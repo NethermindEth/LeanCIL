@@ -17,6 +17,7 @@ def spanMemoryScope : String :=
 /-- The observable choice made by a supported span call. -/
 inductive SpanCall where
   | reinterpret (sourceWidth targetWidth : Nat) (writable : Bool)
+  | copy (width : Nat) (tryCopy : Bool)
   | fill (width : Nat) (clear : Bool)
   | item (width : Nat) | length | slice (counted : Bool) | readOnly
   | array (element : ArrayElement) (writable : Bool) (range : ArraySpanRange)
@@ -25,6 +26,7 @@ inductive SpanCall where
 /-- A span operation's exact semantic parameters, independent of other memory operations. -/
 private def emittedSpanCall : Op → Option SpanCall
   | .memory (.spanReinterpret source target writable) => some (.reinterpret source target writable)
+  | .memory (.spanCopy width tryCopy) => some (.copy width tryCopy)
   | .memory (.spanFill width clear) => some (.fill width clear)
   | .memory (.spanItem width) => some (.item width)
   | .memory .spanLength => some .length
@@ -65,6 +67,15 @@ private def spanMemberCall (opcode : Nat) (site : CallSite) : Option SpanCall :=
   else if opcode == 40 && site.hasThis && writable && !site.returnsValue &&
       site.returnType == .void && site.name == "Fill" && site.parameterTypes == [elementType] &&
       site.target == target "System.Void" "!0" then some (.fill width false)
+  else if opcode == 40 && site.hasThis &&
+      site.parameterTypes == [.apply (.constructor runtimeScope "System.Span`1") elementType] &&
+      site.name == "CopyTo" && !site.returnsValue && site.returnType == .void &&
+      site.target == target "System.Void" "System.Span`1<!0>" then some (.copy width false)
+  else if opcode == 40 && site.hasThis &&
+      site.parameterTypes == [.apply (.constructor runtimeScope "System.Span`1") elementType] &&
+      site.name == "TryCopyTo" && site.returnsValue &&
+      site.returnType == .atom runtimeScope "System.Boolean" &&
+      site.target == target "System.Boolean" "System.Span`1<!0>" then some (.copy width true)
   else if opcode != 40 || !site.returnsValue then none
   else if !site.hasThis && site.name == "op_Implicit" then
     if site.returnType == site.declaringType && site.parameterTypes == [.array elementType] &&

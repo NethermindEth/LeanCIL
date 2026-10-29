@@ -471,6 +471,20 @@ macro "instruction_contract_close" : tactic => `(tactic| (
             | exact retained.tail.tail
             | exact retained.tail.tail.tail))
 
+/-- Copying only changes checked destination bytes and returns a scalar flag or no value. -/
+theorem spanCopyInstruction_contract (width : Nat) (tryCopy : Bool) (stack values : List Value)
+    (memory result : Memory)
+    (copied : spanCopyInstruction width tryCopy stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  cases tryCopy <;> unfold spanCopyInstruction at copied
+  all_goals simp only [Bool.false_eq_true, Bool.true_eq, ite_true, ite_false,
+    writeIndexed_eq, Bind.bind, Except.bind, Pure.pure, Except.pure] at copied
+  all_goals repeat' first
+    | solve | cases copied; instruction_contract_close
+    | cases copied
+    | split at copied
+#print axioms spanCopyInstruction_contract
+
 /-- Fill and clear preserve the checked write effect and retain only valid stack values. -/
 theorem spanFillInstruction_contract (width : Nat) (clear : Bool) (stack values : List Value)
     (memory result : Memory)
@@ -506,6 +520,7 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
   split at h
   · cases h
   · split at h
+    · exact spanCopyInstruction_contract _ _ _ _ _ _ h
     · exact spanFillInstruction_contract _ _ _ _ _ _ h
     · exact otherMemoryInstruction_contract _ _ _ _ _ h
 

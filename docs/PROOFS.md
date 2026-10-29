@@ -621,6 +621,13 @@ the successful checked fill, without a readable-input premise. `Contents.after_s
 preserves sequences outside a nonempty fill's extent. The operation checks the whole range
 once and performs one write; callers need no element-by-element execution proof.
 
+`Span<T>.CopyTo` and `TryCopyTo`, including readonly sources, capture all source bytes
+before a destination write, so both overlap directions and self-copy preserve the original
+sequence. `writeIndexed_readback` and `writeIndexed_outside` expose exact readback and
+neighboring-byte preservation for the retained snapshot. The snapshot uses array indexing
+for constant-time byte lookup. Short destinations throw `ArgumentException` or return false
+without a source read or destination write; empty copies require no byte access.
+
 ## Construct structs through contracts
 
 A `newobj` of a reference-free struct allocates caller-owned storage, writes

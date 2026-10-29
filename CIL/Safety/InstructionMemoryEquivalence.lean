@@ -64,6 +64,23 @@ theorem Memory.Equivalent.storeTransfer {m n : Memory} (same : m.Equivalent n)
     | split
 #print axioms Memory.Equivalent.storeTransfer
 
+/-- Overlapping span copies preserve equivalent memories and the exact success flag. -/
+theorem Memory.Equivalent.spanCopyInstruction {m n : Memory} (same : m.Equivalent n)
+    (width : Nat) (tryCopy : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (spanCopyInstruction width tryCopy stack m)
+      (spanCopyInstruction width tryCopy stack n) := by
+  unfold CIL.Safety.spanCopyInstruction
+  simp only [writeIndexed_eq, same.spanValidate, same.read]
+  repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind_same; intro)
+    | split
+#print axioms Memory.Equivalent.spanCopyInstruction
+
 /-- Fill and clear preserve equivalent backing memories and identical retained values. -/
 theorem Memory.Equivalent.spanFillInstruction {m n : Memory} (same : m.Equivalent n)
     (width : Nat) (clear : Bool) (stack : List Value) :
@@ -120,6 +137,7 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
   split
   · exact .error _
   · split
+    · exact same.spanCopyInstruction _ _ _
     · exact same.spanFillInstruction _ _ _
     · exact same.otherMemoryInstruction _ _
 

@@ -119,7 +119,8 @@ internal static class RuntimeModels
     {
         if (reference.ExplicitThis || reference.CallingConvention == MethodCallingConvention.VarArg ||
             (reference.HasThis && reference.Name is not
-                (".ctor" or "get_Item" or "get_Length" or "Slice" or "Clear" or "Fill")) ||
+                (".ctor" or "get_Item" or "get_Length" or "Slice" or "Clear" or "Fill" or
+                 "CopyTo" or "TryCopyTo")) ||
             (reference.Name == ".ctor" && !reference.HasThis)) return null;
         string scope = reference.DeclaringType.Scope.Name;
         if (scope is "System.Runtime" or "System.Runtime.Intrinsics" or "System.Memory" &&
@@ -303,6 +304,10 @@ internal static class RuntimeModels
                 operations.Add($"System.Void {owner}::.ctor(System.Void*,System.Int32)",
                     $".memory (.spanFromReference {width} {capability})");
                 operations.Add($"System.Int32 {owner}::get_Length()", ".memory .spanLength");
+                operations.Add($"System.Void {owner}::CopyTo(System.Span`1<!0>)",
+                    $".memory (.spanCopy {width} false)");
+                operations.Add($"System.Boolean {owner}::TryCopyTo(System.Span`1<!0>)",
+                    $".memory (.spanCopy {width} true)");
                 if (writable)
                 {
                     operations.Add($"!0& {owner}::get_Item(System.Int32)", $".memory (.spanItem {width})");

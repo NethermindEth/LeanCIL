@@ -306,6 +306,28 @@ def arrayElement (memory : Memory) (view : ArrayView) (index width : Nat) :
   if view.reference == .null then .error (.thrown "System.NullReferenceException") else pure ()
   if index < view.length then pure () else .error (.thrown "System.IndexOutOfRangeException")
   checkedAt view.reference width (view.element memory index)
+/-- Span copying snapshots every source byte before writing, including for overlapping views.
+    A short destination returns false or throws without reading or modifying either range. -/
+def spanCopyInstruction (width : Nat) (tryCopy : Bool) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  let .bufferSpan destination :: .bufferSpan source :: rest := stack | .error .invalidState
+  let _ ← checkedAt source.reference 0 (source.validate memory)
+  let _ ← checkedAt destination.reference 0 (destination.validate memory)
+  if source.width != width || destination.width != width then .error .invalidState else
+  if !destination.writable then .error .invalidState else
+  if source.length > destination.length then
+    if tryCopy then return (memory, .scalar (.i32 0) :: rest)
+    else .error (.thrown "System.ArgumentException")
+  else
+  let values := if tryCopy then .scalar (.i32 1) :: rest else rest
+  if source.length == 0 then return (memory, values) else
+  let .address sourceAddress := source.reference | .error .invalidState
+  let .address target := destination.reference | .error .invalidState
+  let count := source.length * width
+  let bytes ← checkedAt source.reference count (read memory sourceAddress count 1)
+  let result ← checkedAt destination.reference count (writeIndexed memory target bytes 1)
+  return (result, values)
+
 /-- Whole-span fill and clear retain checked write authority and exact operand shapes. -/
 def spanFillInstruction (width : Nat) (clear : Bool) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) := do
@@ -570,6 +592,7 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
     .error (.unsupported "Memory operation observes unspecified vector bits")
   else
   match operation with
+  | .spanCopy width tryCopy => spanCopyInstruction width tryCopy stack memory
   | .spanFill width clear => spanFillInstruction width clear stack memory
   | _ => otherMemoryInstruction operation stack memory
 

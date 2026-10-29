@@ -40,6 +40,50 @@ theorem Memory.Renamed.checkedSpanValidate {mapping : AllocationRenaming}
   exact (ResultEquivalent.eq_refl _).checkedAt _ _
 #print axioms Memory.Renamed.checkedSpanValidate
 
+/-- Snapshot copies transport source reads, destination writes and the exact success flag. -/
+private theorem Memory.Renamed.spanCopyInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (width : Nat) (tryCopy : Bool)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (spanCopyInstruction width tryCopy stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (spanCopyInstruction width tryCopy stack source)
+      (spanCopyInstruction width tryCopy (stack.map mapping.value) target) := by
+  unfold CIL.Safety.spanCopyInstruction at observable ⊢
+  split at observable
+  · rename_i destinationView sourceView rest
+    simp only [List.map_cons, AllocationRenaming.value]
+    dsimp only [AllocationRenaming.spanView]
+    simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
+    obtain ⟨destinationBound, sourceBound, restBound⟩ := bounds
+    apply (related.checkedSpanValidate sourceView sourceBound).bindWithSuccess
+    intro first second sourceStep same
+    subst second
+    apply (related.checkedSpanValidate destinationView destinationBound).bindWithSuccess
+    intro first second destinationStep same
+    subst second
+    cases sourceAddress : sourceView.reference <;>
+      cases destinationAddress : destinationView.reference
+    all_goals simp only [sourceAddress, destinationAddress, ManagedReference.Below]
+      at sourceBound destinationBound
+    all_goals cases tryCopy <;>
+      simp only [sourceAddress, destinationAddress, AllocationRenaming.managedReference,
+        writeIndexed_eq, Bool.false_eq_true, Bool.true_eq, ite_true, ite_false]
+    all_goals repeat' first
+      | exact .ok ⟨related, rfl⟩
+      | exact .error _
+      | (apply (related.checkedRead _ (by assumption) _ _ _ _).bindWithSuccess
+         intro first second sourceStep same
+         subst second)
+      | (apply (related.checkedWrite _ (by assumption) _ _ _ _).bindWithSuccess
+         intro first second sourceStep memoryRelated
+         exact .ok ⟨memoryRelated, rfl⟩)
+      | (split <;> try simp only [*, Bind.bind, Except.bind])
+  · repeat first | contradiction | cases observable | split at observable
+#print axioms Memory.Renamed.spanCopyInstructionResult
+
 /-- Fill and clear preserve their exact checked write under allocation renaming. -/
 private theorem Memory.Renamed.spanFillInstructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -85,6 +129,7 @@ theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
   · rename_i observed
     simp only [observed, Bool.false_eq_true, ite_false]
     split at observable
+    · exact related.spanCopyInstructionResult _ _ _ bounds observable
     · exact related.spanFillInstructionResult _ _ _ bounds observable
     · rename_i notFill
       unfold otherMemoryInstruction at observable ⊢

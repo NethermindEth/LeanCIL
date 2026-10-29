@@ -138,6 +138,8 @@ def TransferKind.width : TransferKind → Nat
 inductive MemoryOp where
   /-- Reinterpret existing bytes without changing their storage or authority. -/
   | spanReinterpret (sourceWidth targetWidth : Nat) (writable : Bool)
+  /-- Snapshot copying permits overlapping spans; try-copy returns false for a short target. -/
+  | spanCopy (width : Nat) (tryCopy : Bool)
   | spanFill (width : Nat) (clear : Bool)
   | bigMul64
   | copyBlock (alignment : Nat) | initBlock (alignment : Nat)
@@ -171,6 +173,7 @@ inductive MemoryOp where
 
 /-- Every popped operand; no default, so each new operation states what it reads. -/
 def MemoryOp.argumentCount : MemoryOp → Nat
+  | .spanCopy .. => 2
   | .spanFill _ clear => if clear then 1 else 2
   | .marshalRead _ tryRead => if tryRead then 2 else 1
   | .marshalWrite .. => 2
