@@ -188,6 +188,8 @@ internal static class RuntimeModels
         ("System.IntPtr", 64, true), ("System.UIntPtr", 64, false)
     ];
 
+    private static readonly Dictionary<string, string> ScalarOperations = BuildScalarOperations();
+
     // Match exact non-generic static signatures, including the defining assembly.
     private static string? Scalar(MethodReference reference)
     {
@@ -201,35 +203,41 @@ internal static class RuntimeModels
         };
     }
 
-    // System.Math and System.Numerics.BitOperations, both defined in System.Runtime.
-    private static string? RuntimeScalar(string signature)
+    private static string? RuntimeScalar(string signature) => ScalarOperations.GetValueOrDefault(signature);
+
+    // Exact signatures share the same semantics across Math and primitive integer entry points.
+    private static Dictionary<string, string> BuildScalarOperations()
     {
-        if (signature == "System.UInt64 System.Math::BigMul(System.UInt64,System.UInt64,System.UInt64&)")
-            return ".memory .bigMul64";
+        var operations = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["System.UInt64 System.Math::BigMul(System.UInt64,System.UInt64,System.UInt64&)"] =
+                ".memory .bigMul64"
+        };
         foreach (var (type, width, signed) in MathIntegers)
         foreach (var (name, operation, arity) in MathOperations)
         {
             if (!signed && arity == 1) continue;
             var result = name == "Sign" ? "System.Int32" : type;
             var parameters = string.Join(",", Enumerable.Repeat(type, arity));
-            if (signature == $"{result} System.Math::{name}({parameters})")
-                return $".intrinsic (.scalar (.math .{operation} {width} {LeanBool(signed)})) {arity}";
+            var model = $".intrinsic (.scalar (.math .{operation} {width} {LeanBool(signed)})) {arity}";
+            operations.Add($"{result} System.Math::{name}({parameters})", model);
+            operations.Add($"{result} {type}::{name}({parameters})", model);
         }
         foreach (var (type, width) in RotatableWords)
         {
             foreach (var (name, operation) in Rotations)
-                if (signature == $"{type} System.Numerics.BitOperations::{name}({type},System.Int32)")
-                    return $".intrinsic (.scalar (.{operation} {width})) 2";
+                operations.Add($"{type} System.Numerics.BitOperations::{name}({type},System.Int32)",
+                    $".intrinsic (.scalar (.{operation} {width})) 2");
             foreach (var (name, operation) in BitCounts)
-                if (signature == $"System.Int32 System.Numerics.BitOperations::{name}({type})")
-                    return $".intrinsic (.scalar (.{operation} {width})) 1";
-            if (signature == $"{type} System.Numerics.BitOperations::RoundUpToPowerOf2({type})")
-                return $".intrinsic (.scalar (.roundUpToPowerOf2 {width})) 1";
+                operations.Add($"System.Int32 System.Numerics.BitOperations::{name}({type})",
+                    $".intrinsic (.scalar (.{operation} {width})) 1");
+            operations.Add($"{type} System.Numerics.BitOperations::RoundUpToPowerOf2({type})",
+                $".intrinsic (.scalar (.roundUpToPowerOf2 {width})) 1");
         }
         foreach (var (type, width, signed) in Pow2Integers)
-            if (signature == $"System.Boolean System.Numerics.BitOperations::IsPow2({type})")
-                return $".intrinsic (.scalar (.isPow2 {width} {LeanBool(signed)})) 1";
-        return null;
+            operations.Add($"System.Boolean System.Numerics.BitOperations::IsPow2({type})",
+                $".intrinsic (.scalar (.isPow2 {width} {LeanBool(signed)})) 1");
+        return operations;
     }
 
     // System.Buffers.Binary.BinaryPrimitives, defined in System.Memory.
