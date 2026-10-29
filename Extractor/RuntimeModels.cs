@@ -66,6 +66,13 @@ internal static class RuntimeModels
             return;
         }
         if (type is GenericParameter) return;
+        if (GenericStructs.Is(type) && type is GenericInstanceType closedStruct)
+        {
+            foreach (var argument in closedStruct.GenericArguments)
+                ValidateTypeIdentity(argument, module, architecture);
+            MetadataValidation.Layout(type, module, architecture);
+            return;
+        }
         if (type is GenericInstanceType generic)
         {
             if (generic.IsValueType != generic.ElementType.IsValueType)

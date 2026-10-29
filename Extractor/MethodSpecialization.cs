@@ -12,6 +12,7 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
     static readonly ConditionalWeakTable<MethodDefinition, TypeReference[]> typeArguments = new();
     static readonly ConditionalWeakTable<MethodDefinition, TypeReference[]> ownerArguments = new();
     static readonly ConditionalWeakTable<MethodDefinition, MethodDefinition> definitions = new();
+    static readonly ConditionalWeakTable<MethodDefinition, TypeReference> declaringTypes = new();
     readonly Dictionary<string, MethodDefinition> instances = new(StringComparer.Ordinal);
 
     internal static Origin? Source(MethodDefinition method) => origins.TryGetValue(method, out var origin) ? origin : null;
@@ -25,7 +26,10 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
     internal static IReadOnlyList<TypeReference> OwnerArguments(MethodDefinition method) =>
         ownerArguments.TryGetValue(method, out var arguments) ? arguments : [];
 
-    static string SignatureType(TypeReference type) => type switch
+    internal static TypeReference DeclaringType(MethodDefinition method) =>
+        declaringTypes.TryGetValue(method, out var owner) ? owner : method.DeclaringType;
+
+    internal static string SignatureType(TypeReference type) => type switch
     {
         GenericParameter parameter => $"{parameter.Type}:{parameter.Position}",
         ByReferenceType reference => SignatureType(reference.ElementType) + "&",
@@ -54,8 +58,9 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
             member.Name != definition.Name || SignatureType(member.ReturnType) != SignatureType(definition.ReturnType) ||
             !member.Parameters.Select(parameter => SignatureType(parameter.ParameterType))
                 .SequenceEqual(definition.Parameters.Select(parameter => SignatureType(parameter.ParameterType))) ||
-            (declaringArguments.Length != 0 && !definition.IsStatic) ||
-            definition.IsConstructor || !definition.HasBody || definition.Body.ExceptionHandlers.Count != 0 ||
+            (declaringArguments.Length != 0 && !definition.IsStatic && !GenericStructs.Is(reference.DeclaringType)) ||
+            (definition.IsConstructor && (methodArguments.Length != 0 || definition.IsStatic)) ||
+            !definition.HasBody || definition.Body.ExceptionHandlers.Count != 0 ||
             (reference.CallingConvention & ~MethodCallingConvention.Generic) != MethodCallingConvention.Default ||
             (definition.CallingConvention & ~MethodCallingConvention.Generic) != MethodCallingConvention.Default)
             throw new InvalidDataException($"Unsupported generic method signature or body: {reference.FullName}");
@@ -96,7 +101,8 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
             }
         }
 
-        var key = reference.FullName;
+        var key = definition.MetadataToken.ToInt32() + ":" + SignatureType(reference.DeclaringType) +
+            "<" + string.Join(",", methodArguments.Select(SignatureType)) + ">";
         if (instances.TryGetValue(key, out var existing)) return existing;
         if (instances.Count >= 256)
             throw new InvalidDataException("Generic specialization limit exceeded (possible expanding recursion)");
@@ -178,7 +184,8 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
             return result;
         }
 
-        var clone = new MethodDefinition(definition.Name + "<" + string.Join(",", arguments.Select(t => t.FullName)) + ">",
+        var clone = new MethodDefinition(definition.IsConstructor ? definition.Name :
+            definition.Name + "<" + string.Join(",", arguments.Select(t => t.FullName)) + ">",
             definition.Attributes, Substitute(definition.ReturnType))
         {
             DeclaringType = definition.DeclaringType,
@@ -214,6 +221,7 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
                 ParameterDefinition parameter => parameter.Index < 0 ? clone.Body.ThisParameter : clone.Parameters[parameter.Index],
                 VariableDefinition local => clone.Body.Variables[local.Index],
                 TypeReference type => Substitute(type),
+                FieldReference field => new FieldReference(field.Name, field.FieldType, Substitute(field.DeclaringType)),
                 MethodReference method => SubstituteMethod(method),
                 Mono.Cecil.CallSite site => SubstituteSite(site),
                 _ => instruction.Operand
@@ -223,6 +231,7 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
         origins.Add(clone, new(definition.FullName, arguments.Select(t => t.FullName).ToArray()));
         typeArguments.Add(clone, arguments);
         ownerArguments.Add(clone, declaringArguments);
+        declaringTypes.Add(clone, reference.DeclaringType);
         definitions.Add(clone, definition);
         return clone;
     }

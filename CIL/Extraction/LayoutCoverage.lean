@@ -56,7 +56,8 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
         let access := match site.parameterTypes.head? with
           | some (.array _) => SizeAccess.arrayElement | _ => .spanElement
         return [.size pc index access]
-    return (aggregateIndex site.declaringType).toList.map fun index => .size pc index .construct
+    return (aggregateIndex (closeLayoutType layouts site.declaringType)).toList.map
+      fun index => .size pc index .construct
   | 0x28, .call site =>
     if site.name ∈ ["AsBytes", "Cast"] &&
         site.declaringType == .atom runtimeScope "System.Runtime.InteropServices.MemoryMarshal" then

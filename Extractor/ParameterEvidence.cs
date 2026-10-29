@@ -23,7 +23,7 @@ internal static class ParameterEvidence
             return $".aggregateSpan {layouts.Index(span.GenericArguments[0])} {(Spans.Writable(type) ? "true" : "false")}";
         if (Spans.Width(type, layouts.Metadata.Architecture) is { } width)
             return $".span {width} {(Spans.Writable(type) ? "true" : "false")}";
-        if (type is GenericInstanceType vector && !ValueTuples.Is(type))
+        if (type is GenericInstanceType vector && !MetadataValidation.IsAggregate(type, module))
             return vector.ElementType.FullName switch
             {
                 "System.Runtime.Intrinsics.Vector128`1" => ".vector128",

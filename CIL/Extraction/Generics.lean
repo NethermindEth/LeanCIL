@@ -158,22 +158,6 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
     else if name = "System.Runtime.Intrinsics.Vector512`1" then some .vector512 else none
   | _ => none
 
-/-- Structural substitution includes nested type constructors, not just signature strings. -/
-def substituteType (arguments : List TypeExpr) : TypeExpr → Option TypeExpr
-  | .parameter index => arguments[index]?
-  | .byref element => TypeExpr.byref <$> substituteType arguments element
-  | .pointer element => TypeExpr.pointer <$> substituteType arguments element
-  | .array element => TypeExpr.array <$> substituteType arguments element
-  | .functionPointer result parameters convention hasThis explicitThis => do
-    return .functionPointer (← substituteType arguments result)
-      (← substituteType arguments parameters) convention hasThis explicitThis
-  | .signatureParameter head tail => do
-    return .signatureParameter (← substituteType arguments head) (← substituteType arguments tail)
-  | .enum identity underlying => TypeExpr.enum identity <$> substituteType arguments underlying
-  | .apply constructor argument => do
-    return .apply (← substituteType arguments constructor) (← substituteType arguments argument)
-  | type => some type
-
 /-- A call target: a method of this module by metadata token, or another assembly's
     method by its `scope::signature` identity. -/
 inductive MethodId where
@@ -249,21 +233,27 @@ structure RawMethod where
   ownerArgumentCount : Nat := 0
   deriving DecidableEq, Repr
 
+/-- Close metadata storage after substitution without changing callable owner expressions. -/
+def substituteStorageType (layouts : List RawLayout) (arguments : List TypeExpr)
+    (type : TypeExpr) : Option TypeExpr :=
+  closeLayoutType layouts <$> substituteType arguments type
+
 /-- Substitutes type arguments through every type an operand mentions. -/
-def substituteOperand (arguments : List TypeExpr) : RawOperand → Option RawOperand
-  | .type type => RawOperand.type <$> substituteType arguments type
+def substituteOperand (arguments : List TypeExpr) (layouts : List RawLayout := []) :
+    RawOperand → Option RawOperand
+  | .type type => RawOperand.type <$> substituteStorageType layouts arguments type
   | .field owner index type isStatic => do
-    return .field (← substituteType arguments owner) index (← substituteType arguments type)
+    return .field (← substituteStorageType layouts arguments owner) index (← substituteStorageType layouts arguments type)
       isStatic
   | .call site => do
     return .call { site with
       declaringType := ← substituteType arguments site.declaringType,
-      typeArguments := ← site.typeArguments.mapM (substituteType arguments),
-      returnType := ← substituteType arguments site.returnType,
-      parameterTypes := ← site.parameterTypes.mapM (substituteType arguments) }
+      typeArguments := ← site.typeArguments.mapM (substituteStorageType layouts arguments),
+      returnType := ← substituteStorageType layouts arguments site.returnType,
+      parameterTypes := ← site.parameterTypes.mapM (substituteStorageType layouts arguments) }
   | .indirectCall returnType parameters hasThis explicitThis convention => do
-    return .indirectCall (← substituteType arguments returnType)
-      (← parameters.mapM (substituteType arguments)) hasThis explicitThis convention
+    return .indirectCall (← substituteStorageType layouts arguments returnType)
+      (← parameters.mapM (substituteStorageType layouts arguments)) hasThis explicitThis convention
   | operand => some operand
 
 /-- The exact runtime identity of the value-type constraint. -/
@@ -335,11 +325,11 @@ def instantiateMethod (layouts : List RawLayout) (original : RawMethod)
       !((original.genericParameters ++ original.ownerParameters).zip arguments).all
         (fun (constraint, argument) => allowedConstraint layouts argument constraint) then none
   else
-    let returnType ← substituteType arguments original.returnType
-    let parameters ← original.parameters.mapM (substituteType arguments)
-    let locals ← original.locals.mapM (substituteType arguments)
+    let returnType ← substituteStorageType layouts arguments original.returnType
+    let parameters ← original.parameters.mapM (substituteStorageType layouts arguments)
+    let locals ← original.locals.mapM (substituteStorageType layouts arguments)
     let code ← original.code.mapM fun instruction => do
-      return { instruction with operand := ← substituteOperand arguments instruction.operand }
+      return { instruction with operand := ← substituteOperand arguments layouts instruction.operand }
     -- Masking with 239 clears the generic calling-convention bit (0x10).
     return { original with
       returnType, parameters, locals, code, genericParameters := [], ownerParameters := [],

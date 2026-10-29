@@ -48,4 +48,20 @@ inductive TypeExpr where
   | apply (constructor argument : TypeExpr)
   deriving DecidableEq, Repr
 
+/-- Structural substitution includes nested type constructors, not just signature strings. -/
+def substituteType (arguments : List TypeExpr) : TypeExpr → Option TypeExpr
+  | .parameter index => arguments[index]?
+  | .byref element => TypeExpr.byref <$> substituteType arguments element
+  | .pointer element => TypeExpr.pointer <$> substituteType arguments element
+  | .array element => TypeExpr.array <$> substituteType arguments element
+  | .functionPointer result parameters convention hasThis explicitThis => do
+    return .functionPointer (← substituteType arguments result)
+      (← substituteType arguments parameters) convention hasThis explicitThis
+  | .signatureParameter head tail => do
+    return .signatureParameter (← substituteType arguments head) (← substituteType arguments tail)
+  | .enum identity underlying => TypeExpr.enum identity <$> substituteType arguments underlying
+  | .apply constructor argument => do
+    return .apply (← substituteType arguments constructor) (← substituteType arguments argument)
+  | type => some type
+
 end CIL.Extraction

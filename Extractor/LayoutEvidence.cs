@@ -20,10 +20,10 @@ internal sealed class LayoutEvidence
     {
         this.layouts = layouts;
         for (var index = 0; index < types.Length; index++)
-            emittedIndices.TryAdd(types[index].FullName, index);
+            emittedIndices.TryAdd(Identity(types[index]), index);
         rawTypes = Topological(types);
         for (var index = 0; index < rawTypes.Length; index++)
-            typeIndices.TryAdd(rawTypes[index].FullName, index);
+            typeIndices.TryAdd(Identity(rawTypes[index]), index);
     }
 
     TypeReference[] Topological(TypeReference[] entries)
@@ -32,7 +32,7 @@ internal sealed class LayoutEvidence
         var seen = new HashSet<string>();
         void Include(TypeReference type)
         {
-            if (!seen.Add(type.FullName)) return;
+            if (!seen.Add(Identity(type))) return;
             foreach (var field in layouts.Fields(type))
                 if (MetadataValidation.IsAggregate(field.Type, type.Module)) Include(field.Type);
             ordered.Add(type);
@@ -44,13 +44,14 @@ internal sealed class LayoutEvidence
     internal static string Scope(TypeReference type) => type.Scope is AssemblyNameReference assembly
         ? assembly.FullName : type.Module.Assembly.Name.FullName;
 
-    internal static string Identity(TypeReference type) => Scope(type) + "::" + type.FullName;
+    internal static string Identity(TypeReference type) => GenericStructs.Is(type)
+        ? MethodSpecialization.SignatureType(type) : Scope(type) + "::" + type.FullName;
 
     internal MetadataValidation.LayoutContext Metadata => layouts;
 
     internal string[] Identities => rawTypes.Select(Identity).ToArray();
 
-    internal int Index(TypeReference type) => typeIndices.GetValueOrDefault(type.FullName, -1);
+    internal int Index(TypeReference type) => typeIndices.GetValueOrDefault(Identity(type), -1);
 
     internal string RawFieldType(TypeReference type, ModuleDefinition module)
     {
@@ -78,9 +79,24 @@ internal sealed class LayoutEvidence
         lean.AppendLine(string.Join(",\n", rawTypes.Select(type =>
         {
             var metadata = ValueTuples.Is(type) ? ((GenericInstanceType)type).ElementType.Resolve() : type.Resolve();
+            var genericEvidence = "";
+            if (GenericStructs.Is(type) && type is GenericInstanceType closed)
+            {
+                var serializer = new GenericEvidence(type.Module, this);
+                genericEvidence = $"generic := some {{ owner := .constructor " +
+                    $"{JsonSerializer.Serialize(Scope(type))} {JsonSerializer.Serialize(metadata.FullName)}, " +
+                    $"arity := {metadata.GenericParameters.Count}, arguments := " +
+                    $"[{string.Join(", ", closed.GenericArguments.Select(serializer.Type))}], fields := " +
+                    $"[{string.Join(", ", metadata.Fields.Where(field => !field.IsStatic)
+                        .Select(field => serializer.Type(field.FieldType)))}], constraints := " +
+                    $"[{string.Join(", ", metadata.GenericParameters.Select(parameter =>
+                        $"({(uint)parameter.Attributes}, [{string.Join(", ", parameter.Constraints.Select(constraint =>
+                            JsonSerializer.Serialize(GenericEvidence.ConstraintType(constraint.ConstraintType))))}])"))}] }}, ";
+            }
             var fields = layouts.Fields(type).Select(field =>
                 $"{{ type := {RawFieldType(field.Type, type.Module)}, offset := {(field.Definition.Offset < 0 ? "none" : $"some {field.Definition.Offset}")} }}");
-            return $"  {{ identity := {JsonSerializer.Serialize(Identity(type))}, explicit := {metadata.IsExplicitLayout.ToString().ToLowerInvariant()}, " +
+            return $"  {{ identity := {JsonSerializer.Serialize(Identity(type))}, {genericEvidence}" +
+                $"explicit := {metadata.IsExplicitLayout.ToString().ToLowerInvariant()}, " +
                 (metadata.IsAutoLayout ? "auto := true, " : "") +
                 $"interfaces := [{string.Join(", ", metadata.Interfaces.Select(implementation => JsonSerializer.Serialize(Identity(implementation.InterfaceType))))}], " +
                 $"packing := {metadata.PackingSize}, declaredSize := {metadata.ClassSize}, fields := [{string.Join(", ", fields)}] }}";
@@ -89,7 +105,7 @@ internal sealed class LayoutEvidence
         lean.AppendLine("def computedLayouts : Array Extraction.ComputedLayout := #[" +
             string.Join(", ", rawTypes.Select(type =>
             {
-                var index = emittedIndices.GetValueOrDefault(type.FullName, -1);
+                var index = emittedIndices.GetValueOrDefault(Identity(type), -1);
                 var alignment = layouts.AggregateLayout(type).Alignment;
                 return $"⟨layout{index}, {alignment}⟩";
             })) + "]");
@@ -140,7 +156,7 @@ internal sealed class LayoutEvidence
             {
                 var reference = (FieldReference)instruction.Operand;
                 var field = reference.Resolve();
-                var owner = ValueTuples.Is(reference.DeclaringType) ? reference.DeclaringType : field.DeclaringType;
+                var owner = reference.DeclaringType;
                 var fieldIndex = layouts.FieldIndex(owner, field);
                 var access = instruction.OpCode.Code switch { Code.Ldfld => "load", Code.Stfld => "store", _ => "address" };
                 uses.Add($".field {pc} {Index(owner)} {fieldIndex} .{access}");
@@ -157,7 +173,8 @@ internal sealed class LayoutEvidence
             }
             else if (instruction.OpCode.Code == Code.Newobj && instruction.Operand is MethodReference constructor &&
                 MetadataValidation.IsAggregate(constructor.DeclaringType, method.Module))
-                uses.Add($".size {pc} {Index(constructor.DeclaringType)} .construct");
+                uses.Add($".size {pc} {Index(constructor is MethodDefinition closedConstructor
+                    ? MethodSpecialization.DeclaringType(closedConstructor) : constructor.DeclaringType)} .construct");
             else if (instruction.OpCode.Code == Code.Call && instruction.Operand is GenericInstanceMethod generic &&
                 generic.DeclaringType.FullName is "System.Runtime.CompilerServices.Unsafe" or
                     "System.Runtime.InteropServices.MemoryMarshal" && generic.GenericArguments.Count == 1 &&

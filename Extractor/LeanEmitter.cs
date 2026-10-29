@@ -71,7 +71,7 @@ internal static class LeanEmitter
     static TypeReference[] LayoutTypes(MethodDefinition[] methods, MetadataValidation.LayoutContext metadata)
     {
         TypeReference[] types = methods.SelectMany(m => m.Parameters.Select(p => p.ParameterType)
-            .Concat(m.HasThis ? [m.DeclaringType] : [])
+            .Concat(m.HasThis ? [MethodSpecialization.DeclaringType(m)] : [])
             .Concat(m.Body.Variables.Select(v => v.VariableType)).Append(m.ReturnType)
             .Concat(MethodSpecialization.Arguments(m))
             .Concat(m.Body.Instructions.Where(i => i.Operand is TypeReference).Select(i => (TypeReference)i.Operand))
@@ -80,12 +80,12 @@ internal static class LeanEmitter
             .Select(t => t is ByReferenceType r ? r.ElementType : t)
             .Select(t => t is ArrayType array ? array.ElementType : t)
             .Select(t => Spans.Is(t) ? ((GenericInstanceType)t).GenericArguments[0] : t)
-            .Where(t => MetadataValidation.IsAggregate(t, methods[0].Module)).DistinctBy(t => t.FullName).ToArray();
+            .Where(t => MetadataValidation.IsAggregate(t, methods[0].Module)).DistinctBy(LayoutEvidence.Identity).ToArray();
         List<TypeReference> layouts = [];
         HashSet<string> seenLayouts = new(StringComparer.Ordinal);
         void IncludeLayout(TypeReference type)
         {
-            if (!seenLayouts.Add(type.FullName)) return;
+            if (!seenLayouts.Add(LayoutEvidence.Identity(type))) return;
             layouts.Add(type);
             foreach (MetadataValidation.InstanceField field in metadata.Fields(type))
                 if (MetadataValidation.IsAggregate(field.Type, methods[0].Module)) IncludeLayout(field.Type);

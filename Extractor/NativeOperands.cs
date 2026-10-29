@@ -69,14 +69,8 @@ internal static class NativeOperands
         _ => Kind.Other
     };
 
-    static TypeReference FieldType(FieldReference field)
-    {
-        if (!ValueTuples.Is(field.DeclaringType)) return field.FieldType;
-        FieldDefinition definition = field.Resolve();
-        MetadataValidation.InstanceField? actual = MetadataValidation.Fields(field.DeclaringType)
-            .FirstOrDefault(candidate => candidate.Definition == definition);
-        return actual?.Type ?? throw new InvalidDataException("Unresolved tuple field: " + field.FullName);
-    }
+    static TypeReference FieldType(FieldReference field) => field.Resolve().IsStatic
+        ? field.FieldType : MetadataValidation.InstanceFieldOf(field).Type;
 
     static bool Binary(Code code) => code is Code.Add or Code.Sub or Code.Mul or Code.Div or Code.Div_Un or
         Code.Rem or Code.Rem_Un or Code.And or Code.Or or Code.Xor or Code.Ceq or Code.Clt or Code.Clt_Un or

@@ -126,20 +126,13 @@ internal static class InstructionTranslation
             var f = (FieldReference)i.Operand;
             FieldDefinition resolved = f.Resolve() ?? throw new InvalidDataException("Unresolved field");
             Layout(f.DeclaringType);
-            RuntimeModels.ValidateTypeIdentity(f.FieldType, m.Module, profile.Architecture);
-            var tuple = ValueTuples.Is(f.DeclaringType);
-            var tupleFields = tuple ? layouts?.Fields(f.DeclaringType) ??
-                MetadataValidation.Fields(f.DeclaringType) : null;
-            var field = tupleFields?.SingleOrDefault(candidate =>
-                candidate.Definition == resolved && f.FieldType is GenericParameter parameter &&
-                resolved.FieldType is GenericParameter definition && parameter.Position == definition.Position);
-            if (resolved.IsStatic || (tuple ? field is null : resolved.Module != m.Module || resolved.FullName != f.FullName))
-                throw new InvalidDataException($"Unsupported field {f.FullName}");
-            var fieldType = field?.Type ?? resolved.FieldType;
+            var actual = MetadataValidation.InstanceFieldOf(f);
+            var fieldType = actual.Type;
+            RuntimeModels.ValidateTypeIdentity(fieldType, m.Module, profile.Architecture);
             var aggregate = MetadataValidation.IsAggregate(fieldType, m.Module);
             int width = layouts?.FieldSize(fieldType) ??
                 MetadataValidation.FieldSize(fieldType, m.Module, profile.Architecture);
-            var owner = tuple ? f.DeclaringType : resolved.DeclaringType;
+            var owner = f.DeclaringType;
             int offset = layouts?.FieldOffset(owner, resolved) ??
                 MetadataValidation.FieldOffset(owner, resolved, m.Module, profile.Architecture);
             if (aggregate && op != "fieldAddr")
@@ -159,7 +152,7 @@ internal static class InstructionTranslation
             if (index > methodIndex || index >= 0 && TailCalls.IsCall(i))
             {
                 if (i.OpCode.Code == Code.Newobj)
-                    return $".newAggregate {index} {resolved.Parameters.Count} {Layout(resolved.DeclaringType)}";
+                    return $".newAggregate {index} {resolved.Parameters.Count} {Layout(MethodSpecialization.DeclaringType(resolved))}";
                 var operation = TailCalls.IsCall(i) ? "tailCall" : "call";
                 return $".{operation} {index} {resolved.Parameters.Count + (resolved.HasThis ? 1 : 0)}";
             }

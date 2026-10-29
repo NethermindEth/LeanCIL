@@ -23,7 +23,9 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
         return scope == TypeTests.RuntimeScope ? "Extraction.runtimeScope" : Quote(scope);
     }
 
-    string Type(TypeReference type)
+    internal string Type(TypeReference type) => Type(type, false);
+
+    string Type(TypeReference type, bool preserveGeneric)
     {
         if (type is FunctionPointerType callable)
         {
@@ -44,6 +46,8 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
             return $".aggregate {Quote(LayoutEvidence.Identity(type))} {tuple}";
         if (type is GenericInstanceType generic)
         {
+            if (!preserveGeneric && GenericStructs.Is(type) && layouts.Index(type) is >= 0 and var aggregate)
+                return $".aggregate {Quote(LayoutEvidence.Identity(type))} {aggregate}";
             var result = $".constructor {Scope(generic.ElementType)} {Quote(generic.ElementType.FullName)}";
             foreach (var argument in generic.GenericArguments) result = $".apply ({result}) ({Type(argument)})";
             return result;
@@ -83,7 +87,7 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
                 reachable.Contains(instruction));
         var name = definition.DeclaringType.Scope is ModuleDefinition
             ? ((MethodDefinition)originalModule.LookupToken(definition.Resolve().MetadataToken)).Name : definition.Name;
-        return $"{{ declaringType := {Type(declaringType)}, name := {Quote(name)}, target := {target}, typeArguments := {List(arguments.Select(Type))}, ownerArgumentCount := {owners.Length}, parameterCount := {reference.Parameters.Count}, hasThis := {Bool(reference.HasThis)}, returnsValue := {Bool(reference.ReturnType.FullName != "System.Void")}, returnType := {Type(CallReturnType.Resolve(reference))}, parameterTypes := {List(CallReturnType.Parameters(reference).Select(Type))} }}";
+        return $"{{ declaringType := {Type(declaringType, true)}, name := {Quote(name)}, target := {target}, typeArguments := {List(arguments.Select(Type))}, ownerArgumentCount := {owners.Length}, parameterCount := {reference.Parameters.Count}, hasThis := {Bool(reference.HasThis)}, returnsValue := {Bool(reference.ReturnType.FullName != "System.Void")}, returnType := {Type(CallReturnType.Resolve(reference))}, parameterTypes := {List(CallReturnType.Parameters(reference).Select(Type))} }}";
     }
 
     string Operand(MethodDefinition method, InstructionIndex instructions, Instruction instruction,
@@ -114,7 +118,8 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
                 if (field.DeclaringType.Scope is ModuleDefinition)
                 {
                     var resolved = field.Resolve();
-                    index = layouts.Metadata.FieldIndex(resolved.DeclaringType, resolved, isStatic);
+                    index = layouts.Metadata.FieldIndex(field.DeclaringType, resolved, isStatic);
+                    if (!isStatic) fieldType = layouts.Metadata.Fields(field.DeclaringType)[index].Type;
                 }
                 else if (!isStatic && ValueTuples.Is(field.DeclaringType))
                 {
@@ -134,7 +139,7 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
         }
     }
 
-    static string ConstraintType(TypeReference type) => type is RequiredModifierType modifier
+    internal static string ConstraintType(TypeReference type) => type is RequiredModifierType modifier
         ? LayoutEvidence.Identity(modifier.ModifierType) + "!" + LayoutEvidence.Identity(modifier.ElementType)
         : LayoutEvidence.Identity(type);
 
