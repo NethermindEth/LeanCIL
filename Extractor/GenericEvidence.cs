@@ -11,6 +11,7 @@ namespace Nethermind.LeanCIL;
 internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvidence layouts, ImportResolution? imports = null)
 {
     readonly ExternalIdentityEvidence externalIdentities = new();
+    int methodParameterCount;
 
     static string Quote(string value) => JsonSerializer.Serialize(value);
     static string Bool(bool value) => value.ToString().ToLowerInvariant();
@@ -34,8 +35,8 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
                 callable.ExplicitThis.ToString().ToLowerInvariant();
         }
         if (type is GenericParameter parameter)
-            return parameter.Type == GenericParameterType.Method ? $".parameter {parameter.Position}" :
-                $".atom \"\" {Quote("type-parameter:" + parameter.FullName)}";
+            return $".parameter {parameter.Position +
+                (parameter.Type == GenericParameterType.Method ? 0 : methodParameterCount)}";
         if (type is ByReferenceType byRef) return $".byref ({Type(byRef.ElementType)})";
         if (type is ArrayType { IsVector: true } array) return $".array ({Type(array.ElementType)})";
         if (type is PointerType pointer) return $".pointer ({Type(pointer.ElementType)})";
@@ -63,6 +64,18 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
         var definition = reference is GenericInstanceMethod generic ? generic.ElementMethod : reference;
         var arguments = reference is GenericInstanceMethod instance ? instance.GenericArguments.ToArray() :
             reference is MethodDefinition specialized ? MethodSpecialization.Arguments(specialized).ToArray() : [];
+        var owners = definition.DeclaringType.Scope is not ModuleDefinition ? [] :
+            reference.DeclaringType is GenericInstanceType owner
+            ? owner.GenericArguments.ToArray() : reference is MethodDefinition closed
+                ? MethodSpecialization.OwnerArguments(closed).ToArray() : [];
+        if (reference is not MethodDefinition) arguments = [.. arguments, .. owners];
+        TypeReference declaringType = definition.DeclaringType;
+        if (reference is MethodDefinition && owners.Length != 0)
+        {
+            var closedOwner = new GenericInstanceType(declaringType);
+            foreach (var argument in owners) closedOwner.GenericArguments.Add(argument);
+            declaringType = closedOwner;
+        }
         var target = definition.DeclaringType.Scope is ModuleDefinition
             ? $".managed {definition.Resolve().MetadataToken.ToUInt32()}"
             : ".external " + externalIdentities.Reference(imports?.Identity(instruction) ??
@@ -70,7 +83,7 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
                 reachable.Contains(instruction));
         var name = definition.DeclaringType.Scope is ModuleDefinition
             ? ((MethodDefinition)originalModule.LookupToken(definition.Resolve().MetadataToken)).Name : definition.Name;
-        return $"{{ declaringType := {Type(definition.DeclaringType)}, name := {Quote(name)}, target := {target}, typeArguments := {List(arguments.Select(Type))}, parameterCount := {reference.Parameters.Count}, hasThis := {Bool(reference.HasThis)}, returnsValue := {Bool(reference.ReturnType.FullName != "System.Void")}, returnType := {Type(CallReturnType.Resolve(reference))}, parameterTypes := {List(CallReturnType.Parameters(reference).Select(Type))} }}";
+        return $"{{ declaringType := {Type(declaringType)}, name := {Quote(name)}, target := {target}, typeArguments := {List(arguments.Select(Type))}, ownerArgumentCount := {owners.Length}, parameterCount := {reference.Parameters.Count}, hasThis := {Bool(reference.HasThis)}, returnsValue := {Bool(reference.ReturnType.FullName != "System.Void")}, returnType := {Type(CallReturnType.Resolve(reference))}, parameterTypes := {List(CallReturnType.Parameters(reference).Select(Type))} }}";
     }
 
     string Operand(MethodDefinition method, InstructionIndex instructions, Instruction instruction,
@@ -139,10 +152,15 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
 
     string Method(MethodDefinition method, MethodDefinition admitted, IReadOnlySet<Instruction> reachable)
     {
+        methodParameterCount = method.GenericParameters.Count;
         var instructions = new InstructionIndex(method);
         var constraints = method.GenericParameters.Select(parameter =>
             $"{{ flags := {(uint)parameter.Attributes}, types := " +
             $"{List(parameter.Constraints.Select(constraint => Constraint(constraint.ConstraintType)))} }}");
+        var ownerConstraints = MethodSpecialization.Source(method) is null
+            ? method.DeclaringType.GenericParameters.Select(parameter =>
+                $"{{ flags := {(uint)parameter.Attributes}, types := " +
+                $"{List(parameter.Constraints.Select(constraint => Constraint(constraint.ConstraintType)))} }}") : [];
         if (method.MetadataToken.ToUInt32() != admitted.MetadataToken.ToUInt32() ||
             method.Body.Instructions.Count != admitted.Body.Instructions.Count)
             throw new InvalidDataException("Specialization instruction mapping differs from the original method.");
@@ -155,7 +173,7 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
             return $"{{ offset := {instruction.Offset}, opcode := {(ushort)instruction.OpCode.Value}, " +
                 $"operand := {operand} }}";
         });
-        return $"{{ token := {method.MetadataToken.ToUInt32()}, owner := {Quote(LayoutEvidence.Identity(method.DeclaringType))}, hasThis := {Bool(method.HasThis)}, explicitThis := {Bool(method.ExplicitThis)}, callingConvention := {(byte)method.CallingConvention}, attributes := {(uint)method.Attributes}, implementation := {(uint)method.ImplAttributes}, returnType := {Type(method.ReturnType)}, parameters := {List(method.Parameters.Select(parameter => Type(parameter.ParameterType)))}, locals := {List(method.Body.Variables.Select(local => Type(local.VariableType)))}, initLocals := {Bool(method.Body.InitLocals)}, maxStack := {method.Body.MaxStackSize}, genericParameters := {List(constraints)}, code := {List(code)} }}";
+        return $"{{ token := {method.MetadataToken.ToUInt32()}, owner := {Quote(LayoutEvidence.Identity(method.DeclaringType))}, ownerParameters := {List(ownerConstraints)}, ownerArgumentCount := {MethodSpecialization.OwnerArguments(method).Count}, hasThis := {Bool(method.HasThis)}, explicitThis := {Bool(method.ExplicitThis)}, callingConvention := {(byte)method.CallingConvention}, attributes := {(uint)method.Attributes}, implementation := {(uint)method.ImplAttributes}, returnType := {Type(method.ReturnType)}, parameters := {List(method.Parameters.Select(parameter => Type(parameter.ParameterType)))}, locals := {List(method.Body.Variables.Select(local => Type(local.VariableType)))}, initLocals := {Bool(method.Body.InitLocals)}, maxStack := {method.Body.MaxStackSize}, genericParameters := {List(constraints)}, code := {List(code)} }}";
     }
 
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number,

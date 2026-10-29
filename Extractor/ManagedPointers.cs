@@ -85,23 +85,15 @@ internal static class ManagedPointers
     // Inspect a closed address signature before attempting to admit its body or constraints.
     internal static IMethodSignature ReferenceSignature(MethodReference target)
     {
-        if (target is not GenericInstanceMethod generic) return target;
-        TypeReference Substitute(TypeReference type) => type switch
-        {
-            GenericParameter { Type: GenericParameterType.Method } parameter
-                when parameter.Position < generic.GenericArguments.Count =>
-                    generic.GenericArguments[parameter.Position],
-            ByReferenceType reference => new ByReferenceType(Substitute(reference.ElementType)),
-            _ => type
-        };
-        var signature = new Mono.Cecil.CallSite(Substitute(target.ReturnType))
+        if (target is not GenericInstanceMethod && target.DeclaringType is not GenericInstanceType) return target;
+        var signature = new Mono.Cecil.CallSite(CallReturnType.Resolve(target))
         {
             CallingConvention = target.CallingConvention & ~MethodCallingConvention.Generic,
             HasThis = target.HasThis,
             ExplicitThis = target.ExplicitThis
         };
-        foreach (var parameter in target.Parameters)
-            signature.Parameters.Add(new ParameterDefinition(Substitute(parameter.ParameterType)));
+        foreach (var parameter in CallReturnType.Parameters(target))
+            signature.Parameters.Add(new ParameterDefinition(parameter));
         return signature;
     }
 

@@ -364,7 +364,8 @@ internal static class MetadataValidation
                     method.IsPInvokeImpl ||
                     (method.ImplAttributes & (MethodImplAttributes.CodeTypeMask | MethodImplAttributes.ManagedMask |
                         MethodImplAttributes.Synchronized | MethodImplAttributes.InternalCall | MethodImplAttributes.ForwardRef)) != 0 ||
-                    method.HasGenericParameters || method.DeclaringType.HasGenericParameters ||
+                    method.HasGenericParameters || (method.DeclaringType.HasGenericParameters &&
+                        MethodSpecialization.OwnerArguments(method).Count == 0) ||
                     method.Body.Instructions.Count == 0 || method.Body.ExceptionHandlers.Count != 0 ||
                     (method.IsConstructor && method.IsStatic) ||
                     (method.DeclaringType.Methods.Any(m => m.IsConstructor && m.IsStatic) &&
@@ -425,12 +426,12 @@ internal static class MetadataValidation
                     }
                     return;
                 }
-                if (reference is GenericInstanceMethod generic)
+                if (reference is GenericInstanceMethod || reference.DeclaringType is GenericInstanceType)
                 {
                     if (instruction.OpCode.Code is not (Code.Call or Code.Ldftn or Code.Calli))
                         throw Call("Unsupported generic constructor call", reference, method, instruction);
                     MethodDefinition specialized;
-                    try { specialized = specializations.Instantiate(generic); }
+                    try { specialized = specializations.Instantiate(reference); }
                     catch (InvalidDataException error) when (Rejections.Of(error) is null)
                     {
                         throw Call("Unsupported generic call", reference, method, instruction, error.Message, error);
@@ -493,8 +494,9 @@ internal static class MetadataValidation
                                 .Where(target => target.DeclaringType.Scope == module).ToArray();
                             targets = addressedMethods
                                 .Where(target => ManagedPointers.SameSignature(site, ManagedPointers.ReferenceSignature(target)))
-                                .Select(target => target is GenericInstanceMethod generic
-                                    ? specializations.Instantiate(generic) : target.Resolve())
+                                .Select(target => target is GenericInstanceMethod ||
+                                        target.DeclaringType is GenericInstanceType
+                                    ? specializations.Instantiate(target) : target.Resolve())
                                 .Where(target => target is not null && ManagedPointers.SameSignature(site, target))
                                 .Distinct().ToArray()!;
                             indirectTargets.Add(signature, targets);

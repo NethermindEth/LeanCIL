@@ -169,6 +169,8 @@ structure CallSite where
   returnsValue : Bool
   returnType : TypeExpr := .void
   parameterTypes : List TypeExpr := []
+  /-- The suffix of `typeArguments` belonging to the declaring type, not the method. -/
+  ownerArgumentCount : Nat := 0
   deriving DecidableEq, Repr
 
 /-- A decoded instruction operand. A field operand names its owner type and the field's
@@ -218,6 +220,10 @@ structure RawMethod where
   maxStack : Nat
   genericParameters : List GenericConstraint
   code : List RawInstruction
+  /-- Declaring-type constraints follow method constraints in the substitution environment. -/
+  ownerParameters : List GenericConstraint := []
+  /-- Closed bodies retain the owner arity after their parameter constraints are discharged. -/
+  ownerArgumentCount : Nat := 0
   deriving DecidableEq, Repr
 
 /-- Substitutes type arguments through every type an operand mentions. -/
@@ -300,9 +306,10 @@ private def admittedTypeArgument (layouts : List RawLayout) (type : TypeExpr) : 
 /-- Instantiation preserves instruction encodings, offsets and branch targets exactly. -/
 def instantiateMethod (layouts : List RawLayout) (original : RawMethod)
     (arguments : List TypeExpr) : Option RawMethod := do
-  if arguments.length != original.genericParameters.length ||
+  if original.ownerArgumentCount != 0 ||
+      arguments.length != original.genericParameters.length + original.ownerParameters.length ||
       !arguments.all (admittedTypeArgument layouts) ||
-      !(original.genericParameters.zip arguments).all
+      !((original.genericParameters ++ original.ownerParameters).zip arguments).all
         (fun (constraint, argument) => allowedConstraint layouts argument constraint) then none
   else
     let returnType ← substituteType arguments original.returnType
@@ -312,7 +319,8 @@ def instantiateMethod (layouts : List RawLayout) (original : RawMethod)
       return { instruction with operand := ← substituteOperand arguments instruction.operand }
     -- Masking with 239 clears the generic calling-convention bit (0x10).
     return { original with
-      returnType, parameters, locals, code, genericParameters := [],
+      returnType, parameters, locals, code, genericParameters := [], ownerParameters := [],
+      ownerArgumentCount := original.ownerParameters.length,
       callingConvention := original.callingConvention &&& 239 }
 
 /-- Closed argument metadata is derived from this checked body, including short opcodes. -/
@@ -411,16 +419,32 @@ def managedTargetMatches (methods : Nat → Option SpecializedMethod)
     callee.closed.returnType == signature.result && callee.closed.parameters == signature.parameters &&
     managedSignature signature.typeExpr == some signature
 
+/-- Split a scoped declaring type from its ordered generic arguments. -/
+def managedOwner : TypeExpr → Option (String × List TypeExpr)
+  | .atom scope name | .constructor scope name => some (scope ++ "::" ++ name, [])
+  | .aggregate identity _ => some (identity, [])
+  | .apply owner argument => do
+    let (identity, arguments) ← managedOwner owner
+    return (identity, arguments ++ [argument])
+  | _ => none
+
+/-- Owner arguments occupy the suffix after method arguments, with independently checked arity. -/
+def managedOwnerMatches (site : CallSite) (owner : String) (ownerCount : Nat) : Bool :=
+  match managedOwner site.declaringType with
+  | some (identity, arguments) => identity == owner && ownerCount == site.ownerArgumentCount &&
+    arguments.length == ownerCount && ownerCount ≤ site.typeArguments.length &&
+    site.typeArguments.drop (site.typeArguments.length - ownerCount) == arguments
+  | none => false
+
 /-- Exact function address evidence; integer constants cannot acquire callable provenance. -/
 def managedAddressMatches (methods : Nat → Option SpecializedMethod)
     (raw : RawInstruction) (target : ManagedTarget) (signature : ManagedSignature) : Bool :=
   raw.opcode == 65030 && managedTargetMatches methods signature target &&
   match raw.operand with
   | .call site => site.target == .managed target.identity.token &&
-    (match site.declaringType with
-      | .atom scope name => target.identity.owner == scope ++ "::" ++ name
-      | .aggregate identity _ => target.identity.owner == identity
-      | _ => false) &&
+    (match methods target.method with
+      | some callee => managedOwnerMatches site target.identity.owner callee.closed.ownerArgumentCount
+      | none => false) &&
     site.typeArguments == target.identity.arguments && !site.hasThis &&
     site.returnType == signature.result && site.parameterTypes == signature.parameters &&
     site.parameterCount == signature.parameters.length &&
@@ -455,6 +479,7 @@ def validateManagedCallWith (methodCount : Nat)
       | some (target, count) => match methods target with
         | none => false
         | some callee =>
+          managedOwnerMatches site callee.closed.owner callee.closed.ownerArgumentCount &&
           callee.closed.token == token && callee.arguments == site.typeArguments &&
           callee.closed.parameters.length == site.parameterCount &&
           callee.closed.hasThis == site.hasThis &&
@@ -553,7 +578,7 @@ theorem validated_import_call {methods : List SpecializedMethod} {imports : List
   cases operand with
   | call site =>
     obtain ⟨declaringType, name, method, typeArguments, parameterCount, hasThis, returnsValue,
-      returnType, parameterTypes⟩ := site
+      returnType, parameterTypes, ownerArgumentCount⟩ := site
     cases method with
     | managed token =>
       have missing : methods[target]? = none := List.getElem?_eq_none_iff.mpr outside
