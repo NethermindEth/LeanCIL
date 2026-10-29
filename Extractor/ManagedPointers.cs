@@ -8,8 +8,17 @@ namespace Nethermind.LeanCIL;
 // Callable identities retain exact metadata; no numerical address is admitted as a target.
 internal static class ManagedPointers
 {
-    static readonly ConditionalWeakTable<IReadOnlyDictionary<MethodDefinition, int>,
-        Dictionary<string, string>> Catalogs = new();
+    sealed class CatalogCache(IReadOnlyDictionary<MethodDefinition, int> methods)
+    {
+        internal readonly Dictionary<string, KeyValuePair<MethodDefinition, int>[]> Targets = methods
+            .Where(pair => !pair.Key.HasThis && !pair.Key.ExplicitThis &&
+                pair.Key.CallingConvention == MethodCallingConvention.Default)
+            .GroupBy(pair => SignatureEvidence(pair.Key), StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
+        internal readonly Dictionary<string, string> Expressions = new(StringComparer.Ordinal);
+    }
+
+    static readonly ConditionalWeakTable<IReadOnlyDictionary<MethodDefinition, int>, CatalogCache> Catalogs = new();
     internal static FunctionPointerType? Signature(TypeReference type) => type switch
     {
         FunctionPointerType pointer => pointer,
@@ -71,20 +80,43 @@ internal static class ManagedPointers
         left.Parameters.Select(parameter => TypeEvidence(parameter.ParameterType))
             .SequenceEqual(right.Parameters.Select(parameter => TypeEvidence(parameter.ParameterType)));
 
+    // Inspect a closed address signature before attempting to admit its body or constraints.
+    internal static IMethodSignature ReferenceSignature(MethodReference target)
+    {
+        if (target is not GenericInstanceMethod generic) return target;
+        TypeReference Substitute(TypeReference type) => type switch
+        {
+            GenericParameter { Type: GenericParameterType.Method } parameter
+                when parameter.Position < generic.GenericArguments.Count => generic.GenericArguments[parameter.Position],
+            ByReferenceType reference => new ByReferenceType(Substitute(reference.ElementType)),
+            _ => type
+        };
+        var signature = new Mono.Cecil.CallSite(Substitute(target.ReturnType))
+        {
+            CallingConvention = target.CallingConvention & ~MethodCallingConvention.Generic,
+            HasThis = target.HasThis,
+            ExplicitThis = target.ExplicitThis
+        };
+        foreach (var parameter in target.Parameters)
+            signature.Parameters.Add(new ParameterDefinition(Substitute(parameter.ParameterType)));
+        return signature;
+    }
+
     internal static string TargetEvidence(MethodDefinition method, int index) =>
         $"{{ identity := {IdentityEvidence(method)}, method := {index} }}";
 
     internal static string Catalog(IMethodSignature signature,
         IReadOnlyDictionary<MethodDefinition, int> methods, int caller, bool tail)
     {
-        var key = SignatureEvidence(signature) + ":" + (tail ? -1 : caller);
-        var cache = Catalogs.GetValue(methods, _ => []);
-        if (cache.TryGetValue(key, out var catalog)) return catalog;
-        var targets = methods.Where(pair => (tail || pair.Value > caller) &&
-            SameSignature(signature, pair.Key)).ToArray();
+        var signatureKey = SignatureEvidence(signature);
+        var key = signatureKey + ":" + (tail ? -1 : caller);
+        var cache = Catalogs.GetValue(methods, static values => new(values));
+        if (cache.Expressions.TryGetValue(key, out var catalog)) return catalog;
+        var targets = cache.Targets.GetValueOrDefault(signatureKey, [])
+            .Where(pair => tail || pair.Value > caller).ToArray();
         if (targets.Length == 0) throw new InvalidDataException("Empty managed pointer target catalog");
         catalog = "[" + string.Join(", ", targets.Select(pair => TargetEvidence(pair.Key, pair.Value))) + "]";
-        cache.Add(key, catalog);
+        cache.Expressions.Add(key, catalog);
         return catalog;
     }
 

@@ -20,6 +20,9 @@ public static unsafe class ManagedDispatch
         var local = value;
         return ((delegate* managed<ref int, int>)&Read)(ref local);
     }
+    public static delegate* managed<float, float> UnrelatedTarget() => &Identity<float>;
+
+    private static T Identity<T>(T value) => value;
 
     // These addresses define the bounded handler universe independently of the supplied table.
     public static void Targets(delegate* managed<int, int>[] handlers)

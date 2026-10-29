@@ -326,8 +326,8 @@ internal static class MetadataValidation
         void Visit(MethodDefinition method)
         {
             var pending = new Stack<(MethodDefinition Method, bool Finish, bool Deferred,
-                MethodDefinition[] Chain)>();
-            pending.Push((method, false, false, [method]));
+                MethodDefinition? Caller)>();
+            pending.Push((method, false, false, null));
             while (pending.TryPop(out var item))
             {
                 if (item.Finish)
@@ -342,14 +342,15 @@ internal static class MetadataValidation
                         throw new InvalidDataException($"Recursive managed dependency: {item.Method.FullName}");
                     continue;
                 }
-                chains[item.Method] = item.Chain;
+                chains[item.Method] = item.Caller is { } caller
+                    ? [.. chains[caller], item.Method] : [item.Method];
                 dependencies[item.Method] = [];
                 Walk(item.Method);
                 if (state[item.Method] == 3) continue;
-                pending.Push((item.Method, true, false, item.Chain));
+                pending.Push((item.Method, true, false, item.Caller));
                 foreach (var dependency in dependencies[item.Method].AsEnumerable().Reverse())
                     pending.Push((dependency.Method, false, dependency.Deferred,
-                        [.. item.Chain, dependency.Method]));
+                        item.Method));
             }
         }
         void Walk(MethodDefinition method)
@@ -490,7 +491,9 @@ internal static class MetadataValidation
                         {
                             addressedMethods ??= ManagedPointers.AddressedMethods(module)
                                 .Where(target => target.DeclaringType.Scope == module).ToArray();
-                            targets = addressedMethods.Select(target => target is GenericInstanceMethod generic
+                            targets = addressedMethods
+                                .Where(target => ManagedPointers.SameSignature(site, ManagedPointers.ReferenceSignature(target)))
+                                .Select(target => target is GenericInstanceMethod generic
                                     ? specializations.Instantiate(generic) : target.Resolve())
                                 .Where(target => target is not null && ManagedPointers.SameSignature(site, target))
                                 .Distinct().ToArray()!;
