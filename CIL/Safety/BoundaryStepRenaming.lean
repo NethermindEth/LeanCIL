@@ -1,4 +1,5 @@
 import CIL.Safety.FixedStepHelpers
+import CIL.Safety.NativeMethodTableRenaming
 
 /-! Argument loads, calls and returns preserve checked values and control flow. -/
 
@@ -11,19 +12,40 @@ private theorem managedReference_null_iff (mapping : AllocationRenaming)
   cases reference <;> simp [AllocationRenaming.managedReference]
 #print axioms managedReference_null_iff
 
+/-- Observable execution through a native table requires a successful checked memory step. -/
+private theorem checkedNative_bind {mapping : AllocationRenaming} {relation : β → γ → Prop}
+    (source target : Checked α) (sourceNext : α → ExecutionResult β)
+    (targetNext : α → ExecutionResult γ)
+    (preserved : ∀ value, source = .ok value → target = .ok value)
+    (observable : SuccessOrThrow (checkedAt .null nativeMethodWidth source >>= sourceNext))
+    (next : ∀ value, source = .ok value → SuccessOrThrow (sourceNext value) →
+      ResultRenamed mapping relation (sourceNext value) (targetNext value)) :
+    ResultRenamed mapping relation (checkedAt .null nativeMethodWidth source >>= sourceNext)
+      (checkedAt .null nativeMethodWidth target >>= targetNext) := by
+  cases checked : source with
+  | error fault =>
+    simp [checked, checkedAt, Except.mapError, Bind.bind, Except.bind, SuccessOrThrow] at observable
+  | ok value =>
+    simp only [checked, checkedAt, Except.mapError, Bind.bind, Except.bind] at observable ⊢
+    rw [preserved value checked]
+    exact next value checked observable
+#print axioms checkedNative_bind
+
 /-- Managed metadata identities are stable while checked argument references are renamed. -/
 theorem Memory.Renamed.managedStep {indices : LocalIndexMap} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
     (related : Memory.Renamed mapping scopes source target)
     (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
+    (formed : source.WellFormed)
     (operation : CIL.ManagedOp) (pc : Nat) (stack : List Value)
-    (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit) :
+    (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (managedStep operation pc sourceFrame stack source)) :
     ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
       (managedStep operation pc sourceFrame stack source)
       (managedStep operation pc targetFrame (stack.map mapping.value) target) := by
-  unfold CIL.Safety.managedStep
+  unfold CIL.Safety.managedStep at observable ⊢
   split
-  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try simp only [*, List.map_cons, AllocationRenaming.value] at observable ⊢
   all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
   all_goals repeat' rcases bounds with ⟨_, bounds⟩
   all_goals try simp only [List.length_map, ← List.map_take, ← List.map_reverse, ← List.map_drop]
@@ -32,14 +54,22 @@ theorem Memory.Renamed.managedStep {indices : LocalIndexMap} {mapping : Allocati
     | exact .ok (.next related frames)
     | exact .ok (.call related)
     | exact .ok (.tailCall related)
+    | (simp only [Bool.false_eq_true, Bool.true_eq, ite_false, ite_true] at observable ⊢)
+    | contradiction
+    | (apply checkedNative_bind _ _ _ _
+        (fun value proof => related.addNativeTable_success formed _ value _ proof) observable
+       intro value found observable)
+    | (apply checkedNative_bind _ _ _ _
+        (fun value proof => related.loadNativeTable_success formed _ value proof) observable
+       intro value found observable)
     | (apply (related.checkedValues _ (by
         intro value member
         exact bounds value (List.mem_of_mem_take (List.mem_reverse.mp member)))).bind
        intro first second same
        subst second)
-    | contradiction
-    | (split <;> try simp only [*, List.map_cons, AllocationRenaming.value,
-        Bind.bind, Except.bind, Pure.pure, Except.pure])
+    | (split <;> try simp only [*, Bool.false_eq_true, Bool.true_eq, ite_false, ite_true,
+        List.map_cons, AllocationRenaming.value, Bind.bind, Except.bind, Pure.pure,
+        Except.pure] at observable ⊢)
   all_goals try simp_all only [reduceCtorEq, forall_const, forall_eq', false_implies, true_implies]
   all_goals cases stack with
   | nil => simp_all [AllocationRenaming.value, managedReference_null_iff]
@@ -68,70 +98,81 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
       (step sourceBody operation pc arguments sourceFrame stack source)
       (step targetBody operation pc (arguments.map mapping.value)
         targetFrame (stack.map mapping.value) target) := by
-  allocation_fixed_step (
-    first
-    | exact related.managedStep frames _ _ _ bounds
-    | (case h_54 =>
-        rename_i _ _ position
-        rw [List.getElem?_map]
-        cases found : arguments[position]? with
-        | none => exact .error .invalidState
-        | some value =>
-          apply (related.checkedValue value
-            (argumentBounds value (List.mem_of_getElem? found))).bind
-          intro first second same
-          subst second
-          exact .ok (.next related frames))
-    | (case h_55 =>
-        rename_i _ _ position kind
-        rw [List.getElem?_map]
-        cases found : arguments[position]? with
-        | none => exact .error .invalidState
-        | some value =>
-          cases value <;> try exact .error .invalidState
-          rename_i scalar
-          cases scalar <;> try exact .error .invalidState
-          apply (related.checkedValue _ (by trivial)).bind
-          intro first second same
-          subst second
-          exact .ok (.next related frames))
-    | (apply (frames.argumentHome _).bind
-       intro slot otherSlot slots
-       rcases slots with ⟨bounded, rfl⟩
-       first
-       | (apply (related.loadLocal slot bounded).bind
-          intro first second same
-          subst second
-          exact .ok (.next related frames))
-       | (apply (related.localAddress slot bounded).bind
-          intro first second same
-          subst second
-          exact .ok (.next related frames)))
-    | (try simp only [List.map_nil, List.length_map, ← List.map_take, ← List.map_drop,
-         ← List.map_reverse, metadata.returnsValue]
-       repeat first
-       | exact .error _
-       | exact .ok (.returned related)
-       | exact .ok (.call related)
-       | exact .ok (.tailCall related)
-       | (apply (related.checkedValues _ (by assumption)).bind
-          intro first second same
-          subst second)
-       | (apply (related.checkedValues _ (by
-            intro value member
-            exact bounds value (List.mem_of_mem_take (List.mem_reverse.mp member)))).bind
-          intro first second same
-          subst second)
-       | (apply (related.checkedValues _ (by
-            intro value member
-            exact bounds value (List.mem_reverse.mp member))).bind
-          intro first second same
-          subst second)
-       | (apply (related.scalarChecks _).bind
-          intro first second same
-          subst second)
-       | (split <;> try simp only [*, Bool.false_eq_true, ite_false])
-       skip))
+  by_cases isManaged : ∃ native, operation = .managed native
+  · rcases isManaged with ⟨native, rfl⟩
+    unfold CIL.Safety.step at observable ⊢
+    simp only [Bool.or_false] at observable ⊢
+    rw [mapping.unspecifiedOperands]
+    by_cases guarded : unspecifiedOperands (observerCount (.managed native)) stack = true
+    · simp only [guarded, ite_true]
+      exact .error (.unsupported "Instruction observes unspecified vector bits")
+    · simp only [guarded, Bool.false_eq_true, ite_false] at observable ⊢
+      exact related.managedStep frames formed native pc stack bounds observable
+  ·
+    allocation_fixed_step (
+      first
+      | exact False.elim (isManaged ⟨_, rfl⟩)
+      | (case h_54 =>
+          rename_i _ _ position
+          rw [List.getElem?_map]
+          cases found : arguments[position]? with
+          | none => exact .error .invalidState
+          | some value =>
+            apply (related.checkedValue value
+              (argumentBounds value (List.mem_of_getElem? found))).bind
+            intro first second same
+            subst second
+            exact .ok (.next related frames))
+      | (case h_55 =>
+          rename_i _ _ position kind
+          rw [List.getElem?_map]
+          cases found : arguments[position]? with
+          | none => exact .error .invalidState
+          | some value =>
+            cases value <;> try exact .error .invalidState
+            rename_i scalar
+            cases scalar <;> try exact .error .invalidState
+            apply (related.checkedValue _ (by trivial)).bind
+            intro first second same
+            subst second
+            exact .ok (.next related frames))
+      | (apply (frames.argumentHome _).bind
+         intro slot otherSlot slots
+         rcases slots with ⟨bounded, rfl⟩
+         first
+         | (apply (related.loadLocal slot bounded).bind
+            intro first second same
+            subst second
+            exact .ok (.next related frames))
+         | (apply (related.localAddress slot bounded).bind
+            intro first second same
+            subst second
+            exact .ok (.next related frames)))
+      | (try simp only [List.map_nil, List.length_map, ← List.map_take, ← List.map_drop,
+           ← List.map_reverse, metadata.returnsValue]
+         repeat first
+         | exact .error _
+         | exact .ok (.returned related)
+         | exact .ok (.call related)
+         | exact .ok (.tailCall related)
+         | (apply (related.checkedValues _ (by assumption)).bind
+            intro first second same
+            subst second)
+         | (apply (related.checkedValues _ (by
+              intro value member
+              exact bounds value (List.mem_of_mem_take (List.mem_reverse.mp member)))).bind
+            intro first second same
+            subst second)
+         | (apply (related.checkedValues _ (by
+              intro value member
+              exact bounds value (List.mem_reverse.mp member))).bind
+            intro first second same
+            subst second)
+         | (apply (related.scalarChecks _).bind
+            intro first second same
+            subst second)
+         | (split <;> try simp only [*, Bool.false_eq_true, ite_false])
+         skip))
 #print axioms Memory.Renamed.stepBoundary
 
 end CIL.Safety
