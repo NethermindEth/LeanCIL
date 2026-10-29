@@ -31,6 +31,10 @@ to an element, and the [buffer fill proof](../Examples/Proofs/FillWords.lean) ca
 the invariant of a compiled loop. `Tests/BufferContents.lean` checks unchanged neighbouring bytes
 and sibling slices, and refutes uninitialized, past-end, overlapping, unjoined and stale claims.
 
+`SpanView.slice_reference` identifies the allocation-relative start of a successful addressed
+slice. Combined with `Contents.drop`, it transports a sequence predicate to the slice without
+repeating byte-read proofs. Slice validity alone does not assert readable contents.
+
 For `Span<T>.Fill` and `Clear`, `SpanView.fill_contents` derives the repeated sequence from the
 successful checked fill, without a readable-input premise. `Contents.after_span_fill` preserves
 sequences outside a nonempty fill's extent. The operation checks the whole range once and performs
