@@ -407,6 +407,18 @@ theorem checkedSpanElement_valid (view : SpanView) (memory : Memory) (width inde
 #print axioms checkedSpanSlice_valid
 #print axioms checkedSpanElement_valid
 
+/-- Reordering integer bytes always produces a defined scalar value. -/
+theorem endianValue_numeric (width : Nat) (signed bigEndian : Bool) (input output : CIL.Value)
+    (ordered : endianValue width signed bigEndian input = .ok output) :
+    numericValue output = true := by
+  unfold endianValue at ordered
+  repeat' first
+    | solve | cases ordered; rfl
+    | cases ordered
+    | split at ordered
+    | simp only [Pure.pure, Except.pure] at ordered
+#print axioms endianValue_numeric
+
 /-- Checked array addresses retain a live allocation-relative reference. -/
 theorem checkedArrayElement_valid (view : ArrayView) (memory : Memory) (index width : Nat)
     (reference : Reference) (found : arrayElement memory view index width = .ok reference) :
@@ -458,6 +470,7 @@ macro "instruction_contract_close" : tactic => `(tactic| (
             | exact bitcastValue_numeric (by assumption)
             | exact loadSnapshot_numeric (by assumption)
             | exact loadTransfer_numeric _ _ _ _ (by assumption)
+            | exact endianValue_numeric _ _ _ _ _ (by assumption)
             | exact retained.head
             | apply loadValue_scalar_valid; assumption
             | apply formValue_result_valid; assumption
@@ -519,6 +532,32 @@ private theorem otherMemoryInstruction_contract (operation : CIL.MemoryOp)
     | split at executed
 #print axioms otherMemoryInstruction_contract
 
+/-- View observations preserve memory and return only valid references or scalar flags. -/
+theorem viewObservationInstruction_contract (observation : CIL.ViewObservation)
+    (stack values : List Value) (memory result : Memory)
+    (observed : viewObservationInstruction observation stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold viewObservationInstruction at observed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at observed
+  repeat' first
+    | solve | cases observed; instruction_contract_close
+    | cases observed
+    | split at observed
+#print axioms viewObservationInstruction_contract
+
+/-- Endian transfers preserve checked writes and return initialized integer values. -/
+theorem binaryTransferInstruction_contract (width : Nat) (signed bigEndian read trying : Bool)
+    (stack values : List Value) (memory result : Memory)
+    (transferred : binaryTransferInstruction width signed bigEndian read trying stack memory =
+      .ok (result, values)) : InstructionContract memory result stack values := by
+  unfold binaryTransferInstruction at transferred
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at transferred
+  repeat' first
+    | solve | cases transferred; instruction_contract_close
+    | cases transferred
+    | split at transferred
+#print axioms binaryTransferInstruction_contract
+
 /-- Checked memory dispatch preserves the effects and stack validity of its selected family. -/
 theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : List Value)
     (m result : Memory) (h : memoryInstruction operation stack m = .ok (result, values)) :
@@ -527,6 +566,9 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
   split at h
   · cases h
   · split at h
+    · exact binaryTransferInstruction_contract _ _ _ _ _ _ _ _ _ h
+    · exact binaryTransferInstruction_contract _ _ _ _ _ _ _ _ _ h
+    · exact viewObservationInstruction_contract _ _ _ _ _ h
     · exact spanCopyInstruction_contract _ _ _ _ _ _ h
     · exact spanFillInstruction_contract _ _ _ _ _ _ h
     · exact otherMemoryInstruction_contract _ _ _ _ _ h

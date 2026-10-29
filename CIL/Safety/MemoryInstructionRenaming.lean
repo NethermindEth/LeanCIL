@@ -215,6 +215,98 @@ private theorem Memory.Renamed.otherMemoryInstructionResult {mapping : Allocatio
 
 #print axioms Memory.Renamed.otherMemoryInstructionResult
 
+/-- View observations preserve reference provenance under allocation renaming. -/
+private theorem Memory.Renamed.viewObservationInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (observation : CIL.ViewObservation)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (viewObservationInstruction observation stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (viewObservationInstruction observation stack source)
+      (viewObservationInstruction observation (stack.map mapping.value) target) := by
+  unfold viewObservationInstruction at observable ⊢
+  split at observable
+  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try dsimp only [AllocationRenaming.arrayView, AllocationRenaming.spanView]
+  all_goals try solve | repeat first | contradiction | cases observable | split at observable
+  all_goals clear observable
+  all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
+  all_goals repeat' rcases bounds with ⟨_, bounds⟩
+  all_goals repeat first
+    | exact .ok ⟨related, rfl⟩
+    | exact .error _
+    | (apply (related.checkedSpanValidate _ (by assumption)).bindWithSuccess
+       intro first second sourceStep same
+       subst second)
+    | (apply (related.checkedArray _ (by assumption) _ _).bindWithSuccess
+       intro first second sourceStep same
+       subst second)
+    | (apply (related.formValue _ (by first | assumption | trivial)).bindWithSuccess
+       intro first second sourceStep same
+       subst second)
+    | simp only [mapping.isNull]
+    | (split <;> try simp only [*, Bool.false_eq_true, Bool.true_eq, ite_false, ite_true,
+        AllocationRenaming.managedReference, Bind.bind, Except.bind])
+  all_goals try simp_all [CIL.Safety.formValue, Pure.pure, Except.pure, Bind.bind, Except.bind]
+  all_goals subst_vars
+  all_goals try solve | split <;> exact .ok ⟨related, rfl⟩
+  all_goals
+    apply (related.formValue _ (by assumption)).bindWithSuccess
+    intro first second sourceStep same
+    subst second
+    split <;> exact .ok ⟨related, rfl⟩
+#print axioms Memory.Renamed.viewObservationInstructionResult
+
+/-- Byte reordering cannot introduce a fault containing allocation identities. -/
+private theorem AllocationRenaming.endianValue (mapping : AllocationRenaming)
+    (width : Nat) (signed bigEndian : Bool) (value : CIL.Value) :
+    ResultRenamed mapping Eq (endianValue width signed bigEndian value)
+      (endianValue width signed bigEndian value) := by
+  unfold CIL.Safety.endianValue
+  split <;> first | exact .ok rfl | exact .error _
+#print axioms AllocationRenaming.endianValue
+
+/-- Fixed-width endian transfers preserve checked reads and writes under allocation renaming. -/
+private theorem Memory.Renamed.binaryTransferInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target)
+    (width : Nat) (signed bigEndian read trying : Bool)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow
+      (binaryTransferInstruction width signed bigEndian read trying stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (binaryTransferInstruction width signed bigEndian read trying stack source)
+      (binaryTransferInstruction width signed bigEndian read trying (stack.map mapping.value) target) := by
+  unfold binaryTransferInstruction at observable ⊢
+  split at observable
+  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try dsimp only [AllocationRenaming.spanView]
+  all_goals try solve | repeat first | contradiction | cases observable | split at observable
+  all_goals clear observable
+  all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
+  all_goals repeat' rcases bounds with ⟨_, bounds⟩
+  all_goals repeat first
+    | exact .ok ⟨by assumption, rfl⟩
+    | exact .error _
+    | (apply (related.checkedSpanValidate _ (by assumption)).bindWithSuccess
+       intro first second sourceStep same
+       subst second)
+    | (apply (related.loadTransfer _ (by assumption) _).bindWithSuccess
+       intro first second sourceStep same
+       subst second)
+    | (apply (related.storeTransfer _ (by assumption) _ _).bindWithSuccess
+       intro first second sourceStep memoryRelated)
+    | (apply (mapping.endianValue _ _ _ _).bindWithSuccess
+       intro first second sourceStep same
+       subst second)
+    | (split <;> try simp only [*, Bool.false_eq_true, Bool.true_eq, ite_false, ite_true,
+        AllocationRenaming.managedReference, Bind.bind, Except.bind])
+#print axioms Memory.Renamed.binaryTransferInstructionResult
+
 /-- A memory instruction's successful effect is preserved on the corresponding allocations. -/
 theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -234,6 +326,9 @@ theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
   · rename_i observed
     simp only [observed, Bool.false_eq_true, ite_false]
     split at observable
+    · exact related.binaryTransferInstructionResult _ _ _ _ _ _ bounds observable
+    · exact related.binaryTransferInstructionResult _ _ _ _ _ _ bounds observable
+    · exact related.viewObservationInstructionResult _ _ bounds observable
     · exact related.spanCopyInstructionResult _ _ _ bounds observable
     · exact related.spanFillInstructionResult _ _ _ bounds observable
     · exact related.otherMemoryInstructionResult _ formed _ bounds observable

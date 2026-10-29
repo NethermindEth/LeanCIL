@@ -142,3 +142,4 @@ Run(["dotnet", "run", "--file", "Tests/MarshaledMemory.cs"], streamOutput: true,
 Run(["dotnet", "run", "--file", "Tests/ReinterpretedSpans.cs"], streamOutput: true, progress: "Span reinterpretation checks");
 Run(["dotnet", "run", "--file", "Tests/SpanCopies.cs"], streamOutput: true, progress: "Span copy checks");
 Run(["dotnet", "run", "--file", "Tests/ViewAccessors.cs"], streamOutput: true, progress: "View accessor checks");
+Run(["dotnet", "run", "--file", "Tests/BinarySpans.cs"], streamOutput: true, progress: "Endian span checks");

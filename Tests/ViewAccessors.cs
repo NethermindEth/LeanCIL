@@ -39,13 +39,18 @@ foreach (var method in metadata.GetType("Examples.ViewAccessors").Methods.Where(
                 $".ok [.scalar (.i32 {(length == 0 ? 1 : 0)})]");
     }
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + """
+        /-- Successful observations identify the checked execution result. -/
+        private theorem result_of_toOption {error value : Type} {result : Except error value}
+            {expected : value} (observed : result.toOption = some expected) : result = .ok expected := by
+          cases result <;> simp_all [Except.toOption]
+        #print axioms result_of_toOption
         /-- Existing storage has no readable bytes or access authority; observations need neither. -/
         def memory : CIL.Safety.Memory := { Examples.empty with
           allocations := fun identity => if identity == 0 then
             some ⟨.callerStack, ⟨16, 1, []⟩, true, [16]⟩ else none
           nextIdentity := 1 }
         /-- Empty views, readonly receivers and zero-length arrays retain their distinct results. -/
-        """ + "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by decide +kernel\n" +
+        """ + "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by\n  repeat constructor\n  all_goals first | (apply result_of_toOption; decide +kernel) | decide +kernel\n" +
         "#print axioms correctness\nend ExampleProof\n");
     queue.Add(new(method.FullName, proof, output), () => Console.WriteLine("PASS view accessor: " + method.Name));
 }

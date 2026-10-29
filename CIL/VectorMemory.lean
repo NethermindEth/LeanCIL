@@ -143,6 +143,10 @@ inductive ViewObservation where
 inductive MemoryOp where
   /-- Inspect an existing view without accessing its element contents. -/
   | observeView (observation : ViewObservation)
+  /-- Fixed-width endian-aware reads; short try-reads initialize the out value to zero. -/
+  | binaryRead (width : Nat) (signed bigEndian trying : Bool)
+  /-- Fixed-width endian-aware writes; short try-writes leave the span unchanged. -/
+  | binaryWrite (width : Nat) (bigEndian trying : Bool)
   /-- Reinterpret existing bytes without changing their storage or authority. -/
   | spanReinterpret (sourceWidth targetWidth : Nat) (writable : Bool)
   /-- Snapshot copying permits overlapping spans; try-copy returns false for a short target. -/
@@ -181,6 +185,8 @@ inductive MemoryOp where
 /-- Every popped operand; no default, so each new operation states what it reads. -/
 def MemoryOp.argumentCount : MemoryOp → Nat
   | .observeView _ => 1
+  | .binaryRead _ _ _ trying => if trying then 2 else 1
+  | .binaryWrite .. => 2
   | .spanCopy .. => 2
   | .spanFill _ clear => if clear then 1 else 2
   | .marshalRead _ tryRead => if tryRead then 2 else 1

@@ -128,6 +128,40 @@ private theorem Memory.Equivalent.otherMemoryInstruction {m n : Memory} (same : 
 
 #print axioms Memory.Equivalent.otherMemoryInstruction
 
+/-- Observations depend only on allocation metadata and preserve equivalent memories. -/
+theorem Memory.Equivalent.viewObservationInstruction {m n : Memory} (same : m.Equivalent n)
+    (observation : CIL.ViewObservation) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (viewObservationInstruction observation stack m)
+      (viewObservationInstruction observation stack n) := by
+  unfold CIL.Safety.viewObservationInstruction
+  split <;> try simp only [same.spanValidate, same.arrayValidate, same.formValue]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | split
+#print axioms Memory.Equivalent.viewObservationInstruction
+
+/-- Endian transfers retain their exact results over equivalent backing memories. -/
+theorem Memory.Equivalent.binaryTransferInstruction {m n : Memory} (same : m.Equivalent n)
+    (width : Nat) (signed bigEndian read trying : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent
+      (binaryTransferInstruction width signed bigEndian read trying stack m)
+      (binaryTransferInstruction width signed bigEndian read trying stack n) := by
+  unfold CIL.Safety.binaryTransferInstruction
+  split <;> try simp only [same.spanValidate, same.loadTransfer]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind (same.storeTransfer _ _ _)
+       intro left right related
+       first
+       | exact .ok ⟨related, rfl⟩
+       | split <;> exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.binaryTransferInstruction
+
 /-- Opcode dispatch preserves the memory equivalence of each checked family. -/
 theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent n)
     (operation : CIL.MemoryOp) (stack : List Value) :
@@ -137,6 +171,9 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
   split
   · exact .error _
   · split
+    · exact same.binaryTransferInstruction _ _ _ _ _ _
+    · exact same.binaryTransferInstruction _ _ _ _ _ _
+    · exact same.viewObservationInstruction _ _
     · exact same.spanCopyInstruction _ _ _
     · exact same.spanFillInstruction _ _ _
     · exact same.otherMemoryInstruction _ _

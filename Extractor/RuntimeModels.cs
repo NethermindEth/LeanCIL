@@ -135,7 +135,8 @@ internal static class RuntimeModels
                 ?? ValueBitCasts.Translate(reference, profile.Architecture)
                 ?? UnsafeModels.Translate(reference, profile.Architecture)
                 ?? EnumSpan(reference) ?? Runtime(reference.FullName),
-            "System.Memory" => Scalar(reference) ?? EnumSpan(reference) ?? Span(reference.FullName),
+            "System.Memory" => Scalar(reference) ?? BinaryTransfers.Translate(reference) ??
+                EnumSpan(reference) ?? Span(reference.FullName),
             "System.Runtime.Intrinsics" => Intrinsic(reference.FullName, profile),
             _ => null
         };
