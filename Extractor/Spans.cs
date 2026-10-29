@@ -41,9 +41,23 @@ internal static class Spans
     internal static bool Writable(TypeReference type) =>
         type is GenericInstanceType { ElementType.FullName: "System.Span`1" };
 
-    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<MethodDefinition, Analysis> cache = new();
+    private sealed class Architectures
+    {
+        internal readonly Dictionary<string, Analysis> Results = new(StringComparer.Ordinal);
+    }
 
-    internal static Analysis Analyze(MethodDefinition method) => cache.GetValue(method, Compute);
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<MethodDefinition, Architectures> cache = new();
+
+    internal static Analysis Analyze(MethodDefinition method, FeatureProfile profile)
+    {
+        var results = cache.GetValue(method, static _ => new()).Results;
+        if (!results.TryGetValue(profile.Architecture, out var analysis))
+        {
+            analysis = Compute(method, profile);
+            results.Add(profile.Architecture, analysis);
+        }
+        return analysis;
+    }
 
     static bool Store(Instruction i) => i.OpCode.Code is Code.Stloc or Code.Stloc_S or Code.Stloc_0 or Code.Stloc_1 or Code.Stloc_2 or Code.Stloc_3;
     static bool Address(Instruction i) => i.OpCode.Code is Code.Ldloca or Code.Ldloca_S;
@@ -54,7 +68,7 @@ internal static class Spans
     static bool Member(Instruction? i, string name) => i is { OpCode.Code: Code.Call, Operand: MethodReference callee } &&
         callee.HasThis && callee.Name == name && Is(callee.DeclaringType);
 
-    static Analysis Compute(MethodDefinition method)
+    static Analysis Compute(MethodDefinition method, FeatureProfile profile)
     {
         var analysis = new Analysis([], [], []);
         var uses = new int[method.Body.Variables.Count];
@@ -68,7 +82,7 @@ internal static class Spans
                 analysis.Operands.Contains(i))
                 continue;
             var local = FeatureConstants.Local(i);
-            if (Address(i) && Constructor(i, method.Body.Variables[local].VariableType) is { } constructor)
+            if (Address(i) && Constructor(i, method.Body.Variables[local].VariableType, profile) is { } constructor)
             {
                 analysis.Operands.Add(i);
                 for (var interior = i.Next; interior is not null; interior = interior.Next)
@@ -94,7 +108,8 @@ internal static class Spans
     }
 
     // The local address cannot escape: only bounded single-value pushes precede its exact constructor.
-    static (Instruction Call, string Descriptor)? Constructor(Instruction address, TypeReference localType)
+    static (Instruction Call, string Descriptor)? Constructor(Instruction address, TypeReference localType,
+        FeatureProfile profile)
     {
         var call = address.Next;
         var count = 0;
@@ -107,14 +122,17 @@ internal static class Spans
             reference.Name != ".ctor" || reference.DeclaringType.FullName != localType.FullName ||
             reference.Parameters.Count != count)
             return null;
-        var operation = InstructionTranslation.RuntimeModel(reference);
+        var operation = InstructionTranslation.RuntimeModel(reference, profile);
         if (operation == ".memory .spanCreate") return (call, ".reference 1 false");
         const string array = ".memory (.arraySpan ";
         const string pointer = ".memory (.spanFromReference ";
+        const string single = ".memory (.spanSingleReference ";
         if (operation?.StartsWith(array, StringComparison.Ordinal) == true)
             return (call, ".array " + operation[array.Length..^1]);
         if (operation?.StartsWith(pointer, StringComparison.Ordinal) == true)
             return (call, ".reference " + operation[pointer.Length..^1]);
+        if (operation?.StartsWith(single, StringComparison.Ordinal) == true)
+            return (call, ".singleReference " + operation[single.Length..^1]);
         return null;
     }
 }

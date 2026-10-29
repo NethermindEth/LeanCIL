@@ -236,10 +236,11 @@ internal static class MetadataValidation
         }
         if (type is PointerType pointer)
         {
-            if (pointer.ElementType is TypeSpecification ||
+            if (!IsAggregate(pointer.ElementType, module) && IntegerVectorWidth(pointer.ElementType) is null &&
+                (pointer.ElementType is TypeSpecification ||
                 pointer.ElementType.MetadataType is not (MetadataType.SByte or MetadataType.Byte or
                     MetadataType.Int16 or MetadataType.UInt16 or MetadataType.Int32 or MetadataType.UInt32 or
-                    MetadataType.Int64 or MetadataType.UInt64 or MetadataType.IntPtr or MetadataType.UIntPtr))
+                    MetadataType.Int64 or MetadataType.UInt64 or MetadataType.IntPtr or MetadataType.UIntPtr)))
                 throw new InvalidDataException("Unsupported stack-storage pointer element type");
             Type(pointer.ElementType, module, architecture: architecture);
             return;
@@ -385,7 +386,7 @@ internal static class MetadataValidation
                     if (parameter.ParameterType is ByReferenceType && importedByref?.Invoke(parameter.ParameterType) == true) return;
                     Type(parameter.ParameterType, module, architecture: profile.Architecture);
                 }, named: true);
-            if (Check(method, null, () => Spans.Analyze(method), named: true))
+            if (Check(method, null, () => Spans.Analyze(method, profile), named: true))
                 foreach (VariableDefinition local in method.Body.Variables)
                     Check(method, null, () => Type(local.VariableType, module,
                         architecture: profile.Architecture), named: true);
@@ -522,7 +523,7 @@ internal static class MetadataValidation
                                 "Folded throws require an allowlisted System.Runtime exception with an exact string-only constructor signature.");
                         if (instruction.OpCode.Code != Code.Newobj && reference.Name == ".ctor" &&
                             Spans.Is(reference.DeclaringType) &&
-                            !Spans.Analyze(method).Constructors.ContainsKey(instruction))
+                            !Spans.Analyze(method, profile).Constructors.ContainsKey(instruction))
                             throw Call("Unsupported in-place span constructor", reference, method, instruction,
                                 "The receiver must be a local address followed by at most three simple argument pushes.");
                         if (InstructionTranslation.RuntimeModel(reference, profile) is null) CallSite(instruction, reference);

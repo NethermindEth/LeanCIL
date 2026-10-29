@@ -314,9 +314,10 @@ internal static class RuntimeModels
                 if (arrayElement is not null) operations.Add($"{name}<!0> {owner}::op_Implicit(!0[])", arrayWhole);
                 if (arrayElement is not null) operations.Add($"System.Void {owner}::.ctor(!0[],System.Int32,System.Int32)",
                     $".memory (.arraySpan {arrayElement} {capability} .counted)");
-                if (elementType is null || !MetadataValidation.IsAggregate(elementType, elementType.Module))
-                    operations.Add($"System.Void {owner}::.ctor(System.Void*,System.Int32)",
+                operations.Add($"System.Void {owner}::.ctor(System.Void*,System.Int32)",
                     $".memory (.spanFromReference {width} {capability})");
+                operations.Add($"System.Void {owner}::.ctor(!0&)",
+                    $".memory (.spanSingleReference {width} {capability})");
                 operations.Add($"System.Int32 {owner}::get_Length()", ".memory .spanLength");
                 operations.Add($"System.Boolean {owner}::get_IsEmpty()", ".memory (.observeView .spanEmpty)");
                 var pinnableResult = writable ? "!0&" :

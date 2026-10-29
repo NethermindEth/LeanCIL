@@ -656,6 +656,20 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     .error (.unsupported "Extraction-bound static/span allocation metadata")
   | _, _ => .error .invalidState
 
+/-- Constructs a one-element view over checked existing storage without reading its bytes. -/
+def singleSpanInstruction (width : Nat) (writable : Bool) (stack : List Value)
+    (memory : Memory) : ExecutionResult (Memory × List Value) := do
+  match writable, stack with
+  | _, .reference reference :: rest =>
+    let view : SpanView := ⟨reference, 1, width, writable⟩
+    let _ ← checkedAt reference width (view.validate memory)
+    return (memory, .bufferSpan view :: rest)
+  | false, .readOnlyReference reference :: rest =>
+    let view : SpanView := ⟨reference, 1, width, false⟩
+    let _ ← checkedAt reference width (view.validate memory)
+    return (memory, .bufferSpan view :: rest)
+  | _, _ => .error .invalidState
+
 /-- Runs a `.memory` operation on the stack (top first), giving the new memory and stack.
     Operands with unspecified bits are rejected first. The static-field and span-construction
     operations need extracted metadata, so `staticInstruction` runs them and they are
@@ -670,6 +684,7 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
     binaryTransferInstruction width signed bigEndian true trying stack memory
   | .binaryWrite width bigEndian trying =>
     binaryTransferInstruction width false bigEndian false trying stack memory
+  | .spanSingleReference width writable => singleSpanInstruction width writable stack memory
   | .observeView observation => viewObservationInstruction observation stack memory
   | .spanCopy width tryCopy => spanCopyInstruction width tryCopy stack memory
   | .spanFill width clear => spanFillInstruction width clear stack memory

@@ -74,12 +74,14 @@ inductive LocalKind where
 inductive SpanConstructor where
   | array (element : ArrayElement) (writable : Bool) (range : ArraySpanRange)
   | reference (width : Nat) (writable : Bool)
+  | singleReference (width : Nat) (writable : Bool)
   deriving DecidableEq, Repr
 
 /-- The checked memory operation underlying a span constructor. -/
 def SpanConstructor.operation : SpanConstructor → MemoryOp
   | .array element writable range => .arraySpan element writable range
   | .reference width writable => .spanFromReference width writable
+  | .singleReference width writable => .spanSingleReference width writable
 
 /-- One instruction. Branch targets and call indices are positions in the method's code
     and in the `Program`. Constructors that `CIL.step` does not execute are handled by the

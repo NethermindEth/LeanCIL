@@ -171,6 +171,7 @@ inductive MemoryOp where
   | createSpan (width : Nat) | spanItem (width : Nat) | spanLength
   /-- Primitive spans over supplied storage; these operations never grant memory authority. -/
   | spanFromReference (width : Nat) (writable : Bool)
+  | spanSingleReference (width : Nat) (writable : Bool)
   | spanSlice (explicitLength : Bool) | spanReadOnly
   /-- A span view over supplied primitive array storage, without allocation or copying. -/
   | arraySpan (element : ArrayElement) (writable : Bool) (range : ArraySpanRange)
@@ -194,6 +195,7 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .bigMul64 | .copyBlock _ | .initBlock _ => 3
   | .spanSlice explicitLength => if explicitLength then 3 else 2
   | .spanFromReference .. | .byteOffset => 2
+  | .spanSingleReference .. => 1
   | .arraySpan _ _ range => range.argumentCount
   | .spanReinterpret .. | .spanReadOnly | .arrayLength => 1
   | .arrayLoad .. | .arrayAddress .. => 2

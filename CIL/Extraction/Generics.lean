@@ -130,6 +130,10 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
     if scope == runtimeScope && name ∈ ["System.SByte", "System.Byte", "System.Int16",
         "System.UInt16", "System.Int32", "System.UInt32", "System.Int64", "System.UInt64",
         "System.IntPtr", "System.UIntPtr"] then some .reference else none
+  | .pointer (.aggregate identity index) => do
+    let metadata ← layouts[index]?
+    if metadata.identity == identity then some .reference else none
+  | .pointer type => if (integerVectorWidth type).isSome then some .reference else none
   | type@(.apply (.constructor scope name) elementType) => do
     if let some storage := spanStorage type then
       if let .aggregate identity index := elementType then

@@ -407,7 +407,7 @@ private def featureOpMatchesAtWith (raw : RawMethod) (eligible : Nat → Option 
   | some (.result value), .const32 word => word == if value then 1 else 0
   | some (.raise name), .throw exception => name == exception
   | some (.spanConstructor index constructor), .initializeSpanLocal actual operation =>
-    index == actual && constructor == operation
+    index == actual && spanConstructorMatches constructor operation
   | some .tailCall, .tailCall target count => match instruction.operand with
     | .call site => site.returnType == raw.returnType &&
       featureOpMatchesWith raw eligible instruction (.call target count)

@@ -49,6 +49,9 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
       else return []
   -- `newobj` of a struct, then `Unsafe.SizeOf<T>` and `Unsafe.Add<T>`.
   | 0x73, .call site =>
+    if let .apply (.constructor scope owner) (.aggregate _ index) := site.declaringType then
+      if scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"] &&
+          site.name == ".ctor" then return [.size pc index .spanElement]
     return (aggregateIndex site.declaringType).toList.map fun index => .size pc index .construct
   | 0x28, .call site =>
     if site.name ∈ ["AsBytes", "Cast"] &&
@@ -60,7 +63,7 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
     match site.declaringType, site.typeArguments with
     | .apply (.constructor scope owner) (.aggregate _ index), [] =>
       if scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"] &&
-          site.name ∈ ["get_Item", "CopyTo", "TryCopyTo", "Clear"] then
+          site.name ∈ ["get_Item", "CopyTo", "TryCopyTo", "Clear", ".ctor"] then
         return [.size pc index .spanElement] else return []
     | .atom _ "System.Runtime.InteropServices.MemoryMarshal", [.aggregate _ index] =>
       if site.name = "Read" || site.name = "TryRead" then return [.size pc index .load]

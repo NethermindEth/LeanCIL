@@ -66,7 +66,10 @@ private def checkSize (size : Nat) : SizeAccess → Op → Bool
   | .spanElement, .memory (.spanItem width)
   | .spanElement, .memory (.spanCopy width _)
   | .spanElement, .memory (.spanFill width _)
-  | .spanElement, .memory (.spanFromReference width _) => width == size
+  | .spanElement, .memory (.spanFromReference width _)
+  | .spanElement, .memory (.spanSingleReference width _)
+  | .spanElement, .initializeSpanLocal _ (.reference width _)
+  | .spanElement, .initializeSpanLocal _ (.singleReference width _) => width == size
   | .spanSource, .memory (.spanReinterpret width _ _) => width == size
   | .spanTarget, .memory (.spanReinterpret _ width _) => width == size
   | .referenceAdd, .memory (.add width _) => width == size

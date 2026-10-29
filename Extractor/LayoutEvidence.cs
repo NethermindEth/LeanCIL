@@ -105,7 +105,8 @@ internal sealed class LayoutEvidence
         {
             var instruction = method.Body.Instructions[pc];
             if (!reachable.Contains(instruction)) continue;
-            if (instruction.OpCode.Code == Code.Call && instruction.Operand is MethodReference spanCall)
+            if (instruction.OpCode.Code is Code.Call or Code.Newobj &&
+                instruction.Operand is MethodReference spanCall)
             {
                 if (spanCall is GenericInstanceMethod reinterpret &&
                     spanCall.DeclaringType.FullName == "System.Runtime.InteropServices.MemoryMarshal" &&
@@ -119,7 +120,7 @@ internal sealed class LayoutEvidence
                 else if (spanCall.DeclaringType is GenericInstanceType spanOwner &&
                     Spans.Is(spanOwner) &&
                     MetadataValidation.IsAggregate(spanOwner.GenericArguments[0], method.Module) &&
-                    spanCall.Name is "get_Item" or "CopyTo" or "TryCopyTo" or "Clear")
+                    spanCall.Name is "get_Item" or "CopyTo" or "TryCopyTo" or "Clear" or ".ctor")
                     uses.Add($".size {pc} {Index(spanOwner.GenericArguments[0])} .spanElement");
             }
             if (instruction.OpCode.Code is Code.Ldfld or Code.Stfld or Code.Ldflda)

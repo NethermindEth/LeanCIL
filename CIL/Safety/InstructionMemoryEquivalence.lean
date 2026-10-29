@@ -162,6 +162,20 @@ theorem Memory.Equivalent.binaryTransferInstruction {m n : Memory} (same : m.Equ
     | split
 #print axioms Memory.Equivalent.binaryTransferInstruction
 
+/-- A single-reference view depends only on equivalent allocation metadata. -/
+theorem Memory.Equivalent.singleSpanInstruction {m n : Memory} (same : m.Equivalent n)
+    (width : Nat) (writable : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (singleSpanInstruction width writable stack m)
+      (singleSpanInstruction width writable stack n) := by
+  unfold CIL.Safety.singleSpanInstruction
+  split <;> try simp only [same.spanValidate]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | split
+#print axioms Memory.Equivalent.singleSpanInstruction
+
 /-- Opcode dispatch preserves the memory equivalence of each checked family. -/
 theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent n)
     (operation : CIL.MemoryOp) (stack : List Value) :
@@ -173,6 +187,7 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
   · split
     · exact same.binaryTransferInstruction _ _ _ _ _ _
     · exact same.binaryTransferInstruction _ _ _ _ _ _
+    · exact same.singleSpanInstruction _ _ _
     · exact same.viewObservationInstruction _ _
     · exact same.spanCopyInstruction _ _ _
     · exact same.spanFillInstruction _ _ _

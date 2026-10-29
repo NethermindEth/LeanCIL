@@ -145,3 +145,4 @@ Run(["dotnet", "run", "--file", "Tests/ViewAccessors.cs"], streamOutput: true, p
 Run(["dotnet", "run", "--file", "Tests/BinarySpans.cs"], streamOutput: true, progress: "Endian span checks");
 
 Run(["dotnet", "run", "--file", "Tests/AggregateSpans.cs"], streamOutput: true, progress: "Aggregate span checks");
+Run(["dotnet", "run", "--file", "Tests/SpanConstructors.cs"], streamOutput: true, progress: "Span constructor checks");

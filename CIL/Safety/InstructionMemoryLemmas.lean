@@ -558,6 +558,19 @@ theorem binaryTransferInstruction_contract (width : Nat) (signed bigEndian read 
     | split at transferred
 #print axioms binaryTransferInstruction_contract
 
+/-- Single-reference construction preserves memory and validates the resulting view. -/
+theorem singleSpanInstruction_contract (width : Nat) (writable : Bool)
+    (stack values : List Value) (memory result : Memory)
+    (constructed : singleSpanInstruction width writable stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold singleSpanInstruction at constructed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at constructed
+  repeat' first
+    | solve | cases constructed; instruction_contract_close
+    | cases constructed
+    | split at constructed
+#print axioms singleSpanInstruction_contract
+
 /-- Checked memory dispatch preserves the effects and stack validity of its selected family. -/
 theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : List Value)
     (m result : Memory) (h : memoryInstruction operation stack m = .ok (result, values)) :
@@ -568,6 +581,7 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
   · split at h
     · exact binaryTransferInstruction_contract _ _ _ _ _ _ _ _ _ h
     · exact binaryTransferInstruction_contract _ _ _ _ _ _ _ _ _ h
+    · exact singleSpanInstruction_contract _ _ _ _ _ _ h
     · exact viewObservationInstruction_contract _ _ _ _ _ h
     · exact spanCopyInstruction_contract _ _ _ _ _ _ h
     · exact spanFillInstruction_contract _ _ _ _ _ _ h

@@ -20,6 +20,7 @@ inductive SpanCall where
   | reinterpret (sourceWidth targetWidth : Nat) (writable : Bool)
   | copy (width : Nat) (tryCopy : Bool)
   | reference (width : Nat) (writable : Bool)
+  | singleReference (width : Nat) (writable : Bool)
   | fill (width : Nat) (clear : Bool)
   | item (width : Nat) | length | slice (counted : Bool) | readOnly
   | array (element : ArrayElement) (writable : Bool) (range : ArraySpanRange)
@@ -30,6 +31,7 @@ private def emittedSpanCall : Op → Option SpanCall
   | .memory (.spanReinterpret source target writable) => some (.reinterpret source target writable)
   | .memory (.spanCopy width tryCopy) => some (.copy width tryCopy)
   | .memory (.spanFromReference width writable) => some (.reference width writable)
+  | .memory (.spanSingleReference width writable) => some (.singleReference width writable)
   | .memory (.spanFill width clear) => some (.fill width clear)
   | .memory (.spanItem width) => some (.item width)
   | .memory .spanLength => some .length
@@ -61,7 +63,10 @@ private def spanMemberCall (opcode : Nat) (site : CallSite)
       "(" ++ parameters ++ ")")
   if opcode == 115 && site.name == ".ctor" && site.hasThis &&
       !site.returnsValue && site.returnType == .void then
-    if site.parameterTypes == [.pointer .void, intType] &&
+    if site.parameterTypes == [.byref elementType] &&
+        site.target == target "System.Void" "!0&" then
+      some (.singleReference width writable)
+    else if site.parameterTypes == [.pointer .void, intType] &&
         site.target == target "System.Void" "System.Void*,System.Int32" then
       if !writable && elementType == .atom runtimeScope "System.Byte" then none
       else some (.reference width writable)
@@ -122,18 +127,27 @@ private def spanMemberCall (opcode : Nat) (site : CallSite)
 
 /-- An exact span constructor, independent of whether CIL allocates or initializes its receiver. -/
 def spanLocalConstructor (site : CallSite) (aggregateWidth : Nat := 0) : Option SpanConstructor := do
-  if let some (.array element writable range) := spanMemberCall 115 site then
+  if let some (.array element writable range) := spanMemberCall 115 site aggregateWidth then
     return .array element writable range
+  if let some (.singleReference width writable) := spanMemberCall 115 site aggregateWidth then
+    return .singleReference width writable
   if site.name != ".ctor" || !site.hasThis || site.returnsValue ||
       !site.typeArguments.isEmpty || site.parameterCount != 2 || site.returnType != .void ||
       site.parameterTypes != [.pointer .void, .atom runtimeScope "System.Int32"] then none
     else pure ()
   let .apply (.constructor _ owner) elementType := site.declaringType | none
-  if let .aggregate .. := elementType then none else pure ()
   let element ← spanElementName elementType
   let .span width writable ← spanStorage site.declaringType aggregateWidth | none
   if site.target != .external (runtimeScope ++ "::System.Void " ++ owner ++ "<" ++ element ++
       ">::.ctor(System.Void*,System.Int32)") then none else some (.reference width writable)
+
+/-- Aggregate constructor widths are bound separately by mandatory layout-use evidence.
+    Only aggregate metadata yields the zero-width placeholder in a folded descriptor. -/
+def spanConstructorMatches : SpanConstructor → SpanConstructor → Bool
+  | .reference expected writable, .reference actual capability
+  | .singleReference expected writable, .singleReference actual capability =>
+    (expected == 0 || expected == actual) && writable == capability
+  | expected, actual => expected == actual
 
 /-- The array overloads of AsSpan accept an array and zero, one or two int32 arguments. -/
 private def arrayExtensionCall (opcode : Nat) (site : CallSite) : Option SpanCall := do
@@ -203,20 +217,10 @@ def spanCallReturnsReference (site : CallSite) : Bool :=
 /-- Exact span signatures and primitive/vector widths. Aggregate widths are separately bound
     by mandatory LayoutUsesComplete and MethodLayoutsValid evidence. -/
 def spanCallMatches (instruction : RawInstruction) (emitted : Op) : Bool :=
-  let aggregateConstructor := match instruction.operand with
-    | .call site => match site.declaringType with
-      | .apply (.constructor scope owner) (.aggregate ..) =>
-        site.name == ".ctor" && scope == runtimeScope &&
-          owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"]
-      | _ => false
-    | _ => false
-  !aggregateConstructor && matchSpanCall instruction emitted
-where
-  matchSpanCall (instruction : RawInstruction) (emitted : Op) : Bool :=
     let (sourceWidth, targetWidth) := match emittedSpanCall emitted with
       | some (.reinterpret source target _) => (source, target)
       | some (.copy width _) | some (.fill width _) | some (.item width)
-      | some (.reference width _) => (width, width)
+      | some (.reference width _) | some (.singleReference width _) => (width, width)
       | _ => (0, 0)
     let expected := match instruction.operand with
       | .call site => (spanMemberCall instruction.opcode site sourceWidth).orElse

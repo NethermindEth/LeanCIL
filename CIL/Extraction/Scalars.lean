@@ -545,7 +545,7 @@ private def byteSpanConstructor (opcode : Nat) (site : CallSite) : Bool :=
     site.target == .external (runtimeScope ++
       "::System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,System.Int32)")
 
-/-- Exact primitive span pointer constructor, including owner scope and external signature. -/
+/-- Exact span pointer constructor, including owner scope and external signature. -/
 private def spanConstructor (opcode : Nat) (site : CallSite) : Option (Nat × Bool) := do
   if opcode != 115 || site.name != ".ctor" || !site.hasThis || site.returnsValue ||
       !site.typeArguments.isEmpty || site.parameterCount != 2 || site.returnType != .void ||
@@ -566,7 +566,8 @@ private def spanCreateMatches (instruction : RawInstruction) (emitted : Op) : Bo
   else if let .call site := instruction.operand then
     match spanConstructor instruction.opcode site with
     | some (width, writable) => match emitted with
-      | .memory (.spanFromReference actual capability) => width == actual && writable == capability
+      | .memory (.spanFromReference actual capability) =>
+        spanConstructorMatches (.reference width writable) (.reference actual capability)
       | _ => false
     | none => match emitted with | .memory .spanCreate => false | _ => true
   else match emitted with | .memory .spanCreate => false | _ => true
@@ -780,7 +781,7 @@ private def checkScalarSite (raw : RawMethod) (context : NativeDispatchContext)
     stack.length == feature.stack.length && stack.length <= raw.maxStack &&
       (match role with
         | some (.spanConstructor index constructor) => match emitted with
-          | .initializeSpanLocal actual operation => index == actual && constructor == operation
+          | .initializeSpanLocal actual operation => index == actual && spanConstructorMatches constructor operation
           | _ => false
         | _ => spanCreateMatches instruction emitted && spanCallMatches instruction emitted) &&
       readOnlySiteMatches raw pc instruction emitted &&

@@ -32,9 +32,9 @@ theorem SuccessOrThrow.bind_left {first : ExecutionResult α}
 theorem Memory.Renamed.checkedSpanValidate {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
     (related : Memory.Renamed mapping scopes source target) (view : SpanView)
-    (bound : view.reference.Below mapping.sourceLimit) :
-    ResultRenamed mapping Eq (checkedAt view.reference 0 (view.validate source))
-      (checkedAt (mapping.managedReference view.reference) 0
+    (bound : view.reference.Below mapping.sourceLimit) (width : Nat := 0) :
+    ResultRenamed mapping Eq (checkedAt view.reference width (view.validate source))
+      (checkedAt (mapping.managedReference view.reference) width
         ((mapping.spanView view).validate target)) := by
   rw [related.spanValidate view bound]
   exact (ResultEquivalent.eq_refl _).checkedAt _ _
@@ -307,6 +307,32 @@ private theorem Memory.Renamed.binaryTransferInstructionResult {mapping : Alloca
         AllocationRenaming.managedReference, Bind.bind, Except.bind])
 #print axioms Memory.Renamed.binaryTransferInstructionResult
 
+/-- A single-reference view preserves its allocation identity under renaming. -/
+private theorem Memory.Renamed.singleSpanInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (width : Nat) (writable : Bool)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (singleSpanInstruction width writable stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (singleSpanInstruction width writable stack source)
+      (singleSpanInstruction width writable (stack.map mapping.value) target) := by
+  unfold singleSpanInstruction at observable ⊢
+  split at observable
+  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
+  all_goals repeat' rcases bounds with ⟨_, bounds⟩
+  all_goals repeat first
+    | exact .ok ⟨related, rfl⟩
+    | exact .error _
+    | (apply (related.checkedSpanValidate _ (by assumption) width).bindWithSuccess
+       intro first second sourceStep same
+       subst second)
+    | (split <;> try simp only [*, AllocationRenaming.managedReference, Bind.bind, Except.bind])
+  all_goals repeat first | contradiction | cases observable | split at observable
+#print axioms Memory.Renamed.singleSpanInstructionResult
+
 /-- A memory instruction's successful effect is preserved on the corresponding allocations. -/
 theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -328,6 +354,7 @@ theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
     split at observable
     · exact related.binaryTransferInstructionResult _ _ _ _ _ _ bounds observable
     · exact related.binaryTransferInstructionResult _ _ _ _ _ _ bounds observable
+    · exact related.singleSpanInstructionResult _ _ _ bounds observable
     · exact related.viewObservationInstructionResult _ _ bounds observable
     · exact related.spanCopyInstructionResult _ _ _ bounds observable
     · exact related.spanFillInstructionResult _ _ _ bounds observable
