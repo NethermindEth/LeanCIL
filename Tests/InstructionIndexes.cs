@@ -63,7 +63,7 @@ var translate = extractor.GetType("Nethermind.LeanCIL.InstructionTranslation", t
     .GetMethod("Translate", BindingFlags.Static | BindingFlags.NonPublic)!;
 var methods = new Dictionary<MethodDefinition, int> { [caller] = 0, [callee] = 1 };
 string Translate(Instruction instruction) => (string)translate.Invoke(null,
-    [instruction, caller, methods, 0, Index(caller), null, null, null, null, null])!;
+    [instruction, caller, methods, 0, Index(caller), null, null, null, null, null, null])!;
 if (Translate(call) != ".call 1 0") throw new Exception("Incorrect call index");
 methods.Remove(callee);
 try
@@ -223,7 +223,7 @@ foreach (var instruction in new[] { Instruction.Create(OpCodes.Ldc_I4_0), storeA
     argumentMethod.Body.Instructions.Add(instruction);
 string TranslateArgument(Instruction instruction, Dictionary<int, int> positions) => (string)translate.Invoke(null,
     [instruction, argumentMethod, new Dictionary<MethodDefinition, int> { [argumentMethod] = 0 },
-        0, Index(argumentMethod), null, null, positions, null, null])!;
+        0, Index(argumentMethod), null, null, positions, null, null, null])!;
 if (TranslateArgument(storeArgument, homePositions) != ".setLocal 3" ||
     TranslateArgument(loadArgument, homePositions) != ".local 3" ||
     TranslateArgument(addressArgument, homePositions) != ".localAddr 3")
