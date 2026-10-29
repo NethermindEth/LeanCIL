@@ -36,7 +36,7 @@ theorem Memory.Equivalent.spanElement {m n : Memory} (same : m.Equivalent n)
 theorem Memory.Equivalent.spanFill {m n : Memory} (same : m.Equivalent n)
     (view : SpanView) (element : List (BitVec 8)) :
     ResultEquivalent Memory.Equivalent (view.fill m element) (view.fill n element) := by
-  unfold SpanView.fill
+  unfold SpanView.fill SpanView.fillWith
   rw [same.spanValidate]
   repeat first
     | exact .error _

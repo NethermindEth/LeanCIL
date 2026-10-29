@@ -69,15 +69,21 @@ def SpanView.write (view : SpanView) (memory : Memory) (index : Nat)
   let reference ← view.element memory index
   Safety.write memory reference bytes 1
 
-/-- Fill the entire writable view with one encoded element, validating authority once.
-    Empty spans require no byte access; nonempty fills initialize their complete extent. -/
-def SpanView.fill (view : SpanView) (memory : Memory)
-    (element : List (BitVec 8)) : Checked Memory := do
+/-- Validate a fill and pass its repeated byte representation to the checked writer.
+    Empty spans leave memory unchanged without invoking the writer. -/
+def SpanView.fillWith {byte : Type} (view : SpanView) (memory : Memory)
+    (element : List byte) (write : Reference → List byte → Checked Memory) : Checked Memory := do
   view.validate memory
   if view.writable then pure () else .error .unwritable
   if element.length == view.width then pure () else .error .unsupportedLayout
   if view.length == 0 then return memory else
   let .address reference := view.reference | .error .nullDereference
-  Safety.write memory reference (List.replicate view.length element).flatten 1
+  write reference (List.replicate view.length element).flatten
+
+/-- Fill the entire writable view with one encoded element, validating authority once.
+    Empty spans require no byte access; nonempty fills initialize their complete extent. -/
+def SpanView.fill (view : SpanView) (memory : Memory)
+    (element : List (BitVec 8)) : Checked Memory :=
+  view.fillWith memory element (fun reference bytes => Safety.write memory reference bytes 1)
 
 end CIL.Safety

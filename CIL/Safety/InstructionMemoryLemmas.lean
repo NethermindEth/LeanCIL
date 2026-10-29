@@ -355,7 +355,7 @@ structure InstructionContract (m result : Memory) (stack values : List Value) : 
 /-- A span fill either leaves an empty view unchanged or performs one checked write. -/
 theorem spanFill_effect (view : SpanView) (memory result : Memory) (element : List (BitVec 8))
     (filled : view.fill memory element = .ok result) : InstructionEffect memory result := by
-  unfold SpanView.fill at filled
+  unfold SpanView.fill SpanView.fillWith at filled
   repeat' first
     | exact .write filled
     | solve | cases filled; exact .unchanged _
@@ -368,7 +368,7 @@ theorem spanFill_effect (view : SpanView) (memory result : Memory) (element : Li
 theorem spanFillSnapshot_effect (view : SpanView) (memory result : Memory)
     (element : List (BitVec 8 × Bool))
     (filled : view.fillSnapshot memory element = .ok result) : InstructionEffect memory result := by
-  unfold SpanView.fillSnapshot at filled
+  unfold SpanView.fillSnapshot SpanView.fillWith at filled
   repeat' first
     | exact .snapshot filled
     | solve | cases filled; exact .unchanged _

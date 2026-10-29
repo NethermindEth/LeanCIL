@@ -349,13 +349,8 @@ def fillSnapshot (width : Nat) (value : CIL.Value) : Option (List (BitVec 8 × B
 
 /-- Fill repeats a captured value without observing or initializing its unknown bytes. -/
 def SpanView.fillSnapshot (view : SpanView) (memory : Memory)
-    (element : List (BitVec 8 × Bool)) : Checked Memory := do
-  view.validate memory
-  if view.writable then pure () else .error .unwritable
-  if element.length == view.width then pure () else .error .unsupportedLayout
-  if view.length == 0 then return memory else
-  let .address reference := view.reference | .error .nullDereference
-  writeSnapshot memory reference (List.replicate view.length element).flatten 1
+    (element : List (BitVec 8 × Bool)) : Checked Memory :=
+  view.fillWith memory element (fun reference bytes => writeSnapshot memory reference bytes 1)
 
 /-- Whole-span fill and clear retain checked write authority and exact operand shapes. -/
 def spanFillInstruction (width : Nat) (clear : Bool) (stack : List Value) (memory : Memory) :

@@ -11,7 +11,7 @@ theorem SpanView.fill_written (view : SpanView) (before after : Memory)
     (address : view.reference = .address base) (nonempty : view.length ≠ 0)
     (filled : view.fill before element = .ok after) :
     Safety.write before base (List.replicate view.length element).flatten 1 = .ok after := by
-  unfold SpanView.fill at filled
+  unfold SpanView.fill SpanView.fillWith at filled
   simp only [address, nonempty, beq_iff_eq, ite_false] at filled
   repeat' first
     | exact filled

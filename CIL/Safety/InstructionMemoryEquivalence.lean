@@ -86,7 +86,7 @@ theorem Memory.Equivalent.spanFillSnapshot {m n : Memory} (same : m.Equivalent n
     (view : SpanView) (element : List (BitVec 8 × Bool)) :
     ResultEquivalent Memory.Equivalent (view.fillSnapshot m element)
       (view.fillSnapshot n element) := by
-  unfold SpanView.fillSnapshot
+  unfold SpanView.fillSnapshot SpanView.fillWith
   rw [same.spanValidate]
   repeat first
     | exact .error _
