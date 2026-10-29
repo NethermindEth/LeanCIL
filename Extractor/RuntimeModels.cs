@@ -256,9 +256,6 @@ internal static class RuntimeModels
     // Signatures are immutable: runtime lookup performs no interpolation or per-element scan.
     private static string? Span(string signature) => SpanOperations.GetValueOrDefault(signature);
 
-    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<TypeDefinition,
-        Dictionary<string, string>> EnumSpanOperations = new();
-
     private static string? EnumSpan(MethodReference method)
     {
         var element = method.DeclaringType is GenericInstanceType { GenericArguments.Count: 1 } owner
@@ -267,7 +264,7 @@ internal static class RuntimeModels
                 ? generic.GenericArguments[0] : null;
         if (element is null || !EnumTypes.IsEnum(element)) return null;
         EnumTypes.Storage(element);
-        return EnumSpanOperations.GetValue(element.Resolve(), type => BuildSpanOperations(type))
+        return EnumTypes.Cached(element, type => BuildSpanOperations(type))
             .GetValueOrDefault(method.FullName);
     }
 

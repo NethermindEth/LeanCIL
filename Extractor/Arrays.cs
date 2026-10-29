@@ -37,6 +37,11 @@ internal static class Arrays
     internal static Element? Storage(TypeReference type)
     {
         if (!EnumTypes.IsEnum(type)) return Primitive(type);
+        return EnumTypes.Cached(type, EnumStorage);
+    }
+
+    static Element EnumStorage(TypeReference type)
+    {
         var underlying = Primitive(EnumTypes.Storage(type))!;
         var identity = JsonSerializer.Serialize(LayoutEvidence.Identity(type));
         return underlying with { Lean = $"enumeration {identity} .{underlying.Lean}" };
