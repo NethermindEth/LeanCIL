@@ -121,11 +121,13 @@ def managedStep (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
     return .next (pc + 1) (.methodPointer ⟨signature, some target.identity⟩ :: stack) frame memory
   | .tableLength, .methodTable table :: rest =>
     let some targets := table.targets | .error (.thrown "System.NullReferenceException")
+    if targets.length >= 2^31 then .error .invalidState else pure ()
     return .next (pc + 1) (.scalar (.i64 (BitVec.ofNat 64 targets.length)) :: rest) frame memory
   | .tableElement signature, .scalar index :: .methodTable table :: rest =>
     if table.signature != signature then .error .invalidState else pure ()
     let some index := arrayIndex index | .error .invalidState
     let some targets := table.targets | .error (.thrown "System.NullReferenceException")
+    if targets.length >= 2^31 then .error .invalidState else pure ()
     let some target := targets[index]? | .error (.thrown "System.IndexOutOfRangeException")
     return .next (pc + 1) (.methodPointer ⟨signature, some target⟩ :: rest) frame memory
   | .call signature catalog tail, .methodPointer pointer :: values =>
