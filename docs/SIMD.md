@@ -38,7 +38,7 @@ Every row applies to both widths, with matching input/output widths. These porta
 | `Vector128<ulong>.AllBitsSet`, `Vector256<ulong>.AllBitsSet` | No arguments | All-one vector |
 | `Vector128.Create`, `Vector256.Create` | One `ulong`, or respectively two/four `ulong` arguments | Broadcast one value, or construct the individual lanes |
 | `Vector128.CreateScalar`, `Vector256.CreateScalar` | One `ulong` or one `uint` | Put the value in the low lane and zero the remaining bits |
-| `Vector128.CreateScalarUnsafe` (128-bit only) | One `ulong` | Put the value in the low lane; the upper lane is unspecified, and only `GetElement(0)`, `As*` and the AVX2 shift counts may read the result (see [SOUNDNESS](SOUNDNESS.md#runtime-assumptions)) |
+| `Vector128.CreateScalarUnsafe` (128-bit only) | One `ulong` | Put the value in the low lane; the upper lane is unspecified, and only `GetElement(0)`, `As*` and the AVX2 shift counts may read the result (see [SOUNDNESS](SOUNDNESS-RUNTIME.md#runtime-assumptions)) |
 | `Vector512.Create` (512-bit only) | Two `V256<ulong>` | Concatenate, first operand in the low half |
 | `Vector128.ShiftRightArithmetic`, `Vector256.ShiftRightArithmetic` | Vector of `long` and `int` count | Signed 64-bit lane shifts; count modulo 64 |
 | `Vector128.ExtractMostSignificantBits<ulong>`, `Vector256.ExtractMostSignificantBits<ulong>` | Vector of `ulong` | Return a `uint` containing the two/four lane sign bits |

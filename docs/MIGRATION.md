@@ -54,7 +54,7 @@ case analysis. See [Writing checked proofs](PROOFS.md) for examples and API loca
 
 Measure consumer elaboration and kernel replay after upgrading as well as
 library artifact size; moving work out of an imported proof can expose repeated
-work in its callers. See [proof automation validation](VALIDATION.md#proof-automation)
+work in its callers. See [proof automation validation](VALIDATION-PROOFS.md#proof-automation)
 for the regression coverage.
 
 Lean stores a definition's equation lemmas in the first module that unfolds it,
