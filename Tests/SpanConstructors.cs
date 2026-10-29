@@ -88,9 +88,9 @@ foreach (var (name, before, after, theorem, marker) in new[]
         "method0_layouts_validated", "MethodLayoutsValid"),
     ("LayoutLocal-x64-sse2", ".reference 64 true", ".reference 48 true",
         "method0_layouts_validated", "MethodLayoutsValid"),
-    ("AggregateLocal", ".singleReference 32 false", ".singleReference 16 false",
+    ("AggregateLocal", ".spanSingleReference 32 false", ".spanSingleReference 16 false",
         "method0_layouts_validated", "MethodLayoutsValid"),
-    ("AggregateLocal", ".singleReference 32 false", ".singleReference 32 true",
+    ("AggregateLocal", ".spanSingleReference 32 false", ".spanSingleReference 32 true",
         "method0_scalars_validated", "ScalarFlowValid")
 })
 {
