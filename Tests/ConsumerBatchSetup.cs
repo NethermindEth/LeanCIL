@@ -20,11 +20,11 @@ File.Copy(At("lean-toolchain"), Path.Combine(root, "lean-toolchain"));
 Run(["lake", "update"], root);
 File.WriteAllText(Path.Combine(root, "Client", "Shared.lean"), """
     import Extracted
-    import CIL.Semantics
+    import CIL.Safety.Execution
     namespace Client
-    theorem execution (x y : CIL.W64) (memory : CIL.Memory) :
-        CIL.invoke Extracted.program 4 0 [.i64 x, .i64 y] memory =
-          some (memory, [.i64 (x + y)]) := by rfl
+    theorem execution (x y : CIL.W64) (memory : CIL.Safety.Memory) :
+        CIL.Safety.invoke Extracted.program 4 0 [.scalar (.i64 x), .scalar (.i64 y)] memory =
+          .ok (memory, [.scalar (.i64 (x + y))]) := by rfl
     #print axioms execution
     end Client
     """);
@@ -32,9 +32,9 @@ var proof = Path.Combine(root, "Proof.lean");
 File.WriteAllText(proof, """
     import Client.Shared
     namespace ExampleProof
-    theorem correctness (x y : CIL.W64) (memory : CIL.Memory) :
-        CIL.invoke Extracted.program 4 0 [.i64 x, .i64 y] memory =
-          some (memory, [.i64 (x + y)]) := Client.execution x y memory
+    theorem correctness (x y : CIL.W64) (memory : CIL.Safety.Memory) :
+        CIL.Safety.invoke Extracted.program 4 0 [.scalar (.i64 x), .scalar (.i64 y)] memory =
+          .ok (memory, [.scalar (.i64 (x + y))]) := Client.execution x y memory
     #print axioms correctness
     end ExampleProof
     """);

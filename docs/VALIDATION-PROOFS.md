@@ -14,10 +14,9 @@ failed candidate summaries do not escape their transaction. Memory and static di
 abstract bitcast results in inferred stacks; a conjunction-wrapped store fact exercises the generic
 dispatch fallback.
 
-`Tests.LegacyFeatures`, imported by `Tests.Automation`, uses only the reference interpreter tactic
-import. It checks enabled and disabled symbolic features from caller facts, plus a concrete feature
-reduced to its profile field. `cil_steps` keeps symbolic `FeatureProfile.evaluate` applications
-folded, as checked stepping does.
+`Tests.FeatureExecution`, imported by `Tests.Automation`, checks enabled and disabled symbolic
+features from caller facts, plus a concrete feature reduced to its profile field. All three
+proofs use checked invocation and the shared feature evaluator.
 
 `Tests.StoreFacts` checks symbolic carry and borrow stores whose write facts state `a + b + c`, `a -
 b - c` and the flag words in source form, through both `cil_checked_steps` and `cil_contract_steps`.

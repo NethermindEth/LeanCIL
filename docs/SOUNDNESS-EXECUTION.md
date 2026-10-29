@@ -315,7 +315,6 @@ Scope and limits:
 
 - The transfer covers success and named thrown exceptions only. Fuel exhaustion, `.unsupported`, memory, arithmetic and invalid-state faults do not transfer: the actual program may have code or methods where the expected one faults, and the actual body may fault where the expected body is dead. No handler or post-throw memory is modeled.
 - Dead expected pcs are unconstrained: an `.unsupported` instruction faults whenever it executes, so a successful expected run never reaches one. Actual pcs outside the image of live expected pcs are unconstrained as well; the simulation never visits them.
-- Only the checked interpreter is covered. The base `CIL.run` keys vector homes by pc, so renumbering changes its memory and no such theorem holds for it.
 - The relation is syntactic and conservative: an inserted live instruction, even a `nop`, on a reachable path is rejected.
 
 `cil_embed` (`CIL.Embedding.Tactic`) computes the map outside the kernel by aligning live

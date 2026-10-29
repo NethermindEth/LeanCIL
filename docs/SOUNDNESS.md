@@ -33,8 +33,6 @@ alignment. Its successful executions satisfy the proved preservation properties.
 exceptions are distinct from unsupported instructions, invalid states and fuel exhaustion.
 An expected-exception proof cannot use these model failures as its witness.
 
-The standalone `CIL.invoke` interpreter does not establish checked-memory properties. Until its
-consumers are consolidated, memory-safety claims must use `CIL.Safety.invoke` explicitly.
 
 Extraction reads compiled CIL; it does not prove that the source compiler preserves a source-level
 specification. JIT correctness, hardware correctness, concurrent interference, GC internals and

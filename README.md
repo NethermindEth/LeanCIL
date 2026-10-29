@@ -100,8 +100,8 @@ documented in the [opcode support table](docs/OPCODES.md) and [intrinsic support
 Unsupported instructions and signatures are rejected explicitly.
 
 The checked memory model tracks allocation identity, lifetime, bounds, permissions,
-initialization and alignment. Use `CIL.Safety.invoke` for memory-safety claims; successful
-execution in the simpler `CIL.invoke` model alone does not establish them.
+initialization and alignment. `CIL.Safety.invoke` is the execution model for both functional
+correctness and memory-safety claims.
 
 General class allocation and virtual dispatch, ordinary recursive calls, exception handlers,
 floating-point arithmetic and arbitrary external calls are outside the supported subset.

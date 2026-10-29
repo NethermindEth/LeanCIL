@@ -57,12 +57,9 @@ It produces 48 jobs for the current 66 suites. Applying those groups to the late
 times, retaining the slowest setup in each group, estimates 996 fewer runner-seconds. Network
 variation and the job dependency graph mean this is not a wall-clock guarantee.
 
-Reference-interpreter stepping rewrites feature and return instructions directly before using
-the general dispatcher. The three `LegacyFeatures` proofs fell from about 23 seconds to 3–4
-seconds locally. Child invocation matching skips duplicate facts and incompatible literal fuel
-budgets for abstract programs; `ContractCalls` fell from about 12 seconds to 3.3 seconds. These
-are Windows measurements with compiled imports; the full library and tactic regressions still
-kernel-check the resulting proofs.
+Checked stepping rewrites feature and return instructions before using the general dispatcher.
+Child invocation matching skips duplicate facts and incompatible literal fuel budgets for
+abstract programs. The library and tactic regressions kernel-check the resulting proofs.
 
 Single-request contract exports combine declaration replay with the complete theorem, constant
 and closure audit. Source and artifact checks still surround the export callback. External-call

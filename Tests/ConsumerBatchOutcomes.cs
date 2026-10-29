@@ -34,12 +34,12 @@ partial class Program
             File.WriteAllText(forgedProof, "import Client.Forged\n" + File.ReadAllText(proof));
             File.WriteAllText(axiomatic, """
                 import Extracted
-                import CIL.Semantics
+                import CIL.Safety.Execution
                 namespace Client.Axiomatic
                 axiom hidden : False
-                axiom execution (x y : CIL.W64) (memory : CIL.Memory) :
-                    CIL.invoke Extracted.program 4 0 [.i64 x, .i64 y] memory =
-                      some (memory, [.i64 (x + y)])
+                axiom execution (x y : CIL.W64) (memory : CIL.Safety.Memory) :
+                    CIL.Safety.invoke Extracted.program 4 0 [.scalar (.i64 x), .scalar (.i64 y)] memory =
+                      .ok (memory, [.scalar (.i64 (x + y))])
                 end Client.Axiomatic
                 """);
             File.WriteAllText(axiomProof, File.ReadAllText(proof)
