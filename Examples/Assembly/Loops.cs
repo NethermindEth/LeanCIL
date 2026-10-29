@@ -4,6 +4,13 @@ namespace Examples;
 
 public static class Loops
 {
+    public static int Drain(ReadOnlySpan<int> values)
+    {
+        while (values.Length != 0)
+            values = values.Slice(1);
+        return values.Length;
+    }
+
     public static uint Countdown(uint value)
     {
         uint remaining = value;

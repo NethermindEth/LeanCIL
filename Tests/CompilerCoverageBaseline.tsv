@@ -230,6 +230,7 @@ Examples:System.Int32 Examples.IntegerMath::SignInt64(System.Int64)	A	A	A	A	A	A	
 Examples:System.Int32 Examples.IntegerMath::SignInt8(System.SByte)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.IntegerMath::SignNative(System.IntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.IntegerOperations::Negate32(System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Loops::Drain(System.ReadOnlySpan`1<System.Int32>)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ManagedDispatch::Address(System.Int32)	B	B	B	B	B	B	B	B
 Examples:System.Int32 Examples.ManagedDispatch::Dispatch(method System.Int32 *(System.Int32)[],System.Int32,System.Int32)	B	B	B	B	B	B	B	B
 Examples:System.Int32 Examples.ManagedDispatch::LocalEscape(System.Int32)	A	A	A	A	A	A	A	A
