@@ -306,21 +306,15 @@ def arrayElement (memory : Memory) (view : ArrayView) (index width : Nat) :
   if view.reference == .null then .error (.thrown "System.NullReferenceException") else pure ()
   if index < view.length then pure () else .error (.thrown "System.IndexOutOfRangeException")
   checkedAt view.reference width (view.element memory index)
-/-- Runs a `.memory` operation on the stack (top first), giving the new memory and stack.
-    Operands with unspecified bits are rejected first. The static-field and span-construction
-    operations need extracted metadata, so `staticInstruction` runs them and they are
-    unsupported here; any other operand shape is `invalidState`. -/
-def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
+/-- Whole-span fill and clear retain checked write authority and exact operand shapes. -/
+def spanFillInstruction (width : Nat) (clear : Bool) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) := do
-  if unspecifiedOperands operation.argumentCount stack then
-    .error (.unsupported "Memory operation observes unspecified vector bits") else
-  match operation, stack with
-  -- Whole-span initialization retains byte authority and creates no element loop in CIL.
-  | .spanFill width true, .bufferSpan view :: rest =>
+  match clear, stack with
+  | true, .bufferSpan view :: rest =>
     if view.width != width then .error .invalidState else
     return (← checkedAt view.reference (view.length * width)
       (view.fill memory (List.replicate width 0)), rest)
-  | .spanFill width false, .scalar value :: .bufferSpan view :: rest =>
+  | false, .scalar value :: .bufferSpan view :: rest =>
     if view.width != width then .error .invalidState else
     let number ← match width, value with
       | 1, .i32 bits | 2, .i32 bits | 4, .i32 bits => .ok bits.toNat
@@ -328,6 +322,12 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
       | _, _ => .error .invalidState
     return (← checkedAt view.reference (view.length * width)
       (view.fill memory (numberBytes number width)), rest)
+  | _, _ => .error .invalidState
+
+/-- Executes non-fill memory operations after the shared operand guard. -/
+def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  match operation, stack with
   -- Byte-span transfers retain the span extent and the typed value representation.
   | .marshalRead kind false, .bufferSpan view :: rest =>
     let _ ← checkedAt view.reference 0 (view.validate memory)
@@ -550,6 +550,19 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .staticAddress _, _ | .staticValue _, _ | .createSpan _, _ | .spanCreate, _ =>
     .error (.unsupported "Extraction-bound static/span allocation metadata")
   | _, _ => .error .invalidState
+
+/-- Runs a `.memory` operation on the stack (top first), giving the new memory and stack.
+    Operands with unspecified bits are rejected first. The static-field and span-construction
+    operations need extracted metadata, so `staticInstruction` runs them and they are
+    unsupported here; any other operand shape is `invalidState`. -/
+def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  if unspecifiedOperands operation.argumentCount stack then
+    .error (.unsupported "Memory operation observes unspecified vector bits")
+  else
+  match operation with
+  | .spanFill width clear => spanFillInstruction width clear stack memory
+  | _ => otherMemoryInstruction operation stack memory
 
 /-- Runs an op on the stack (top first) and memory: loads, stores, typed copies, aggregate
     fields, vector lanes, constants and stack shuffles. `step` falls back to it for ops with

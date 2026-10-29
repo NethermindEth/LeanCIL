@@ -471,16 +471,43 @@ macro "instruction_contract_close" : tactic => `(tactic| (
             | exact retained.tail.tail
             | exact retained.tail.tail.tail))
 
+/-- Fill and clear preserve the checked write effect and retain only valid stack values. -/
+theorem spanFillInstruction_contract (width : Nat) (clear : Bool) (stack values : List Value)
+    (memory result : Memory)
+    (filled : spanFillInstruction width clear stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold spanFillInstruction at filled
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at filled
+  repeat' first
+    | solve | cases filled; instruction_contract_close
+    | cases filled
+    | split at filled
+#print axioms spanFillInstruction_contract
+
 set_option maxHeartbeats 800000 in
+/-- The remaining memory operations preserve their checked effects and stack validity. -/
+private theorem otherMemoryInstruction_contract (operation : CIL.MemoryOp)
+    (stack values : List Value) (memory result : Memory)
+    (executed : otherMemoryInstruction operation stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold otherMemoryInstruction at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms otherMemoryInstruction_contract
+
+/-- Checked memory dispatch preserves the effects and stack validity of its selected family. -/
 theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : List Value)
     (m result : Memory) (h : memoryInstruction operation stack m = .ok (result, values)) :
     InstructionContract m result stack values := by
   unfold memoryInstruction at h
-  split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-  all_goals repeat' first
-    | solve | cases h; instruction_contract_close
-    | cases h
-    | split at h
+  split at h
+  · cases h
+  · split at h
+    · exact spanFillInstruction_contract _ _ _ _ _ _ h
+    · exact otherMemoryInstruction_contract _ _ _ _ _ h
 
 set_option maxHeartbeats 800000 in
 theorem instruction_contract (operation : CIL.Op) (stack values : List Value) (m result : Memory)

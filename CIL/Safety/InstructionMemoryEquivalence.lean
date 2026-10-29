@@ -64,11 +64,27 @@ theorem Memory.Equivalent.storeTransfer {m n : Memory} (same : m.Equivalent n)
     | split
 #print axioms Memory.Equivalent.storeTransfer
 
-theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent n)
+/-- Fill and clear preserve equivalent backing memories and identical retained values. -/
+theorem Memory.Equivalent.spanFillInstruction {m n : Memory} (same : m.Equivalent n)
+    (width : Nat) (clear : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (spanFillInstruction width clear stack m)
+      (spanFillInstruction width clear stack n) := by
+  unfold CIL.Safety.spanFillInstruction
+  repeat first
+    | exact .error _
+    | (apply ResultEquivalent.bind ((same.spanFill _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind_same; intro)
+    | split
+#print axioms Memory.Equivalent.spanFillInstruction
+
+/-- Non-fill memory operations preserve equivalent memories and identical values. -/
+private theorem Memory.Equivalent.otherMemoryInstruction {m n : Memory} (same : m.Equivalent n)
     (operation : CIL.MemoryOp) (stack : List Value) :
-    ResultEquivalent MemoryFirstEquivalent (memoryInstruction operation stack m)
-      (memoryInstruction operation stack n) := by
-  unfold CIL.Safety.memoryInstruction
+    ResultEquivalent MemoryFirstEquivalent (otherMemoryInstruction operation stack m)
+      (otherMemoryInstruction operation stack n) := by
+  unfold CIL.Safety.otherMemoryInstruction
   split <;> try simp only [same.read, same.access, same.loadValue, same.formValue, same.add,
     same.referenceDifference, same.spanValidate, same.spanSlice, same.spanElement,
     same.arrayValidate, same.arrayElement, same.loadTransfer]
@@ -92,6 +108,20 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
        intro left right related
        exact .ok ⟨related, rfl⟩)
     | split
+
+#print axioms Memory.Equivalent.otherMemoryInstruction
+
+/-- Opcode dispatch preserves the memory equivalence of each checked family. -/
+theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent n)
+    (operation : CIL.MemoryOp) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (memoryInstruction operation stack m)
+      (memoryInstruction operation stack n) := by
+  unfold CIL.Safety.memoryInstruction
+  split
+  · exact .error _
+  · split
+    · exact same.spanFillInstruction _ _ _
+    · exact same.otherMemoryInstruction _ _
 
 theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)
     (operation : CIL.Op) (stack : List Value) :
