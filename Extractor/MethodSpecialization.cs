@@ -105,6 +105,10 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
         {
             if (type is GenericParameter parameter)
             {
+                var expectedOwner = parameter.Type == GenericParameterType.Method
+                    ? (IGenericParameterProvider)definition : definition.DeclaringType;
+                if (parameter.Owner != expectedOwner)
+                    throw new InvalidDataException("Foreign generic parameter owner in specialized body");
                 var supplied = parameter.Type == GenericParameterType.Method ? methodArguments : declaringArguments;
                 return parameter.Position >= 0 && parameter.Position < supplied.Length
                     ? supplied[parameter.Position]

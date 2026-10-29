@@ -1,5 +1,6 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
+#:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
@@ -7,10 +8,36 @@
 
 using System.Reflection;
 using System.Text.RegularExpressions;
+using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/GenericOwners");
 Directory.CreateDirectory(root);
+// Foreign owners cannot be serialized as distinct CLI slots; check the in-memory metadata boundary.
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var caller = module.Types.Single(type => type.Name == "GenericOwners").Methods
+        .Single(method => method.Name == "Identity");
+    var target = (MethodReference)caller.Body.Instructions.Single(instruction =>
+        instruction.OpCode.Code == Code.Call).Operand;
+    var foreignOwner = module.Types.Single(type => type.Name == "OwnerOuter`1");
+    target.Resolve().Body.Variables.Add(new VariableDefinition(foreignOwner.GenericParameters[0]));
+    var specialization = Assembly.LoadFrom(ExtractorPath).GetType("Nethermind.LeanCIL.MethodSpecialization")!;
+    var instance = Activator.CreateInstance(specialization, BindingFlags.Instance | BindingFlags.Public |
+        BindingFlags.NonPublic, null, [module, "scalar"], null)!;
+    try
+    {
+        specialization.GetMethod("Instantiate", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(instance, [target]);
+        throw new InvalidOperationException("Foreign generic owner was accepted");
+    }
+    catch (TargetInvocationException error) when (error.InnerException is InvalidDataException invalid &&
+        invalid.Message.Contains("Foreign generic parameter owner", StringComparison.Ordinal))
+    {
+        Console.WriteLine("PASS rejected foreign generic parameter owner");
+    }
+}
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution");
 var evidence = new GeneratedEvidence(root);
 var rejected = new RejectedEvidence(root);
