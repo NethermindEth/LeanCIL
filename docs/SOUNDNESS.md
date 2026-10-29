@@ -23,6 +23,10 @@ A concrete-input theorem is not a universal method contract.
 
 ## What verification establishes
 
+The [runtime-call catalog and compiler corpus](COMPILER-COVERAGE.md) make changes to the
+admitted API surface and compiler-sensitive patterns visible. Their finite probe domain does
+not establish correspondence with the CLR.
+
 The normal verifier regenerates and checks extraction identity, compiles the proof, replays it
 through the kernel, and audits the theorem's dependencies. Unexpected axioms, missing evidence,
 failed builds and exhausted proof resources are failures. Hash equality establishes identity,

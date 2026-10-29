@@ -39,6 +39,8 @@ instruction must not satisfy a named-exception obligation.
 - [Proof automation regressions](VALIDATION-PROOFS.md): shared tactics, memory facts and composition.
 - [Export and consumer checks](VALIDATION-EXPORTS.md): interface pins, audit and consumer packages.
 - [CI operation](CI.md): job selection, prepared libraries and artifacts.
+- [Pinned compiler corpus and runtime inventory](COMPILER-COVERAGE.md): compiler-sensitive
+  recognizers and visible changes to admitted runtime-call definitions.
 
 Use existing fixture batches for related cases. Measure producer work, proof compilation and
 kernel replay separately; moving work between jobs or caches does not itself demonstrate a

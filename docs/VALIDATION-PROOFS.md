@@ -15,8 +15,8 @@ abstract bitcast results in inferred stacks; a conjunction-wrapped store fact ex
 dispatch fallback.
 
 `Tests.FeatureExecution`, imported by `Tests.Automation`, checks enabled and disabled symbolic
-features from caller facts, plus a concrete feature reduced to its profile field. All three
-proofs use checked invocation and the shared feature evaluator.
+features from caller facts, plus a concrete feature reduced to its profile field. All three proofs
+use checked invocation and the shared feature evaluator.
 
 `Tests.StoreFacts` checks symbolic carry and borrow stores whose write facts state `a + b + c`, `a -
 b - c` and the flag words in source form, through both `cil_checked_steps` and `cil_contract_steps`.

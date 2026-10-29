@@ -157,6 +157,7 @@ if (suite is "all" or "evidence")
     projects.AddRange([
         "Tests/PreparedLeanFixturesTests.cs", "Tests/RejectedEvidenceTests.cs", "Tests/LayoutEvidence.cs",
         "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TypeTests.cs",
+        "Tests/CompilerCoverage.cs", "Tests/RuntimeModelInventory.cs",
         "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/StaticScalarValues.cs",
         "Tests/TranslationAudit.cs", "Tests/NativeProbe"]);
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
