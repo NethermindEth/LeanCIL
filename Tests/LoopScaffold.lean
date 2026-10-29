@@ -37,3 +37,62 @@ def missingArgument : CIL.Method := { code := [.ret], locals := [], returnsValue
 bind_entry invalid := missingArgument with [] from Examples.empty
 
 end Tests.LoopScaffold
+
+namespace Tests.SymbolicLoopScaffold
+open CIL.Safety
+
+/-- An addressed parameter has a private numeric home in the entry memory. -/
+def addressed : CIL.Method := {
+  code := [.ret], locals := [], returnsValue := false, parameterHomes := [(0, .word32)] }
+
+bind_entry parameter (value : CIL.W32) := addressed
+  with [.scalar (.i32 value)] from Examples.empty
+
+/-- The generated frame equation holds for every parameter value, not just a sample. -/
+theorem parameter_entry (value : CIL.W32) :
+    enterFrame addressed [.scalar (.i32 value)] Examples.empty =
+      .ok (parameter.frame value, parameter.memory value) := parameter.checked value
+#print axioms parameter_entry
+
+/-- Vector argument homes preserve a symbolic vector's bytes. -/
+def vectorBody : CIL.Method := {
+  code := [.ret], locals := [], returnsValue := false, vectorArgs := [0] }
+
+bind_entry vector (bits : BitVec 256) := vectorBody
+  with [.scalar (.v256 bits)] from Examples.empty
+
+/-- Vector entry uses the supplied bits and is checked for every vector. -/
+theorem vector_entry (bits : BitVec 256) :
+    enterFrame vectorBody [.scalar (.v256 bits)] Examples.empty =
+      .ok (vector.frame bits, vector.memory bits) := vector.checked bits
+#print axioms vector_entry
+
+end Tests.SymbolicLoopScaffold
+
+namespace Tests.SymbolicStorageEntry
+open CIL.Safety
+
+/-- Assigned byref and span parameters keep their typed roots in the frame. -/
+def body : CIL.Method := {
+  code := [.ret], locals := [], returnsValue := false
+  parameterHomes := [(0, .reference), (1, .span 4 true)] }
+
+bind_entry entry (memory : Memory) (reference : ManagedReference) (view : SpanView)
+    (wellFormed : memory.WellFormed)
+    (valid : ValuesValid memory [.reference reference, .bufferSpan view])
+    (fits : FrameSetupFits body [.reference reference, .bufferSpan view]) := body
+  with [.reference reference, .bufferSpan view] from memory
+  using (enterFrame_isSome body _ memory wellFormed valid fits)
+
+/-- Symbolic caller storage remains subject to its validity and frame-shape premises. -/
+theorem checked (memory : Memory) (reference : ManagedReference) (view : SpanView)
+    (wellFormed : memory.WellFormed)
+    (valid : ValuesValid memory [.reference reference, .bufferSpan view])
+    (fits : FrameSetupFits body [.reference reference, .bufferSpan view]) :
+    enterFrame body [.reference reference, .bufferSpan view] memory =
+      .ok (entry.frame memory reference view wellFormed valid fits,
+        entry.memory memory reference view wellFormed valid fits) :=
+  entry.checked memory reference view wellFormed valid fits
+#print axioms checked
+
+end Tests.SymbolicStorageEntry

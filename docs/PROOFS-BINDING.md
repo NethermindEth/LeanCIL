@@ -13,8 +13,23 @@ bind_cutpoint cutpoint := Extracted.method0 matching
 
 `entry.frame`, `entry.memory` and `entry.home0` (and subsequent numeric homes) come from
 `enterFrame`. `entry.checked` proves the allocator returned exactly that frame and memory. Inputs
-must reduce to successful allocation; an invalid entry is rejected. This command does not construct
-symbolic allocation premises for arbitrary initial memory.
+must reduce to successful allocation, or the command must receive a proof of success. An invalid
+entry is rejected.
+
+Binders parameterize the generated declarations, including memory stores for symbolic arguments:
+
+```lean
+bind_entry entry (value : CIL.W32) := body
+  with [.scalar (.i32 value)] from Examples.empty
+```
+
+For symbolic initial memory or reference and span arguments, append `using success`, where
+`success` proves `(enterFrame body args memory).toOption.isSome = true`. The reusable
+`enterFrame_isSome` theorem supplies this from `Memory.WellFormed`, `ValuesValid` and
+`FrameSetupFits` premises. The generated frame and memory are exact projections of that checked
+allocation, with no default state or unchecked adapter. Numeric `homeN` declarations require the
+frame's local list to reduce; arbitrary symbolic memory may leave that layout symbolic. The command
+does not infer allocation premises or generate invariant-preservation verification conditions.
 
 `cutpoint stack memory` constructs the loop state. `cutpoint.checked` proves the selected
 instruction satisfies the predicate and is its unique match. Missing or ambiguous matches are
