@@ -148,8 +148,14 @@ the latter returns the native-width byte displacement from origin to target.
 `Unsafe.Subtract<T>` accepts `int`, `nint` or `nuint` element offsets for admitted scalar,
 aggregate and vector storage. Scaling and subtraction wrap at the native 64-bit width;
 the resulting reference must still be live and in bounds. These operations grant no read
-or write authority. The pointer overload `Unsafe.Add<T>(void*, int)` uses the same checked
-reference representation; it does not admit fabricated numeric addresses.
+or write authority. The pointer overloads `Unsafe.Add<T>(void*, int)` and
+`Unsafe.Subtract<T>(void*, int)` use the same checked reference representation; they do not admit
+fabricated numeric addresses.
+
+Pointer parameters and locals admit `char` and validated same-assembly integer-enum elements
+alongside supported integer, vector and reference-free aggregate storage. Enum identity and
+backing type remain checked; indirect loads and returns use the declared width and signedness.
+Boolean, floating-point, nested-pointer and reference-bearing pointees remain unsupported.
 
 ## Block memory and alignment prefixes
 
@@ -354,7 +360,7 @@ See the [per-family intrinsic tables](SIMD.md) for the exact Vector128/256, SSE,
 
 SIMD and hardware features enter compiled CIL mostly through `call`, rather than dedicated SIMD CIL opcodes. Selected Vector128/256, SSE, AVX, AVX2, AVX512, BMI and ARM overloads have models. The exact allowed runtime assembly identities, generic arguments, signatures and capability requirements are defined in [RuntimeModels.cs](../Extractor/RuntimeModels.cs) and [FeatureProfiles.cs](../Extractor/FeatureProfiles.cs). Supporting one overload or CPU feature does not mean the entire API is supported.
 
-`Unsafe.SizeOf<T>()`, the managed-reference `Unsafe.Add<T>` overloads with `int`, `nint` or `nuint` offsets, and `Unsafe.Add<T>(void*, int)` use validated layouts for supported integer primitives, enums, reference-free structs and supported Vector128/256/512 types. Sizes include managed packing and padding; reference offsets scale by that size and wrap at the validated native width. Forming the resulting reference checks allocation identity, lifetime and bounds, including explicitly admitted one-past positions. It does not grant permission to read or write. Classes, pointer/byref type arguments and unsupported layouts fail extraction.
+`Unsafe.SizeOf<T>()`, the managed-reference `Unsafe.Add<T>` overloads with `int`, `nint` or `nuint` offsets, and the pointer `Unsafe.Add<T>(void*, int)`/`Unsafe.Subtract<T>(void*, int)` overloads use validated layouts for supported integer primitives, enums, reference-free structs and supported Vector128/256/512 types. Sizes include managed packing and padding; reference offsets scale by that size and wrap at the validated native width. Forming the resulting reference checks allocation identity, lifetime and bounds, including explicitly admitted one-past positions. It does not grant permission to read or write. Classes, pointer/byref type arguments and unsupported layouts fail extraction.
 
 `Unsafe.SkipInit<T>(out T)` admits the same supported storage types. Its checked
 operation validates the managed reference and leaves memory unchanged, including
