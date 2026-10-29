@@ -40,9 +40,35 @@ private def emittedSpanCall : Op → Option SpanCall
   | .memory (.arraySpan element writable range) => some (.array element writable range)
   | _ => none
 
-/-- Closed span element names retain nested integer-vector arguments in runtime signatures. -/
+/-- A scoped argument starts with an assembly identity; commas inside it have a following space. -/
+private def afterArgumentScope : List Char → Option (List Char)
+  | ':' :: ':' :: rest => some rest
+  | '<' :: _ | '>' :: _ => none
+  | ',' :: ' ' :: rest => afterArgumentScope rest
+  | ',' :: _ => none
+  | _ :: rest => afterArgumentScope rest
+  | [] => none
+
+/-- Runtime signatures omit nested argument scopes while metadata identities retain them. -/
+private def unscopedArguments : Nat → List Char → List Char
+  | 0, chars => chars
+  | _ + 1, [] => []
+  | fuel + 1, '<' :: rest =>
+    '<' :: unscopedArguments fuel ((afterArgumentScope rest).getD rest)
+  | fuel + 1, ',' :: rest =>
+    ',' :: unscopedArguments fuel ((afterArgumentScope rest).getD rest)
+  | fuel + 1, char :: rest => char :: unscopedArguments fuel rest
+
+/-- Closed span element names retain nested type arguments in runtime signatures. -/
 def spanElementName (type : TypeExpr) : Option String := do
-  if let some (_, name) := namedType type then return String.ofList name
+  if let some (_, name) := namedType type then
+    return String.ofList name
+  if let .aggregate identity _ := type then
+    let name ← afterArgumentScope identity.toList
+    let name := unscopedArguments name.length name
+    if name.isEmpty || !name.all (fun char => char.isAlphanum ||
+        char ∈ ['_', '.', '/', '`', '<', '>', ',']) then none
+    else return String.ofList name
   let .apply (.constructor _ name) (.atom _ element) := type | none
   if (integerVectorWidth type).isSome then some (name ++ "<" ++ element ++ ">") else none
 
