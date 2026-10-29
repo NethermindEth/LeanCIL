@@ -193,7 +193,8 @@ internal static class NativeOperands
                         Code.Ldfld or Code.Ldsfld => Type(FieldType((FieldReference)instruction.Operand)),
                         Code.Ldobj or Code.Ldelem_Any => Type((TypeReference)instruction.Operand),
                         Code.Ldloca or Code.Ldloca_S =>
-                            Type(new ByReferenceType(method.Body.Variables[FeatureConstants.Local(instruction)].VariableType)),
+                            Type(new ByReferenceType(method.Body.Variables[
+                                FeatureConstants.Local(instruction)].VariableType)),
                         Code.Ldarga or Code.Ldarga_S => Type(new ByReferenceType(MethodArguments.Type(method,
                             MethodArguments.Index(method, (ParameterDefinition)instruction.Operand)))),
                         Code.Ldflda or Code.Ldsflda or Code.Localloc or Code.Ldelema => Kind.Reference,

@@ -76,13 +76,14 @@ foreach (var (name, arguments, result, width) in new[]
     var output = Path.Combine(root, name);
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "Proof.lean");
+    var initialBytes = width == 8 ? "if offset == 8 then 1 else if offset == 15 then 128 else 0" : "7";
     File.WriteAllText(proof, $$"""
         import Extracted
         namespace ExampleProof
         private def memory : CIL.Safety.Memory := {
           allocations := fun identity => if identity == 0 then
             some ⟨.managedHeap, ⟨24, 8, []⟩, true, [24]⟩ else none
-          cells := fun _ offset => ⟨{{(width == 8 ? "if offset == 8 then 1 else if offset == 15 then 128 else 0" : "7")}}, true⟩
+          cells := fun _ offset => ⟨{{initialBytes}}, true⟩
           views := [⟨0, 0, 24, true, true⟩]
           nextIdentity := 1 }
         /-- The compiled enum operation agrees with the observed CLR result. -/
