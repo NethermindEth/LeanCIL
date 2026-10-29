@@ -332,7 +332,7 @@ internal static class RuntimeModels
                 {
                     operations.Add($"!0& {owner}::get_Item(System.Int32)", $".memory (.spanItem {width})");
                     operations.Add($"System.Void {owner}::Clear()", $".memory (.spanFill {width} true)");
-                    if (arrayElement is not null) operations.Add($"System.Void {owner}::Fill(!0)", $".memory (.spanFill {width} false)");
+                    operations.Add($"System.Void {owner}::Fill(!0)", $".memory (.spanFill {width} false)");
                 }
                 operations.Add($"{name}<!0> {owner}::Slice(System.Int32)", ".memory (.spanSlice false)");
                 operations.Add($"{name}<!0> {owner}::Slice(System.Int32,System.Int32)", ".memory (.spanSlice true)");

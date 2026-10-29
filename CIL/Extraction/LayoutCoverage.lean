@@ -63,7 +63,7 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
     match site.declaringType, site.typeArguments with
     | .apply (.constructor scope owner) (.aggregate _ index), [] =>
       if scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"] &&
-          site.name ∈ ["get_Item", "CopyTo", "TryCopyTo", "Clear", ".ctor"] then
+          site.name ∈ ["get_Item", "CopyTo", "TryCopyTo", "Clear", "Fill", ".ctor"] then
         return [.size pc index .spanElement] else return []
     | .atom _ "System.Runtime.InteropServices.MemoryMarshal", [.aggregate _ index] =>
       if site.name = "Read" || site.name = "TryRead" then return [.size pc index .load]

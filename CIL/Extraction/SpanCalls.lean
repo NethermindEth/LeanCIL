@@ -84,7 +84,7 @@ private def spanMemberCall (opcode : Nat) (site : CallSite)
       site.target == target "System.Void" "" then some (.fill width true)
   else if opcode == 40 && site.hasThis && writable && !site.returnsValue &&
       site.returnType == .void && site.name == "Fill" && site.parameterTypes == [elementType] &&
-      site.target == target "System.Void" "!0" && arrayElement.isSome then some (.fill width false)
+      site.target == target "System.Void" "!0" then some (.fill width false)
   else if opcode == 40 && site.hasThis &&
       site.parameterTypes == [.apply (.constructor runtimeScope "System.Span`1") elementType] &&
       site.name == "CopyTo" && !site.returnsValue && site.returnType == .void &&

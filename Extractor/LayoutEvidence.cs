@@ -120,7 +120,7 @@ internal sealed class LayoutEvidence
                 else if (spanCall.DeclaringType is GenericInstanceType spanOwner &&
                     Spans.Is(spanOwner) &&
                     MetadataValidation.IsAggregate(spanOwner.GenericArguments[0], method.Module) &&
-                    spanCall.Name is "get_Item" or "CopyTo" or "TryCopyTo" or "Clear" or ".ctor")
+                    spanCall.Name is "get_Item" or "CopyTo" or "TryCopyTo" or "Clear" or "Fill" or ".ctor")
                     uses.Add($".size {pc} {Index(spanOwner.GenericArguments[0])} .spanElement");
             }
             if (instruction.OpCode.Code is Code.Ldfld or Code.Stfld or Code.Ldflda)
