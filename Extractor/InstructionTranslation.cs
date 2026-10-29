@@ -7,6 +7,7 @@ internal static class InstructionTranslation
 {
     internal static string? RuntimeModel(MethodReference reference, FeatureProfile? profile = null)
     {
+        if (FeatureProfile.PlatformConstant(reference) is int constant) return $".const32 {constant}";
         if (FeatureProfile.Getter(reference) is Feature feature)
             return ".feature " + FeatureProfile.LeanFeature(feature);
         return RuntimeModels.Translate(reference, profile ?? FeatureProfile.Scalar);

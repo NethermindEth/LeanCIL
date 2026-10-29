@@ -355,8 +355,8 @@ private def sizeConstant (instruction : RawInstruction) (bits : W32) : Bool :=
     | _ => false
   | _, _ => false
 
-/-- Covered opcodes emit exactly their encoding. Elsewhere only a decided type test's word
-    (bound by the feature check) or a size constant may emit a scalar operation. -/
+/-- Covered opcodes emit exactly their encoding. Elsewhere only a decided type test's word,
+    a size constant or an exact platform getter may emit a scalar operation. -/
 def scalarEmissionMatches (role : Option FoldRole) (instruction : RawInstruction)
     (stack : List ScalarKind) (emitted : Op) : Bool :=
   if instruction.opcode == 77 && (stack.head?).any
@@ -391,7 +391,10 @@ def scalarEmissionMatches (role : Option FoldRole) (instruction : RawInstruction
   else if scalarCovered instruction.opcode then scalarOpMatches instruction stack emitted
   else !scalarEmission emitted || match role, emitted with
     | some (.result _), .const32 _ => true
-    | _, .const32 bits => sizeConstant instruction bits
+    | _, .const32 bits => sizeConstant instruction bits ||
+        (instruction.opcode == 40 && match instruction.operand with
+          | .call site => platformConstant site == some bits
+          | _ => false)
     | _, _ => false
 
 /-- The result kind of a conversion opcode: `conv.i`/`conv.u` forms give native ints,

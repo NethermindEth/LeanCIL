@@ -55,4 +55,38 @@ theorem wrong_call_shape :
       typeArguments := [.atom runtimeScope "System.Int32"] } = none := by decide +kernel
 #print axioms wrong_call_shape
 
+/-- Raw process-width calls retain their exact owner, result and external identity. -/
+def platform (owner member result : String) : CallSite := {
+  declaringType := .atom runtimeScope owner, name := member
+  target := .external (runtimeScope ++ "::" ++ result ++ " " ++ owner ++ "::" ++ member ++ "()")
+  parameterCount := 0, hasThis := false, returnsValue := true, typeArguments := []
+  returnType := .atom runtimeScope result, parameterTypes := [] }
+
+/-- Both native-size getters and the process query use the admitted 64-bit platform. -/
+theorem platform_values :
+    platformConstant (platform "System.IntPtr" "get_Size" "System.Int32") = some 8 ∧
+    platformConstant (platform "System.UIntPtr" "get_Size" "System.Int32") = some 8 ∧
+    platformConstant (platform "System.Environment" "get_Is64BitProcess" "System.Boolean") =
+      some 1 := by decide +kernel
+#print axioms platform_values
+
+/-- A platform constant is checked even when its forged instruction has the same stack effect. -/
+theorem platform_encoding (raw : RawMethod) :
+    let site := platform "System.IntPtr" "get_Size" "System.Int32"
+    featureOpMatches raw ⟨0, 40, .call site⟩ (.const32 8) = true ∧
+    featureOpMatches raw ⟨0, 40, .call site⟩ (.const32 4) = false ∧
+    featureOpMatches raw ⟨0, 40, .call { site with
+      declaringType := .atom "forged" "System.IntPtr" }⟩ (.const32 8) = false ∧
+    featureOpMatches raw ⟨0, 40, .call { site with
+      target := .external "forged" }⟩ (.const32 8) = false ∧
+    featureOpMatches raw ⟨0, 40, .call { site with
+      returnType := .atom runtimeScope "System.UInt32" }⟩ (.const32 8) = false ∧
+    featureOpMatches raw ⟨0, 111, .call site⟩ (.const32 8) = false ∧
+    featureOpMatches raw ⟨0, 40, .call { site with hasThis := true }⟩ (.const32 8) = false ∧
+    featureOpMatches raw ⟨0, 40, .call { site with parameterCount := 1 }⟩ (.const32 8) = false ∧
+    featureOpMatches raw ⟨0, 40, .call { site with
+      typeArguments := [.atom runtimeScope "System.Int32"] }⟩ (.const32 8) = false := by
+  exact ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+#print axioms platform_encoding
+
 end Tests.FeatureGetter

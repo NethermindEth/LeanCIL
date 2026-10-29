@@ -119,7 +119,9 @@ internal sealed class FeatureConstants
             case Code.Call: case Code.Callvirt: case Code.Newobj:
                 MethodReference callee = (MethodReference)instruction.Operand;
                 for (int i = 0; i < callee.Parameters.Count + (code != Code.Newobj && callee.HasThis ? 1 : 0); i++) Pop();
-                if (FeatureProfile.Getter(callee) is Feature feature)
+                if (FeatureProfile.PlatformConstant(callee) is int constant)
+                    _stack.Add(constant);
+                else if (FeatureProfile.Getter(callee) is Feature feature)
                     _stack.Add(profile.Get(feature) ? 1 : 0);
                 else if (code == Code.Newobj || callee.ReturnType.MetadataType != MetadataType.Void)
                     _stack.Add(null);

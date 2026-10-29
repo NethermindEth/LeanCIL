@@ -17,7 +17,9 @@ var output = At("artifacts/FeatureEvidence");
 Directory.CreateDirectory(output);
 var rejected = new RejectedEvidence(output);
 // Exercise the production validator and both old-name and custom-profile migration paths.
-var profileType = Assembly.LoadFrom(ExtractorPath).GetType("Nethermind.LeanCIL.FeatureProfile", throwOnError: true)!;
+verification.EnsureExtractorBuilt();
+var profileType = Assembly.Load(File.ReadAllBytes(ExtractorPath))
+    .GetType("Nethermind.LeanCIL.FeatureProfile", throwOnError: true)!;
 var selectProfile = profileType.GetMethod("Select", BindingFlags.Static | BindingFlags.NonPublic)!;
 object SelectProfile(string name) => selectProfile.Invoke(null, [name])!;
 var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
@@ -93,13 +95,15 @@ Reject("forged-constant", baseline.Replace("stack := [some (BitVec.ofInt 32 (0))
 Reject("malformed-entry", MutateState(baseline, "set 0 (some { stack := [none], locals := [none] })"));
 Reject("false-pruned-successor", MutateState(baseline, "set 10 none"));
 Reject("omitted-states", MutateState(baseline, "take 17"));
-rejected.Check();
 var unsupported = Execute(Extract("extract", assembly, "Examples", "Loops::FeatureCountdown(uint)",
     Path.Combine(output, "EnabledUnsupported"), "x64-v3"));
 if (unsupported.Code == 0 || !unsupported.Output.Contains("Unsupported instruction"))
     throw new InvalidOperationException("Enabled feature failed to expose unsupported array code: " + unsupported.Output);
 // X86Base.X64 and Vector128 getters decide their branches from the profile alone.
 var capabilitiesQueue = new GeneratedQueue(verification, assembly);
+var platformResult = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Capabilities")!
+    .GetMethod("Platform")!.Invoke(null, []);
+if (!Equals(platformResult, 17)) throw new InvalidOperationException("Platform comparison requires a 64-bit process");
 foreach (var (profile, flags) in new[] { ("scalar", 0), ("x64-v3", 3), ("arm64-advsimd", 2), ("x64-sse42", 3) })
 {
     var capabilities = Path.Combine(output, "Capabilities-" + profile);
@@ -109,8 +113,34 @@ foreach (var (profile, flags) in new[] { ("scalar", 0), ("x64-v3", 3), ("arm64-a
         $"  (CIL.Safety.invoke Extracted.program 64 0 [] Examples.empty).map Prod.snd = .ok [.scalar (.i32 {flags})] := rfl\nend ExampleProof\n");
     capabilitiesQueue.Add(new("Capabilities::Flags()", proof, Path.Combine(capabilities, "Verified"), Profile: profile),
         () => Console.WriteLine($"PASS Capabilities::Flags under {profile} returns {flags}"));
+    var platform = Path.Combine(capabilities, "Platform.lean");
+    File.WriteAllText(platform, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" +
+        "theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [] Examples.empty).map Prod.snd = " +
+        ".ok [.scalar (.i32 17)] := rfl\n#print axioms correctness\nend ExampleProof\n");
+    capabilitiesQueue.Add(new("Capabilities::Platform()", platform, Path.Combine(capabilities, "Platform"), Profile: profile),
+        () => Console.WriteLine($"PASS platform constants and pruned unsupported branch under {profile}"));
 }
 capabilitiesQueue.Flush();
+var platformSource = File.ReadAllText(Path.Combine(output, "Capabilities-scalar", "Platform", "Extracted.lean"));
+var platformControls = new GeneratedEvidence(Path.Combine(output, "PlatformControls"));
+foreach (var (obligation, diagnostic) in new[]
+{
+    ("method0_features_validated", "FeatureFlowValid"), ("method0_scalars_validated", "ScalarFlowValid")
+})
+{
+    var narrowed = NarrowEvidence(platformSource, obligation);
+    var controlPath = Path.Combine(output, obligation + "-platform.lean");
+    File.WriteAllText(controlPath, narrowed);
+    platformControls.Add(controlPath, "PASS exact platform constant control: " + diagnostic, obligation);
+    const string literal = ".const32 8";
+    var position = narrowed.IndexOf(literal, StringComparison.Ordinal);
+    if (position < 0) throw new InvalidOperationException("Missing initial platform getter constant");
+    var forged = Path.Combine(output, obligation + "-wrong-platform.lean");
+    File.WriteAllText(forged, narrowed[..position] + ".const32 4" + narrowed[(position + literal.Length)..]);
+    rejected.Add(forged, "PASS exact platform constant rejection: " + diagnostic, diagnostic);
+}
+platformControls.Check(replay: false);
+rejected.Check();
 var scalarCapabilities = Path.Combine(output, "Capabilities-scalar");
 verification.Verify(assembly, "Examples", "Capabilities::Flags()", Path.Combine(scalarCapabilities, "Proof.lean"),
     Path.Combine(scalarCapabilities, "Verified"), check: true);

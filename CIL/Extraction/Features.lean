@@ -106,6 +106,27 @@ private theorem stripFeaturePrefix_eq (expected bytes suffix : List UInt8) :
 private def featureSignature (identity : String) : Option (List UInt8) :=
   stripFeaturePrefix featurePrefix.toByteArray.data.toList identity.toByteArray.data.toList
 
+/-- Platform query names whose exact signatures must bind emitted constants. -/
+def platformQuery (site : CallSite) : Bool :=
+  match site.declaringType with
+  | .atom _ owner =>
+    (site.name == "get_Size" && owner ∈ ["System.IntPtr", "System.UIntPtr"]) ||
+      (site.name == "get_Is64BitProcess" && owner == "System.Environment")
+  | _ => false
+
+/-- Exact process-width getters under the supported 64-bit runtime profiles. -/
+def platformConstant (site : CallSite) : Option W32 := do
+  let .atom scope owner := site.declaringType | none
+  if !platformQuery site || scope != runtimeScope || site.parameterCount != 0 ||
+      !site.parameterTypes.isEmpty || site.hasThis || !site.returnsValue ||
+      site.ownerArgumentCount != 0 || !site.typeArguments.isEmpty then none
+  else
+    let result := if site.name == "get_Size" then "System.Int32" else "System.Boolean"
+    if site.returnType != .atom runtimeScope result ||
+        site.target != .external (runtimeScope ++ "::" ++ result ++ " " ++ owner ++
+          "::" ++ site.name ++ "()") then none
+    else some (if site.name == "get_Size" then 8 else 1)
+
 /-- Identify getters from raw member and assembly identity, never an emitter-supplied flag. -/
 def featureGetter (site : CallSite) : Option Feature := do
   let .external identity := site.target | none
@@ -228,6 +249,9 @@ private def featureTransferWith (raw : RawMethod) (eligible : Nat → Option W32
     let .call site := instruction.operand | none
     let next ← forget state
       (site.parameterCount + if instruction.opcode != 115 && site.hasThis then 1 else 0) 0
+    if let some constant := platformConstant site then
+      if instruction.opcode != 40 then none else
+        return { next with stack := some constant :: next.stack }
     if let some feature := featureGetter site then
       if instruction.opcode != 40 then none else
         return { next with stack := some (if profile.evaluate feature then 1 else 0) :: next.stack }
@@ -332,6 +356,10 @@ private def featureOpMatchesWith (raw : RawMethod) (eligible : Nat → Option W3
   if let some word := constant32 instruction then
     return match emitted with | .const32 actual => word == actual | _ => false
   if let .call site := instruction.operand then
+    if platformQuery site then
+      return match platformConstant site, emitted with
+        | some expected, .const32 actual => instruction.opcode == 40 && expected == actual
+        | _, _ => false
     if let some feature := featureGetter site then
       return match emitted with
         | .feature actual => instruction.opcode == 40 && feature == actual
