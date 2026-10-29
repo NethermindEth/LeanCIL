@@ -14,9 +14,7 @@ internal static class Spans
     internal static bool Is(TypeReference type) =>
         type is GenericInstanceType span && span.ElementType.FullName is "System.Span`1" or "System.ReadOnlySpan`1" &&
         span.GenericArguments.Count == 1 &&
-        (Arrays.Storage(span.GenericArguments[0]) is not null ||
-            MetadataValidation.IntegerVectorWidth(span.GenericArguments[0]) is not null ||
-            MetadataValidation.IsAggregate(span.GenericArguments[0], type.Module));
+        Arrays.Storage(span.GenericArguments[0]) is not null;
 
     internal static int? Width(TypeReference type, string architecture) => Is(type)
         ? ElementWidth(((GenericInstanceType)type).GenericArguments[0], architecture) : null;

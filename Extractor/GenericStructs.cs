@@ -17,16 +17,8 @@ internal static class GenericStructs
                 throw new InvalidDataException("Foreign or unbound generic struct parameter");
             return owner.GenericArguments[parameter.Position];
         }
-        if (type is GenericInstanceType nested)
-        {
-            var closed = new GenericInstanceType(nested.ElementType);
-            foreach (var argument in nested.GenericArguments) closed.GenericArguments.Add(Substitute(argument, owner));
-            return closed;
-        }
-        if (type is ByReferenceType reference) return new ByReferenceType(Substitute(reference.ElementType, owner));
-        if (type is PointerType pointer) return new PointerType(Substitute(pointer.ElementType, owner));
         if (type is ArrayType array) return new ArrayType(Substitute(array.ElementType, owner), array.Rank);
-        return type;
+        return TypeSubstitution.Components(type, component => Substitute(component, owner));
     }
 
     internal static void Validate(GenericInstanceType owner)

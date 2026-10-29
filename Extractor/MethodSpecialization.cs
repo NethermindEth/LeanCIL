@@ -120,8 +120,6 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
                     ? supplied[parameter.Position]
                     : throw new InvalidDataException("Malformed generic method type parameter");
             }
-            if (type is ByReferenceType byRef) return new ByReferenceType(Substitute(byRef.ElementType));
-            if (type is PointerType pointer) return new PointerType(Substitute(pointer.ElementType));
             if (type is ArrayType { IsVector: true } array) return new ArrayType(Substitute(array.ElementType));
             if (type is FunctionPointerType pointerSignature)
             {
@@ -136,13 +134,7 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
                     result.Parameters.Add(new ParameterDefinition(Substitute(argument.ParameterType)));
                 return result;
             }
-            if (type is GenericInstanceType generic)
-            {
-                var result = new GenericInstanceType(generic.ElementType);
-                foreach (var argument in generic.GenericArguments) result.GenericArguments.Add(Substitute(argument));
-                return result;
-            }
-            return type;
+            return TypeSubstitution.Components(type, Substitute);
         }
 
         MethodReference SubstituteMethod(MethodReference method)
