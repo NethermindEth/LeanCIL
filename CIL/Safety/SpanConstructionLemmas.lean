@@ -15,7 +15,7 @@ theorem spanConstructor_result (constructor : CIL.SpanConstructor)
       .ok (after, value :: rest)) :
     after = memory ∧ value.Valid memory := by
   cases constructor <;> simp only [CIL.SpanConstructor.operation] at constructed
-  all_goals unfold memoryInstruction at constructed
+  all_goals unfold memoryInstruction otherMemoryInstruction at constructed
   all_goals split at constructed
   all_goals repeat' first
     | contradiction
