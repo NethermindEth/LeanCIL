@@ -343,7 +343,7 @@ foreach (var mutation in new[]
     {
         "wrong-marker-scope" or "vararg-marker" => "byref-like marker",
         "nested-byref-like" => "Byref-like field",
-        "byref-like" or "oversized" => "Unsupported instruction",
+        "oversized" => "Unsupported instruction",
         _ => "Unsupported array"
     };
     if (result.Code == 0 || !result.Output.Contains(expected, StringComparison.Ordinal))

@@ -32,7 +32,7 @@ string Source(string inserted) => string.Join("\n",
     "    }",
     "    public static uint Fail(uint x)",
     "    {",
-    "        if (x == 0) throw null!;",
+    "        if (x == 0) return (uint)new float[x].Length;",
     "        return x;",
     "    }",
     "}");
@@ -142,13 +142,13 @@ if (!Fails(original, wrong, "Original-Wrong", $"Names.cs:{returnLine}:"))
 Console.WriteLine($"PASS cil_body reports Names.cs:{returnLine} for the differing pc");
 
 // Extraction errors gain the source location, and only when a PDB is present.
-var throwLine = Array.FindIndex(lines, l => l.Contains("throw null!")) + 1;
+var unsupportedLine = Array.FindIndex(lines, l => l.Contains("new float[x]")) + 1;
 foreach (var (name, assembly, located) in new[] { ("Original", original, true), ("Stripped", stripped, false) })
 {
     var result = Execute(Extract("extract", assembly, "Names", "Calls::Fail(uint)", Path.Combine(root, name + "-Fail")));
-    var source = $"  Source: Names.cs:{throwLine}:";
+    var source = $"  Source: Names.cs:{unsupportedLine}:";
     if (result.Code == 0 || !result.Output.Contains("Unsupported instruction") || result.Output.Contains(source) != located ||
         (!located && result.Output.Contains("  Source: ")))
         throw new InvalidOperationException($"Unexpected extraction diagnostic for {name}:\n{result.Output}");
 }
-Console.WriteLine($"PASS unsupported instructions report Names.cs:{throwLine} with a PDB and no source without one");
+Console.WriteLine($"PASS unsupported instructions report Names.cs:{unsupportedLine} with a PDB and no source without one");
