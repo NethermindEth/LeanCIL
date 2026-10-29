@@ -39,7 +39,7 @@ internal static class Arrays
         if (!EnumTypes.IsEnum(type)) return Primitive(type);
         var underlying = Primitive(EnumTypes.Storage(type))!;
         var identity = JsonSerializer.Serialize(LayoutEvidence.Identity(type));
-        return underlying with { Lean = $"enumeration {identity} {underlying.Width} {underlying.Signed.ToString().ToLowerInvariant()}" };
+        return underlying with { Lean = $"enumeration {identity} .{underlying.Lean}" };
     }
 
     internal static Element? Of(TypeReference type) =>

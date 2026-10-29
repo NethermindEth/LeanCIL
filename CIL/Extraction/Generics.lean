@@ -52,10 +52,13 @@ private def enumField : FieldType → Bool
 def arrayElementType : TypeExpr → Option ArrayElement
   | .enum identity (.atom scope name) => do
     if scope != runtimeScope then none else pure ()
-    let kind ← primitiveField name
-    if !enumField kind then none else pure ()
-    let width ← primitiveFieldWidth kind
-    return .enumeration identity width (kind ∈ [.signed8, .signed16])
+    let storage ← match name with
+      | "System.SByte" => some EnumStorage.signed8 | "System.Byte" => some .unsigned8
+      | "System.Int16" => some .signed16 | "System.UInt16" => some .unsigned16
+      | "System.Int32" => some .signed32 | "System.UInt32" => some .unsigned32
+      | "System.Int64" => some .signed64 | "System.UInt64" => some .unsigned64
+      | _ => none
+    return .enumeration identity storage
   | .atom scope name =>
     if scope != runtimeScope then none else match name with
       | "System.SByte" => some .signed8 | "System.Byte" => some .unsigned8

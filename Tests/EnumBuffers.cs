@@ -54,11 +54,11 @@ if (!Equals(runtime.GetMethod("FillClear")!.Invoke(null, [values]), seven) ||
     values.Cast<object>().Any(value => Convert.ToInt32(value) != 0))
     throw new InvalidOperationException("Enum runtime Fill/Clear mismatch");
 
-string Element(string name, int width, bool signed) =>
+string Element(string name, string storage) =>
     $".enumeration {JsonSerializer.Serialize(metadata.Assembly.Name.FullName + "::Examples.EnumBuffers/" + name)} " +
-    $"{width} {signed.ToString().ToLowerInvariant()}";
-var narrow = Element("Small", 1, true);
-var wide = Element("Large", 8, false);
+    $".{storage}";
+var narrow = Element("Small", "signed8");
+var wide = Element("Large", "unsigned64");
 var array = $".array ⟨.address ⟨0, 0⟩, 3, ({narrow})⟩";
 var queue = new GeneratedQueue(verification, assembly);
 Run(["lake", "env", "lean", At("Tests/EnumBufferEvidence.lean")], cwd: FixturePackage());
@@ -85,6 +85,7 @@ foreach (var (name, arguments, result, width) in new[]
           cells := fun _ offset => ⟨{{(width == 8 ? "if offset == 8 then 1 else if offset == 15 then 128 else 0" : "7")}}, true⟩
           views := [⟨0, 0, 24, true, true⟩]
           nextIdentity := 1 }
+        /-- The compiled enum operation agrees with the observed CLR result. -/
         theorem correctness :
             (match CIL.Safety.invoke Extracted.program 256 0 {{arguments}} memory with
              | .ok result => result.2 == [.scalar (.i{{(width == 8 ? 64 : 32)}} {{result}})]
@@ -107,8 +108,7 @@ foreach (var (name, obligation) in new[]
 {
     var baseline = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));
     var control = Path.Combine(root, name + "-control.lean");
-    File.WriteAllText(control, baseline + CheckedEvidenceControl(baseline,
-        NarrowEvidence(baseline, obligation), [obligation], 0));
+    File.WriteAllText(control, NarrowEvidence(baseline, obligation));
     Run(["lake", "env", "lean", control], cwd: verification.CheckoutPackage());
     var marker = "def method0ScalarStates";
     var start = baseline.IndexOf(marker, StringComparison.Ordinal);

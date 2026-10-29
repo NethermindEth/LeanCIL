@@ -22,13 +22,13 @@ private def method : RawMethod := {
 
 /-- All eight legal enum bases retain their exact identity and existing integer width. -/
 theorem enum_storage_checked :
-    [("System.SByte", 1, true), ("System.Byte", 1, false),
-     ("System.Int16", 2, true), ("System.UInt16", 2, false),
-     ("System.Int32", 4, false), ("System.UInt32", 4, false),
-     ("System.Int64", 8, false), ("System.UInt64", 8, false)].all
-      (fun (name, width, signed) =>
+    [("System.SByte", EnumStorage.signed8), ("System.Byte", .unsigned8),
+     ("System.Int16", .signed16), ("System.UInt16", .unsigned16),
+     ("System.Int32", .signed32), ("System.UInt32", .unsigned32),
+     ("System.Int64", .signed64), ("System.UInt64", .unsigned64)].all
+      (fun (name, storage) =>
         arrayElementType (.enum "Fixture::Choice" (.atom runtimeScope name)) ==
-          some (.enumeration "Fixture::Choice" width signed)) = true := by decide +kernel
+          some (.enumeration "Fixture::Choice" storage)) = true := by decide +kernel
 #print axioms enum_storage_checked
 
 /-- Exact enum identity survives local stores and returns instead of becoming only a width. -/
