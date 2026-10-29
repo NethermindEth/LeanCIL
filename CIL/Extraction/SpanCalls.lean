@@ -1,4 +1,4 @@
-import CIL.Extraction.Generics
+import CIL.Extraction.Folds
 
 /-!
 # Exact primitive span calls
@@ -33,8 +33,12 @@ private def emittedSpanCall : Op → Option SpanCall
 
 /-- A span member or array constructor with a fully specified owner and signature. -/
 private def spanMemberCall (opcode : Nat) (site : CallSite) : Option SpanCall := do
-  let .apply (.constructor _ owner) elementType@(.atom _ elementName) := site.declaringType
+  let .apply (.constructor _ owner) elementType := site.declaringType
     | none
+  let elementName ← match elementType with
+    | .atom _ name => some name
+    | .enum .. => (String.ofList ∘ Prod.snd) <$> namedType elementType
+    | _ => none
   let .span width writable ← spanStorage site.declaringType | none
   let element ← arrayElementType elementType
   if !site.typeArguments.isEmpty || site.parameterCount != site.parameterTypes.length then none

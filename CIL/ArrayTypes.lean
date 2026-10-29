@@ -8,6 +8,7 @@ namespace CIL
 inductive ArrayElement where
   | signed8 | unsigned8 | signed16 | unsigned16 | signed32 | unsigned32
   | signed64 | unsigned64 | nativeInt | nativeUInt | boolean | character
+  | enumeration (identity : String) (bytes : Nat) (signed : Bool)
   deriving DecidableEq, Repr
 
 /-- Storage width on the admitted 64-bit runtime profiles. -/
@@ -16,6 +17,13 @@ def ArrayElement.width : ArrayElement → Nat
   | .signed16 | .unsigned16 | .character => 2
   | .signed32 | .unsigned32 => 4
   | .signed64 | .unsigned64 | .nativeInt | .nativeUInt => 8
+  | .enumeration _ bytes _ => bytes
+
+/-- Narrow loads sign-extend signed integer and enum storage. -/
+def ArrayElement.signed : ArrayElement → Bool
+  | .signed8 | .signed16 => true
+  | .enumeration _ _ signed => signed
+  | _ => false
 
 /-- Native elements keep their stack kind distinct from fixed-width int64 elements. -/
 def ArrayElement.native : ArrayElement → Bool

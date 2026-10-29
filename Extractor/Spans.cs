@@ -13,7 +13,7 @@ internal static class Spans
     internal static int? Width(TypeReference type) =>
         type is GenericInstanceType span && span.ElementType.FullName is "System.Span`1" or "System.ReadOnlySpan`1" &&
             span.GenericArguments.Count == 1
-            ? Arrays.Primitive(span.GenericArguments[0])?.Width
+            ? Arrays.Storage(span.GenericArguments[0])?.Width
             : null;
 
     internal static bool Writable(TypeReference type) =>

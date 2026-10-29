@@ -22,6 +22,7 @@ namespace CIL.Extraction
 inductive ScalarKind where
   | word32 | word64 | native | reference | nullObject | other
   | array (element : ArrayElement)
+  | enumSpan (element : ArrayElement) (writable : Bool) (reference : Bool)
   deriving DecidableEq, Repr
 
 /-- The claimed stack kinds (top first) at each raw pc; `none` where the pc is unreachable. -/
@@ -32,8 +33,15 @@ abbrev ScalarCertificate := List (Option (List ScalarKind))
 def scalarType : TypeExpr → ScalarKind
   | .enum _ underlying => scalarType underlying
   | .pointer .void => .other
-  | .byref _ | .pointer _ => .reference
+  | .byref element => match scalarType element with
+      | .enumSpan identity writable _ => .enumSpan identity writable true
+      | _ => .reference
+  | .pointer _ => .reference
   | .array element => (arrayElementType element).map ScalarKind.array |>.getD .other
+  | type@(.apply _ element@(.enum ..)) =>
+    match spanStorage type, arrayElementType element with
+    | some (.span _ writable), some identity => .enumSpan identity writable false
+    | _, _ => .other
   | .atom scope name =>
     if scope != runtimeScope then .other
     else if name ∈ ["System.IntPtr", "System.UIntPtr"] then .native
@@ -108,7 +116,7 @@ private def arrayStep (instruction : RawInstruction) (stack : List ScalarKind) :
       let .type token := instruction.operand | none
       let expected ← arrayElementType token
       if element.isSome && element != some expected then none else
-        pure (expected.width, expected ∈ [.signed8, .signed16], expected.native)
+        pure (expected.width, expected.signed, expected.native)
     else do
       if instruction.operand != .none then none else pure ()
       let (width, signed, native) ← match opcode with
@@ -478,6 +486,11 @@ private def externalResult (site : CallSite) (identity : String) : ScalarKind :=
       let name := (splitBytes (signatureBytes identity) [58, 58])[1]?.getD []
       if !name.isEmpty && (name ++ [32]).isPrefixOf signature then scalarType site.returnType
       else .other
+    | .apply .. =>
+      match scalarTypeBytes site.returnType with
+      | some name => if (name ++ [32]).isPrefixOf signature then scalarType site.returnType
+          else .other
+      | none => .other
     | _ => .other
 
 /-- The kind a call pushes. -/
@@ -502,7 +515,11 @@ private def spanConstructor (opcode : Nat) (site : CallSite) : Option (Nat × Bo
       !site.typeArguments.isEmpty || site.parameterCount != 2 || site.returnType != .void ||
       site.parameterTypes != [.pointer .void, .atom runtimeScope "System.Int32"] then none
     else pure ()
-  let .apply (.constructor _ owner) (.atom _ element) := site.declaringType | none
+  let .apply (.constructor _ owner) elementType := site.declaringType | none
+  let element ← match elementType with
+    | .atom _ name => some name
+    | .enum .. => (String.ofList ∘ Prod.snd) <$> namedType elementType
+    | _ => none
   let .span width writable ← spanStorage site.declaringType | none
   if site.target != .external (runtimeScope ++ "::System.Void " ++ owner ++ "<" ++ element ++
       ">::.ctor(System.Void*,System.Int32)") then none else some (width, writable)
@@ -535,7 +552,16 @@ private def pushedKind (raw : RawMethod) (instruction : RawInstruction) : Option
     if instruction.opcode ∈ [6, 7, 8, 9, 17, 65036] then
       scalarType <$> raw.locals[← localIndex instruction]?
     -- `ldarga`, `ldloca`, `ldflda` and `ldsflda`.
-    else if instruction.opcode ∈ [15, 18, 124, 127, 65034, 65037] then some .reference
+    else if instruction.opcode ∈ [18, 65037] then
+      (scalarType ∘ TypeExpr.byref) <$> raw.locals[← localIndex instruction]?
+    else if instruction.opcode ∈ [15, 65034] then
+      match argumentOperation instruction with
+      | some (.address index) =>
+        if raw.hasThis && index == 0 then return .reference
+        let type ← raw.parameters[index - (if raw.hasThis then 1 else 0)]?
+        return scalarType (.byref type)
+      | _ => none
+    else if instruction.opcode ∈ [124, 127] then some .reference
     -- `ldfld` and `ldsfld`, then `ldobj`.
     else if instruction.opcode == 123 || instruction.opcode == 126 then
       let .field _ _ type _ := instruction.operand | none
@@ -607,7 +633,7 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     let expected := if byteSpanConstructor opcode site || (spanConstructor opcode site).isSome
       then [.word32, .reference] else
       site.parameterTypes.reverse.map scalarType ++
-        (if opcode != 115 && site.hasThis then [.reference] else [])
+        (if opcode != 115 && site.hasThis then [scalarType (.byref site.declaringType)] else [])
     let inputs := if opcode == 115 && role == some .interior then
         stack.map (fun kind => if kind == .nullObject then .other else kind)
       else stack
@@ -616,7 +642,7 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
         value == home || (value == .nullObject &&
           (match home with | .array _ => true | _ => false))) ||
         site.returnsValue != (site.returnType != .void) then none else
-      return (if opcode == 115 then [ScalarKind.other]
+      return (if opcode == 115 then [scalarType site.declaringType]
         else if site.returnsValue then [callResult site] else []) ++ stack.drop pops
   -- `ret` leaves exactly the return value, of a compatible kind.
   if opcode == 42 then

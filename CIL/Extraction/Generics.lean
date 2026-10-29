@@ -48,25 +48,14 @@ private def enumField : FieldType → Bool
   | .signed64 | .unsigned64 => true
   | _ => false
 
-/-- Exact primitive span metadata, including element width and write capability. -/
-def spanStorage : TypeExpr → Option StorageType
-  | .apply (.constructor scope name) (.atom elementScope element) => do
-    if scope != runtimeScope || elementScope != runtimeScope ||
-        name ∉ ["System.Span`1", "System.ReadOnlySpan`1"] then none else
-    let width ← match element with
-      | "System.Byte" | "System.SByte" | "System.Boolean" => some 1
-      | "System.Int16" | "System.UInt16" | "System.Char" => some 2
-      | "System.Int32" | "System.UInt32" => some 4
-      | "System.Int64" | "System.UInt64" | "System.IntPtr" | "System.UIntPtr" => some 8
-      | _ => none
-    return .span width (name == "System.Span`1")
-  | _ => none
-
-/-- Whether a local is a supported primitive span. -/
-def spanLocal (type : TypeExpr) : Bool := (spanStorage type).isSome
-
 /-- Primitive array element identity is derived from the exact runtime metadata scope. -/
 def arrayElementType : TypeExpr → Option ArrayElement
+  | .enum identity (.atom scope name) => do
+    if scope != runtimeScope then none else pure ()
+    let kind ← primitiveField name
+    if !enumField kind then none else pure ()
+    let width ← primitiveFieldWidth kind
+    return .enumeration identity width (kind ∈ [.signed8, .signed16])
   | .atom scope name =>
     if scope != runtimeScope then none else match name with
       | "System.SByte" => some .signed8 | "System.Byte" => some .unsigned8
@@ -77,6 +66,18 @@ def arrayElementType : TypeExpr → Option ArrayElement
       | "System.Boolean" => some .boolean | "System.Char" => some .character
       | _ => none
   | _ => none
+/-- Exact primitive span metadata, including element width and write capability. -/
+def spanStorage : TypeExpr → Option StorageType
+  | .apply (.constructor scope name) elementType => do
+    if scope != runtimeScope ||
+        name ∉ ["System.Span`1", "System.ReadOnlySpan`1"] then none else
+    let element ← arrayElementType elementType
+    return .span element.width (name == "System.Span`1")
+  | _ => none
+
+/-- Whether a local is a supported primitive span. -/
+def spanLocal (type : TypeExpr) : Bool := (spanStorage type).isSome
+
 /-- Decode storage independently from the exact metadata type identity. -/
 def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
   | .atom scope name => if scope = runtimeScope then .field <$> primitiveField name else none
@@ -92,8 +93,9 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
     if scope == runtimeScope && name ∈ ["System.SByte", "System.Byte", "System.Int16",
         "System.UInt16", "System.Int32", "System.UInt32", "System.Int64", "System.UInt64",
         "System.IntPtr", "System.UIntPtr"] then some .reference else none
-  | type@(.apply (.constructor scope name) (.atom elementScope element)) =>
-    if let some storage := spanStorage type then some storage else
+  | type@(.apply (.constructor scope name) elementType) => do
+    if let some storage := spanStorage type then return storage
+    let .atom elementScope element := elementType | none
     if scope != intrinsicsScope || elementScope != runtimeScope ||
         element ∉ ["System.UInt64", "System.Int64", "System.UInt32", "System.Int32",
           "System.Byte", "System.Double", "System.Single"] then none

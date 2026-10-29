@@ -1,12 +1,17 @@
 using Mono.Cecil;
 using Mono.Cecil.Cil;
+using System.Text.Json;
 
 namespace Nethermind.LeanCIL;
 
 // Array identity and physical integer width are kept together throughout extraction.
 internal static class Arrays
 {
-    internal sealed record Element(string Lean, int Width, bool Signed, NativeOperands.Kind Kind);
+    internal sealed record Element(string Lean, int Width, bool Signed, NativeOperands.Kind Kind)
+    {
+        internal string Expression => Lean.StartsWith("enumeration ", StringComparison.Ordinal)
+            ? $"(.{Lean})" : $".{Lean}";
+    }
 
     static readonly Dictionary<string, Element> elements = new(StringComparer.Ordinal)
     {
@@ -29,8 +34,16 @@ internal static class Arrays
     internal static Element? Primitive(TypeReference type) =>
         type is not TypeSpecification ? Primitive(type.FullName) : null;
 
+    internal static Element? Storage(TypeReference type)
+    {
+        if (!EnumTypes.IsEnum(type)) return Primitive(type);
+        var underlying = Primitive(EnumTypes.Storage(type))!;
+        var identity = JsonSerializer.Serialize(LayoutEvidence.Identity(type));
+        return underlying with { Lean = $"enumeration {identity} {underlying.Width} {underlying.Signed.ToString().ToLowerInvariant()}" };
+    }
+
     internal static Element? Of(TypeReference type) =>
-        type is ArrayType { IsVector: true } array ? Primitive(array.ElementType) : null;
+        type is ArrayType { IsVector: true } array ? Storage(array.ElementType) : null;
 
     internal static string? StackKind(NativeOperands.Kind kind) =>
         elements.Values.FirstOrDefault(element => element.Kind == kind) is { } element
@@ -39,8 +52,8 @@ internal static class Arrays
     internal static string? Translate(Instruction instruction) => instruction.OpCode.Code switch
     {
         Code.Ldlen => ".memory .arrayLength",
-        Code.Ldelema => $".memory (.arrayAddress .{(Primitive((TypeReference)instruction.Operand) ??
-            throw new InvalidDataException("Unsupported array element token: " + instruction.Operand)).Lean}" +
+        Code.Ldelema => $".memory (.arrayAddress {(Storage((TypeReference)instruction.Operand) ??
+            throw new InvalidDataException("Unsupported array element token: " + instruction.Operand)).Expression}" +
             (instruction.Previous?.OpCode.Code == Code.Readonly ? " false)" : ")"),
         Code.Ldelem_I1 => ".memory (.arrayLoad 1 true)",
         Code.Ldelem_U1 => ".memory (.arrayLoad 1 false)",
@@ -67,7 +80,7 @@ internal static class Arrays
 
     static string Typed(Instruction instruction, bool store)
     {
-        var element = Primitive((TypeReference)instruction.Operand) ??
+        var element = Storage((TypeReference)instruction.Operand) ??
             throw new InvalidDataException("Unsupported array element token: " + instruction.Operand);
         return store ? $".memory (.arrayStore {element.Width})" :
             $".memory (.arrayLoad {element.Width} {element.Signed.ToString().ToLowerInvariant()})";

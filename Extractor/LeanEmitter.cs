@@ -26,7 +26,7 @@ internal static class LeanEmitter
     {
         layouts?.Require(module, architecture);
         if (type is ByReferenceType or PointerType) return ".reference";
-        if (Arrays.Of(type) is { } element) return $".array .{element.Lean}";
+        if (Arrays.Of(type) is { } element) return $".array {element.Expression}";
         if (Spans.Width(type) is { } width)
             return $".span {width} {(Spans.Writable(type) ? "true" : "false")}";
         if (MetadataValidation.IsAggregate(type, module))

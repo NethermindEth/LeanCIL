@@ -249,6 +249,14 @@ multidimensional arrays and taking the address of an array root are outside this
 The scalar certificate checks array opcode families, integer widths, load signedness, native
 integer distinctions and typed element tokens against the emitted operations.
 
+Same-assembly integer-backed enum arrays retain the full assembly/type identity separately
+from their underlying integer width and narrow-load signedness. Typed element tokens and
+array-to-span factories must match that identity; equal widths do not permit substitution.
+Enum span metadata keeps its identity and write capability in scalar-flow states across
+locals, calls, returns, joins and backedges. Span storage remains a physical checked view;
+it does not encode a CLR type tag or grant additional memory authority. Enum elements reuse
+the existing initialization, lifetime, bounds and readonly checks without heap allocation.
+
 For `readonly.; ldelema`, the certificate additionally binds the readonly flag to the
 immediately preceding raw prefix and disallows branch entry between the two instructions.
 Restricted references keep their tag through argument checks, calls, returns and local stores.
