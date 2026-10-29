@@ -13,7 +13,7 @@ var begin = enumTypes.GetMethod("BeginScope", flags)!;
 var arrays = extractor.GetType("Nethermind.LeanCIL.Arrays", true)!;
 var descriptor = arrays.GetMethod("Storage", flags)!;
 var runtime = extractor.GetType("Nethermind.LeanCIL.RuntimeModels", true)!;
-var span = runtime.GetMethod("EnumSpan", flags)!;
+var span = runtime.GetMethod("ElementSpan", flags)!;
 using var module = ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Examples.dll"));
 var owner = module.GetType("Examples.EnumBuffers");
 var element = owner.NestedTypes.Single(type => type.Name == "Small");
@@ -23,7 +23,7 @@ var getter = (MethodReference)owner.Methods.Single(method => method.Name == "Rea
 
 IDisposable Scope() => (IDisposable)begin.Invoke(null, null)!;
 object Describe() => descriptor.Invoke(null, [element])!;
-string Span() => (string)span.Invoke(null, [getter])!;
+string Span() => (string)span.Invoke(null, [getter, "scalar"])!;
 int Width(object value) => (int)value.GetType().GetProperty("Width")!.GetValue(value)!;
 void Reject(string reason)
 {
