@@ -129,6 +129,7 @@ internal static class RuntimeModels
         string? op = scope switch
         {
             "System.Runtime" => Scalar(reference)
+                ?? MemoryTransfers.Marshal(reference, profile.Architecture)
                 ?? ValueBitCasts.Translate(reference, profile.Architecture)
                 ?? UnsafeModels.Translate(reference, profile.Architecture)
                 ?? EnumSpan(reference) ?? Runtime(reference.FullName),

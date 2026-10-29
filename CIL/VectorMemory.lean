@@ -122,6 +122,17 @@ inductive ArraySpanRange where
 def ArraySpanRange.argumentCount : ArraySpanRange → Nat
   | .whole => 1 | .fromStart => 2 | .counted => 3
 
+/-- Reference-free representations transferred by the checked MemoryMarshal helpers. -/
+inductive TransferKind where
+  | scalar (width : Nat) (signed : Bool)
+  | snapshot (shape : SnapshotShape)
+  deriving DecidableEq, Repr
+
+/-- The complete byte extent transferred by a value operation. -/
+def TransferKind.width : TransferKind → Nat
+  | .scalar width _ => width
+  | .snapshot shape => shape.width
+
 /-- Exact memory calls and object opcodes supported by the reachable vector
     bodies. Widths and signedness are fixed by the validated overload. -/
 inductive MemoryOp where
@@ -132,6 +143,10 @@ inductive MemoryOp where
   | asRef | add (sizeBytes : Nat) (signed : Bool)
   /-- The target-minus-origin byte displacement within one live allocation. -/
   | byteOffset
+  /-- Read into a value or an out reference; a short try-read stores default(T). -/
+  | marshalRead (kind : TransferKind) (tryRead : Bool)
+  /-- Copy an in-reference value to a byte span; a short try-write has no memory effect. -/
+  | marshalWrite (kind : TransferKind) (tryWrite : Bool)
   | bitcast256 | bitcastByteBool | skipInit
   | bitcastValue (source target : SnapshotShape)
   | staticAddress (bytes : List (BitVec 8)) | spanCreate | spanReference
@@ -155,6 +170,8 @@ inductive MemoryOp where
 /-- Every popped operand; no default, so each new operation states what it reads. -/
 def MemoryOp.argumentCount : MemoryOp → Nat
   | .spanFill _ clear => if clear then 1 else 2
+  | .marshalRead _ tryRead => if tryRead then 2 else 1
+  | .marshalWrite .. => 2
   | .bigMul64 | .copyBlock _ | .initBlock _ => 3
   | .spanSlice explicitLength => if explicitLength then 3 else 2
   | .spanFromReference .. | .byteOffset => 2

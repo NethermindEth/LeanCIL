@@ -52,6 +52,10 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
     return (aggregateIndex site.declaringType).toList.map fun index => .size pc index .construct
   | 0x28, .call site =>
     match site.declaringType, site.typeArguments with
+    | .atom _ "System.Runtime.InteropServices.MemoryMarshal", [.aggregate _ index] =>
+      if site.name = "Read" || site.name = "TryRead" then return [.size pc index .load]
+      else if site.name = "Write" || site.name = "TryWrite" then return [.size pc index .store]
+      else return []
     | .atom _ "System.Runtime.CompilerServices.Unsafe", [.aggregate _ index] =>
       if site.name = "SizeOf" then return [.size pc index .sizeOf]
       else if site.name = "Add" then return [.size pc index .referenceAdd]

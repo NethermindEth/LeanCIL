@@ -28,6 +28,18 @@ theorem SuccessOrThrow.bind_left {first : ExecutionResult α}
   | error fault => cases fault <;> exact observable
 #print axioms SuccessOrThrow.bind_left
 
+/-- Validating a byte view preserves both the checked fault and its allocation-relative location. -/
+theorem Memory.Renamed.checkedSpanValidate {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (view : SpanView)
+    (bound : view.reference.Below mapping.sourceLimit) :
+    ResultRenamed mapping Eq (checkedAt view.reference 0 (view.validate source))
+      (checkedAt (mapping.managedReference view.reference) 0
+        ((mapping.spanView view).validate target)) := by
+  rw [related.spanValidate view bound]
+  exact (ResultEquivalent.eq_refl _).checkedAt _ _
+#print axioms Memory.Renamed.checkedSpanValidate
+
 /-- A memory instruction's successful effect is preserved on the corresponding allocations. -/
 theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -56,6 +68,19 @@ theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
         right < mapping.sourceLimit → (mapping.image left = mapping.image right ↔ left = right) :=
       fun left right leftBound rightBound =>
         ⟨mapping.injective left right leftBound rightBound, congrArg mapping.image⟩
+    all_goals try solve
+      | apply (related.checkedSpanValidate _ (by assumption)).bindWithSuccess
+        intro first second sourceStep same
+        subst second
+        repeat first
+          | exact .ok ⟨by assumption, rfl⟩
+          | exact .error _
+          | (apply (related.loadTransfer _ (by assumption) _).bindWithSuccess
+             intro first second sourceStep same
+             subst second)
+          | (apply (related.storeTransfer _ (by assumption) _ _).bindWithSuccess
+             intro first second sourceStep memoryRelated)
+          | (split <;> try simp only [*, AllocationRenaming.managedReference, Bind.bind, Except.bind])
     all_goals repeat first
       | exact .ok ⟨related, rfl⟩
       | exact .error _

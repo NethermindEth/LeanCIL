@@ -48,6 +48,8 @@ private def checkField (layout : FieldLayout) (signed : Bool) : FieldAccess → 
 
 /-- The emitted size-dependent operation uses exactly the computed struct size. -/
 private def checkSize (size : Nat) : SizeAccess → Op → Bool
+  | .load, .memory (.marshalRead (.snapshot (.aggregate width)) _)
+  | .store, .memory (.marshalWrite (.snapshot (.aggregate width)) _) => width == size
   | .load, .loadAggregate width | .store, .storeAggregate width
   | .initialize, .initAggregate width | .copy, .copyObject width => width == size
   | .sizeOf, .const32 bits => bits.toNat == size

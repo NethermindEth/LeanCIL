@@ -237,6 +237,35 @@ def storeValue (memory : Memory) (reference : ManagedReference) (value : CIL.Val
   checkedAt reference width
     (write memory address (numberBytes number width) ordinaryAccessAlignment)
 
+/-- Read a reference-free value while retaining the initialization mask of snapshots. -/
+def loadTransfer (memory : Memory) (reference : ManagedReference) (kind : CIL.TransferKind) :
+    ExecutionResult CIL.Value :=
+  match kind with
+  | .scalar width signed =>
+    if width ∈ [1, 2, 4, 8] then loadValue memory reference width signed
+    else .error (.unsupported "Scalar transfer width")
+  | .snapshot shape => loadSnapshot memory reference shape
+
+/-- Store one typed value through checked authority; shape mismatches are invalid states. -/
+def storeTransfer (memory : Memory) (reference : ManagedReference) (kind : CIL.TransferKind)
+    (value : CIL.Value) : ExecutionResult Memory := do
+  let address ← referenceAt reference
+  match kind with
+  | .scalar width _ =>
+    let bits ← match width, value with
+      | 1, .i32 bits | 2, .i32 bits | 4, .i32 bits => .ok bits.toNat
+      | 8, .i64 bits => .ok bits.toNat
+      | _, _ => .error .invalidState
+    checkedAt reference width (write memory address (numberBytes bits width) 1)
+  | .snapshot shape =>
+    let some bytes := valueSnapshot shape value | .error .invalidState
+    checkedAt reference shape.width (writeSnapshot memory address bytes 1)
+
+/-- A failed try-read initializes every byte of its output to zero. -/
+def defaultTransfer : CIL.TransferKind → CIL.Value
+  | .scalar width _ => if width == 8 then .i64 0 else .i32 0
+  | .snapshot shape => snapshotValue shape (List.replicate shape.width (0, true))
+
 /-- `reference` as a stack value, once it forms (a live allocation, a valid offset); `null`
     always forms. -/
 def formValue (memory : Memory) (reference : ManagedReference) : ExecutionResult Value := do
@@ -299,6 +328,31 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
       | _, _ => .error .invalidState
     return (← checkedAt view.reference (view.length * width)
       (view.fill memory (numberBytes number width)), rest)
+  -- Byte-span transfers retain the span extent and the typed value representation.
+  | .marshalRead kind false, .bufferSpan view :: rest =>
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    if view.width != 1 then .error .invalidState else
+    if view.length < kind.width then .error (.thrown "System.ArgumentOutOfRangeException") else
+    return (memory, .scalar (← loadTransfer memory view.reference kind) :: rest)
+  | .marshalRead kind true, .reference destination :: .bufferSpan view :: rest =>
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    if view.width != 1 then .error .invalidState else
+    let fits := kind.width ≤ view.length
+    let value ← if fits then loadTransfer memory view.reference kind else .ok (defaultTransfer kind)
+    let result ← storeTransfer memory destination kind value
+    return (result, .scalar (.i32 (if fits then 1 else 0)) :: rest)
+  | .marshalWrite kind trying, .reference source :: .bufferSpan view :: rest
+  | .marshalWrite kind trying, .readOnlyReference source :: .bufferSpan view :: rest =>
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    if view.width != 1 then .error .invalidState else
+    if !view.writable then .error (.memory .unwritable view.reference kind.width) else
+    if view.length < kind.width then
+      if trying then return (memory, .scalar (.i32 0) :: rest)
+      else .error (.thrown "System.ArgumentOutOfRangeException")
+    else
+      let value ← loadTransfer memory source kind
+      let result ← storeTransfer memory view.reference kind value
+      if trying then return (result, .scalar (.i32 1) :: rest) else return (result, rest)
   -- Wide multiply, block copy and block initialization
   | .bigMul64, .reference low :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest =>
     return (← storeValue memory low (.i64 (left * right)),

@@ -43,6 +43,27 @@ theorem Memory.Equivalent.referenceDifference {m n : Memory} (same : m.Equivalen
   simp only [CIL.Safety.referenceDifference, same.referencePositions]
 #print axioms Memory.Equivalent.referenceDifference
 
+/-- Typed transfer reads observe the same bytes in equivalent memories. -/
+theorem Memory.Equivalent.loadTransfer {m n : Memory} (same : m.Equivalent n)
+    (reference : ManagedReference) (kind : CIL.TransferKind) :
+    loadTransfer m reference kind = loadTransfer n reference kind := by
+  cases kind <;> simp only [CIL.Safety.loadTransfer, same.loadValue, same.loadSnapshot]
+#print axioms Memory.Equivalent.loadTransfer
+
+/-- Typed transfer writes preserve memory equivalence. -/
+theorem Memory.Equivalent.storeTransfer {m n : Memory} (same : m.Equivalent n)
+    (reference : ManagedReference) (kind : CIL.TransferKind) (value : CIL.Value) :
+    ResultEquivalent Memory.Equivalent (storeTransfer m reference kind value)
+      (storeTransfer n reference kind value) := by
+  unfold CIL.Safety.storeTransfer
+  repeat first
+    | exact .error _
+    | (apply ResultEquivalent.bind_same; intro)
+    | exact (same.write _ _ _).mapError _
+    | exact (same.writeSnapshot _ _ _).mapError _
+    | split
+#print axioms Memory.Equivalent.storeTransfer
+
 theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent n)
     (operation : CIL.MemoryOp) (stack : List Value) :
     ResultEquivalent MemoryFirstEquivalent (memoryInstruction operation stack m)
@@ -50,7 +71,7 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
   unfold CIL.Safety.memoryInstruction
   split <;> try simp only [same.read, same.access, same.loadValue, same.formValue, same.add,
     same.referenceDifference, same.spanValidate, same.spanSlice, same.spanElement,
-    same.arrayValidate, same.arrayElement]
+    same.arrayValidate, same.arrayElement, same.loadTransfer]
   all_goals repeat first
     | exact .error _
     | exact .ok ⟨same, rfl⟩
@@ -62,6 +83,9 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
        intro left right related
        exact .ok ⟨related, rfl⟩)
     | (apply ResultEquivalent.bind (same.storeValue _ _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind (same.storeTransfer _ _ _)
        intro left right related
        exact .ok ⟨related, rfl⟩)
     | (apply ResultEquivalent.bind ((same.writeSnapshot _ _ _).mapError _)

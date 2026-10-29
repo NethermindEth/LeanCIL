@@ -265,6 +265,19 @@ theorem loadValue_scalar_valid (m : Memory) (r : ManagedReference) (width : Nat)
     | split at h
     | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
 
+/-- Typed transfer reads produce numeric or snapshot values, never managed references. -/
+theorem loadTransfer_numeric (memory : Memory) (reference : ManagedReference)
+    (kind : CIL.TransferKind) (value : CIL.Value)
+    (read : loadTransfer memory reference kind = .ok value) : numericValue value = true := by
+  cases kind with
+  | scalar width signed =>
+    simp only [loadTransfer] at read
+    split at read
+    · exact loadValue_scalar_valid _ _ _ _ read
+    · cases read
+  | snapshot shape => exact loadSnapshot_numeric read
+#print axioms loadTransfer_numeric
+
 theorem add_result_valid (m : Memory) (r result : Reference) (size : Nat) (offset : BitVec 64)
     (h : add m r size offset = .ok result) : form m result = .ok result := by
   unfold add at h
@@ -315,6 +328,20 @@ theorem storeValue_effect (m result : Memory) (reference : ManagedReference) (va
     | cases h
     | split at h
     | simp only [Bind.bind, Except.bind] at h
+
+/-- A typed transfer changes memory by one checked write. -/
+theorem storeTransfer_effect (memory result : Memory) (reference : ManagedReference)
+    (kind : CIL.TransferKind) (value : CIL.Value)
+    (stored : storeTransfer memory reference kind value = .ok result) :
+    InstructionEffect memory result := by
+  unfold storeTransfer at stored
+  repeat' first
+    | solve | exact .write (checkedAt_ok (by assumption))
+    | solve | exact .snapshot (checkedAt_ok (by assumption))
+    | cases stored
+    | split at stored
+    | simp only [Bind.bind, Except.bind] at stored
+#print axioms storeTransfer_effect
 
 /-- Memory effects and output validity share the same instruction case analysis.
     Validity remains conditional, so effect clients need no input invariant. -/
@@ -412,6 +439,7 @@ macro "instruction_contract_close" : tactic => `(tactic| (
     | exact .snapshot (checkedAt_ok (by assumption))
     | apply storeValue_effect; assumption
     | exact spanFill_effect _ _ _ _ (checkedAt_ok (by assumption))
+    | apply storeTransfer_effect; assumption
   · intro retained
     repeat' first
       | exact retained
@@ -426,6 +454,7 @@ macro "instruction_contract_close" : tactic => `(tactic| (
             | exact True.intro
             | exact bitcastValue_numeric (by assumption)
             | exact loadSnapshot_numeric (by assumption)
+            | exact loadTransfer_numeric _ _ _ _ (by assumption)
             | exact retained.head
             | apply loadValue_scalar_valid; assumption
             | apply formValue_result_valid; assumption

@@ -47,7 +47,8 @@ private def unalignedCall (raw : RawInstruction) : Option (TypeExpr × Bool) := 
   else if site.name == "WriteUnaligned" && site.parameterCount == 2 && !site.returnsValue &&
       site.parameterTypes == [.byref byte, type] && site.returnType == .void &&
       site.target == .external (runtimeScope ++
-        "::System.Void System.Runtime.CompilerServices.Unsafe::WriteUnaligned(System.Byte&,!!0)") then
+        "::System.Void System.Runtime.CompilerServices.Unsafe::" ++
+        "WriteUnaligned(System.Byte&,!!0)") then
     some (type, false)
   else none
 

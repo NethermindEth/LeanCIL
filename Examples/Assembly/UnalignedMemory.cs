@@ -14,7 +14,10 @@ internal static class UnalignedMemory
     public static void WriteSigned(ref byte destination, sbyte value) => Unsafe.WriteUnaligned(ref destination, value);
     public static void WriteHalf(ref byte destination, short value) => Unsafe.WriteUnaligned(ref destination, value);
     public static void WriteWord(ref byte destination, ulong value) => Unsafe.WriteUnaligned(ref destination, value);
-    public static void WriteAggregate(ref byte destination, FourLimbs value) => Unsafe.WriteUnaligned(ref destination, value);
-    public static void Write128(ref byte destination, Vector128<byte> value) => Unsafe.WriteUnaligned(ref destination, value);
-    public static void Write512(ref byte destination, Vector512<uint> value) => Unsafe.WriteUnaligned(ref destination, value);
+    public static void WriteAggregate(ref byte destination, FourLimbs value) =>
+        Unsafe.WriteUnaligned(ref destination, value);
+    public static void Write128(ref byte destination, Vector128<byte> value) =>
+        Unsafe.WriteUnaligned(ref destination, value);
+    public static void Write512(ref byte destination, Vector512<uint> value) =>
+        Unsafe.WriteUnaligned(ref destination, value);
 }
