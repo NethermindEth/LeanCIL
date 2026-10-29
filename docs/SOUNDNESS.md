@@ -492,7 +492,7 @@ through native target locals; unrelated native locals remain numeric scalars. Lo
 eight-byte alignment, bounds, initialized readable backing storage and an exact catalog
 signature. The target identity is supplied explicitly, never decoded from raw address bytes.
 The supplied binding must faithfully describe the runtime slots. Each method body requires
-a unique scalar-only managed indirect-call signature; handler signatures carrying native table
+a unique supported managed indirect-call signature; handler signatures carrying native table
 pointers remain unsupported. Mutable or dangling backing storage cannot establish a target.
 
 Direct and indirect tail transfers may form cycles, using the same frame-retirement checks.

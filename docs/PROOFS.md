@@ -645,7 +645,7 @@ For supplied native dispatch tables, provide an immutable allocation binding and
 target identities in `MethodTable.backing`. Checked byte offsets and `ldind.i` preserve
 authenticated callable provenance; numeric address bytes alone are insufficient.
 `Tests/NativeManagedDispatch.cs` and `Tests/NativeMethodTables.lean` cover dispatch and rejection
-obligations. These tables require a unique scalar-only managed indirect-call signature in each
+obligations. These tables require a unique supported managed indirect-call signature in each
 body; handler signatures cannot carry native table pointers. Ordinary call and tail-call
 lifetime and fuel obligations still apply.
 
