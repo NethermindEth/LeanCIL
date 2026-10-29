@@ -38,24 +38,27 @@ private def admittedReferenceArgument (layouts : List RawLayout) : List TypeExpr
     | _ => false
   | _ => false
 
-/-- Element subtraction binds signedness and native stride; aggregate sizes use layout evidence. -/
-def unsafeSubtractMatches (layouts : List RawLayout) (raw : RawInstruction) (emitted : Op) : Bool :=
+/-- Element offsets bind signedness and native stride; aggregate sizes use layout evidence. -/
+def unsafeElementOffsetMatches (layouts : List RawLayout) (raw : RawInstruction)
+    (emitted : Op) : Bool :=
   match raw.opcode, raw.operand with
   | 40, .call site =>
-    if site.name != "Subtract" ||
+    if site.name ∉ ["Add", "Subtract"] ||
         site.declaringType != .atom runtimeScope "System.Runtime.CompilerServices.Unsafe" then true
     else if !unsafeElementOffset raw || !admittedReferenceArgument layouts site.typeArguments then
       false
     else match site.typeArguments, emitted with
       | [type], .memory (.add stride signed) =>
+        let expected := fun width => if site.name == "Subtract" then subtractionStride width
+          else width
         signed == (site.parameterTypes[1]? != some (.atom runtimeScope "System.UIntPtr")) &&
           match typeStorage layouts type with
           | some (.field (.aggregate _)) => true
           | some (.field kind) => (primitiveFieldWidth kind).any fun width =>
-            stride == subtractionStride width
-          | some .vector128 => stride == subtractionStride 16
-          | some .vector256 => stride == subtractionStride 32
-          | some .vector512 => stride == subtractionStride 64
+            stride == expected width
+          | some .vector128 => stride == expected 16
+          | some .vector256 => stride == expected 32
+          | some .vector512 => stride == expected 64
           | _ => false
       | _, _ => false
   | _, _ => true
@@ -101,7 +104,7 @@ def UnsafeCallsValid (layouts : List RawLayout) (closed : RawMethod)
       marshalTransferMatches layouts instruction emitted &&
       viewObservationMatches instruction emitted &&
       binaryTransferMatches instruction emitted &&
-      unsafeSubtractMatches layouts instruction emitted &&
+      unsafeElementOffsetMatches layouts instruction emitted &&
       if unsafeReferenceRequired instruction emitted then
         match unsafeReferenceHelper instruction, instruction.operand with
         | some helper, .call site =>

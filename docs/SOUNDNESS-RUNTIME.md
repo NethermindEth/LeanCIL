@@ -23,6 +23,16 @@ and binary hashes on pinned x64/ARM64 binaries. It is differential evidence, not
 reproducible source-to-binary build. Small integers use i32 stack values; narrow stores truncate and
 loads/returns sign- or zero-extend by the declared type. Boolean bytes need not be canonical.
 
+### Pointer element offsets
+
+`Unsafe.Add<T>(void*, int)` uses the same checked, allocation-relative element offset as its
+managed-reference counterpart. The runtime correspondence assumes the .NET 10 helper's native-width
+multiplication by `sizeof(T)` followed by addition. It admits existing storage for supported integer,
+enum, vector and reference-free aggregate types; it neither fabricates addresses nor grants authority.
+Negative offsets wrap at native width before the resulting reference is checked for lifetime and
+bounds. Null and invalid resulting references fail. Exact signature checks bind the pointer overload;
+primitive/vector stride and signedness are checked directly, and aggregate stride uses layout evidence.
+
 ### Unspecified vector lanes
 
 `v128Low64 low` represents every vector with that low lane. `checkedIntrinsic` admits only consumers

@@ -1,5 +1,6 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
+#:property AllowUnsafeBlocks=true
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include ../scripts/BatchVerification.cs
@@ -172,8 +173,44 @@ Prove("SubtractVector",
     "UnsafeReferences::SubtractVector(System.Runtime.Intrinsics.Vector128`1<System.UInt64>&,System.UIntPtr)",
     "CIL.Safety.invoke Extracted.program 8 0 [.reference (.address ⟨0, 16⟩), .scalar (.i64 1)] " +
     "memory = .ok (memory, [.reference (.address ⟨0, 0⟩)])");
+foreach (var (name, width) in new[] { ("AddPointer", 8), ("AddPointerAggregate", 32) })
+{
+    unsafe
+    {
+        fixed (byte* start = bytes)
+        {
+            var operation = runtime.GetMethod(name)!.CreateDelegate<PointerOffset>();
+            if ((byte*)operation(start, 1) - start != width ||
+                (byte*)operation(start + width, -1) != start)
+                throw new InvalidOperationException("Pointer element offset differs from runtime: " + name);
+        }
+    }
+    Prove(name, $"UnsafeReferences::{name}(byte*,int)",
+        "CIL.Safety.invoke Extracted.program 8 0 [Examples.reference, .scalar (.i32 1)] memory = " +
+        $".ok (memory, [.reference (.address ⟨0, {width}⟩)])");
+    Boundary(name, "negative_element_offset",
+        $"[.reference (.address ⟨0, {width}⟩), .scalar (.i32 (-1))]",
+        ".ok (memory, [Examples.reference])");
+    Boundary(name, "outside_element_offset", "[Examples.reference, .scalar (.i32 5)]",
+        ".error ⟨0, 2, .memory .invalidReference (.address ⟨0, 0⟩) 0⟩");
+    Boundary(name, "null_element_offset", "[.reference .null, .scalar (.i32 0)]",
+        ".error ⟨0, 2, .memory .nullDereference .null 0⟩");
+}
 queue.Flush();
 
+var controls = new GeneratedEvidence(Path.Combine(root, "OffsetControls"));
+foreach (var (name, theorem) in new[]
+{
+    ("AddPointer", "method0_unsafe_validated"), ("Store", "method0_unsafe_validated"),
+    ("AddPointerAggregate", "method0_layouts_validated")
+})
+{
+    var path = Path.Combine(root, name, "OffsetControl.lean");
+    var source = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));
+    File.WriteAllText(path, NarrowEvidence(source, theorem));
+    controls.Add(path, "PASS narrowed pointer offset control: " + name, theorem);
+}
+controls.Check(replay: false);
 var rejected = new RejectedEvidence(Path.Combine(root, "EvidenceRejections"));
 foreach (var (name, before, after) in new[]
 {
@@ -183,6 +220,8 @@ foreach (var (name, before, after) in new[]
     ("AddUnsigned", ".memory (.add 1 false)", ".memory (.add 1 true)"),
     ("Subtract", ".sub", ".add"),
     ("SubtractUnsigned", ".sub", ".add"),
+    ("AddPointer", ".memory (.add 8 true)", ".memory (.add 4 true)"),
+    ("Store", ".memory (.add 8 true)", ".memory (.add 8 false)"),
     ("SubtractElements32", ".memory (.add 18446744073709551608 true)", ".memory (.add 8 true)"),
     ("SubtractElementsUnsigned", ".memory (.add 18446744073709551608 false)",
         ".memory (.add 18446744073709551608 true)"),
@@ -206,6 +245,32 @@ var aggregateForgery = Path.Combine(root, "SubtractAggregate", "WrongStride.lean
 File.WriteAllText(aggregateForgery, aggregateEvidence.Replace(aggregateStride,
     ".memory (.add 32 true)", StringComparison.Ordinal));
 rejected.Add(aggregateForgery, "PASS exact aggregate subtraction layout", "MethodLayoutsValid");
+var pointerSource = NarrowEvidence(File.ReadAllText(Path.Combine(root, "AddPointer", "Extracted.lean")),
+    "method0_unsafe_validated");
+foreach (var (name, before, after) in new[]
+{
+    ("signedness", ".memory (.add 8 true)", ".memory (.add 8 false)"),
+    ("offset-type", ".atom Extraction.runtimeScope \"System.Int32\"",
+        ".atom Extraction.runtimeScope \"System.UInt32\""),
+    ("return", "returnType := .pointer (.void)",
+        "returnType := .byref (.atom Extraction.runtimeScope \"System.UInt64\")"),
+    ("identity", "target := .external externalIdentity0", "target := .external \"forged\"")
+})
+{
+    if (!pointerSource.Contains(before, StringComparison.Ordinal))
+        throw new InvalidOperationException("Missing pointer offset mutation: " + name);
+    var path = Path.Combine(root, "AddPointer", "Wrong-" + name + ".lean");
+    File.WriteAllText(path, pointerSource.Replace(before, after, StringComparison.Ordinal));
+    rejected.Add(path, "PASS exact pointer offset rejection: " + name, "UnsafeCallsValid");
+}
+var pointerLayout = NarrowEvidence(File.ReadAllText(Path.Combine(root, "AddPointerAggregate", "Extracted.lean")),
+    "method0_layouts_validated");
+const string pointerStride = ".memory (.add 32 true)";
+if (!pointerLayout.Contains(pointerStride, StringComparison.Ordinal))
+    throw new InvalidOperationException("Missing aggregate pointer stride");
+var pointerForgery = Path.Combine(root, "AddPointerAggregate", "WrongStride.lean");
+File.WriteAllText(pointerForgery, pointerLayout.Replace(pointerStride, ".memory (.add 8 true)", StringComparison.Ordinal));
+rejected.Add(pointerForgery, "PASS exact aggregate pointer offset layout", "MethodLayoutsValid");
 var byteOffsetSource = NarrowEvidence(File.ReadAllText(Path.Combine(root, "ByteOffset", "Extracted.lean")),
     "method0_unsafe_validated");
 foreach (var (name, before, after) in new[]
@@ -293,6 +358,7 @@ foreach (var mutation in new[] { "parameter", "return", "generic", "scope" })
 }
 
 delegate bool ReferenceComparison(ref byte origin, ref byte target);
+unsafe delegate byte* PointerOffset(byte* source, int offset);
 delegate nint ReferenceDifference(ref byte origin, ref byte target);
 delegate ref byte SignedReferenceOffset(ref byte origin, nint offset);
 delegate ref byte UnsignedReferenceOffset(ref byte origin, nuint offset);
