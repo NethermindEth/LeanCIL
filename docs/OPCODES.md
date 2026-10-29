@@ -181,8 +181,9 @@ supported integer Vector128/256/512 elements over existing storage. Their length
 and allocation identity remain explicit across locals, calls and returns. Indexing checks
 null before bounds; negative and out-of-range indices raise `System.IndexOutOfRangeException`
 on a valid non-null array. Length does not require readable contents. Invalid storage and
-insufficient authority remain model faults. Array-root address-taking, object identity tests,
-array allocation and reference/floating-point elements remain outside this subset.
+insufficient authority remain model faults. Primitive integer arrays can also be allocated with
+`newarr`. Array-root address-taking, object identity tests and reference/floating-point elements
+remain outside this subset.
 
 The table above is exhaustive for reachable translation. Notable exclusions include:
 
@@ -263,7 +264,7 @@ array storage. Enum views retain their exact enum identity through locals, slice
 enums are not interchangeable. `AsSpan` accepts a whole array, a start index, or a start and length. Null arrays produce empty
 spans only for a zero range; invalid ranges raise `ArgumentOutOfRangeException`.
 These operations allocate no backing storage, preserve aliases and grant no byte-access
-authority. Array allocation and non-array `AsSpan` overloads remain unsupported.
+authority. Non-array `AsSpan` overloads remain unsupported.
 
 In-place construction of a span local accepts `ldloca`, up to three simple argument loads or
 integer constants, and its exact constructor call. The address cannot escape or be duplicated,
@@ -326,7 +327,7 @@ Rejected: a declaring type without the assumption; values built by other code sh
 store, a store outside the static constructor, or `ldsflda` of the field during initialization;
 and `stsfld` in an extracted method.
 
-Release configuration is required, but it does not guarantee that a compiler emits only supported instructions. For example, reachable array allocation or exception handling is still rejected.
+Release configuration is required, but it does not guarantee that a compiler emits only supported instructions. For example, reachable reference-element array allocation or exception handling is still rejected.
 
 ## Runtime calls and SIMD
 

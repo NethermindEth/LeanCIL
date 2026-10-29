@@ -16,7 +16,9 @@ private def ctor (scope type : String) (parameters : Nat) : RawOperand := .call 
   declaringType := .atom scope type, name := ".ctor",
   target := .external (scope ++ "::System.Void " ++ type ++ "::.ctor(" ++
     ",".intercalate (List.replicate parameters "System.String") ++ ")"),
-  typeArguments := [], parameterCount := parameters, hasThis := true, returnsValue := false }
+  typeArguments := [], parameterCount := parameters,
+  parameterTypes := List.replicate parameters (.atom runtime "System.String"),
+  hasThis := true, returnsValue := false }
 private def argument := ctor runtime "System.ArgumentException" 1
 private def divide := ctor runtime "System.DivideByZeroException" 0
 
