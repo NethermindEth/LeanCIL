@@ -22,13 +22,19 @@ reference-pack version, acceptance and rejection diagnostics.
 
 The whole-corpus scan recompiles the C# sources in `Examples/Assembly`, the contract-import
 library and application, and `Tests/NativeProbe` with each compiler/language combination.
-It runs the extractor's blocker analysis over every metadata method, including constructors
-and open generic methods. The checked-in
+It runs the extractor's blocker analysis under the scalar profile over every metadata method,
+including constructors and open generic methods. The checked-in
 [baseline](../Tests/CompilerCoverageBaseline.tsv) records each method as admitted (`A`),
 blocked (`B`) or not checked (`N`) in each column. A missing method is `-`. Any difference
 requires review; use `--update` to record an intentional change. Per-method comparison catches
 losses even when gains elsewhere leave the accepted count unchanged. Reports include counts
 and detailed blocker diagnostics. Admission is extraction coverage, not a correctness proof.
+Each compiler/language directory also contains `not-checked.tsv`, listing the method and
+selection failure for every `N` entry; console output groups these entries by reason.
+Open generic definitions need explicit closed instantiations before they can be checked as
+entries. Their `N` status neither establishes support nor proves that they are unsupported;
+closed callers can exercise their specializations. Profile-dependent SIMD coverage is tested
+separately and is not measured by this scalar whole-corpus baseline.
 This scan does not compile F# or the C# strings and mutated assemblies constructed by test scripts.
 
 The weekly, manually runnable advisory workflow tests the latest stable Roslyn from NuGet

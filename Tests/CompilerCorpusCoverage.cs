@@ -34,6 +34,7 @@ partial class Program
         string directory, string language)
     {
         var results = new SortedDictionary<string, char>(StringComparer.Ordinal);
+        var uncheckedEntries = new List<(string Assembly, string Signature, string Reason)>();
         Directory.CreateDirectory(directory);
         var attributes = Path.Combine(directory, "AssemblyInfo.cs");
         File.WriteAllText(attributes, """
@@ -78,15 +79,25 @@ partial class Program
             Run(["dotnet", ExtractorPath, "blockers", assembly, "--manifest", manifest, "--output", report]);
             using var coverage = JsonDocument.Parse(File.ReadAllText(report));
             foreach (var entry in coverage.RootElement.GetProperty("entries").EnumerateArray())
+            {
+                if (entry.GetProperty("status").GetString() == "notChecked")
+                    uncheckedEntries.Add((Path.GetFileNameWithoutExtension(assembly),
+                        entry.GetProperty("signature").GetString()!, entry.GetProperty("reason").GetString()!));
                 results.Add(Path.GetFileNameWithoutExtension(assembly) + ":" + entry.GetProperty("signature").GetString(),
                     entry.GetProperty("status").GetString() switch
                     {
                         "admitted" => 'A', "blocked" => 'B', "notChecked" => 'N',
                         var status => throw new InvalidDataException("Unexpected coverage status: " + status)
                     });
+            }
             Console.WriteLine($"COVERAGE {Path.GetFileNameWithoutExtension(assembly)} {language}: " +
                 coverage.RootElement.GetProperty("counts"));
         }
+        File.WriteAllLines(Path.Combine(directory, "not-checked.tsv"),
+            new[] { "assembly\tmethod\treason" }.Concat(uncheckedEntries.Select(entry =>
+                $"{entry.Assembly}\t{entry.Signature}\t{entry.Reason.ReplaceLineEndings(" ")}")));
+        foreach (var group in uncheckedEntries.GroupBy(entry => entry.Reason).OrderBy(group => group.Key))
+            Console.WriteLine($"NOT CHECKED {language}: {group.Count()} methods: {group.Key}");
         return results;
     }
 
