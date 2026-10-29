@@ -74,7 +74,7 @@ theorem invalid_dead_initializers_rejected :
     ¬ InitializerFits .byte (.i32 256) ∧
     ¬ InitializerFits (.aggregate 2) (.aggregate [0]) ∧
     ¬ InitializerFits .vector128 (.v128Low64 0) ∧
-    ¬ InitializerFits (.span 3 false) .nullRef := by simp [InitializerFits]
+    ¬ InitializerFits (.span (2^64) false) .nullRef := by simp [InitializerFits]
 #print axioms invalid_dead_initializers_rejected
 
 /-- The child reads seven from its retained initializer after allocating its numeric homes. -/
