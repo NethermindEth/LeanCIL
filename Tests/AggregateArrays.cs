@@ -62,7 +62,7 @@ foreach (var method in methods)
           nextIdentity := 1 }
         /-- Compiled array operations preserve typed contents and storage identity. -/
         theorem result : (CIL.Safety.invoke Extracted.program 64 0 [{{arguments}}] memory).map
-            Prod.snd = .ok [{{expected}}] := by rfl
+            Prod.snd = .ok [{{expected}}] := by decide +kernel
         #print axioms result
         """);
     evidence.Add(proof, "PASS aggregate array: " + name);
