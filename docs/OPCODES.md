@@ -117,7 +117,7 @@ request charges its size rounded to 16 bytes. Insufficient quota produces a dist
 `stackAllocationFailure`; a zero request returns null and consumes no quota.
 
 The raw method's `localsinit` flag controls zero initialization. Otherwise bytes remain unreadable
-until written. Checked pointer offsets, integer loads and stores, and primitive span construction
+until written. Checked pointer offsets, typed loads and stores, and admitted span construction
 retain allocation bounds and authority. Returning a reference or span into expired stack storage
 fails. Numeric address fabrication and general pointer casts remain unsupported.
 
@@ -156,7 +156,10 @@ Unprefixed block operations require eight-byte alignment on the admitted 64-bit 
 
 `unaligned.` is also accepted before supported integer `ldind.*`/`stind.*`, `ldobj`/`stobj` and `ldfld`/`stfld` instructions. These retain the existing target-specific ordinary byte-aligned memory semantics; a prefix does not bypass any safety check. The prefix occupies its original instruction position and lowers to a no-op, with block alignment encoded in the following operation.
 
-The exact managed-reference overloads of `Unsafe.InitBlock`, `InitBlockUnaligned`, `CopyBlock` and `CopyBlockUnaligned` use these same operations. Pointer overloads and arbitrary integer addresses remain unsupported.
+The exact managed-reference and pointer overloads of `Unsafe.InitBlock`, `InitBlockUnaligned`,
+`CopyBlock` and `CopyBlockUnaligned` use these same operations. Pointer arguments must come from
+admitted allocation-relative references; arbitrary integer addresses remain unsupported. The
+certificate binds each helper's exact signature, operation and alignment.
 
 ## Pointer subtraction and ordering
 
@@ -295,7 +298,7 @@ initialization, repeated stores and conditional initialization remain rejected.
 
 `public static readonly UInt256 One = 1ul;` compiles to `ldc.i4.1; conv.i8; call op_Implicit(ulong); stsfld One` in the static constructor. A reachable `ldsfld` of such a field emits `.staticValue bytes`, which pushes the field's value as an aggregate and touches no memory. The static constructor must store the field exactly once, unconditionally (no control flow before the store and no branch back to it), as the result of a same-assembly static call whose arguments are integer constants (`ldc.i4*`, `ldc.i8` with `conv.i4`/`conv.u4`/`conv.i8`/`conv.u8`/`conv.i`/`conv.u`), or as a copy (`ldsfld G; stsfld F`) of such a field stored earlier, as in `MinValue = Zero`. The field's declaring type must be named by `--assume-initialized`. The called method and its callees become part of the extracted program and must not access static fields. The static site records the call, and the extraction certificate reruns it in the checked interpreter: the result must be exactly the emitted bytes, or `translation_valid` fails.
 
-Rejected: a declaring type without the assumption; values built by `newobj` in the static constructor or by any other code shape; a second store, a store outside the static constructor, or `ldsflda` of the field during initialization; `stsfld` in an extracted method; and `ldsflda` of the field in an extracted method, so its address, and any write through it, is never formed. Static fields of primitive type are rejected too.
+Rejected: a declaring type without the assumption; values built by `newobj` in the static constructor or by any other code shape; a second store, a store outside the static constructor, or `ldsflda` of the field during initialization; `stsfld` in an extracted method; and `ldsflda` of the field in an extracted method, so its address, and any write through it, is never formed.
 
 Release configuration is required, but it does not guarantee that a compiler emits only supported instructions. For example, reachable array allocation or exception handling is still rejected.
 
