@@ -59,6 +59,7 @@ internal static class TypeTests
         "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)");
 
     static bool? Comparison(Instruction instruction) =>
+        instruction.OpCode.Code == Code.Ceq && instruction.Operand is null ? true :
         instruction.Operand is Instruction && instruction.OpCode.Code is Code.Beq or Code.Beq_S ? true :
         instruction.Operand is Instruction && instruction.OpCode.Code is Code.Bne_Un or Code.Bne_Un_S ? false :
         TypeMethod(instruction, "op_Equality", "System.Boolean System.Type::op_Equality(System.Type,System.Type)") ? true :

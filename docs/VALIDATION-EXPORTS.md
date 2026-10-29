@@ -705,7 +705,8 @@ with repeated generic controls deduplicated. Byte-backed identity definitions re
 witnesses. Evidence-list omission and reordering still check the complete certificate because they
 test agreement between records, not an independent validator.
 
-Closed typeof comparisons cover value-producing calls and short/long reference-equality branches.
+Closed typeof comparisons cover value-producing calls, operandless `ceq` and short/long
+reference-equality branches.
 The branch cases check both identity outcomes in shared feature/scalar certificates; forged targets,
 wrong opcodes, forwarded scopes and branches into erased operands fail independently. Runtime
 comparisons exercise three closed generic instantiations in one generated proof batch.

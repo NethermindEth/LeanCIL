@@ -156,4 +156,25 @@ theorem reference_type_branch_rejections :
   decide +kernel
 #print axioms reference_type_branch_rejections
 
+/-- Operandless `ceq` returns the closed type identity as a word, with the raw two-value stack. -/
+theorem reference_type_results :
+    ([true, false].all fun same =>
+      let body := raw ((test word (if same then word else intType)).take 4 ++ [i 65025, i 42])
+      let result := if same then 1 else 0
+      let states := (branchStates false).take 5 ++ [state [some result]]
+      let kinds := (branchKinds false).take 5 ++ [some [.word32]]
+      let code := [.nop, .nop, .nop, .nop, .const32 result, .ret none]
+      decide (FeatureFlowValid #[] body .scalar states (List.replicate 6 true) code) &&
+      decide (ScalarFlowValid #[] body states kinds code) &&
+      !decide (FeatureFlowValid #[] { body with code := body.code.set 4 (i 65026) }
+        .scalar states (List.replicate 6 true) code) &&
+      !decide (FeatureFlowValid #[] { body with code := body.code.set 4 (i 65025 (.target 5)) }
+        .scalar states (List.replicate 6 true) code) &&
+      !decide (FeatureFlowValid #[] body .scalar states (List.replicate 6 true)
+        (code.set 4 (.const32 (if same then 0 else 1)))) &&
+      !decide (ScalarFlowValid #[] body states kinds
+        (code.set 4 (.const32 (if same then 0 else 1))))) = true := by
+  decide +kernel
+#print axioms reference_type_results
+
 end Tests.TypeTestEvidence

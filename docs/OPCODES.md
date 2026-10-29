@@ -54,7 +54,7 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `conv.i8` | Partial | Sign-extend `i32` to `i64`, or preserve an `i64`. No floating-point or reference conversions. |
 | `conv.i` | Partial | Sign-extend an integer `i32` to the admitted 64-bit native width, or preserve an `i64`. No pointer/reference or floating-point conversion. |
 | `conv.u` | Partial | Model native unsigned integers as 64-bit: zero-extend `i32`, or preserve `i64`. Does not convert a managed reference to an integer address. |
-| `clt`, `clt.un`, `cgt`, `cgt.un`, `ceq` | Partial | Same-width `i32`/`i64` comparisons, returning `i32` zero or one. `clt` and `cgt` are signed; `.un` comparisons are unsigned. `ceq` additionally supports checked reference equality as described below; `clt.un` and `cgt.un` additionally order live references within one allocation. Signed reference ordering remains unsupported. No floating-point/unordered comparisons. |
+| `clt`, `clt.un`, `cgt`, `cgt.un`, `ceq` | Partial | Same-width `i32`/`i64` comparisons, returning `i32` zero or one. `clt` and `cgt` are signed; `.un` comparisons are unsigned. `ceq` additionally supports checked reference equality and exact closed `typeof` reference results as described below; `clt.un` and `cgt.un` additionally order live references within one allocation. Signed reference ordering remains unsupported. No floating-point/unordered comparisons. |
 | `br`, `br.s` | Partial | Unconditional branch to an admitted instruction boundary, including backward edges and self-loops. |
 | `switch` | Partial | Pop an `i32` unsigned table index; branch to its target or fall through when outside the table. Empty and duplicate-target tables are supported. Every encoded target must be a valid instruction boundary and fold entry. Known int32 selectors prune untaken arms; otherwise every arm and the fallthrough participate in dependency and stack analysis. |
 | `sizeof` | Partial | Push the validated storage width as `i32` for admitted integer types (including Boolean/char), same-assembly explicit- or sequential-layout reference-free aggregates, or the integer vectors listed below. Native integers use eight bytes under the validated profile. Closed same-assembly generic structs require validated sequential layouts. No reference types, floating-point or unsupported generic layouts. |
@@ -210,6 +210,8 @@ Closed `typeof(A) == typeof(B)` and `!=` tests use two adjacent
 `ldtoken; call Type::GetTypeFromHandle` pairs followed by `Type::op_Equality` or
 `op_Inequality`, with exact `System.Runtime` signatures. The four operands emit `nop`
 and the comparison emits its decided Boolean. `ReferenceEquals(typeof(A), typeof(B))`
+used as a Boolean value ends in operandless `ceq`, which emits the same decided Boolean.
+Its negation uses the ordinary integer comparison of that result with zero. Reference-equality
 branches use the same operands followed by short or long `beq` or `bne.un`; they emit
 an unconditional branch to the original target or a fallthrough `nop`. No instruction
 slots are inserted. Feature and scalar certificates share the selected successor.

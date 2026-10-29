@@ -67,7 +67,9 @@ private def typeFromHandle (instruction : RawInstruction) : Bool :=
 
 /-- Equality polarity of the exact comparison call or reference-equality branch. -/
 private def typeComparison (instruction : RawInstruction) : Option Bool :=
-  if instruction.opcode ∈ [46, 51, 59, 64] then
+  if instruction.opcode == 65025 then
+    if instruction.operand == .none then some true else none
+  else if instruction.opcode ∈ [46, 51, 59, 64] then
     match instruction.operand with
     | .target _ => some (instruction.opcode == 46 || instruction.opcode == 59)
     | _ => none
@@ -288,7 +290,7 @@ private def foldAt (locals receiverLocals : List TypeExpr)
   (match tail with
     | b :: c :: d :: e :: _ => (typeTest a b c d e).map fun value =>
         [some .head, some .interior, some .interior, some .interior,
-          some (if e.opcode == 40 then .result value else .typeBranch value)]
+          some (if e.opcode == 40 || e.opcode == 65025 then .result value else .typeBranch value)]
     | _ => none) <|>
   (throwFold (a :: tail)).map fun (count, name) =>
     some .head :: List.replicate count (some .interior) ++ [some (.raise name)]

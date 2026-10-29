@@ -24,9 +24,10 @@ public static class TypeTests
     [MethodImpl(MethodImplOptions.NoInlining)]
     public static int ReferenceClassify<T>(int value) where T : struct
     {
-        if (ReferenceEquals(typeof(T), typeof(TypeMarker))) return value + 1;
-        if (!ReferenceEquals(typeof(T), typeof(ulong))) return value + 2;
-        return value + 3;
+        bool same = ReferenceEquals(typeof(T), typeof(TypeMarker));
+        if (ReferenceEquals(typeof(T), typeof(TypeMarker))) return value + (same ? 4 : 0) + 1;
+        if (!ReferenceEquals(typeof(T), typeof(ulong))) return value + (same ? 4 : 0) + 2;
+        return value + (same ? 4 : 0) + 3;
     }
 
     public static int ReferenceCases(int value) => ReferenceClassify<TypeMarker>(value) +

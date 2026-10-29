@@ -91,8 +91,11 @@ Run(Extract("extract", assembly, "Examples", "TypeTests::ReferenceCases(int)", r
 var referenceSource = File.ReadAllText(Path.Combine(referenceFolder, "Extracted.lean"));
 var referenceOps = Enumerable.Range(1, 3).Select(index => Ops(referenceSource, index)).ToArray();
 if (referenceOps.Any(ops => ops.Length == 0) ||
-    referenceOps.Sum(ops => ops.Count(op => op.StartsWith(".branch ", StringComparison.Ordinal))) != 3)
-    throw new InvalidOperationException("Missing three decided typeof branch transfers");
+    !referenceOps.SelectMany(ops => Folds(ops).Select(fold => fold.Word)).Order().SequenceEqual(["0", "0", "1"]) ||
+    referenceOps.Sum(ops => Enumerable.Range(4, ops.Length - 4).Count(pc =>
+        ops[(pc - 4)..pc].All(op => op == ".nop") &&
+        ops[pc].StartsWith(".branch ", StringComparison.Ordinal))) != 3)
+    throw new InvalidOperationException("Missing exact typeof result or branch folds");
 QueueRuntime("ReferenceCases", referenceFolder);
 queue.Flush();
 controls.Check(replay: false);
@@ -128,32 +131,33 @@ foreach (var (mutation, marker) in new[]
         var body = method.Body;
         var code = body.Instructions;
         var il = body.GetILProcessor();
-        if (code[0].OpCode.Code != Code.Ldtoken || code[2].OpCode.Code != Code.Ldtoken ||
-            code[4].OpCode.Code != (branchFold ? Code.Bne_Un_S : Code.Call))
+        var at = branchFold ? code.IndexOf(code.First(i => i.OpCode.Code == Code.Bne_Un_S)) - 4 : 0;
+        if (code[at].OpCode.Code != Code.Ldtoken || code[at + 2].OpCode.Code != Code.Ldtoken ||
+            code[at + 4].OpCode.Code != (branchFold ? Code.Bne_Un_S : Code.Call))
             throw new InvalidOperationException("Unexpected compiled type test");
-        var fromHandle = (MethodReference)code[1].Operand;
+        var fromHandle = (MethodReference)code[at + 1].Operand;
         switch (branchFold ? mutation["branch-".Length..] : mutation)
         {
-            case "operand-gap": il.InsertAfter(code[1], il.Create(OpCodes.Nop)); break;
+            case "operand-gap": il.InsertAfter(code[at + 1], il.Create(OpCodes.Nop)); break;
             case "type-local":
                 var local = new VariableDefinition(fromHandle.ReturnType);
                 body.Variables.Add(local);
-                il.InsertAfter(code[1], il.Create(OpCodes.Ldloc, local));
-                il.InsertAfter(code[1], il.Create(OpCodes.Stloc, local));
+                il.InsertAfter(code[at + 1], il.Create(OpCodes.Ldloc, local));
+                il.InsertAfter(code[at + 1], il.Create(OpCodes.Stloc, local));
                 break;
             case "forwarded-scope":
                 var forwarder = new AssemblyNameReference("Forwarder", new Version(1, 0, 0, 0));
                 module.AssemblyReferences.Add(forwarder);
-                code[2].Operand = new TypeReference("Examples", "TypeMarker", module, forwarder, true);
+                code[at + 2].Operand = new TypeReference("Examples", "TypeMarker", module, forwarder, true);
                 break;
             case "reference-equality":
-                code[4].Operand = module.ImportReference(typeof(object).GetMethod(nameof(ReferenceEquals))!);
+                code[at + 4].Operand = module.ImportReference(typeof(object).GetMethod(nameof(ReferenceEquals))!);
                 break;
             case "interior-branch":
-                var target = code[2];
-                il.InsertBefore(code[0], il.Create(OpCodes.Br, target));
-                il.InsertBefore(code[0], il.Create(OpCodes.Call, fromHandle));
-                il.InsertBefore(code[0], il.Create(OpCodes.Ldtoken, module.ImportReference(typeof(int))));
+                var target = code[at + 2];
+                il.InsertBefore(code[at], il.Create(OpCodes.Br, target));
+                il.InsertBefore(code[at], il.Create(OpCodes.Call, fromHandle));
+                il.InsertBefore(code[at], il.Create(OpCodes.Ldtoken, module.ImportReference(typeof(int))));
                 break;
         }
         module.Write(dll);
