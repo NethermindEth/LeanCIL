@@ -129,7 +129,8 @@ theorem Memory.Equivalent.storeLocal {m n : Memory} (same : m.Equivalent n)
       cases scalar <;> first | exact .error _ | exact .ok ⟨rfl, same⟩
     | reference _ => exact .error _
     | span _ _ => exact .error _
-    | bufferSpan _ | readOnlyReference _ | array _ | methodPointer _ | methodTable _ => exact .error _
+    | bufferSpan _ | readOnlyReference _ | array _
+    | methodPointer _ | methodTable _ => exact .error _
   | root root | readOnlyRoot root =>
     cases value with
     | reference reference | readOnlyReference reference =>
@@ -162,7 +163,8 @@ theorem Memory.Equivalent.storeLocal {m n : Memory} (same : m.Equivalent n)
            exact .ok ⟨rfl, related⟩)
     | reference reference => exact .error _
     | span reference length => exact .error _
-    | bufferSpan _ | readOnlyReference _ | array _ | methodPointer _ | methodTable _ => exact .error _
+    | bufferSpan _ | readOnlyReference _ | array _
+    | methodPointer _ | methodTable _ => exact .error _
   | span width writable stored =>
     cases value
     case scalar scalar => cases scalar <;> exact .error _
@@ -320,7 +322,8 @@ theorem Memory.Equivalent.makeArgumentHomes {m n : Memory} (same : m.Equivalent 
       cases value with
       | reference reference => exact .error _
       | span reference length => exact .error _
-      | bufferSpan _ | readOnlyReference _ | array _ | methodPointer _ | methodTable _ => exact .error _
+      | bufferSpan _ | readOnlyReference _ | array _
+      | methodPointer _ | methodTable _ => exact .error _
       | scalar value =>
         cases value <;> first | exact .error _ | skip
         apply ResultEquivalent.bind (same.allocateHome _ _ _)

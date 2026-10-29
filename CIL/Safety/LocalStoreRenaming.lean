@@ -53,7 +53,8 @@ theorem Memory.Renamed.storeLocal {mapping : AllocationRenaming}
     cases value with
     | scalar scalar =>
       cases scalar <;> first | exact .error _ | exact .ok ⟨rfl, related⟩
-    | reference _ | span _ _ | bufferSpan _ | readOnlyReference _ | array _ | methodPointer _ | methodTable _ => exact .error _
+    | reference _ | span _ _ | bufferSpan _ | readOnlyReference _ | array _
+    | methodPointer _ | methodTable _ => exact .error _
   | root stored | readOnlyRoot stored =>
     cases value with
     | reference reference | readOnlyReference reference =>
@@ -85,11 +86,13 @@ theorem Memory.Renamed.storeLocal {mapping : AllocationRenaming}
              (.address reference) (localWidth kind)).bind
            intro left right stored
            exact .ok ⟨rfl, stored⟩)
-    | reference _ | span _ _ | bufferSpan _ | readOnlyReference _ | array _ | methodPointer _ | methodTable _ => exact .error _
+    | reference _ | span _ _ | bufferSpan _ | readOnlyReference _ | array _
+    | methodPointer _ | methodTable _ => exact .error _
   | span width writable stored =>
     cases value with
     | scalar scalar => cases scalar <;> exact .error _
-    | reference _ | readOnlyReference _ | array _ | methodPointer _ | methodTable _ => exact .error _
+    | reference _ | readOnlyReference _ | array _
+    | methodPointer _ | methodTable _ => exact .error _
     | span reference length =>
       cases writable with
       | true => exact .error .invalidState
@@ -121,7 +124,8 @@ theorem Memory.Renamed.storeLocal {mapping : AllocationRenaming}
     | reference reference => cases reference <;> first
         | exact .error .invalidState
         | exact .ok ⟨rfl, related⟩
-    | span _ _ | readOnlyReference _ | bufferSpan _ | methodPointer _ | methodTable _ => exact .error _
+    | span _ _ | readOnlyReference _ | bufferSpan _
+    | methodPointer _ | methodTable _ => exact .error _
     | array view =>
       dsimp only [CIL.Safety.storeLocal, AllocationRenaming.localSlot,
         AllocationRenaming.value, AllocationRenaming.arrayView, Value.hasUnspecified, Bool.and]
