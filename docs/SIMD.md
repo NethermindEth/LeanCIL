@@ -28,14 +28,14 @@ Every row applies to both widths, with matching input/output widths. These porta
 | API / operation | Accepted element types / overloads | Model |
 | --- | --- | --- |
 | `Vector128<T>` / `Vector256<T>` operators `+`, `-` | `T = ulong` | Per-lane wrapping 64-bit addition/subtraction |
-| Operators `&`, `\|`, `^`, `~` | `T = ulong`, `uint`, `int` | Bitwise operations on the complete vector |
-| Operator `==` | `T = ulong`, `uint`, `int` | Boolean equality of all bits; `!=` is not mapped |
+| Operators `&`, `\|`, `^`, `~` | `T = byte`, `int`, `uint`, `long`, `ulong` | Bitwise operations on the complete vector |
+| Operator `==` | `T = byte`, `int`, `uint`, `long`, `ulong` | Boolean equality of all bits; `!=` is not mapped |
 | `Vector128.LessThan<ulong>`, `Vector256.LessThan<ulong>` | Two vectors of `ulong` | Unsigned per-lane comparison; each result lane is all ones or zero |
 | `Vector128.Equals<ulong>`, `Vector256.Equals<ulong>` | Two vectors of `ulong` | Per-lane equality masks |
-| `Vector128.EqualsAll<ulong>`, `Vector256.EqualsAll<ulong>` | Two vectors of `ulong` | One Boolean result |
+| `Vector128.EqualsAll<T>`, `Vector256.EqualsAll<T>` | `T = byte`, `int`, `uint`, `long`, `ulong` | One Boolean result |
 | `Vector128.GetElement<ulong>`, `Vector256.GetElement<ulong>` | Vector and `int` index | Return one `ulong`; valid indices are 0–1 / 0–3; other indices fail |
-| `Vector128<T>.Zero`, `Vector256<T>.Zero` | `T = ulong`, `uint` | All-zero vector |
-| `Vector128<ulong>.AllBitsSet`, `Vector256<ulong>.AllBitsSet` | No arguments | All-one vector |
+| `Vector128<T>.Zero`, `Vector256<T>.Zero` | `T = byte`, `int`, `uint`, `long`, `ulong` | All-zero vector |
+| `Vector128<T>.AllBitsSet`, `Vector256<T>.AllBitsSet` | `T = byte`, `int`, `uint`, `long`, `ulong` | All-one vector |
 | `Vector128.Create`, `Vector256.Create` | One `ulong`, or respectively two/four `ulong` arguments | Broadcast one value, or construct the individual lanes |
 | `Vector128.CreateScalar`, `Vector256.CreateScalar` | One `ulong` or one `uint` | Put the value in the low lane and zero the remaining bits |
 | `Vector128.CreateScalarUnsafe` (128-bit only) | One `ulong` | Put the value in the low lane; the upper lane is unspecified, and only `GetElement(0)`, `As*` and the AVX2 shift counts may read the result (see [SOUNDNESS](SOUNDNESS-RUNTIME.md#runtime-assumptions)) |

@@ -141,6 +141,17 @@ example : Safety.checkedIntrinsic (.vector (.extract64 128)) [.v128Low64 7, .i32
     .error (.unsupported "Intrinsic observes unspecified vector bits") := rfl
 example : Safety.checkedIntrinsic (.vector (.equalsAll 128)) [.v128Low64 7, .v128 7] =
     .error (.unsupported "Intrinsic observes unspecified vector bits") := rfl
+/-- Whole-vector bitwise operations cannot turn unspecified lanes into concrete results. -/
+theorem unspecified_bitwise :
+    Safety.checkedIntrinsic (.vector (.band 128)) [.v128Low64 7, .v128 0] =
+      .error (.unsupported "Intrinsic observes unspecified vector bits") ∧
+    Safety.checkedIntrinsic (.vector (.bor 128)) [.v128 0, .v128Low64 7] =
+      .error (.unsupported "Intrinsic observes unspecified vector bits") ∧
+    Safety.checkedIntrinsic (.vector (.bxor 128)) [.v128Low64 7, .v128Low64 7] =
+      .error (.unsupported "Intrinsic observes unspecified vector bits") ∧
+    Safety.checkedIntrinsic (.vector (.bnot 128)) [.v128Low64 7] =
+      .error (.unsupported "Intrinsic observes unspecified vector bits") := ⟨rfl, rfl, rfl, rfl⟩
+#print axioms unspecified_bitwise
 example : Safety.bitcastValue .vector128 .vector128 (.v128Low64 7) =
     .error (.unsupported "Bitcast observes unspecified vector bits") := rfl
 example (memory : Safety.Memory) : Safety.storeLocal memory (.opaque128 none) (.scalar (.v128Low64 7)) =

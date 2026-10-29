@@ -6,8 +6,10 @@
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
 
+using System.Numerics;
 using System.Reflection;
 using System.Runtime.Intrinsics;
+using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -42,11 +44,34 @@ var fields = new[] { 128, 256 }.Select(bits => $$"""
     public static Vector{{bits}}<uint> Field{{bits}}(ref Holder{{bits}} holder, Vector{{bits}}<uint> value)
     { holder.Value = value; return holder.Value; }
     """);
+var portableCases = (from bits in new[] { 128, 256 } from element in new[] { "byte", "long" }
+    select (Bits: bits, Element: element)).ToArray();
+var portable = portableCases.Select(item =>
+{
+    var intersection = item is { Bits: 128, Element: "byte" } ? "PortableAnd(left, right)" : "(left & right)";
+    var primitiveChecks = item.Element == "byte" ? $$"""
+        if (!Vector{{item.Bits}}.EqualsAll(Vector{{item.Bits}}<int>.Zero, ~Vector{{item.Bits}}<int>.AllBitsSet) ||
+            !Vector{{item.Bits}}.EqualsAll(Vector{{item.Bits}}<uint>.Zero, ~Vector{{item.Bits}}<uint>.AllBitsSet))
+            return Vector{{item.Bits}}<{{item.Element}}>.Zero;
+        """ : "";
+    return $$"""
+    public static Vector{{item.Bits}}<{{item.Element}}> Portable{{item.Bits}}{{item.Element}}(
+        Vector{{item.Bits}}<{{item.Element}}> left, Vector{{item.Bits}}<{{item.Element}}> right, bool equal)
+    {
+        if ((left == right) != equal || Vector{{item.Bits}}.EqualsAll(left, right) != equal)
+            return Vector{{item.Bits}}<{{item.Element}}>.Zero;
+        {{primitiveChecks}}
+        return ({{intersection}} ^ (left | right)) |
+            (~left & Vector{{item.Bits}}<{{item.Element}}>.AllBitsSet) ^ Vector{{item.Bits}}<{{item.Element}}>.Zero;
+    }
+    """;
+});
 File.WriteAllText(Path.Combine(source, "Storage.cs"),
     "using System.Runtime.Intrinsics; using System.Runtime.InteropServices;\n" +
     "public static unsafe class Storage {\n" +
     "static T Pass<T>(T value) where T : unmanaged => value;\n" +
-    string.Join('\n', methods.Concat(copies).Concat(fields)) +
+    "static Vector128<byte> PortableAnd(Vector128<byte> left, Vector128<byte> right) => left & right;\n" +
+    string.Join('\n', methods.Concat(copies).Concat(fields).Concat(portable)) +
     "\npublic static int Sizes() => " + string.Join(" + ", cases.Select(item =>
         $"sizeof(Vector{item.Bits}<{item.Element}>)")) + ";\n}\n");
 Run(["dotnet", "build", Path.Combine(source, "Storage.csproj"), "-c", "Release"]);
@@ -175,6 +200,55 @@ theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [] Examples.empt
 end ExampleProof
 """);
 pending.Add(new(selectors["Sizes"], sizeProof, sizeOutput), () => Console.WriteLine("PASS all vector sizeof tokens"));
+foreach (var item in portableCases)
+{
+    var name = $"Portable{item.Bits}{item.Element}";
+    var output = Path.Combine(root, name);
+    Directory.CreateDirectory(output);
+    var claims = new List<string>();
+    var left = Enumerable.Range(0, item.Bits / 8).Select(index => (byte)(index * 17 + 3)).ToArray();
+    foreach (var variant in new[] { 0, 1, 2, 3 })
+    {
+        var right = left.ToArray();
+        if (variant == 1) right[^1] ^= 128;
+        if (variant == 2) right = left.Select(value => (byte)~value).ToArray();
+        var equal = variant is 0 or 3;
+        var suppliedEquality = variant != 3 && equal;
+        var expected = variant == 3 ? new byte[left.Length] : left.Zip(right, (a, b) =>
+            (byte)(((a & b) ^ (a | b)) | (~a & 255))).ToArray();
+        object Box(byte[] bytes) => (item.Bits, item.Element) switch
+        {
+            (128, "byte") => Vector128.Create<byte>(bytes),
+            (128, _) => Vector128.Create<byte>(bytes).AsInt64(),
+            (256, "byte") => Vector256.Create<byte>(bytes),
+            _ => Vector256.Create<byte>(bytes).AsInt64()
+        };
+        var actual = runtime.GetMethod(name)!.Invoke(null, [Box(left), Box(right), suppliedEquality]);
+        if (!Box(expected).Equals(actual)) throw new InvalidOperationException("Portable vector mismatch: " + name);
+        string Value(byte[] bytes) => $".scalar (.v{item.Bits} {new BigInteger(bytes, isUnsigned: true)})";
+        claims.Add($"((CIL.Safety.invoke Extracted.program 192 0 " +
+            $"[{Value(left)}, {Value(right)}, .scalar (.i32 {(suppliedEquality ? 1 : 0)})] " +
+            $"Examples.empty).map Prod.snd).toOption = some [{Value(expected)}]");
+    }
+    var proof = Path.Combine(output, "Proof.lean");
+    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" +
+        "theorem correctness :\n" + string.Join(" ∧\n", claims) + " := by decide +kernel\n" +
+        "#print axioms correctness\nend ExampleProof\n");
+    if (name == "Portable128byte")
+    {
+        Run(Extract("extract", assembly, "Storage", selectors[name], output));
+        var evidence = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+        var callOutput = Path.Combine(root, "PortableCall");
+        Run(Extract("extract", assembly, "Storage", selectors["PortableAnd"], callOutput));
+        // The helper's isolated declarations must match its certificate in the complete caller.
+        var callEvidence = File.ReadAllText(Path.Combine(callOutput, "Extracted.lean"))
+            .Replace("method0", "method1", StringComparison.Ordinal);
+        const string portableObligation = "method1_division_validated";
+        File.AppendAllText(proof, CheckedEvidenceControl(evidence,
+            NarrowEvidence(callEvidence, portableObligation), [portableObligation], 1));
+    }
+    pending.Add(new(selectors[name], proof, output), () => Console.WriteLine("PASS portable vector operations: " + name));
+}
 pending.Flush();
 
 var baseline = File.ReadAllText(Path.Combine(root, "Roundtrip128uint/Extracted.lean"));
@@ -199,6 +273,32 @@ foreach (var (name, changed) in new[]
     File.WriteAllText(path, NarrowEvidence(changed, obligation));
     rejected.Add(path, "PASS independently rejected vector evidence: " + name,
         "Extraction.VectorInitializationsValid method0Closed", "is false");
+}
+var portableBaseline = File.ReadAllText(Path.Combine(root, "PortableCall/Extracted.lean"))
+    .Replace("method0", "method1", StringComparison.Ordinal);
+string RawOnly(string text, Func<string, string> change) => Regex.Replace(text,
+    @"(?m)^def method1(?:Original|Closed) :[^\r\n]*", match => change(match.Value));
+var unrelated = RawOnly(portableBaseline, text => Regex.Replace(
+    text.Replace("System.Runtime.Intrinsics.Vector128", "Unrelated.Vector128"),
+    @"name := ""[^""]*""", "name := \"Unrelated\""));
+unrelated = Regex.Replace(unrelated,
+    @"\.intrinsic \(\.vector \(\.(?:band|bor|bxor|bnot|equalsAll|zero|ones) 128\)\) \d+", ".nop");
+foreach (var (name, changed) in new[]
+{
+    ("portable-operation", portableBaseline.Replace(".vector (.band 128)", ".vector (.bor 128)")),
+    ("portable-element", RawOnly(portableBaseline, text => text.Replace("System.Byte", "System.Int64"))),
+    ("portable-scope", RawOnly(portableBaseline, text => text.Replace("Version=10.0.0.0", "Version=9.0.0.0"))),
+    ("portable-width", portableBaseline.Replace(".vector (.band 128)", ".vector (.band 256)")),
+    ("portable-arity", portableBaseline.Replace(".intrinsic (.vector (.band 128)) 2",
+        ".intrinsic (.vector (.band 128)) 1")),
+    ("portable-target-family", unrelated)
+})
+{
+    if (changed == portableBaseline) throw new InvalidOperationException("Ineffective portable mutation: " + name);
+    var path = Path.Combine(root, name + ".lean");
+    File.WriteAllText(path, NarrowEvidence(changed, "method1_division_validated"));
+    rejected.Add(path, "PASS independently rejected portable vector evidence: " + name,
+        "Extraction.DivisionIntrinsicsValid method1Closed", "is false");
 }
 rejected.Check();
 

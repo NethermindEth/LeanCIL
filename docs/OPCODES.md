@@ -343,6 +343,11 @@ Release configuration is required, but it does not guarantee that a compiler emi
 
 ## Runtime calls and SIMD
 
+Portable Vector128/256 bitwise operators, whole-vector equality (`==` and `EqualsAll<T>`),
+`Zero` and `AllBitsSet` accept `byte`, `int`, `uint`, `long` and `ulong`. Their exact call
+identities and emitted operations are independently checked; these forms do not admit floating
+equality, Vector512 operations or observation of unspecified lanes.
+
 Reachable same-assembly generic methods are specialized for supported primitive, enum, reference-free aggregate and vector type arguments. This substitutes types in the original CIL parameters, locals, type operands and nested generic calls; it does not replace method bodies with functional summaries. Repeated uses share a specialization, while different type arguments retain separate bodies. Ordinary calls retain an acyclic order; tail transfers may form cycles. Extraction rejects more than 256 distinct specializations.
 
 Select a non-generic entry method whose compiled calls supply the concrete type arguments.
