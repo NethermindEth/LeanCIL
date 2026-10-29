@@ -117,7 +117,7 @@ partial class Program
             #print axioms excluded_indirect_tail
             """);
         evidence.Add(excludedProof, "PASS profile-excluded indirect tail");
-        foreach (var mutation in new[] { "branch", "return", "indirect", "stack", "type" })
+        foreach (var mutation in new[] { "branch", "return", "missing-pointer", "stack", "type" })
         {
             var changed = Path.Combine(root, "Tail-Rejected-" + mutation + ".dll");
             using (var module = ModuleDefinition.ReadModule(dll))
@@ -145,6 +145,7 @@ partial class Program
             var marker = mutation switch
             {
                 "branch" => "middle of a tail transfer",
+                "missing-pointer" => "Invalid evaluation stack during reachability",
                 "stack" => "Tail call requires exactly its arguments",
                 _ => "Unsupported tail prefix"
             };
