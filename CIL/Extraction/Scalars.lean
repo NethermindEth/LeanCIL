@@ -262,6 +262,11 @@ private def literal (instruction : RawInstruction) : Option Op :=
     if 22 <= opcode && opcode <= 30 then some (.const32 (BitVec.ofNat 32 (opcode - 22))) else none
   | _, _ => none
 
+/-- Pointer addition admits an int32 or native byte offset on either side of the reference. -/
+private def referenceAddition : ScalarKind → ScalarKind → Bool
+  | .reference, offset | offset, .reference => offset ∈ [.word32, .native]
+  | _, _ => false
+
 /-- A covered opcode emits exactly the encoding its operand kinds imply. -/
 def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind) (emitted : Op) :
     Bool :=
@@ -292,9 +297,10 @@ def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind) (em
         nativeWrapped left right (branchEncodingMatches instruction.opcode target) emitted
     | _, _ => false
   else if instruction.operand != .none then false
-  else if instruction.opcode == 88 && (stack[1]? == some .reference) then
-    match stack[0]?, emitted with
-    | some kind, .memory (.add 1 true) => kind ∈ [.word32, .native]
+  else if instruction.opcode == 88 &&
+      (stack[0]? == some .reference || stack[1]? == some .reference) then
+    match stack, emitted with
+    | right :: left :: _, .memory (.add 1 true) => referenceAddition left right
     | _, _ => false
   else if instruction.opcode == 89 && (stack.drop 1).head? == some .reference then
     match stack.head?, emitted with
@@ -713,7 +719,8 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
   -- Arithmetic, shifts, `neg`, `not` and conversions.
   if scalarBinary opcode then
     let right :: left :: tail := stack | none
-    if opcode ∈ [88, 89] && left == .reference && right ∈ [.word32, .native] then
+    if (opcode == 88 && referenceAddition left right) ||
+        (opcode == 89 && left == .reference && right ∈ [.word32, .native]) then
       return .reference :: tail
     if opcode == 89 && left == .reference && right == .reference then
       return .native :: tail

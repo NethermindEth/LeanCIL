@@ -21,6 +21,10 @@ internal static class NativeOperands
         public static implicit operator StackType(Kind kind) => new(kind);
     }
 
+    internal static bool ReferenceAddition(StackType left, StackType right) =>
+        left == Kind.Reference && right.Kind is Kind.Word32 or Kind.Native ||
+        right == Kind.Reference && left.Kind is Kind.Word32 or Kind.Native;
+
     static StackType Type(TypeReference type)
     {
         if (ManagedPointers.Signature(type) is { } pointer)
@@ -128,11 +132,6 @@ internal static class NativeOperands
                     throw new InvalidDataException("localloc requires only an int32 or native byte count");
                 stack.Add(Kind.Reference);
             }
-            else if (code == Code.Add && stack.Count >= 2 && stack[^2] == Kind.Reference &&
-                     stack[^1].Kind is Kind.Word32 or Kind.Native)
-            {
-                Pop();
-            }
             else if (code is Code.Cpblk or Code.Initblk)
             {
                 var count = Pop();
@@ -155,9 +154,12 @@ internal static class NativeOperands
             {
                 var right = Pop();
                 var left = Pop();
-                var referenceOffset = code is Code.Add or Code.Sub && left == Kind.Reference &&
-                    right.Kind is Kind.Word32 or Kind.Native;
+                var referenceOffset = code == Code.Add ? ReferenceAddition(left, right) :
+                    code == Code.Sub && left == Kind.Reference && right.Kind is Kind.Word32 or Kind.Native;
                 var referenceDifference = code == Code.Sub && left == Kind.Reference && right == Kind.Reference;
+                if (code is Code.Add or Code.Sub && (left == Kind.Reference || right == Kind.Reference) &&
+                    !referenceOffset && !referenceDifference)
+                    throw new InvalidDataException($"Unsupported reference arithmetic operand types: {instruction}");
                 var native = !referenceOffset && (left == Kind.Native || right == Kind.Native);
                 if (native && (left.Kind is not (Kind.Native or Kind.Word32) || right.Kind is not (Kind.Native or Kind.Word32)))
                     throw new InvalidDataException($"Unsupported native operand mixture: {instruction}");

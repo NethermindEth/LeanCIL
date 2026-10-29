@@ -19,7 +19,7 @@ private theorem bind_ite {α β : Type} (c : Prop) [Decidable c] (a b : Executio
     dispatchers check the same operands, so a decided guard leaves one arm and no `if`. -/
 local macro "memory_step_proof" : tactic => `(tactic| (
   simp only [step, staticInstruction, memoryInstruction, spanFillInstruction, spanCopyInstruction,
-    otherMemoryInstruction, observerCount,
+    otherMemoryInstruction, referenceAddInstruction, observerCount,
     CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
     Bool.or_false, Bool.false_eq_true, ite_false, CIL.offsetValue, cil_guard, bind_ite,
     bind_assoc, pure_bind]
