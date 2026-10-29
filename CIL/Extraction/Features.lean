@@ -3,6 +3,7 @@ import CIL.Extraction.FeatureEffects
 import CIL.Extraction.Folds
 import CIL.Extraction.FlowIndex
 import CIL.Extraction.FeatureLocals
+import CIL.Semantics
 import Lean.Elab.Tactic.BuiltinTactic
 
 /-!
@@ -209,6 +210,27 @@ private def forget (state : FeatureState) (pops pushes : Nat) : Option FeatureSt
     some { state with stack := List.replicate pushes none ++ state.stack.drop pops }
   else none
 
+/-- Short and long compare branches share the CLI's ten-operation ordering. -/
+def comparisonBranchIndex (opcode : Nat) : Option Nat :=
+  if 46 <= opcode && opcode <= 55 then some (opcode - 46)
+  else if 59 <= opcode && opcode <= 68 then some (opcode - 59) else none
+
+/-- Known int32 comparisons use the value evaluator, including signedness and operand order. -/
+def constantComparison (opcode : Nat) (left right : W32) : Option W32 := do
+  let index ← match opcode with
+    | 65025 => some 0 | 65026 => some 2 | 65027 => some 7
+    | 65028 => some 4 | 65029 => some 9
+    | _ => comparisonBranchIndex opcode
+  let (operation, negate) ← match index with
+    | 0 => some (Op.eq, false) | 5 => some (.eq, true)
+    | 1 => some (.lt, true) | 2 => some (.gt, false)
+    | 3 => some (.gt, true) | 4 => some (.lt, false)
+    | 6 => some (.ltu, true) | 7 => some (.gtu, false)
+    | 8 => some (.gtu, true) | 9 => some (.ltu, false)
+    | _ => none
+  let .i32 value ← binary operation (.i32 left) (.i32 right) | none
+  return if negate then (if value == 0 then 1 else 0) else value
+
 /-- Recompute a transfer from raw CLI encodings and metadata, independently of the
     extractor's worklist and its claimed incoming/outgoing facts. -/
 private def featureTransferWith (raw : RawMethod) (eligible : Nat → Option W32 → Bool)
@@ -227,18 +249,20 @@ private def featureTransferWith (raw : RawMethod) (eligible : Nat → Option W32
     if index >= state.locals.length then none else
       return { stack, locals :=
         state.locals.set index (if eligible index value then value else none) }
-  -- `dup`, then `and`, `or`, `xor` and `ceq` over known words.
+  -- `dup`, then bitwise operations and comparisons over known words.
   if instruction.opcode == 37 then
     let value :: stack := state.stack | none
     return { state with stack := value :: value :: stack }
-  if instruction.opcode ∈ [95, 96, 97, 65025] then
+  if instruction.opcode ∈ [95, 96, 97] ||
+      (65025 <= instruction.opcode && instruction.opcode <= 65029) then
     let right :: left :: stack := state.stack | none
     let value := do
       let a ← left
       let b ← right
-      return if instruction.opcode == 95 then a &&& b
-        else if instruction.opcode == 96 then a ||| b
-        else if instruction.opcode == 97 then a ^^^ b else if a == b then 1 else 0
+      if instruction.opcode == 95 then some (a &&& b)
+        else if instruction.opcode == 96 then some (a ||| b)
+        else if instruction.opcode == 97 then some (a ^^^ b)
+        else constantComparison instruction.opcode a b
     return { state with stack := value :: stack }
   -- `call` and `newobj`; a feature getter pushes the profile's answer.
   if instruction.opcode == 41 then
@@ -287,8 +311,7 @@ private def featureTransferAtWith (raw : RawMethod) (eligible : Nat → Option W
 /-- The folded transfer stated independently of any local-eligibility index. -/
 def featureTransferAt (raw : RawMethod) := featureTransferAtWith raw (featureLocalEligible raw)
 
-/-- Every switch destination is retained, even for a constant selector. Only
-    true/false branches may prune an edge, and only for a known word. -/
+/-- Known int32 conditions select a branch edge; unknowns retain both edges and switches all. -/
 def featureSuccessors (pc : Nat) (instruction : RawInstruction) (state : FeatureState) :
     Option (List Nat) :=
   -- `ret`, `throw`, `rethrow`, `endfinally` and `endfilter` leave the method or handler.
@@ -299,7 +322,7 @@ def featureSuccessors (pc : Nat) (instruction : RawInstruction) (state : Feature
     match instruction.operand with | .target target => some [target] | _ => none
   else if instruction.opcode == 69 then
     match instruction.operand with | .targets targets => some ((pc + 1) :: targets) | _ => none
-  -- Conditional branches; only `brfalse` and `brtrue` on a known word prune an edge.
+  -- Conditional branches use the incoming facts before their operands are popped.
   else if (44 <= instruction.opcode && instruction.opcode <= 55) ||
       (57 <= instruction.opcode && instruction.opcode <= 68) then do
     let .target target := instruction.operand | none
@@ -309,7 +332,12 @@ def featureSuccessors (pc : Nat) (instruction : RawInstruction) (state : Feature
         return [if (value != 0) == (instruction.opcode == 45 || instruction.opcode == 58) then
           target else pc + 1]
       | _ => return [target, pc + 1]
-    else return [target, pc + 1]
+    else match state.stack with
+      | some right :: some left :: _ =>
+        match constantComparison instruction.opcode left right with
+        | some value => return [if value != 0 then target else pc + 1]
+        | none => return [target, pc + 1]
+      | _ => return [target, pc + 1]
   else some [pc + 1]
 
 /-- The raw stack effect, with calls taken from their signature. -/
@@ -389,16 +417,18 @@ private def featureOpMatchesWith (raw : RawMethod) (eligible : Nat → Option W3
       | _ => false
   if instruction.opcode ∈ [16, 65035] then
     return match emitted with | .setLocal index none => raw.locals.length <= index | _ => false
-  -- A native-width wrapper is looked through only for `and`, `or`, `xor`, `ceq` and
+  -- A native-width wrapper is looked through only for bitwise operations, comparisons and
   -- two-operand branches.
   let emitted := match emitted with
-    | .nativeBinary operation => if instruction.opcode ∈ [95, 96, 97, 65025] ||
+    | .nativeBinary operation => if instruction.opcode ∈ [95, 96, 97] ||
+        (65025 <= instruction.opcode && instruction.opcode <= 65029) ||
         (46 <= instruction.opcode && instruction.opcode <= 55) ||
         (59 <= instruction.opcode && instruction.opcode <= 68) then operation else emitted
     | _ => emitted
   return match instruction.opcode, instruction.operand, emitted with
-    -- `dup`, `and`, `or`, `xor` and `ceq`.
+    -- Stack duplication, bitwise operations and exact comparison signedness.
     | 37, _, .dup | 95, _, .band | 96, _, .bor | 97, _, .bxor | 65025, _, .eq => true
+    | 65026, _, .gt | 65027, _, .gtu | 65028, _, .lt | 65029, _, .ltu => true
     -- Branches, short and long forms, must keep their target.
     | 43, .target x, .branch y | 56, .target x, .branch y
     | 44, .target x, .brzero y | 57, .target x, .brzero y
@@ -418,7 +448,8 @@ private def featureOpMatchesWith (raw : RawMethod) (eligible : Nat → Option W3
     -- No other raw instruction may emit control flow, a feature test or a hole.
     | _, _, .unsupported _ | _, _, .throw _ | _, _, .feature _ | _, _, .branch _ | _, _, .switch _
     | _, _, .brzero _ | _, _, .brnonzero _ => false
-    | opcode, _, _ => !(opcode ∈ [37, 95, 96, 97, 65025, 42] || (43 <= opcode && opcode <= 69)) &&
+    | opcode, _, _ => !(opcode ∈ [37, 95, 96, 97, 42] ||
+        (65025 <= opcode && opcode <= 65029) || (43 <= opcode && opcode <= 69)) &&
         fallbackFeatureEffect instruction emitted
 
 /-- Bind an emitted operation using the raw local-eligibility rule. -/

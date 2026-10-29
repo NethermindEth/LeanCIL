@@ -222,7 +222,7 @@ private def scalarEncodingMatches (opcode : Nat) (emitted : Op) : Bool :=
 
 /-- The emitted branch each compare-branch opcode must produce, keeping its target. -/
 private def branchEncodingMatches (opcode target : Nat) (emitted : Op) : Bool :=
-  match (if opcode <= 55 then opcode - 46 else opcode - 59), emitted with
+  (comparisonBranchIndex opcode).any fun index => match index, emitted with
   | 0, .beq actual | 1, .bge actual | 2, .bgt actual | 3, .ble actual | 4, .blt actual
   | 5, .bne actual | 6, .bgeu actual | 7, .bgtu actual | 8, .bleu actual
   | 9, .bltu actual => actual == target

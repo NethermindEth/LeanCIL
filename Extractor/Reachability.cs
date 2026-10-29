@@ -47,7 +47,8 @@ internal static class Reachability
             queued.Remove(i);
             if (i.OpCode.Code == Code.Tail) TailCalls.ValidateReachable(method, i, profile.Architecture);
             FeatureConstants state = incoming[i];
-            int? condition = state.Top;
+            var condition = i.OpCode.FlowControl == FlowControl.Cond_Branch
+                ? state.BranchCondition(i.OpCode.Code) : null;
             state = state.Copy();
             state.Step(i, method, profile, addressed, typeTests.Results.TryGetValue(i, out bool same) ? same : null);
 
@@ -77,9 +78,8 @@ internal static class Reachability
                 Successor(target);
             }
 
-            if (condition is int known && i.OpCode.Code is Code.Brfalse or Code.Brfalse_S or Code.Brtrue or Code.Brtrue_S)
+            if (condition is bool taken)
             {
-                bool taken = (known != 0) == (i.OpCode.Code is Code.Brtrue or Code.Brtrue_S);
                 if (taken) Jump((Instruction)i.Operand);
                 else Successor(i.Next ?? throw new InvalidDataException("Missing selected feature successor"));
                 continue;

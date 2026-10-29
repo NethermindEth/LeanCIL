@@ -11,7 +11,11 @@ public static class Capabilities
 
     public static int Platform()
     {
-        if (!((IntPtr.Size == 8) & (UIntPtr.Size == 8) & Environment.Is64BitProcess))
+        if (IntPtr.Size != 8 || UIntPtr.Size != 8 || !Environment.Is64BitProcess)
+            return (int)Math.Sqrt(2);
+        if (IntPtr.Size <= 4 || UIntPtr.Size > 16)
+            return (int)Math.Sqrt(2);
+        if (!((IntPtr.Size > 4) & ((uint)UIntPtr.Size < uint.MaxValue)))
             return (int)Math.Sqrt(2);
         return IntPtr.Size + UIntPtr.Size + (Environment.Is64BitProcess ? 1 : 0);
     }

@@ -67,21 +67,24 @@ example : ¬ FeatureFlowValid branchRaw .scalar branchStates (branchMask.set 0 f
 
 -- A backedge changes a local from zero to one. The join must forget the constant,
 -- so the branch keeps both successors even though the first iteration is false.
-private def loopRaw := raw [i 22, i 10, i 6, i 45 (.target 7), i 23, i 10, i 43 (.target 2), i 42] [intType] .void
+private def loopRaw := raw
+  [i 22, i 10, i 6, i 22, i 51 (.target 8), i 23, i 10, i 43 (.target 2), i 42] [intType] .void
 private def loopStates : FeatureCertificate := [state [] [none], state [some 0] [none],
-  state [] [none], state [none] [none], state [] [none], state [some 1] [none],
+  state [] [none], state [none] [none], state [some 0, none] [none],
+  state [] [none], state [some 1] [none],
   state [] [some 1], state [] [none]]
-private def loopCode : List Op := [.const32 0, .setLocal 0, .local 0, .brnonzero 7,
+private def loopCode : List Op := [.const32 0, .setLocal 0, .local 0, .const32 0, .bne 8,
   .const32 1, .setLocal 0, .branch 2, .ret]
-example : FeatureFlowValid loopRaw .scalar loopStates (List.replicate 8 true) loopCode := by decide
+example : FeatureFlowValid loopRaw .scalar loopStates (List.replicate 9 true) loopCode := by decide
 example : ¬ FeatureFlowValid loopRaw .scalar (loopStates.set 2 (state [] [some 0]))
-    (List.replicate 8 true) loopCode := by decide
-example : ¬ FeatureFlowValid loopRaw .scalar (loopStates.set 7 none)
-    [true, true, true, true, true, true, true, false] (loopCode.set 7 (.unsupported "pruned backedge exit")) := by decide
+    (List.replicate 9 true) loopCode := by decide
+example : ¬ FeatureFlowValid loopRaw .scalar (loopStates.set 8 none)
+    [true, true, true, true, true, true, true, true, false]
+    (loopCode.set 8 (.unsupported "pruned backedge exit")) := by decide
 -- Taking a local's address anywhere invalidates constant facts for that local.
 example : ¬ FeatureFlowValid
     { loopRaw with code := loopRaw.code ++ [i 18 (.local 0)] }
-    .scalar (loopStates ++ [none]) ((List.replicate 8 true) ++ [false])
+    .scalar (loopStates ++ [none]) ((List.replicate 9 true) ++ [false])
     (loopCode ++ [.unsupported "unreachable address"]) := by decide
 
 private def switchRaw := raw [i 2, i 69 (.targets [4, 6]), i 23, i 42, i 24, i 42, i 25, i 42]
@@ -151,5 +154,61 @@ theorem indexed_malformed_address :
     let locals := FeatureLocalIndex.ofRaw (raw [i 18 (.integer 0), i 65037 (.local 99)] [intType])
     locals.eligible 0 (some 42) = true ∧ locals.eligible 99 (some 42) = false := by decide +kernel
 #print axioms indexed_malformed_address
+
+/-- Signed and unsigned boundary decisions agree in both short and long branch encodings. -/
+theorem constant_branch_boundaries :
+    ([( -1, 0, [false, false, false, true, true, true, true, true, false, false]),
+      (0, -1, [false, true, true, false, false, true, false, false, true, true]),
+      (-2147483648, 2147483647,
+        [false, false, false, true, true, true, true, true, false, false]),
+      (2147483647, -2147483648,
+        [false, true, true, false, false, true, false, false, true, true]),
+      (-1, -1, [true, true, false, true, false, false, true, false, true, false])] :
+        List (Int × Int × List Bool)).all (fun (left, right, expected) =>
+          [46, 59].all fun first => (List.range 10).all fun index =>
+            featureSuccessors 2 (i (first + index) (.target 5))
+              ⟨[some (BitVec.ofInt 32 right), some (BitVec.ofInt 32 left)], []⟩ ==
+                some [if expected[index]?.getD false then 5 else 3]) = true := by decide +kernel
+#print axioms constant_branch_boundaries
+
+/-- An unknown operand keeps both comparison edges; no argument fact is guessed. -/
+theorem unknown_comparison_edges :
+    [46, 59].all (fun first => (List.range 10).all fun index =>
+      [([none, some 0] : List (Option W32)), [some 0, none], [none, none]].all fun stack =>
+        featureSuccessors 2 (i (first + index) (.target 5)) ⟨stack, []⟩ == some [5, 3]) =
+          true := by decide +kernel
+#print axioms unknown_comparison_edges
+
+/-- A known signed comparison prunes only its untaken edge in the independent flow certificate. -/
+theorem comparison_certificate :
+    let body := raw [i 21, i 22, i 50 (.target 5), i 22, i 42, i 23, i 42]
+    let facts := [state [], state [some (-1)], state [some 0, some (-1)], none, none,
+      state [], state [some 1]]
+    let code := [.const32 (-1), .const32 0, .blt 5, .unsupported "pruned", .unsupported "pruned",
+      .const32 1, .ret]
+    FeatureFlowValid body .scalar facts [true, true, true, false, false, true, true] code ∧
+    ¬ FeatureFlowValid body .scalar facts [true, true, true, false, false, true, true]
+      (code.set 2 (.bltu 5)) ∧
+    ¬ FeatureFlowValid body .scalar (facts.set 5 none)
+      [true, true, true, false, false, false, true] code := by decide +kernel
+#print axioms comparison_certificate
+
+/-- Comparison results preserve unknowns and distinguish signed from unsigned ordering. -/
+theorem comparison_results :
+    ([65025, 65026, 65027, 65028, 65029].zip [0, 0, 1, 1, 0]).all
+      (fun (opcode, expected) =>
+        featureTransfer (raw []) .scalar (i opcode) ⟨[some 0, some (-1)], []⟩ ==
+          some ⟨[some expected], []⟩ &&
+        featureTransfer (raw []) .scalar (i opcode) ⟨[none, some (-1)], []⟩ ==
+          some ⟨[none], []⟩) = true := by decide +kernel
+#print axioms comparison_results
+
+/-- Widening an int32 constant does not create a native-width fact in the int32 domain. -/
+theorem widened_comparison_unknown :
+    featureTransfer (raw []) .scalar (i 211) ⟨[some (-1)], []⟩ = some ⟨[none], []⟩ ∧
+    featureTransfer (raw []) .scalar (i 224) ⟨[some (-1)], []⟩ = some ⟨[none], []⟩ ∧
+    featureSuccessors 2 (i 51 (.target 5)) ⟨[none, some (-1)], []⟩ = some [5, 3] :=
+  by decide +kernel
+#print axioms widened_comparison_unknown
 
 end Tests.FeatureEvidence

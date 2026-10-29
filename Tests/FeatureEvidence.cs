@@ -140,6 +140,19 @@ foreach (var (obligation, diagnostic) in new[]
     rejected.Add(forged, "PASS exact platform constant rejection: " + diagnostic, diagnostic);
 }
 platformControls.Check(replay: false);
+var comparisonEvidence = NarrowEvidence(platformSource, featureObligation);
+foreach (var (name, before, after) in new[]
+{
+    ("branch", ".bne ", ".beq "), ("signedness", ".gt,", ".gtu,"),
+    ("unsigned-comparison", ".ltu,", ".lt,")
+})
+{
+    if (!comparisonEvidence.Contains(before, StringComparison.Ordinal))
+        throw new InvalidOperationException("Missing comparison mutation target: " + name);
+    var forged = Path.Combine(output, "wrong-comparison-" + name + ".lean");
+    File.WriteAllText(forged, comparisonEvidence.Replace(before, after, StringComparison.Ordinal));
+    rejected.Add(forged, "PASS exact constant comparison rejection: " + name, "FeatureFlowValid");
+}
 rejected.Check();
 var scalarCapabilities = Path.Combine(output, "Capabilities-scalar");
 verification.Verify(assembly, "Examples", "Capabilities::Flags()", Path.Combine(scalarCapabilities, "Proof.lean"),
