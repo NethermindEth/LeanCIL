@@ -45,13 +45,13 @@ internal static class NativeOperands
         new(table ? Kind.MethodTable : Kind.MethodPointer,
             $".{(table ? "methodTable" : "methodPointer")} {ManagedPointers.SignatureEvidence(signature)}");
 
-    static StackType CallType(MethodReference method)
+    static StackType CallType(MethodReference method, FeatureProfile profile)
     {
         var result = CallReturnType.Resolve(method);
         if (result is RequiredModifierType { ModifierType.FullName:
             "System.Runtime.InteropServices.InAttribute", ElementType: ByReferenceType })
         {
-            var operation = InstructionTranslation.RuntimeModel(method);
+            var operation = InstructionTranslation.RuntimeModel(method, profile);
             if (operation == ".memory (.observeView .spanPinnable)" ||
                 operation?.StartsWith(".memory (.spanItem ", StringComparison.Ordinal) == true)
                 return Kind.Reference;
@@ -85,7 +85,8 @@ internal static class NativeOperands
         Code.Bgt or Code.Bgt_S or Code.Bgt_Un or Code.Bgt_Un_S or Code.Bge or Code.Bge_S or Code.Bge_Un or Code.Bge_Un_S or
         Code.Blt or Code.Blt_S or Code.Blt_Un or Code.Blt_Un_S or Code.Ble or Code.Ble_S or Code.Ble_Un or Code.Ble_Un_S;
 
-    internal static Certificate Certify(MethodDefinition method, IReadOnlySet<Instruction> reachable)
+    internal static Certificate Certify(MethodDefinition method, IReadOnlySet<Instruction> reachable,
+        FeatureProfile profile)
     {
         var dispatch = NativeDispatch.For(method);
         StackType Slot(TypeReference type, int? local = null) => dispatch.Kind(type, local) is { } kind
@@ -212,7 +213,7 @@ internal static class NativeOperands
                 var callee = (MethodReference)instruction.Operand;
                 for (var index = 0; index < callee.Parameters.Count + (code != Code.Newobj && callee.HasThis ? 1 : 0); index++) Pop();
                 if (code == Code.Newobj || callee.ReturnType.MetadataType != MetadataType.Void)
-                    stack.Add(code == Code.Newobj ? Type(callee.DeclaringType) : CallType(callee));
+                    stack.Add(code == Code.Newobj ? Type(callee.DeclaringType) : CallType(callee, profile));
             }
             else if (code == Code.Ret)
             {

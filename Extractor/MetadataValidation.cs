@@ -548,7 +548,7 @@ internal static class MetadataValidation
             if (!Check(method, null, () =>
                 {
                     reachable = Reachability.Analyze(method, profile);
-                    nativeOperands = NativeOperands.Certify(method, reachable);
+                    nativeOperands = NativeOperands.Certify(method, reachable, profile);
                     parameterHomes = ParameterStorage.IndexHomes(ParameterStorage.Analyze(method, reachable));
                 }, named: true))
                 continue;

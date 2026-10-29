@@ -22,7 +22,7 @@ internal static class InstructionTranslation
         layouts?.Require(m.Module, profile.Architecture);
         var reachable = nativeOperands is null || parameterHomes is null
             ? Reachability.Analyze(m, profile) : null;
-        nativeOperands ??= NativeOperands.Certify(m, reachable!);
+        nativeOperands ??= NativeOperands.Certify(m, reachable!, profile);
         if (nativeOperands.Incoming.TryGetValue(i, out var dispatchStack))
         {
             if (i.OpCode.Code == Code.Add && dispatchStack.Length >= 2 &&

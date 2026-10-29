@@ -149,7 +149,7 @@ internal static class LeanEmitter
             var instructions = new InstructionIndex(m);
             var featureCertificate = Reachability.Certify(m, profile);
             var reachable = featureCertificate.Keys.ToHashSet();
-            var scalarCertificate = NativeOperands.Certify(m, reachable);
+            var scalarCertificate = NativeOperands.Certify(m, reachable, profile);
             var parameterIndices = ParameterStorage.Analyze(m, reachable);
             var parameterHomes = ParameterStorage.IndexHomes(parameterIndices);
             var dispatch = NativeDispatch.For(m);
