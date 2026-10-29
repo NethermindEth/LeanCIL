@@ -23,7 +23,9 @@ internal static class NativeOperands
 
     static StackType Type(TypeReference type)
     {
-        if (Arrays.Of(type) is { } array) return new(array.Kind, $".array {array.Expression}");
+        if (Arrays.Of(type) is { } array)
+            return type is ArrayType buffer && EnumTypes.IsEnum(buffer.ElementType)
+                ? new StackType(array.Kind, $".array {array.Expression}") : array.Kind;
         var reference = type is ByReferenceType;
         var value = reference ? ((ByReferenceType)type).ElementType : type;
         if (Spans.Width(value) is not null && value is GenericInstanceType span &&
