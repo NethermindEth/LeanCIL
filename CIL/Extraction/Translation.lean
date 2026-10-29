@@ -96,11 +96,11 @@ private theorem staticSiteIndex_get (sites : List (Nat × StaticDescriptor)) (pc
 #print axioms staticSiteIndex_get
 
 /-- A readonly scalar load has exactly the width and extension of its raw field type. -/
-private def staticLoadMatches (instruction : Option RawInstruction)
+private def staticLoadMatches (opcode : Nat) (instruction : Option RawInstruction)
     (descriptor : Option StaticDescriptor) : Bool :=
   match instruction, descriptor with
   | some instruction, some descriptor =>
-    if instruction.opcode != 126 then false else
+    if instruction.opcode != opcode then false else
     match instruction.operand with
     | .field _ _ type _ =>
       match staticScalarType type with
@@ -116,7 +116,10 @@ def methodShapeInstructions (layouts : List RawLayout) (closed : RawMethod)
   let sites := staticSiteIndex method.staticSites
   method.code.zipIdx.all fun (op, pc) => match op with
     | .ret narrow => narrow == returnNarrow layouts closed.returnType
-    | .memory (.staticValue _) => staticLoadMatches (raw.get? pc) sites[pc]?
+    | .memory (.staticValue _) => staticLoadMatches 126 (raw.get? pc) sites[pc]?
+    | .memory (.staticAddress _) =>
+      if (sites[pc]?.bind (·.initializer)).isSome then
+        staticLoadMatches 127 (raw.get? pc) sites[pc]? else true
     | _ => true
 
 /-- Indexed instruction-shape checks agree with direct list lookups at every emitted pc. -/
@@ -125,8 +128,12 @@ theorem methodShapeInstructions_eq_scan (layouts : List RawLayout) (closed : Raw
     methodShapeInstructions layouts closed method = method.code.zipIdx.all (fun (op, pc) =>
       match op with
       | .ret narrow => narrow == returnNarrow layouts closed.returnType
-      | .memory (.staticValue _) => staticLoadMatches closed.code[pc]?
+      | .memory (.staticValue _) => staticLoadMatches 126 closed.code[pc]?
           ((method.staticSites.find? (fun site => site.1 == pc)).map Prod.snd)
+      | .memory (.staticAddress _) =>
+        let descriptor := (method.staticSites.find? (fun site => site.1 == pc)).map Prod.snd
+        if (descriptor.bind (·.initializer)).isSome then
+          staticLoadMatches 127 closed.code[pc]? descriptor else true
       | _ => true) := by
   simp only [methodShapeInstructions, FlowIndex.get?_ofList, staticSiteIndex_get]
 

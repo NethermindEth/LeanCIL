@@ -48,6 +48,14 @@ public static class StaticValues
     public static Word256 Max() => Word256.MaxValue;
     public static StaticPair<uint> Pair32() => Word256.Pair32;
     public static StaticPair<ulong> Pair64() => Word256.Pair64;
+    public static ulong ReadAddress() => Read(in Word256.One);
+    static ulong Read(in Word256 value) => value.U0;
+
+    public static bool SameAddress() => Unsafe.AreSame(
+        ref Unsafe.AsRef(in Word256.One), ref Unsafe.AsRef(in Word256.One));
+
+    public static bool DifferentAddresses() => Unsafe.AreSame(
+        ref Unsafe.AsRef(in Word256.Zero), ref Unsafe.AsRef(in Word256.MinValue));
 
     // ExpMod's shape: store a loaded value through an out parameter.
     public static void Select(bool one, out Word256 result)

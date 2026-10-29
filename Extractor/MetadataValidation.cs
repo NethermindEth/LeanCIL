@@ -536,7 +536,7 @@ internal static class MetadataValidation
                     });
                     continue;
                 }
-                if (instruction.OpCode.Code == Code.Ldsfld && instruction.Operand is FieldReference loaded)
+                if (StaticValues.IsLoad(instruction) && instruction.Operand is FieldReference loaded)
                 {
                     if (!Check(method, instruction, () => StaticLoad(instruction, loaded), named: true))
                         skipped.Add(instruction);

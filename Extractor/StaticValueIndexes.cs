@@ -12,7 +12,16 @@ internal static partial class StaticValues
         readonly Dictionary<MethodDefinition, ConstructorIndex> constructors = new();
         readonly Dictionary<MethodDefinition, FieldUses> addresses = new();
         readonly Dictionary<MethodDefinition, MethodDefinition?> initializerStatics = new();
+        readonly Dictionary<string, MethodSpecialization> specializations = new(StringComparer.Ordinal);
         FieldUses? stores;
+
+        internal MethodDefinition Specialize(MethodReference reference, string architecture)
+        {
+            if (reference.DeclaringType is not GenericInstanceType) return reference.Resolve();
+            if (!specializations.TryGetValue(architecture, out var instances))
+                specializations.Add(architecture, instances = new MethodSpecialization(module, architecture));
+            return instances.Instantiate(reference);
+        }
 
         internal Value Resolve(FieldReference reference, string architecture = "scalar")
         {

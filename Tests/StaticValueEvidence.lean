@@ -63,4 +63,19 @@ theorem returning_constructor : ¬ StaticValuesValid (constructed zeros initiali
   decide +kernel
 #print axioms returning_constructor
 
+/-- Raw address and value loads have the same stack height but different result kinds. -/
+private def rawStatic (opcode : Nat) : RawMethod := {
+  token := 0, owner := "Fixture", hasThis := false, explicitThis := false
+  callingConvention := 0, attributes := 0, implementation := 0, returnType := .void
+  parameters := [], locals := [], initLocals := true, maxStack := 1, genericParameters := []
+  code := [⟨0, opcode, .field (.atom "Fixture" "Holder") 0 (.atom "Fixture" "Pair") true⟩] }
+
+/-- Constructor-initialized addresses retain their original raw opcode. -/
+theorem static_address_opcode :
+    let address := { loader zeros zeros (some ⟨1, [], none, false⟩) with
+      code := [.memory (.staticAddress zeros)] }
+    methodShapeInstructions [] (rawStatic 127) address = true ∧
+    methodShapeInstructions [] (rawStatic 126) address = false := by decide +kernel
+#print axioms static_address_opcode
+
 end Tests.StaticValueEvidence
