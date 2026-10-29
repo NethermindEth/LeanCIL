@@ -78,6 +78,10 @@ internal static class RuntimeModels
         }
         if (type is TypeSpecification specification)
         {
+            if (type is RequiredModifierType required)
+                ValidateTypeIdentity(required.ModifierType, module, architecture);
+            if (type is OptionalModifierType optional)
+                ValidateTypeIdentity(optional.ModifierType, module, architecture);
             ValidateTypeIdentity(specification.ElementType, module, architecture);
             return;
         }

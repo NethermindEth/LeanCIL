@@ -1,13 +1,50 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
+#:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
 
+using Mono.Cecil;
+
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/MemorySpans");
 Directory.CreateDirectory(root);
+foreach (var mutation in new[] { "scope", "version" })
+{
+    var output = Path.Combine(root, "Rejected-ReadonlyModifier-" + mutation);
+    Directory.CreateDirectory(output);
+    var dll = Path.Combine(output, "Examples.dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        var read = module.GetType("Examples.MemorySpans").Methods.Single(method => method.Name == "Read");
+        var getter = (MethodReference)read.Body.Instructions.Single(instruction =>
+            instruction.Operand is MethodReference { Name: "get_Item" }).Operand;
+        if (getter.ReturnType is not RequiredModifierType modifier ||
+            modifier.ModifierType.FullName != "System.Runtime.InteropServices.InAttribute" ||
+            modifier.ModifierType.Scope is not AssemblyNameReference originalScope)
+            throw new InvalidOperationException("Missing readonly span modifier fixture");
+        var forgedScope = new AssemblyNameReference(mutation == "scope" ? "Forged.Runtime" : originalScope.Name,
+            mutation == "version" ? new Version(9, 0, 0, 0) : originalScope.Version)
+        {
+            PublicKeyToken = originalScope.PublicKeyToken,
+            Culture = originalScope.Culture
+        };
+        module.AssemblyReferences.Add(forgedScope);
+        modifier.ModifierType.Scope = forgedScope;
+        module.Write(dll);
+    }
+    File.Delete(Path.Combine(output, "Extracted.lean"));
+    var result = Execute(["dotnet", ExtractorPath, "extract", dll,
+        "MemorySpans::Read(System.ReadOnlySpan`1<System.Int32>,System.Int32)", output]);
+    if (result.Code == 0 || File.Exists(Path.Combine(output, "Extracted.lean")) ||
+        !result.Output.Contains("Unsupported type identity: System.Runtime.InteropServices.InAttribute",
+            StringComparison.Ordinal))
+        throw new InvalidOperationException("Readonly modifier identity was not rejected: " + mutation +
+            "\n" + result.Output);
+    Console.WriteLine("PASS readonly span modifier identity rejection: " + mutation);
+}
 var evidence = new GeneratedEvidence(root);
 var rejected = new RejectedEvidence(root);
 var spanProofs = new Dictionary<string, string>(StringComparer.Ordinal);
