@@ -193,6 +193,13 @@ private def referenceFactory (opcode : Nat) (site : CallSite)
         "<!!0> System.Runtime.InteropServices.MemoryMarshal::" ++ site.name ++
         "(!!0&,System.Int32)") then none
   else some (.reference (← spanElementWidth element aggregateWidth) writable)
+
+/-- An exactly checked span indexer returns a reference, including readonly metadata modifiers. -/
+def spanCallReturnsReference (site : CallSite) : Bool :=
+  (spanMemberCall 40 site).any fun operation => match operation with
+    | .item _ => true
+    | _ => false
+
 /-- Exact span signatures and primitive/vector widths. Aggregate widths are separately bound
     by mandatory LayoutUsesComplete and MethodLayoutsValid evidence. -/
 def spanCallMatches (instruction : RawInstruction) (emitted : Op) : Bool :=

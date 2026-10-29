@@ -10,7 +10,7 @@ their admitted view types. Their evidence cannot be replaced by another unary op
 namespace CIL.Extraction
 
 /-- The exact accessor signature fixes the observation without consulting element contents. -/
-private def viewObservation (raw : RawInstruction) : Option ViewObservation := do
+def viewObservation (raw : RawInstruction) : Option ViewObservation := do
   if raw.opcode != 40 then none else pure ()
   let .call site := raw.operand | none
   if !site.returnsValue || site.parameterCount != site.parameterTypes.length then none else pure ()

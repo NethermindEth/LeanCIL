@@ -45,6 +45,20 @@ internal static class NativeOperands
         new(table ? Kind.MethodTable : Kind.MethodPointer,
             $".{(table ? "methodTable" : "methodPointer")} {ManagedPointers.SignatureEvidence(signature)}");
 
+    static StackType CallType(MethodReference method)
+    {
+        var result = CallReturnType.Resolve(method);
+        if (result is RequiredModifierType { ModifierType.FullName:
+            "System.Runtime.InteropServices.InAttribute", ElementType: ByReferenceType })
+        {
+            var operation = InstructionTranslation.RuntimeModel(method);
+            if (operation == ".memory (.observeView .spanPinnable)" ||
+                operation?.StartsWith(".memory (.spanItem ", StringComparison.Ordinal) == true)
+                return Kind.Reference;
+        }
+        return Type(result);
+    }
+
     static StackType PrimitiveType(TypeReference type) => type is ByReferenceType or PointerType
         ? Kind.Reference : Arrays.Of(type)?.Kind ?? EnumTypes.Storage(type).MetadataType switch
     {
@@ -196,7 +210,7 @@ internal static class NativeOperands
                 var callee = (MethodReference)instruction.Operand;
                 for (var index = 0; index < callee.Parameters.Count + (code != Code.Newobj && callee.HasThis ? 1 : 0); index++) Pop();
                 if (code == Code.Newobj || callee.ReturnType.MetadataType != MetadataType.Void)
-                    stack.Add(code == Code.Newobj ? Type(callee.DeclaringType) : Type(CallReturnType.Resolve(callee)));
+                    stack.Add(code == Code.Newobj ? Type(callee.DeclaringType) : CallType(callee));
             }
             else if (code == Code.Ret)
             {

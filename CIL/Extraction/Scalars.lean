@@ -1,6 +1,7 @@
 import CIL.Extraction.Features
 import CIL.Extraction.UnsafeReferences
 import CIL.Extraction.SpanCalls
+import CIL.Extraction.ViewObservations
 
 /-!
 # Scalar flow
@@ -526,9 +527,12 @@ private def externalResult (site : CallSite) (identity : String) : ScalarKind :=
 
 /-- The kind a call pushes. -/
 private def callResult (site : CallSite) : ScalarKind :=
-  match site.target with
-  | .managed _ => scalarType site.returnType
-  | .external identity => externalResult site identity
+  if spanCallReturnsReference site ||
+      (viewObservation ⟨0, 40, .call site⟩).any
+        (fun operation => operation == .spanPinnable || operation == .arrayData) then .reference
+  else match site.target with
+    | .managed _ => scalarType site.returnType
+    | .external identity => externalResult site identity
 
 /-- Exactly `newobj ReadOnlySpan<byte>(void*, int)`. -/
 private def byteSpanConstructor (opcode : Nat) (site : CallSite) : Bool :=
