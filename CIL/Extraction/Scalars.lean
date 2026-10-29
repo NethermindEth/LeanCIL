@@ -1,5 +1,6 @@
 import CIL.Extraction.Features
 import CIL.Extraction.UnsafeReferences
+import CIL.Extraction.UnsafeTransfers
 import CIL.Extraction.SpanCalls
 import CIL.Extraction.ViewObservations
 
@@ -721,7 +722,9 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
   -- `call` and `newobj`: the operands must have the signature's kinds.
   if opcode == 40 || opcode == 111 || opcode == 115 then
     let .call site := instruction.operand | none
-    let expected := if (opcode == 115 || opcode == 40) && (spanConstructor 115 site).isSome
+    let expected := if let some (copy, _) := unsafeBlockCall instruction then
+        [.word32, if copy then .reference else .word32, .reference] else
+      if (opcode == 115 || opcode == 40) && (spanConstructor 115 site).isSome
       then [.word32, .reference] ++
         (if opcode == 40 then [scalarType (.byref site.declaringType)] else []) else
       site.parameterTypes.reverse.map scalarType ++

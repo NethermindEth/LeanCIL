@@ -252,11 +252,15 @@ internal static class RuntimeModels
 
     private static string? Runtime(string signature) => signature switch
     {
-        $"System.Void {Unsafe}::CopyBlock(System.Byte&,System.Byte&,System.UInt32)" => ".memory (.copyBlock 8)",
-        $"System.Void {Unsafe}::CopyBlockUnaligned(System.Byte&,System.Byte&,System.UInt32)" =>
+        $"System.Void {Unsafe}::CopyBlock(System.Byte&,System.Byte&,System.UInt32)" or
+        $"System.Void {Unsafe}::CopyBlock(System.Void*,System.Void*,System.UInt32)" => ".memory (.copyBlock 8)",
+        $"System.Void {Unsafe}::CopyBlockUnaligned(System.Byte&,System.Byte&,System.UInt32)" or
+        $"System.Void {Unsafe}::CopyBlockUnaligned(System.Void*,System.Void*,System.UInt32)" =>
             ".memory (.copyBlock 1)",
-        $"System.Void {Unsafe}::InitBlock(System.Byte&,System.Byte,System.UInt32)" => ".memory (.initBlock 8)",
-        $"System.Void {Unsafe}::InitBlockUnaligned(System.Byte&,System.Byte,System.UInt32)" => ".memory (.initBlock 1)",
+        $"System.Void {Unsafe}::InitBlock(System.Byte&,System.Byte,System.UInt32)" or
+        $"System.Void {Unsafe}::InitBlock(System.Void*,System.Byte,System.UInt32)" => ".memory (.initBlock 8)",
+        $"System.Void {Unsafe}::InitBlockUnaligned(System.Byte&,System.Byte,System.UInt32)" or
+        $"System.Void {Unsafe}::InitBlockUnaligned(System.Void*,System.Byte,System.UInt32)" => ".memory (.initBlock 1)",
         $"!!1 {Unsafe}::BitCast<System.Byte,System.Boolean>(!!0)" => ".memory .bitcastByteBool",
         "System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,System.Int32)" => ".memory .spanCreate",
         _ => Span(signature)
