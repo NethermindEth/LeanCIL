@@ -134,9 +134,8 @@ def managedStep (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
     if targets.size >= 2^31 then .error .invalidState else pure ()
     let some target := targets[index]? | .error (.thrown "System.IndexOutOfRangeException")
     if let some backing := table.backing then
-      let base := { table with backing := some { backing with byteOffset := 0 } }
-      let selected ← checkedAt .null nativeMethodWidth
-        (addNativeTable base memory (BitVec.ofNat 64 (nativeMethodWidth * index)))
+      let selected := { table with backing := some { backing with
+        byteOffset := nativeMethodWidth * index } }
       let pointer ← checkedAt .null nativeMethodWidth (loadNativeTable selected memory)
       return .next (pc + 1) (.methodPointer pointer :: rest) frame memory
     return .next (pc + 1) (.methodPointer ⟨signature, some target⟩ :: rest) frame memory
