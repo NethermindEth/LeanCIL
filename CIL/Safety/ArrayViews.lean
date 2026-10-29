@@ -2,7 +2,7 @@ import CIL.ArrayTypes
 import CIL.Safety.SpanViews
 
 /-!
-# Supplied primitive arrays
+# Supplied reference-free arrays
 
 An array retains its element type, length and allocation-relative data reference. Its contents
 and authority use the existing checked memory model. Null and empty arrays remain distinct;

@@ -119,6 +119,16 @@ private def arrayStep (instruction : RawInstruction) (stack : List ScalarKind) :
     let expected ← arrayElementType token
     if element.isSome && element != some expected then none else
       return (.arrayAddress expected, .reference :: tail)
+  if opcode ∈ [163, 164] then
+    let .type token := instruction.operand | none
+    let expected ← arrayElementType token
+    if element.isSome && element != some expected then none else pure ()
+    match expected with
+    | .aggregate .. | .vector .. =>
+      if store then
+        if value == some .other then return (.arrayTransfer expected true, tail) else none
+      else return (.arrayTransfer expected false, .other :: tail)
+    | _ => pure ()
   let (width, signed, native) : Nat × Bool × Bool ←
     if opcode ∈ [163, 164] then do
       let .type token := instruction.operand | none
@@ -136,6 +146,7 @@ private def arrayStep (instruction : RawInstruction) (stack : List ScalarKind) :
         | 158 => some (4, false, false) | 159 => some (8, false, false)
         | _ => none
       if let some actual := element then
+        if (match actual with | .aggregate .. | .vector .. => true | _ => false) then none else pure ()
         if actual.width != width || actual.native != native then none else pure ()
       pure (width, signed, native)
   let kind := if native then ScalarKind.native else if width == 8 then .word64 else .word32
@@ -147,6 +158,7 @@ private def arrayStep (instruction : RawInstruction) (stack : List ScalarKind) :
 private def arrayEmission : Op → Bool
   | .memory .arrayLength | .memory (.arrayLoad ..) | .memory (.arrayStore _)
   | .memory (.arrayAddress ..) => true
+  | .memory (.arrayTransfer ..) => true
   | _ => false
 
 /-- The emitted array operation agrees exactly with its independently decoded raw opcode. -/
@@ -157,7 +169,10 @@ private def arrayMatches (instruction : RawInstruction) (stack : List ScalarKind
   | some (.arrayLoad width signed, _), .memory (.arrayLoad actual polarity) =>
     width == actual && signed == polarity
   | some (.arrayStore width, _), .memory (.arrayStore actual) => width == actual
-  | some (.arrayAddress element _, _), .memory (.arrayAddress actual _) => element == actual
+  | some (.arrayAddress element _, _), .memory (.arrayAddress actual _) =>
+    element == actual.metadata
+  | some (.arrayTransfer element store, _), .memory (.arrayTransfer actual actualStore) =>
+    element == actual.metadata && store == actualStore
   | _, _ => false
 /-- Opcodes whose emitted encoding the scalar check fixes: integer constants, arithmetic,
     shifts, `neg`, `not`, conversions and compare-branches. -/

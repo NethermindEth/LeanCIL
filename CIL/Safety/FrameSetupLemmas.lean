@@ -266,7 +266,6 @@ theorem storeLocal_preserves_reference_validity (m result : Memory) (slot final 
   unfold storeLocal at h
   repeat' first
     | exact retained
-    | solve | exact ArrayView.null_valid _ _
     | solve | exact formValue_root_valid (by assumption)
     | solve | exact formValue_readOnlyRoot_valid (by assumption)
     | solve | exact checkedAt_ok (by assumption)
@@ -388,11 +387,14 @@ theorem makeLocal_setup (m result : Memory) (activation : Nat) (kind : CIL.Local
           by simp [LocalSlot.Above]⟩)
   · rename_i element
     split at h
-    · cases h
+    · split at h
+      · cases h
+      rename_i width
+      cases h
       refine ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id, ?_, ?_⟩
       · intro _ entry member
         obtain rfl := List.mem_singleton.mp member
-        exact ArrayView.null_valid element m
+        exact ArrayView.null_valid element m (by simpa using width)
       · intro entry member
         obtain rfl := List.mem_singleton.mp member
         trivial

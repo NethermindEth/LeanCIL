@@ -446,6 +446,32 @@ def viewObservationInstruction (observation : CIL.ViewObservation) (stack : List
     .error (.thrown "System.NullReferenceException")
   | _, _ => .error .invalidState
 
+/-- Typed array transfers share the checked snapshot reads and writes used by byref transfers. -/
+def arrayTransferInstruction (element : CIL.ArrayElement) (store : Bool)
+  (stack : List Value) (memory : Memory) : ExecutionResult (Memory × List Value) := do
+  let (value, input) ← if store then match stack with
+    | .scalar value :: tail => pure (some value, tail)
+    | _ => .error .invalidState
+    else pure (none, stack)
+  let .scalar index :: array :: rest := input | .error .invalidState
+  let some index := arrayIndex index | .error .invalidState
+  let view ← match array with
+    | .array view => pure view
+    | .reference .null => .error (.thrown "System.NullReferenceException")
+    | _ => .error .invalidState
+  if view.elementType != element then .error .invalidState else pure ()
+  let shape ← match element with
+    | .aggregate _ size => pure (CIL.SnapshotShape.aggregate size)
+    | .vector _ 16 => pure .vector128
+    | .vector _ 32 => pure .vector256
+    | .vector _ 64 => pure .vector512
+    | _ => .error .invalidState
+  let reference ← arrayElement memory view index element.width
+  match value with
+  | none => return (memory, .scalar (← loadTransfer memory (.address reference)
+      (.snapshot shape)) :: rest)
+  | some value => return (← storeTransfer memory (.address reference) (.snapshot shape) value, rest)
+
 /-- Executes non-fill memory operations after the shared operand guard. -/
 def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) := do
@@ -706,6 +732,7 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
     .error (.unsupported "Memory operation observes unspecified vector bits")
   else
   match operation with
+  | .arrayTransfer element store => arrayTransferInstruction element store stack memory
   | .binaryRead width signed bigEndian trying =>
     binaryTransferInstruction width signed bigEndian true trying stack memory
   | .binaryWrite width bigEndian trying =>

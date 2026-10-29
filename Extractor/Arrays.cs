@@ -4,12 +4,12 @@ using System.Text.Json;
 
 namespace Nethermind.LeanCIL;
 
-// Array identity and physical integer width are kept together throughout extraction.
+// Array identity and physical element shape remain distinct throughout extraction.
 internal static class Arrays
 {
     internal sealed record Element(string Lean, int Width, bool Signed, NativeOperands.Kind Kind)
     {
-        internal string Expression => Lean.StartsWith("enumeration ", StringComparison.Ordinal)
+        internal string Expression => Lean.Contains(' ', StringComparison.Ordinal)
             ? $"(.{Lean})" : $".{Lean}";
     }
 
@@ -34,8 +34,17 @@ internal static class Arrays
     internal static Element? Primitive(TypeReference type) =>
         type is not TypeSpecification ? Primitive(type.FullName) : null;
 
-    internal static Element? Storage(TypeReference type)
+    internal static Element? Storage(TypeReference type, string? architecture = null)
     {
+        if (MetadataValidation.IntegerVectorWidth(type) is { } vectorWidth)
+            return new($"vector {JsonSerializer.Serialize(type.FullName)} {vectorWidth}",
+                vectorWidth, false, NativeOperands.Kind.ArrayComposite);
+        if (MetadataValidation.IsAggregate(type, type.Module))
+        {
+            var width = architecture is null ? 0 : Spans.ElementWidth(type, architecture)!.Value;
+            return new($"aggregate {JsonSerializer.Serialize(LayoutEvidence.Identity(type))} {width}",
+                width, false, NativeOperands.Kind.ArrayComposite);
+        }
         if (!EnumTypes.IsEnum(type)) return Primitive(type);
         return EnumTypes.Cached(type, EnumStorage);
     }
@@ -47,17 +56,17 @@ internal static class Arrays
         return underlying with { Lean = $"enumeration {identity} .{underlying.Lean}" };
     }
 
-    internal static Element? Of(TypeReference type) =>
-        type is ArrayType { IsVector: true } array ? Storage(array.ElementType) : null;
+    internal static Element? Of(TypeReference type, string? architecture = null) =>
+        type is ArrayType { IsVector: true } array ? Storage(array.ElementType, architecture) : null;
 
     internal static string? StackKind(NativeOperands.Kind kind) =>
         elements.Values.FirstOrDefault(element => element.Kind == kind) is { } element
             ? $".array .{element.Lean}" : null;
 
-    internal static string? Translate(Instruction instruction) => instruction.OpCode.Code switch
+    internal static string? Translate(Instruction instruction, string architecture) => instruction.OpCode.Code switch
     {
         Code.Ldlen => ".memory .arrayLength",
-        Code.Ldelema => $".memory (.arrayAddress {(Storage((TypeReference)instruction.Operand) ??
+        Code.Ldelema => $".memory (.arrayAddress {(Storage((TypeReference)instruction.Operand, architecture) ??
             throw new InvalidDataException("Unsupported array element token: " + instruction.Operand)).Expression}" +
             (instruction.Previous?.OpCode.Code == Code.Readonly ? " false)" : ")"),
         Code.Ldelem_I1 => ".memory (.arrayLoad 1 true)",
@@ -70,8 +79,8 @@ internal static class Arrays
         Code.Stelem_I2 => ".memory (.arrayStore 2)",
         Code.Stelem_I4 => ".memory (.arrayStore 4)",
         Code.Stelem_I8 or Code.Stelem_I => ".memory (.arrayStore 8)",
-        Code.Ldelem_Any => Typed(instruction, false),
-        Code.Stelem_Any => Typed(instruction, true),
+        Code.Ldelem_Any => Typed(instruction, false, architecture),
+        Code.Stelem_Any => Typed(instruction, true, architecture),
         _ => null
     };
 
@@ -83,10 +92,12 @@ internal static class Arrays
             throw new InvalidDataException("Branch enters an array address after its readonly prefix");
     }
 
-    static string Typed(Instruction instruction, bool store)
+    static string Typed(Instruction instruction, bool store, string architecture)
     {
-        var element = Storage((TypeReference)instruction.Operand) ??
+        var element = Storage((TypeReference)instruction.Operand, architecture) ??
             throw new InvalidDataException("Unsupported array element token: " + instruction.Operand);
+        if (element.Kind == NativeOperands.Kind.ArrayComposite)
+            return $".memory (.arrayTransfer {element.Expression} {store.ToString().ToLowerInvariant()})";
         return store ? $".memory (.arrayStore {element.Width})" :
             $".memory (.arrayLoad {element.Width} {element.Signed.ToString().ToLowerInvariant()})";
     }

@@ -29,7 +29,8 @@ internal static class Spans
 
     internal static int? ElementWidth(TypeReference type, string architecture)
     {
-        if (Arrays.Storage(type)?.Width is { } primitive) return primitive;
+        if (Arrays.Storage(type) is { Kind: not NativeOperands.Kind.ArrayComposite } primitive)
+            return primitive.Width;
         if (MetadataValidation.IntegerVectorWidth(type) is { } vector) return vector;
         if (!MetadataValidation.IsAggregate(type, type.Module)) return null;
         var widths = EnumTypes.Cached(type, _ => new ElementLayouts()).Widths;

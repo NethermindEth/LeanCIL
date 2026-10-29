@@ -180,6 +180,7 @@ theorem Memory.Equivalent.binaryTransferInstruction {m n : Memory} (same : m.Equ
     | split
 #print axioms Memory.Equivalent.binaryTransferInstruction
 
+<<<<<<< HEAD
 /-- A single-reference view depends only on equivalent allocation metadata. -/
 theorem Memory.Equivalent.singleSpanInstruction {m n : Memory} (same : m.Equivalent n)
     (width : Nat) (writable : Bool) (stack : List Value) :
@@ -193,6 +194,24 @@ theorem Memory.Equivalent.singleSpanInstruction {m n : Memory} (same : m.Equival
     | (apply ResultEquivalent.bind_same; intro)
     | split
 #print axioms Memory.Equivalent.singleSpanInstruction
+=======
+/-- Typed array transfers observe identical bytes and preserve equivalent checked writes. -/
+theorem Memory.Equivalent.arrayTransferInstruction {m n : Memory} (same : m.Equivalent n)
+    (element : CIL.ArrayElement) (store : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (arrayTransferInstruction element store stack m)
+      (arrayTransferInstruction element store stack n) := by
+  unfold CIL.Safety.arrayTransferInstruction
+  simp only [same.arrayElement, same.loadTransfer]
+  repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind (same.storeTransfer _ _ _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.arrayTransferInstruction
+>>>>>>> a7aeb1bd (feat(arrays): support supplied aggregate and integer-vector elements)
 
 /-- Opcode dispatch preserves the memory equivalence of each checked family. -/
 theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent n)
@@ -203,6 +222,7 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
   split
   · exact .error _
   · split
+    · exact same.arrayTransferInstruction _ _ _
     · exact same.binaryTransferInstruction _ _ _ _ _ _
     · exact same.binaryTransferInstruction _ _ _ _ _ _
     · exact same.singleSpanInstruction _ _ _

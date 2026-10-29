@@ -26,6 +26,7 @@ private def memoryFeatureEffect : MemoryOp → Nat × Nat
   | .arraySpan _ _ range => (range.argumentCount, 1)
   | .observeView _ | .spanReinterpret .. | .spanReadOnly | .arrayLength => (1, 1)
   | .arrayLoad .. | .arrayAddress .. => (2, 1)
+  | .arrayTransfer _ store => if store then (3, 0) else (2, 1)
   | .arrayStore _ => (3, 0)
   | .copyBlock _ | .initBlock _ => (3, 0)
   | .store128 | .store256 | .store512 => (2, 0)

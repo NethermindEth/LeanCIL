@@ -120,13 +120,24 @@ theorem Memory.Renamed.makeLocalInitialized {mapping : AllocationRenaming}
     rw [← related.sourceLimit, mapping.allocate_fresh, related.targetLimit]
   let retainedKind := kind
   cases kind with
-  | reference | array _ | methodPointer _ | methodTable _ =>
+  | reference | methodPointer _ | methodTable _ =>
     cases initial <;> simp only [CIL.Safety.makeLocal] at made
     all_goals first | contradiction | cases made
     all_goals refine ⟨mapping, target, .refl mapping, ?_, related, ?_, ?_⟩
     all_goals simp [CIL.Safety.makeLocal, AllocationRenaming.localSlot,
       AllocationRenaming.managedReference,
       AllocationRenaming.arrayView, LocalSlot.Below, ManagedReference.Below]
+  | array element =>
+    cases initial <;> simp only [CIL.Safety.makeLocal] at made
+    all_goals first | contradiction | cases made | skip
+    split at made
+    · cases made
+    rename_i width
+    cases made
+    refine ⟨mapping, target, .refl mapping, ?_, related, ?_, ?_⟩
+    all_goals simp [CIL.Safety.makeLocal, width, AllocationRenaming.localSlot,
+      AllocationRenaming.managedReference, AllocationRenaming.arrayView,
+      LocalSlot.Below, ManagedReference.Below]
   | span width writable =>
     have widthOK := spanWidth width writable rfl
     cases initial <;> simp only [CIL.Safety.makeLocal, widthOK, not_true_eq_false,
@@ -286,8 +297,8 @@ theorem Memory.Renamed.skipLocalInitialized {mapping : AllocationRenaming}
   | array element =>
     cases initial <;> simp [InitializerFits] at fits unknown
     refine ⟨mapping, .array element (some ⟨.null, 0, element⟩), [], target,
-      .refl mapping, rfl, related, ?_⟩
-    intro identity member; cases member
+      .refl mapping, ?_, related, ?_⟩
+    all_goals simp_all [makeLocal]
   | span width writable =>
     cases initial <;> simp [InitializerFits] at fits unknown
     refine ⟨mapping, .span width writable (some ⟨.null, 0, width, writable⟩), [], target,

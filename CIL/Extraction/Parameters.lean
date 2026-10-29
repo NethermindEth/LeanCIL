@@ -23,6 +23,7 @@ inductive StorageType where
   | span (width : Nat) (writable : Bool)
   | aggregateSpan (index : Nat) (writable : Bool)
   | array (element : ArrayElement)
+  | aggregateArray (identity : String) (index : Nat)
   | methodPointer (signature : ManagedSignature)
   | methodTable (signature : ManagedSignature)
   deriving DecidableEq, Repr
@@ -48,6 +49,10 @@ structure RawArguments where
 def storageKind (layouts : Array ComputedLayout) : StorageType → Option LocalKind
   | .reference => some .reference
   | .array element => some (.array element)
+  | .aggregateArray identity index => do
+    let layout ← layouts[index]?
+    if 0 < layout.layout.size ∧ layout.layout.size < 2^64 then
+      some (.array (.aggregate identity layout.layout.size)) else none
   | .methodPointer signature => some (.methodPointer signature)
   | .methodTable signature => some (.methodTable signature)
   | .aggregateSpan index writable => do

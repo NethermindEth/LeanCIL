@@ -1,6 +1,6 @@
 import Std
 
-/-! # Primitive array element types shared by extraction and checked storage -/
+/-! # Reference-free array element types shared by extraction and checked storage -/
 
 namespace CIL
 
@@ -22,11 +22,13 @@ def EnumStorage.signed : EnumStorage → Bool
   | .signed8 | .signed16 => true
   | _ => false
 
-/-- Primitive integer array identity, retained separately from its physical byte width. -/
+/-- Exact reference-free array element identity and physical storage shape. -/
 inductive ArrayElement where
   | signed8 | unsigned8 | signed16 | unsigned16 | signed32 | unsigned32
   | signed64 | unsigned64 | nativeInt | nativeUInt | boolean | character
   | enumeration (identity : String) (storage : EnumStorage)
+  | aggregate (identity : String) (size : Nat)
+  | vector (identity : String) (size : Nat)
   deriving DecidableEq, Repr
 
 /-- Storage width on the admitted 64-bit runtime profiles. -/
@@ -36,6 +38,7 @@ def ArrayElement.width : ArrayElement → Nat
   | .signed32 | .unsigned32 => 4
   | .signed64 | .unsigned64 | .nativeInt | .nativeUInt => 8
   | .enumeration _ storage => storage.width
+  | .aggregate _ size | .vector _ size => size
 
 /-- Narrow loads sign-extend signed integer and enum storage. -/
 def ArrayElement.signed : ArrayElement → Bool
@@ -47,5 +50,10 @@ def ArrayElement.signed : ArrayElement → Bool
 def ArrayElement.native : ArrayElement → Bool
   | .nativeInt | .nativeUInt => true
   | _ => false
+
+/-- Aggregate widths come from layout evidence, separately from exact metadata identity. -/
+def ArrayElement.metadata : ArrayElement → ArrayElement
+  | .aggregate identity _ => .aggregate identity 0
+  | element => element
 
 end CIL

@@ -11,7 +11,7 @@ internal static class NativeOperands
     {
         Other, Word32, Word64, Native, Reference, NullObject, MethodPointer, MethodTable, NativeMethodTable,
         ArraySigned8, ArrayUnsigned8, ArraySigned16, ArrayUnsigned16, ArraySigned32, ArrayUnsigned32,
-        ArraySigned64, ArrayUnsigned64, ArrayNativeInt, ArrayNativeUInt, ArrayBoolean, ArrayCharacter
+        ArraySigned64, ArrayUnsigned64, ArrayNativeInt, ArrayNativeUInt, ArrayBoolean, ArrayCharacter, ArrayComposite
     }
 
     internal sealed record Certificate(HashSet<Instruction> Mixed, Dictionary<Instruction, StackType[]> Incoming);
@@ -26,7 +26,7 @@ internal static class NativeOperands
         if (ManagedPointers.Signature(type) is { } pointer)
             return CallableType(pointer, type is ArrayType);
         if (Arrays.Of(type) is { } array)
-            return type is ArrayType buffer && EnumTypes.IsEnum(buffer.ElementType)
+            return array.Kind == Kind.ArrayComposite || type is ArrayType buffer && EnumTypes.IsEnum(buffer.ElementType)
                 ? new StackType(array.Kind, $".array {array.Expression}") : array.Kind;
         var reference = type is ByReferenceType;
         var value = reference ? ((ByReferenceType)type).ElementType : type;

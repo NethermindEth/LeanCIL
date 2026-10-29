@@ -296,7 +296,8 @@ internal static class RuntimeModels
         foreach (var (element, width) in elementType is null ? primitives :
             [(elementType.FullName, Spans.ElementWidth(elementType, architecture)!.Value)])
         {
-            var arrayElement = (elementType is null ? Arrays.Primitive(element) : Arrays.Storage(elementType))?.Expression;
+            var arrayElement = (elementType is null ? Arrays.Primitive(element) :
+                Arrays.Storage(elementType, architecture))?.Expression;
             var span = $"System.ReadOnlySpan`1<{element}>";
             if (arrayElement is not null) operations.Add("System.ReadOnlySpan`1<!!0> System.Runtime.CompilerServices.RuntimeHelpers::" +
                 $"CreateSpan<{element}>(System.RuntimeFieldHandle)", $".memory (.createSpan {width})");

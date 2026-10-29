@@ -46,12 +46,16 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
       else if opcode = 0xfe15 then return [.size pc index .initialize]
       else if opcode = 0x70 then return [.size pc index .copy]
       else if opcode = 0xfe1c then return [.size pc index .sizeOf]
+      else if opcode ∈ [0x8f, 0xa3, 0xa4] then return [.size pc index .arrayElement]
       else return []
   -- `newobj` of a struct, then `Unsafe.SizeOf<T>` and `Unsafe.Add<T>`.
   | 0x73, .call site =>
     if let .apply (.constructor scope owner) (.aggregate _ index) := site.declaringType then
       if scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"] &&
-          site.name == ".ctor" then return [.size pc index .spanElement]
+          site.name == ".ctor" then
+        let access := match site.parameterTypes.head? with
+          | some (.array _) => SizeAccess.arrayElement | _ => .spanElement
+        return [.size pc index access]
     return (aggregateIndex site.declaringType).toList.map fun index => .size pc index .construct
   | 0x28, .call site =>
     if site.name ∈ ["AsBytes", "Cast"] &&
@@ -63,8 +67,15 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
     match site.declaringType, site.typeArguments with
     | .apply (.constructor scope owner) (.aggregate _ index), [] =>
       if scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"] &&
+          site.name ∈ [".ctor", "op_Implicit"] &&
+          (site.parameterTypes.head?.map fun type => match type with
+            | .array _ => true | _ => false).getD false then
+        return [.size pc index .arrayElement]
+      else if scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"] &&
           site.name ∈ ["get_Item", "CopyTo", "TryCopyTo", "Clear", "Fill", ".ctor"] then
         return [.size pc index .spanElement] else return []
+    | .atom _ "System.MemoryExtensions", [.aggregate _ index] =>
+      if site.name == "AsSpan" then return [.size pc index .arrayElement] else return []
     | .atom _ "System.Runtime.InteropServices.MemoryMarshal", [.aggregate _ index] =>
       if site.name = "Read" || site.name = "TryRead" then return [.size pc index .load]
       else if site.name = "Write" || site.name = "TryWrite" then return [.size pc index .store]

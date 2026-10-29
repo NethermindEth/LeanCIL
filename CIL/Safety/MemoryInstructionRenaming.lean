@@ -137,6 +137,46 @@ private theorem Memory.Renamed.spanFillInstructionResult {mapping : AllocationRe
        exact .ok ⟨memoryRelated, rfl⟩)
     | (split <;> try simp only [*, Bind.bind, Except.bind])
 #print axioms Memory.Renamed.spanFillInstructionResult
+
+/-- Typed array loads and stores transport the exact snapshot mask and checked authority. -/
+private theorem Memory.Renamed.arrayTransferInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (formed : source.WellFormed)
+    (element : CIL.ArrayElement) (store : Bool) (stack : List Value)
+    (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (arrayTransferInstruction element store stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (arrayTransferInstruction element store stack source)
+      (arrayTransferInstruction element store (stack.map mapping.value) target) := by
+  cases store <;> simp only [arrayTransferInstruction, Bool.false_eq_true, ite_false, ite_true]
+    at observable ⊢
+  all_goals simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at observable ⊢
+  all_goals split at observable
+  all_goals repeat' first
+    | contradiction
+    | cases observable
+    | exact .error _
+    | exact .ok ⟨by assumption, rfl⟩
+    | (try simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
+       rcases bounds with ⟨_, bounds⟩)
+    | (apply (related.arrayElement _ (by assumption) _ _).bindWithSuccess
+       intro first second sourceStep same
+       have addressBound : first.allocation < mapping.sourceLimit := by
+         rw [related.sourceLimit]
+         exact (checkedArrayElement_valid _ _ _ _ _ sourceStep).below formed
+       subst second)
+    | (apply (related.loadTransfer _ (by assumption) _).bindWithSuccess
+       intro first second sourceStep same
+       subst second)
+    | (apply (related.storeTransfer _ (by assumption) _ _).bindWithSuccess
+       intro first second sourceStep memoryRelated)
+    | (split at observable <;> try simp only [*, List.map_cons, AllocationRenaming.value,
+        AllocationRenaming.arrayView, AllocationRenaming.managedReference,
+        Bool.false_eq_true, ite_false, ite_true, Bind.bind, Except.bind, Pure.pure, Except.pure]
+        at observable ⊢)
+#print axioms Memory.Renamed.arrayTransferInstructionResult
 /-- Ordinary memory effects transport independently of the whole-span dispatch families. -/
 private theorem Memory.Renamed.otherMemoryInstructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -239,7 +279,6 @@ private theorem Memory.Renamed.otherMemoryInstructionResult {mapping : Allocatio
     | simp only [mapping.isNull, imageEquality]
     | (split <;> try simp only [*, mapping.isNull, AllocationRenaming.managedReference,
         Bind.bind, Except.bind])
-
 #print axioms Memory.Renamed.otherMemoryInstructionResult
 
 /-- View observations preserve reference provenance under allocation renaming. -/
@@ -379,6 +418,7 @@ theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
   · rename_i observed
     simp only [observed, Bool.false_eq_true, ite_false]
     split at observable
+    · exact related.arrayTransferInstructionResult formed _ _ _ bounds observable
     · exact related.binaryTransferInstructionResult _ _ _ _ _ _ bounds observable
     · exact related.binaryTransferInstructionResult _ _ _ _ _ _ bounds observable
     · exact related.singleSpanInstructionResult _ _ _ bounds observable

@@ -106,6 +106,18 @@ internal sealed class LayoutEvidence
             var instruction = method.Body.Instructions[pc];
             if (!reachable.Contains(instruction)) continue;
             if (instruction.OpCode.Code is Code.Call or Code.Newobj &&
+                instruction.Operand is MethodReference arrayCall &&
+                arrayCall.Parameters.FirstOrDefault()?.ParameterType is ArrayType)
+            {
+                var element = arrayCall.DeclaringType is GenericInstanceType arraySpan && Spans.Is(arraySpan)
+                    ? arraySpan.GenericArguments[0]
+                    : arrayCall is GenericInstanceMethod extension &&
+                        extension.DeclaringType.FullName == "System.MemoryExtensions" && extension.Name == "AsSpan"
+                        ? extension.GenericArguments[0] : null;
+                if (element is not null && MetadataValidation.IsAggregate(element, method.Module))
+                    uses.Add($".size {pc} {Index(element)} .arrayElement");
+            }
+            if (instruction.OpCode.Code is Code.Call or Code.Newobj &&
                 instruction.Operand is MethodReference spanCall)
             {
                 if (spanCall is GenericInstanceMethod reinterpret &&
@@ -119,6 +131,7 @@ internal sealed class LayoutEvidence
                 }
                 else if (spanCall.DeclaringType is GenericInstanceType spanOwner &&
                     Spans.Is(spanOwner) &&
+                    spanCall.Parameters.FirstOrDefault()?.ParameterType is not ArrayType &&
                     MetadataValidation.IsAggregate(spanOwner.GenericArguments[0], method.Module) &&
                     spanCall.Name is "get_Item" or "CopyTo" or "TryCopyTo" or "Clear" or "Fill" or ".ctor")
                     uses.Add($".size {pc} {Index(spanOwner.GenericArguments[0])} .spanElement");
@@ -137,7 +150,8 @@ internal sealed class LayoutEvidence
                 var access = instruction.OpCode.Code switch
                 {
                     Code.Ldobj => "load", Code.Stobj => "store", Code.Initobj => "initialize",
-                    Code.Cpobj => "copy", Code.Sizeof => "sizeOf", _ => null
+                    Code.Cpobj => "copy", Code.Sizeof => "sizeOf",
+                    Code.Ldelema or Code.Ldelem_Any or Code.Stelem_Any => "arrayElement", _ => null
                 };
                 if (access is not null) uses.Add($".size {pc} {Index(type)} .{access}");
             }

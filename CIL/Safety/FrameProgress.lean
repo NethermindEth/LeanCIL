@@ -17,7 +17,9 @@ namespace CIL.Safety
     physical home, and a managed root may start null. -/
 def InitializerFits (kind : CIL.LocalKind) (initial : CIL.Value) : Prop :=
   match kind with
-  | .array _ | .methodPointer _ | .methodTable _ => initial = .unmodeled ∨ initial = .nullRef
+  | .methodPointer _ | .methodTable _ => initial = .unmodeled ∨ initial = .nullRef
+  | .array element => initial = .unmodeled ∨
+      (0 < element.width ∧ element.width < 2^64) ∧ initial = .nullRef
   | .span width _ => (0 < width ∧ width < 2^64) ∧ (initial = .unmodeled ∨ initial = .nullRef)
   | _ => initial = .unmodeled ∨ match kind, initial with
   | .aggregate size, .aggregate bytes => bytes.length = size.val
@@ -177,11 +179,12 @@ theorem initializeParameter_succeeds (m : Memory) (activation : Nat) (kind : CIL
   | array view =>
     change kind = .array view.elementType at fits
     subst kind
-    refine ⟨.array view.elementType none, [], m,
-      .array view.elementType (some view), m, rfl, ?_⟩
     change view.validate m = .ok () at valid
-    simp [storeLocal, Value.hasUnspecified, valid, checkedAt, Except.mapError,
-      Bind.bind, Except.bind, Pure.pure, Except.pure]
+    refine ⟨.array view.elementType none, [], m,
+      .array view.elementType (some view), m, ?_, ?_⟩
+    · rfl
+    · simp [storeLocal, Value.hasUnspecified, valid, checkedAt, Except.mapError,
+        Bind.bind, Except.bind, Pure.pure, Except.pure]
   | bufferSpan view =>
     obtain ⟨rfl, widthValid⟩ := fits
     refine ⟨.span view.width view.writable none, [], m,

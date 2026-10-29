@@ -173,12 +173,14 @@ inductive MemoryOp where
   | spanFromReference (width : Nat) (writable : Bool)
   | spanSingleReference (width : Nat) (writable : Bool)
   | spanSlice (explicitLength : Bool) | spanReadOnly
-  /-- A span view over supplied primitive array storage, without allocation or copying. -/
+  /-- A span view over supplied reference-free array storage, without allocation or copying. -/
   | arraySpan (element : ArrayElement) (writable : Bool) (range : ArraySpanRange)
   /-- Integer operations over supplied array storage; allocation is not modelled. -/
   | arrayLength | arrayLoad (width : Nat) (signed : Bool) | arrayStore (width : Nat)
   /-- A checked element address retains allocation provenance without granting authority. -/
   | arrayAddress (element : ArrayElement) (writable : Bool := true)
+  /-- A typed reference-free element transfer retains byte initialization masks. -/
+  | arrayTransfer (element : ArrayElement) (store : Bool)
   /-- `Unsafe.NullRef<T>` pushes the null reference; `Unsafe.IsNullRef<T>` tests for it. -/
   | nullRef | isNullRef
   deriving Repr
@@ -199,6 +201,7 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .arraySpan _ _ range => range.argumentCount
   | .spanReinterpret .. | .spanReadOnly | .arrayLength => 1
   | .arrayLoad .. | .arrayAddress .. => 2
+  | .arrayTransfer _ store => if store then 3 else 2
   | .arrayStore _ => 3
   | .store128 | .store256 | .store512 | .add .. | .spanCreate | .spanItem _ => 2
   | .staticAddress _ | .staticValue _ | .nullRef => 0

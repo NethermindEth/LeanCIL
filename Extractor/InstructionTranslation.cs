@@ -65,7 +65,7 @@ internal static class InstructionTranslation
             return ".nop";
         }
         if (i.Previous?.OpCode.Code == Code.Readonly) Arrays.ValidateReadOnly(instructions, i.Previous);
-        if (Arrays.Translate(i) is { } arrayOperation) return arrayOperation;
+        if (Arrays.Translate(i, profile.Architecture) is { } arrayOperation) return arrayOperation;
         parameterHomes ??= ParameterStorage.IndexHomes(ParameterStorage.Analyze(m, reachable!));
         var translated = TranslateCore(i, m, methods, methodIndex, instructions, profile, parameterHomes, layouts);
         return nativeOperands.Mixed.Contains(i) ? $".nativeBinary ({translated})" : translated;

@@ -53,7 +53,7 @@ private def spanMemberCall (opcode : Nat) (site : CallSite)
     | none
   let elementName ← spanElementName elementType
   let .span width writable ← spanStorage site.declaringType aggregateWidth | none
-  let arrayElement := arrayElementType elementType
+  let arrayElement := arrayElementType elementType aggregateWidth
   if !site.typeArguments.isEmpty || site.parameterCount != site.parameterTypes.length then none
     else pure ()
   let intType := TypeExpr.atom runtimeScope "System.Int32"
@@ -147,15 +147,18 @@ def spanConstructorMatches : SpanConstructor → SpanConstructor → Bool
   | .reference expected writable, .reference actual capability
   | .singleReference expected writable, .singleReference actual capability =>
     (expected == 0 || expected == actual) && writable == capability
+  | .array expected writable range, .array actual capability actualRange =>
+    expected.metadata == actual.metadata && writable == capability && range == actualRange
   | expected, actual => expected == actual
 
 /-- The array overloads of AsSpan accept an array and zero, one or two int32 arguments. -/
-private def arrayExtensionCall (opcode : Nat) (site : CallSite) : Option SpanCall := do
+private def arrayExtensionCall (opcode : Nat) (site : CallSite)
+    (aggregateWidth : Nat := 0) : Option SpanCall := do
   if opcode != 40 || site.hasThis || !site.returnsValue || site.name != "AsSpan" ||
       site.declaringType != .atom spanMemoryScope "System.MemoryExtensions" ||
       site.parameterCount != site.parameterTypes.length then none else pure ()
   let [elementType] := site.typeArguments | none
-  let arrayElement := arrayElementType elementType
+  let arrayElement := arrayElementType elementType aggregateWidth
   if site.returnType != .apply (.constructor runtimeScope "System.Span`1") elementType then none
     else pure ()
   let intType := TypeExpr.atom runtimeScope "System.Int32"
@@ -221,10 +224,11 @@ def spanCallMatches (instruction : RawInstruction) (emitted : Op) : Bool :=
       | some (.reinterpret source target _) => (source, target)
       | some (.copy width _) | some (.fill width _) | some (.item width)
       | some (.reference width _) | some (.singleReference width _) => (width, width)
+      | some (.array element _ _) => (element.width, element.width)
       | _ => (0, 0)
     let expected := match instruction.operand with
       | .call site => (spanMemberCall instruction.opcode site sourceWidth).orElse
-          (fun _ => (arrayExtensionCall instruction.opcode site).orElse
+          (fun _ => (arrayExtensionCall instruction.opcode site sourceWidth).orElse
             (fun _ => (referenceFactory instruction.opcode site sourceWidth).orElse
               (fun _ => reinterpretCall instruction.opcode site sourceWidth targetWidth)))
       | _ => none

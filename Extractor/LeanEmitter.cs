@@ -29,7 +29,7 @@ internal static class LeanEmitter
             return $".{(type is ArrayType ? "methodTable" : "methodPointer")} " +
                 ManagedPointers.SignatureEvidence(pointer);
         if (type is ByReferenceType or PointerType) return ".reference";
-        if (Arrays.Of(type) is { } element) return $".array {element.Expression}";
+        if (Arrays.Of(type, architecture) is { } element) return $".array {element.Expression}";
         if (Spans.Width(type, architecture) is { } width)
             return $".span {width} {(Spans.Writable(type) ? "true" : "false")}";
         if (MetadataValidation.IsAggregate(type, module))
@@ -78,6 +78,7 @@ internal static class LeanEmitter
             .Concat(m.Body.Instructions.Where(i => i.Operand is GenericInstanceMethod).SelectMany(i => ((GenericInstanceMethod)i.Operand).GenericArguments))
             .Concat(m.Body.Instructions.Where(i => i.Operand is FieldReference).Select(i => ((FieldReference)i.Operand).DeclaringType)))
             .Select(t => t is ByReferenceType r ? r.ElementType : t)
+            .Select(t => t is ArrayType array ? array.ElementType : t)
             .Select(t => Spans.Is(t) ? ((GenericInstanceType)t).GenericArguments[0] : t)
             .Where(t => MetadataValidation.IsAggregate(t, methods[0].Module)).DistinctBy(t => t.FullName).ToArray();
         List<TypeReference> layouts = [];

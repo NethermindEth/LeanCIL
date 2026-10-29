@@ -49,7 +49,12 @@ private def enumField : FieldType → Bool
   | _ => false
 
 /-- Primitive array element identity is derived from the exact runtime metadata scope. -/
-def arrayElementType : TypeExpr → Option ArrayElement
+def arrayElementType (type : TypeExpr) (aggregateWidth : Nat := 0) : Option ArrayElement :=
+  match type with
+  | .aggregate identity _ => some (.aggregate identity aggregateWidth)
+  | type@(.apply (.constructor _ name) (.atom _ element)) => do
+    let width ← integerVectorWidth type
+    return .vector (name ++ "<" ++ element ++ ">") width
   | .enum identity (.atom scope name) => do
     if scope != runtimeScope then none else pure ()
     let storage ← match name with
@@ -122,6 +127,9 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
     let .field kind ← typeStorage layouts underlying | none
     if enumField kind then return .field kind else none
   | .byref _ => some .reference
+  | .array (.aggregate identity index) => do
+    let metadata ← layouts[index]?
+    if metadata.identity == identity then some (.aggregateArray identity index) else none
   | .array element => match managedSignature element with
     | some signature => some (.methodTable signature)
     | none => StorageType.array <$> arrayElementType element

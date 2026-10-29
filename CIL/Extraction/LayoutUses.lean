@@ -21,6 +21,7 @@ inductive FieldAccess where
 inductive SizeAccess where
   | load | store | initialize | copy | sizeOf | construct | referenceAdd | referenceSubtract
   | spanElement | spanSource | spanTarget
+  | arrayElement
   deriving DecidableEq, Repr
 
 /-- The native-width negative stride used to subtract an element offset. -/
@@ -57,6 +58,10 @@ private def checkField (layout : FieldLayout) (signed : Bool) : FieldAccess → 
 
 /-- The emitted size-dependent operation uses exactly the computed struct size. -/
 private def checkSize (size : Nat) : SizeAccess → Op → Bool
+  | .arrayElement, .memory (.arrayAddress (.aggregate _ width) _)
+  | .arrayElement, .memory (.arrayTransfer (.aggregate _ width) _)
+  | .arrayElement, .memory (.arraySpan (.aggregate _ width) _ _)
+  | .arrayElement, .initializeSpanLocal _ (.array (.aggregate _ width) _ _) => width == size
   | .load, .memory (.marshalRead (.snapshot (.aggregate width)) _)
   | .store, .memory (.marshalWrite (.snapshot (.aggregate width)) _) => width == size
   | .load, .loadAggregate width | .store, .storeAggregate width
