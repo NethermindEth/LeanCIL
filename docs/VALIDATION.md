@@ -15,9 +15,8 @@ build because their external MSBuild source graph is not described by file-app i
 
 `Tests/PreparedFixtures.cs` covers arguments, included-source changes, nested configuration changes,
 unsupported project references, SDK/runtime mismatches,
-manifest tampering and added or modified output files. This targets the 66 runner builds,
-14 contract-export builds and ten full-import builds observed in run 40486409764. CI timing
-must confirm the net saving, including the shared producer and artifact transfer.
+manifest tampering and added or modified output files. Shared preparation amortizes fixture
+compilation across suites; producer work and artifact transfers remain part of total CI time.
 
 Branch positions and prefix-bypass checks use indexes scoped to each body traversal, and call
 translation uses a method index scoped to the current ordered call graph. Original and specialized
