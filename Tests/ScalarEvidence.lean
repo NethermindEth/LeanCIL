@@ -412,6 +412,8 @@ private theorem span_constructor_cases :
     (scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with
         parameterTypes := [.pointer word, intType] })) [.word32, .reference] = none) ∧
     (scalarTransfer byteSpanRaw (i 40 (.call byteSpanSite)) [.word32, .reference, .reference] =
+      some []) ∧
+    (scalarTransfer byteSpanRaw (i 40 (.call byteSpanSite)) [.word32, .reference, .other] =
       none) := by
   decide +kernel
 
