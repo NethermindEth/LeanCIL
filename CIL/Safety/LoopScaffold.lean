@@ -33,17 +33,44 @@ theorem enterFrame_isSome (body : CIL.Method) (args : List Value) (memory : Memo
 /-- Derive parameterized frames, memory and numeric homes from checked allocation.
     Entry must reduce to success or have an explicit proof; no failure receives a default. -/
 syntax "bind_entry " ident bracketedBinder* " := " term:max
-  " with " term:max " from " term:max (" using " term:max)? : command
+  " with " term:max " from " term:max (" using " term:max)?
+  (" simplifying " "[" term,* "]")? : command
+
+/-- Normalize frame setup with explicit storage facts, retaining checked allocation semantics. -/
+private def entrySimplifier (body : TSyntax `term) (facts : Array (TSyntax `term)) :
+    CommandElabM (TSyntax `tactic) :=
+  `(tactic| (simp [enterFrame, $body:term, makeSelectedLocals, makeLocals,
+    makeArgumentHomes, makeParameterHomes, makeLocal, storeLocal, Value.hasUnspecified,
+    checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure,
+    $[$facts:term],*]; try rfl))
 
 elab_rules : command
-  | `(bind_entry $name $binders* := $body with $args from $memory $[using $witness]?) => do
-    let parameters ← liftTermElabM <| Term.elabBinders binders fun variables => do
+  | `(bind_entry $name $binders* := $body with $args from $memory $[using $witness]?
+      $[simplifying [$facts,*]]?) => do
+    if witness.isSome && facts.isSome then
+      throwError "Choose a success witness or simplifying facts, not both"
+    let normalizer ← entrySimplifier body (facts.map (·.getElems) |>.getD #[])
+    let (parameters, computed) ← liftTermElabM <| Term.elabBinders binders fun variables => do
       let outcome ← Term.elabTermEnsuringType (← `(enterFrame $body $args $memory)) none
       Term.synthesizeSyntheticMVarsNoPostponing
-      unless witness.isSome || (← Meta.whnf (← instantiateMVars outcome)).isAppOf ``Except.ok do
+      let computed ← if facts.isSome then do
+        let pair ← Meta.mkFreshExprMVar (← Term.elabTerm (← `(Frame × Memory)) none)
+        let success ← Meta.mkAppOptM ``Except.ok
+          #[some (mkConst ``ExecutionFault), some (← Meta.inferType pair), some pair]
+        let equality ← Meta.mkFreshExprMVar (← Meta.mkEq outcome success)
+        let remaining ← Tactic.run equality.mvarId! (Tactic.evalTactic normalizer)
+        unless remaining.isEmpty do
+          throwError "Entry facts do not establish a successful allocation"
+        let pair ← instantiateMVars pair
+        if pair.hasMVar then throwError "Entry facts leave the allocated frame unresolved"
+        pure (some (← PrettyPrinter.delab pair))
+      else pure none
+      unless computed.isSome || witness.isSome ||
+          (← Meta.whnf (← instantiateMVars outcome)).isAppOf ``Except.ok do
         throwError "Frame entry must reduce to a successful checked allocation"
-      variables.mapM fun parameter => do
+      let parameters ← variables.mapM fun parameter => do
         return mkIdent (← parameter.fvarId!.getDecl).userName
+      return (parameters, computed)
     let result := mkIdent (name.getId ++ `result)
     let frame := mkIdent (name.getId ++ `frame)
     let entered := mkIdent (name.getId ++ `memory)
@@ -51,18 +78,22 @@ elab_rules : command
     let success ← match witness with
       | some proof => pure proof
       | none => `(by rfl)
-    elabCommand (← `(def $result $binders* : Frame × Memory :=
-      ((enterFrame $body $args $memory).toOption).get $success))
-    let frameValue ← if witness.isSome then `((@$result $parameters*).1) else
+    let resultValue ← match computed with
+      | some pair => pure pair
+      | none => `(((enterFrame $body $args $memory).toOption).get $success)
+    elabCommand (← `(def $result $binders* : Frame × Memory := $resultValue))
+    let frameValue ← if witness.isSome && computed.isNone then `((@$result $parameters*).1) else
       liftTermElabM <| Term.elabBinders binders fun _ => do
         let value ← Term.elabTerm (← `((@$result $parameters*).1)) (some (mkConst ``Frame))
         PrettyPrinter.delab (← Meta.reduce (← instantiateMVars value))
     elabCommand (← `(def $frame $binders* : Frame := $frameValue))
     elabCommand (← `(def $entered $binders* : Memory := (@$result $parameters*).2))
+    let checkedProof ← if computed.isSome then
+      `(by simp only [$frame:term, $entered:term, $result:term]; $normalizer:tactic)
+      else `(entry_result_checked _ $success)
     elabCommand (← `(theorem $equation $binders* :
       enterFrame $body $args $memory =
-        .ok (@$frame $parameters*, @$entered $parameters*) :=
-      entry_result_checked _ $success))
+        .ok (@$frame $parameters*, @$entered $parameters*) := $checkedProof))
     elabCommand (← `(#print axioms $equation))
     let homes ← liftTermElabM <| Term.elabBinders binders fun _ => do
       let value ← Term.elabTerm (← `(@$frame $parameters*)) none
@@ -89,6 +120,29 @@ elab_rules : command
 syntax "bind_cutpoint " ident " := " term:max " matching " term:max
   " with " term:max : command
 
+/-- Select an instruction explicitly, including a structural label in a multi-loop method.
+    The requested instruction must exist and satisfy the supplied predicate. -/
+syntax "bind_cutpoint " ident bracketedBinder* " := " term:max " at " term:max
+  " matching " term:max " with " term:max : command
+
+elab_rules : command
+  | `(bind_cutpoint $name $binders* := $body at $location matching $predicate with $frame) => do
+    liftTermElabM do
+      let selected ← Term.elabTermEnsuringType
+        (← `(if ($body).code[$location]?.map $predicate = some true then 1 else 0))
+        (some (mkConst ``Nat))
+      Term.synthesizeSyntheticMVarsNoPostponing
+      unless (← (Meta.evalNat (← Meta.reduce (← instantiateMVars selected))).run) == some 1 do
+        throwError "Selected cutpoint must exist and match the instruction predicate"
+    let pc := mkIdent (name.getId ++ `pc)
+    let checked := mkIdent (name.getId ++ `checked)
+    elabCommand (← `(@[cil_code] def $pc : Nat := $location))
+    elabCommand (← `(theorem $checked :
+      ($body).code[$pc]?.map $predicate = some true := by decide +kernel))
+    elabCommand (← `(#print axioms $checked))
+    elabCommand (← `(def $name $binders* (stack : List Value) (memory : Memory) : LoopState :=
+      ⟨$pc, $frame, stack, memory⟩))
+
 elab_rules : command
   | `(bind_cutpoint $name := $body matching $predicate with $frame) => do
     let pc := mkIdent (name.getId ++ `pc)
@@ -99,7 +153,8 @@ elab_rules : command
       Term.synthesizeSyntheticMVarsNoPostponing
       unless (← (Meta.evalNat (← Meta.reduce (← instantiateMVars count))).run) == some 1 do
         throwError "Cutpoint must match exactly one instruction"
-      let value ← Term.elabTermEnsuringType (← `(instructionLocation $body $predicate)) (some (mkConst ``Nat))
+      let value ← Term.elabTermEnsuringType (← `(instructionLocation $body $predicate))
+        (some (mkConst ``Nat))
       Term.synthesizeSyntheticMVarsNoPostponing
       let some location ← (Meta.evalNat (← Meta.reduce (← instantiateMVars value))).run
         | throwError "Cutpoint must reduce to an instruction index"
