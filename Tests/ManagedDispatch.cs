@@ -53,11 +53,12 @@ using (var module = ModuleDefinition.ReadModule(dll))
 var runtimeAddress = Assembly.Load(File.ReadAllBytes(dll)).GetType("Examples.ManagedDispatch")!
     .GetMethod("Address")!.CreateDelegate<Func<int, int>>();
 if (runtimeAddress(3) != 17) throw new Exception("Runtime indirect tail cycle differs");
-foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNormal" })
+foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNormal", "NullLength" })
 {
     var output = Path.Combine(root, name);
-    Run(["dotnet", ExtractorPath, "extract", name == "DispatchNormal" ? normalDll : dll,
-        name.StartsWith("Dispatch", StringComparison.Ordinal) ? selector : $"ManagedDispatch::{name}(int)", output]);
+    var entry = name.StartsWith("Dispatch", StringComparison.Ordinal) ? selector :
+        $"ManagedDispatch::{name}({(name == "NullLength" ? "" : "int")})";
+    Run(["dotnet", ExtractorPath, "extract", name == "DispatchNormal" ? normalDll : dll, entry, output]);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
     var proof = Path.Combine(root, name + ".lean");
     var claims = new List<string>();
@@ -73,6 +74,11 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
     {
         claims.Add($"(match {RunCase(".scalar (.i32 42)")} with | .error fault => some fault.fault | " +
             ".ok _ => none) = some (.memory .expiredLifetime (.address ⟨0, 0⟩) 0)");
+    }
+    else if (name == "NullLength")
+    {
+        claims.Add($"(match {RunCase("")} with | .error fault => some fault.fault | " +
+            ".ok _ => none) = some (.thrown \"System.NullReferenceException\")");
     }
     else
     {

@@ -15,6 +15,10 @@ public static unsafe class ManagedDispatch
 
     public static int Read(ref int value) => value;
 
+    public static delegate* managed<int, int>[] NullTable() => null!;
+
+    public static int NullLength() => NullTable().Length;
+
     public static int LocalEscape(int value)
     {
         var local = value;
