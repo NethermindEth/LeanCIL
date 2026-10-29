@@ -26,11 +26,11 @@ internal static class InstructionTranslation
         if (nativeOperands.Incoming.TryGetValue(i, out var dispatchStack))
         {
             if (i.OpCode.Code == Code.Add && dispatchStack.Length >= 2 &&
-                dispatchStack[^2].Kind == NativeOperands.Kind.MethodTable)
+                dispatchStack[^2].Kind == NativeOperands.Kind.NativeMethodTable)
                 return ".managed .tableOffset";
             if (i.OpCode.Code == Code.Ldind_I && dispatchStack.LastOrDefault() is
-                { Kind: NativeOperands.Kind.MethodTable, Metadata: { } signature })
-                return ".managed (.tableLoad " + signature[".methodTable ".Length..] + ")";
+                { Kind: NativeOperands.Kind.NativeMethodTable, Metadata: { } signature })
+                return ".managed (.tableLoad " + signature[".nativeMethodTable ".Length..] + ")";
         }
         if (i.OpCode.Code == Code.Calli && i.Operand is Mono.Cecil.CallSite indirect)
             return $".managed (.call {ManagedPointers.SignatureEvidence(indirect)} " +

@@ -77,6 +77,13 @@ theorem native_throw : (match nativeRun nativeTable 0 (-1) with
 /-- A numeric local beside the authenticated target keeps its ordinary scalar representation. -/
 theorem numeric_local : Extracted.method0.localKinds[1]? = some .word64 := by decide +kernel
 #print axioms numeric_local
+/-- Native pointers cannot use managed-array length or indexing opcodes. -/
+theorem native_not_array :
+    Extraction.scalarTransfer Extracted.method0Closed ⟨0, 142, .none⟩
+      [.nativeMethodTable nativeSignature] = none ∧
+    Extraction.scalarTransfer Extracted.method0Closed ⟨0, 151, .none⟩
+      [.word32, .nativeMethodTable nativeSignature] = none := by decide +kernel
+#print axioms native_not_array
 /-- Out-of-range and uninitialized table storage cannot manufacture callable identities. -/
 theorem native_invalid_storage :
     (nativeRun nativeTable 1 0).isOk = false ∧
@@ -111,7 +118,8 @@ foreach (var (name, mutated) in new[]
     if (mutated == scalar) throw new InvalidOperationException("Ineffective native evidence mutation: " + name);
     var rejectedPath = Path.Combine(root, "Rejected-" + name + ".lean");
     File.WriteAllText(rejectedPath, mutated);
-    rejected.Add(rejectedPath, "PASS independently rejected native dispatch evidence: " + name);
+    rejected.Add(rejectedPath, "PASS independently rejected native dispatch evidence: " + name,
+        "Extraction.ScalarFlowValid");
 }
 var numericDll = Path.Combine(root, "NumericTarget.dll");
 using (var module = ModuleDefinition.ReadModule(dll))

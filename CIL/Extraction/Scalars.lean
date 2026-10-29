@@ -26,6 +26,7 @@ inductive ScalarKind where
   | enumSpan (element : ArrayElement) (writable : Bool) (reference : Bool)
   | methodPointer (signature : ManagedSignature)
   | methodTable (signature : ManagedSignature)
+  | nativeMethodTable (signature : ManagedSignature)
   deriving DecidableEq, Repr
 
 /-- The claimed stack kinds (top first) at each raw pc; `none` where the pc is unreachable. -/
@@ -333,21 +334,21 @@ private def sizeConstant (instruction : RawInstruction) (bits : W32) : Bool :=
 def scalarEmissionMatches (role : Option FoldRole) (instruction : RawInstruction)
     (stack : List ScalarKind) (emitted : Op) : Bool :=
   if instruction.opcode == 77 && (stack.head?).any
-      (fun kind => match kind with | .methodTable _ => true | _ => false) then
+      (fun kind => match kind with | .nativeMethodTable _ => true | _ => false) then
     match stack, emitted with
-    | .methodTable signature :: _, .managed (.tableLoad actual) => signature == actual
+    | .nativeMethodTable signature :: _, .managed (.tableLoad actual) => signature == actual
     | _, _ => false
   else if instruction.opcode == 88 && (stack[1]?).any
-      (fun kind => match kind with | .methodTable _ => true | _ => false) then
+      (fun kind => match kind with | .nativeMethodTable _ => true | _ => false) then
     match stack, emitted with
     | offset :: _ :: _, .managed .tableOffset => offset ∈ [.word32, .native]
     | _, _ => false
   else if let .managed operation := emitted then match operation, stack with
     | .address .., _ => instruction.opcode == 65030
     | .call .., _ => instruction.opcode == 41
-    | .tableOffset, offset :: .methodTable _ :: _ =>
+    | .tableOffset, offset :: .nativeMethodTable _ :: _ =>
       instruction.opcode == 88 && offset ∈ [.word32, .native]
-    | .tableLoad signature, .methodTable actual :: _ =>
+    | .tableLoad signature, .nativeMethodTable actual :: _ =>
       instruction.opcode == 77 && signature == actual
     | .tableAddress .., _ => false
     | .tableLength, .methodTable _ :: _ => instruction.opcode == 142
@@ -574,7 +575,7 @@ private def spanCreateMatches (instruction : RawInstruction) (emitted : Op) : Bo
 private def dispatchScalar (context : NativeDispatchContext) (type : TypeExpr)
     (index : Option Nat := none) : ScalarKind :=
   match nativeDispatchStorage context type index with
-  | some (.methodTable signature) => .methodTable signature
+  | some (.methodTable signature) => .nativeMethodTable signature
   | some (.methodPointer signature) => .methodPointer signature
   | _ => scalarType type
 
@@ -641,10 +642,10 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
         !(values.take expected.length == expected) then none else
       return (if result == .void then [] else [scalarType result]) ++ values.drop expected.length
   if opcode == 77 then
-    if let .methodTable signature :: rest := stack then return .methodPointer signature :: rest
+    if let .nativeMethodTable signature :: rest := stack then return .methodPointer signature :: rest
   if opcode == 88 then
-    if let offset :: .methodTable signature :: rest := stack then
-      if offset ∈ [.word32, .native] then return .methodTable signature :: rest else none
+    if let offset :: .nativeMethodTable signature :: rest := stack then
+      if offset ∈ [.word32, .native] then return .nativeMethodTable signature :: rest else none
   if opcode == 142 then
     if let .methodTable _ :: rest := stack then return .native :: rest
   if opcode == 151 || opcode == 163 then

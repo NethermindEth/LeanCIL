@@ -9,7 +9,7 @@ internal static class NativeOperands
 {
     internal enum Kind
     {
-        Other, Word32, Word64, Native, Reference, NullObject, MethodPointer, MethodTable,
+        Other, Word32, Word64, Native, Reference, NullObject, MethodPointer, MethodTable, NativeMethodTable,
         ArraySigned8, ArrayUnsigned8, ArraySigned16, ArrayUnsigned16, ArraySigned32, ArrayUnsigned32,
         ArraySigned64, ArrayUnsigned64, ArrayNativeInt, ArrayNativeUInt, ArrayBoolean, ArrayCharacter
     }
@@ -89,7 +89,9 @@ internal static class NativeOperands
     {
         var dispatch = NativeDispatch.For(method);
         StackType Slot(TypeReference type, int? local = null) => dispatch.Kind(type, local) is { } kind
-            ? new(kind.StartsWith(".methodTable ", StringComparison.Ordinal) ? Kind.MethodTable : Kind.MethodPointer, kind)
+            ? kind.StartsWith(".methodTable ", StringComparison.Ordinal)
+                ? new(Kind.NativeMethodTable, kind.Replace(".methodTable ", ".nativeMethodTable ", StringComparison.Ordinal))
+                : new(Kind.MethodPointer, kind)
             : Type(type);
         var incoming = new Dictionary<Instruction, StackType[]> { [method.Body.Instructions[0]] = [] };
         var mixed = new HashSet<Instruction>();
@@ -116,13 +118,13 @@ internal static class NativeOperands
                 if (Pop() != Slot(local.VariableType, local.Index))
                     throw new InvalidDataException("Native callable local requires authenticated pointer provenance");
             }
-            else if (code == Code.Add && stack.Count >= 2 && stack[^2].Kind == Kind.MethodTable &&
+            else if (code == Code.Add && stack.Count >= 2 && stack[^2].Kind == Kind.NativeMethodTable &&
                 stack[^1].Kind is Kind.Word32 or Kind.Native)
                 Pop();
-            else if (code == Code.Ldind_I && stack.Count > 0 && stack[^1].Kind == Kind.MethodTable)
+            else if (code == Code.Ldind_I && stack.Count > 0 && stack[^1].Kind == Kind.NativeMethodTable)
             {
                 var table = Pop();
-                stack.Add(new(Kind.MethodPointer, table.Metadata!.Replace(".methodTable ", ".methodPointer ",
+                stack.Add(new(Kind.MethodPointer, table.Metadata!.Replace(".nativeMethodTable ", ".methodPointer ",
                     StringComparison.Ordinal)));
             }
             else if (code == Code.Localloc)
