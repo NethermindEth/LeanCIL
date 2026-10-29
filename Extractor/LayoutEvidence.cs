@@ -128,8 +128,16 @@ internal sealed class LayoutEvidence
                 uses.Add($".size {pc} {Index(constructor.DeclaringType)} .construct");
             else if (instruction.OpCode.Code == Code.Call && instruction.Operand is GenericInstanceMethod generic &&
                 generic.DeclaringType.FullName == "System.Runtime.CompilerServices.Unsafe" && generic.GenericArguments.Count == 1 &&
-                MetadataValidation.IsAggregate(generic.GenericArguments[0], method.Module) && generic.Name is "SizeOf" or "Add")
-                uses.Add($".size {pc} {Index(generic.GenericArguments[0])} .{(generic.Name == "SizeOf" ? "sizeOf" : "referenceAdd")}");
+                MetadataValidation.IsAggregate(generic.GenericArguments[0], method.Module))
+            {
+                var access = generic.Name switch
+                {
+                    "SizeOf" => "sizeOf", "Add" => "referenceAdd",
+                    "ReadUnaligned" => "load", "WriteUnaligned" => "store", _ => null
+                };
+                if (access is not null)
+                    uses.Add($".size {pc} {Index(generic.GenericArguments[0])} .{access}");
+            }
         }
         foreach (var local in method.Body.Variables)
             if (MetadataValidation.IsAggregate(local.VariableType, method.Module))

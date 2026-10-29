@@ -55,6 +55,8 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
     | .atom _ "System.Runtime.CompilerServices.Unsafe", [.aggregate _ index] =>
       if site.name = "SizeOf" then return [.size pc index .sizeOf]
       else if site.name = "Add" then return [.size pc index .referenceAdd]
+      else if site.name = "ReadUnaligned" then return [.size pc index .load]
+      else if site.name = "WriteUnaligned" then return [.size pc index .store]
       else return []
     | _, _ => return []
   | _, _ => return []

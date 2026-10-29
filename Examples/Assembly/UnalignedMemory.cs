@@ -1,0 +1,20 @@
+using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
+
+namespace Examples;
+
+internal static class UnalignedMemory
+{
+    public static sbyte ReadSigned(in byte source) => Unsafe.ReadUnaligned<sbyte>(in source);
+    public static short ReadHalf(in byte source) => Unsafe.ReadUnaligned<short>(in source);
+    public static ulong ReadWord(in byte source) => Unsafe.ReadUnaligned<ulong>(in source);
+    public static FourLimbs ReadAggregate(in byte source) => Unsafe.ReadUnaligned<FourLimbs>(in source);
+    public static Vector128<byte> Read128(in byte source) => Unsafe.ReadUnaligned<Vector128<byte>>(in source);
+    public static Vector512<uint> Read512(in byte source) => Unsafe.ReadUnaligned<Vector512<uint>>(in source);
+    public static void WriteSigned(ref byte destination, sbyte value) => Unsafe.WriteUnaligned(ref destination, value);
+    public static void WriteHalf(ref byte destination, short value) => Unsafe.WriteUnaligned(ref destination, value);
+    public static void WriteWord(ref byte destination, ulong value) => Unsafe.WriteUnaligned(ref destination, value);
+    public static void WriteAggregate(ref byte destination, FourLimbs value) => Unsafe.WriteUnaligned(ref destination, value);
+    public static void Write128(ref byte destination, Vector128<byte> value) => Unsafe.WriteUnaligned(ref destination, value);
+    public static void Write512(ref byte destination, Vector512<uint> value) => Unsafe.WriteUnaligned(ref destination, value);
+}

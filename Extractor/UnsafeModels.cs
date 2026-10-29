@@ -7,6 +7,7 @@ internal static class UnsafeModels
 {
     internal static string? Translate(MethodReference reference, string architecture = "scalar")
     {
+        if (MemoryTransfers.Unaligned(reference, architecture) is { } transfer) return transfer;
         if (ReinterpretReference(reference, architecture) is { } cast) return cast;
         if (reference.DeclaringType.FullName != "System.Runtime.CompilerServices.Unsafe" ||
             !RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||

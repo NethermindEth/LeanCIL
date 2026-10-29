@@ -323,9 +323,12 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
       return (← checkedAt destination width
         (write memory dst (List.replicate width (value.setWidth 8)) alignment), rest)
   -- Vector loads and stores
-  | .load128, .reference r :: rest => return (memory, .scalar (← loadValue memory r 16) :: rest)
-  | .load256, .reference r :: rest => return (memory, .scalar (← loadValue memory r 32) :: rest)
-  | .load512, .reference r :: rest => return (memory, .scalar (← loadValue memory r 64) :: rest)
+  | .load128, .reference r :: rest | .load128, .readOnlyReference r :: rest =>
+    return (memory, .scalar (← loadValue memory r 16) :: rest)
+  | .load256, .reference r :: rest | .load256, .readOnlyReference r :: rest =>
+    return (memory, .scalar (← loadValue memory r 32) :: rest)
+  | .load512, .reference r :: rest | .load512, .readOnlyReference r :: rest =>
+    return (memory, .scalar (← loadValue memory r 64) :: rest)
   | .store512, .scalar (.v512 bits) :: .reference r :: rest =>
     return (← storeValue memory r (.v512 bits), rest)
   | .store512, .scalar (.snapshot .vector512 bytes) :: .reference r :: rest =>
@@ -527,7 +530,7 @@ def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
       (write m address (numberBytes number width) ordinaryAccessAlignment), rest)
   | .storeScalar width, _ :: .readOnlyReference r :: _ =>
     .error (.memory .unwritable r width)
-  | .loadAggregate size, .reference r :: rest =>
+  | .loadAggregate size, .reference r :: rest | .loadAggregate size, .readOnlyReference r :: rest =>
     if let .error .uninitialized := dereference m r size ordinaryAccessAlignment then
       return (m, .scalar (← loadSnapshot m r (.aggregate size)) :: rest)
     let bytes ← checkedAt r size (dereference m r size ordinaryAccessAlignment)
