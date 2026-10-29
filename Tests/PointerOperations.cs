@@ -39,6 +39,9 @@ foreach (var name in new[]
     var resultValue = subtraction ? $".reference (.address ⟨0, {expected}⟩)" :
         $".scalar (.{(name == "Difference" ? "i64" : "i32")} {expected})";
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    var differenceEvidence = name == "Difference" ? NarrowEvidence(source, "method0_scalars_validated") : null;
+    var control = differenceEvidence is null ? "" : CheckedEvidenceControl(source, differenceEvidence,
+        ["method0_scalars_validated"], 0);
     var proof = Path.Combine(root, name + ".lean");
     File.WriteAllText(proof, source + $$"""
 
@@ -53,12 +56,12 @@ foreach (var name in new[]
               [.reference (.address ⟨0, 5⟩), {{arguments}}] inputMemory =
               .ok (inputMemory, [{{resultValue}}]) := rfl
         #print axioms pointer_result
-        """);
+        """ + "\n" + control);
     evidence.Add(proof, "PASS runtime, certificate and checked pointer execution: " + name);
     if (name != "Difference") continue;
     if (!source.Contains(".sub", StringComparison.Ordinal)) throw new Exception("Missing difference mutation target");
     var forged = Path.Combine(root, "ForgedDifference.lean");
-    File.WriteAllText(forged, source.Replace(".sub", ".add", StringComparison.Ordinal));
+    File.WriteAllText(forged, differenceEvidence!.Replace(".sub", ".add", StringComparison.Ordinal));
     var rejection = Execute(["lake", "env", "lean", forged], cwd: FixturePackage());
     if (rejection.Code == 0 || !rejection.Output.Contains("ScalarFlowValid", StringComparison.Ordinal))
         throw new Exception("Forged difference was not rejected by scalar evidence: " + rejection.Output);
