@@ -49,13 +49,13 @@ theorem Memory.Renamed.allocateArray {mapping : AllocationRenaming} {scopes : Na
     · cases success
     · rename_i bounded
       cases allocated : CIL.Safety.allocate source
-          ⟨.managedHeap, ⟨length * element.width, element.width, []⟩, true,
+          ⟨.managedHeap, ⟨length * element.width, element.allocationAlignment, []⟩, true,
             [length * element.width]⟩ with
       | error fault => simp [allocated, checkedAt, Except.mapError] at success
       | ok pair =>
         obtain ⟨identity, memory⟩ := pair
         have valid : (Allocation.mk .managedHeap
-            ⟨length * element.width, element.width, []⟩ true
+            ⟨length * element.width, element.allocationAlignment, []⟩ true
             [length * element.width]).valid = true := by
           unfold CIL.Safety.allocate at allocated
           split at allocated <;> first | cases allocated | simp_all

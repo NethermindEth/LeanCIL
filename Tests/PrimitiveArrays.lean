@@ -212,12 +212,39 @@ theorem native_negative_array_length :
      | .ok _ => false) = true := by decide +kernel
 #print axioms native_negative_array_length
 
-/-- Unsupported element kinds cannot claim an expected exception through their length. -/
+/-- Unsupported element extents cannot claim an expected exception through their length. -/
 theorem unsupported_allocation_is_not_exception :
-    (match newArray memory (.aggregate "Record" 4) (.i32 (-1)) with
+    (match newArray memory (.aggregate "Record" (2^16)) (.i32 (-1)) with
      | .error fault => fault == .unsupported "Unsupported array element allocation"
      | .ok _ => false) = true := by decide +kernel
 #print axioms unsupported_allocation_is_not_exception
+
+/-- A zero-width composite cannot form an array even when its length is zero. -/
+theorem zero_width_allocation_rejected :
+    (newArray memory (.aggregate "Record" 0) (.i32 0)).isOk = false := rfl
+#print axioms zero_width_allocation_rejected
+
+/-- Maximum supported component size and count stay bounded without materializing cells. -/
+theorem composite_maximum_constant_initialization :
+    (match allocateArray memory (.aggregate "Record" (2^16 - 1)) maxArrayLength with
+     | .ok (view, result) => view.length == maxArrayLength &&
+         (view.validate result).isOk &&
+         (result.cells memory.nextIdentity (maxArrayLength * (2^16 - 1) - 1)).initialized &&
+         (result.cells memory.nextIdentity 0).bits == 0
+     | .error _ => false) = true := by decide +kernel
+#print axioms composite_maximum_constant_initialization
+
+/-- Ref-like containment is accepted only when the enclosing struct is also ref-like. -/
+theorem byref_like_layout_containment :
+    let child : CIL.Extraction.RawLayout :=
+      { identity := "Child", explicit := false, packing := 0, declaredSize := 0,
+        fields := [], byRefLike := true }
+    let parent : CIL.Extraction.RawLayout :=
+      { identity := "Parent", explicit := false, packing := 0, declaredSize := 0,
+        fields := [⟨.aggregate 0, none⟩] }
+    (CIL.Extraction.computeLayouts [child, { parent with byRefLike := true }]).isSome = true ∧
+      CIL.Extraction.computeLayouts [child, parent] = none := by decide +kernel
+#print axioms byref_like_layout_containment
 
 /-- Native length operands certify, while raw int64 stack kinds do not. -/
 theorem allocation_native_kind :

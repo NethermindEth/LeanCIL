@@ -20,7 +20,7 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 
 | Opcodes | Status | Implemented behaviour and restrictions |
 | --- | --- | --- |
-| `newarr` | Partial | Fresh zero-initialized primitive integer and same-assembly enum arrays, including native integers, `bool` and `char`. Enum zero values need not name a declared member. Int32/native lengths must be nonnegative and at most the .NET 10 CoreCLR ceiling `0x7fffffc7`; negative lengths raise `System.OverflowException`. Heap identity survives returns. Success assumes runtime-supported allocation size and available heap capacity; no GC, object-header or out-of-memory model. |
+| `newarr` | Partial | Fresh zero-initialized primitive integer, same-assembly enum, validated reference-free aggregate and integer-vector arrays, including native integers, `bool` and `char`. Composite element sizes must be positive and fit the CoreCLR 16-bit component-size field; byref-like elements are rejected. Enum zero values need not name a declared member. Int32/native lengths must be nonnegative and at most the .NET 10 CoreCLR ceiling `0x7fffffc7`; negative lengths raise `System.OverflowException`. Heap identity survives returns. Success assumes runtime-supported allocation size and available heap capacity; no GC, object-header or out-of-memory model. |
 | `ldlen` | Partial | Length of a supplied integer, enum, reference-free aggregate or integer-vector array, or typed handler table, returned as a native integer. Null raises `System.NullReferenceException`. |
 | `ldelema` | Partial | Checked element reference into a supplied integer, enum, reference-free aggregate or integer-vector array. The type token must match the array element type; null and bounds checks precede address formation. Grants no read/write authority and does not make uninitialized contents readable. References retain allocation lifetime across locals, calls and returns. |
 | `readonly.` | Partial | Immediately precedes an admitted `ldelema`; branches into the following address instruction are rejected. Produces a restricted reference that remains readonly through byref locals, arguments and returns. Scalar reads are allowed, while stores and adapters that would discard the restriction fail. Other authorized aliases can still update the backing bytes. |
@@ -188,7 +188,7 @@ supported integer Vector128/256/512 elements over existing storage. Their length
 and allocation identity remain explicit across locals, calls and returns. Indexing checks
 null before bounds; negative and out-of-range indices raise `System.IndexOutOfRangeException`
 on a valid non-null array. Length does not require readable contents. Invalid storage and
-insufficient authority remain model faults. Primitive integer and same-assembly enum arrays can also be allocated with
+insufficient authority remain model faults. Admitted reference-free arrays with element sizes from 1 to 65535 bytes can also be allocated with
 `newarr`. Array-root address-taking, object identity tests and reference/floating-point elements
 remain outside this subset.
 
@@ -199,7 +199,7 @@ The table above is exhaustive for reachable translation. Notable exclusions incl
 | Debugger and prefixes | `break`, `volatile.`; `tail.` outside admitted same-assembly calls; `readonly.` outside the checked array-element subset; `constrained.` outside the checked struct-call subset |
 | Other conversions | Floating-point conversions |
 | Other indirect/block memory | `ldind.ref`, floating-point `ldind.*`, `stind.ref`, floating-point `stind.*` |
-| Objects, arrays and metadata | `ldstr` outside a folded throw, `box`, `unbox`, `unbox.any`, `castclass`, `isinst`, aggregate, vector, reference and floating-point `newarr`, reference/floating-point `ldelem.*`/`stelem.*`, `ldtoken` of a method or of a type outside a decided type test |
+| Objects, arrays and metadata | `ldstr` outside a folded throw, `box`, `unbox`, `unbox.any`, `castclass`, `isinst`, byref-like, reference and floating-point `newarr`, reference/floating-point `ldelem.*`/`stelem.*`, `ldtoken` of a method or of a type outside a decided type test |
 | Static field values | `stsfld`, `ldsfld` and `ldsflda` of fields outside the admitted readonly subset |
 | Dispatch and exceptions | Unconstrained `callvirt`, `jmp`, `ldvirtftn`, `throw` outside a folded throw, `rethrow`, `leave`, `leave.s`, `endfinally`, `endfilter` |
 | Floating-point constants | `ldc.r4`, `ldc.r8` |

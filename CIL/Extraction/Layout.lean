@@ -49,6 +49,8 @@ structure RawLayout where
   fields : List RawField
   /-- Auto layout; CoreCLR keeps declaration order only among fields of equal width. -/
   auto : Bool := false
+  /-- Byref-like structs cannot be elements of heap arrays. -/
+  byRefLike : Bool := false
   /-- Direct interface identities, used when checking closed generic constraints. -/
   interfaces : List String := []
   /-- Closed sequential generic layouts additionally prove their original field substitutions. -/
@@ -350,10 +352,18 @@ def genericLayoutValid (layouts : List RawLayout) (layout : RawLayout) : Bool :=
         genericFieldType layouts (← substituteType generic.arguments type)) ==
           some (layout.fields.map RawField.type)
 
+/-- A heap-storable struct cannot contain a byref-like struct, even with no reference fields. -/
+def byRefLikeFieldsValid (raw : Array RawLayout) (layout : RawLayout) : Bool :=
+  layout.byRefLike || layout.fields.all (fun field => match field.type with
+    | .aggregate index => (raw[index]?).any (fun child => !child.byRefLike)
+    | _ => true)
+
 /-- Reject forward references and cycles by computing strictly in metadata-table order. -/
 def computeLayouts (raw : List RawLayout) (architecture : Architecture := .scalar) :
     Option (Array ComputedLayout) :=
-  if !raw.all (genericLayoutValid raw) then none else
+  let indexed := raw.toArray
+  if !raw.all (fun layout => genericLayoutValid raw layout && byRefLikeFieldsValid indexed layout)
+    then none else
     raw.foldlM (init := #[]) fun previous entry => do
       return previous.push (← computeLayout previous entry architecture)
 

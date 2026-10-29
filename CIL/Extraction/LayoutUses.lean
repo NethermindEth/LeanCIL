@@ -61,6 +61,7 @@ private def checkSize (size alignment : Nat) : SizeAccess → Op → Bool
   | .load, .memory (.pointerTransfer (.snapshot (.aggregate width)) actual false)
   | .store, .memory (.pointerTransfer (.snapshot (.aggregate width)) actual true) =>
     width == size && actual == alignment
+  | .arrayElement, .newArray (.aggregate _ width)
   | .arrayElement, .memory (.arrayAddress (.aggregate _ width) _)
   | .arrayElement, .memory (.arrayTransfer (.aggregate _ width) _)
   | .arrayElement, .memory (.arraySpan (.aggregate _ width) _ _)
@@ -96,6 +97,8 @@ def validateLayoutUse (raw : List RawLayout) (layouts : Array ComputedLayout)
       let signed := field.type == FieldType.signed8 || field.type == FieldType.signed16
       return checkField computed signed access operation).getD false
   | .size pc type access => (do
+      let metadata ← raw[type]?
+      if access = SizeAccess.arrayElement ∧ metadata.byRefLike = true then none else pure ()
       let layout ← layouts[type]?
       let operation ← method.code[pc]?
       return checkSize layout.layout.size layout.alignment access operation).getD false

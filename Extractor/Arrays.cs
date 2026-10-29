@@ -41,6 +41,7 @@ internal static class Arrays
                 vectorWidth, false, NativeOperands.Kind.ArrayComposite);
         if (MetadataValidation.IsAggregate(type, type.Module))
         {
+            if (MetadataValidation.IsByRefLike(type)) return null;
             var width = architecture is null ? 0 : Spans.ElementWidth(type, architecture)!.Value;
             return new($"aggregate {JsonSerializer.Serialize(LayoutEvidence.Identity(type))} {width}",
                 width, false, NativeOperands.Kind.ArrayComposite);
@@ -65,9 +66,7 @@ internal static class Arrays
 
     internal static string? Translate(Instruction instruction, string architecture) => instruction.OpCode.Code switch
     {
-        Code.Newarr when Storage((TypeReference)instruction.Operand) is
-            { Kind: not NativeOperands.Kind.ArrayComposite } element =>
-            $".newArray {element.Expression}",
+        Code.Newarr => $".newArray {AllocationElement((TypeReference)instruction.Operand, architecture).Expression}",
         Code.Ldlen => ".memory .arrayLength",
         Code.Ldelema => $".memory (.arrayAddress {(Storage((TypeReference)instruction.Operand, architecture) ??
             throw new InvalidDataException("Unsupported array element token: " + instruction.Operand)).Expression}" +
@@ -86,6 +85,14 @@ internal static class Arrays
         Code.Stelem_Any => Typed(instruction, true, architecture),
         _ => null
     };
+
+    static Element AllocationElement(TypeReference type, string architecture)
+    {
+        var element = Storage(type, architecture);
+        if (element is null || element.Width is <= 0 or > ushort.MaxValue)
+            throw new InvalidDataException("Unsupported array allocation element: " + type.FullName);
+        return element;
+    }
 
     internal static void ValidateReadOnly(InstructionIndex instructions, Instruction prefix)
     {

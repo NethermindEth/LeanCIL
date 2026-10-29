@@ -104,6 +104,7 @@ internal sealed class LayoutEvidence
             return $"  {{ identity := {JsonSerializer.Serialize(Identity(type))}, {genericEvidence}" +
                 $"explicit := {metadata.IsExplicitLayout.ToString().ToLowerInvariant()}, " +
                 (metadata.IsAutoLayout ? "auto := true, " : "") +
+                (MetadataValidation.IsByRefLike(type) ? "byRefLike := true, " : "") +
                 $"interfaces := [{string.Join(", ", metadata.Interfaces.Select(implementation =>
                     JsonSerializer.Serialize(Identity(GenericStructs.Substitute(implementation.InterfaceType,
                         type as GenericInstanceType)))))}], " +
@@ -175,7 +176,7 @@ internal sealed class LayoutEvidence
                 {
                     Code.Ldobj => "load", Code.Stobj => "store", Code.Initobj => "initialize",
                     Code.Cpobj => "copy", Code.Sizeof => "sizeOf",
-                    Code.Ldelema or Code.Ldelem_Any or Code.Stelem_Any => "arrayElement", _ => null
+                    Code.Newarr or Code.Ldelema or Code.Ldelem_Any or Code.Stelem_Any => "arrayElement", _ => null
                 };
                 if (access is not null) uses.Add($".size {pc} {Index(type)} .{access}");
             }

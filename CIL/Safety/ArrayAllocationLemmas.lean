@@ -1,7 +1,7 @@
 import CIL.Safety.ArrayAllocation
 import CIL.Safety.FrameSetupLemmas
 
-/-! # Freshness and initialized storage evidence for integer and enum heap allocation -/
+/-! # Freshness and initialized storage evidence for reference-free heap arrays -/
 
 namespace CIL.Safety
 
@@ -10,7 +10,7 @@ inductive ArrayAllocationEffect (memory : Memory) : ArrayView → Memory → Pro
   | fresh {element length identity allocated}
       (supported : element.allocationSupported = true) (bounded : length < 2^31)
       (allocation : allocate memory
-        ⟨.managedHeap, ⟨length * element.width, element.width, []⟩, true,
+        ⟨.managedHeap, ⟨length * element.width, element.allocationAlignment, []⟩, true,
           [length * element.width]⟩ = .ok (identity, allocated)) :
       ArrayAllocationEffect memory ⟨.address ⟨identity, 0⟩, length, element⟩
         (arrayMemory allocated identity (length * element.width))
@@ -78,12 +78,10 @@ theorem ArrayAllocationEffect.view_valid {memory result : Memory} {view : ArrayV
   | fresh supported bounded allocation =>
     have found := allocation_lookup _ _ _ _ allocation
     rename_i element length identity allocated
-    have width : 0 < element.width ∧ element.width ≤ 8 := by
-      cases element <;> simp_all [CIL.ArrayElement.allocationSupported, CIL.ArrayElement.width]
-      rename_i storage
-      cases storage <;> decide
+    have width : 0 < element.width ∧ element.width < 2^16 := by
+      simpa [CIL.ArrayElement.allocationSupported] using supported
     have extent : length * element.width < nativeLimit := by
-      have := Nat.mul_le_mul_left length width.2
+      have := Nat.mul_le_mul (Nat.le_of_lt bounded) (Nat.le_of_lt width.2)
       simp only [nativeLimit]
       omega
     simp only [nativeLimit] at extent

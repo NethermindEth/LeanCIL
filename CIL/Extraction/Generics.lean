@@ -151,7 +151,8 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
   | .byref _ => some .reference
   | .array (.aggregate identity index) => do
     let metadata ← layouts[index]?
-    if metadata.identity == identity then some (.aggregateArray identity index) else none
+    if metadata.identity == identity && !metadata.byRefLike then
+      some (.aggregateArray identity index) else none
   | .array element => match managedSignature element with
     | some signature => if callableLayoutsValid layouts element then some (.methodTable signature)
       else none

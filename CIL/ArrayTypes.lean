@@ -31,11 +31,6 @@ inductive ArrayElement where
   | vector (identity : String) (size : Nat)
   deriving DecidableEq, Repr
 
-/-- Integer and enum elements whose zero-initialized arrays the allocator admits. -/
-def ArrayElement.allocationSupported : ArrayElement → Bool
-  | .aggregate .. | .vector .. => false
-  | _ => true
-
 /-- Storage width on the admitted 64-bit runtime profiles. -/
 def ArrayElement.width : ArrayElement → Nat
   | .signed8 | .unsigned8 | .boolean => 1
@@ -44,6 +39,16 @@ def ArrayElement.width : ArrayElement → Nat
   | .signed64 | .unsigned64 | .nativeInt | .nativeUInt => 8
   | .enumeration _ storage => storage.width
   | .aggregate _ size | .vector _ size => size
+
+/-- Array payload alignment guaranteed by the admitted 64-bit CoreCLR deployment. -/
+def ArrayElement.allocationAlignment (element : ArrayElement) : Nat :=
+  match element with
+  | .aggregate .. | .vector .. => 8
+  | _ => element.width
+
+/-- CoreCLR array component sizes occupy a nonzero 16-bit field. -/
+def ArrayElement.allocationSupported (element : ArrayElement) : Bool :=
+  0 < element.width && element.width < 2^16
 
 /-- Narrow loads sign-extend signed integer and enum storage. -/
 def ArrayElement.signed : ArrayElement → Bool

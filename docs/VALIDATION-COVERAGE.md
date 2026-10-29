@@ -483,7 +483,7 @@ arguments checks everything and writes `artifacts/test-results.json`.
 | Method discovery includes canonical selectors and unsupported candidates without claiming support | Passed |
 | Malformed settings, missing proof, unsupported CIL, changed assembly and missing Lake produce stage-specific guidance | Passed |
 | Subtraction rejected by the unchanged universal addition contract | Passed; no successful report retained |
-| Primitive integer array allocation | Checked zero initialization, empty/non-null identity, negative/native lengths, helper returns and stores; forged element/operation certificates and unsupported element types rejected |
+| Reference-free array allocation | Checked primitive/enum, packed/nested aggregate and vector zero initialization, payload alignment, empty/non-null identity, negative/native lengths, helper returns and packed field stores; forged element identity, layout identity/width and byref-like certificates, malformed markers and unsupported extents rejected |
 | Integer `div`, `div.un`, `rem`, `rem.un`, both widths | 648 comparisons against actual .NET execution and corresponding Lean proofs passed, including divide-by-zero and signed overflow |
 | Extracted unsigned quotient for arbitrary inputs with a nonzero divisor | Universal proofs passed for 32 and 64 bits; multiplication substituted for division rejected by the unchanged contract |
 | Division with mixed widths, references, stack underflow or a zero divisor | Semantic rejection tests passed |

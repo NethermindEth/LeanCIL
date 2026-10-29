@@ -74,12 +74,23 @@ Reference-element and multidimensional arrays, covariance and addresses of array
 Valid null/index failures raise their named exceptions; invalid descriptors, expired storage and
 missing authority remain model faults and cannot discharge those exceptional contracts.
 
-`newarr` allocates primitive integer/bool/char/native arrays and same-assembly integer-backed enum
-arrays. Enum payloads start at zero even when the enum declares no zero member. Fresh non-null
+`newarr` allocates primitive integer/bool/char/native arrays, same-assembly integer-backed enums,
+validated reference-free aggregates and supported integer vectors. Enum payloads start at zero
+even when the enum declares no zero member. Fresh non-null
 identities survive frame return, including for empty arrays. Payloads start zeroed and writable.
 Negative lengths raise `OverflowException`; lengths above `0x7fffffc7`, invalid native extents and
 allocator inconsistency are model faults. The [CoreCLR ceiling](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/vm/gchelpers.cpp)
 does not establish available memory. GC, object headers and out-of-memory behavior are not modeled.
+
+Array component sizes range from 1 to 65535 bytes, matching CoreCLR's
+[16-bit component-size field](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/vm/methodtable.h).
+Composite payloads have eight-byte base alignment on the admitted 64-bit targets, independent of
+element stride: the [array header](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/vm/object.h)
+preserves the [GC pointer alignment](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/gc/env/gcenv.base.h).
+Vector arrays do not acquire 16-, 32- or 64-byte alignment from their element width. Padding bytes,
+like fields, start initialized to zero. Byref-like structs cannot be array elements or fields of
+heap-storable structs. The raw byref-like marker is decoded from metadata; faithful decoding and
+serialization remain extractor assumptions, while the Lean layout and array checks enforce it.
 
 Spans, slices, array conversions and `MemoryMarshal` views preserve backing identity and capability;
 creating a view neither reads/initializes bytes nor grants byte authority. Readonly views permit

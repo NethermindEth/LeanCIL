@@ -52,6 +52,16 @@ public static class PrimitiveArrays
     public static byte[] AllocateBytes(int length) => new byte[length];
     public static short[] AllocateShorts(int length) => new short[length];
     public static long[] AllocateLongs(int length) => new long[length];
+    public static PackedLeaf[] AllocatePacked(int length) => new PackedLeaf[length];
+    public static NestedRecord[] AllocateNested(int length) => new NestedRecord[length];
+    public static System.Runtime.Intrinsics.Vector256<ulong>[] AllocateVector(int length) =>
+        new System.Runtime.Intrinsics.Vector256<ulong>[length];
+    public static int AllocatePackedAndWrite(int length, int index, int value)
+    {
+        var values = AllocatePacked(length);
+        values[index].Value = (uint)value;
+        return (int)values[index].Value;
+    }
     public static int AllocateAndWrite(int length, int index, int value)
     {
         var values = Allocate(length);
