@@ -22,6 +22,9 @@ internal static class AggregateSpans
         public Vector256<ulong> Value;
     }
 
+    public static bool IsEmpty(Span<Words> source) => source.IsEmpty;
+    public static bool VectorIsEmpty(ReadOnlySpan<Vector128<ulong>> source) => source.IsEmpty;
+
     public static Span<byte> LayoutBytes(Span<VectorRecord> source) => MemoryMarshal.AsBytes(source);
     public static VectorRecord LayoutRead(ReadOnlySpan<VectorRecord> source) => source[0];
 

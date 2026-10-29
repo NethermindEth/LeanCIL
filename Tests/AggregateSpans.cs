@@ -29,7 +29,7 @@ foreach (var profile in method.Name.StartsWith("Layout", StringComparison.Ordina
         "Factory" or "ReadOnlyFactory" => ".reference (.address ⟨0, 0⟩), .scalar (.i32 2)",
         "LayoutBytes" => Span(layoutWidth), "LayoutRead" => Span(layoutWidth, false),
         "WordsView" => Span(1, false, length: 64),
-        "VectorBytes" => Span(16), "ReadVector" => Span(16, false),
+        "VectorBytes" => Span(16), "ReadVector" or "VectorIsEmpty" => Span(16, false),
         "Read" => Span(32, false),
         "Write" => Span(32) + ", .scalar (.aggregate (List.replicate 32 7))",
         "WriteVector" => Span(16) + ", .scalar (.v128 0)",
@@ -45,6 +45,7 @@ foreach (var profile in method.Name.StartsWith("Layout", StringComparison.Ordina
         "Bytes" => Span(1, length: 64), "WordsView" => Span(32, false),
         "VectorBytes" => Span(1, length: 32), "ReadVector" => ".scalar (.v128 0)",
         "Read" => ".scalar (.aggregate (List.replicate 32 0))",
+        "IsEmpty" or "VectorIsEmpty" => ".scalar (.i32 0)",
         "Copy" => ".scalar (.i32 1)", "Slice" => Span(32, offset: 32, length: 1), _ => ""
     };
     var proof = Path.Combine(output, "Proof.lean");

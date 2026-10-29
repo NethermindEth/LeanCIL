@@ -1,4 +1,4 @@
-import CIL.Extraction.MetadataNames
+import CIL.Extraction.SpanCalls
 
 /-!
 # Exact view observations
@@ -26,10 +26,7 @@ private def viewObservation (raw : RawInstruction) : Option ViewObservation := d
   else
     let .apply (.constructor _ owner) element := site.declaringType | none
     let .span _ writable ← spanStorage site.declaringType | none
-    let elementName ← match element with
-      | .atom _ name => some name
-      | .enum .. => (String.ofList ∘ Prod.snd) <$> namedType element
-      | _ => none
+    let elementName ← spanElementName element
     if !site.hasThis || !site.typeArguments.isEmpty || !site.parameterTypes.isEmpty then none
       else pure ()
     let target (result : String) := MethodId.external (runtimeScope ++ "::" ++ result ++
