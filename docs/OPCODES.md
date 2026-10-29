@@ -363,6 +363,11 @@ integer, aggregate and integer-vector storage. They use the existing typed loads
 with byte alignment, retaining bounds, lifetime, access authority and snapshot initialization
 masks. Readonly source references are accepted; writes require writable references and byte
 authority. Pointer overloads require allocation-relative references, not numeric addresses.
+`Unsafe.Read<T>(void*)` and `Write<T>(void*, T)` reuse those checked transfers after an alignment
+check. Primitive integers require their storage width; aggregates require their computed layout
+alignment, including packing. Integer vectors conservatively require alignment to their full byte
+width. This subset can reject vector addresses that a particular runtime accepts; the unaligned
+overloads remain available. Alignment checks do not repeat the per-byte authority scan.
 `Unsafe.AsRef<T>(void*)` preserves that provenance and forms a live reference without reading or
 initializing bytes or granting access authority. Reference-bearing value types remain unsupported.
 

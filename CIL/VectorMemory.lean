@@ -162,6 +162,8 @@ inductive MemoryOp where
   | marshalRead (kind : TransferKind) (tryRead : Bool)
   /-- Copy an in-reference value to a byte span; a short try-write has no memory effect. -/
   | marshalWrite (kind : TransferKind) (tryWrite : Bool)
+  /-- A typed pointer transfer with independently validated alignment. -/
+  | pointerTransfer (kind : TransferKind) (alignment : Nat) (store : Bool)
   | bitcast256 | bitcastByteBool | skipInit
   | bitcastValue (source target : SnapshotShape)
   | staticAddress (bytes : List (BitVec 8)) | spanCreate | spanReference
@@ -194,6 +196,7 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .spanFill _ clear => if clear then 1 else 2
   | .marshalRead _ tryRead => if tryRead then 2 else 1
   | .marshalWrite .. => 2
+  | .pointerTransfer _ _ store => if store then 2 else 1
   | .bigMul64 | .copyBlock _ | .initBlock _ => 3
   | .spanSlice explicitLength => if explicitLength then 3 else 2
   | .spanFromReference .. | .byteOffset => 2

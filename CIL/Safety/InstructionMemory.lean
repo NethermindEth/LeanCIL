@@ -467,6 +467,23 @@ def arrayTransferInstruction (element : CIL.ArrayElement) (store : Bool)
       (.snapshot shape)) :: rest)
   | some value => return (← storeTransfer memory (.address reference) (.snapshot shape) value, rest)
 
+/-- Aligned pointer transfers check alignment without rescanning the typed transfer's byte authority. -/
+def pointerTransferInstruction (kind : CIL.TransferKind) (alignment : Nat) (store : Bool)
+    (stack : List Value) (memory : Memory) : ExecutionResult (Memory × List Value) := do
+  match store, stack with
+  | false, .reference reference :: rest
+  | false, .readOnlyReference reference :: rest =>
+    let address ← referenceAt reference
+    let _ ← checkedAt reference kind.width (access memory address 0 alignment false)
+    return (memory, .scalar (← loadTransfer memory reference kind) :: rest)
+  | true, .scalar value :: .reference reference :: rest =>
+    let address ← referenceAt reference
+    let _ ← checkedAt reference kind.width (access memory address 0 alignment true)
+    return (← storeTransfer memory reference kind value, rest)
+  | true, _ :: .readOnlyReference reference :: _ =>
+    .error (.memory .unwritable reference kind.width)
+  | _, _ => .error .invalidState
+
 /-- Executes non-fill memory operations after the shared operand guard. -/
 def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) := do
@@ -727,6 +744,7 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
     .error (.unsupported "Memory operation observes unspecified vector bits")
   else
   match operation with
+  | .pointerTransfer kind alignment store => pointerTransferInstruction kind alignment store stack memory
   | .arrayTransfer element store => arrayTransferInstruction element store stack memory
   | .binaryRead width signed bigEndian trying =>
     binaryTransferInstruction width signed bigEndian true trying stack memory
