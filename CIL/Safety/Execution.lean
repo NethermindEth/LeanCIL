@@ -105,6 +105,7 @@ def scalars : List Value → ExecutionResult (List CIL.Value)
 inductive FrameAction where
   | next (pc : Nat) (stack : List Value) (frame : Frame) (memory : Memory)
   | call (callee : Nat) (args rest : List Value) (memory : Memory)
+  | tailCall (callee : Nat) (args : List Value) (memory : Memory)
   | construct (callee : Nat) (args rest : List Value) (frame : Frame)
       (temporary : Reference) (kind : CIL.LocalKind) (memory : Memory)
   | returned (result : List Value) (memory : Memory)
@@ -263,6 +264,9 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
     let value :: rest := values | .error .invalidState
     let (slot, memory) ← storeLocal memory slot value
     return .next (pc + 1) rest { frame with locals := frame.locals.set index slot } memory
+  | .tailCall callee argc, _ =>
+    if stack.length != argc then .error .invalidState else
+      return .tailCall callee (← stack.reverse.mapM (checkedValue m)) m
   | .call callee argc, _ =>
     if stack.length < argc then .error .invalidState else
       let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
@@ -328,6 +332,15 @@ def run (program : CIL.Program) : Nat → Nat → Nat → List Value → Frame �
       let (childFrame, memory) ← (enterFrame child arguments memory).mapError fun fault => ⟨method, pc, fault⟩
       let (memory, result) ← run program fuel callee 0 arguments childFrame [] memory
       run program fuel method (pc + 1) args frame (result ++ rest) memory
+    | .tailCall callee arguments memory =>
+      let some child := program[callee]? | .error ⟨method, pc, .invalidState⟩
+      if child.returnsValue != body.returnsValue then .error ⟨method, pc, .invalidState⟩ else
+        let memory := leaveFrame frame memory
+        let arguments ← (arguments.mapM (checkedValue memory)).mapError
+          fun fault => ⟨method, pc, fault⟩
+        let (childFrame, memory) ← (enterFrame child arguments memory).mapError
+          fun fault => ⟨method, pc, fault⟩
+        run program fuel callee 0 arguments childFrame [] memory
     | .construct callee arguments rest frame temporary kind memory =>
       let some child := program[callee]? | .error ⟨method, pc, .invalidState⟩
       let (childFrame, memory) ← (enterFrame child arguments memory).mapError fun fault => ⟨method, pc, fault⟩

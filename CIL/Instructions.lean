@@ -116,6 +116,8 @@ inductive Op where
   | localAddr (index : Nat)
   | setLocal (index : Nat) (narrow : Option NarrowKind := none)
   | initializeSpanLocal (index : Nat) (constructor : SpanConstructor)
+  /-- Transfer to a managed method after retiring the current activation. -/
+  | tailCall (callee argc : Nat)
   -- 64-bit lanes of a 256-bit vector.
   | lane (index : Fin 4)
   | laneAddress (index : Fin 4)

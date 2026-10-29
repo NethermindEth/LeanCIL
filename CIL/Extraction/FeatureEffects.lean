@@ -57,7 +57,7 @@ def emittedFeatureEffect (op : Op) (returnsValue : Bool) : Option (Nat × Nat) :
   | .initAggregate _ | .skipInit | .pop => some (1, 0)
   | .dup => some (1, 2)
   -- Calls, construction, intrinsics and memory operations.
-  | .call _ count => some (count, if returnsValue then 1 else 0)
+  | .call _ count | .tailCall _ count => some (count, if returnsValue then 1 else 0)
   | .newAggregate _ count _ | .newVector256 _ count => some (count, 1)
   | .intrinsic _ count => some (count, 1)
   | .memory operation => some (memoryFeatureEffect operation)

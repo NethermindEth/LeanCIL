@@ -81,7 +81,7 @@ def observerCount : CIL.Op → Nat
   | .setLane _ | .store64 | .copyObject _ => 2
   -- Method boundaries
   | .ret _ => 1
-  | .call _ argc | .newVector256 _ argc | .newAggregate _ argc _ => argc
+  | .call _ argc | .tailCall _ argc | .newVector256 _ argc | .newAggregate _ argc _ => argc
   | .memory operation => operation.argumentCount
   | .initializeSpanLocal _ constructor => constructor.operation.argumentCount
   -- Internal forwarders preserve unspecified bits; stores and intrinsic consumers guard them.
