@@ -358,6 +358,22 @@ def spanFillInstruction (width : Nat) (clear : Bool) (stack : List Value) (memor
 def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) := do
   match operation, stack with
+  -- View observations validate storage but never inspect element bytes.
+  | .observeView .spanEmpty, .bufferSpan view :: rest =>
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    return (memory, .scalar (.i32 (if view.length == 0 then 1 else 0)) :: rest)
+  | .observeView .spanPinnable, .bufferSpan view :: rest =>
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    let reference := if view.length == 0 then .null else view.reference
+    let formed ← formValue memory reference
+    return (memory, (if view.writable then formed
+      else .readOnlyReference reference) :: rest)
+  | .observeView .arrayData, .array view :: rest =>
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    if view.reference == .null then .error (.thrown "System.NullReferenceException") else
+    return (memory, (← formValue memory view.reference) :: rest)
+  | .observeView .arrayData, .reference .null :: _ =>
+    .error (.thrown "System.NullReferenceException")
   -- Byte-span transfers retain the span extent and the typed value representation.
   | .marshalRead kind false, .bufferSpan view :: rest =>
     let _ ← checkedAt view.reference 0 (view.validate memory)
@@ -584,7 +600,7 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
   -- Null references
   | .nullRef, _ => return (memory, .reference .null :: stack)
   -- A pure comparison: no access, so a live, expired or end reference all answer false.
-  | .isNullRef, .reference r :: rest =>
+  | .isNullRef, .reference r :: rest | .isNullRef, .readOnlyReference r :: rest =>
     return (memory, .scalar (.i32 (match r with | .null => 1 | .address _ => 0)) :: rest)
   | .staticAddress _, _ | .staticValue _, _ | .createSpan _, _ | .spanCreate, _ =>
     .error (.unsupported "Extraction-bound static/span allocation metadata")

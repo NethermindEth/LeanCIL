@@ -1,6 +1,7 @@
 import CIL.Extraction.UnsafeReferences
 import CIL.Extraction.UnsafeTransfers
 import CIL.Extraction.MarshalCalls
+import CIL.Extraction.ViewObservations
 
 /-!
 # Unsafe helper calls
@@ -96,6 +97,7 @@ def UnsafeCallsValid (layouts : List RawLayout) (closed : RawMethod)
   all3 (fun instruction live emitted => !live ||
       unsafeTransferMatches layouts instruction emitted &&
       marshalTransferMatches layouts instruction emitted &&
+      viewObservationMatches instruction emitted &&
       unsafeSubtractMatches layouts instruction emitted &&
       if unsafeReferenceRequired instruction emitted then
         match unsafeReferenceHelper instruction, instruction.operand with

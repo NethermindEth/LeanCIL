@@ -133,9 +133,16 @@ def TransferKind.width : TransferKind → Nat
   | .scalar width _ => width
   | .snapshot shape => shape.width
 
+/-- Observations of existing views that neither read bytes nor grant write authority. -/
+inductive ViewObservation where
+  | spanEmpty | spanPinnable | arrayData
+  deriving DecidableEq, Repr
+
 /-- Exact memory calls and object opcodes supported by the reachable vector
     bodies. Widths and signedness are fixed by the validated overload. -/
 inductive MemoryOp where
+  /-- Inspect an existing view without accessing its element contents. -/
+  | observeView (observation : ViewObservation)
   /-- Reinterpret existing bytes without changing their storage or authority. -/
   | spanReinterpret (sourceWidth targetWidth : Nat) (writable : Bool)
   /-- Snapshot copying permits overlapping spans; try-copy returns false for a short target. -/
@@ -173,6 +180,7 @@ inductive MemoryOp where
 
 /-- Every popped operand; no default, so each new operation states what it reads. -/
 def MemoryOp.argumentCount : MemoryOp → Nat
+  | .observeView _ => 1
   | .spanCopy .. => 2
   | .spanFill _ clear => if clear then 1 else 2
   | .marshalRead _ tryRead => if tryRead then 2 else 1

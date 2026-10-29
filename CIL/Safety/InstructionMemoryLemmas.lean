@@ -461,6 +461,10 @@ macro "instruction_contract_close" : tactic => `(tactic| (
             | exact retained.head
             | apply loadValue_scalar_valid; assumption
             | apply formValue_result_valid; assumption
+            | apply formValue_readOnly_valid; assumption
+            | split <;> first
+                | apply formValue_result_valid; assumption
+                | apply formValue_readOnly_valid; assumption
             | apply checked_add_result_valid; assumption
             | apply checkedSpan_valid; assumption
             | apply checkedReadOnlySpan_valid; assumption
