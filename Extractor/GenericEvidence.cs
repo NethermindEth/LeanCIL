@@ -81,6 +81,10 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
             case VariableDefinition local: return $".local {local.Index}";
             case TypeReference type: return $".type ({Type(type)})";
             case MethodReference callee: return $".call {Call(callee, admittedInstruction, reachable)}";
+            case Mono.Cecil.CallSite site when instruction.OpCode.Code == Code.Calli:
+                return $".indirectCall ({Type(site.ReturnType)}) "+
+                    $"{List(site.Parameters.Select(parameter => Type(parameter.ParameterType)))} "+
+                    $"{Bool(site.HasThis)} {Bool(site.ExplicitThis)} {(int)site.CallingConvention}";
             case FieldReference field:
                 var isStatic = instruction.OpCode.Code is Code.Ldsfld or Code.Stsfld or Code.Ldsflda or Code.Ldtoken;
                 var index = 0;

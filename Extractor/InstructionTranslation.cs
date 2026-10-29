@@ -49,6 +49,11 @@ internal static class InstructionTranslation
     {
         profile ??= FeatureProfile.Scalar;
         var typeTests = TypeTests.Analyze(m);
+        if (i.OpCode.Code == Code.Tail)
+        {
+            TailCalls.ValidateReachable(m, i);
+            return ".nop";
+        }
         if (typeTests.Results.TryGetValue(i, out bool same)) return same ? ".const32 1" : ".const32 0";
         if (typeTests.Operands.Contains(i)) return ".nop";
         var throws = Throws.Analyze(m);
@@ -135,7 +140,6 @@ internal static class InstructionTranslation
         return i.OpCode.Code switch
         {
             Code.Nop => ".nop",
-            Code.Tail => ".nop",
             // Ordinary accesses already use the documented byte-aligned runtime model.
             // For block instructions the validated prefix selects the required alignment.
             Code.Unaligned => ".nop",

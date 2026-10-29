@@ -151,6 +151,8 @@ inductive RawOperand where
   | type (value : TypeExpr)
   | field (owner : TypeExpr) (index : Nat) (type : TypeExpr) (isStatic : Bool)
   | call (site : CallSite)
+  | indirectCall (returnType : TypeExpr) (parameters : List TypeExpr)
+      (hasThis explicitThis : Bool) (callingConvention : Nat)
   deriving DecidableEq, Repr
 
 /-- One CIL instruction: its byte offset, opcode and operand. Branch operands are
@@ -197,6 +199,9 @@ def substituteOperand (arguments : List TypeExpr) : RawOperand → Option RawOpe
       typeArguments := ← site.typeArguments.mapM (substituteType arguments),
       returnType := ← substituteType arguments site.returnType,
       parameterTypes := ← site.parameterTypes.mapM (substituteType arguments) }
+  | .indirectCall returnType parameters hasThis explicitThis convention => do
+    return .indirectCall (← substituteType arguments returnType)
+      (← parameters.mapM (substituteType arguments)) hasThis explicitThis convention
   | operand => some operand
 
 /-- The exact runtime identity of the value-type constraint. -/

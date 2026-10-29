@@ -91,6 +91,32 @@ partial class Program
                 rejected.Add(forged, "PASS tail certificate rejection: " + mutation, marker);
             }
         }
+        var excludedDll = Path.Combine(root, "TailExcluded.dll");
+        using (var module = ModuleDefinition.ReadModule(assembly))
+        {
+            var method = module.GetType("Examples.TailCalls").Methods.Single(method => method.Name == "Excluded");
+            var call = method.Body.Instructions.Single(instruction =>
+                instruction.Operand is MethodReference { Name: "Increment" });
+            method.Body.GetILProcessor().InsertBefore(call, Instruction.Create(OpCodes.Tail));
+            var signature = new CallSite(module.TypeSystem.Int32);
+            signature.Parameters.Add(new ParameterDefinition(module.TypeSystem.Int32));
+            call.OpCode = OpCodes.Calli;
+            call.Operand = signature;
+            module.Write(excludedDll);
+        }
+        var excludedOutput = Path.Combine(root, "Tail-Excluded");
+        Run(["dotnet", ExtractorPath, "extract", excludedDll, "TailCalls::Excluded(System.Int32)", excludedOutput]);
+        var excludedProof = Path.Combine(root, "Tail-Excluded.lean");
+        File.WriteAllText(excludedProof, File.ReadAllText(Path.Combine(excludedOutput, "Extracted.lean")) + """
+
+            theorem excluded_indirect_tail :
+                (CIL.Safety.invoke Extracted.program 32 0 [.scalar (.i32 42)]
+                  { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩,
+                    views := [], nextIdentity := 0 }).map Prod.snd =
+                  .ok [.scalar (.i32 42)] := rfl
+            #print axioms excluded_indirect_tail
+            """);
+        evidence.Add(excludedProof, "PASS profile-excluded indirect tail");
         foreach (var mutation in new[] { "branch", "return", "indirect", "stack", "type" })
         {
             var changed = Path.Combine(root, "Tail-Rejected-" + mutation + ".dll");

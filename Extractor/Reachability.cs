@@ -13,7 +13,7 @@ internal static class Reachability
         FeatureProfile profile = selectedProfile ?? FeatureProfile.Scalar;
         profile.Validate();
         MemoryPrefixes.Validate(method);
-        TailCalls.Validate(method);
+        TailCalls.ValidateStructure(method);
         var instructions = method.Body.Instructions;
         var boundaries = instructions.ToHashSet();
         foreach (Instruction instruction in instructions)
@@ -45,6 +45,7 @@ internal static class Reachability
         while (pending.TryDequeue(out Instruction? i))
         {
             queued.Remove(i);
+            if (i.OpCode.Code == Code.Tail) TailCalls.ValidateReachable(method, i);
             FeatureConstants state = incoming[i];
             int? condition = state.Top;
             state = state.Copy();
