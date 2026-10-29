@@ -9,6 +9,13 @@ public static class ValueBitCasts
     public struct Limbs { public ulong A, B, C, D; }
     public struct ContainsReference { public object Value; }
 
+    public static Vector128<byte> To128Byte(Pair value) => Unsafe.BitCast<Pair, Vector128<byte>>(value);
+    public static Pair From128Byte(Vector128<byte> value) => Unsafe.BitCast<Vector128<byte>, Pair>(value);
+    public static Vector256<int> To256Int32(Limbs value) => Unsafe.BitCast<Limbs, Vector256<int>>(value);
+    public static Limbs From256Int32(Vector256<int> value) => Unsafe.BitCast<Vector256<int>, Limbs>(value);
+    public static Vector256<long> To256Int64(Limbs value) => Unsafe.BitCast<Limbs, Vector256<long>>(value);
+    public static Limbs From256Int64(Vector256<long> value) => Unsafe.BitCast<Vector256<long>, Limbs>(value);
+
     public static Vector256<ulong> To256UInt64(Limbs value) => Unsafe.BitCast<Limbs, Vector256<ulong>>(value);
     public static Vector256<uint> To256UInt32(Limbs value) => Unsafe.BitCast<Limbs, Vector256<uint>>(value);
     public static Limbs From256UInt64(Vector256<ulong> value) => Unsafe.BitCast<Vector256<ulong>, Limbs>(value);

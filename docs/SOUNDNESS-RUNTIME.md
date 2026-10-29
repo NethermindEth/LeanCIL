@@ -89,8 +89,11 @@ constructors require a checked extent, not a numeric address. Raw `void*` is adm
 supported helpers/constructors. Arbitrary pointer element types and reference-bearing layouts remain
 unsupported. [OPCODES](OPCODES.md) specifies the exact constructor and receiver forms.
 
-Aggregate/vector loads and stores preserve snapshot initialization masks. Fill captures its value
-before writing, including aliasing cases, and preserves those masks; Clear initializes every byte.
+Equal-size aggregate/vector `Unsafe.BitCast` uses the same snapshot representation for validated
+`byte`, `int`, `uint`, `long` and `ulong` vector elements. Element signedness does not initialize
+unknown bytes or change their bits. Aggregate/vector loads and stores preserve initialization masks.
+Fill captures its value before writing, including aliasing cases, and preserves those masks;
+Clear initializes every byte.
 Nonempty destinations need write authority, not prior readability. Copy requires initialized source
 bytes. Empty operations grant no authority. Empty spans have null pinnable references; empty arrays
 retain their data reference. Null array data-reference access raises its named exception.

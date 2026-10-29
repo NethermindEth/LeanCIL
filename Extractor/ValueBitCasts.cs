@@ -29,15 +29,8 @@ internal static class ValueBitCasts
                 int width = MetadataValidation.Layout(type, reference.Module, architecture);
                 return ($"(.aggregate {width})", width);
             }
-            if (type is GenericInstanceType vector && vector.GenericArguments.Count == 1 &&
-                vector.GenericArguments[0].FullName is "System.UInt64" or "System.UInt32")
-                return vector.ElementType.FullName switch
-                {
-                    "System.Runtime.Intrinsics.Vector128`1" => (".vector128", 16),
-                    "System.Runtime.Intrinsics.Vector256`1" => (".vector256", 32),
-                    "System.Runtime.Intrinsics.Vector512`1" => (".vector512", 64),
-                    _ => null
-                };
+            if (MetadataValidation.IntegerVectorWidth(type) is int vectorWidth)
+                return ($".vector{vectorWidth * 8}", vectorWidth);
             return null;
         }
 

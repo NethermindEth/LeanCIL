@@ -399,7 +399,7 @@ overloads remain available. Alignment checks do not repeat the per-byte authorit
 `Unsafe.AsRef<T>(void*)` preserves that provenance and forms a live reference without reading or
 initializing bytes or granting access authority. Reference-bearing value types remain unsupported.
 
-The checked model supports `Unsafe.BitCast<TFrom,TTo>` between equal-size validated unmanaged aggregates and `Vector128`/`Vector256` values with `uint` or `ulong` elements, in both directions and under the scalar profile. Byte snapshots retain initialization flags through the cast, local and parameter homes, and value loads/stores. Partially initialized results remain snapshots; numeric reads and vector arithmetic cannot consume their unknown bytes.
+The checked model supports `Unsafe.BitCast<TFrom,TTo>` between equal-size validated unmanaged aggregates and `Vector128`/`Vector256`/`Vector512` values with `byte`, `int`, `uint`, `long` or `ulong` elements, in both directions and under the scalar profile. Byte snapshots retain initialization flags through the cast, local and parameter homes, and value loads/stores. Partially initialized results remain snapshots; numeric reads and vector arithmetic cannot consume their unknown bytes.
 
 `CIL.Safety.ValueBitCasts` supplies byte/vector round-trip lemmas and `bitcastValue_preserves_snapshot`; `CIL.Safety.SnapshotMemory` supplies checked snapshot write/readback facts. Access witnesses in `AccessAlignment` distinguish initialized reads/writes from snapshot copies, which preserve flags instead of asserting initialization.
 
