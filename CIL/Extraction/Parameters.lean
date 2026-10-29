@@ -187,7 +187,7 @@ def validateArgumentOpAt (localCount : Nat) (argumentAt : Nat → Option Storage
       | _ => return false).getD false
   | .other => match emitted with
       | .arg .. | .vectorArg .. | .vectorArgAddr .. => false
-      | .local index _ | .setLocal index _ | .localAddr index
+      | .local index _ | .setLocal index _ | .localAddr index | .initializeSpanLocal index _
       | .vectorLocal index | .vectorLocalAddr index | .setVectorLocal index =>
         index < localCount
       | _ => true

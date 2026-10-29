@@ -388,6 +388,9 @@ private def featureOpMatchesAtWith (raw : RawMethod) (eligible : Nat → Option 
   | some .head, .nop | some .interior, .nop => true
   | some (.result value), .const32 word => word == if value then 1 else 0
   | some (.raise name), .throw exception => name == exception
+  | some (.spanConstructor index constructor), .initializeSpanLocal actual operation =>
+    index == actual && constructor == operation
+  | some .argument, _ => featureOpMatchesWith raw eligible instruction emitted
   | some _, _ => false
   | none, _ => !typeTestInstruction instruction && featureOpMatchesWith raw eligible instruction emitted
 

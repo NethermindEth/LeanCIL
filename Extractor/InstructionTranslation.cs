@@ -62,7 +62,9 @@ internal static class InstructionTranslation
             return $".call {index} {resolved.Parameters.Count + 1}";
         }
         if (throws.Raises.TryGetValue(i, out string? raised)) return $".throw \"{raised}\"";
-        if (throws.Operands.Contains(i) || Spans.Analyze(m).Operands.Contains(i)) return ".nop";
+        var spans = Spans.Analyze(m);
+        if (spans.Constructors.TryGetValue(i, out var constructor)) return constructor;
+        if (throws.Operands.Contains(i) || spans.Operands.Contains(i)) return ".nop";
         int Target() => instructions.Position((Instruction)i.Operand);
         int Local() => ((VariableDefinition)i.Operand).Index;
         string Narrow(TypeReference type) => LeanEmitter.Narrow(type) is { } kind ? $" (some .{kind})" : "";

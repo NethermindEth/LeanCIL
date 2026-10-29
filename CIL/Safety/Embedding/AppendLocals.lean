@@ -560,6 +560,23 @@ theorem step_appendLocals_setLocal (index : Nat) (narrow : Option NarrowKind) :
 
 #print axioms step_appendLocals_setLocal
 
+/-- Span construction updates only its existing typed local slot. -/
+theorem step_appendLocals_initializeSpanLocal (index : Nat) (constructor : CIL.SpanConstructor) :
+    StepAppendLocals (.initializeSpanLocal index constructor) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  cases found : frame.locals[index]? with
+  | some slot =>
+    simp only [step, found, Frame.appendLocals_getElem? found, Frame.appendLocals_set found]
+    frame_natural
+  | none =>
+    revert kept
+    simp only [step, found]
+    repeat' split
+    all_goals first | (simp [StepKept]; done) | (intro; frame_natural; done)
+
+#print axioms step_appendLocals_initializeSpanLocal
+
 /-- `lane` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_lane (index : Fin 4) :
     StepAppendLocals (.lane index) := by
@@ -1278,6 +1295,8 @@ theorem step_appendLocals (body : Method) (op : Op) (pc : Nat) (args : List Valu
       exact step_appendLocals_vectorLocalAddr index
     case setVectorLocal index =>
       exact step_appendLocals_setVectorLocal index
+    case initializeSpanLocal index constructor =>
+      exact step_appendLocals_initializeSpanLocal index constructor
     case localAddr index =>
       exact step_appendLocals_localAddr index
     case setLocal index narrow =>

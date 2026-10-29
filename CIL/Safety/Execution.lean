@@ -257,6 +257,12 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
     let some slot := frame.locals[i]? | .error .invalidState
     let (slot, memory) ← storeLocal m slot value
     return .next (pc + 1) rest { frame with locals := frame.locals.set i slot } memory
+  | .initializeSpanLocal index constructor, _ =>
+    let some slot := frame.locals[index]? | .error .invalidState
+    let (memory, values) ← memoryInstruction constructor.operation stack m
+    let value :: rest := values | .error .invalidState
+    let (slot, memory) ← storeLocal memory slot value
+    return .next (pc + 1) rest { frame with locals := frame.locals.set index slot } memory
   | .call callee argc, _ =>
     if stack.length < argc then .error .invalidState else
       let arguments ← (stack.take argc).reverse.mapM (checkedValue m)

@@ -205,6 +205,24 @@ def instructionStep (op : CIL.Op) (pc : Nat) (frame : Frame) (stack : List Value
       return FrameAction.next (pc + 1) rest { frame with locals := frame.locals.set index slot }
         memory := rfl
 
+/-- A constructor checks its arguments and replaces its typed local at the call instruction. -/
+@[cil_step] theorem step_initializeSpanLocal_eq (index : Nat)
+    (constructor : CIL.SpanConstructor) (stack : List Value) :
+    step body (.initializeSpanLocal index constructor) pc args frame stack memory =
+      if unspecifiedOperands constructor.operation.argumentCount stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else do
+        let some slot := frame.locals[index]? | .error .invalidState
+        let (memory, values) ← memoryInstruction constructor.operation stack memory
+        let value :: rest := values | .error .invalidState
+        let (slot, memory) ← storeLocal memory slot value
+        return FrameAction.next (pc + 1) rest
+          { frame with locals := frame.locals.set index slot } memory := by
+  simp only [step, observerCount, Bool.or_false]
+  rfl
+
+#print axioms step_initializeSpanLocal_eq
+
 /-- Memory operations fault on unspecified operand bits, then run `staticInstruction`. -/
 @[cil_step] theorem step_memory_eq (operation : CIL.MemoryOp) (stack : List Value) :
     step body (.memory operation) pc args frame stack memory =

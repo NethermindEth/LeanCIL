@@ -47,6 +47,9 @@ theorem stepTransport : StepTransport := by
     cases operation <;> try cases family
     all_goals dsimp only [LocalIndexMap.operation]
     all_goals first
+    | exact ⟨mapping, .refl mapping,
+        frames.stepInitializeSpanLocal memories sourceFormed sourceBody targetBody _ pc _
+          arguments stack bounds observable⟩
     | exact memories.stepMemory frames sourceFormed targetFormed staticBounds sourceBody targetBody
         metadata _ pc arguments stack bounds observable
     | exact memories.stepStackAlloc frames sourceFormed targetFormed staticBounds

@@ -92,7 +92,8 @@ inductive FixedStepFamily where
 /-- Allocating and relocated-local operations have separate concrete step proofs. -/
 def fixedStepFamily : CIL.Op → FixedStepFamily
   | .local .. | .localAddr _ | .setLocal .. | .vectorLocal _ | .vectorLocalAddr _
-  | .setVectorLocal _ | .stackAlloc _ | .newVector256 .. | .newAggregate .. | .memory _ => .excluded
+  | .setVectorLocal _ | .initializeSpanLocal .. | .stackAlloc _ | .newVector256 ..
+  | .newAggregate .. | .memory _ => .excluded
   | .sub => .reference
   | .ltu | .gtu | .eq => .reference
   | .bltu _ | .bgeu _ | .bgtu _ | .bleu _ => .reference
@@ -210,7 +211,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
       metadata.returnsValue]
     all_goals try exact (related.stepFallback frames formed operation pc sourceBody.profile
       stack bounds observable)
-    case h_70 =>
+    case h_71 =>
       first
       | (have boundary : fixedStepFamily operation = .boundary := family
          have noArg : ∀ position, operation = .arg position none → False := by assumption

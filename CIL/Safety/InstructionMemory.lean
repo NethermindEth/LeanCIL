@@ -83,6 +83,7 @@ def observerCount : CIL.Op → Nat
   | .ret _ => 1
   | .call _ argc | .newVector256 _ argc | .newAggregate _ argc _ => argc
   | .memory operation => operation.argumentCount
+  | .initializeSpanLocal _ constructor => constructor.operation.argumentCount
   -- Internal forwarders preserve unspecified bits; stores and intrinsic consumers guard them.
   | .nop | .arg .. | .vectorArg _ | .vectorArgAddr _ | .local .. | .vectorLocal _
   | .vectorLocalAddr _ | .setVectorLocal _ | .localAddr _ | .setLocal .. | .const32 _

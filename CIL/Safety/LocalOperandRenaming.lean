@@ -16,6 +16,8 @@ def LocalIndexMap.operation (indices : LocalIndexMap) : CIL.Op → CIL.Op
   | .local position narrow => .local (indices.index position) narrow
   | .localAddr position => .localAddr (indices.index position)
   | .setLocal position narrow => .setLocal (indices.index position) narrow
+  | .initializeSpanLocal position constructor =>
+    .initializeSpanLocal (indices.index position) constructor
   | .vectorLocal position => .vectorLocal (indices.index position)
   | .vectorLocalAddr position => .vectorLocalAddr (indices.index position)
   | .setVectorLocal position => .setVectorLocal (indices.index position)

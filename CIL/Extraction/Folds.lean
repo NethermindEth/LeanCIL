@@ -1,4 +1,5 @@
 import CIL.Extraction.Generics
+import CIL.Extraction.SpanCalls
 import Std.Data.TreeMap.Lemmas
 
 /-!
@@ -310,13 +311,37 @@ inductive FoldRole where
   | result (value : Bool)
   /-- The raw `throw`: raises the constructed type. -/
   | raise (exception : String)
+  /-- An unchanged argument push protected from non-fallthrough entry. -/
+  | argument
+  /-- A checked constructor initializes the local whose address starts the fold. -/
+  | spanConstructor (index : Nat) (constructor : SpanConstructor)
   deriving DecidableEq, Repr
 
+/-- A constructor fold admits at most three pure single-value argument pushes. -/
+private def spanConstructorFold (locals : List TypeExpr) (head : RawInstruction)
+    (tail : List RawInstruction) : Option (List (Option FoldRole)) := do
+  if !(head.opcode ∈ [18, 65037]) then none else pure ()
+  let index ← localIndex head
+  let localType ← locals[index]?
+  let pushes := (tail.take 4).takeWhile fun instruction => instruction.opcode ∈
+    [2, 3, 4, 5, 14, 65033, 6, 7, 8, 9, 17, 65036,
+      20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
+  if pushes.length > 3 then none else pure ()
+  let call ← tail[pushes.length]?
+  let .call site := call.operand | none
+  if call.opcode != 40 || site.declaringType != localType then none else pure ()
+  let constructor ← spanLocalConstructor site
+  if pushes.length != site.parameterCount then none else
+    some (some .head :: List.replicate pushes.length (some .argument) ++
+      [some (.spanConstructor index constructor)])
+
 /-- The roles of a fold starting at `a`, if any; type tests take precedence. -/
-private def foldAt (locals : List TypeExpr) (a : RawInstruction) (tail : List RawInstruction) :
+private def foldAt (locals receiverLocals : List TypeExpr)
+    (a : RawInstruction) (tail : List RawInstruction) :
     Option (List (Option FoldRole)) :=
+  spanConstructorFold locals a tail <|>
   (match tail with
-    | b :: rest => if receiverFold locals a b && spanReceiverUse rest then
+    | b :: rest => if receiverFold receiverLocals a b && spanReceiverUse rest then
         some [some .head, some .interior] else none
     | _ => none) <|>
   (match tail with
@@ -327,13 +352,13 @@ private def foldAt (locals : List TypeExpr) (a : RawInstruction) (tail : List Ra
     some .head :: List.replicate count (some .interior) ++ [some (.raise name)]
 
 /-- Assign `pending` roles first; each step consumes one instruction, so the walk is structural. -/
-def foldRolesFrom (locals : List TypeExpr) :
+def foldRolesFrom (locals receiverLocals : List TypeExpr) :
     List (Option FoldRole) → List RawInstruction → List (Option FoldRole)
   | _, [] => []
-  | role :: pending, _ :: tail => role :: foldRolesFrom locals pending tail
-  | [], a :: tail => match foldAt locals a tail with
-    | some (role :: pending) => role :: foldRolesFrom locals pending tail
-    | _ => none :: foldRolesFrom locals [] tail
+  | role :: pending, _ :: tail => role :: foldRolesFrom locals receiverLocals pending tail
+  | [], a :: tail => match foldAt locals receiverLocals a tail with
+    | some (role :: pending) => role :: foldRolesFrom locals receiverLocals pending tail
+    | _ => none :: foldRolesFrom locals receiverLocals [] tail
 
 /-- Exact counts of decoded local operands, including indexes outside the declared locals. -/
 private def localUseCounts : List RawInstruction → Std.TreeMap Nat Nat
@@ -363,15 +388,15 @@ private theorem localUseCounts_get (code : List RawInstruction) (index : Nat) :
 
 /-- Roles derived from the raw body alone; extraction evidence cannot add or move a fold. -/
 def foldRoles (locals : List TypeExpr) (code : List RawInstruction) : List (Option FoldRole) :=
-  if locals.isEmpty then foldRolesFrom [] [] code else
+  if locals.isEmpty then foldRolesFrom [] [] [] code else
   let counts := localUseCounts code
   let singleUse := locals.zipIdx.map fun (type, index) =>
     if counts.getD index 0 == 2 then type else .void
-  foldRolesFrom singleUse [] code
+  foldRolesFrom locals singleUse [] code
 
 /-- Indexed role discovery agrees with filtering the whole body separately for each local. -/
 theorem foldRoles_eq_filter (locals : List TypeExpr) (code : List RawInstruction) :
-    foldRoles locals code = foldRolesFrom
+    foldRoles locals code = foldRolesFrom locals
       (locals.zipIdx.map fun (type, index) =>
         if (code.filter fun instruction => localIndex instruction == some index).length == 2
           then type else .void) [] code := by
@@ -383,7 +408,8 @@ theorem foldRoles_eq_filter (locals : List TypeExpr) (code : List RawInstruction
 /-- A non-fallthrough edge may enter a fold only at its first instruction. -/
 def foldEntry (role : Option (Option FoldRole)) : Bool :=
   match role with
-  | some (some .interior) | some (some (.result _)) | some (some (.raise _)) => false
+  | some (some .interior) | some (some (.result _)) | some (some (.raise _))
+  | some (some .argument) | some (some (.spanConstructor ..)) => false
   | _ => true
 
 end CIL.Extraction

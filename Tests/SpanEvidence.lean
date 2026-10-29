@@ -142,4 +142,47 @@ theorem exact_span_fill_call :
       (.memory (.spanFill 4 false)) = false := by decide +kernel
 #print axioms exact_span_fill_call
 
+/-- Exact array constructor used by an in-place local initialization. -/
+private def localConstructor : CallSite := {
+  declaringType := words, name := ".ctor"
+  target := .external (runtime ++
+    "::System.Void System.ReadOnlySpan`1<System.UInt32>::.ctor(!0[])")
+  typeArguments := [], parameterCount := 1, hasThis := true, returnsValue := false
+  returnType := .void, parameterTypes := [.array (.atom runtime "System.UInt32")] }
+
+private def constructorCode :=
+  [i 18 (.local 0), i 2, i 40 (.call localConstructor), i 18 (.local 0)]
+
+/-- Reused local addresses do not disable exact constructor folding. -/
+theorem constructor_fold : foldRoles [words] constructorCode =
+    [some .head, some .argument, some (.spanConstructor 0 (.array .unsigned32 false .whole)),
+      none] := by decide +kernel
+#print axioms constructor_fold
+
+/-- Constructor arguments and the constructor itself cannot be external branch targets. -/
+theorem constructor_no_interior_entry :
+    foldEntry (foldRoles [words] constructorCode)[0]? = true ∧
+    foldEntry (foldRoles [words] constructorCode)[1]? = false ∧
+    foldEntry (foldRoles [words] constructorCode)[2]? = false := by decide +kernel
+#print axioms constructor_no_interior_entry
+
+/-- Duplicating the local address or changing its declared span type prevents the fold. -/
+theorem constructor_alias_rejected :
+    foldRoles [words] [i 18 (.local 0), i 37, i 2, i 40 (.call localConstructor)] =
+      List.replicate 4 none ∧
+    foldRoles [span runtime "System.Int32"] constructorCode = List.replicate 4 none := by
+  decide +kernel
+#print axioms constructor_alias_rejected
+
+/-- The emitted local and constructor capability are both bound by the raw sequence. -/
+theorem constructor_forgery_rejected :
+    featureOpMatchesAt (raw [words] constructorCode)
+      (some (.spanConstructor 0 (.array .unsigned32 false .whole)))
+      (i 40 (.call localConstructor))
+      (.initializeSpanLocal 1 (.array .unsigned32 false .whole)) = false ∧
+    featureOpMatchesAt (raw [words] constructorCode)
+      (some (.spanConstructor 0 (.array .unsigned32 false .whole)))
+      (i 40 (.call localConstructor))
+      (.initializeSpanLocal 0 (.array .unsigned32 true .whole)) = false := by decide +kernel
+#print axioms constructor_forgery_rejected
 end Tests.SpanEvidence

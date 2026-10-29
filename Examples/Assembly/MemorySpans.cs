@@ -29,6 +29,26 @@ public static class MemorySpans
         return span[0];
     }
 
+    public static int InPlaceArrayLength(int[] values, int start, int length)
+    {
+        var span = new ReadOnlySpan<int>(values, start, length);
+        return span.Length;
+    }
+
+    public static int ReinitializeArraySpan(int[] values, int start, int length)
+    {
+        var span = new Span<int>(values);
+        var first = span[0];
+        span = new Span<int>(values, start, length);
+        return first + span[0] + span.Length;
+    }
+
+    public static unsafe int InPlacePointerSpan(int* values, int length)
+    {
+        var span = new ReadOnlySpan<int>(values, length);
+        return span[0] + span.Length;
+    }
+
     public static ReadOnlySpan<int> ArrayRange(int[] values, int start, int length) => new(values, start, length);
 
     public static Span<bool> ArrayAsSpan(bool[] values) => values.AsSpan();

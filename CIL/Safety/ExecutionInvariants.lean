@@ -2,6 +2,7 @@ import CIL.Safety.ExecutionTrace
 import CIL.Safety.FrameSetupLemmas
 import CIL.Safety.StaticMemoryLemmas
 import CIL.Safety.StackAllocationLemmas
+import CIL.Safety.SpanConstructionLemmas
 
 /-!
 # What one checked step may change
@@ -184,6 +185,31 @@ theorem referenceSubtract_valid (memory : Memory) (reference result : ManagedRef
         cases success
         constructor <;> apply checked_add_result_valid <;> assumption
 #print axioms referenceSubtract_valid
+/-- Constructing a view and storing it changes only the destination local. -/
+theorem StepContract.initializeSpanLocal {body : CIL.Method} {frame : Frame}
+    {stack rest : List Value} {memory result : Memory} {construction : Memory × List Value}
+    {index pc : Nat} {slot final : LocalSlot} {value : Value}
+    {constructor : CIL.SpanConstructor}
+    (found : frame.locals[index]? = some slot)
+    (constructed : memoryInstruction constructor.operation stack memory =
+      .ok construction)
+    (values : construction.2 = value :: rest)
+    (stored : storeLocal construction.1 slot value = .ok (final, result)) :
+    StepContract body frame stack memory
+      (.next pc rest { frame with locals := frame.locals.set index final } result) := by
+  obtain ⟨constructedMemory, constructedValues⟩ := construction
+  dsimp only at values stored
+  subst constructedValues
+  obtain ⟨same, _⟩ := spanConstructor_result constructor memory constructedMemory stack
+    value rest constructed
+  subst constructedMemory
+  refine ⟨.store found stored, ?_⟩
+  intro formed valid
+  exact ((memoryInstruction_contract _ _ _ _ _ constructed).values formed valid).tail.preserve
+    formed (storeLocal_extends_allocations _ _ _ _ _ stored)
+
+#print axioms StepContract.initializeSpanLocal
+
 /-- Every successful checked step has a `StepContract`. The proof walks every dispatcher arm,
     so it is the place that breaks when an instruction is added without an effect. -/
 theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
@@ -193,6 +219,9 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
   unfold step at h
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
+    | solve |
+        apply StepContract.initializeSpanLocal
+        all_goals assumption
     | solve | exact .stackAllocation (by assumption)
     | solve |
         apply StepContract.staticInstruction

@@ -91,6 +91,20 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
        obtain ⟨otherSlot, otherMemory⟩ := right
        obtain ⟨rfl, equivalent⟩ := related
        exact .ok (.next equivalent _ _ _))
+    | (apply ResultEquivalent.bind (same.memoryInstruction _ _)
+       intro left right related
+       obtain ⟨memory, values⟩ := left
+       obtain ⟨otherMemory, otherValues⟩ := right
+       obtain ⟨equivalent, rfl⟩ := related
+       cases values with
+       | nil => exact .error _
+       | cons value rest =>
+         apply ResultEquivalent.bind (equivalent.storeLocal _ _)
+         intro left right related
+         obtain ⟨slot, memory⟩ := left
+         obtain ⟨otherSlot, otherMemory⟩ := right
+         obtain ⟨rfl, stored⟩ := related
+         exact .ok (.next stored _ _ _))
     | (apply ResultEquivalent.bind (same.staticInstruction _ _ _ _)
        intro left right related
        obtain ⟨memory, values⟩ := left

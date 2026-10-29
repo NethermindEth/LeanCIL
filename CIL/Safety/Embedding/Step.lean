@@ -347,6 +347,22 @@ theorem step_relabel_setLocal (index : Nat) (narrow : Option NarrowKind) :
   stack_cases =>
     first | fallback_vacuous | lookup_lockstep
 
+/-- Span construction and its typed local store retain the original instruction boundary. -/
+theorem step_relabel_initializeSpanLocal (index : Nat) (constructor : SpanConstructor) :
+    StepRelabel (.initializeSpanLocal index constructor) := by
+  plain_cases
+  split at h
+  · rename_i found
+    try simp only [found]
+    obtain ⟨⟨memory, values⟩, constructed, h⟩ := except_bind_ok h
+    simp only [constructed, ok_bind_eq]
+    cases values with
+    | nil => cases h
+    | cons value rest => lockstep
+  · cases h
+
+#print axioms step_relabel_initializeSpanLocal
+
 theorem step_relabel_call (callee argc : Nat) : StepRelabel (.call callee argc) := by
   plain_cases
   by_cases short : stack.length < argc
@@ -617,6 +633,8 @@ theorem step_relabel (op : CIL.Op) : StepRelabel op := by
   case vectorLocal index => exact step_relabel_vectorLocal index
   case vectorLocalAddr index => exact step_relabel_vectorLocalAddr index
   case setVectorLocal index => exact step_relabel_setVectorLocal index
+  case initializeSpanLocal index constructor =>
+    exact step_relabel_initializeSpanLocal index constructor
   case localAddr index => exact step_relabel_localAddr index
   case setLocal index narrow => exact step_relabel_setLocal index narrow
   case call method argc => exact step_relabel_call method argc
@@ -1112,6 +1130,18 @@ theorem step_raise (op : CIL.Op) : StepRaise op := by
   case setVectorLocal | setLocal =>
     stack_cases =>
       first | fallback_raise_vacuous | lookup_raise
+  case initializeSpanLocal =>
+    plain_cases
+    split at h
+    · rename_i found
+      try simp only [found]
+      rcases except_bind_error h with constructed | ⟨⟨memory, values⟩, constructed, h⟩
+      · simp only [constructed, error_bind_eq]
+      · simp only [constructed, ok_bind_eq]
+        cases values with
+        | nil => cases h
+        | cons value rest => raise_lockstep
+    · cases h
   case call callee argc => exact step_raise_call callee argc
   case newVector256 callee argc => exact step_raise_newVector256 callee argc
   case newAggregate callee argc size => exact step_raise_newAggregate callee argc size

@@ -45,6 +45,32 @@ foreach (var mutation in new[] { "scope", "version" })
             "\n" + result.Output);
     Console.WriteLine("PASS readonly span modifier identity rejection: " + mutation);
 }
+foreach (var mutation in new[] { "alias", "branch" })
+{
+    var output = Path.Combine(root, "Rejected-Constructor-" + mutation);
+    Directory.CreateDirectory(output);
+    var dll = Path.Combine(output, "Examples.dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        var method = module.GetType("Examples.MemorySpans").Methods.Single(method =>
+            method.Name == "InPlaceArrayConstructor");
+        var head = method.Body.Instructions[0];
+        if (head.OpCode.Code is not (Mono.Cecil.Cil.Code.Ldloca or Mono.Cecil.Cil.Code.Ldloca_S))
+            throw new InvalidOperationException("Missing in-place constructor receiver");
+        var processor = method.Body.GetILProcessor();
+        if (mutation == "alias")
+            processor.InsertAfter(head, processor.Create(Mono.Cecil.Cil.OpCodes.Dup));
+        else
+            processor.InsertBefore(head, processor.Create(Mono.Cecil.Cil.OpCodes.Br, head.Next));
+        module.Write(dll);
+    }
+    var result = Execute(["dotnet", ExtractorPath, "extract", dll,
+        "MemorySpans::InPlaceArrayConstructor(System.Int32[],System.Int32,System.Int32)", output]);
+    var marker = mutation == "alias" ? "Unsupported in-place span constructor" : "folded span";
+    if (result.Code == 0 || !result.Output.Contains(marker, StringComparison.OrdinalIgnoreCase))
+        throw new InvalidOperationException("Incorrect constructor rejection: " + mutation + "\n" + result.Output);
+    Console.WriteLine("PASS in-place constructor rejection: " + mutation);
+}
 var evidence = new GeneratedEvidence(root);
 var rejected = new RejectedEvidence(root);
 var spanProofs = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -62,7 +88,15 @@ foreach (var (name, signature, arguments, expected) in new[]
         "[.reference (.address ⟨0, 0⟩), .scalar (.i32 3), .scalar (.i32 1)]", 7),
     ("ArraySliceWrite", "System.Int32[],System.Int32,System.Int32,System.Int32",
         "[.array ⟨.address ⟨0, 0⟩, 3, .signed32⟩, .scalar (.i32 1), " +
-        ".scalar (.i32 2), .scalar (.i32 11)]", 11)
+        ".scalar (.i32 2), .scalar (.i32 11)]", 11),
+    ("InPlaceArrayConstructor", "System.Int32[],System.Int32,System.Int32",
+        "[.array ⟨.address ⟨0, 0⟩, 3, .signed32⟩, .scalar (.i32 1), .scalar (.i32 2)]", 7),
+    ("InPlaceArrayLength", "System.Int32[],System.Int32,System.Int32",
+        "[.reference .null, .scalar (.i32 0), .scalar (.i32 0)]", 0),
+    ("ReinitializeArraySpan", "System.Int32[],System.Int32,System.Int32",
+        "[.array ⟨.address ⟨0, 0⟩, 3, .signed32⟩, .scalar (.i32 1), .scalar (.i32 2)]", 9),
+    ("InPlacePointerSpan", "System.Int32*,System.Int32",
+        "[.reference (.address ⟨0, 0⟩), .scalar (.i32 3)]", 3)
 })
 {
     var output = Path.Combine(root, name);
@@ -84,6 +118,41 @@ foreach (var (name, signature, arguments, expected) in new[]
         #print axioms compiled_span_result
         """);
     spanProofs.Add(name, proof);
+    if (name == "InPlaceArrayLength")
+        File.AppendAllText(proof, """
+
+            theorem constructor_fault_keeps_call_pc :
+                (CIL.Safety.invoke Extracted.program 64 0
+                  [.reference .null, .scalar (.i32 1), .scalar (.i32 0)] spanMemory).map Prod.snd =
+                  .error ⟨0, 4, .thrown "System.ArgumentOutOfRangeException"⟩ := rfl
+            #print axioms constructor_fault_keeps_call_pc
+
+            theorem uninitialized_span_local_rejected :
+                CIL.Safety.step Extracted.method0 (.local 0) 0 []
+                  ⟨0, [.span 4 false none], [], [], 0⟩ [] spanMemory = .error .invalidState := rfl
+            #print axioms uninitialized_span_local_rejected
+
+            theorem constructor_expired_storage_rejected :
+                CIL.Safety.step Extracted.method0
+                  (.initializeSpanLocal 0 (.array .signed32 false .counted)) 4 []
+                  ⟨0, [.span 4 false none], [], [], 0⟩
+                  [.scalar (.i32 0), .scalar (.i32 0), .array ⟨.address ⟨0, 0⟩, 3, .signed32⟩]
+                  { spanMemory with
+                    allocations := fun _ => some ⟨.callerStack, ⟨12, 1, []⟩, false, []⟩ } =
+                  .error (.memory .expiredLifetime (.address ⟨0, 0⟩) 0) := rfl
+            #print axioms constructor_expired_storage_rejected
+            """);
+    if (name == "InPlaceArrayConstructor")
+    {
+        const string operation = ".initializeSpanLocal 0 (.array .signed32 true .counted)";
+        if (!source.Contains(operation, StringComparison.Ordinal))
+            throw new InvalidOperationException("Missing compiled in-place span constructor");
+        var forged = Path.Combine(root, "Forged-constructor-local.lean");
+        File.WriteAllText(forged, source.Replace(operation,
+            ".initializeSpanLocal 1 (.array .signed32 true .counted)", StringComparison.Ordinal));
+        rejected.Add(forged, "PASS independent constructor destination rejection",
+            "Extraction.FeatureFlowValid method0Closed");
+    }
 }
 
 foreach (var (name, signature, width, arguments, bytes) in new[]
@@ -342,8 +411,7 @@ Console.WriteLine("PASS compiled span helper contract and caller composition");
 foreach (var (signature, marker) in new[]
 {
     ("ByRefSpan(System.Span`1<System.Int32>&)", "Unsupported by-reference span"),
-    ("FloatingSpan(System.ReadOnlySpan`1<System.Double>)", "Unsupported type"),
-    ("InPlaceArrayConstructor(System.Int32[],System.Int32,System.Int32)", "Unsupported in-place span constructor")
+    ("FloatingSpan(System.ReadOnlySpan`1<System.Double>)", "Unsupported type")
 })
 {
     var result = Execute(["dotnet", ExtractorPath, "extract", assembly, "MemorySpans::" + signature,

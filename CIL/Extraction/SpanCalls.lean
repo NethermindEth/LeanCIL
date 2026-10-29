@@ -94,6 +94,19 @@ private def spanMemberCall (opcode : Nat) (site : CallSite) : Option SpanCall :=
     else none
   else none
 
+/-- An exact span constructor, independent of whether CIL allocates or initializes its receiver. -/
+def spanLocalConstructor (site : CallSite) : Option SpanConstructor := do
+  if let some (.array element writable range) := spanMemberCall 115 site then
+    return .array element writable range
+  if site.name != ".ctor" || !site.hasThis || site.returnsValue ||
+      !site.typeArguments.isEmpty || site.parameterCount != 2 || site.returnType != .void ||
+      site.parameterTypes != [.pointer .void, .atom runtimeScope "System.Int32"] then none
+    else pure ()
+  let .apply (.constructor _ owner) (.atom _ element) := site.declaringType | none
+  let .span width writable ← spanStorage site.declaringType | none
+  if site.target != .external (runtimeScope ++ "::System.Void " ++ owner ++ "<" ++ element ++
+      ">::.ctor(System.Void*,System.Int32)") then none else some (.reference width writable)
+
 /-- The array overloads of AsSpan accept an array and zero, one or two int32 arguments. -/
 private def arrayExtensionCall (opcode : Nat) (site : CallSite) : Option SpanCall := do
   if opcode != 40 || site.hasThis || !site.returnsValue || site.name != "AsSpan" ||

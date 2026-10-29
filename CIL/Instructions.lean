@@ -66,6 +66,17 @@ inductive LocalKind where
   | byte | word32 | word64 | vector128 | vector256 | vector512 | reference
   deriving DecidableEq, Repr
 
+/-- Constructors that initialize a typed span local without exposing its storage address. -/
+inductive SpanConstructor where
+  | array (element : ArrayElement) (writable : Bool) (range : ArraySpanRange)
+  | reference (width : Nat) (writable : Bool)
+  deriving DecidableEq, Repr
+
+/-- The checked memory operation underlying a span constructor. -/
+def SpanConstructor.operation : SpanConstructor → MemoryOp
+  | .array element writable range => .arraySpan element writable range
+  | .reference width writable => .spanFromReference width writable
+
 /-- One instruction. Branch targets and call indices are positions in the method's code
     and in the `Program`. Constructors that `CIL.step` does not execute are handled by the
     checked interpreter in `CIL.Safety`. -/
@@ -104,6 +115,7 @@ inductive Op where
   | setVectorLocal (index : Nat)
   | localAddr (index : Nat)
   | setLocal (index : Nat) (narrow : Option NarrowKind := none)
+  | initializeSpanLocal (index : Nat) (constructor : SpanConstructor)
   -- 64-bit lanes of a 256-bit vector.
   | lane (index : Fin 4)
   | laneAddress (index : Fin 4)

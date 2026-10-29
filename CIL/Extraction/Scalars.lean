@@ -630,8 +630,8 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
   -- `call` and `newobj`: the operands must have the signature's kinds.
   if opcode == 40 || opcode == 111 || opcode == 115 then
     let .call site := instruction.operand | none
-    let expected := if byteSpanConstructor opcode site || (spanConstructor opcode site).isSome
-      then [.word32, .reference] else
+    let expected := if (opcode == 115 || opcode == 40) && (spanConstructor 115 site).isSome
+      then [.word32, .reference] ++ (if opcode == 40 then [.reference] else []) else
       site.parameterTypes.reverse.map scalarType ++
         (if opcode != 115 && site.hasThis then [scalarType (.byref site.declaringType)] else [])
     let inputs := if opcode == 115 && role == some .interior then
@@ -703,8 +703,11 @@ private def checkScalarSite (raw : RawMethod)
   | _, none, none, .unsupported _ => true
   | ((instruction, role), pc), some feature, some stack, emitted =>
     stack.length == feature.stack.length && stack.length <= raw.maxStack &&
-      spanCreateMatches instruction emitted &&
-      spanCallMatches instruction emitted &&
+      (match role with
+        | some (.spanConstructor index constructor) => match emitted with
+          | .initializeSpanLocal actual operation => index == actual && constructor == operation
+          | _ => false
+        | _ => spanCreateMatches instruction emitted && spanCallMatches instruction emitted) &&
       readOnlySiteMatches raw pc instruction emitted &&
       scalarEmissionMatches role instruction stack emitted &&
       (scalarStoreFault raw instruction stack emitted ||
