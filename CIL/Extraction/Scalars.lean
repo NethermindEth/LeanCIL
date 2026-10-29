@@ -678,7 +678,7 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     let pops := expected.length
     if !callParametersMatch site || pops > stack.length || !((inputs.take pops).zip expected).all (fun (value, home) =>
         value == home || (value == .nullObject &&
-          (match home with | .array _ => true | _ => false))) ||
+          (match home with | .array _ | .methodTable _ => true | _ => false))) ||
         site.returnsValue != (site.returnType != .void) then none else
       return (if opcode == 115 then [scalarType site.declaringType]
         else if site.returnsValue then [callResult site] else []) ++ stack.drop pops

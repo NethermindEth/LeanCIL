@@ -117,6 +117,9 @@ inductive FrameAction where
 def managedStep (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
     (stack : List Value) (memory : Memory) : ExecutionResult FrameAction := do
   match operation, stack with
+  | .tableLength, .reference .null :: _
+  | .tableElement _, .scalar _ :: .reference .null :: _ =>
+    .error (.thrown "System.NullReferenceException")
   | .address target signature, _ =>
     return .next (pc + 1) (.methodPointer ⟨signature, some target.identity⟩ :: stack) frame memory
   | .tableLength, .methodTable table :: rest =>
