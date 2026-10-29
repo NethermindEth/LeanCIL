@@ -409,7 +409,7 @@ internal static class RuntimeModels
     private static Dictionary<string, string> BuildPortableVectorOperations()
     {
         var operations = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var width in new[] { 128, 256 })
+        foreach (var width in new[] { 128, 256, 512 })
         {
             var genericVector = Vector(width, "!!0");
             var memberVector = Vector(width, "!0");

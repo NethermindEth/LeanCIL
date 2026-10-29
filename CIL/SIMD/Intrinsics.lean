@@ -22,7 +22,7 @@ bit-level operations; whether a profile may call an intrinsic is `Intrinsic.avai
 
 namespace CIL
 
-/-- Portable `Vector128`/`Vector256` operations with software semantics on every target.
+/-- Portable vector operations with software semantics on every target.
     `width` is the vector width in bits; lanes are 64 bits unless named otherwise. -/
 inductive VectorIntrinsic where
   | add64 (width : Nat) | sub64 (width : Nat) | ltu64 (width : Nat) | eq64 (width : Nat)
@@ -143,17 +143,21 @@ def evalIntrinsic (op : Intrinsic) (args : List Value) : Option Value := do
   | .vector (.band w), xs => binaryVector w (fun a b => a &&& b) xs
   | .vector (.bor w), xs => binaryVector w (fun a b => a ||| b) xs
   | .vector (.bxor w), xs => binaryVector w (fun a b => a ^^^ b) xs
-  -- Portable 128- and 256-bit vectors: equality, complement, reinterpretation and constants.
+  -- Whole-vector equality, complement, reinterpretation and constants at supported widths.
   | .vector (.equalsAll 128), [.v128 a, .v128 b] => some (boolValue (a == b))
   | .vector (.equalsAll 256), [.v256 a, .v256 b] => some (boolValue (a == b))
+  | .vector (.equalsAll 512), [.v512 a, .v512 b] => some (boolValue (a == b))
   | .vector (.bnot 128), [.v128 a] => some (.v128 (~~~a))
   | .vector (.bnot 256), [.v256 a] => some (.v256 (~~~a))
+  | .vector (.bnot 512), [.v512 a] => some (.v512 (~~~a))
   | .vector (.reinterpret 128), [.v128 a] => some (.v128 a)
   | .vector (.reinterpret 256), [.v256 a] => some (.v256 a)
   | .vector (.zero 128), [] => some (.v128 0)
   | .vector (.zero 256), [] => some (.v256 0)
+  | .vector (.zero 512), [] => some (.v512 0)
   | .vector (.ones 128), [] => some (.v128 (~~~0))
   | .vector (.ones 256), [] => some (.v256 (~~~0))
+  | .vector (.ones 512), [] => some (.v512 (~~~0))
   -- Creation from scalars and lane extraction.
   | .vector (.create64 128), [.i64 a, .i64 b] => some (.v128 (Vector.pack128 a b))
   | .vector (.create64 256), [.i64 a, .i64 b, .i64 c, .i64 d] =>

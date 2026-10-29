@@ -44,11 +44,12 @@ var fields = new[] { 128, 256 }.Select(bits => $$"""
     public static Vector{{bits}}<uint> Field{{bits}}(ref Holder{{bits}} holder, Vector{{bits}}<uint> value)
     { holder.Value = value; return holder.Value; }
     """);
-var portableCases = (from bits in new[] { 128, 256 } from element in new[] { "byte", "long" }
+var portableCases = (from bits in new[] { 128, 256, 512 } from element in new[] { "byte", "long" }
     select (Bits: bits, Element: element)).ToArray();
 var portable = portableCases.Select(item =>
 {
-    var intersection = item is { Bits: 128, Element: "byte" } ? "PortableAnd(left, right)" : "(left & right)";
+    var intersection = item.Element == "byte" && item.Bits != 256
+        ? $"PortableAnd{item.Bits}(left, right)" : "(left & right)";
     var primitiveChecks = item.Element == "byte" ? $$"""
         if (!Vector{{item.Bits}}.EqualsAll(Vector{{item.Bits}}<int>.Zero, ~Vector{{item.Bits}}<int>.AllBitsSet) ||
             !Vector{{item.Bits}}.EqualsAll(Vector{{item.Bits}}<uint>.Zero, ~Vector{{item.Bits}}<uint>.AllBitsSet))
@@ -70,7 +71,9 @@ File.WriteAllText(Path.Combine(source, "Storage.cs"),
     "using System.Runtime.Intrinsics; using System.Runtime.InteropServices;\n" +
     "public static unsafe class Storage {\n" +
     "static T Pass<T>(T value) where T : unmanaged => value;\n" +
-    "static Vector128<byte> PortableAnd(Vector128<byte> left, Vector128<byte> right) => left & right;\n" +
+    string.Join('\n', new[] { 128, 512 }.Select(bits =>
+        $"static Vector{bits}<byte> PortableAnd{bits}(Vector{bits}<byte> left, " +
+        $"Vector{bits}<byte> right) => left & right;")) +
     string.Join('\n', methods.Concat(copies).Concat(fields).Concat(portable)) +
     "\npublic static int Sizes() => " + string.Join(" + ", cases.Select(item =>
         $"sizeof(Vector{item.Bits}<{item.Element}>)")) + ";\n}\n");
@@ -221,7 +224,9 @@ foreach (var item in portableCases)
             (128, "byte") => Vector128.Create<byte>(bytes),
             (128, _) => Vector128.Create<byte>(bytes).AsInt64(),
             (256, "byte") => Vector256.Create<byte>(bytes),
-            _ => Vector256.Create<byte>(bytes).AsInt64()
+            (256, _) => Vector256.Create<byte>(bytes).AsInt64(),
+            (512, "byte") => Vector512.Create<byte>(bytes),
+            _ => Vector512.Create<byte>(bytes).AsInt64()
         };
         var actual = runtime.GetMethod(name)!.Invoke(null, [Box(left), Box(right), suppliedEquality]);
         if (!Box(expected).Equals(actual)) throw new InvalidOperationException("Portable vector mismatch: " + name);
@@ -234,12 +239,12 @@ foreach (var item in portableCases)
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" +
         "theorem correctness :\n" + string.Join(" ∧\n", claims) + " := by decide +kernel\n" +
         "#print axioms correctness\nend ExampleProof\n");
-    if (name == "Portable128byte")
+    if (item.Element == "byte" && item.Bits != 256)
     {
         Run(Extract("extract", assembly, "Storage", selectors[name], output));
         var evidence = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-        var callOutput = Path.Combine(root, "PortableCall");
-        Run(Extract("extract", assembly, "Storage", selectors["PortableAnd"], callOutput));
+        var callOutput = Path.Combine(root, $"PortableCall{item.Bits}");
+        Run(Extract("extract", assembly, "Storage", selectors[$"PortableAnd{item.Bits}"], callOutput));
         // The helper's isolated declarations must match its certificate in the complete caller.
         var callEvidence = File.ReadAllText(Path.Combine(callOutput, "Extracted.lean"))
             .Replace("method0", "method1", StringComparison.Ordinal);
@@ -274,15 +279,26 @@ foreach (var (name, changed) in new[]
     rejected.Add(path, "PASS independently rejected vector evidence: " + name,
         "Extraction.VectorInitializationsValid method0Closed", "is false");
 }
-var portableBaseline = File.ReadAllText(Path.Combine(root, "PortableCall/Extracted.lean"))
+var portableBaseline = File.ReadAllText(Path.Combine(root, "PortableCall128/Extracted.lean"))
     .Replace("method0", "method1", StringComparison.Ordinal);
 string RawOnly(string text, Func<string, string> change) => Regex.Replace(text,
     @"(?m)^def method1(?:Original|Closed) :[^\r\n]*", match => change(match.Value));
-var unrelated = RawOnly(portableBaseline, text => Regex.Replace(
-    text.Replace("System.Runtime.Intrinsics.Vector128", "Unrelated.Vector128"),
-    @"name := ""[^""]*""", "name := \"Unrelated\""));
-unrelated = Regex.Replace(unrelated,
-    @"\.intrinsic \(\.vector \(\.(?:band|bor|bxor|bnot|equalsAll|zero|ones) 128\)\) \d+", ".nop");
+string UnrelatedPortable(string source, int bits)
+{
+    var unrelated = RawOnly(source, text => Regex.Replace(
+        text.Replace($"System.Runtime.Intrinsics.Vector{bits}", $"Unrelated.Vector{bits}"),
+        @"name := ""[^""]*""", "name := \"Unrelated\""));
+    return Regex.Replace(unrelated,
+        $@"\.intrinsic \(\.vector \(\.(?:band|bor|bxor|bnot|equalsAll|zero|ones) {bits}\)\) \d+", ".nop");
+}
+void RejectPortable(string original, string name, string changed)
+{
+    if (changed == original) throw new InvalidOperationException("Ineffective portable mutation: " + name);
+    var path = Path.Combine(root, name + ".lean");
+    File.WriteAllText(path, NarrowEvidence(changed, "method1_division_validated"));
+    rejected.Add(path, "PASS independently rejected portable vector evidence: " + name,
+        "Extraction.DivisionIntrinsicsValid method1Closed", "is false");
+}
 foreach (var (name, changed) in new[]
 {
     ("portable-operation", portableBaseline.Replace(".vector (.band 128)", ".vector (.bor 128)")),
@@ -291,15 +307,14 @@ foreach (var (name, changed) in new[]
     ("portable-width", portableBaseline.Replace(".vector (.band 128)", ".vector (.band 256)")),
     ("portable-arity", portableBaseline.Replace(".intrinsic (.vector (.band 128)) 2",
         ".intrinsic (.vector (.band 128)) 1")),
-    ("portable-target-family", unrelated)
+    ("portable-target-family", UnrelatedPortable(portableBaseline, 128))
 })
-{
-    if (changed == portableBaseline) throw new InvalidOperationException("Ineffective portable mutation: " + name);
-    var path = Path.Combine(root, name + ".lean");
-    File.WriteAllText(path, NarrowEvidence(changed, "method1_division_validated"));
-    rejected.Add(path, "PASS independently rejected portable vector evidence: " + name,
-        "Extraction.DivisionIntrinsicsValid method1Closed", "is false");
-}
+    RejectPortable(portableBaseline, name, changed);
+var wideBaseline = File.ReadAllText(Path.Combine(root, "PortableCall512/Extracted.lean"))
+    .Replace("method0", "method1", StringComparison.Ordinal);
+RejectPortable(wideBaseline, "portable512-width",
+    wideBaseline.Replace(".vector (.band 512)", ".vector (.band 256)"));
+RejectPortable(wideBaseline, "portable512-target-family", UnrelatedPortable(wideBaseline, 512));
 rejected.Check();
 
 foreach (var mutation in new[] { "element", "scope", "encoding", "field512" })

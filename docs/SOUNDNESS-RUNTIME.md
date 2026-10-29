@@ -53,10 +53,10 @@ primitive/vector stride and signedness are checked directly, and aggregate strid
 
 ### Unspecified vector lanes
 
-Portable 128- and 256-bit integer vector bitwise operators, whole-vector equality, `Zero` and
+Portable 128-, 256- and 512-bit integer vector bitwise operators, whole-vector equality, `Zero` and
 `AllBitsSet` share their bit-level semantics for byte, signed/unsigned 32-bit and signed/unsigned
 64-bit elements. The intrinsic certificate checks the exact runtime call, element, width, generic
-arguments and emitted operation. Floating-point equality and 512-bit portable forms are excluded.
+arguments and emitted operation. Floating-point equality and unspecified-lane observations are excluded.
 
 `v128Low64 low` represents every vector with that low lane. `checkedIntrinsic` admits only consumers
 proved independent of the upper lane: reinterpretation, lane-zero extraction and the count operands
