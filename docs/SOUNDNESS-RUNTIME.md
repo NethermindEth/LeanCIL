@@ -123,8 +123,9 @@ than the address of the caller's span home, as span-local addresses already do. 
 only because the home cannot change during the call: the extractor rejects `starg` and `ldarga`
 of such a parameter, span `stobj`, `initobj` and `cpobj` outside the checked local reset, `ref`
 and `out` span parameters, and span references in locals, returns and fields, so no admitted
-code can rebind, address or overwrite a span home. The parameter's readonly attributes and these
-rejections are trusted extractor decisions; the Lean validators still bind the raw argument to
+code can rebind, address or overwrite a span home. The parameter's readonly attributes, which a
+generic specialization copies from its definition, and these rejections are trusted extractor
+decisions; the Lean validators still bind the raw argument to
 a managed reference, reject its address and accept an empty emission for `ldobj` only at a span
 type. Loads, stores and comparisons that expect a byte reference fault on a view rather than
 reading it as an address.

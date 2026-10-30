@@ -364,6 +364,10 @@ The callee cannot replace the caller's span: `starg` or `ldarga` of the paramete
 directly loaded span address are rejected. `ref` and `out` span parameters, span references
 in locals, returns, fields and imported signatures remain unsupported.
 
+A generic specialization keeps its definition's parameter flags and attributes, so a closed
+generic helper's `in` and `ref readonly` span parameters follow the same rules, and its `ref`
+span parameters stay rejected.
+
 ### `in` parameters of virtual members
 
 C# encodes an `in` parameter of a virtual, abstract or interface member, and of its explicit
@@ -430,7 +434,10 @@ types above.
 
 Explicit/auto generic layouts, reference-containing instantiations, reference constraints,
 open interface constraints and inherited interface matching remain unsupported, as do boxing
-and general runtime dispatch.
+and general runtime dispatch. Runtime members called on a type built from a method type
+parameter, such as `ReadOnlySpan<T>.Length` or its indexer, extract but fail the certificate's
+specialization check, because the open and closed call targets name different identities.
+Generic runtime methods such as `MemoryMarshal.GetReference<T>` keep one identity and are checked.
 
 See the [per-family intrinsic tables](SIMD.md) for the exact Vector128/256, SSE, AVX, AVX2, AVX512, BMI and ARM operations, operand types and profile requirements.
 

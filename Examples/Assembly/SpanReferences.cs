@@ -133,6 +133,29 @@ public static class SpanReferences
     // Rejected: the callee replaces the caller's span.
     public static void Replace(out Span<int> values) => values = default;
 
+    static T Head<T>(in ReadOnlySpan<T> values) where T : unmanaged =>
+        Unsafe.Add(ref MemoryMarshal.GetReference(values), 1);
+
+    static T Front<T>(ref readonly Span<T> values) where T : unmanaged => MemoryMarshal.GetReference(values);
+
+    // A specialized clone must keep the `in` and `ref readonly` markers of its definition.
+    public static ulong GenericHead(in ReadOnlySpan<ulong> values) => Head(in values);
+
+    public static int GenericFront(int[] data)
+    {
+        Span<int> values = data;
+        return Front(in values);
+    }
+
+    // Rejected: specialization does not make a `ref` span parameter readonly.
+    static int Rebind<T>(ref Span<T> values) where T : unmanaged => values.Length;
+
+    public static int GenericWritable(int[] data)
+    {
+        Span<int> values = data;
+        return Rebind(ref values);
+    }
+
     public static ulong Construct(ReadOnlySpan<ulong> data)
     {
         var limbs = new Limbs(in data, false);

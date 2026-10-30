@@ -158,6 +158,12 @@ foreach (var (name, selector, claim) in new[]
             [.reference (.address ⟨0, 0⟩), .bufferSpan ⟨.address ⟨0, 8⟩, 2, 8, false⟩]
             inMemory).map Prod.snd = .ok [.scalar (.i64 42)] := rfl
         """),
+    // The specialized helper forwards its readonly span reference through the constrained slot.
+    ("InConstrainedSum", "InParameters::ConstrainedSum(Examples.InWord&,System.ReadOnlySpan<ulong>)", """
+        theorem in_result : (CIL.Safety.invoke Extracted.program 32 0
+            [.reference (.address ⟨0, 0⟩), .bufferSpan ⟨.address ⟨0, 8⟩, 2, 8, false⟩]
+            inMemory).map Prod.snd = .ok [.scalar (.i64 42)] := rfl
+        """),
     ("InConstrained", "InParameters::Constrained(Examples.InWord&,Examples.InWord&)", """
         theorem in_result : (CIL.Safety.invoke Extracted.program 32 0
             [.reference (.address ⟨0, 0⟩), .reference (.address ⟨0, 8⟩)]

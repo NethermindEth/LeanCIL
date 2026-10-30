@@ -25,6 +25,12 @@ public static class InParameters
     public static void Add<T>(ref T left, in InWord right, out InWord result) where T : struct, IInWord<InWord> =>
         left.Add(in right, out result);
 
+    public static ulong Sum<T>(ref T word, in ReadOnlySpan<ulong> values) where T : struct, IInWord<InWord> =>
+        word.Sum(in values);
+
+    // The specialized helper keeps its readonly span reference through the constrained call.
+    public static ulong ConstrainedSum(ref InWord word, ReadOnlySpan<ulong> values) => Sum(ref word, in values);
+
     public static ulong Constrained(ref InWord left, in InWord right)
     {
         Add(ref left, in right, out InWord result);

@@ -329,7 +329,10 @@ Examples:System.Int32 Examples.SpanReferences::Caller(System.Byte[])	A	A	A	A	A	A
 Examples:System.Int32 Examples.SpanReferences::Copy(System.ReadOnlySpan`1<System.Byte>&)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SpanReferences::First(System.Span`1<System.Int32>&)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SpanReferences::Forward(System.ReadOnlySpan`1<System.Byte>&)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanReferences::GenericFront(System.Int32[])	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanReferences::GenericWritable(System.Int32[])	B	B	B	B	B	B	B	B
 Examples:System.Int32 Examples.SpanReferences::Length(System.ReadOnlySpan`1<System.Int32>&)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanReferences::Rebind(System.Span`1<T>&)	N	N	N	N	N	N	N	N
 Examples:System.Int32 Examples.SpanReferences::Sum(System.ReadOnlySpan`1<System.Byte>&)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SpanReferences::Tail(System.ReadOnlySpan`1<System.Byte>&)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SpanReferences::Temporary(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
@@ -725,6 +728,8 @@ Examples:System.UInt64 Examples.GenericMethods::Select(System.Boolean,System.UIn
 Examples:System.UInt64 Examples.GenericMethods::TwoTypes(System.UInt64,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.IInWord`1::Sum(System.ReadOnlySpan`1<System.UInt64>& modreq(System.Runtime.InteropServices.InAttribute))	N	N	N	N	N	N	N	N
 Examples:System.UInt64 Examples.InParameters::Constrained(Examples.InWord&,Examples.InWord&)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.InParameters::ConstrainedSum(Examples.InWord&,System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.InParameters::Sum(T&,System.ReadOnlySpan`1<System.UInt64>&)	N	N	N	N	N	N	N	N
 Examples:System.UInt64 Examples.InWord::Examples.IInWord<Examples.InWord>.Sum(System.ReadOnlySpan`1<System.UInt64>& modreq(System.Runtime.InteropServices.InAttribute))	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.InitializedHelper::Identity(System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.InitializedTypes::Add(System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
@@ -761,6 +766,7 @@ Examples:System.UInt64 Examples.SpanReferences::Construct(System.ReadOnlySpan`1<
 Examples:System.UInt64 Examples.SpanReferences::CursorSum(System.ReadOnlySpan`1<System.UInt64>&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanReferences::Element(System.ReadOnlySpan`1<System.UInt64>&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanReferences::FirstHigh(System.ReadOnlySpan`1<Examples.SpanReferences/Pair>&)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.SpanReferences::GenericHead(System.ReadOnlySpan`1<System.UInt64>&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanReferences::High(System.Span`1<Examples.SpanReferences/Pair>&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanReferences::HighAddress(System.ReadOnlySpan`1<Examples.SpanReferences/Pair>&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanReferences::ReadOnlyHigh(System.ReadOnlySpan`1<Examples.SpanReferences/Pair>&,System.Int32)	A	A	A	A	A	A	A	A
@@ -973,6 +979,8 @@ Examples:T Examples.IndirectValues::Identity(T)	N	N	N	N	N	N	N	N
 Examples:T Examples.ManagedDispatch::Identity(T)	N	N	N	N	N	N	N	N
 Examples:T Examples.OwnerHelper`1::Identity(T)	N	N	N	N	N	N	N	N
 Examples:T Examples.PrimitiveArrays::ReadGeneric(T[],System.Int32)	N	N	N	N	N	N	N	N
+Examples:T Examples.SpanReferences::Front(System.Span`1<T>&)	N	N	N	N	N	N	N	N
+Examples:T Examples.SpanReferences::Head(System.ReadOnlySpan`1<T>&)	N	N	N	N	N	N	N	N
 Examples:T& Examples.GenericMethods::Next(T&,System.Int32)	N	N	N	N	N	N	N	N
 Examples:TMethod Examples.GenericCounterValue`1::Read(TMethod)	N	N	N	N	N	N	N	N
 Examples:U Examples.OwnerHelper`1::Select(U,T)	N	N	N	N	N	N	N	N

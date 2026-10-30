@@ -67,6 +67,9 @@ var cases = new (string Name, string Arguments, string Results, string Extra)[]
     ("Caller", ".array ⟨.address ⟨0, 1⟩, 4, .unsigned8⟩", ".scalar (.i32 10)", ""),
     ("Argument", bytes, ".scalar (.i32 10)", ""),
     ("Temporary", bytes, ".scalar (.i32 9)", ""),
+    // Specialized generic helpers read through their `in` and `ref readonly` span references.
+    ("GenericHead", ".bufferSpan ⟨.address ⟨0, 0⟩, 4, 8, false⟩", ".scalar (.i64 0x0F0E0D0C0B0A0908)", ""),
+    ("GenericFront", ".array ⟨.address ⟨0, 4⟩, 5, .signed32⟩", ".scalar (.i32 0x07060504)", ""),
     // Limbs 0 and 3 are the little-endian words at offsets 0 and 24.
     ("Construct", ".bufferSpan ⟨.address ⟨0, 0⟩, 4, 8, false⟩",
         ".scalar (.i64 (0x0706050403020100 + 0x1F1E1D1C1B1A1918))", ""),
@@ -205,7 +208,8 @@ rejected.Check();
 foreach (var (name, marker) in new[]
 {
     ("Alias", "Unsupported by-reference span"),
-    ("Replace", "Unsupported writable by-reference span parameter")
+    ("Replace", "Unsupported writable by-reference span parameter"),
+    ("GenericWritable", "Unsupported writable by-reference span parameter: System.Span`1<System.Int32>&")
 })
 {
     var result = Execute(Extract("extract", assembly, null, Method(metadata, name).FullName, Path.Combine(root, name)));
@@ -254,4 +258,20 @@ foreach (var (mutation, marker) in new[]
     if (result.Code == 0 || !result.Output.Contains(marker, StringComparison.Ordinal))
         throw new InvalidOperationException("Wrong span reference rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS span reference extraction rejection: " + mutation);
+}
+
+// A specialized clone takes its readonly markers from the generic definition, never by default.
+using (var altered = ModuleDefinition.ReadModule(assembly))
+{
+    var head = Method(altered, "Head").Parameters[0];
+    head.Attributes &= ~ParameterAttributes.In;
+    head.CustomAttributes.Clear();
+    var path = Path.Combine(root, "generic-writable.dll");
+    altered.Write(path);
+    var result = Execute(Extract("extract", path, null, Method(altered, "GenericHead").FullName,
+        Path.Combine(root, "Rejected-generic-writable")));
+    if (result.Code == 0 || !result.Output.Contains("Unsupported writable by-reference span parameter",
+            StringComparison.Ordinal) || !result.Output.Contains("::Head<System.UInt64>", StringComparison.Ordinal))
+        throw new InvalidOperationException("Wrong span reference rejection: generic-writable\n" + result.Output);
+    Console.WriteLine("PASS span reference extraction rejection: generic-writable");
 }
