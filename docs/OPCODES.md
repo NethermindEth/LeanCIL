@@ -290,7 +290,7 @@ Span `IsEmpty` and `GetPinnableReference` inspect a validated view without readi
 An empty span's pinnable reference is null; readonly views return readonly references.
 `MemoryMarshal.GetReference<T>(Span<T>)` returns a writable span's start reference, including
 for an empty span, so writes through it reach the span's storage. The `ReadOnlySpan<T>` overload
-is supported over static data spans; over other readonly views it fails as unsupported, since
+is supported over static data spans; over other readonly views it faults with `invalidState`, since
 .NET returns a writable `ref T` that the readonly view cannot grant.
 `MemoryMarshal.GetArrayDataReference<T>` supports all admitted array elements: an empty array
 retains its data reference, while a null array raises `NullReferenceException`. These accessors
