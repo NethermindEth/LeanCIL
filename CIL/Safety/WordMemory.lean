@@ -7,8 +7,8 @@ import CIL.Safety.Frames
 
 How encoded numbers read back through the checked interpreter: an initialized read of
 `numberBytes x width` loads as `x` at every scalar and vector width, and a numeric local or
-a word behind a reference can be stored with write access alone. The word lemmas are the base case the stepping
-lemmas for locals and fields build on.
+a word behind a reference can be stored with write access alone. The word lemmas are the base
+case the stepping lemmas for locals and fields build on.
 -/
 
 namespace CIL.Safety
