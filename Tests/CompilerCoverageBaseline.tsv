@@ -739,6 +739,7 @@ Examples:System.UInt64 Examples.InitializedValue::Read(Examples.InitializedValue
 Examples:System.UInt64 Examples.IntegerMath::ClampUInt64(System.UInt64,System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.IntegerMath::MaxUInt64(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.IntegerMath::MinUInt64(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Loops::Sum(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.MarshaledMemory::Read(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Nested::Alias(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Nested::Copy(System.UInt64)	A	A	A	A	A	A	A	A
