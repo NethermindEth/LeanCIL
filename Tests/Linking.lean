@@ -20,13 +20,7 @@ theorem addLib_closed : Closed addLib.program := Closed.of_check (by decide)
 theorem add_holds : addContract.Holds addProgram 0 := by
   rintro ⟨a, b, res, x, y⟩ m ⟨readA, readB, writable⟩
   dsimp only [addContract] at *
-  have length : (numberBytes (x + y).toNat 8).length = 8 := by simp [numberBytes]
-  obtain ⟨stored, wrote⟩ := write_succeeds (bytes := numberBytes (x + y).toNat 8) (by simpa only [length] using writable)
-  have readback := write_readback _ _ _ _ _ wrote
-  rw [length] at readback
-  have store : storeValue m (.address res) (.i64 (x + y)) = .ok stored := by
-    simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ↓reduceIte,
-      referenceAt, checkedAt, wrote, Except.mapError, Bind.bind, Except.bind]
+  obtain ⟨stored, wrote, store, readback⟩ := store_word64 (x + y) writable
   have fa := access_reference_valid _ _ _ _ _ (read_access readA)
   have fb := access_reference_valid _ _ _ _ _ (read_access readB)
   have fr := access_reference_valid _ _ _ _ _ writable

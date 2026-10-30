@@ -269,13 +269,7 @@ def addPublic : MethodContract AddInput where
 theorem add_internal : addInternal.Holds Extracted.program addTo := by
   rintro ⟨a, b, res, region, x, y⟩ m ⟨readA, readB, writable⟩
   dsimp only [addInternal, addArgs] at *
-  have length : (numberBytes (x + y).toNat 8).length = 8 := by simp [numberBytes]
-  obtain ⟨stored, wrote⟩ := write_succeeds (bytes := numberBytes (x + y).toNat 8) (by simpa only [length] using writable)
-  have readback := write_readback _ _ _ _ _ wrote
-  rw [length] at readback
-  have store : storeValue m (.address res) (.i64 (x + y)) = .ok stored := by
-    simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ↓reduceIte,
-      referenceAt, checkedAt, wrote, Except.mapError, Bind.bind, Except.bind]
+  obtain ⟨stored, wrote, store, readback⟩ := store_word64 (x + y) writable
   have fa := access_reference_valid _ _ _ _ _ (read_access readA)
   have fb := access_reference_valid _ _ _ _ _ (read_access readB)
   have fr := access_reference_valid _ _ _ _ _ writable
@@ -384,14 +378,7 @@ def addFlagContract : MethodContract AddInput Bool where
 theorem add_flag_holds : addFlagContract.Holds Extracted.program addFlag := by
   rintro ⟨a, b, res, region, x, y⟩ memory ⟨readA, readB, writable⟩
   dsimp only [addFlagContract, addArgs] at *
-  have length : (numberBytes (x + y).toNat 8).length = 8 := by simp [numberBytes]
-  obtain ⟨stored, wrote⟩ := write_succeeds (bytes := numberBytes (x + y).toNat 8)
-    (by simpa only [length] using writable)
-  have readback := write_readback _ _ _ _ _ wrote
-  rw [length] at readback
-  have store : storeValue memory (.address res) (.i64 (x + y)) = .ok stored := by
-    simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ↓reduceIte,
-      referenceAt, checkedAt, wrote, Except.mapError, Bind.bind, Except.bind]
+  obtain ⟨stored, wrote, store, readback⟩ := store_word64 (x + y) writable
   have formedA := access_reference_valid _ _ _ _ _ (read_access readA)
   have formedB := access_reference_valid _ _ _ _ _ (read_access readB)
   have formedRes := access_reference_valid _ _ _ _ _ writable

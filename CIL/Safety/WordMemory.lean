@@ -6,8 +6,8 @@ import CIL.Safety.Frames
 # Word loads and stores
 
 How encoded numbers read back through the checked interpreter: an initialized read of
-`numberBytes x width` loads as `x` at every scalar and vector width, and a numeric local
-can be stored with write access alone. The word lemmas are the base case the stepping
+`numberBytes x width` loads as `x` at every scalar and vector width, and a numeric local or
+a word behind a reference can be stored with write access alone. The word lemmas are the base case the stepping
 lemmas for locals and fields build on.
 -/
 
@@ -88,11 +88,29 @@ theorem store_local_word64 {memory : Memory} {reference : Reference} (word : Bit
     Bool.false_eq_true, ite_false, localNumber, localWidth, written, checkedAt, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
+/-- A word store through a reference requires write access but no prior initialization; it
+    writes the word's encoding, which reads back. The `storeValue` equation is a step fact. -/
+theorem store_word64 {memory : Memory} {reference : Reference} (word : BitVec 64)
+    (ready : access memory reference 8 1 true = .ok ()) :
+    ∃ result,
+      write memory reference (numberBytes word.toNat 8) 1 = .ok result ∧
+      storeValue memory (.address reference) (.i64 word) = .ok result ∧
+      read result reference 8 1 = .ok (numberBytes word.toNat 8) := by
+  have length : (numberBytes word.toNat 8).length = 8 := by simp [numberBytes]
+  obtain ⟨result, written⟩ := write_succeeds (bytes := numberBytes word.toNat 8)
+    (by simpa only [length] using ready)
+  have readback := write_readback _ _ _ _ _ written
+  rw [length] at readback
+  refine ⟨result, written, ?_, readback⟩
+  simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false, referenceAt,
+    checkedAt, written, Except.mapError, Bind.bind, Except.bind]
+
 #print axioms decode_word64
 #print axioms load_word64_of_read
 #print axioms loadValue_of_read
 #print axioms load_scalar_of_read
 #print axioms load_local_word64_of_read
 #print axioms store_local_word64
+#print axioms store_word64
 
 end CIL.Safety
