@@ -2,7 +2,6 @@ import Extracted
 import CIL.Verification
 import CIL.Safety.LoopScaffold
 import CIL.Safety.LoopVC
-import CIL.Safety.NumericLocals
 import CIL.Safety.ReturnMemory
 import CIL.Safety.SpanContents
 import CIL.StructuralLabels
@@ -13,11 +12,13 @@ open CIL.Safety
 open CIL (W64)
 namespace ExampleProof
 
-bind_loop loop := Extracted.method0
+bind_entry entry (memory : Memory) (view : SpanView) (wellFormed : memory.WellFormed)
+    (valid : view.validate memory = .ok ()) (width : view.width = 8)
+    (readOnly : view.writable = false) := Extracted.method0
+  with [.bufferSpan view] from memory allocating wellFormed
+  simplifying [valid, width, readOnly]
 
-/-- The activation's running total home and remaining span, above the caller's memory. -/
-private def frame (memory : Memory) (home : Reference) (view : SpanView) : Frame :=
-  ⟨memory.nextIdentity, [.bytes .word64 home, .span 8 false (some view)], [home.allocation], [], 0⟩
+bind_loop loop := Extracted.method0
 
 /-- A suffix of the caller's buffer, the total of the consumed prefix, and frame memory that
     keeps the caller's memory. -/
@@ -36,7 +37,7 @@ private structure State (memory : Memory) (home : Reference) where
 bind_cutpoint cutpoint (memory : Memory) (home : Reference) (state : State memory home) :=
   Extracted.method0 at loop.latch matching
     (fun op => match op with | .brnonzero _ => true | _ => false)
-  with (frame memory home state.view)
+  with (entry.frame memory state.view home)
 
 /-- The loop guard observes the remaining span length. -/
 private def header (memory : Memory) (home : Reference) (state : State memory home) : LoopState :=
@@ -57,13 +58,13 @@ private theorem terminates (memory : Memory) (home : Reference) (args : List Val
     invariant
   have width := contents.elementWidth
   have validHere := view.validate_below valid wellFormed kept
-  have exit := kept.trans (leaveFrame_preserves_memory_below (frame memory home view) current _
-    fun id member => by simp_all [frame])
+  have exit := kept.trans (leaveFrame_preserves_memory_below (entry.frame memory view home)
+    current _ fun id member => by simp_all [entry.frame])
   cases values with
   | nil =>
     obtain rfl : total = result := by simpa using invariant
     left
-    cil_loop_finish [header, cutpoint, frame, width, readOnly, validHere, loaded,
+    cil_loop_finish [header, cutpoint, entry.frame, width, readOnly, validHere, loaded,
       contents.length, exit]
     exact loop_terminates_return (op := .ret _) (by rfl) (by rfl) (by cil_checked_step []) rfl
       ⟨exit, rfl⟩
@@ -86,7 +87,7 @@ private theorem terminates (memory : Memory) (home : Reference) (args : List Val
     obtain ⟨cost, segment⟩ : LoopReaches Extracted.program 0 args
         (header memory home ⟨view, value :: remaining, total, current, valid, readOnly, contents,
           kept, loaded, writable⟩) (header memory home next) := by
-      cil_loop_steps [header, cutpoint, frame, width, readOnly, validHere, validThere, loaded,
+      cil_loop_steps [header, cutpoint, entry.frame, width, readOnly, validHere, validThere, loaded,
         nonzero, found, element, numericOfWidth, BitVec.ofNat_toNat, facts, stored, nextLoaded,
         slicedThere, validNextThere, nextContents.elementWidth, sameMode, next]
     exact ⟨next, cost, by simpa [next, BitVec.add_assoc] using invariant, by simp [next],
@@ -101,29 +102,19 @@ theorem correctness (memory : Memory) (view : SpanView) (values : List W64)
     ∃ fuel final, invoke Extracted.program fuel 0 [.bufferSpan view] memory =
       .ok (final, [.scalar (.i64 values.sum)]) ∧ MemoryBelow memory.nextIdentity memory final := by
   have width := contents.elementWidth
-  obtain ⟨home, entered, made, _, writable, preserved⟩ :=
-    make_numeric_local memory memory.nextIdentity .word64 (.i64 0) 0 wellFormed rfl
-  have fresh := ((makeLocal_fresh _ _ _ _ _ _ _ made).2 home.allocation (by simp)).1
-  have validEntered := view.validate_below valid wellFormed preserved
-  have setup : enterFrame Extracted.method0 [.bufferSpan view] memory =
-      .ok (frame memory home view, entered) := by
-    have noOpaque : Extracted.method0.opaqueVectorLocals = [] := rfl
-    simp only [enterFrame, Extracted.method0_locals, Extracted.method0_localKinds,
-      Extracted.method0_vectorArgs, Extracted.method0_parameterHomes, noOpaque,
-      makeSelectedLocals, List.isEmpty, ite_true, makeLocals, made, makeArgumentHomes,
-      makeParameterHomes, Bind.bind, Except.bind, Pure.pure, Except.pure]
-    simp [makeLocal, storeLocal_span, validEntered, width, readOnly, frame]
-  cil_store_vc started stored loaded nextWritable := .word64 (.i64 0) using writable
-  have kept := preserved.trans
-    (store_numeric_local_preserves_memory_below _ _ _ _ _ _ _ fresh stored)
+  obtain ⟨home, entered, setup, numeric, entryMemory⟩ :=
+    entry.checked memory view wellFormed valid width readOnly
+  cil_store_vc started stored loaded nextWritable := .word64 (.i64 0) using numeric.writable
+  have kept := entryMemory.kept.trans
+    (store_numeric_local_preserves_memory_below _ _ _ _ _ _ _ numeric.fresh stored)
   let state : State memory home :=
     ⟨view, values, 0, started, valid, readOnly, contents, kept, loaded, nextWritable⟩
   have path : LoopReaches Extracted.program 0 [.bufferSpan view]
-      ⟨0, frame memory home view, [], entered⟩ (header memory home state) := by
-    cil_loop_steps [header, cutpoint, state, frame, stored, width, readOnly,
+      ⟨0, entry.frame memory view home, [], entered⟩ (header memory home state) := by
+    cil_loop_steps [header, cutpoint, state, entry.frame, stored, width, readOnly,
       view.validate_below valid wellFormed kept]
   obtain ⟨fuel, final, returned, executed, sameMemory, sameValues⟩ := loop_reaches_terminates path
-    (terminates memory home _ values.sum wellFormed fresh state (by simp [state]))
+    (terminates memory home _ values.sum wellFormed numeric.fresh state (by simp [state]))
   subst returned
   exact ⟨fuel, final,
     invoke_of_run Extracted.lookup0 (by simp [cil_checked, valid]) setup executed, sameMemory⟩
