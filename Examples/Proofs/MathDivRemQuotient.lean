@@ -53,25 +53,20 @@ theorem fault_of_divRem {left right : W32} {fault : ArithmeticFault}
   rw [divRem_step, mathDivRem32_eq, failed]
   rfl
 
-/-- The divisor `-1` as an unsigned literal; the audit rejects a negated `BitVec` numeral. -/
-theorem negOne_literal : (0xFFFFFFFF#32 : W32) = -1 := by decide
-
 /-- `Math.DivRem(left, right).Quotient` returns the exact truncated quotient whenever `div`
     succeeds, and otherwise raises its divide-by-zero or overflow fault. -/
 theorem correctness (left right : W32) :
-    (right ≠ 0 → (left ≠ BitVec.intMin 32 ∨ right ≠ 0xFFFFFFFF#32) → ∃ quotient : W32,
+    (right ≠ 0 → (left ≠ BitVec.intMin 32 ∨ right ≠ -1) → ∃ quotient : W32,
       (CIL.Safety.invoke Extracted.program 8 0 (inputs left right) Examples.empty).map Prod.snd =
         .ok [.scalar (.i32 quotient)] ∧
       quotient.toInt = left.toInt.tdiv right.toInt) ∧
     CIL.Safety.invoke Extracted.program 8 0 (inputs left 0) Examples.empty =
       .error ⟨0, 2, .arithmetic .divideByZero⟩ ∧
-    CIL.Safety.invoke Extracted.program 8 0 (inputs (BitVec.intMin 32) 0xFFFFFFFF#32)
-      Examples.empty =
+    CIL.Safety.invoke Extracted.program 8 0 (inputs (BitVec.intMin 32) (-1)) Examples.empty =
       .error ⟨0, 2, .arithmetic .overflow⟩ := by
   refine ⟨fun nonzero representable => ?_, fault_of_divRem (divRemBits_zero true left),
-    negOne_literal ▸ fault_of_divRem (divRemBits_overflow (by decide))⟩
-  obtain ⟨evaluated, exact, -⟩ :=
-    divRemBits_signed (by decide) nonzero (negOne_literal ▸ representable)
+    fault_of_divRem (divRemBits_overflow (by decide))⟩
+  obtain ⟨evaluated, exact, -⟩ := divRemBits_signed (by decide) nonzero representable
   refine ⟨left.sdiv right, ?_, exact⟩
   have call : CIL.Safety.step Extracted.method0 (.intrinsic (.scalar (.divRem 32 true)) 2) 2
       (inputs left right) frame [.scalar (.i32 right), .scalar (.i32 left)] Examples.empty =
