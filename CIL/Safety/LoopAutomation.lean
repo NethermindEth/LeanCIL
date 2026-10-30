@@ -106,7 +106,12 @@ elab_rules : tactic
          · cil_lookup [$[$facts:term],*]
          · cil_checked_step_normalized [$[$prepared:term],*]
          · rfl
-         · simp [$[$facts:term],*])
+         · first
+           | simp [$[$prepared:term],*]; done
+           -- Frame cleanup only after the facts fail, since unfolding `leaveFrame` first
+           -- would hide it from a supplied fact about the exited frame's memory.
+           | simp [CIL.Safety.leaveFrame, CIL.NarrowKind.extend,
+               $[$prepared:term],*])
       | (apply CIL.Safety.loop_terminates_next
          · cil_lookup [$[$facts:term],*]
          · cil_lookup [$[$facts:term],*]
