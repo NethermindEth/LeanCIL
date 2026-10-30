@@ -233,10 +233,11 @@ type identity. This does not admit floating-point, nested-pointer or reference-b
 Rotations use modulo-width counts; counts/reversal and log2 follow the scalar bit-vector model.
 Log2(0) is zero. Round-up returns zero for zero/overflow; signed power-of-two tests exclude the sign
 bit. Native overloads assume 64 bits. Primitive signed and unsigned 32-bit, 64-bit and native
-`RotateLeft`/`RotateRight` overloads share the same bit-vector rotation model. Primitive `Int32`
-and `UInt32` population/leading-zero/trailing-zero counts and `UInt32.Log2` share the existing
-32-bit result models; primitive 32-bit, 64-bit and native `IsPow2` share the signedness-aware
-power-of-two model. Signed `Log2` and 64-bit/native count results are not admitted by these aliases.
+`RotateLeft`/`RotateRight` overloads share the same bit-vector rotation model. Primitive integer
+population/leading-zero/trailing-zero counts reuse the same count functions, with the result
+encoded in the declared 32-bit or 64-bit stack representation. Unsigned primitive `Log2` uses
+the same logarithm function and result encoding. Primitive `IsPow2` uses the signedness-aware
+power-of-two model. Signed `Log2` remains unsupported.
 Correspondence to these primitive methods and the selected .NET BitOperations and BinaryPrimitives
 overloads remains
 a runtime assumption backed by exact signature checks and boundary/runtime comparisons.

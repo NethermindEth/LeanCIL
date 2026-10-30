@@ -278,7 +278,7 @@ theorem scalar_helper_wrong_width :
     CIL.evalScalarIntrinsic (.rotateLeft 64) [.i32 1, .i32 2] = none := rfl
 
 theorem scalar_helper_wrong_arity :
-    CIL.evalScalarIntrinsic (.popCount 64) [.i64 1, .i64 2] = none := rfl
+    CIL.evalScalarIntrinsic (.popCount 64 .word32) [.i64 1, .i64 2] = none := rfl
 
 theorem scalar_helper_wrong_type :
     CIL.evalScalarIntrinsic (.reverseEndianness 32 false) [.nullRef] = none := rfl
@@ -286,9 +286,15 @@ theorem scalar_helper_wrong_type :
 theorem scalar_helper_unsupported_width :
     CIL.evalScalarIntrinsic (.reverseEndianness 24 false) [.i32 1] = none := rfl
 
+/-- Zero counts preserve both the input width and the declared result stack representation. -/
 theorem scalar_helper_zero_counts :
-    CIL.evalScalarIntrinsic (.leadingZeroCount 64) [.i64 0] = some (.i32 64) ∧
-    CIL.evalScalarIntrinsic (.trailingZeroCount 32) [.i32 0] = some (.i32 32) := ⟨rfl, rfl⟩
+    CIL.evalScalarIntrinsic (.leadingZeroCount 64 .word32) [.i64 0] = some (.i32 64) ∧
+    CIL.evalScalarIntrinsic (.trailingZeroCount 32 .word32) [.i32 0] = some (.i32 32) ∧
+    CIL.evalScalarIntrinsic (.leadingZeroCount 64 .word64) [.i64 0] = some (.i64 64) ∧
+    CIL.evalScalarIntrinsic (.trailingZeroCount 64 .word64) [.i64 0] = some (.i64 64) :=
+  ⟨rfl, rfl, rfl, rfl⟩
+
+#print axioms scalar_helper_zero_counts
 
 theorem nested_snapshot_bounds :
     (instruction (.aggregateFieldAt 3 2) [.scalar (.aggregate [1, 2, 3, 4])] Examples.empty).map Prod.snd =

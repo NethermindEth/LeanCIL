@@ -232,7 +232,7 @@ internal static class RuntimeModels
                     $".intrinsic (.scalar (.{operation} {width})) 2");
             foreach (var (name, operation) in BitCounts)
                 operations.Add($"System.Int32 System.Numerics.BitOperations::{name}({type})",
-                    $".intrinsic (.scalar (.{operation} {width})) 1");
+                    $".intrinsic (.scalar (.{operation} {width} .word32)) 1");
             operations.Add($"{type} System.Numerics.BitOperations::RoundUpToPowerOf2({type})",
                 $".intrinsic (.scalar (.roundUpToPowerOf2 {width})) 1");
         }
@@ -240,12 +240,12 @@ internal static class RuntimeModels
         foreach (var (name, operation) in Rotations)
             operations.Add($"{type} {type}::{name}({type},System.Int32)",
                 $".intrinsic (.scalar (.{operation} {width})) 2");
-        foreach (var (type, width, signed) in Pow2Integers.Where(integer => integer.Width == 32))
+        foreach (var (type, width, signed) in Pow2Integers)
         foreach (var (name, operation) in BitCounts)
         {
             if (name == "Log2" && signed) continue;
             operations.Add($"{type} {type}::{name}({type})",
-                $".intrinsic (.scalar (.{operation} {width})) 1");
+                $".intrinsic (.scalar (.{operation} {width} .word{width})) 1");
         }
         foreach (var (type, width, signed) in Pow2Integers)
         {
@@ -259,9 +259,9 @@ internal static class RuntimeModels
                 $".intrinsic (.scalar (.isPow2 {width} {LeanBool(signed)})) 1");
             foreach (var (name, operation) in BitCounts.Where(count => count.Name != "Log2"))
                 operations.Add($"{type} {type}::{name}({type})",
-                    $".intrinsic (.scalar (.{operation} {width})) 1");
+                    $".intrinsic (.scalar (.{operation} {width} .word32)) 1");
             if (signed) continue;
-            operations.Add($"{type} {type}::Log2({type})", $".intrinsic (.scalar (.log2 {width})) 1");
+            operations.Add($"{type} {type}::Log2({type})", $".intrinsic (.scalar (.log2 {width} .word32)) 1");
             foreach (var (name, operation) in Rotations)
                 operations.Add($"{type} {type}::{name}({type},System.Int32)",
                     $".intrinsic (.scalar (.{operation} {width})) 2");
