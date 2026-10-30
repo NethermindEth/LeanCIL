@@ -43,6 +43,34 @@ theorem SpanView.validate_below (view : SpanView) {before after : Memory}
       simpa only [SpanView.validate, address, liveAllocation, kept.allocations _ old] using valid
 #print axioms SpanView.validate_below
 
+/-- An addressed view valid in well-formed memory names an allocation below its watermark. -/
+theorem SpanView.allocation_below {view : SpanView} {memory : Memory} {base : Reference}
+    (valid : view.validate memory = .ok ()) (wellFormed : memory.WellFormed)
+    (address : view.reference = .address base) : base.allocation < memory.nextIdentity := by
+  cases present : memory.allocations base.allocation with
+  | none =>
+    simp only [SpanView.validate, address, liveAllocation, present] at valid
+    repeat' first
+      | contradiction
+      | split at valid
+      | simp_all [Bind.bind, Except.bind, Pure.pure, Except.pure]
+  | some allocation => exact (wellFormed.1 _ _ present).1
+#print axioms SpanView.allocation_below
+
+/-- Validity of a view of caller memory `anchor` is unchanged by anything that keeps the memory
+    below `anchor`'s watermark, even between later memories such as a callee's result and the
+    caller's frame exit. -/
+theorem SpanView.validate_eq_below {view : SpanView} {anchor before after : Memory}
+    (valid : view.validate anchor = .ok ()) (wellFormed : anchor.WellFormed)
+    (kept : MemoryBelow anchor.nextIdentity before after) :
+    view.validate after = view.validate before := by
+  cases address : view.reference with
+  | null => simp only [SpanView.validate, address]
+  | address base =>
+    simp only [SpanView.validate, address, liveAllocation,
+      kept.allocations _ (SpanView.allocation_below valid wellFormed address)]
+#print axioms SpanView.validate_eq_below
+
 /-- A successful slice of well-formed memory succeeds identically in any memory that keeps
     everything below the watermark. -/
 theorem SpanView.slice_below (view result : SpanView) {before after : Memory}
@@ -163,6 +191,21 @@ theorem after_below {before after : Memory} {values : List (BitVec (8 * width))}
       obtain ⟨allocation, present, _, _⟩ := formed_reference_live _ _ _ formed
       exact shape.after_below kept (by simpa using (wellFormed.1 _ _ present).1)
 
+/-- Contents of a view valid in caller memory `anchor` survive anything that keeps the memory
+    below `anchor`'s watermark, so contents a callee leaves in caller storage reach the caller's
+    final memory through the caller's own frame exit. -/
+theorem after_below_valid {anchor before after : Memory} {values : List (BitVec (8 * width))}
+    (contents : SpanContents before view width values) (valid : view.validate anchor = .ok ())
+    (wellFormed : anchor.WellFormed) (kept : MemoryBelow anchor.nextIdentity before after) :
+    SpanContents after view width values := by
+  refine ⟨contents.elementWidth, contents.length, ?_⟩
+  have shape := contents.contents
+  cases address : view.reference with
+  | null => simpa only [address] using shape
+  | address base =>
+    simp only [address] at shape ⊢
+    exact shape.after_below kept (SpanView.allocation_below valid wellFormed address)
+
 end SpanContents
 
 #print axioms SpanContents.nil
@@ -171,5 +214,6 @@ end SpanContents
 #print axioms SpanContents.drop
 #print axioms SpanContents.tail
 #print axioms SpanContents.after_below
+#print axioms SpanContents.after_below_valid
 
 end CIL.Safety

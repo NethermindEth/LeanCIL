@@ -20,6 +20,22 @@ Callee frames allocate locals above the caller's memory. For well-formed caller 
 successful slices and contents to any memory related by `MemoryBelow memory.nextIdentity`, such as
 the memory after frame entry and local stores.
 
+A method with locals cannot promise `final = memory`: its expired frame allocations stay in the
+final memory, so it ends with `MemoryBelow memory.nextIdentity memory final`, as `SpanSum` does,
+and its callers should expect that instead of equality. Two such calls compose with
+[`MemoryBelow.compose_invoke`](../CIL/Safety/ExecutionLifetime.lean) `called first second`, which
+takes the watermark growth from the first call's successful `invoke`;
+[`MemoryBelow.compose`](../CIL/Safety/MemoryBelow.lean) takes it as a premise. Without that growth
+the two facts do not compose. The `_below` lemmas then carry the caller's validity and contents
+from `memory` to the final memory. Contents a callee leaves in caller storage hold in the callee's
+result memory, which the caller's frame exit relates only by its entry watermark.
+[`SpanContents.after_below_valid`](../CIL/Safety/SpanContents.lean) and
+[`SpanView.validate_eq_below`](../CIL/Safety/SpanContents.lean) transport them, given the view is
+valid in the caller's well-formed entry memory. `Contents.after_below` does the same for a
+`Contents` fact once `SpanView.allocation_below` bounds its allocation.
+[Tests/BufferContents](../Tests/BufferContents.lean) composes two calls and refutes composition
+without growth.
+
 The [AllZero span loop](../Examples/Proofs/SpanAllZero.lean) decides whether every element of an
 arbitrary-length `ReadOnlySpan<uint>` is zero, with the invariant `remaining.all (· == 0) = result`
 and exact memory preservation. The [Sum span fold](../Examples/Proofs/SpanSum.lean) returns the

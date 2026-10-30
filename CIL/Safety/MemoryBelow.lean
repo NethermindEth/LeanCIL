@@ -37,6 +37,15 @@ theorem MemoryBelow.weaken {lower upper : Nat} {before after : Memory}
     fun id old => preserved.cells id (Nat.lt_of_lt_of_le old bound),
     fun id old => preserved.permissions id (Nat.lt_of_lt_of_le old bound)⟩
 
+/-- Consecutive calls compose: each keeps the memory below its own entry watermark, and the
+    first does not lower the watermark, so together they keep everything below the first's. -/
+theorem MemoryBelow.compose {first middle last : Memory}
+    (left : MemoryBelow first.nextIdentity first middle)
+    (right : MemoryBelow middle.nextIdentity middle last)
+    (grows : first.nextIdentity ≤ middle.nextIdentity) :
+    MemoryBelow first.nextIdentity first last :=
+  left.trans (right.weaken grows)
+
 theorem MemoryBelow.access {watermark : Nat} {m result : Memory}
     (preserved : MemoryBelow watermark m result) (r : Reference) (old : r.allocation < watermark)
     (width alignment : Nat) (writing : Bool) :
@@ -94,6 +103,7 @@ theorem write_preserves_memory_below (m result : Memory) (r : Reference) (bytes 
       rw [writeViews_permitted]
       simp [permitted, viewContains, Ne.symm different]
 
+#print axioms MemoryBelow.compose
 #print axioms MemoryBelow.read
 #print axioms allocate_preserves_memory_below
 #print axioms write_preserves_memory_below

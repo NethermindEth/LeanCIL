@@ -1,5 +1,6 @@
 import CIL.Safety.BufferContents
 import CIL.Safety.SpanContents
+import CIL.Safety.ExecutionLifetime
 
 /-! Contiguous-buffer contents over the checked memory model, checked without an extraction. -/
 namespace Tests.BufferContents
@@ -281,6 +282,53 @@ theorem span_length_refutes_extra {m : Memory} {view : SpanView} {values : List 
   have := extra.length.symm.trans contents.length
   simp at this
 
+/-- Two calls whose postcondition is `SpanSum`'s `MemoryBelow` leave the caller's span valid and
+    holding the same values, with no well-formedness fact about the memory between them. -/
+theorem span_survives_consecutive_calls {program : CIL.Program} {fuel method : Nat}
+    {args results : List Value} {memory middle final : Memory} {view : SpanView}
+    {values : List (BitVec (8 * 8))} (wellFormed : memory.WellFormed)
+    (valid : view.validate memory = .ok ()) (contents : SpanContents memory view 8 values)
+    (first : invoke program fuel method args memory = .ok (middle, results))
+    (firstKept : MemoryBelow memory.nextIdentity memory middle)
+    (secondKept : MemoryBelow middle.nextIdentity middle final) :
+    MemoryBelow memory.nextIdentity memory final ∧ view.validate final = .ok () ∧
+      SpanContents final view 8 values := by
+  have kept := firstKept.compose_invoke first secondKept
+  exact ⟨kept, view.validate_below valid wellFormed kept, contents.after_below wellFormed kept⟩
+
+/-- Contents a callee leaves in a caller's span reach the caller's final memory through a frame
+    exit that keeps only the memory below the caller's entry watermark. -/
+theorem callee_contents_reach_caller_exit {entry returned final : Memory} {view : SpanView}
+    {values : List (BitVec (8 * 8))} (wellFormed : entry.WellFormed)
+    (valid : view.validate entry = .ok ()) (written : SpanContents returned view 8 values)
+    (stillValid : view.validate returned = .ok ())
+    (exit : MemoryBelow entry.nextIdentity returned final) :
+    view.validate final = .ok () ∧ SpanContents final view 8 values :=
+  ⟨(view.validate_eq_below valid wellFormed exit).trans stillValid,
+    written.after_below_valid valid wellFormed exit⟩
+
+/-- Without the first call's watermark growth, two `MemoryBelow` facts do not compose: a middle
+    memory with a lowered watermark lets the second step rewrite caller bytes. -/
+theorem consecutive_calls_need_growth :
+    ¬ ∀ first middle last : Memory, MemoryBelow first.nextIdentity first middle →
+      MemoryBelow middle.nextIdentity middle last →
+      MemoryBelow first.nextIdentity first last := by
+  intro compose
+  let first : Memory :=
+    { allocations := fun _ => none
+      cells := fun _ _ => ⟨0, false⟩
+      views := []
+      nextIdentity := 1 }
+  have unchanged : MemoryBelow 1 first { first with nextIdentity := 0 } :=
+    ⟨fun _ _ => rfl, fun _ _ _ => rfl, fun _ _ _ _ => rfl⟩
+  have vacuous : MemoryBelow 0 { first with nextIdentity := 0 }
+      { first with cells := fun _ _ => ⟨1, true⟩ } :=
+    ⟨fun id bound => absurd bound (Nat.not_lt_zero id),
+      fun id bound => absurd bound (Nat.not_lt_zero id),
+      fun id bound => absurd bound (Nat.not_lt_zero id)⟩
+  have rewritten := (compose first _ _ unchanged vacuous).cells 0 Nat.zero_lt_one 0
+  simp [first] at rewritten
+
 #print axioms fill_replicates
 #print axioms transform_loads
 #print axioms byte_load_zero_extends
@@ -308,5 +356,8 @@ theorem span_length_refutes_extra {m : Memory} {view : SpanView} {values : List 
 #print axioms span_third_after_two_tails
 #print axioms null_span_holds_nothing
 #print axioms span_length_refutes_extra
+#print axioms span_survives_consecutive_calls
+#print axioms callee_contents_reach_caller_exit
+#print axioms consecutive_calls_need_growth
 
 end Tests.BufferContents

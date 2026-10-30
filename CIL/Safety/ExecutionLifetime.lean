@@ -119,6 +119,18 @@ theorem invoke_preserves_caller_allocations (program : CIL.Program) (fuel method
   obtain ⟨_, _, _, _, _, _, setup, executed⟩ := invoke_success_setup h
   exact entered_run_preserves_caller_allocations _ _ _ _ _ _ _ _ _ _ setup executed
 
+/-- A successful call's `MemoryBelow` postcondition composes with anything that keeps the memory
+    below the call's final watermark, such as a second call's postcondition. -/
+theorem MemoryBelow.compose_invoke {program : CIL.Program} {fuel method : Nat}
+    {args values : List Value} {memory middle last : Memory}
+    (called : invoke program fuel method args memory = .ok (middle, values))
+    (left : MemoryBelow memory.nextIdentity memory middle)
+    (right : MemoryBelow middle.nextIdentity middle last) :
+    MemoryBelow memory.nextIdentity memory last :=
+  left.compose right (invoke_preserves_caller_allocations _ _ _ _ _ _ _ called).next
+
+#print axioms MemoryBelow.compose_invoke
+
 theorem invoke_preserves_caller_reference (program : CIL.Program) (fuel method : Nat)
     (args values : List Value) (m final : Memory) (r formed : Reference) (hm : m.WellFormed)
     (valid : form m r = .ok formed)
