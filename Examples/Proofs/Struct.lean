@@ -61,12 +61,15 @@ theorem correctness (memory : Memory) (x : CIL.W64) (wellFormed : memory.WellFor
   refine ⟨CIL.executionBound Extracted.program 0, leaveFrame (entry.frame memory reference) tagged,
     ?_, ?_⟩
   · apply invoke_of_run (by simp only [cil_code] <;> rfl) rfl setup
-    cil_checked_steps [initStep, localAddress, entry.frame, enteredForm, initializedForm, payloadForm,
-      taggedForm, payloadAddress, tagAddress, readAddress, loaded, initializedWrite, payloadWrite,
+    cil_checked_steps [initStep, localAddress, entry.frame, enteredForm, initializedForm,
+      payloadForm, taggedForm, payloadAddress, tagAddress, readAddress, loaded, initializedWrite, payloadWrite,
       tagWrite, referenceAt, ordinaryAccessAlignment]
-  · have first := write_preserves_memory_below _ _ _ _ _ memory.nextIdentity home.fresh initializedWrite
-    have second := write_preserves_memory_below _ _ _ _ _ memory.nextIdentity home.fresh payloadWrite
-    have third := write_preserves_memory_below _ _ { reference with offset := reference.offset + 8 } _ _ memory.nextIdentity home.fresh tagWrite
+  · have first := write_preserves_memory_below _ _ _ _ _ memory.nextIdentity home.fresh
+      initializedWrite
+    have second := write_preserves_memory_below _ _ _ _ _ memory.nextIdentity home.fresh
+      payloadWrite
+    have third := write_preserves_memory_below _ _ { reference with offset := reference.offset + 8 }
+      _ _ memory.nextIdentity home.fresh tagWrite
     have last := leaveFrame_preserves_memory_below (entry.frame memory reference) tagged
       memory.nextIdentity (by
       intro id member

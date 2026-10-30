@@ -82,7 +82,8 @@ private theorem terminates (initial : Memory) (base home : Reference) (v : W64) 
     have same : k = n := BitVec.eq_of_toNat_eq exit
     subst same
     have stays : ¬ k.toInt < k.toInt := Int.lt_irrefl _
-    have below := leaveFrame_preserves_memory_below (entry.frame initial home) m initial.nextIdentity
+    have below := leaveFrame_preserves_memory_below (entry.frame initial home) m
+      initial.nextIdentity
       (by intro id member; change id ∈ [home.allocation] at member; rw [List.mem_singleton.mp member]; exact fresh)
     cil_loop_finish [entry.frame, header, guard, loaded, stays]
     refine loop_terminates_return (op := .ret none) (by first | (simp only [cil_code]; rfl) | rfl)
@@ -149,8 +150,8 @@ private theorem terminates (initial : Memory) (base home : Reference) (v : W64) 
       cil_loop_steps [entry.frame, header, guard]
       refine loop_reaches_next (by first | (simp only [cil_code]; rfl) | rfl)
         (by first | (simp only [cil_code]; rfl) | rfl) (storeStep _ _ _ _) ?_
-      cil_loop_steps [entry.frame, header, guard, loaded1, storedStep, loadedStep, List.reverse_cons,
-        List.reverse_nil, List.nil_append, List.cons_append]
+      cil_loop_steps [entry.frame, header, guard, loaded1, storedStep, loadedStep,
+        List.reverse_cons, List.reverse_nil, List.nil_append, List.cons_append]
     obtain ⟨cost, segment⟩ := path
     refine ⟨(k + 1, m2), cost, ⟨bytes2, ((homeReady.after_write stored).after_write written2).access, ?_, ?_,
       write_preserves_wellFormed _ _ _ _ _ formed1 written2, form_after_write written2 (form_after_write stored valid),
@@ -192,8 +193,10 @@ theorem fill_words (initial : Memory) (base : Reference) (v : W64) (n : W32) (fo
     simpa only [form, liveAllocation, entryMemory.kept.allocations _ old] using valid
   have start : invariant initial base home v n (0, m0) := by
     refine ⟨by simpa using bytes0, (homeReady.after_write written0).access, ?_, by simp,
-      write_preserves_wellFormed _ _ _ _ _ entryMemory.wellFormed written0, form_after_write written0 enteredForm, ?_⟩
-    · simpa using Filled.start (room := n.toNat) ((writable.after_below entryMemory.kept old).after_write written0)
+      write_preserves_wellFormed _ _ _ _ _ entryMemory.wellFormed written0,
+      form_after_write written0 enteredForm, ?_⟩
+    · simpa using Filled.start (room := n.toNat)
+        ((writable.after_below entryMemory.kept old).after_write written0)
     · exact home_confined (Confined.ofMemoryBelow entryMemory.kept (Nat.le_refl _)
         entryMemory.grown) numeric.fresh written0
   have path : LoopReaches Extracted.program 0 [.reference (.address base), .scalar (.i64 v), .scalar (.i32 n)]
