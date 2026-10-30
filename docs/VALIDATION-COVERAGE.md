@@ -50,7 +50,7 @@ true under a custom v4 profile declaring VBMI, where the unmodeled VBMI body blo
 `Avx512Vbmi2.VL` stays unclassified, and observations that omit or split `avx512VbmiVL` are rejected.
 `BitConverter.IsLittleEndian` prunes its big-endian branch on those profiles; forged owners and values are rejected by both certificates,
 and lookalike scopes, fields and same-named module types are rejected by the extractor.
-`Tests/DivisionIntrinsics.cs` compares `Avx2.Shuffle` and `Ssse3.Shuffle`, fed by
+`Tests/ExactIntrinsics.cs` compares `Avx2.Shuffle` and `Ssse3.Shuffle`, fed by
 `Vector256.Create<byte>` and `Vector128.Create<byte>` over byte spans, with the host CPU on twelve
 seeded span pairs each, one of them int256's byte-reversal mask. Both short-span calls raise
 `ArgumentOutOfRangeException` in the runtime and the model. The test fails if its inputs do not

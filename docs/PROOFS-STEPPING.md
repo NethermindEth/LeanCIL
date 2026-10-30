@@ -48,10 +48,10 @@ optional lookup result, so a list-based caller writes `foldEntry roles[target]?`
 retain the original permissive fold-role result; the successor-state check independently rejects a
 target missing from its certificate.
 
-Division intrinsic validation classifies each emitted intrinsic once and removes the common assembly
+Exact intrinsic validation classifies each emitted intrinsic once and removes the common assembly
 scope once when recognizing a raw call's family. Its signature-byte table is generated from the
 existing signature strings at elaboration time; a kernel-checked equality proves the table exact
-without adding axioms. `DivisionIntrinsicsValid_iff_original` proves equivalence to the original
+without adding axioms. `ExactIntrinsicsValid_iff_original` proves equivalence to the original
 signature lookup, malformed-family rejection, arity, reachability, profile availability and length
 checks for arbitrary raw metadata, including non-ASCII identities.
 

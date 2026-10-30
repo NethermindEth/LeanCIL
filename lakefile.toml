@@ -173,7 +173,7 @@ name = "Tests.ImportedLayouts"
 name = "Tests.ContractClosure"
 
 [[lean_lib]]
-name = "Tests.DivisionIntrinsics"
+name = "Tests.ExactIntrinsics"
 
 [[lean_lib]]
 name = "Tests.ScalarEvidence"

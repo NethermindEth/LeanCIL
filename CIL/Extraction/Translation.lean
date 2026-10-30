@@ -1,7 +1,7 @@
 import CIL.Extraction.Scalars
 import CIL.Extraction.LayoutCoverage
 import CIL.Extraction.UnsafeCalls
-import CIL.Extraction.DivisionIntrinsics
+import CIL.Extraction.ExactIntrinsics
 import CIL.Extraction.VectorInitialization
 import CIL.Extraction.StaticValues
 import CIL.Extraction.ImportLayouts
@@ -165,7 +165,7 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   LayoutUsesComplete rawLayouts item.closed item.parameterInput item.reachable item.layoutUses ∧
   MethodShapeValid rawLayouts item.closed method ∧
   UnsafeCallsValid rawLayouts item.closed item.reachable method.code ∧
-  DivisionIntrinsicsValid item.closed item.reachable method ∧
+  ExactIntrinsicsValid item.closed item.reachable method ∧
   OpaqueLocalsValid item.closed method ∧
   VectorInitializationsValid item.closed item.reachable method ∧
   ScalarFlowValid rawLayouts.toArray item.closed item.featureStates item.scalarStates method.code ∧
