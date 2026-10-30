@@ -394,12 +394,15 @@ syntax "bind_cutpoint " ident " := " term:max " matching " term:max
   " with " term:max : command
 
 /-- Select an instruction explicitly, including a structural label in a multi-loop method.
-    The requested instruction must exist and satisfy the supplied predicate. -/
+    The requested instruction must exist and satisfy the supplied predicate. Given as
+    `with frame, stack, memory`, the generated state fixes all three instead of taking the stack
+    and memory as arguments. -/
 syntax "bind_cutpoint " ident bracketedBinder* " := " term:max " at " term:max
-  " matching " term:max " with " term:max : command
+  " matching " term:max " with " term:max ("," term:max "," term:max)? : command
 
 elab_rules : command
-  | `(bind_cutpoint $name $binders* := $body at $location matching $predicate with $frame) => do
+  | `(bind_cutpoint $name $binders* := $body at $location matching $predicate with $frame
+      $[, $stack, $memory]?) => do
     liftTermElabM do
       let selected ← Term.elabTermEnsuringType
         (← `(if ($body).code[$location]?.map $predicate = some true then 1 else 0))
@@ -413,8 +416,12 @@ elab_rules : command
     elabCommand (← `(theorem $checked :
       ($body).code[$pc]?.map $predicate = some true := by decide +kernel))
     elabCommand (← `(#print axioms $checked))
-    elabCommand (← `(def $name $binders* (stack : List Value) (memory : Memory) : LoopState :=
-      ⟨$pc, $frame, stack, memory⟩))
+    match stack, memory with
+    | some stack, some memory =>
+      elabCommand (← `(def $name $binders* : LoopState := ⟨$pc, $frame, $stack, $memory⟩))
+    | _, _ =>
+      elabCommand (← `(def $name $binders* (stack : List Value) (memory : Memory) : LoopState :=
+        ⟨$pc, $frame, stack, memory⟩))
 
 elab_rules : command
   | `(bind_cutpoint $name := $body matching $predicate with $frame) => do
