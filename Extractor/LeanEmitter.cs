@@ -190,17 +190,23 @@ internal static class LeanEmitter
                         var literal = value.Literal is null ? "" : $", literal := some ({value.Literal})";
                         var construct = value.Construct ? ", construct := true" : "";
                         StaticIdentityRecord identity = StaticIdentity.Of(value.Field);
-                        return $"({s.pc}, {{ identity := {identity.Identity}, " +
-                            $"assemblyIdentity := {JsonSerializer.Serialize(identity.AssemblyIdentity)}, " +
-                            $"fieldName := {JsonSerializer.Serialize(value.Field.FullName)}, " +
-                            $"bytes := {StaticData.LeanBytes(value.Bytes)}, scalar := {StaticValues.Scalar(value.Field)}, " +
-                            $"initializer := some {{ method := {initializer}, " +
-                            $"arguments := [{string.Join(", ", value.Arguments)}]{literal}{construct} }} }})";
+                        return $$"""
+                            ({{s.pc}}, { identity := {{identity.Identity}},
+                              assemblyIdentity := {{JsonSerializer.Serialize(identity.AssemblyIdentity)}},
+                              fieldName := {{JsonSerializer.Serialize(value.Field.FullName)}},
+                              bytes := {{StaticData.LeanBytes(value.Bytes)}}, scalar := {{StaticValues.Scalar(value.Field)}},
+                              initializer := some { method := {{initializer}},
+                                arguments := [{{string.Join(", ", value.Arguments)}}]{{literal}}{{construct}} } })
+                            """;
                     }
                     FieldDefinition f = StaticData.Validate((FieldReference)s.i.Operand, m.Module);
                     StaticIdentityRecord fieldIdentity = StaticIdentity.Of(f);
-                    return $"({s.pc}, {{ identity := {fieldIdentity.Identity}, assemblyIdentity := {JsonSerializer.Serialize(fieldIdentity.AssemblyIdentity)}, fieldName := {JsonSerializer.Serialize(f.FullName)}, bytes := {StaticData.LeanBytes(f)}, " +
-                        $"alignment := {StaticData.Alignment(f)} }})";
+                    return $$"""
+                        ({{s.pc}}, { identity := {{fieldIdentity.Identity}},
+                          assemblyIdentity := {{JsonSerializer.Serialize(fieldIdentity.AssemblyIdentity)}},
+                          fieldName := {{JsonSerializer.Serialize(f.FullName)}},
+                          bytes := {{StaticData.LeanBytes(f)}}, alignment := {{StaticData.Alignment(f)}} })
+                        """;
                 }));
             lean.AppendLine($"def method{n}Signature : String := {JsonSerializer.Serialize(m.FullName)}");
             if (MethodSpecialization.Source(m) is { } origin)

@@ -28,8 +28,10 @@ internal static class StaticData
         // Image bases, section RVAs and file offsets are 512-byte multiples, so RVA alignment survives
         // both mapped and flat loads; CreateSpan<T> throws on data misaligned for sizeof(T).
         if (field.RVA % layout.PackingSize != 0)
-            throw new InvalidDataException($"Misaligned static data: {reference.FullName}\n  " +
-                $"RVA 0x{field.RVA:X} is not a multiple of its declared packing {layout.PackingSize}.");
+            throw new InvalidDataException($"""
+                Misaligned static data: {reference.FullName}
+                  RVA 0x{field.RVA:X} is not a multiple of its declared packing {layout.PackingSize}.
+                """);
         return field;
     }
 
