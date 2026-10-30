@@ -737,6 +737,13 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     return (memory, .scalar (.i32 (BitVec.ofNat 32 view.length)) :: rest)
   | .spanReference, .span r _ :: rest =>
     return (memory, (← formValue memory r) :: rest)
+  -- Unlike `GetPinnableReference`, an empty view still yields its own reference, never null.
+  -- A readonly view is unsupported: .NET returns a writable `ref T` for it.
+  | .spanReference, .bufferSpan view :: rest =>
+    if view.writable then
+      let _ ← checkedAt view.reference 0 (view.validate memory)
+      return (memory, (← formValue memory view.reference) :: rest)
+    else .error .invalidState
   -- Unsigned comparison: a negative index is out of range, as in `ReadOnlySpan<T>.this[int]`.
   | .spanItem width, .scalar (.i32 index) :: .span r length :: rest =>
     if index.toNat < length then

@@ -265,6 +265,22 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       return .next (pc + 1) (value :: rest) frame memory := by
   memory_step_proof
 
+/-- `MemoryMarshal.GetReference` over a writable view returns its start reference, even when
+    the view is empty; it validates the view's extent but makes no access. -/
+@[cil_step high] theorem step_memory_spanReference_view_eq (reference : ManagedReference)
+    (length width : Nat) (rest : List Value) :
+    step body (.memory .spanReference) pc args frame
+      (.bufferSpan ⟨reference, length, width, true⟩ :: rest) memory = do
+      let _ ← checkedAt reference 0 (SpanView.validate ⟨reference, length, width, true⟩ memory)
+      let value ← formValue memory reference
+      return .next (pc + 1) (value :: rest) frame memory := by
+  simp only [step, staticInstruction, memoryInstruction, otherMemoryInstruction, observerCount,
+    CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
+    Bool.or_false, Bool.false_eq_true, ite_false, cil_guard, bind_ite, bind_assoc, pure_bind]
+  all_goals (repeat' split) <;> first
+    | exact absurd trivial (by assumption)
+    | ((try simp only [*]) <;> rfl)
+
 /-- The address of element `index`; an index that is negative or not below `length` throws
     `IndexOutOfRangeException`. -/
 @[cil_step high] theorem step_memory_spanItem_eq (width : Nat) (index : CIL.W32)
@@ -374,6 +390,7 @@ end MemoryEquations
 #print axioms step_memory_bitcastByteBool_i8_eq
 #print axioms step_memory_skipInit_eq
 #print axioms step_memory_spanReference_eq
+#print axioms step_memory_spanReference_view_eq
 #print axioms step_memory_spanItem_eq
 #print axioms step_memory_spanLength_eq
 #print axioms step_memory_nullRef_eq

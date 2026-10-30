@@ -423,6 +423,7 @@ System.Runtime::T& System.Runtime.CompilerServices.Unsafe::SubtractByteOffset(T&
 System.Runtime::T& System.Runtime.CompilerServices.Unsafe::SubtractByteOffset(T&,System.UIntPtr)
 System.Runtime::T& System.Runtime.InteropServices.MemoryMarshal::GetArrayDataReference(T[])
 System.Runtime::T& System.Runtime.InteropServices.MemoryMarshal::GetReference(System.ReadOnlySpan`1<T>)
+System.Runtime::T& System.Runtime.InteropServices.MemoryMarshal::GetReference(System.Span`1<T>)
 System.Runtime::T& System.Span`1::GetPinnableReference()
 System.Runtime::T& System.Span`1::get_Item(System.Int32)
 System.Runtime::T& modreq(System.Runtime.InteropServices.InAttribute) System.ReadOnlySpan`1::GetPinnableReference()

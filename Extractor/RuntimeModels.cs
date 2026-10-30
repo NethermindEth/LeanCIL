@@ -362,6 +362,8 @@ internal static class RuntimeModels
                 $".memory (.spanItem {width})");
             operations.Add("!!0& System.Runtime.InteropServices.MemoryMarshal::" +
                 $"GetReference<{element}>(System.ReadOnlySpan`1<!!0>)", ".memory .spanReference");
+            operations.Add("!!0& System.Runtime.InteropServices.MemoryMarshal::" +
+                $"GetReference<{element}>(System.Span`1<!!0>)", ".memory .spanReference");
             foreach (var name in new[] { "System.Span`1", "System.ReadOnlySpan`1" })
             {
                 var owner = $"{name}<{element}>";

@@ -216,7 +216,10 @@ foreach (var (name, signature, width, arguments, expected) in new[]
     ("CharacterWrite", "System.Span`1<System.Char>,System.Int32,System.Char", 2,
         "[.bufferSpan ⟨.address ⟨0, 0⟩, 2, 2, true⟩, .scalar (.i32 1), .scalar (.i32 65535)]", ".i32 65535"),
     ("BooleanWrite", "System.Span`1<System.Boolean>,System.Int32,System.Boolean", 1,
-        "[.bufferSpan ⟨.address ⟨0, 0⟩, 2, 1, true⟩, .scalar (.i32 1), .scalar (.i32 1)]", ".i32 1")
+        "[.bufferSpan ⟨.address ⟨0, 0⟩, 2, 1, true⟩, .scalar (.i32 1), .scalar (.i32 1)]", ".i32 1"),
+    // MemoryMarshal.GetReference(Span<int>) writes through to element 0, which starts as 0.
+    ("ReferenceWrite", "System.Span`1<System.Int32>,System.Int32", 4,
+        "[.bufferSpan ⟨.address ⟨0, 0⟩, 2, 4, true⟩, .scalar (.i32 9)]", ".i32 9")
 })
 {
     var output = Path.Combine(root, name);

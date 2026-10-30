@@ -100,6 +100,12 @@ public static class MemorySpans
 
     public static void Write(Span<int> values, int index, int value) => values[index] = value;
 
+    public static int ReferenceWrite(Span<int> values, int value)
+    {
+        MemoryMarshal.GetReference(values) = value;
+        return values[0];
+    }
+
     public static int SliceWrite(Span<int> values, int start, int length, int index, int value)
     {
         var slice = values.Slice(start, length);
