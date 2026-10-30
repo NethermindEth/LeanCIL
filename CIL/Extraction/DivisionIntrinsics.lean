@@ -6,9 +6,9 @@ import Lean.Elab.Tactic.BuiltinTactic
 # Exact vector calls and opaque vector locals
 
 `DivisionIntrinsicsValid` checks selected hardware calls, used by vectorized division and
-byte reversal, and lane-independent portable integer vector calls. Each covered call requires exact raw metadata
-and the matching emitted intrinsic, available under the method's profile. Other intrinsic
-families retain their existing extraction checks.
+byte reversal, and lane-independent portable integer vector calls. Each covered call requires
+exact raw metadata and the matching emitted intrinsic, available under the method's profile.
+Other intrinsic families retain their existing extraction checks.
 
 `Vector128.CreateScalarUnsafe` leaves the upper half of its result unspecified, so a
 method that uses it keeps eligible `Vector128<ulong>` locals as opaque whole values rather

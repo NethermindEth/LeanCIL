@@ -532,12 +532,14 @@ private theorem append_low (high low : V128) : (high ++ low).extractLsb' 0 128 =
   ext i hi
   rw [BitVec.getElem_extractLsb', BitVec.getLsbD_append]
   simp [hi, BitVec.getLsbD_eq_getElem]
+#print axioms append_low
 
 /-- The high half of a concatenation is its first operand. -/
 private theorem append_high (high low : V128) : (high ++ low).extractLsb' 128 128 = high := by
   ext i hi
   rw [BitVec.getElem_extractLsb', BitVec.getLsbD_append]
   simp [hi, BitVec.getLsbD_eq_getElem]
+#print axioms append_high
 
 /-- The low result half depends only on the low source and control halves. -/
 theorem shuffle_low_half (source control : V256) :
