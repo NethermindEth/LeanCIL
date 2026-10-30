@@ -187,6 +187,32 @@ if (shifted.Code == 0 || File.Exists(Path.Combine(shiftedFolder, "Extracted.lean
     throw new InvalidOperationException("Misaligned RVA was not rejected:\n" + shifted.Output);
 Console.WriteLine("PASS rejection: static data RVA off its declared packing");
 
+// A section whose file offset and virtual address differ by 4 keeps the RVA aligned but not a flat layout;
+// Roslyn's own output, extracted above, is the positive control.
+const string sectionMisaligned = "Static data section misaligned";
+var offsetFolder = Path.Combine(root, "Reject-section-file-offset");
+var offsetDll = Path.Combine(offsetFolder, "Examples.dll");
+Directory.CreateDirectory(offsetFolder);
+File.Delete(Path.Combine(offsetFolder, "Extracted.lean"));
+var wordsRva = ShiftSectionRawData(assembly, offsetDll, wordsField);
+using (var original = ModuleDefinition.ReadModule(assembly))
+using (var moved = ModuleDefinition.ReadModule(offsetDll))
+{
+    byte[] Words(ModuleDefinition module) => module.GetTypes().SelectMany(type => type.Fields)
+        .Single(field => field.Name == wordsField).InitialValue;
+    if (!Words(original).AsSpan().SequenceEqual(Words(moved)) || wordsRva % 8 != 0)
+        throw new InvalidOperationException("Shifted section no longer holds the table at an 8-aligned RVA");
+}
+var offset = Execute(Extract("extract", offsetDll, "Examples", "SpanTables::Word(int)", offsetFolder));
+if (offset.Code == 0 || File.Exists(Path.Combine(offsetFolder, "Extracted.lean")) ||
+    !offset.Output.Contains(sectionMisaligned, StringComparison.Ordinal) ||
+    offset.Output.Contains("Misaligned static data", StringComparison.Ordinal))
+    throw new InvalidOperationException($"""
+        Section file offset off its virtual address was not rejected:
+        {offset.Output}
+        """);
+Console.WriteLine("PASS rejection: static data section whose file offset breaks RVA alignment");
+
 queue.Flush();
 rejected.Check();
 Console.WriteLine("PASS typed static spans, bounds faults, reused locals, computed indexes and forged receivers");
@@ -218,4 +244,49 @@ static void ShiftFieldRva(string path, string fieldName, uint delta)
     var rva = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(image.AsSpan(entry));
     System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(image.AsSpan(entry), rva + delta);
     File.WriteAllBytes(path, image);
+}
+
+// Writes a copy whose section raw data starts 4 bytes later in the file; returns the named field's RVA.
+static uint ShiftSectionRawData(string source, string target, string fieldName)
+{
+    const int shift = 4, sectionHeaderSize = 40, sectionPointerToRawData = 20;
+    const int debugEntrySize = 28, debugPointerToRawData = 24;
+    var original = File.ReadAllBytes(source);
+    using var pe = new System.Reflection.PortableExecutable.PEReader(new MemoryStream(original));
+    var headers = pe.PEHeaders;
+    var reader = System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(pe);
+    var field = reader.GetFieldDefinition(reader.FieldDefinitions.Single(handle =>
+        reader.GetString(reader.GetFieldDefinition(handle).Name) == fieldName));
+    var rva = field.GetRelativeVirtualAddress();
+    var firstRaw = headers.SectionHeaders.Min(section => section.PointerToRawData);
+    if (headers.PEHeader!.SizeOfHeaders > firstRaw)
+        throw new InvalidOperationException("Section raw data overlaps the PE headers");
+    // Inserting before the first section moves every file offset at or past it, and no RVA.
+    var image = new byte[original.Length + shift];
+    original.AsSpan(0, firstRaw).CopyTo(image);
+    original.AsSpan(firstRaw).CopyTo(image.AsSpan(firstRaw + shift));
+    void Bump(int at)
+    {
+        var value = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(image.AsSpan(at));
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(image.AsSpan(at), value + shift);
+    }
+    var table = headers.PEHeaderStartOffset + headers.CoffHeader.SizeOfOptionalHeader;
+    for (var index = 0; index < headers.SectionHeaders.Length; index++)
+        Bump(table + index * sectionHeaderSize + sectionPointerToRawData);
+    // Cecil reads debug entry data by file offset, so those offsets move with the sections.
+    var debugTable = headers.PEHeader.DebugTableDirectory;
+    if (headers.TryGetDirectoryOffset(debugTable, out var debug))
+        for (var index = 0; index < debugTable.Size / debugEntrySize; index++)
+        {
+            var entry = debug + shift + index * debugEntrySize + debugPointerToRawData;
+            if (System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(image.AsSpan(entry)) >= firstRaw)
+                Bump(entry);
+        }
+    File.WriteAllBytes(target, image);
+    using var shifted = new System.Reflection.PortableExecutable.PEReader(new MemoryStream(image));
+    var section = shifted.PEHeaders.SectionHeaders[shifted.PEHeaders.GetContainingSectionIndex(rva)];
+    if (shifted.PEHeaders.SectionHeaders.Any(other => other.PointerToRawData < firstRaw + shift) ||
+        (section.VirtualAddress - section.PointerToRawData) % 8 != 8 - shift)
+        throw new InvalidOperationException("Shifted section still agrees with its virtual address modulo 8");
+    return (uint)rva;
 }

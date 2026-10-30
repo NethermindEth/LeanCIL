@@ -150,7 +150,7 @@ internal static class Blockers
             }
 
             // Validation rewrites generic call operands, so every entry gets its own module.
-            using var module = ModuleDefinition.ReadModule(new MemoryStream(assembly));
+            using var module = StaticData.ReadModule(assembly);
             Symbols.Read(module, assemblyPath, out _);
             var blocked = new List<MetadataValidation.Blocked>();
             MethodDefinition[] methods;
@@ -165,7 +165,7 @@ internal static class Blockers
             {
                 try
                 {
-                    using var original = ModuleDefinition.ReadModule(new MemoryStream(assembly));
+                    using var original = StaticData.ReadModule(assembly);
                     LeanEmitter.Emit(methods, profile, original);
                 }
                 catch (Exception error) { blocked.Add(new(methods[0], null, error, [methods[0]])); }

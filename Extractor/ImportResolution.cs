@@ -78,7 +78,7 @@ internal sealed class ImportResolution : IDisposable
                     throw new InvalidDataException("Import requires an independently supplied interface digest: --import-interface-sha256 Lib=<hex>.");
                 if (source.ExpectedInterfaceDigest != contract.InterfaceDigest)
                     throw new InvalidDataException($"Import interface SHA-256 mismatch: expected {source.ExpectedInterfaceDigest}, actual {contract.InterfaceDigest}.");
-                ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(implementation));
+                ModuleDefinition module = StaticData.ReadModule(implementation);
                 try
                 {
                     bool referenceAssembly = module.Assembly.CustomAttributes.Any(attribute =>
