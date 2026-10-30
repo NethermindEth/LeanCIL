@@ -1,9 +1,9 @@
-import CIL.SIMD.Vector
+import CIL.SIMD.SSE
 
 /-!
 # AVX2
 
-Lane multiplication, permutation and blending on 256-bit vectors.
+Lane multiplication, permutation, blending and byte shuffles on 256-bit vectors.
 -/
 
 namespace CIL.Vector
@@ -28,5 +28,10 @@ def blend32 (a b : V256) (control : BitVec 8) : V256 :=
   let lane := fun i => if control.getLsbD i then lane32 b i else lane32 a i
   ((lane 7 ++ lane 6) ++ (lane 5 ++ lane 4)) ++
     ((lane 3 ++ lane 2) ++ (lane 1 ++ lane 0))
+
+/-- VPSHUFB: PSHUFB on each 128-bit half, so no byte crosses between the halves. -/
+def shuffleBytes256 (source control : V256) : V256 :=
+  shuffleBytes128 (source.extractLsb' 128 128) (control.extractLsb' 128 128) ++
+    shuffleBytes128 (source.extractLsb' 0 128) (control.extractLsb' 0 128)
 
 end CIL.Vector

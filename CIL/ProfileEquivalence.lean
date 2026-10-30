@@ -97,7 +97,7 @@ def Intrinsic.requiredFeatures : Intrinsic → List Feature
   | .vector _ => []
   | .advSimd _ => [.advSimd]
   | .sse .shiftLeftBytes => [.sse2]
-  | .sse .alignBytes => [.ssse3]
+  | .sse .alignBytes | .sse .shuffleBytes => [.ssse3]
   | .avx _ => [.avx]
   | .avx2 _ => [.avx2]
   | .avx512 .ltu512 | .avx512 .gtu512 => [.avx512F]

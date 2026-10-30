@@ -26,6 +26,7 @@ internal static class RuntimeModels
     private const string Avx512DQ = X86 + ".Avx512DQ";
     private const string V128Byte = Intrinsics + ".Vector128`1<System.Byte>";
     private const string V128UInt64 = Intrinsics + ".Vector128`1<System.UInt64>";
+    private const string V256Byte = Intrinsics + ".Vector256`1<System.Byte>";
     private const string V256UInt64 = Intrinsics + ".Vector256`1<System.UInt64>";
     private const string V256UInt32 = Intrinsics + ".Vector256`1<System.UInt32>";
     private const string V256Int32 = Intrinsics + ".Vector256`1<System.Int32>";
@@ -460,6 +461,17 @@ internal static class RuntimeModels
         return operations;
     }
 
+    // Vector128/256.Create<byte>(ReadOnlySpan<byte>) reads the leading bytes and throws
+    // ArgumentOutOfRangeException for a short span, exactly as MemoryMarshal.Read of the vector.
+    private static string? VectorFromByteSpan(string signature)
+    {
+        const string spanParameter = "System.ReadOnlySpan`1<!!0>";
+        foreach (var width in new[] { 128, 256 })
+            if (signature == $"{Vector(width, "!!0")} {Intrinsics}.Vector{width}::Create<System.Byte>({spanParameter})")
+                return $".memory (.marshalRead (.snapshot .vector{width}) false)";
+        return null;
+    }
+
     private static string? Intrinsic(string signature, FeatureProfile profile)
     {
         if (PortableVectorOperations.TryGetValue(signature, out var operation)) return operation;
@@ -491,6 +503,7 @@ internal static class RuntimeModels
             return Finish(".vector .combine256", 2);
         if (signature == $"{V128UInt64} {Intrinsics}.Vector128::CreateScalarUnsafe(System.UInt64)")
             return Finish(".vector .createScalarUnsafe64", 1);
+        if (VectorFromByteSpan(signature) is { } load) return load;
         foreach (int width in new[] { 128, 256 })
         {
             string ulongVector = Vector(width, "System.UInt64");
@@ -540,6 +553,10 @@ internal static class RuntimeModels
                 Finish(".sse .shiftLeftBytes", 2, Feature.Sse2),
             $"{V128Byte} {X86}.Ssse3::AlignRight({V128Byte},{V128Byte},System.Byte)" =>
                 Finish(".sse .alignBytes", 3, Feature.Ssse3),
+            $"{V128Byte} {X86}.Ssse3::Shuffle({V128Byte},{V128Byte})" =>
+                Finish(".sse .shuffleBytes", 2, Feature.Ssse3),
+            $"{V256Byte} {Avx2}::Shuffle({V256Byte},{V256Byte})" =>
+                Finish(".avx2 .shuffleBytes", 2, Feature.Avx2),
             $"{V256UInt64} {Avx2}::Permute4x64({V256UInt64},System.Byte)" =>
                 Finish(".avx2 .permute4x64", 2, Feature.Avx2),
             $"{V256UInt32} {Avx2}::Blend({V256UInt32},{V256UInt32},System.Byte)" =>

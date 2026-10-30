@@ -5,8 +5,8 @@ import Lean.Elab.Tactic.BuiltinTactic
 /-!
 # Exact vector calls and opaque vector locals
 
-`DivisionIntrinsicsValid` checks selected hardware calls used by vectorized division and
-lane-independent portable integer vector calls. Each covered call requires exact raw metadata
+`DivisionIntrinsicsValid` checks selected hardware calls, used by vectorized division and
+byte reversal, and lane-independent portable integer vector calls. Each covered call requires exact raw metadata
 and the matching emitted intrinsic, available under the method's profile. Other intrinsic
 families retain their existing extraction checks.
 
@@ -99,12 +99,29 @@ private def divisionSignatures : List (String × String × String × Intrinsic �
     "System.Int32 \
       System.Runtime.Intrinsics.X86.Avx512DQ::MoveMask(\
       System.Runtime.Intrinsics.Vector256`1<System.UInt64>)",
-    .avx512DQ .moveMask64, 1)]
+    .avx512DQ .moveMask64, 1),
+  ("System.Runtime.Intrinsics.X86.Avx2", "Shuffle",
+    "System.Runtime.Intrinsics.Vector256`1<System.Byte> \
+      System.Runtime.Intrinsics.X86.Avx2::Shuffle(\
+      System.Runtime.Intrinsics.Vector256`1<System.Byte>,\
+      System.Runtime.Intrinsics.Vector256`1<System.Byte>)",
+    .avx2 .shuffleBytes, 2),
+  ("System.Runtime.Intrinsics.X86.Ssse3", "Shuffle",
+    "System.Runtime.Intrinsics.Vector128`1<System.Byte> \
+      System.Runtime.Intrinsics.X86.Ssse3::Shuffle(\
+      System.Runtime.Intrinsics.Vector128`1<System.Byte>,\
+      System.Runtime.Intrinsics.Vector128`1<System.Byte>)",
+    .sse .shuffleBytes, 2)]
 
 /-- `Vector{width}<ulong>` with exact scopes. -/
 private def divisionVector (width : String) : TypeExpr :=
   .apply (.constructor intrinsicsScope ("System.Runtime.Intrinsics.Vector" ++ width ++ "`1"))
     (.atom runtimeScope "System.UInt64")
+
+/-- `Vector{width}<byte>` with exact scopes. -/
+private def byteVector (width : String) : TypeExpr :=
+  .apply (.constructor intrinsicsScope ("System.Runtime.Intrinsics.Vector" ++ width ++ "`1"))
+    (.atom runtimeScope "System.Byte")
 
 /-- The return and parameter types each admitted intrinsic's call site must declare. -/
 private def divisionCallTypes : Intrinsic → Option (TypeExpr × List TypeExpr)
@@ -121,6 +138,8 @@ private def divisionCallTypes : Intrinsic → Option (TypeExpr × List TypeExpr)
   | .vector .combine256 => some (divisionVector "512", [divisionVector "256", divisionVector "256"])
   | .vector .createScalarUnsafe64 =>
     some (divisionVector "128", [.atom runtimeScope "System.UInt64"])
+  | .avx2 .shuffleBytes => some (byteVector "256", [byteVector "256", byteVector "256"])
+  | .sse .shuffleBytes => some (byteVector "128", [byteVector "128", byteVector "128"])
   | _ => none
 
 /-- Lane-independent integer operations share vector semantics at each supported width. -/
@@ -330,7 +349,7 @@ def emittedDivisionIntrinsic : Op → Option (Intrinsic × Nat)
     | .avx2 .shl64Count | .avx2 .shr64Count | .avx2 .shl64 | .avx2 .shr64
     | .avx512 .ltu512 | .avx512 .gtu512
     | .avx512DQ .moveMask512 | .avx512DQ .moveMask64 | .vector .combine256
-    | .vector .createScalarUnsafe64
+    | .vector .createScalarUnsafe64 | .avx2 .shuffleBytes | .sse .shuffleBytes
     | .vector (.band _) | .vector (.bor _) | .vector (.bxor _) | .vector (.bnot _)
     | .vector (.equalsAll _) | .vector (.zero _) | .vector (.ones _) => some (intrinsic, arity)
     | _ => none

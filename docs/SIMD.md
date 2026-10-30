@@ -10,10 +10,10 @@ Values are modelled as bit patterns with lane zero in the least-significant bits
 
 | Family | Extractable operations |
 | --- | --- |
-| [Portable vectors](#portable-vector-operations) | Selected integer arithmetic, bitwise/equality operators, lane comparisons, construction, extraction, reductions, arithmetic shifts and bit reinterpretation |
-| [SSE](#sse) | `Sse2.ShiftLeftLogical128BitLane`, `Ssse3.AlignRight`; SSE4.1/4.2 getters only |
+| [Portable vectors](#portable-vector-operations) | Selected integer arithmetic, bitwise/equality operators, lane comparisons, construction (including from a byte span), extraction, reductions, arithmetic shifts and bit reinterpretation |
+| [SSE](#sse) | `Sse2.ShiftLeftLogical128BitLane`, `Ssse3.AlignRight`, `Ssse3.Shuffle`; SSE4.1/4.2 getters only |
 | [AVX](#avx) | Selected `MoveMask`, `Blend`, `TestZ` overloads |
-| [AVX2](#avx2) | `Permute4x64`, `Blend`, `Add`, `CompareEqual`, `CompareGreaterThan`, widening even-lane `Multiply`, bitwise operations, logical shifts |
+| [AVX2](#avx2) | `Permute4x64`, byte `Shuffle`, `Blend`, `Add`, `CompareEqual`, `CompareGreaterThan`, widening even-lane `Multiply`, bitwise operations, logical shifts |
 | [AVX512](#avx512) | F.VL alignment, ternary logic and unsigned comparisons; DQ mask extraction and DQ.VL low multiplication on 256-bit vectors; F unsigned comparisons and DQ mask extraction on 512-bit vectors |
 | [BMI](#bmi) | `Bmi1.BitFieldExtract(uint, byte, byte)`, `Bmi2.X64.MultiplyNoFlags(ulong, ulong)` |
 | [X86Base](#x86base) | `X86Base.X64.DivRem(ulong, ulong, ulong)` returning `(ulong Quotient, ulong Remainder)` |
@@ -40,12 +40,13 @@ Rows apply to the named widths, with matching input/output widths. The bitwise a
 | `Vector128.CreateScalar`, `Vector256.CreateScalar` | One `ulong` or one `uint` | Put the value in the low lane and zero the remaining bits |
 | `Vector128.CreateScalarUnsafe` (128-bit only) | One `ulong` | Put the value in the low lane; the upper lane is unspecified, and only `GetElement(0)`, `As*` and the AVX2 shift counts may read the result (see [SOUNDNESS](SOUNDNESS-RUNTIME.md#runtime-assumptions)) |
 | `Vector512.Create` (512-bit only) | Two `V256<ulong>` | Concatenate, first operand in the low half |
+| `Vector128.Create<byte>`, `Vector256.Create<byte>` | One `ReadOnlySpan<byte>` | Read the first 16/32 bytes; a shorter span throws `ArgumentOutOfRangeException`. Shares the `MemoryMarshal.Read` model ([opcodes](OPCODES.md)), including its bounds, initialization and lifetime checks |
 | `Vector128.ShiftRightArithmetic`, `Vector256.ShiftRightArithmetic` | Vector of `long` and `int` count | Signed 64-bit lane shifts; count modulo 64 |
 | `Vector128.ExtractMostSignificantBits<ulong>`, `Vector256.ExtractMostSignificantBits<ulong>` | Vector of `ulong` | Return a `uint` containing the two/four lane sign bits |
 | `Vector128.Sum<ulong>`, `Vector256.Sum<ulong>` | Vector of `ulong` | Wrapping sum of the 64-bit lanes |
 | `AsByte`, `AsUInt32`, `AsInt64`, `AsDouble`, `AsUInt64`, `AsInt32`, `AsSingle` on `Vector128` / `Vector256` | Source element type is `ulong`, `byte`, `uint`, `long`, `int` or `float`; target is the named type | Preserve the bit pattern. The extractor does not currently accept `double` as a source for these casts |
 
-No other element types or operators are implied. In particular, portable vector multiplication is present as a Lean operation but has no generic vector-operator mapping in the extractor. There is no Vector64 support, Vector512 is limited to bitwise/equality operators, the rows naming it and to `ldobj`/`stobj`/`initobj` of `V512<ulong>`, and there is no general vector load/store API coverage. The specific vector `ldobj`/`stobj` cases are documented in the [opcode table](OPCODES.md).
+No other element types or operators are implied. In particular, portable vector multiplication is present as a Lean operation but has no generic vector-operator mapping in the extractor. There is no Vector64 support, Vector512 is limited to bitwise/equality operators, the rows naming it and to `ldobj`/`stobj`/`initobj` of `V512<ulong>`, and there is no general vector load/store API coverage beyond the byte-span `Create` row. The specific vector `ldobj`/`stobj` cases are documented in the [opcode table](OPCODES.md).
 
 ## SSE
 
@@ -53,6 +54,7 @@ No other element types or operators are implied. In particular, portable vector 
 | --- | --- | --- | --- |
 | `Sse2.ShiftLeftLogical128BitLane` | `V128<ulong>, byte` → `V128<ulong>` | `Sse2` | Shift the whole vector left by a byte count, zero-filling; counts ≥16 yield zero |
 | `Ssse3.AlignRight` | `V128<byte>, V128<byte>, byte` → `V128<byte>` | `Ssse3` | Extract a 16-byte window from the concatenation, with the second operand as the low half; out-of-range bits are zero |
+| `Ssse3.Shuffle` | `V128<byte> value, V128<byte> mask` -> `V128<byte>` | `Ssse3` | `pshufb`: byte `i` is zero when bit 7 of mask byte `i` is set, else the value byte selected by its low four bits |
 
 SSE4.1 and SSE4.2 capability getters are recognised, but their instruction APIs have no mappings. There is no blanket SSE/SSE2 arithmetic, comparison or load/store support.
 
@@ -76,6 +78,7 @@ All rows require `Avx2` and operate on 256-bit vectors.
 | Exact API | Arguments → result | Model |
 | --- | --- | --- |
 | `Avx2.Permute4x64` | `V256<ulong>, byte` → `V256<ulong>` | Four 2-bit selectors choose the output lanes |
+| `Avx2.Shuffle` | `V256<byte> value, V256<byte> mask` -> `V256<byte>` | `vpshufb`: the `Ssse3.Shuffle` rule in each 128-bit half; mask bits 4-6 are ignored, so no byte crosses between halves |
 | `Avx2.Blend` | Two `V256<uint>` or two `V256<int>`, then `byte` → matching vector type | Select each 32-bit lane using a control bit |
 | `Avx2.Add` | `V256<ulong>, V256<ulong>` → `V256<ulong>` | Wrapping lane addition |
 | `Avx2.CompareEqual` | `V256<ulong>, V256<ulong>` → `V256<ulong>` | Per-lane all-one/zero equality masks |
