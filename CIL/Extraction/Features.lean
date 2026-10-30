@@ -480,6 +480,10 @@ private def featureOpMatchesWith (layouts : Array RawLayout) (raw : RawMethod)
       | _ => false
   if instruction.opcode ∈ [16, 65035] then
     return match emitted with | .setLocal index none => raw.locals.length <= index | _ => false
+  -- A span address on the stack is already the view it names, so copying the span emits nothing.
+  if instruction.opcode == 113 then
+    if let .type type := instruction.operand then
+      if spanLocal type then return match emitted with | .nop => true | _ => false
   -- A native-width wrapper is looked through only for bitwise operations, comparisons and
   -- two-operand branches.
   let emitted := match emitted with

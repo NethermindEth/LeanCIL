@@ -415,7 +415,7 @@ Console.WriteLine("PASS compiled span helper contract and caller composition");
 
 foreach (var (signature, marker) in new[]
 {
-    ("ByRefSpan(System.Span`1<System.Int32>&)", "Unsupported by-reference span"),
+    ("ByRefSpan(System.Span`1<System.Int32>&)", "Unsupported writable by-reference span parameter"),
     ("FloatingSpan(System.ReadOnlySpan`1<System.Double>)", "Unsupported type")
 })
 {

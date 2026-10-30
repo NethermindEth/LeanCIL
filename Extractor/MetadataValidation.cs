@@ -314,7 +314,9 @@ internal static class MetadataValidation
             if (byRef.ElementType is ArrayType)
                 throw new InvalidDataException("Unsupported by-reference array root");
             if (Spans.Is(byRef.ElementType))
-                throw new InvalidDataException("Unsupported by-reference span");
+                throw new InvalidDataException("Unsupported by-reference span: " + type.FullName +
+                    "\n  Only `in` and `ref readonly` span parameters are admitted, not span references in " +
+                    "locals, returns, fields or external signatures.");
             if (byRef.ElementType is ByReferenceType)
                 throw new InvalidDataException("Unsupported nested managed reference");
             Type(byRef.ElementType, module, architecture: architecture);
@@ -438,8 +440,11 @@ internal static class MetadataValidation
             foreach (ParameterDefinition parameter in method.Parameters)
                 Check(method, null, () =>
                 {
-                    if (parameter.ParameterType is ByReferenceType && importedByref?.Invoke(parameter.ParameterType) == true) return;
-                    Type(parameter.ParameterType, module, architecture: profile.Architecture);
+                    if (SpanReferences.Is(parameter.ParameterType))
+                        SpanReferences.ValidateParameter(method, parameter, module, profile.Architecture);
+                    else if (parameter.ParameterType is not ByReferenceType ||
+                        importedByref?.Invoke(parameter.ParameterType) != true)
+                        Type(parameter.ParameterType, module, architecture: profile.Architecture);
                 }, named: true);
             if (Check(method, null, () => Spans.Analyze(method, profile), named: true))
                 foreach (VariableDefinition local in method.Body.Variables)

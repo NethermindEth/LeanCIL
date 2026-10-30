@@ -151,6 +151,15 @@ internal static class InstructionTranslation
         }
         if (i.OpCode.Code is Code.Ldobj or Code.Stobj or Code.Initobj or Code.Sizeof or Code.Cpobj && i.Operand is TypeReference operandType)
             RuntimeModels.ValidateTypeIdentity(operandType, m.Module, profile.Architecture);
+        if (i.OpCode.Code is Code.Ldobj or Code.Stobj or Code.Initobj or Code.Cpobj &&
+            i.Operand is TypeReference spanType && Spans.Is(spanType))
+        {
+            // A span address on the stack is the view itself, so a copy leaves it in place.
+            if (i.OpCode.Code != Code.Ldobj)
+                throw new InvalidDataException($"Unsupported store to a span home: {i}");
+            SpanReferences.ValidateCopy(m, i, instructions);
+            return ".nop";
+        }
         if (i.OpCode.Code is Code.Call or Code.Newobj)
         {
             var r = (MethodReference)i.Operand;
