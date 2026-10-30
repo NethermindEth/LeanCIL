@@ -6,7 +6,9 @@ import CIL.Safety.FrameMemoryBelow
 # Numeric local steps
 
 Creating a numeric local gives a fresh, initialized, writable home, and the checked `ldloc`
-and `stloc` steps on such a home are given in closed form for stepping proofs.
+and `stloc` steps on such a home are given in closed form for stepping proofs. During frame
+entry, `EntryMemory` and `NumericEntryHome` carry the caller's memory and each home's facts
+across later allocations to the entered memory.
 -/
 
 namespace CIL.Safety
@@ -92,4 +94,60 @@ theorem step_store_numeric_local {body : CIL.Method} {pc index : Nat} {args rest
 #print axioms make_numeric_local
 #print axioms step_load_numeric_local
 #print axioms step_store_numeric_local
+
+/-- Memory during frame entry: the caller's memory below its watermark is kept, identities only
+    grow, and the memory stays well formed. -/
+structure EntryMemory (caller memory : Memory) : Prop where
+  kept : MemoryBelow caller.nextIdentity caller memory
+  grown : caller.nextIdentity ≤ memory.nextIdentity
+  wellFormed : memory.WellFormed
+
+/-- Frame entry starts from well-formed caller memory. -/
+theorem EntryMemory.start {memory : Memory} (wellFormed : memory.WellFormed) :
+    EntryMemory memory memory :=
+  ⟨MemoryBelow.refl _ _, Nat.le_refl _, wellFormed⟩
+
+/-- Successive frame-entry allocations compose. -/
+theorem EntryMemory.trans {caller middle last : Memory} (first : EntryMemory caller middle)
+    (second : EntryMemory middle last) : EntryMemory caller last :=
+  ⟨first.kept.trans (second.kept.weaken first.grown), Nat.le_trans first.grown second.grown,
+    second.wellFormed⟩
+
+/-- A numeric local's home in the entered memory: allocated above the caller, holding its
+    initializer's bytes, and writable. -/
+structure NumericEntryHome (caller entered : Memory) (kind : CIL.LocalKind) (number : Nat)
+    (home : Reference) : Prop where
+  fresh : caller.nextIdentity ≤ home.allocation
+  bounded : home.allocation < entered.nextIdentity
+  loaded : read entered home (localWidth kind) 1 = .ok (numberBytes number (localWidth kind))
+  writable : access entered home (localWidth kind) 1 true = .ok ()
+
+/-- Later frame-entry allocations keep an earlier home's bytes and authority. -/
+theorem NumericEntryHome.after {caller middle last : Memory} {kind : CIL.LocalKind}
+    {number : Nat} {home : Reference} (entered : NumericEntryHome caller middle kind number home)
+    (later : EntryMemory middle last) : NumericEntryHome caller last kind number home :=
+  ⟨entered.fresh, Nat.lt_of_lt_of_le entered.bounded later.grown,
+    by rw [later.kept.read home entered.bounded (localWidth kind) 1]; exact entered.loaded,
+    by rw [later.kept.access home entered.bounded (localWidth kind) 1 true]
+       exact entered.writable⟩
+
+/-- Creating a numeric local during frame entry yields its home and extends entry memory. -/
+theorem make_numeric_entry_local {caller memory : Memory} (entered : EntryMemory caller memory)
+    (activation : Nat) (kind : CIL.LocalKind) (value : CIL.Value) (number : Nat)
+    (fits : localNumber kind value = .ok number) :
+    ∃ home result,
+      makeLocal activation kind value memory =
+        .ok (.bytes kind home, [home.allocation], result) ∧
+      NumericEntryHome caller result kind number home ∧ EntryMemory memory result := by
+  obtain ⟨home, result, made, loaded, writable, kept⟩ :=
+    make_numeric_local memory activation kind value number entered.wellFormed fits
+  have owned := makeLocal_fresh _ _ _ _ _ _ _ made
+  have fresh := owned.2 home.allocation (by simp)
+  exact ⟨home, result, made, ⟨Nat.le_trans entered.grown fresh.1, fresh.2, loaded, writable⟩,
+    ⟨kept, owned.1.next,
+      makeLocal_preserves_wellFormed _ _ _ _ _ _ _ entered.wellFormed made⟩⟩
+
+#print axioms EntryMemory.trans
+#print axioms NumericEntryHome.after
+#print axioms make_numeric_entry_local
 end CIL.Safety

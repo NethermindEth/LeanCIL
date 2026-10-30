@@ -23,26 +23,6 @@ structure SpanContents (memory : Memory) (view : SpanView) (width : Nat)
     | .null => values = []
     | .address base => Contents memory base width values
 
-/-- A valid view of well-formed memory addresses an existing allocation, so it stays valid in any
-    memory that keeps everything below the watermark, such as a callee frame's memory. -/
-theorem SpanView.validate_below (view : SpanView) {before after : Memory}
-    (valid : view.validate before = .ok ()) (wellFormed : before.WellFormed)
-    (kept : MemoryBelow before.nextIdentity before after) : view.validate after = .ok () := by
-  cases address : view.reference with
-  | null => simpa only [SpanView.validate, address] using valid
-  | address base =>
-    cases present : before.allocations base.allocation with
-    | none =>
-      simp only [SpanView.validate, address, liveAllocation, present] at valid
-      repeat' first
-        | contradiction
-        | split at valid
-        | simp_all [Bind.bind, Except.bind, Pure.pure, Except.pure]
-    | some allocation =>
-      have old := (wellFormed.1 _ _ present).1
-      simpa only [SpanView.validate, address, liveAllocation, kept.allocations _ old] using valid
-#print axioms SpanView.validate_below
-
 /-- An addressed view valid in well-formed memory names an allocation below its watermark. -/
 theorem SpanView.allocation_below {view : SpanView} {memory : Memory} {base : Reference}
     (valid : view.validate memory = .ok ()) (wellFormed : memory.WellFormed)
