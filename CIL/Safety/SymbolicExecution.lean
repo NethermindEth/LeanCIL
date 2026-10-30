@@ -800,13 +800,34 @@ def cilFetchedOp (lemma : Lean.Name) (select : Lean.Expr → Option Lean.Expr) (
     ← Term.exprToSyntax (← instantiateMVars instructionFound), operation)
 
 open Lean Elab Tactic Meta in
+/-- Whether the main goal is an equation whose right side is syntactically `Except.error`. -/
+def cilGoalStatesFault : TacticM Bool := withMainContext do
+  return (← instantiateMVars (← getMainTarget)).consumeMData.eq?.any
+    fun (_, _, result) => result.isAppOf ``Except.error
+
+/-- Succeeds only on a goal stating `.error`; the fault composition lemmas are tried only there,
+    since unifying them against a returning or run-to-run goal costs a failed defeq check. -/
+elab "cil_goal_states_fault" : tactic => do
+  unless ← cilGoalStatesFault do throwError "The goal does not state a fault"
+
+open Lean Elab Tactic Meta in
 /-- One `run` step: prove the method and instruction lookups once, then apply only the
     composition lemma for the fetched opcode. With `openCall`, a call leaves the caller's
     continuation as the goal. Toward a stated fault, a step that raises it ends the run. -/
 def cilRunStep (facts : Array Term) (openCall : Bool) : TacticM Unit := withMainContext do
-  -- Only a goal stating a fault tries `run_fault`, so returning proofs never pay for it.
-  let faulting := (← instantiateMVars (← getMainTarget)).consumeMData.eq?.any
-    fun (_, _, result) => result.isAppOf ``Except.error
+  -- `run_fault` can close only at the pc the stated fault names; elsewhere it only costs.
+  let target := (← instantiateMVars (← getMainTarget)).consumeMData
+  let faulting ← match target.eq? with
+    | some (_, current, result) =>
+      if !result.isAppOf ``Except.error then pure false
+      else
+        let located := result.appArg!.consumeMData
+        if located.isAppOfArity ``CIL.Safety.LocatedFault.mk 3 &&
+            current.isAppOfArity ``CIL.Safety.run 8 then
+          withNewMCtxDepth <| withTransparency .instances <|
+            isDefEq located.getAppArgs[1]! current.getAppArgs[3]!
+        else pure true
+    | none => pure false
   let (methodSyntax, instructionSyntax, operation) ←
     cilFetchedOp ``CIL.Safety.run_next (fun e => e.eq?.map (·.2.1)) 3 facts
   evalTactic (← if operation == ``CIL.Op.ret then
@@ -834,11 +855,12 @@ macro_rules
   `(tactic| (
     try (conv => lhs; arg 2; cil_reduce_fuel)
     try (first
-      | (cil_strict apply CIL.Safety.invoke_of_run
+      | (cil_goal_states_fault
+         cil_strict apply CIL.Safety.invoke_of_run_fault
          · cil_lookup [$[$facts:term],*]
          · cil_checked_side [$[$facts:term],*]
          · cil_checked_side [$[$facts:term],*])
-      | (cil_strict apply CIL.Safety.invoke_of_run_fault
+      | (cil_strict apply CIL.Safety.invoke_of_run
          · cil_lookup [$[$facts:term],*]
          · cil_checked_side [$[$facts:term],*]
          · cil_checked_side [$[$facts:term],*]))
