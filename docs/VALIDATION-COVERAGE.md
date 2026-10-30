@@ -597,7 +597,8 @@ owner arguments and malformed prefix, branch and interface-constraint metadata. 
 implementations with `in` aggregate and span parameters (`modreq(InAttribute)`) are proved as
 entries and through a constrained generic call; `modopt`, another `modreq` type, by-value and
 nested placements, versioned and foreign modifier scopes and a slot reference without the
-modifier are rejected, and twins differing only in the modifier select distinct entries.
+modifier are rejected, as are a `ref readonly` return and both members of a modifier-only
+overload pair.
 `Tests/ConstrainedResolution.cs` checks the extractor's resolution rules;
 `Tests/ConstrainedEvidence.lean` independently checks Lean resolution, target, signature, ambiguity
 and prefix rejection. These run in the `evidence` suite.

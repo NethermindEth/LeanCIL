@@ -255,7 +255,7 @@ if (plainSlotResult.Code == 0 ||
     throw new Exception("Incorrect plain slot rejection\n" + plainSlotResult.Output);
 Console.WriteLine("PASS in-modifier rejection: plain slot reference");
 
-// Signatures differing only in the modifier select and identify distinct methods.
+// Signatures differing only in the modifier are rejected: the certificate erases it.
 var twin = Path.Combine(root, "in-twin.dll");
 string inSelector, plainSelector;
 using (var module = ModuleDefinition.ReadModule(assembly))
@@ -280,13 +280,31 @@ using (var module = ModuleDefinition.ReadModule(assembly))
     (inSelector, plainSelector) = (method.FullName, copy.FullName);
     module.Write(twin);
 }
-var twinEntries = new[] { inSelector, plainSelector }.Select((selector, index) =>
+foreach (var (selector, index) in new[] { (inSelector, 0), (plainSelector, 1) })
 {
-    var output = Path.Combine(root, "in-twin-" + index);
-    Run(["dotnet", ExtractorPath, "extract", twin, selector, output]);
-    return JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "identity.json"))).RootElement
-        .GetProperty("entry").GetString()!;
-}).ToArray();
-if (twinEntries[0] != inSelector || twinEntries[1] != plainSelector || twinEntries[0] == twinEntries[1])
-    throw new Exception("In-modifier twins lost distinct entry identities: " + string.Join(" | ", twinEntries));
-Console.WriteLine("PASS in-modifier twins select distinct entries");
+    var result = Execute(["dotnet", ExtractorPath, "extract", twin, selector,
+        Path.Combine(root, "in-twin-" + index)]);
+    if (result.Code == 0 || !result.Output.Contains("Ambiguous in-parameter twin", StringComparison.Ordinal) ||
+        !result.Output.Contains("cannot distinguish modifier-only overloads", StringComparison.Ordinal))
+        throw new Exception("Incorrect in-modifier twin rejection: " + selector + "\n" + result.Output);
+}
+Console.WriteLine("PASS in-modifier rejection: modifier-only twins");
+
+// A `ref readonly` return carries the same modifier, which is admitted only on parameters.
+var readOnlyReturn = Path.Combine(root, "in-return.dll");
+string returnSelector;
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var method = module.GetType("Examples.InWord").Methods
+        .Single(method => method.Name.EndsWith(".Sum", StringComparison.Ordinal));
+    var modifier = ((RequiredModifierType)method.Parameters[0].ParameterType).ModifierType;
+    method.ReturnType = new RequiredModifierType(modifier, new ByReferenceType(method.ReturnType));
+    returnSelector = method.FullName;
+    module.Write(readOnlyReturn);
+}
+var returnResult = Execute(["dotnet", ExtractorPath, "extract", readOnlyReturn, returnSelector,
+    Path.Combine(root, "Reject-in-return")]);
+const string returnRejection = "Custom modifiers are unsupported in typed contract signatures: System.UInt64& modreq(";
+if (returnResult.Code == 0 || !returnResult.Output.Contains(returnRejection, StringComparison.Ordinal))
+    throw new Exception("Incorrect in-modifier return rejection\n" + returnResult.Output);
+Console.WriteLine("PASS in-modifier rejection: ref readonly return");

@@ -133,6 +133,7 @@ internal static class ContractMethodMetadata
     static Selection Instantiate(MethodDefinition definition, TypeReference[] arguments, string architecture)
     {
         RejectModifiers(definition, inParameters: true);
+        InReferences.RejectTwins(definition);
         if (definition.DeclaringType.HasGenericParameters || definition.GenericParameters.Count != arguments.Length)
             throw new InvalidDataException("Contract method requires an exact closed generic instantiation.");
         if (arguments.Any(type => !Primitive(type)))

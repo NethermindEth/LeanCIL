@@ -26,6 +26,27 @@ internal static class InReferences
         type is RequiredModifierType required && Unwrap(type) is { } reference
             ? new RequiredModifierType(required.ModifierType, substitute(reference)) : substitute(type);
 
+    // Lean records an `in` reference as a plain one, so a sibling equal once the modifier is erased
+    // would be indistinguishable in the certificate. C# never emits such modifier-only overloads.
+    internal static void RejectTwins(MethodDefinition method)
+    {
+        var definition = MethodSpecialization.Definition(method);
+        var siblings = definition.DeclaringType.Methods.Where(other => other.Name == definition.Name).ToArray();
+        if (siblings.Length < 2 ||
+            !siblings.Any(other => other.Parameters.Any(parameter => Is(parameter.ParameterType)))) return;
+        var erased = Erased(definition);
+        var twins = siblings.Where(other => Erased(other) == erased).ToArray();
+        if (twins.Length > 1)
+            throw new InvalidDataException("Ambiguous in-parameter twin: " +
+                string.Join(" | ", twins.Select(twin => twin.FullName)) +
+                "; the certificate cannot distinguish modifier-only overloads");
+    }
+
+    static string Erased(MethodDefinition method) =>
+        $"{method.HasThis}:{method.ExplicitThis}:{(int)method.CallingConvention}:{method.GenericParameters.Count}:" +
+        MethodSpecialization.SignatureType(method.ReturnType) + "(" + string.Join(",", method.Parameters
+            .Select(parameter => MethodSpecialization.SignatureType(Parameter(parameter.ParameterType)))) + ")";
+
     // Whether any custom modifier occurs in the type, including inside elements and generic arguments.
     internal static bool Modified(TypeReference type) => type switch
     {

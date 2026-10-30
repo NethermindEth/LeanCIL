@@ -372,8 +372,9 @@ admitted only directly on a by-reference parameter and only with the exact `Syst
 scope. Such a parameter has the semantics of a non-virtual `in` parameter of the same type: an
 ordinary reference, or the referenced view for an admitted span type (see
 [span reference parameters](#span-reference-parameters)). The modifier stays in selectors,
-recorded signatures, specialization keys and constrained-slot matching, so signatures that
-differ only in it remain distinct. `modopt`, other `modreq` types, the modifier on a by-value
+recorded signatures, specialization keys and constrained-slot matching. Because the Lean
+certificate records the plain reference, a method whose declaring type also has a
+modifier-only twin is rejected. `modopt`, other `modreq` types, the modifier on a by-value
 parameter, inside the reference or on a return, and an `InAttribute` from any other scope
 are rejected. Imported and exported contract signatures admit no modifier.
 

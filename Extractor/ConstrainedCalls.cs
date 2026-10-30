@@ -61,6 +61,7 @@ internal static class ConstrainedCalls
             slot.HasGenericParameters || reference.ExplicitThis ||
             reference.CallingConvention != MethodCallingConvention.Default)
             throw new InvalidDataException("Unsupported constrained method slot");
+        InReferences.RejectTwins(slot);
 
         var owner = receiver as GenericInstanceType;
         var slotOwner = reference.DeclaringType as GenericInstanceType;

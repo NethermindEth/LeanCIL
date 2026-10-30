@@ -429,6 +429,7 @@ internal static class MetadataValidation
                     (method.DeclaringType.Methods.Any(m => m.IsConstructor && m.IsStatic) &&
                         !initializedTypes.Contains(method.DeclaringType.FullName, StringComparer.Ordinal)))
                     throw new InvalidDataException($"Unsupported method metadata or static initialisation: {method.FullName}");
+                InReferences.RejectTwins(method);
             })) return;
             Check(method, null, () =>
             {

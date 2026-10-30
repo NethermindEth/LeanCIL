@@ -131,11 +131,11 @@ reading it as an address.
 
 An `in` parameter of a virtual member carries `modreq(InAttribute)` on its reference. The
 modifier has no run-time effect, so the Lean signature types, parameter kinds and dispatch
-metadata record the plain reference. Its identity is an extractor decision: the extractor admits
-only the exact `System.Runtime` modifier on a by-reference parameter and compares it exactly in
-selectors, specialization keys and constrained-slot resolution. The kernel's dispatch check
-therefore cannot tell an `in` slot from an otherwise identical plain one. The CLR treats required
-modifiers as part of a signature, which is why C# emits bridge methods when only they differ.
+metadata record the plain reference. The extractor admits only the exact `System.Runtime`
+modifier on a by-reference parameter, and rejects an entry, callee or constrained slot whose
+declaring type has another method with the same name and signature once the modifier is erased.
+No admitted certificate therefore contains two methods that differ only in that modifier. C#
+never emits such overloads.
 
 Equal-size aggregate/vector `Unsafe.BitCast` uses the same snapshot representation for validated
 `byte`, `int`, `uint`, `long` and `ulong` vector elements. Element signedness does not initialize
