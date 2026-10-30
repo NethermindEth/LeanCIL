@@ -252,6 +252,6 @@ macro_rules
     refine CIL.Safety.loop_outcome_call_raises $holds $input
       (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
       (by cil_checked_step [$[$facts:term],*]) (by rfl)
-      (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_ ?_))
+      (by cil_checked_side [$[$facts:term],*]) ?_ ?_))
 
 end CIL.Safety

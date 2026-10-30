@@ -609,8 +609,8 @@ macro "cil_contract_prepare" "[" facts:term,* "]" : tactic =>
     cil_stack_cleanup
     try (cil_strict refine CIL.Safety.invoke_exists_of_run
            (by cil_lookup [$[$facts:term],*])
-           (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))
-           (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)))
+           (by cil_checked_side [$[$facts:term],*])
+           (by cil_checked_side [$[$facts:term],*]) ?_)))
 
 /-- One contract step, selecting the composition rule from the fetched opcode. -/
 syntax "cil_contract_step" "[" term,* "]" : tactic
@@ -751,7 +751,7 @@ elab_rules : tactic
       `(tactic| cil_strict refine CIL.Safety.run_return_exists
         $methodFound $instructionFound
         (by cil_checked_step_normalized [$[$facts:term],*])
-        (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)
+        (by cil_checked_side [$[$facts:term],*]) ?_)
       else
       `(tactic| (
         cil_strict refine CIL.Safety.run_next_exists (post := _)

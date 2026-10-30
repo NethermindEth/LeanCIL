@@ -35,6 +35,20 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       else .error .invalidState := by
   simp only [step, observerCount, Bool.or_false]
 
+/-- A call checks its `argc` arguments, deepest first, and leaves the rest of the stack for the
+    caller's continuation. -/
+@[cil_step] theorem step_call_eq (callee argc : Nat) (stack : List Value) :
+    step body (.call callee argc) pc args frame stack memory =
+      if unspecifiedOperands argc stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else if stack.length < argc then .error .invalidState
+      else do
+        let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
+        return FrameAction.call callee arguments (stack.drop argc) memory := by
+  simp only [step, observerCount, Bool.or_false]
+
+#print axioms step_call_eq
+
 /-- A narrowed return of one i32 extends it to the declared width. -/
 @[cil_step] theorem step_return_narrow_eq (kind : CIL.NarrowKind) (bits : CIL.W32) :
     step body (.ret (some kind)) pc args frame [.scalar (.i32 bits)] memory =

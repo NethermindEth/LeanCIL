@@ -4,6 +4,7 @@ import CIL.Safety.Equations
 import CIL.Safety.StepComposition
 import CIL.Safety.ValueSteps
 import CIL.Safety.MemorySteps
+import CIL.Safety.InstructionSteps
 import CIL.Safety.CallComposition
 import CIL.Safety.CodeAt
 import CIL.Safety.CheckedHomes
@@ -269,10 +270,37 @@ macro "cil_stack_cleanup" : tactic =>
     List.take_succ_cons, List.take_zero, List.take_nil, List.reverse_cons, List.reverse_nil,
     List.nil_append, List.cons_append, List.append_nil])
 
-/-- Closes a checked `step` goal by rewriting with the `@[cil_step]` equations, failing if
-    nothing rewrites, then by the checked-value definitions and `facts`, constructors and `rfl`. -/
+/-- Closes a checked `step` goal by rewriting with the `@[cil_step]` and
+    `@[cil_instruction_step]` equations, failing if nothing rewrites, then by the checked-value
+    definitions and `facts`, constructors and `rfl`. -/
 macro "cil_checked_step_by_equations " "[" facts:term,* "]" : tactic =>
   `(tactic| (
+       simp only [cil_instruction_step, cil_step, cil_guard, CIL.Safety.instructionStep]
+       try simp [cil_guard, cil_checked, CIL.fin_val_three, CIL.fin_mk_ofNat,
+         CIL.Safety.checkedValue,
+         CIL.Safety.numericValue, CIL.Safety.scalars, CIL.Safety.formValue, CIL.Safety.checkedAt,
+         CIL.Safety.leaveFrame, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure,
+         $[$facts:term],*]
+       all_goals ((repeat constructor) <;> rfl)))
+
+open Lean Elab Tactic Meta in
+/-- Succeed only on a checked `step` goal whose opcode has `@[cil_instruction_step]` equations;
+    a syntactic test, since a trial rewrite would traverse the whole goal. -/
+elab "cil_instruction_step_goal" : tactic => withMainContext do
+  let target := (← instantiateMVars (← getMainTarget)).consumeMData
+  let some (_, lhs, _) := target.eq? | throwError "Expected a checked step equality"
+  unless lhs.isAppOfArity ``CIL.Safety.step 7 do throwError "Expected a checked step equality"
+  let head := (← whnfR lhs.getAppArgs[1]!).getAppFn.constName?
+  unless head.any (#[``CIL.Op.load64, ``CIL.Op.store64, ``CIL.Op.fieldAt, ``CIL.Op.fieldAddress,
+      ``CIL.Op.setFieldAt, ``CIL.Op.asRef, ``CIL.Op.skipInit, ``CIL.Op.initAggregate].contains ·) do
+    throwError "No instruction step equation for this opcode"
+
+/-- `cil_checked_step_by_equations` without the `@[cil_instruction_step]` equations, for a step
+    those equations rewrite: the step stays at `instruction`, where a supplied fact about
+    `instruction`, or `CIL.Safety.instruction` itself, applies. -/
+macro "cil_checked_instruction_retry " "[" facts:term,* "]" : tactic =>
+  `(tactic| (
+       cil_instruction_step_goal
        simp only [cil_step, cil_guard, CIL.Safety.instructionStep]
        try simp [cil_guard, cil_checked, CIL.fin_val_three, CIL.fin_mk_ofNat,
          CIL.Safety.checkedValue,
@@ -294,6 +322,18 @@ macro "cil_checked_memory_by_equations " "[" facts:term,* "]" : tactic =>
          CIL.Safety.referenceAt_address, CIL.Safety.leaveFrame, Except.mapError, Bind.bind,
          Except.bind, Pure.pure, Except.pure, $[$facts:term],*]
        all_goals ((repeat constructor) <;> rfl)))
+
+/-- Closes a frame-entry or return premise (checked argument or result values, the entered
+    frame) by `rfl`, by `simp` with `facts`, or by also unfolding the checked-value definitions
+    that `cil_checked_step_by_equations` unfolds. Facts alone come first, so a supplied
+    `checkedValue` result is used before its definition is unfolded past it. -/
+macro "cil_checked_side " "[" facts:term,* "]" : tactic =>
+  `(tactic| first
+    | rfl
+    | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)
+    | (simp [cil_checked, CIL.Safety.checkedValue, CIL.Safety.numericValue,
+         CIL.Safety.formValue, CIL.Safety.checkedAt, Except.mapError, Bind.bind, Except.bind,
+         Pure.pure, Except.pure, $[$facts:term],*] <;> (repeat constructor) <;> rfl))
 
 /-- Closes a checked `step` goal for an op with no `@[cil_step]` equation by unfolding
     `CIL.Safety.step` and `CIL.step` with `facts`, unfolding the return checks only if needed. -/
@@ -329,10 +369,12 @@ elab "cil_intrinsic_pending" : tactic => Lean.Elab.Tactic.withMainContext do
       e.isConstOf ``CIL.evalIntrinsic || e.isConstOf ``CIL.Safety.checkedIntrinsic).isSome do
     Lean.throwError "No pending intrinsic evaluation"
 
-/-- Closes a checked `step` goal by its equation, or by unfolding when the op has none. -/
+/-- Closes a checked `step` goal by its equation, at `instruction` when the per-shape equation
+    leaves it open, or by unfolding when the op has none. -/
 macro "cil_checked_step_equations " "[" facts:term,* "]" : tactic =>
   `(tactic| first
     | cil_checked_step_by_equations [$[$facts:term],*]
+    | cil_checked_instruction_retry [$[$facts:term],*]
     | cil_checked_step_by_unfolding [$[$facts:term],*])
 
 /-- Closes a `.memory` step through the generic `step_memory_eq` with `facts`, constructors
@@ -587,6 +629,12 @@ elab_rules : tactic
           if (← attempt retry).isNone then return
         -- Report the per-shape goal, where facts belong, rather than the whole-instruction retry's.
         throw equationError
+      -- A fact about `instruction` keeps its abstraction only if tried before a per-shape
+      -- equation rewrites past it.
+      else if ← factsMention facts.getElems ``CIL.Safety.instruction then
+        `(tactic| first
+          | cil_checked_instruction_retry [$facts:term,*]
+          | cil_checked_step_equations [$facts:term,*])
       else
         `(tactic| cil_checked_step_equations [$facts:term,*])
     evalTactic strategy
@@ -625,7 +673,7 @@ macro "cil_checked_return_at " methodFound:term:max instructionFound:term:max
   `(tactic| (
     cil_strict refine Eq.trans (CIL.Safety.run_return $methodFound $instructionFound
       (by cil_checked_step_normalized [$[$facts:term],*])
-      (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))) ?_
+      (by cil_checked_side [$[$facts:term],*])) ?_
     try simp only [CIL.Safety.leaveFrame, List.foldl_nil, List.nil_append, List.append_nil,
       CIL.NarrowKind.extend_ite_one_zero, CIL.NarrowKind.extend_ite_ofNat_one_zero,
       List.reverse_cons, List.reverse_nil, BitVec.reduceToNat, BitVec.reduceSignExtend,
@@ -700,7 +748,8 @@ macro "cil_checked_call_at " methodFound:term:max instructionFound:term:max
     (by cil_checked_step_normalized [$[$facts:term],*])
     (by first | cil_checked_child [$[$facts:term],*]
               | (cil_checked_steps_normalized [$[$facts:term],*]; done))
-    (by cil_checked_steps_normalized [$[$facts:term],*]; done))
+    -- The continuation starts on `returned ++ rest`, which per-shape equations cannot match.
+    (by cil_stack_cleanup; cil_checked_steps_normalized [$[$facts:term],*]; done))
 
 /-- `cil_checked_call_at`, except that only the callee runs to its return; the caller's
     continuation stays open as the goal. -/
@@ -768,8 +817,8 @@ macro_rules
     try (conv => lhs; arg 2; cil_reduce_fuel)
     try (cil_strict apply CIL.Safety.invoke_of_run
          · cil_lookup [$[$facts:term],*]
-         · first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)
-         · first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))
+         · cil_checked_side [$[$facts:term],*]
+         · cil_checked_side [$[$facts:term],*])
     cil_steps_from "cil_checked_steps took no step: the method or instruction lookup, or the \
       first step, did not close; pass the lookup hypothesis, feature facts or step facts"
       cil_checked_run_step [$[$facts:term],*]))
