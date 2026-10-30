@@ -19,8 +19,8 @@ theorem bigMul64_of_write (memory result : Memory) (reference : Reference)
       (.reference (.address reference) :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest)
         memory =
       .ok (result, .scalar (.i64 (CIL.WideMultiply.high64 left right)) :: rest) := by
-  simp only [memoryInstruction, wideArithmeticInstruction, storeValue, referenceAt, checkedAt, stored,
-    CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take_succ_cons, List.take_zero,
+  simp only [memoryInstruction, wideArithmeticInstruction, storeValue, referenceAt, checkedAt,
+    stored,    CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take_succ_cons, List.take_zero,
     List.any_cons, List.any_nil, Value.hasUnspecified, CIL.Value.hasUnspecified,
     Bool.false_or, Bool.false_eq_true, ite_false,
     Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
@@ -61,8 +61,8 @@ theorem bigMul64_signed_of_write (memory result : Memory) (reference : Reference
       (.reference (.address reference) :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest)
         memory =
       .ok (result, .scalar (.i64 (CIL.WideMultiply.signedHigh64 left right)) :: rest) := by
-  simp only [memoryInstruction, wideArithmeticInstruction, storeValue, referenceAt, checkedAt, stored,
-    CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take_succ_cons, List.take_zero,
+  simp only [memoryInstruction, wideArithmeticInstruction, storeValue, referenceAt, checkedAt,
+    stored,    CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take_succ_cons, List.take_zero,
     List.any_cons, List.any_nil, Value.hasUnspecified, CIL.Value.hasUnspecified,
     Bool.false_or, Bool.false_eq_true, ite_false,
     Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]

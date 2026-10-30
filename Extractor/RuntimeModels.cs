@@ -211,8 +211,10 @@ internal static class RuntimeModels
     {
         var operations = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["System.UInt64 System.Math::BigMul(System.UInt32,System.UInt32)"] = ".intrinsic (.scalar (.bigMul32 false)) 2",
-            ["System.Int64 System.Math::BigMul(System.Int32,System.Int32)"] = ".intrinsic (.scalar (.bigMul32 true)) 2",
+            ["System.UInt64 System.Math::BigMul(System.UInt32,System.UInt32)"] =
+                ".intrinsic (.scalar (.bigMul32 false)) 2",
+            ["System.Int64 System.Math::BigMul(System.Int32,System.Int32)"] =
+                ".intrinsic (.scalar (.bigMul32 true)) 2",
             ["System.UInt64 System.Math::BigMul(System.UInt64,System.UInt64,System.UInt64&)"] =
                 ".memory (.bigMul64 false)",
             ["System.Int64 System.Math::BigMul(System.Int64,System.Int64,System.Int64&)"] = ".memory (.bigMul64 true)",
