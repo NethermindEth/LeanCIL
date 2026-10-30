@@ -434,9 +434,12 @@ types above.
 
 Explicit/auto generic layouts, reference-containing instantiations, reference constraints,
 open interface constraints and inherited interface matching remain unsupported, as do boxing
-and general runtime dispatch. Runtime members called on a type built from a method type
-parameter, such as `ReadOnlySpan<T>.Length` or its indexer, extract but fail the certificate's
-specialization check, because the open and closed call targets name different identities.
+and general runtime dispatch. Runtime members called on a type built from the helper's own type
+parameters, such as `ReadOnlySpan<T>.Length`, `Slice` or its indexer in a generic method or on a
+generic (including nested) owner, are admitted: the open call target spells the owner with ECMA-335
+parameter positions (`ReadOnlySpan`1<!!0>`, `<!0>`), and the certificate substitutes that owner
+segment of the identity, and nothing else, exactly as the runtime instantiates it. Owner arguments
+must be primitive, enum, aggregate or integer-vector types with ASCII names.
 Generic runtime methods such as `MemoryMarshal.GetReference<T>` keep one identity and are checked.
 
 See the [per-family intrinsic tables](SIMD.md) for the exact Vector128/256, SSE, AVX, AVX2, AVX512, BMI and ARM operations, operand types and profile requirements.

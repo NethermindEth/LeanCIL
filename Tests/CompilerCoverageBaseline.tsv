@@ -264,6 +264,7 @@ Examples:System.Int32 Examples.GenericMethods::RejectRecursion(System.Int32)	B	B
 Examples:System.Int32 Examples.GenericMethods::Size()	N	N	N	N	N	N	N	N
 Examples:System.Int32 Examples.GenericMethods::VectorSize()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.GenericMethods::WrongIdentity(System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.GenericOwners::SpanCount(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.IClosedCounter`1::Read()	N	N	N	N	N	N	N	N
 Examples:System.Int32 Examples.ICounterValue::Read()	B	B	B	B	B	B	B	B
 Examples:System.Int32 Examples.IntegerMath::AbsInt32(System.Int32)	A	A	A	A	A	A	A	A
@@ -324,6 +325,7 @@ Examples:System.Int32 Examples.Sequential::RecordSize()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SpanConstructors::AggregateLocal(Examples.AggregateSpans/Words&)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SpanConstructors::LayoutLocal(Examples.AggregateSpans/VectorRecord*,System.Int32)	B	B	B	B	B	B	B	B
 Examples:System.Int32 Examples.SpanConstructors::Local(System.Int32&)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanHelpers::Count(System.ReadOnlySpan`1<T>)	N	N	N	N	N	N	N	N
 Examples:System.Int32 Examples.SpanReferences::Argument(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SpanReferences::Caller(System.Byte[])	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SpanReferences::Copy(System.ReadOnlySpan`1<System.Byte>&)	A	A	A	A	A	A	A	A
@@ -726,6 +728,10 @@ Examples:System.UInt64 Examples.GenericMethods::Nested(System.UInt64)	A	A	A	A	A	
 Examples:System.UInt64 Examples.GenericMethods::Repeated(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.GenericMethods::Select(System.Boolean,System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.GenericMethods::TwoTypes(System.UInt64,System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.GenericOwners::NestedSpanFirst(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.GenericOwners::OwnerSpanFirst(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.GenericOwners::SpanFirst(System.ReadOnlySpan`1<System.UInt64>&)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.GenericOwners::SpanSecond(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.IInWord`1::Sum(System.ReadOnlySpan`1<System.UInt64>& modreq(System.Runtime.InteropServices.InAttribute))	N	N	N	N	N	N	N	N
 Examples:System.UInt64 Examples.InParameters::Constrained(Examples.InWord&,Examples.InWord&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.InParameters::ConstrainedSum(Examples.InWord&,System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
@@ -978,13 +984,17 @@ Examples:T Examples.GenericPair`1::GetSecond()	N	N	N	N	N	N	N	N
 Examples:T Examples.GenericPicker::Pick(T)	N	N	N	N	N	N	N	N
 Examples:T Examples.IndirectValues::Identity(T)	N	N	N	N	N	N	N	N
 Examples:T Examples.ManagedDispatch::Identity(T)	N	N	N	N	N	N	N	N
+Examples:T Examples.OwnerHelper`1::First(System.ReadOnlySpan`1<T>)	N	N	N	N	N	N	N	N
 Examples:T Examples.OwnerHelper`1::Identity(T)	N	N	N	N	N	N	N	N
 Examples:T Examples.PrimitiveArrays::ReadGeneric(T[],System.Int32)	N	N	N	N	N	N	N	N
+Examples:T Examples.SpanHelpers::First(System.ReadOnlySpan`1<T>&)	N	N	N	N	N	N	N	N
+Examples:T Examples.SpanHelpers::Second(System.ReadOnlySpan`1<T>)	N	N	N	N	N	N	N	N
 Examples:T Examples.SpanReferences::Front(System.Span`1<T>&)	N	N	N	N	N	N	N	N
 Examples:T Examples.SpanReferences::Head(System.ReadOnlySpan`1<T>&)	N	N	N	N	N	N	N	N
 Examples:T& Examples.GenericMethods::Next(T&,System.Int32)	N	N	N	N	N	N	N	N
 Examples:TMethod Examples.GenericCounterValue`1::Read(TMethod)	N	N	N	N	N	N	N	N
 Examples:U Examples.OwnerHelper`1::Select(U,T)	N	N	N	N	N	N	N	N
+Examples:U Examples.OwnerOuter`1/Inner`1::First(System.ReadOnlySpan`1<U>)	N	N	N	N	N	N	N	N
 Examples:U Examples.OwnerOuter`1/Inner`1::Identity(U)	N	N	N	N	N	N	N	N
 Examples:method System.Int32 *(System.Int32)[] Examples.ManagedDispatch::NullTable()	A	A	A	A	A	A	A	A
 Examples:method System.Single *(System.Single) Examples.ManagedDispatch::UnrelatedTarget()	B	B	B	B	B	B	B	B

@@ -86,12 +86,35 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
         var target = definition.DeclaringType.Scope is ModuleDefinition
             ? $".managed {definition.Resolve().MetadataToken.ToUInt32()}"
             : ".external " + externalIdentities.Reference(imports?.Identity(instruction) ??
-                (LayoutEvidence.Scope(definition.DeclaringType) + "::" + definition.FullName),
+                (LayoutEvidence.Scope(definition.DeclaringType) + "::" + ExternalSignature(definition)),
                 reachable.Contains(instruction));
         var name = definition.DeclaringType.Scope is ModuleDefinition
             ? ((MethodDefinition)originalModule.LookupToken(definition.Resolve().MetadataToken)).Name : definition.Name;
         return $"{{ declaringType := {Type(declaringType, true)}, name := {Quote(name)}, target := {target}, typeArguments := {List(arguments.Select(Type))}, ownerArgumentCount := {owners.Length}, parameterCount := {reference.Parameters.Count}, hasThis := {Bool(reference.HasThis)}, returnsValue := {Bool(reference.ReturnType.FullName != "System.Void")}, returnType := {Type(CallReturnType.Resolve(reference))}, parameterTypes := {List(CallReturnType.Parameters(reference).Select(Parameter))} }}";
     }
+
+    // An open owner spells caller parameters by position, so the certificate can instantiate it;
+    // closed owners keep Cecil's spelling byte for byte.
+    static string ExternalSignature(MethodReference definition)
+    {
+        var owner = definition.DeclaringType;
+        if (!owner.ContainsGenericParameter) return definition.FullName;
+        var named = definition.ReturnType.FullName + " " + owner.FullName + "::";
+        if (!definition.FullName.StartsWith(named, StringComparison.Ordinal))
+            throw new InvalidDataException("Unexpected external call signature: " + definition.FullName);
+        return definition.ReturnType.FullName + " " + OwnerSpelling(owner) + "::" +
+            definition.FullName[named.Length..];
+    }
+
+    // Matches the certificate's owner spelling: `!!n` method and `!n` declaring-type parameters.
+    static string OwnerSpelling(TypeReference type) => type switch
+    {
+        GenericParameter parameter => (parameter.Type == GenericParameterType.Method ? "!!" : "!") +
+            parameter.Position.ToString(CultureInfo.InvariantCulture),
+        GenericInstanceType generic => generic.ElementType.FullName + "<" +
+            string.Join(",", generic.GenericArguments.Select(OwnerSpelling)) + ">",
+        _ => type.FullName
+    };
 
     string Operand(MethodDefinition method, InstructionIndex instructions, Instruction instruction,
         Instruction admittedInstruction, IReadOnlySet<Instruction> reachable)

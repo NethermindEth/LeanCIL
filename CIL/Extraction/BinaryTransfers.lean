@@ -1,4 +1,4 @@
-import CIL.Extraction.MetadataNames
+import CIL.Extraction.Generics
 
 /-!
 # Exact endian-aware integer transfers

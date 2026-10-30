@@ -10,7 +10,7 @@ cannot substitute for it.
 | Evidence | Independently checked relation | Remaining assumption or limit |
 | --- | --- | --- |
 | Layouts | Recompute layouts from raw fields, packing and size; check required use sites and bounds | Faithful metadata/serialization and runtime layout correspondence |
-| Specialization | Substitute closed method/owner arguments through signatures, locals, operands and calls; preserve control flow | Faithful raw definitions and admitted constraints |
+| Specialization | Substitute closed method/owner arguments through signatures, locals, operands and calls, including the owner segment of an external call identity (`scope::result owner::member`, open owners spelled `!!n`/`!n`); preserve control flow | Faithful raw definitions and admitted constraints |
 | Feature flow | Entry, transfers, joins, required successors, reachable mask and feature-dependent operations | No complete concrete CLI simulation for every opcode |
 | Scalar flow | Complete stack kinds, raw maximum stack, joins/backedges, call arguments/results, homes and returns | Unknown types remain opaque; decoding is not proved |
 | Scalar translations | Exact literal values, arithmetic, comparisons, conversion flags and branch targets | Other operations require specialized checks or retain stack-effect fallback |

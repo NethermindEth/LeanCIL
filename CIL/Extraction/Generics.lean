@@ -1,6 +1,7 @@
 import CIL.Extraction.Parameters
 import CIL.Extraction.FlowIndex
 import CIL.Imports
+import CIL.Extraction.MetadataNames
 
 /-!
 # Raw methods, generic instantiation and call binding
@@ -266,16 +267,83 @@ def substituteStorageType (layouts : List RawLayout) (arguments : List TypeExpr)
     (type : TypeExpr) : Option TypeExpr :=
   closeLayoutType layouts <$> substituteType arguments type
 
-/-- Substitutes type arguments through every type an operand mentions. -/
-def substituteOperand (arguments : List TypeExpr) (layouts : List RawLayout := []) :
-    RawOperand → Option RawOperand
+/-- Whether a type mentions a generic parameter of the method being instantiated. -/
+private def mentionsParameter : TypeExpr → Bool
+  | .parameter _ => true
+  | .byref element | .pointer element | .array element | .enum _ element =>
+    mentionsParameter element
+  | .functionPointer result parameters .. | .signatureParameter result parameters =>
+    mentionsParameter result || mentionsParameter parameters
+  | .apply constructor argument => mentionsParameter constructor || mentionsParameter argument
+  | _ => false
+
+/-- A call owner's runtime signature spelling. Parameters below `methodArity` are the method's
+    (`!!n`); the rest are the declaring type's (`!n`), as ECMA-335 writes them. -/
+def ownerTypeName (methodArity : Nat) : TypeExpr → Option (List Char)
+  | .parameter index => some (if index < methodArity then '!' :: '!' :: (toString index).toList
+      else '!' :: (toString (index - methodArity)).toList)
+  | .aggregate identity _ => aggregateName identity
+  | .apply constructor argument => do
+    let argument ← ownerTypeName methodArity argument
+    match constructor with
+    | .apply .. => do
+      -- A curried owner `C<A>` applied to `B` is spelled `C<A,B>`.
+      let head ← ownerTypeName methodArity constructor
+      return head.dropLast ++ ',' :: argument ++ ['>']
+    | _ => return (← plainTypeName constructor) ++ '<' :: argument ++ ['>']
+  | type => plainTypeName type
+
+/-- Split a reversed identity at its last `::`, returning the member in original order. -/
+private def splitMember : List Char → List Char → Option (List Char × List Char)
+  | member, ':' :: ':' :: rest => some (member, rest)
+  | member, char :: rest => splitMember (char :: member) rest
+  | _, [] => none
+
+/-- Split a reversed identity head at its last space, returning the owner in original order. -/
+private def splitOwner : List Char → List Char → Option (List Char × List Char)
+  | owner, ' ' :: rest => some (owner, rest)
+  | owner, char :: rest => splitOwner (char :: owner) rest
+  | _, [] => none
+
+/-- The assembly scope of an owner's generic type definition. -/
+private def ownerScope : TypeExpr → Option String
+  | .constructor scope _ => some scope
+  | .apply constructor _ => ownerScope constructor
+  | _ => none
+
+/-- An external identity `scope::result owner::member` instantiated at a closed owner. The scope
+    is the owner's, the open owner segment must be exactly `openOwner`'s spelling, and no other
+    part of the identity changes. Only the unscoped remainder is decoded. -/
+def substituteTarget (methodArity : Nat) (openOwner closedOwner : TypeExpr) :
+    MethodId → Option MethodId
+  | .external identity => do
+    let scope ← ownerScope openOwner
+    let signature ← stripIdentityPrefix (scope.toByteArray.data.toList ++ [58, 58])
+      identity.toByteArray.data.toList
+    let (member, head) ← splitMember [] (← asciiChars signature).reverse
+    let (owner, front) ← splitOwner [] head
+    if owner != (← ownerTypeName methodArity openOwner) then none else
+    let closed ← ownerTypeName methodArity closedOwner
+    return .external (scope ++ "::" ++
+      String.ofList (front.reverse ++ ' ' :: closed ++ ':' :: ':' :: member))
+  | target => some target
+
+/-- Substitutes type arguments through every type an operand mentions, including the owner
+    instantiation an external call target names. `methodArity` splits method and owner
+    parameters. -/
+def substituteOperand (arguments : List TypeExpr) (layouts : List RawLayout := [])
+    (methodArity : Nat := 0) : RawOperand → Option RawOperand
   | .type type => RawOperand.type <$> substituteStorageType layouts arguments type
   | .field owner index type isStatic => do
     return .field (← substituteStorageType layouts arguments owner) index (← substituteStorageType layouts arguments type)
       isStatic
   | .call site => do
+    let declaringType ← substituteType arguments site.declaringType
     return .call { site with
-      declaringType := ← substituteType arguments site.declaringType,
+      declaringType,
+      target := ← if mentionsParameter site.declaringType then
+        substituteTarget methodArity site.declaringType declaringType site.target
+        else pure site.target,
       typeArguments := ← site.typeArguments.mapM (substituteStorageType layouts arguments),
       returnType := ← substituteStorageType layouts arguments site.returnType,
       parameterTypes := ← site.parameterTypes.mapM (substituteStorageType layouts arguments) }
@@ -304,7 +372,9 @@ def instantiateMethod (layouts : List RawLayout) (original : RawMethod)
     let parameters ← original.parameters.mapM (substituteStorageType layouts arguments)
     let locals ← original.locals.mapM (substituteStorageType layouts arguments)
     let code ← original.code.mapM fun instruction => do
-      return { instruction with operand := ← substituteOperand arguments layouts instruction.operand }
+      let operand ← substituteOperand arguments layouts original.genericParameters.length
+        instruction.operand
+      return { instruction with operand }
     -- Masking with 239 clears the generic calling-convention bit (0x10).
     return { original with
       returnType, parameters, locals, code, genericParameters := [], ownerParameters := [],
