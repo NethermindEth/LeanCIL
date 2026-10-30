@@ -9,6 +9,7 @@ internal static class StaticData
     /// <summary>The largest admitted packing, and so the widest alignment static data may promise.</summary>
     const uint MaximumPacking = 8;
 
+    /// <summary>The section headers of each module read through <see cref="ReadModule"/>.</summary>
     static readonly ConditionalWeakTable<ModuleDefinition, SectionHeader[]> sections = new();
 
     /// <summary>
@@ -70,7 +71,7 @@ internal static class StaticData
             start < (long)header.VirtualAddress + Math.Max(header.VirtualSize, header.SizeOfRawData))];
         if (containing.Length != 1)
             throw new InvalidDataException($"""
-                Static data outside any section: {reference.FullName}
+                Static data not in exactly one section: {reference.FullName}
                   RVA 0x{start:X} lies in {containing.Length} sections of the image.
                 """);
         SectionHeader section = containing[0];
