@@ -148,3 +148,4 @@ Run(["dotnet", "run", "--file", "Tests/AggregateSpans.cs"], streamOutput: true, 
 Run(["dotnet", "run", "--file", "Tests/SpanConstructors.cs"], streamOutput: true, progress: "Span constructor checks");
 Run(["dotnet", "run", "--file", "Tests/AggregateSpanFill.cs"], streamOutput: true, progress: "Aggregate fill checks");
 Run(["dotnet", "run", "--file", "Tests/AggregateArrays.cs"], streamOutput: true, progress: "Aggregate array checks");
+Run(["dotnet", "run", "--file", "Tests/SpanReferences.cs"], streamOutput: true, progress: "Span reference checks");

@@ -150,6 +150,7 @@ Examples:System.Byte Examples.IntegerMath::ClampUInt8(System.Byte,System.Byte,Sy
 Examples:System.Byte Examples.IntegerMath::MaxUInt8(System.Byte,System.Byte)	A	A	A	A	A	A	A	A
 Examples:System.Byte Examples.IntegerMath::MinUInt8(System.Byte,System.Byte)	A	A	A	A	A	A	A	A
 Examples:System.Byte Examples.PrimitiveArrays::ReadByte(System.Byte[],System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Byte Examples.SpanReferences::At(System.ReadOnlySpan`1<System.Byte>&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Byte Examples.StaticScalars::ReadByte()	B	B	B	B	B	B	B	B
 Examples:System.Byte Examples.StaticSpans::First()	A	A	A	A	A	A	A	A
 Examples:System.Byte Examples.StaticSpans::Last()	A	A	A	A	A	A	A	A
@@ -322,6 +323,15 @@ Examples:System.Int32 Examples.Sequential::RecordSize()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SpanConstructors::AggregateLocal(Examples.AggregateSpans/Words&)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SpanConstructors::LayoutLocal(Examples.AggregateSpans/VectorRecord*,System.Int32)	B	B	B	B	B	B	B	B
 Examples:System.Int32 Examples.SpanConstructors::Local(System.Int32&)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanReferences::Argument(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanReferences::Caller(System.Byte[])	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanReferences::Copy(System.ReadOnlySpan`1<System.Byte>&)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanReferences::First(System.Span`1<System.Int32>&)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanReferences::Forward(System.ReadOnlySpan`1<System.Byte>&)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanReferences::Length(System.ReadOnlySpan`1<System.Int32>&)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanReferences::Sum(System.ReadOnlySpan`1<System.Byte>&)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanReferences::Tail(System.ReadOnlySpan`1<System.Byte>&)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanReferences::Temporary(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SpanTables::Count()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.StackAllocation::FillAndRead(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.StackAllocation::Length(System.Int32)	A	A	A	A	A	A	A	A
@@ -567,6 +577,7 @@ Examples:System.Span`1<System.Int32> Examples.SpanConstructors::DefaultReset(Sys
 Examples:System.Span`1<System.Int32> Examples.SpanConstructors::Empty()	A	A	A	A	A	A	A	A
 Examples:System.Span`1<System.Int32> Examples.SpanConstructors::Pass(System.Span`1<System.Int32>)	A	A	A	A	A	A	A	A
 Examples:System.Span`1<System.Int32> Examples.SpanConstructors::Single(System.Int32&)	A	A	A	A	A	A	A	A
+Examples:System.Span`1<System.Int32>& Examples.SpanReferences::Alias(System.Span`1<System.Int32>&)	B	B	B	B	B	B	B	B
 Examples:System.Span`1<System.IntPtr> Examples.MemorySpans::ArrayAsSpanStart(System.IntPtr[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Span`1<System.Runtime.Intrinsics.Vector128`1<System.UInt64>> Examples.AggregateArrays::VectorView(System.Runtime.Intrinsics.Vector128`1<System.UInt64>[])	A	A	A	A	A	A	A	A
 Examples:System.Span`1<System.UInt32> Examples.ReinterpretedSpans::Words(System.Span`1<System.Byte>)	A	A	A	A	A	A	A	A
@@ -732,6 +743,7 @@ Examples:System.UInt64 Examples.PointerOperations::WriteEnum(Examples.Unsigned64
 Examples:System.UInt64 Examples.PrimitiveArrays::ReadUInt64(System.UInt64[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Sequential::Packed(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SkipInitialization::Read(System.UInt64&)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.SpanReferences::Construct(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanTables::First()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanTables::Power(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.StaticScalars::ReadLong()	B	B	B	B	B	B	B	B
@@ -878,6 +890,9 @@ Examples:System.Void Examples.SkipInitialization::Store(Examples.FourLimbs&,Syst
 Examples:System.Void Examples.SpanCopies::Copy(System.Span`1<System.Byte>,System.Span`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.SpanCopies::CopyLongs(System.ReadOnlySpan`1<System.Int64>,System.Span`1<System.Int64>)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.SpanCopies::CopyReadOnly(System.ReadOnlySpan`1<System.Byte>,System.Span`1<System.Byte>)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.SpanReferences/Limbs::.ctor(System.ReadOnlySpan`1<System.UInt64>&,System.Boolean)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.SpanReferences::Replace(System.Span`1<System.Int32>&)	B	B	B	B	B	B	B	B
+Examples:System.Void Examples.SpanReferences::WriteFirst(System.Span`1<System.Int32>&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.StaticPair`1::.ctor(T,System.UInt64)	N	N	N	N	N	N	N	N
 Examples:System.Void Examples.StaticScalars::.cctor()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.StaticSpans::Write()	A	A	A	A	A	A	A	A

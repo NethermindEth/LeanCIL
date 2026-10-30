@@ -166,7 +166,7 @@ if (suite is "all" or "unsafe")
     projects.AddRange(["Tests/SkipInitialization.cs", "Tests/NullReferences.cs", "Tests/UnalignedMemory.cs",
         "Tests/MarshaledMemory.cs", "Tests/ReinterpretedSpans.cs", "Tests/SpanCopies.cs", "Tests/ViewAccessors.cs",
         "Tests/BinarySpans.cs", "Tests/AggregateSpans.cs", "Tests/SpanConstructors.cs",
-        "Tests/AggregateSpanFill.cs", "Tests/AggregateArrays.cs"]);
+        "Tests/AggregateSpanFill.cs", "Tests/AggregateArrays.cs", "Tests/SpanReferences.cs"]);
 foreach (var (name, entry) in independentSuites)
     if (suite == "all" || suite == name)
         projects.Add(entry.Script);
