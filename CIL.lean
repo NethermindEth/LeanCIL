@@ -126,6 +126,7 @@ import CIL.Safety.ReturnReferences
 import CIL.Safety.RunReturnTrace
 import CIL.Safety.RunningPrefixes
 import CIL.Safety.ScalarBranch
+import CIL.Safety.SpanContents
 import CIL.Safety.StaticInitialization
 import CIL.Safety.StaticInstructionWorld
 import CIL.Safety.StaticLifetime
@@ -133,6 +134,7 @@ import CIL.Safety.StaticMemory
 import CIL.Safety.StaticMemoryBelow
 import CIL.Safety.StaticMemoryLemmas
 import CIL.Safety.StaticReferences
+import CIL.Safety.StaticSpanAlignment
 import CIL.Safety.StaticWorld
 import CIL.Safety.StepAttribute
 import CIL.Safety.StepComposition

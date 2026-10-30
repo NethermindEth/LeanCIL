@@ -10,6 +10,10 @@ trip is in `ByteRoundTrip`. Scalar loads and stores of checked memory go through
 
 namespace CIL.Safety
 
+/-- An encoding at `width` has exactly `width` bytes. -/
+theorem numberBytes_length (value width : Nat) : (numberBytes value width).length = width := by
+  simp [numberBytes]
+
 /-- Encoding peels the lowest byte first. -/
 theorem numberBytes_succ (value width : Nat) :
     numberBytes value (width + 1) = BitVec.ofNat 8 value :: numberBytes (value / 256) width := by
@@ -35,6 +39,7 @@ theorem byteNumber_numberBytes (value width : Nat) :
     simpa only [Nat.mod_mul_left_mod, Nat.mod_mul_left_div_self] using
       Nat.mod_add_div (value % (256^width * 256)) 256
 
+#print axioms numberBytes_length
 #print axioms numberBytes_succ
 #print axioms byteNumber_numberBytes
 

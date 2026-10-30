@@ -173,6 +173,13 @@ RVA storage is immutable and extraction-bound. Static keys hash full assembly/fi
 hash injectivity is not assumed: extraction/import checks reject collisions, and composed full
 verification proves `linkChecked`. Raw `link` alone supplies no collision guarantee.
 
+An RVA field's descriptor alignment is its packing. The extractor checks the RVA, and that its
+section's virtual address and file offset agree modulo 8; the runtime premise is that CoreCLR
+places the image at an 8-byte-aligned base. Its loader maps or copies images to page-aligned
+memory, and the bundler pads single-file assemblies to 64 bytes or more, but a flat image the host
+supplies through external assembly probing is used at the host's address, which is assumed, not
+checked, to be 8-byte aligned.
+
 `StaticRegistryValid` requires unique keys, distinct allocations and live immutable storage.
 `StaticWorldValid` constrains the listed descriptors. Composition requires shared keys to have equal
 descriptors in one memory; it neither merges memories nor infers disjointness from different keys.

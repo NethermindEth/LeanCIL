@@ -1,5 +1,6 @@
 import CIL.Safety.LoopAutomation
 import CIL.Safety.FrameProgress
+import CIL.Safety.NumericLocals
 import Lean
 
 /-!
@@ -33,21 +34,281 @@ theorem enterFrame_isSome (body : CIL.Method) (args : List Value) (memory : Memo
 /-- Derive parameterized frames, memory and numeric homes from checked allocation.
     Entry must reduce to success or have an explicit proof; no failure receives a default. -/
 syntax "bind_entry " ident bracketedBinder* " := " term:max
-  " with " term:max " from " term:max (" using " term:max)?
+  " with " term:max " from " term:max (" using " term:max)? (" allocating " term:max)?
   (" simplifying " "[" term,* "]")? : command
 
 /-- Normalize frame setup with explicit storage facts, retaining checked allocation semantics. -/
-private def entrySimplifier (body : TSyntax `term) (facts : Array (TSyntax `term)) :
-    CommandElabM (TSyntax `tactic) := do
+private def entrySimplifier {m : Type → Type} [Monad m] [MonadQuotation m]
+    (body : TSyntax `term) (facts : Array (TSyntax `term)) : m (TSyntax `tactic) := do
   let facts := (if body.raw.isIdent then #[body] else #[]) ++ facts
   `(tactic| (simp [enterFrame, makeSelectedLocals, makeLocals,
     makeArgumentHomes, makeParameterHomes, makeLocal, storeLocal, Value.hasUnspecified,
     checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure,
     $[$facts:term],*]; try rfl))
 
+/-- Rewrite each numeric local by its allocation equation before `makeLocal` is unfolded, then
+    normalize the rest of frame setup; an unmatched equation leaves allocation unresolved. -/
+private def allocationSimplifier {m : Type → Type} [Monad m] [MonadQuotation m]
+    (body : TSyntax `term) (facts made : Array (TSyntax `term)) : m (TSyntax `tactic) := do
+  let unfolded := (if body.raw.isIdent then #[body] else #[]) ++ facts ++ made
+  let normalizer ← entrySimplifier body (facts ++ made)
+  `(tactic| ((simp only [enterFrame, makeSelectedLocals, makeLocals, List.isEmpty, ite_true,
+    Bind.bind, Except.bind, Pure.pure, Except.pure, $[$unfolded:term],*]) <;> $normalizer:tactic))
+
+/-- A local slot's generated facts: its index and slot, typed load and store facts for span and
+    root slots, the address of a byte home, and whether the storage kind mentions binders. -/
+private abbrev SlotFacts :=
+  Nat × Term × Option Term × Option Term × Option Term × Bool
+
+/-- Read the generated facts for each local of a frame whose local list reduces. -/
+private def frameSlots (frame : Expr) : TermElabM (Array SlotFacts) := do
+  let mut locals := mkApp (mkConst ``Frame.locals) frame
+  let mut homes := #[]
+  let mut index := 0
+  repeat
+    match (← Meta.whnf locals).getAppFnArgs with
+    | (``List.cons, #[_, slot, tail]) =>
+      let slotValue ← Meta.whnf slot
+      let (loaded, stored, address) ← match slotValue.getAppFnArgs with
+      | (``LocalSlot.bytes, #[_, address]) =>
+        pure (none, none, some (← PrettyPrinter.delab address))
+      | (``LocalSlot.span, #[width, writable, _]) =>
+        let width ← PrettyPrinter.delab width
+        let writable ← PrettyPrinter.delab writable
+        pure (some (← `(loadLocal_span (width := $width) (writable := $writable))),
+          some (← `(storeLocal_span (width := $width) (writable := $writable))), none)
+      | (``LocalSlot.root, _) =>
+        pure (some (← `(loadLocal_root)), some (← `(storeLocal_root)), none)
+      | (``LocalSlot.readOnlyRoot, _) =>
+        pure (some (← `(loadLocal_readOnlyRoot)),
+          some (← `(storeLocal_readOnlyRoot_readOnly)), none)
+      | _ => pure (none, none, none)
+      let symbolic := match slotValue.getAppFnArgs with
+        | (``LocalSlot.span, #[width, writable, _]) => width.hasFVar || writable.hasFVar
+        | _ => false
+      homes := homes.push (index, ← PrettyPrinter.delab slot, loaded, stored, address, symbolic)
+      locals := tail
+      index := index + 1
+    | _ => break
+  return homes
+
+/-- Emit `homeN` for byte homes when `addresses` holds, and `slotN`, `loadN` and `storeN` for
+    span and root slots. -/
+private def emitSlots (name : Ident)
+    (binders : TSyntaxArray ``Lean.Parser.Term.bracketedBinder)
+    (slots : Array SlotFacts) (addresses : Bool) : CommandElabM Unit := do
+  for (index, slot, loaded, stored, address, symbolic) in slots do
+    if let some address := address then
+      if addresses then
+        let home := mkIdent (name.getId ++ Name.mkSimple s!"home{index}")
+        elabCommand (← `(abbrev $home $binders* : Reference := $address))
+    if let (some loaded, some stored) := (loaded, stored) then
+      let slotName := mkIdent (name.getId ++ Name.mkSimple s!"slot{index}")
+      elabCommand (← `(abbrev $slotName $binders* : LocalSlot := $slot))
+      let loadedName := mkIdent (name.getId ++ Name.mkSimple s!"load{index}")
+      let storedName := mkIdent (name.getId ++ Name.mkSimple s!"store{index}")
+      let factBinders := if symbolic then binders else #[]
+      elabCommand (← `(abbrev $loadedName $factBinders* := $loaded))
+      elabCommand (← `(abbrev $storedName $factBinders* := $stored))
+
+/-- A numeric local of the entered method: its index, storage kind, initializer and the number
+    its home stores. -/
+private structure NumericLocal where
+  index : Nat
+  kind : Term
+  value : Term
+  number : Term
+
+/-- The kinds `makeLocal` creates without allocating memory. -/
+private def unallocatedKinds : List Name :=
+  [``CIL.LocalKind.span, ``CIL.LocalKind.reference, ``CIL.LocalKind.array,
+    ``CIL.LocalKind.methodPointer, ``CIL.LocalKind.methodTable]
+
+/-- Find the numeric locals of `body`. Every other local must be created without allocating, so
+    each allocation of the entered frame is a numeric home. -/
+private def numericLocals (body : Term) : TermElabM (Array NumericLocal) := do
+  let kinds ← Term.elabTerm (← `(CIL.Method.localKinds $body)) none
+  let values ← Term.elabTerm (← `(CIL.Method.locals $body)) none
+  Term.synthesizeSyntheticMVarsNoPostponing
+  let mut kinds ← instantiateMVars kinds
+  let mut values ← instantiateMVars values
+  let mut found := #[]
+  let mut index := 0
+  repeat
+    match (← Meta.whnf kinds).getAppFnArgs, (← Meta.whnf values).getAppFnArgs with
+    | (``List.cons, #[_, kind, kindTail]), (``List.cons, #[_, value, valueTail]) =>
+      let outcome ← Meta.whnf (mkApp2 (mkConst ``localNumber) kind value)
+      match outcome.getAppFnArgs with
+      | (``Except.ok, #[_, _, number]) =>
+        found := found.push ⟨index, ← PrettyPrinter.delab kind, ← PrettyPrinter.delab value,
+          ← PrettyPrinter.delab (← Meta.reduce number)⟩
+      | _ =>
+        let storage ← Meta.whnf kind
+        unless unallocatedKinds.any storage.isAppOf do
+          throwError "Local {index} allocates a home without a checked numeric initializer"
+      kinds := kindTail
+      values := valueTail
+      index := index + 1
+    | (``List.nil, _), (``List.nil, _) => break
+    | _, _ => throwError "Local kinds and initializers must reduce to lists of equal length"
+  return found
+
+/-- Introduce each numeric home, the memory after it and its allocation equation. -/
+private partial def withNumericHomes {α : Type} (memory : Term) (homes : Array NumericLocal)
+    (position : Nat) (current : Term) (references : Array Expr)
+    (continuation : Array Expr → Term → TermElabM α) : TermElabM α := do
+  if h : position < homes.size then
+    let home := homes[position]
+    let reference := mkIdent (Name.mkSimple s!"home{home.index}")
+    let allocated := mkIdent (Name.mkSimple s!"allocated{home.index}")
+    Meta.withLocalDeclD reference.getId (mkConst ``Reference) fun referenceVar =>
+    Meta.withLocalDeclD allocated.getId (mkConst ``Memory) fun _ => do
+      let made ← Term.elabTerm (← `(makeLocal ($memory).nextIdentity $(home.kind) $(home.value)
+        $current = Except.ok (LocalSlot.bytes $(home.kind) $reference, [($reference).allocation],
+          $allocated))) (some (mkSort .zero))
+      Term.synthesizeSyntheticMVarsNoPostponing
+      Meta.withLocalDeclD (Name.mkSimple s!"made{home.index}") (← instantiateMVars made) fun _ =>
+        withNumericHomes memory homes (position + 1) allocated (references.push referenceVar)
+          continuation
+  else continuation references current
+
+/-- Introduce the numeric home references alone. -/
+private partial def withHomeReferences {α : Type} (homes : List NumericLocal)
+    (continuation : TermElabM α) : TermElabM α :=
+  match homes with
+  | [] => continuation
+  | home :: rest =>
+    Meta.withLocalDeclD (Name.mkSimple s!"home{home.index}") (mkConst ``Reference) fun _ =>
+      withHomeReferences rest continuation
+
+/-- Derive an entry whose numeric locals allocate homes in symbolic memory. The frame is
+    explicit in opaque home references, and the checked theorem yields them existentially. -/
+private def elabAllocatingEntry (name : Ident)
+    (binders : TSyntaxArray ``Lean.Parser.Term.bracketedBinder)
+    (body args memory wellFormed : Term) (facts : Array Term) : CommandElabM Unit := do
+  let indexed (base : String) (index : Nat) := mkIdent (Name.mkSimple s!"{base}{index}")
+  let kept := mkIdent `kept
+  let (homes, frameBinders, frameParameters, frameValue, transported) ←
+      liftTermElabM <| Term.elabBinders binders fun variables => do
+    let homes ← numericLocals body
+    withNumericHomes memory homes 0 memory #[] fun references final => do
+      let finalValue ← Term.elabTerm final (some (mkConst ``Memory))
+      let keptType ← Term.elabTerm (← `(MemoryBelow ($memory).nextIdentity $memory $final))
+        (some (mkSort .zero))
+      Term.synthesizeSyntheticMVarsNoPostponing
+      Meta.withLocalDeclD kept.getId (← instantiateMVars keptType) fun _ => do
+        -- Caller span validity survives earlier frame allocations; other facts are kept as is.
+        let mut transported := #[]
+        for fact in facts do
+          let candidate ← `(SpanView.validate_below _ $fact $wellFormed $kept)
+          let saved ← saveState
+          let accepted ← try
+              let _ ← Term.withoutErrToSorry <| Term.elabTerm candidate none
+              Term.synthesizeSyntheticMVarsNoPostponing
+              pure true
+            catch _ => pure false
+          saved.restore
+          if accepted then transported := transported.push candidate
+        let made := homes.map fun home => indexed "made" home.index
+        let normalizer ← allocationSimplifier body (facts ++ transported) made
+        let outcome ← Term.elabTermEnsuringType (← `(enterFrame $body $args $memory)) none
+        Term.synthesizeSyntheticMVarsNoPostponing
+        let pair ← Meta.mkFreshExprMVar (← Term.elabTerm (← `(Frame × Memory)) none)
+        let success ← Meta.mkAppOptM ``Except.ok
+          #[some (mkConst ``ExecutionFault), some (← Meta.inferType pair), some pair]
+        let equality ← Meta.mkFreshExprMVar (← Meta.mkEq (← instantiateMVars outcome) success)
+        let remaining ← Tactic.run equality.mvarId! (Tactic.evalTactic normalizer)
+        unless remaining.isEmpty do
+          throwError "Entry facts do not establish a successful allocation"
+        let pair ← instantiateMVars pair
+        let (``Prod.mk, #[_, _, frame, entered]) := pair.getAppFnArgs
+          | throwError "Entry facts leave the allocated frame unresolved"
+        if frame.hasMVar then throwError "Entry facts leave the allocated frame unresolved"
+        unless entered == (← instantiateMVars finalValue) do
+          throwError "Frame entry allocates storage other than its numeric homes"
+        let homeIds := references.map Expr.fvarId!
+        let userIds := variables.map Expr.fvarId!
+        let mentioned := (collectFVars {} frame).fvarIds
+        for fvar in mentioned do
+          unless homeIds.contains fvar || userIds.contains fvar do
+            throwError "The entered frame depends on intermediate allocation state"
+        -- The frame takes only the binders its layout mentions, with their dependencies.
+        let mut needed := mentioned.filter userIds.contains
+        for binder in variables.reverse do
+          if needed.contains binder.fvarId! then
+            let dependencies := (collectFVars {} (← binder.fvarId!.getType)).fvarIds
+            needed := needed ++ dependencies.filter userIds.contains
+        let selected := variables.filter (needed.contains ·.fvarId!)
+        let frameBinders ← selected.mapM fun selection => do
+          let declaration ← selection.fvarId!.getDecl
+          let type ← PrettyPrinter.delab declaration.type
+          `(Lean.Parser.Term.bracketedBinderF| ($(mkIdent declaration.userName) : $type))
+        let parameters ← selected.mapM fun selection => do
+          return mkIdent (← selection.fvarId!.getDecl).userName
+        return (homes, frameBinders, parameters, ← PrettyPrinter.delab frame, transported)
+  let frameName := mkIdent (name.getId ++ `frame)
+  let homeNames := homes.map fun home => indexed "home" home.index
+  let homeBinders ← homeNames.mapM fun home =>
+    `(Lean.Parser.Term.bracketedBinderF| ($home : Reference))
+  let allBinders : TSyntaxArray ``Lean.Parser.Term.bracketedBinder :=
+    (frameBinders ++ homeBinders).map (⟨·.raw⟩)
+  elabCommand (← `(def $frameName $allBinders* : Frame := $frameValue))
+  let frameApplied ← `($frameName $(frameParameters ++ homeNames)*)
+  let entered := mkIdent `entered
+  let final := match homes.back? with
+    | some home => indexed "allocated" home.index
+    | none => memory
+  let mut statement ← `(EntryMemory $memory $entered)
+  for home in homes.reverse do
+    statement ← `(NumericEntryHome $memory $entered $(home.kind) $(home.number)
+      $(indexed "home" home.index) ∧ $statement)
+  statement ← `(enterFrame $body $args $memory = .ok ($frameApplied, $entered) ∧ $statement)
+  statement ← `(∃ $entered:ident : Memory, $statement)
+  for home in homes.reverse do
+    statement ← `(∃ $(indexed "home" home.index):ident : Reference, $statement)
+  let mut progress := mkIdent `entryMemory
+  let mut steps : Array (TSyntax `tactic) :=
+    #[← `(tactic| have $progress:ident := EntryMemory.start $wellFormed)]
+  for home in homes do
+    let step := indexed "step" home.index
+    steps := steps.push (← `(tactic| obtain ⟨$(indexed "home" home.index):ident,
+      $(indexed "allocated" home.index):ident, $(indexed "made" home.index):ident,
+      $(indexed "numeric" home.index):ident, $step:ident⟩ :=
+        make_numeric_entry_local $progress ($memory).nextIdentity $(home.kind) $(home.value)
+          $(home.number) rfl))
+    let next := indexed "entryMemory" home.index
+    steps := steps.push (← `(tactic| have $next:ident := EntryMemory.trans $progress $step))
+    progress := next
+  steps := steps.push (← `(tactic| have $kept:ident := ($progress).kept))
+  let made := homes.map fun home => indexed "made" home.index
+  let normalizer ← allocationSimplifier body (facts ++ transported) made
+  let setup := mkIdent `setup
+  steps := steps.push (← `(tactic| have $setup:ident :
+    enterFrame $body $args $memory = .ok ($frameApplied, $final) := by
+      simp only [$frameName:term] <;> $normalizer:tactic))
+  let mut witnesses : Array Term := homeNames.map (⟨·.raw⟩) ++ #[final, setup]
+  for (home, position) in homes.zipIdx do
+    let mut fact : Term := indexed "numeric" home.index
+    for later in homes.extract (position + 1) homes.size do
+      fact ← `(NumericEntryHome.after $fact $(indexed "step" later.index))
+    witnesses := witnesses.push fact
+  witnesses := witnesses.push progress
+  steps := steps.push (← `(tactic| exact ⟨$witnesses,*⟩))
+  let checked := mkIdent (name.getId ++ `checked)
+  elabCommand (← `(theorem $checked $binders* : $statement := by $steps*))
+  elabCommand (← `(#print axioms $checked))
+  let slots ← liftTermElabM <| Term.elabBinders binders fun _ =>
+    withHomeReferences homes.toList do
+      frameSlots (← Term.elabTerm frameApplied (some (mkConst ``Frame)))
+  emitSlots name binders slots false
+
 elab_rules : command
   | `(bind_entry $name $binders* := $body with $args from $memory $[using $witness]?
-      $[simplifying [$facts,*]]?) => do
+      $[allocating $wellFormed]? $[simplifying [$facts,*]]?) => do
+    if let some wellFormed := wellFormed then
+      if witness.isSome then throwError "Choose a success witness or allocation, not both"
+      return ← elabAllocatingEntry name binders body args memory wellFormed
+        (facts.map (·.getElems) |>.getD #[])
     if witness.isSome && facts.isSome then
       throwError "Choose a success witness or simplifying facts, not both"
     let normalizer ← entrySimplifier body (facts.map (·.getElems) |>.getD #[])
@@ -96,49 +357,9 @@ elab_rules : command
       enterFrame $body $args $memory =
         .ok (@$frame $parameters*, @$entered $parameters*) := $checkedProof))
     elabCommand (← `(#print axioms $equation))
-    let homes ← liftTermElabM <| Term.elabBinders binders fun _ => do
-      let value ← Term.elabTerm (← `(@$frame $parameters*)) none
-      let mut locals := mkApp (mkConst ``Frame.locals) value
-      let mut homes := #[]
-      let mut index := 0
-      repeat
-        match (← Meta.whnf locals).getAppFnArgs with
-        | (``List.cons, #[_, slot, tail]) =>
-          let slotValue ← Meta.whnf slot
-          let (loaded, stored, address) ← match slotValue.getAppFnArgs with
-          | (``LocalSlot.bytes, #[_, address]) =>
-            pure (none, none, some (← PrettyPrinter.delab address))
-          | (``LocalSlot.span, #[width, writable, _]) =>
-            let width ← PrettyPrinter.delab width
-            let writable ← PrettyPrinter.delab writable
-            pure (some (← `(loadLocal_span (width := $width) (writable := $writable))),
-              some (← `(storeLocal_span (width := $width) (writable := $writable))), none)
-          | (``LocalSlot.root, _) =>
-            pure (some (← `(loadLocal_root)), some (← `(storeLocal_root)), none)
-          | (``LocalSlot.readOnlyRoot, _) =>
-            pure (some (← `(loadLocal_readOnlyRoot)),
-              some (← `(storeLocal_readOnlyRoot_readOnly)), none)
-          | _ => pure (none, none, none)
-          let symbolic := match slotValue.getAppFnArgs with
-            | (``LocalSlot.span, #[width, writable, _]) => width.hasFVar || writable.hasFVar
-            | _ => false
-          homes := homes.push (index, ← PrettyPrinter.delab slot, loaded, stored, address, symbolic)
-          locals := tail
-          index := index + 1
-        | _ => break
-      return homes
-    for (index, slot, loaded, stored, address, symbolic) in homes do
-      if let some address := address then
-        let home := mkIdent (name.getId ++ Name.mkSimple s!"home{index}")
-        elabCommand (← `(abbrev $home $binders* : Reference := $address))
-      if let (some loaded, some stored) := (loaded, stored) then
-        let slotName := mkIdent (name.getId ++ Name.mkSimple s!"slot{index}")
-        elabCommand (← `(abbrev $slotName $binders* : LocalSlot := $slot))
-        let loadedName := mkIdent (name.getId ++ Name.mkSimple s!"load{index}")
-        let storedName := mkIdent (name.getId ++ Name.mkSimple s!"store{index}")
-        let factBinders := if symbolic then binders else #[]
-        elabCommand (← `(abbrev $loadedName $factBinders* := $loaded))
-        elabCommand (← `(abbrev $storedName $factBinders* := $stored))
+    let slots ← liftTermElabM <| Term.elabBinders binders fun _ => do
+      frameSlots (← Term.elabTerm (← `(@$frame $parameters*)) none)
+    emitSlots name binders slots true
 
 /-- Derive the unique matching cutpoint and a state constructor from the extracted body.
     Ambiguous or missing matches fail the kernel-checked uniqueness obligation. -/

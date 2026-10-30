@@ -37,7 +37,7 @@ internal static class ExceptionLint
         byte[] xml = new byte[checked((int)documentationStream.Length)];
         documentationStream.ReadExactly(xml);
         if (documentationStream.ReadByte() != -1) throw new InvalidDataException("Exception documentation changed while reading.");
-        using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(assembly));
+        using ModuleDefinition module = StaticData.ReadModule(assembly);
         FeatureProfile profile = identity.GetProperty("profile").Deserialize<FeatureProfile>()
             ?? throw new InvalidDataException("Missing extraction profile.");
         SortedSet<string> initialized = new(identity.GetProperty("initializedTypes").Deserialize<string[]>() ?? [], StringComparer.Ordinal);

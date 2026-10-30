@@ -1,12 +1,51 @@
 # Buffer content proofs
 
-The [AllZero span loop](../Examples/Proofs/SpanAllZero.lean) computes whether every element of an
-arbitrary-length `ReadOnlySpan<uint>` is zero. Its symbolic entry carries caller memory and an
-assigned span parameter throughout execution. `SpanContents` ties that view to a mathematical
-list through `Contents`; the loop invariant preserves the list's all-zero predicate while each
-successful iteration drops one zero element. The theorem includes null empty spans, early false
-returns and exact memory preservation. `Contents.load` and `Contents.drop` supply the read and
-suffix facts; `SpanView.slice_reference` connects the sliced view to the suffix address.
+## Describe span contents
+
+`CIL.Safety.SpanContents` is the vocabulary for what a span holds. `SpanContents memory view width
+values` says the view has element width `width`, its length is `values.length`, a null view holds
+`[]`, and an addressed view's elements read back from its base as `Contents`. It asserts neither
+validity nor write authority; state `view.validate memory = .ok ()` and the access mode separately.
+`SpanContents.nil` builds the empty case for any zero-length view. For a valid view,
+`SpanContents.load` gives element `index` as a successful `view.element` reference whose scalar
+load is `numericOfWidth width value.toNat`; `SpanContents.head` is that fact for the first element
+of `value :: rest`. `SpanContents.drop` and `SpanContents.tail` give the successful
+`view.slice memory count (view.length - count)`, its validity, its unchanged mode and the contents
+of the remaining elements, so a loop that reads `values[0]` and continues with `values.Slice(1)`
+carries its invariant without unfolding views, slices or byte reads.
+`SpanView.length_word_ne_zero` discharges a `Length != 0` guard for a valid nonempty view.
+
+Callee frames allocate locals above the caller's memory. For well-formed caller memory,
+`SpanView.validate_below`, `SpanView.slice_below` and `SpanContents.after_below` transport validity,
+successful slices and contents to any memory related by `MemoryBelow memory.nextIdentity`, such as
+the memory after frame entry and local stores.
+
+A method with locals cannot promise `final = memory`: its expired frame allocations stay in the
+final memory, so it ends with `MemoryBelow memory.nextIdentity memory final`, as `SpanSum` does,
+and its callers should expect that instead of equality. Two such calls compose with
+[`MemoryBelow.compose_invoke`](../CIL/Safety/ExecutionLifetime.lean) `called first second`, which
+takes the watermark growth from the first call's successful `invoke`;
+[`MemoryBelow.compose`](../CIL/Safety/MemoryBelow.lean) takes it as a premise. Without that growth
+the two facts do not compose. The `_below` lemmas then carry the caller's validity and contents
+from `memory` to the final memory. Contents a callee leaves in caller storage hold in the callee's
+result memory, which the caller's frame exit relates only by its entry watermark.
+[`SpanContents.after_below_valid`](../CIL/Safety/SpanContents.lean) and
+[`SpanView.validate_eq_below`](../CIL/Safety/SpanContents.lean) transport them, given the view is
+valid in the caller's well-formed entry memory. `Contents.after_below` does the same for a
+`Contents` fact once `SpanView.allocation_below` bounds its allocation.
+[Tests/BufferContents](../Tests/BufferContents.lean) composes two calls and refutes composition
+without growth.
+
+The [AllZero span loop](../Examples/Proofs/SpanAllZero.lean) decides whether every element of an
+arbitrary-length `ReadOnlySpan<uint>` is zero, with the invariant `remaining.all (· == 0) = result`
+and exact memory preservation. The [Sum span fold](../Examples/Proofs/SpanSum.lean) returns the
+wrapping sum of a `ReadOnlySpan<ulong>` with the invariant `total + remaining.sum = result`; its
+running total lives in a frame home, so its state keeps the span facts in caller memory and
+transports them to the current frame memory with the `_below` lemmas. Its entry comes from
+`bind_entry ... allocating wellFormed`, which names the home, its freshness and write access, and
+the kept caller memory without restating frame setup; see [loop
+scaffolding](PROOFS-BINDING.md#generate-loop-entry-and-cutpoint-scaffolding). Both measure the
+remaining length and cover null empty spans.
 
 ## Describe buffer contents
 
@@ -40,8 +79,8 @@ the invariant of a compiled loop. `Tests/BufferContents.lean` checks unchanged n
 and sibling slices, and refutes uninitialized, past-end, overlapping, unjoined and stale claims.
 
 `SpanView.slice_reference` identifies the allocation-relative start of a successful addressed
-slice. Combined with `Contents.drop`, it transports a sequence predicate to the slice without
-repeating byte-read proofs. Slice validity alone does not assert readable contents.
+slice; `SpanContents.drop` combines it with `Contents.drop`. Slice validity alone does not assert
+readable contents.
 
 For `Span<T>.Fill` and `Clear`, `SpanView.fill_contents` derives the repeated sequence from the
 successful checked fill, without a readable-input premise. `Contents.after_span_fill` preserves

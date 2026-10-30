@@ -18,6 +18,7 @@ def StaticBindingValid (m : Memory) (descriptor : CIL.StaticDescriptor) (referen
   reference.offset = 0 ∧ ∃ allocation,
     m.allocations reference.allocation = some allocation ∧ allocation.live = true ∧
     allocation.kind = .immutableStatic ∧ allocation.layout.size = descriptor.bytes.length ∧
+    allocation.layout.alignment = descriptor.alignment ∧
     read m reference descriptor.bytes.length 1 = .ok descriptor.bytes
 
 /-- The static registry binds each identity once, to distinct allocations that are all live
@@ -29,10 +30,12 @@ def StaticRegistryValid (m : Memory) : Prop :=
     m.allocations binding.2.allocation = some allocation ∧
       allocation.live = true ∧ allocation.kind = .immutableStatic
 
-/-- The descriptors fit native sizes and have unique identities, the registry is valid, and
-    every registered binding for a descriptor holds that descriptor's bytes. -/
+/-- The descriptors fit native sizes, declare a positive alignment and have unique identities,
+    the registry is valid, and every registered binding for a descriptor holds that descriptor's
+    bytes at that descriptor's alignment. -/
 def StaticWorldValid (descriptors : List CIL.StaticDescriptor) (m : Memory) : Prop :=
-  (∀ descriptor ∈ descriptors, descriptor.bytes.length < nativeLimit) ∧
+  (∀ descriptor ∈ descriptors,
+    descriptor.bytes.length < nativeLimit ∧ 0 < descriptor.alignment) ∧
   (∀ left ∈ descriptors, ∀ right ∈ descriptors,
     left.identity = right.identity → left = right) ∧
   StaticRegistryValid m ∧
@@ -46,9 +49,9 @@ theorem cached_static_reference_succeeds (m : Memory) (descriptor : CIL.StaticDe
       some (key, reference))
     (valid : StaticBindingValid m descriptor reference) :
     staticReference descriptor m = .ok (m, reference) := by
-  obtain ⟨offset, allocation, present, live, kind, size, bytes⟩ := valid
+  obtain ⟨offset, allocation, present, live, kind, size, alignment, bytes⟩ := valid
   simp [staticReference, cache, checkedAt, liveAllocation, present, live, kind, offset, size,
-    bytes, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+    alignment, bytes, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 theorem wellFormed_next_unused (m : Memory) (hm : m.WellFormed) :
     m.allocations m.nextIdentity = none := by
@@ -74,10 +77,11 @@ theorem staticReference_succeeds (m : Memory) (descriptor : CIL.StaticDescriptor
     exact ⟨m, binding.2, cached_static_reference_succeeds _ _ _ _ hc valid⟩
   | none =>
     have unused := wellFormed_next_unused m hm
-    have size := world.1 descriptor member
-    have valid : (Allocation.mk .immutableStatic ⟨descriptor.bytes.length, 1, []⟩
+    have ⟨size, aligned⟩ := world.1 descriptor member
+    have valid : (Allocation.mk .immutableStatic
+        ⟨descriptor.bytes.length, descriptor.alignment, []⟩
         true [descriptor.bytes.length]).valid = true := by
-      simp [Allocation.valid, size]
+      simp [Allocation.valid, size, aligned]
     simp only [staticReference, hc, allocate, valid, Bool.not_true, Bool.false_eq_true,
       ite_false, unused, Option.isSome_none, checkedAt, Except.mapError, Bind.bind,
       Except.bind, Pure.pure, Except.pure]
@@ -87,11 +91,12 @@ theorem staticReference_succeeds (m : Memory) (descriptor : CIL.StaticDescriptor
 #print axioms staticReference_succeeds
 
 theorem empty_static_world_valid (descriptors : List CIL.StaticDescriptor) (m : Memory)
-    (sizes : ∀ descriptor ∈ descriptors, descriptor.bytes.length < nativeLimit)
+    (fits : ∀ descriptor ∈ descriptors,
+      descriptor.bytes.length < nativeLimit ∧ 0 < descriptor.alignment)
     (identities : ∀ left ∈ descriptors, ∀ right ∈ descriptors,
       left.identity = right.identity → left = right)
     (empty : m.staticBindings = []) : StaticWorldValid descriptors m := by
-  refine ⟨sizes, identities, ?_, ?_⟩
+  refine ⟨fits, identities, ?_, ?_⟩
   · constructor <;> simp [empty]
   · simp [empty]
 
@@ -108,13 +113,14 @@ def StaticIdentitiesAbsent (identities : List Nat) (m : Memory) : Prop :=
 
 /-- A valid registry with none of the descriptors bound yet gives a valid static world. -/
 theorem StaticWorldValid.of_absent (descriptors : List CIL.StaticDescriptor) (m : Memory)
-    (sizes : ∀ descriptor ∈ descriptors, descriptor.bytes.length < nativeLimit)
+    (fits : ∀ descriptor ∈ descriptors,
+      descriptor.bytes.length < nativeLimit ∧ 0 < descriptor.alignment)
     (identities : ∀ left ∈ descriptors, ∀ right ∈ descriptors,
       left.identity = right.identity → left = right)
     (registry : StaticRegistryValid m)
     (absent : StaticIdentitiesAbsent (descriptors.map CIL.StaticDescriptor.identity) m) :
     StaticWorldValid descriptors m := by
-  refine ⟨sizes, identities, registry, ?_⟩
+  refine ⟨fits, identities, registry, ?_⟩
   intro descriptor selected binding member same
   exact False.elim (absent binding member (same ▸ List.mem_map.mpr ⟨descriptor, selected, rfl⟩))
 

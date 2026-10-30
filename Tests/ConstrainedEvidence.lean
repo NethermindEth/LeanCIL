@@ -96,6 +96,19 @@ theorem explicit_override_precedes_implicit :
       receiver site).map (·.token) = some 22 := by decide +kernel
 #print axioms explicit_override_precedes_implicit
 
+/-- Static virtual interface members (ECMA-335 augments) are outside the admitted subset. -/
+theorem static_virtual_slot_rejected :
+    resolveConstrained [concrete, { declared with methods := [{ slot with hasThis := false }] }]
+      receiver { site with hasThis := false } = none := by decide +kernel
+#print axioms static_virtual_slot_rejected
+
+/-- A default interface method slot is rejected even when the struct implements it. -/
+theorem default_interface_slot_rejected :
+    resolveConstrained
+      [concrete, { declared with methods := [{ slot with isAbstract := false, hasBody := true }] }]
+      receiver site = none := by decide +kernel
+#print axioms default_interface_slot_rejected
+
 theorem missing_interface_rejected :
     resolveConstrained [{ concrete with interfaces := [] }, declared] receiver site = none := by
   decide +kernel

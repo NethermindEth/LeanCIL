@@ -91,7 +91,8 @@ theorem Memory.Renamed.staticInstructionResult {mapping : AllocationRenaming}
     | exact .error _
     | (apply ((related.liveAllocation _ (by assumption)).checkedAt _ _).bindWithSuccess
        intro first second sourceStep descriptors
-       rw [← descriptors.layout, ← descriptors.kind.immutable])
+       rw [← descriptors.layout, ← descriptors.kind.immutable]
+       try (unfold staticSpanAligned; rw [← descriptors.layout]))
     | (apply (related.formValue _ (by assumption)).bindWithSuccess
        intro first second sourceStep same
        subst second)

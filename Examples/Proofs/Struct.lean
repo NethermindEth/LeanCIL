@@ -1,7 +1,7 @@
 import Extracted
 import Examples.Support
 import CIL.Safety.SymbolicExecution
-import CIL.Safety.NumericLocals
+import CIL.Safety.LoopScaffold
 import CIL.Safety.ReturnMemory
 import CIL.Safety.CallComposition
 import CIL.Safety.WordMemory
@@ -9,29 +9,22 @@ import CIL.Safety.WordMemory
 open CIL.Safety
 namespace ExampleProof
 
+bind_entry entry (memory : Memory) (x : CIL.W64) (wellFormed : memory.WellFormed) :=
+  Extracted.method0 with [.scalar (.i64 x)] from memory allocating wellFormed
+
 /-- The compiled struct stores and helper call return every input word.
     All caller allocation metadata, bytes, initialization and permissions survive;
     only fresh frame-owned storage may be allocated, written and expired. -/
 theorem correctness (memory : Memory) (x : CIL.W64) (wellFormed : memory.WellFormed) :
     ∃ fuel result, invoke Extracted.program fuel 0 [.scalar (.i64 x)] memory =
       .ok (result, [.scalar (.i64 x)]) ∧ MemoryBelow memory.nextIdentity memory result := by
-  obtain ⟨reference, entered, made, initialRead, writable, preserved⟩ :=
-    make_numeric_local memory memory.nextIdentity (.aggregate 12)
-      (.aggregate (List.replicate 12 0)) 0 wellFormed rfl
-  let frame : Frame := ⟨memory.nextIdentity, [.bytes (.aggregate 12) reference], [reference.allocation], [], 0⟩
-  have opaqueLocalsEmpty : Extracted.method0.opaqueVectorLocals = [] := rfl
-  have setup : enterFrame Extracted.method0 [.scalar (.i64 x)] memory = .ok (frame, entered) := by
-    simp only [enterFrame, Extracted.method0_locals, Extracted.method0_localKinds,
-      Extracted.method0_vectorArgs, Extracted.method0_parameterHomes, opaqueLocalsEmpty,
-      makeSelectedLocals, List.isEmpty, ↓reduceIte, makeLocals, made, makeArgumentHomes, makeParameterHomes,
-      frame, Bind.bind, Except.bind, Pure.pure, Except.pure, List.map_nil, List.append_nil]
-  have enteredWF := makeLocal_preserves_wellFormed _ _ _ _ _ _ _ wellFormed made
-  have fresh := (makeLocal_fresh _ _ _ _ _ _ _ made).2 reference.allocation (by simp)
+  obtain ⟨reference, entered, setup, home, entryMemory⟩ := entry.checked memory x wellFormed
+  have writable := home.writable
   change access entered reference 12 1 true = .ok () at writable
   obtain ⟨allocation, ready⟩ := access_requirements writable
   obtain ⟨initialized, initializedWrite⟩ := write_succeeds
     (bytes := List.replicate 12 (0 : BitVec 8)) (by simpa using writable)
-  have initializedWF := write_preserves_wellFormed _ _ _ _ _ enteredWF initializedWrite
+  have initializedWF := write_preserves_wellFormed _ _ _ _ _ entryMemory.wellFormed initializedWrite
   have initReady := ready.after_write initializedWrite
   have payloadReady := initReady.slice initializedWF 0 8 (by decide) (by decide)
   obtain ⟨payload, payloadWrite⟩ := write_succeeds
@@ -65,19 +58,24 @@ theorem correctness (memory : Memory) (x : CIL.W64) (wellFormed : memory.WellFor
       Value.hasUnspecified, Bool.false_or, Bool.false_eq_true, ↓reduceIte,
       referenceAt, ordinaryAccessAlignment, initializedWrite,
       checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
-  refine ⟨CIL.executionBound Extracted.program 0, leaveFrame frame tagged, ?_, ?_⟩
+  refine ⟨CIL.executionBound Extracted.program 0, leaveFrame (entry.frame memory reference) tagged,
+    ?_, ?_⟩
   · apply invoke_of_run (by simp only [cil_code] <;> rfl) rfl setup
-    cil_checked_steps [initStep, localAddress, frame, enteredForm, initializedForm, payloadForm,
-      taggedForm, payloadAddress, tagAddress, readAddress, loaded, initializedWrite, payloadWrite,
+    cil_checked_steps [initStep, localAddress, entry.frame, enteredForm, initializedForm,
+      payloadForm, taggedForm, payloadAddress, tagAddress, readAddress, loaded, initializedWrite, payloadWrite,
       tagWrite, referenceAt, ordinaryAccessAlignment]
-  · have first := write_preserves_memory_below _ _ _ _ _ memory.nextIdentity fresh.1 initializedWrite
-    have second := write_preserves_memory_below _ _ _ _ _ memory.nextIdentity fresh.1 payloadWrite
-    have third := write_preserves_memory_below _ _ { reference with offset := reference.offset + 8 } _ _ memory.nextIdentity fresh.1 tagWrite
-    have last := leaveFrame_preserves_memory_below frame tagged memory.nextIdentity (by
+  · have first := write_preserves_memory_below _ _ _ _ _ memory.nextIdentity home.fresh
+      initializedWrite
+    have second := write_preserves_memory_below _ _ _ _ _ memory.nextIdentity home.fresh
+      payloadWrite
+    have third := write_preserves_memory_below _ _ { reference with offset := reference.offset + 8 }
+      _ _ memory.nextIdentity home.fresh tagWrite
+    have last := leaveFrame_preserves_memory_below (entry.frame memory reference) tagged
+      memory.nextIdentity (by
       intro id member
-      have same : id = reference.allocation := by simpa [frame] using member
-      simpa [same] using fresh.1)
-    exact ((preserved.trans first).trans second).trans (third.trans last)
+      have same : id = reference.allocation := by simpa [entry.frame] using member
+      simpa [same] using home.fresh)
+    exact ((entryMemory.kept.trans first).trans second).trans (third.trans last)
 
 #print axioms correctness
 end ExampleProof

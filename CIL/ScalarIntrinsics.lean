@@ -82,8 +82,8 @@ where
   tuple {w : Nat} (result : Except ArithmeticFault (BitVec w × BitVec w)) :
       Except ArithmeticFault Value := do
     let (quotient, remainder) ← result
-    return .aggregate (littleEndianBytes (w / 8) quotient.toNat ++
-      littleEndianBytes (w / 8) remainder.toNat)
+    return .aggregate (Safety.numberBytes quotient.toNat (w / 8) ++
+      Safety.numberBytes remainder.toNat (w / 8))
 
 /-- The number of set bits. -/
 def population (x : BitVec w) : Nat := x.cpopNatRec w 0

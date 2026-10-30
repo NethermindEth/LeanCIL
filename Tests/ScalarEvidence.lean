@@ -659,4 +659,29 @@ theorem closed_generic_fill_signature :
         [.word64, .reference] = none := by decide +kernel
 #print axioms closed_generic_fill_signature
 
+/-- The ECMA-335 augments make int32-to-`native unsigned int` coercion sign-extending, unlike
+    the 2012 text; scalar flow admits no implicit int32-to-native coercion in either direction. -/
+theorem no_implicit_native_coercion :
+    let unsignedNative : TypeExpr := .atom runtime "System.UIntPtr"
+    ([nativeType, unsignedNative].all fun home =>
+      let method := { addRaw with locals := [home], parameters := [home], returnType := home }
+      let call := i 40 (.call { site with parameterCount := 1, parameterTypes := [home] })
+      scalarTransfer method (i 10) [.word32] == none &&
+        scalarTransfer method (i 10) [.native] == some [] &&
+        scalarTransfer method (i 16 (.argument 0)) [.word32] == none &&
+        scalarTransfer method (i 16 (.argument 0)) [.native] == some [] &&
+        scalarTransfer method (i 42) [.word32] == none &&
+        scalarTransfer method (i 42) [.native] == some [] &&
+        scalarTransfer method call [.word32] == none &&
+        scalarTransfer method call [.native] == some [.word64]) = true := by
+  decide +kernel
+#print axioms no_implicit_native_coercion
+
+/-- The checked interpreter likewise never widens an int32 into a native-width home. -/
+theorem native_home_rejects_int32 :
+    CIL.Safety.localNumber .word64 (.i32 (-1)) = .error .invalidState ∧
+      CIL.Safety.localNumber .word64 (.i64 (-1)) = .ok (2 ^ 64 - 1) :=
+  ⟨rfl, rfl⟩
+#print axioms native_home_rejects_int32
+
 end Tests.ScalarEvidence

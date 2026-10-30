@@ -1,10 +1,10 @@
-import CIL.Extraction.Generics
+import CIL.TypeExpr
 
 /-!
 # Exact named metadata identities
 
-Span signatures and folded type tests share a kernel-reducible decoder for scoped type names.
-The ASCII fast path is proved equivalent to ordinary Unicode character decoding.
+Span signatures, folded type tests and generic call targets share a kernel-reducible decoder
+for scoped type names. The ASCII fast path is proved equivalent to Unicode character decoding.
 -/
 
 namespace CIL.Extraction
@@ -30,7 +30,7 @@ private def leaf (scope name : List Char) : Option (List Char × List Char) :=
   if plainScope scope && plainName name then some (scope, name) else none
 
 /-- Decode ASCII without repeated indexed UTF-8 reads during kernel reduction. -/
-private def asciiChars : List UInt8 → Option (List Char)
+def asciiChars : List UInt8 → Option (List Char)
   | [] => some []
   | byte :: bytes =>
     if byte.toNat < 128 then (Char.ofNat byte.toNat :: ·) <$> asciiChars bytes else none
@@ -65,13 +65,13 @@ private theorem asciiChars_encode (bytes : List UInt8) (chars : List Char)
 #print axioms asciiChars_encode
 
 /-- ASCII metadata uses a byte-list traversal; Unicode retains the full decoder. -/
-private def metadataChars (value : String) : List Char :=
+def metadataChars (value : String) : List Char :=
   match asciiChars value.toByteArray.data.toList with
   | some chars => chars
   | none => value.toList
 
 /-- Metadata decoding preserves the original character sequence for every string. -/
-private theorem metadataChars_eq (value : String) : metadataChars value = value.toList := by
+theorem metadataChars_eq (value : String) : metadataChars value = value.toList := by
   unfold metadataChars
   cases decoded : asciiChars value.toByteArray.data.toList with
   | none => rfl
@@ -103,5 +103,59 @@ theorem namedType_eq_original (type : TypeExpr) : namedType type =
   cases type <;> simp only [namedType, metadataChars_eq]
 
 #print axioms namedType_eq_original
+
+/-- A named type's plain full name; an atom's or constructor's scope is left undecoded. -/
+def plainTypeName : TypeExpr → Option (List Char)
+  | .atom _ name | .constructor _ name =>
+    let name := metadataChars name
+    if plainName name then some name else none
+  | type => Prod.snd <$> namedType type
+
+/-- Remove an exact byte prefix, rejecting mismatches and truncated identities. -/
+def stripIdentityPrefix : List UInt8 → List UInt8 → Option (List UInt8)
+  | [], bytes => some bytes
+  | first :: expected, actual :: bytes =>
+    if first == actual then stripIdentityPrefix expected bytes else none
+  | _, _ => none
+
+/-- Prefix removal succeeds exactly for the original prefix followed by the returned bytes. -/
+theorem stripIdentityPrefix_eq (expected bytes suffix : List UInt8) :
+    stripIdentityPrefix expected bytes = some suffix ↔ bytes = expected ++ suffix := by
+  induction expected generalizing bytes with
+  | nil => simp [stripIdentityPrefix]
+  | cons first expected ih =>
+    cases bytes with
+    | nil => simp [stripIdentityPrefix]
+    | cons actual bytes =>
+      by_cases equal : first = actual
+      · subst actual
+        simp [stripIdentityPrefix, ih]
+      · simp [stripIdentityPrefix, equal, beq_iff_eq, Ne.symm equal]
+#print axioms stripIdentityPrefix_eq
+
+/-- A scoped argument starts with an assembly identity; commas inside it have a following space. -/
+private def afterArgumentScope : List Char → Option (List Char)
+  | ':' :: ':' :: rest => some rest
+  | '<' :: _ | '>' :: _ => none
+  | ',' :: ' ' :: rest => afterArgumentScope rest
+  | ',' :: _ => none
+  | _ :: rest => afterArgumentScope rest
+  | [] => none
+
+/-- Runtime signatures omit nested argument scopes while metadata identities retain them. -/
+private def unscopedArguments : Nat → List Char → List Char
+  | 0, chars => chars
+  | _ + 1, [] => []
+  | fuel + 1, '<' :: rest =>
+    '<' :: unscopedArguments fuel ((afterArgumentScope rest).getD rest)
+  | fuel + 1, ',' :: rest =>
+    ',' :: unscopedArguments fuel ((afterArgumentScope rest).getD rest)
+  | fuel + 1, char :: rest => char :: unscopedArguments fuel rest
+
+/-- The runtime signature spelling of a scoped aggregate identity, nested arguments included. -/
+def aggregateName (identity : String) : Option (List Char) := do
+  let name ← afterArgumentScope identity.toList
+  let name := unscopedArguments name.length name
+  if name.isEmpty then none else return name
 
 end CIL.Extraction

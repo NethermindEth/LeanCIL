@@ -180,15 +180,7 @@ theorem Memory.Renamed.referenceSubtract {mapping : AllocationRenaming}
   unfold CIL.Safety.referenceSubtract
   cases CIL.offsetValue true offset with
   | none => exact .error .invalidState
-  | some displacement =>
-    cases reference with
-    | null => exact .error (.memory .nullDereference .null 0)
-    | address reference =>
-      dsimp only [AllocationRenaming.managedReference, referenceAt, Bind.bind, Except.bind]
-      rw [related.add reference bound]
-      cases CIL.Safety.add source reference 1 (BitVec.ofInt 64 (-displacement)) with
-      | error fault => exact .error (.memory fault (.address reference) 0)
-      | ok result => exact .ok rfl
+  | some displacement => exact related.displaceReference reference bound 1 (-displacement)
 #print axioms Memory.Renamed.referenceSubtract
 
 end CIL.Safety

@@ -44,7 +44,5 @@ def referenceLess (memory : Memory) (left right : ManagedReference) : ExecutionR
 def referenceSubtract (memory : Memory) (reference : ManagedReference) (offset : CIL.Value) :
     ExecutionResult ManagedReference := do
   let some displacement := CIL.offsetValue true offset | .error .invalidState
-  let address ← referenceAt reference
-  let result ← checkedAt reference 0 (add memory address 1 (BitVec.ofInt 64 (-displacement)))
-  return .address result
+  displaceReference memory reference 1 (-displacement)
 end CIL.Safety

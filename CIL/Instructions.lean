@@ -187,6 +187,9 @@ structure StaticDescriptor where
   /-- Integer fields use their byte width and this signed-load flag; aggregates use `none`. -/
   scalar : Option Bool := none
   assemblyIdentity : String := ""
+  /-- Guaranteed alignment of the field's storage: the declared packing of RVA data, which the
+      extractor checked divides the field's RVA. `1` promises nothing beyond byte alignment. -/
+  alignment : Nat := 1
   deriving DecidableEq, Repr
 
 /-- An extracted method body with the frame layout the interpreter needs. -/

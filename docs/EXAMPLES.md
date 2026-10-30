@@ -9,6 +9,8 @@
 - `Loops.Countdown`: universal termination and a zero result for every `uint`, including zero and `UInt32.MaxValue`, using a decreasing natural-number measure over checked local storage.
 - `Loops.Drain`: universal termination of a reassigned `ReadOnlySpan<int>` parameter, returning
   zero after repeated slicing and preserving arbitrary caller memory exactly.
+- `Loops.AllZero` and `Loops.Sum`: an early-exit predicate and a wrapping fold over the symbolic
+  contents of an arbitrary-length `ReadOnlySpan<uint>` or `ReadOnlySpan<ulong>`.
 - `Calls`: a managed-call chain with an address-taken mutable local.
 - `IntegerOperations.Negate32` / `Negate64`: checked-execution proofs that negation returns the modular additive inverse for every input, including the signed minimum.
 - `NarrowIntegers`: signed/unsigned casts, character values, calls and an eight-byte struct containing narrow fields. `UnsignedShort.lean` proves reduction modulo 65,536 for every 32-bit input.
@@ -43,6 +45,18 @@ The loop suite checks the unchanged universal proof after inserting NOPs and rea
 [The outcome loop proof](../Examples/Proofs/CountUntil.lean) shows that `Loops.CountUntil(value, limit)` returns `value` when `value <= limit`, and otherwise propagates the `System.InvalidOperationException` that its `Bump` helper throws once the count reaches `limit`, after `limit` successful calls. It holds for every pair of `uint`s from empty caller memory. The proof uses only `bumpContract`, an `OutcomeContract` naming when `Bump` throws, through `loop_outcome_induction`, `cil_loop_outcome_call` and `cil_loop_outcome_raise`; `ensures_outcome_of_loop` gives the method's `EnsuresOutcome`. The suite compares five inputs with .NET, two of which throw. It verifies the unchanged loop proof against a `Bump` that tests inequality and subtracts minus one, and rejects it at the exceptional exit for a `Bump` that throws `System.ArgumentException` under a contract re-proved to say so. Against the correct build, measuring by the count fails the decrease obligation, the invariant `count <= limit - remaining` fails only its preservation, and specifying `System.ArgumentException` for the loop fails only at the exceptional exit.
 
 [The buffer fill proof](../Examples/Proofs/FillWords.lean) shows that `Loops.FillWords`, which stores `value` through `Unsafe.Add(ref destination, i)` for each `i < count`, leaves `Contents final destination 8 (List.replicate count value)` for every nonnegative `int` count and is `Confined` to those `8 * count` bytes. It assumes only write authority over the words (`Writable`), never readable or initialized contents, and its invariant is `Filled`: the first `i` words filled, the rest still only writable. The suite compares the runtime result for four counts, checking that both neighbouring words are unchanged, and rejects builds that shift every store by one word or skip every other word.
+
+[The span predicate proof](../Examples/Proofs/SpanAllZero.lean) and [the span fold
+proof](../Examples/Proofs/SpanSum.lean) state their results over `SpanContents`, the library's
+description of what a span holds. `Loops.AllZero` returns whether `values.all (· == 0)` and leaves
+caller memory unchanged; `Loops.Sum` returns `values.sum` with wrapping `ulong` addition while a
+frame home holds the running total, and keeps all memory below the caller's allocation watermark.
+Both hold for every length, including null empty spans. Each invariant relates the remaining
+suffix to the answer (`remaining.all (· == 0) = result`, `total + remaining.sum = result`), its
+measure is the suffix length, and `SpanContents.head` and `SpanContents.tail` carry it across one
+`values[0]` read and `values.Slice(1)`. The suite compares both methods with .NET, including
+`default` spans and wrapping sums, and rejects a build of `AllZero` that replaces every read with
+zero and a build of `Sum` that stops while one element remains.
 
 ```sh
 leancil extract Examples/Assembly/bin/Examples.dll "Loops::Countdown(uint)" artifacts/Countdown

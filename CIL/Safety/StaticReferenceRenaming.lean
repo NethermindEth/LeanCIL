@@ -105,6 +105,7 @@ theorem Memory.Renamed.freshStatic {mapping : AllocationRenaming}
     (staticBounds : ∀ binding ∈ source.staticBindings,
       binding.2.allocation < mapping.sourceLimit)
     (descriptor : CIL.StaticDescriptor) (bounded : descriptor.bytes.length < nativeLimit)
+    (aligned : 0 < descriptor.alignment)
     (missing : source.staticBindings.find? (fun binding => binding.1 == descriptor.identity) =
       none) :
     ∃ sourceAfter targetAfter,
@@ -112,8 +113,9 @@ theorem Memory.Renamed.freshStatic {mapping : AllocationRenaming}
       staticReference descriptor target = .ok (targetAfter, ⟨target.nextIdentity, 0⟩) ∧
       Memory.Renamed mapping.allocate scopes sourceAfter targetAfter := by
   let allocation : Allocation :=
-    ⟨.immutableStatic, ⟨descriptor.bytes.length, 1, []⟩, true, [descriptor.bytes.length]⟩
-  have valid : allocation.valid = true := by simp [allocation, Allocation.valid, bounded]
+    ⟨.immutableStatic,
+      ⟨descriptor.bytes.length, descriptor.alignment, []⟩, true, [descriptor.bytes.length]⟩
+  have valid : allocation.valid = true := by simp [allocation, Allocation.valid, bounded, aligned]
   obtain ⟨sourceAllocated, targetAllocated, sourceMade, targetMade, allocations⟩ :=
     related.allocate sourceFormed targetFormed staticBounds allocation allocation
       (Allocation.Related.refl scopes allocation) valid
@@ -167,8 +169,16 @@ theorem Memory.Renamed.staticReference {mapping : AllocationRenaming}
         outside, decide_false, Bool.false_and, Bool.not_false, ite_true, checkedAt,
         Except.mapError, Bind.bind, Except.bind] at loaded
       cases loaded
+    have aligned : 0 < descriptor.alignment := by
+      by_cases positive : 0 < descriptor.alignment
+      · exact positive
+      simp only [CIL.Safety.staticReference, cached, CIL.Safety.allocate, Allocation.valid,
+        positive, decide_false, Bool.and_false, Bool.false_and, Bool.not_false, ite_true,
+        checkedAt, Except.mapError, Bind.bind, Except.bind] at loaded
+      cases loaded
     obtain ⟨sourceAllocated, targetAllocated, sourceLoaded, targetLoaded, memories⟩ :=
-      related.freshStatic sourceFormed targetFormed staticBounds descriptor bounded cached
+      related.freshStatic sourceFormed targetFormed staticBounds descriptor bounded aligned
+        cached
     rw [sourceLoaded] at loaded
     cases loaded
     refine ⟨mapping.allocate, targetAllocated, mapping.allocate_extends, ?_, memories⟩

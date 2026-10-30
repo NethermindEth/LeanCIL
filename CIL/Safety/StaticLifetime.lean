@@ -28,13 +28,13 @@ theorem leaveFrame_preserves_static_binding (m : Memory) (frame : Frame)
     (descriptor : CIL.StaticDescriptor) (reference : Reference)
     (valid : StaticBindingValid m descriptor reference) :
     StaticBindingValid (leaveFrame frame m) descriptor reference := by
-  obtain ⟨offset, a, present, live, kind, size, bytes⟩ := valid
+  obtain ⟨offset, a, present, live, kind, size, alignment, bytes⟩ := valid
   have absent := frame_does_not_own_immutable _ _ owns _ _ present kind
   have lookup : (leaveFrame frame m).allocations reference.allocation =
       m.allocations reference.allocation := by
     simp [leaveFrame, expireAll_allocations, absent]
   have retained := expireAll_retained_fields frame.owned m
-  refine ⟨offset, a, lookup.trans present, live, kind, size, ?_⟩
+  refine ⟨offset, a, lookup.trans present, live, kind, size, alignment, ?_⟩
   rw [read_allocation_congr m (leaveFrame frame m) reference descriptor.bytes.length 1
     lookup retained.1 retained.2.1]
   exact bytes

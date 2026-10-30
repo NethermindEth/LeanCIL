@@ -34,9 +34,9 @@ For symbolic initial memory or reference and span arguments, append `using succe
 `enterFrame_isSome` theorem supplies this from `Memory.WellFormed`, `ValuesValid` and
 `FrameSetupFits` premises. The generated frame and memory are exact projections of that checked
 allocation, with no default state or unchecked adapter. Numeric `homeN` declarations require the
-frame's local list to reduce, as do typed slot and home facts; arbitrary symbolic memory may leave
-that layout symbolic. The command
-does not infer allocation premises or generate invariant-preservation verification conditions.
+frame's local list to reduce, as do typed slot and home facts; this form leaves that layout opaque.
+The command does not infer allocation premises or generate invariant-preservation verification
+conditions.
 
 When the success premises are available as rewrite facts, use `simplifying [facts]` instead of
 `using`. This derives an explicit frame and memory expression and checks the resulting entry
@@ -61,6 +61,36 @@ Its stepping uses generated home facts and `cil_checked`, the shared simplificat
 successful checked values and typed home operations. The set preserves unresolved validity checks
 and does not unfold instruction dispatchers. Buffer-span length, indexing and slicing have direct
 step equations retaining their memory, bounds and capability checks.
+
+A method whose numeric locals allocate homes in symbolic memory adds `allocating wellFormed`,
+where `wellFormed` proves `memory.WellFormed`; `simplifying [facts]` stays optional:
+
+```lean
+bind_entry entry (memory : Memory) (view : SpanView) (wellFormed : memory.WellFormed)
+    (valid : view.validate memory = .ok ()) (width : view.width = 8)
+    (readOnly : view.writable = false) := Extracted.method0
+  with [.bufferSpan view] from memory allocating wellFormed
+  simplifying [valid, width, readOnly]
+```
+
+Each home is an opaque reference, so `entry.frame` takes the binders its layout mentions followed by
+one `homeN : Reference` per numeric local, here `entry.frame memory view home0`. `entry.checked`
+proves there exist homes and an entered memory such that `enterFrame` returns exactly that frame and
+memory, each home satisfies
+[`NumericEntryHome`](../CIL/Safety/NumericLocals.lean) `memory entered kind number home` (allocated
+at or above `memory.nextIdentity` and below `entered.nextIdentity`, holding its initializer's
+bytes, writable), and [`EntryMemory`](../CIL/Safety/NumericLocals.lean) `memory entered` holds
+(caller memory kept below its watermark, identities grown, well formed). A proof opens it with
+`obtain ⟨home, entered, setup, numeric, entryMemory⟩ := entry.checked ...`; this form generates no
+`entry.result`, `entry.memory` or `homeN` abbreviations, while span and root slots still get
+`slotN`, `loadN` and `storeN`. Homes are threaded through
+[`make_numeric_entry_local`](../CIL/Safety/NumericLocals.lean), and a fact `valid : view.validate
+memory = .ok ()` is also supplied in the memory after the homes through
+[`SpanView.validate_below`](../CIL/Safety/FrameMemoryBelow.lean), so an assigned span parameter
+stores without restating its validity. Every other local must allocate nothing: a numeric local
+without a checked initializer, a vector argument home or a numeric parameter home is rejected.
+[SpanSum](../Examples/Proofs/SpanSum.lean), [FillWords](../Examples/Proofs/FillWords.lean) and
+[Struct](../Examples/Proofs/Struct.lean) enter this way.
 
 `cutpoint stack memory` constructs the loop state. `cutpoint.checked` proves the selected
 instruction satisfies the predicate and is its unique match. Missing or ambiguous matches are

@@ -126,10 +126,6 @@ theorem referenceAt_address (reference : Reference) :
 def byteNumber (bytes : List (BitVec 8)) : Nat :=
   bytes.foldr (fun byte high => byte.toNat + 256 * high) 0
 
-/-- The low `width` bytes of `value`, least significant first, as `byteNumber` reads them. -/
-def numberBytes (value width : Nat) : List (BitVec 8) :=
-  (List.range width).map fun i => BitVec.ofNat 8 (value / 256^i)
-
 /-- The value a byte snapshot of `shape` denotes: a plain aggregate or vector when every byte
     is initialized, otherwise the snapshot itself. -/
 def snapshotValue (shape : CIL.SnapshotShape) (bytes : List (BitVec 8 × Bool)) : CIL.Value :=

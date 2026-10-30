@@ -102,5 +102,88 @@ foreach (var name in new[] { "Identity", "Combined", "Nested", "Repeated", "Addr
     File.WriteAllText(proofPath, proof);
     evidence.Add(proofPath, "PASS closed generic owner: " + name);
 }
+
+// Generic helpers call span members on owners built from their own parameters: `!!0` in
+// SpanHelpers, `!0` in OwnerHelper<T> and `!1` in OwnerOuter<T>.Inner<U>. Byte i holds i.
+var words = Enumerable.Range(0, 32).Select(index => (byte)index).ToArray();
+string Word(int index) =>
+    BitConverter.ToUInt64(words, index * 8).ToString(System.Globalization.CultureInfo.InvariantCulture);
+const string spanMemory = """
+
+    /-- Readable caller storage whose byte at offset `i` is `i`. -/
+    def spanMemory : CIL.Safety.Memory :=
+      { allocations := fun identity => if identity == 0 then
+          some ⟨.callerStack, ⟨32, 8, []⟩, true, [32]⟩ else none
+        cells := fun _ offset => ⟨BitVec.ofNat 8 offset, true⟩
+        views := [⟨0, 0, 32, true, true⟩], nextIdentity := 1 }
+    """;
+var spanCases = new (string Name, string Result)[]
+{
+    ("SpanFirst", ".i64 " + Word(0)), ("SpanCount", ".i32 4"), ("SpanSecond", ".i64 " + Word(1)),
+    ("OwnerSpanFirst", ".i64 " + Word(0)), ("NestedSpanFirst", ".i64 " + Word(0))
+};
+var spanSources = new Dictionary<string, string>();
+foreach (var (name, result) in spanCases)
+{
+    var output = Path.Combine(root, name);
+    var parameter = "System.ReadOnlySpan`1<ulong>" + (name == "SpanFirst" ? "&" : "");
+    Run(["dotnet", ExtractorPath, "extract", assembly, $"GenericOwners::{name}({parameter})", output]);
+    var source = spanSources[name] = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    var proof = source + spanMemory + $$"""
+
+        /-- The specialized helper reads the caller's four-word readonly view. -/
+        theorem generic_span_result :
+            (CIL.Safety.invoke Extracted.program 64 0 [.bufferSpan ⟨.address ⟨0, 0⟩, 4, 8, false⟩]
+              spanMemory).map Prod.snd = .ok [.scalar ({{result}})] := by rfl
+        #print axioms generic_span_result
+        """;
+    var proofPath = Path.Combine(root, name + ".lean");
+    File.WriteAllText(proofPath, proof);
+    evidence.Add(proofPath, "PASS generic span member call: " + name);
+}
+
+// Forged call targets must fail instantiation itself, not a later obligation.
+Dictionary<string, string> Identities(string source) => Regex.Matches(source,
+        @"(?m)^def (externalIdentity\d+)Bytes : ByteArray := ⟨#\[([0-9, ]*)\]⟩")
+    .ToDictionary(match => match.Groups[1].Value, match => System.Text.Encoding.UTF8.GetString(
+        match.Groups[2].Value.Split(", ").Select(byte.Parse).ToArray()));
+string Target(string source, string text) =>
+    Identities(source).Single(identity => identity.Value.Contains(text, StringComparison.Ordinal)).Key;
+// Replace a target reference with a literal copy of its identity, edited in one place.
+string Forge(string source, string line, string text, string from, string to)
+{
+    var target = Target(source, text);
+    return line.Replace(target, System.Text.Json.JsonSerializer.Serialize(
+        Identities(source)[target].Replace(from, to, StringComparison.Ordinal)), StringComparison.Ordinal);
+}
+const string closedItem = "<System.UInt64>::get_Item(";
+var targetCases = new List<(string Name, string Fixture, string Definition, Func<string, string, string> Change)>
+{
+    ("unsubstituted", "SpanSecond", "method1Closed", (source, line) => line.Replace(
+        Target(source, closedItem), Target(source, "<!!0>::get_Item("), StringComparison.Ordinal)),
+    ("instantiation", "SpanSecond", "method1Closed", (source, line) =>
+        Forge(source, line, closedItem, "<System.UInt64>", "<System.UInt32>")),
+    ("member", "SpanSecond", "method1Closed", (source, line) => line
+        .Replace(Target(source, closedItem), "SwappedTarget", StringComparison.Ordinal)
+        .Replace(Target(source, "<System.UInt64>::Slice("), Target(source, closedItem), StringComparison.Ordinal)
+        .Replace("SwappedTarget", Target(source, "<System.UInt64>::Slice("), StringComparison.Ordinal)),
+    ("owner", "SpanSecond", "method1Closed", (source, line) =>
+        Forge(source, line, closedItem, "System.ReadOnlySpan`1<", "System.Span`1<")),
+    // An owner parameter spelling cannot stand for the method's own parameter.
+    ("open-spelling", "SpanSecond", "method1Original", (source, line) =>
+        Forge(source, line, "<!!0>::get_Item(", "<!!0>", "<!0>")),
+    ("owner-argument", "OwnerSpanFirst", "method1Closed", (source, line) =>
+        Forge(source, line, closedItem, "<System.UInt64>", "<System.UInt32>")),
+    // `!1` is Inner's U = ulong; the outer owner's T = uint must not be substituted.
+    ("nested-position", "NestedSpanFirst", "method1Closed", (source, line) =>
+        Forge(source, line, closedItem, "<System.UInt64>", "<System.UInt32>"))
+};
+foreach (var (name, fixture, definition, change) in targetCases)
+{
+    var narrowed = NarrowEvidence(spanSources[fixture], "method1_specialization_validated");
+    var path = Path.Combine(root, "target-" + name + ".lean");
+    File.WriteAllText(path, ChangeDefinition(narrowed, definition, line => change(narrowed, line)));
+    rejected.Add(path, "PASS rejected generic span call target: " + name, "Extraction.instantiateMethod");
+}
 evidence.Check();
 rejected.Check();

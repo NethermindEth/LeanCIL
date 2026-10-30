@@ -206,7 +206,7 @@ internal static partial class Program
             stage = "metadata and CIL validation";
             if (assemblySnapshot is null) VectorSignatures.Validate(assembly);
             else assemblySnapshot.ValidateSignatures();
-            using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(assembly, writable: false));
+            using ModuleDefinition module = StaticData.ReadModule(assembly);
             var symbols = Symbols.Read(module, assemblyPath, out var symbolNotice);
             var assemblyIdentity = module.Assembly?.Name.FullName ?? throw new InvalidDataException("Input must contain assembly metadata.");
             stage = "contract import validation";
@@ -276,7 +276,7 @@ internal static partial class Program
                     throw new InvalidDataException("Stale or mismatched verification artifact: extractor has changed since extraction.");
             }
             stage = "metadata and CIL validation";
-            using var originalModule = ModuleDefinition.ReadModule(new MemoryStream(assembly, writable: false));
+            using var originalModule = StaticData.ReadModule(assembly);
             LeanEmitter.Emission emitted = LeanEmitter.Emit(methods, profile, originalModule, imports,
                 staticIdentities, collectTemplates: checkedTemplate is not null);
             string source = emitted.Source;

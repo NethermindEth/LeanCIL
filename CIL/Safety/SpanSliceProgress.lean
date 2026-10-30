@@ -15,6 +15,18 @@ theorem SpanView.length_bounded (view : SpanView) (memory : Memory)
   · simp [SpanView.validate, width, Bind.bind, Except.bind, Pure.pure, Except.pure] at valid
 #print axioms SpanView.length_bounded
 
+/-- The `int` length of a valid nonempty view is nonzero, so a `Length != 0` guard holds. -/
+theorem SpanView.length_word_ne_zero (view : SpanView) (memory : Memory)
+    (valid : view.validate memory = .ok ()) (nonempty : view.length ≠ 0) :
+    BitVec.ofNat 32 view.length ≠ 0 := by
+  have bounded := view.length_bounded memory valid
+  intro zero
+  have truncated := congrArg BitVec.toNat zero
+  simp only [BitVec.toNat_ofNat] at truncated
+  rw [Nat.mod_eq_of_lt (by omega)] at truncated
+  exact nonempty truncated
+#print axioms SpanView.length_word_ne_zero
+
 /-- Subranges of a valid view retain its allocation, width and access mode. -/
 theorem SpanView.slice_succeeds (view : SpanView) (memory : Memory) (start count : Nat)
     (valid : view.validate memory = .ok ())

@@ -70,6 +70,14 @@ Keep this aggregate check required rather than individual matrix jobs, which may
 be absent on a PR. Run `dotnet run --file scripts/TestSelectVerification.cs` to test the
 selection rules and final gate locally.
 
+Selection first runs `dotnet run --file scripts/CheckDocReferences.cs`, so documentation-only PRs
+check it too. Every link under `docs/` and in the README whose text is one code span and whose
+target is a `.lean` or `.cs` file must name something that file still contains: a Lean
+declaration, a declared C# type or member, or a quoted string literal such as a test mutation
+name. A label may also be the file's own path. A rename or deletion fails selection. A link whose
+text names a `.lean` or `.cs` line, or whose target has a `#L` line anchor, also fails: cite code by
+name, not by line number.
+
 The separate scheduled/manual consumer advisory checks a pinned int256 library
 and four compiled-method certificates. It does not participate in PR checks.
 When upgrading the pin, follow the [consumer API migration notes](CONSUMER-MIGRATION.md)

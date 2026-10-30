@@ -73,7 +73,7 @@ private theorem libBody_reads (memory : Safety.Memory) (formed : memory.WellForm
   obtain ⟨result, reference, resolved, _, valid⟩ :=
     staticReference_valid_result libField [libField] memory formed world (by simp)
   have loaded : read result reference 8 1 = .ok (numberBytes (17#64).toNat 8) := by
-    simpa [libField, numberBytes] using valid.2.choose_spec.2.2.2.2
+    simpa [libField, numberBytes] using valid.2.choose_spec.2.2.2.2.2
   have load := load_word64_of_read loaded
   have addressed : staticInstruction libBody 0 (.staticAddress (numberBytes 17 8)) [] memory =
       .ok (result, [.reference (.address reference)]) := by
@@ -186,7 +186,7 @@ theorem changed_loaded_table_not_valid :
   intro world
   have valid := world.2.2.2 { appField with bytes := numberBytes 8 8 } (by simp)
     (101, (⟨0, 0⟩ : Reference)) (by decide +kernel) rfl
-  obtain ⟨_, allocation, present, live, kind, size, bytes⟩ := valid
+  obtain ⟨_, allocation, present, live, kind, size, alignment, bytes⟩ := valid
   have actual : read afterApp ⟨0, 0⟩ 8 1 = .ok (numberBytes 7 8) := rfl
   have incompatible : numberBytes 7 8 ≠ numberBytes 8 8 := by decide +kernel
   exact incompatible (Except.ok.inj (actual.symm.trans bytes))

@@ -231,28 +231,6 @@ private theorem divisionSignatureBytes_eq : divisionSignatureBytes =
   decide +kernel
 #print axioms divisionSignatureBytes_eq
 
-/-- Remove an exact byte prefix, rejecting mismatches and truncated identities. -/
-private def stripIdentityPrefix : List UInt8 → List UInt8 → Option (List UInt8)
-  | [], bytes => some bytes
-  | first :: expected, actual :: bytes =>
-    if first == actual then stripIdentityPrefix expected bytes else none
-  | _, _ => none
-
-/-- Prefix removal succeeds exactly for the original prefix followed by the returned bytes. -/
-private theorem stripIdentityPrefix_eq (expected bytes suffix : List UInt8) :
-    stripIdentityPrefix expected bytes = some suffix ↔ bytes = expected ++ suffix := by
-  induction expected generalizing bytes with
-  | nil => simp [stripIdentityPrefix]
-  | cons first expected ih =>
-    cases bytes with
-    | nil => simp [stripIdentityPrefix]
-    | cons actual bytes =>
-      by_cases equal : first = actual
-      · subst actual
-        simp [stripIdentityPrefix, ih]
-      · simp [stripIdentityPrefix, equal, beq_iff_eq, Ne.symm equal]
-#print axioms stripIdentityPrefix_eq
-
 /-- The unqualified signature of an external target under the exact intrinsic scope. -/
 private def intrinsicSignature (target : MethodId) : Option (List UInt8) :=
   match target with

@@ -63,4 +63,25 @@ theorem enterFrame_preserves_caller_memory (body : CIL.Method) (args : List Valu
 #print axioms makeArgumentHomes_preserves_caller_memory
 #print axioms enterFrame_preserves_caller_memory
 
+
+/-- A valid view of well-formed memory addresses an existing allocation, so it stays valid in any
+    memory that keeps everything below the watermark, such as a callee frame's memory. -/
+theorem SpanView.validate_below (view : SpanView) {before after : Memory}
+    (valid : view.validate before = .ok ()) (wellFormed : before.WellFormed)
+    (kept : MemoryBelow before.nextIdentity before after) : view.validate after = .ok () := by
+  cases address : view.reference with
+  | null => simpa only [SpanView.validate, address] using valid
+  | address base =>
+    cases present : before.allocations base.allocation with
+    | none =>
+      simp only [SpanView.validate, address, liveAllocation, present] at valid
+      repeat' first
+        | contradiction
+        | split at valid
+        | simp_all [Bind.bind, Except.bind, Pure.pure, Except.pure]
+    | some allocation =>
+      have old := (wellFormed.1 _ _ present).1
+      simpa only [SpanView.validate, address, liveAllocation, kept.allocations _ old] using valid
+#print axioms SpanView.validate_below
+
 end CIL.Safety

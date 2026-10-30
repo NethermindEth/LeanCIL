@@ -200,13 +200,10 @@ theorem StepContract.arrayAllocation {body : CIL.Method} {frame : Frame}
 theorem referenceSubtract_valid (memory : Memory) (reference result : ManagedReference)
     (offset : CIL.Value) (success : referenceSubtract memory reference offset = .ok result) :
     (Value.reference result).Valid memory ∧ (Value.readOnlyReference result).Valid memory := by
-  simp only [referenceSubtract, Bind.bind, Except.bind, Pure.pure, Except.pure] at success
-  repeat' first
-    | split at success
-    | solve | cases success
-    | solve |
-        cases success
-        constructor <;> apply checked_add_result_valid <;> assumption
+  simp only [referenceSubtract] at success
+  split at success
+  · exact displaceReference_valid success
+  · cases success
 #print axioms referenceSubtract_valid
 /-- Constructing a view and storing it changes only the destination local. -/
 theorem StepContract.initializeSpanLocal {body : CIL.Method} {frame : Frame}

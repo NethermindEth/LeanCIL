@@ -5,7 +5,8 @@ import CIL.Types
 
 The faulting integer instructions: overflow-checked `add.ovf`, `sub.ovf` and `mul.ovf`,
 checked conversions, and division and remainder. Each computes on mathematical integers
-and returns an `ArithmeticFault` instead of a wrapped result.
+and returns an `ArithmeticFault` instead of a wrapped result. `Safety.numberBytes` is the
+little-endian byte encoding shared by stored scalars and returned tuple fields.
 -/
 
 namespace CIL
@@ -227,8 +228,9 @@ theorem divRemBits_narrow_signed {left right : BitVec width} (narrow : width < 3
   rw [remainder]
 #print axioms divRemBits_narrow_signed
 
-/-- The low `count` bytes of `number`, least significant first: one stored tuple field. -/
-def littleEndianBytes (count number : Nat) : List (BitVec 8) :=
-  (List.range count).map fun i => BitVec.ofNat 8 (number / 256 ^ i)
+/-- The low `width` bytes of `value`, least significant first, as `Safety.byteNumber` reads
+    them: the encoding of every stored scalar and tuple field. -/
+def Safety.numberBytes (value width : Nat) : List (BitVec 8) :=
+  (List.range width).map fun i => BitVec.ofNat 8 (value / 256^i)
 
 end CIL

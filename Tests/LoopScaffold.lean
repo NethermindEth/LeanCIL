@@ -198,3 +198,48 @@ theorem generated (width : Nat) (writable : Bool) (bounded : 0 < width ∧ width
 #print axioms generated
 
 end Tests.SymbolicHomeKinds
+
+namespace Tests.AllocatingEntry
+open CIL.Safety
+
+/-- Two numeric locals allocate homes in symbolic memory before an assigned span parameter. -/
+def body : CIL.Method := {
+  code := [.ret], locals := [.i64 7, .i32 5], returnsValue := false
+  localKinds := [.word64, .word32], parameterHomes := [(0, .span 4 false)] }
+
+bind_entry entry (memory : Memory) (view : SpanView) (wellFormed : memory.WellFormed)
+    (valid : view.validate memory = .ok ()) (width : view.width = 4)
+    (readOnly : view.writable = false) := body
+  with [.bufferSpan view] from memory allocating wellFormed
+  simplifying [valid, width, readOnly]
+
+/-- The frame names both homes, and the span parameter's validity carries past their
+    allocation; each home keeps its initializer and authority in the entered memory. -/
+theorem homes (memory : Memory) (view : SpanView) (wellFormed : memory.WellFormed)
+    (valid : view.validate memory = .ok ()) (width : view.width = 4)
+    (readOnly : view.writable = false) :
+    ∃ first second entered,
+      enterFrame body [.bufferSpan view] memory = .ok (entry.frame memory view first second,
+        entered) ∧
+      (entry.frame memory view first second).locals =
+        [.bytes .word64 first, .bytes .word32 second, .span 4 false (some view)] ∧
+      read entered first 8 1 = .ok (numberBytes 7 8) ∧
+      read entered second 4 1 = .ok (numberBytes 5 4) ∧
+      memory.nextIdentity ≤ first.allocation ∧ second.allocation < entered.nextIdentity ∧
+      MemoryBelow memory.nextIdentity memory entered ∧ entered.WellFormed := by
+  obtain ⟨first, second, entered, setup, firstHome, secondHome, entryMemory⟩ :=
+    entry.checked memory view wellFormed valid width readOnly
+  exact ⟨first, second, entered, setup, rfl, firstHome.loaded, secondHome.loaded,
+    firstHome.fresh, secondHome.bounded, entryMemory.kept, entryMemory.wellFormed⟩
+#print axioms homes
+
+/-- An uninitialized numeric local allocates without a checked initializer. -/
+def unmodeled : CIL.Method := {
+  code := [.ret], locals := [.unmodeled], returnsValue := false, localKinds := [.word32] }
+
+/-- error: Local 0 allocates a home without a checked numeric initializer -/
+#guard_msgs (error) in
+bind_entry rejected (memory : Memory) (wellFormed : memory.WellFormed) := unmodeled
+  with [] from memory allocating wellFormed
+
+end Tests.AllocatingEntry

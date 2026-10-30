@@ -1,6 +1,6 @@
 # CIL opcode support
 
-This table covers all 179 opcode encodings currently handled by the translator and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime.
+This table covers all 179 opcode encodings currently handled by the translator and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime. Opcode meanings follow ECMA-335 as amended by the augments listed in the [specification baseline](SOUNDNESS-SPEC.md).
 
 - **Complete within the admitted model:** the opcode's operation is implemented for its admitted operands. Ordinary stack/value validity checks still apply.
 - **Partial:** translation exists, but the row lists additional type, layout, control-flow or runtime restrictions. Unsupported operand shapes can fail during checked execution even when translation succeeds.
@@ -347,7 +347,7 @@ reference and returns false; a short `TryWrite` returns false without reading th
 or modifying memory. Successful transfers preserve snapshot initialization masks and retain
 the checked model's bounds, lifetime and authority requirements.
 
-A collection-expression property such as `static ReadOnlySpan<uint> Table => [...]` compiles to `ldtoken <field>; call RuntimeHelpers::CreateSpan<uint>` over a static data field (`ldsflda` rules, packing 1, 2, 4 or 8). The span covers the whole field and has `size / sizeof(T)` elements, for any primitive integer `T`. A caller reads it as `stloc s; ldloca s; [index;] call get_Item` or `stloc s; ldloca s; call get_Length`: the store and address emit `nop`, so the span stays on the stack as the receiver. `get_Item` faults with `System.IndexOutOfRangeException` at the call when the index is out of range, compared unsigned as in .NET. `MemoryMarshal.GetReference` also accepts these spans. The fold is used only for a single-use receiver with a single-load or constant index; other supported uses retain typed span storage. Branches into a folded receiver remain rejected.
+A collection-expression property such as `static ReadOnlySpan<uint> Table => [...]` compiles to `ldtoken <field>; call RuntimeHelpers::CreateSpan<uint>` over a static data field (`ldsflda` rules, packing 1, 2, 4 or 8, with an RVA that is a multiple of the packing, inside one section's raw data, in a section whose virtual address and file offset agree modulo 8 so that flat and mapped loads keep the alignment). The span covers the whole field and has `size / sizeof(T)` elements, for any primitive integer `T`. As in CoreCLR, which throws `ArgumentException` for data misaligned for `T`, `sizeof(T)` must divide the field's packing; otherwise the call is an `unsupported` fault. Roslyn emits each such field with packing `sizeof(T)` at an 8-byte-aligned RVA, in a section whose virtual address and file offset are multiples of 512. A caller reads it as `stloc s; ldloca s; [index;] call get_Item` or `stloc s; ldloca s; call get_Length`: the store and address emit `nop`, so the span stays on the stack as the receiver. `get_Item` faults with `System.IndexOutOfRangeException` at the call when the index is out of range, compared unsigned as in .NET. `MemoryMarshal.GetReference` also accepts these spans. The fold is used only for a single-use receiver with a single-load or constant index; other supported uses retain typed span storage. Branches into a folded receiver remain rejected.
 
 ### Span reference parameters
 
@@ -434,9 +434,12 @@ types above.
 
 Explicit/auto generic layouts, reference-containing instantiations, reference constraints,
 open interface constraints and inherited interface matching remain unsupported, as do boxing
-and general runtime dispatch. Runtime members called on a type built from a method type
-parameter, such as `ReadOnlySpan<T>.Length` or its indexer, extract but fail the certificate's
-specialization check, because the open and closed call targets name different identities.
+and general runtime dispatch. Runtime members called on a type built from the helper's own type
+parameters, such as `ReadOnlySpan<T>.Length`, `Slice` or its indexer in a generic method or on a
+generic (including nested) owner, are admitted: the open call target spells the owner with ECMA-335
+parameter positions (`ReadOnlySpan`1<!!0>`, `<!0>`), and the certificate substitutes that owner
+segment of the identity, and nothing else, exactly as the runtime instantiates it. Owner arguments
+must be primitive, enum, aggregate or integer-vector types with ASCII names.
 Generic runtime methods such as `MemoryMarshal.GetReference<T>` keep one identity and are checked.
 
 See the [per-family intrinsic tables](SIMD.md) for the exact Vector128/256, SSE, AVX, AVX2, AVX512, BMI and ARM operations, operand types and profile requirements.
