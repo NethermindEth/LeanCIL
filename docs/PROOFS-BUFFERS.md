@@ -71,6 +71,10 @@ constructors, including target-dependent layouts, empty getters and in-place loc
 `memoryInstruction_emptySpan` proves that every supported element width and capability produces
 a null, zero-length view without changing memory. `SpanConstructor.empty` uses that same operation
 when `initializeSpanLocal` replaces a local's previous view.
+An `in` or `ref readonly` span parameter is passed as the referenced `.bufferSpan` view, so a
+contract states the same view argument as a by-value span and reuses `SpanView.validate`,
+`Contents` and the span element lemmas; `Tests/SpanReferenceContracts.lean` proves an indexed
+read this way and `Tests/SpanReferences.cs` covers callers that pass span locals and temporaries.
 `Tests/BinarySpans.cs` demonstrates integer byte-order transfers and short-span behavior.
 `Tests/ViewAccessors.cs` checks observations without byte authority. Supplied aggregate/vector
 arrays reuse the same checked snapshot loads/stores, indexed references and span conversions; no

@@ -110,6 +110,17 @@ and write capability remain bound to the exact span type; aggregate widths and i
 checked against the layout table. Resetting a local replaces its view without modifying backing
 memory, granting authority or extending a lifetime.
 
+A readonly span reference parameter (`in` or `ref readonly`) carries the referenced view rather
+than the address of the caller's span home, as span-local addresses already do. This is sound
+only because the home cannot change during the call: the extractor rejects `starg` and `ldarga`
+of such a parameter, span `stobj`, `initobj` and `cpobj` outside the checked local reset, `ref`
+and `out` span parameters, and span references in locals, returns and fields, so no admitted
+code can rebind, address or overwrite a span home. The parameter's readonly attributes and these
+rejections are trusted extractor decisions; the Lean validators still bind the raw argument to
+a managed reference, reject its address and accept an empty emission for `ldobj` only at a span
+type. Loads, stores and comparisons that expect a byte reference fault on a view rather than
+reading it as an address.
+
 Equal-size aggregate/vector `Unsafe.BitCast` uses the same snapshot representation for validated
 `byte`, `int`, `uint`, `long` and `ulong` vector elements. Element signedness does not initialize
 unknown bytes or change their bits. Aggregate/vector loads and stores preserve initialization masks.
