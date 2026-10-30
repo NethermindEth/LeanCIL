@@ -69,7 +69,10 @@ var cases = new (string Name, string Arguments, string Results, string Extra)[]
     ("Temporary", bytes, ".scalar (.i32 9)", ""),
     // Limbs 0 and 3 are the little-endian words at offsets 0 and 24.
     ("Construct", ".bufferSpan ⟨.address ⟨0, 0⟩, 4, 8, false⟩",
-        ".scalar (.i64 (0x0706050403020100 + 0x1F1E1D1C1B1A1918))", "")
+        ".scalar (.i64 (0x0706050403020100 + 0x1F1E1D1C1B1A1918))", ""),
+    // Aggregate elements are 16 bytes wide, so the high word of element 1 sits at offset 24.
+    ("High", ".bufferSpan ⟨.address ⟨0, 0⟩, 2, 16, true⟩, .scalar (.i32 1)",
+        ".scalar (.i64 0x1F1E1D1C1B1A1918)", "")
 };
 var queue = new GeneratedQueue(verification, assembly);
 foreach (var (name, arguments, results, extra) in cases)

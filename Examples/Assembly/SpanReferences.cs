@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.InteropServices;
 
 namespace Examples;
 
@@ -27,6 +28,16 @@ public static class SpanReferences
             }
         }
     }
+
+    /// <summary>A two-word aggregate span element.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Pair
+    {
+        public ulong Low;
+        public ulong High;
+    }
+
+    public static ulong High(in Span<Pair> values, int index) => values[index].High;
 
     public static int Sum(in ReadOnlySpan<byte> values)
     {

@@ -744,6 +744,7 @@ Examples:System.UInt64 Examples.PrimitiveArrays::ReadUInt64(System.UInt64[],Syst
 Examples:System.UInt64 Examples.Sequential::Packed(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SkipInitialization::Read(System.UInt64&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanReferences::Construct(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.SpanReferences::High(System.Span`1<Examples.SpanReferences/Pair>&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanTables::First()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanTables::Power(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.StaticScalars::ReadLong()	B	B	B	B	B	B	B	B
