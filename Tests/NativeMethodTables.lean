@@ -94,6 +94,20 @@ theorem native_dispatch_load :
         .ok (.next 2 [.methodPointer ⟨signature, some second⟩] frame memory) := ⟨rfl, rfl⟩
 #print axioms native_dispatch_load
 
+/-- Commuted native table addition uses the same checked cursor operation for every offset. -/
+theorem native_add_commutes (offset : CIL.Value) (table : MethodTable)
+    (memory : CIL.Safety.Memory) (frame : Frame) (rest : List CIL.Safety.Value) (pc : Nat) :
+    managedStep .tableOffset pc frame (.methodTable table :: .scalar offset :: rest) memory =
+      managedStep .tableOffset pc frame (.scalar offset :: .methodTable table :: rest) memory := by
+  cases offset <;> rfl
+#print axioms native_add_commutes
+
+/-- Commuting the operands cannot admit a cursor outside the authenticated allocation. -/
+theorem commuted_invalid_offset :
+    (managedStep .tableOffset 0 frame [.methodTable opaqueTable, .scalar (.i64 24)] memory).isOk =
+      false := by rfl
+#print axioms commuted_invalid_offset
+
 /-- A native array element load validates the same backing storage as pointer loading. -/
 theorem native_array_load :
     managedStep (.tableElement signature) 0 frame

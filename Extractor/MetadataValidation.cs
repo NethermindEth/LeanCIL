@@ -314,7 +314,9 @@ internal static class MetadataValidation
             if (byRef.ElementType is ArrayType)
                 throw new InvalidDataException("Unsupported by-reference array root");
             if (Spans.Is(byRef.ElementType))
-                throw new InvalidDataException("Unsupported by-reference span");
+                throw new InvalidDataException("Unsupported by-reference span: " + type.FullName +
+                    "\n  Only `in` and `ref readonly` span parameters are admitted, not span references in " +
+                    "locals, returns, fields or external signatures.");
             if (byRef.ElementType is ByReferenceType)
                 throw new InvalidDataException("Unsupported nested managed reference");
             Type(byRef.ElementType, module, architecture: architecture);
@@ -427,6 +429,7 @@ internal static class MetadataValidation
                     (method.DeclaringType.Methods.Any(m => m.IsConstructor && m.IsStatic) &&
                         !initializedTypes.Contains(method.DeclaringType.FullName, StringComparer.Ordinal)))
                     throw new InvalidDataException($"Unsupported method metadata or static initialisation: {method.FullName}");
+                InReferences.RejectTwins(method);
             })) return;
             Check(method, null, () =>
             {
@@ -438,8 +441,11 @@ internal static class MetadataValidation
             foreach (ParameterDefinition parameter in method.Parameters)
                 Check(method, null, () =>
                 {
-                    if (parameter.ParameterType is ByReferenceType && importedByref?.Invoke(parameter.ParameterType) == true) return;
-                    Type(parameter.ParameterType, module, architecture: profile.Architecture);
+                    var type = InReferences.Parameter(parameter.ParameterType);
+                    if (SpanReferences.Is(type))
+                        SpanReferences.ValidateParameter(method, parameter, module, profile.Architecture);
+                    else if (type is not ByReferenceType || importedByref?.Invoke(type) != true)
+                        Type(type, module, architecture: profile.Architecture);
                 }, named: true);
             if (Check(method, null, () => Spans.Analyze(method, profile), named: true))
                 foreach (VariableDefinition local in method.Body.Variables)
@@ -563,6 +569,13 @@ internal static class MetadataValidation
                         }
                         foreach (var target in targets) CallSite(instruction, target);
                     });
+                    continue;
+                }
+                if (instruction.OpCode.Code == Code.Ldsfld && instruction.Operand is FieldReference platform &&
+                    FeatureProfile.PlatformFieldQuery(platform))
+                {
+                    if (!Check(method, instruction, () => FeatureProfile.PlatformField(platform), named: true))
+                        skipped.Add(instruction);
                     continue;
                 }
                 if (StaticValues.IsLoad(instruction) && instruction.Operand is FieldReference loaded)

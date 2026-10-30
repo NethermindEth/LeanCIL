@@ -194,9 +194,15 @@ def run (env : Environment) (x : CoreM α) : IO α := do
   let (a, _) ← x.toIO coreContext { env }
   return a
 
-/-- `thm : type`, pretty-printed for the report. -/
+/-- `thm : type`, pretty-printed for the report, or the raw expression when the printer fails.
+    Structural audit, not this text, checks expected types. -/
 def statement (env : Environment) (thm : Name) (type : Expr) : IO String :=
-  run env do return s!"{thm} : {← Meta.MetaM.run' (PrettyPrinter.ppExpr type)}"
+  run env do
+    -- Builtin notation such as `-1` has formatters only in unloaded imports; the text is
+    -- display and binding only, so print such a type raw instead of failing the audit.
+    let text ← try pure (toString (← Meta.MetaM.run' (PrettyPrinter.ppExpr type)))
+      catch _ => pure (toString type)
+    return s!"{thm} : {text}"
 
 /-- When `type` negates a contract predicate applied to arguments, that contract and the
     source position of `thm`; otherwise `none`. -/

@@ -23,7 +23,7 @@ inductive SpanCall where
   | reference (width : Nat) (writable : Bool)
   | singleReference (width : Nat) (writable : Bool)
   | fill (width : Nat) (clear : Bool)
-  | arrayFill (element : ArrayElement)
+  | arrayFill (element : ArrayElement) (counted : Bool)
   | item (width : Nat) | length | slice (counted : Bool) | readOnly
   | array (element : ArrayElement) (writable : Bool) (range : ArraySpanRange)
   deriving DecidableEq, Repr
@@ -36,7 +36,7 @@ private def emittedSpanCall : Op → Option SpanCall
   | .memory (.spanFromReference width writable) => some (.reference width writable)
   | .memory (.spanSingleReference width writable) => some (.singleReference width writable)
   | .memory (.spanFill width clear) => some (.fill width clear)
-  | .memory (.arrayFill element) => some (.arrayFill element)
+  | .memory (.arrayFill element counted) => some (.arrayFill element counted)
   | .memory (.spanItem width) => some (.item width)
   | .memory .spanLength => some .length
   | .memory (.spanSlice counted) => some (.slice counted)
@@ -183,19 +183,25 @@ def spanConstructorMatches : SpanConstructor → SpanConstructor → Bool
     expected.metadata == actual.metadata && writable == capability && range == actualRange
   | expected, actual => expected == actual
 
-/-- Whole-array fill binds the exact primitive or enum element and rejects range overloads. -/
+/-- Array fill binds the exact primitive or enum element and optional int32 range. -/
 private def arrayFillCall (opcode : Nat) (site : CallSite) : Option SpanCall := do
   if opcode != 40 || site.hasThis || site.returnsValue || site.returnType != .void ||
       site.name != "Fill" || site.declaringType != .atom runtimeScope "System.Array" ||
-      site.parameterCount != 2 || site.ownerArgumentCount != 0 then none else pure ()
+      site.parameterCount != site.parameterTypes.length || site.ownerArgumentCount != 0 then none
+      else pure ()
   let [elementType] := site.typeArguments | none
   let element ← arrayElementType elementType
   match element with
   | .aggregate .. | .vector .. => none
   | _ =>
-    if site.parameterTypes != [.array elementType, elementType] then none else pure ()
-    if site.target != .external (runtimeScope ++ "::System.Void System.Array::Fill(!!0[],!!0)")
-      then none else some (.arrayFill element)
+    let intType := TypeExpr.atom runtimeScope "System.Int32"
+    let (counted, suffix) ← if site.parameterTypes == [.array elementType, elementType] then
+        some (false, "")
+      else if site.parameterTypes == [.array elementType, elementType, intType, intType] then
+        some (true, ",System.Int32,System.Int32") else none
+    if site.target != .external
+        (runtimeScope ++ "::System.Void System.Array::Fill(!!0[],!!0" ++ suffix ++ ")")
+      then none else some (.arrayFill element counted)
 
 /-- The array overloads of AsSpan accept an array and zero, one or two int32 arguments. -/
 private def arrayExtensionCall (opcode : Nat) (site : CallSite)

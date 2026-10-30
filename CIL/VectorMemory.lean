@@ -152,9 +152,12 @@ inductive MemoryOp where
   /-- Snapshot copying permits overlapping spans; try-copy returns false for a short target. -/
   | spanCopy (width : Nat) (tryCopy : Bool)
   | spanFill (width : Nat) (clear : Bool)
-  /-- Fill an exact typed array through its checked writable view, rejecting null arrays. -/
-  | arrayFill (element : ArrayElement)
-  | bigMul64
+  /-- Fill an exact typed array, optionally taking int32 start/count, through checked storage. -/
+  | arrayFill (element : ArrayElement) (counted : Bool)
+  /-- `Math.BigMul` on 64-bit words: store the low word, push the unsigned or signed high. -/
+  | bigMul64 (signed : Bool)
+  /-- Signed `Math.DivRem(left, right, out remainder)` on `width`-bit integers. -/
+  | divRemOut (width : Nat)
   | copyBlock (alignment : Nat) | initBlock (alignment : Nat)
   | load128 | load256 | load512 | store128 | store256 | store512 | init256
   | asRef | add (sizeBytes : Nat) (signed : Bool)
@@ -197,11 +200,11 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .binaryWrite .. => 2
   | .spanCopy .. => 2
   | .spanFill _ clear => if clear then 1 else 2
-  | .arrayFill _ => 2
+  | .arrayFill _ counted => if counted then 4 else 2
   | .marshalRead _ tryRead => if tryRead then 2 else 1
   | .marshalWrite .. => 2
   | .pointerTransfer _ _ store => if store then 2 else 1
-  | .bigMul64 | .copyBlock _ | .initBlock _ => 3
+  | .bigMul64 _ | .divRemOut _ | .copyBlock _ | .initBlock _ => 3
   | .spanSlice explicitLength => if explicitLength then 3 else 2
   | .spanFromReference .. | .byteOffset => 2
   | .spanSingleReference .. => 1
@@ -229,8 +232,11 @@ def evalMemory (op : MemoryOp) (stack : List Value) (memory : Memory) :
     Option (Memory × List Value) := do
   match op, stack with
   -- `Math.BigMul`: the low word is stored through the reference, the high word is pushed.
-  | .bigMul64, .ref low :: .i64 right :: .i64 left :: rest =>
+  | .bigMul64 false, .ref low :: .i64 right :: .i64 left :: rest =>
     return (← write64 memory low (left * right), .i64 (WideMultiply.high64 left right) :: rest)
+  | .bigMul64 true, .ref low :: .i64 right :: .i64 left :: rest =>
+    return (← write64 memory low (left * right),
+      .i64 (WideMultiply.signedHigh64 left right) :: rest)
   -- Vector loads and stores, through a reference or an object; `init256` stores zero.
   | .load128, .ref address :: rest => return (memory, (← read128 memory address) :: rest)
   | .load256, .ref address :: rest => return (memory, (← read256 memory address) :: rest)

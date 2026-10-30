@@ -1,5 +1,13 @@
 # Buffer content proofs
 
+The [AllZero span loop](../Examples/Proofs/SpanAllZero.lean) computes whether every element of an
+arbitrary-length `ReadOnlySpan<uint>` is zero. Its symbolic entry carries caller memory and an
+assigned span parameter throughout execution. `SpanContents` ties that view to a mathematical
+list through `Contents`; the loop invariant preserves the list's all-zero predicate while each
+successful iteration drops one zero element. The theorem includes null empty spans, early false
+returns and exact memory preservation. `Contents.load` and `Contents.drop` supply the read and
+suffix facts; `SpanView.slice_reference` connects the sliced view to the suffix address.
+
 ## Describe buffer contents
 
 `CIL.Safety.BufferContents` states what a contiguous run of integer elements holds, over the checked
@@ -31,6 +39,10 @@ to an element, and the [buffer fill proof](../Examples/Proofs/FillWords.lean) ca
 the invariant of a compiled loop. `Tests/BufferContents.lean` checks unchanged neighbouring bytes
 and sibling slices, and refutes uninitialized, past-end, overlapping, unjoined and stale claims.
 
+`SpanView.slice_reference` identifies the allocation-relative start of a successful addressed
+slice. Combined with `Contents.drop`, it transports a sequence predicate to the slice without
+repeating byte-read proofs. Slice validity alone does not assert readable contents.
+
 For `Span<T>.Fill` and `Clear`, `SpanView.fill_contents` derives the repeated sequence from the
 successful checked fill, without a readable-input premise. `Contents.after_span_fill` preserves
 sequences outside a nonempty fill's extent. The operation checks the whole range once and performs
@@ -59,6 +71,16 @@ constructors, including target-dependent layouts, empty getters and in-place loc
 `memoryInstruction_emptySpan` proves that every supported element width and capability produces
 a null, zero-length view without changing memory. `SpanConstructor.empty` uses that same operation
 when `initializeSpanLocal` replaces a local's previous view.
+An `in` or `ref readonly` span parameter is passed as the referenced `.bufferSpan` view, so a
+contract states the same view argument as a by-value span and reuses `SpanView.validate`,
+`Contents` and the span element lemmas; `Tests/SpanReferenceContracts.lean` proves an indexed
+read this way and `Tests/SpanReferences.cs` covers callers that pass span locals and temporaries.
+`MemoryMarshal.GetReference` of a readonly view steps by `step_memory_spanReference_readOnlyView_eq`
+to a `.readOnlyReference`; loads, field loads and `ldflda` accept it, so
+`Tests/SpanReferenceWordContract.lean` proves the first-element load with the same lemmas.
+Element and byte offsets of a readonly reference step by the `step_memory_add_readOnly_*`
+equations to a `.readOnlyReference` with the writable form's address, so `add_element` applies
+unchanged; `Tests/SpanReferenceSecondContract.lean` proves `Unsafe.Add(..., 1)` this way.
 `Tests/BinarySpans.cs` demonstrates integer byte-order transfers and short-span behavior.
 `Tests/ViewAccessors.cs` checks observations without byte authority. Supplied aggregate/vector
 arrays reuse the same checked snapshot loads/stores, indexed references and span conversions; no

@@ -55,6 +55,52 @@ theorem asRef_cannot_strip_restriction :
       .error .invalidState := rfl
 #print axioms asRef_cannot_strip_restriction
 
+/-- A readonly view's `GetReference` keeps the restriction instead of granting a `ref T`. -/
+theorem view_reference_restricted :
+    memoryInstruction .spanReference [.bufferSpan ⟨.address ⟨0, 4⟩, 1, 4, false⟩] memory =
+      .ok (memory, [.readOnlyReference (.address ⟨0, 4⟩)]) := rfl
+#print axioms view_reference_restricted
+
+/-- An empty readonly view still yields its own reference once its extent validates. -/
+theorem empty_view_reference :
+    memoryInstruction .spanReference [.bufferSpan ⟨.address ⟨0, 8⟩, 0, 4, false⟩] memory =
+      .ok (memory, [.readOnlyReference (.address ⟨0, 8⟩)]) := rfl
+#print axioms empty_view_reference
+
+/-- A readonly view whose extent leaves the allocation forms no reference. -/
+theorem view_reference_outside :
+    memoryInstruction .spanReference [.bufferSpan ⟨.address ⟨0, 4⟩, 2, 4, false⟩] memory =
+      .error (.memory .outsideAllocation (.address ⟨0, 4⟩) 0) := rfl
+#print axioms view_reference_outside
+
+/-- Field loads and field addresses through a restricted reference stay readable and restricted. -/
+theorem restricted_field_reads :
+    instruction (.fieldAt 4 4 false) [.readOnlyReference (.address ⟨0, 0⟩)] memory =
+      .ok (memory, [.scalar (.i32 0)]) ∧
+    instruction (.fieldAddress 4) [.readOnlyReference (.address ⟨0, 0⟩)] memory =
+      .ok (memory, [.readOnlyReference (.address ⟨0, 4⟩)]) ∧
+    instruction (.aggregateFieldAt 4 4) [.readOnlyReference (.address ⟨0, 0⟩)] memory =
+      .ok (memory, [.scalar (.aggregate [0, 0, 0, 0])]) := ⟨rfl, rfl, rfl⟩
+#print axioms restricted_field_reads
+
+/-- Field stores through a restricted reference fail, naming the struct reference and field
+    width, despite the backing allocation's write authority. -/
+theorem restricted_field_stores_rejected :
+    instruction (.setFieldAt 4 4) [.scalar (.i32 7), .readOnlyReference (.address ⟨0, 0⟩)]
+      memory = .error (.memory .unwritable (.address ⟨0, 0⟩) 4) ∧
+    instruction (.setAggregateFieldAt 4 4)
+      [.scalar (.aggregate [7, 0, 0, 0]), .readOnlyReference (.address ⟨0, 0⟩)] memory =
+      .error (.memory .unwritable (.address ⟨0, 0⟩) 4) := ⟨rfl, rfl⟩
+#print axioms restricted_field_stores_rejected
+
+/-- A readonly field access through null faults before any field offset is formed. -/
+theorem restricted_null_field :
+    instruction (.fieldAt 4 4 false) [.readOnlyReference .null] memory =
+      .error (.memory .nullDereference .null 0) ∧
+    instruction (.fieldAddress 4) [.readOnlyReference .null] memory =
+      .error (.memory .nullDereference .null 0) := ⟨rfl, rfl⟩
+#print axioms restricted_null_field
+
 private def intType : CIL.Extraction.TypeExpr := .atom CIL.Extraction.runtimeScope "System.Int32"
 private def raw (target : Nat) : CIL.Extraction.RawMethod := {
   token := 1, owner := "Readonly", hasThis := false, explicitThis := false,

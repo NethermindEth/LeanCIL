@@ -111,7 +111,10 @@ namespace CIL.Safety
 @[cil_guard] theorem guard_asRef : observerCount .asRef = 1 := rfl
 
 -- Operand counts of memory instructions, which `observerCount` defers to.
-@[cil_guard] theorem guard_count_bigMul64 : CIL.MemoryOp.bigMul64.argumentCount = 3 := rfl
+@[cil_guard] theorem guard_count_bigMul64 (signed : Bool) :
+    (CIL.MemoryOp.bigMul64 signed).argumentCount = 3 := rfl
+@[cil_guard] theorem guard_count_divRemOut (width : Nat) :
+    (CIL.MemoryOp.divRemOut width).argumentCount = 3 := rfl
 @[cil_guard] theorem guard_count_copyBlock (alignment : Nat) :
     (CIL.MemoryOp.copyBlock alignment).argumentCount = 3 := rfl
 @[cil_guard] theorem guard_count_initBlock (alignment : Nat) :

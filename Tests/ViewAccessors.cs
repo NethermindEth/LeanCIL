@@ -32,11 +32,13 @@ foreach (var method in metadata.GetType("Examples.ViewAccessors").Methods.Where(
     else
     {
         var writable = (!method.Name.StartsWith("ReadOnly", StringComparison.Ordinal)).ToString().ToLowerInvariant();
+        // GetReference keeps an empty view's own reference, where GetPinnableReference yields null.
+        var nullOnlyWhenNull = method.Name.EndsWith("ReferenceNull", StringComparison.Ordinal);
         foreach (var (address, length) in new[] { (".null", 0), (".address ⟨0, 16⟩", 0),
             (".address ⟨0, 0⟩", 4) })
             claims.Add("(CIL.Safety.invoke Extracted.program 32 0 " +
                 $"[.bufferSpan ⟨{address}, {length}, 4, {writable}⟩] memory).map Prod.snd = " +
-                $".ok [.scalar (.i32 {(length == 0 ? 1 : 0)})]");
+                $".ok [.scalar (.i32 {(length == 0 && (!nullOnlyWhenNull || address == ".null") ? 1 : 0)})]");
     }
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + """
         /-- Successful observations identify the checked execution result. -/
@@ -60,6 +62,7 @@ foreach (var (name, before, after) in new[]
 {
     ("Empty", ".observeView .spanEmpty", ".observeView .spanPinnable"),
     ("PinnableNull", ".observeView .spanPinnable", ".spanReference"),
+    ("ReferenceNull", ".memory .spanReference", ".memory (.observeView .spanPinnable)"),
     ("ArrayData", ".observeView .arrayData", ".observeView .spanPinnable")
 })
 {

@@ -410,8 +410,8 @@ macro_rules
     cil_stack_cleanup
     try (cil_strict refine CIL.Safety.raises_of_run
            (by cil_lookup [$[$facts:term],*])
-           (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl))
-           (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_)
+           (by cil_checked_side [$[$facts:term],*])
+           (by cil_checked_side [$[$facts:term],*]) ?_)
     cil_steps_from "cil_raise_steps took no step: the method or instruction lookup, or the \
       first step, did not close; pass the lookup hypothesis, feature facts or step facts"
       cil_raise_run_step [$[$facts:term],*]))
@@ -468,6 +468,6 @@ macro_rules
     refine CIL.Safety.run_call_raises_of_contract $holds $input
       (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
       (by cil_checked_step [$[$facts:term],*]) (by rfl)
-      (by first | rfl | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)) ?_ ?_))
+      (by cil_checked_side [$[$facts:term],*]) ?_ ?_))
 
 end CIL.Safety

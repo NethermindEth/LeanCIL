@@ -98,13 +98,26 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     {
         object[] inputs = rotations ? [value, count] : [value];
         var expected = method.Invoke(null, inputs)!;
-        claims.Add($"(CIL.Safety.invoke Extracted.program {(narrow ? 96 : 8)} 0 [{string.Join(", ", inputs.Select(LeanValue))}] Examples.empty).map Prod.snd = .ok [{LeanValue(expected)}]");
+        var fuel = narrow ? 96 : method.Name.StartsWith("PrimitiveCounts", StringComparison.Ordinal) ? 32 : 8;
+        claims.Add($"""
+            (CIL.Safety.invoke Extracted.program {fuel} 0
+              [{string.Join(", ", inputs.Select(LeanValue))}] Examples.empty).map Prod.snd =
+              .ok [{LeanValue(expected)}]
+            """);
     }
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 8192\n" +
-        "namespace ExampleProof\ntheorem correctness :\n" + string.Join(" ∧\n", claims) +
-        " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) +
-        "⟩\n#print axioms correctness\nend ExampleProof\n");
+    File.WriteAllText(proof, $"""
+        import Extracted
+        import Examples.Support
+        set_option maxRecDepth 8192
+        namespace ExampleProof
+        theorem correctness :
+        {string.Join(" ∧\n", claims)} := by
+          exact ⟨{string.Join(", ", claims.Select(_ => "rfl"))}⟩
+        #print axioms correctness
+        end ExampleProof
+
+        """);
     var selector = $"Bits::{method.Name}({string.Join(",", parameters.Select(p => p.ParameterType.FullName))})";
     var comparisons = claims.Count;
     queue.Add(new(selector, proof, output), () =>
@@ -197,7 +210,7 @@ foreach (var mutation in new[] { "scope", "version", "instance", "return", "argu
             case "wide-count":
             case "native-count":
                 call.Name = "PopCount";
-                call.ReturnType = call.Parameters[0].ParameterType;
+                call.ReturnType = module.TypeSystem.Int32;
                 break;
         }
         expectedDiagnostic = mutation switch

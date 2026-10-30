@@ -135,7 +135,7 @@ No other AdvSimd operations, signed `MultiplyHigh` overload or ARM ISA family is
 
 ## Feature getters, profiles and execution restrictions
 
-Recognised `IsSupported` getters are `X86Base.X64`, `Sse2`, `Ssse3`, `Sse41`, `Sse42`, `Avx`, `Avx2`, `Avx512F`, `Avx512F.VL`, `Avx512DQ`, `Avx512DQ.VL`, `Bmi1`, `Bmi2.X64`, `AdvSimd` and `ArmBase.Arm64`. `Vector128.IsHardwareAccelerated` and `Vector256.IsHardwareAccelerated` are also recognised. The getter result comes from the chosen profile, not the host CPU. Other getters are rejected.
+Recognised `IsSupported` getters are `X86Base.X64`, `Sse2`, `Ssse3`, `Sse41`, `Sse42`, `Avx`, `Avx2`, `Avx512F`, `Avx512F.VL`, `Avx512DQ`, `Avx512DQ.VL`, `Bmi1`, `Bmi2.X64`, `AdvSimd`, `AdvSimd.Arm64` and `ArmBase.Arm64`. `AdvSimd.Arm64` answers with the `AdvSimd` capability, as .NET 10 reports them together ([runtime profiles](RUNTIME-PROFILES.md)). `Vector128.IsHardwareAccelerated` and `Vector256.IsHardwareAccelerated` are also recognised. The getter result comes from the chosen profile, not the host CPU. Other getters are rejected.
 
 | Built-in profile | Enabled capabilities |
 | --- | --- |

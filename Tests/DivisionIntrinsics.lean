@@ -303,7 +303,7 @@ example : Safety.checkedIntrinsic (.vector (.reinterpret 256)) [.v128Low64 7] =
     .error (.unsupported "Intrinsic observes unspecified vector bits") := rfl
 example : Safety.checkedIntrinsic (.avx2 .shl64Count) [.v128Low64 1, .v128Low64 1] =
     .error (.unsupported "Intrinsic observes unspecified vector bits") := rfl
-example : Safety.checkedIntrinsic (.scalar (.leadingZeroCount 64)) [.v128Low64 1] =
+example : Safety.checkedIntrinsic (.scalar (.leadingZeroCount 64 .word32)) [.v128Low64 1] =
     .error (.unsupported "Intrinsic observes unspecified vector bits") := rfl
 
 /-- An admitted call still requires its exact emitted intrinsic and arity. -/

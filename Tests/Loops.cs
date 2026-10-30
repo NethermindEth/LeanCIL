@@ -415,6 +415,35 @@ var rejectedSpan = RejectedLines(stutteringSpanAssembly, drainProof, "SpanDrainS
 if (rejectedSpan.Length == 0) throw new InvalidOperationException("Span loop rejection has no proof diagnostic");
 Console.WriteLine("PASS unchanged span loop proof rejects a nondecreasing slice");
 
+const string AllZero = "Loops::AllZero(System.ReadOnlySpan`1<System.UInt32>)";
+var allZeroProof = At("Examples/Proofs/SpanAllZero.lean");
+verification.Verify(assembly, "Examples", AllZero, allZeroProof, Path.Combine(root, "SpanAllZero"));
+var allZero = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Loops")!
+    .GetMethod("AllZero")!.CreateDelegate<AllZeroDelegate>();
+foreach (uint[] values in new uint[][] { [], [0], [0, 0], [0, 1, 0], [uint.MaxValue] })
+    if (allZero(values) != values.All(value => value == 0))
+        throw new InvalidOperationException("Span content loop differs from its sequence predicate");
+if (!allZero(default)) throw new InvalidOperationException("Null empty span must satisfy AllZero");
+Console.WriteLine("PASS symbolic span contents, all-zero predicate and exact caller-memory preservation");
+
+var skippedRead = Path.Combine(root, "SpanAllZeroSkippedRead");
+Directory.CreateDirectory(skippedRead);
+var skippedReadAssembly = Path.Combine(skippedRead, "Examples.dll");
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var method = module.GetType("Examples.Loops").Methods.Single(method => method.Name == "AllZero");
+    var load = method.Body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Ldind_U4);
+    load.OpCode = OpCodes.Pop;
+    method.Body.GetILProcessor().InsertAfter(load, Instruction.Create(OpCodes.Ldc_I4_0));
+    module.Write(skippedReadAssembly);
+}
+Run(Extract("extract", skippedReadAssembly, "Examples", AllZero, skippedRead));
+var wrongAllZero = Assembly.Load(File.ReadAllBytes(skippedReadAssembly)).GetType("Examples.Loops")!
+    .GetMethod("AllZero")!.CreateDelegate<AllZeroDelegate>();
+if (!wrongAllZero([1])) throw new InvalidOperationException("Skipped-read mutation did not change the result");
+RejectedLines(skippedReadAssembly, allZeroProof, "SpanAllZeroSkippedRead", true, AllZero);
+Console.WriteLine("PASS unchanged content theorem rejects replacing every read with zero");
+
 // A buffer loop is proved as a sequence property: every nonnegative count fills exactly that
 // many words from write authority alone and changes no other caller byte.
 const string FillWords = "Loops::FillWords(ulong&,ulong,int)";
@@ -653,3 +682,4 @@ foreach (var mutation in new[] { "stack-height", "stack-type", "local-fact", "st
 }
 
 delegate void FillWordsDelegate(ref ulong destination, ulong value, int count);
+delegate bool AllZeroDelegate(ReadOnlySpan<uint> values);

@@ -109,9 +109,12 @@ Examples:System.Boolean Examples.Bits::PrimitivePowerNative(System.IntPtr)	A	A	A
 Examples:System.Boolean Examples.Bits::PrimitivePowerU32(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.Bits::PrimitivePowerU64(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.Bits::PrimitivePowerUNative(System.UIntPtr)	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.Capabilities::Crc64()	B	B	B	B	B	B	B	B
+Examples:System.Boolean Examples.Capabilities::Rdm64()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.DivisionIntrinsics::UnsafeEquals(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.IntegerOperations::Greater32(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.IntegerOperations::Greater64(System.Int64,System.Int64)	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.Loops::AllZero(System.ReadOnlySpan`1<System.UInt32>)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.MarshaledMemory::TryRead(System.ReadOnlySpan`1<System.Byte>,System.UInt64&)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.MarshaledMemory::TryReadAggregate(System.ReadOnlySpan`1<System.Byte>,Examples.FourLimbs&)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.MarshaledMemory::TryWrite(System.Span`1<System.Byte>,System.UInt64&)	A	A	A	A	A	A	A	A
@@ -136,6 +139,8 @@ Examples:System.Boolean Examples.ViewAccessors::Empty(System.Span`1<System.Int32
 Examples:System.Boolean Examples.ViewAccessors::PinnableNull(System.Span`1<System.Int32>)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.ViewAccessors::ReadOnlyEmpty(System.ReadOnlySpan`1<System.Int32>)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.ViewAccessors::ReadOnlyPinnableNull(System.ReadOnlySpan`1<System.Int32>)	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.ViewAccessors::ReadOnlyReferenceNull(System.ReadOnlySpan`1<System.Int32>)	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.ViewAccessors::ReferenceNull(System.Span`1<System.Int32>)	A	A	A	A	A	A	A	A
 Examples:System.Boolean& Examples.UnsafeLayouts::Add0int(System.Boolean&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Boolean& Examples.UnsafeLayouts::Add0nint(System.Boolean&,System.IntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Boolean& Examples.UnsafeLayouts::Add0nuint(System.Boolean&,System.UIntPtr)	A	A	A	A	A	A	A	A
@@ -146,6 +151,7 @@ Examples:System.Byte Examples.IntegerMath::ClampUInt8(System.Byte,System.Byte,Sy
 Examples:System.Byte Examples.IntegerMath::MaxUInt8(System.Byte,System.Byte)	A	A	A	A	A	A	A	A
 Examples:System.Byte Examples.IntegerMath::MinUInt8(System.Byte,System.Byte)	A	A	A	A	A	A	A	A
 Examples:System.Byte Examples.PrimitiveArrays::ReadByte(System.Byte[],System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Byte Examples.SpanReferences::At(System.ReadOnlySpan`1<System.Byte>&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Byte Examples.StaticScalars::ReadByte()	B	B	B	B	B	B	B	B
 Examples:System.Byte Examples.StaticSpans::First()	A	A	A	A	A	A	A	A
 Examples:System.Byte Examples.StaticSpans::Last()	A	A	A	A	A	A	A	A
@@ -216,6 +222,8 @@ Examples:System.Int32 Examples.Bits::Trailing32(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Bits::Trailing64(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Bits::TrailingNative(System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Bits::WrongLog64(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Capabilities::ArmCount(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Capabilities::Endian()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Capabilities::Platform()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Capabilities::ReferenceFree()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ClosedInterfaceCounter::Examples.IClosedCounter<System.Int32>.Read()	A	A	A	A	A	A	A	A
@@ -284,6 +292,7 @@ Examples:System.Int32 Examples.MemorySpans::InPlaceArrayConstructor(System.Int32
 Examples:System.Int32 Examples.MemorySpans::InPlaceArrayLength(System.Int32[],System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.MemorySpans::InPlacePointerSpan(System.Int32*,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.MemorySpans::Read(System.ReadOnlySpan`1<System.Int32>,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.MemorySpans::ReferenceWrite(System.Span`1<System.Int32>,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.MemorySpans::ReinitializeArraySpan(System.Int32[],System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.MemorySpans::SliceRead(System.ReadOnlySpan`1<System.Int32>,System.Int32,System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.MemorySpans::SliceWrite(System.Span`1<System.Int32>,System.Int32,System.Int32,System.Int32,System.Int32)	A	A	A	A	A	A	A	A
@@ -315,6 +324,18 @@ Examples:System.Int32 Examples.Sequential::RecordSize()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SpanConstructors::AggregateLocal(Examples.AggregateSpans/Words&)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SpanConstructors::LayoutLocal(Examples.AggregateSpans/VectorRecord*,System.Int32)	B	B	B	B	B	B	B	B
 Examples:System.Int32 Examples.SpanConstructors::Local(System.Int32&)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanReferences::Argument(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanReferences::Caller(System.Byte[])	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanReferences::Copy(System.ReadOnlySpan`1<System.Byte>&)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanReferences::First(System.Span`1<System.Int32>&)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanReferences::Forward(System.ReadOnlySpan`1<System.Byte>&)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanReferences::GenericFront(System.Int32[])	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanReferences::GenericWritable(System.Int32[])	B	B	B	B	B	B	B	B
+Examples:System.Int32 Examples.SpanReferences::Length(System.ReadOnlySpan`1<System.Int32>&)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanReferences::Rebind(System.Span`1<T>&)	N	N	N	N	N	N	N	N
+Examples:System.Int32 Examples.SpanReferences::Sum(System.ReadOnlySpan`1<System.Byte>&)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanReferences::Tail(System.ReadOnlySpan`1<System.Byte>&)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanReferences::Temporary(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SpanTables::Count()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.StackAllocation::FillAndRead(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.StackAllocation::Length(System.Int32)	A	A	A	A	A	A	A	A
@@ -334,6 +355,9 @@ Examples:System.Int32 Examples.TailCalls::Increment(System.Int32)	A	A	A	A	A	A	A	
 Examples:System.Int32 Examples.TailCalls::LocalReference(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.TailCalls::Raise(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.TailCalls::Read(System.Int32&)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.TupleDivision::MathOutInt32(System.Int32,System.Int32,System.Int32&)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.TupleDivision::MathQuotient(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.TupleDivision::MathWrongQuotient(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.TypeTests::Classify(System.Int32)	N	N	N	N	N	N	N	N
 Examples:System.Int32 Examples.TypeTests::Marker(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.TypeTests::Other(System.Int32)	A	A	A	A	A	A	A	A
@@ -369,6 +393,7 @@ Examples:System.Int32* Examples.StackAllocation::EscapingStorage()	A	A	A	A	A	A	A
 Examples:System.Int32[] Examples.PrimitiveArrays::Allocate(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32[] Examples.PrimitiveArrays::Identity(System.Int32[])	A	A	A	A	A	A	A	A
 Examples:System.Int32[] Examples.PrimitiveArrays::ReadJagged(System.Int32[][],System.Int32)	B	B	B	B	B	B	B	B
+Examples:System.Int64 Examples.Bits::PrimitiveCounts64(System.Int64)	A	A	A	A	A	A	A	A
 Examples:System.Int64 Examples.Bits::PrimitiveLeft64(System.Int64,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int64 Examples.Bits::PrimitiveRight64(System.Int64,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int64 Examples.Bits::ReverseI64(System.Int64)	A	A	A	A	A	A	A	A
@@ -383,6 +408,7 @@ Examples:System.Int64 Examples.IntegerOperations::Negate64(System.Int64)	A	A	A	A
 Examples:System.Int64 Examples.PointerOperations::Difference(System.Byte*,System.Byte*)	A	A	A	A	A	A	A	A
 Examples:System.Int64 Examples.PrimitiveArrays::ReadInt64(System.Int64[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int64 Examples.StaticScalars::ReadSignedLong()	B	B	B	B	B	B	B	B
+Examples:System.Int64 Examples.TupleDivision::MathOutInt64(System.Int64,System.Int64,System.Int64&)	A	A	A	A	A	A	A	A
 Examples:System.Int64 Examples.UnsafeLayouts::Measure0int(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int64 Examples.UnsafeLayouts::Measure0nint(System.IntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Int64 Examples.UnsafeLayouts::Measure0nuint(System.UIntPtr)	A	A	A	A	A	A	A	A
@@ -440,11 +466,14 @@ Examples:System.Int64 Examples.UnsafeLayouts::Measure8nuint(System.UIntPtr)	A	A	
 Examples:System.Int64 Examples.UnsafeLayouts::Measure9int(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int64 Examples.UnsafeLayouts::Measure9nint(System.IntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Int64 Examples.UnsafeLayouts::Measure9nuint(System.UIntPtr)	A	A	A	A	A	A	A	A
+Examples:System.Int64 Examples.WideProduct::BigMul32(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int64 Examples.WideProduct::SignedBigMul(System.Int64,System.Int64,System.Int64&)	A	A	A	A	A	A	A	A
 Examples:System.Int64& Examples.UnsafeLayouts::Add8int(System.Int64&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int64& Examples.UnsafeLayouts::Add8nint(System.Int64&,System.IntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Int64& Examples.UnsafeLayouts::Add8nuint(System.Int64&,System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Int64[] Examples.PrimitiveArrays::AllocateLongs(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.IntPtr Examples.Arguments::Native(System.IntPtr)	A	A	A	A	A	A	A	A
+Examples:System.IntPtr Examples.Bits::PrimitiveCountsNative(System.IntPtr)	A	A	A	A	A	A	A	A
 Examples:System.IntPtr Examples.Bits::PrimitiveLeftNative(System.IntPtr,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.IntPtr Examples.Bits::PrimitiveRightNative(System.IntPtr,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.IntPtr Examples.Bits::ReverseNative(System.IntPtr)	A	A	A	A	A	A	A	A
@@ -530,6 +559,7 @@ Examples:System.SByte Examples.IntegerMath::MaxInt8(System.SByte,System.SByte)	A
 Examples:System.SByte Examples.IntegerMath::MinInt8(System.SByte,System.SByte)	A	A	A	A	A	A	A	A
 Examples:System.SByte Examples.PrimitiveArrays::ReadSByte(System.SByte[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.SByte Examples.StaticScalars::ReadSignedByte()	B	B	B	B	B	B	B	B
+Examples:System.SByte Examples.TupleDivision::MathSByteRemainder(System.SByte,System.SByte)	A	A	A	A	A	A	A	A
 Examples:System.SByte Examples.UnalignedMemory::ReadSigned(System.Byte&)	A	A	A	A	A	A	A	A
 Examples:System.SByte& Examples.UnsafeLayouts::Add2int(System.SByte&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.SByte& Examples.UnsafeLayouts::Add2nint(System.SByte&,System.IntPtr)	A	A	A	A	A	A	A	A
@@ -558,6 +588,7 @@ Examples:System.Span`1<System.Int32> Examples.SpanConstructors::DefaultReset(Sys
 Examples:System.Span`1<System.Int32> Examples.SpanConstructors::Empty()	A	A	A	A	A	A	A	A
 Examples:System.Span`1<System.Int32> Examples.SpanConstructors::Pass(System.Span`1<System.Int32>)	A	A	A	A	A	A	A	A
 Examples:System.Span`1<System.Int32> Examples.SpanConstructors::Single(System.Int32&)	A	A	A	A	A	A	A	A
+Examples:System.Span`1<System.Int32>& Examples.SpanReferences::Alias(System.Span`1<System.Int32>&)	B	B	B	B	B	B	B	B
 Examples:System.Span`1<System.IntPtr> Examples.MemorySpans::ArrayAsSpanStart(System.IntPtr[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Span`1<System.Runtime.Intrinsics.Vector128`1<System.UInt64>> Examples.AggregateArrays::VectorView(System.Runtime.Intrinsics.Vector128`1<System.UInt64>[])	A	A	A	A	A	A	A	A
 Examples:System.Span`1<System.UInt32> Examples.ReinterpretedSpans::Words(System.Span`1<System.Byte>)	A	A	A	A	A	A	A	A
@@ -587,6 +618,7 @@ Examples:System.UInt32 Examples.Bits::PrimitiveTrailingU32(System.UInt32)	A	A	A	
 Examples:System.UInt32 Examples.Bits::ReverseU32(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Bits::Right32(System.UInt32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Bits::RoundUp32(System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt32 Examples.Capabilities::ArmFlags()	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Capabilities::Flags()	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.CheckedArithmetic::Add(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.CheckedConversions::Narrow(System.UInt64)	A	A	A	A	A	A	A	A
@@ -647,6 +679,7 @@ Examples:System.UInt64 Examples.BinarySpans::ReadLittle(System.ReadOnlySpan`1<Sy
 Examples:System.UInt64 Examples.BinarySpans::TryReadBig(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.BinarySpans::TryReadLittle(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Bits::Left64(System.UInt64,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Bits::PrimitiveCountsU64(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Bits::PrimitiveLeftU64(System.UInt64,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Bits::PrimitiveRightU64(System.UInt64,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Bits::ReverseU64(System.UInt64)	A	A	A	A	A	A	A	A
@@ -693,6 +726,11 @@ Examples:System.UInt64 Examples.GenericMethods::Nested(System.UInt64)	A	A	A	A	A	
 Examples:System.UInt64 Examples.GenericMethods::Repeated(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.GenericMethods::Select(System.Boolean,System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.GenericMethods::TwoTypes(System.UInt64,System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.IInWord`1::Sum(System.ReadOnlySpan`1<System.UInt64>& modreq(System.Runtime.InteropServices.InAttribute))	N	N	N	N	N	N	N	N
+Examples:System.UInt64 Examples.InParameters::Constrained(Examples.InWord&,Examples.InWord&)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.InParameters::ConstrainedSum(Examples.InWord&,System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.InParameters::Sum(T&,System.ReadOnlySpan`1<System.UInt64>&)	N	N	N	N	N	N	N	N
+Examples:System.UInt64 Examples.InWord::Examples.IInWord<Examples.InWord>.Sum(System.ReadOnlySpan`1<System.UInt64>& modreq(System.Runtime.InteropServices.InAttribute))	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.InitializedHelper::Identity(System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.InitializedTypes::Add(System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.InitializedTypes::CallHelper(System.UInt64)	B	B	B	B	B	B	B	B
@@ -721,6 +759,19 @@ Examples:System.UInt64 Examples.PointerOperations::WriteEnum(Examples.Unsigned64
 Examples:System.UInt64 Examples.PrimitiveArrays::ReadUInt64(System.UInt64[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Sequential::Packed(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SkipInitialization::Read(System.UInt64&)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.SpanReferences::Back(System.ReadOnlySpan`1<System.UInt64>&)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.SpanReferences::BigEndianWord(System.ReadOnlySpan`1<System.Byte>&)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.SpanReferences::ByteSecond(System.ReadOnlySpan`1<System.UInt64>&)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.SpanReferences::Construct(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.SpanReferences::CursorSum(System.ReadOnlySpan`1<System.UInt64>&)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.SpanReferences::Element(System.ReadOnlySpan`1<System.UInt64>&,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.SpanReferences::FirstHigh(System.ReadOnlySpan`1<Examples.SpanReferences/Pair>&)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.SpanReferences::GenericHead(System.ReadOnlySpan`1<System.UInt64>&)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.SpanReferences::High(System.Span`1<Examples.SpanReferences/Pair>&,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.SpanReferences::HighAddress(System.ReadOnlySpan`1<Examples.SpanReferences/Pair>&,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.SpanReferences::ReadOnlyHigh(System.ReadOnlySpan`1<Examples.SpanReferences/Pair>&,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.SpanReferences::Second(System.ReadOnlySpan`1<System.UInt64>&)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.SpanReferences::Word(System.ReadOnlySpan`1<System.UInt64>&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanTables::First()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanTables::Power(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.StaticScalars::ReadLong()	B	B	B	B	B	B	B	B
@@ -744,6 +795,7 @@ Examples:System.UInt64 Examples.UnsafeReferences::PastEnd(Examples.FourLimbs&)	A
 Examples:System.UInt64 Examples.UnsafeReferences::Read(Examples.FourLimbs&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.UnsafeReferences::Store(Examples.FourLimbs&,System.UInt64,System.UInt64,System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.WideProduct::BigMul(System.UInt64,System.UInt64,System.UInt64&)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.WideProduct::UnsignedBigMul32(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 SelectorExamples.One.Collision::Add(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 SelectorExamples.Two.Collision::Add(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64& Examples.Arithmetic::Escape()	A	A	A	A	A	A	A	A
@@ -756,6 +808,7 @@ Examples:System.UInt64& Examples.UnsafeReferences::SubtractElementsNative(System
 Examples:System.UInt64& Examples.UnsafeReferences::SubtractElementsUnsigned(System.UInt64&,System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.UInt64& Examples.UnsafeReferences::Word(Examples.FourLimbs&)	A	A	A	A	A	A	A	A
 Examples:System.UIntPtr Examples.Bits::LeftNative(System.UIntPtr,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.UIntPtr Examples.Bits::PrimitiveCountsUNative(System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.UIntPtr Examples.Bits::PrimitiveLeftUNative(System.UIntPtr,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UIntPtr Examples.Bits::PrimitiveRightUNative(System.UIntPtr,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UIntPtr Examples.Bits::ReverseUNative(System.UIntPtr)	A	A	A	A	A	A	A	A
@@ -776,7 +829,17 @@ Examples:System.UIntPtr Examples.StaticScalars::ReadNative()	B	B	B	B	B	B	B	B
 Examples:System.UIntPtr& Examples.UnsafeLayouts::Add11int(System.UIntPtr&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UIntPtr& Examples.UnsafeLayouts::Add11nint(System.UIntPtr&,System.IntPtr)	A	A	A	A	A	A	A	A
 Examples:System.UIntPtr& Examples.UnsafeLayouts::Add11nuint(System.UIntPtr&,System.UIntPtr)	A	A	A	A	A	A	A	A
+Examples:System.ValueTuple`2<System.Byte,System.Byte> Examples.TupleDivision::MathByte(System.Byte,System.Byte)	A	A	A	A	A	A	A	A
+Examples:System.ValueTuple`2<System.Int16,System.Int16> Examples.TupleDivision::MathInt16(System.Int16,System.Int16)	A	A	A	A	A	A	A	A
+Examples:System.ValueTuple`2<System.Int32,System.Int32> Examples.TupleDivision::MathInt32(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.ValueTuple`2<System.Int64,System.Int64> Examples.TupleDivision::MathInt64(System.Int64,System.Int64)	A	A	A	A	A	A	A	A
+Examples:System.ValueTuple`2<System.IntPtr,System.IntPtr> Examples.TupleDivision::MathIntPtr(System.IntPtr,System.IntPtr)	A	A	A	A	A	A	A	A
+Examples:System.ValueTuple`2<System.SByte,System.SByte> Examples.TupleDivision::MathSByte(System.SByte,System.SByte)	A	A	A	A	A	A	A	A
+Examples:System.ValueTuple`2<System.UInt16,System.UInt16> Examples.TupleDivision::MathUInt16(System.UInt16,System.UInt16)	A	A	A	A	A	A	A	A
+Examples:System.ValueTuple`2<System.UInt32,System.UInt32> Examples.TupleDivision::MathUInt32(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.ValueTuple`2<System.UInt64,System.UInt64> Examples.TupleDivision::MathUInt64(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.ValueTuple`2<System.UInt64,System.UInt64> Examples.TupleDivision::Pair(System.UInt64,System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
+Examples:System.ValueTuple`2<System.UIntPtr,System.UIntPtr> Examples.TupleDivision::MathUIntPtr(System.UIntPtr,System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.AggregateArrays::Write(Examples.AggregateArrays/Pair[],System.Int32,Examples.AggregateArrays/Pair)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.AggregateArrays::WriteVector(System.Runtime.Intrinsics.Vector128`1<System.UInt64>[],System.Int32,System.Runtime.Intrinsics.Vector128`1<System.UInt64>)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.AggregateSpanFill::Aliased(System.Span`1<Examples.AggregateSpans/Words>)	A	A	A	A	A	A	A	A
@@ -825,6 +888,9 @@ Examples:System.Void Examples.GenericMethods::SwapRecord(Examples.PackedLeaf&,Ex
 Examples:System.Void Examples.GenericPair`1::.ctor(T,T)	N	N	N	N	N	N	N	N
 Examples:System.Void Examples.GenericPair`1::SetSecond(T)	N	N	N	N	N	N	N	N
 Examples:System.Void Examples.ICounterValue::Increment()	B	B	B	B	B	B	B	B
+Examples:System.Void Examples.IInWord`1::Add(T& modreq(System.Runtime.InteropServices.InAttribute),T&)	N	N	N	N	N	N	N	N
+Examples:System.Void Examples.InParameters::Add(T&,Examples.InWord&,Examples.InWord&)	N	N	N	N	N	N	N	N
+Examples:System.Void Examples.InWord::Examples.IInWord<Examples.InWord>.Add(Examples.InWord& modreq(System.Runtime.InteropServices.InAttribute),Examples.InWord&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.InitializedHelper::.cctor()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.InitializedTypes::.cctor()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.InitializedValue::.cctor()	B	B	B	B	B	B	B	B
@@ -845,6 +911,9 @@ Examples:System.Void Examples.PackedConstructor::.ctor(System.UInt64,System.Byte
 Examples:System.Void Examples.PrimitiveArrays::FillEnums(Examples.AllocationTag[],Examples.AllocationTag)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PrimitiveArrays::FillGeneric(T[],T)	N	N	N	N	N	N	N	N
 Examples:System.Void Examples.PrimitiveArrays::FillIntegers(System.Int32[],System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.PrimitiveArrays::FillRangeEnums(Examples.AllocationTag[],Examples.AllocationTag,System.Int32,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.PrimitiveArrays::FillRangeGeneric(T[],T,System.Int32,System.Int32)	N	N	N	N	N	N	N	N
+Examples:System.Void Examples.PrimitiveArrays::FillRangeIntegers(System.Int32[],System.Int32,System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PrimitiveArrays::WriteBoolean(System.Boolean[],System.Int32,System.Boolean)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PrimitiveArrays::WriteByte(System.Byte[],System.Int32,System.Byte)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PrimitiveArrays::WriteChar(System.Char[],System.Int32,System.Char)	A	A	A	A	A	A	A	A
@@ -863,6 +932,12 @@ Examples:System.Void Examples.SkipInitialization::Store(Examples.FourLimbs&,Syst
 Examples:System.Void Examples.SpanCopies::Copy(System.Span`1<System.Byte>,System.Span`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.SpanCopies::CopyLongs(System.ReadOnlySpan`1<System.Int64>,System.Span`1<System.Int64>)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.SpanCopies::CopyReadOnly(System.ReadOnlySpan`1<System.Byte>,System.Span`1<System.Byte>)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.SpanReferences/Limbs::.ctor(System.ReadOnlySpan`1<System.UInt64>&,System.Boolean)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.SpanReferences::Replace(System.Span`1<System.Int32>&)	B	B	B	B	B	B	B	B
+Examples:System.Void Examples.SpanReferences::SetHigh(System.ReadOnlySpan`1<Examples.SpanReferences/Pair>&,System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.SpanReferences::WriteFirst(System.Span`1<System.Int32>&,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.SpanReferences::WriteSecond(System.ReadOnlySpan`1<System.UInt64>&,System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.SpanReferences::WriteWord(System.ReadOnlySpan`1<System.UInt64>&,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.StaticPair`1::.ctor(T,System.UInt64)	N	N	N	N	N	N	N	N
 Examples:System.Void Examples.StaticScalars::.cctor()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.StaticSpans::Write()	A	A	A	A	A	A	A	A
@@ -904,6 +979,8 @@ Examples:T Examples.IndirectValues::Identity(T)	N	N	N	N	N	N	N	N
 Examples:T Examples.ManagedDispatch::Identity(T)	N	N	N	N	N	N	N	N
 Examples:T Examples.OwnerHelper`1::Identity(T)	N	N	N	N	N	N	N	N
 Examples:T Examples.PrimitiveArrays::ReadGeneric(T[],System.Int32)	N	N	N	N	N	N	N	N
+Examples:T Examples.SpanReferences::Front(System.Span`1<T>&)	N	N	N	N	N	N	N	N
+Examples:T Examples.SpanReferences::Head(System.ReadOnlySpan`1<T>&)	N	N	N	N	N	N	N	N
 Examples:T& Examples.GenericMethods::Next(T&,System.Int32)	N	N	N	N	N	N	N	N
 Examples:TMethod Examples.GenericCounterValue`1::Read(TMethod)	N	N	N	N	N	N	N	N
 Examples:U Examples.OwnerHelper`1::Select(U,T)	N	N	N	N	N	N	N	N

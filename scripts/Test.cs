@@ -53,9 +53,10 @@ var independentSuites = new Dictionary<string, (string Script, string Descriptio
     ["generics"] = ("Tests/GenericMethods.cs", "C# and F# generic method specialization, provenance and rejection proofs"),
     ["blocks"] = ("Tests/Blocks.cs", "block memory, alignment prefixes, runtime comparisons and safety faults"),
     ["unsafe"] = ("Tests/UnsafeLayouts.cs", "layout-based Unsafe sizes, reference offsets and metadata validation"),
-    ["math"] = ("Tests/IntegerMath.cs", "integer Math helpers, runtime faults and universal minimum"),
+    ["math"] = ("Tests/IntegerMath.cs", "integer Math helpers, BigMul, runtime faults and universal minimum"),
     ["intrinsics"] = ("Tests/DivisionIntrinsics.cs", "division SIMD signatures, unspecified lanes, opaque locals and profile rejection"),
-    ["divrem"] = ("Tests/TupleDivision.cs", "X86Base.X64.DivRem through ValueTuple fields, divide-error faults and layout rejection"),
+    ["divrem"] = ("Tests/TupleDivision.cs",
+        "X86Base.X64.DivRem and Math.DivRem through ValueTuple fields, divide faults and layout rejection"),
     ["fsharp"] = ("Tests/FSharp.cs", "F# arithmetic, branches, calls, references and struct construction"),
     ["constructors"] = ("Tests/Constructors.cs", "struct construction, initialized temporaries and constructor faults"),
     ["instance"] = ("Tests/StructMethods.cs", "struct instance calls, managed this and constructor calls"),
@@ -166,7 +167,7 @@ if (suite is "all" or "unsafe")
     projects.AddRange(["Tests/SkipInitialization.cs", "Tests/NullReferences.cs", "Tests/UnalignedMemory.cs",
         "Tests/MarshaledMemory.cs", "Tests/ReinterpretedSpans.cs", "Tests/SpanCopies.cs", "Tests/ViewAccessors.cs",
         "Tests/BinarySpans.cs", "Tests/AggregateSpans.cs", "Tests/SpanConstructors.cs",
-        "Tests/AggregateSpanFill.cs", "Tests/AggregateArrays.cs"]);
+        "Tests/AggregateSpanFill.cs", "Tests/AggregateArrays.cs", "Tests/SpanReferences.cs"]);
 foreach (var (name, entry) in independentSuites)
     if (suite == "all" || suite == name)
         projects.Add(entry.Script);

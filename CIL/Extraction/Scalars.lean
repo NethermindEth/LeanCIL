@@ -380,15 +380,17 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
     match stack, emitted with
     | .nativeMethodTable signature :: _, .managed (.tableLoad actual) => signature == actual
     | _, _ => false
-  else if instruction.opcode == 88 && (stack[1]?).any
-      (fun kind => match kind with | .nativeMethodTable _ => true | _ => false) then
+  else if instruction.opcode == 88 && (match stack with
+      | .nativeMethodTable _ :: _ | _ :: .nativeMethodTable _ :: _ => true | _ => false) then
     match stack, emitted with
-    | offset :: _ :: _, .managed .tableOffset => offset ∈ [.word32, .native]
+    | offset :: .nativeMethodTable _ :: _, .managed .tableOffset
+    | .nativeMethodTable _ :: offset :: _, .managed .tableOffset => offset ∈ [.word32, .native]
     | _, _ => false
   else if let .managed operation := emitted then match operation, stack with
     | .address .., _ => instruction.opcode == 65030
     | .call .., _ => instruction.opcode == 41
-    | .tableOffset, offset :: .nativeMethodTable _ :: _ =>
+    | .tableOffset, offset :: .nativeMethodTable _ :: _
+    | .tableOffset, .nativeMethodTable _ :: offset :: _ =>
       instruction.opcode == 88 && offset ∈ [.word32, .native]
     | .tableLoad signature, .nativeMethodTable actual :: _ =>
       instruction.opcode == 77 && signature == actual
@@ -407,6 +409,7 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
   else if scalarCovered instruction.opcode then scalarOpMatches instruction stack emitted
   else !scalarEmission emitted || match role, emitted with
     | _, .const32 bits => sizeConstant instruction bits ||
+        platformField instruction == some bits ||
         (instruction.opcode == 40 && match instruction.operand with
           | .call site => platformConstant site == some bits
           | _ => false)
@@ -700,8 +703,11 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
   if opcode == 77 then
     if let .nativeMethodTable signature :: rest := stack then return .methodPointer signature :: rest
   if opcode == 88 then
-    if let offset :: .nativeMethodTable signature :: rest := stack then
+    match stack with
+    | offset :: .nativeMethodTable signature :: rest
+    | .nativeMethodTable signature :: offset :: rest =>
       if offset ∈ [.word32, .native] then return .nativeMethodTable signature :: rest else none
+    | _ => pure ()
   if opcode == 142 then
     if let .methodTable _ :: rest := stack then return .native :: rest
   if opcode == 151 || opcode == 163 then

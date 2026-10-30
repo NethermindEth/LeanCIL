@@ -192,3 +192,196 @@ foreach (var (mutation, method, marker) in new[]
         throw new InvalidOperationException("Incorrect DivRem rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS rejection: " + mutation);
 }
+
+// Portable Math.DivRem: every tuple overload, its narrow field read, the out overloads and a
+// universal int quotient contract, each compared with the runtime including its exceptions.
+static long Width<T>() => Unsafe.SizeOf<T>();
+foreach (var (pair, width) in new (Func<bool, long>, long)[]
+{
+    (second => Offset<sbyte, sbyte>(second), Width<sbyte>()), (second => Offset<short, short>(second), Width<short>()),
+    (second => Offset<int, int>(second), Width<int>()), (second => Offset<nint, nint>(second), Width<nint>())
+})
+    if (pair(false) != 0 || pair(true) != width)
+        throw new InvalidOperationException("Runtime equal-width ValueTuple places Item2 away from the element width");
+Console.WriteLine("PASS runtime equal-width ValueTuple offsets 0 and the element width for 1, 2, 4 and 8 bytes");
+
+static byte[] RuntimeBytes<T>(T value) where T : struct =>
+    MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref value, 1)).ToArray();
+var runtimeBytes = ((Func<(int, int), byte[]>)RuntimeBytes).Method.GetGenericMethodDefinition();
+string StackArgument(object value) => value switch
+{
+    sbyte x => $".scalar (.i32 {unchecked((uint)x)})", byte x => $".scalar (.i32 {x})",
+    short x => $".scalar (.i32 {unchecked((uint)x)})", ushort x => $".scalar (.i32 {x})",
+    int x => $".scalar (.i32 {unchecked((uint)x)})", uint x => $".scalar (.i32 {x})",
+    long x => $".scalar (.i64 {unchecked((ulong)x)})", ulong x => $".scalar (.i64 {x})",
+    nint x => $".scalar (.i64 {unchecked((ulong)x)})", nuint x => $".scalar (.i64 {(ulong)x})",
+    _ => throw new InvalidOperationException("Unexpected DivRem operand: " + value)
+};
+string? Fault(Exception error) => error switch
+{
+    DivideByZeroException => "divideByZero", OverflowException => "overflow", _ => null
+};
+// Runtime result or exception; any other exception is a fixture failure.
+(object? Value, string? Fault) Observe(MethodInfo method, object?[] inputs)
+{
+    try { return (method.Invoke(null, inputs), null); }
+    catch (TargetInvocationException error) when (Fault(error.InnerException!) is { } fault) { return (null, fault); }
+}
+var operands = new Dictionary<Type, object[]>
+{
+    [typeof(sbyte)] = new object[]
+        { sbyte.MinValue, (sbyte)-127, (sbyte)-7, (sbyte)-1, (sbyte)0, (sbyte)1, (sbyte)2, sbyte.MaxValue },
+    [typeof(byte)] = new object[] { (byte)0, (byte)1, (byte)2, (byte)7, (byte)128, byte.MaxValue },
+    [typeof(short)] = new object[]
+        { short.MinValue, (short)-300, (short)-1, (short)0, (short)1, (short)3, short.MaxValue },
+    [typeof(ushort)] = new object[] { (ushort)0, (ushort)1, (ushort)3, (ushort)40000, ushort.MaxValue },
+    [typeof(int)] = new object[] { int.MinValue, -7, -1, 0, 1, 3, int.MaxValue },
+    [typeof(uint)] = new object[] { 0u, 1u, 3u, 0x80000000u, uint.MaxValue },
+    [typeof(long)] = new object[] { long.MinValue, -7L, -1L, 0L, 1L, 3L, long.MaxValue },
+    [typeof(ulong)] = new object[] { 0UL, 1UL, 3UL, 1UL << 63, ulong.MaxValue },
+    [typeof(nint)] = new object[] { nint.MinValue, (nint)(-7), (nint)(-1), (nint)0, (nint)1, (nint)3, nint.MaxValue },
+    [typeof(nuint)] = new object[] { (nuint)0, (nuint)1, (nuint)3, (nuint)(1UL << 63), nuint.MaxValue }
+};
+string BoundaryProof(IReadOnlyList<string> claims) =>
+    "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" +
+    "def memory : CIL.Safety.Memory := { Examples.caller with cells := fun _ _ => ⟨93, false⟩ }\n" +
+    string.Join("", claims.Select((claim, index) => $"theorem case{index} : {claim} := by rfl\n")) +
+    "theorem correctness :\n" + Balanced(claims, false) + " :=\n" +
+    Balanced(Enumerable.Range(0, claims.Count).Select(index => "case" + index).ToArray(), true) +
+    "\nend ExampleProof\n";
+var mathRequests = new List<GeneratedVerification>();
+var mathCases = 0;
+var faultKinds = new SortedSet<string>(StringComparer.Ordinal);
+void AddBoundary(string name, string selector, List<string> claims)
+{
+    var output = Path.Combine(root, name);
+    Directory.CreateDirectory(output);
+    var proof = Path.Combine(output, "BoundaryProof.lean");
+    File.WriteAllText(proof, BoundaryProof(claims));
+    mathRequests.Add(new GeneratedVerification(selector, proof, output));
+    mathCases += claims.Count;
+}
+string LeanType(Type type) => type == typeof(sbyte) ? "sbyte" : type == typeof(byte) ? "byte" :
+    type == typeof(short) ? "short" : type == typeof(ushort) ? "ushort" : type == typeof(int) ? "int" :
+    type == typeof(uint) ? "uint" : type == typeof(long) ? "long" : type == typeof(ulong) ? "ulong" :
+    type == typeof(nint) ? "nint" : "nuint";
+foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Static)
+    .Where(m => m.Name.StartsWith("Math", StringComparison.Ordinal) && m.ReturnType.IsGenericType))
+{
+    var type = method.GetParameters()[0].ParameterType;
+    var direct = typeof(Math).GetMethod("DivRem", [type, type])!;
+    var claims = new List<string>();
+    foreach (var left in operands[type])
+    foreach (var right in operands[type])
+    {
+        var (value, fault) = Observe(method, [left, right]);
+        var (directValue, directFault) = Observe(direct, [left, right]);
+        if (!Equals(value, directValue) || fault != directFault)
+            throw new InvalidOperationException($"Wrapper differs from Math.DivRem for {method.Name}({left}, {right})");
+        var arguments = $"[{StackArgument(left)}, {StackArgument(right)}]";
+        string outcome;
+        if (fault is not null)
+        {
+            faultKinds.Add($"{LeanType(type)} {fault}");
+            outcome = $".error ⟨0, 2, .arithmetic .{fault}⟩";
+        }
+        else
+        {
+            var bytes = (byte[])runtimeBytes.MakeGenericMethod(method.ReturnType).Invoke(null, [value])!;
+            outcome = $".ok [.scalar (.aggregate [{string.Join(", ", bytes)}])]";
+        }
+        claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 {arguments} Examples.empty).map Prod.snd = " +
+            outcome);
+    }
+    AddBoundary(method.Name, $"TupleDivision::{method.Name}({LeanType(type)},{LeanType(type)})", claims);
+}
+// The narrow Remainder field is read back sign-extended, with the wrapped sbyte.MinValue / -1 quotient.
+{
+    var method = runtime.GetMethod("MathSByteRemainder")!;
+    var claims = new List<string>();
+    foreach (var left in operands[typeof(sbyte)])
+    foreach (var right in operands[typeof(sbyte)])
+    {
+        var (value, fault) = Observe(method, [left, right]);
+        var outcome = fault is null ? $".ok [{StackArgument(value!)}]" : $".error ⟨0, 2, .arithmetic .{fault}⟩";
+        claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 [{StackArgument(left)}, {StackArgument(right)}] " +
+            $"Examples.empty).map Prod.snd = {outcome}");
+    }
+    AddBoundary("MathSByteRemainder", "TupleDivision::MathSByteRemainder(sbyte,sbyte)", claims);
+}
+// The out overloads store the remainder through a checked reference to uninitialized storage.
+foreach (var (name, type, width) in new[] { ("MathOutInt32", typeof(int), 4), ("MathOutInt64", typeof(long), 8) })
+{
+    var method = runtime.GetMethod(name)!;
+    var claims = new List<string>();
+    foreach (var left in operands[type])
+    foreach (var right in operands[type])
+    {
+        object?[] inputs = [left, right, null];
+        var (value, fault) = Observe(method, inputs);
+        // Reflection writes the out remainder back only when the call returns.
+        var outcome = fault is null
+            ? $".ok ([{StackArgument(value!)}], .ok {StackArgument(inputs[2]!)[".scalar ".Length..]})"
+            : $".error ⟨0, 3, .arithmetic .{fault}⟩";
+        claims.Add("(CIL.Safety.invoke Extracted.program 8 0 " +
+            $"[{StackArgument(left)}, {StackArgument(right)}, Examples.reference] memory).map " +
+            $"(fun (final, result) => (result, CIL.Safety.loadValue final (.address ⟨0, 0⟩) {width})) = {outcome}");
+    }
+    // The division faults before the store, so a null destination still reports DivideByZeroException.
+    string NullDestination(int left, int right) => "CIL.Safety.invoke Extracted.program 8 0 " +
+        $"[{StackArgument(Convert.ChangeType(left, type))}, {StackArgument(Convert.ChangeType(right, type))}, " +
+        ".reference .null] Examples.caller";
+    claims.Add($"{NullDestination(1, 0)} = .error ⟨0, 3, .arithmetic .divideByZero⟩");
+    claims.Add($"{NullDestination(7, 2)} = .error ⟨0, 3, .memory .nullDereference .null 0⟩");
+    AddBoundary(name, $"TupleDivision::{name}({LeanType(type)},{LeanType(type)},{LeanType(type)}&)", claims);
+}
+foreach (var required in new[] { "sbyte divideByZero", "int overflow", "long overflow", "nint overflow",
+    "ulong divideByZero" })
+    if (!faultKinds.Contains(required))
+        throw new InvalidOperationException("Runtime grid lacks the fault: " + required);
+if (faultKinds.Any(kind => kind.EndsWith("overflow", StringComparison.Ordinal) &&
+    kind.Split(' ')[0] is "sbyte" or "byte" or "short" or "ushort"))
+    throw new InvalidOperationException("A narrow DivRem overload faulted on overflow");
+verification.VerifyGeneratedBatch(assembly, "Examples", mathRequests);
+Console.WriteLine($"PASS {mathCases} Math.DivRem comparisons over ten tuple overloads, " +
+    "a narrow field read and two out overloads");
+
+var mathContract = At("Examples/Proofs/MathDivRemQuotient.lean");
+verification.Verify(assembly, "Examples", "TupleDivision::MathQuotient(int,int)", mathContract,
+    Path.Combine(root, "MathUniversal"));
+Console.WriteLine("PASS universal Math.DivRem quotient, divide-by-zero and MinValue / -1 overflow contract");
+var mathWrong = Path.Combine(root, "MathWrongQuotient");
+var mathRejected = false;
+try
+{
+    verification.Verify(assembly, "Examples", "TupleDivision::MathWrongQuotient(int,int)", mathContract, mathWrong);
+}
+catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
+{
+    mathRejected = true;
+}
+if (!mathRejected || File.Exists(Path.Combine(mathWrong, "verified.json")))
+    throw new InvalidOperationException("Math.DivRem remainder accepted as the quotient");
+Console.WriteLine("PASS Math.DivRem remainder rejected by the quotient contract");
+
+// A Math.DivRem tuple whose recomputed layout differs from the model never reaches it.
+{
+    var output = Path.Combine(root, "Reject-math-tuple");
+    Directory.CreateDirectory(output);
+    var dll = Path.Combine(output, "Examples.dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        var body = module.GetType("Examples.TupleDivision").Methods.Single(m => m.Name == "MathInt32").Body;
+        var call = (MethodReference)body.Instructions
+            .Single(i => i.Operand is MethodReference { Name: "DivRem" }).Operand;
+        var tuple = new GenericInstanceType(((GenericInstanceType)call.ReturnType).ElementType);
+        tuple.GenericArguments.Add(module.TypeSystem.Int32);
+        tuple.GenericArguments.Add(module.TypeSystem.Int64);
+        call.ReturnType = tuple;
+        module.Write(dll);
+    }
+    var result = Execute(Extract("extract", dll, "Examples", "TupleDivision::MathInt32(int,int)", output));
+    if (result.Code == 0 || File.Exists(Path.Combine(output, "Extracted.lean")))
+        throw new InvalidOperationException("Forged Math.DivRem tuple accepted\n" + result.Output);
+    Console.WriteLine("PASS rejection: math-tuple");
+}

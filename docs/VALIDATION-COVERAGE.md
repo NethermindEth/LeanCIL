@@ -42,6 +42,11 @@ that do not survive a loop backedge. Compiled profile guards exercise the same p
 Switch checks cover known, unknown, negative and out-of-range selectors, empty and duplicate
 tables, and backedge weakening. Unselected targets still reject out-of-range positions and
 tail-transfer interiors in both extraction and independent evidence validation.
+`Tests/FeatureEvidence.cs` proves that `AdvSimd.Arm64.IsSupported` agrees with `AdvSimd` under
+scalar, x64 and ARM64 profiles, that the unmodeled ARM64 body it guards blocks only
+`arm64-advsimd`, and that `Crc32.Arm64` and `Rdm.Arm64` stay unclassified.
+`BitConverter.IsLittleEndian` prunes its big-endian branch on those profiles; forged owners and values are rejected by both certificates,
+and lookalike scopes, fields and same-named module types are rejected by the extractor.
 
 The array, generic, layout and parameter evidence fixtures submit their 63 independent positive
 extractions in six batches. Each method retains fresh mutable metadata; immutable assembly bytes,
@@ -325,8 +330,11 @@ from inserting a placeholder. The ordinary shared tactic tests run unchanged.
 types against runtime results and certified checked execution. It also covers length, helper calls,
 aliases, returned arrays, named null/bounds faults and unsupported array forms. Generic integer
 and enum fills cover readback, neighboring bytes, empty arrays, named null exceptions and missing
-write authority. Independent changes to fill element identities, widths, operations, scope and
-arity, or load width and signedness, must fail the Lean scalar certificate. `Tests/PrimitiveArrays.lean`
+write authority. Ranged fills cover interior slices, end-position empty ranges, null-first faults
+and negative or overflowing bounds. Malformed or expired storage cannot establish a named
+runtime exception. Independent changes to fill element identities, widths,
+operations, scope, arity and range selection, or load width and signedness, must fail the Lean
+scalar certificate. `Tests/PrimitiveArrays.lean`
 covers empty and null arrays, signed and native indices, initialization, authority, invalid extents,
 local storage and neighboring-byte preservation. Both run in the evidence suite.
 
@@ -339,7 +347,9 @@ and address formation without granting memory authority. Both run in the evidenc
 returned and locally stored references, and proves that caller stores fail despite writable backing
 memory. It rejects independently forged writable evidence, separated prefixes and branches that skip
 a prefix. `Tests/ReadOnlyArrayReferences.lean` also checks alias updates, read access and rejection
-of an adapter that would remove the restriction. Both run in the evidence suite.
+of an adapter that would remove the restriction, plus readonly `GetReference` results for nonempty,
+empty and out-of-extent views and field loads, field addresses and rejected field stores through
+restricted references. Both run in the evidence suite.
 
 `Tests/StaticScalarValues.cs` compares 16 compiled readonly-field loads with the runtime, covering
 integer widths, Boolean/Char, native integers, signed/unsigned enums, helper initialization and
@@ -444,16 +454,19 @@ arguments checks everything and writes `artifacts/test-results.json`.
 | Aggregate and vector spans (`AggregateSpans`) | Reference-free aggregate buffers and integer vectors cover views, slicing, typed reads/writes, reinterpretation, overlap-safe copying and clearing. Vector masks and neighboring bytes are checked; vector-field layouts are certified for x64 and ARM64. Evidence mutations reject forged widths and write capabilities. |
 | Aggregate/vector fills (`AggregateSpanFill`) | Five compiled aggregate, Vector128/256/512 and aliased-source wrappers check repeated values, initialization masks, unknown-lane rejection, empty views, write authority and neighboring bytes. Independent evidence mutations reject changed aggregate/vector widths and clear/fill flags. |
 | Span constructors (`SpanConstructors`) | Single-reference and pointer constructors cover primitive, aggregate and integer-vector elements, mutable/readonly views and in-place local initialization without readable bytes. Empty getters and explicit default resets cover returns, helper calls and empty slices. Vector-field aggregate layouts are checked on x64 and ARM64; evidence mutations reject changed widths, capabilities and aggregate identities. Wrong scoped reset types and branches into reset folds are rejected. |
+| Span reference parameters (`SpanReferences`, `SpanReferenceContracts`, `SpanReferenceWordContract`, `SpanReferenceSecondContract`) | `in` and `ref readonly` span parameters cover loops, indexing, slicing, element writes, copies, forwarding, caller-side local, parameter and temporary addresses, closed generic helpers, a struct constructor, field reads and field addresses through writable and readonly aggregate elements, and `MemoryMarshal.GetReference` of readonly views, including a byte-order read and `Unsafe.Add`, `Subtract` and `AddByteOffset` offsets and an advancing cursor loop that stay readonly; symbolic `Contents` contracts prove an indexed read, a first-word read and a second-word read through `Unsafe.Add`. Kernel fixtures check expired backing storage, readonly element stores, writes and field stores through readonly `GetReference` results and their offsets against writable controls, one-past, beyond-end and negative readonly offsets, empty and out-of-extent readonly views and forged reference arguments. Evidence mutations reject a span-valued raw argument and a load in place of a span copy; rebinding, addressing or storing to the parameter, writable span parameters (including a generic helper's `ref` span and a generic definition stripped of its readonly markers), span reference returns and indirect copy sources are rejected during extraction. |
 | Supplied aggregate/vector arrays (`AggregateArrays`, `AggregateArrayStorage`) | Typed element addresses, loads/stores, lengths, span conversions and data references cover reference-free structs and integer vectors over existing storage. Kernel fixtures check masks, authority, bounds, lifetime and readonly views; independent evidence mutations reject changed element descriptors and operations. |
 | Closed generic structs (`GenericLayouts`) | Sequential same-assembly reference-free instantiations cover nested layouts, fields, direct instance methods and constructors through checked owner substitution and ordinary aggregate storage. Unsupported reference-bearing, open, non-sequential and interface/reference-constrained generic layouts remain rejected. |
 | Byte-order span transfers (`BinarySpans`) | Compiled wrappers exercise all 64 signed/unsigned 16-, 32-, 64-bit and native integer read/write/try endian overloads, short spans, read/write authority and uninitialized reads. Evidence mutations reject altered widths, endian choices, signedness and try behavior. |
-| No-read view observations (`ViewAccessors`) | Span emptiness, pinnable references and array data references cover empty/default/readonly views, empty and null arrays and observations without readable bytes or byte authority. Evidence mutations reject mismatched accessors and capabilities. |
+| No-read view observations (`ViewAccessors`) | Span emptiness, pinnable references, `MemoryMarshal.GetReference` of writable and readonly spans and array data references cover empty/default/readonly views, empty and null arrays and observations without readable bytes or byte authority. Evidence mutations reject mismatched accessors and capabilities. |
 | Closed generic owners (`GenericOwners`) | Static helpers on closed same-assembly generic owners, nested owners and combined owner/method arguments certify through structural substitution; evidence mutations reject incorrect owner and argument bindings. |
 | Native managed dispatch (`NativeManagedDispatch`, `NativeMethodTables`) | Supplied immutable native tables cover checked byte-offset loads, authenticated native target locals, separate numeric locals and tail dispatch. Fault and certificate controls reject invalid storage, target provenance and signature changes. |
 | Null managed references | `IsNullRef` of `NullRef` and of a live argument, reads and writes through `NullRef` (indirect and field) and an optional `ref` local: ten outcomes compared with .NET, each `NullReferenceException` matched to a located null-dereference fault; forged `NullRef`/`IsNullRef` translations rejected by the call binding; 22 malformed generic calls rejected |
 | Reference/null observations | Emitted CIL fixtures compare .NET and checked Lean execution for `ceq`, `brtrue`, `brfalse`, `beq`, `bne.un` and bounded `ldnull`; an independently changed equality operation must fail scalar evidence. Semantic fixtures cover readonly views, null, lifetime, invalid addresses, end pointers and disjoint allocation interiors. A null-message throw fixture preserves existing folding. |
 | Integer Math helpers | 21,804 runtime comparisons across 40 overloads; universal signed-minimum proof; incorrect implementation and seven malformed calls rejected |
 | `X86Base.X64.DivRem` through `ValueTuple<ulong, ulong>` Item1/Item2 reads | Runtime tuple offset probe; 500 checked-execution boundary cases across five read shapes compared with hardware and a `UInt128` oracle, including divide-by-zero and overflow faults; universal quotient and fault proof; remainder substituted for quotient rejected; eight forged calls, scopes and tuple layouts rejected |
+| `Math.DivRem` tuple and `out` overloads | Runtime equal-width tuple offset probe; 562 checked-execution comparisons with .NET over the ten tuple overloads, a narrow Item2 read and both `out` overloads, including divide-by-zero, wide `MinValue / -1` overflow, wrapping narrow `MinValue / -1` and null output faults; universal `int` quotient, divide-by-zero and overflow proof; remainder substituted for quotient rejected; forged mixed-width tuple rejected |
+| Signed and 32-bit `Math.BigMul` | Universal signed high/low proof with exact `Int` recomposition and 81 signed boundary cases with uninitialized output storage; unsigned high-word contract rejected for the signed call; universal exact `BigMul(int, int)` proof; 36 signed and 36 unsigned 32-bit boundary cases compared with .NET |
 | Library, scalar/SIMD semantics, allocation, permissions, initialization, lifetime and symbolic automation | Passed |
 | Ten extracted arithmetic, branching, call, aliasing, aggregate and semantic-negative proofs, each with artifact checks | Passed |
 | Compiled C# negation: universal modular additive-inverse contracts for 32- and 64-bit inputs | Both proofs passed |
@@ -580,7 +593,13 @@ and non-native 64-bit size operands. These run in the `evidence` suite.
 
 `Tests/ConstrainedCalls.cs` checks compiled implicit and explicit struct-interface calls, including
 closed generic owners and mutation through the receiver, and rejects forged generated call targets,
-owner arguments and malformed prefix, branch and interface-constraint metadata.
+owner arguments and malformed prefix, branch and interface-constraint metadata. Explicit
+implementations with `in` aggregate and span parameters (`modreq(InAttribute)`) are proved as
+entries and through constrained generic calls, including a generic helper forwarding its own `in`
+span; `modopt`, another `modreq` type, by-value and
+nested placements, versioned and foreign modifier scopes and a slot reference without the
+modifier are rejected, as are a `ref readonly` return and both members of a modifier-only
+overload pair.
 `Tests/ConstrainedResolution.cs` checks the extractor's resolution rules;
 `Tests/ConstrainedEvidence.lean` independently checks Lean resolution, target, signature, ambiguity
 and prefix rejection. These run in the `evidence` suite.

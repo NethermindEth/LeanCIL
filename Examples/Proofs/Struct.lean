@@ -67,12 +67,9 @@ theorem correctness (memory : Memory) (x : CIL.W64) (wellFormed : memory.WellFor
       checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
   refine ⟨CIL.executionBound Extracted.program 0, leaveFrame frame tagged, ?_, ?_⟩
   · apply invoke_of_run (by simp only [cil_code] <;> rfl) rfl setup
-    cil_checked_steps [checkedValue, numericValue, initStep, instruction,
-      observerCount, CIL.MemoryOp.argumentCount, unspecifiedOperands,
-      Value.hasUnspecified, CIL.Value.hasUnspecified, localAddress, frame, formValue,
-      enteredForm, initializedForm, payloadForm, taggedForm, payloadAddress, tagAddress,
-      readAddress, loaded, initializedWrite, payloadWrite, tagWrite, referenceAt, ordinaryAccessAlignment,
-      checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+    cil_checked_steps [initStep, localAddress, frame, enteredForm, initializedForm, payloadForm,
+      taggedForm, payloadAddress, tagAddress, readAddress, loaded, initializedWrite, payloadWrite,
+      tagWrite, referenceAt, ordinaryAccessAlignment]
   · have first := write_preserves_memory_below _ _ _ _ _ memory.nextIdentity fresh.1 initializedWrite
     have second := write_preserves_memory_below _ _ _ _ _ memory.nextIdentity fresh.1 payloadWrite
     have third := write_preserves_memory_below _ _ { reference with offset := reference.offset + 8 } _ _ memory.nextIdentity fresh.1 tagWrite

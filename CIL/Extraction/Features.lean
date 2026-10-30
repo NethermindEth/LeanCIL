@@ -43,9 +43,10 @@ def factsWeaken (source target : List (Option W32)) : Bool :=
 def FeatureState.weakens (source target : FeatureState) : Bool :=
   factsWeaken source.stack target.stack && factsWeaken source.locals target.locals
 
-/-- The admitted feature classes, by name under `System.Runtime.Intrinsics`. -/
+/-- The admitted feature classes, by name under `System.Runtime.Intrinsics`.
+    .NET 10 reports `AdvSimd.Arm64` exactly when it reports `AdvSimd` (docs/RUNTIME-PROFILES.md). -/
 private def featureNames : List (String × Feature) := [
-  ("Arm.AdvSimd", .advSimd), ("Arm.ArmBase/Arm64", .armBase64),
+  ("Arm.AdvSimd", .advSimd), ("Arm.AdvSimd/Arm64", .advSimd), ("Arm.ArmBase/Arm64", .armBase64),
   ("X86.Sse2", .sse2), ("X86.Ssse3", .ssse3), ("X86.Sse41", .sse41),
   ("X86.Sse42", .sse42), ("X86.Avx", .avx), ("X86.Avx2", .avx2),
   ("X86.Avx512F", .avx512F), ("X86.Avx512F/VL", .avx512FVL),
@@ -127,6 +128,14 @@ def platformConstant (site : CallSite) : Option W32 := do
         site.target != .external (runtimeScope ++ "::" ++ result ++ " " ++ owner ++
           "::" ++ site.name ++ "()") then none
     else some (if site.name == "get_Size" then 8 else 1)
+
+/-- `ldsfld` of the System.Runtime `BitConverter` static Boolean, whose only such field is
+    `IsLittleEndian`; the raw operand omits field names, so the extractor checks the member.
+    Valid profiles are little-endian, so the load is the constant 1. -/
+def platformField (instruction : RawInstruction) : Option W32 :=
+  if instruction.opcode == 126 && instruction.operand ==
+      .field (.atom runtimeScope "System.BitConverter") 0 (.atom runtimeScope "System.Boolean") true
+  then some 1 else none
 
 /-- Classify reference-free storage against a table whose `LayoutsValid` is checked separately.
     Aggregate identity lookup does not revalidate fields or confer memory access authority. -/
@@ -266,7 +275,7 @@ private def featureTransferWith (layouts : Array RawLayout) (raw : RawMethod)
     (eligible : Nat → Option W32 → Bool)
     (profile : FeatureProfile)
     (instruction : RawInstruction) (state : FeatureState) : Option FeatureState := do
-  if let some word := constant32 instruction then
+  if let some word := constant32 instruction <|> platformField instruction then
     return { state with stack := some word :: state.stack }
   -- `ldloc` and `stloc`; a store keeps its fact only in an eligible local.
   if instruction.opcode ∈ [6, 7, 8, 9, 17, 65036] then
@@ -428,8 +437,11 @@ private def featureOpMatchesWith (layouts : Array RawLayout) (raw : RawMethod)
       | .none, .stackAlloc flag => flag == raw.initLocals
       | _, _ => false
   if let .stackAlloc _ := emitted then return false
-  if let some word := constant32 instruction then
+  if let some word := constant32 instruction <|> platformField instruction then
     return match emitted with | .const32 actual => word == actual | _ => false
+  -- Any other static load is never a constant.
+  if instruction.opcode == 126 && (match emitted with | .const32 _ => true | _ => false) then
+    return false
   if let .call site := instruction.operand then
     if referenceContentQuery site then
       return match referenceContentConstant layouts site, emitted with
@@ -468,6 +480,10 @@ private def featureOpMatchesWith (layouts : Array RawLayout) (raw : RawMethod)
       | _ => false
   if instruction.opcode ∈ [16, 65035] then
     return match emitted with | .setLocal index none => raw.locals.length <= index | _ => false
+  -- A span address on the stack is already the view it names, so copying the span emits nothing.
+  if instruction.opcode == 113 then
+    if let .type type := instruction.operand then
+      if spanLocal type then return match emitted with | .nop => true | _ => false
   -- A native-width wrapper is looked through only for bitwise operations, comparisons and
   -- two-operand branches.
   let emitted := match emitted with

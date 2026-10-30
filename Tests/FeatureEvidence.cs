@@ -28,6 +28,26 @@ object SelectProfile(string name) => selectProfile.Invoke(null, [name])!;
 var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 var sharedCases = RuntimeProfileValidation.Observations(
     Directory.GetFiles(At("docs/evidence/runtime-profiles"), "*.json")).ToList();
+// Getters read AdvSimd.Arm64 as AdvSimd, so observations that omit or split it are refused.
+var recorded = JsonNode.Parse(File.ReadAllText(At("docs/evidence/runtime-profiles/macos-arm64-net10.json")))!;
+foreach (var (name, mutate) in new (string, Action<JsonObject>)[]
+{
+    ("missing", observed => observed.Remove("advSimd64")),
+    ("split", observed => observed["advSimd64"] = !observed["advSimd"]!.GetValue<bool>())
+})
+{
+    var observations = recorded.DeepClone();
+    mutate(observations[0]!["observed"]!.AsObject());
+    var observationPath = Path.Combine(output, $"advsimd64-{name}.json");
+    File.WriteAllText(observationPath, observations.ToJsonString());
+    try
+    {
+        _ = RuntimeProfileValidation.Observations([observationPath]).ToList();
+        throw new InvalidOperationException("AdvSimd.Arm64 observation accepted: " + name);
+    }
+    catch (InvalidDataException error) when (error.Message.Contains("AdvSimd.Arm64", StringComparison.Ordinal)) { }
+    Console.WriteLine("PASS AdvSimd.Arm64 observation rejected: " + name);
+}
 foreach (var name in new[] { "scalar", "x64-sse2", "x64-sse42", "x64-v3", "x64-v4", "arm64-advsimd" })
     sharedCases.Add((JsonSerializer.Serialize(SelectProfile(name), jsonOptions), true));
 foreach (var name in new[] { "x64-avx2", "x64-avx2-bmi1", "x64-avx512", "x64-avx512-bmi1",
@@ -122,6 +142,44 @@ foreach (var (profile, flags) in new[] { ("scalar", 0), ("x64-v3", 3), ("arm64-a
         ".ok [.scalar (.i32 17)] := rfl\n#print axioms correctness\nend ExampleProof\n");
     capabilitiesQueue.Add(new("Capabilities::Platform()", platform, Path.Combine(capabilities, "Platform"), Profile: profile),
         () => Console.WriteLine($"PASS platform constants and pruned unsupported branch under {profile}"));
+    // AdvSimd.Arm64 and AdvSimd share one answer, so ArmFlags is 0 or 3 and never 1 or 2.
+    var armFlags = profile == "arm64-advsimd" ? 3 : 0;
+    var armProof = Path.Combine(capabilities, "ArmFlags.lean");
+    File.WriteAllText(armProof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" +
+        "theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [] Examples.empty).map Prod.snd = " +
+        $".ok [.scalar (.i32 {armFlags})] := rfl\n#print axioms correctness\nend ExampleProof\n");
+    capabilitiesQueue.Add(
+        new("Capabilities::ArmFlags()", armProof, Path.Combine(capabilities, "ArmFlags"), Profile: profile),
+        () => Console.WriteLine($"PASS AdvSimd.Arm64 follows AdvSimd under {profile}: {armFlags}"));
+    var endianProof = Path.Combine(capabilities, "Endian.lean");
+    File.WriteAllText(endianProof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" +
+        "theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [] Examples.empty).map Prod.snd = " +
+        ".ok [.scalar (.i32 1)] := rfl\n#print axioms correctness\nend ExampleProof\n");
+    capabilitiesQueue.Add(
+        new("Capabilities::Endian()", endianProof, Path.Combine(capabilities, "Endian"), Profile: profile),
+        () => Console.WriteLine($"PASS BitConverter.IsLittleEndian prunes the big-endian branch under {profile}"));
+}
+// The unmodeled ARM64 body is pruned without AdvSimd and blocks extraction with it.
+foreach (var profile in new[] { "scalar", "x64-v4", "arm64-advsimd" })
+{
+    var result = Execute(Extract("extract", assembly, "Examples", "Capabilities::ArmCount(ulong)",
+        Path.Combine(output, "ArmCount-" + profile), profile));
+    var blocked = result.Output.Contains("External managed dependency", StringComparison.Ordinal) &&
+        result.Output.Contains("ArmBase/Arm64::LeadingSignCount", StringComparison.Ordinal);
+    if (profile == "arm64-advsimd" ? result.Code == 0 || !blocked : result.Code != 0)
+        throw new InvalidOperationException($"AdvSimd.Arm64 branch selection failed under {profile}:\n{result.Output}");
+    var body = blocked ? "rejected ARM64" : "portable";
+    Console.WriteLine($"PASS AdvSimd.Arm64 selects the {body} body under {profile}");
+}
+foreach (var (method, owner) in new[] { ("Crc64", "Crc32/Arm64"), ("Rdm64", "Rdm/Arm64") })
+{
+    var result = Execute(Extract("extract", assembly, "Examples", $"Capabilities::{method}()",
+        Path.Combine(output, "Unclassified-" + method), "arm64-advsimd"));
+    if (result.Code == 0 || !result.Output.Contains(
+            $"Unclassified feature getter: System.Boolean System.Runtime.Intrinsics.Arm.{owner}::get_IsSupported()",
+            StringComparison.Ordinal))
+        throw new InvalidOperationException($"Nested ARM64 getter was classified: {owner}\n{result.Output}");
+    Console.WriteLine("PASS unmeasured nested ARM64 getter rejected: " + owner);
 }
 var referenceQueryFolder = Path.Combine(output, "ReferenceQuery");
 Directory.CreateDirectory(referenceQueryFolder);
@@ -290,6 +348,70 @@ foreach (var (obligation, diagnostic) in new[]
     rejected.Add(forged, "PASS exact platform constant rejection: " + diagnostic, diagnostic);
 }
 platformControls.Check(replay: false);
+// Lean binds the raw endianness load to System.Runtime's BitConverter Boolean and the value 1.
+var endianSource = File.ReadAllText(Path.Combine(output, "Capabilities-scalar", "Endian", "Extracted.lean"));
+var endianControls = new GeneratedEvidence(Path.Combine(output, "EndianControls"));
+foreach (var (obligation, diagnostic) in new[]
+{
+    (featureObligation, "FeatureFlowValid"), ("method0_scalars_validated", "ScalarFlowValid")
+})
+{
+    var narrowed = NarrowEvidence(endianSource, obligation);
+    var controlPath = Path.Combine(output, obligation + "-endian.lean");
+    File.WriteAllText(controlPath, narrowed);
+    endianControls.Add(controlPath, "PASS exact endianness constant control: " + diagnostic, obligation);
+    const string literal = ".const32 1";
+    var position = narrowed.IndexOf(literal, StringComparison.Ordinal);
+    if (position < 0) throw new InvalidOperationException("Missing endianness constant");
+    var forgedValue = Path.Combine(output, obligation + "-wrong-endian.lean");
+    File.WriteAllText(forgedValue, narrowed[..position] + ".const32 0" + narrowed[(position + literal.Length)..]);
+    rejected.Add(forgedValue, "PASS endianness constant value rejection: " + diagnostic, diagnostic);
+    const string owner = ".atom Extraction.runtimeScope \"System.BitConverter\"";
+    if (!narrowed.Contains(owner, StringComparison.Ordinal))
+        throw new InvalidOperationException("Missing endianness owner");
+    var forgedOwner = Path.Combine(output, obligation + "-forged-endian-owner.lean");
+    File.WriteAllText(forgedOwner,
+        narrowed.Replace(owner, ".atom \"forged\" \"System.BitConverter\"", StringComparison.Ordinal));
+    rejected.Add(forgedOwner, "PASS endianness owner forgery rejection: " + diagnostic, diagnostic);
+}
+endianControls.Check(replay: false);
+foreach (var mutation in new[] { "scope", "field", "module-type" })
+{
+    using var module = ModuleDefinition.ReadModule(assembly);
+    var method = module.Types.Single(type => type.FullName == "Examples.Capabilities")
+        .Methods.Single(method => method.Name == "Endian");
+    var load = method.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Ldsfld);
+    var field = (FieldReference)load.Operand;
+    var diagnostic = "Only System.Runtime's static readonly BitConverter.IsLittleEndian is a platform constant";
+    switch (mutation)
+    {
+        case "scope": field.DeclaringType.Scope = new AssemblyNameReference("Forged", new Version(10, 0)); break;
+        case "field":
+            load.Operand = new FieldReference("IsBigEndian", field.FieldType, field.DeclaringType);
+            diagnostic = "Only same-assembly static readonly";
+            break;
+        case "module-type":
+            const Mono.Cecil.TypeAttributes staticClass = Mono.Cecil.TypeAttributes.Public |
+                Mono.Cecil.TypeAttributes.Abstract | Mono.Cecil.TypeAttributes.Sealed;
+            const Mono.Cecil.FieldAttributes readonlyStatic = Mono.Cecil.FieldAttributes.Public |
+                Mono.Cecil.FieldAttributes.Static | Mono.Cecil.FieldAttributes.InitOnly;
+            var forged = new TypeDefinition("System", "BitConverter", staticClass, module.TypeSystem.Object);
+            var forgedField = new FieldDefinition("IsLittleEndian", readonlyStatic, module.TypeSystem.Boolean);
+            forged.Fields.Add(forgedField);
+            module.Types.Add(forged);
+            load.Operand = forgedField;
+            break;
+    }
+    var modified = Path.Combine(output, "endian-" + mutation + ".dll");
+    module.Write(modified);
+    var result = Execute(Extract("extract", modified, "Examples", "Capabilities::Endian()",
+        Path.Combine(output, "endian-" + mutation)));
+    if (result.Code == 0 || !result.Output.Contains("Unsupported static field load", StringComparison.Ordinal) ||
+        !result.Output.Contains(diagnostic, StringComparison.Ordinal))
+        throw new InvalidOperationException(
+            "Endianness lookalike accepted or misreported: " + mutation + "\n" + result.Output);
+    Console.WriteLine("PASS endianness lookalike rejected: " + mutation);
+}
 var comparisonEvidence = NarrowEvidence(platformSource, featureObligation);
 foreach (var (name, before, after) in new[]
 {

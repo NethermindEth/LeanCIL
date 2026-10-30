@@ -57,6 +57,20 @@ theorem SpanView.slice_valid (view result : SpanView) (memory : Memory) (start l
     | split at sliced
     | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at sliced
 
+/-- Slicing an addressed view retains its allocation and advances by whole elements. -/
+theorem SpanView.slice_reference (view result : SpanView) (memory : Memory)
+    (start length : Nat) (base : Reference) (address : view.reference = .address base)
+    (sliced : view.slice memory start length = .ok result) :
+    result.reference = .address { base with offset := base.offset + start * view.width } := by
+  unfold SpanView.slice at sliced
+  simp only [address] at sliced
+  repeat' first
+    | cases sliced
+    | split at sliced
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at sliced
+  rfl
+#print axioms SpanView.slice_reference
+
 /-- A successful element lookup yields a reference that forms in the same memory. -/
 theorem SpanView.element_formed (view : SpanView) (memory : Memory) (index : Nat)
     (reference : Reference) (found : view.element memory index = .ok reference) :

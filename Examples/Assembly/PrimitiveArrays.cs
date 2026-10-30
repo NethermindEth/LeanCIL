@@ -8,6 +8,12 @@ public static class PrimitiveArrays
     public static void FillGeneric<T>(T[] values, T value) => System.Array.Fill(values, value);
     public static void FillIntegers(int[] values, int value) => FillGeneric(values, value);
     public static void FillEnums(AllocationTag[] values, AllocationTag value) => FillGeneric(values, value);
+    public static void FillRangeGeneric<T>(T[] values, T value, int start, int count) =>
+        System.Array.Fill(values, value, start, count);
+    public static void FillRangeIntegers(int[] values, int value, int start, int count) =>
+        FillRangeGeneric(values, value, start, count);
+    public static void FillRangeEnums(AllocationTag[] values, AllocationTag value, int start, int count) =>
+        FillRangeGeneric(values, value, start, count);
     public static sbyte ReadSByte(sbyte[] values, int index) => values[index];
     public static byte ReadByte(byte[] values, int index) => values[index];
     public static short ReadInt16(short[] values, int index) => values[index];

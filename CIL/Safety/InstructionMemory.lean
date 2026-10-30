@@ -27,7 +27,8 @@ inductive Value where
   | bufferSpan (view : SpanView)
   /-- A supplied primitive array; its length is immutable and does not grant byte authority. -/
   | array (view : ArrayView)
-  /-- A reference obtained through a readonly view; scalar loads preserve this restriction. -/
+  /-- A reference obtained through a readonly view. Loads and field reads go through it, field
+      addresses keep the restriction, and stores through it fail. -/
   | readOnlyReference (reference : ManagedReference)
   /-- Callable identities cannot be forged by arithmetic or byte reinterpretation. -/
   | methodPointer (pointer : CIL.MethodPointer)
@@ -375,16 +376,28 @@ def spanFillInstruction (width : Nat) (clear : Bool) (stack : List Value) (memor
         (view.fillSnapshot memory bytes), rest)
   | _, _ => .error .invalidState
 
-/-- Whole-array fill delegates to the checked span fill after preserving typed null semantics. -/
-def arrayFillInstruction (element : CIL.ArrayElement) (stack : List Value) (memory : Memory) :
-    ExecutionResult (Memory × List Value) :=
-  match stack with
-  | .scalar value :: .array view :: rest =>
-    if view.elementType != element then .error .invalidState
-    else if view.reference == .null then .error (.thrown "System.ArgumentNullException")
-    else spanFillInstruction element.width false
-      (.scalar value :: .bufferSpan view.storage :: rest) memory
-  | .scalar _ :: .reference .null :: _ => .error (.thrown "System.ArgumentNullException")
+/-- Array fill delegates to checked span slicing and writes after preserving null semantics. -/
+def arrayFillInstruction (element : CIL.ArrayElement) (counted : Bool)
+    (stack : List Value) (memory : Memory) : ExecutionResult (Memory × List Value) := do
+  let (value, input, rest, range) ← match counted, stack with
+    | false, .scalar value :: input :: rest => pure (value, input, rest, none)
+    | true, .scalar (.i32 count) :: .scalar (.i32 start) :: .scalar value :: input :: rest =>
+      pure (value, input, rest, some (start.toNat, count.toNat))
+    | _, _ => .error .invalidState
+  match input with
+  | .array view =>
+    if view.elementType != element then .error .invalidState else do
+      let _ ← checkedAt view.reference 0 (view.validate memory)
+      if view.reference == .null then .error (.thrown "System.ArgumentNullException") else do
+        let storage ← match range with
+          | none => pure view.storage
+          | some (start, count) => do
+            if start ≤ view.length && count ≤ view.length - start then pure ()
+              else .error (.thrown "System.ArgumentOutOfRangeException")
+            checkedAt view.reference 0 (view.storage.slice memory start count)
+        spanFillInstruction element.width false
+          (.scalar value :: .bufferSpan storage :: rest) memory
+  | .reference .null => .error (.thrown "System.ArgumentNullException")
   | _ => .error .invalidState
 
 /-- A fixed-width integer in the requested byte order, with the required narrow extension. -/
@@ -496,17 +509,59 @@ def pointerTransferInstruction (kind : CIL.TransferKind) (alignment : Nat) (stor
     .error (.memory .unwritable reference kind.width)
   | _, _ => .error .invalidState
 
-/-- Adds a scalar offset to a checked reference while preserving its allocation identity. -/
+/-- Displaces a checked reference by `displacement` elements of `size` bytes within its
+    allocation; the result passes the lifetime and bounds check but grants no access. -/
+def displaceReference (memory : Memory) (reference : ManagedReference) (size : Nat)
+    (displacement : Int) : ExecutionResult ManagedReference := do
+  let address ← referenceAt reference
+  let result ← checkedAt reference 0 (add memory address size (BitVec.ofInt 64 displacement))
+  return .address result
+
+/-- Adds a scalar offset to a checked reference while preserving its allocation identity and
+    its write capability: a readonly reference yields a readonly result. -/
 def referenceAddInstruction (size : Nat) (signed : Bool) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) := do
   match stack with
   | .scalar value :: .reference reference :: rest
   | .reference reference :: .scalar value :: rest =>
     let some offset := CIL.offsetValue signed value | .error .invalidState
-    let address ← referenceAt reference
-    let result ← checkedAt reference 0 (add memory address size (BitVec.ofInt 64 offset))
-    return (memory, .reference (.address result) :: rest)
+    return (memory, .reference (← displaceReference memory reference size offset) :: rest)
+  | .scalar value :: .readOnlyReference reference :: rest
+  | .readOnlyReference reference :: .scalar value :: rest =>
+    let some offset := CIL.offsetValue signed value | .error .invalidState
+    return (memory, .readOnlyReference (← displaceReference memory reference size offset) :: rest)
   | _ => .error .invalidState
+
+/-- `Math.BigMul` and `Math.DivRem` with an out reference: each pushes its arithmetic result
+    and stores one word through the checked reference. A division fault precedes the store. -/
+def wideArithmeticInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  match operation, stack with
+  | .bigMul64 false, .reference low :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest =>
+    return (← storeValue memory low (.i64 (left * right)),
+      .scalar (.i64 (CIL.WideMultiply.high64 left right)) :: rest)
+  | .bigMul64 true, .reference low :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest =>
+    return (← storeValue memory low (.i64 (left * right)),
+      .scalar (.i64 (CIL.WideMultiply.signedHigh64 left right)) :: rest)
+  | .divRemOut 32,
+      .reference destination :: .scalar (.i32 right) :: .scalar (.i32 left) :: rest =>
+    match CIL.divRemBits true left right with
+    | .error fault => .error (.arithmetic fault)
+    | .ok (quotient, remainder) =>
+      let address ← referenceAt destination
+      return (← checkedAt destination 4
+        (write memory address (numberBytes remainder.toNat 4) ordinaryAccessAlignment),
+        .scalar (.i32 quotient) :: rest)
+  | .divRemOut 64,
+      .reference destination :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest =>
+    match CIL.divRemBits true left right with
+    | .error fault => .error (.arithmetic fault)
+    | .ok (quotient, remainder) =>
+      let address ← referenceAt destination
+      return (← checkedAt destination 8
+        (write memory address (numberBytes remainder.toNat 8) ordinaryAccessAlignment),
+        .scalar (.i64 quotient) :: rest)
+  | _, _ => .error .invalidState
 
 /-- Executes the remaining memory operations after the shared operand guard. -/
 def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
@@ -537,10 +592,7 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
       let value ← loadTransfer memory source kind
       let result ← storeTransfer memory view.reference kind value
       if trying then return (result, .scalar (.i32 1) :: rest) else return (result, rest)
-  -- Wide multiply, block copy and block initialization
-  | .bigMul64, .reference low :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest =>
-    return (← storeValue memory low (.i64 (left * right)),
-      .scalar (.i64 (CIL.WideMultiply.high64 left right)) :: rest)
+  -- Block copy and block initialization
   | .copyBlock alignment,
       .scalar (.i32 count) :: .reference source :: .reference destination :: rest =>
     let width := count.toNat
@@ -725,6 +777,13 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     return (memory, .scalar (.i32 (BitVec.ofNat 32 view.length)) :: rest)
   | .spanReference, .span r _ :: rest =>
     return (memory, (← formValue memory r) :: rest)
+  -- Unlike `GetPinnableReference`, an empty view still yields its own reference, never null.
+  -- A readonly view grants only a readonly reference, though .NET types the result `ref T`.
+  | .spanReference, .bufferSpan view :: rest =>
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    let formed ← formValue memory view.reference
+    return (memory, (if view.writable then formed
+      else .readOnlyReference view.reference) :: rest)
   -- Unsigned comparison: a negative index is out of range, as in `ReadOnlySpan<T>.this[int]`.
   | .spanItem width, .scalar (.i32 index) :: .span r length :: rest =>
     if index.toNat < length then
@@ -779,7 +838,8 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .observeView observation => viewObservationInstruction observation stack memory
   | .spanCopy width tryCopy => spanCopyInstruction width tryCopy stack memory
   | .spanFill width clear => spanFillInstruction width clear stack memory
-  | .arrayFill element => arrayFillInstruction element stack memory
+  | .arrayFill element counted => arrayFillInstruction element counted stack memory
+  | .bigMul64 _ | .divRemOut _ => wideArithmeticInstruction operation stack memory
   | _ => otherMemoryInstruction operation stack memory
 
 /-- Runs an op on the stack (top first) and memory: loads, stores, typed copies, aggregate
@@ -837,6 +897,10 @@ def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
   | .fieldAddress offset, .reference (.address r) :: rest =>
     let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
     return (m, .reference (.address address) :: rest)
+  -- A field of a readonly reference keeps the restriction, as `readonly. ldelema` results do.
+  | .fieldAddress offset, .readOnlyReference (.address r) :: rest =>
+    let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
+    return (m, .readOnlyReference (.address address) :: rest)
   | .fieldAt offset width signed, .scalar (.aggregate bytes) :: rest =>
     if offset + width > bytes.length then .error .invalidState else
       let number := byteNumber ((bytes.drop offset).take width)
@@ -861,7 +925,8 @@ def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
   | .aggregateFieldAt offset size, .scalar (.aggregate bytes) :: rest =>
     if offset + size > bytes.length then .error .invalidState else
       return (m, .scalar (.aggregate ((bytes.drop offset).take size)) :: rest)
-  | .aggregateFieldAt offset size, .reference reference :: rest =>
+  | .aggregateFieldAt offset size, .reference reference :: rest
+  | .aggregateFieldAt offset size, .readOnlyReference reference :: rest =>
     let r ← referenceAt reference
     let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
     let bytes ← checkedAt (.address address) size (read m address size ordinaryAccessAlignment)
@@ -872,7 +937,8 @@ def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
       let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
       return (← checkedAt (.address address) size
         (write m address bytes ordinaryAccessAlignment), rest)
-  | .fieldAt offset width signed, .reference (.address r) :: rest =>
+  | .fieldAt offset width signed, .reference (.address r) :: rest
+  | .fieldAt offset width signed, .readOnlyReference (.address r) :: rest =>
     let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
     return (m, .scalar (← loadValue m (.address address) width signed) :: rest)
   | .setFieldAt offset 16, .scalar value :: .reference (.address r) :: rest =>
@@ -895,8 +961,13 @@ def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
     let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
     return (← checkedAt (.address address) width
       (write m address (numberBytes number width) ordinaryAccessAlignment), rest)
+  -- Field stores need write permission, however the backing allocation may be written.
+  | .setFieldAt _ width, _ :: .readOnlyReference r :: _ => .error (.memory .unwritable r width)
+  | .setAggregateFieldAt _ size, _ :: .readOnlyReference r :: _ =>
+    .error (.memory .unwritable r size)
   -- Field and lane accesses through null fault like `referenceAt`, before any offset is formed.
   | .fieldAt .., .reference .null :: _ | .fieldAddress _, .reference .null :: _
+  | .fieldAt .., .readOnlyReference .null :: _ | .fieldAddress _, .readOnlyReference .null :: _
   | .lane _, .reference .null :: _ | .laneAddress _, .reference .null :: _
   | .setFieldAt .., .scalar _ :: .reference .null :: _
   | .setLane _, .scalar _ :: .reference .null :: _ =>

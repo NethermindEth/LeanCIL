@@ -27,7 +27,7 @@ internal static class InstructionTranslation
         if (nativeOperands.Incoming.TryGetValue(i, out var dispatchStack))
         {
             if (i.OpCode.Code == Code.Add && dispatchStack.Length >= 2 &&
-                dispatchStack[^2].Kind == NativeOperands.Kind.NativeMethodTable)
+                NativeOperands.NativeTableAddition(dispatchStack[^2], dispatchStack[^1]))
                 return ".managed .tableOffset";
             if (i.OpCode.Code == Code.Ldind_I && dispatchStack.LastOrDefault() is
                 { Kind: NativeOperands.Kind.NativeMethodTable, Metadata: { } signature })
@@ -151,6 +151,15 @@ internal static class InstructionTranslation
         }
         if (i.OpCode.Code is Code.Ldobj or Code.Stobj or Code.Initobj or Code.Sizeof or Code.Cpobj && i.Operand is TypeReference operandType)
             RuntimeModels.ValidateTypeIdentity(operandType, m.Module, profile.Architecture);
+        if (i.OpCode.Code is Code.Ldobj or Code.Stobj or Code.Initobj or Code.Cpobj &&
+            i.Operand is TypeReference spanType && Spans.Is(spanType))
+        {
+            // A span address on the stack is the view itself, so a copy leaves it in place.
+            if (i.OpCode.Code != Code.Ldobj)
+                throw new InvalidDataException($"Unsupported store to a span home: {i}");
+            SpanReferences.ValidateCopy(m, i, instructions);
+            return ".nop";
+        }
         if (i.OpCode.Code is Code.Call or Code.Newobj)
         {
             var r = (MethodReference)i.Operand;
@@ -210,6 +219,8 @@ internal static class InstructionTranslation
             Code.Bgt or Code.Bgt_S => $".bgt {Target()}",
             Code.Ble or Code.Ble_S => $".ble {Target()}",
             Code.Ble_Un or Code.Ble_Un_S => $".bleu {Target()}",
+            Code.Ldsfld when FeatureProfile.PlatformField((FieldReference)i.Operand) is int constant =>
+                $".const32 {constant}",
             Code.Ldsfld or Code.Ldsflda when StaticValues.IsLoad(i) =>
                 $".memory (.{(i.OpCode.Code == Code.Ldsfld ? "staticValue" : "staticAddress")} " +
                 $"{StaticData.LeanBytes(StaticValues.Resolve((FieldReference)i.Operand, m.Module, profile.Architecture).Bytes)})",

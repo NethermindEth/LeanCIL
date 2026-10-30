@@ -12,6 +12,14 @@ public static class Bits
     public static int PrimitiveTrailing32(int value) => int.TrailingZeroCount(value);
     public static uint PrimitiveTrailingU32(uint value) => uint.TrailingZeroCount(value);
     public static uint PrimitiveLogU32(uint value) => uint.Log2(value);
+    public static long PrimitiveCounts64(long value) => long.PopCount(value) |
+        (long.LeadingZeroCount(value) << 8) | (long.TrailingZeroCount(value) << 16);
+    public static ulong PrimitiveCountsU64(ulong value) => ulong.PopCount(value) |
+        (ulong.LeadingZeroCount(value) << 8) | (ulong.TrailingZeroCount(value) << 16) | (ulong.Log2(value) << 24);
+    public static nint PrimitiveCountsNative(nint value) => nint.PopCount(value) |
+        (nint.LeadingZeroCount(value) << 8) | (nint.TrailingZeroCount(value) << 16);
+    public static nuint PrimitiveCountsUNative(nuint value) => nuint.PopCount(value) |
+        (nuint.LeadingZeroCount(value) << 8) | (nuint.TrailingZeroCount(value) << 16) | (nuint.Log2(value) << 24);
     public static bool PrimitivePower32(int value) => int.IsPow2(value);
     public static bool PrimitivePowerU32(uint value) => uint.IsPow2(value);
     public static bool PrimitivePower64(long value) => long.IsPow2(value);

@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
 
 namespace Examples;
@@ -23,6 +24,20 @@ public static class Capabilities
 
     // Each getter folds to the selected profile's flag.
     public static uint Flags() => (X86Base.X64.IsSupported ? 1u : 0u) | (Vector128.IsHardwareAccelerated ? 2u : 0u);
+
+    // AdvSimd.Arm64 folds with AdvSimd, so the two flags always agree.
+    public static uint ArmFlags() => (AdvSimd.Arm64.IsSupported ? 1u : 0u) | (AdvSimd.IsSupported ? 2u : 0u);
+
+    // The ARM64 body is unmodeled: only profiles without AdvSimd prune it.
+    public static int ArmCount(ulong value) =>
+        AdvSimd.Arm64.IsSupported ? ArmBase.Arm64.LeadingSignCount((long)value) : (int)(value & 1);
+
+    public static bool Crc64() => Crc32.Arm64.IsSupported;
+
+    public static bool Rdm64() => Rdm.Arm64.IsSupported;
+
+    // Valid profiles are little-endian, so the big-endian branch is pruned.
+    public static int Endian() => BitConverter.IsLittleEndian ? 1 : (int)Math.Sqrt(2);
 
     public static int Platform()
     {

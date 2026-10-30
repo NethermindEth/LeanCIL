@@ -25,6 +25,10 @@ internal static class NativeOperands
         left == Kind.Reference && right.Kind is Kind.Word32 or Kind.Native ||
         right == Kind.Reference && left.Kind is Kind.Word32 or Kind.Native;
 
+    internal static bool NativeTableAddition(StackType left, StackType right) =>
+        left.Kind == Kind.NativeMethodTable && right.Kind is Kind.Word32 or Kind.Native ||
+        right.Kind == Kind.NativeMethodTable && left.Kind is Kind.Word32 or Kind.Native;
+
     static StackType Type(TypeReference type)
     {
         if (ManagedPointers.Signature(type) is { } pointer)
@@ -117,9 +121,12 @@ internal static class NativeOperands
                 if (Pop() != Slot(local.VariableType, local.Index))
                     throw new InvalidDataException("Native callable local requires authenticated pointer provenance");
             }
-            else if (code == Code.Add && stack.Count >= 2 && stack[^2].Kind == Kind.NativeMethodTable &&
-                stack[^1].Kind is Kind.Word32 or Kind.Native)
-                Pop();
+            else if (code == Code.Add && stack.Count >= 2 && NativeTableAddition(stack[^2], stack[^1]))
+            {
+                var right = Pop();
+                var left = Pop();
+                stack.Add(left.Kind == Kind.NativeMethodTable ? left : right);
+            }
             else if (code == Code.Ldind_I && stack.Count > 0 && stack[^1].Kind == Kind.NativeMethodTable)
             {
                 var table = Pop();

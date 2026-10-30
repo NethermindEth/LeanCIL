@@ -130,6 +130,32 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
         return pointerSize ? 8 : 1;
     }
 
+    /// <summary>Whether a field load is named <c>BitConverter.IsLittleEndian</c>, before identity checks.</summary>
+    internal static bool PlatformFieldQuery(FieldReference reference) =>
+        reference.Name == "IsLittleEndian" && reference.DeclaringType.FullName == "System.BitConverter";
+
+    /// <summary>
+    /// The value of the exact System.Runtime <c>BitConverter.IsLittleEndian</c> field;
+    /// <see cref="Validate"/> admits only little-endian profiles. Lookalike identities throw.
+    /// </summary>
+    internal static int? PlatformField(FieldReference reference)
+    {
+        if (!PlatformFieldQuery(reference)) return null;
+        const string identity = "System.Boolean System.BitConverter::IsLittleEndian";
+        var exactReference = reference.DeclaringType is not TypeSpecification &&
+            RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") &&
+            RuntimeModels.ExactScope(reference.FieldType.Scope, "System.Runtime") && reference.FullName == identity;
+        // Resolve only exact references: a forged assembly scope must not reach the resolver.
+        var field = exactReference ? reference.Resolve() : null;
+        if (field is null || field.FullName != identity ||
+            !field.IsStatic || !field.IsInitOnly || !field.IsPublic || field.HasConstant ||
+            (field.Attributes & FieldAttributes.HasFieldRVA) != 0)
+            throw new InvalidDataException($"Unsupported static field load: {reference.FullName} " +
+                $"[{reference.DeclaringType.Scope.Name}]\n  Only System.Runtime's static readonly " +
+                "BitConverter.IsLittleEndian is a platform constant.");
+        return 1;
+    }
+
     internal static Feature? Getter(MethodReference reference)
     {
         if (reference.Name is not ("get_IsSupported" or "get_IsHardwareAccelerated") ||
@@ -147,7 +173,8 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
             "System.Runtime.Intrinsics.Vector128" when reference.Name == "get_IsHardwareAccelerated" => Feature.Vector128Accelerated,
             "System.Runtime.Intrinsics.Vector256" when reference.Name == "get_IsHardwareAccelerated" => Feature.Vector256Accelerated,
             _ when reference.Name != "get_IsSupported" => throw new InvalidDataException($"Unclassified feature getter: {reference.FullName}"),
-            "System.Runtime.Intrinsics.Arm.AdvSimd" => Feature.AdvSimd,
+            // .NET 10 sets AdvSimd_Arm64 exactly when AdvSimd is set on ARM64; see docs/RUNTIME-PROFILES.md.
+            "System.Runtime.Intrinsics.Arm.AdvSimd" or "System.Runtime.Intrinsics.Arm.AdvSimd/Arm64" => Feature.AdvSimd,
             "System.Runtime.Intrinsics.Arm.ArmBase/Arm64" => Feature.ArmBase64,
             "System.Runtime.Intrinsics.X86.Sse2" => Feature.Sse2,
             "System.Runtime.Intrinsics.X86.Ssse3" => Feature.Ssse3,

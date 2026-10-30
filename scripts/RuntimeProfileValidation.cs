@@ -14,6 +14,11 @@ internal static class RuntimeProfileValidation
             foreach (var observation in observations)
             {
                 var profile = observation!["observed"]!.DeepClone().AsObject();
+                // Feature getters read AdvSimd.Arm64 as AdvSimd; a split observation refutes that model.
+                if (profile["advSimd64"]?.GetValue<bool>() is not bool advSimd64 ||
+                    advSimd64 != profile["advSimd"]!.GetValue<bool>())
+                    throw new InvalidDataException("AdvSimd.Arm64 is missing or differs from AdvSimd: " + file);
+                profile.Remove("advSimd64");
                 profile.Remove("runtime");
                 profile.Remove("runtimeVersion");
                 profile.Remove("os");

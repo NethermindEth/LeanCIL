@@ -128,3 +128,73 @@ theorem checked (memory : Memory) (reference : ManagedReference) (view : SpanVie
 #print axioms checked
 
 end Tests.SymbolicStorageEntry
+
+namespace Tests.TypedHomeFacts
+open CIL.Safety
+
+/-- Typed root and span homes require a value before they can be loaded. -/
+def body : CIL.Method := {
+  code := [.ret], locals := [.unmodeled, .unmodeled], returnsValue := false
+  localKinds := [.reference, .span 4 false] }
+
+bind_entry entry := body with [] from Examples.empty
+
+/-- The generated slot aliases expose the exact uninitialized storage from frame entry. -/
+theorem initial_slots : entry.slot0 = .root none ∧ entry.slot1 = .span 4 false none :=
+  ⟨rfl, rfl⟩
+#print axioms initial_slots
+
+/-- Generated span store facts accept a replacement only with its validity and exact mode. -/
+theorem replacement (memory : Memory) (view : SpanView)
+    (valid : view.validate memory = .ok ()) (width : view.width = 4)
+    (readOnly : view.writable = false) :
+    storeLocal memory entry.slot1 (.bufferSpan view) =
+      .ok (.span 4 false (some view), memory) ∧
+    loadLocal memory (.span 4 false (some view)) = .ok (.bufferSpan view) :=
+  ⟨entry.store1 memory none view valid width readOnly, entry.load1 memory view valid width readOnly⟩
+#print axioms replacement
+
+/-- Generated root facts reuse formation checks and preserve the stored reference. -/
+theorem root_replacement (memory : Memory) (reference : ManagedReference)
+    (formed : formValue memory reference = .ok (.reference reference)) :
+    storeLocal memory entry.slot0 (.reference reference) =
+      .ok (.root (some reference), memory) ∧
+    loadLocal memory (.root (some reference)) = .ok (.reference reference) :=
+  ⟨entry.store0 memory none reference formed, entry.load0 memory reference formed⟩
+#print axioms root_replacement
+
+/-- Home facts do not initialize empty slots or permit a different width or capability. -/
+theorem rejected_homes :
+    loadLocal Examples.empty entry.slot1 = .error .invalidState ∧
+    storeLocal Examples.empty entry.slot1 (.bufferSpan ⟨.null, 0, 8, false⟩) =
+      .error .invalidState ∧
+    storeLocal Examples.empty entry.slot1 (.bufferSpan ⟨.null, 0, 4, true⟩) =
+      .error .invalidState := ⟨rfl, rfl, rfl⟩
+#print axioms rejected_homes
+
+end Tests.TypedHomeFacts
+
+namespace Tests.SymbolicHomeKinds
+open CIL.Safety
+
+/-- A span local's storage kind can depend on explicit proof parameters. -/
+def body (width : Nat) (writable : Bool) : CIL.Method := {
+  code := [.ret], locals := [.unmodeled], returnsValue := false
+  localKinds := [.span width writable] }
+
+bind_entry entry (width : Nat) (writable : Bool) (bounded : 0 < width ∧ width < 2^64) :=
+  (body width writable) with [] from Examples.empty simplifying [body, bounded]
+
+/-- Parameterized home facts retain their storage-kind binders and replacement checks. -/
+theorem generated (width : Nat) (writable : Bool) (bounded : 0 < width ∧ width < 2^64)
+    (memory : Memory) (view : SpanView) (valid : view.validate memory = .ok ())
+    (sameWidth : view.width = width) (sameMode : view.writable = writable) :
+    entry.slot0 width writable bounded = .span width writable none ∧
+    loadLocal memory (.span width writable (some view)) = .ok (.bufferSpan view) ∧
+    storeLocal memory (entry.slot0 width writable bounded) (.bufferSpan view) =
+      .ok (.span width writable (some view), memory) :=
+  ⟨rfl, entry.load0 width writable bounded memory view valid sameWidth sameMode,
+    entry.store0 width writable bounded memory none view valid sameWidth sameMode⟩
+#print axioms generated
+
+end Tests.SymbolicHomeKinds

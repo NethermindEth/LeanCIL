@@ -150,6 +150,25 @@ theorem Memory.Renamed.add {mapping : AllocationRenaming}
       (BitVec.ofNat 64 reference.offset + BitVec.ofNat 64 size * offset).toNat } bound
 #print axioms Memory.Renamed.add
 
+/-- Displacing a reference preserves the mapped reference and the original validity check. -/
+theorem Memory.Renamed.displaceReference {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (reference : ManagedReference)
+    (bound : reference.Below mapping.sourceLimit) (size : Nat) (displacement : Int) :
+    ResultRenamed mapping (fun source target => target = mapping.managedReference source)
+      (displaceReference source reference size displacement)
+      (displaceReference target (mapping.managedReference reference) size displacement) := by
+  unfold CIL.Safety.displaceReference
+  cases reference with
+  | null => exact .error (.memory .nullDereference .null 0)
+  | address reference =>
+    dsimp only [AllocationRenaming.managedReference, referenceAt, Bind.bind, Except.bind]
+    rw [related.add reference bound]
+    cases CIL.Safety.add source reference size (BitVec.ofInt 64 displacement) with
+    | error fault => exact .error (.memory fault (.address reference) 0)
+    | ok result => exact .ok rfl
+#print axioms Memory.Renamed.displaceReference
+
 /-- Subtracting an integer offset preserves the mapped reference and the original validity check. -/
 theorem Memory.Renamed.referenceSubtract {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}

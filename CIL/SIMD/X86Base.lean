@@ -25,8 +25,7 @@ def divRem64 (lower upper divisor : W64) : Except ArithmeticFault (W64 × W64) :
     BitVec.ofNat 64 (dividend lower upper % divisor.toNat))
 
 /-- Little-endian bytes of one 64-bit tuple field. -/
-def wordBytes (word : W64) : List (BitVec 8) :=
-  (List.range 8).map fun i => BitVec.ofNat 8 (word.toNat / 256 ^ i)
+def wordBytes (word : W64) : List (BitVec 8) := littleEndianBytes 8 word.toNat
 
 /-- `ValueTuple<ulong, ulong>` stores Item1 at offset 0 and Item2 at offset 8. -/
 def divRemValue : List Value → Except ArithmeticFault Value

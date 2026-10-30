@@ -24,8 +24,12 @@ after` is the memory guarantee: earlier allocations and write authority are unch
 read authority change only inside the footprint (a write grants read access to what it wrote).
 `Confined.trans`, `Confined.widen`, `Confined.write`, `Confined.read_eq` and `Confined.access_write`
 compose and consume it. A callee with locals writes its own frame too: list those slots in the
-footprint while executing, then drop them with `Confined.forget_fresh` and cover frame entry and
-teardown with `Confined.then_below`. `Outside.nil` and `Outside.cons` are simp rules, so `simpa
+footprint while executing, then drop them with `Confined.forget_fresh` and cover frame entry with
+`Confined.then_below`. `framed.after_leaveFrame owned` covers teardown, given that every identity
+the frame owns is at least the caller's `nextIdentity`. A store through an argument reference
+needs only write access: `store_word64 word writable` gives the `write`, the `storeValue` step
+fact and the readback of its encoding, so `Confined.write` and the stepping tactics consume the
+same equation. `Outside.nil` and `Outside.cons` are simp rules, so `simpa
 using ⟨hr, hq⟩` closes a word footprint from per-word `OutsideWord` facts; `Outside.word` builds it
 as a term. `Within inner outer` states that an interval lies inside another of the same allocation:
 `Confined.widen_within` widens a footprint to one whose entries enclose it, and

@@ -542,24 +542,42 @@ theorem spanFillInstruction_contract (width : Nat) (clear : Bool) (stack values 
     | split at filled
 #print axioms spanFillInstruction_contract
 
-/-- Whole-array filling inherits the checked span write and retained-stack contract. -/
-theorem arrayFillInstruction_contract (element : CIL.ArrayElement) (stack values : List Value)
+/-- Array filling inherits the checked span write and retained-stack contract. -/
+theorem arrayFillInstruction_contract (element : CIL.ArrayElement) (counted : Bool)
+    (stack values : List Value)
     (memory result : Memory)
-    (filled : arrayFillInstruction element stack memory = .ok (result, values)) :
+    (filled : arrayFillInstruction element counted stack memory = .ok (result, values)) :
     InstructionContract memory result stack values := by
   unfold arrayFillInstruction at filled
-  split at filled
-  · split at filled
-    · cases filled
-    · split at filled
-      · cases filled
-      · have contract := spanFillInstruction_contract _ _ _ _ _ _ filled
+  split at filled <;>
+    simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at filled
+  all_goals repeat' first
+    | cases filled
+    | solve
+      | have contract := spanFillInstruction_contract _ _ _ _ _ _ filled
         refine ⟨contract.effect, fun formed valid => contract.values formed ?_⟩
-        simpa only [ValuesValid, List.mem_cons, forall_eq_or_imp, Value.Valid,
-          ArrayView.validate] using valid
-  · cases filled
-  · cases filled
+        simp only [ValuesValid, List.mem_cons, forall_eq_or_imp, Value.Valid,
+          ArrayView.validate] at valid ⊢
+        first
+        | exact valid
+        | exact ⟨valid.2.2.1, checkedSpanSlice_valid _ _ _ _ _ (by assumption), valid.2.2.2.2⟩
+    | split at filled
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at filled
 #print axioms arrayFillInstruction_contract
+
+/-- A displaced reference is valid with either write capability. -/
+theorem displaceReference_valid {memory : Memory} {reference result : ManagedReference}
+    {size : Nat} {displacement : Int}
+    (success : displaceReference memory reference size displacement = .ok result) :
+    (Value.reference result).Valid memory ∧ (Value.readOnlyReference result).Valid memory := by
+  simp only [displaceReference, Bind.bind, Except.bind, Pure.pure, Except.pure] at success
+  repeat' first
+    | split at success
+    | solve | cases success
+    | solve |
+        cases success
+        constructor <;> apply checked_add_result_valid <;> assumption
+#print axioms displaceReference_valid
 
 /-- Checked reference addition preserves memory and returns only a valid reference. -/
 theorem referenceAddInstruction_contract (size : Nat) (signed : Bool)
@@ -569,10 +587,29 @@ theorem referenceAddInstruction_contract (size : Nat) (signed : Bool)
   unfold referenceAddInstruction at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
-    | solve | cases executed; instruction_contract_close
+    | solve
+      | cases executed
+        exact InstructionContract.of_effect (.unchanged _) fun retained =>
+          ValuesValid.cons (displaceReference_valid (by assumption)).1 retained.tail.tail
+      | cases executed
+        exact InstructionContract.of_effect (.unchanged _) fun retained =>
+          ValuesValid.cons (displaceReference_valid (by assumption)).2 retained.tail.tail
     | cases executed
     | split at executed
 #print axioms referenceAddInstruction_contract
+
+/-- Wide multiplication and out-reference division preserve checked effects and stack validity. -/
+theorem wideArithmeticInstruction_contract (operation : CIL.MemoryOp)
+    (stack values : List Value) (memory result : Memory)
+    (executed : wideArithmeticInstruction operation stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold wideArithmeticInstruction at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms wideArithmeticInstruction_contract
 
 set_option maxHeartbeats 800000 in
 /-- The remaining memory operations preserve their checked effects and stack validity. -/
@@ -671,7 +708,9 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
     · exact viewObservationInstruction_contract _ _ _ _ _ h
     · exact spanCopyInstruction_contract _ _ _ _ _ _ h
     · exact spanFillInstruction_contract _ _ _ _ _ _ h
-    · exact arrayFillInstruction_contract _ _ _ _ _ h
+    · exact arrayFillInstruction_contract _ _ _ _ _ _ h
+    · exact wideArithmeticInstruction_contract _ _ _ _ _ h
+    · exact wideArithmeticInstruction_contract _ _ _ _ _ h
     · exact otherMemoryInstruction_contract _ _ _ _ _ h
 
 set_option maxHeartbeats 800000 in

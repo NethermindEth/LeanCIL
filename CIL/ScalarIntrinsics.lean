@@ -42,15 +42,48 @@ def evalIntegerMath (operation : IntegerMath) (width : Nat) (signed : Bool)
     return if operation == .sign || width ≤ 32 then .i32 (BitVec.ofInt 32 result)
       else .i64 (BitVec.ofInt 64 result)
 
+/-- Integer stack representation of a portable count or logarithm result. -/
+inductive ScalarResultWidth where
+  | word32 | word64
+  deriving DecidableEq, Repr
+
+/-- Encode a nonnegative result in its declared integer stack representation. -/
+def ScalarResultWidth.value : ScalarResultWidth → Nat → Value
+  | .word32, number => .i32 (BitVec.ofNat 32 number)
+  | .word64, number => .i64 (BitVec.ofNat 64 number)
+
 /-- Portable runtime helpers, independent of hardware feature availability. -/
 inductive ScalarIntrinsic where
   | math (operation : IntegerMath) (width : Nat) (signed : Bool)
   | rotateLeft (width : Nat) | rotateRight (width : Nat)
-  | popCount (width : Nat) | leadingZeroCount (width : Nat) | trailingZeroCount (width : Nat)
+  | popCount (width : Nat) (result : ScalarResultWidth)
+  | leadingZeroCount (width : Nat) (result : ScalarResultWidth)
+  | trailingZeroCount (width : Nat) (result : ScalarResultWidth)
   | reverseEndianness (width : Nat) (signed : Bool)
   | isPow2 (width : Nat) (signed : Bool)
-  | log2 (width : Nat) | roundUpToPowerOf2 (width : Nat)
+  | log2 (width : Nat) (result : ScalarResultWidth) | roundUpToPowerOf2 (width : Nat)
+  /-- `Math.DivRem(T, T)`, returning a `(T Quotient, T Remainder)` tuple. -/
+  | divRem (width : Nat) (signed : Bool)
+  /-- `Math.BigMul(int, int)` or `Math.BigMul(uint, uint)`: the exact 64-bit product. -/
+  | bigMul32 (signed : Bool)
   deriving DecidableEq, Repr
+
+/-- `Math.DivRem(T, T)` as its `ValueTuple<T, T>`: Item1 at offset 0 and Item2 at offset
+    `width / 8`. Narrow parameters truncate at the call boundary; `div` faults are reported. -/
+def evalDivRem (width : Nat) (signed : Bool) : List Value → Except ArithmeticFault Value
+  | [.i32 left, .i32 right] =>
+    if width == 8 || width == 16 || width == 32 then
+      tuple (divRemBits signed (left.setWidth width) (right.setWidth width))
+    else .error .invalidOperands
+  | [.i64 left, .i64 right] =>
+    if width == 64 then tuple (divRemBits signed left right) else .error .invalidOperands
+  | _ => .error .invalidOperands
+where
+  tuple {w : Nat} (result : Except ArithmeticFault (BitVec w × BitVec w)) :
+      Except ArithmeticFault Value := do
+    let (quotient, remainder) ← result
+    return .aggregate (littleEndianBytes (w / 8) quotient.toNat ++
+      littleEndianBytes (w / 8) remainder.toNat)
 
 /-- The number of set bits. -/
 def population (x : BitVec w) : Nat := x.cpopNatRec w 0
@@ -92,26 +125,30 @@ def reverseBytes (x : BitVec w) : BitVec w :=
     (result <<< 8) ||| ((x >>> (8 * i)) &&& 255)) 0
 
 /-- A scalar intrinsic on its stack arguments, first argument first. An unsupported width
-    or ill-typed argument is stuck; count results are pushed as `i32`. -/
+    or ill-typed argument is stuck; counts use their declared result representation. -/
 def evalScalarIntrinsic : ScalarIntrinsic → List Value → Option Value
   | .math operation width signed, args =>
     (evalIntegerMath operation width signed args).toOption
+  | .divRem width signed, args => (evalDivRem width signed args).toOption
+  | .bigMul32 signed, [.i32 left, .i32 right] =>
+    some (.i64 (BitVec.ofInt 64 (if signed then left.toInt * right.toInt
+      else (left.toNat * right.toNat : Nat))))
   | .isPow2 32 signed, [.i32 x] => some (.i32 (if isPowerOfTwo x signed then 1 else 0))
   | .isPow2 64 signed, [.i64 x] => some (.i32 (if isPowerOfTwo x signed then 1 else 0))
-  | .log2 32, [.i32 x] => some (.i32 (BitVec.ofNat 32 x.toNat.log2))
-  | .log2 64, [.i64 x] => some (.i32 (BitVec.ofNat 32 x.toNat.log2))
+  | .log2 32 result, [.i32 x] => some (result.value x.toNat.log2)
+  | .log2 64 result, [.i64 x] => some (result.value x.toNat.log2)
   | .roundUpToPowerOf2 32, [.i32 x] => some (.i32 (roundUpPowerOfTwo x))
   | .roundUpToPowerOf2 64, [.i64 x] => some (.i64 (roundUpPowerOfTwo x))
   | .rotateLeft 32, [.i32 x, .i32 n] => some (.i32 (x.rotateLeft n.toNat))
   | .rotateLeft 64, [.i64 x, .i32 n] => some (.i64 (x.rotateLeft n.toNat))
   | .rotateRight 32, [.i32 x, .i32 n] => some (.i32 (x.rotateRight n.toNat))
   | .rotateRight 64, [.i64 x, .i32 n] => some (.i64 (x.rotateRight n.toNat))
-  | .popCount 32, [.i32 x] => some (.i32 (BitVec.ofNat 32 (population x)))
-  | .popCount 64, [.i64 x] => some (.i32 (BitVec.ofNat 32 (population x)))
-  | .leadingZeroCount 32, [.i32 x] => some (.i32 (BitVec.ofNat 32 (leadingZeros x)))
-  | .leadingZeroCount 64, [.i64 x] => some (.i32 (BitVec.ofNat 32 (leadingZeros x)))
-  | .trailingZeroCount 32, [.i32 x] => some (.i32 (BitVec.ofNat 32 (trailingZeros x)))
-  | .trailingZeroCount 64, [.i64 x] => some (.i32 (BitVec.ofNat 32 (trailingZeros x)))
+  | .popCount 32 result, [.i32 x] => some (result.value (population x))
+  | .popCount 64 result, [.i64 x] => some (result.value (population x))
+  | .leadingZeroCount 32 result, [.i32 x] => some (result.value (leadingZeros x))
+  | .leadingZeroCount 64 result, [.i64 x] => some (result.value (leadingZeros x))
+  | .trailingZeroCount 32 result, [.i32 x] => some (result.value (trailingZeros x))
+  | .trailingZeroCount 64 result, [.i64 x] => some (result.value (trailingZeros x))
   | .reverseEndianness 8 signed, [.i32 x] =>
     let result := x.setWidth 8
     some (.i32 (if signed then result.signExtend 32 else result.zeroExtend 32))
@@ -124,18 +161,18 @@ def evalScalarIntrinsic : ScalarIntrinsic → List Value → Option Value
   | .isPow2 width signed, [.i32 bits] =>
     if width == 8 || width == 16 then
       some (.i32 (if isPowerOfTwo (bits.setWidth width) signed then 1 else 0)) else none
-  | .popCount width, [.i32 bits] =>
+  | .popCount width result, [.i32 bits] =>
     if width == 8 || width == 16 then
-      some (.i32 (BitVec.ofNat 32 (population (bits.setWidth width)))) else none
-  | .log2 width, [.i32 bits] =>
+      some (result.value (population (bits.setWidth width))) else none
+  | .log2 width result, [.i32 bits] =>
     if width == 8 || width == 16 then
-      some (.i32 (BitVec.ofNat 32 (bits.setWidth width).toNat.log2)) else none
-  | .leadingZeroCount width, [.i32 bits] =>
+      some (result.value (bits.setWidth width).toNat.log2) else none
+  | .leadingZeroCount width result, [.i32 bits] =>
     if width == 8 || width == 16 then
-      some (.i32 (BitVec.ofNat 32 (leadingZeros (bits.setWidth width)))) else none
-  | .trailingZeroCount width, [.i32 bits] =>
+      some (result.value (leadingZeros (bits.setWidth width))) else none
+  | .trailingZeroCount width result, [.i32 bits] =>
     if width == 8 || width == 16 then
-      some (.i32 (BitVec.ofNat 32 (trailingZeros (bits.setWidth width)))) else none
+      some (result.value (trailingZeros (bits.setWidth width))) else none
   | .rotateLeft width, [.i32 bits, .i32 count] =>
     if width == 8 || width == 16 then
       some (.i32 (((bits.setWidth width).rotateLeft count.toNat).zeroExtend 32)) else none

@@ -38,8 +38,9 @@ syntax "bind_entry " ident bracketedBinder* " := " term:max
 
 /-- Normalize frame setup with explicit storage facts, retaining checked allocation semantics. -/
 private def entrySimplifier (body : TSyntax `term) (facts : Array (TSyntax `term)) :
-    CommandElabM (TSyntax `tactic) :=
-  `(tactic| (simp [enterFrame, $body:term, makeSelectedLocals, makeLocals,
+    CommandElabM (TSyntax `tactic) := do
+  let facts := (if body.raw.isIdent then #[body] else #[]) ++ facts
+  `(tactic| (simp [enterFrame, makeSelectedLocals, makeLocals,
     makeArgumentHomes, makeParameterHomes, makeLocal, storeLocal, Value.hasUnspecified,
     checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure,
     $[$facts:term],*]; try rfl))
@@ -103,17 +104,41 @@ elab_rules : command
       repeat
         match (← Meta.whnf locals).getAppFnArgs with
         | (``List.cons, #[_, slot, tail]) =>
-          match (← Meta.whnf slot).getAppFnArgs with
+          let slotValue ← Meta.whnf slot
+          let (loaded, stored, address) ← match slotValue.getAppFnArgs with
           | (``LocalSlot.bytes, #[_, address]) =>
-            homes := homes.push (index, ← PrettyPrinter.delab address)
-          | _ => pure ()
+            pure (none, none, some (← PrettyPrinter.delab address))
+          | (``LocalSlot.span, #[width, writable, _]) =>
+            let width ← PrettyPrinter.delab width
+            let writable ← PrettyPrinter.delab writable
+            pure (some (← `(loadLocal_span (width := $width) (writable := $writable))),
+              some (← `(storeLocal_span (width := $width) (writable := $writable))), none)
+          | (``LocalSlot.root, _) =>
+            pure (some (← `(loadLocal_root)), some (← `(storeLocal_root)), none)
+          | (``LocalSlot.readOnlyRoot, _) =>
+            pure (some (← `(loadLocal_readOnlyRoot)),
+              some (← `(storeLocal_readOnlyRoot_readOnly)), none)
+          | _ => pure (none, none, none)
+          let symbolic := match slotValue.getAppFnArgs with
+            | (``LocalSlot.span, #[width, writable, _]) => width.hasFVar || writable.hasFVar
+            | _ => false
+          homes := homes.push (index, ← PrettyPrinter.delab slot, loaded, stored, address, symbolic)
           locals := tail
           index := index + 1
         | _ => break
       return homes
-    for (index, address) in homes do
-      let home := mkIdent (name.getId ++ Name.mkSimple s!"home{index}")
-      elabCommand (← `(abbrev $home $binders* : Reference := $address))
+    for (index, slot, loaded, stored, address, symbolic) in homes do
+      if let some address := address then
+        let home := mkIdent (name.getId ++ Name.mkSimple s!"home{index}")
+        elabCommand (← `(abbrev $home $binders* : Reference := $address))
+      if let (some loaded, some stored) := (loaded, stored) then
+        let slotName := mkIdent (name.getId ++ Name.mkSimple s!"slot{index}")
+        elabCommand (← `(abbrev $slotName $binders* : LocalSlot := $slot))
+        let loadedName := mkIdent (name.getId ++ Name.mkSimple s!"load{index}")
+        let storedName := mkIdent (name.getId ++ Name.mkSimple s!"store{index}")
+        let factBinders := if symbolic then binders else #[]
+        elabCommand (← `(abbrev $loadedName $factBinders* := $loaded))
+        elabCommand (← `(abbrev $storedName $factBinders* := $stored))
 
 /-- Derive the unique matching cutpoint and a state constructor from the extracted body.
     Ambiguous or missing matches fail the kernel-checked uniqueness obligation. -/

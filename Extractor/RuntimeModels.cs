@@ -150,11 +150,10 @@ internal static class RuntimeModels
             _ => null
         };
         if (op is not null) ValidateSignature(reference, profile.Architecture);
-        if (op == DivRem) ValueTuples.RequireWordPair(reference.ReturnType, reference.Module, profile.Architecture);
+        if (op is not null && ValueTuples.Is(reference.ReturnType))
+            ValueTuples.RequirePair(reference.ReturnType, reference.Module, profile.Architecture);
         return op;
     }
-
-    const string DivRem = ".intrinsic (.x86Base .divRem64) 3";
 
     private static readonly (string Type, int Width, bool Signed)[] MathIntegers =
     [
@@ -212,9 +211,19 @@ internal static class RuntimeModels
     {
         var operations = new Dictionary<string, string>(StringComparer.Ordinal)
         {
+            ["System.UInt64 System.Math::BigMul(System.UInt32,System.UInt32)"] =
+                ".intrinsic (.scalar (.bigMul32 false)) 2",
+            ["System.Int64 System.Math::BigMul(System.Int32,System.Int32)"] =
+                ".intrinsic (.scalar (.bigMul32 true)) 2",
             ["System.UInt64 System.Math::BigMul(System.UInt64,System.UInt64,System.UInt64&)"] =
-                ".memory .bigMul64"
+                ".memory (.bigMul64 false)",
+            ["System.Int64 System.Math::BigMul(System.Int64,System.Int64,System.Int64&)"] = ".memory (.bigMul64 true)",
+            ["System.Int32 System.Math::DivRem(System.Int32,System.Int32,System.Int32&)"] = ".memory (.divRemOut 32)",
+            ["System.Int64 System.Math::DivRem(System.Int64,System.Int64,System.Int64&)"] = ".memory (.divRemOut 64)"
         };
+        foreach (var (type, width, signed) in MathIntegers)
+            operations.Add($"System.ValueTuple`2<{type},{type}> System.Math::DivRem({type},{type})",
+                $".intrinsic (.scalar (.divRem {width} {LeanBool(signed)})) 2");
         foreach (var (type, width, signed) in MathIntegers)
         foreach (var (name, operation, arity) in MathOperations)
         {
@@ -232,7 +241,7 @@ internal static class RuntimeModels
                     $".intrinsic (.scalar (.{operation} {width})) 2");
             foreach (var (name, operation) in BitCounts)
                 operations.Add($"System.Int32 System.Numerics.BitOperations::{name}({type})",
-                    $".intrinsic (.scalar (.{operation} {width})) 1");
+                    $".intrinsic (.scalar (.{operation} {width} .word32)) 1");
             operations.Add($"{type} System.Numerics.BitOperations::RoundUpToPowerOf2({type})",
                 $".intrinsic (.scalar (.roundUpToPowerOf2 {width})) 1");
         }
@@ -240,12 +249,12 @@ internal static class RuntimeModels
         foreach (var (name, operation) in Rotations)
             operations.Add($"{type} {type}::{name}({type},System.Int32)",
                 $".intrinsic (.scalar (.{operation} {width})) 2");
-        foreach (var (type, width, signed) in Pow2Integers.Where(integer => integer.Width == 32))
+        foreach (var (type, width, signed) in Pow2Integers)
         foreach (var (name, operation) in BitCounts)
         {
             if (name == "Log2" && signed) continue;
             operations.Add($"{type} {type}::{name}({type})",
-                $".intrinsic (.scalar (.{operation} {width})) 1");
+                $".intrinsic (.scalar (.{operation} {width} .word{width})) 1");
         }
         foreach (var (type, width, signed) in Pow2Integers)
         {
@@ -259,9 +268,9 @@ internal static class RuntimeModels
                 $".intrinsic (.scalar (.isPow2 {width} {LeanBool(signed)})) 1");
             foreach (var (name, operation) in BitCounts.Where(count => count.Name != "Log2"))
                 operations.Add($"{type} {type}::{name}({type})",
-                    $".intrinsic (.scalar (.{operation} {width})) 1");
+                    $".intrinsic (.scalar (.{operation} {width} .word32)) 1");
             if (signed) continue;
-            operations.Add($"{type} {type}::Log2({type})", $".intrinsic (.scalar (.log2 {width})) 1");
+            operations.Add($"{type} {type}::Log2({type})", $".intrinsic (.scalar (.log2 {width} .word32)) 1");
             foreach (var (name, operation) in Rotations)
                 operations.Add($"{type} {type}::{name}({type},System.Int32)",
                     $".intrinsic (.scalar (.{operation} {width})) 2");
@@ -350,14 +359,20 @@ internal static class RuntimeModels
             var staticElement = elementType is null || Arrays.Primitive(elementType) is not null ||
                 EnumTypes.IsEnum(elementType);
             if (staticElement && arrayElement is not null)
+            {
                 operations.Add($"System.Void System.Array::Fill<{element}>(!!0[],!!0)",
-                    $".memory (.arrayFill {arrayElement})");
+                    $".memory (.arrayFill {arrayElement} false)");
+                operations.Add($"System.Void System.Array::Fill<{element}>(!!0[],!!0,System.Int32,System.Int32)",
+                    $".memory (.arrayFill {arrayElement} true)");
+            }
             if (staticElement) operations.Add("System.ReadOnlySpan`1<!!0> System.Runtime.CompilerServices.RuntimeHelpers::" +
                 $"CreateSpan<{element}>(System.RuntimeFieldHandle)", $".memory (.createSpan {width})");
             operations.Add($"!0& modreq(System.Runtime.InteropServices.InAttribute) {span}::get_Item(System.Int32)",
                 $".memory (.spanItem {width})");
             operations.Add("!!0& System.Runtime.InteropServices.MemoryMarshal::" +
                 $"GetReference<{element}>(System.ReadOnlySpan`1<!!0>)", ".memory .spanReference");
+            operations.Add("!!0& System.Runtime.InteropServices.MemoryMarshal::" +
+                $"GetReference<{element}>(System.Span`1<!!0>)", ".memory .spanReference");
             foreach (var name in new[] { "System.Span`1", "System.ReadOnlySpan`1" })
             {
                 var owner = $"{name}<{element}>";

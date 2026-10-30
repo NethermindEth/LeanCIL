@@ -105,10 +105,38 @@ constructors require a checked extent, not a numeric address. Raw `void*` is adm
 supported helpers/constructors. Arbitrary pointer element types and reference-bearing layouts remain
 unsupported. [OPCODES](OPCODES.md) specifies the exact constructor and receiver forms.
 
+`MemoryMarshal.GetReference` of a readonly view returns a readonly-restricted reference even
+though .NET types the result `ref T`. A write through it faults instead of taking the CLR meaning,
+so no proof relies on mutating storage a readonly span exposes. Element and byte offsets from a
+readonly reference (CIL `add`/`sub`, `Unsafe.Add`, `Subtract`, `AddByteOffset`) take the writable
+reference's allocation, bounds and lifetime checks and stay readonly, so they never regain write
+permission. An empty view yields its own validated reference, never null, and any read through
+it is still checked against the allocation.
+
 Empty span getters and explicit default resets use null, zero-length views. Their element width
 and write capability remain bound to the exact span type; aggregate widths and identities are
 checked against the layout table. Resetting a local replaces its view without modifying backing
 memory, granting authority or extending a lifetime.
+
+A readonly span reference parameter (`in` or `ref readonly`) carries the referenced view rather
+than the address of the caller's span home, as span-local addresses already do. This is sound
+only because the home cannot change during the call: the extractor rejects `starg` and `ldarga`
+of such a parameter, span `stobj`, `initobj` and `cpobj` outside the checked local reset, `ref`
+and `out` span parameters, and span references in locals, returns and fields, so no admitted
+code can rebind, address or overwrite a span home. The parameter's readonly attributes, which a
+generic specialization copies from its definition, and these rejections are trusted extractor
+decisions; the Lean validators still bind the raw argument to
+a managed reference, reject its address and accept an empty emission for `ldobj` only at a span
+type. Loads, stores and comparisons that expect a byte reference fault on a view rather than
+reading it as an address.
+
+An `in` parameter of a virtual member carries `modreq(InAttribute)` on its reference. The
+modifier has no run-time effect, so the Lean signature types, parameter kinds and dispatch
+metadata record the plain reference. The extractor admits only the exact `System.Runtime`
+modifier on a by-reference parameter, and rejects an entry, callee or constrained slot whose
+declaring type has another method with the same name and signature once the modifier is erased.
+No admitted certificate therefore contains two methods that differ only in that modifier. C#
+never emits such overloads.
 
 Equal-size aggregate/vector `Unsafe.BitCast` uses the same snapshot representation for validated
 `byte`, `int`, `uint`, `long` and `ulong` vector elements. Element signedness does not initialize
@@ -116,11 +144,13 @@ unknown bytes or change their bits. Aggregate/vector loads and stores preserve i
 Fill captures its value before writing, including aliasing cases, and preserves those masks;
 Clear initializes every byte.
 
-Whole-array `Array.Fill<T>(T[], T)` requires the exact runtime signature and primitive or
-integer-backed enum element identity. It rejects null before delegating to the array's checked
-span view; an empty non-null array performs no write. The view supplies no additional memory
-authority, and the shared span fill preserves confinement and initialization guarantees.
-Range overloads and other element families are not modeled by this helper.
+Whole-array and ranged `Array.Fill<T>` require the exact runtime signature and primitive or
+integer-backed enum element identity. Typed array views must describe live, valid storage before
+named runtime exceptions can be selected. Valid null inputs fault before range checks; other
+inputs delegate to checked span slicing and filling. Range bounds use widened natural arithmetic
+over the unsigned int32 arguments, retaining rejection of negative or overflowing ranges. Empty non-null ranges
+perform no write. The view supplies no additional memory authority, and the shared span fill
+preserves confinement and initialization guarantees. Other element families are not modeled.
 Nonempty destinations need write authority, not prior readability. Copy requires initialized source
 bytes. Empty operations grant no authority. Empty spans have null pinnable references; empty arrays
 retain their data reference. Null array data-reference access raises its named exception.
@@ -233,11 +263,18 @@ type identity. This does not admit floating-point, nested-pointer or reference-b
 Rotations use modulo-width counts; counts/reversal and log2 follow the scalar bit-vector model.
 Log2(0) is zero. Round-up returns zero for zero/overflow; signed power-of-two tests exclude the sign
 bit. Native overloads assume 64 bits. Primitive signed and unsigned 32-bit, 64-bit and native
-`RotateLeft`/`RotateRight` overloads share the same bit-vector rotation model. Primitive `Int32`
-and `UInt32` population/leading-zero/trailing-zero counts and `UInt32.Log2` share the existing
-32-bit result models; primitive 32-bit, 64-bit and native `IsPow2` share the signedness-aware
-power-of-two model. Signed `Log2` and 64-bit/native count results are not admitted by these aliases.
+`RotateLeft`/`RotateRight` overloads share the same bit-vector rotation model. Primitive integer
+population/leading-zero/trailing-zero counts reuse the same count functions, with the result
+encoded in the declared 32-bit or 64-bit stack representation. Unsigned primitive `Log2` uses
+the same logarithm function and result encoding. Primitive `IsPow2` uses the signedness-aware
+power-of-two model. Signed `Log2` remains unsupported.
 Correspondence to these primitive methods and the selected .NET BitOperations and BinaryPrimitives
 overloads remains
 a runtime assumption backed by exact signature checks and boundary/runtime comparisons.
 See [SIMD](SIMD.md) and [OPCODES](OPCODES.md).
+
+`Math.DivRem` and the 32-bit and signed 64-bit `Math.BigMul` overloads are modelled from the
+pinned .NET 10 `Math.cs` source: the quotient reuses CIL `div`, narrow operands divide in
+`int` and wrap, and the remainder is `left - quotient * right`. The equal-width tuple layout is
+recomputed from metadata and probed at run time. Correspondence to the runtime remains an
+assumption backed by exact signature checks and boundary comparisons that include both faults.

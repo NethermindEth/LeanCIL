@@ -10,7 +10,7 @@ internal static class MethodArguments
         var parameter = index - (method.HasThis ? 1 : 0);
         if (parameter < 0 || parameter >= method.Parameters.Count)
             throw new InvalidDataException($"Invalid argument index {index}: {method.FullName}");
-        return method.Parameters[parameter].ParameterType;
+        return InReferences.Parameter(method.Parameters[parameter].ParameterType);
     }
 
     internal static int Index(MethodDefinition method, ParameterDefinition parameter)

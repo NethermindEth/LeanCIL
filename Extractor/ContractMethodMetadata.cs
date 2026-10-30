@@ -85,11 +85,23 @@ internal static class ContractMethodMetadata
         if (type is TypeSpecification specification) RejectModifiers(specification.ElementType);
     }
 
-    internal static void RejectModifiers(MethodReference method)
+    // Imported and exported signatures admit no modifier: their methods are static and non-virtual.
+    internal static void RejectModifiers(MethodReference method) => RejectModifiers(method, inParameters: false);
+
+    // A selected method may carry `modreq(InAttribute)` on a by-reference parameter and nowhere else.
+    static void RejectModifiers(MethodReference method, bool inParameters)
     {
         RejectModifiers(method.DeclaringType);
         RejectModifiers(method.ReturnType);
-        foreach (ParameterDefinition parameter in method.Parameters) RejectModifiers(parameter.ParameterType);
+        foreach (ParameterDefinition parameter in method.Parameters)
+        {
+            if (inParameters && InReferences.Is(parameter.ParameterType)) continue;
+            if (inParameters && InReferences.Modified(parameter.ParameterType))
+                throw new InvalidDataException("Custom modifiers are unsupported in method signatures, except " +
+                    "System.Runtime's modreq(InAttribute) directly on a by-reference parameter: " +
+                    parameter.ParameterType.FullName);
+            RejectModifiers(parameter.ParameterType);
+        }
         if (method is GenericInstanceMethod generic)
             foreach (TypeReference argument in generic.GenericArguments) RejectModifiers(argument);
     }
@@ -120,7 +132,8 @@ internal static class ContractMethodMetadata
 
     static Selection Instantiate(MethodDefinition definition, TypeReference[] arguments, string architecture)
     {
-        RejectModifiers(definition);
+        RejectModifiers(definition, inParameters: true);
+        InReferences.RejectTwins(definition);
         if (definition.DeclaringType.HasGenericParameters || definition.GenericParameters.Count != arguments.Length)
             throw new InvalidDataException("Contract method requires an exact closed generic instantiation.");
         if (arguments.Any(type => !Primitive(type)))
@@ -183,11 +196,15 @@ internal static class ContractMethodMetadata
             .Append(Part(OpenType(definition.ReturnType)))
             .Append(Part(definition.Parameters.Count.ToString(CultureInfo.InvariantCulture)));
         foreach (ParameterDefinition parameter in definition.Parameters)
-            key.Append(Part(OpenType(parameter.ParameterType)));
+            key.Append(Part(OpenParameter(parameter.ParameterType)));
         return key.ToString();
     }
 
     static string Part(string value) => value.Length.ToString(CultureInfo.InvariantCulture) + ":" + value;
+
+    // The `in:` tag keeps an `in` reference distinct from a plain one; plain parameters keep their encoding.
+    static string OpenParameter(TypeReference type) =>
+        InReferences.Unwrap(type) is { } reference ? "in:" + Part(OpenType(reference)) : OpenType(type);
 
     internal static string OpenType(TypeReference type)
     {

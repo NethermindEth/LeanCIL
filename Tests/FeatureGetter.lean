@@ -24,7 +24,8 @@ def getter (owner member : String) : CallSite := {
 theorem supported :
     featureGetter (getter "Vector256" "get_IsHardwareAccelerated") = some .vector256Accelerated ∧
     featureGetter (getter "X86.Sse41" "get_IsSupported") = some .sse41 ∧
-    featureGetter (getter "Arm.ArmBase/Arm64" "get_IsSupported") = some .armBase64 := by
+    featureGetter (getter "Arm.ArmBase/Arm64" "get_IsSupported") = some .armBase64 ∧
+    featureGetter (getter "Arm.AdvSimd/Arm64" "get_IsSupported") = some .advSimd := by
   decide +kernel
 #print axioms supported
 
@@ -35,6 +36,14 @@ theorem wrong_names :
     featureGetter (getter "X86.Sse41" "get_IsSupportedX") = none ∧
     featureGetter (getter "X86.Ssé41" "get_IsSupported") = none := by decide +kernel
 #print axioms wrong_names
+
+/-- Nested 64-bit classes outside the measured runtime groups remain unclassified. -/
+theorem unclassified_nested :
+    featureGetter (getter "Arm.Crc32/Arm64" "get_IsSupported") = none ∧
+    featureGetter (getter "Arm.Rdm/Arm64" "get_IsSupported") = none ∧
+    featureGetter (getter "Arm.AdvSimd/Arm64" "get_IsHardwareAccelerated") = none := by
+  decide +kernel
+#print axioms unclassified_nested
 
 /-- Truncation, an incorrect assembly and trailing signature bytes all fail exact matching. -/
 theorem wrong_prefix_or_tail :
@@ -88,6 +97,29 @@ theorem platform_encoding (raw : RawMethod) :
       typeArguments := [.atom runtimeScope "System.Int32"] }⟩ (.const32 8) = false := by
   exact ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 #print axioms platform_encoding
+
+/-- A raw static Boolean load from `owner` in `scope`. -/
+def staticBoolean (scope owner : String) : RawInstruction :=
+  ⟨0, 126, .field (.atom scope owner) 0 (.atom runtimeScope "System.Boolean") true⟩
+
+/-- A static `BitConverter` field of another type, which is not the endianness constant. -/
+def integerField : RawOperand :=
+  .field (.atom runtimeScope "System.BitConverter") 0 (.atom runtimeScope "System.Int32") true
+
+/-- Only the runtime's `BitConverter` Boolean is the little-endian constant, bound exactly. -/
+theorem platform_field (raw : RawMethod) :
+    let endian := staticBoolean runtimeScope "System.BitConverter"
+    platformField endian = some 1 ∧
+    platformField (staticBoolean "forged" "System.BitConverter") = none ∧
+    platformField (staticBoolean runtimeScope "System.BitConverterX") = none ∧
+    platformField { endian with opcode := 127 } = none ∧
+    platformField { endian with operand := integerField } = none ∧
+    featureOpMatches #[] raw endian (.const32 1) = true ∧
+    featureOpMatches #[] raw endian (.const32 0) = false ∧
+    featureOpMatches #[] raw (staticBoolean "forged" "System.BitConverter") (.const32 1) =
+      false := by
+  exact ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+#print axioms platform_field
 
 /-- A reference-content query retains its independently serialized generic argument. -/
 def referenceQuery (type : TypeExpr) : CallSite := {

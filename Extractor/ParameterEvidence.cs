@@ -47,8 +47,8 @@ internal static class ParameterEvidence
         var dispatch = NativeDispatch.For(method);
         var arguments = new List<string>();
         if (method.HasThis) arguments.Add(".reference");
-        arguments.AddRange(method.Parameters.Select(parameter => dispatch.Kind(parameter.ParameterType) ??
-            Type(parameter.ParameterType, method.Module, layouts)));
+        arguments.AddRange(method.Parameters.Select(parameter => InReferences.Parameter(parameter.ParameterType))
+            .Select(type => dispatch.Kind(type) ?? Type(type, method.Module, layouts)));
         var locals = method.Body.Variables.Select(local => dispatch.Kind(local.VariableType, local.Index) ??
             Type(local.VariableType, method.Module, layouts));
         var code = method.Body.Instructions.Select(instruction => instruction.OpCode.Code switch

@@ -122,22 +122,14 @@ theorem mix_holds : mixContract.Holds Extracted.program mix := by
 theorem add_holds : addContract.Holds Extracted.program addTo := by
   rintro ⟨a, b, res, x, y⟩ m ⟨readA, readB, writable⟩
   dsimp only [addContract] at *
-  have length : (numberBytes (x + y).toNat 8).length = 8 := by simp [numberBytes]
-  obtain ⟨stored, wrote⟩ := write_succeeds (bytes := numberBytes (x + y).toNat 8) (by simpa only [length] using writable)
-  have readback := write_readback _ _ _ _ _ wrote
-  rw [length] at readback
-  have store : storeValue m (.address res) (.i64 (x + y)) = .ok stored := by
-    simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ↓reduceIte,
-      referenceAt, checkedAt, wrote, Except.mapError, Bind.bind, Except.bind]
+  obtain ⟨stored, wrote, store, readback⟩ := store_word64 (x + y) writable
   have fa := access_reference_valid _ _ _ _ _ (read_access readA)
   have fb := access_reference_valid _ _ _ _ _ (read_access readB)
   have fr := access_reference_valid _ _ _ _ _ writable
   have la := load_word64_of_read readA
   have lb := load_word64_of_read readB
   refine ⟨9, stored, [], ?_, Confined.write wrote (by simp [numberBytes]), _, rfl, rfl, readback⟩
-  cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
-    observerCount, unspecifiedOperands, Value.hasUnspecified, CIL.Value.hasUnspecified,
-    fa, fb, fr, la, lb, store, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_checked_steps [fa, fb, fr, la, lb, store]
 
 set_option maxHeartbeats 400000 in
 /-- Uses only the callees' contracts at their call sites; neither callee body is unfolded. -/
@@ -149,10 +141,8 @@ theorem root_holds (mixHolds : mixContract.Holds Extracted.program mix)
   have bOld := formed.access_bound (read_access readB)
   have fr := access_reference_valid _ _ _ _ _ writable
   have fb := access_reference_valid _ _ _ _ _ (read_access readB)
-  cil_contract_steps [checkedValue, formValue, checkedAt, fr, fb,
-    Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
-  cil_formed_call addHolds ⟨r, b, r, x, y⟩ at addSite [checkedValue, formValue, checkedAt, fr, fb,
-    Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_contract_steps [fr, fb]
+  cil_formed_call addHolds ⟨r, b, r, x, y⟩ at addSite [fr, fb]
   · exact ⟨readR, readB, writable⟩
   · exact formed
   -- The call supplies `m1.WellFormed`, which `mixContract.pre` needs; `addContract.post` does not state it.
@@ -164,27 +154,16 @@ theorem root_holds (mixHolds : mixContract.Holds Extracted.program mix)
   have fb1 := access_reference_valid _ _ _ _ _ (read_access readB1)
   have lr1 := load_word64_of_read readR1
   have lb1 := load_word64_of_read readB1
-  cil_contract_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
-    fr1, fb1, lr1, lb1, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
-  cil_contract_call mixHolds (x + y, y) at mixSite [checkedValue, numericValue, Except.mapError, Bind.bind, Except.bind,
-    Pure.pure, Except.pure]
+  cil_contract_steps [fr1, fb1, lr1, lb1]
+  cil_contract_call mixHolds (x + y, y) at mixSite []
   · exact formed1
   rintro m2 _ - framed2 ⟨_, rfl, rfl⟩
   dsimp only [mixContract]
   have writable2 : access m2 r 8 1 true = .ok () :=
     (framed2.access_write r (Nat.lt_of_lt_of_le rOld framed1.grows) 8 1).trans writable1
-  have length : (numberBytes ((x + y) * 3 + y).toNat 8).length = 8 := by simp [numberBytes]
-  obtain ⟨m3, wrote⟩ := write_succeeds (bytes := numberBytes ((x + y) * 3 + y).toNat 8)
-    (by simpa only [length] using writable2)
-  have readback := write_readback _ _ _ _ _ wrote
-  rw [length] at readback
-  have store : storeValue m2 (.address r) (.i64 ((x + y) * 3 + y)) = .ok m3 := by
-    simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ↓reduceIte,
-      referenceAt, checkedAt, wrote, Except.mapError, Bind.bind, Except.bind]
+  obtain ⟨m3, wrote, store, readback⟩ := store_word64 ((x + y) * 3 + y) writable2
   have fr2 := access_reference_valid _ _ _ _ _ writable2
-  cil_contract_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
-    observerCount, unspecifiedOperands, Value.hasUnspecified, CIL.Value.hasUnspecified,
-    staticInstruction, fr2, store, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_contract_steps [fr2, store]
   simp only [leaveFrame, List.foldl_nil]
   exact ⟨framed1.trans ((framed2.widen (by simp [mixContract])).trans (Confined.write wrote (by simp [addContract, numberBytes]))),
     _, rfl, rfl, readback⟩
@@ -203,8 +182,7 @@ theorem frame_confined (m entered home stored final : Memory) (frame : Frame) (s
     ((Confined.refl _ m).then_below enter grows).trans
       ((Confined.write wroteSlot (by simp)).trans (Confined.write wroteOut (by simp)))
   subst left
-  exact (body.forget_fresh (by simpa using fresh)).then_below
-    (leaveFrame_preserves_memory_below frame stored _ owned) (Nat.le_of_eq (leaveFrame_nextIdentity frame stored).symm)
+  exact (body.forget_fresh (by simpa using fresh)).after_leaveFrame owned
 
 -- A callee that writes only its own frame cannot change what the caller reads after the call.
 theorem call_keeps_caller_read (body : CIL.Method) (args : List Value) (m entered home : Memory) (frame : Frame)
@@ -341,7 +319,7 @@ theorem feature_load_contract (program : CIL.Program) (index : Nat) (profile : C
     (loaded : loadValue memory (.address source) 16 = .ok (.v128 value)) :
     ∃ fuel result returned, invoke program fuel index [.reference (.address source)] memory =
       .ok (result, returned) ∧ returned = [.scalar (.v128 value)] := by
-  cil_contract_steps [wide, formed, loaded, checkedValue, formValue, checkedAt]
+  cil_contract_steps [wide, formed, loaded]
   rfl
 
 /-- info: 'Tests.MethodContract.feature_load_contract' depends on axioms: [propext, Quot.sound] -/

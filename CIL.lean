@@ -138,6 +138,7 @@ import CIL.Safety.StepAttribute
 import CIL.Safety.StepComposition
 import CIL.Safety.ValueSteps
 import CIL.Safety.MemorySteps
+import CIL.Safety.InstructionSteps
 import CIL.Safety.StepLiveState
 import CIL.Safety.StepLocalReferences
 import CIL.Safety.StepValues

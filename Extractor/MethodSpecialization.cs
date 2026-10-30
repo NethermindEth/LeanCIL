@@ -33,6 +33,8 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
     {
         GenericParameter parameter => $"{parameter.Type}:{parameter.Position}",
         ByReferenceType reference => SignatureType(reference.ElementType) + "&",
+        // Other modifiers keep their full spelling below and cannot equal an `in` reference.
+        RequiredModifierType modifier when InReferences.Is(modifier) => SignatureType(modifier.ElementType) + " in",
         PointerType pointer => SignatureType(pointer.ElementType) + "*",
         ArrayType { IsVector: true } array => SignatureType(array.ElementType) + "[]",
         GenericInstanceType instance => LayoutEvidence.Identity(instance.ElementType) + "<" +
@@ -185,8 +187,14 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
         // Materialize an empty collection: the retained source token must not lazily
         // reload the definition's open generic parameters into this closed body.
         clone.GenericParameters.Clear();
+        // Readonly span references are recognized by parameter attributes, so a clone keeps them all.
         foreach (var parameter in definition.Parameters)
-            clone.Parameters.Add(new ParameterDefinition(parameter.Name, parameter.Attributes, Substitute(parameter.ParameterType)));
+        {
+            var copy = new ParameterDefinition(parameter.Name, parameter.Attributes,
+                Substitute(parameter.ParameterType));
+            foreach (var attribute in parameter.CustomAttributes) copy.CustomAttributes.Add(attribute);
+            clone.Parameters.Add(copy);
+        }
         clone.Body = new MethodBody(clone) { InitLocals = definition.Body.InitLocals, MaxStackSize = definition.Body.MaxStackSize };
         foreach (var local in definition.Body.Variables)
             clone.Body.Variables.Add(new VariableDefinition(Substitute(local.VariableType)));

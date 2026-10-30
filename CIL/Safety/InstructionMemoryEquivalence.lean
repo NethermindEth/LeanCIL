@@ -116,13 +116,15 @@ theorem Memory.Equivalent.spanFillInstruction {m n : Memory} (same : m.Equivalen
 
 /-- Typed array fill uses the same checked span write in equivalent memories. -/
 theorem Memory.Equivalent.arrayFillInstruction {m n : Memory} (same : m.Equivalent n)
-    (element : CIL.ArrayElement) (stack : List Value) :
-    ResultEquivalent MemoryFirstEquivalent (arrayFillInstruction element stack m)
-      (arrayFillInstruction element stack n) := by
+    (element : CIL.ArrayElement) (counted : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (arrayFillInstruction element counted stack m)
+      (arrayFillInstruction element counted stack n) := by
   unfold CIL.Safety.arrayFillInstruction
+  simp only [same.spanSlice, same.arrayValidate]
   repeat first
     | exact same.spanFillInstruction _ _ _
     | exact .error _
+    | (apply ResultEquivalent.bind_same; intro)
     | split
 #print axioms Memory.Equivalent.arrayFillInstruction
 
@@ -131,7 +133,7 @@ theorem Memory.Equivalent.referenceAddInstruction {m n : Memory} (same : m.Equiv
     (size : Nat) (signed : Bool) (stack : List Value) :
     ResultEquivalent MemoryFirstEquivalent (referenceAddInstruction size signed stack m)
       (referenceAddInstruction size signed stack n) := by
-  unfold CIL.Safety.referenceAddInstruction
+  unfold CIL.Safety.referenceAddInstruction CIL.Safety.displaceReference
   split <;> try simp only [same.add]
   all_goals repeat first
     | exact .error _
@@ -171,6 +173,26 @@ private theorem Memory.Equivalent.otherMemoryInstruction {m n : Memory} (same : 
     | split
 
 #print axioms Memory.Equivalent.otherMemoryInstruction
+
+/-- Wide multiplication and out-reference division perform equivalent checked stores. -/
+private theorem Memory.Equivalent.wideArithmeticInstruction {m n : Memory} (same : m.Equivalent n)
+    (operation : CIL.MemoryOp) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (wideArithmeticInstruction operation stack m)
+      (wideArithmeticInstruction operation stack n) := by
+  unfold CIL.Safety.wideArithmeticInstruction
+  split
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind (same.storeValue _ _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.wideArithmeticInstruction
 
 /-- Observations depend only on allocation metadata and preserve equivalent memories. -/
 theorem Memory.Equivalent.viewObservationInstruction {m n : Memory} (same : m.Equivalent n)
@@ -272,7 +294,9 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     · exact same.viewObservationInstruction _ _
     · exact same.spanCopyInstruction _ _ _
     · exact same.spanFillInstruction _ _ _
-    · exact same.arrayFillInstruction _ _
+    · exact same.arrayFillInstruction _ _ _
+    · exact same.wideArithmeticInstruction _ _
+    · exact same.wideArithmeticInstruction _ _
     · exact same.otherMemoryInstruction _ _
 
 theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)

@@ -134,5 +134,42 @@ using (var module = ModuleDefinition.ReadModule(dll))
 var numericResult = Execute(["dotnet", ExtractorPath, "extract", numericDll, selector, Path.Combine(root, "Numeric")]);
 if (numericResult.Code == 0 || !numericResult.Output.Contains("authenticated pointer provenance", StringComparison.Ordinal))
     throw new InvalidOperationException("Numeric target provenance was accepted: " + numericResult.Output);
+var commutedDll = Path.Combine(root, "Commuted.dll");
+using (var module = ModuleDefinition.ReadModule(dll))
+{
+    var dispatch = module.GetType("Examples.NativeManagedDispatch").Methods.Single(method => method.Name == "Dispatch");
+    var addition = dispatch.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Add);
+    var tableLoad = dispatch.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Ldarg_0);
+    var processor = dispatch.Body.GetILProcessor();
+    processor.Remove(tableLoad);
+    processor.InsertBefore(addition, tableLoad);
+    module.Write(commutedDll);
+}
+var commutedOutput = Path.Combine(root, "Commuted");
+Run(["dotnet", ExtractorPath, "extract", commutedDll, selector, commutedOutput]);
+var commuted = File.ReadAllText(Path.Combine(commutedOutput, "Extracted.lean"));
+var commutedScalar = NarrowEvidence(commuted, "method0_scalars_validated");
+var commutedProof = Path.Combine(root, "Commuted.lean");
+File.WriteAllText(commutedProof, commuted + "\n" +
+    CheckedEvidenceControl(commuted, commutedScalar, ["method0_scalars_validated"], 0) + "\n" + """
+
+open CIL CIL.Extraction
+/-- The commuted raw addition retains its authenticated native table kind. -/
+theorem commuted_native_kind :
+    scalarTransfer Extracted.method0Closed ⟨0, 88, .none⟩
+      [.nativeMethodTable ⟨.void, []⟩, .native] =
+        some [.nativeMethodTable ⟨.void, []⟩] ∧
+    scalarTransfer Extracted.method0Closed ⟨0, 88, .none⟩
+      [.nativeMethodTable ⟨.void, []⟩, .word64] = none := by decide +kernel
+#print axioms commuted_native_kind
+""");
+evidence.Add(commutedProof, "PASS commuted native table extraction, certificate and exact offset kinds");
+var wrongAddition = commutedScalar.Replace("opcode := 88, operand := .none",
+    "opcode := 89, operand := .none", StringComparison.Ordinal);
+if (wrongAddition == commutedScalar) throw new InvalidOperationException("Missing commuted native addition");
+var wrongAdditionPath = Path.Combine(root, "Rejected-CommutedAddition.lean");
+File.WriteAllText(wrongAdditionPath, wrongAddition);
+rejected.Add(wrongAdditionPath, "PASS independently rejected commuted subtraction evidence",
+    "Extraction.ScalarFlowValid");
 evidence.Check();
 rejected.Check();

@@ -7,7 +7,8 @@ internal static class CallReturnType
     internal static TypeReference Resolve(MethodReference method) => Substitute(method.ReturnType, method);
 
     internal static IEnumerable<TypeReference> Parameters(MethodReference method) =>
-        method.Parameters.Select(parameter => Substitute(parameter.ParameterType, method));
+        method.Parameters.Select(parameter => InReferences.Substitute(parameter.ParameterType,
+            type => Substitute(type, method)));
 
     static TypeReference Substitute(TypeReference type, MethodReference method)
     {
