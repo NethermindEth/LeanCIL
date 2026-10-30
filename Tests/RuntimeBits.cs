@@ -99,7 +99,9 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         object[] inputs = rotations ? [value, count] : [value];
         var expected = method.Invoke(null, inputs)!;
         var fuel = narrow ? 96 : method.Name.StartsWith("PrimitiveCounts", StringComparison.Ordinal) ? 32 : 8;
-        claims.Add($"(CIL.Safety.invoke Extracted.program {fuel} 0 [{string.Join(", ", inputs.Select(LeanValue))}] Examples.empty).map Prod.snd = .ok [{LeanValue(expected)}]");
+        claims.Add($"(CIL.Safety.invoke Extracted.program {fuel} 0 " +
+            $"[{string.Join(", ", inputs.Select(LeanValue))}] Examples.empty).map Prod.snd = " +
+            $".ok [{LeanValue(expected)}]");
     }
     var proof = Path.Combine(output, "BoundaryProof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 8192\n" +
