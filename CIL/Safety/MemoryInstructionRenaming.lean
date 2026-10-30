@@ -350,7 +350,7 @@ private theorem Memory.Renamed.otherMemoryInstructionResult {mapping : Allocatio
     | (apply (related.formValue _ (by assumption)).bindWithSuccess
        intro first second sourceStep same
        subst second
-       exact .ok ⟨related, rfl⟩)
+       first | (split <;> exact .ok ⟨related, rfl⟩) | exact .ok ⟨related, rfl⟩)
     | (apply (related.storeValue _ (by assumption) _).bindWithSuccess
        intro first second sourceStep memoryRelated
        exact .ok ⟨memoryRelated, rfl⟩)

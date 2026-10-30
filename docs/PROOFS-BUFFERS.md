@@ -75,6 +75,9 @@ An `in` or `ref readonly` span parameter is passed as the referenced `.bufferSpa
 contract states the same view argument as a by-value span and reuses `SpanView.validate`,
 `Contents` and the span element lemmas; `Tests/SpanReferenceContracts.lean` proves an indexed
 read this way and `Tests/SpanReferences.cs` covers callers that pass span locals and temporaries.
+`MemoryMarshal.GetReference` of a readonly view steps by `step_memory_spanReference_readOnlyView_eq`
+to a `.readOnlyReference`; loads, field loads and `ldflda` accept it, so
+`Tests/SpanReferenceWordContract.lean` proves the first-element load with the same lemmas.
 `Tests/BinarySpans.cs` demonstrates integer byte-order transfers and short-span behavior.
 `Tests/ViewAccessors.cs` checks observations without byte authority. Supplied aggregate/vector
 arrays reuse the same checked snapshot loads/stores, indexed references and span conversions; no

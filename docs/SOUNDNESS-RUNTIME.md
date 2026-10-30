@@ -105,6 +105,11 @@ constructors require a checked extent, not a numeric address. Raw `void*` is adm
 supported helpers/constructors. Arbitrary pointer element types and reference-bearing layouts remain
 unsupported. [OPCODES](OPCODES.md) specifies the exact constructor and receiver forms.
 
+`MemoryMarshal.GetReference` of a readonly view returns a readonly-restricted reference even
+though .NET types the result `ref T`. A write through it faults instead of taking the CLR meaning,
+so no proof relies on mutating storage a readonly span exposes. An empty view yields its own
+validated reference, never null, and any read through it is still checked against the allocation.
+
 Empty span getters and explicit default resets use null, zero-length views. Their element width
 and write capability remain bound to the exact span type; aggregate widths and identities are
 checked against the layout table. Resetting a local replaces its view without modifying backing

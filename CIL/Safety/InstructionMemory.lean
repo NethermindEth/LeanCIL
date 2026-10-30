@@ -27,7 +27,8 @@ inductive Value where
   | bufferSpan (view : SpanView)
   /-- A supplied primitive array; its length is immutable and does not grant byte authority. -/
   | array (view : ArrayView)
-  /-- A reference obtained through a readonly view; scalar loads preserve this restriction. -/
+  /-- A reference obtained through a readonly view. Loads and field reads go through it, field
+      addresses keep the restriction, and stores through it fail. -/
   | readOnlyReference (reference : ManagedReference)
   /-- Callable identities cannot be forged by arithmetic or byte reinterpretation. -/
   | methodPointer (pointer : CIL.MethodPointer)
@@ -738,12 +739,12 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
   | .spanReference, .span r _ :: rest =>
     return (memory, (← formValue memory r) :: rest)
   -- Unlike `GetPinnableReference`, an empty view still yields its own reference, never null.
-  -- A readonly view is unsupported: .NET returns a writable `ref T` for it.
+  -- A readonly view grants only a readonly reference, though .NET types the result `ref T`.
   | .spanReference, .bufferSpan view :: rest =>
-    if view.writable then
-      let _ ← checkedAt view.reference 0 (view.validate memory)
-      return (memory, (← formValue memory view.reference) :: rest)
-    else .error .invalidState
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    let formed ← formValue memory view.reference
+    return (memory, (if view.writable then formed
+      else .readOnlyReference view.reference) :: rest)
   -- Unsigned comparison: a negative index is out of range, as in `ReadOnlySpan<T>.this[int]`.
   | .spanItem width, .scalar (.i32 index) :: .span r length :: rest =>
     if index.toNat < length then
@@ -856,6 +857,10 @@ def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
   | .fieldAddress offset, .reference (.address r) :: rest =>
     let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
     return (m, .reference (.address address) :: rest)
+  -- A field of a readonly reference keeps the restriction, as `readonly. ldelema` results do.
+  | .fieldAddress offset, .readOnlyReference (.address r) :: rest =>
+    let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
+    return (m, .readOnlyReference (.address address) :: rest)
   | .fieldAt offset width signed, .scalar (.aggregate bytes) :: rest =>
     if offset + width > bytes.length then .error .invalidState else
       let number := byteNumber ((bytes.drop offset).take width)
@@ -880,7 +885,8 @@ def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
   | .aggregateFieldAt offset size, .scalar (.aggregate bytes) :: rest =>
     if offset + size > bytes.length then .error .invalidState else
       return (m, .scalar (.aggregate ((bytes.drop offset).take size)) :: rest)
-  | .aggregateFieldAt offset size, .reference reference :: rest =>
+  | .aggregateFieldAt offset size, .reference reference :: rest
+  | .aggregateFieldAt offset size, .readOnlyReference reference :: rest =>
     let r ← referenceAt reference
     let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
     let bytes ← checkedAt (.address address) size (read m address size ordinaryAccessAlignment)
@@ -891,7 +897,8 @@ def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
       let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
       return (← checkedAt (.address address) size
         (write m address bytes ordinaryAccessAlignment), rest)
-  | .fieldAt offset width signed, .reference (.address r) :: rest =>
+  | .fieldAt offset width signed, .reference (.address r) :: rest
+  | .fieldAt offset width signed, .readOnlyReference (.address r) :: rest =>
     let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
     return (m, .scalar (← loadValue m (.address address) width signed) :: rest)
   | .setFieldAt offset 16, .scalar value :: .reference (.address r) :: rest =>
@@ -914,8 +921,13 @@ def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
     let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
     return (← checkedAt (.address address) width
       (write m address (numberBytes number width) ordinaryAccessAlignment), rest)
+  -- Field stores need write permission, however the backing allocation may be written.
+  | .setFieldAt _ width, _ :: .readOnlyReference r :: _ => .error (.memory .unwritable r width)
+  | .setAggregateFieldAt _ size, _ :: .readOnlyReference r :: _ =>
+    .error (.memory .unwritable r size)
   -- Field and lane accesses through null fault like `referenceAt`, before any offset is formed.
   | .fieldAt .., .reference .null :: _ | .fieldAddress _, .reference .null :: _
+  | .fieldAt .., .readOnlyReference .null :: _ | .fieldAddress _, .readOnlyReference .null :: _
   | .lane _, .reference .null :: _ | .laneAddress _, .reference .null :: _
   | .setFieldAt .., .scalar _ :: .reference .null :: _
   | .setLane _, .scalar _ :: .reference .null :: _ =>
