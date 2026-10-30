@@ -126,7 +126,8 @@ returned values. These lemmas are also available directly from
 A goal stating a located fault, `invoke p fuel m args memory = .error ⟨m, pc, fault⟩`, enters
 through `invoke_of_run_fault` and steps the same way. At the stated `pc` the tactic first tries
 `run_fault`, which closes the goal when the fetched step raises exactly `fault`; other steps
-continue through `run_next`. Pass the fact that makes the step fail, such as
+continue through `run_next`. A goal already stated over `run` tries neither entry lemma, so
+run-to-run goals and call continuations pay no failed unification. Pass the fact that makes the step fail, such as
 `divRemBits_zero true left` for a zero divisor, with implicit widths given when its premise
 cannot fix them. Goals stating a successful result never try either fault lemma. The [Math.DivRem quotient](../Examples/Proofs/MathDivRemQuotient.lean) proves its
 success and both `div` faults this way.
