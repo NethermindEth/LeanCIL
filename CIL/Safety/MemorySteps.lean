@@ -21,7 +21,7 @@ local macro "memory_step_proof" : tactic => `(tactic| (
   simp only [step, staticInstruction, memoryInstruction, spanFillInstruction, spanCopyInstruction,
     otherMemoryInstruction, referenceAddInstruction, observerCount,
     CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
-    Bool.or_false, Bool.false_eq_true, ite_false, CIL.offsetValue, cil_guard, bind_ite,
+    Bool.or_false, Bool.false_eq_true, ite_false, ite_true, CIL.offsetValue, cil_guard, bind_ite,
     bind_assoc, pure_bind]
   all_goals (repeat' split) <;>
     (try simp only [*, Bool.false_eq_true, ite_false, ite_true, bind_assoc, pure_bind]) <;> rfl))
@@ -29,6 +29,37 @@ local macro "memory_step_proof" : tactic => `(tactic| (
 section MemoryEquations
 
 variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (memory : Memory)
+
+/-- Loading through a writable reference uses the existing width check and checked scalar read. -/
+@[cil_step high] theorem step_loadScalar_reference_eq (width : Nat) (signed : Bool)
+    (reference : ManagedReference) (rest : List Value) :
+    step body (.loadScalar width signed) pc args frame (.reference reference :: rest) memory =
+      if width = 1 || width = 2 || width = 4 || width = 8 then do
+        let value ← loadValue memory reference width signed
+        return .next (pc + 1) (.scalar value :: rest) frame memory
+      else .error (.unsupported "Scalar memory width") := by
+  rw [step_loadScalar_eq]
+  simp only [instructionStep, instruction, cil_guard, unspecifiedOperands, List.take, List.any,
+    Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false, bind_ite,
+    bind_assoc, pure_bind]
+  rfl
+#print axioms step_loadScalar_reference_eq
+
+/-- A readonly reference permits the same checked read without acquiring write authority. -/
+@[cil_step high] theorem step_loadScalar_readOnlyReference_eq (width : Nat) (signed : Bool)
+    (reference : ManagedReference) (rest : List Value) :
+    step body (.loadScalar width signed) pc args frame
+      (.readOnlyReference reference :: rest) memory =
+      if width = 1 || width = 2 || width = 4 || width = 8 then do
+        let value ← loadValue memory reference width signed
+        return .next (pc + 1) (.scalar value :: rest) frame memory
+      else .error (.unsupported "Scalar memory width") := by
+  rw [step_loadScalar_eq]
+  simp only [instructionStep, instruction, cil_guard, unspecifiedOperands, List.take, List.any,
+    Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false, bind_ite,
+    bind_assoc, pure_bind]
+  rfl
+#print axioms step_loadScalar_readOnlyReference_eq
 
 /-- `bigMul64` stores the low 64 bits of the product through `low` and pushes the high 64. -/
 @[cil_step high] theorem step_memory_bigMul64_eq (low : ManagedReference) (right left : CIL.W64)
@@ -252,6 +283,55 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
     step body (.memory .spanLength) pc args frame (.span r length :: rest) memory =
       .ok (.next (pc + 1) (.scalar (.i32 (BitVec.ofNat 32 length)) :: rest) frame memory) := by
   memory_step_proof
+
+/-- A buffer span's length retains its validation obligation and does not read its bytes. -/
+@[cil_step high] theorem step_memory_bufferSpanLength_eq (view : SpanView) (rest : List Value) :
+    step body (.memory .spanLength) pc args frame (.bufferSpan view :: rest) memory = do
+      let _ ← checkedAt view.reference 0 (view.validate memory)
+      return .next (pc + 1)
+        (.scalar (.i32 (BitVec.ofNat 32 view.length)) :: rest) frame memory := by
+  memory_step_proof
+#print axioms step_memory_bufferSpanLength_eq
+
+/-- A suffix slice checks the starting index and preserves the span's storage and capability. -/
+@[cil_step high] theorem step_memory_bufferSpanSlice_eq (view : SpanView)
+    (start : CIL.W32) (rest : List Value) :
+    step body (.memory (.spanSlice false)) pc args frame
+      (.scalar (.i32 start) :: .bufferSpan view :: rest) memory = do
+      if start.toNat ≤ view.length then pure ()
+        else .error (.thrown "System.ArgumentOutOfRangeException")
+      let sliced ← checkedAt view.reference 0
+        (view.slice memory start.toNat (view.length - start.toNat))
+      return .next (pc + 1) (.bufferSpan sliced :: rest) frame memory := by
+  memory_step_proof
+#print axioms step_memory_bufferSpanSlice_eq
+
+/-- A counted slice retains both range checks and the checked view-construction result. -/
+@[cil_step high] theorem step_memory_bufferSpanSliceCount_eq (view : SpanView)
+    (start length : CIL.W32) (rest : List Value) :
+    step body (.memory (.spanSlice true)) pc args frame
+      (.scalar (.i32 length) :: .scalar (.i32 start) :: .bufferSpan view :: rest) memory = do
+      if start.toNat ≤ view.length && length.toNat ≤ view.length - start.toNat then pure ()
+        else .error (.thrown "System.ArgumentOutOfRangeException")
+      let sliced ← checkedAt view.reference 0 (view.slice memory start.toNat length.toNat)
+      return .next (pc + 1) (.bufferSpan sliced :: rest) frame memory := by
+  memory_step_proof
+#print axioms step_memory_bufferSpanSliceCount_eq
+
+/-- Buffer indexing keeps width, bounds and memory checks before returning a restricted address. -/
+@[cil_step high] theorem step_memory_bufferSpanItem_eq (view : SpanView)
+    (width : Nat) (index : CIL.W32) (rest : List Value) :
+    step body (.memory (.spanItem width)) pc args frame
+      (.scalar (.i32 index) :: .bufferSpan view :: rest) memory = do
+      if width == view.width then pure () else .error .invalidState
+      if index.toNat < view.length then pure ()
+        else .error (.thrown "System.IndexOutOfRangeException")
+      let reference ← checkedAt view.reference width (view.element memory index.toNat)
+      return .next (pc + 1)
+        ((if view.writable then .reference (.address reference)
+          else .readOnlyReference (.address reference)) :: rest) frame memory := by
+  memory_step_proof
+#print axioms step_memory_bufferSpanItem_eq
 
 -- Null references; `isNullRef` makes no access, so it answers for expired references too.
 @[cil_step high] theorem step_memory_nullRef_eq (stack : List Value) :

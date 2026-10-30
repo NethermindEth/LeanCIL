@@ -16,6 +16,12 @@ bind_cutpoint cutpoint := Extracted.method0 matching
 must reduce to successful allocation, or the command must receive a proof of success. An invalid
 entry is rejected.
 
+For reducible span and reference slots, `entry.slotN` names the exact initial slot, while
+`entry.loadN` and `entry.storeN` specialize shared home lemmas to its storage kind. Span facts
+require a valid view with the exact element width and writable mode; store facts accept a
+replacement view and preserve memory. Reference facts require the replacement reference to form.
+These facts do not make an uninitialized slot readable or grant backing-memory authority.
+
 Binders parameterize the generated declarations, including memory stores for symbolic arguments:
 
 ```lean
@@ -28,7 +34,8 @@ For symbolic initial memory or reference and span arguments, append `using succe
 `enterFrame_isSome` theorem supplies this from `Memory.WellFormed`, `ValuesValid` and
 `FrameSetupFits` premises. The generated frame and memory are exact projections of that checked
 allocation, with no default state or unchecked adapter. Numeric `homeN` declarations require the
-frame's local list to reduce; arbitrary symbolic memory may leave that layout symbolic. The command
+frame's local list to reduce, as do typed slot and home facts; arbitrary symbolic memory may leave
+that layout symbolic. The command
 does not infer allocation premises or generate invariant-preservation verification conditions.
 
 When the success premises are available as rewrite facts, use `simplifying [facts]` instead of
@@ -44,10 +51,16 @@ bind_entry entry (memory : Memory) (view : SpanView)
 ```
 
 Facts must suffice to derive a successful entry; unresolved allocation is an error. This uses the
-checked allocator and does not assume a frame layout. The [span loop](../Examples/Proofs/SpanDrain.lean)
+checked allocator and does not assume a frame layout. For an applied body such as `(body width mode)`,
+include its defining name in `simplifying [body, facts]`.
+The [span loop](../Examples/Proofs/SpanDrain.lean)
 proves method invocation, repeated slicing and parameter reassignment, termination and exact caller
 memory preservation for any valid readonly integer span. Empty spans are included. It requires no
 read authority or initialization because the method only observes length and constructs subviews.
+Its stepping uses generated home facts and `cil_checked`, the shared simplification set for
+successful checked values and typed home operations. The set preserves unresolved validity checks
+and does not unfold instruction dispatchers. Buffer-span length, indexing and slicing have direct
+step equations retaining their memory, bounds and capability checks.
 
 `cutpoint stack memory` constructs the loop state. `cutpoint.checked` proves the selected
 instruction satisfies the predicate and is its unique match. Missing or ambiguous matches are

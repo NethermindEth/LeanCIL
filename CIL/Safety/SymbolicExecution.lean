@@ -6,6 +6,7 @@ import CIL.Safety.ValueSteps
 import CIL.Safety.MemorySteps
 import CIL.Safety.CallComposition
 import CIL.Safety.CodeAt
+import CIL.Safety.CheckedHomes
 
 /-!
 # Checked symbolic execution
@@ -273,7 +274,8 @@ macro "cil_stack_cleanup" : tactic =>
 macro "cil_checked_step_by_equations " "[" facts:term,* "]" : tactic =>
   `(tactic| (
        simp only [cil_step, cil_guard, CIL.Safety.instructionStep]
-       try simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.checkedValue,
+       try simp [cil_guard, cil_checked, CIL.fin_val_three, CIL.fin_mk_ofNat,
+         CIL.Safety.checkedValue,
          CIL.Safety.numericValue, CIL.Safety.scalars, CIL.Safety.formValue, CIL.Safety.checkedAt,
          CIL.Safety.leaveFrame, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure,
          $[$facts:term],*]
@@ -285,7 +287,8 @@ macro "cil_checked_step_by_equations " "[" facts:term,* "]" : tactic =>
 macro "cil_checked_memory_by_equations " "[" facts:term,* "]" : tactic =>
   `(tactic| (
        simp only [cil_step, cil_guard, CIL.Safety.instructionStep]
-       try simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.checkedValue,
+       try simp [cil_guard, cil_checked, CIL.fin_val_three, CIL.fin_mk_ofNat,
+         CIL.Safety.checkedValue,
          CIL.Safety.numericValue, CIL.Safety.scalars,
          CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.referenceAt_null,
          CIL.Safety.referenceAt_address, CIL.Safety.leaveFrame, Except.mapError, Bind.bind,
@@ -300,11 +303,11 @@ macro "cil_checked_step_by_unfolding " "[" facts:term,* "]" : tactic =>
        -- Keep established arithmetic proofs compact. Unfolding checkedAt/formValue in the
        -- first pass can expand return checks enough to exceed the kernel recursion limit.
        first
-       | (simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.step,
+       | (simp [cil_guard, cil_checked, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.step,
            CIL.Safety.checkedValue, CIL.Safety.numericValue,
            CIL.Safety.pureArity, CIL.Safety.scalars, CIL.Safety.leaveFrame, CIL.step,
            $[$facts:term],*] <;> (repeat constructor) <;> rfl)
-       | (simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.step,
+       | (simp [cil_guard, cil_checked, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.step,
            CIL.Safety.checkedValue, CIL.Safety.numericValue,
            CIL.Safety.pureArity, CIL.Safety.scalars, CIL.Safety.leaveFrame, CIL.step,
            CIL.Safety.formValue, CIL.Safety.checkedAt, Except.mapError,
@@ -341,7 +344,8 @@ macro "cil_checked_memory_retry " "[" facts:term,* "]" : tactic =>
   `(tactic| (
        rw [CIL.Safety.step_memory_eq]
        try simp only [cil_guard]
-       try simp [cil_guard, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.checkedValue,
+       try simp [cil_guard, cil_checked, CIL.fin_val_three, CIL.fin_mk_ofNat,
+         CIL.Safety.checkedValue,
          CIL.Safety.numericValue, CIL.Safety.scalars,
          CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.referenceAt_null,
          CIL.Safety.referenceAt_address, CIL.Safety.leaveFrame, Except.mapError, Bind.bind,

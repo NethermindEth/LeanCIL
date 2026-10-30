@@ -3,7 +3,7 @@ import Lean
 /-!
 # Step simp sets
 
-Three simp attributes used by the stepping tactics. They are registered in their own file
+Simp attributes used by the stepping tactics. They are registered in their own file
 because a simp attribute cannot be used in the module that declares it.
 -/
 
@@ -16,3 +16,5 @@ register_simp_attr cil_guard
 -- `FeatureProfile.evaluate` equations, one per `Feature` constructor, so facts are normalised
 -- to the field a known feature test steps to.
 register_simp_attr cil_feature
+-- Successful checked values and typed homes normalize without expanding instruction dispatch.
+register_simp_attr cil_checked

@@ -37,26 +37,14 @@ private theorem terminates (memory : Memory) (args : List Value) (state : State 
     (fun state => state.val.length) _ ?_ state trivial
   intro state _
   obtain ⟨view, valid, width, readOnly⟩ := state
-  have loaded : loadLocal memory (.span 4 false (some view)) = .ok (.bufferSpan view) := by
-    simp [loadLocal, width, readOnly, valid, checkedAt, Except.mapError,
-      Bind.bind, Except.bind, Pure.pure, Except.pure]
   by_cases empty : view.length = 0
   · left
-    cil_loop_finish [staticInstruction, memoryInstruction, otherMemoryInstruction, header,
-      cutpoint, entry.frame, width, readOnly, valid, Value.hasUnspecified, checkedAt,
-      Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure, empty, loaded, leaveFrame]
+    cil_loop_finish [header, cutpoint, entry.frame, entry.load0, width, readOnly, valid,
+      empty, leaveFrame]
   · right
     obtain ⟨sliced, slicedOK, length, sameWidth, sameMode⟩ :=
       view.slice_succeeds memory 1 (view.length - 1) valid (by omega)
     have formed := view.slice_valid sliced memory 1 (view.length - 1) slicedOK
-    have loadedNext : loadLocal memory (.span 4 false (some sliced)) =
-        .ok (.bufferSpan sliced) := by
-      simp [loadLocal, sameWidth, sameMode, width, readOnly, formed, checkedAt,
-        Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
-    have stored : storeLocal memory (.span 4 false (some view)) (.bufferSpan sliced) =
-        .ok (.span 4 false (some sliced), memory) := by
-      simp [storeLocal, sameWidth, sameMode, width, readOnly, formed, checkedAt,
-        Value.hasUnspecified, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
     let next : State memory := ⟨sliced, formed, sameWidth.trans width, sameMode.trans readOnly⟩
     have nonzero : BitVec.ofNat 32 view.length ≠ 0 := by
       have bounded := view.length_bounded memory valid
@@ -67,10 +55,8 @@ private theorem terminates (memory : Memory) (args : List Value) (state : State 
       exact empty this
     have path : LoopReaches Extracted.program 0 args
         (header memory ⟨view, valid, width, readOnly⟩) (header memory next) := by
-      cil_loop_steps [staticInstruction, memoryInstruction, otherMemoryInstruction, header,
-        cutpoint, entry.frame, width, readOnly, valid, Value.hasUnspecified, checkedAt,
-        Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure, nonzero,
-        slicedOK, formed, next, sameWidth, sameMode, loaded, loadedNext, stored,
+      cil_loop_steps [header, cutpoint, entry.frame, entry.load0, entry.store0,
+        width, readOnly, valid, nonzero, slicedOK, formed, next, sameWidth, sameMode,
         show 1 ≤ view.length by omega]
     obtain ⟨cost, segment⟩ := path
     exact ⟨next, cost, trivial, by dsimp [next]; omega, segment⟩
@@ -82,23 +68,17 @@ theorem drain (memory : Memory) (view : SpanView) (valid : view.validate memory 
     ∃ fuel, invoke Extracted.program fuel 0 [.bufferSpan view] memory =
       .ok (memory, [.scalar (.i32 0)]) := by
   let state : State memory := ⟨view, valid, width, readOnly⟩
-  have loaded : loadLocal memory (.span 4 false (some view)) = .ok (.bufferSpan view) := by
-    simp [loadLocal, width, readOnly, valid, checkedAt, Except.mapError,
-      Bind.bind, Except.bind, Pure.pure, Except.pure]
   have path : LoopReaches Extracted.program 0 [.bufferSpan view]
       ⟨0, entry.frame memory view valid width readOnly, [],
         entry.memory memory view valid width readOnly⟩ (header memory state) := by
     cil_loop_steps [header, cutpoint, state, entry.frame, entry.memory, entry.result,
-      loaded, staticInstruction, memoryInstruction, otherMemoryInstruction, valid,
-      Value.hasUnspecified, checkedAt, Except.mapError, Bind.bind, Except.bind,
-      Pure.pure, Except.pure]
+      entry.load0, valid, width, readOnly]
   obtain ⟨fuel, final, values, executed, sameMemory, returned⟩ :=
     loop_reaches_terminates path (terminates memory [.bufferSpan view] state)
   subst final values
   refine ⟨fuel, invoke_of_run Extracted.lookup0 ?_
     (entry.checked memory view valid width readOnly) executed⟩
-  simp [checkedValue, valid, checkedAt, Except.mapError, Bind.bind, Except.bind,
-    Pure.pure, Except.pure]
+  simp [cil_checked, valid]
 #print axioms drain
 
 /-- The compiled method returns zero for every valid span, with exact memory preservation. -/
