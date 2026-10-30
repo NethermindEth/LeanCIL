@@ -49,15 +49,18 @@ theorem unclassified_nested :
   decide +kernel
 #print axioms unclassified_nested
 
+/-- The x86-64-v3 capabilities, with AVX-512 and VBMI left to each case. -/
+def v3Profile : FeatureProfile := {
+  architecture := .x64, x86Base64 := true, sse2 := true, ssse3 := true, sse41 := true,
+  sse42 := true, avx := true, avx2 := true, bmi1 := true, bmi2 := true,
+  vector128Accelerated := true, vector256Accelerated := true }
+
 /-- `x64-v4` with VBMI declared is valid; VBMI without AVX-512 is not. -/
 theorem vbmi_profiles :
-    ({ architecture := .x64, x86Base64 := true, sse2 := true, ssse3 := true, sse41 := true,
-        sse42 := true, avx := true, avx2 := true, bmi1 := true, bmi2 := true, avx512F := true,
-        avx512FVL := true, avx512DQ := true, avx512DQVL := true, avx512Vbmi := true,
-        vector128Accelerated := true, vector256Accelerated := true } : FeatureProfile).Valid ∧
-    ¬ ({ architecture := .x64, x86Base64 := true, sse2 := true, ssse3 := true, sse41 := true,
-        sse42 := true, avx := true, avx2 := true, bmi1 := true, bmi2 := true, avx512Vbmi := true,
-        vector128Accelerated := true, vector256Accelerated := true } : FeatureProfile).Valid := by
+    { v3Profile with
+      avx512F := true, avx512FVL := true, avx512DQ := true, avx512DQVL := true
+      avx512Vbmi := true }.Valid ∧
+    ¬ { v3Profile with avx512Vbmi := true }.Valid := by
   decide +kernel
 #print axioms vbmi_profiles
 
