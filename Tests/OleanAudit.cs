@@ -187,8 +187,8 @@ if (shapes.constants[0].error is not null || shapes.constants[1].error is null |
     throw new InvalidOperationException("Constant value checks: " + JsonSerializer.Serialize(shapes.constants));
 Console.WriteLine("PASS theorem kind, structural wildcards, constant values and refutation locations");
 
-// Builtin delaborators emit notation such as `-1`, `/` and `bif` that only `ParserDescr` constants
-// describe; evaluating those runs imported code, which crashed the audit on the extern `String.hash`.
+// Builtin notation such as `-1`, `/` and `bif` has formatters only in unloaded imports; printing
+// it must fall back to the raw expression instead of failing the audit or evaluating imports.
 Compile("Notation", """
     theorem Notation.negative : (-1 : BitVec 32) = 0xFFFFFFFF#32 := by decide
     theorem Notation.quotient : (1 / 2 : Int) = 0 := by decide
@@ -198,16 +198,17 @@ Compile("Notation", """
     """);
 var notation = Audit("Notation", [ProofTheorem("Notation.negative"), ProofTheorem("Notation.quotient"),
     ProofTheorem("Notation.branch"), ProofTheorem("Notation.forged")]);
-string[] printed = ["Notation.negative : Eq (-1) (BitVec.ofNat 32 4294967295)", "Notation.quotient : Eq (1 / 2) 0",
-    "Notation.branch : Eq (bif Bool.true then 1 else 2) 1", "Notation.forged : Eq (-1) 1"];
-foreach (var (audited, expected) in notation.theorems.Zip(printed))
-    if (audited.statement != expected)
-        throw new InvalidOperationException($"Printed statement {audited.statement} instead of {expected}");
+const string rawQuotient = "Notation.quotient : Eq.{1} Int (HDiv.hDiv.{0, 0, 0} Int Int Int " +
+    "(instHDiv.{0} Int Int.instDiv) (OfNat.ofNat.{0} Int 1 (instOfNat 1)) (OfNat.ofNat.{0} Int 2 (instOfNat 2))) " +
+    "(OfNat.ofNat.{0} Int 0 (instOfNat 0))";
+if (notation.theorems[1].statement != rawQuotient ||
+    notation.theorems.Zip(["Notation.negative : Eq.{1} ", "", "Notation.branch : Eq.{1} Nat (cond.{1} ",
+        "Notation.forged : Eq.{1} Int (Neg.neg.{0} "]).Any(pair => pair.First.statement?.StartsWith(pair.Second) != true))
+    throw new InvalidOperationException("Raw statements: " + JsonSerializer.Serialize(notation.theorems));
 foreach (var audited in notation.theorems.Take(3)) AuditedAxioms(audited);
-// Printing the statement must not stand in for the axiom check it precedes.
+// The printed text must not stand in for the axiom check it precedes.
 Rejected(notation.theorems[3], "Unapproved proof axioms: Notation.bogus");
-Console.WriteLine("PASS descriptor notation prints without evaluating imported code; " +
-    "unapproved axioms still fail");
+Console.WriteLine("PASS unformattable notation prints raw; unapproved axioms still fail");
 
 // Axioms are collected from declaration bodies across modules and private names, not from olean summaries.
 Compile("Hidden", "axiom Hidden.ax : False\nprivate theorem secret : 1 = 2 := Hidden.ax.elim\ntheorem Hidden.exposed : 1 = 2 := secret\n");
