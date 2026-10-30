@@ -141,8 +141,7 @@ private theorem terminates (initial : Memory) (base home : Reference) (v : W64) 
         [.reference (.address base), .scalar (.i64 v), .scalar (.i32 n)] (header initial home n (k, m))
         (header initial home n (k + 1, m2)) := by
       -- The checked stepper unfolds `step`, so the two memory instructions are crossed by their own equations.
-      cil_loop_steps [frame, header, guard, loaded, inside, valid, formValue, checkedAt, Except.mapError,
-        Bind.bind, Except.bind, Pure.pure, Except.pure]
+      cil_loop_steps [frame, header, guard, loaded, inside, valid]
       refine loop_reaches_next (by first | (simp only [cil_code]; rfl) | rfl)
         (by first | (simp only [cil_code]; rfl) | rfl) (addStep _ _ _ _) ?_
       cil_loop_steps [frame, header, guard]
