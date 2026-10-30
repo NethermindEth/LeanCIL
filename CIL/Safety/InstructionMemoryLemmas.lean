@@ -565,6 +565,20 @@ theorem arrayFillInstruction_contract (element : CIL.ArrayElement) (counted : Bo
     | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at filled
 #print axioms arrayFillInstruction_contract
 
+/-- A displaced reference is valid with either write capability. -/
+theorem displaceReference_valid {memory : Memory} {reference result : ManagedReference}
+    {size : Nat} {displacement : Int}
+    (success : displaceReference memory reference size displacement = .ok result) :
+    (Value.reference result).Valid memory ∧ (Value.readOnlyReference result).Valid memory := by
+  simp only [displaceReference, Bind.bind, Except.bind, Pure.pure, Except.pure] at success
+  repeat' first
+    | split at success
+    | solve | cases success
+    | solve |
+        cases success
+        constructor <;> apply checked_add_result_valid <;> assumption
+#print axioms displaceReference_valid
+
 /-- Checked reference addition preserves memory and returns only a valid reference. -/
 theorem referenceAddInstruction_contract (size : Nat) (signed : Bool)
     (stack values : List Value) (memory result : Memory)
@@ -573,7 +587,13 @@ theorem referenceAddInstruction_contract (size : Nat) (signed : Bool)
   unfold referenceAddInstruction at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
-    | solve | cases executed; instruction_contract_close
+    | solve
+      | cases executed
+        exact InstructionContract.of_effect (.unchanged _) fun retained =>
+          ValuesValid.cons (displaceReference_valid (by assumption)).1 retained.tail.tail
+      | cases executed
+        exact InstructionContract.of_effect (.unchanged _) fun retained =>
+          ValuesValid.cons (displaceReference_valid (by assumption)).2 retained.tail.tail
     | cases executed
     | split at executed
 #print axioms referenceAddInstruction_contract

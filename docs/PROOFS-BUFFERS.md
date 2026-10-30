@@ -78,6 +78,9 @@ read this way and `Tests/SpanReferences.cs` covers callers that pass span locals
 `MemoryMarshal.GetReference` of a readonly view steps by `step_memory_spanReference_readOnlyView_eq`
 to a `.readOnlyReference`; loads, field loads and `ldflda` accept it, so
 `Tests/SpanReferenceWordContract.lean` proves the first-element load with the same lemmas.
+Element and byte offsets of a readonly reference step by the `step_memory_add_readOnly_*`
+equations to a `.readOnlyReference` with the writable form's address, so `add_element` applies
+unchanged; `Tests/SpanReferenceSecondContract.lean` proves `Unsafe.Add(..., 1)` this way.
 `Tests/BinarySpans.cs` demonstrates integer byte-order transfers and short-span behavior.
 `Tests/ViewAccessors.cs` checks observations without byte authority. Supplied aggregate/vector
 arrays reuse the same checked snapshot loads/stores, indexed references and span conversions; no

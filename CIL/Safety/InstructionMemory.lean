@@ -509,16 +509,27 @@ def pointerTransferInstruction (kind : CIL.TransferKind) (alignment : Nat) (stor
     .error (.memory .unwritable reference kind.width)
   | _, _ => .error .invalidState
 
-/-- Adds a scalar offset to a checked reference while preserving its allocation identity. -/
+/-- Displaces a checked reference by `displacement` elements of `size` bytes within its
+    allocation; the result passes the lifetime and bounds check but grants no access. -/
+def displaceReference (memory : Memory) (reference : ManagedReference) (size : Nat)
+    (displacement : Int) : ExecutionResult ManagedReference := do
+  let address ← referenceAt reference
+  let result ← checkedAt reference 0 (add memory address size (BitVec.ofInt 64 displacement))
+  return .address result
+
+/-- Adds a scalar offset to a checked reference while preserving its allocation identity and
+    its write capability: a readonly reference yields a readonly result. -/
 def referenceAddInstruction (size : Nat) (signed : Bool) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) := do
   match stack with
   | .scalar value :: .reference reference :: rest
   | .reference reference :: .scalar value :: rest =>
     let some offset := CIL.offsetValue signed value | .error .invalidState
-    let address ← referenceAt reference
-    let result ← checkedAt reference 0 (add memory address size (BitVec.ofInt 64 offset))
-    return (memory, .reference (.address result) :: rest)
+    return (memory, .reference (← displaceReference memory reference size offset) :: rest)
+  | .scalar value :: .readOnlyReference reference :: rest
+  | .readOnlyReference reference :: .scalar value :: rest =>
+    let some offset := CIL.offsetValue signed value | .error .invalidState
+    return (memory, .readOnlyReference (← displaceReference memory reference size offset) :: rest)
   | _ => .error .invalidState
 
 /-- Executes the remaining memory operations after the shared operand guard. -/

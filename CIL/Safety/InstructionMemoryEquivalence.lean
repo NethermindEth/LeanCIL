@@ -133,7 +133,7 @@ theorem Memory.Equivalent.referenceAddInstruction {m n : Memory} (same : m.Equiv
     (size : Nat) (signed : Bool) (stack : List Value) :
     ResultEquivalent MemoryFirstEquivalent (referenceAddInstruction size signed stack m)
       (referenceAddInstruction size signed stack n) := by
-  unfold CIL.Safety.referenceAddInstruction
+  unfold CIL.Safety.referenceAddInstruction CIL.Safety.displaceReference
   split <;> try simp only [same.add]
   all_goals repeat first
     | exact .error _

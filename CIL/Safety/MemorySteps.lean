@@ -19,7 +19,7 @@ private theorem bind_ite {α β : Type} (c : Prop) [Decidable c] (a b : Executio
     dispatchers check the same operands, so a decided guard leaves one arm and no `if`. -/
 local macro "memory_step_proof" : tactic => `(tactic| (
   simp only [step, staticInstruction, memoryInstruction, spanFillInstruction, spanCopyInstruction,
-    otherMemoryInstruction, referenceAddInstruction, observerCount,
+    otherMemoryInstruction, referenceAddInstruction, displaceReference, observerCount,
     CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
     Bool.or_false, Bool.false_eq_true, ite_false, ite_true, CIL.offsetValue, cil_guard, bind_ite,
     bind_assoc, pure_bind]
@@ -221,6 +221,43 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       return .next (pc + 1) (.reference (.address result) :: rest) frame memory := by
   memory_step_proof
 
+/-- Offsetting a readonly reference keeps the restriction and the writable form's checks. -/
+@[cil_step high] theorem step_memory_add_readOnly_commuted_eq (size : Nat) (signed : Bool)
+    (reference : ManagedReference) (offset : CIL.Value) (rest : List Value) :
+    step body (.memory (.add size signed)) pc args frame
+      (.readOnlyReference reference :: .scalar offset :: rest) memory =
+    step body (.memory (.add size signed)) pc args frame
+      (.scalar offset :: .readOnlyReference reference :: rest) memory := by
+  rfl
+#print axioms step_memory_add_readOnly_commuted_eq
+
+@[cil_step high] theorem step_memory_add_readOnly_signed_i32_eq (size : Nat) (offset : CIL.W32)
+    (r : ManagedReference) (rest : List Value) :
+    step body (.memory (.add size true)) pc args frame
+      (.scalar (.i32 offset) :: .readOnlyReference r :: rest) memory = do
+      let address ← referenceAt r
+      let result ← checkedAt r 0 (add memory address size (BitVec.ofInt 64 offset.toInt))
+      return .next (pc + 1) (.readOnlyReference (.address result) :: rest) frame memory := by
+  memory_step_proof
+
+@[cil_step high] theorem step_memory_add_readOnly_signed_i64_eq (size : Nat) (offset : CIL.W64)
+    (r : ManagedReference) (rest : List Value) :
+    step body (.memory (.add size true)) pc args frame
+      (.scalar (.i64 offset) :: .readOnlyReference r :: rest) memory = do
+      let address ← referenceAt r
+      let result ← checkedAt r 0 (add memory address size (BitVec.ofInt 64 offset.toInt))
+      return .next (pc + 1) (.readOnlyReference (.address result) :: rest) frame memory := by
+  memory_step_proof
+
+@[cil_step high] theorem step_memory_add_readOnly_unsigned_i64_eq (size : Nat) (offset : CIL.W64)
+    (r : ManagedReference) (rest : List Value) :
+    step body (.memory (.add size false)) pc args frame
+      (.scalar (.i64 offset) :: .readOnlyReference r :: rest) memory = do
+      let address ← referenceAt r
+      let result ← checkedAt r 0 (add memory address size (BitVec.ofInt 64 (offset.toNat : Int)))
+      return .next (pc + 1) (.readOnlyReference (.address result) :: rest) frame memory := by
+  memory_step_proof
+
 @[cil_step high] theorem step_memory_bitcast256_eq (bits : BitVec 256) (rest : List Value) :
     step body (.memory .bitcast256) pc args frame (.scalar (.v256 bits) :: rest) memory =
       .ok (.next (pc + 1) (.scalar (.v256 bits) :: rest) frame memory) := by
@@ -400,6 +437,9 @@ end MemoryEquations
 #print axioms step_memory_add_signed_i32_eq
 #print axioms step_memory_add_signed_i64_eq
 #print axioms step_memory_add_unsigned_i64_eq
+#print axioms step_memory_add_readOnly_signed_i32_eq
+#print axioms step_memory_add_readOnly_signed_i64_eq
+#print axioms step_memory_add_readOnly_unsigned_i64_eq
 #print axioms step_memory_bitcast256_eq
 #print axioms step_memory_bitcastValue_eq
 #print axioms step_memory_bitcastByteBool_i32_eq

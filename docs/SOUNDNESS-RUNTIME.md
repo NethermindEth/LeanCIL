@@ -107,8 +107,11 @@ unsupported. [OPCODES](OPCODES.md) specifies the exact constructor and receiver 
 
 `MemoryMarshal.GetReference` of a readonly view returns a readonly-restricted reference even
 though .NET types the result `ref T`. A write through it faults instead of taking the CLR meaning,
-so no proof relies on mutating storage a readonly span exposes. An empty view yields its own
-validated reference, never null, and any read through it is still checked against the allocation.
+so no proof relies on mutating storage a readonly span exposes. Element and byte offsets from a
+readonly reference (CIL `add`/`sub`, `Unsafe.Add`, `Subtract`, `AddByteOffset`) take the writable
+reference's allocation, bounds and lifetime checks and stay readonly, so they never regain write
+permission. An empty view yields its own validated reference, never null, and any read through
+it is still checked against the allocation.
 
 Empty span getters and explicit default resets use null, zero-length views. Their element width
 and write capability remain bound to the exact span type; aggregate widths and identities are

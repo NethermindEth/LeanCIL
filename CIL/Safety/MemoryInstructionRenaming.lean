@@ -289,12 +289,8 @@ private theorem Memory.Renamed.referenceAddInstructionResult {mapping : Allocati
   all_goals repeat first
     | exact .error _
     | exact .ok ⟨related, rfl⟩
-    | (apply (mapping.referenceAt _).bindWithSuccess
-       intro first second sourceStep same
-       have addressBound := referenceAt_below (by assumption) sourceStep
-       subst second)
-    | (apply (related.checkedAdd _ (by assumption) _ _ _ _).bindWithSuccess
-       intro first second sourceStep same
+    | (apply (related.displaceReference _ (by assumption) _ _).bind
+       intro first second same
        subst second
        exact .ok ⟨related, rfl⟩)
     | (split <;> try simp only [*, Bind.bind, Except.bind])
