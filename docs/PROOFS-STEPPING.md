@@ -123,6 +123,14 @@ returned values. These lemmas are also available directly from
 [StepComposition](../CIL/Safety/StepComposition.lean) and
 [CallComposition](../CIL/Safety/CallComposition.lean) for manual proofs.
 
+A goal stating a located fault, `invoke p fuel m args memory = .error ⟨m, pc, fault⟩`, enters
+through `invoke_of_run_fault` and steps the same way; at each non-return step the tactic first
+tries `run_fault`, which closes the goal when the fetched step raises exactly `fault`, and
+otherwise continues through `run_next`. Pass the fact that makes the step fail, such as
+`divRemBits_zero true left` for a zero divisor. Goals stating a successful result never try
+`run_fault`. The [Math.DivRem quotient](../Examples/Proofs/MathDivRemQuotient.lean) proves its
+success and both `div` faults this way.
+
 The frame-entry and return premises (checked arguments, frame setup and checked results) close by
 `rfl`, by `simp` with the supplied facts, or by also unfolding `checkedValue`, `numericValue`,
 `formValue`, `checkedAt` and the `Except` bind, which the step closer unfolds too. The contract,

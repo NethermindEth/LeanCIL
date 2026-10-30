@@ -303,6 +303,31 @@ theorem run_return {program : CIL.Program} {fuel method pc : Nat}
 
 #print axioms run_return
 
+/-- A fetched step that faults ends the run with that fault, located at its method and pc. -/
+theorem run_fault {program : CIL.Program} {fuel method pc : Nat}
+    {body : CIL.Method} {op : CIL.Op} {args stack : List Value}
+    {frame : Frame} {memory : Memory} {fault : ExecutionFault}
+    (methodFound : program[method]? = some body)
+    (instructionFound : body.code[pc]? = some op)
+    (failed : step body op pc args frame stack memory = .error fault) :
+    run program (fuel + 1) method pc args frame stack memory = .error ⟨method, pc, fault⟩ := by
+  simp only [run, methodFound, instructionFound, failed, Except.mapError, Bind.bind, Except.bind]
+
+#print axioms run_fault
+
+/-- An invocation whose checked entry succeeds faults exactly as its body's run does. -/
+theorem invoke_of_run_fault {program : CIL.Program} {fuel method : Nat} {body : CIL.Method}
+    {args : List Value} {frame : Frame} {memory entered : Memory} {fault : LocatedFault}
+    (found : program[method]? = some body)
+    (checked : args.mapM (checkedValue memory) = .ok args)
+    (setup : enterFrame body args memory = .ok (frame, entered))
+    (executed : run program fuel method 0 args frame [] entered = .error fault) :
+    invoke program fuel method args memory = .error fault := by
+  simp only [invoke, found, checked, setup, Except.mapError, Bind.bind, Except.bind]
+  exact executed
+
+#print axioms invoke_of_run_fault
+
 /-- Compose one checked fetched step with a terminating continuation without
     fixing the continuation's fuel in the caller proof. -/
 theorem run_next_exists {program : CIL.Program} {method pc target : Nat}
