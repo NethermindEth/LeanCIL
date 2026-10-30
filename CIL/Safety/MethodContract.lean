@@ -1,6 +1,7 @@
 import CIL.Verification
 import CIL.Safety.SymbolicExecution
 import CIL.Safety.MemoryBelow
+import CIL.Safety.ReturnMemory
 import CIL.Safety.ViewReuse
 import CIL.Safety.WriteEffects
 import CIL.Safety.MemoryLemmas
@@ -138,6 +139,17 @@ theorem Confined.then_below {footprint : List (Reference × Nat)} {first middle 
       (preserved.permissions id bound offset true).trans (framed.writable id bound offset),
     fun id bound offset outside => (preserved.permissions id bound offset false).trans
       (framed.readable id bound offset outside)⟩
+
+/-- Leaving a frame that owns only identities allocated after `before`, such as the callee's
+    own locals, keeps `Confined`. -/
+theorem Confined.after_leaveFrame {footprint : List (Reference × Nat)} {before current : Memory}
+    {frame : Frame} (framed : Confined footprint before current)
+    (owned : ∀ id ∈ frame.owned, before.nextIdentity ≤ id) :
+    Confined footprint before (leaveFrame frame current) :=
+  framed.then_below (leaveFrame_preserves_memory_below frame current _ owned)
+    (Nat.le_of_eq (leaveFrame_nextIdentity frame current).symm)
+
+#print axioms Confined.after_leaveFrame
 
 /-- A checked write inside the footprint keeps every other byte and all write authority. -/
 theorem Confined.write {footprint : List (Reference × Nat)} {m result : Memory} {r : Reference}

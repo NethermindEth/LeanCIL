@@ -201,8 +201,7 @@ theorem root_holds (pairHolds : pairContract.Holds Extracted.program pair)
     (storage2.confined framed2).forget_fresh (fresh := [(t2, 32)]) (by simp [storage2.fresh])
   have owned : ∀ id ∈ [t2.allocation, t1.allocation], m.nextIdentity ≤ id := by
     simp [storage1.fresh, storage2.fresh, kept1.grows]
-  exact ⟨(kept1.trans kept2).then_below (leaveFrame_preserves_memory_below _ _ _ owned)
-    (Nat.le_of_eq (leaveFrame_nextIdentity _ _).symm), _, rfl, rfl⟩
+  exact ⟨(kept1.trans kept2).after_leaveFrame owned, _, rfl, rfl⟩
 
 theorem root_correct : rootContract.Holds Extracted.program root := root_holds pair_holds word_holds
 
@@ -276,8 +275,7 @@ theorem caller_holds (lowHolds : lowContract.Holds program 1) : callerContract.H
     Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
   have kept : Confined [] m final :=
     (storage.confined framed).forget_fresh (fresh := [(t, 16)]) (by simp [storage.fresh])
-  exact ⟨kept.then_below (leaveFrame_preserves_memory_below _ _ _ (by simp [storage.fresh]))
-    (Nat.le_of_eq (leaveFrame_nextIdentity _ _).symm), _, rfl, rfl⟩
+  exact ⟨kept.after_leaveFrame (by simp [storage.fresh]), _, rfl, rfl⟩
 
 theorem caller_correct : callerContract.Holds program 0 := caller_holds low_holds
 

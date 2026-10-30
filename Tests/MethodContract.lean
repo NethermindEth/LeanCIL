@@ -190,8 +190,7 @@ theorem frame_confined (m entered home stored final : Memory) (frame : Frame) (s
     ((Confined.refl _ m).then_below enter grows).trans
       ((Confined.write wroteSlot (by simp)).trans (Confined.write wroteOut (by simp)))
   subst left
-  exact (body.forget_fresh (by simpa using fresh)).then_below
-    (leaveFrame_preserves_memory_below frame stored _ owned) (Nat.le_of_eq (leaveFrame_nextIdentity frame stored).symm)
+  exact (body.forget_fresh (by simpa using fresh)).after_leaveFrame owned
 
 -- A callee that writes only its own frame cannot change what the caller reads after the call.
 theorem call_keeps_caller_read (body : CIL.Method) (args : List Value) (m entered home : Memory) (frame : Frame)

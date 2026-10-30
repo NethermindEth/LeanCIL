@@ -172,9 +172,7 @@ macro "relay_finish" : tactic => `(tactic| (
   cases lookup
   cil_contract_steps []
   -- `Relay` owns no allocation, so leaving its frame keeps all memory below its watermark.
-  exact ⟨framed.then_below
-      (leaveFrame_preserves_memory_below _ final _ fun _ member => nomatch member)
-      (Nat.le_of_eq (leaveFrame_nextIdentity _ final).symm), out, rfl, rfl,
+  exact ⟨framed.after_leaveFrame (fun _ member => nomatch member), out, rfl, rfl,
     calleeFuel, frame, entered, final, setup, finished, visits⟩
   ))
 
