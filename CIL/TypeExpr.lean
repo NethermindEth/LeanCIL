@@ -4,7 +4,8 @@ import Std
 # Metadata type expressions
 
 A scope-qualified form of ECMA-335 signature types, used by extraction and by typed import
-slots to compare signatures as values.
+slots to compare signatures as values. Custom modifiers, whose placement the ECMA-335 augments
+widen, are not represented; see `docs/SOUNDNESS-SPEC.md` for the admitted placements.
 -/
 
 namespace CIL.Extraction

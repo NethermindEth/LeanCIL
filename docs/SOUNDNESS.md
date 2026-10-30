@@ -10,7 +10,7 @@ A concrete-input theorem is not a universal method contract.
 | Component or assumption | What remains trusted | Evidence and limits |
 | --- | --- | --- |
 | Lean kernel and foundations | Lean 4.35.0 checks proof terms correctly; admitted foundational axioms are `propext`, `Quot.sound` and `Classical.choice`. | [Theorem audit](SOUNDNESS-VERIFICATION.md#theorem-audit); [toolchain pin](../lean-toolchain) |
-| CIL and memory semantics | The definitions correspond to the admitted CLR behavior. This correspondence is reviewed, not proved against a CLR implementation. | [Execution guarantees](SOUNDNESS-EXECUTION.md#what-is-defined-and-proved); [checked execution](../CIL/Safety/Execution.lean) |
+| CIL and memory semantics | The definitions correspond to the admitted CLR behavior. This correspondence is reviewed, not proved against a CLR implementation. | [Execution guarantees](SOUNDNESS-EXECUTION.md#what-is-defined-and-proved); [checked execution](../CIL/Safety/Execution.lean); [specification baseline](SOUNDNESS-SPEC.md) |
 | Metadata decoding and extraction | Mono.Cecil and the extractor faithfully decode and serialize the assembly; checks cover only their stated translation families. | [Independent translation evidence](SOUNDNESS-EVIDENCE.md#independently-checked-extraction-evidence); [opcode coverage](OPCODES.md) |
 | Runtime helpers and intrinsics | Each admitted external method implements the modeled behavior on the selected runtime and architecture. | [Runtime assumptions](SOUNDNESS-RUNTIME.md#runtime-assumptions); [intrinsic inventory](SIMD.md); [runtime bindings](../Extractor/RuntimeModels.cs) |
 | Deployment profile | The actual runtime version, architecture, endianness and feature availability satisfy the selected profile. | [Runtime profiles](RUNTIME-PROFILES.md); [profile validation](../CIL/Features.lean) |
@@ -43,6 +43,7 @@ The [runtime-call catalog and compiler corpus](COMPILER-COVERAGE.md) make change
 admitted API surface and compiler-sensitive patterns visible. Their finite probe domain does
 not establish correspondence with the CLR.
 
+- [Specification baseline](SOUNDNESS-SPEC.md): ECMA-335 (2012) plus the tracked augments.
 - [Execution and preservation](SOUNDNESS-EXECUTION.md): frames, allocation, embeddings and composition.
 - [Runtime and storage](SOUNDNESS-RUNTIME.md): external models, layout and deployment assumptions.
 - [Extraction and contracts](SOUNDNESS-EVIDENCE.md): independently checked evidence and imported proofs.
