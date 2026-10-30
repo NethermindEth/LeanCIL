@@ -126,6 +126,7 @@ import CIL.Safety.ReturnReferences
 import CIL.Safety.RunReturnTrace
 import CIL.Safety.RunningPrefixes
 import CIL.Safety.ScalarBranch
+import CIL.Safety.SpanContents
 import CIL.Safety.StaticInitialization
 import CIL.Safety.StaticInstructionWorld
 import CIL.Safety.StaticLifetime

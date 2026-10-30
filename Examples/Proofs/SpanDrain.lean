@@ -46,13 +46,7 @@ private theorem terminates (memory : Memory) (args : List Value) (state : State 
       view.slice_succeeds memory 1 (view.length - 1) valid (by omega)
     have formed := view.slice_valid sliced memory 1 (view.length - 1) slicedOK
     let next : State memory := ⟨sliced, formed, sameWidth.trans width, sameMode.trans readOnly⟩
-    have nonzero : BitVec.ofNat 32 view.length ≠ 0 := by
-      have bounded := view.length_bounded memory valid
-      intro zero
-      have := congrArg BitVec.toNat zero
-      simp only [BitVec.toNat_ofNat] at this
-      rw [Nat.mod_eq_of_lt (by omega)] at this
-      exact empty this
+    have nonzero := view.length_word_ne_zero memory valid empty
     have path : LoopReaches Extracted.program 0 args
         (header memory ⟨view, valid, width, readOnly⟩) (header memory next) := by
       cil_loop_steps [header, cutpoint, entry.frame, entry.load0, entry.store0,
