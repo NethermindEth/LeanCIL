@@ -147,7 +147,8 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
             "System.Runtime.Intrinsics.Vector128" when reference.Name == "get_IsHardwareAccelerated" => Feature.Vector128Accelerated,
             "System.Runtime.Intrinsics.Vector256" when reference.Name == "get_IsHardwareAccelerated" => Feature.Vector256Accelerated,
             _ when reference.Name != "get_IsSupported" => throw new InvalidDataException($"Unclassified feature getter: {reference.FullName}"),
-            "System.Runtime.Intrinsics.Arm.AdvSimd" => Feature.AdvSimd,
+            // .NET 10 sets AdvSimd_Arm64 exactly when AdvSimd is set on ARM64; see docs/RUNTIME-PROFILES.md.
+            "System.Runtime.Intrinsics.Arm.AdvSimd" or "System.Runtime.Intrinsics.Arm.AdvSimd/Arm64" => Feature.AdvSimd,
             "System.Runtime.Intrinsics.Arm.ArmBase/Arm64" => Feature.ArmBase64,
             "System.Runtime.Intrinsics.X86.Sse2" => Feature.Sse2,
             "System.Runtime.Intrinsics.X86.Ssse3" => Feature.Ssse3,

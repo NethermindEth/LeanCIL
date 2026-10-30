@@ -43,9 +43,10 @@ def factsWeaken (source target : List (Option W32)) : Bool :=
 def FeatureState.weakens (source target : FeatureState) : Bool :=
   factsWeaken source.stack target.stack && factsWeaken source.locals target.locals
 
-/-- The admitted feature classes, by name under `System.Runtime.Intrinsics`. -/
+/-- The admitted feature classes, by name under `System.Runtime.Intrinsics`.
+    .NET 10 reports `AdvSimd.Arm64` exactly when it reports `AdvSimd` (docs/RUNTIME-PROFILES.md). -/
 private def featureNames : List (String × Feature) := [
-  ("Arm.AdvSimd", .advSimd), ("Arm.ArmBase/Arm64", .armBase64),
+  ("Arm.AdvSimd", .advSimd), ("Arm.AdvSimd/Arm64", .advSimd), ("Arm.ArmBase/Arm64", .armBase64),
   ("X86.Sse2", .sse2), ("X86.Ssse3", .ssse3), ("X86.Sse41", .sse41),
   ("X86.Sse42", .sse42), ("X86.Avx", .avx), ("X86.Avx2", .avx2),
   ("X86.Avx512F", .avx512F), ("X86.Avx512F/VL", .avx512FVL),

@@ -28,6 +28,26 @@ object SelectProfile(string name) => selectProfile.Invoke(null, [name])!;
 var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 var sharedCases = RuntimeProfileValidation.Observations(
     Directory.GetFiles(At("docs/evidence/runtime-profiles"), "*.json")).ToList();
+// Getters read AdvSimd.Arm64 as AdvSimd, so observations that omit or split it are refused.
+var recorded = JsonNode.Parse(File.ReadAllText(At("docs/evidence/runtime-profiles/macos-arm64-net10.json")))!;
+foreach (var (name, mutate) in new (string, Action<JsonObject>)[]
+{
+    ("missing", observed => observed.Remove("advSimd64")),
+    ("split", observed => observed["advSimd64"] = !observed["advSimd"]!.GetValue<bool>())
+})
+{
+    var observations = recorded.DeepClone();
+    mutate(observations[0]!["observed"]!.AsObject());
+    var observationPath = Path.Combine(output, $"advsimd64-{name}.json");
+    File.WriteAllText(observationPath, observations.ToJsonString());
+    try
+    {
+        _ = RuntimeProfileValidation.Observations([observationPath]).ToList();
+        throw new InvalidOperationException("AdvSimd.Arm64 observation accepted: " + name);
+    }
+    catch (InvalidDataException error) when (error.Message.Contains("AdvSimd.Arm64", StringComparison.Ordinal)) { }
+    Console.WriteLine("PASS AdvSimd.Arm64 observation rejected: " + name);
+}
 foreach (var name in new[] { "scalar", "x64-sse2", "x64-sse42", "x64-v3", "x64-v4", "arm64-advsimd" })
     sharedCases.Add((JsonSerializer.Serialize(SelectProfile(name), jsonOptions), true));
 foreach (var name in new[] { "x64-avx2", "x64-avx2-bmi1", "x64-avx512", "x64-avx512-bmi1",

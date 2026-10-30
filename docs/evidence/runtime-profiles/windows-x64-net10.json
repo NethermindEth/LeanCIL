@@ -2,11 +2,12 @@
   {
     "configuration": "default",
     "observed": {
-      "runtime": ".NET 10.0.13",
-      "runtimeVersion": "10.0.13",
+      "runtime": ".NET 10.0.14",
+      "runtimeVersion": "10.0.14",
       "architecture": "X64",
       "os": "Microsoft Windows 10.0.26220",
       "advSimd": false,
+      "advSimd64": false,
       "armBase64": false,
       "x86Base64": true,
       "sse2": true,
@@ -28,11 +29,12 @@
   {
     "configuration": "EnableHWIntrinsic=0",
     "observed": {
-      "runtime": ".NET 10.0.13",
-      "runtimeVersion": "10.0.13",
+      "runtime": ".NET 10.0.14",
+      "runtimeVersion": "10.0.14",
       "architecture": "X64",
       "os": "Microsoft Windows 10.0.26220",
       "advSimd": false,
+      "advSimd64": false,
       "armBase64": false,
       "x86Base64": false,
       "sse2": false,
@@ -54,11 +56,12 @@
   {
     "configuration": "EnableSSE2=0",
     "observed": {
-      "runtime": ".NET 10.0.13",
-      "runtimeVersion": "10.0.13",
+      "runtime": ".NET 10.0.14",
+      "runtimeVersion": "10.0.14",
       "architecture": "X64",
       "os": "Microsoft Windows 10.0.26220",
       "advSimd": false,
+      "advSimd64": false,
       "armBase64": false,
       "x86Base64": true,
       "sse2": true,
@@ -80,11 +83,12 @@
   {
     "configuration": "EnableSSSE3=0",
     "observed": {
-      "runtime": ".NET 10.0.13",
-      "runtimeVersion": "10.0.13",
+      "runtime": ".NET 10.0.14",
+      "runtimeVersion": "10.0.14",
       "architecture": "X64",
       "os": "Microsoft Windows 10.0.26220",
       "advSimd": false,
+      "advSimd64": false,
       "armBase64": false,
       "x86Base64": true,
       "sse2": true,
@@ -106,11 +110,12 @@
   {
     "configuration": "EnableSSE41=0",
     "observed": {
-      "runtime": ".NET 10.0.13",
-      "runtimeVersion": "10.0.13",
+      "runtime": ".NET 10.0.14",
+      "runtimeVersion": "10.0.14",
       "architecture": "X64",
       "os": "Microsoft Windows 10.0.26220",
       "advSimd": false,
+      "advSimd64": false,
       "armBase64": false,
       "x86Base64": true,
       "sse2": true,
@@ -132,11 +137,12 @@
   {
     "configuration": "EnableSSE42=0",
     "observed": {
-      "runtime": ".NET 10.0.13",
-      "runtimeVersion": "10.0.13",
+      "runtime": ".NET 10.0.14",
+      "runtimeVersion": "10.0.14",
       "architecture": "X64",
       "os": "Microsoft Windows 10.0.26220",
       "advSimd": false,
+      "advSimd64": false,
       "armBase64": false,
       "x86Base64": true,
       "sse2": true,
@@ -158,11 +164,12 @@
   {
     "configuration": "EnableAVX=0",
     "observed": {
-      "runtime": ".NET 10.0.13",
-      "runtimeVersion": "10.0.13",
+      "runtime": ".NET 10.0.14",
+      "runtimeVersion": "10.0.14",
       "architecture": "X64",
       "os": "Microsoft Windows 10.0.26220",
       "advSimd": false,
+      "advSimd64": false,
       "armBase64": false,
       "x86Base64": true,
       "sse2": true,
@@ -184,11 +191,12 @@
   {
     "configuration": "EnableAVX2=0",
     "observed": {
-      "runtime": ".NET 10.0.13",
-      "runtimeVersion": "10.0.13",
+      "runtime": ".NET 10.0.14",
+      "runtimeVersion": "10.0.14",
       "architecture": "X64",
       "os": "Microsoft Windows 10.0.26220",
       "advSimd": false,
+      "advSimd64": false,
       "armBase64": false,
       "x86Base64": true,
       "sse2": true,
@@ -210,11 +218,12 @@
   {
     "configuration": "EnableBMI1=0",
     "observed": {
-      "runtime": ".NET 10.0.13",
-      "runtimeVersion": "10.0.13",
+      "runtime": ".NET 10.0.14",
+      "runtimeVersion": "10.0.14",
       "architecture": "X64",
       "os": "Microsoft Windows 10.0.26220",
       "advSimd": false,
+      "advSimd64": false,
       "armBase64": false,
       "x86Base64": true,
       "sse2": true,
@@ -236,11 +245,12 @@
   {
     "configuration": "EnableBMI2=0",
     "observed": {
-      "runtime": ".NET 10.0.13",
-      "runtimeVersion": "10.0.13",
+      "runtime": ".NET 10.0.14",
+      "runtimeVersion": "10.0.14",
       "architecture": "X64",
       "os": "Microsoft Windows 10.0.26220",
       "advSimd": false,
+      "advSimd64": false,
       "armBase64": false,
       "x86Base64": true,
       "sse2": true,
@@ -262,11 +272,12 @@
   {
     "configuration": "EnableAVX512=0",
     "observed": {
-      "runtime": ".NET 10.0.13",
-      "runtimeVersion": "10.0.13",
+      "runtime": ".NET 10.0.14",
+      "runtimeVersion": "10.0.14",
       "architecture": "X64",
       "os": "Microsoft Windows 10.0.26220",
       "advSimd": false,
+      "advSimd64": false,
       "armBase64": false,
       "x86Base64": true,
       "sse2": true,
@@ -288,11 +299,12 @@
   {
     "configuration": "EnableAVX512DQ=0",
     "observed": {
-      "runtime": ".NET 10.0.13",
-      "runtimeVersion": "10.0.13",
+      "runtime": ".NET 10.0.14",
+      "runtimeVersion": "10.0.14",
       "architecture": "X64",
       "os": "Microsoft Windows 10.0.26220",
       "advSimd": false,
+      "advSimd64": false,
       "armBase64": false,
       "x86Base64": true,
       "sse2": true,
@@ -314,11 +326,12 @@
   {
     "configuration": "EnableAVX512F_VL=0",
     "observed": {
-      "runtime": ".NET 10.0.13",
-      "runtimeVersion": "10.0.13",
+      "runtime": ".NET 10.0.14",
+      "runtimeVersion": "10.0.14",
       "architecture": "X64",
       "os": "Microsoft Windows 10.0.26220",
       "advSimd": false,
+      "advSimd64": false,
       "armBase64": false,
       "x86Base64": true,
       "sse2": true,
@@ -340,11 +353,12 @@
   {
     "configuration": "EnableArm64AdvSimd=0",
     "observed": {
-      "runtime": ".NET 10.0.13",
-      "runtimeVersion": "10.0.13",
+      "runtime": ".NET 10.0.14",
+      "runtimeVersion": "10.0.14",
       "architecture": "X64",
       "os": "Microsoft Windows 10.0.26220",
       "advSimd": false,
+      "advSimd64": false,
       "armBase64": false,
       "x86Base64": true,
       "sse2": true,
@@ -366,11 +380,12 @@
   {
     "configuration": "EnableArm64=0",
     "observed": {
-      "runtime": ".NET 10.0.13",
-      "runtimeVersion": "10.0.13",
+      "runtime": ".NET 10.0.14",
+      "runtimeVersion": "10.0.14",
       "architecture": "X64",
       "os": "Microsoft Windows 10.0.26220",
       "advSimd": false,
+      "advSimd64": false,
       "armBase64": false,
       "x86Base64": true,
       "sse2": true,
@@ -392,11 +407,12 @@
   {
     "configuration": "PreferredVectorBitWidth=128",
     "observed": {
-      "runtime": ".NET 10.0.13",
-      "runtimeVersion": "10.0.13",
+      "runtime": ".NET 10.0.14",
+      "runtimeVersion": "10.0.14",
       "architecture": "X64",
       "os": "Microsoft Windows 10.0.26220",
       "advSimd": false,
+      "advSimd64": false,
       "armBase64": false,
       "x86Base64": true,
       "sse2": true,
@@ -418,11 +434,12 @@
   {
     "configuration": "PreferredVectorBitWidth=64",
     "observed": {
-      "runtime": ".NET 10.0.13",
-      "runtimeVersion": "10.0.13",
+      "runtime": ".NET 10.0.14",
+      "runtimeVersion": "10.0.14",
       "architecture": "X64",
       "os": "Microsoft Windows 10.0.26220",
       "advSimd": false,
+      "advSimd64": false,
       "armBase64": false,
       "x86Base64": true,
       "sse2": true,

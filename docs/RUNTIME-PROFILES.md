@@ -16,11 +16,15 @@ The runtime sources pin this policy to .NET 10:
 - [codeman.cpp, v10.0.13](https://github.com/dotnet/runtime/blob/v10.0.13/src/coreclr/vm/codeman.cpp)
   enables groups from CPU capabilities and runtime switches. On ARM64 it enables
   ArmBase and AdvSimd together under EnableHWIntrinsic.
+- [corinfoinstructionset.h, v10.0.13](https://github.com/dotnet/runtime/blob/v10.0.13/src/coreclr/inc/corinfoinstructionset.h)
+  defines ArmBase_Arm64 and AdvSimd_Arm64 only for ARM64 targets. `Set64BitInstructionSetVariants`
+  adds each exactly when its base set is enabled, and `EnsureInstructionSetFlagsAreValid`
+  removes either one when the other is absent. Both files are unchanged in v10.0.14.
 
-Fresh-process observations collected on 2026-10-24 are checked in:
+Fresh-process observations collected on 2026-10-30 are checked in:
 
-- [Windows x64, .NET 10.0.13](evidence/runtime-profiles/windows-x64-net10.json).
-- [macOS ARM64, .NET 10.0.12, Apple M4](evidence/runtime-profiles/macos-arm64-net10.json).
+- [Windows x64, .NET 10.0.14](evidence/runtime-profiles/windows-x64-net10.json).
+- [macOS ARM64, .NET 10.0.14, Apple M4](evidence/runtime-profiles/macos-arm64-net10.json).
 
 Each record includes the actual runtime version, process architecture, OS, switch
 and observed flags. Reproduce with:
@@ -45,7 +49,7 @@ supported deployment boundary.
 | AVX | Requires SSE4.2; may be enabled without AVX2 |
 | AVX2, BMI1, BMI2 | Equal; require AVX |
 | AVX-512 F, F.VL, DQ, DQ.VL | Equal; require AVX2 |
-| ArmBase.Arm64, AdvSimd | Equal; ARM64 only |
+| ArmBase.Arm64, AdvSimd, AdvSimd.Arm64 | Equal; ARM64 only |
 | Vector128 acceleration | Equal to SSE2 or AdvSimd |
 | Vector256 acceleration | Requires AVX2; may be disabled independently |
 
@@ -53,8 +57,8 @@ On the measured x64 runtime, EnableSSE42, EnableAVX, EnableAVX2 and EnableAVX512
 disable whole groups and their dependents. Legacy individual switches such as
 EnableBMI2 and EnableAVX512DQ have no effect. PreferredVectorBitWidth=128 disables
 Vector256 acceleration without disabling AVX2. On the measured ARM64 runtime,
-EnableHWIntrinsic=0 disables ArmBase, AdvSimd and Vector128 acceleration together;
-the tested individual ARM switches do not split that group.
+EnableHWIntrinsic=0 disables ArmBase, AdvSimd, AdvSimd.Arm64 and Vector128 acceleration
+together; the tested individual ARM switches do not split that group.
 
 ## Migration
 
@@ -86,6 +90,10 @@ job validates only those observations, not every possible deployment.
 Evidence field `bmi2` is `Bmi2.X64.IsSupported`, `x86Base64` is
 `X86Base.X64.IsSupported`, and `armBase64` is `ArmBase.Arm64.IsSupported`.
 These are the model's 64-bit capabilities, not the corresponding base-class flags.
+Evidence field `advSimd64` is `AdvSimd.Arm64.IsSupported`. Extraction answers that getter
+with the `advSimd` capability, so validation rejects an observation that lacks it or
+records a different value; it is not a separate profile field. Other nested ARM64
+getters, such as `Crc32.Arm64` and `Rdm.Arm64`, remain unclassified and are rejected.
 
 Custom consumer profiles, including int256's historical `x64-avx2-bmi2.json` and
 `x64-avx512dqvl.json`, must obey the same constraints. Set AVX2/BMI1/BMI2 together;

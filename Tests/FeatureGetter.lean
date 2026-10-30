@@ -24,7 +24,8 @@ def getter (owner member : String) : CallSite := {
 theorem supported :
     featureGetter (getter "Vector256" "get_IsHardwareAccelerated") = some .vector256Accelerated ∧
     featureGetter (getter "X86.Sse41" "get_IsSupported") = some .sse41 ∧
-    featureGetter (getter "Arm.ArmBase/Arm64" "get_IsSupported") = some .armBase64 := by
+    featureGetter (getter "Arm.ArmBase/Arm64" "get_IsSupported") = some .armBase64 ∧
+    featureGetter (getter "Arm.AdvSimd/Arm64" "get_IsSupported") = some .advSimd := by
   decide +kernel
 #print axioms supported
 
@@ -35,6 +36,14 @@ theorem wrong_names :
     featureGetter (getter "X86.Sse41" "get_IsSupportedX") = none ∧
     featureGetter (getter "X86.Ssé41" "get_IsSupported") = none := by decide +kernel
 #print axioms wrong_names
+
+/-- Nested 64-bit classes outside the measured runtime groups remain unclassified. -/
+theorem unclassified_nested :
+    featureGetter (getter "Arm.Crc32/Arm64" "get_IsSupported") = none ∧
+    featureGetter (getter "Arm.Rdm/Arm64" "get_IsSupported") = none ∧
+    featureGetter (getter "Arm.AdvSimd/Arm64" "get_IsHardwareAccelerated") = none := by
+  decide +kernel
+#print axioms unclassified_nested
 
 /-- Truncation, an incorrect assembly and trailing signature bytes all fail exact matching. -/
 theorem wrong_prefix_or_tail :

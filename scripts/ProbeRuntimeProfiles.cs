@@ -18,6 +18,7 @@ if (args is ["--child"])
         architecture = RuntimeInformation.ProcessArchitecture.ToString(),
         os = RuntimeInformation.OSDescription,
         advSimd = AdvSimd.IsSupported,
+        advSimd64 = AdvSimd.Arm64.IsSupported,
         armBase64 = ArmBase.Arm64.IsSupported,
         x86Base64 = X86Base.X64.IsSupported,
         sse2 = Sse2.IsSupported,
