@@ -36,7 +36,7 @@ foreach (var (evidence, nested, baseFlag, getter) in new[]
     ("windows-x64-net10.json", "avx512VbmiVL", "avx512Vbmi", "Avx512Vbmi.VL")
 })
 {
-    var recorded = JsonNode.Parse(File.ReadAllText(At("docs/evidence/runtime-profiles/" + evidence)))!;
+    var recorded = JsonNode.Parse(File.ReadAllText(At($"docs/evidence/runtime-profiles/{evidence}")))!;
     foreach (var (name, mutate) in new (string, Action<JsonObject>)[]
     {
         ("missing", observed => observed.Remove(nested)),
@@ -179,10 +179,10 @@ File.WriteAllText(vbmiProfile, vbmiNode.ToJsonString());
 foreach (var (profile, label, vbmiFlags) in new[]
 {
     ("scalar", "scalar", 0), ("x64-v3", "x64-v3", 0), ("x64-v4", "x64-v4", 0), ("arm64-advsimd", "arm64-advsimd", 0),
-    ("@" + vbmiProfile, "x64-v4-vbmi", 3)
+    ($"@{vbmiProfile}", "x64-v4-vbmi", 3)
 })
 {
-    var vbmiFolder = Path.Combine(output, "Vbmi-" + label);
+    var vbmiFolder = Path.Combine(output, $"Vbmi-{label}");
     Directory.CreateDirectory(vbmiFolder);
     var vbmiProof = Path.Combine(vbmiFolder, "VbmiFlags.lean");
     File.WriteAllText(vbmiProof, $$"""
@@ -200,10 +200,10 @@ foreach (var (profile, label, vbmiFlags) in new[]
         () => Console.WriteLine($"PASS Avx512Vbmi.VL follows Avx512Vbmi under {label}: {vbmiFlags}"));
 }
 // The unmodeled VBMI body is pruned under x64-v4 and blocks extraction when VBMI is declared.
-foreach (var (profile, label) in new[] { ("x64-v4", "x64-v4"), ("@" + vbmiProfile, "x64-v4-vbmi") })
+foreach (var (profile, label) in new[] { ("x64-v4", "x64-v4"), ($"@{vbmiProfile}", "x64-v4-vbmi") })
 {
     var result = Execute(Extract("extract", assembly, "Examples", "Capabilities::VbmiCount(ulong)",
-        Path.Combine(output, "VbmiCount-" + label), profile));
+        Path.Combine(output, $"VbmiCount-{label}"), profile));
     var blocked = result.Output.Contains("External managed dependency", StringComparison.Ordinal) &&
         result.Output.Contains("Avx512Vbmi/VL::PermuteVar32x8", StringComparison.Ordinal);
     if (label == "x64-v4-vbmi" ? result.Code == 0 || !blocked : result.Code != 0)
@@ -211,11 +211,11 @@ foreach (var (profile, label) in new[] { ("x64-v4", "x64-v4"), ("@" + vbmiProfil
     Console.WriteLine($"PASS Avx512Vbmi.VL selects the {(blocked ? "rejected VBMI" : "portable")} body under {label}");
 }
 var vbmi2 = Execute(Extract("extract", assembly, "Examples", "Capabilities::Vbmi2()",
-    Path.Combine(output, "Unclassified-Vbmi2"), "@" + vbmiProfile));
+    Path.Combine(output, "Unclassified-Vbmi2"), $"@{vbmiProfile}"));
 if (vbmi2.Code == 0 || !vbmi2.Output.Contains(
         "Unclassified feature getter: System.Boolean System.Runtime.Intrinsics.X86.Avx512Vbmi2/VL::get_IsSupported()",
         StringComparison.Ordinal))
-    throw new InvalidOperationException("Avx512Vbmi2.VL getter was classified:\n" + vbmi2.Output);
+    throw new InvalidOperationException($"Avx512Vbmi2.VL getter was classified:\n{vbmi2.Output}");
 Console.WriteLine("PASS unmeasured AVX-512 getter rejected: Avx512Vbmi2/VL");
 // The unmodeled ARM64 body is pruned without AdvSimd and blocks extraction with it.
 foreach (var profile in new[] { "scalar", "x64-v4", "arm64-advsimd" })
