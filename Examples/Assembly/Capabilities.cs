@@ -41,7 +41,7 @@ public static class Capabilities
 
     // The VBMI body is unmodeled: only profiles without VBMI prune it.
     public static int VbmiCount(ulong value) => Avx512Vbmi.VL.IsSupported
-        ? Avx512Vbmi.VL.PermuteVar32x8(Vector256.Create((byte)value), Vector256<byte>.Zero).GetElement(0)
+        ? Avx512Vbmi.VL.PermuteVar32x8(Vector256<byte>.Zero, Vector256<byte>.Zero).GetElement(0)
         : (int)(value & 1);
 
     public static bool Vbmi2() => Avx512Vbmi2.VL.IsSupported;
