@@ -22,6 +22,8 @@
       "avx512FVL": true,
       "avx512DQ": true,
       "avx512DQVL": true,
+      "avx512Vbmi": true,
+      "avx512VbmiVL": true,
       "vector128Accelerated": true,
       "vector256Accelerated": true
     }
@@ -49,6 +51,8 @@
       "avx512FVL": false,
       "avx512DQ": false,
       "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": false,
       "vector256Accelerated": false
     }
@@ -76,6 +80,8 @@
       "avx512FVL": true,
       "avx512DQ": true,
       "avx512DQVL": true,
+      "avx512Vbmi": true,
+      "avx512VbmiVL": true,
       "vector128Accelerated": true,
       "vector256Accelerated": true
     }
@@ -103,6 +109,8 @@
       "avx512FVL": true,
       "avx512DQ": true,
       "avx512DQVL": true,
+      "avx512Vbmi": true,
+      "avx512VbmiVL": true,
       "vector128Accelerated": true,
       "vector256Accelerated": true
     }
@@ -130,6 +138,8 @@
       "avx512FVL": true,
       "avx512DQ": true,
       "avx512DQVL": true,
+      "avx512Vbmi": true,
+      "avx512VbmiVL": true,
       "vector128Accelerated": true,
       "vector256Accelerated": true
     }
@@ -157,6 +167,8 @@
       "avx512FVL": false,
       "avx512DQ": false,
       "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": true,
       "vector256Accelerated": false
     }
@@ -184,6 +196,8 @@
       "avx512FVL": false,
       "avx512DQ": false,
       "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": true,
       "vector256Accelerated": false
     }
@@ -211,6 +225,8 @@
       "avx512FVL": false,
       "avx512DQ": false,
       "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": true,
       "vector256Accelerated": false
     }
@@ -238,6 +254,8 @@
       "avx512FVL": true,
       "avx512DQ": true,
       "avx512DQVL": true,
+      "avx512Vbmi": true,
+      "avx512VbmiVL": true,
       "vector128Accelerated": true,
       "vector256Accelerated": true
     }
@@ -265,6 +283,8 @@
       "avx512FVL": true,
       "avx512DQ": true,
       "avx512DQVL": true,
+      "avx512Vbmi": true,
+      "avx512VbmiVL": true,
       "vector128Accelerated": true,
       "vector256Accelerated": true
     }
@@ -292,6 +312,8 @@
       "avx512FVL": false,
       "avx512DQ": false,
       "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": true,
       "vector256Accelerated": true
     }
@@ -319,6 +341,37 @@
       "avx512FVL": true,
       "avx512DQ": true,
       "avx512DQVL": true,
+      "avx512Vbmi": true,
+      "avx512VbmiVL": true,
+      "vector128Accelerated": true,
+      "vector256Accelerated": true
+    }
+  },
+  {
+    "configuration": "EnableAVX512v2=0",
+    "observed": {
+      "runtime": ".NET 10.0.14",
+      "runtimeVersion": "10.0.14",
+      "architecture": "X64",
+      "os": "Microsoft Windows 10.0.26220",
+      "advSimd": false,
+      "advSimd64": false,
+      "armBase64": false,
+      "x86Base64": true,
+      "sse2": true,
+      "ssse3": true,
+      "sse41": true,
+      "sse42": true,
+      "avx": true,
+      "avx2": true,
+      "bmi1": true,
+      "bmi2": true,
+      "avx512F": true,
+      "avx512FVL": true,
+      "avx512DQ": true,
+      "avx512DQVL": true,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": true,
       "vector256Accelerated": true
     }
@@ -346,6 +399,8 @@
       "avx512FVL": true,
       "avx512DQ": true,
       "avx512DQVL": true,
+      "avx512Vbmi": true,
+      "avx512VbmiVL": true,
       "vector128Accelerated": true,
       "vector256Accelerated": true
     }
@@ -373,6 +428,8 @@
       "avx512FVL": true,
       "avx512DQ": true,
       "avx512DQVL": true,
+      "avx512Vbmi": true,
+      "avx512VbmiVL": true,
       "vector128Accelerated": true,
       "vector256Accelerated": true
     }
@@ -400,6 +457,8 @@
       "avx512FVL": true,
       "avx512DQ": true,
       "avx512DQVL": true,
+      "avx512Vbmi": true,
+      "avx512VbmiVL": true,
       "vector128Accelerated": true,
       "vector256Accelerated": true
     }
@@ -427,6 +486,8 @@
       "avx512FVL": true,
       "avx512DQ": true,
       "avx512DQVL": true,
+      "avx512Vbmi": true,
+      "avx512VbmiVL": true,
       "vector128Accelerated": true,
       "vector256Accelerated": false
     }
@@ -454,6 +515,8 @@
       "avx512FVL": true,
       "avx512DQ": true,
       "avx512DQVL": true,
+      "avx512Vbmi": true,
+      "avx512VbmiVL": true,
       "vector128Accelerated": true,
       "vector256Accelerated": true
     }

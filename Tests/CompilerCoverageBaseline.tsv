@@ -111,6 +111,7 @@ Examples:System.Boolean Examples.Bits::PrimitivePowerU64(System.UInt64)	A	A	A	A	
 Examples:System.Boolean Examples.Bits::PrimitivePowerUNative(System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.Capabilities::Crc64()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.Capabilities::Rdm64()	B	B	B	B	B	B	B	B
+Examples:System.Boolean Examples.Capabilities::Vbmi2()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.DivisionIntrinsics::UnsafeEquals(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.IntegerOperations::Greater32(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.IntegerOperations::Greater64(System.Int64,System.Int64)	A	A	A	A	A	A	A	A
@@ -226,6 +227,7 @@ Examples:System.Int32 Examples.Capabilities::ArmCount(System.UInt64)	A	A	A	A	A	A
 Examples:System.Int32 Examples.Capabilities::Endian()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Capabilities::Platform()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Capabilities::ReferenceFree()	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Capabilities::VbmiCount(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ClosedInterfaceCounter::Examples.IClosedCounter<System.Int32>.Read()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ClosedInterfaceCounter::Examples.IClosedCounter<System.Int64>.Read()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ConstrainedCalls::ClosedBoth(Examples.ClosedInterfaceCounter&)	A	A	A	A	A	A	A	A
@@ -622,6 +624,7 @@ Examples:System.UInt32 Examples.Bits::Right32(System.UInt32,System.Int32)	A	A	A	
 Examples:System.UInt32 Examples.Bits::RoundUp32(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Capabilities::ArmFlags()	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Capabilities::Flags()	A	A	A	A	A	A	A	A
+Examples:System.UInt32 Examples.Capabilities::VbmiFlags()	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.CheckedArithmetic::Add(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.CheckedConversions::Narrow(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Division::Quotient(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A

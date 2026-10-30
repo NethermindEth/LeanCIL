@@ -19,6 +19,11 @@ internal static class RuntimeProfileValidation
                     advSimd64 != profile["advSimd"]!.GetValue<bool>())
                     throw new InvalidDataException("AdvSimd.Arm64 is missing or differs from AdvSimd: " + file);
                 profile.Remove("advSimd64");
+                // Feature getters read Avx512Vbmi.VL as Avx512Vbmi; a split observation refutes that model.
+                if (profile["avx512VbmiVL"]?.GetValue<bool>() is not bool avx512VbmiVL ||
+                    avx512VbmiVL != profile["avx512Vbmi"]?.GetValue<bool>())
+                    throw new InvalidDataException("Avx512Vbmi.VL is missing or differs from Avx512Vbmi: " + file);
+                profile.Remove("avx512VbmiVL");
                 profile.Remove("runtime");
                 profile.Remove("runtimeVersion");
                 profile.Remove("os");

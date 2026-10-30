@@ -22,6 +22,8 @@
       "avx512FVL": false,
       "avx512DQ": false,
       "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": true,
       "vector256Accelerated": false
     }
@@ -49,6 +51,8 @@
       "avx512FVL": false,
       "avx512DQ": false,
       "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": false,
       "vector256Accelerated": false
     }
@@ -76,6 +80,8 @@
       "avx512FVL": false,
       "avx512DQ": false,
       "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": true,
       "vector256Accelerated": false
     }
@@ -103,6 +109,8 @@
       "avx512FVL": false,
       "avx512DQ": false,
       "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": true,
       "vector256Accelerated": false
     }
@@ -130,6 +138,8 @@
       "avx512FVL": false,
       "avx512DQ": false,
       "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": true,
       "vector256Accelerated": false
     }
@@ -157,6 +167,8 @@
       "avx512FVL": false,
       "avx512DQ": false,
       "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": true,
       "vector256Accelerated": false
     }
@@ -184,6 +196,8 @@
       "avx512FVL": false,
       "avx512DQ": false,
       "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": true,
       "vector256Accelerated": false
     }
@@ -211,6 +225,8 @@
       "avx512FVL": false,
       "avx512DQ": false,
       "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": true,
       "vector256Accelerated": false
     }
@@ -238,6 +254,8 @@
       "avx512FVL": false,
       "avx512DQ": false,
       "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": true,
       "vector256Accelerated": false
     }
@@ -265,6 +283,8 @@
       "avx512FVL": false,
       "avx512DQ": false,
       "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": true,
       "vector256Accelerated": false
     }
@@ -292,6 +312,8 @@
       "avx512FVL": false,
       "avx512DQ": false,
       "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": true,
       "vector256Accelerated": false
     }
@@ -319,6 +341,37 @@
       "avx512FVL": false,
       "avx512DQ": false,
       "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
+      "vector128Accelerated": true,
+      "vector256Accelerated": false
+    }
+  },
+  {
+    "configuration": "EnableAVX512v2=0",
+    "observed": {
+      "runtime": ".NET 10.0.14",
+      "runtimeVersion": "10.0.14",
+      "architecture": "Arm64",
+      "os": "macOS 27.0.0",
+      "advSimd": true,
+      "advSimd64": true,
+      "armBase64": true,
+      "x86Base64": false,
+      "sse2": false,
+      "ssse3": false,
+      "sse41": false,
+      "sse42": false,
+      "avx": false,
+      "avx2": false,
+      "bmi1": false,
+      "bmi2": false,
+      "avx512F": false,
+      "avx512FVL": false,
+      "avx512DQ": false,
+      "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": true,
       "vector256Accelerated": false
     }
@@ -346,6 +399,8 @@
       "avx512FVL": false,
       "avx512DQ": false,
       "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": true,
       "vector256Accelerated": false
     }
@@ -373,6 +428,8 @@
       "avx512FVL": false,
       "avx512DQ": false,
       "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": true,
       "vector256Accelerated": false
     }
@@ -400,6 +457,8 @@
       "avx512FVL": false,
       "avx512DQ": false,
       "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": true,
       "vector256Accelerated": false
     }
@@ -427,6 +486,8 @@
       "avx512FVL": false,
       "avx512DQ": false,
       "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": true,
       "vector256Accelerated": false
     }
@@ -454,6 +515,8 @@
       "avx512FVL": false,
       "avx512DQ": false,
       "avx512DQVL": false,
+      "avx512Vbmi": false,
+      "avx512VbmiVL": false,
       "vector128Accelerated": true,
       "vector256Accelerated": false
     }

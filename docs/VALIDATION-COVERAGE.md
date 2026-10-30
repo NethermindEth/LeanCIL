@@ -44,7 +44,10 @@ tables, and backedge weakening. Unselected targets still reject out-of-range pos
 tail-transfer interiors in both extraction and independent evidence validation.
 `Tests/FeatureEvidence.cs` proves that `AdvSimd.Arm64.IsSupported` agrees with `AdvSimd` under
 scalar, x64 and ARM64 profiles, that the unmodeled ARM64 body it guards blocks only
-`arm64-advsimd`, and that `Crc32.Arm64` and `Rdm.Arm64` stay unclassified.
+`arm64-advsimd`, and that `Crc32.Arm64` and `Rdm.Arm64` stay unclassified. It likewise proves
+that `Avx512Vbmi.VL` agrees with `Avx512Vbmi`: both are false under the built-in profiles and
+true under a custom v4 profile declaring VBMI, where the unmodeled VBMI body blocks extraction;
+`Avx512Vbmi2.VL` stays unclassified, and observations that omit or split `avx512VbmiVL` are rejected.
 `BitConverter.IsLittleEndian` prunes its big-endian branch on those profiles; forged owners and values are rejected by both certificates,
 and lookalike scopes, fields and same-named module types are rejected by the extractor.
 

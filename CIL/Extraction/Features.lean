@@ -44,13 +44,15 @@ def FeatureState.weakens (source target : FeatureState) : Bool :=
   factsWeaken source.stack target.stack && factsWeaken source.locals target.locals
 
 /-- The admitted feature classes, by name under `System.Runtime.Intrinsics`.
-    .NET 10 reports `AdvSimd.Arm64` exactly when it reports `AdvSimd` (docs/RUNTIME-PROFILES.md). -/
+    .NET 10 reports `AdvSimd.Arm64` exactly when it reports `AdvSimd`, and `Avx512Vbmi.VL` exactly
+    when it reports `Avx512Vbmi` (docs/RUNTIME-PROFILES.md). -/
 private def featureNames : List (String × Feature) := [
   ("Arm.AdvSimd", .advSimd), ("Arm.AdvSimd/Arm64", .advSimd), ("Arm.ArmBase/Arm64", .armBase64),
   ("X86.Sse2", .sse2), ("X86.Ssse3", .ssse3), ("X86.Sse41", .sse41),
   ("X86.Sse42", .sse42), ("X86.Avx", .avx), ("X86.Avx2", .avx2),
   ("X86.Avx512F", .avx512F), ("X86.Avx512F/VL", .avx512FVL),
   ("X86.Avx512DQ", .avx512DQ), ("X86.Avx512DQ/VL", .avx512DQVL),
+  ("X86.Avx512Vbmi", .avx512Vbmi), ("X86.Avx512Vbmi/VL", .avx512Vbmi),
   ("X86.Bmi1", .bmi1), ("X86.Bmi2/X64", .bmi2), ("X86.X86Base/X64", .x86Base64),
   ("Vector128", .vector128Accelerated), ("Vector256", .vector256Accelerated)]
 
