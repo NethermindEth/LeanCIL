@@ -51,7 +51,9 @@ bind_entry entry (memory : Memory) (view : SpanView)
 ```
 
 Facts must suffice to derive a successful entry; unresolved allocation is an error. This uses the
-checked allocator and does not assume a frame layout. For an applied body such as `(body width mode)`,
+checked allocator and does not assume a frame layout. Frame setup is normalized once: the proof
+that computes the frame also proves `entry.checked`, which the kernel checks against the
+generated definitions. For an applied body such as `(body width mode)`,
 include its defining name in `simplifying [body, facts]`.
 The [span loop](../Examples/Proofs/SpanDrain.lean)
 proves method invocation, repeated slicing and parameter reassignment, termination and exact caller
@@ -83,7 +85,9 @@ bytes, writable), and [`EntryMemory`](../CIL/Safety/NumericLocals.lean) `memory 
 (caller memory kept below its watermark, identities grown, well formed). A proof opens it with
 `obtain ⟨home, entered, setup, numeric, entryMemory⟩ := entry.checked ...`; this form generates no
 `entry.result`, `entry.memory` or `homeN` abbreviations, while span and root slots still get
-`slotN`, `loadN` and `storeN`. Homes are threaded through
+`slotN`, `loadN` and `storeN`. `entry.setup` is the setup equation given each home's allocation
+equation `madeN` and `kept`; it is the proof that derived the frame, so `entry.checked` reuses it
+instead of normalizing frame setup again. Homes are threaded through
 [`make_numeric_entry_local`](../CIL/Safety/NumericLocals.lean), and a fact `valid : view.validate
 memory = .ok ()` is also supplied in the memory after the homes through
 [`SpanView.validate_below`](../CIL/Safety/FrameMemoryBelow.lean), so an assigned span parameter
