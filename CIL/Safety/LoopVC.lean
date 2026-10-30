@@ -2,6 +2,7 @@ import CIL.Safety.NumericLocals
 import CIL.Safety.LoopAutomation
 import CIL.Safety.ReturnMemory
 import CIL.Safety.MemoryLemmas
+import CIL.Safety.WriteEffects
 
 /-!
 # Checked numeric-store verification conditions
@@ -16,18 +17,6 @@ At a loop head of a frame entered over symbolic caller memory, `EntryMemory` and
 -/
 
 namespace CIL.Safety
-
-/-- A checked write allocates nothing, so the identity watermark is unchanged. -/
-theorem write_nextIdentity {memory result : Memory} {reference : Reference}
-    {bytes : List (BitVec 8)} {alignment : Nat}
-    (written : write memory reference bytes alignment = .ok result) :
-    result.nextIdentity = memory.nextIdentity := by
-  unfold CIL.Safety.write at written
-  cases ready : access memory reference bytes.length alignment true <;>
-    simp only [ready, Bind.bind, Except.bind, Pure.pure, Except.pure] at written
-  · cases written
-  · cases written; rfl
-#print axioms write_nextIdentity
 
 /-- An entry home holding `value`'s number loads as `value` after the CLI's readback. -/
 theorem NumericEntryHome.load {caller current : Memory} {kind : CIL.LocalKind} {number : Nat}

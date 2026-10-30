@@ -156,13 +156,7 @@ theorem Confined.write {footprint : List (Reference × Nat)} {m result : Memory}
     {bytes : List (BitVec 8)} {alignment : Nat}
     (h : write m r bytes alignment = .ok result) (member : (r, bytes.length) ∈ footprint) :
     Confined footprint m result := by
-  have shape :
-      result.views = writeViews m r bytes.length ∧ result.nextIdentity = m.nextIdentity := by
-    unfold CIL.Safety.write at h
-    cases ha : access m r bytes.length alignment true <;>
-      simp only [ha, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-    · cases h
-    · cases h; exact ⟨rfl, rfl⟩
+  have shape := write_views_nextIdentity h
   have authority : ∀ writing q, permitted result writing q =
       permitted { m with views := ⟨r.allocation, r.offset, bytes.length, true, false⟩ :: m.views }
         writing q := by
