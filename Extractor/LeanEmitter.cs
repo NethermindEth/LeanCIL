@@ -71,7 +71,8 @@ internal static class LeanEmitter
     };
     static TypeReference[] LayoutTypes(MethodDefinition[] methods, MetadataValidation.LayoutContext metadata)
     {
-        TypeReference[] types = methods.SelectMany(m => m.Parameters.Select(p => p.ParameterType)
+        TypeReference[] types = methods
+            .SelectMany(m => m.Parameters.Select(p => InReferences.Parameter(p.ParameterType))
             .Concat(m.HasThis ? [MethodSpecialization.DeclaringType(m)] : [])
             .Concat(m.Body.Variables.Select(v => v.VariableType)).Append(m.ReturnType)
             .Concat(MethodSpecialization.Arguments(m))

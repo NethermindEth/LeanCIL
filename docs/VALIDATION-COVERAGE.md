@@ -593,7 +593,11 @@ and non-native 64-bit size operands. These run in the `evidence` suite.
 
 `Tests/ConstrainedCalls.cs` checks compiled implicit and explicit struct-interface calls, including
 closed generic owners and mutation through the receiver, and rejects forged generated call targets,
-owner arguments and malformed prefix, branch and interface-constraint metadata.
+owner arguments and malformed prefix, branch and interface-constraint metadata. Explicit
+implementations with `in` aggregate and span parameters (`modreq(InAttribute)`) are proved as
+entries and through a constrained generic call; `modopt`, another `modreq` type, by-value and
+nested placements, versioned and foreign modifier scopes and a slot reference without the
+modifier are rejected, and twins differing only in the modifier select distinct entries.
 `Tests/ConstrainedResolution.cs` checks the extractor's resolution rules;
 `Tests/ConstrainedEvidence.lean` independently checks Lean resolution, target, signature, ambiguity
 and prefix rejection. These run in the `evidence` suite.

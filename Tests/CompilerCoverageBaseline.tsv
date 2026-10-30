@@ -723,6 +723,9 @@ Examples:System.UInt64 Examples.GenericMethods::Nested(System.UInt64)	A	A	A	A	A	
 Examples:System.UInt64 Examples.GenericMethods::Repeated(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.GenericMethods::Select(System.Boolean,System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.GenericMethods::TwoTypes(System.UInt64,System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.IInWord`1::Sum(System.ReadOnlySpan`1<System.UInt64>& modreq(System.Runtime.InteropServices.InAttribute))	N	N	N	N	N	N	N	N
+Examples:System.UInt64 Examples.InParameters::Constrained(Examples.InWord&,Examples.InWord&)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.InWord::Examples.IInWord<Examples.InWord>.Sum(System.ReadOnlySpan`1<System.UInt64>& modreq(System.Runtime.InteropServices.InAttribute))	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.InitializedHelper::Identity(System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.InitializedTypes::Add(System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.InitializedTypes::CallHelper(System.UInt64)	B	B	B	B	B	B	B	B
@@ -879,6 +882,9 @@ Examples:System.Void Examples.GenericMethods::SwapRecord(Examples.PackedLeaf&,Ex
 Examples:System.Void Examples.GenericPair`1::.ctor(T,T)	N	N	N	N	N	N	N	N
 Examples:System.Void Examples.GenericPair`1::SetSecond(T)	N	N	N	N	N	N	N	N
 Examples:System.Void Examples.ICounterValue::Increment()	B	B	B	B	B	B	B	B
+Examples:System.Void Examples.IInWord`1::Add(T& modreq(System.Runtime.InteropServices.InAttribute),T&)	N	N	N	N	N	N	N	N
+Examples:System.Void Examples.InParameters::Add(T&,Examples.InWord&,Examples.InWord&)	N	N	N	N	N	N	N	N
+Examples:System.Void Examples.InWord::Examples.IInWord<Examples.InWord>.Add(Examples.InWord& modreq(System.Runtime.InteropServices.InAttribute),Examples.InWord&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.InitializedHelper::.cctor()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.InitializedTypes::.cctor()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.InitializedValue::.cctor()	B	B	B	B	B	B	B	B

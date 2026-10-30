@@ -26,7 +26,7 @@ internal static class SpanReferences
             throw new InvalidDataException("Unsupported writable by-reference span parameter: " +
                 parameter.ParameterType.FullName + "\n  Only `in` and `ref readonly` span parameters are admitted: " +
                 "a store through `ref` or `out` could replace the caller's span.");
-        MetadataValidation.Type(((ByReferenceType)parameter.ParameterType).ElementType, module,
+        MetadataValidation.Type(((ByReferenceType)InReferences.Parameter(parameter.ParameterType)).ElementType, module,
             architecture: architecture);
         if (!method.HasBody) return;
         // Pruned code is checked too: rebinding the reference would make later reads see another home.

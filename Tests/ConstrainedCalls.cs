@@ -7,6 +7,7 @@
 #:include RejectedEvidence.cs
 #:include TailCallFixtures.cs
 
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -131,6 +132,47 @@ File.WriteAllText(twoOwnerProof, File.ReadAllText(Path.Combine(twoOwners, "Extra
     """);
 evidence.Add(twoOwnerProof, "PASS distinct constrained owner specializations");
 
+// `in` interface members and their explicit implementations carry modreq(InAttribute) on the reference.
+// Words at 0, 8 and 16 hold 40, 1 and 1: Add yields 41 and Sum 42 only when every operand is read.
+const string inAttribute = " modreq(System.Runtime.InteropServices.InAttribute)";
+const string inMemory = """
+
+    private def inMemory : CIL.Safety.Memory := {
+      allocations := fun identity => if identity == 0 then
+        some ⟨.callerStack, ⟨24, 8, []⟩, true, []⟩ else none
+      cells := fun _ offset => ⟨if offset == 0 then 40 else if offset == 8 || offset == 16 then 1 else 0, true⟩
+      views := [⟨0, 0, 24, true, true⟩]
+      nextIdentity := 1 }
+    """;
+foreach (var (name, selector, claim) in new[]
+{
+    ("InExplicitAdd", "Examples.InWord::Examples.IInWord<Examples.InWord>.Add(Examples.InWord&" + inAttribute +
+        ",Examples.InWord&)", """
+        theorem in_result : ((CIL.Safety.invoke Extracted.program 32 0
+            [.reference (.address ⟨0, 0⟩), .reference (.address ⟨0, 8⟩), .reference (.address ⟨0, 16⟩)]
+            inMemory).map fun result => ((result.1.cells 0 16).bits, result.2)) = .ok (41, []) := rfl
+        """),
+    ("InExplicitSum", "Examples.InWord::Examples.IInWord<Examples.InWord>.Sum(System.ReadOnlySpan<ulong>&" +
+        inAttribute + ")", """
+        theorem in_result : (CIL.Safety.invoke Extracted.program 32 0
+            [.reference (.address ⟨0, 0⟩), .bufferSpan ⟨.address ⟨0, 8⟩, 2, 8, false⟩]
+            inMemory).map Prod.snd = .ok [.scalar (.i64 42)] := rfl
+        """),
+    ("InConstrained", "InParameters::Constrained(Examples.InWord&,Examples.InWord&)", """
+        theorem in_result : (CIL.Safety.invoke Extracted.program 32 0
+            [.reference (.address ⟨0, 0⟩), .reference (.address ⟨0, 8⟩)]
+            inMemory).map Prod.snd = .ok [.scalar (.i64 41)] := rfl
+        """)
+})
+{
+    var output = Path.Combine(root, name);
+    Run(["dotnet", ExtractorPath, "extract", assembly, selector, output]);
+    var proof = Path.Combine(root, name + ".lean");
+    File.WriteAllText(proof, File.ReadAllText(Path.Combine(output, "Extracted.lean")) + inMemory + "\n" + claim +
+        "#print axioms in_result\n");
+    evidence.Add(proof, "PASS in-modifier reference parameter: " + name);
+}
+
 AddTailCallFixtures(assembly, root, evidence, rejected);
 evidence.Check();
 rejected.Check();
@@ -159,3 +201,92 @@ foreach (var (mutation, marker) in new[]
         throw new Exception("Incorrect constrained rejection: " + mutation + "\n" + extractionRejection.Output);
     Console.WriteLine("PASS constrained extraction rejection: " + mutation);
 }
+
+// Only System.Runtime's modreq(InAttribute) directly on a by-reference parameter is admitted.
+const string modifierRejection = "except System.Runtime's modreq(InAttribute) directly on a by-reference parameter";
+MethodDefinition InAdd(ModuleDefinition module) => module.GetType("Examples.InWord").Methods
+    .Single(method => method.Name.EndsWith(".Add", StringComparison.Ordinal));
+foreach (var mutation in new[] { "modopt", "other-modreq", "by-value", "nested", "versioned-scope", "foreign-scope" })
+{
+    var dll = Path.Combine(root, "in-" + mutation + ".dll");
+    string selector;
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        var method = InAdd(module);
+        var modified = (RequiredModifierType)method.Parameters[0].ParameterType;
+        var reference = (ByReferenceType)modified.ElementType;
+        var runtime = (AssemblyNameReference)modified.ModifierType.Scope;
+        TypeReference Forged(AssemblyNameReference scope) =>
+            new(modified.ModifierType.Namespace, modified.ModifierType.Name, module, scope);
+        method.Parameters[0].ParameterType = mutation switch
+        {
+            "modopt" => new OptionalModifierType(modified.ModifierType, reference),
+            "other-modreq" => new RequiredModifierType(
+                new TypeReference("System.Runtime.CompilerServices", "IsVolatile", module, runtime), reference),
+            "by-value" => new RequiredModifierType(modified.ModifierType, reference.ElementType),
+            "nested" => new ByReferenceType(new RequiredModifierType(modified.ModifierType, reference.ElementType)),
+            "versioned-scope" => new RequiredModifierType(Forged(new AssemblyNameReference(runtime.Name,
+                new Version(9, 0, 0, 0)) { PublicKeyToken = runtime.PublicKeyToken }), reference),
+            _ => new RequiredModifierType(Forged(new AssemblyNameReference("Forged", runtime.Version)), reference)
+        };
+        selector = method.FullName;
+        module.Write(dll);
+    }
+    var result = Execute(["dotnet", ExtractorPath, "extract", dll, selector,
+        Path.Combine(root, "Reject-in-" + mutation)]);
+    if (result.Code == 0 || !result.Output.Contains(modifierRejection, StringComparison.Ordinal))
+        throw new Exception("Incorrect in-modifier rejection: " + mutation + "\n" + result.Output);
+    Console.WriteLine("PASS in-modifier rejection: " + mutation);
+}
+
+// A slot reference without the modifier names a different signature, so it cannot reach the `in` member.
+var plainSlot = Path.Combine(root, "in-plain-slot.dll");
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var call = (MethodReference)module.GetType("Examples.InParameters").Methods.Single(method => method.Name == "Add")
+        .Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Callvirt).Operand;
+    call.Parameters[0].ParameterType = ((RequiredModifierType)call.Parameters[0].ParameterType).ElementType;
+    module.Write(plainSlot);
+}
+var plainSlotResult = Execute(["dotnet", ExtractorPath, "extract", plainSlot,
+    "InParameters::Constrained(Examples.InWord&,Examples.InWord&)", Path.Combine(root, "Reject-in-plain-slot")]);
+if (plainSlotResult.Code == 0 ||
+    !plainSlotResult.Output.Contains("Unsupported constrained method slot", StringComparison.Ordinal))
+    throw new Exception("Incorrect plain slot rejection\n" + plainSlotResult.Output);
+Console.WriteLine("PASS in-modifier rejection: plain slot reference");
+
+// Signatures differing only in the modifier select and identify distinct methods.
+var twin = Path.Combine(root, "in-twin.dll");
+string inSelector, plainSelector;
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var method = InAdd(module);
+    var copy = new MethodDefinition(method.Name, MethodAttributes.Private | MethodAttributes.HideBySig,
+        method.ReturnType);
+    var plain = ((RequiredModifierType)method.Parameters[0].ParameterType).ElementType;
+    copy.Parameters.Add(new ParameterDefinition(plain));
+    copy.Parameters.Add(new ParameterDefinition(method.Parameters[1].ParameterType));
+    foreach (var instruction in method.Body.Instructions)
+    {
+        var cloned = Instruction.Create(OpCodes.Nop);
+        cloned.OpCode = instruction.OpCode;
+        cloned.Operand = instruction.Operand;
+        copy.Body.Instructions.Add(cloned);
+    }
+    if (method.Body.Instructions.Any(instruction =>
+        instruction.Operand is Instruction or Instruction[] or ParameterDefinition))
+        throw new Exception("In-modifier twin requires a straight-line body with short argument loads");
+    method.DeclaringType.Methods.Add(copy);
+    (inSelector, plainSelector) = (method.FullName, copy.FullName);
+    module.Write(twin);
+}
+var twinEntries = new[] { inSelector, plainSelector }.Select((selector, index) =>
+{
+    var output = Path.Combine(root, "in-twin-" + index);
+    Run(["dotnet", ExtractorPath, "extract", twin, selector, output]);
+    return JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "identity.json"))).RootElement
+        .GetProperty("entry").GetString()!;
+}).ToArray();
+if (twinEntries[0] != inSelector || twinEntries[1] != plainSelector || twinEntries[0] == twinEntries[1])
+    throw new Exception("In-modifier twins lost distinct entry identities: " + string.Join(" | ", twinEntries));
+Console.WriteLine("PASS in-modifier twins select distinct entries");

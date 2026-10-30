@@ -25,6 +25,9 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
 
     internal string Type(TypeReference type) => Type(type, false);
 
+    // The kernel sees an `in` reference as the reference it is; the extractor compares the modifier exactly.
+    string Parameter(TypeReference type) => Type(InReferences.Parameter(type));
+
     string Type(TypeReference type, bool preserveGeneric)
     {
         if (type is FunctionPointerType callable)
@@ -87,7 +90,7 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
                 reachable.Contains(instruction));
         var name = definition.DeclaringType.Scope is ModuleDefinition
             ? ((MethodDefinition)originalModule.LookupToken(definition.Resolve().MetadataToken)).Name : definition.Name;
-        return $"{{ declaringType := {Type(declaringType, true)}, name := {Quote(name)}, target := {target}, typeArguments := {List(arguments.Select(Type))}, ownerArgumentCount := {owners.Length}, parameterCount := {reference.Parameters.Count}, hasThis := {Bool(reference.HasThis)}, returnsValue := {Bool(reference.ReturnType.FullName != "System.Void")}, returnType := {Type(CallReturnType.Resolve(reference))}, parameterTypes := {List(CallReturnType.Parameters(reference).Select(Type))} }}";
+        return $"{{ declaringType := {Type(declaringType, true)}, name := {Quote(name)}, target := {target}, typeArguments := {List(arguments.Select(Type))}, ownerArgumentCount := {owners.Length}, parameterCount := {reference.Parameters.Count}, hasThis := {Bool(reference.HasThis)}, returnsValue := {Bool(reference.ReturnType.FullName != "System.Void")}, returnType := {Type(CallReturnType.Resolve(reference))}, parameterTypes := {List(CallReturnType.Parameters(reference).Select(Parameter))} }}";
     }
 
     string Operand(MethodDefinition method, InstructionIndex instructions, Instruction instruction,
@@ -178,7 +181,7 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
             return $"{{ offset := {instruction.Offset}, opcode := {(ushort)instruction.OpCode.Value}, " +
                 $"operand := {operand} }}";
         });
-        return $"{{ token := {method.MetadataToken.ToUInt32()}, owner := {Quote(LayoutEvidence.Identity(method.DeclaringType))}, ownerParameters := {List(ownerConstraints)}, ownerArgumentCount := {MethodSpecialization.OwnerArguments(method).Count}, hasThis := {Bool(method.HasThis)}, explicitThis := {Bool(method.ExplicitThis)}, callingConvention := {(byte)method.CallingConvention}, attributes := {(uint)method.Attributes}, implementation := {(uint)method.ImplAttributes}, returnType := {Type(method.ReturnType)}, parameters := {List(method.Parameters.Select(parameter => Type(parameter.ParameterType)))}, locals := {List(method.Body.Variables.Select(local => Type(local.VariableType)))}, initLocals := {Bool(method.Body.InitLocals)}, maxStack := {method.Body.MaxStackSize}, genericParameters := {List(constraints)}, code := {List(code)} }}";
+        return $"{{ token := {method.MetadataToken.ToUInt32()}, owner := {Quote(LayoutEvidence.Identity(method.DeclaringType))}, ownerParameters := {List(ownerConstraints)}, ownerArgumentCount := {MethodSpecialization.OwnerArguments(method).Count}, hasThis := {Bool(method.HasThis)}, explicitThis := {Bool(method.ExplicitThis)}, callingConvention := {(byte)method.CallingConvention}, attributes := {(uint)method.Attributes}, implementation := {(uint)method.ImplAttributes}, returnType := {Type(method.ReturnType)}, parameters := {List(method.Parameters.Select(parameter => Parameter(parameter.ParameterType)))}, locals := {List(method.Body.Variables.Select(local => Type(local.VariableType)))}, initLocals := {Bool(method.Body.InitLocals)}, maxStack := {method.Body.MaxStackSize}, genericParameters := {List(constraints)}, code := {List(code)} }}";
     }
 
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number,
@@ -227,8 +230,8 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
 
     string DispatchMethod(MethodDefinition method, GenericInstanceType? owner)
     {
-        string Signature(TypeReference type) => Type(owner is null || method.HasGenericParameters
-            ? type : GenericStructs.Substitute(type, owner));
+        TypeReference Closed(TypeReference type) => owner is null || method.HasGenericParameters
+            ? type : GenericStructs.Substitute(type, owner);
         var specialization = owner is null ? "" :
             $", owner := .constructor {Scope(owner.ElementType)} {Quote(owner.ElementType.FullName)}, " +
             $"ownerArguments := {List(owner.GenericArguments.Select(Type))}";
@@ -239,8 +242,8 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
         $"hasBody := {Bool(method.HasBody)}, genericArity := {method.GenericParameters.Count}, " +
         $"explicitThis := {Bool(method.ExplicitThis)}, callingConvention := {(byte)method.CallingConvention}, " +
         $"attributes := {(uint)method.Attributes}, implementation := {(uint)method.ImplAttributes}, " +
-        $"returnType := {Signature(method.ReturnType)}, " +
-        $"parameters := {List(method.Parameters.Select(parameter => Signature(parameter.ParameterType)))}, " +
+        $"returnType := {Type(Closed(method.ReturnType))}, " +
+        $"parameters := {List(method.Parameters.Select(parameter => Parameter(Closed(parameter.ParameterType))))}, " +
         $"overrides := {List(method.Overrides.Where(slot => slot.DeclaringType.Scope is ModuleDefinition)
             .Select(slot => $"({slot.Resolve().MetadataToken.ToUInt32().ToString(CultureInfo.InvariantCulture)}, " +
                 $"{Type(GenericStructs.Substitute(slot.DeclaringType, owner))})"))}{specialization} }}";

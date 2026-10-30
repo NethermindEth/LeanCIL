@@ -8,6 +8,8 @@ internal static class TypeSubstitution
     internal static TypeReference Components(TypeReference type, Func<TypeReference, TypeReference> substitute)
     {
         if (type is ByReferenceType reference) return new ByReferenceType(substitute(reference.ElementType));
+        if (type is RequiredModifierType required)
+            return new RequiredModifierType(required.ModifierType, substitute(required.ElementType));
         if (type is PointerType pointer) return new PointerType(substitute(pointer.ElementType));
         if (type is GenericInstanceType generic)
         {

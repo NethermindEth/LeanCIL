@@ -22,6 +22,8 @@ internal static class CallReturnType
             return arguments[parameter.Position];
         }
         if (type is ByReferenceType byRef) return new ByReferenceType(Substitute(byRef.ElementType, method));
+        if (type is RequiredModifierType required)
+            return new RequiredModifierType(required.ModifierType, Substitute(required.ElementType, method));
         if (type is PointerType pointer) return new PointerType(Substitute(pointer.ElementType, method));
         if (type is ArrayType { IsVector: true } array)
             return new ArrayType(Substitute(array.ElementType, method));

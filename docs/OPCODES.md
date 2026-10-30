@@ -248,6 +248,8 @@ Closed sequential generic structs admit direct slots and directly implemented in
 including closed generic interfaces. The slot's closed declaring owner must match exactly.
 Implicit implementations must uniquely match the public name and signature; explicit `MethodImpl`
 overrides take precedence and retain the closed interface owner as well as the method token.
+Slots with [`in` parameters](#in-parameters-of-virtual-members) match only implementations
+that carry the same modifier.
 Closed generic helpers can use a directly implemented closed interface constraint.
 The original managed-reference receiver is passed to the resolved implementation, so mutations
 remain visible to the caller without boxing.
@@ -361,6 +363,19 @@ The callee cannot replace the caller's span: `starg` or `ldarga` of the paramete
 `stobj`, `initobj` or `cpobj` outside the checked local reset, and copies from anything but a
 directly loaded span address are rejected. `ref` and `out` span parameters, span references
 in locals, returns, fields and imported signatures remain unsupported.
+
+### `in` parameters of virtual members
+
+C# encodes an `in` parameter of a virtual, abstract or interface member, and of its explicit
+implementations, as `T& modreq(System.Runtime.InteropServices.InAttribute)`. That modifier is
+admitted only directly on a by-reference parameter and only with the exact `System.Runtime`
+scope. Such a parameter has the semantics of a non-virtual `in` parameter of the same type: an
+ordinary reference, or the referenced view for an admitted span type (see
+[span reference parameters](#span-reference-parameters)). The modifier stays in selectors,
+recorded signatures, specialization keys and constrained-slot matching, so signatures that
+differ only in it remain distinct. `modopt`, other `modreq` types, the modifier on a by-value
+parameter, inside the reference or on a return, and an `InAttribute` from any other scope
+are rejected. Imported and exported contract signatures admit no modifier.
 
 ### Static readonly values
 

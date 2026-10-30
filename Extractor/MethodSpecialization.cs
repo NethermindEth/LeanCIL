@@ -33,6 +33,8 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
     {
         GenericParameter parameter => $"{parameter.Type}:{parameter.Position}",
         ByReferenceType reference => SignatureType(reference.ElementType) + "&",
+        // Other modifiers keep their full spelling below and cannot equal an `in` reference.
+        RequiredModifierType modifier when InReferences.Is(modifier) => SignatureType(modifier.ElementType) + " in",
         PointerType pointer => SignatureType(pointer.ElementType) + "*",
         ArrayType { IsVector: true } array => SignatureType(array.ElementType) + "[]",
         GenericInstanceType instance => LayoutEvidence.Identity(instance.ElementType) + "<" +

@@ -20,7 +20,7 @@ Examples.Arithmetic::Add(ulong,ulong)
 Arithmetic::Add(ulong,ulong)
 ```
 
-The parameter list remains required. Matching is case-sensitive; an explicit return type must match. Use `ulong&` for a by-reference parameter. Ambiguous selectors fail with a list of full candidate signatures, which can be copied into the command. Artifacts always record the resolved canonical signature, so equivalent selectors can check the same artifact. Selection never relaxes supported-type or instruction validation.
+The parameter list remains required. Matching is case-sensitive; an explicit return type must match. Use `ulong&` for a by-reference parameter. An `in` parameter of a virtual, abstract or interface member, including an explicit interface implementation, is spelled `ulong& modreq(System.Runtime.InteropServices.InAttribute)`, as `discover` prints it; the modifier is part of the selector and the recorded signature, so it never matches the unmodified `ulong&` overload. Ambiguous selectors fail with a list of full candidate signatures, which can be copied into the command. Artifacts always record the resolved canonical signature, so equivalent selectors can check the same artifact. Selection never relaxes supported-type or instruction validation.
 
 The extraction CLI infers the assembly identity from the DLL's metadata. Optionally add `--assembly Examples` to require a specific short name, or supply a full identity to constrain version, culture and public key token as well. A mismatch is rejected. Generated artifacts always retain the actual full identity and assembly hash, including when `--assembly` is omitted.
 

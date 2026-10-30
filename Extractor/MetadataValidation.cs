@@ -440,11 +440,11 @@ internal static class MetadataValidation
             foreach (ParameterDefinition parameter in method.Parameters)
                 Check(method, null, () =>
                 {
-                    if (SpanReferences.Is(parameter.ParameterType))
+                    var type = InReferences.Parameter(parameter.ParameterType);
+                    if (SpanReferences.Is(type))
                         SpanReferences.ValidateParameter(method, parameter, module, profile.Architecture);
-                    else if (parameter.ParameterType is not ByReferenceType ||
-                        importedByref?.Invoke(parameter.ParameterType) != true)
-                        Type(parameter.ParameterType, module, architecture: profile.Architecture);
+                    else if (type is not ByReferenceType || importedByref?.Invoke(type) != true)
+                        Type(type, module, architecture: profile.Architecture);
                 }, named: true);
             if (Check(method, null, () => Spans.Analyze(method, profile), named: true))
                 foreach (VariableDefinition local in method.Body.Variables)
