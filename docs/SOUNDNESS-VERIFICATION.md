@@ -114,4 +114,5 @@ checks. Untrusted source needs a disposable container/account, restricted writab
 process-tree termination before verification continues. Nothing that build could modify may be
 trusted afterwards. Printed theorem text also needs care: notation is disabled, but numeral
 instances can affect interpretation; exact statements are guaranteed only where structural audit
-explicitly checks the expected type.
+explicitly checks the expected type. The builtin forms that remain, such as `-1`, `/` and `bif`,
+are formatted from their `ParserDescr` declarations read as data, never evaluated.

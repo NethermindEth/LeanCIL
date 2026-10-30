@@ -187,6 +187,28 @@ if (shapes.constants[0].error is not null || shapes.constants[1].error is null |
     throw new InvalidOperationException("Constant value checks: " + JsonSerializer.Serialize(shapes.constants));
 Console.WriteLine("PASS theorem kind, structural wildcards, constant values and refutation locations");
 
+// Builtin delaborators emit notation such as `-1`, `/` and `bif` that only `ParserDescr` constants
+// describe; evaluating those runs imported code, which crashed the audit on the extern `String.hash`.
+Compile("Notation", """
+    theorem Notation.negative : (-1 : BitVec 32) = 0xFFFFFFFF#32 := by decide
+    theorem Notation.quotient : (1 / 2 : Int) = 0 := by decide
+    theorem Notation.branch : (bif true then 1 else 2 : Nat) = 1 := rfl
+    axiom Notation.bogus : False
+    theorem Notation.forged : (-1 : Int) = 1 := Notation.bogus.elim
+    """);
+var notation = Audit("Notation", [ProofTheorem("Notation.negative"), ProofTheorem("Notation.quotient"),
+    ProofTheorem("Notation.branch"), ProofTheorem("Notation.forged")]);
+string[] printed = ["Notation.negative : Eq (-1) (BitVec.ofNat 32 4294967295)", "Notation.quotient : Eq (1 / 2) 0",
+    "Notation.branch : Eq (bif Bool.true then 1 else 2) 1", "Notation.forged : Eq (-1) 1"];
+foreach (var (audited, expected) in notation.theorems.Zip(printed))
+    if (audited.statement != expected)
+        throw new InvalidOperationException($"Printed statement {audited.statement} instead of {expected}");
+foreach (var audited in notation.theorems.Take(3)) AuditedAxioms(audited);
+// Printing the statement must not stand in for the axiom check it precedes.
+Rejected(notation.theorems[3], "Unapproved proof axioms: Notation.bogus");
+Console.WriteLine("PASS descriptor notation prints without evaluating imported code; " +
+    "unapproved axioms still fail");
+
 // Axioms are collected from declaration bodies across modules and private names, not from olean summaries.
 Compile("Hidden", "axiom Hidden.ax : False\nprivate theorem secret : 1 = 2 := Hidden.ax.elim\ntheorem Hidden.exposed : 1 = 2 := secret\n");
 Compile("Uses", "import Hidden\ntheorem Uses.claim : 1 = 2 := Hidden.exposed\n");

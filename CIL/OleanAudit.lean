@@ -16,7 +16,8 @@ An audit request with `replayTargets` checks those modules first and reuses thei
 environment when declaration names are unique and the audit needs no target module metadata.
 
 It imports `modules` with `loadExts := false`, so no imported environment extension, attribute,
-elaborator, notation or `initialize` runs; only constant declarations are read. The toolchain's
+elaborator, notation or `initialize` runs; only constant declarations are read. A printed
+statement formats builtin notation from `ParserDescr` declarations decoded as data. The toolchain's
 library precedes `LEAN_PATH`, so a user module cannot shadow `Init`, `Std` or `Lean`.
 
 REQUEST (JSON):
@@ -194,9 +195,105 @@ def run (env : Environment) (x : CoreM α) : IO α := do
   let (a, _) ← x.toIO coreContext { env }
   return a
 
+/-- The name a `Name` constructor term spells out with literal components, or `none`. -/
+partial def nameLiteral? (e : Expr) : Option Name :=
+  let args := e.consumeMData.getAppArgs
+  let strings := args.toList.filterMap fun
+    | .lit (.strVal s) => some s
+    | _ => none
+  match e.consumeMData.getAppFn.constName?, args with
+  | some ``Name.anonymous, #[] => some .anonymous
+  | some ``Name.mkSimple, #[.lit (.strVal s)] => some (.str .anonymous s)
+  | some ``Name.mkStr, #[pre, .lit (.strVal s)] | some ``Name.str, #[pre, .lit (.strVal s)] =>
+    (nameLiteral? pre).map (·.str s)
+  | some ``Name.mkNum, #[pre, n] | some ``Name.num, #[pre, n] =>
+    (nameLiteral? pre).bind fun pre => (natLiteral? n).map pre.num
+  | some head, _ =>
+    -- `Name.mkStr1` to `Name.mkStr8` take only string literals.
+    if head.getPrefix == ``Name && (head.getString!.startsWith "mkStr") &&
+        strings.length == args.size && !args.isEmpty then
+      some (strings.foldl Name.str .anonymous)
+    else none
+  | none, _ => none
+where
+  /-- A raw or `instOfNatNat` numeral. -/
+  natLiteral? (e : Expr) : Option Nat := match e.consumeMData with
+    | .lit (.natVal n) => some n
+    | .app (.app (.app (.const ``OfNat.ofNat _) (.const ``Nat [])) (.lit (.natVal n))) _ => some n
+    | _ => none
+
+/-- The `ParserDescr` that a `ParserDescr` term spells out, read structurally without evaluating
+    any declaration; referenced descriptor constants are unfolded at most `fuel` times. -/
+partial def parserDescr? (env : Environment) (e : Expr) (fuel : Nat := 64) : Option ParserDescr :=
+  let e := e.consumeMData
+  let args := e.getAppArgs
+  let name := nameLiteral?
+  let nat := nameLiteral?.natLiteral?
+  let descr (e : Expr) := parserDescr? env e fuel
+  let string : Expr → Option String
+    | .lit (.strVal s) => some s
+    | _ => none
+  let bool : Expr → Option Bool
+    | .const ``Bool.true _ => some true
+    | .const ``Bool.false _ => some false
+    | _ => none
+  match e.getAppFn.constName?, args with
+  | some ``ParserDescr.const, #[n] => .const <$> name n
+  | some ``ParserDescr.unary, #[n, d] => .unary <$> name n <*> descr d
+  | some ``ParserDescr.binary, #[n, d₁, d₂] => .binary <$> name n <*> descr d₁ <*> descr d₂
+  | some ``ParserDescr.node, #[k, prec, d] => .node <$> name k <*> nat prec <*> descr d
+  | some ``ParserDescr.trailingNode, #[k, prec, lhs, d] =>
+    .trailingNode <$> name k <*> nat prec <*> nat lhs <*> descr d
+  | some ``ParserDescr.symbol, #[s] => .symbol <$> string s
+  | some ``ParserDescr.nonReservedSymbol, #[s, b] => .nonReservedSymbol <$> string s <*> bool b
+  | some ``ParserDescr.cat, #[n, prec] => .cat <$> name n <*> nat prec
+  | some ``ParserDescr.parser, #[n] => .parser <$> name n
+  | some ``ParserDescr.nodeWithAntiquot, #[s, k, d] =>
+    .nodeWithAntiquot <$> string s <*> name k <*> descr d
+  | some ``ParserDescr.sepBy, #[p, s, sep, b] =>
+    (fun p s sep b => .sepBy p s sep b) <$> descr p <*> string s <*> descr sep <*> bool b
+  | some ``ParserDescr.sepBy1, #[p, s, sep, b] =>
+    (fun p s sep b => .sepBy1 p s sep b) <$> descr p <*> string s <*> descr sep <*> bool b
+  | some ``ParserDescr.unicodeSymbol, #[s, ascii, b] =>
+    .unicodeSymbol <$> string s <*> string ascii <*> bool b
+  | some c, #[] => match fuel, env.find? c with
+    | fuel + 1, some (.defnInfo info) => parserDescr? env info.value fuel
+    | _, _ => none
+  | _, _ => none
+
+/-- Every node kind that occurs in `stx`. -/
+partial def nodeKinds (stx : Syntax) (kinds : NameSet := {}) : NameSet := match stx with
+  | .node _ kind args => args.foldl (fun kinds arg => nodeKinds arg kinds) (kinds.insert kind)
+  | _ => kinds
+
+/-- Registers, for each node kind of `stx` that a `ParserDescr` declares and that lacks one, a
+    formatter and parenthesizer built from the descriptor decoded as data. Without them the pretty
+    printer evaluates the descriptor, running imported code that this executable cannot link. -/
+unsafe def registerDescriptorKinds (stx : Syntax) : CoreM Unit := do
+  for kind in nodeKinds stx do
+    let env ← getEnv
+    let some (.defnInfo info) := env.find? kind | continue
+    unless info.type.isConstOf ``ParserDescr || info.type.isConstOf ``TrailingParserDescr do
+      continue
+    let some descr := parserDescr? env info.value
+      | throwError "Cannot decode the parser descriptor of syntax kind {kind}"
+    if (PrettyPrinter.formatterAttribute.getValues env kind).isEmpty then
+      let value ← PrettyPrinter.Formatter.interpretParserDescr descr
+      modifyEnv (PrettyPrinter.formatterAttribute.ext.modifyState · (·.insert
+        { key := kind, declName := kind, value, isBuiltin := false }))
+    if (PrettyPrinter.parenthesizerAttribute.getValues (← getEnv) kind).isEmpty then
+      let value ← PrettyPrinter.Parenthesizer.interpretParserDescr descr
+      modifyEnv (PrettyPrinter.parenthesizerAttribute.ext.modifyState · (·.insert
+        { key := kind, declName := kind, value, isBuiltin := false }))
+
 /-- `thm : type`, pretty-printed for the report. -/
-def statement (env : Environment) (thm : Name) (type : Expr) : IO String :=
-  run env do return s!"{thm} : {← Meta.MetaM.run' (PrettyPrinter.ppExpr type)}"
+unsafe def statement (env : Environment) (thm : Name) (type : Expr) : IO String :=
+  run env do
+    let delab (e : Expr) : MetaM Term := do
+      let stx ← PrettyPrinter.delab e
+      registerDescriptorKinds stx
+      return stx
+    return s!"{thm} : {← Meta.MetaM.run' (PrettyPrinter.ppUsing type delab)}"
 
 /-- When `type` negates a contract predicate applied to arguments, that contract and the
     source position of `thm`; otherwise `none`. -/
@@ -221,7 +318,7 @@ def checkAxioms (allowed : Array Name) (found : Array Name) : Option String :=
   else some s!"Unapproved proof axioms: {", ".intercalate (bad.toList.map toString)}"
 
 /-- Audits one theorem's kind, owner scope, level parameters, type and axiom closure. -/
-def theorem? (env : Environment) (req : Json)
+unsafe def theorem? (env : Environment) (req : Json)
     (ownerOf : Name → Option Name) (replayed : NameSet)
     (dependencies : Name → IO (Array Name)) : IO Json := do
   let thm := name (← IO.ofExcept (req.getObjValAs? String "name"))
