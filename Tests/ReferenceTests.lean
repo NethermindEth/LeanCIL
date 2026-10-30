@@ -167,7 +167,7 @@ theorem readonly_add_preserves (memory : Memory) (reference : ManagedReference)
   cases unspecified : offset.hasUnspecified <;>
     simp only [memoryInstruction, referenceAddInstruction, CIL.MemoryOp.argumentCount,
       unspecifiedOperands, List.take, List.any, Value.hasUnspecified, unspecified, Bool.or_false,
-      Bool.false_or, Bool.or_true, Bool.false_eq_true, ite_true, ite_false]
+      Bool.or_true, Bool.false_eq_true, ite_true, ite_false]
   · constructor <;> cases CIL.offsetValue signed offset <;> try rfl
     all_goals simp only [Bind.bind, Except.bind]; split <;> rfl
   · exact ⟨rfl, rfl⟩
