@@ -7,7 +7,6 @@
 #:include RejectedEvidence.cs
 #:include TailCallFixtures.cs
 
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
