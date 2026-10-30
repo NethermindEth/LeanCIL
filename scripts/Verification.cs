@@ -1364,14 +1364,21 @@ partial class Program : IDisposable
             "Lake will rebuild their dependent closure before full kernel replay.");
     }
 
+    static string RequireEmptyLibraryDestination(string destination)
+    {
+        destination = Path.GetFullPath(destination);
+        if (File.Exists(destination) ||
+            Directory.Exists(destination) && Directory.EnumerateFileSystemEntries(destination).Any())
+            throw new InvalidOperationException("Certified library destination must be empty");
+        return destination;
+    }
+
     string PrepareLibrary(string destination, string? trustedDigest = null)
     {
         if (trustedDigest is not null)
             return ReusePreparedLibrary(destination, trustedDigest) ??
                 throw new InvalidOperationException("Certified library identity or integrity mismatch; destination left unchanged");
-        destination = Path.GetFullPath(destination);
-        if (Directory.Exists(destination) && Directory.EnumerateFileSystemEntries(destination).Any())
-            throw new InvalidOperationException("Certified library destination must be empty");
+        destination = RequireEmptyLibraryDestination(destination);
         Library(Inputs(At("CIL.lean")));
         var staging = destination.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + "." + Guid.NewGuid().ToString("N");
         try

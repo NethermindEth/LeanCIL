@@ -14,6 +14,7 @@ var trustedDigest = args.Length == 3 ? args[2] : null;
 // Fresh production must not inherit a supplied library from a consumer's environment.
 Environment.SetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY", null);
 var incremental = args.Length == 4 && args[1] == "--incremental";
+if (args.Length == 1 || incremental) directory = RequireEmptyLibraryDestination(directory);
 using var verifier = new Program
 {
     freshLibrary = true,
