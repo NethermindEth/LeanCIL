@@ -1,8 +1,7 @@
 import Extracted
 import Examples.Support
 import CIL.Verification
-import CIL.Safety.NumericLocals
-import CIL.Safety.LoopAutomation
+import CIL.Safety.LoopScaffold
 import CIL.Safety.ReturnMemory
 import CIL.Safety.BufferContents
 import CIL.Safety.MemorySteps
@@ -15,14 +14,17 @@ namespace ExampleProof
 private def guard : Nat := instructionLocation Extracted.method0 fun op =>
   match op with | .blt _ => true | _ => false
 
+bind_entry entry (initial : Memory) (base : Reference) (v : W64) (n : W32)
+    (formed : initial.WellFormed) := Extracted.method0
+  with [.reference (.address base), .scalar (.i64 v), .scalar (.i32 n)] from initial
+  allocating formed
+
 section Loop
 
 variable (initial : Memory) (base home : Reference) (v : W64) (n : W32)
 
-private def frame : Frame := ⟨initial.nextIdentity, [.bytes .word32 home], [home.allocation], [], 0⟩
-
 private def header (state : W32 × Memory) : LoopState :=
-  ⟨guard, frame initial home, [.scalar (.i32 n), .scalar (.i32 state.1)], state.2⟩
+  ⟨guard, entry.frame initial home, [.scalar (.i32 n), .scalar (.i32 state.1)], state.2⟩
 
 /-- The index home holds `k`, the first `k` words are filled and the rest stay writable. -/
 private def invariant (state : W32 × Memory) : Prop :=
@@ -80,9 +82,9 @@ private theorem terminates (initial : Memory) (base home : Reference) (v : W64) 
     have same : k = n := BitVec.eq_of_toNat_eq exit
     subst same
     have stays : ¬ k.toInt < k.toInt := Int.lt_irrefl _
-    have below := leaveFrame_preserves_memory_below (frame initial home) m initial.nextIdentity
+    have below := leaveFrame_preserves_memory_below (entry.frame initial home) m initial.nextIdentity
       (by intro id member; change id ∈ [home.allocation] at member; rw [List.mem_singleton.mp member]; exact fresh)
-    cil_loop_finish [frame, header, guard, loaded, stays]
+    cil_loop_finish [entry.frame, header, guard, loaded, stays]
     refine loop_terminates_return (op := .ret none) (by first | (simp only [cil_code]; rfl) | rfl)
       (by first | (simp only [cil_code]; rfl) | rfl)
       (by cil_checked_step [CIL.truth]) rfl ⟨rfl, filled.1.after_below below old, ?_⟩
@@ -141,13 +143,13 @@ private theorem terminates (initial : Memory) (base home : Reference) (v : W64) 
         [.reference (.address base), .scalar (.i64 v), .scalar (.i32 n)] (header initial home n (k, m))
         (header initial home n (k + 1, m2)) := by
       -- The checked stepper unfolds `step`, so the two memory instructions are crossed by their own equations.
-      cil_loop_steps [frame, header, guard, loaded, inside, valid]
+      cil_loop_steps [entry.frame, header, guard, loaded, inside, valid]
       refine loop_reaches_next (by first | (simp only [cil_code]; rfl) | rfl)
         (by first | (simp only [cil_code]; rfl) | rfl) (addStep _ _ _ _) ?_
-      cil_loop_steps [frame, header, guard]
+      cil_loop_steps [entry.frame, header, guard]
       refine loop_reaches_next (by first | (simp only [cil_code]; rfl) | rfl)
         (by first | (simp only [cil_code]; rfl) | rfl) (storeStep _ _ _ _) ?_
-      cil_loop_steps [frame, header, guard, loaded1, storedStep, loadedStep, List.reverse_cons,
+      cil_loop_steps [entry.frame, header, guard, loaded1, storedStep, loadedStep, List.reverse_cons,
         List.reverse_nil, List.nil_append, List.cons_append]
     obtain ⟨cost, segment⟩ := path
     refine ⟨(k + 1, m2), cost, ⟨bytes2, ((homeReady.after_write stored).after_write written2).access, ?_, ?_,
@@ -173,17 +175,8 @@ theorem fill_words (initial : Memory) (base : Reference) (v : W64) (n : W32) (fo
         initial = .ok (final, []) ∧
       Contents final base 8 (List.replicate n.toNat (v : BitVec (8 * 8))) ∧
       Confined [(base, 8 * n.toNat)] initial final := by
-  obtain ⟨home, entered, made, _, homeWritable, preserved⟩ :=
-    make_numeric_local initial initial.nextIdentity .word32 (.i32 0) 0 formed rfl
-  have opaqueLocalsEmpty : Extracted.method0.opaqueVectorLocals = [] := rfl
-  have setup : enterFrame Extracted.method0 [.reference (.address base), .scalar (.i64 v), .scalar (.i32 n)]
-      initial = .ok (frame initial home, entered) := by
-    simp only [enterFrame, Extracted.method0_locals, Extracted.method0_localKinds, Extracted.method0_vectorArgs,
-      Extracted.method0_parameterHomes, opaqueLocalsEmpty, makeSelectedLocals, List.isEmpty, ite_true,
-      makeLocals, made, makeArgumentHomes, makeParameterHomes, frame,
-      Bind.bind, Except.bind, Pure.pure, Except.pure, List.map_nil, List.append_nil]
-  have fresh := (makeLocal_fresh _ _ _ _ _ _ _ made).2 home.allocation (by simp)
-  have enteredWF := makeLocal_preserves_wellFormed _ _ _ _ _ _ _ formed made
+  obtain ⟨home, entered, setup, numeric, entryMemory⟩ := entry.checked initial base v n formed
+  have homeWritable := numeric.writable
   obtain ⟨allocation, present, _, _⟩ := formed_reference_live _ _ _ valid
   have old : base.allocation < initial.nextIdentity := (formed.1 _ _ present).1
   change access entered home 4 1 true = .ok () at homeWritable
@@ -196,18 +189,18 @@ theorem fill_words (initial : Memory) (base : Reference) (v : W64) (n : W32) (fo
   simp only [BitVec.ofNat_eq_ofNat] at storedStep loadedStep
   obtain ⟨_, homeReady⟩ := access_requirements homeWritable
   have enteredForm : form entered base = .ok base := by
-    simpa only [form, liveAllocation, preserved.allocations _ old] using valid
+    simpa only [form, liveAllocation, entryMemory.kept.allocations _ old] using valid
   have start : invariant initial base home v n (0, m0) := by
     refine ⟨by simpa using bytes0, (homeReady.after_write written0).access, ?_, by simp,
-      write_preserves_wellFormed _ _ _ _ _ enteredWF written0, form_after_write written0 enteredForm, ?_⟩
-    · simpa using Filled.start (room := n.toNat) ((writable.after_below preserved old).after_write written0)
-    · exact home_confined (Confined.ofMemoryBelow preserved (Nat.le_refl _)
-        (Nat.le_of_lt (Nat.lt_of_le_of_lt fresh.1 fresh.2))) fresh.1 written0
-  have entry : LoopReaches Extracted.program 0 [.reference (.address base), .scalar (.i64 v), .scalar (.i32 n)]
-      ⟨0, frame initial home, [], entered⟩ (header initial home n (0, m0)) := by
-    cil_loop_steps [frame, header, guard, storedStep, loadedStep]
-  obtain ⟨fuel, final, values, executed, returned, contents, framed⟩ := loop_reaches_terminates entry
-    (terminates initial base home v n _ fresh.1 old small rfl (0, m0) start)
+      write_preserves_wellFormed _ _ _ _ _ entryMemory.wellFormed written0, form_after_write written0 enteredForm, ?_⟩
+    · simpa using Filled.start (room := n.toNat) ((writable.after_below entryMemory.kept old).after_write written0)
+    · exact home_confined (Confined.ofMemoryBelow entryMemory.kept (Nat.le_refl _)
+        entryMemory.grown) numeric.fresh written0
+  have path : LoopReaches Extracted.program 0 [.reference (.address base), .scalar (.i64 v), .scalar (.i32 n)]
+      ⟨0, entry.frame initial home, [], entered⟩ (header initial home n (0, m0)) := by
+    cil_loop_steps [entry.frame, header, guard, storedStep, loadedStep]
+  obtain ⟨fuel, final, values, executed, returned, contents, framed⟩ := loop_reaches_terminates path
+    (terminates initial base home v n _ numeric.fresh old small rfl (0, m0) start)
   subst returned
   refine ⟨fuel, final, invoke_of_run (by rfl) ?_ setup executed, contents, framed⟩
   simp [checkedValue, formValue, checkedAt, valid, numericValue, Except.mapError, Bind.bind, Except.bind,
