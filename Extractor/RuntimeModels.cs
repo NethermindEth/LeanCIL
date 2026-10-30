@@ -150,11 +150,10 @@ internal static class RuntimeModels
             _ => null
         };
         if (op is not null) ValidateSignature(reference, profile.Architecture);
-        if (op == DivRem) ValueTuples.RequireWordPair(reference.ReturnType, reference.Module, profile.Architecture);
+        if (op is not null && ValueTuples.Is(reference.ReturnType))
+            ValueTuples.RequirePair(reference.ReturnType, reference.Module, profile.Architecture);
         return op;
     }
-
-    const string DivRem = ".intrinsic (.x86Base .divRem64) 3";
 
     private static readonly (string Type, int Width, bool Signed)[] MathIntegers =
     [
@@ -212,9 +211,17 @@ internal static class RuntimeModels
     {
         var operations = new Dictionary<string, string>(StringComparer.Ordinal)
         {
+            ["System.UInt64 System.Math::BigMul(System.UInt32,System.UInt32)"] = ".intrinsic (.scalar (.bigMul32 false)) 2",
+            ["System.Int64 System.Math::BigMul(System.Int32,System.Int32)"] = ".intrinsic (.scalar (.bigMul32 true)) 2",
             ["System.UInt64 System.Math::BigMul(System.UInt64,System.UInt64,System.UInt64&)"] =
-                ".memory .bigMul64"
+                ".memory (.bigMul64 false)",
+            ["System.Int64 System.Math::BigMul(System.Int64,System.Int64,System.Int64&)"] = ".memory (.bigMul64 true)",
+            ["System.Int32 System.Math::DivRem(System.Int32,System.Int32,System.Int32&)"] = ".memory (.divRemOut 32)",
+            ["System.Int64 System.Math::DivRem(System.Int64,System.Int64,System.Int64&)"] = ".memory (.divRemOut 64)"
         };
+        foreach (var (type, width, signed) in MathIntegers)
+            operations.Add($"System.ValueTuple`2<{type},{type}> System.Math::DivRem({type},{type})",
+                $".intrinsic (.scalar (.divRem {width} {LeanBool(signed)})) 2");
         foreach (var (type, width, signed) in MathIntegers)
         foreach (var (name, operation, arity) in MathOperations)
         {

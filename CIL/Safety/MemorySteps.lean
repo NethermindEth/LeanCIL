@@ -19,7 +19,8 @@ private theorem bind_ite {α β : Type} (c : Prop) [Decidable c] (a b : Executio
     dispatchers check the same operands, so a decided guard leaves one arm and no `if`. -/
 local macro "memory_step_proof" : tactic => `(tactic| (
   simp only [step, staticInstruction, memoryInstruction, spanFillInstruction, spanCopyInstruction,
-    otherMemoryInstruction, referenceAddInstruction, displaceReference, observerCount,
+    otherMemoryInstruction, wideArithmeticInstruction, referenceAddInstruction,
+    displaceReference, observerCount,
     CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
     Bool.or_false, Bool.false_eq_true, ite_false, ite_true, CIL.offsetValue, cil_guard, bind_ite,
     bind_assoc, pure_bind]
@@ -64,12 +65,58 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 /-- `bigMul64` stores the low 64 bits of the product through `low` and pushes the high 64. -/
 @[cil_step high] theorem step_memory_bigMul64_eq (low : ManagedReference) (right left : CIL.W64)
     (rest : List Value) :
-    step body (.memory .bigMul64) pc args frame
+    step body (.memory (.bigMul64 false)) pc args frame
       (.reference low :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest) memory = do
       let stored ← storeValue memory low (.i64 (left * right))
       return .next (pc + 1)
         (.scalar (.i64 (CIL.WideMultiply.high64 left right)) :: rest) frame stored := by
   memory_step_proof
+
+/-- Signed `bigMul64` stores the same low word and pushes the signed high 64 bits. -/
+@[cil_step high] theorem step_memory_bigMul64_signed_eq (low : ManagedReference)
+    (right left : CIL.W64) (rest : List Value) :
+    step body (.memory (.bigMul64 true)) pc args frame
+      (.reference low :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest) memory = do
+      let stored ← storeValue memory low (.i64 (left * right))
+      return .next (pc + 1)
+        (.scalar (.i64 (CIL.WideMultiply.signedHigh64 left right)) :: rest) frame stored := by
+  memory_step_proof
+
+/-- `Math.DivRem(int, int, out int)` divides first, then stores the remainder's four bytes. -/
+@[cil_step high] theorem step_memory_divRemOut32_eq (destination : ManagedReference)
+    (right left : CIL.W32) (rest : List Value) :
+    step body (.memory (.divRemOut 32)) pc args frame
+      (.reference destination :: .scalar (.i32 right) :: .scalar (.i32 left) :: rest) memory = do
+      match CIL.divRemBits true left right with
+      | .error fault => .error (.arithmetic fault)
+      | .ok (quotient, remainder) => do
+        let address ← referenceAt destination
+        let stored ← checkedAt destination 4
+          (write memory address (numberBytes remainder.toNat 4) ordinaryAccessAlignment)
+        return .next (pc + 1) (.scalar (.i32 quotient) :: rest) frame stored := by
+  cases outcome : CIL.divRemBits true left right <;>
+    simp only [step, staticInstruction, memoryInstruction, wideArithmeticInstruction, observerCount,
+      CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
+      Bool.or_false, Bool.false_eq_true, ite_false, cil_guard, outcome, bind_assoc, pure_bind] <;>
+    rfl
+
+/-- `Math.DivRem(long, long, out long)` divides first, then stores the remainder's eight bytes. -/
+@[cil_step high] theorem step_memory_divRemOut64_eq (destination : ManagedReference)
+    (right left : CIL.W64) (rest : List Value) :
+    step body (.memory (.divRemOut 64)) pc args frame
+      (.reference destination :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest) memory = do
+      match CIL.divRemBits true left right with
+      | .error fault => .error (.arithmetic fault)
+      | .ok (quotient, remainder) => do
+        let address ← referenceAt destination
+        let stored ← checkedAt destination 8
+          (write memory address (numberBytes remainder.toNat 8) ordinaryAccessAlignment)
+        return .next (pc + 1) (.scalar (.i64 quotient) :: rest) frame stored := by
+  cases outcome : CIL.divRemBits true left right <;>
+    simp only [step, staticInstruction, memoryInstruction, wideArithmeticInstruction, observerCount,
+      CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
+      Bool.or_false, Bool.false_eq_true, ite_false, cil_guard, outcome, bind_assoc, pure_bind] <;>
+    rfl
 
 /-- A zero-byte copy touches no memory, even through null references; otherwise overlapping
     source and destination regions are rejected. -/
@@ -421,6 +468,9 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 end MemoryEquations
 
 #print axioms step_memory_bigMul64_eq
+#print axioms step_memory_bigMul64_signed_eq
+#print axioms step_memory_divRemOut32_eq
+#print axioms step_memory_divRemOut64_eq
 #print axioms step_memory_copyBlock_eq
 #print axioms step_memory_initBlock_eq
 #print axioms step_memory_load128_eq

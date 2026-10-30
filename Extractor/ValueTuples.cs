@@ -25,12 +25,14 @@ internal static class ValueTuples
         return [.. fields.Select((field, index) => new MetadataValidation.InstanceField(field.Name, tuple.GenericArguments[index], field))];
     }
 
-    // The modelled X86Base.X64.DivRem result stores Quotient at offset 0 and Remainder at offset 8.
-    internal static void RequireWordPair(TypeReference type, ModuleDefinition module, string architecture = "scalar")
+    // Modelled DivRem results store Quotient at offset 0 and Remainder at the element width.
+    internal static void RequirePair(TypeReference type, ModuleDefinition module, string architecture = "scalar")
     {
         MetadataValidation.AggregateInfo layout = MetadataValidation.AggregateLayout(type, module, architecture);
         var fields = Fields(type);
-        if (layout.Size != 16 || layout.Offsets[fields[0].Definition.FullName] != 0 || layout.Offsets[fields[1].Definition.FullName] != 8)
+        var width = MetadataValidation.PrimitiveWidth(fields[0].Type);
+        if (layout.Size != 2 * width || layout.Offsets[fields[0].Definition.FullName] != 0 ||
+            layout.Offsets[fields[1].Definition.FullName] != width)
             throw new InvalidDataException($"Unsupported aggregate layout: {type.FullName}");
     }
 }

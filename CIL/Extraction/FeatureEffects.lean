@@ -21,7 +21,7 @@ private def memoryFeatureEffect : MemoryOp → Nat × Nat
   | .binaryWrite _ _ trying => (2, if trying then 1 else 0)
   | .marshalWrite _ trying => (2, if trying then 1 else 0)
   | .pointerTransfer _ _ store => if store then (2, 0) else (1, 1)
-  | .bigMul64 => (3, 1)
+  | .bigMul64 _ | .divRemOut _ => (3, 1)
   | .spanSlice explicitLength => (if explicitLength then 3 else 2, 1)
   | .spanFromReference .. | .byteOffset => (2, 1)
   | .spanSingleReference .. => (1, 1)

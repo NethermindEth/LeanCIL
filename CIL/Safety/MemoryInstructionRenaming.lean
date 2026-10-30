@@ -296,6 +296,40 @@ private theorem Memory.Renamed.referenceAddInstructionResult {mapping : Allocati
     | (split <;> try simp only [*, Bind.bind, Except.bind])
 #print axioms Memory.Renamed.referenceAddInstructionResult
 
+/-- Wide multiplication and out-reference division store through the renamed reference. -/
+private theorem Memory.Renamed.wideArithmeticInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (operation : CIL.MemoryOp)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (wideArithmeticInstruction operation stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (wideArithmeticInstruction operation stack source)
+      (wideArithmeticInstruction operation (stack.map mapping.value) target) := by
+  unfold wideArithmeticInstruction at observable ⊢
+  split at observable
+  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try solve | repeat first | contradiction | cases observable | split at observable
+  all_goals clear observable
+  all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
+  all_goals repeat' rcases bounds with ⟨_, bounds⟩
+  all_goals repeat first
+    | exact .ok ⟨related, rfl⟩
+    | exact .error _
+    | (apply (related.storeValue _ (by assumption) _).bindWithSuccess
+       intro first second sourceStep memoryRelated
+       exact .ok ⟨memoryRelated, rfl⟩)
+    | (apply (mapping.referenceAt _).bindWithSuccess
+       intro first second sourceStep same
+       have addressBound := referenceAt_below (by assumption) sourceStep
+       subst second)
+    | (apply (related.checkedWrite _ (by assumption) _ _ _ _).bindWithSuccess
+       intro first second sourceStep memoryRelated
+       exact .ok ⟨memoryRelated, rfl⟩)
+    | (split <;> try simp only [*, AllocationRenaming.managedReference, Bind.bind, Except.bind])
+#print axioms Memory.Renamed.wideArithmeticInstructionResult
+
 /-- Ordinary memory effects transport independently of the whole-span dispatch families. -/
 private theorem Memory.Renamed.otherMemoryInstructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -583,6 +617,8 @@ theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
     · exact related.spanCopyInstructionResult _ _ _ bounds observable
     · exact related.spanFillInstructionResult _ _ _ bounds observable
     · exact related.arrayFillInstructionResult formed _ _ _ bounds observable
+    · exact related.wideArithmeticInstructionResult _ _ bounds observable
+    · exact related.wideArithmeticInstructionResult _ _ bounds observable
     · exact related.otherMemoryInstructionResult _ formed _ bounds observable
 
 #print axioms Memory.Renamed.memoryInstructionResult

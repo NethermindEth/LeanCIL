@@ -62,7 +62,28 @@ inductive ScalarIntrinsic where
   | reverseEndianness (width : Nat) (signed : Bool)
   | isPow2 (width : Nat) (signed : Bool)
   | log2 (width : Nat) (result : ScalarResultWidth) | roundUpToPowerOf2 (width : Nat)
+  /-- `Math.DivRem(T, T)`, returning a `(T Quotient, T Remainder)` tuple. -/
+  | divRem (width : Nat) (signed : Bool)
+  /-- `Math.BigMul(int, int)` or `Math.BigMul(uint, uint)`: the exact 64-bit product. -/
+  | bigMul32 (signed : Bool)
   deriving DecidableEq, Repr
+
+/-- `Math.DivRem(T, T)` as its `ValueTuple<T, T>`: Item1 at offset 0 and Item2 at offset
+    `width / 8`. Narrow parameters truncate at the call boundary; `div` faults are reported. -/
+def evalDivRem (width : Nat) (signed : Bool) : List Value → Except ArithmeticFault Value
+  | [.i32 left, .i32 right] =>
+    if width == 8 || width == 16 || width == 32 then
+      tuple (divRemBits signed (left.setWidth width) (right.setWidth width))
+    else .error .invalidOperands
+  | [.i64 left, .i64 right] =>
+    if width == 64 then tuple (divRemBits signed left right) else .error .invalidOperands
+  | _ => .error .invalidOperands
+where
+  tuple {w : Nat} (result : Except ArithmeticFault (BitVec w × BitVec w)) :
+      Except ArithmeticFault Value := do
+    let (quotient, remainder) ← result
+    return .aggregate (littleEndianBytes (w / 8) quotient.toNat ++
+      littleEndianBytes (w / 8) remainder.toNat)
 
 /-- The number of set bits. -/
 def population (x : BitVec w) : Nat := x.cpopNatRec w 0
@@ -108,6 +129,10 @@ def reverseBytes (x : BitVec w) : BitVec w :=
 def evalScalarIntrinsic : ScalarIntrinsic → List Value → Option Value
   | .math operation width signed, args =>
     (evalIntegerMath operation width signed args).toOption
+  | .divRem width signed, args => (evalDivRem width signed args).toOption
+  | .bigMul32 signed, [.i32 left, .i32 right] =>
+    some (.i64 (BitVec.ofInt 64 (if signed then left.toInt * right.toInt
+      else (left.toNat * right.toNat : Nat))))
   | .isPow2 32 signed, [.i32 x] => some (.i32 (if isPowerOfTwo x signed then 1 else 0))
   | .isPow2 64 signed, [.i64 x] => some (.i32 (if isPowerOfTwo x signed then 1 else 0))
   | .log2 32 result, [.i32 x] => some (result.value x.toNat.log2)

@@ -598,6 +598,19 @@ theorem referenceAddInstruction_contract (size : Nat) (signed : Bool)
     | split at executed
 #print axioms referenceAddInstruction_contract
 
+/-- Wide multiplication and out-reference division preserve checked effects and stack validity. -/
+theorem wideArithmeticInstruction_contract (operation : CIL.MemoryOp)
+    (stack values : List Value) (memory result : Memory)
+    (executed : wideArithmeticInstruction operation stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold wideArithmeticInstruction at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms wideArithmeticInstruction_contract
+
 set_option maxHeartbeats 800000 in
 /-- The remaining memory operations preserve their checked effects and stack validity. -/
 private theorem otherMemoryInstruction_contract (operation : CIL.MemoryOp)
@@ -696,6 +709,8 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
     · exact spanCopyInstruction_contract _ _ _ _ _ _ h
     · exact spanFillInstruction_contract _ _ _ _ _ _ h
     · exact arrayFillInstruction_contract _ _ _ _ _ _ h
+    · exact wideArithmeticInstruction_contract _ _ _ _ _ h
+    · exact wideArithmeticInstruction_contract _ _ _ _ _ h
     · exact otherMemoryInstruction_contract _ _ _ _ _ h
 
 set_option maxHeartbeats 800000 in

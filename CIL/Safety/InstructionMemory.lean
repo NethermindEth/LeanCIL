@@ -532,6 +532,37 @@ def referenceAddInstruction (size : Nat) (signed : Bool) (stack : List Value) (m
     return (memory, .readOnlyReference (← displaceReference memory reference size offset) :: rest)
   | _ => .error .invalidState
 
+/-- `Math.BigMul` and `Math.DivRem` with an out reference: each pushes its arithmetic result
+    and stores one word through the checked reference. A division fault precedes the store. -/
+def wideArithmeticInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  match operation, stack with
+  | .bigMul64 false, .reference low :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest =>
+    return (← storeValue memory low (.i64 (left * right)),
+      .scalar (.i64 (CIL.WideMultiply.high64 left right)) :: rest)
+  | .bigMul64 true, .reference low :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest =>
+    return (← storeValue memory low (.i64 (left * right)),
+      .scalar (.i64 (CIL.WideMultiply.signedHigh64 left right)) :: rest)
+  | .divRemOut 32,
+      .reference destination :: .scalar (.i32 right) :: .scalar (.i32 left) :: rest =>
+    match CIL.divRemBits true left right with
+    | .error fault => .error (.arithmetic fault)
+    | .ok (quotient, remainder) =>
+      let address ← referenceAt destination
+      return (← checkedAt destination 4
+        (write memory address (numberBytes remainder.toNat 4) ordinaryAccessAlignment),
+        .scalar (.i32 quotient) :: rest)
+  | .divRemOut 64,
+      .reference destination :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest =>
+    match CIL.divRemBits true left right with
+    | .error fault => .error (.arithmetic fault)
+    | .ok (quotient, remainder) =>
+      let address ← referenceAt destination
+      return (← checkedAt destination 8
+        (write memory address (numberBytes remainder.toNat 8) ordinaryAccessAlignment),
+        .scalar (.i64 quotient) :: rest)
+  | _, _ => .error .invalidState
+
 /-- Executes the remaining memory operations after the shared operand guard. -/
 def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) := do
@@ -561,10 +592,7 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
       let value ← loadTransfer memory source kind
       let result ← storeTransfer memory view.reference kind value
       if trying then return (result, .scalar (.i32 1) :: rest) else return (result, rest)
-  -- Wide multiply, block copy and block initialization
-  | .bigMul64, .reference low :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest =>
-    return (← storeValue memory low (.i64 (left * right)),
-      .scalar (.i64 (CIL.WideMultiply.high64 left right)) :: rest)
+  -- Block copy and block initialization
   | .copyBlock alignment,
       .scalar (.i32 count) :: .reference source :: .reference destination :: rest =>
     let width := count.toNat
@@ -811,6 +839,7 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .spanCopy width tryCopy => spanCopyInstruction width tryCopy stack memory
   | .spanFill width clear => spanFillInstruction width clear stack memory
   | .arrayFill element counted => arrayFillInstruction element counted stack memory
+  | .bigMul64 _ | .divRemOut _ => wideArithmeticInstruction operation stack memory
   | _ => otherMemoryInstruction operation stack memory
 
 /-- Runs an op on the stack (top first) and memory: loads, stores, typed copies, aggregate

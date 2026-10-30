@@ -184,6 +184,8 @@ def checkedIntrinsic (operation : CIL.Intrinsic) (operands : List CIL.Value) : E
   else match operation with
   | .scalar (.math kind width signed) =>
     (CIL.evalIntegerMath kind width signed operands).mapError ExecutionFault.arithmetic
+  | .scalar (.divRem width signed) =>
+    (CIL.evalDivRem width signed operands).mapError ExecutionFault.arithmetic
   | .x86Base .divRem64 => (CIL.X86.divRemValue operands).mapError ExecutionFault.arithmetic
   | _ => match CIL.evalIntrinsic operation operands with
     | some value => .ok value

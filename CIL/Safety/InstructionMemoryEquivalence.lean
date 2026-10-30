@@ -174,6 +174,26 @@ private theorem Memory.Equivalent.otherMemoryInstruction {m n : Memory} (same : 
 
 #print axioms Memory.Equivalent.otherMemoryInstruction
 
+/-- Wide multiplication and out-reference division perform equivalent checked stores. -/
+private theorem Memory.Equivalent.wideArithmeticInstruction {m n : Memory} (same : m.Equivalent n)
+    (operation : CIL.MemoryOp) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (wideArithmeticInstruction operation stack m)
+      (wideArithmeticInstruction operation stack n) := by
+  unfold CIL.Safety.wideArithmeticInstruction
+  split
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind (same.storeValue _ _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.wideArithmeticInstruction
+
 /-- Observations depend only on allocation metadata and preserve equivalent memories. -/
 theorem Memory.Equivalent.viewObservationInstruction {m n : Memory} (same : m.Equivalent n)
     (observation : CIL.ViewObservation) (stack : List Value) :
@@ -275,6 +295,8 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     · exact same.spanCopyInstruction _ _ _
     · exact same.spanFillInstruction _ _ _
     · exact same.arrayFillInstruction _ _ _
+    · exact same.wideArithmeticInstruction _ _
+    · exact same.wideArithmeticInstruction _ _
     · exact same.otherMemoryInstruction _ _
 
 theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)
