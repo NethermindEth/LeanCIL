@@ -48,7 +48,8 @@ internal static class LeanEmitter
             _ => throw new InvalidDataException($"Unsupported local: {type.FullName}")
         };
     }
-    static bool StaticSite(Instruction i) => i.OpCode.Code is Code.Ldsflda or Code.Ldsfld || (i.OpCode.Code == Code.Ldtoken && i.Operand is FieldReference);
+    static bool StaticSite(Instruction i) => i.OpCode.Code == Code.Ldsflda || StaticValues.IsLoad(i) ||
+        (i.OpCode.Code == Code.Ldtoken && i.Operand is FieldReference);
     static FieldDefinition StaticField(Instruction i, ModuleDefinition module, string architecture) => StaticValues.IsLoad(i)
         ? StaticValues.Resolve((FieldReference)i.Operand, module, architecture).Field : StaticData.Validate((FieldReference)i.Operand, module);
     internal static StaticIdentityRecord[] StaticIdentities(MethodDefinition[] methods, FeatureProfile profile) =>

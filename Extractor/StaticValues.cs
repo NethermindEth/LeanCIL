@@ -13,7 +13,9 @@ internal static partial class StaticValues
     internal sealed record Value(FieldDefinition Field, MethodDefinition? Initializer, string[] Arguments,
         byte[] Bytes, string? Literal = null, bool Construct = false);
 
-    internal static bool IsLoad(Instruction instruction) => instruction.OpCode.Code == Code.Ldsfld ||
+    // BitConverter.IsLittleEndian is a profile constant, never a module static value.
+    internal static bool IsLoad(Instruction instruction) => instruction.OpCode.Code == Code.Ldsfld &&
+        !FeatureProfile.PlatformFieldQuery((FieldReference)instruction.Operand) ||
         instruction.OpCode.Code == Code.Ldsflda && instruction.Operand is FieldReference reference &&
         reference.Resolve() is { } field && (field.Attributes & FieldAttributes.HasFieldRVA) == 0;
 

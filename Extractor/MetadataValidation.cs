@@ -565,6 +565,13 @@ internal static class MetadataValidation
                     });
                     continue;
                 }
+                if (instruction.OpCode.Code == Code.Ldsfld && instruction.Operand is FieldReference platform &&
+                    FeatureProfile.PlatformFieldQuery(platform))
+                {
+                    if (!Check(method, instruction, () => FeatureProfile.PlatformField(platform), named: true))
+                        skipped.Add(instruction);
+                    continue;
+                }
                 if (StaticValues.IsLoad(instruction) && instruction.Operand is FieldReference loaded)
                 {
                     if (!Check(method, instruction, () => StaticLoad(instruction, loaded), named: true))

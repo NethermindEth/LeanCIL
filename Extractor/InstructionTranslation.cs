@@ -210,6 +210,8 @@ internal static class InstructionTranslation
             Code.Bgt or Code.Bgt_S => $".bgt {Target()}",
             Code.Ble or Code.Ble_S => $".ble {Target()}",
             Code.Ble_Un or Code.Ble_Un_S => $".bleu {Target()}",
+            Code.Ldsfld when FeatureProfile.PlatformField((FieldReference)i.Operand) is int constant =>
+                $".const32 {constant}",
             Code.Ldsfld or Code.Ldsflda when StaticValues.IsLoad(i) =>
                 $".memory (.{(i.OpCode.Code == Code.Ldsfld ? "staticValue" : "staticAddress")} " +
                 $"{StaticData.LeanBytes(StaticValues.Resolve((FieldReference)i.Operand, m.Module, profile.Architecture).Bytes)})",

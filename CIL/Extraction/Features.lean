@@ -129,6 +129,14 @@ def platformConstant (site : CallSite) : Option W32 := do
           "::" ++ site.name ++ "()") then none
     else some (if site.name == "get_Size" then 8 else 1)
 
+/-- `ldsfld` of the System.Runtime `BitConverter` static Boolean, whose only such field is
+    `IsLittleEndian`; the raw operand omits field names, so the extractor checks the member.
+    Valid profiles are little-endian, so the load is the constant 1. -/
+def platformField (instruction : RawInstruction) : Option W32 :=
+  if instruction.opcode == 126 && instruction.operand ==
+      .field (.atom runtimeScope "System.BitConverter") 0 (.atom runtimeScope "System.Boolean") true
+  then some 1 else none
+
 /-- Classify reference-free storage against a table whose `LayoutsValid` is checked separately.
     Aggregate identity lookup does not revalidate fields or confer memory access authority. -/
 def referenceFreeStorage (layouts : Array RawLayout) : TypeExpr → Bool
@@ -267,7 +275,7 @@ private def featureTransferWith (layouts : Array RawLayout) (raw : RawMethod)
     (eligible : Nat → Option W32 → Bool)
     (profile : FeatureProfile)
     (instruction : RawInstruction) (state : FeatureState) : Option FeatureState := do
-  if let some word := constant32 instruction then
+  if let some word := constant32 instruction <|> platformField instruction then
     return { state with stack := some word :: state.stack }
   -- `ldloc` and `stloc`; a store keeps its fact only in an eligible local.
   if instruction.opcode ∈ [6, 7, 8, 9, 17, 65036] then
@@ -429,8 +437,11 @@ private def featureOpMatchesWith (layouts : Array RawLayout) (raw : RawMethod)
       | .none, .stackAlloc flag => flag == raw.initLocals
       | _, _ => false
   if let .stackAlloc _ := emitted then return false
-  if let some word := constant32 instruction then
+  if let some word := constant32 instruction <|> platformField instruction then
     return match emitted with | .const32 actual => word == actual | _ => false
+  -- Any other static load is never a constant.
+  if instruction.opcode == 126 && (match emitted with | .const32 _ => true | _ => false) then
+    return false
   if let .call site := instruction.operand then
     if referenceContentQuery site then
       return match referenceContentConstant layouts site, emitted with

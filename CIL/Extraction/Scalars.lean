@@ -409,6 +409,7 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
   else if scalarCovered instruction.opcode then scalarOpMatches instruction stack emitted
   else !scalarEmission emitted || match role, emitted with
     | _, .const32 bits => sizeConstant instruction bits ||
+        platformField instruction == some bits ||
         (instruction.opcode == 40 && match instruction.operand with
           | .call site => platformConstant site == some bits
           | _ => false)

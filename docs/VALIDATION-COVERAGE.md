@@ -42,6 +42,11 @@ that do not survive a loop backedge. Compiled profile guards exercise the same p
 Switch checks cover known, unknown, negative and out-of-range selectors, empty and duplicate
 tables, and backedge weakening. Unselected targets still reject out-of-range positions and
 tail-transfer interiors in both extraction and independent evidence validation.
+`Tests/FeatureEvidence.cs` proves that `AdvSimd.Arm64.IsSupported` agrees with `AdvSimd` under
+scalar, x64 and ARM64 profiles, that the unmodeled ARM64 body it guards blocks only
+`arm64-advsimd`, and that `Crc32.Arm64` and `Rdm.Arm64` stay unclassified.
+`BitConverter.IsLittleEndian` prunes its big-endian branch on those profiles; forged owners and values are rejected by both certificates,
+and lookalike scopes, fields and same-named module types are rejected by the extractor.
 
 The array, generic, layout and parameter evidence fixtures submit their 63 independent positive
 extractions in six batches. Each method retains fresh mutable metadata; immutable assembly bytes,

@@ -134,6 +134,9 @@ internal sealed class FeatureConstants
                     _ => Compare(code, a, b) is bool comparison ? comparison ? 1 : 0 : null
                 } : null);
                 return;
+            case Code.Ldsfld when FeatureProfile.PlatformField((FieldReference)instruction.Operand) is int platform:
+                _stack.Add(platform);
+                return;
             case Code.Calli:
                 var indirect = (Mono.Cecil.CallSite)instruction.Operand;
                 for (var index = 0; index < indirect.Parameters.Count + 1; index++) Pop();
