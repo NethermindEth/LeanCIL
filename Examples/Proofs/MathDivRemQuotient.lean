@@ -53,7 +53,7 @@ theorem fault_of_divRem {left right : W32} {fault : ArithmeticFault}
   rw [divRem_step, mathDivRem32_eq, failed]
   rfl
 
-/-- The divisor `-1` as an unsigned literal; the audit cannot print a negated `BitVec` numeral. -/
+/-- The divisor `-1` as an unsigned literal; the audit rejects a negated `BitVec` numeral. -/
 theorem negOne_literal : (0xFFFFFFFF#32 : W32) = -1 := by decide
 
 /-- `Math.DivRem(left, right).Quotient` returns the exact truncated quotient whenever `div`
