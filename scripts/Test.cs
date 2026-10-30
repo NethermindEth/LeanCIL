@@ -54,7 +54,7 @@ var independentSuites = new Dictionary<string, (string Script, string Descriptio
     ["blocks"] = ("Tests/Blocks.cs", "block memory, alignment prefixes, runtime comparisons and safety faults"),
     ["unsafe"] = ("Tests/UnsafeLayouts.cs", "layout-based Unsafe sizes, reference offsets and metadata validation"),
     ["math"] = ("Tests/IntegerMath.cs", "integer Math helpers, BigMul, runtime faults and universal minimum"),
-    ["intrinsics"] = ("Tests/DivisionIntrinsics.cs", "division SIMD signatures, unspecified lanes, opaque locals and profile rejection"),
+    ["intrinsics"] = ("Tests/DivisionIntrinsics.cs", "division SIMD signatures, byte shuffles, unspecified lanes, opaque locals and profile rejection"),
     ["divrem"] = ("Tests/TupleDivision.cs",
         "X86Base.X64.DivRem and Math.DivRem through ValueTuple fields, divide faults and layout rejection"),
     ["fsharp"] = ("Tests/FSharp.cs", "F# arithmetic, branches, calls, references and struct construction"),

@@ -519,6 +519,7 @@ Examples:System.ReadOnlySpan`1<System.Runtime.Intrinsics.Vector128`1<System.UInt
 Examples:System.ReadOnlySpan`1<System.UInt16> Examples.ReinterpretedSpans::ReadOnlyWords(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.ReadOnlySpan`1<System.UInt32> Examples.SpanTables::get_Words()	A	A	A	A	A	A	A	A
 Examples:System.ReadOnlySpan`1<System.UInt64> Examples.SpanTables::get_Powers()	A	A	A	A	A	A	A	A
+Examples:System.Runtime.Intrinsics.Vector128`1<System.Byte> Examples.DivisionIntrinsics::Shuffle128(System.ReadOnlySpan`1<System.Byte>,System.ReadOnlySpan`1<System.Byte>)	B	B	B	B	B	B	B	B
 Examples:System.Runtime.Intrinsics.Vector128`1<System.Byte> Examples.MarshaledMemory::ReadVector(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector128`1<System.Byte> Examples.UnalignedMemory::Read128(System.Byte&)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector128`1<System.Byte> Examples.UnalignedMemory::ReadAligned128(System.Byte*)	A	A	A	A	A	A	A	A
@@ -538,6 +539,7 @@ Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64>& Examples.UnsafeLa
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64>& Examples.UnsafeLayouts::Add17nuint(System.Runtime.Intrinsics.Vector128`1<System.UInt64>&,System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64>& Examples.UnsafeReferences::Half(Examples.FourLimbs&)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64>& Examples.UnsafeReferences::SubtractVector(System.Runtime.Intrinsics.Vector128`1<System.UInt64>&,System.UIntPtr)	A	A	A	A	A	A	A	A
+Examples:System.Runtime.Intrinsics.Vector256`1<System.Byte> Examples.DivisionIntrinsics::Shuffle256(System.ReadOnlySpan`1<System.Byte>,System.ReadOnlySpan`1<System.Byte>)	B	B	B	B	B	B	B	B
 Examples:System.Runtime.Intrinsics.Vector256`1<System.Int32> Examples.ValueBitCasts::To256Int32(Examples.ValueBitCasts/Limbs)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector256`1<System.Int64> Examples.ValueBitCasts::To256Int64(Examples.ValueBitCasts/Limbs)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector256`1<System.UInt32> Examples.ValueBitCasts::To256UInt32(Examples.ValueBitCasts/Limbs)	A	A	A	A	A	A	A	A

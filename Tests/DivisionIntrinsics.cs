@@ -3,6 +3,8 @@
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include ../scripts/BatchVerification.cs
+#:include GeneratedEvidence.cs
+#:include RejectedEvidence.cs
 
 using System.Reflection;
 using System.Text.Json;
@@ -220,6 +222,141 @@ end ExampleProof
 
 Flush();
 
+// The byte shuffles and span constructions are compared with the host CPU on seeded random spans.
+if (!Avx2.IsSupported) throw new InvalidOperationException("The byte shuffle differential test needs an AVX2 host");
+const int ShuffleCases = 12;
+var shuffleRandom = new Random(0x5348);
+foreach ((string name, int width, string profile, string unavailable, string feature) in new[]
+{
+    ("Shuffle256", 32, "x64-v3", "x64-sse42", "Avx2"), ("Shuffle128", 16, "x64-sse42", "x64-sse2", "Ssse3")
+})
+{
+    var cases = new List<(byte[] Source, byte[] Control)>();
+    if (width == 32)
+        cases.Add((Enumerable.Range(0, 32).Select(index => (byte)index).ToArray(),
+            BitConverter.GetBytes(0x18191a1b1c1d1e1ful).Concat(BitConverter.GetBytes(0x1011121314151617ul))
+                .Concat(BitConverter.GetBytes(0x08090a0b0c0d0e0ful))
+                .Concat(BitConverter.GetBytes(0x0001020304050607ul)).ToArray()));
+    while (cases.Count < ShuffleCases)
+    {
+        byte[] source = new byte[width], control = new byte[width];
+        shuffleRandom.NextBytes(source);
+        shuffleRandom.NextBytes(control);
+        cases.Add((source, control));
+    }
+    var method = runtime.GetMethod(name)!;
+    var observed = cases.Select(item => RuntimeShuffle(method, item.Source, item.Control)).ToArray();
+    // The inputs must separate the model from a shuffle that ignores bit 7 or crosses halves.
+    foreach ((string mutant, Func<byte[], byte[], byte[]> model) in new (string, Func<byte[], byte[], byte[]>)[]
+    {
+        ("bit 7 ignored", (source, control) => control.Select((selector, index) =>
+            source[(index & ~15) | (selector & 15)]).ToArray()),
+        ("lane crossing", (source, control) => control.Select(selector =>
+            (selector & 0x80) != 0 ? (byte)0 : source[(selector & 31) % source.Length]).ToArray())
+    })
+    {
+        var agrees = cases.Select((item, index) => model(item.Source, item.Control).SequenceEqual(observed[index]));
+        if ((width == 32 || mutant == "bit 7 ignored") && agrees.All(same => same))
+            throw new InvalidOperationException($"Shuffle inputs do not reject the {mutant} mutant: {name}");
+    }
+    foreach ((int sourceLength, int controlLength) in new[] { (width - 1, width), (width, width - 1) })
+    {
+        try
+        {
+            RuntimeShuffle(method, new byte[sourceLength], new byte[controlLength]);
+            throw new InvalidOperationException($"Runtime accepted a short span: {name}");
+        }
+        catch (ArgumentOutOfRangeException) { }
+    }
+    var output = Path.Combine(root, name);
+    Directory.CreateDirectory(output);
+    var proof = Path.Combine(output, "Proof.lean");
+    string Bytes(byte[] bytes) => $"[{string.Join(", ", bytes)}]";
+    string Bits(byte[] bytes) => $"0x{Convert.ToHexString(bytes.Reverse().ToArray())}";
+    string Claim(int sourceLength, int controlLength, string source, string control, string result) =>
+        $"(run {sourceLength} {controlLength} {source} {control}).map Prod.snd =\n      {result}";
+    var claims = cases.Select((item, index) => Claim(width, width, Bytes(item.Source), Bytes(item.Control),
+        $".ok [.scalar (.v{width * 8} {Bits(observed[index])})]")).ToList();
+    var proofs = cases.Select(_ => "by apply result_of_toOption; decide +kernel").ToList();
+    foreach ((int sourceLength, int controlLength, int pc) in new[] { (width - 1, width, 1), (width, width - 1, 3) })
+    {
+        claims.Add(Claim(sourceLength, controlLength, "[]", "[]",
+            $".error ⟨0, {pc}, .thrown \"System.ArgumentOutOfRangeException\"⟩"));
+        proofs.Add("by rfl");
+    }
+    File.WriteAllText(proof, $$"""
+        import Extracted
+        import Examples.Support
+        namespace ExampleProof
+        /-- Successful observations identify the successful checked execution result. -/
+        private theorem result_of_toOption {error value : Type} {result : Except error value}
+            {expected : value} (observed : result.toOption = some expected) : result = .ok expected := by
+          cases result <;> simp_all [Except.toOption]
+        #print axioms result_of_toOption
+        /-- Disjoint read-only storage for the source and control byte spans. -/
+        private def memory (source control : List (BitVec 8)) : CIL.Safety.Memory := { Examples.empty with
+          allocations := fun identity => if identity < 2 then
+            some ⟨.callerStack, ⟨{{width}}, 1, []⟩, true, [{{width}}]⟩ else none
+          cells := fun identity offset => ⟨(if identity == 0 then source else control).getD offset 0, true⟩
+          views := [⟨0, 0, {{width}}, true, false⟩, ⟨1, 0, {{width}}, true, false⟩]
+          nextIdentity := 2 }
+        /-- The method on spans of the given lengths over the source and control bytes. -/
+        private def run (sourceLength controlLength : Nat) (source control : List (BitVec 8)) :=
+          CIL.Safety.invoke Extracted.program 32 0
+            [.bufferSpan ⟨.address ⟨0, 0⟩, sourceLength, 1, false⟩,
+              .bufferSpan ⟨.address ⟨1, 0⟩, controlLength, 1, false⟩] (memory source control)
+        /-- The host CPU's shuffles of seeded random spans, and the short-span exceptions. -/
+        theorem correctness :
+            {{string.Join(" ∧\n    ", claims)}} := by
+          exact ⟨{{string.Join(", ", proofs)}}⟩
+        #print axioms correctness
+        end ExampleProof
+        """);
+    pending.Add((new(selectors[name], proof, output), profile,
+        () => Console.WriteLine($"PASS byte shuffle matches the host CPU on {cases.Count} spans: {name}")));
+    // Without the shuffle's feature the reachable call is rejected before any evidence is written.
+    var rejectedOutput = Path.Combine(root, $"{name}-{unavailable}");
+    Directory.CreateDirectory(rejectedOutput);
+    File.Delete(Path.Combine(rejectedOutput, "Extracted.lean"));
+    var rejectedShuffle = Execute(
+        Extract("extract", assembly, "Examples", selectors[name], rejectedOutput, unavailable));
+    if (rejectedShuffle.Code == 0 || File.Exists(Path.Combine(rejectedOutput, "Extracted.lean")) ||
+        !rejectedShuffle.Output.Contains($"Reachable intrinsic lacks {feature}", StringComparison.Ordinal))
+        throw new InvalidOperationException($"{name} was admitted without {feature}: {rejectedShuffle.Output}");
+    Console.WriteLine($"PASS {name} rejected under {unavailable}");
+}
+
+Flush();
+
+// Forged evidence must not substitute another load width or another intrinsic for the shuffle.
+var rejectedShuffles = new RejectedEvidence(Path.Combine(root, "RejectedShuffles"));
+foreach ((string name, string theorem, string before, string after, string validator) in new[]
+{
+    ("Shuffle256", "method0_unsafe_validated", ".snapshot .vector256", ".snapshot .vector128", "UnsafeCallsValid"),
+    ("Shuffle256", "method0_division_validated", ".avx2 .shuffleBytes", ".avx2 .add64", "DivisionIntrinsicsValid"),
+    ("Shuffle128", "method0_division_validated", ".sse .shuffleBytes", ".sse .shiftLeftBytes",
+        "DivisionIntrinsicsValid")
+})
+{
+    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")), theorem);
+    if (!source.Contains(before, StringComparison.Ordinal))
+        throw new InvalidOperationException($"Missing shuffle mutation: {before}");
+    var path = Path.Combine(root, "RejectedShuffles", $"{name}-{validator}.lean");
+    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+    File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
+    rejectedShuffles.Add(path, $"PASS forged {name} evidence rejected by {validator}", validator);
+}
+rejectedShuffles.Check();
+
+// Runs the compiled example on the host CPU and returns the vector's bytes, lane zero first.
+static byte[] RuntimeShuffle(MethodInfo method, byte[] source, byte[] control)
+{
+    var bytes = new byte[method.ReturnType == typeof(Vector256<byte>) ? 32 : 16];
+    if (bytes.Length == 32) method.CreateDelegate<WideShuffle>()(source, control).CopyTo(bytes);
+    else method.CreateDelegate<NarrowShuffle>()(source, control).CopyTo(bytes);
+    return bytes;
+}
+
 // .NET 10 reports AVX2 only with BMI1/BMI2 and AVX-512 F/DQ/VL only together; any other profile certifies no runtime.
 static void RequireRuntimeGroups(string output, bool wide)
 {
@@ -230,4 +367,10 @@ static void RequireRuntimeGroups(string output, bool wide)
     bool v4 = Flag("Avx512F") && Flag("Avx512FVL") && Flag("Avx512DQ") && Flag("Avx512DQVL");
     if (!v3 || v4 != wide)
         throw new InvalidOperationException("Division profile matches no .NET 10 x64 ISA level: " + profile);
+}
+
+partial class Program
+{
+    delegate Vector256<byte> WideShuffle(ReadOnlySpan<byte> source, ReadOnlySpan<byte> control);
+    delegate Vector128<byte> NarrowShuffle(ReadOnlySpan<byte> source, ReadOnlySpan<byte> control);
 }
