@@ -65,12 +65,8 @@ theorem read_holds : readContract.Holds Extracted.program 1 := by
   simp only [Safety.invoke, Extracted.lookup1]
   simp [checkedValue, numericValue, valid, entered, checkedAt, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure, List.mapM_cons, List.mapM_nil]
-  cil_checked_steps [readContract, ReadInput.view, checkedValue, numericValue, makeParameterHomes,
-    makeLocal, storeLocal, loadLocal, instruction, staticInstruction, valid, element, scalar,
-    bound, numericOfWidth, formed, formValue, item,
-    observerCount, unspecifiedOperands, MemoryOp.argumentCount,
-    Safety.Value.hasUnspecified, CIL.Value.hasUnspecified,
-    checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_checked_steps [readContract, ReadInput.view, makeParameterHomes, makeLocal, storeLocal,
+    loadLocal, valid, element, scalar, bound, numericOfWidth, formed, item]
 
 #print axioms read_holds
 
@@ -106,24 +102,13 @@ theorem slice_read_composes (program : Program)
       Safety.run program fuel 0 0 args frame [] memory = .ok (final, returned) ∧
       final = memory ∧ returned =
         [.scalar (.i32 (input.expected + BitVec.ofNat 32 input.values.length))] := by
-    cil_contract_steps [caller, args, frame, checkedValue, numericValue, loadLocal, storeLocal,
-      sourceValid, sourceWidth, sourceReadonly, valid, sliced, startBound, lengthBound,
-      ReadInput.view, instruction, staticInstruction, memoryInstruction,
-        otherMemoryInstruction, MemoryOp.argumentCount,
-      observerCount, unspecifiedOperands, Safety.Value.hasUnspecified, CIL.Value.hasUnspecified,
-      checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
-    cil_contract_call helper input [caller, args, ReadInput.view, checkedValue, numericValue,
-      sourceValid,
-      valid, Safety.Value.hasUnspecified, CIL.Value.hasUnspecified, checkedAt, Except.mapError,
-      Bind.bind, Except.bind, Pure.pure, Except.pure]
+    cil_contract_steps [caller, args, frame, loadLocal, storeLocal, sourceValid, sourceWidth,
+      sourceReadonly, valid, sliced, startBound, lengthBound, ReadInput.view]
+    cil_contract_call helper input [caller, args, ReadInput.view, sourceValid, valid]
     · exact permitted
     · intro final values invoked confined returned
       obtain ⟨value, rfl, rfl, rfl⟩ := returned
-      cil_contract_steps [caller, args, loadLocal, checkedValue, numericValue, valid,
-        ReadInput.view, instruction, staticInstruction, memoryInstruction,
-        otherMemoryInstruction, MemoryOp.argumentCount,
-        observerCount, unspecifiedOperands, Safety.Value.hasUnspecified, CIL.Value.hasUnspecified,
-        checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+      cil_contract_steps [caller, args, loadLocal, valid, ReadInput.view]
       exact ⟨rfl, rfl⟩
   obtain ⟨fuel, final, returned, ran, result⟩ := execution
   refine ⟨fuel, final, returned, ?_, result⟩

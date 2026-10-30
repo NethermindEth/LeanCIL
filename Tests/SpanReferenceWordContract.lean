@@ -49,9 +49,7 @@ theorem word_holds : wordContract.Holds Extracted.program 0 := by
   simp [checkedValue, valid, enterFrame, Extracted.method0, makeLocals,
     makeArgumentHomes, makeParameterHomes, checkedAt, Except.mapError, Bind.bind, Except.bind,
     Pure.pure, Except.pure, List.mapM_cons, List.mapM_nil]
-  cil_checked_steps [wordContract, WordInput.view, checkedValue, numericValue, instruction,
-    staticInstruction, valid, word, formed, formValue, observerCount, unspecifiedOperands,
-    checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_checked_steps [wordContract, WordInput.view, valid, word, formed]
 
 #print axioms word_holds
 

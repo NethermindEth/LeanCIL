@@ -53,9 +53,7 @@ theorem second_holds : secondContract.Holds Extracted.program 0 := by
   simp [checkedValue, valid, enterFrame, Extracted.method0, makeLocals,
     makeArgumentHomes, makeParameterHomes, checkedAt, Except.mapError, Bind.bind, Except.bind,
     Pure.pure, Except.pure, List.mapM_cons, List.mapM_nil]
-  cil_checked_steps [secondContract, SecondInput.view, checkedValue, numericValue, instruction,
-    staticInstruction, valid, word, formed, offset, formValue, observerCount, unspecifiedOperands,
-    referenceAt, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_checked_steps [secondContract, SecondInput.view, valid, word, formed, offset, referenceAt]
 
 #print axioms second_holds
 
