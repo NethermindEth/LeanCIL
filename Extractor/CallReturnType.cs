@@ -7,7 +7,8 @@ internal static class CallReturnType
     internal static TypeReference Resolve(MethodReference method) => Substitute(method.ReturnType, method);
 
     internal static IEnumerable<TypeReference> Parameters(MethodReference method) =>
-        method.Parameters.Select(parameter => Substitute(parameter.ParameterType, method));
+        method.Parameters.Select(parameter => InReferences.Substitute(parameter.ParameterType,
+            type => Substitute(type, method)));
 
     static TypeReference Substitute(TypeReference type, MethodReference method)
     {
@@ -22,8 +23,6 @@ internal static class CallReturnType
             return arguments[parameter.Position];
         }
         if (type is ByReferenceType byRef) return new ByReferenceType(Substitute(byRef.ElementType, method));
-        if (type is RequiredModifierType required)
-            return new RequiredModifierType(required.ModifierType, Substitute(required.ElementType, method));
         if (type is PointerType pointer) return new PointerType(Substitute(pointer.ElementType, method));
         if (type is ArrayType { IsVector: true } array)
             return new ArrayType(Substitute(array.ElementType, method));
