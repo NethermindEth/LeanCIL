@@ -17,15 +17,18 @@ private def invariant (state : W32 × Memory) : Prop :=
   loadLocal state.2 (.bytes .word32 entry.home0) = .ok (.scalar (.i32 state.1)) ∧
   access state.2 entry.home0 4 1 true = .ok ()
 
-private theorem terminates (args : List CIL.Safety.Value) (state : W32 × Memory)
-    (valid : invariant state) :
-    LoopTerminates Extracted.program 0 args (fun _ values => values = [.scalar (.i32 0)])
-      (header state) := by
-  apply loop_terminates Extracted.program 0 args header invariant (fun s => s.1.toNat)
-    (fun _ values => values = [.scalar (.i32 0)]) ?_ state valid
-  intro state valid
-  obtain ⟨x, m⟩ := state
-  obtain ⟨loaded, writable⟩ := valid
+-- The invariant cutpoint is found in compiled code. Every path and its cost are
+-- derived by checked stepping, so instruction positions and block order are not assumptions.
+theorem correctness : CIL.Safety.Ensures Extracted.program 0
+    (fun args initial => ∃ x : W32, args = [.scalar (.i32 x)] ∧ initial = Examples.empty)
+    (fun _ _ _ values => values = [.scalar (.i32 0)]) := by
+  rintro args initial ⟨x, rfl, rfl⟩
+  have writable : access entry.memory entry.home0 4 1 true = .ok () := by rfl
+  cil_store_vc updated stored readback nextWritable := .word32 (.i32 x) using writable
+  refine invoke_loop_vc Extracted.lookup0 rfl entry.checked header invariant (fun s => s.1.toNat)
+    (x, updated) (by cil_loop_steps [entry.frame, header, cutpoint, stored, readback])
+    ⟨readback, nextWritable⟩ ?_
+  rintro ⟨x, m⟩ ⟨loaded, writable⟩
   by_cases zero : x = 0
   · left
     subst x
@@ -42,28 +45,6 @@ private theorem terminates (args : List CIL.Safety.Value) (state : W32 × Memory
       · simp; omega
       · change 1 ≤ x.toNat
         omega
-
--- The invariant cutpoint is found in compiled code. Every path and its cost are
--- derived by checked stepping, so instruction positions and block order are not assumptions.
-theorem correctness : CIL.Safety.Ensures Extracted.program 0
-    (fun args initial => ∃ x : W32, args = [.scalar (.i32 x)] ∧ initial = Examples.empty)
-    (fun _ _ _ values => values = [.scalar (.i32 0)]) := by
-  apply ensures_of_loop
-  intro args initial permitted
-  obtain ⟨x, rfl, rfl⟩ := permitted
-  let entered := entry.memory
-  have setup : enterFrame Extracted.method0 [.scalar (.i32 x)] Examples.empty =
-      .ok (entry.frame, entered) := by
-    rfl
-  have writable : access entered entry.home0 4 1 true = .ok () := by rfl
-  cil_store_vc updated stored readback nextWritable := .word32 (.i32 x) using writable
-  have entryPath : LoopReaches Extracted.program 0 [.scalar (.i32 x)]
-      ⟨0, entry.frame, [], entered⟩ (header (x, updated)) := by
-    cil_loop_steps [entry.frame, header, cutpoint, stored, readback]
-  obtain ⟨fuel, final, values, executed, satisfied⟩ := loop_reaches_terminates entryPath
-    (terminates [.scalar (.i32 x)] (x, updated) ⟨readback, nextWritable⟩)
-  exact ⟨Extracted.method0, entry.frame, entered, Extracted.lookup0, rfl, setup,
-    fuel, final, values, executed, satisfied⟩
 
 #print axioms correctness
 end ExampleProof
