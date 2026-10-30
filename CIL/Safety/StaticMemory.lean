@@ -6,7 +6,7 @@ import CIL.Safety.InstructionMemory
 `staticReference` resolves an extracted readonly static field to immutable storage, creating
 it on first use and revalidating a cached binding on every later use. `staticInstruction`
 runs the static and span instructions on top of it and hands every other memory instruction
-to `memoryInstruction`.
+to `memoryInstruction`. `staticSpanAligned` is the element alignment a typed static span needs.
 -/
 
 namespace CIL.Safety
