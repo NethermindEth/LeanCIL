@@ -14,6 +14,17 @@ public static class Loops
         return true;
     }
 
+    public static ulong Sum(ReadOnlySpan<ulong> values)
+    {
+        ulong total = 0;
+        while (values.Length != 0)
+        {
+            total = unchecked(total + values[0]);
+            values = values.Slice(1);
+        }
+        return total;
+    }
+
     public static int Drain(ReadOnlySpan<int> values)
     {
         while (values.Length != 0)

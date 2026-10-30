@@ -444,6 +444,41 @@ if (!wrongAllZero([1])) throw new InvalidOperationException("Skipped-read mutati
 RejectedLines(skippedReadAssembly, allZeroProof, "SpanAllZeroSkippedRead", true, AllZero);
 Console.WriteLine("PASS unchanged content theorem rejects replacing every read with zero");
 
+// A fold carries a running total in a frame home while consuming symbolic span contents.
+const string Sum = "Loops::Sum(System.ReadOnlySpan`1<System.UInt64>)";
+var sumProof = At("Examples/Proofs/SpanSum.lean");
+verification.Verify(assembly, "Examples", Sum, sumProof, Path.Combine(root, "SpanSum"));
+var sum = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Loops")!
+    .GetMethod("Sum")!.CreateDelegate<SumDelegate>();
+static ulong WrappingSum(ulong[] values) => values.Aggregate(0UL, (total, value) => unchecked(total + value));
+ulong[][] sumInputs = [[], [7], [1, 2, 3], [ulong.MaxValue, 2], [ulong.MaxValue, ulong.MaxValue, 5]];
+foreach (var values in sumInputs)
+    if (sum(values) != WrappingSum(values))
+        throw new InvalidOperationException("Span fold differs from its wrapping sum");
+if (sum(default) != 0) throw new InvalidOperationException("Null empty span must sum to zero");
+Console.WriteLine("PASS symbolic span fold, wrapping sum and caller-memory preservation");
+
+// Stopping while one element remains is still a terminating fold, but omits the last element.
+var skippedLast = Path.Combine(root, "SpanSumSkippedLast");
+Directory.CreateDirectory(skippedLast);
+var skippedLastAssembly = Path.Combine(skippedLast, "Examples.dll");
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var method = module.GetType("Examples.Loops").Methods.Single(method => method.Name == "Sum");
+    var guard = method.Body.Instructions.Single(
+        instruction => instruction.OpCode.FlowControl == FlowControl.Cond_Branch);
+    method.Body.GetILProcessor().InsertBefore(guard, Instruction.Create(OpCodes.Ldc_I4_1));
+    guard.OpCode = OpCodes.Bgt;
+    module.Write(skippedLastAssembly);
+}
+Run(Extract("extract", skippedLastAssembly, "Examples", Sum, skippedLast));
+var wrongSum = Assembly.Load(File.ReadAllBytes(skippedLastAssembly)).GetType("Examples.Loops")!
+    .GetMethod("Sum")!.CreateDelegate<SumDelegate>();
+if (wrongSum([1, 2, 3]) != 3)
+    throw new InvalidOperationException("Skipped-last mutation did not drop the last element");
+RejectedLines(skippedLastAssembly, sumProof, "SpanSumSkippedLast", true, Sum);
+Console.WriteLine("PASS unchanged fold theorem rejects skipping the last element");
+
 // A buffer loop is proved as a sequence property: every nonnegative count fills exactly that
 // many words from write authority alone and changes no other caller byte.
 const string FillWords = "Loops::FillWords(ulong&,ulong,int)";
@@ -683,3 +718,4 @@ foreach (var mutation in new[] { "stack-height", "stack-type", "local-fact", "st
 
 delegate void FillWordsDelegate(ref ulong destination, ulong value, int count);
 delegate bool AllZeroDelegate(ReadOnlySpan<uint> values);
+delegate ulong SumDelegate(ReadOnlySpan<ulong> values);
