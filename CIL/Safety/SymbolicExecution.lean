@@ -291,8 +291,10 @@ elab "cil_instruction_step_goal" : tactic => withMainContext do
   let some (_, lhs, _) := target.eq? | throwError "Expected a checked step equality"
   unless lhs.isAppOfArity ``CIL.Safety.step 7 do throwError "Expected a checked step equality"
   let head := (← whnfR lhs.getAppArgs[1]!).getAppFn.constName?
-  unless head.any (#[``CIL.Op.load64, ``CIL.Op.store64, ``CIL.Op.fieldAt, ``CIL.Op.fieldAddress,
-      ``CIL.Op.setFieldAt, ``CIL.Op.asRef, ``CIL.Op.skipInit, ``CIL.Op.initAggregate].contains ·) do
+  -- The opcodes of `CIL.Safety.InstructionSteps`.
+  unless head.any (#[``CIL.Op.load64, ``CIL.Op.store64, ``CIL.Op.storeScalar, ``CIL.Op.fieldAt,
+      ``CIL.Op.fieldAddress, ``CIL.Op.setFieldAt, ``CIL.Op.asRef, ``CIL.Op.skipInit,
+      ``CIL.Op.initAggregate].contains ·) do
     throwError "No instruction step equation for this opcode"
 
 /-- `cil_checked_step_by_equations` without the `@[cil_instruction_step]` equations, for a step
