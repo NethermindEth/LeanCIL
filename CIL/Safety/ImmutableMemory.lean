@@ -44,8 +44,8 @@ theorem PreservesImmutable.binding {m result : Memory} (preserves : PreservesImm
     (descriptor : CIL.StaticDescriptor) (reference : Reference)
     (valid : StaticBindingValid m descriptor reference) :
     StaticBindingValid result descriptor reference := by
-  obtain ⟨offset, a, present, live, kind, size, bytes⟩ := valid
-  exact ⟨offset, a, (preserves _ _ present kind).1, live, kind, size,
+  obtain ⟨offset, a, present, live, kind, size, alignment, bytes⟩ := valid
+  exact ⟨offset, a, (preserves _ _ present kind).1, live, kind, size, alignment,
     (preserves.read reference a present kind _ _).trans bytes⟩
 
 /-- A static world stays valid across any step that preserves immutable storage and leaves

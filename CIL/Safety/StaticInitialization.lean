@@ -29,8 +29,8 @@ theorem staticReference_new_binding_valid (descriptor : CIL.StaticDescriptor) (m
     (h : staticReference descriptor m = .ok (result, reference)) :
     StaticBindingValid result descriptor reference := by
   simp only [staticReference, missing] at h
-  cases ha : allocate m ⟨.immutableStatic, ⟨descriptor.bytes.length, 1, []⟩,
-      true, [descriptor.bytes.length]⟩ <;>
+  cases ha : allocate m ⟨.immutableStatic,
+      ⟨descriptor.bytes.length, descriptor.alignment, []⟩, true, [descriptor.bytes.length]⟩ <;>
     simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind,
       Pure.pure, Except.pure] at h
   · cases h
@@ -38,7 +38,7 @@ theorem staticReference_new_binding_valid (descriptor : CIL.StaticDescriptor) (m
     obtain ⟨id, memory⟩ := allocated
     cases h
     have lookup := allocation_lookup m _ id memory ha
-    refine ⟨rfl, _, lookup, rfl, rfl, rfl, ?_⟩
+    refine ⟨rfl, _, lookup, rfl, rfl, rfl, rfl, ?_⟩
     let initialized : Memory := { memory with
       cells := fun other offset => if other == id then
         match descriptor.bytes[offset]? with
@@ -56,10 +56,10 @@ theorem staticReference_new_binding_valid (descriptor : CIL.StaticDescriptor) (m
       simp [initialized, permitted, viewContains, bound]
     have accessOK : access initialized ⟨id, 0⟩ descriptor.bytes.length 1 false = .ok () := by
       have present : initialized.allocations id = some
-          ⟨.immutableStatic, ⟨descriptor.bytes.length, 1, []⟩, true,
-            [descriptor.bytes.length]⟩ := lookup
+          ⟨.immutableStatic, ⟨descriptor.bytes.length, descriptor.alignment, []⟩,
+            true, [descriptor.bytes.length]⟩ := lookup
       have position : 0 < descriptor.bytes.length ∨ 0 = descriptor.bytes.length := by omega
-      simp [access, form, liveAllocation, present, validPosition,
+      simp [access, form, liveAllocation, present, validPosition, Nat.mod_one,
         nativeLimit, permission, position, Bind.bind, Except.bind, Pure.pure, Except.pure]
     simp only [read, accessOK, Bind.bind, Except.bind, Nat.zero_add]
     have cells : (List.range descriptor.bytes.length).map (fun i => initialized.cells id (0 + i)) =
@@ -82,8 +82,8 @@ theorem staticReference_preserves_immutable (descriptor : CIL.StaticDescriptor)
     exact .refl _
   | none =>
     simp only [staticReference, hc] at h
-    cases ha : allocate m ⟨.immutableStatic, ⟨descriptor.bytes.length, 1, []⟩,
-        true, [descriptor.bytes.length]⟩ <;>
+    cases ha : allocate m ⟨.immutableStatic,
+        ⟨descriptor.bytes.length, descriptor.alignment, []⟩, true, [descriptor.bytes.length]⟩ <;>
       simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind,
         Pure.pure, Except.pure] at h
     · cases h
@@ -119,8 +119,8 @@ theorem staticReference_preserves_static_world (descriptor : CIL.StaticDescripto
     have initialized := staticReference_new_binding_valid _ _ _ _ hc h
     have retained := staticReference_preserves_immutable _ _ _ _ hm h
     simp only [staticReference, hc] at h
-    cases ha : allocate m ⟨.immutableStatic, ⟨descriptor.bytes.length, 1, []⟩,
-        true, [descriptor.bytes.length]⟩ <;>
+    cases ha : allocate m ⟨.immutableStatic,
+        ⟨descriptor.bytes.length, descriptor.alignment, []⟩, true, [descriptor.bytes.length]⟩ <;>
       simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind,
         Pure.pure, Except.pure] at h
     · cases h

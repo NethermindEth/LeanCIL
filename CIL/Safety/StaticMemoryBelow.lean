@@ -24,8 +24,8 @@ theorem staticReference_preserves_memory_below (descriptor : CIL.StaticDescripto
     exact .refl _ _
   | none =>
     simp only [staticReference, cache] at resolved
-    cases allocated : allocate memory ⟨.immutableStatic, ⟨descriptor.bytes.length, 1, []⟩,
-        true, [descriptor.bytes.length]⟩ <;>
+    cases allocated : allocate memory ⟨.immutableStatic,
+        ⟨descriptor.bytes.length, descriptor.alignment, []⟩, true, [descriptor.bytes.length]⟩ <;>
       simp only [allocated, checkedAt, Except.mapError, Bind.bind, Except.bind,
         Pure.pure, Except.pure] at resolved
     · cases resolved

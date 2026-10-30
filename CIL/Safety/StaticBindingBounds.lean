@@ -86,7 +86,8 @@ theorem staticReference_staticBindingsBounded {source target : Memory}
   | none =>
     simp only [staticReference, cached] at success
     cases allocated : allocate source
-        ⟨.immutableStatic, ⟨descriptor.bytes.length, 1, []⟩, true, [descriptor.bytes.length]⟩ <;>
+        ⟨.immutableStatic,
+          ⟨descriptor.bytes.length, descriptor.alignment, []⟩, true, [descriptor.bytes.length]⟩ <;>
       simp only [allocated, checkedAt, Except.mapError, Bind.bind, Except.bind,
         Pure.pure, Except.pure] at success
     · cases success

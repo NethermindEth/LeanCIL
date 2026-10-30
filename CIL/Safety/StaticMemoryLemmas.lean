@@ -52,8 +52,8 @@ theorem staticReference_preserves_wellFormed (descriptor : CIL.StaticDescriptor)
     exact hm
   | none =>
     simp only [staticReference, hc] at h
-    cases ha : allocate m ⟨.immutableStatic, ⟨descriptor.bytes.length, 1, []⟩,
-        true, [descriptor.bytes.length]⟩ <;>
+    cases ha : allocate m ⟨.immutableStatic,
+        ⟨descriptor.bytes.length, descriptor.alignment, []⟩, true, [descriptor.bytes.length]⟩ <;>
       simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind,
         Pure.pure, Except.pure] at h
     · cases h
@@ -82,8 +82,8 @@ theorem staticReference_extends_allocations (descriptor : CIL.StaticDescriptor)
     exact .refl _
   | none =>
     simp only [staticReference, hc] at h
-    cases ha : allocate m ⟨.immutableStatic, ⟨descriptor.bytes.length, 1, []⟩,
-        true, [descriptor.bytes.length]⟩ <;>
+    cases ha : allocate m ⟨.immutableStatic,
+        ⟨descriptor.bytes.length, descriptor.alignment, []⟩, true, [descriptor.bytes.length]⟩ <;>
       simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind,
         Pure.pure, Except.pure] at h
     · cases h
@@ -149,8 +149,8 @@ theorem staticReference_reference_valid (descriptor : CIL.StaticDescriptor) (m r
     exact read_reference_valid _ _ _ _ _ bytes
   | none =>
     simp only [staticReference, hc] at h
-    cases ha : allocate m ⟨.immutableStatic, ⟨descriptor.bytes.length, 1, []⟩,
-        true, [descriptor.bytes.length]⟩ <;>
+    cases ha : allocate m ⟨.immutableStatic,
+        ⟨descriptor.bytes.length, descriptor.alignment, []⟩, true, [descriptor.bytes.length]⟩ <;>
       simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind,
         Pure.pure, Except.pure] at h
     · cases h

@@ -58,6 +58,10 @@ foreach (var (name, selector, inputs) in new (string, string, int[][])[]
             return Claim(assembly, name, input, $".error ⟨{site.Groups[1].Value}, {site.Groups[2].Value}, .thrown \"{error.InnerException!.GetType().FullName}\"⟩");
         }
     }).ToList();
+    // The RVA descriptor carries the declared packing Roslyn aligned the table to.
+    var packing = name is "Word" or "Count" ? 4 : 8;
+    if (!source.Contains($"alignment := {packing} }})", StringComparison.Ordinal))
+        throw new InvalidOperationException($"{name}: missing static data alignment {packing}");
     var folded = Regex.Match(source,
         @"theorem method(\d+)_instruction\d+ : [^\r\n]*some \(\.nop : Op\)");
     if (source.Contains("(.nop : Op)", StringComparison.Ordinal) && !folded.Success)
@@ -140,6 +144,78 @@ foreach (var (mutation, marker) in new[]
         throw new InvalidOperationException("Incorrect span rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS rejection: " + mutation);
 }
+// CoreCLR's CreateSpan<uint> throws on data not 4-byte aligned; packing 2 promises only 2 bytes.
+const string misalignedSpan = "Typed span element width does not divide the field alignment";
+var narrowFolder = Path.Combine(root, "Narrow-packing");
+var narrowDll = Path.Combine(narrowFolder, "Examples.dll");
+Directory.CreateDirectory(narrowFolder);
+string wordsField;
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var getter = module.GetType("Examples.SpanTables").Methods.Single(m => m.Name == "get_Words");
+    var blob = ((FieldReference)getter.Body.Instructions[0].Operand).Resolve();
+    wordsField = blob.Name;
+    var layout = (TypeDefinition)blob.FieldType;
+    // Cecil resolves packing and class size together; setting one first would lose the other.
+    var classSize = layout.ClassSize;
+    layout.PackingSize = 2;
+    layout.ClassSize = classSize;
+    module.Write(narrowDll);
+}
+Run(Extract("extract", narrowDll, "Examples", "SpanTables::Word(int)", narrowFolder));
+var narrowSource = File.ReadAllText(Path.Combine(narrowFolder, "Extracted.lean"));
+var createSite = Regex.Match(narrowSource,
+    @"theorem method(\d+)_instruction(\d+) : [^\r\n]*some \(\.memory \(\.createSpan 4\) : Op\)");
+if (!createSite.Success || !narrowSource.Contains("alignment := 2 })", StringComparison.Ordinal))
+    throw new InvalidOperationException("Narrow packing did not reach the extracted CreateSpan site");
+Prove(narrowDll, "SpanTables::Word(int)", "Narrow-packing-Verified",
+    [Claim(narrowDll, "Word", [0], $".error ⟨{createSite.Groups[1].Value}, {createSite.Groups[2].Value}, " +
+        $".unsupported \"{misalignedSpan}\"⟩")],
+    () => Console.WriteLine("PASS CreateSpan over a narrower packing is unsupported, never a success"));
+
+// An RVA off its declared packing is rejected before extraction; Cecil re-aligns, so patch the table.
+var shiftedFolder = Path.Combine(root, "Reject-misaligned-rva");
+var shiftedDll = Path.Combine(shiftedFolder, "Examples.dll");
+Directory.CreateDirectory(shiftedFolder);
+File.Delete(Path.Combine(shiftedFolder, "Extracted.lean"));
+File.Copy(assembly, shiftedDll, true);
+ShiftFieldRva(shiftedDll, wordsField, 2);
+var shifted = Execute(Extract("extract", shiftedDll, "Examples", "SpanTables::Word(int)", shiftedFolder));
+if (shifted.Code == 0 || File.Exists(Path.Combine(shiftedFolder, "Extracted.lean")) ||
+    !shifted.Output.Contains("Misaligned static data", StringComparison.Ordinal) ||
+    !shifted.Output.Contains("is not a multiple of its declared packing 4", StringComparison.Ordinal))
+    throw new InvalidOperationException("Misaligned RVA was not rejected:\n" + shifted.Output);
+Console.WriteLine("PASS rejection: static data RVA off its declared packing");
+
 queue.Flush();
 rejected.Check();
 Console.WriteLine("PASS typed static spans, bounds faults, reused locals, computed indexes and forged receivers");
+
+// Adds `delta` to the FieldRVA row of the named field in a written PE image.
+static void ShiftFieldRva(string path, string fieldName, uint delta)
+{
+    const System.Reflection.Metadata.Ecma335.TableIndex fieldRva =
+        System.Reflection.Metadata.Ecma335.TableIndex.FieldRva;
+    var image = File.ReadAllBytes(path);
+    using var pe = new System.Reflection.PortableExecutable.PEReader(new MemoryStream(image));
+    var reader = System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(pe);
+    var field = reader.FieldDefinitions.Single(handle =>
+        reader.GetString(reader.GetFieldDefinition(handle).Name) == fieldName);
+    var fieldRow = System.Reflection.Metadata.Ecma335.MetadataTokens.GetRowNumber(field);
+    var table = pe.PEHeaders.MetadataStartOffset +
+        System.Reflection.Metadata.Ecma335.MetadataReaderExtensions.GetTableMetadataOffset(reader, fieldRva);
+    var rowSize = System.Reflection.Metadata.Ecma335.MetadataReaderExtensions.GetTableRowSize(reader, fieldRva);
+    var rowCount = System.Reflection.Metadata.Ecma335.MetadataReaderExtensions.GetTableRowCount(reader, fieldRva);
+    // Each row is a 4-byte RVA followed by a 2- or 4-byte Field index.
+    var entry = -1;
+    for (var index = 0; index < rowCount && entry < 0; index++)
+    {
+        var start = table + index * rowSize;
+        var owner = rowSize == 6 ? BitConverter.ToUInt16(image, start + 4) : BitConverter.ToInt32(image, start + 4);
+        if (owner == fieldRow) entry = start;
+    }
+    if (entry < 0) throw new InvalidOperationException("Missing FieldRVA row: " + fieldName);
+    var rva = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(image.AsSpan(entry));
+    System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(image.AsSpan(entry), rva + delta);
+    File.WriteAllBytes(path, image);
+}

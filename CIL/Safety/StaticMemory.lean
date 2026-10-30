@@ -36,14 +36,15 @@ def staticReference (descriptor : CIL.StaticDescriptor) (m : Memory) :
     let allocation ← checkedAt (.address reference) descriptor.bytes.length
       (liveAllocation m reference.allocation)
     if allocation.kind == .immutableStatic && reference.offset == 0 &&
-        allocation.layout.size == descriptor.bytes.length then pure () else .error .invalidState
+        allocation.layout.size == descriptor.bytes.length &&
+        allocation.layout.alignment == descriptor.alignment then pure () else .error .invalidState
     let bytes ← checkedAt (.address reference) descriptor.bytes.length
       (read m reference descriptor.bytes.length 1)
     if bytes == descriptor.bytes then return (m, reference) else .error .invalidState
   | none =>
     let (id, memory) ← checkedAt .null descriptor.bytes.length (allocate m {
       kind := .immutableStatic
-      layout := ⟨descriptor.bytes.length, 1, []⟩
+      layout := ⟨descriptor.bytes.length, descriptor.alignment, []⟩
       sentinels := [descriptor.bytes.length] })
     let reference : Reference := ⟨id, 0⟩
     return ({ memory with
@@ -54,6 +55,11 @@ def staticReference (descriptor : CIL.StaticDescriptor) (m : Memory) :
         else memory.cells other offset
       views := ⟨id, 0, descriptor.bytes.length, true, false⟩ :: memory.views
       staticBindings := (descriptor.identity, reference) :: memory.staticBindings }, reference)
+
+/-- CoreCLR's `CreateSpan<T>` throws unless the field data is aligned to `sizeof(T)`, so a typed
+    span needs `width` to divide the allocation's guaranteed alignment. -/
+def staticSpanAligned (allocation : Allocation) (width : Nat) : Bool :=
+  0 < width && allocation.layout.alignment % width == 0
 
 /-- Runs a memory instruction at `pc`. Static loads use the field identity extracted for that
     pc; span constructors over raw pointers are accepted only inside extracted static data. -/
@@ -88,7 +94,9 @@ def staticInstruction (body : CIL.Method) (pc : Nat) (operation : CIL.MemoryOp)
     let allocation ← checkedAt (.address reference) 0 (liveAllocation m reference.allocation)
     if allocation.kind == .immutableStatic && reference.offset == 0 && 0 < width &&
         allocation.layout.size % width == 0 then
-      return (m, .span (.address reference) (allocation.layout.size / width) :: rest)
+      if staticSpanAligned allocation width then
+        return (m, .span (.address reference) (allocation.layout.size / width) :: rest)
+      else .error (.unsupported "Typed span element width does not divide the field alignment")
     else .error (.unsupported "Typed span outside a whole extracted static field")
   | .spanCreate, .scalar (.i32 length) :: .reference .null :: rest =>
     if length == 0 then return (m, .span .null 0 :: rest)

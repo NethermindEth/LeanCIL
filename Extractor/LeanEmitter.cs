@@ -199,7 +199,8 @@ internal static class LeanEmitter
                     }
                     FieldDefinition f = StaticData.Validate((FieldReference)s.i.Operand, m.Module);
                     StaticIdentityRecord fieldIdentity = StaticIdentity.Of(f);
-                    return $"({s.pc}, {{ identity := {fieldIdentity.Identity}, assemblyIdentity := {JsonSerializer.Serialize(fieldIdentity.AssemblyIdentity)}, fieldName := {JsonSerializer.Serialize(f.FullName)}, bytes := {StaticData.LeanBytes(f)} }})";
+                    return $"({s.pc}, {{ identity := {fieldIdentity.Identity}, assemblyIdentity := {JsonSerializer.Serialize(fieldIdentity.AssemblyIdentity)}, fieldName := {JsonSerializer.Serialize(f.FullName)}, bytes := {StaticData.LeanBytes(f)}, " +
+                        $"alignment := {StaticData.Alignment(f)} }})";
                 }));
             lean.AppendLine($"def method{n}Signature : String := {JsonSerializer.Serialize(m.FullName)}");
             if (MethodSpecialization.Source(m) is { } origin)

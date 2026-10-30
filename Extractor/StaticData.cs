@@ -25,8 +25,16 @@ internal static class StaticData
             field.DeclaringType.Methods.Any(m => m.IsConstructor && m.IsStatic) ||
             layout.Methods.Any(m => m.IsConstructor && m.IsStatic))
             throw new InvalidDataException($"Unsupported static data or initialisation: {reference.FullName}");
+        // Image bases, section RVAs and file offsets are 512-byte multiples, so RVA alignment survives
+        // both mapped and flat loads; CreateSpan<T> throws on data misaligned for sizeof(T).
+        if (field.RVA % layout.PackingSize != 0)
+            throw new InvalidDataException($"Misaligned static data: {reference.FullName}\n  " +
+                $"RVA 0x{field.RVA:X} is not a multiple of its declared packing {layout.PackingSize}.");
         return field;
     }
+
+    /// <summary>The guaranteed alignment of validated static data: its declared packing.</summary>
+    internal static int Alignment(FieldDefinition field) => field.FieldType.Resolve().PackingSize;
 
     internal static string LeanBytes(FieldDefinition field) => LeanBytes(field.InitialValue);
 

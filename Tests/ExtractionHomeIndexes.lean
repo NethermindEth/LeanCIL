@@ -54,7 +54,7 @@ theorem opaque_edges : opaqueLocalIndices { raw with
 #print axioms opaque_edges
 
 /-- A one-byte unsigned static field descriptor. -/
-def descriptor : StaticDescriptor := ⟨0, "Field", [0], none, some false, ""⟩
+def descriptor : StaticDescriptor := ⟨0, "Field", [0], none, some false, "", 1⟩
 
 /-- The matching raw static field load. -/
 def load : RawInstruction :=
