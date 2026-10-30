@@ -20,7 +20,8 @@ bind_loop loop := Extracted.method0
 
 -- The loop guard observes the remaining span length.
 bind_cutpoint header (memory : Memory) (state : SpanSuffix memory 4 false) :=
-  Extracted.method0 at loop.latch matching (fun op => match op with | .brnonzero _ => true | _ => false)
+  Extracted.method0 at loop.latch matching
+    (fun op => match op with | .brnonzero _ => true | _ => false)
   with (entry.frame memory state.view state.checked.valid state.checked.elementWidth
     state.checked.mode), [.scalar (.i32 (BitVec.ofNat 32 state.view.length))], memory
 
