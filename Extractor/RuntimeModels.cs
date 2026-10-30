@@ -19,21 +19,21 @@ internal static class RuntimeModels
     ];
 
     private const string Intrinsics = "System.Runtime.Intrinsics";
-    private const string X86 = Intrinsics + ".X86";
-    private const string Avx = X86 + ".Avx";
-    private const string Avx2 = X86 + ".Avx2";
-    private const string Avx512FVL = X86 + ".Avx512F/VL";
-    private const string Avx512DQ = X86 + ".Avx512DQ";
-    private const string V128Byte = Intrinsics + ".Vector128`1<System.Byte>";
-    private const string V128UInt64 = Intrinsics + ".Vector128`1<System.UInt64>";
-    private const string V256Byte = Intrinsics + ".Vector256`1<System.Byte>";
-    private const string V256UInt64 = Intrinsics + ".Vector256`1<System.UInt64>";
-    private const string V256UInt32 = Intrinsics + ".Vector256`1<System.UInt32>";
-    private const string V256Int32 = Intrinsics + ".Vector256`1<System.Int32>";
-    private const string V256Int64 = Intrinsics + ".Vector256`1<System.Int64>";
-    private const string V256Double = Intrinsics + ".Vector256`1<System.Double>";
-    private const string V256Single = Intrinsics + ".Vector256`1<System.Single>";
-    private const string V512UInt64 = Intrinsics + ".Vector512`1<System.UInt64>";
+    private const string X86 = $"{Intrinsics}.X86";
+    private const string Avx = $"{X86}.Avx";
+    private const string Avx2 = $"{X86}.Avx2";
+    private const string Avx512FVL = $"{X86}.Avx512F/VL";
+    private const string Avx512DQ = $"{X86}.Avx512DQ";
+    private const string V128Byte = $"{Intrinsics}.Vector128`1<System.Byte>";
+    private const string V128UInt64 = $"{Intrinsics}.Vector128`1<System.UInt64>";
+    private const string V256Byte = $"{Intrinsics}.Vector256`1<System.Byte>";
+    private const string V256UInt64 = $"{Intrinsics}.Vector256`1<System.UInt64>";
+    private const string V256UInt32 = $"{Intrinsics}.Vector256`1<System.UInt32>";
+    private const string V256Int32 = $"{Intrinsics}.Vector256`1<System.Int32>";
+    private const string V256Int64 = $"{Intrinsics}.Vector256`1<System.Int64>";
+    private const string V256Double = $"{Intrinsics}.Vector256`1<System.Double>";
+    private const string V256Single = $"{Intrinsics}.Vector256`1<System.Single>";
+    private const string V512UInt64 = $"{Intrinsics}.Vector512`1<System.UInt64>";
     private const string UInt64Pair = "System.ValueTuple`2<System.UInt64,System.UInt64>";
     private const string Unsafe = "System.Runtime.CompilerServices.Unsafe";
 
