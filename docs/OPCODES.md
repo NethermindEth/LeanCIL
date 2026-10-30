@@ -1,6 +1,6 @@
 # CIL opcode support
 
-This table covers all 179 opcode encodings currently handled by the translator and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime. Opcode meanings follow ECMA-335 as amended by the augments listed in the [specification baseline](SOUNDNESS-SPEC.md).
+The table below lists every opcode encoding the translator handles and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime. Opcode meanings follow ECMA-335 as amended by the augments listed in the [specification baseline](SOUNDNESS-SPEC.md).
 
 - **Complete within the admitted model:** the opcode's operation is implemented for its admitted operands. Ordinary stack/value validity checks still apply.
 - **Partial:** translation exists, but the row lists additional type, layout, control-flow or runtime restrictions. Unsupported operand shapes can fail during checked execution even when translation succeeds.
