@@ -114,7 +114,10 @@ bind_cutpoint cutpoint (frame : Frame) := Extracted.method0 at inner.latch match
 ```
 
 Structural loop occurrences are ordered by head index. Out-of-range locations and wrong instruction
-shapes are rejected. The explicit-location form also accepts binders for symbolic frames.
+shapes are rejected. The explicit-location form also accepts binders for symbolic frames, and
+`with frame, stack, memory` fixes the stack and memory too, so the generated state is the loop
+head itself, such as the guard stack `[.scalar (.i32 (BitVec.ofNat 32 state.view.length))]` of a
+span loop, with no separate header definition.
 
 [Countdown](../Examples/Proofs/Countdown.lean) uses these commands without literal frame layouts,
 allocation identifiers or instruction offsets. The author still supplies the invariant, measure,
@@ -125,10 +128,12 @@ elaborate the scaffold; ordinary extraction certificates do not grow.
 `cil_store_vc updated stored loaded writable := kind value using ready` derives numeric-store
 progress, readback and retained write authority, then exposes the post-state proof obligation.
 `cil_loop_continue next [facts]` checks the path with `cil_loop_steps`, infers its cost, and leaves
-invariant-preservation and strict-measure-decrease goals. Countdown uses both commands. Failed
-encoding, access, path, invariant or decrease obligations cannot produce a successful proof.
-The author supplies branch cases, next states, invariants, measures and any remaining arithmetic.
-This is not an automatic whole-method VC generator or invariant discovery engine.
+invariant-preservation and strict-measure-decrease goals. The [loop entry
+rules](PROOFS-STEPPING.md#loop-verification-conditions) compose frame entry, the first path and
+these obligations into the method's own theorem. Failed encoding, access, path, invariant or
+decrease obligations cannot produce a successful proof. The author supplies branch cases, next
+states, invariants, measures and any remaining arithmetic. This is not an invariant discovery
+engine.
 
 [FillWords](../Examples/Proofs/FillWords.lean) is a larger result: its contract describes an
 arbitrary-length buffer fill, termination and preservation outside the writable region. See [buffer
