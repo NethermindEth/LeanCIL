@@ -72,7 +72,44 @@ var cases = new (string Name, string Arguments, string Results, string Extra)[]
         ".scalar (.i64 (0x0706050403020100 + 0x1F1E1D1C1B1A1918))", ""),
     // Aggregate elements are 16 bytes wide, so the high word of element 1 sits at offset 24.
     ("High", ".bufferSpan ⟨.address ⟨0, 0⟩, 2, 16, true⟩, .scalar (.i32 1)",
-        ".scalar (.i64 0x1F1E1D1C1B1A1918)", "")
+        ".scalar (.i64 0x1F1E1D1C1B1A1918)", ""),
+    // A readonly element reference permits field loads and readonly field addresses.
+    ("ReadOnlyHigh", ".bufferSpan ⟨.address ⟨0, 0⟩, 2, 16, false⟩, .scalar (.i32 1)",
+        ".scalar (.i64 0x1F1E1D1C1B1A1918)", ""),
+    ("HighAddress", ".bufferSpan ⟨.address ⟨0, 0⟩, 2, 16, false⟩, .scalar (.i32 1)",
+        ".scalar (.i64 0x1F1E1D1C1B1A1918)", ""),
+    ("Word", ".bufferSpan ⟨.address ⟨0, 8⟩, 3, 8, false⟩", ".scalar (.i64 0x0F0E0D0C0B0A0908)", $$"""
+        /-- An empty view yields its own reference, so reading past the allocation still faults. -/
+        theorem emptyAtEnd : (CIL.Safety.invoke Extracted.program 64 0
+            [.bufferSpan ⟨.address ⟨0, 32⟩, 0, 8, false⟩] memory).map Prod.snd =
+            .error ⟨0, 3, .memory .outsideAllocation (.address ⟨0, 32⟩) 8⟩ := by rfl
+        #print axioms emptyAtEnd
+        /-- A view whose extent leaves its allocation is rejected where it is passed. -/
+        theorem outsideExtent : (CIL.Safety.invoke Extracted.program 64 0
+            [.bufferSpan ⟨.address ⟨0, 8⟩, 4, 8, false⟩] memory).map Prod.snd =
+            .error ⟨0, 0, .memory .outsideAllocation (.address ⟨0, 8⟩) 0⟩ := by rfl
+        #print axioms outsideExtent
+        """),
+    ("BigEndianWord", ".bufferSpan ⟨.address ⟨0, 0⟩, 8, 1, false⟩", ".scalar (.i64 0x0001020304050607)", ""),
+    ("FirstHigh", ".bufferSpan ⟨.address ⟨0, 0⟩, 1, 16, false⟩", ".scalar (.i64 0x0F0E0D0C0B0A0908)", ""),
+    // Writes through a reference obtained from a readonly view fault, while a writable view stores.
+    ("WriteWord", ".bufferSpan ⟨.address ⟨0, 0⟩, 1, 8, false⟩, .scalar (.i64 7)",
+        ".error ⟨0, 4, .memory .unwritable (.address ⟨0, 0⟩) 8⟩", $$"""
+        /-- The fault is the missing write permission: the same storage behind a writable view stores. -/
+        theorem writableStores : ((CIL.Safety.invoke Extracted.program 64 0
+            [.bufferSpan ⟨.address ⟨0, 0⟩, 1, 8, true⟩, .scalar (.i64 7)] memory).map
+              fun result => (result.1.cells 0 0, result.2)) = .ok (⟨7, true⟩, []) := by rfl
+        #print axioms writableStores
+        """),
+    // The field store reports the readonly struct reference and the field width.
+    ("SetHigh", ".bufferSpan ⟨.address ⟨0, 0⟩, 1, 16, false⟩, .scalar (.i64 7)",
+        ".error ⟨0, 4, .memory .unwritable (.address ⟨0, 0⟩) 8⟩", $$"""
+        /-- The fault is the missing write permission: a writable view stores the high word. -/
+        theorem writableStores : ((CIL.Safety.invoke Extracted.program 64 0
+            [.bufferSpan ⟨.address ⟨0, 0⟩, 1, 16, true⟩, .scalar (.i64 7)] memory).map
+              fun result => (result.1.cells 0 8, result.2)) = .ok (⟨7, true⟩, []) := by rfl
+        #print axioms writableStores
+        """)
 };
 var queue = new GeneratedQueue(verification, assembly);
 foreach (var (name, arguments, results, extra) in cases)
@@ -81,10 +118,11 @@ foreach (var (name, arguments, results, extra) in cases)
     var output = Path.Combine(root, name);
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "Proof.lean");
+    var outcome = results.StartsWith(".error", StringComparison.Ordinal) ? results : $".ok [{results}]";
     File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + memory +
         "\n/-- A readonly span reference reads and writes exactly as the referenced view. -/\n" +
         $"theorem correctness : (CIL.Safety.invoke Extracted.program 200 0 [{arguments}] memory).map " +
-        $"Prod.snd = .ok [{results}] := by rfl\n#print axioms correctness\n" + extra + "\nend ExampleProof\n");
+        $"Prod.snd = {outcome} := by rfl\n#print axioms correctness\n" + extra + "\nend ExampleProof\n");
     queue.Add(new(method.FullName, proof, output),
         () => Console.WriteLine("PASS readonly span reference: " + name));
 }
@@ -92,6 +130,10 @@ var contract = Path.Combine(root, "AtContract");
 queue.Add(new(owner.Methods.Single(method => method.Name == "At").FullName,
         At("Tests/SpanReferenceContracts.lean"), contract, Theorem: "Tests.SpanReferenceContracts.read_holds"),
     () => Console.WriteLine("PASS readonly span reference contract: At"));
+queue.Add(new(owner.Methods.Single(method => method.Name == "Word").FullName,
+        At("Tests/SpanReferenceWordContract.lean"), Path.Combine(root, "WordContract"),
+        Theorem: "Tests.SpanReferenceWordContract.word_holds"),
+    () => Console.WriteLine("PASS readonly span reference contract: Word"));
 queue.Flush();
 
 // The raw argument stays a managed reference bound to the closed signature, never a span value.

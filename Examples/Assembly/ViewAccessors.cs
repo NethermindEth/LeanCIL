@@ -12,5 +12,7 @@ public static class ViewAccessors
     public static bool ReadOnlyPinnableNull(ReadOnlySpan<int> values) =>
         Unsafe.IsNullRef(in values.GetPinnableReference());
     public static bool ReferenceNull(Span<int> values) => Unsafe.IsNullRef(ref MemoryMarshal.GetReference(values));
+    public static bool ReadOnlyReferenceNull(ReadOnlySpan<int> values) =>
+        Unsafe.IsNullRef(ref MemoryMarshal.GetReference(values));
     public static ref int ArrayData(int[] values) => ref MemoryMarshal.GetArrayDataReference(values);
 }

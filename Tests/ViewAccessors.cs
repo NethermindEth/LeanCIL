@@ -33,7 +33,7 @@ foreach (var method in metadata.GetType("Examples.ViewAccessors").Methods.Where(
     {
         var writable = (!method.Name.StartsWith("ReadOnly", StringComparison.Ordinal)).ToString().ToLowerInvariant();
         // GetReference keeps an empty view's own reference, where GetPinnableReference yields null.
-        var nullOnlyWhenNull = method.Name == "ReferenceNull";
+        var nullOnlyWhenNull = method.Name.EndsWith("ReferenceNull", StringComparison.Ordinal);
         foreach (var (address, length) in new[] { (".null", 0), (".address ⟨0, 16⟩", 0),
             (".address ⟨0, 0⟩", 4) })
             claims.Add("(CIL.Safety.invoke Extracted.program 32 0 " +

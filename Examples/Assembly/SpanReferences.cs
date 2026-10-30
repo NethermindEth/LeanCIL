@@ -1,4 +1,6 @@
 using System;
+using System.Buffers.Binary;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Examples;
@@ -38,6 +40,29 @@ public static class SpanReferences
     }
 
     public static ulong High(in Span<Pair> values, int index) => values[index].High;
+
+    public static ulong ReadOnlyHigh(in ReadOnlySpan<Pair> values, int index) => values[index].High;
+
+    public static ulong HighAddress(in ReadOnlySpan<Pair> values, int index)
+    {
+        ref readonly var high = ref values[index].High;
+        return high;
+    }
+
+    public static ulong Word(in ReadOnlySpan<ulong> values) => MemoryMarshal.GetReference(values);
+
+    public static ulong BigEndianWord(in ReadOnlySpan<byte> values) =>
+        BinaryPrimitives.ReverseEndianness(Unsafe.ReadUnaligned<ulong>(ref MemoryMarshal.GetReference(values)));
+
+    public static ulong FirstHigh(in ReadOnlySpan<Pair> values) => MemoryMarshal.GetReference(values).High;
+
+    // Faults: a reference from a readonly view grants no write permission.
+    public static void WriteWord(in ReadOnlySpan<ulong> values, ulong value) =>
+        MemoryMarshal.GetReference(values) = value;
+
+    // Faults: the field store needs write permission the readonly view never granted.
+    public static void SetHigh(in ReadOnlySpan<Pair> values, ulong value) =>
+        MemoryMarshal.GetReference(values).High = value;
 
     public static int Sum(in ReadOnlySpan<byte> values)
     {
