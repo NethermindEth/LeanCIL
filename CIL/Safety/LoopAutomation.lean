@@ -1,5 +1,6 @@
 import CIL.Safety.Loops
 import CIL.Safety.SymbolicExecution
+import CIL.Safety.LoopFacts
 
 /-!
 # Loop path automation
@@ -7,7 +8,8 @@ import CIL.Safety.SymbolicExecution
 Fuel-free reasoning about loops in the checked interpreter. `LoopReaches` is a checked path
 between two loop states whose fuel cost is existential, so proofs compose fetched
 instructions without counting steps. `cil_loop_steps` walks a goal to an invariant cutpoint
-and `cil_loop_finish` walks it to a return; both reuse the symbolic stepping tactics.
+and `cil_loop_finish` walks it to a return; both reuse the symbolic stepping tactics and take,
+besides an explicit list, the facts `gatherLoopFacts` finds in the proof context.
 -/
 
 namespace CIL.Safety
@@ -79,12 +81,14 @@ theorem loop_reaches_terminates {program : CIL.Program} {method : Nat} {args : L
 #print axioms loop_reaches_terminates
 
 /-- Compose actual fetched instructions until the requested invariant state.
-    Fuel is inferred from the path, including NOPs and unconditional branches. -/
-syntax "cil_loop_steps" "[" term,* "]" : tactic
+    Fuel is inferred from the path, including NOPs and unconditional branches. The facts are
+    the optional list and those `gatherLoopFacts` finds. -/
+syntax "cil_loop_steps" (" [" term,* "]")? : tactic
 
 elab_rules : tactic
-  | `(tactic| cil_loop_steps [$facts:term,*]) =>
-    cilWithNormalisedFacts facts.getElems fun facts prepared =>
+  | `(tactic| cil_loop_steps $[[$facts:term,*]]?) => do
+    let facts ← gatherLoopFacts (facts.map (·.getElems) |>.getD #[])
+    cilWithNormalisedFacts facts fun facts prepared =>
     `(tactic| repeat first
       | (simp only [$[$facts:term],*])
       | exact CIL.Safety.loop_reaches_refl
@@ -93,12 +97,14 @@ elab_rules : tactic
          · cil_lookup [$[$facts:term],*]
          · cil_checked_step_normalized [$[$prepared:term],*]))
 
-/-- Establish an exit path and its postcondition without choosing a fuel bound. -/
-syntax "cil_loop_finish" "[" term,* "]" : tactic
+/-- Establish an exit path and its postcondition without choosing a fuel bound. The facts are
+    the optional list and those `gatherLoopFacts` finds. -/
+syntax "cil_loop_finish" (" [" term,* "]")? : tactic
 
 elab_rules : tactic
-  | `(tactic| cil_loop_finish [$facts:term,*]) =>
-    cilWithNormalisedFacts facts.getElems fun facts prepared =>
+  | `(tactic| cil_loop_finish $[[$facts:term,*]]?) => do
+    let facts ← gatherLoopFacts (facts.map (·.getElems) |>.getD #[])
+    cilWithNormalisedFacts facts fun facts prepared =>
     `(tactic| repeat first
       | (simp only [$[$facts:term],*])
       | (apply CIL.Safety.loop_terminates_return (op := .ret _)

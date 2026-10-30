@@ -168,15 +168,9 @@ theorem fill_words (initial : Memory) (base : Reference) (v : W64) (n : W32) (fo
     have path : LoopReaches Extracted.program 0
         [.reference (.address base), .scalar (.i64 v), .scalar (.i32 n)] (header initial home n (k, m))
         (header initial home n (k + 1, m2)) := by
-      -- The checked stepper unfolds `step`, so the two memory instructions are crossed by their own equations.
-      cil_loop_steps [entry.frame, header, guard, loaded, inside, valid]
-      refine loop_reaches_next (by first | (simp only [cil_code]; rfl) | rfl)
-        (by first | (simp only [cil_code]; rfl) | rfl) (addStep _ _ _ _) ?_
-      cil_loop_steps [entry.frame, header, guard]
-      refine loop_reaches_next (by first | (simp only [cil_code]; rfl) | rfl)
-        (by first | (simp only [cil_code]; rfl) | rfl) (storeStep _ _ _ _) ?_
-      cil_loop_steps [entry.frame, header, guard, loaded1, storedStep, loadedStep,
-        List.reverse_cons, List.reverse_nil, List.nil_append, List.cons_append]
+      -- The two memory instructions are crossed by `addStep` and `storeStep` from the context.
+      cil_loop_steps [header, guard, inside, valid, List.reverse_cons, List.reverse_nil,
+        List.nil_append, List.cons_append]
     obtain ⟨cost, segment⟩ := path
     refine ⟨(k + 1, m2), cost, ⟨bytes2, ((homeReady.after_write stored).after_write written2).access, ?_, ?_,
       write_preserves_wellFormed _ _ _ _ _ formed1 written2, form_after_write written2 (form_after_write stored valid),

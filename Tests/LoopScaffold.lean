@@ -272,8 +272,9 @@ bind_cutpoint header (memory : Memory) (home : Reference) (state : State memory 
   countdown at 3 matching (fun op => match op with | .brnonzero _ => true | _ => false)
   with (entry.frame memory home), [.scalar (.i32 state.remaining)], state.current
 
-/-- The store and exit rules carry the frame part of the state, so the loop proof states only
-    its measure; every input terminates with zero and keeps the caller's memory. -/
+/-- The store and exit rules carry the frame part of the state, and the loop tactics read the
+    home's load and the frame exit from it, so the proof states only its measure and branch;
+    every input terminates with zero and keeps the caller's memory. -/
 theorem countdown_returns_zero (memory : Memory) (input : CIL.W32)
     (wellFormed : memory.WellFormed) :
     ∃ fuel final, invoke program fuel 0 [.scalar (.i32 input)] memory =
@@ -282,17 +283,15 @@ theorem countdown_returns_zero (memory : Memory) (input : CIL.W32)
   cil_home_store started stored loaded frame holds := (.i32 input) using entryMemory numeric
   refine invoke_loop_results (by rfl) (by rfl) setup (header memory home) (fun _ => True)
     (·.remaining.toNat) ⟨input, started, frame, holds⟩
-    (by cil_loop_steps [header, entry.frame, stored, loaded]) trivial ?_
+    (by cil_loop_steps) trivial ?_
   rintro ⟨remaining, current, frame, holds⟩ -
-  have loaded := holds.load (value := .i32 remaining) rfl
   by_cases zero : remaining = 0
   · subst zero
     left
-    cil_loop_finish [header, entry.frame, loaded, localResult, frame.leave setup]
+    cil_loop_finish
   · cil_home_store updated stored nextLoaded nextFrame nextHolds := (.i32 (remaining - 1))
       using frame holds
-    cil_loop_continue ⟨remaining - 1, updated, nextFrame, nextHolds⟩
-      [header, entry.frame, loaded, localResult, zero, stored, nextLoaded]
+    cil_loop_continue ⟨remaining - 1, updated, nextFrame, nextHolds⟩ [zero]
     · trivial
     · have positive : remaining.toNat ≠ 0 := fun same => zero (BitVec.eq_of_toNat_eq same)
       have one : (1 : CIL.W32).toNat = 1 := rfl
@@ -314,17 +313,15 @@ theorem constant_measure (memory : Memory) (input : CIL.W32) (wellFormed : memor
   cil_home_store started stored loaded frame holds := (.i32 input) using entryMemory numeric
   refine invoke_loop_results (by rfl) (by rfl) setup (header memory home) (fun _ => True)
     (fun _ => 0) ⟨input, started, frame, holds⟩
-    (by cil_loop_steps [header, entry.frame, stored, loaded]) trivial ?_
+    (by cil_loop_steps) trivial ?_
   rintro ⟨remaining, current, frame, holds⟩ -
-  have loaded := holds.load (value := .i32 remaining) rfl
   by_cases zero : remaining = 0
   · subst zero
     left
-    cil_loop_finish [header, entry.frame, loaded, localResult, frame.leave setup]
+    cil_loop_finish
   · cil_home_store updated stored nextLoaded nextFrame nextHolds := (.i32 (remaining - 1))
       using frame holds
-    cil_loop_continue ⟨remaining - 1, updated, nextFrame, nextHolds⟩
-      [header, entry.frame, loaded, localResult, zero, stored, nextLoaded]
+    cil_loop_continue ⟨remaining - 1, updated, nextFrame, nextHolds⟩ [zero]
     · trivial
     · decide
 
@@ -341,17 +338,162 @@ theorem stale_invariant (memory : Memory) (wellFormed : memory.WellFormed) :
   cil_home_store started stored loaded frame holds := (.i32 2) using entryMemory numeric
   refine invoke_loop_results (by rfl) (by rfl) setup (header memory home)
     (fun state => state.remaining = 2) (·.remaining.toNat) ⟨2, started, frame, holds⟩
-    (by cil_loop_steps [header, entry.frame, stored, loaded]) rfl ?_
+    (by cil_loop_steps) rfl ?_
   rintro ⟨remaining, current, frame, holds⟩ (invariant : remaining = 2)
   subst invariant
-  have loaded := holds.load (value := .i32 2) rfl
   cil_home_store updated stored nextLoaded nextFrame nextHolds := (.i32 (2 - 1))
     using frame holds
   cil_loop_continue ⟨2 - 1, updated, nextFrame, nextHolds⟩
-    [header, entry.frame, loaded, localResult, stored, nextLoaded]
   · show (2 - 1 : CIL.W32) = 2
     decide
   · show (2 - 1 : CIL.W32).toNat < (2 : CIL.W32).toNat
     decide
 
 end Tests.LoopVC
+
+namespace Tests.LoopFacts
+open CIL.Safety
+
+/-- `ulong total = 0; while (span.Length != 0) { total += span[0]; span = span.Slice(1); }
+    return total;` over a readonly span, with `total` in a frame home. -/
+@[cil_code] def sum : CIL.Method := {
+  locals := [.i64 0], localKinds := [.word64], returnsValue := true
+  parameterHomes := [(0, .span 8 false)]
+  code := [.const32 0, .convI8, .setLocal 0, .branch 15, .local 0, .local 1, .const32 0,
+    .memory (.spanItem 8), .load64, .add, .setLocal 0, .local 1, .const32 1,
+    .memory (.spanSlice false), .setLocal 1, .local 1, .memory .spanLength, .brnonzero 4,
+    .local 0, .ret] }
+
+/-- The program holding only `sum`. -/
+@[cil_code] def program : CIL.Program := [sum]
+
+bind_entry entry (memory : Memory) (view : SpanView) (wellFormed : memory.WellFormed)
+    (valid : view.validate memory = .ok ()) (width : view.width = 8)
+    (readOnly : view.writable = false) := sum
+  with [.bufferSpan view] from memory allocating wellFormed
+  simplifying [valid, width, readOnly]
+
+/-- The unconsumed suffix, checked in caller memory, and the consumed total in the frame home. -/
+structure State (memory : Memory) (home : Reference) where
+  suffix : SpanSuffix memory 8 false
+  total : CIL.W64
+  current : Memory
+  frame : EntryMemory memory current
+  holds : NumericEntryHome memory current .word64 total.toNat home
+
+-- The guard sees the remaining length.
+bind_cutpoint header (memory : Memory) (home : Reference) (state : State memory home) :=
+  sum at 17 matching (· matches .brnonzero _)
+  with entry.frame memory state.suffix.view home,
+    [.scalar (.i32 (BitVec.ofNat 32 state.suffix.view.length))], state.current
+
+/-- Every step, exit and frame fact comes from the context: the span checks in frame memory
+    follow from the caller-memory `CheckedSpan`, `EntryMemory` and well-formedness, the element
+    load is normalised at its literal width, and the exit keeps the caller's memory. -/
+theorem sum_returns (memory : Memory) (view : SpanView) (values : List CIL.W64)
+    (wellFormed : memory.WellFormed) (span : CheckedSpan memory view 8 false values) :
+    ∃ fuel final, invoke program fuel 0 [.bufferSpan view] memory =
+      .ok (final, [.scalar (.i64 values.sum)]) ∧ MemoryBelow memory.nextIdentity memory final := by
+  obtain ⟨home, entered, setup, numeric, entryMemory⟩ :=
+    entry.checked memory view wellFormed span.valid span.elementWidth span.mode
+  cil_home_store started stored loaded frame holds := (.i64 0) using entryMemory numeric
+  refine invoke_loop_results (by rfl) (by simp [cil_checked, span.valid]) setup
+    (header memory home) (fun state => state.total + state.suffix.values.sum = values.sum)
+    (·.suffix.values.length) ⟨⟨view, values, span⟩, 0, started, frame, holds⟩
+    (by cil_loop_steps) (by simp) ?_
+  rintro ⟨⟨view, remaining, span⟩, total, current, frame, holds⟩ invariant
+  cases remaining with
+  | nil => exact .inl (by cil_loop_finish [invariant.symm])
+  | cons value remaining =>
+    obtain ⟨item, -, found, element⟩ := (span.within wellFormed frame).head (by decide)
+    cil_home_store updated stored nextLoaded nextFrame nextHolds := (.i64 (total + value))
+      using frame holds
+    obtain ⟨sliced, slicedOK, next, -⟩ := span.tail_below wellFormed nextFrame.kept
+    cil_loop_continue ⟨⟨sliced, remaining, next⟩, total + value, updated, nextFrame, nextHolds⟩
+    · simpa [BitVec.add_assoc] using invariant
+    · simp
+#print axioms sum_returns
+
+/-- error: Type mismatch
+  zero
+has type
+  total = 0
+but is expected to have type
+  total + value = 0 -/
+#guard_msgs (error) in
+/-- The gathered facts do not discharge preservation: with a total claimed to stay zero,
+    the path and exit close and the false goal `total + value = 0` remains. -/
+theorem zero_total (memory : Memory) (view : SpanView) (values : List CIL.W64)
+    (wellFormed : memory.WellFormed) (span : CheckedSpan memory view 8 false values) :
+    ∃ fuel final, invoke program fuel 0 [.bufferSpan view] memory =
+      .ok (final, [.scalar (.i64 values.sum)]) ∧ MemoryBelow memory.nextIdentity memory final := by
+  obtain ⟨home, entered, setup, numeric, entryMemory⟩ :=
+    entry.checked memory view wellFormed span.valid span.elementWidth span.mode
+  cil_home_store started stored loaded frame holds := (.i64 0) using entryMemory numeric
+  refine invoke_loop_results (by rfl) (by simp [cil_checked, span.valid]) setup
+    (header memory home)
+    (fun state => state.total + state.suffix.values.sum = values.sum ∧ state.total = 0)
+    (·.suffix.values.length) ⟨⟨view, values, span⟩, 0, started, frame, holds⟩
+    (by cil_loop_steps) ⟨by simp, rfl⟩ ?_
+  rintro ⟨⟨view, remaining, span⟩, total, current, frame, holds⟩
+    ⟨invariant, (zero : total = 0)⟩
+  cases remaining with
+  | nil => exact .inl (by cil_loop_finish [invariant.symm])
+  | cons value remaining =>
+    obtain ⟨item, -, found, element⟩ := (span.within wellFormed frame).head (by decide)
+    cil_home_store updated stored nextLoaded nextFrame nextHolds := (.i64 (total + value))
+      using frame holds
+    obtain ⟨sliced, slicedOK, next, -⟩ := span.tail_below wellFormed nextFrame.kept
+    cil_loop_continue ⟨⟨sliced, remaining, next⟩, total + value, updated, nextFrame, nextHolds⟩
+    · refine ⟨by simpa [BitVec.add_assoc] using invariant, ?_⟩
+      show total + value = 0
+      exact zero
+    · simp
+
+/-- error: Tactic `decide` proved that the proposition
+  0 < 0
+is false -/
+#guard_msgs (error) in
+/-- A constant measure leaves a false decrease goal once the gathered facts close the path
+    and the exit. -/
+theorem constant_measure (memory : Memory) (view : SpanView) (values : List CIL.W64)
+    (wellFormed : memory.WellFormed) (span : CheckedSpan memory view 8 false values) :
+    ∃ fuel final, invoke program fuel 0 [.bufferSpan view] memory =
+      .ok (final, [.scalar (.i64 values.sum)]) ∧ MemoryBelow memory.nextIdentity memory final := by
+  obtain ⟨home, entered, setup, numeric, entryMemory⟩ :=
+    entry.checked memory view wellFormed span.valid span.elementWidth span.mode
+  cil_home_store started stored loaded frame holds := (.i64 0) using entryMemory numeric
+  refine invoke_loop_results (by rfl) (by simp [cil_checked, span.valid]) setup
+    (header memory home) (fun state => state.total + state.suffix.values.sum = values.sum)
+    (fun _ => 0) ⟨⟨view, values, span⟩, 0, started, frame, holds⟩
+    (by cil_loop_steps) (by simp) ?_
+  rintro ⟨⟨view, remaining, span⟩, total, current, frame, holds⟩ invariant
+  cases remaining with
+  | nil => exact .inl (by cil_loop_finish [invariant.symm])
+  | cons value remaining =>
+    obtain ⟨item, -, found, element⟩ := (span.within wellFormed frame).head (by decide)
+    cil_home_store updated stored nextLoaded nextFrame nextHolds := (.i64 (total + value))
+      using frame holds
+    obtain ⟨sliced, slicedOK, next, -⟩ := span.tail_below wellFormed nextFrame.kept
+    cil_loop_continue ⟨⟨sliced, remaining, next⟩, total + value, updated, nextFrame, nextHolds⟩
+    · simpa [BitVec.add_assoc] using invariant
+    · decide
+
+/-- `return span.Length;` read straight from the argument, with no parameter home. -/
+@[cil_code] def length : CIL.Method :=
+  { locals := [], returnsValue := true, code := [.arg 0, .memory .spanLength, .ret] }
+
+/-- The program holding only `length`. -/
+@[cil_code] def lengthProgram : CIL.Program := [length]
+
+/-- A span that only the method arguments hold keeps its checks, since the program reads an
+    argument: `spanLength` needs `valid`, which only rewriting can apply, though neither the
+    state nor the postcondition mentions `view`. -/
+theorem argument_length (memory : Memory) (view : SpanView) (frame : Frame)
+    (valid : ∀ memory, view.validate memory = .ok ()) :
+    LoopTerminates lengthProgram 0 [.bufferSpan view]
+      (fun _ results => results.length = 1) ⟨0, frame, [], memory⟩ := by
+  cil_loop_finish
+#print axioms argument_length
+
+end Tests.LoopFacts

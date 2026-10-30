@@ -3,6 +3,7 @@ import CIL.Safety.LoopAutomation
 import CIL.Safety.ReturnMemory
 import CIL.Safety.MemoryLemmas
 import CIL.Safety.WriteEffects
+import CIL.Safety.SpanContents
 
 /-!
 # Checked numeric-store verification conditions
@@ -45,6 +46,15 @@ theorem NumericEntryHome.store {caller current : Memory} {kind : CIL.LocalKind} 
       (store_numeric_local_preserves_memory_below _ _ _ _ _ _ _ holds.fresh step)
   · exact write_preserves_wellFormed _ _ _ _ _ frame.wellFormed written
 #print axioms NumericEntryHome.store
+
+/-- A checked span of well-formed caller memory stays checked in the memory of a frame entered
+    from it, so a loop state keeps its span in caller memory and reads it in frame memory. -/
+theorem CheckedSpan.within {caller current : Memory} {view : SpanView} {width : Nat}
+    {writable : Bool} {values : List (BitVec (8 * width))}
+    (span : CheckedSpan caller view width writable values) (wellFormed : caller.WellFormed)
+    (frame : EntryMemory caller current) : CheckedSpan current view width writable values :=
+  span.below wellFormed frame.kept
+#print axioms CheckedSpan.within
 
 /-- Leaving any frame that owns what an entry from `caller` allocated keeps everything the frame
     kept of the caller's memory; slot contents may differ from the entered frame's. -/
@@ -153,12 +163,14 @@ theorem invoke_loop_results {α : Type} {program : CIL.Program} {method : Nat}
   exact ⟨fuel, final, executed, satisfied⟩
 #print axioms invoke_loop_results
 
-/-- Generate invariant-preservation and measure-decrease goals after checking the path.
-    A path that cannot be justified leaves its checked execution obligation unsolved. -/
-syntax "cil_loop_continue " term:max " [" term,* "]" : tactic
+/-- Generate invariant-preservation and measure-decrease goals after checking the path with
+    `cil_loop_steps` and the optional facts. A path that cannot be justified leaves its checked
+    execution obligation unsolved. -/
+syntax "cil_loop_continue " term:max (" [" term,* "]")? : tactic
 
 macro_rules
-  | `(tactic| cil_loop_continue $next [$facts,*]) =>
+  | `(tactic| cil_loop_continue $next $[[$facts,*]]?) => do
+    let facts := facts.map (·.getElems) |>.getD #[]
     `(tactic| (
       apply loop_continue_vc (next := $next)
       · cil_loop_steps [$facts,*]))

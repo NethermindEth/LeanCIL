@@ -226,6 +226,13 @@ theorem length_nil (span : CheckedSpan memory view width writable []) :
   rw [span.contents.length]
   rfl
 
+/-- A nonempty checked span passes the `Length != 0` guard and has a positive length. -/
+theorem length_cons {value : BitVec (8 * width)} {rest : List (BitVec (8 * width))}
+    (span : CheckedSpan memory view width writable (value :: rest)) :
+    BitVec.ofNat 32 view.length ≠ 0 ∧ 0 < view.length ∧ 1 ≤ view.length := by
+  refine ⟨view.length_word_ne_zero memory span.valid ?_, ?_, ?_⟩ <;>
+    simp [span.contents.length]
+
 /-- A nonempty checked span passes the `Length != 0` guard, has a positive length, and its
     first element is addressable and loads as `value`. -/
 theorem head {value : BitVec (8 * width)} {rest : List (BitVec (8 * width))}
@@ -235,8 +242,7 @@ theorem head {value : BitVec (8 * width)} {rest : List (BitVec (8 * width))}
       view.element memory 0 = .ok item ∧
       loadValue memory (.address item) width = .ok (numericOfWidth width value.toNat) := by
   obtain ⟨item, found, element⟩ := span.contents.head span.valid scalar
-  refine ⟨item, ⟨view.length_word_ne_zero memory span.valid ?_, ?_, ?_⟩, found, element⟩ <;>
-    simp [span.contents.length]
+  exact ⟨item, span.length_cons, found, element⟩
 
 /-- `Slice(1)` of a nonempty checked span is a checked span of the remaining elements. -/
 theorem tail {value : BitVec (8 * width)} {rest : List (BitVec (8 * width))}
@@ -272,6 +278,7 @@ structure SpanSuffix (memory : Memory) (width : Nat) (writable : Bool) where
 #print axioms CheckedSpan.elementWidth
 #print axioms CheckedSpan.below
 #print axioms CheckedSpan.length_nil
+#print axioms CheckedSpan.length_cons
 #print axioms CheckedSpan.head
 #print axioms CheckedSpan.tail
 #print axioms CheckedSpan.tail_below

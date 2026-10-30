@@ -21,3 +21,6 @@ register_simp_attr cil_guard
 register_simp_attr cil_feature
 -- Successful checked values and typed homes normalize without expanding instruction dispatch.
 register_simp_attr cil_checked
+-- Definitions that `bind_entry` and `bind_cutpoint` generate for a proof, such as loop states,
+-- entry frames and slot facts; the loop tactics use the set in scope as facts.
+register_simp_attr cil_loop_unfold
