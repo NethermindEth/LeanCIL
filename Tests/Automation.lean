@@ -300,7 +300,7 @@ theorem leaf_checked (program : CIL.Program) (index : Nat) (profile : CIL.Featur
       (limb left 16 ^^^ limb right 16) ||| (limb left 24 ^^^ limb right 24)
     invoke program 28 index [.reference (.address left), .reference (.address right)] memory =
       .ok (memory, [.scalar (.i32 (CIL.NarrowKind.unsigned8.extend (if difference = 0 then 1 else 0)))]) := by
-  cil_checked_steps [checkedValue, formValue, checkedAt, fl, fr, field]
+  cil_checked_steps [fl, fr, field]
 
 def boundBody (profile : CIL.FeatureProfile) : CIL.Method :=
   { profile, returnsValue := true, locals := [], code := [.arg 0, .arg 1, .bltu 5, .arg 0, .ret, .arg 1, .ret] }
@@ -731,7 +731,7 @@ theorem add_run (memory : Memory) (source moved : Reference)
     (formed : form memory source = .ok source)
     (shifted : add memory source 8 (BitVec.ofInt 64 (BitVec.ofInt 32 8).toInt) = .ok moved) :
     invoke [addBody] 6 0 [.reference (.address source)] memory = .ok (memory, [.scalar (.i32 1)]) := by
-  cil_checked_steps [checkedValue, formValue, checkedAt, formed, shifted]
+  cil_checked_steps [formed, shifted]
 
 -- A missing memory fact reports the per-shape goal, not the legacy `staticInstruction` match.
 open CIL.Safety in

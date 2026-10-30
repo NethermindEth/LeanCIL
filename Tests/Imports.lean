@@ -89,10 +89,8 @@ theorem root_given : HoldsGiven Extracted.program importsAdd (fun linked => root
   have bOld := formed.access_bound (read_access readB)
   have fr := access_reference_valid _ _ _ _ _ writable
   have fb := access_reference_valid _ _ _ _ _ (read_access readB)
-  cil_contract_steps [checkedValue, formValue, checkedAt, fr, fb,
-    Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
-  cil_formed_call addHolds ⟨r, b, r, x, y⟩ at addSite [checkedValue, formValue, checkedAt, fr, fb,
-    Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_contract_steps [fr, fb]
+  cil_formed_call addHolds ⟨r, b, r, x, y⟩ at addSite [fr, fb]
   · exact ⟨readR, readB, writable⟩
   · exact formed
   rintro m1 _ - formed1 - framed1 ⟨_, rfl, rfl, readR1⟩
@@ -103,10 +101,8 @@ theorem root_given : HoldsGiven Extracted.program importsAdd (fun linked => root
   have fb1 := access_reference_valid _ _ _ _ _ (read_access readB1)
   have lr1 := load_word64_of_read readR1
   have lb1 := load_word64_of_read readB1
-  cil_contract_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
-    fr1, fb1, lr1, lb1, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
-  cil_contract_call mixHolds (x + y, y) at mixSite [checkedValue, numericValue, Except.mapError, Bind.bind, Except.bind,
-    Pure.pure, Except.pure]
+  cil_contract_steps [fr1, fb1, lr1, lb1]
+  cil_contract_call mixHolds (x + y, y) at mixSite []
   · exact formed1
   rintro m2 _ - framed2 ⟨_, rfl, rfl⟩
   dsimp only [mixContract]
@@ -115,9 +111,7 @@ theorem root_given : HoldsGiven Extracted.program importsAdd (fun linked => root
     (framed2.access_write r (Nat.lt_of_lt_of_le rOld framed1.grows) 8 1).trans writable1
   obtain ⟨m3, wrote, store, readback⟩ := store_word64 v writable2
   have fr2 := access_reference_valid _ _ _ _ _ writable2
-  cil_contract_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
-    observerCount, unspecifiedOperands, Value.hasUnspecified, CIL.Value.hasUnspecified,
-    staticInstruction, fr2, store, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_contract_steps [fr2, store]
   simp only [leaveFrame, List.foldl_nil]
   exact ⟨framed1.trans ((framed2.widen (by simp [mixContract])).trans (Confined.write wrote (by simp [addContract, numberBytes]))),
     _, rfl, rfl, readback⟩
@@ -143,9 +137,7 @@ theorem add_linked : importsAdd linkedProgram := by
   have la := load_word64_of_read readA
   have lb := load_word64_of_read readB
   refine ⟨9, stored, [], ?_, Confined.write wrote (by simp [numberBytes]), _, rfl, rfl, readback⟩
-  cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
-    observerCount, unspecifiedOperands, Value.hasUnspecified, CIL.Value.hasUnspecified,
-    fa, fb, fr, la, lb, store, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_checked_steps [fa, fb, fr, la, lb, store]
 
 theorem root_linked : rootContract.Holds linkedProgram root :=
   root_given.discharge ⟨[addBody], rfl⟩ add_linked
@@ -172,11 +164,9 @@ theorem root_unlinked (input : RootInput) (m : Memory) (permitted : rootContract
   refine invoke_eq_of_run (by simp only [cil_code]; rfl)
     (by simp [checkedValue, formValue, checkedAt, fr, fb, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure])
     (by rfl) ?_
-  cil_checked_steps [checkedValue, formValue, checkedAt, fr, fb,
-    Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_checked_steps [fr, fb]
   exact run_call_unlinked (by simp only [cil_code]; rfl) addSite.call
-    (by cil_checked_step [checkedValue, formValue, checkedAt, fr, fb, Except.mapError, Bind.bind, Except.bind,
-      Pure.pure, Except.pure])
+    (by cil_checked_step [fr, fb])
     (importIndex_unlinked _ 0)
 
 /-- Unlinked, `Root` returns at no fuel. -/

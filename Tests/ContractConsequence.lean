@@ -276,9 +276,7 @@ theorem add_internal : addInternal.Holds Extracted.program addTo := by
   have la := load_word64_of_read readA
   have lb := load_word64_of_read readB
   refine ⟨9, stored, [], ?_, Confined.write wrote (by simp [numberBytes]), _, rfl, rfl, readback⟩
-  cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
-    observerCount, unspecifiedOperands, Value.hasUnspecified, CIL.Value.hasUnspecified,
-    fa, fb, fr, la, lb, store, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_checked_steps [fa, fb, fr, la, lb, store]
 
 /-- The frame fact comes from the internal footprint, not from re-executing `AddTo`. -/
 theorem add_public_refines : addInternal.Refines addPublic where
@@ -302,13 +300,11 @@ theorem sum_holds (addHolds : addPublic.Holds Extracted.program addTo) : sumCont
   have fa := access_reference_valid _ _ _ _ _ (read_access readA)
   have fb := access_reference_valid _ _ _ _ _ (read_access readB)
   have fr := access_reference_valid _ _ _ _ _ writable
-  cil_contract_steps [checkedValue, formValue, checkedAt, fa, fb, fr,
-    Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
-  cil_contract_call addHolds ⟨a, b, res, region, x, y⟩ at addSite [checkedValue, formValue, checkedAt, fa, fb, fr,
-    Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_contract_steps [fa, fb, fr]
+  cil_contract_call addHolds ⟨a, b, res, region, x, y⟩ at addSite [fa, fb, fr]
   · exact ⟨formed, ⟨readA, readB, writable⟩, apart, within⟩
   rintro m1 _ - framed ⟨_, rfl, rfl, readRes, readA1⟩
-  cil_contract_steps [checkedValue, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_contract_steps []
   simp only [leaveFrame, List.foldl_nil]
   exact ⟨framed, _, rfl, rfl, readRes, readA1⟩
 
@@ -387,10 +383,7 @@ theorem add_flag_holds : addFlagContract.Holds Extracted.program addFlag := by
   have narrowed : CIL.NarrowKind.unsigned8.extend 1 = 1 := by decide
   refine ⟨11, stored, [.scalar (.i32 1)], ?_, Confined.write wrote (by simp [numberBytes]),
     true, rfl, rfl, readback⟩
-  cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, instruction,
-    memoryInstruction, observerCount, unspecifiedOperands, Value.hasUnspecified,
-    CIL.Value.hasUnspecified, formedA, formedB, formedRes, loadA, loadB, store, narrowed,
-    Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_checked_steps [formedA, formedB, formedRes, loadA, loadB, store, narrowed]
 
 #print axioms add_flag_holds
 

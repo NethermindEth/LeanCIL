@@ -36,9 +36,8 @@ theorem carry_stores (a b c : CIL.W64) (sum carry : Reference) (m m1 m2 : Memory
     (sumWrite : write m sum (numberBytes (a + b + c).toNat 8) 1 = .ok m1)
     (carryWrite : write m1 carry (numberBytes (carryOut a b c).toNat 8) 1 = .ok m2) :
     invoke carryProgram (CIL.executionBound carryProgram 0) 0 (carryArgs a b c sum carry) m = .ok (m2, []) := by
-  cil_checked_steps [carryArgs, carryOut, checkedValue, formValue, checkedAt, instruction, storeValue, referenceAt,
-    formedSum, formedCarry, formedCarry1, sumWrite, carryWrite,
-    Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_checked_steps [carryArgs, carryOut, storeValue, referenceAt, formedSum, formedCarry,
+    formedCarry1, sumWrite, carryWrite]
 
 #print axioms carry_stores
 
@@ -49,9 +48,8 @@ theorem borrow_stores (a b c : CIL.W64) (difference borrow : Reference) (m m1 m2
     (borrowWrite : write m1 borrow (numberBytes (borrowOut a b c).toNat 8) 1 = .ok m2) :
     invoke borrowProgram (CIL.executionBound borrowProgram 0) 0 (carryArgs a b c difference borrow) m =
       .ok (m2, []) := by
-  cil_checked_steps [carryArgs, borrowOut, checkedValue, formValue, checkedAt, instruction, storeValue, referenceAt,
-    formedDifference, formedBorrow, formedBorrow1, differenceWrite, borrowWrite,
-    Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_checked_steps [carryArgs, borrowOut, storeValue, referenceAt, formedDifference, formedBorrow,
+    formedBorrow1, differenceWrite, borrowWrite]
 
 #print axioms borrow_stores
 
@@ -63,9 +61,8 @@ theorem carry_contract_steps (a b c : CIL.W64) (sum carry : Reference) (m m1 m2 
     (carryWrite : write m1 carry (numberBytes (carryOut a b c).toNat 8) 1 = .ok m2) :
     ∃ fuel final values, invoke carryProgram fuel 0 (carryArgs a b c sum carry) m = .ok (final, values) ∧
       final = m2 ∧ values = [] := by
-  cil_contract_steps [carryArgs, carryOut, checkedValue, formValue, checkedAt, instruction, storeValue, referenceAt,
-    formedSum, formedCarry, formedCarry1, sumWrite, carryWrite,
-    Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_contract_steps [carryArgs, carryOut, storeValue, referenceAt, formedSum, formedCarry,
+    formedCarry1, sumWrite, carryWrite]
   exact ⟨rfl, rfl⟩
 
 #print axioms carry_contract_steps
@@ -115,9 +112,8 @@ example (a b c : CIL.W64) (sum carry : Reference) (m m1 m2 : Memory)
     (sumWrite : write m sum (numberBytes (a + b + c).toNat 8) 1 = .ok m1)
     (carryWrite : write m1 carry (numberBytes (a + b + c).toNat 8) 1 = .ok m2) :
     invoke carryProgram (CIL.executionBound carryProgram 0) 0 (carryArgs a b c sum carry) m = .ok (m2, []) := by
-  cil_checked_steps [carryArgs, carryOut, checkedValue, formValue, checkedAt, instruction, storeValue, referenceAt,
-    formedSum, formedCarry, formedCarry1, sumWrite, carryWrite,
-    Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_checked_steps [carryArgs, carryOut, storeValue, referenceAt, formedSum, formedCarry,
+    formedCarry1, sumWrite, carryWrite]
 
 -- The sum written to the carry's address.
 /--
@@ -143,8 +139,7 @@ example (a b c : CIL.W64) (sum carry : Reference) (m m1 : Memory)
     (formedSum : form m sum = .ok sum) (formedCarry : form m carry = .ok carry)
     (sumWrite : write m carry (numberBytes (a + b + c).toNat 8) 1 = .ok m1) :
     invoke carryProgram (CIL.executionBound carryProgram 0) 0 (carryArgs a b c sum carry) m = .ok (m1, []) := by
-  cil_checked_steps [carryArgs, checkedValue, formValue, checkedAt, instruction, storeValue, referenceAt,
-    formedSum, formedCarry, sumWrite, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_checked_steps [carryArgs, storeValue, referenceAt, formedSum, formedCarry, sumWrite]
 
 -- The sum written from a memory the method never reaches.
 /--
@@ -170,8 +165,7 @@ example (a b c : CIL.W64) (sum carry : Reference) (m m1 m2 : Memory)
     (formedSum : form m sum = .ok sum) (formedCarry : form m carry = .ok carry)
     (sumWrite : write m1 sum (numberBytes (a + b + c).toNat 8) 1 = .ok m2) :
     invoke carryProgram (CIL.executionBound carryProgram 0) 0 (carryArgs a b c sum carry) m = .ok (m2, []) := by
-  cil_checked_steps [carryArgs, checkedValue, formValue, checkedAt, instruction, storeValue, referenceAt,
-    formedSum, formedCarry, sumWrite, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_checked_steps [carryArgs, storeValue, referenceAt, formedSum, formedCarry, sumWrite]
 
 open Lean Elab Tactic in
 elab "fact_normalizations " expected:num " in " body:tacticSeq : tactic => do
@@ -245,7 +239,7 @@ theorem indexed_fields (memory : Memory) (left : Reference) (words : Fin 4 → C
         .ok (memory, .scalar (.i64 (words index)) :: rest)) :
     invoke fourLimbProgram 12 0 [.reference (.address left)] memory =
       .ok (memory, [.scalar (.i64 (words 0))]) := by
-  cil_checked_steps [checkedValue, formValue, checkedAt, formed, limbs]
+  cil_checked_steps [formed, limbs]
 
 @[cil_code] def literalBranch : CIL.Method :=
   { code := [.arg 0, .fieldAt 8 8, .brzero 5, .const32 9, .ret, .const32 0, .ret],
@@ -260,7 +254,7 @@ theorem constructor_index_branch (memory : Memory) (left : Reference) (words : F
     (zero : words 1 = 0) :
     invoke literalBranchProgram 7 0 [.reference (.address left)] memory =
       .ok (memory, [.scalar (.i32 0)]) := by
-  cil_checked_steps [checkedValue, formValue, checkedAt, formed, field, zero]
+  cil_checked_steps [formed, field, zero]
 
 #print axioms normalize_once
 #print axioms contract_normalize_once

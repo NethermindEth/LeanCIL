@@ -108,8 +108,7 @@ theorem pair_holds : pairContract.Holds Extracted.program pair := by
   have c2 : Confined [(⟨id, offset⟩, 16)] m1 m2 :=
     Confined.write_within w2 ⟨_, List.mem_singleton_self _, rfl, by simp, by simp [length]⟩
   refine ⟨8, m2, [], ?_, c1.trans c2, (), rfl, readback⟩
-  cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
-    f0, f1, a1, a2, w1, w2, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_checked_steps [f0, f1, a1, a2, w1, w2]
 
 theorem word_holds : wordContract.Holds Extracted.program word := by
   rintro ⟨⟨id, offset⟩, u0, u1, u2, u3⟩ m ⟨formed, writable⟩
@@ -162,8 +161,7 @@ theorem word_holds : wordContract.Holds Extracted.program word := by
     fun written inside => Confined.write_within written ⟨_, List.mem_singleton_self _, rfl, by simp, by simp; omega⟩
   refine ⟨14, m4, [], ?_, (covered (start := 0) w1 (by simp [length])).trans ((covered w2 (by simp [length])).trans
     ((covered w3 (by simp [length])).trans (covered w4 (by simp [length])))), (), rfl, ?_⟩
-  · cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
-      f0, f1, f2, f3, a1, a2, a3, a4, w1, w2, w3, w4, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  · cil_checked_steps [f0, f1, f2, f3, a1, a2, a3, a4, w1, w2, w3, w4]
   · simpa [wordBytes, List.append_assoc] using readback
 
 /-- Uses only the constructors' contracts at their `newobj` sites; neither constructor body is unfolded. -/
@@ -171,7 +169,7 @@ theorem root_holds (pairHolds : pairContract.Holds Extracted.program pair)
     (wordHolds : wordContract.Holds Extracted.program word) : rootContract.Holds Extracted.program root := by
   rintro ⟨x, y⟩ m formed
   dsimp only [rootContract, MethodContract.Returns] at *
-  cil_contract_steps [checkedValue, numericValue, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_contract_steps []
   cil_contract_construct pairHolds pair_constructs (fun this => ⟨this, x, y⟩) []
   · exact formed
   · exact fun _ _ storage => ⟨storage.formed, storage.writable⟩
@@ -180,8 +178,7 @@ theorem root_holds (pairHolds : pairContract.Holds Extracted.program pair)
   have size1 : (pairBytes ⟨t1, x, y⟩).length = 16 := by simp [pairBytes, length]
   have high1 : ((pairBytes ⟨t1, x, y⟩).drop 8).take 8 = numberBytes y.toNat 8 := by
     simp [pairBytes, length, List.take_of_length_le]
-  cil_contract_steps [checkedValue, numericValue, instruction, size1, high1, decode_word64,
-    Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_contract_steps [size1, high1, decode_word64]
   cil_contract_construct wordHolds word_constructs (fun this => ⟨this, y, 1#64, 2#64, x⟩) []
   · exact formed1
   · exact fun _ _ storage => ⟨storage.formed, storage.writable⟩
@@ -192,8 +189,7 @@ theorem root_holds (pairHolds : pairContract.Holds Extracted.program pair)
     rw [List.drop_append, List.drop_eq_nil_of_le (by simp [length]), length, List.drop_append,
       List.drop_eq_nil_of_le (by simp [length]), length, List.drop_left' (length _)]
     simp [length, List.take_of_length_le]
-  cil_contract_steps [checkedValue, numericValue, instruction, size2, top2, decode_word64,
-    Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_contract_steps [size2, top2, decode_word64]
   -- Both temporaries are fresh in the caller's frame, which expires them on return.
   have kept1 : Confined [] m final1 :=
     (storage1.confined framed1).forget_fresh (fresh := [(t1, 16)]) (by simp [storage1.fresh])
@@ -249,8 +245,7 @@ theorem low_holds : lowContract.Holds program 1 := by
   have readback := read_append (left := 8) (right := 8) (ready.after_write w1).access assigned untouched
   refine ⟨5, m1, [], ?_, Confined.write_within w1 ⟨_, List.mem_singleton_self _, rfl, by simp, by simp [length]⟩,
     (), rfl, by simpa [lowBytes] using readback⟩
-  cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
-    f0, a1, w1, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_checked_steps [f0, a1, w1]
 
 def callerContract : MethodContract CIL.W64 CIL.W64 where
   args x := [.scalar (.i64 x)]
@@ -262,7 +257,7 @@ def callerContract : MethodContract CIL.W64 CIL.W64 where
 theorem caller_holds (lowHolds : lowContract.Holds program 1) : callerContract.Holds program 0 := by
   intro x m formed
   dsimp only [callerContract, MethodContract.Returns] at *
-  cil_contract_steps [checkedValue, numericValue, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_contract_steps []
   cil_contract_construct lowHolds low_constructs (fun this => ⟨this, x⟩) []
   · exact formed
   · exact fun _ _ storage => ⟨storage.formed, storage.writable, storage.zeroed⟩
@@ -271,8 +266,7 @@ theorem caller_holds (lowHolds : lowContract.Holds program 1) : callerContract.H
   have high : ((lowBytes ⟨t, x⟩).drop 8).take 8 = List.replicate 8 0 := by
     simp [lowBytes, numberBytes, List.take_of_length_le]
   have zero : BitVec.ofNat 64 (byteNumber (List.replicate 8 (0 : BitVec 8))) = 0 := by decide
-  cil_contract_steps [checkedValue, numericValue, instruction, size, high, zero,
-    Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_contract_steps [size, high, zero]
   have kept : Confined [] m final :=
     (storage.confined framed).forget_fresh (fresh := [(t, 16)]) (by simp [storage.fresh])
   exact ⟨kept.after_leaveFrame (by simp [storage.fresh]), _, rfl, rfl⟩
@@ -386,7 +380,7 @@ is not definitionally equal to the right-hand side
 example (halfHolds : halfContract.Holds Extracted.program pair) : rootContract.Holds Extracted.program root := by
   rintro ⟨x, y⟩ m formed
   dsimp only [rootContract, MethodContract.Returns] at *
-  cil_contract_steps [checkedValue, numericValue, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cil_contract_steps []
   cil_contract_construct halfHolds half_constructs (fun this => ⟨this, x, y⟩) []
 
 end Rejected
