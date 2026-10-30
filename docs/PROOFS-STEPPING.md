@@ -296,10 +296,16 @@ returns, so other opcodes do not incur failed return-step simplification.
 
 For loops, import [LoopAutomation](../CIL/Safety/LoopAutomation.lean). `cil_loop_steps [facts]`
 composes an execution segment and `cil_loop_finish [facts]` proves an exit path and its
-postcondition. The exit closes with the normalised facts, then again after unfolding `leaveFrame`
-and narrow extension, so a fact about the exited frame's memory is tried before cleanup rewrites
-past it. Supply an invariant and decreasing measure to the loop termination theorem; these
-tactics do not infer termination. See the [countdown proof](../Examples/Proofs/Countdown.lean).
+postcondition. The list is optional: both tactics add the facts
+[`gatherLoopFacts`](../CIL/Safety/LoopFacts.lean) finds, described under [loop verification
+conditions](#loop-verification-conditions), so the list carries only case hypotheses, invariant
+equations and other facts of no recognized shape. A step equation in the context, quantified or not,
+is used whenever its instruction is reached, so a run that used to stop at an instruction such a
+hypothesis justifies now continues past it. The exit closes with the normalised facts, then again
+after unfolding `leaveFrame` and narrow extension, so a fact about the exited frame's memory is
+tried before cleanup rewrites past it. Supply an invariant and decreasing measure to the loop
+termination theorem; these tactics do not infer termination. See the [countdown
+proof](../Examples/Proofs/Countdown.lean).
 
 A loop body that calls a helper composes through the helper's `MethodContract`
 ([LoopContract](../CIL/Safety/LoopContract.lean)). `LoopSegment` fixes one cost for every
@@ -353,6 +359,38 @@ invoke ... = .ok (final, values) ∧ kept final`, so `refine` against a theorem 
 the postcondition. Inside the progress goal, `cil_loop_continue next [facts]` leaves only
 preservation and decrease, and `cil_loop_finish [facts]` proves an exit.
 
+The loop tactics take their facts from the proof context as well as from the optional list.
+[`gatherLoopFacts`](../CIL/Safety/LoopFacts.lean) selects hypotheses by the head of their type, so
+an unrelated context adds nothing to simp:
+
+- the declarations in scope with the `cil_loop_unfold` simp attribute, which `bind_cutpoint`
+  gives its state and `bind_entry` its frame and normalized result and memory;
+- equations, possibly quantified or conjoined, about `step`, `instruction`, `memoryInstruction`,
+  `staticInstruction`, `loadLocal`, `storeLocal`, `loadValue`, `storeValue` and the span
+  `element`, `slice`, `validate`, `width` and `writable` checks;
+- for a [`CheckedSpan`](../CIL/Safety/SpanContents.lean), its `facts`, `length_nil` or
+  `length_cons` when its values are `[]` or a cons, and, for each `EntryMemory` from its memory
+  with that memory's `WellFormed` in context, the facts of
+  [`CheckedSpan.within`](../CIL/Safety/LoopVC.lean) in the frame's memory;
+- `elementWidth` of a `SpanContents`;
+- the load of a [`NumericEntryHome`](../CIL/Safety/NumericLocals.lean) whose number is a word's
+  `toNat` or a literal, through [`NumericEntryHome.load`](../CIL/Safety/LoopVC.lean), with
+  `localResult`;
+- [`EntryMemory.leave`](../CIL/Safety/LoopVC.lean) of each `EntryMemory` with the entry's
+  `setup` equation, when the goal is an exit;
+- `numericOfWidth` and `BitVec.ofNat_toNat` when a gathered fact loads at a literal width.
+
+Only hypotheses reachable by name are read: a shadowed state of an earlier iteration and
+hygienic hypotheses are skipped. A fact is kept only when stepping can meet every variable it is
+about. [`loopGoalScope`](../CIL/Safety/LoopFacts.lean) starts from the goal's states and
+postcondition, and from the method arguments only when the program reads one with `.arg`; the
+right side of each kept equation then extends it. A derived fact must be about variables reached
+without an equation. A fact about a memory that no state of the goal holds and no kept equation
+produces, such as the caller's memory once the frame has stored, is dropped. Derived facts are added as hygienic
+hypotheses, so the stepper looks them up by name instead of elaborating a proof term at every
+step, and a statement already gathered is not added again. `SpanSum` names no fact but its
+invariant equation.
+
 A loop over symbolic caller memory keeps the frame part of its state as the `EntryMemory` and
 `NumericEntryHome` facts that `bind_entry ... allocating` returns.
 `cil_home_store updated stored loaded frame home := value using frame home` stores into the home
@@ -360,9 +398,11 @@ through [`NumericEntryHome.store`](../CIL/Safety/LoopVC.lean) and names the step
 equations and both facts after the store, without composing `MemoryBelow` by hand.
 [`NumericEntryHome.load`](../CIL/Safety/LoopVC.lean) reads the home at a loop head, and
 [`EntryMemory.leave`](../CIL/Safety/LoopVC.lean) `setup` is the exit's `MemoryBelow` fact for any
-exited frame with the entry's owned identities, closing a postcondition such as `SpanSum`'s.
-`Tests/LoopScaffold.lean` proves a countdown over symbolic memory this way, and shows that a
-constant measure fails at the decrease goal and a stale invariant at its preservation goal.
+exited frame with the entry's owned identities, closing a postcondition such as `SpanSum`'s; the
+loop tactics derive both from the state's facts. `Tests/LoopScaffold.lean` proves a countdown and
+a span fold over symbolic memory this way, naming no frame or span fact, and shows for each that
+a constant measure fails at the decrease goal and an invariant that is not preserved at its
+preservation goal.
 
 ## Read control flow off one step
 
