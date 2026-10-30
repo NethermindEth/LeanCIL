@@ -1,4 +1,5 @@
 import CIL.Safety.BufferContents
+import CIL.Safety.SpanContents
 
 /-! Contiguous-buffer contents over the checked memory model, checked without an extraction. -/
 namespace Tests.BufferContents
@@ -254,6 +255,32 @@ theorem word_limbs_decode (a b c d : BitVec (8 * 8)) :
 example : byteNumber (elementBytes 2 [1, 2]) = 1 + 2 * 2^16 := by
   rw [byteNumber_elementBytes]; rfl
 
+/-- Two `Slice(1)` steps reach the third element through the head and tail lemmas alone. -/
+theorem span_third_after_two_tails {m : Memory} {view : SpanView} {a b c : BitVec (8 * 8)}
+    {rest : List (BitVec (8 * 8))} (contents : SpanContents m view 8 (a :: b :: c :: rest))
+    (valid : view.validate m = .ok ()) :
+    ∃ first second reference, view.slice m 1 (view.length - 1) = .ok first ∧
+      first.slice m 1 (first.length - 1) = .ok second ∧ second.element m 0 = .ok reference ∧
+      loadValue m (.address reference) 8 = .ok (.i64 c) := by
+  obtain ⟨first, firstOK, firstValid, _, firstContents⟩ := contents.tail valid
+  obtain ⟨second, secondOK, secondValid, _, secondContents⟩ := firstContents.tail firstValid
+  obtain ⟨reference, found, loaded⟩ := secondContents.head secondValid (by decide)
+  exact ⟨first, second, reference, firstOK, secondOK, found,
+    by simpa [numericOfWidth, BitVec.ofNat_toNat] using loaded⟩
+
+/-- A null view holds nothing, whatever length it claims, so it cannot stand for stale contents. -/
+theorem null_span_holds_nothing {m : Memory} {length : Nat} {x : BitVec (8 * 8)}
+    {rest : List (BitVec (8 * 8))} :
+    ¬ SpanContents m ⟨.null, length, 8, false⟩ 8 (x :: rest) := fun contents => by
+  simpa using contents.contents
+
+/-- The view's length fixes how many elements it holds; a longer list is refuted. -/
+theorem span_length_refutes_extra {m : Memory} {view : SpanView} {values : List (BitVec (8 * 8))}
+    {x : BitVec (8 * 8)} (contents : SpanContents m view 8 values) :
+    ¬ SpanContents m view 8 (x :: values) := fun extra => by
+  have := extra.length.symm.trans contents.length
+  simp at this
+
 #print axioms fill_replicates
 #print axioms transform_loads
 #print axioms byte_load_zero_extends
@@ -278,5 +305,8 @@ example : byteNumber (elementBytes 2 [1, 2]) = 1 + 2 * 2^16 := by
 #print axioms empty_past_end
 #print axioms empty_at_sentinel
 #print axioms overrun_not_writable
+#print axioms span_third_after_two_tails
+#print axioms null_span_holds_nothing
+#print axioms span_length_refutes_extra
 
 end Tests.BufferContents

@@ -23,6 +23,52 @@ structure SpanContents (memory : Memory) (view : SpanView) (width : Nat)
     | .null => values = []
     | .address base => Contents memory base width values
 
+/-- A valid view of well-formed memory addresses an existing allocation, so it stays valid in any
+    memory that keeps everything below the watermark, such as a callee frame's memory. -/
+theorem SpanView.validate_below (view : SpanView) {before after : Memory}
+    (valid : view.validate before = .ok ()) (wellFormed : before.WellFormed)
+    (kept : MemoryBelow before.nextIdentity before after) : view.validate after = .ok () := by
+  cases address : view.reference with
+  | null => simpa only [SpanView.validate, address] using valid
+  | address base =>
+    cases present : before.allocations base.allocation with
+    | none =>
+      simp only [SpanView.validate, address, liveAllocation, present] at valid
+      repeat' first
+        | contradiction
+        | split at valid
+        | simp_all [Bind.bind, Except.bind, Pure.pure, Except.pure]
+    | some allocation =>
+      have old := (wellFormed.1 _ _ present).1
+      simpa only [SpanView.validate, address, liveAllocation, kept.allocations _ old] using valid
+#print axioms SpanView.validate_below
+
+/-- A successful slice of well-formed memory succeeds identically in any memory that keeps
+    everything below the watermark. -/
+theorem SpanView.slice_below (view result : SpanView) {before after : Memory}
+    (start length : Nat) (sliced : view.slice before start length = .ok result)
+    (wellFormed : before.WellFormed) (kept : MemoryBelow before.nextIdentity before after) :
+    view.slice after start length = .ok result := by
+  have valid : view.validate before = .ok () := by
+    cases formed : view.validate before with
+    | error fault =>
+      simp [SpanView.slice, formed, Bind.bind, Except.bind] at sliced
+    | ok _ => rfl
+  unfold SpanView.slice at sliced ⊢
+  rw [view.validate_below valid wellFormed kept]
+  rw [valid] at sliced
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at sliced ⊢
+  split at sliced
+  · rename_i bounds
+    simp only [bounds, ite_true]
+    split at sliced
+    · contradiction
+    · rename_i formed
+      rw [SpanView.validate_below _ formed wellFormed kept]
+      exact sliced
+  · contradiction
+#print axioms SpanView.slice_below
+
 namespace SpanContents
 
 variable {memory : Memory} {view : SpanView} {width : Nat}
@@ -33,7 +79,8 @@ theorem nil (sameWidth : view.width = width) (empty : view.length = 0) :
   ⟨sameWidth, empty, by split <;> first | rfl | exact Contents.nil⟩
 
 /-- Element `index` of a valid view is addressable and loads as the element's scalar value. -/
-theorem load {values : List (BitVec (8 * width))} (contents : SpanContents memory view width values)
+theorem load {values : List (BitVec (8 * width))}
+    (contents : SpanContents memory view width values)
     (valid : view.validate memory = .ok ()) (scalar : ScalarWidth width) {index : Nat}
     {value : BitVec (8 * width)} (found : values[index]? = some value) :
     ∃ reference, view.element memory index = .ok reference ∧
@@ -65,7 +112,8 @@ theorem head {value : BitVec (8 * width)} {rest : List (BitVec (8 * width))}
 
 /-- Slicing off the first `count` elements yields a valid view, with the same width and mode,
     that holds the remaining elements. -/
-theorem drop {values : List (BitVec (8 * width))} (contents : SpanContents memory view width values)
+theorem drop {values : List (BitVec (8 * width))}
+    (contents : SpanContents memory view width values)
     (valid : view.validate memory = .ok ()) (count : Nat) (inside : count ≤ values.length) :
     ∃ sliced, view.slice memory count (view.length - count) = .ok sliced ∧
       sliced.validate memory = .ok () ∧ sliced.writable = view.writable ∧
@@ -96,6 +144,25 @@ theorem tail {value : BitVec (8 * width)} {rest : List (BitVec (8 * width))}
       SpanContents memory sliced width rest :=
   contents.drop valid 1 (by simp)
 
+/-- The contents of a view of well-formed memory survive any change that keeps everything below
+    the watermark, such as callee frame entry, local stores and frame exit. -/
+theorem after_below {before after : Memory} {values : List (BitVec (8 * width))}
+    (contents : SpanContents before view width values) (wellFormed : before.WellFormed)
+    (kept : MemoryBelow before.nextIdentity before after) :
+    SpanContents after view width values := by
+  refine ⟨contents.elementWidth, contents.length, ?_⟩
+  have shape := contents.contents
+  cases address : view.reference with
+  | null => simpa only [address] using shape
+  | address base =>
+    simp only [address] at shape ⊢
+    cases values with
+    | nil => exact Contents.nil
+    | cons value rest =>
+      have formed := access_reference_valid _ _ _ _ _ (read_access (shape 0 value rfl))
+      obtain ⟨allocation, present, _, _⟩ := formed_reference_live _ _ _ formed
+      exact shape.after_below kept (by simpa using (wellFormed.1 _ _ present).1)
+
 end SpanContents
 
 #print axioms SpanContents.nil
@@ -103,5 +170,6 @@ end SpanContents
 #print axioms SpanContents.head
 #print axioms SpanContents.drop
 #print axioms SpanContents.tail
+#print axioms SpanContents.after_below
 
 end CIL.Safety
