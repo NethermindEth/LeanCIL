@@ -92,6 +92,48 @@ var cases = new (string Name, string Arguments, string Results, string Extra)[]
         """),
     ("BigEndianWord", ".bufferSpan ⟨.address ⟨0, 0⟩, 8, 1, false⟩", ".scalar (.i64 0x0001020304050607)", ""),
     ("FirstHigh", ".bufferSpan ⟨.address ⟨0, 0⟩, 1, 16, false⟩", ".scalar (.i64 0x0F0E0D0C0B0A0908)", ""),
+    // Element and byte offsets from a readonly view's reference read the word at offset 8.
+    ("Second", ".bufferSpan ⟨.address ⟨0, 0⟩, 4, 8, false⟩", ".scalar (.i64 0x0F0E0D0C0B0A0908)", ""),
+    ("Back", ".bufferSpan ⟨.address ⟨0, 0⟩, 4, 8, false⟩", ".scalar (.i64 0x0F0E0D0C0B0A0908)", ""),
+    ("ByteSecond", ".bufferSpan ⟨.address ⟨0, 0⟩, 4, 8, false⟩", ".scalar (.i64 0x0F0E0D0C0B0A0908)", ""),
+    ("Element", ".bufferSpan ⟨.address ⟨0, 0⟩, 4, 8, false⟩, .scalar (.i32 2)",
+        ".scalar (.i64 0x1716151413121110)", $$"""
+        /-- The one-past offset forms, but reading through it leaves the allocation. -/
+        theorem onePastRead : (CIL.Safety.invoke Extracted.program 64 0
+            [.bufferSpan ⟨.address ⟨0, 0⟩, 4, 8, false⟩, .scalar (.i32 4)] memory).map Prod.snd =
+            .error ⟨0, 5, .memory .outsideAllocation (.address ⟨0, 32⟩) 8⟩ := by rfl
+        #print axioms onePastRead
+        /-- Offsets beyond one past the end fault where the readonly reference is formed. -/
+        theorem beyondEnd : (CIL.Safety.invoke Extracted.program 64 0
+            [.bufferSpan ⟨.address ⟨0, 0⟩, 4, 8, false⟩, .scalar (.i32 5)] memory).map Prod.snd =
+            .error ⟨0, 4, .memory .invalidReference (.address ⟨0, 0⟩) 0⟩ := by rfl
+        #print axioms beyondEnd
+        /-- A negative offset before the allocation also faults at formation. -/
+        theorem beforeStart : (CIL.Safety.invoke Extracted.program 64 0
+            [.bufferSpan ⟨.address ⟨0, 0⟩, 4, 8, false⟩, .scalar (.i32 (-1))] memory).map Prod.snd =
+            .error ⟨0, 4, .memory .invalidReference (.address ⟨0, 0⟩) 0⟩ := by rfl
+        #print axioms beforeStart
+        """),
+    // The cursor advances by readonly element offsets until it reaches the one-past reference.
+    ("CursorSum", ".bufferSpan ⟨.address ⟨0, 0⟩, 4, 8, false⟩",
+        ".scalar (.i64 (0x0706050403020100 + 0x0F0E0D0C0B0A0908 + 0x1716151413121110 + 0x1F1E1D1C1B1A1918))",
+        $$"""
+        /-- An empty view's cursor already equals its end, so the loop body never reads. -/
+        theorem emptySum : (CIL.Safety.invoke Extracted.program 64 0
+            [.bufferSpan ⟨.address ⟨0, 32⟩, 0, 8, false⟩] memory).map Prod.snd =
+            .ok [.scalar (.i64 0)] := by rfl
+        #print axioms emptySum
+        """),
+    // An offset from a readonly reference stays readonly, so the store faults.
+    ("WriteSecond", ".bufferSpan ⟨.address ⟨0, 0⟩, 4, 8, false⟩, .scalar (.i64 7)",
+        ".error ⟨0, 6, .memory .unwritable (.address ⟨0, 8⟩) 8⟩", $$"""
+        /-- The fault is the missing write permission: a writable view stores the second word. -/
+        theorem writableStores : ((CIL.Safety.invoke Extracted.program 64 0
+            [.bufferSpan ⟨.address ⟨0, 0⟩, 4, 8, true⟩, .scalar (.i64 7)] memory).map
+              fun result => (result.1.cells 0 8, result.1.cells 0 0, result.2)) =
+            .ok (⟨7, true⟩, ⟨0, true⟩, []) := by rfl
+        #print axioms writableStores
+        """),
     // Writes through a reference obtained from a readonly view fault, while a writable view stores.
     ("WriteWord", ".bufferSpan ⟨.address ⟨0, 0⟩, 1, 8, false⟩, .scalar (.i64 7)",
         ".error ⟨0, 4, .memory .unwritable (.address ⟨0, 0⟩) 8⟩", $$"""
@@ -134,6 +176,10 @@ queue.Add(new(owner.Methods.Single(method => method.Name == "Word").FullName,
         At("Tests/SpanReferenceWordContract.lean"), Path.Combine(root, "WordContract"),
         Theorem: "Tests.SpanReferenceWordContract.word_holds"),
     () => Console.WriteLine("PASS readonly span reference contract: Word"));
+queue.Add(new(owner.Methods.Single(method => method.Name == "Second").FullName,
+        At("Tests/SpanReferenceSecondContract.lean"), Path.Combine(root, "SecondContract"),
+        Theorem: "Tests.SpanReferenceSecondContract.second_holds"),
+    () => Console.WriteLine("PASS readonly span reference contract: Second"));
 queue.Flush();
 
 // The raw argument stays a managed reference bound to the closed signature, never a span value.

@@ -744,12 +744,17 @@ Examples:System.UInt64 Examples.PointerOperations::WriteEnum(Examples.Unsigned64
 Examples:System.UInt64 Examples.PrimitiveArrays::ReadUInt64(System.UInt64[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Sequential::Packed(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SkipInitialization::Read(System.UInt64&)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.SpanReferences::Back(System.ReadOnlySpan`1<System.UInt64>&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanReferences::BigEndianWord(System.ReadOnlySpan`1<System.Byte>&)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.SpanReferences::ByteSecond(System.ReadOnlySpan`1<System.UInt64>&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanReferences::Construct(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.SpanReferences::CursorSum(System.ReadOnlySpan`1<System.UInt64>&)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.SpanReferences::Element(System.ReadOnlySpan`1<System.UInt64>&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanReferences::FirstHigh(System.ReadOnlySpan`1<Examples.SpanReferences/Pair>&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanReferences::High(System.Span`1<Examples.SpanReferences/Pair>&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanReferences::HighAddress(System.ReadOnlySpan`1<Examples.SpanReferences/Pair>&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanReferences::ReadOnlyHigh(System.ReadOnlySpan`1<Examples.SpanReferences/Pair>&,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.SpanReferences::Second(System.ReadOnlySpan`1<System.UInt64>&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanReferences::Word(System.ReadOnlySpan`1<System.UInt64>&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanTables::First()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanTables::Power(System.Int32)	A	A	A	A	A	A	A	A
@@ -901,6 +906,7 @@ Examples:System.Void Examples.SpanReferences/Limbs::.ctor(System.ReadOnlySpan`1<
 Examples:System.Void Examples.SpanReferences::Replace(System.Span`1<System.Int32>&)	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.SpanReferences::SetHigh(System.ReadOnlySpan`1<Examples.SpanReferences/Pair>&,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.SpanReferences::WriteFirst(System.Span`1<System.Int32>&,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.SpanReferences::WriteSecond(System.ReadOnlySpan`1<System.UInt64>&,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.SpanReferences::WriteWord(System.ReadOnlySpan`1<System.UInt64>&,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.StaticPair`1::.ctor(T,System.UInt64)	N	N	N	N	N	N	N	N
 Examples:System.Void Examples.StaticScalars::.cctor()	B	B	B	B	B	B	B	B

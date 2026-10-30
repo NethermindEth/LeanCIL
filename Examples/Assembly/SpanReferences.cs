@@ -56,6 +56,34 @@ public static class SpanReferences
 
     public static ulong FirstHigh(in ReadOnlySpan<Pair> values) => MemoryMarshal.GetReference(values).High;
 
+    public static ulong Second(in ReadOnlySpan<ulong> values) => Unsafe.Add(ref MemoryMarshal.GetReference(values), 1);
+
+    public static ulong Element(in ReadOnlySpan<ulong> values, int index) =>
+        Unsafe.Add(ref MemoryMarshal.GetReference(values), index);
+
+    public static ulong Back(in ReadOnlySpan<ulong> values) =>
+        Unsafe.Subtract(ref Unsafe.Add(ref MemoryMarshal.GetReference(values), 3), 2);
+
+    public static ulong ByteSecond(in ReadOnlySpan<ulong> values) =>
+        Unsafe.AddByteOffset(ref MemoryMarshal.GetReference(values), (nint)sizeof(ulong));
+
+    public static ulong CursorSum(in ReadOnlySpan<ulong> values)
+    {
+        ref var cursor = ref MemoryMarshal.GetReference(values);
+        ref var end = ref Unsafe.Add(ref cursor, values.Length);
+        ulong total = 0;
+        while (Unsafe.IsAddressLessThan(ref cursor, ref end))
+        {
+            total += cursor;
+            cursor = ref Unsafe.Add(ref cursor, 1);
+        }
+        return total;
+    }
+
+    // Faults: an offset from a readonly view's reference stays readonly.
+    public static void WriteSecond(in ReadOnlySpan<ulong> values, ulong value) =>
+        Unsafe.Add(ref MemoryMarshal.GetReference(values), 1) = value;
+
     // Faults: a reference from a readonly view grants no write permission.
     public static void WriteWord(in ReadOnlySpan<ulong> values, ulong value) =>
         MemoryMarshal.GetReference(values) = value;
