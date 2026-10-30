@@ -122,8 +122,8 @@ theorem invoke_loop_vc {α : Type} {program : CIL.Program} {method : Nat} {body 
   exact ⟨fuel, final, values, invoke_of_run found checked setup executed, satisfied⟩
 #print axioms invoke_loop_vc
 
-/-- `invoke_loop_vc` for a loop whose exits return exactly `final` and `values`, as a goal that
-    fixes both states it; exits must establish those equalities. -/
+/-- `invoke_loop_vc` for a loop whose exits return exactly `final` and `values`, so a goal of
+    this shape fixes the postcondition; exits must establish both equalities. -/
 theorem invoke_loop_returns {α : Type} {program : CIL.Program} {method : Nat}
     {body : CIL.Method} {args : List Value} {memory entered final : Memory} {frame : Frame}
     {values : List Value}
@@ -144,7 +144,7 @@ theorem invoke_loop_returns {α : Type} {program : CIL.Program} {method : Nat}
 #print axioms invoke_loop_returns
 
 /-- `invoke_loop_vc` for a loop whose exits return exactly `values` in a final memory that
-    satisfies `kept`, as a goal that fixes both states it. -/
+    satisfies `kept`, so a goal of this shape fixes the postcondition. -/
 theorem invoke_loop_results {α : Type} {program : CIL.Program} {method : Nat}
     {body : CIL.Method} {args : List Value} {memory entered : Memory} {frame : Frame}
     {values : List Value} {kept : Memory → Prop}

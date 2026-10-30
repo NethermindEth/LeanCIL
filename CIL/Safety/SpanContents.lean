@@ -269,6 +269,7 @@ structure SpanSuffix (memory : Memory) (width : Nat) (writable : Bool) where
   checked : CheckedSpan memory view width writable values
 
 #print axioms CheckedSpan.facts
+#print axioms CheckedSpan.elementWidth
 #print axioms CheckedSpan.below
 #print axioms CheckedSpan.length_nil
 #print axioms CheckedSpan.head

@@ -301,30 +301,6 @@ and narrow extension, so a fact about the exited frame's memory is tried before 
 past it. Supply an invariant and decreasing measure to the loop termination theorem; these
 tactics do not infer termination. See the [countdown proof](../Examples/Proofs/Countdown.lean).
 
-### Loop verification conditions
-
-[`invoke_loop_vc`](../CIL/Safety/LoopVC.lean) proves a method's `invoke` from its lookup, checked
-arguments, frame-setup equation, a loop configuration, invariant and measure, the first loop state,
-a checked path to it and the invariant there. The one remaining goal is the progress rule of
-`loop_terminates`: each invariant state exits through a path satisfying the postcondition, or
-reaches a next state that keeps the invariant with a smaller measure.
-[`invoke_loop_returns`](../CIL/Safety/LoopVC.lean) states the result as `∃ fuel, invoke ... =
-.ok (final, values)` and [`invoke_loop_results`](../CIL/Safety/LoopVC.lean) as `∃ fuel final,
-invoke ... = .ok (final, values) ∧ kept final`, so `refine` against a theorem of that shape fixes
-the postcondition. Inside the progress goal, `cil_loop_continue next [facts]` leaves only
-preservation and decrease, and `cil_loop_finish [facts]` proves an exit.
-
-A loop over symbolic caller memory keeps the frame part of its state as the `EntryMemory` and
-`NumericEntryHome` facts that `bind_entry ... allocating` returns.
-`cil_home_store updated stored loaded frame home := value using frame home` stores into the home
-through [`NumericEntryHome.store`](../CIL/Safety/LoopVC.lean) and names the step's store and load
-equations and both facts after the store, without composing `MemoryBelow` by hand.
-[`NumericEntryHome.load`](../CIL/Safety/LoopVC.lean) reads the home at a loop head, and
-[`EntryMemory.leave`](../CIL/Safety/LoopVC.lean) `setup` is the exit's `MemoryBelow` fact for any
-exited frame with the entry's owned identities, closing a postcondition such as `SpanSum`'s.
-`Tests/LoopScaffold.lean` proves a countdown over symbolic memory this way, and shows that a
-constant measure fails at the decrease goal and a stale invariant at its preservation goal.
-
 A loop body that calls a helper composes through the helper's `MethodContract`
 ([LoopContract](../CIL/Safety/LoopContract.lean)). `LoopSegment` fixes one cost for every
 continuation budget, which a contract's existential fuel cannot supply, so
@@ -363,6 +339,30 @@ helper that raises another type; on the correct build, a nondecreasing measure, 
 invariant and a wrong specified exception each fail at that obligation. `Tests/LoopOutcome.lean`
 derives the normal-only rules as the `none` instances and proves that unsupported execution, invalid
 state and fuel exhaustion never satisfy an expected loop exception.
+
+### Loop verification conditions
+
+[`invoke_loop_vc`](../CIL/Safety/LoopVC.lean) proves a method's `invoke` from its lookup, checked
+arguments, frame-setup equation, a loop configuration, invariant and measure, the first loop state,
+a checked path to it and the invariant there. The one remaining goal is the progress rule of
+`loop_terminates`: each invariant state exits through a path satisfying the postcondition, or
+reaches a next state that keeps the invariant with a smaller measure.
+[`invoke_loop_returns`](../CIL/Safety/LoopVC.lean) states the result as `∃ fuel, invoke ... =
+.ok (final, values)` and [`invoke_loop_results`](../CIL/Safety/LoopVC.lean) as `∃ fuel final,
+invoke ... = .ok (final, values) ∧ kept final`, so `refine` against a theorem of that shape fixes
+the postcondition. Inside the progress goal, `cil_loop_continue next [facts]` leaves only
+preservation and decrease, and `cil_loop_finish [facts]` proves an exit.
+
+A loop over symbolic caller memory keeps the frame part of its state as the `EntryMemory` and
+`NumericEntryHome` facts that `bind_entry ... allocating` returns.
+`cil_home_store updated stored loaded frame home := value using frame home` stores into the home
+through [`NumericEntryHome.store`](../CIL/Safety/LoopVC.lean) and names the step's store and load
+equations and both facts after the store, without composing `MemoryBelow` by hand.
+[`NumericEntryHome.load`](../CIL/Safety/LoopVC.lean) reads the home at a loop head, and
+[`EntryMemory.leave`](../CIL/Safety/LoopVC.lean) `setup` is the exit's `MemoryBelow` fact for any
+exited frame with the entry's owned identities, closing a postcondition such as `SpanSum`'s.
+`Tests/LoopScaffold.lean` proves a countdown over symbolic memory this way, and shows that a
+constant measure fails at the decrease goal and a stale invariant at its preservation goal.
 
 ## Read control flow off one step
 
