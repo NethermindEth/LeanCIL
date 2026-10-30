@@ -24,14 +24,12 @@ def divRem64 (lower upper divisor : W64) : Except ArithmeticFault (W64 × W64) :
   else .ok (BitVec.ofNat 64 (dividend lower upper / divisor.toNat),
     BitVec.ofNat 64 (dividend lower upper % divisor.toNat))
 
-/-- Little-endian bytes of one 64-bit tuple field. -/
-def wordBytes (word : W64) : List (BitVec 8) := littleEndianBytes 8 word.toNat
-
 /-- `ValueTuple<ulong, ulong>` stores Item1 at offset 0 and Item2 at offset 8. -/
 def divRemValue : List Value → Except ArithmeticFault Value
   | [.i64 lower, .i64 upper, .i64 divisor] => do
     let (quotient, remainder) ← divRem64 lower upper divisor
-    return .aggregate (wordBytes quotient ++ wordBytes remainder)
+    return .aggregate
+      (Safety.numberBytes quotient.toNat 8 ++ Safety.numberBytes remainder.toNat 8)
   | _ => .error .invalidOperands
 
 theorem dividend_lt {lower upper divisor : W64} (fits : upper.toNat < divisor.toNat) :

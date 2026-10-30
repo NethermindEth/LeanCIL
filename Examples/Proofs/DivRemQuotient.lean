@@ -42,11 +42,13 @@ theorem correctness (lower upper divisor : W64) :
       divRem_fields (lower := lower) fits [] Examples.empty
     refine ⟨quotient, ?_, exact⟩
     have field : CIL.Safety.step Extracted.method0 (.fieldAt 0 8) 4 (inputs lower upper divisor) frame
-        [.scalar (.aggregate (X86.wordBytes quotient ++ X86.wordBytes remainder))] Examples.empty =
+        [.scalar (.aggregate (numberBytes quotient.toNat 8 ++ numberBytes remainder.toNat 8))]
+          Examples.empty =
         .ok (.next 5 [.scalar (.i64 quotient)] frame Examples.empty) := by
       change ((do
         let (memory, values) ← instruction (.fieldAt 0 8)
-          [.scalar (.aggregate (X86.wordBytes quotient ++ X86.wordBytes remainder))] Examples.empty
+          [.scalar (.aggregate (numberBytes quotient.toNat 8 ++ numberBytes remainder.toNat 8))]
+            Examples.empty
         return FrameAction.next 5 values frame memory) : ExecutionResult FrameAction) = _
       rw [item1]
       rfl

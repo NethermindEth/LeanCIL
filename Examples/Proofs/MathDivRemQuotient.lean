@@ -70,18 +70,18 @@ theorem correctness (left right : W32) :
   refine ⟨left.sdiv right, ?_, exact⟩
   have call : CIL.Safety.step Extracted.method0 (.intrinsic (.scalar (.divRem 32 true)) 2) 2
       (inputs left right) frame [.scalar (.i32 right), .scalar (.i32 left)] Examples.empty =
-      .ok (.next 3 [.scalar (.aggregate (littleEndianBytes 4 (left.sdiv right).toNat ++
-        littleEndianBytes 4 (left.srem right).toNat))] frame Examples.empty) := by
+      .ok (.next 3 [.scalar (.aggregate (numberBytes (left.sdiv right).toNat 4 ++
+        numberBytes (left.srem right).toNat 4))] frame Examples.empty) := by
     rw [divRem_step, mathDivRem32_eq, evaluated]
     rfl
   have field : CIL.Safety.step Extracted.method0 (.fieldAt 0 4) 3 (inputs left right) frame
-      [.scalar (.aggregate (littleEndianBytes 4 (left.sdiv right).toNat ++
-        littleEndianBytes 4 (left.srem right).toNat))] Examples.empty =
+      [.scalar (.aggregate (numberBytes (left.sdiv right).toNat 4 ++
+        numberBytes (left.srem right).toNat 4))] Examples.empty =
       .ok (.next 4 [.scalar (.i32 (left.sdiv right))] frame Examples.empty) := by
     change ((do
       let (memory, values) ← instruction (.fieldAt 0 4)
-        [.scalar (.aggregate (littleEndianBytes 4 (left.sdiv right).toNat ++
-          littleEndianBytes 4 (left.srem right).toNat))] Examples.empty
+        [.scalar (.aggregate (numberBytes (left.sdiv right).toNat 4 ++
+          numberBytes (left.srem right).toNat 4))] Examples.empty
       return FrameAction.next 4 values frame memory) : ExecutionResult FrameAction) = _
     rw [item1_of_int_tuple]
     rfl

@@ -13,38 +13,34 @@ through the same aggregate encoding, with `divRemBits` faults reported unchanged
 
 namespace CIL.Safety
 
-theorem wordBytes_eq (word : CIL.W64) : CIL.X86.wordBytes word = numberBytes word.toNat 8 := rfl
-
-theorem wordBytes_length (word : CIL.W64) : (CIL.X86.wordBytes word).length = 8 := by
-  simp [CIL.X86.wordBytes, CIL.littleEndianBytes]
-
-theorem byteNumber_wordBytes (word : CIL.W64) :
-    byteNumber (CIL.X86.wordBytes word) = word.toNat := by
-  rw [wordBytes_eq, byteNumber_numberBytes]
+/-- An eight-byte field encoding a 64-bit word decodes back to that word. -/
+theorem byteNumber_numberBytes_word (word : CIL.W64) :
+    byteNumber (numberBytes word.toNat 8) = word.toNat := by
+  rw [byteNumber_numberBytes]
   exact Nat.mod_eq_of_lt word.isLt
 
 /-- `ldfld Item1` on a returned `(ulong, ulong)` reads the first word. -/
 theorem item1_of_tuple (first second : CIL.W64) (rest : List Value) (m : Memory) :
     instruction (.fieldAt 0 8)
-      (.scalar (.aggregate (CIL.X86.wordBytes first ++ CIL.X86.wordBytes second)) :: rest) m =
+      (.scalar (.aggregate (numberBytes first.toNat 8 ++ numberBytes second.toNat 8)) :: rest) m =
       .ok (m, .scalar (.i64 first) :: rest) := by
-  have taken : ((CIL.X86.wordBytes first ++ CIL.X86.wordBytes second).drop 0).take 8 =
-      CIL.X86.wordBytes first := by
-    simp [wordBytes_length]
-  simp only [instruction, List.length_append, wordBytes_length, taken, byteNumber_wordBytes,
-    BitVec.ofNat_toNat, BitVec.setWidth_eq]
+  have taken : ((numberBytes first.toNat 8 ++ numberBytes second.toNat 8).drop 0).take 8 =
+      numberBytes first.toNat 8 := by
+    simp [numberBytes_length]
+  simp only [instruction, List.length_append, numberBytes_length, taken,
+    byteNumber_numberBytes_word, BitVec.ofNat_toNat, BitVec.setWidth_eq]
   rfl
 
 /-- `ldfld Item2` on a returned `(ulong, ulong)` reads the second word. -/
 theorem item2_of_tuple (first second : CIL.W64) (rest : List Value) (m : Memory) :
     instruction (.fieldAt 8 8)
-      (.scalar (.aggregate (CIL.X86.wordBytes first ++ CIL.X86.wordBytes second)) :: rest) m =
+      (.scalar (.aggregate (numberBytes first.toNat 8 ++ numberBytes second.toNat 8)) :: rest) m =
       .ok (m, .scalar (.i64 second) :: rest) := by
-  have taken : ((CIL.X86.wordBytes first ++ CIL.X86.wordBytes second).drop 8).take 8 =
-      CIL.X86.wordBytes second := by
-    simp [wordBytes_length, List.take_of_length_le]
-  simp only [instruction, List.length_append, wordBytes_length, taken, byteNumber_wordBytes,
-    BitVec.ofNat_toNat, BitVec.setWidth_eq]
+  have taken : ((numberBytes first.toNat 8 ++ numberBytes second.toNat 8).drop 8).take 8 =
+      numberBytes second.toNat 8 := by
+    simp [numberBytes_length, List.take_of_length_le]
+  simp only [instruction, List.length_append, numberBytes_length, taken,
+    byteNumber_numberBytes_word, BitVec.ofNat_toNat, BitVec.setWidth_eq]
   rfl
 
 /-- Under `upper < divisor`, DivRem returns the exact `Nat` quotient and remainder in Item1
@@ -53,13 +49,13 @@ theorem divRem_fields {lower upper divisor : CIL.W64} (fits : upper.toNat < divi
     (rest : List Value) (m : Memory) :
     ∃ quotient remainder : CIL.W64,
       checkedIntrinsic (.x86Base .divRem64) [.i64 lower, .i64 upper, .i64 divisor] =
-        .ok (.aggregate (CIL.X86.wordBytes quotient ++ CIL.X86.wordBytes remainder)) ∧
+        .ok (.aggregate (numberBytes quotient.toNat 8 ++ numberBytes remainder.toNat 8)) ∧
       instruction (.fieldAt 0 8)
-          (.scalar (.aggregate (CIL.X86.wordBytes quotient ++ CIL.X86.wordBytes remainder)) ::
+          (.scalar (.aggregate (numberBytes quotient.toNat 8 ++ numberBytes remainder.toNat 8)) ::
             rest) m =
         .ok (m, .scalar (.i64 quotient) :: rest) ∧
       instruction (.fieldAt 8 8)
-          (.scalar (.aggregate (CIL.X86.wordBytes quotient ++ CIL.X86.wordBytes remainder)) ::
+          (.scalar (.aggregate (numberBytes quotient.toNat 8 ++ numberBytes remainder.toNat 8)) ::
             rest) m =
         .ok (m, .scalar (.i64 remainder) :: rest) ∧
       quotient.toNat = (upper.toNat * 2 ^ 64 + lower.toNat) / divisor.toNat ∧
@@ -82,8 +78,8 @@ theorem divRem_fault {lower upper divisor : CIL.W64} (overflows : divisor.toNat 
 theorem mathDivRem32_eq (signed : Bool) (left right : CIL.W32) :
     checkedIntrinsic (.scalar (.divRem 32 signed)) [.i32 left, .i32 right] =
       ((CIL.divRemBits signed left right).map fun (quotient, remainder) =>
-        CIL.Value.aggregate (CIL.littleEndianBytes 4 quotient.toNat ++
-          CIL.littleEndianBytes 4 remainder.toNat)).mapError .arithmetic := by
+        CIL.Value.aggregate (numberBytes quotient.toNat 4 ++
+          numberBytes remainder.toNat 4)).mapError .arithmetic := by
   simp only [checkedIntrinsic, CIL.evalDivRem, CIL.evalDivRem.tuple, BitVec.setWidth_eq,
     List.any_cons, List.any_nil, CIL.Value.hasUnspecified, Bool.false_or, Bool.false_eq_true,
     ite_false, Bool.or_true, ite_true]
@@ -92,23 +88,20 @@ theorem mathDivRem32_eq (signed : Bool) (left right : CIL.W32) :
 /-- `ldfld Item1` on a returned `(int, int)` reads the quotient's four bytes back exactly. -/
 theorem item1_of_int_tuple (first second : CIL.W32) (rest : List Value) (m : Memory) :
     instruction (.fieldAt 0 4)
-      (.scalar (.aggregate (CIL.littleEndianBytes 4 first.toNat ++
-        CIL.littleEndianBytes 4 second.toNat)) :: rest) m =
+      (.scalar (.aggregate (numberBytes first.toNat 4 ++
+        numberBytes second.toNat 4)) :: rest) m =
       .ok (m, .scalar (.i32 first) :: rest) := by
-  have length (word : CIL.W32) : (CIL.littleEndianBytes 4 word.toNat).length = 4 := by
-    simp [CIL.littleEndianBytes]
-  have taken : ((CIL.littleEndianBytes 4 first.toNat ++
-      CIL.littleEndianBytes 4 second.toNat).drop 0).take 4 =
-      CIL.littleEndianBytes 4 first.toNat := by
-    simp [length]
-  have number : byteNumber (CIL.littleEndianBytes 4 first.toNat) = first.toNat := by
-    rw [show CIL.littleEndianBytes 4 first.toNat = numberBytes first.toNat 4 from rfl,
-      byteNumber_numberBytes]
+  have taken : ((numberBytes first.toNat 4 ++ numberBytes second.toNat 4).drop 0).take 4 =
+      numberBytes first.toNat 4 := by
+    simp [numberBytes_length]
+  have number : byteNumber (numberBytes first.toNat 4) = first.toNat := by
+    rw [byteNumber_numberBytes]
     exact Nat.mod_eq_of_lt first.isLt
-  simp only [instruction, List.length_append, length, taken, number, BitVec.ofNat_toNat,
+  simp only [instruction, List.length_append, numberBytes_length, taken, number, BitVec.ofNat_toNat,
     BitVec.setWidth_eq]
   rfl
 
+#print axioms byteNumber_numberBytes_word
 #print axioms mathDivRem32_eq
 #print axioms item1_of_int_tuple
 #print axioms item1_of_tuple

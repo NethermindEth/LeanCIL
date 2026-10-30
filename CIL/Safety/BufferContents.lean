@@ -39,9 +39,7 @@ theorem Reference.element_element (base : Reference) (width first second : Nat) 
 def elementBytes (width : Nat) (xs : List (BitVec (8 * width))) : List (BitVec 8) :=
   xs.flatMap fun x => numberBytes x.toNat width
 
-@[simp] theorem numberBytes_length (value width : Nat) :
-    (numberBytes value width).length = width := by
-  simp [numberBytes]
+attribute [simp] numberBytes_length
 
 @[simp] theorem elementBytes_nil (width : Nat) : elementBytes width [] = [] := rfl
 
