@@ -38,7 +38,7 @@ theorem Memory.Equivalent.referenceLess {m n : Memory} (same : m.Equivalent n)
 theorem Memory.Equivalent.referenceSubtract {m n : Memory} (same : m.Equivalent n)
     (reference : ManagedReference) (offset : CIL.Value) :
     referenceSubtract m reference offset = referenceSubtract n reference offset := by
-  simp only [CIL.Safety.referenceSubtract, checkedAt, same.add]
+  simp only [CIL.Safety.referenceSubtract, displaceReference, checkedAt, same.add]
 #print axioms Memory.Equivalent.referenceSubtract
 theorem Memory.Equivalent.checkedValue {m n : Memory} (same : m.Equivalent n)
     (value : Value) : checkedValue m value = checkedValue n value := by
