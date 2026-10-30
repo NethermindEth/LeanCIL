@@ -116,11 +116,13 @@ unknown bytes or change their bits. Aggregate/vector loads and stores preserve i
 Fill captures its value before writing, including aliasing cases, and preserves those masks;
 Clear initializes every byte.
 
-Whole-array `Array.Fill<T>(T[], T)` requires the exact runtime signature and primitive or
-integer-backed enum element identity. It rejects null before delegating to the array's checked
-span view; an empty non-null array performs no write. The view supplies no additional memory
-authority, and the shared span fill preserves confinement and initialization guarantees.
-Range overloads and other element families are not modeled by this helper.
+Whole-array and ranged `Array.Fill<T>` require the exact runtime signature and primitive or
+integer-backed enum element identity. Typed array views must describe live, valid storage before
+named runtime exceptions can be selected. Valid null inputs fault before range checks; other
+inputs delegate to checked span slicing and filling. Range bounds use widened natural arithmetic
+over the unsigned int32 arguments, retaining rejection of negative or overflowing ranges. Empty non-null ranges
+perform no write. The view supplies no additional memory authority, and the shared span fill
+preserves confinement and initialization guarantees. Other element families are not modeled.
 Nonempty destinations need write authority, not prior readability. Copy requires initialized source
 bytes. Empty operations grant no authority. Empty spans have null pinnable references; empty arrays
 retain their data reference. Null array data-reference access raises its named exception.

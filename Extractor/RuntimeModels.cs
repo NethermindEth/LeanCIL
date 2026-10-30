@@ -350,8 +350,12 @@ internal static class RuntimeModels
             var staticElement = elementType is null || Arrays.Primitive(elementType) is not null ||
                 EnumTypes.IsEnum(elementType);
             if (staticElement && arrayElement is not null)
+            {
                 operations.Add($"System.Void System.Array::Fill<{element}>(!!0[],!!0)",
-                    $".memory (.arrayFill {arrayElement})");
+                    $".memory (.arrayFill {arrayElement} false)");
+                operations.Add($"System.Void System.Array::Fill<{element}>(!!0[],!!0,System.Int32,System.Int32)",
+                    $".memory (.arrayFill {arrayElement} true)");
+            }
             if (staticElement) operations.Add("System.ReadOnlySpan`1<!!0> System.Runtime.CompilerServices.RuntimeHelpers::" +
                 $"CreateSpan<{element}>(System.RuntimeFieldHandle)", $".memory (.createSpan {width})");
             operations.Add($"!0& modreq(System.Runtime.InteropServices.InAttribute) {span}::get_Item(System.Int32)",

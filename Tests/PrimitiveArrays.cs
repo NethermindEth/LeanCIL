@@ -304,15 +304,18 @@ foreach (var (name, element, width) in allocations)
     evidence.Add(proof, "PASS runtime, certificate and heap array return: " + name);
 }
 var fillEnum = System.Text.Json.JsonSerializer.Serialize(runtime.Assembly.FullName + "::Examples.AllocationTag");
-var fills = new (string Name, string Signature, string Element, int Width)[]
+var fills = new (string Name, string Signature, string Element, int Width, bool Counted)[]
 {
-    ("FillIntegers", "System.Int32[],System.Int32", "signed32", 4),
+    ("FillIntegers", "System.Int32[],System.Int32", "signed32", 4, false),
     ("FillEnums", "Examples.AllocationTag[],Examples.AllocationTag",
-        $"enumeration {fillEnum} .unsigned8", 1)
+        $"enumeration {fillEnum} .unsigned8", 1, false),
+    ("FillRangeIntegers", "System.Int32[],System.Int32,System.Int32,System.Int32", "signed32", 4, true),
+    ("FillRangeEnums", "Examples.AllocationTag[],Examples.AllocationTag,System.Int32,System.Int32",
+        $"enumeration {fillEnum} .unsigned8", 1, true)
 };
 ExtractBatch("extract", null, fills.Select(fill => new GeneratedExtraction(assembly,
     $"PrimitiveArrays::{fill.Name}({fill.Signature})", Path.Combine(root, fill.Name))));
-foreach (var (name, _, element, width) in fills)
+foreach (var (name, _, element, width, counted) in fills)
 {
     var output = Path.Combine(root, name);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
@@ -328,7 +331,9 @@ foreach (var (name, _, element, width) in fills)
         /-- The generic helper fills both elements and preserves neighboring bytes. -/
         theorem array_fill :
             (match CIL.Safety.invoke Extracted.program 128 0
-              [.array ⟨.address ⟨0, 8⟩, 2, .{{element}}⟩, .scalar (.i32 7)] fillMemory with
+              [.array ⟨.address ⟨0, {{(counted ? 8 - width : 8)}}⟩, {{(counted ? 4 : 2)}},
+                .{{element}}⟩, .scalar (.i32 7){{(counted ? ", .scalar (.i32 1), .scalar (.i32 2)" : "")}}]
+              fillMemory with
              | .ok result => result.2 == [] &&
                [7, 7, 11, 11] == [result.1.cells 0 8 |>.bits,
                  result.1.cells 0 {{8 + width}} |>.bits, result.1.cells 0 7 |>.bits,
@@ -336,7 +341,95 @@ foreach (var (name, _, element, width) in fills)
              | .error _ => false) = true := by decide +kernel
         #print axioms array_fill
         """);
-    if (name == "FillIntegers")
+    if (name == "FillRangeIntegers")
+    {
+        File.AppendAllText(proof, """
+
+            /-- Range filling checks null first and rejects negative or overflowing bounds. -/
+            theorem range_fill_faults :
+                ([(0, 0), (4, 0)].all fun (start, count) =>
+                  match CIL.Safety.invoke Extracted.program 128 0
+                    [.array ⟨.address ⟨0, 4⟩, 4, .signed32⟩, .scalar (.i32 7),
+                      .scalar (.i32 start), .scalar (.i32 count)] { fillMemory with views := [] } with
+                  | .ok result => result.2 == [] | .error _ => false) = true ∧
+                ([(-1, 0), (0, -1), (5, 0), (3, 2), (1, 2147483647)].all fun (start, count) =>
+                  match CIL.Safety.invoke Extracted.program 128 0
+                    [.array ⟨.address ⟨0, 4⟩, 4, .signed32⟩, .scalar (.i32 7),
+                      .scalar (.i32 start), .scalar (.i32 count)] fillMemory with
+                  | .error fault => fault.fault == .thrown "System.ArgumentOutOfRangeException"
+                  | .ok _ => false) = true ∧
+                ([.reference .null, .array ⟨.null, 0, .signed32⟩].all fun input =>
+                  match CIL.Safety.invoke Extracted.program 128 0
+                    [input, .scalar (.i32 7), .scalar (.i32 (-1)), .scalar (.i32 (-1))] fillMemory with
+                  | .error fault => fault.fault == .thrown "System.ArgumentNullException"
+                  | .ok _ => false) = true ∧
+                (match CIL.Safety.invoke Extracted.program 128 0
+                  [.array ⟨.address ⟨0, 4⟩, 4, .signed32⟩, .scalar (.i32 7),
+                    .scalar (.i32 1), .scalar (.i32 2)] { fillMemory with views := [] } with
+                 | .error _ => true | .ok _ => false) = true := by
+              repeat' apply And.intro
+              all_goals decide +kernel
+            #print axioms range_fill_faults
+
+            /-- Invalid model storage cannot discharge a named runtime exception obligation. -/
+            theorem malformed_fill_states :
+                ([⟨.address ⟨0, 4⟩, 9, .signed32⟩, ⟨.address ⟨1, 0⟩, 4, .signed32⟩,
+                  ⟨.null, 1, .signed32⟩].all fun view =>
+                  [false, true].all fun counted =>
+                    let operands := [.scalar (.i32 7), .array view]
+                    match CIL.Safety.arrayFillInstruction .signed32 counted
+                      (if counted then [.scalar (.i32 (-1)), .scalar (.i32 (-1))] ++ operands
+                        else operands) fillMemory with
+                    | .error (.thrown _) => false | .error _ => true | .ok _ => false) = true ∧
+                (match CIL.Safety.arrayFillInstruction .signed32 true
+                  [.scalar (.i32 (-1)), .scalar (.i32 (-1)), .scalar (.i32 7),
+                    .array ⟨.address ⟨0, 4⟩, 4, .signed32⟩]
+                  { fillMemory with allocations := fun identity =>
+                      if identity == 0 then some ⟨.managedHeap, ⟨32, 8, []⟩, false, [32]⟩ else none } with
+                 | .error (.thrown _) => false | .error _ => true | .ok _ => false) = true := by
+              constructor <;> decide +kernel
+            #print axioms malformed_fill_states
+            """);
+        var obligation = "method1_scalars_validated";
+        var narrowed = NarrowEvidence(source, obligation);
+        File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, narrowed, [obligation], 0));
+        foreach (var (label, before, after) in new[]
+        {
+            ("range", ".arrayFill .signed32 true", ".arrayFill .signed32 false"),
+            ("index-type", ".atom Extraction.runtimeScope \"System.Int32\", " +
+                ".atom Extraction.runtimeScope \"System.Int32\"]",
+                ".atom Extraction.runtimeScope \"System.UInt32\", " +
+                ".atom Extraction.runtimeScope \"System.Int32\"]")
+        })
+        {
+            if (!narrowed.Contains(before, StringComparison.Ordinal))
+                throw new Exception("Missing range fill mutation: " + label);
+            var forged = Path.Combine(root, "ForgedFillRange-" + label + ".lean");
+            File.WriteAllText(forged, narrowed.Replace(before, after, StringComparison.Ordinal));
+            rejected.Add(forged, "PASS forged array fill range: " + label, "ScalarFlowValid");
+        }
+        foreach (var (start, count) in new[]
+            { (1, 2), (0, 0), (4, 0), (-1, 0), (0, -1), (5, 0), (3, 2), (1, int.MaxValue) })
+        {
+            var values = new[] { 1, 2, 3, 4 };
+            var valid = (uint)start <= values.Length && (uint)count <= values.Length - start;
+            try
+            {
+                runtime.GetMethod(name)!.Invoke(null, [values, 7, start, count]);
+                if (!valid || !values.SequenceEqual(start == 1 ? [1, 7, 7, 4] : [1, 2, 3, 4]))
+                    throw new Exception("Runtime range fill mismatch");
+            }
+            catch (TargetInvocationException fault) when (
+                !valid && fault.InnerException is ArgumentOutOfRangeException) { }
+        }
+        try
+        {
+            runtime.GetMethod(name)!.Invoke(null, [null, 7, -1, -1]);
+            throw new Exception("Expected null array fill rejection");
+        }
+        catch (TargetInvocationException fault) when (fault.InnerException is ArgumentNullException) { }
+    }
+    else if (name == "FillIntegers")
     {
         File.AppendAllText(proof, """
 
@@ -363,9 +456,9 @@ foreach (var (name, _, element, width) in fills)
         File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, narrowed, [obligation], 0));
         foreach (var (label, before, after) in new[]
         {
-            ("element", ".arrayFill .signed32", ".arrayFill .unsigned32"),
-            ("width", ".arrayFill .signed32", ".arrayFill .signed64"),
-            ("operation", ".arrayFill .signed32", ".spanFill 4 false"),
+            ("element", ".arrayFill .signed32 false", ".arrayFill .unsigned32 false"),
+            ("width", ".arrayFill .signed32 false", ".arrayFill .signed64 false"),
+            ("operation", ".arrayFill .signed32 false", ".spanFill 4 false"),
             ("arity", "parameterCount := 2, hasThis := false, returnsValue := false",
                 "parameterCount := 4, hasThis := false, returnsValue := false"),
             ("scope", ".atom Extraction.runtimeScope \"System.Array\"", ".atom \"Wrong.Scope\" \"System.Array\"")
@@ -393,22 +486,28 @@ foreach (var (name, _, element, width) in fills)
         var type = runtime.Assembly.GetType("Examples.AllocationTag")!;
         var values = Array.CreateInstance(type, 2);
         var value = Enum.ToObject(type, 7);
-        runtime.GetMethod(name)!.Invoke(null, [values, value]);
+        runtime.GetMethod(name)!.Invoke(null, counted ? [values, value, 0, 2] : [values, value]);
         if (!Equals(values.GetValue(0), value) || !Equals(values.GetValue(1), value))
             throw new Exception("Runtime enum array fill mismatch");
+        if (counted)
+        {
+            evidence.Add(proof, "PASS generic array fill: " + name);
+            continue;
+        }
         var obligation = "method1_scalars_validated";
         var narrowed = NarrowEvidence(source, obligation);
         File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, narrowed, [obligation], 0));
-        var target = $".arrayFill (.enumeration {fillEnum} .unsigned8)";
+        var mode = counted ? "true" : "false";
+        var target = $".arrayFill (.enumeration {fillEnum} .unsigned8) {mode}";
         if (!narrowed.Contains(target, StringComparison.Ordinal))
             throw new Exception("Missing enum array fill descriptor");
         foreach (var (label, replacement) in new[]
         {
-            ("identity", ".arrayFill (.enumeration \"Wrong.Enum\" .unsigned8)"),
-            ("backing", $".arrayFill (.enumeration {fillEnum} .signed8)")
+            ("identity", $".arrayFill (.enumeration \"Wrong.Enum\" .unsigned8) {mode}"),
+            ("backing", $".arrayFill (.enumeration {fillEnum} .signed8) {mode}")
         })
         {
-            var forged = Path.Combine(root, "ForgedFillEnum-" + label + ".lean");
+            var forged = Path.Combine(root, "Forged" + name + "-" + label + ".lean");
             File.WriteAllText(forged, narrowed.Replace(target, replacement, StringComparison.Ordinal));
             rejected.Add(forged, "PASS forged enum array fill: " + label, "ScalarFlowValid");
         }

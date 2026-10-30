@@ -375,16 +375,28 @@ def spanFillInstruction (width : Nat) (clear : Bool) (stack : List Value) (memor
         (view.fillSnapshot memory bytes), rest)
   | _, _ => .error .invalidState
 
-/-- Whole-array fill delegates to the checked span fill after preserving typed null semantics. -/
-def arrayFillInstruction (element : CIL.ArrayElement) (stack : List Value) (memory : Memory) :
-    ExecutionResult (Memory × List Value) :=
-  match stack with
-  | .scalar value :: .array view :: rest =>
-    if view.elementType != element then .error .invalidState
-    else if view.reference == .null then .error (.thrown "System.ArgumentNullException")
-    else spanFillInstruction element.width false
-      (.scalar value :: .bufferSpan view.storage :: rest) memory
-  | .scalar _ :: .reference .null :: _ => .error (.thrown "System.ArgumentNullException")
+/-- Array fill delegates to checked span slicing and writes after preserving null semantics. -/
+def arrayFillInstruction (element : CIL.ArrayElement) (counted : Bool)
+    (stack : List Value) (memory : Memory) : ExecutionResult (Memory × List Value) := do
+  let (value, input, rest, range) ← match counted, stack with
+    | false, .scalar value :: input :: rest => pure (value, input, rest, none)
+    | true, .scalar (.i32 count) :: .scalar (.i32 start) :: .scalar value :: input :: rest =>
+      pure (value, input, rest, some (start.toNat, count.toNat))
+    | _, _ => .error .invalidState
+  match input with
+  | .array view =>
+    if view.elementType != element then .error .invalidState else do
+      let _ ← checkedAt view.reference 0 (view.validate memory)
+      if view.reference == .null then .error (.thrown "System.ArgumentNullException") else do
+        let storage ← match range with
+          | none => pure view.storage
+          | some (start, count) => do
+            if start ≤ view.length && count ≤ view.length - start then pure ()
+              else .error (.thrown "System.ArgumentOutOfRangeException")
+            checkedAt view.reference 0 (view.storage.slice memory start count)
+        spanFillInstruction element.width false
+          (.scalar value :: .bufferSpan storage :: rest) memory
+  | .reference .null => .error (.thrown "System.ArgumentNullException")
   | _ => .error .invalidState
 
 /-- A fixed-width integer in the requested byte order, with the required narrow extension. -/
@@ -779,7 +791,7 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .observeView observation => viewObservationInstruction observation stack memory
   | .spanCopy width tryCopy => spanCopyInstruction width tryCopy stack memory
   | .spanFill width clear => spanFillInstruction width clear stack memory
-  | .arrayFill element => arrayFillInstruction element stack memory
+  | .arrayFill element counted => arrayFillInstruction element counted stack memory
   | _ => otherMemoryInstruction operation stack memory
 
 /-- Runs an op on the stack (top first) and memory: loads, stores, typed copies, aggregate

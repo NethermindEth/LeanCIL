@@ -325,8 +325,11 @@ from inserting a placeholder. The ordinary shared tactic tests run unchanged.
 types against runtime results and certified checked execution. It also covers length, helper calls,
 aliases, returned arrays, named null/bounds faults and unsupported array forms. Generic integer
 and enum fills cover readback, neighboring bytes, empty arrays, named null exceptions and missing
-write authority. Independent changes to fill element identities, widths, operations, scope and
-arity, or load width and signedness, must fail the Lean scalar certificate. `Tests/PrimitiveArrays.lean`
+write authority. Ranged fills cover interior slices, end-position empty ranges, null-first faults
+and negative or overflowing bounds. Malformed or expired storage cannot establish a named
+runtime exception. Independent changes to fill element identities, widths,
+operations, scope, arity and range selection, or load width and signedness, must fail the Lean
+scalar certificate. `Tests/PrimitiveArrays.lean`
 covers empty and null arrays, signed and native indices, initialization, authority, invalid extents,
 local storage and neighboring-byte preservation. Both run in the evidence suite.
 

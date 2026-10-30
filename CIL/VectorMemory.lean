@@ -152,8 +152,8 @@ inductive MemoryOp where
   /-- Snapshot copying permits overlapping spans; try-copy returns false for a short target. -/
   | spanCopy (width : Nat) (tryCopy : Bool)
   | spanFill (width : Nat) (clear : Bool)
-  /-- Fill an exact typed array through its checked writable view, rejecting null arrays. -/
-  | arrayFill (element : ArrayElement)
+  /-- Fill an exact typed array, optionally taking int32 start/count, through checked storage. -/
+  | arrayFill (element : ArrayElement) (counted : Bool)
   | bigMul64
   | copyBlock (alignment : Nat) | initBlock (alignment : Nat)
   | load128 | load256 | load512 | store128 | store256 | store512 | init256
@@ -197,7 +197,7 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .binaryWrite .. => 2
   | .spanCopy .. => 2
   | .spanFill _ clear => if clear then 1 else 2
-  | .arrayFill _ => 2
+  | .arrayFill _ counted => if counted then 4 else 2
   | .marshalRead _ tryRead => if tryRead then 2 else 1
   | .marshalWrite .. => 2
   | .pointerTransfer _ _ store => if store then 2 else 1

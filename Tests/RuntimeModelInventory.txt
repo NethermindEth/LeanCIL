@@ -376,6 +376,7 @@ System.Runtime::System.UIntPtr System.UIntPtr::RotateLeft(System.UIntPtr,System.
 System.Runtime::System.UIntPtr System.UIntPtr::RotateRight(System.UIntPtr,System.Int32)
 System.Runtime::System.UIntPtr System.UIntPtr::TrailingZeroCount(System.UIntPtr)
 System.Runtime::System.Void System.Array::Fill(T[],T)
+System.Runtime::System.Void System.Array::Fill(T[],T,System.Int32,System.Int32)
 System.Runtime::System.Void System.ReadOnlySpan`1::.ctor(System.Void*,System.Int32)
 System.Runtime::System.Void System.ReadOnlySpan`1::.ctor(T&)
 System.Runtime::System.Void System.ReadOnlySpan`1::.ctor(T[])

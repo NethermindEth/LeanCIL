@@ -15,7 +15,7 @@ namespace CIL.Extraction
 private def memoryFeatureEffect : MemoryOp → Nat × Nat
   | .spanCopy _ tryCopy => (2, if tryCopy then 1 else 0)
   | .spanFill _ clear => (if clear then 1 else 2, 0)
-  | .arrayFill _ => (2, 0)
+  | .arrayFill _ counted => (if counted then 4 else 2, 0)
   | .marshalRead _ trying => (if trying then 2 else 1, 1)
   | .binaryRead _ _ _ trying => (if trying then 2 else 1, 1)
   | .binaryWrite _ _ trying => (2, if trying then 1 else 0)
