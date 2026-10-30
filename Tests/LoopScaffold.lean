@@ -1,4 +1,5 @@
 import CIL.Safety.LoopScaffold
+import CIL.Safety.LoopVC
 import Examples.Support
 import CIL.StructuralLabels
 
@@ -243,3 +244,114 @@ bind_entry rejected (memory : Memory) (wellFormed : memory.WellFormed) := unmode
   with [] from memory allocating wellFormed
 
 end Tests.AllocatingEntry
+
+namespace Tests.LoopVC
+open CIL.Safety
+
+/-- `while (remaining != 0) remaining--; return remaining;` with `remaining` in a frame home. -/
+@[cil_code] def countdown : CIL.Method := {
+  locals := [.i32 0], localKinds := [.word32], returnsValue := true
+  code := [.arg 0, .setLocal 0, .local 0, .brnonzero 6, .local 0, .ret, .local 0, .const32 1,
+    .sub, .setLocal 0, .branch 2] }
+
+/-- The program holding only `countdown`. -/
+@[cil_code] def program : CIL.Program := [countdown]
+
+bind_entry entry (memory : Memory) (input : CIL.W32) (wellFormed : memory.WellFormed) :=
+  countdown with [.scalar (.i32 input)] from memory allocating wellFormed
+
+/-- The remaining count, held in the frame home of the current memory. -/
+structure State (memory : Memory) (home : Reference) where
+  remaining : CIL.W32
+  current : Memory
+  frame : EntryMemory memory current
+  holds : NumericEntryHome memory current .word32 remaining.toNat home
+
+-- The guard sees the remaining count.
+bind_cutpoint header (memory : Memory) (home : Reference) (state : State memory home) :=
+  countdown at 3 matching (fun op => match op with | .brnonzero _ => true | _ => false)
+  with (entry.frame memory home), [.scalar (.i32 state.remaining)], state.current
+
+/-- The store and exit rules carry the frame part of the state, so the loop proof states only
+    its measure; every input terminates with zero and keeps the caller's memory. -/
+theorem countdown_returns_zero (memory : Memory) (input : CIL.W32)
+    (wellFormed : memory.WellFormed) :
+    ∃ fuel final, invoke program fuel 0 [.scalar (.i32 input)] memory =
+      .ok (final, [.scalar (.i32 0)]) ∧ MemoryBelow memory.nextIdentity memory final := by
+  obtain ⟨home, entered, setup, numeric, entryMemory⟩ := entry.checked memory input wellFormed
+  cil_home_store started stored loaded frame holds := (.i32 input) using entryMemory numeric
+  refine invoke_loop_results (by rfl) (by rfl) setup (header memory home) (fun _ => True)
+    (·.remaining.toNat) ⟨input, started, frame, holds⟩
+    (by cil_loop_steps [header, entry.frame, stored, loaded]) trivial ?_
+  rintro ⟨remaining, current, frame, holds⟩ -
+  have loaded := holds.load (value := .i32 remaining) rfl
+  by_cases zero : remaining = 0
+  · subst zero
+    left
+    cil_loop_finish [header, entry.frame, loaded, localResult, frame.leave setup]
+  · cil_home_store updated stored nextLoaded nextFrame nextHolds := (.i32 (remaining - 1))
+      using frame holds
+    cil_loop_continue ⟨remaining - 1, updated, nextFrame, nextHolds⟩
+      [header, entry.frame, loaded, localResult, zero, stored, nextLoaded]
+    · trivial
+    · have positive : remaining.toNat ≠ 0 := fun same => zero (BitVec.eq_of_toNat_eq same)
+      have one : (1 : CIL.W32).toNat = 1 := rfl
+      show (remaining - 1).toNat < remaining.toNat
+      rw [BitVec.toNat_sub_of_le (by rw [BitVec.le_def]; omega)]
+      omega
+#print axioms countdown_returns_zero
+
+/-- error: Tactic `decide` proved that the proposition
+  0 < 0
+is false -/
+#guard_msgs (error) in
+/-- A measure that does not decrease leaves a false decrease obligation once the checked path
+    and the preservation goal have closed. -/
+theorem constant_measure (memory : Memory) (input : CIL.W32) (wellFormed : memory.WellFormed) :
+    ∃ fuel final, invoke program fuel 0 [.scalar (.i32 input)] memory =
+      .ok (final, [.scalar (.i32 0)]) ∧ MemoryBelow memory.nextIdentity memory final := by
+  obtain ⟨home, entered, setup, numeric, entryMemory⟩ := entry.checked memory input wellFormed
+  cil_home_store started stored loaded frame holds := (.i32 input) using entryMemory numeric
+  refine invoke_loop_results (by rfl) (by rfl) setup (header memory home) (fun _ => True)
+    (fun _ => 0) ⟨input, started, frame, holds⟩
+    (by cil_loop_steps [header, entry.frame, stored, loaded]) trivial ?_
+  rintro ⟨remaining, current, frame, holds⟩ -
+  have loaded := holds.load (value := .i32 remaining) rfl
+  by_cases zero : remaining = 0
+  · subst zero
+    left
+    cil_loop_finish [header, entry.frame, loaded, localResult, frame.leave setup]
+  · cil_home_store updated stored nextLoaded nextFrame nextHolds := (.i32 (remaining - 1))
+      using frame holds
+    cil_loop_continue ⟨remaining - 1, updated, nextFrame, nextHolds⟩
+      [header, entry.frame, loaded, localResult, zero, stored, nextLoaded]
+    · trivial
+    · decide
+
+/-- error: Tactic `decide` proved that the proposition
+  2 - 1 = 2
+is false -/
+#guard_msgs (error) in
+/-- An invariant that holds at entry but is not preserved fails exactly at its preservation
+    obligation: from two, the next count is one. -/
+theorem stale_invariant (memory : Memory) (wellFormed : memory.WellFormed) :
+    ∃ fuel final, invoke program fuel 0 [.scalar (.i32 2)] memory =
+      .ok (final, [.scalar (.i32 0)]) ∧ MemoryBelow memory.nextIdentity memory final := by
+  obtain ⟨home, entered, setup, numeric, entryMemory⟩ := entry.checked memory 2 wellFormed
+  cil_home_store started stored loaded frame holds := (.i32 2) using entryMemory numeric
+  refine invoke_loop_results (by rfl) (by rfl) setup (header memory home)
+    (fun state => state.remaining = 2) (·.remaining.toNat) ⟨2, started, frame, holds⟩
+    (by cil_loop_steps [header, entry.frame, stored, loaded]) rfl ?_
+  rintro ⟨remaining, current, frame, holds⟩ (invariant : remaining = 2)
+  subst invariant
+  have loaded := holds.load (value := .i32 2) rfl
+  cil_home_store updated stored nextLoaded nextFrame nextHolds := (.i32 (2 - 1))
+    using frame holds
+  cil_loop_continue ⟨2 - 1, updated, nextFrame, nextHolds⟩
+    [header, entry.frame, loaded, localResult, stored, nextLoaded]
+  · show (2 - 1 : CIL.W32) = 2
+    decide
+  · show (2 - 1 : CIL.W32).toNat < (2 : CIL.W32).toNat
+    decide
+
+end Tests.LoopVC
