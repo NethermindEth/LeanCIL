@@ -15,6 +15,14 @@ of the remaining elements, so a loop that reads `values[0]` and continues with `
 carries its invariant without unfolding views, slices or byte reads.
 `SpanView.length_word_ne_zero` discharges a `Length != 0` guard for a valid nonempty view.
 
+[`CheckedSpan`](../CIL/Safety/SpanContents.lean) `memory view width writable values` bundles the
+view's validity, access mode and contents, and [`SpanSuffix`](../CIL/Safety/SpanContents.lean)
+is a loop state over such a view. `span.facts` is the view's validity, width and mode for the
+stepper; `span.head` gives the passing guard, a positive length and the first element's
+reference and load; `span.length_nil` makes the guard fail; `span.tail` gives `Slice(1)` and the
+checked suffix; `span.below` moves a checked span into any memory that keeps the caller's, and
+`span.tail_below` slices there while keeping the suffix checked in caller memory.
+
 Callee frames allocate locals above the caller's memory. For well-formed caller memory,
 `SpanView.validate_below`, `SpanView.slice_below` and `SpanContents.after_below` transport validity,
 successful slices and contents to any memory related by `MemoryBelow memory.nextIdentity`, such as
@@ -39,13 +47,14 @@ without growth.
 The [AllZero span loop](../Examples/Proofs/SpanAllZero.lean) decides whether every element of an
 arbitrary-length `ReadOnlySpan<uint>` is zero, with the invariant `remaining.all (· == 0) = result`
 and exact memory preservation. The [Sum span fold](../Examples/Proofs/SpanSum.lean) returns the
-wrapping sum of a `ReadOnlySpan<ulong>` with the invariant `total + remaining.sum = result`; its
-running total lives in a frame home, so its state keeps the span facts in caller memory and
-transports them to the current frame memory with the `_below` lemmas. Its entry comes from
-`bind_entry ... allocating wellFormed`, which names the home, its freshness and write access, and
-the kept caller memory without restating frame setup; see [loop
-scaffolding](PROOFS-BINDING.md#generate-loop-entry-and-cutpoint-scaffolding). Both measure the
-remaining length and cover null empty spans.
+wrapping sum of a `ReadOnlySpan<ulong>` with the invariant `total + remaining.sum = values.sum`;
+its running total lives in a frame home, so its state keeps the `CheckedSpan` suffix in caller
+memory and moves it to the current frame memory with `span.below`. Its entry comes from
+`bind_entry ... allocating wellFormed`, and its state carries the returned `EntryMemory` and
+`NumericEntryHome` across each store with `cil_home_store`; see [loop verification
+conditions](PROOFS-STEPPING.md#loop-verification-conditions). Both measure the remaining length,
+prove the loop inside the public theorem through `invoke_loop_returns` or
+`invoke_loop_results`, and cover null empty spans.
 
 ## Describe buffer contents
 

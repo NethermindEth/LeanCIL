@@ -153,24 +153,36 @@ private def numericLocals (body : Term) : TermElabM (Array NumericLocal) := do
     | _, _ => throwError "Local kinds and initializers must reduce to lists of equal length"
   return found
 
-/-- Introduce each numeric home, the memory after it and its allocation equation. -/
+/-- Introduce each numeric home, the memory after it and its allocation equation, passing them
+    to `continuation` in that order, three per home. -/
 private partial def withNumericHomes {α : Type} (memory : Term) (homes : Array NumericLocal)
-    (position : Nat) (current : Term) (references : Array Expr)
+    (position : Nat) (current : Term) (introduced : Array Expr)
     (continuation : Array Expr → Term → TermElabM α) : TermElabM α := do
   if h : position < homes.size then
     let home := homes[position]
     let reference := mkIdent (Name.mkSimple s!"home{home.index}")
     let allocated := mkIdent (Name.mkSimple s!"allocated{home.index}")
     Meta.withLocalDeclD reference.getId (mkConst ``Reference) fun referenceVar =>
-    Meta.withLocalDeclD allocated.getId (mkConst ``Memory) fun _ => do
+    Meta.withLocalDeclD allocated.getId (mkConst ``Memory) fun allocatedVar => do
       let made ← Term.elabTerm (← `(makeLocal ($memory).nextIdentity $(home.kind) $(home.value)
         $current = Except.ok (LocalSlot.bytes $(home.kind) $reference, [($reference).allocation],
           $allocated))) (some (mkSort .zero))
       Term.synthesizeSyntheticMVarsNoPostponing
-      Meta.withLocalDeclD (Name.mkSimple s!"made{home.index}") (← instantiateMVars made) fun _ =>
-        withNumericHomes memory homes (position + 1) allocated (references.push referenceVar)
-          continuation
-  else continuation references current
+      Meta.withLocalDeclD (Name.mkSimple s!"made{home.index}") (← instantiateMVars made)
+        fun madeVar => withNumericHomes memory homes (position + 1) allocated
+          (introduced ++ #[referenceVar, allocatedVar, madeVar]) continuation
+  else continuation introduced current
+
+/-- Add the theorem `name : ∀ context, statement` proved by `proof`, both closed over the
+    local `context`; frame setup is normalized once and this proof reused, not re-simplified. -/
+private def addClosedTheorem (name : Name) (context : Array Expr) (statement proof : Expr) :
+    TermElabM Unit := do
+  -- Binder types keep assigned universe metavariables until the abstraction is instantiated.
+  let type ← instantiateMVars (← Meta.mkForallFVars context (← instantiateMVars statement))
+  let value ← instantiateMVars (← Meta.mkLambdaFVars context (← instantiateMVars proof))
+  if type.hasMVar || value.hasMVar then
+    throwError "Entry normalization left metavariables in its setup proof"
+  addDecl (.thmDecl { name, levelParams := [], type, value })
 
 /-- Introduce the numeric home references alone. -/
 private partial def withHomeReferences {α : Type} (homes : List NumericLocal)
@@ -188,15 +200,17 @@ private def elabAllocatingEntry (name : Ident)
     (body args memory wellFormed : Term) (facts : Array Term) : CommandElabM Unit := do
   let indexed (base : String) (index : Nat) := mkIdent (Name.mkSimple s!"{base}{index}")
   let kept := mkIdent `kept
-  let (homes, frameBinders, frameParameters, frameValue, transported) ←
+  let setupName := (← getCurrNamespace) ++ name.getId ++ `setup
+  let (homes, frameBinders, frameParameters, frameValue, parameters) ←
       liftTermElabM <| Term.elabBinders binders fun variables => do
     let homes ← numericLocals body
-    withNumericHomes memory homes 0 memory #[] fun references final => do
+    withNumericHomes memory homes 0 memory #[] fun introduced final => do
+      let references := (List.range homes.size).toArray.map (introduced[3 * ·]!)
       let finalValue ← Term.elabTerm final (some (mkConst ``Memory))
       let keptType ← Term.elabTerm (← `(MemoryBelow ($memory).nextIdentity $memory $final))
         (some (mkSort .zero))
       Term.synthesizeSyntheticMVarsNoPostponing
-      Meta.withLocalDeclD kept.getId (← instantiateMVars keptType) fun _ => do
+      Meta.withLocalDeclD kept.getId (← instantiateMVars keptType) fun keptVar => do
         -- Caller span validity survives earlier frame allocations; other facts are kept as is.
         let mut transported := #[]
         for fact in facts do
@@ -243,9 +257,13 @@ private def elabAllocatingEntry (name : Ident)
           let declaration ← selection.fvarId!.getDecl
           let type ← PrettyPrinter.delab declaration.type
           `(Lean.Parser.Term.bracketedBinderF| ($(mkIdent declaration.userName) : $type))
-        let parameters ← selected.mapM fun selection => do
+        let frameParameters ← selected.mapM fun selection => do
           return mkIdent (← selection.fvarId!.getDecl).userName
-        return (homes, frameBinders, parameters, ← PrettyPrinter.delab frame, transported)
+        addClosedTheorem setupName (variables ++ introduced.push keptVar)
+          (← equality.mvarId!.getType) equality
+        let parameters ← variables.mapM fun binder => do
+          return mkIdent (← binder.fvarId!.getDecl).userName
+        return (homes, frameBinders, frameParameters, ← PrettyPrinter.delab frame, parameters)
   let frameName := mkIdent (name.getId ++ `frame)
   let homeNames := homes.map fun home => indexed "home" home.index
   let homeBinders ← homeNames.mapM fun home =>
@@ -280,12 +298,14 @@ private def elabAllocatingEntry (name : Ident)
     steps := steps.push (← `(tactic| have $next:ident := EntryMemory.trans $progress $step))
     progress := next
   steps := steps.push (← `(tactic| have $kept:ident := ($progress).kept))
-  let made := homes.map fun home => indexed "made" home.index
-  let normalizer ← allocationSimplifier body (facts ++ transported) made
   let setup := mkIdent `setup
+  let mut setupArguments : Array Term := parameters
+  for home in homes do
+    setupArguments := setupArguments ++ #[indexed "home" home.index,
+      indexed "allocated" home.index, indexed "made" home.index]
   steps := steps.push (← `(tactic| have $setup:ident :
-    enterFrame $body $args $memory = .ok ($frameApplied, $final) := by
-      simp only [$frameName:term] <;> $normalizer:tactic))
+    enterFrame $body $args $memory = .ok ($frameApplied, $final) :=
+      @$(mkCIdent setupName) $(setupArguments.push kept)*))
   let mut witnesses : Array Term := homeNames.map (⟨·.raw⟩) ++ #[final, setup]
   for (home, position) in homes.zipIdx do
     let mut fact : Term := indexed "numeric" home.index
@@ -325,7 +345,8 @@ elab_rules : command
           throwError "Entry facts do not establish a successful allocation"
         let pair ← instantiateMVars pair
         if pair.hasMVar then throwError "Entry facts leave the allocated frame unresolved"
-        pure (some (← PrettyPrinter.delab pair))
+        let proof ← Meta.mkLambdaFVars variables (← instantiateMVars equality)
+        pure (some (← PrettyPrinter.delab pair, proof))
       else pure none
       unless computed.isSome || witness.isSome ||
           (← Meta.whnf (← instantiateMVars outcome)).isAppOf ``Except.ok do
@@ -341,7 +362,7 @@ elab_rules : command
       | some proof => pure proof
       | none => `(by rfl)
     let resultValue ← match computed with
-      | some pair => pure pair
+      | some (pair, _) => pure pair
       | none => `(((enterFrame $body $args $memory).toOption).get $success)
     elabCommand (← `(def $result $binders* : Frame × Memory := $resultValue))
     let frameValue ← if witness.isSome && computed.isNone then `((@$result $parameters*).1) else
@@ -350,12 +371,18 @@ elab_rules : command
         PrettyPrinter.delab (← Meta.reduce (← instantiateMVars value))
     elabCommand (← `(def $frame $binders* : Frame := $frameValue))
     elabCommand (← `(def $entered $binders* : Memory := (@$result $parameters*).2))
-    let checkedProof ← if computed.isSome then
-      `(by simp only [$frame:term, $entered:term, $result:term]; $normalizer:tactic)
-      else `(entry_result_checked _ $success)
-    elabCommand (← `(theorem $equation $binders* :
-      enterFrame $body $args $memory =
-        .ok (@$frame $parameters*, @$entered $parameters*) := $checkedProof))
+    let statement ← `(enterFrame $body $args $memory =
+      .ok (@$frame $parameters*, @$entered $parameters*))
+    if let some (_, proof) := computed then
+      -- The kernel unfolds the frame and memory definitions to the normalized pair.
+      let equationName := (← getCurrNamespace) ++ equation.getId
+      liftTermElabM <| Term.elabBinders binders fun variables => do
+        let type ← Term.elabType statement
+        Term.synthesizeSyntheticMVarsNoPostponing
+        addClosedTheorem equationName variables type (proof.beta variables)
+    else
+      elabCommand (← `(theorem $equation $binders* : $statement :=
+        entry_result_checked _ $success))
     elabCommand (← `(#print axioms $equation))
     let slots ← liftTermElabM <| Term.elabBinders binders fun _ => do
       frameSlots (← Term.elabTerm (← `(@$frame $parameters*)) none)
@@ -367,12 +394,15 @@ syntax "bind_cutpoint " ident " := " term:max " matching " term:max
   " with " term:max : command
 
 /-- Select an instruction explicitly, including a structural label in a multi-loop method.
-    The requested instruction must exist and satisfy the supplied predicate. -/
+    The requested instruction must exist and satisfy the supplied predicate. Given as
+    `with frame, stack, memory`, the generated state fixes all three instead of taking the stack
+    and memory as arguments. -/
 syntax "bind_cutpoint " ident bracketedBinder* " := " term:max " at " term:max
-  " matching " term:max " with " term:max : command
+  " matching " term:max " with " term:max ("," term:max "," term:max)? : command
 
 elab_rules : command
-  | `(bind_cutpoint $name $binders* := $body at $location matching $predicate with $frame) => do
+  | `(bind_cutpoint $name $binders* := $body at $location matching $predicate with $frame
+      $[, $stack, $memory]?) => do
     liftTermElabM do
       let selected ← Term.elabTermEnsuringType
         (← `(if ($body).code[$location]?.map $predicate = some true then 1 else 0))
@@ -386,8 +416,12 @@ elab_rules : command
     elabCommand (← `(theorem $checked :
       ($body).code[$pc]?.map $predicate = some true := by decide +kernel))
     elabCommand (← `(#print axioms $checked))
-    elabCommand (← `(def $name $binders* (stack : List Value) (memory : Memory) : LoopState :=
-      ⟨$pc, $frame, stack, memory⟩))
+    match stack, memory with
+    | some stack, some memory =>
+      elabCommand (← `(def $name $binders* : LoopState := ⟨$pc, $frame, $stack, $memory⟩))
+    | _, _ =>
+      elabCommand (← `(def $name $binders* (stack : List Value) (memory : Memory) : LoopState :=
+        ⟨$pc, $frame, stack, memory⟩))
 
 elab_rules : command
   | `(bind_cutpoint $name := $body matching $predicate with $frame) => do

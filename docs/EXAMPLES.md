@@ -36,7 +36,7 @@ The `Examples.Bits` methods exercise these APIs, including universal proofs of t
 
 Reachable backward branches and switch targets are admitted when control-flow targets and stack joins validate. Feature reachability uses a fixed point: a backedge that invalidates a constant fact causes affected instructions to be revisited. Recursive managed calls remain unsupported.
 
-Extraction does not establish termination. [The countdown proof](../Examples/Proofs/Countdown.lean) uses `CIL.Safety.loop_terminates` with an invariant describing readable, writable counter storage and the measure `remaining.toNat`. The invariant location is found from the compiled branch instruction. `cil_loop_steps` checks the path between invariant locations and infers its execution cost; each iteration proves a strictly smaller measure; the zero case proves a successful return. `ensures_of_loop` lifts this to `CIL.Safety.Ensures`, so the theorem supplies successful finite execution for every input, including the maximum 32-bit unsigned value, without unrolling billions of iterations. Subtraction cannot underflow because it occurs only when the counter is positive.
+Extraction does not establish termination. [The countdown proof](../Examples/Proofs/Countdown.lean) uses `CIL.Safety.invoke_loop_vc`, which applies `loop_terminates`, with an invariant describing readable, writable counter storage and the measure `remaining.toNat`. The invariant location is found from the compiled branch instruction. `cil_loop_steps` checks the path between invariant locations and infers its execution cost; each iteration proves a strictly smaller measure; the zero case proves a successful return. The rule composes this with frame entry into the `CIL.Safety.Ensures` obligation, so the theorem supplies successful finite execution for every input, including the maximum 32-bit unsigned value, without unrolling billions of iterations. Subtraction cannot underflow because it occurs only when the counter is positive.
 
 The loop suite checks the unchanged universal proof after inserting NOPs and rearranging basic blocks. It also requires that proof to reject both an incorrect result and a loop whose counter never decreases.
 
@@ -53,8 +53,11 @@ caller memory unchanged; `Loops.Sum` returns `values.sum` with wrapping `ulong` 
 frame home holds the running total, and keeps all memory below the caller's allocation watermark.
 Both hold for every length, including null empty spans. Each invariant relates the remaining
 suffix to the answer (`remaining.all (· == 0) = result`, `total + remaining.sum = result`), its
-measure is the suffix length, and `SpanContents.head` and `SpanContents.tail` carry it across one
-`values[0]` read and `values.Slice(1)`. The suite compares both methods with .NET, including
+measure is the suffix length, and `CheckedSpan.head` and `CheckedSpan.tail` carry it across one
+`values[0]` read and `values.Slice(1)`. Each proof states its specification, invariant and
+measure, the next state of each iteration and the facts its steps use; frame entry, the frame
+home and the exit's memory fact come from the [loop verification
+conditions](PROOFS-STEPPING.md#loop-verification-conditions). The suite compares both methods with .NET, including
 `default` spans and wrapping sums, and rejects a build of `AllZero` that replaces every read with
 zero and a build of `Sum` that stops while one element remains.
 

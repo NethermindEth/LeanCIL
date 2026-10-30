@@ -665,7 +665,7 @@ elab_rules : tactic
     withMainContext <| evalTactic (← `(tactic| cil_checked_step_normalized [$[$prepared:term],*]))
 
 /-- `cil_checked_steps` with facts already normalised: enters an `invoke` goal through
-    `invoke_of_run`, then takes checked `run` steps until the goal closes or a step fails,
+    `cil_checked_entry`, then takes checked `run` steps until the goal closes or a step fails,
     leaving that goal. Fails if it takes no step. -/
 syntax "cil_checked_steps_normalized" "[" term,* "]" : tactic
 
@@ -805,10 +805,23 @@ def cilGoalStatesFault : TacticM Bool := withMainContext do
   return (← instantiateMVars (← getMainTarget)).consumeMData.eq?.any
     fun (_, _, result) => result.isAppOf ``Except.error
 
-/-- Succeeds only on a goal stating `.error`; the fault composition lemmas are tried only there,
-    since unifying them against a returning or run-to-run goal costs a failed defeq check. -/
-elab "cil_goal_states_fault" : tactic => do
-  unless ← cilGoalStatesFault do throwError "The goal does not state a fault"
+/-- Enters an `invoke` goal through `invoke_of_run_fault` when it states `.error`, else through
+    `invoke_of_run`, and leaves the goal unchanged when entry fails. A goal already about `run`
+    tries neither, since unifying an entry lemma against it costs a failed defeq check. -/
+syntax "cil_checked_entry" "[" term,* "]" : tactic
+
+open Lean Elab Tactic Meta in
+elab_rules : tactic
+  | `(tactic| cil_checked_entry [$facts:term,*]) => withMainContext do
+    let target := (← instantiateMVars (← getMainTarget)).consumeMData
+    if target.eq?.any (·.2.1.consumeMData.isAppOf ``CIL.Safety.run) then return
+    let entry := mkIdent (if ← cilGoalStatesFault then ``CIL.Safety.invoke_of_run_fault
+      else ``CIL.Safety.invoke_of_run)
+    evalTactic (← `(tactic| try
+      (cil_strict apply $entry
+       · cil_lookup [$facts,*]
+       · cil_checked_side [$facts,*]
+       · cil_checked_side [$facts,*])))
 
 open Lean Elab Tactic Meta in
 /-- One `run` step: prove the method and instruction lookups once, then apply only the
@@ -854,16 +867,7 @@ macro_rules
   | `(tactic| cil_checked_steps_normalized [$facts:term,*]) =>
   `(tactic| (
     try (conv => lhs; arg 2; cil_reduce_fuel)
-    try (first
-      | (cil_goal_states_fault
-         cil_strict apply CIL.Safety.invoke_of_run_fault
-         · cil_lookup [$[$facts:term],*]
-         · cil_checked_side [$[$facts:term],*]
-         · cil_checked_side [$[$facts:term],*])
-      | (cil_strict apply CIL.Safety.invoke_of_run
-         · cil_lookup [$[$facts:term],*]
-         · cil_checked_side [$[$facts:term],*]
-         · cil_checked_side [$[$facts:term],*]))
+    cil_checked_entry [$[$facts:term],*]
     cil_steps_from "cil_checked_steps took no step: the method or instruction lookup, or the \
       first step, did not close; pass the lookup hypothesis, feature facts or step facts"
       cil_checked_run_step [$[$facts:term],*]))

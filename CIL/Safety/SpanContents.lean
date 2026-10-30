@@ -188,6 +188,94 @@ theorem after_below_valid {anchor before after : Memory} {values : List (BitVec 
 
 end SpanContents
 
+/-- A valid view of `memory` in access mode `writable` that holds `values`: the span facts a loop
+    keeps about the suffix it has not consumed yet. -/
+structure CheckedSpan (memory : Memory) (view : SpanView) (width : Nat) (writable : Bool)
+    (values : List (BitVec (8 * width))) : Prop where
+  valid : view.validate memory = .ok ()
+  mode : view.writable = writable
+  contents : SpanContents memory view width values
+
+namespace CheckedSpan
+
+variable {memory : Memory} {view : SpanView} {width : Nat} {writable : Bool}
+
+/-- The view's own checks, as the stepper's span-local facts consume them. -/
+theorem facts {values : List (BitVec (8 * width))}
+    (span : CheckedSpan memory view width writable values) :
+    view.validate memory = .ok () ∧ view.width = width ∧ view.writable = writable :=
+  ⟨span.valid, span.contents.elementWidth, span.mode⟩
+
+/-- The view's element width. -/
+theorem elementWidth {values : List (BitVec (8 * width))}
+    (span : CheckedSpan memory view width writable values) : view.width = width :=
+  span.contents.elementWidth
+
+/-- A checked span of well-formed memory stays checked in any memory that keeps everything below
+    the watermark, such as the memory of a frame entered from it. -/
+theorem below {after : Memory} {values : List (BitVec (8 * width))}
+    (span : CheckedSpan memory view width writable values) (wellFormed : memory.WellFormed)
+    (kept : MemoryBelow memory.nextIdentity memory after) :
+    CheckedSpan after view width writable values :=
+  ⟨view.validate_below span.valid wellFormed kept, span.mode,
+    span.contents.after_below wellFormed kept⟩
+
+/-- An empty checked span has length zero, so a `Length != 0` guard fails. -/
+theorem length_nil (span : CheckedSpan memory view width writable []) :
+    BitVec.ofNat 32 view.length = 0 := by
+  rw [span.contents.length]
+  rfl
+
+/-- A nonempty checked span passes the `Length != 0` guard, has a positive length, and its
+    first element is addressable and loads as `value`. -/
+theorem head {value : BitVec (8 * width)} {rest : List (BitVec (8 * width))}
+    (span : CheckedSpan memory view width writable (value :: rest))
+    (scalar : ScalarWidth width) :
+    ∃ item, (BitVec.ofNat 32 view.length ≠ 0 ∧ 0 < view.length ∧ 1 ≤ view.length) ∧
+      view.element memory 0 = .ok item ∧
+      loadValue memory (.address item) width = .ok (numericOfWidth width value.toNat) := by
+  obtain ⟨item, found, element⟩ := span.contents.head span.valid scalar
+  refine ⟨item, ⟨view.length_word_ne_zero memory span.valid ?_, ?_, ?_⟩, found, element⟩ <;>
+    simp [span.contents.length]
+
+/-- `Slice(1)` of a nonempty checked span is a checked span of the remaining elements. -/
+theorem tail {value : BitVec (8 * width)} {rest : List (BitVec (8 * width))}
+    (span : CheckedSpan memory view width writable (value :: rest)) :
+    ∃ sliced, view.slice memory 1 (view.length - 1) = .ok sliced ∧
+      CheckedSpan memory sliced width writable rest := by
+  obtain ⟨sliced, slicedOK, valid, sameMode, contents⟩ := span.contents.tail span.valid
+  exact ⟨sliced, slicedOK, valid, sameMode.trans span.mode, contents⟩
+
+/-- `Slice(1)` of a nonempty checked span of well-formed memory, taken in any memory that keeps
+    it, is checked in both memories and holds the remaining elements. -/
+theorem tail_below {after : Memory} {value : BitVec (8 * width)}
+    {rest : List (BitVec (8 * width))}
+    (span : CheckedSpan memory view width writable (value :: rest))
+    (wellFormed : memory.WellFormed) (kept : MemoryBelow memory.nextIdentity memory after) :
+    ∃ sliced, view.slice after 1 (view.length - 1) = .ok sliced ∧
+      CheckedSpan memory sliced width writable rest ∧
+      CheckedSpan after sliced width writable rest := by
+  obtain ⟨sliced, slicedOK, next⟩ := span.tail
+  exact ⟨sliced, view.slice_below sliced 1 _ slicedOK wellFormed kept, next,
+    next.below wellFormed kept⟩
+
+end CheckedSpan
+
+/-- The state of a loop that consumes a span from the front: the remaining view, the values it
+    still holds, and its checks in `memory`. -/
+structure SpanSuffix (memory : Memory) (width : Nat) (writable : Bool) where
+  view : SpanView
+  values : List (BitVec (8 * width))
+  checked : CheckedSpan memory view width writable values
+
+#print axioms CheckedSpan.facts
+#print axioms CheckedSpan.elementWidth
+#print axioms CheckedSpan.below
+#print axioms CheckedSpan.length_nil
+#print axioms CheckedSpan.head
+#print axioms CheckedSpan.tail
+#print axioms CheckedSpan.tail_below
+
 #print axioms SpanContents.nil
 #print axioms SpanContents.load
 #print axioms SpanContents.head

@@ -2,6 +2,7 @@ import Extracted
 import Examples.Support
 import CIL.Verification
 import CIL.Safety.LoopScaffold
+import CIL.Safety.LoopVC
 import CIL.Safety.ReturnMemory
 import CIL.Safety.BufferContents
 import CIL.Safety.MemorySteps
@@ -60,18 +61,42 @@ private theorem offset_index {k : W32} (small : k.toNat < 2^31) :
     simp [show 2 * k.toNat < 2^32 by omega]
   rw [this, BitVec.ofInt_natCast]
 
-private theorem terminates (initial : Memory) (base home : Reference) (v : W64) (n : W32)
-    (args : List CIL.Safety.Value) (fresh : initial.nextIdentity ≤ home.allocation)
-    (old : base.allocation < initial.nextIdentity) (small : n.toNat < 2^31)
-    (arguments : args = [.reference (.address base), .scalar (.i64 v), .scalar (.i32 n)])
-    (state : W32 × Memory) (valid : invariant initial base home v n state) :
-    LoopTerminates Extracted.program 0 args (fun final values => values = [] ∧
-        Contents final base 8 (List.replicate n.toNat (v : BitVec (8 * 8))) ∧
-        Confined [(base, 8 * n.toNat)] initial final)
-      (header initial home n state) := by
-  subst arguments
-  apply loop_terminates Extracted.program 0 _ (header initial home n) (invariant initial base home v n)
-    (fun s => n.toNat - s.1.toNat) _ ?_ state valid
+/-- `FillWords` fills `count` words from write authority alone and changes no other caller byte. -/
+theorem fill_words (initial : Memory) (base : Reference) (v : W64) (n : W32) (formed : initial.WellFormed)
+    (valid : form initial base = .ok base) (small : n.toNat < 2^31) (writable : Writable initial base 8 0 n.toNat) :
+    ∃ fuel final, invoke Extracted.program fuel 0 [.reference (.address base), .scalar (.i64 v), .scalar (.i32 n)]
+        initial = .ok (final, []) ∧
+      Contents final base 8 (List.replicate n.toNat (v : BitVec (8 * 8))) ∧
+      Confined [(base, 8 * n.toNat)] initial final := by
+  obtain ⟨home, entered, setup, numeric, entryMemory⟩ := entry.checked initial base v n formed
+  have homeWritable := numeric.writable
+  obtain ⟨allocation, present, _, _⟩ := formed_reference_live _ _ _ valid
+  have old : base.allocation < initial.nextIdentity := (formed.1 _ _ present).1
+  change access entered home 4 1 true = .ok () at homeWritable
+  obtain ⟨m0, written0, stored0, bytes0⟩ := store_numeric_local .word32 (.i32 0) 0 rfl homeWritable
+  simp only [localWidth] at written0 bytes0
+  have loaded0 := load_numeric_local .word32 (.i32 0) 0 rfl bytes0
+  simp only [localResult] at loaded0
+  have storedStep := stored0
+  have loadedStep := loaded0
+  simp only [BitVec.ofNat_eq_ofNat] at storedStep loadedStep
+  obtain ⟨_, homeReady⟩ := access_requirements homeWritable
+  have enteredForm : form entered base = .ok base := by
+    simpa only [form, liveAllocation, entryMemory.kept.allocations _ old] using valid
+  have start : invariant initial base home v n (0, m0) := by
+    refine ⟨by simpa using bytes0, (homeReady.after_write written0).access, ?_, by simp,
+      write_preserves_wellFormed _ _ _ _ _ entryMemory.wellFormed written0,
+      form_after_write written0 enteredForm, ?_⟩
+    · simpa using Filled.start (room := n.toNat)
+        ((writable.after_below entryMemory.kept old).after_write written0)
+    · exact home_confined (Confined.ofMemoryBelow entryMemory.kept (Nat.le_refl _)
+        entryMemory.grown) numeric.fresh written0
+  refine invoke_loop_results (by rfl) ?_ setup (header initial home n)
+    (invariant initial base home v n) (fun s => n.toNat - s.1.toNat) (0, m0)
+    (by cil_loop_steps [entry.frame, header, guard, storedStep, loadedStep]) start ?_
+  · simp [checkedValue, formValue, checkedAt, valid, numericValue, Except.mapError, Bind.bind,
+      Except.bind, Pure.pure, Except.pure, List.mapM_cons, List.mapM_nil]
+  have fresh := numeric.fresh
   rintro ⟨k, m⟩ ⟨readHome, writableHome, filled, bounded, formed, valid, framed⟩
   dsimp only at readHome writableHome filled bounded formed valid framed
   have loaded := load_numeric_local .word32 (.i32 k) k.toNat rfl readHome
@@ -88,7 +113,7 @@ private theorem terminates (initial : Memory) (base home : Reference) (v : W64) 
     cil_loop_finish [entry.frame, header, guard, loaded, stays]
     refine loop_terminates_return (op := .ret none) (by first | (simp only [cil_code]; rfl) | rfl)
       (by first | (simp only [cil_code]; rfl) | rfl)
-      (by cil_checked_step [CIL.truth]) rfl ⟨rfl, filled.1.after_below below old, ?_⟩
+      (by cil_checked_step [CIL.truth]) rfl ⟨⟨filled.1.after_below below old, ?_⟩, rfl⟩
     exact framed.then_below below (by rw [leaveFrame_nextIdentity]; exact Nat.le_refl _)
   · right
     have lower : k.toNat < n.toNat := by omega
@@ -168,46 +193,6 @@ private theorem terminates (initial : Memory) (base home : Reference) (v : W64) 
       simpa using base.element_run_within 8 (first := k.toNat) (count := 1) (outer := 0) (total := n.toNat)
         (Nat.zero_le _) (by omega)
     · dsimp only; omega
-
-/-- `FillWords` fills `count` words from write authority alone and changes no other caller byte. -/
-theorem fill_words (initial : Memory) (base : Reference) (v : W64) (n : W32) (formed : initial.WellFormed)
-    (valid : form initial base = .ok base) (small : n.toNat < 2^31) (writable : Writable initial base 8 0 n.toNat) :
-    ∃ fuel final, invoke Extracted.program fuel 0 [.reference (.address base), .scalar (.i64 v), .scalar (.i32 n)]
-        initial = .ok (final, []) ∧
-      Contents final base 8 (List.replicate n.toNat (v : BitVec (8 * 8))) ∧
-      Confined [(base, 8 * n.toNat)] initial final := by
-  obtain ⟨home, entered, setup, numeric, entryMemory⟩ := entry.checked initial base v n formed
-  have homeWritable := numeric.writable
-  obtain ⟨allocation, present, _, _⟩ := formed_reference_live _ _ _ valid
-  have old : base.allocation < initial.nextIdentity := (formed.1 _ _ present).1
-  change access entered home 4 1 true = .ok () at homeWritable
-  obtain ⟨m0, written0, stored0, bytes0⟩ := store_numeric_local .word32 (.i32 0) 0 rfl homeWritable
-  simp only [localWidth] at written0 bytes0
-  have loaded0 := load_numeric_local .word32 (.i32 0) 0 rfl bytes0
-  simp only [localResult] at loaded0
-  have storedStep := stored0
-  have loadedStep := loaded0
-  simp only [BitVec.ofNat_eq_ofNat] at storedStep loadedStep
-  obtain ⟨_, homeReady⟩ := access_requirements homeWritable
-  have enteredForm : form entered base = .ok base := by
-    simpa only [form, liveAllocation, entryMemory.kept.allocations _ old] using valid
-  have start : invariant initial base home v n (0, m0) := by
-    refine ⟨by simpa using bytes0, (homeReady.after_write written0).access, ?_, by simp,
-      write_preserves_wellFormed _ _ _ _ _ entryMemory.wellFormed written0,
-      form_after_write written0 enteredForm, ?_⟩
-    · simpa using Filled.start (room := n.toNat)
-        ((writable.after_below entryMemory.kept old).after_write written0)
-    · exact home_confined (Confined.ofMemoryBelow entryMemory.kept (Nat.le_refl _)
-        entryMemory.grown) numeric.fresh written0
-  have path : LoopReaches Extracted.program 0 [.reference (.address base), .scalar (.i64 v), .scalar (.i32 n)]
-      ⟨0, entry.frame initial home, [], entered⟩ (header initial home n (0, m0)) := by
-    cil_loop_steps [entry.frame, header, guard, storedStep, loadedStep]
-  obtain ⟨fuel, final, values, executed, returned, contents, framed⟩ := loop_reaches_terminates path
-    (terminates initial base home v n _ numeric.fresh old small rfl (0, m0) start)
-  subst returned
-  refine ⟨fuel, final, invoke_of_run (by rfl) ?_ setup executed, contents, framed⟩
-  simp [checkedValue, formValue, checkedAt, valid, numericValue, Except.mapError, Bind.bind, Except.bind,
-    Pure.pure, Except.pure, List.mapM_cons, List.mapM_nil]
 
 /-- Every nonnegative count fills exactly that many words, whatever the buffer held before. -/
 theorem correctness : Ensures Extracted.program 0

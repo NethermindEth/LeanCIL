@@ -51,7 +51,9 @@ bind_entry entry (memory : Memory) (view : SpanView)
 ```
 
 Facts must suffice to derive a successful entry; unresolved allocation is an error. This uses the
-checked allocator and does not assume a frame layout. For an applied body such as `(body width mode)`,
+checked allocator and does not assume a frame layout. Frame setup is normalized once: the proof
+that computes the frame also proves `entry.checked`, which the kernel checks against the
+generated definitions. For an applied body such as `(body width mode)`,
 include its defining name in `simplifying [body, facts]`.
 The [span loop](../Examples/Proofs/SpanDrain.lean)
 proves method invocation, repeated slicing and parameter reassignment, termination and exact caller
@@ -83,7 +85,9 @@ bytes, writable), and [`EntryMemory`](../CIL/Safety/NumericLocals.lean) `memory 
 (caller memory kept below its watermark, identities grown, well formed). A proof opens it with
 `obtain ⟨home, entered, setup, numeric, entryMemory⟩ := entry.checked ...`; this form generates no
 `entry.result`, `entry.memory` or `homeN` abbreviations, while span and root slots still get
-`slotN`, `loadN` and `storeN`. Homes are threaded through
+`slotN`, `loadN` and `storeN`. `entry.setup` is the setup equation given each home's allocation
+equation `madeN` and `kept`; it is the proof that derived the frame, so `entry.checked` reuses it
+instead of normalizing frame setup again. Homes are threaded through
 [`make_numeric_entry_local`](../CIL/Safety/NumericLocals.lean), and a fact `valid : view.validate
 memory = .ok ()` is also supplied in the memory after the homes through
 [`SpanView.validate_below`](../CIL/Safety/FrameMemoryBelow.lean), so an assigned span parameter
@@ -110,7 +114,10 @@ bind_cutpoint cutpoint (frame : Frame) := Extracted.method0 at inner.latch match
 ```
 
 Structural loop occurrences are ordered by head index. Out-of-range locations and wrong instruction
-shapes are rejected. The explicit-location form also accepts binders for symbolic frames.
+shapes are rejected. The explicit-location form also accepts binders for symbolic frames, and
+`with frame, stack, memory` fixes the stack and memory too, so the generated state is the loop
+head itself, such as the guard stack `[.scalar (.i32 (BitVec.ofNat 32 state.view.length))]` of a
+span loop, with no separate header definition.
 
 [Countdown](../Examples/Proofs/Countdown.lean) uses these commands without literal frame layouts,
 allocation identifiers or instruction offsets. The author still supplies the invariant, measure,
@@ -121,10 +128,12 @@ elaborate the scaffold; ordinary extraction certificates do not grow.
 `cil_store_vc updated stored loaded writable := kind value using ready` derives numeric-store
 progress, readback and retained write authority, then exposes the post-state proof obligation.
 `cil_loop_continue next [facts]` checks the path with `cil_loop_steps`, infers its cost, and leaves
-invariant-preservation and strict-measure-decrease goals. Countdown uses both commands. Failed
-encoding, access, path, invariant or decrease obligations cannot produce a successful proof.
-The author supplies branch cases, next states, invariants, measures and any remaining arithmetic.
-This is not an automatic whole-method VC generator or invariant discovery engine.
+invariant-preservation and strict-measure-decrease goals. The [loop entry
+rules](PROOFS-STEPPING.md#loop-verification-conditions) compose frame entry, the first path and
+these obligations into the method's own theorem. Failed encoding, access, path, invariant or
+decrease obligations cannot produce a successful proof. The author supplies branch cases, next
+states, invariants, measures and any remaining arithmetic. This is not an invariant discovery
+engine.
 
 [FillWords](../Examples/Proofs/FillWords.lean) is a larger result: its contract describes an
 arbitrary-length buffer fill, termination and preservation outside the writable region. See [buffer
