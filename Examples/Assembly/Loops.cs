@@ -4,6 +4,16 @@ namespace Examples;
 
 public static class Loops
 {
+    public static bool AllZero(ReadOnlySpan<uint> values)
+    {
+        while (values.Length != 0)
+        {
+            if (values[0] != 0) return false;
+            values = values.Slice(1);
+        }
+        return true;
+    }
+
     public static int Drain(ReadOnlySpan<int> values)
     {
         while (values.Length != 0)

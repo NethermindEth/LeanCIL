@@ -12,8 +12,8 @@ Proofs can compose previously proved method contracts without unfolding helper b
 
 The [buffer-fill example](Examples/Proofs/FillWords.lean) proves an arbitrary-length fill,
 including termination, the resulting contents and preservation outside the writable region.
-The [span-loop example](Examples/Proofs/SpanDrain.lean) proves termination of repeated slicing
-over symbolic caller storage, with exact memory preservation.
+The [span-content loop](Examples/Proofs/SpanAllZero.lean) proves whether every element is zero
+over arbitrary-length symbolic caller storage, including termination and exact memory preservation.
 
 ```mermaid
 flowchart TD

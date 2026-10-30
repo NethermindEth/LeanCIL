@@ -1,5 +1,13 @@
 # Buffer content proofs
 
+The [AllZero span loop](../Examples/Proofs/SpanAllZero.lean) computes whether every element of an
+arbitrary-length `ReadOnlySpan<uint>` is zero. Its symbolic entry carries caller memory and an
+assigned span parameter throughout execution. `SpanContents` ties that view to a mathematical
+list through `Contents`; the loop invariant preserves the list's all-zero predicate while each
+successful iteration drops one zero element. The theorem includes null empty spans, early false
+returns and exact memory preservation. `Contents.load` and `Contents.drop` supply the read and
+suffix facts; `SpanView.slice_reference` connects the sliced view to the suffix address.
+
 ## Describe buffer contents
 
 `CIL.Safety.BufferContents` states what a contiguous run of integer elements holds, over the checked
