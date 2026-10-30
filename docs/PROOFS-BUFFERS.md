@@ -41,8 +41,11 @@ arbitrary-length `ReadOnlySpan<uint>` is zero, with the invariant `remaining.all
 and exact memory preservation. The [Sum span fold](../Examples/Proofs/SpanSum.lean) returns the
 wrapping sum of a `ReadOnlySpan<ulong>` with the invariant `total + remaining.sum = result`; its
 running total lives in a frame home, so its state keeps the span facts in caller memory and
-transports them to the current frame memory with the `_below` lemmas. Both measure the remaining
-length and cover null empty spans.
+transports them to the current frame memory with the `_below` lemmas. Its entry comes from
+`bind_entry ... allocating wellFormed`, which names the home, its freshness and write access, and
+the kept caller memory without restating frame setup; see [loop
+scaffolding](PROOFS-BINDING.md#generate-loop-entry-and-cutpoint-scaffolding). Both measure the
+remaining length and cover null empty spans.
 
 ## Describe buffer contents
 

@@ -138,6 +138,9 @@ outcome and loop tactics share this closer, `cil_checked_side`. Pass only the fa
 such as `form memory r = .ok r` or a `loadValue` result; these definitions, and the `cil_guard`
 names `observerCount`, `unspecifiedOperands`, `hasUnspecified` and `argumentCount`, need not be
 listed. A closed call steps its caller's continuation from the cleaned `returned ++ rest` stack.
+Over symbolic caller memory, frame setup of a method with numeric locals is not a closed term;
+`bind_entry ... allocating` supplies its setup equation and home facts instead (see [loop
+scaffolding](PROOFS-BINDING.md#generate-loop-entry-and-cutpoint-scaffolding)).
 
 At a return, the tactic leaves the equation between the computed checked result and the stated
 result as a proof goal. It closes that equation automatically only when `with_reducible rfl`
