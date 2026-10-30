@@ -5,7 +5,8 @@ import CIL.Types
 
 The faulting integer instructions: overflow-checked `add.ovf`, `sub.ovf` and `mul.ovf`,
 checked conversions, and division and remainder. Each computes on mathematical integers
-and returns an `ArithmeticFault` instead of a wrapped result.
+and returns an `ArithmeticFault` instead of a wrapped result. `Safety.numberBytes` is the
+little-endian byte encoding shared by stored scalars and returned tuple fields.
 -/
 
 namespace CIL
