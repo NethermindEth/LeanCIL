@@ -5,13 +5,15 @@ using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 
 // Each [`name`](path.lean|path.cs) link in the documentation must name something the file still
-// declares, so a rename or deletion fails here instead of leaving a stale citation.
+// declares, so a rename or deletion fails here instead of leaving a stale citation. Line-number
+// citations drift silently, so any link whose text or anchor names a source line fails.
 var root = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Source())!, ".."));
 var documents = Directory.EnumerateFiles(Path.Combine(root, "docs"), "*.md", SearchOption.AllDirectories)
     .Append(Path.Combine(root, "README.md"))
     .Order(StringComparer.Ordinal)
     .ToArray();
 var link = new Regex(@"\[`(?<label>[^`\]]+)`\]\((?<target>[^)#\s]+\.(?:lean|cs))\)");
+var lineCitation = new Regex(@"\[[^\]]*\.(?:lean|cs):\d[^\]]*\]\(|\]\([^)\s]*\.(?:lean|cs)#L\d");
 var sources = new Dictionary<string, string>(StringComparer.Ordinal);
 List<string> failures = [];
 var checkedReferences = 0;
@@ -19,6 +21,9 @@ foreach (var document in documents)
 {
     var lines = File.ReadAllLines(document);
     for (var index = 0; index < lines.Length; index++)
+    {
+        foreach (Match match in lineCitation.Matches(lines[index]))
+            failures.Add($"{Relative(document)}:{index + 1}: `{match.Value}` cites a source line; cite a declaration name");
         foreach (Match match in link.Matches(lines[index]))
         {
             checkedReferences++;
@@ -34,6 +39,7 @@ foreach (var document in documents)
                 sources[target] = text = File.ReadAllText(target);
             if (Problem(label, target, text) is { } problem) failures.Add(at + ": " + problem);
         }
+    }
 }
 if (failures.Count != 0)
 {
