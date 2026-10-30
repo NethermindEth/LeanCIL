@@ -263,3 +263,9 @@ Correspondence to these primitive methods and the selected .NET BitOperations an
 overloads remains
 a runtime assumption backed by exact signature checks and boundary/runtime comparisons.
 See [SIMD](SIMD.md) and [OPCODES](OPCODES.md).
+
+`Math.DivRem` and the 32-bit and signed 64-bit `Math.BigMul` overloads are modelled from the
+pinned .NET 10 `Math.cs` source: the quotient reuses CIL `div`, narrow operands divide in
+`int` and wrap, and the remainder is `left - quotient * right`. The equal-width tuple layout is
+recomputed from metadata and probed at run time. Correspondence to the runtime remains an
+assumption backed by exact signature checks and boundary comparisons that include both faults.

@@ -534,8 +534,28 @@ Signed types also admit `Abs` and `Sign`, with the same overflow behavior and `i
 These exact signatures share the checked integer semantics used for `System.Math`.
 
 `System.Math.BigMul(ulong, ulong, out ulong)` returns the high 64 bits of the unsigned product and writes the low 64 bits through the checked output reference. The destination must be live, in bounds and writable; its previous bytes need not be initialized. `CIL.Safety.bigMul64_succeeds` exposes the exact result, low-word readback, allocation preservation and preservation of cells outside the output's eight bytes.
+`Math.BigMul(long, long, out long)` writes the same low word and returns the signed high word
+`CIL.WideMultiply.signedHigh64`; `signedHigh64_decomposition` proves that the high word's signed
+value times `2^64` plus the low word's unsigned value is the exact `Int` product, and
+`CIL.Safety.bigMul64_signed_succeeds` gives the same memory guarantees as the unsigned overload.
+`Math.BigMul(int, int)` and `Math.BigMul(uint, uint)` return the exact product as a `long` or
+`ulong` stack value; they never fault.
 
-Native-width overloads use the validated 64-bit target. The 128-bit, generic-math and other unlisted helper overloads remain unsupported. The extractor validates the exact .NET 10 runtime assembly identity, declaring type, static calling convention and signature. These portable API semantics do not require any ISA to be enabled and do not establish correctness of a particular runtime implementation.
+`System.Math.DivRem(T, T)` returns `(T Quotient, T Remainder)` for `sbyte`, `byte`, `short`,
+`ushort`, `int`, `uint`, `long`, `ulong`, `nint` and `nuint`. The result is an aggregate with
+Item1 at offset 0 and Item2 at the element width; extraction requires the recomputed equal-width
+`ValueTuple<T, T>` layout to match it. `Math.DivRem(int, int, out int)` and
+`Math.DivRem(long, long, out long)` push the quotient and store the remainder through the
+checked output reference. Every overload follows the pinned runtime source: the quotient is the
+CIL `div` of the operands and the remainder is `left - quotient * right` with wrapping. A zero
+divisor raises `DivideByZeroException` and, for `int`, `long` and `nint`, `MinValue / -1` raises
+`OverflowException`, both before any output store. The narrow overloads divide in `int` and
+truncate, so `sbyte.MinValue / -1` and `short.MinValue / -1` return the wrapped quotient
+`MinValue` and remainder 0 rather than faulting. `CIL.divRemBits_signed`,
+`divRemBits_unsigned` and `divRemBits_narrow_signed` state the exact quotient and remainder,
+and `divRemBits_zero` and `divRemBits_overflow` the faults.
+
+Native-width overloads use the validated 64-bit target. The 128-bit (`Int128` and `UInt128` `BigMul`), generic-math and other unlisted helper overloads remain unsupported. The extractor validates the exact .NET 10 runtime assembly identity, declaring type, static calling convention and signature. These portable API semantics do not require any ISA to be enabled and do not establish correctness of a particular runtime implementation.
 
 `BinaryPrimitives.Read{Int,UInt}{16,32,64}{Little,Big}Endian`, their `TryRead` forms,
 native-width `IntPtr`/`UIntPtr` counterparts,
