@@ -80,7 +80,7 @@ partial class Program
             profile.LittleEndian, profile.AdvSimd, profile.Sse2, profile.Ssse3, profile.Sse42,
             profile.Avx, profile.Avx2, profile.Avx512F, profile.Avx512FVL, profile.Bmi1,
             profile.Sse41, profile.Avx512DQ, profile.Avx512DQVL, profile.Bmi2, profile.ArmBase64,
-            profile.Vector256Accelerated, profile.X86Base64, profile.Vector128Accelerated
+            profile.Vector256Accelerated, profile.X86Base64, profile.Vector128Accelerated, profile.Avx512Vbmi
         }.Select(value => AuditConstant(value ? "Bool.true" : "Bool.false"))).ToArray()
     };
 

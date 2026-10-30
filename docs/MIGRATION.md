@@ -170,3 +170,14 @@ Direct `call` instructions may target admitted same-assembly struct instance met
 ## Generic method specialization
 
 Reachable generic methods on admitted non-generic declaring types now produce closed CIL bodies. Artifact manifests record the original definition, metadata token and concrete type arguments; regenerate artifacts with the updated extractor. CIL execution APIs and theorem namespaces are unchanged. Select a non-generic entry whose compiled calls provide the required instantiations.
+
+## Loop facts from the context
+
+`cil_loop_steps`, `cil_loop_finish` and `cil_loop_continue` take an optional fact list and add
+the facts the proof context determines (see [loop verification
+conditions](PROOFS-STEPPING.md#loop-verification-conditions)). A step equation in the context is
+now used whenever its instruction is reached, so a run that stopped at such an instruction to be
+crossed by hand continues past it: drop the manual `loop_reaches_next` and the second
+`cil_loop_steps`, as `FillWords` does. The `simplifying` form of `bind_entry` gives `entry.frame`
+only the binders its layout mentions, such as `entry.frame memory view`; drop the proof arguments
+from its uses. `bind_cutpoint` accepts its frame, stack and memory without parentheses.

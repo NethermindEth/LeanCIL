@@ -30,9 +30,8 @@ private structure State (memory : Memory) (home : Reference) where
 
 -- The loop guard observes the remaining span length.
 bind_cutpoint header (memory : Memory) (home : Reference) (state : State memory home) :=
-  Extracted.method0 at loop.latch matching
-    (fun op => match op with | .brnonzero _ => true | _ => false)
-  with (entry.frame memory state.suffix.view home),
+  Extracted.method0 at loop.latch matching (· matches .brnonzero _)
+  with entry.frame memory state.suffix.view home,
     [.scalar (.i32 (BitVec.ofNat 32 state.suffix.view.length))], state.current
 
 /-- `Sum` returns the wrapping sum of a valid readonly span's contents, for any length, and
@@ -46,29 +45,19 @@ theorem correctness (memory : Memory) (view : SpanView) (values : List W64)
     entry.checked memory view wellFormed valid contents.elementWidth readOnly
   cil_home_store started stored loaded frame holds := (.i64 0) using entryMemory numeric
   have span : CheckedSpan memory view 8 false values := ⟨valid, readOnly, contents⟩
-  refine invoke_loop_results Extracted.lookup0
-    (by simp [cil_checked, valid]) setup (header memory home)
-    (fun state => state.total + state.suffix.values.sum = values.sum)
+  refine invoke_loop_results Extracted.lookup0 (by simp [cil_checked, valid]) setup
+    (header memory home) (fun state => state.total + state.suffix.values.sum = values.sum)
     (·.suffix.values.length) ⟨⟨view, values, span⟩, 0, started, frame, holds⟩
-    (by cil_loop_steps [header, entry.frame, stored, (span.below wellFormed
-      frame.kept).facts]) (by simp) ?_
+    (by cil_loop_steps) (by simp) ?_
   rintro ⟨⟨view, remaining, span⟩, total, current, frame, holds⟩ invariant
-  have here := span.below wellFormed frame.kept
-  have loaded := holds.load (value := .i64 total) rfl
   cases remaining with
-  | nil =>
-    left
-    cil_loop_finish [header, entry.frame, here.facts, here.length_nil, loaded,
-      localResult, frame.leave setup, invariant.symm]
+  | nil => exact .inl (by cil_loop_finish [invariant.symm])
   | cons value remaining =>
-    obtain ⟨item, guard, found, element⟩ := here.head (by decide)
+    obtain ⟨item, -, found, element⟩ := (span.within wellFormed frame).head (by decide)
     cil_home_store updated stored nextLoaded nextFrame nextHolds := (.i64 (total + value))
       using frame holds
     obtain ⟨sliced, slicedOK, next, there⟩ := span.tail_below wellFormed nextFrame.kept
     cil_loop_continue ⟨⟨sliced, remaining, next⟩, total + value, updated, nextFrame, nextHolds⟩
-      [header, entry.frame, here.facts, (span.below wellFormed nextFrame.kept).facts,
-        guard, found, element, numericOfWidth, BitVec.ofNat_toNat, loaded, localResult, stored,
-        nextLoaded, slicedOK, there.facts]
     · simpa [BitVec.add_assoc] using invariant
     · simp
 #print axioms correctness

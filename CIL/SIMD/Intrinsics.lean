@@ -44,13 +44,13 @@ inductive AdvSimdIntrinsic where
 
 /-- SSE2 and SSSE3 intrinsics. -/
 inductive SSEIntrinsic where
-  | shiftLeftBytes | alignBytes
+  | shiftLeftBytes | alignBytes | shuffleBytes
   deriving DecidableEq, Repr
 
 /-- AVX2 intrinsics on 256-bit vectors. -/
 inductive AVX2Intrinsic where
   | permute4x64 | blend32 | add64 | eq64 | signedgt64 | multiplyEven32 | shr64 | shl64
-  | band | bor | bxor | andNot | shr64Count | shl64Count
+  | band | bor | bxor | andNot | shr64Count | shl64Count | shuffleBytes
   deriving DecidableEq, Repr
 
 /-- AVX-512F intrinsics; the 512-bit comparisons need only AVX-512F, the rest also VL. -/
@@ -194,7 +194,7 @@ def evalIntrinsic (op : Intrinsic) (args : List Value) : Option Value := do
   | .vector .byteToBool, [.i32 a] =>
     if a.toNat < 256 then some (.i32 a) else none
   | .vector .byteToBool, [.i8 a] => some (.i32 (a.setWidth 32))
-  -- 128-bit byte alignment: ARM AdvSimd and SSE/SSSE3.
+  -- 128-bit byte alignment and shuffles: ARM AdvSimd and SSE/SSSE3.
   | .advSimd .extract64, [.v128 a, .v128 b, i] =>
     let c ← immediate i
     if c.toNat < 2 then some (.v128 (Vector.advExtract64 a b c.toNat)) else none
@@ -204,6 +204,8 @@ def evalIntrinsic (op : Intrinsic) (args : List Value) : Option Value := do
   | .sse .alignBytes, [.v128 a, .v128 b, i] =>
     let c ← immediate i
     some (.v128 (Vector.ssseAlignBytes a b c.toNat))
+  | .sse .shuffleBytes, [.v128 source, .v128 control] =>
+    some (.v128 (Vector.shuffleBytes128 source control))
   -- AVX and AVX2.
   | .avx .moveMask64, [.v256 a] => some (.i32 (Vector.moveMask64 a))
   | .avx .moveMask32, [.v256 a] => some (.i32 (Vector.moveMask32 a))
@@ -235,6 +237,8 @@ def evalIntrinsic (op : Intrinsic) (args : List Value) : Option Value := do
   | .avx2 .signedgt64, [.v256 a, .v256 b] =>
     some (.v256 (Vector.zip256 (fun x y => Vector.mask64 (decide (y.toInt < x.toInt))) a b))
   | .avx2 .multiplyEven32, [.v256 a, .v256 b] => some (.v256 (Vector.multiplyEven32 a b))
+  | .avx2 .shuffleBytes, [.v256 source, .v256 control] =>
+    some (.v256 (Vector.shuffleBytes256 source control))
   | .avx2 .shr64, [.v256 a, i] =>
     let count ← immediate i
     some (.v256 (Vector.map256 (· >>> count.toNat) a))

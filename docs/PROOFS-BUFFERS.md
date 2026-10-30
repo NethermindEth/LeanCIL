@@ -19,9 +19,11 @@ carries its invariant without unfolding views, slices or byte reads.
 view's validity, access mode and contents, and [`SpanSuffix`](../CIL/Safety/SpanContents.lean)
 is a loop state over such a view. `span.facts` is the view's validity, width and mode for the
 stepper; `span.head` gives the passing guard, a positive length and the first element's
-reference and load; `span.length_nil` makes the guard fail; `span.tail` gives `Slice(1)` and the
-checked suffix; `span.below` moves a checked span into any memory that keeps the caller's, and
-`span.tail_below` slices there while keeping the suffix checked in caller memory.
+reference and load; `span.length_cons` is the passing guard alone and `span.length_nil` makes it
+fail; `span.tail` gives `Slice(1)` and the checked suffix; `span.below` moves a checked span into
+any memory that keeps the caller's, [`CheckedSpan.within`](../CIL/Safety/LoopVC.lean) into the
+memory of a frame entered from it, and `span.tail_below` slices there while keeping the suffix
+checked in caller memory. The loop tactics take these facts from a `CheckedSpan` in context.
 
 Callee frames allocate locals above the caller's memory. For well-formed caller memory,
 `SpanView.validate_below`, `SpanView.slice_below` and `SpanContents.after_below` transport validity,
@@ -47,14 +49,14 @@ without growth.
 The [AllZero span loop](../Examples/Proofs/SpanAllZero.lean) decides whether every element of an
 arbitrary-length `ReadOnlySpan<uint>` is zero, with the invariant `remaining.all (· == 0) = result`
 and exact memory preservation. The [Sum span fold](../Examples/Proofs/SpanSum.lean) returns the
-wrapping sum of a `ReadOnlySpan<ulong>` with the invariant `total + remaining.sum = values.sum`;
-its running total lives in a frame home, so its state keeps the `CheckedSpan` suffix in caller
-memory and moves it to the current frame memory with `span.below`. Its entry comes from
+wrapping sum of a `ReadOnlySpan<ulong>` with the invariant `total + remaining.sum = values.sum`; its
+running total lives in a frame home, so its state keeps the `CheckedSpan` suffix in caller memory,
+which the loop tactics move to the current frame memory with `span.within`. Its entry comes from
 `bind_entry ... allocating wellFormed`, and its state carries the returned `EntryMemory` and
 `NumericEntryHome` across each store with `cil_home_store`; see [loop verification
 conditions](PROOFS-STEPPING.md#loop-verification-conditions). Both measure the remaining length,
-prove the loop inside the public theorem through `invoke_loop_returns` or
-`invoke_loop_results`, and cover null empty spans.
+prove the loop inside the public theorem through `invoke_loop_returns` or `invoke_loop_results`, and
+cover null empty spans.
 
 ## Describe buffer contents
 

@@ -25,7 +25,9 @@ theorem supported :
     featureGetter (getter "Vector256" "get_IsHardwareAccelerated") = some .vector256Accelerated ∧
     featureGetter (getter "X86.Sse41" "get_IsSupported") = some .sse41 ∧
     featureGetter (getter "Arm.ArmBase/Arm64" "get_IsSupported") = some .armBase64 ∧
-    featureGetter (getter "Arm.AdvSimd/Arm64" "get_IsSupported") = some .advSimd := by
+    featureGetter (getter "Arm.AdvSimd/Arm64" "get_IsSupported") = some .advSimd ∧
+    featureGetter (getter "X86.Avx512Vbmi" "get_IsSupported") = some .avx512Vbmi ∧
+    featureGetter (getter "X86.Avx512Vbmi/VL" "get_IsSupported") = some .avx512Vbmi := by
   decide +kernel
 #print axioms supported
 
@@ -41,9 +43,26 @@ theorem wrong_names :
 theorem unclassified_nested :
     featureGetter (getter "Arm.Crc32/Arm64" "get_IsSupported") = none ∧
     featureGetter (getter "Arm.Rdm/Arm64" "get_IsSupported") = none ∧
-    featureGetter (getter "Arm.AdvSimd/Arm64" "get_IsHardwareAccelerated") = none := by
+    featureGetter (getter "Arm.AdvSimd/Arm64" "get_IsHardwareAccelerated") = none ∧
+    featureGetter (getter "X86.Avx512Vbmi2/VL" "get_IsSupported") = none ∧
+    featureGetter (getter "X86.Avx512Vbmi/VL" "get_IsHardwareAccelerated") = none := by
   decide +kernel
 #print axioms unclassified_nested
+
+/-- The x86-64-v3 capabilities, with AVX-512 and VBMI left to each case. -/
+def v3Profile : FeatureProfile := {
+  architecture := .x64, x86Base64 := true, sse2 := true, ssse3 := true, sse41 := true,
+  sse42 := true, avx := true, avx2 := true, bmi1 := true, bmi2 := true,
+  vector128Accelerated := true, vector256Accelerated := true }
+
+/-- `x64-v4` with VBMI declared is valid; VBMI without AVX-512 is not. -/
+theorem vbmi_profiles :
+    { v3Profile with
+      avx512F := true, avx512FVL := true, avx512DQ := true, avx512DQVL := true
+      avx512Vbmi := true }.Valid ∧
+    ¬ { v3Profile with avx512Vbmi := true }.Valid := by
+  decide +kernel
+#print axioms vbmi_profiles
 
 /-- Truncation, an incorrect assembly and trailing signature bytes all fail exact matching. -/
 theorem wrong_prefix_or_tail :

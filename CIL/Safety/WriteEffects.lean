@@ -27,6 +27,25 @@ theorem write_allocations (m result : Memory) (r : Reference) (bytes : List (Bit
   · cases h
   · cases h; rfl
 
+/-- A checked write records exactly its write view and allocates nothing. -/
+theorem write_views_nextIdentity {memory result : Memory} {reference : Reference}
+    {bytes : List (BitVec 8)} {alignment : Nat}
+    (written : write memory reference bytes alignment = .ok result) :
+    result.views = writeViews memory reference bytes.length ∧
+      result.nextIdentity = memory.nextIdentity := by
+  unfold write at written
+  cases ready : access memory reference bytes.length alignment true <;>
+    simp only [ready, Bind.bind, Except.bind, Pure.pure, Except.pure] at written
+  · cases written
+  · cases written; exact ⟨rfl, rfl⟩
+
+/-- A checked write allocates nothing, so the identity watermark is unchanged. -/
+theorem write_nextIdentity {memory result : Memory} {reference : Reference}
+    {bytes : List (BitVec 8)} {alignment : Nat}
+    (written : write memory reference bytes alignment = .ok result) :
+    result.nextIdentity = memory.nextIdentity :=
+  (write_views_nextIdentity written).2
+
 /-- A write leaves every cell outside its interval unchanged. -/
 theorem write_outside (m result : Memory) (r : Reference) (bytes : List (BitVec 8))
     (alignment id offset : Nat) (h : write m r bytes alignment = .ok result)
@@ -150,6 +169,8 @@ theorem write_readback (m result : Memory) (r : Reference) (bytes : List (BitVec
   rw [same] at snapshot
   exact snapshot
 
+#print axioms write_views_nextIdentity
+#print axioms write_nextIdentity
 #print axioms write_outside
 #print axioms write_preserves_initialization
 #print axioms AccessRequirements.after_write

@@ -1,3 +1,4 @@
+using System;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 
@@ -52,4 +53,8 @@ public static class DivisionIntrinsics
     public static void Init128(ref Vector128<ulong> value) => value = default;
     public static void Init256(ref Vector256<ulong> value) => value = default;
     public static void Init512(ref Vector512<ulong> value) => value = default;
+    public static Vector256<byte> Shuffle256(ReadOnlySpan<byte> source, ReadOnlySpan<byte> control) =>
+        Avx2.Shuffle(Vector256.Create(source), Vector256.Create(control));
+    public static Vector128<byte> Shuffle128(ReadOnlySpan<byte> source, ReadOnlySpan<byte> control) =>
+        Ssse3.Shuffle(Vector128.Create(source), Vector128.Create(control));
 }

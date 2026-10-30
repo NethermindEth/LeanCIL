@@ -20,6 +20,8 @@ abbrev V512 := BitVec 512
 
 /-- Lane zero occupies the least significant bits, matching little-endian byte memory. -/
 def lane64 (x : BitVec n) (i : Nat) : W64 := x.extractLsb' (64 * i) 64
+/-- Byte `i`, byte zero least significant. -/
+def lane8 (x : BitVec n) (i : Nat) : BitVec 8 := x.extractLsb' (8 * i) 8
 /-- 32-bit lane `i`, lane zero least significant. -/
 def lane32 (x : BitVec n) (i : Nat) : W32 := x.extractLsb' (32 * i) 32
 /-- The 128-bit vector with 64-bit lanes `a0` and `a1`, `a0` lowest. -/

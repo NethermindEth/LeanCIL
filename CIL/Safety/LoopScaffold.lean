@@ -32,7 +32,9 @@ theorem enterFrame_isSome (body : CIL.Method) (args : List Value) (memory : Memo
 #print axioms enterFrame_isSome
 
 /-- Derive parameterized frames, memory and numeric homes from checked allocation.
-    Entry must reduce to success or have an explicit proof; no failure receives a default. -/
+    Entry must reduce to success or have an explicit proof; no failure receives a default.
+    The frame, slot facts and a normalized entry's result and memory unfold in the loop
+    tactics in this scope. -/
 syntax "bind_entry " ident bracketedBinder* " := " term:max
   " with " term:max " from " term:max (" using " term:max)? (" allocating " term:max)?
   (" simplifying " "[" term,* "]")? : command
@@ -93,7 +95,8 @@ private def frameSlots (frame : Expr) : TermElabM (Array SlotFacts) := do
   return homes
 
 /-- Emit `homeN` for byte homes when `addresses` holds, and `slotN`, `loadN` and `storeN` for
-    span and root slots. -/
+    span and root slots. Stepping needs no `loadN` or `storeN`: they instantiate `cil_checked`
+    lemmas. -/
 private def emitSlots (name : Ident)
     (binders : TSyntaxArray ``Lean.Parser.Term.bracketedBinder)
     (slots : Array SlotFacts) (addresses : Bool) : CommandElabM Unit := do
@@ -193,6 +196,25 @@ private partial def withHomeReferences {α : Type} (homes : List NumericLocal)
     Meta.withLocalDeclD (Name.mkSimple s!"home{home.index}") (mkConst ``Reference) fun _ =>
       withHomeReferences rest continuation
 
+/-- The binders among `variables` that `value` mentions, with the binders their types mention,
+    as binder syntax and as arguments: a frame takes only what its layout depends on. -/
+private def mentionedBinders (variables : Array Expr) (value : Expr) :
+    TermElabM (Array (TSyntax ``Lean.Parser.Term.bracketedBinderF) × Array Ident) := do
+  let userIds := variables.map Expr.fvarId!
+  let mut needed := (collectFVars {} (← instantiateMVars value)).fvarIds.filter userIds.contains
+  for binder in variables.reverse do
+    if needed.contains binder.fvarId! then
+      let dependencies := (collectFVars {} (← binder.fvarId!.getType)).fvarIds
+      needed := needed ++ dependencies.filter userIds.contains
+  let selected := variables.filter (needed.contains ·.fvarId!)
+  let binders ← selected.mapM fun selection => do
+    let declaration ← selection.fvarId!.getDecl
+    let type ← PrettyPrinter.delab declaration.type
+    `(Lean.Parser.Term.bracketedBinderF| ($(mkIdent declaration.userName) : $type))
+  let arguments ← selected.mapM fun selection => do
+    return mkIdent (← selection.fvarId!.getDecl).userName
+  return (binders, arguments)
+
 /-- Derive an entry whose numeric locals allocate homes in symbolic memory. The frame is
     explicit in opaque home references, and the checked theorem yields them existentially. -/
 private def elabAllocatingEntry (name : Ident)
@@ -246,19 +268,7 @@ private def elabAllocatingEntry (name : Ident)
         for fvar in mentioned do
           unless homeIds.contains fvar || userIds.contains fvar do
             throwError "The entered frame depends on intermediate allocation state"
-        -- The frame takes only the binders its layout mentions, with their dependencies.
-        let mut needed := mentioned.filter userIds.contains
-        for binder in variables.reverse do
-          if needed.contains binder.fvarId! then
-            let dependencies := (collectFVars {} (← binder.fvarId!.getType)).fvarIds
-            needed := needed ++ dependencies.filter userIds.contains
-        let selected := variables.filter (needed.contains ·.fvarId!)
-        let frameBinders ← selected.mapM fun selection => do
-          let declaration ← selection.fvarId!.getDecl
-          let type ← PrettyPrinter.delab declaration.type
-          `(Lean.Parser.Term.bracketedBinderF| ($(mkIdent declaration.userName) : $type))
-        let frameParameters ← selected.mapM fun selection => do
-          return mkIdent (← selection.fvarId!.getDecl).userName
+        let (frameBinders, frameParameters) ← mentionedBinders variables frame
         addClosedTheorem setupName (variables ++ introduced.push keptVar)
           (← equality.mvarId!.getType) equality
         let parameters ← variables.mapM fun binder => do
@@ -271,6 +281,7 @@ private def elabAllocatingEntry (name : Ident)
   let allBinders : TSyntaxArray ``Lean.Parser.Term.bracketedBinder :=
     (frameBinders ++ homeBinders).map (⟨·.raw⟩)
   elabCommand (← `(def $frameName $allBinders* : Frame := $frameValue))
+  elabCommand (← `(attribute [local cil_loop_unfold] $frameName))
   let frameApplied ← `($frameName $(frameParameters ++ homeNames)*)
   let entered := mkIdent `entered
   let final := match homes.back? with
@@ -365,14 +376,25 @@ elab_rules : command
       | some (pair, _) => pure pair
       | none => `(((enterFrame $body $args $memory).toOption).get $success)
     elabCommand (← `(def $result $binders* : Frame × Memory := $resultValue))
-    let frameValue ← if witness.isSome && computed.isNone then `((@$result $parameters*).1) else
-      liftTermElabM <| Term.elabBinders binders fun _ => do
+    -- A normalized frame takes only the binders its layout mentions.
+    let (frameBinders, frameParameters, frameValue) ←
+      if witness.isSome && computed.isNone then
+        pure (binders, parameters, ← `((@$result $parameters*).1))
+      else liftTermElabM <| Term.elabBinders binders fun variables => do
         let value ← Term.elabTerm (← `((@$result $parameters*).1)) (some (mkConst ``Frame))
-        PrettyPrinter.delab (← Meta.reduce (← instantiateMVars value))
-    elabCommand (← `(def $frame $binders* : Frame := $frameValue))
+        let value ← Meta.reduce (← instantiateMVars value)
+        let delaborated ← PrettyPrinter.delab value
+        if computed.isNone then return (binders, parameters, delaborated)
+        let (selected, arguments) ← mentionedBinders variables value
+        return (selected.map (⟨·.raw⟩), arguments, delaborated)
+    elabCommand (← `(def $frame $frameBinders* : Frame := $frameValue))
     elabCommand (← `(def $entered $binders* : Memory := (@$result $parameters*).2))
+    elabCommand (← `(attribute [local cil_loop_unfold] $frame))
+    -- Only a normalized pair unfolds to a literal memory; `Option.get` of setup would not.
+    if computed.isSome then
+      elabCommand (← `(attribute [local cil_loop_unfold] $result $entered))
     let statement ← `(enterFrame $body $args $memory =
-      .ok (@$frame $parameters*, @$entered $parameters*))
+      .ok (@$frame $frameParameters*, @$entered $parameters*))
     if let some (_, proof) := computed then
       -- The kernel unfolds the frame and memory definitions to the normalized pair.
       let equationName := (← getCurrNamespace) ++ equation.getId
@@ -385,20 +407,21 @@ elab_rules : command
         entry_result_checked _ $success))
     elabCommand (← `(#print axioms $equation))
     let slots ← liftTermElabM <| Term.elabBinders binders fun _ => do
-      frameSlots (← Term.elabTerm (← `(@$frame $parameters*)) none)
+      frameSlots (← Term.elabTerm (← `(@$frame $frameParameters*)) none)
     emitSlots name binders slots true
 
 /-- Derive the unique matching cutpoint and a state constructor from the extracted body.
-    Ambiguous or missing matches fail the kernel-checked uniqueness obligation. -/
+    Ambiguous or missing matches fail the kernel-checked uniqueness obligation. The state
+    unfolds in the loop tactics in this scope. -/
 syntax "bind_cutpoint " ident " := " term:max " matching " term:max
-  " with " term:max : command
+  " with " term : command
 
 /-- Select an instruction explicitly, including a structural label in a multi-loop method.
     The requested instruction must exist and satisfy the supplied predicate. Given as
     `with frame, stack, memory`, the generated state fixes all three instead of taking the stack
-    and memory as arguments. -/
+    and memory as arguments. The generated state unfolds in the loop tactics in this scope. -/
 syntax "bind_cutpoint " ident bracketedBinder* " := " term:max " at " term:max
-  " matching " term:max " with " term:max ("," term:max "," term:max)? : command
+  " matching " term:max " with " term ("," term "," term)? : command
 
 elab_rules : command
   | `(bind_cutpoint $name $binders* := $body at $location matching $predicate with $frame
@@ -422,6 +445,7 @@ elab_rules : command
     | _, _ =>
       elabCommand (← `(def $name $binders* (stack : List Value) (memory : Memory) : LoopState :=
         ⟨$pc, $frame, stack, memory⟩))
+    elabCommand (← `(attribute [local cil_loop_unfold] $name))
 
 elab_rules : command
   | `(bind_cutpoint $name := $body matching $predicate with $frame) => do
@@ -446,5 +470,6 @@ elab_rules : command
     elabCommand (← `(#print axioms $checked))
     elabCommand (← `(def $name (stack : List Value) (memory : Memory) : LoopState :=
       ⟨$pc, $frame, stack, memory⟩))
+    elabCommand (← `(attribute [local cil_loop_unfold] $name))
 
 end CIL.Safety

@@ -7,8 +7,7 @@ instruction from an extracted method:
 
 ```lean
 bind_entry entry := Extracted.method0 with [] from Examples.empty
-bind_cutpoint cutpoint := Extracted.method0 matching
-  (fun op => match op with | .brnonzero _ => true | _ => false) with entry.frame
+bind_cutpoint cutpoint := Extracted.method0 matching (· matches .brnonzero _) with entry.frame
 ```
 
 `entry.frame`, `entry.memory` and `entry.home0` (and subsequent numeric homes) come from
@@ -51,7 +50,9 @@ bind_entry entry (memory : Memory) (view : SpanView)
 ```
 
 Facts must suffice to derive a successful entry; unresolved allocation is an error. This uses the
-checked allocator and does not assume a frame layout. Frame setup is normalized once: the proof
+checked allocator and does not assume a frame layout. The normalized `entry.frame` takes only the
+binders its layout mentions, here `entry.frame memory view`, while `entry.memory`, `entry.result`
+and `entry.checked` take them all. Frame setup is normalized once: the proof
 that computes the frame also proves `entry.checked`, which the kernel checks against the
 generated definitions. For an applied body such as `(body width mode)`,
 include its defining name in `simplifying [body, facts]`.
@@ -96,6 +97,13 @@ without a checked initializer, a vector argument home or a numeric parameter hom
 [SpanSum](../Examples/Proofs/SpanSum.lean), [FillWords](../Examples/Proofs/FillWords.lean) and
 [Struct](../Examples/Proofs/Struct.lean) enter this way.
 
+`bind_entry` gives `entry.frame` and, for the `simplifying` form, `entry.result` and
+`entry.memory` the `cil_loop_unfold` simp attribute in the current scope, and `bind_cutpoint` gives
+it the generated state, so the loop tactics unfold them without naming them; see [loop
+verification conditions](PROOFS-STEPPING.md#loop-verification-conditions). The slot facts
+`entry.loadN` and `entry.storeN` instantiate `cil_checked` lemmas that stepping already uses, so
+loop proofs need not pass them.
+
 `cutpoint stack memory` constructs the loop state. `cutpoint.checked` proves the selected
 instruction satisfies the predicate and is its unique match. Missing or ambiguous matches are
 errors. The predicate locates an instruction; it does not prove that it is a loop header or that
@@ -110,7 +118,7 @@ with frame` checks that particular instruction rather than requiring a unique pr
 bind_loop outer := Extracted.method0 [0]
 bind_loop inner := Extracted.method0 [1]
 bind_cutpoint cutpoint (frame : Frame) := Extracted.method0 at inner.latch matching
-  (fun op => match op with | .brnonzero _ => true | _ => false) with frame
+  (· matches .brnonzero _) with frame
 ```
 
 Structural loop occurrences are ordered by head index. Out-of-range locations and wrong instruction
@@ -127,7 +135,8 @@ elaborate the scaffold; ordinary extraction certificates do not grow.
 `CIL.Safety.LoopVC` supplies bounded verification-condition generation for explicit loop paths.
 `cil_store_vc updated stored loaded writable := kind value using ready` derives numeric-store
 progress, readback and retained write authority, then exposes the post-state proof obligation.
-`cil_loop_continue next [facts]` checks the path with `cil_loop_steps`, infers its cost, and leaves
+`cil_loop_continue next [facts]` checks the path with `cil_loop_steps`, whose facts include those
+gathered from the context, infers its cost, and leaves
 invariant-preservation and strict-measure-decrease goals. The [loop entry
 rules](PROOFS-STEPPING.md#loop-verification-conditions) compose frame entry, the first path and
 these obligations into the method's own theorem. Failed encoding, access, path, invariant or

@@ -28,25 +28,33 @@ object SelectProfile(string name) => selectProfile.Invoke(null, [name])!;
 var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 var sharedCases = RuntimeProfileValidation.Observations(
     Directory.GetFiles(At("docs/evidence/runtime-profiles"), "*.json")).ToList();
-// Getters read AdvSimd.Arm64 as AdvSimd, so observations that omit or split it are refused.
-var recorded = JsonNode.Parse(File.ReadAllText(At("docs/evidence/runtime-profiles/macos-arm64-net10.json")))!;
-foreach (var (name, mutate) in new (string, Action<JsonObject>)[]
+// Getters read AdvSimd.Arm64 as AdvSimd and Avx512Vbmi.VL as Avx512Vbmi, so observations that
+// omit or split either nested flag are refused.
+foreach (var (evidence, nested, baseFlag, getter) in new[]
 {
-    ("missing", observed => observed.Remove("advSimd64")),
-    ("split", observed => observed["advSimd64"] = !observed["advSimd"]!.GetValue<bool>())
+    ("macos-arm64-net10.json", "advSimd64", "advSimd", "AdvSimd.Arm64"),
+    ("windows-x64-net10.json", "avx512VbmiVL", "avx512Vbmi", "Avx512Vbmi.VL")
 })
 {
-    var observations = recorded.DeepClone();
-    mutate(observations[0]!["observed"]!.AsObject());
-    var observationPath = Path.Combine(output, $"advsimd64-{name}.json");
-    File.WriteAllText(observationPath, observations.ToJsonString());
-    try
+    var recorded = JsonNode.Parse(File.ReadAllText(At($"docs/evidence/runtime-profiles/{evidence}")))!;
+    foreach (var (name, mutate) in new (string, Action<JsonObject>)[]
     {
-        _ = RuntimeProfileValidation.Observations([observationPath]).ToList();
-        throw new InvalidOperationException("AdvSimd.Arm64 observation accepted: " + name);
+        ("missing", observed => observed.Remove(nested)),
+        ("split", observed => observed[nested] = !observed[baseFlag]!.GetValue<bool>())
+    })
+    {
+        var observations = recorded.DeepClone();
+        mutate(observations[0]!["observed"]!.AsObject());
+        var observationPath = Path.Combine(output, $"{nested}-{name}.json");
+        File.WriteAllText(observationPath, observations.ToJsonString());
+        try
+        {
+            _ = RuntimeProfileValidation.Observations([observationPath]).ToList();
+            throw new InvalidOperationException($"{getter} observation accepted: {name}");
+        }
+        catch (InvalidDataException error) when (error.Message.Contains(getter, StringComparison.Ordinal)) { }
+        Console.WriteLine($"PASS {getter} observation rejected: {name}");
     }
-    catch (InvalidDataException error) when (error.Message.Contains("AdvSimd.Arm64", StringComparison.Ordinal)) { }
-    Console.WriteLine("PASS AdvSimd.Arm64 observation rejected: " + name);
 }
 foreach (var name in new[] { "scalar", "x64-sse2", "x64-sse42", "x64-v3", "x64-v4", "arm64-advsimd" })
     sharedCases.Add((JsonSerializer.Serialize(SelectProfile(name), jsonOptions), true));
@@ -64,7 +72,10 @@ foreach (var (name, flag, value, accepted) in new[]
     ("x64-sse42", "sse42", false, false), ("x64-sse42", "vector256Accelerated", true, false),
     ("x64-v4", "avx512FVL", false, false), ("x64-v4", "avx512DQ", false, false),
     ("x64-v4", "avx512DQVL", false, false), ("arm64-advsimd", "advSimd", false, false),
-    ("arm64-advsimd", "vector128Accelerated", false, false), ("arm64-advsimd", "vector256Accelerated", true, false)
+    ("arm64-advsimd", "vector128Accelerated", false, false), ("arm64-advsimd", "vector256Accelerated", true, false),
+    // VBMI is an optional group above AVX-512: x64-v4 may add it, but nothing below v4 may.
+    ("x64-v4", "avx512Vbmi", true, true), ("x64-v3", "avx512Vbmi", true, false),
+    ("arm64-advsimd", "avx512Vbmi", true, false)
 })
 {
     var profile = JsonSerializer.SerializeToNode(SelectProfile(name), jsonOptions)!;
@@ -159,6 +170,53 @@ foreach (var (profile, flags) in new[] { ("scalar", 0), ("x64-v3", 3), ("arm64-a
         new("Capabilities::Endian()", endianProof, Path.Combine(capabilities, "Endian"), Profile: profile),
         () => Console.WriteLine($"PASS BitConverter.IsLittleEndian prunes the big-endian branch under {profile}"));
 }
+// x64-v4 excludes VBMI; a custom v4 profile that declares it reads both getters as true.
+var vbmiProfile = Path.Combine(output, "x64-v4-vbmi.json");
+var vbmiNode = JsonSerializer.SerializeToNode(SelectProfile("x64-v4"), jsonOptions)!;
+vbmiNode["name"] = "x64-v4-vbmi";
+vbmiNode["avx512Vbmi"] = true;
+File.WriteAllText(vbmiProfile, vbmiNode.ToJsonString());
+foreach (var (profile, label, vbmiFlags) in new[]
+{
+    ("scalar", "scalar", 0), ("x64-v3", "x64-v3", 0), ("x64-v4", "x64-v4", 0), ("arm64-advsimd", "arm64-advsimd", 0),
+    ($"@{vbmiProfile}", "x64-v4-vbmi", 3)
+})
+{
+    var vbmiFolder = Path.Combine(output, $"Vbmi-{label}");
+    Directory.CreateDirectory(vbmiFolder);
+    var vbmiProof = Path.Combine(vbmiFolder, "VbmiFlags.lean");
+    File.WriteAllText(vbmiProof, $$"""
+        import Extracted
+        import Examples.Support
+        namespace ExampleProof
+        theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [] Examples.empty).map Prod.snd =
+            .ok [.scalar (.i32 {{vbmiFlags}})] := rfl
+        #print axioms correctness
+        end ExampleProof
+
+        """);
+    capabilitiesQueue.Add(
+        new("Capabilities::VbmiFlags()", vbmiProof, Path.Combine(vbmiFolder, "VbmiFlags"), Profile: profile),
+        () => Console.WriteLine($"PASS Avx512Vbmi.VL follows Avx512Vbmi under {label}: {vbmiFlags}"));
+}
+// The unmodeled VBMI body is pruned under x64-v4 and blocks extraction when VBMI is declared.
+foreach (var (profile, label) in new[] { ("x64-v4", "x64-v4"), ($"@{vbmiProfile}", "x64-v4-vbmi") })
+{
+    var result = Execute(Extract("extract", assembly, "Examples", "Capabilities::VbmiCount(ulong)",
+        Path.Combine(output, $"VbmiCount-{label}"), profile));
+    var blocked = result.Output.Contains("External managed dependency", StringComparison.Ordinal) &&
+        result.Output.Contains("Avx512Vbmi/VL::PermuteVar32x8", StringComparison.Ordinal);
+    if (label == "x64-v4-vbmi" ? result.Code == 0 || !blocked : result.Code != 0)
+        throw new InvalidOperationException($"Avx512Vbmi.VL branch selection failed under {label}:\n{result.Output}");
+    Console.WriteLine($"PASS Avx512Vbmi.VL selects the {(blocked ? "rejected VBMI" : "portable")} body under {label}");
+}
+var vbmi2 = Execute(Extract("extract", assembly, "Examples", "Capabilities::Vbmi2()",
+    Path.Combine(output, "Unclassified-Vbmi2"), $"@{vbmiProfile}"));
+if (vbmi2.Code == 0 || !vbmi2.Output.Contains(
+        "Unclassified feature getter: System.Boolean System.Runtime.Intrinsics.X86.Avx512Vbmi2/VL::get_IsSupported()",
+        StringComparison.Ordinal))
+    throw new InvalidOperationException($"Avx512Vbmi2.VL getter was classified:\n{vbmi2.Output}");
+Console.WriteLine("PASS unmeasured AVX-512 getter rejected: Avx512Vbmi2/VL");
 // The unmodeled ARM64 body is pruned without AdvSimd and blocks extraction with it.
 foreach (var profile in new[] { "scalar", "x64-v4", "arm64-advsimd" })
 {
@@ -448,7 +506,7 @@ File.WriteAllText(noBase, """
     { "name": "bmi2-only", "architecture": "x64", "nativeWidth": 64, "littleEndian": true, "advSimd": false, "sse2": false,
       "ssse3": false, "sse42": false, "avx": false, "avx2": false, "avx512F": false, "avx512FVL": false, "bmi1": false,
       "sse41": false, "avx512DQ": false, "avx512DQVL": false, "bmi2": true, "armBase64": false, "vector256Accelerated": false,
-      "x86Base64": false, "vector128Accelerated": false }
+      "x86Base64": false, "vector128Accelerated": false, "avx512Vbmi": false }
     """);
 var invalid = Execute(Extract("extract", assembly, "Examples", "Capabilities::Flags()", Path.Combine(output, "Reject-profile"), "@" + noBase));
 if (invalid.Code == 0 || !invalid.Output.Contains("bmi2-only: x86 ISA flags require x86Base64"))

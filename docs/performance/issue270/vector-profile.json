@@ -19,5 +19,6 @@
   "armBase64": false,
   "vector256Accelerated": true,
   "x86Base64": true,
-  "vector128Accelerated": true
+  "vector128Accelerated": true,
+  "avx512Vbmi": false
 }

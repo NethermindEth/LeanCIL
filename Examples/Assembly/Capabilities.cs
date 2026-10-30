@@ -36,6 +36,16 @@ public static class Capabilities
 
     public static bool Rdm64() => Rdm.Arm64.IsSupported;
 
+    // Avx512Vbmi.VL folds with Avx512Vbmi, so the two flags always agree.
+    public static uint VbmiFlags() => (Avx512Vbmi.VL.IsSupported ? 1u : 0u) | (Avx512Vbmi.IsSupported ? 2u : 0u);
+
+    // The VBMI body is unmodeled: only profiles without VBMI prune it.
+    public static int VbmiCount(ulong value) => Avx512Vbmi.VL.IsSupported
+        ? Avx512Vbmi.VL.PermuteVar32x8(Vector256<byte>.Zero, Vector256<byte>.Zero).GetElement(0)
+        : (int)(value & 1);
+
+    public static bool Vbmi2() => Avx512Vbmi2.VL.IsSupported;
+
     // Valid profiles are little-endian, so the big-endian branch is pruned.
     public static int Endian() => BitConverter.IsLittleEndian ? 1 : (int)Math.Sqrt(2);
 

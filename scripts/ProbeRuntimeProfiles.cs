@@ -33,6 +33,8 @@ if (args is ["--child"])
         avx512FVL = Avx512F.VL.IsSupported,
         avx512DQ = Avx512DQ.IsSupported,
         avx512DQVL = Avx512DQ.VL.IsSupported,
+        avx512Vbmi = Avx512Vbmi.IsSupported,
+        avx512VbmiVL = Avx512Vbmi.VL.IsSupported,
         vector128Accelerated = Vector128.IsHardwareAccelerated,
         vector256Accelerated = Vector256.IsHardwareAccelerated
     }));
@@ -42,7 +44,7 @@ if (args is not [var output])
     throw new ArgumentException("Usage: dotnet run --file scripts/ProbeRuntimeProfiles.cs -- <output.json>");
 
 string[] switches = ["EnableHWIntrinsic", "EnableSSE2", "EnableSSSE3", "EnableSSE41", "EnableSSE42",
-    "EnableAVX", "EnableAVX2", "EnableBMI1", "EnableBMI2", "EnableAVX512", "EnableAVX512DQ",
+    "EnableAVX", "EnableAVX2", "EnableBMI1", "EnableBMI2", "EnableAVX512", "EnableAVX512DQ", "EnableAVX512v2",
     "EnableAVX512F_VL", "EnableArm64AdvSimd", "EnableArm64", "PreferredVectorBitWidth"];
 var configurations = new List<(string Name, string? Switch, string? Value)> { ("default", null, null) };
 configurations.AddRange(switches.Where(name => name != "PreferredVectorBitWidth").Select(name => (name + "=0", (string?)name, (string?)"0")));

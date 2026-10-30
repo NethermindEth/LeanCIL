@@ -8,6 +8,7 @@ Checks the lane lemmas the way a multi-limb vector routine uses them: the carry 
 from intrinsic comparison masks reproduces the 256-bit sum and difference on concrete inputs
 where a single repair hop is wrong and on symbolic inputs; intrinsic results on packed lanes
 rewrite to their lane values; and a method steps through shift and multiply with them as facts.
+The byte shuffles are pinned on concrete vectors that a bit-7 or lane-crossing mutant fails.
 -/
 
 open CIL CIL.Vector
@@ -454,5 +455,104 @@ theorem gtu_intrinsic_cascade (left right comparison : V256)
   cases evaluated
   exact cascade_add256_gtu_broadcast left right (by decide)
 #print axioms gtu_intrinsic_cascade
+
+/-- Bytes `0` to `31` in order: byte `i` of the vector is `i`. -/
+private def ascending : V256 :=
+  BitVec.ofNat 256 0x1f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100
+
+/-- Control bytes `0` to `15` in each half; a lane-crossing shuffle reads the low half twice. -/
+private def laneIdentity : V256 :=
+  BitVec.ofNat 256 0x0f0e0d0c0b0a090807060504030201000f0e0d0c0b0a09080706050403020100
+
+/-- Even control bytes set bit 7 over a reversing index; odd bytes keep the bare index. -/
+private def evenZeroed : V256 :=
+  BitVec.ofNat 256 0x8102830485068708890a8b0c8d0e8f008102830485068708890a8b0c8d0e8f
+
+/-- The int256 big-endian control: indices 31 down to 0, whose bit 4 the shuffle ignores. -/
+private def int256Reversal : V256 :=
+  pack256 0x18191a1b1c1d1e1f 0x1011121314151617 0x08090a0b0c0d0e0f 0x0001020304050607
+
+/-- Bytes 31 down to 0. -/
+private def descending : V256 :=
+  BitVec.ofNat 256 0x000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
+
+/-- A shuffle that drops the bit-7 zeroing rule. -/
+private def ignoreBit7 (source control : V256) : V256 :=
+  (List.range 32).foldl (fun result index =>
+    let half := index / 16
+    let selector := (lane8 control index).extractLsb' 0 4
+    let byte := lane8 source (16 * half + selector.toNat)
+    result ||| (byte.zeroExtend 256 <<< (8 * index))) 0
+
+/-- A shuffle that indexes all 32 bytes with five control bits, crossing the halves. -/
+private def crossLane (source control : V256) : V256 :=
+  (List.range 32).foldl (fun result index =>
+    let selector := lane8 control index
+    let byte := if selector.msb then 0 else lane8 source (selector.extractLsb' 0 5).toNat
+    result ||| (byte.zeroExtend 256 <<< (8 * index))) 0
+
+/-- Each half selects within itself: the upper half of the result reads source bytes 16-31. -/
+theorem shuffle_lane_identity : shuffleBytes256 ascending laneIdentity = ascending := by
+  decide +kernel
+#print axioms shuffle_lane_identity
+
+/-- A set bit 7 zeroes its byte; a clear one selects by the low four bits. -/
+theorem shuffle_bit7_zeroes : shuffleBytes256 ascending evenZeroed = BitVec.ofNat 256
+    0x100012001400160018001a001c001e00000002000400060008000a000c000e00 := by
+  decide +kernel
+#print axioms shuffle_bit7_zeroes
+
+/-- int256's control reverses each half; swapping the halves completes the 32-byte reversal. -/
+theorem shuffle_int256_reversal :
+    permute4x64 (shuffleBytes256 ascending int256Reversal) 0x4E = descending := by
+  decide +kernel
+#print axioms shuffle_int256_reversal
+
+/-- `Avx2.Shuffle` and `Ssse3.Shuffle` evaluate to the shared per-half model. -/
+theorem shuffle_intrinsics :
+    evalIntrinsic (.avx2 .shuffleBytes) [.v256 ascending, .v256 evenZeroed] =
+      some (.v256 (BitVec.ofNat 256
+        0x100012001400160018001a001c001e00000002000400060008000a000c000e00)) ∧
+    evalIntrinsic (.sse .shuffleBytes)
+      [.v128 (ascending.extractLsb' 0 128), .v128 (evenZeroed.extractLsb' 0 128)] =
+      some (.v128 0x2000400060008000a000c000e00) := by
+  decide +kernel
+#print axioms shuffle_intrinsics
+
+/-- The pinned vectors reject a model that ignores bit 7 or crosses halves. -/
+theorem shuffle_mutants_rejected :
+    ignoreBit7 ascending evenZeroed ≠ shuffleBytes256 ascending evenZeroed ∧
+    crossLane ascending laneIdentity ≠ shuffleBytes256 ascending laneIdentity ∧
+    crossLane ascending int256Reversal ≠ shuffleBytes256 ascending int256Reversal := by
+  decide +kernel
+#print axioms shuffle_mutants_rejected
+
+/-- The low half of a concatenation is its second operand. -/
+private theorem append_low (high low : V128) : (high ++ low).extractLsb' 0 128 = low := by
+  ext i hi
+  rw [BitVec.getElem_extractLsb', BitVec.getLsbD_append]
+  simp [hi, BitVec.getLsbD_eq_getElem]
+#print axioms append_low
+
+/-- The high half of a concatenation is its first operand. -/
+private theorem append_high (high low : V128) : (high ++ low).extractLsb' 128 128 = high := by
+  ext i hi
+  rw [BitVec.getElem_extractLsb', BitVec.getLsbD_append]
+  simp [hi, BitVec.getLsbD_eq_getElem]
+#print axioms append_high
+
+/-- The low result half depends only on the low source and control halves. -/
+theorem shuffle_low_half (source control : V256) :
+    (shuffleBytes256 source control).extractLsb' 0 128 =
+      shuffleBytes128 (source.extractLsb' 0 128) (control.extractLsb' 0 128) :=
+  append_low _ _
+#print axioms shuffle_low_half
+
+/-- The high result half depends only on the high source and control halves. -/
+theorem shuffle_high_half (source control : V256) :
+    (shuffleBytes256 source control).extractLsb' 128 128 =
+      shuffleBytes128 (source.extractLsb' 128 128) (control.extractLsb' 128 128) :=
+  append_high _ _
+#print axioms shuffle_high_half
 
 end Tests.SimdLanes
