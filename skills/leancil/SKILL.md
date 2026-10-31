@@ -34,29 +34,38 @@ leancil check artifacts/Method                                 # artifacts still
 leancil verify artifacts/Method --proof proofs/Method.lean --theorem MyProof.correctness
 ```
 
-- The selector needs the parameter list; copy it from `leancil list` when unsure. Use `ulong&`
-  for `ref`/`out` parameters.
+- The selector needs the parameter list. C# aliases (`ulong`) and an unqualified type name are
+  accepted when unique; `leancil list` prints the full forms. Use `ulong&` for `ref`/`out`.
+  Several types can declare a method with the same name and parameters: the `Entry:` line of
+  `verify` shows the method actually checked; report it, and ask the user when the choice is unclear.
 - The profile defaults to `scalar`. Pick the profile matching the deployment runtime and
   architecture; it is recorded and `check`/`verify` reuse it.
 - `--theorem` defaults to `ExampleProof.correctness`. The first `verify` saves proof and theorem
   in `verification.json`, so later runs need only `leancil verify artifacts/Method`.
-- Proofs split across the user's own Lean modules need `--proof-root <lake package root>`; see
-  the model reference for the package setup.
+- `Extracted` (the generated code), `CIL.*` and `Examples.Support` (example caller memories such
+  as `Examples.empty`) ship with the tool. Proofs that also import the user's own Lean modules
+  need `--proof-root <lake package root>`; see the model reference for the package setup.
 - After changing the C# code, rebuild and re-run `extract` before `verify`; `check` reports a
   changed assembly.
 
 ## Report a result honestly
 
 On success `verify` prints `Verified: <theorem>`, the axioms, and the elaborated `Statement:`,
-and writes `verified.json`. Before telling the user the code is verified, read the printed
-statement and confirm:
+and writes `verified.json`. Statements usually run the method with
+`CIL.Safety.invoke program fuel methodIndex args memory`: the entry method is index `0`, `args`
+are the argument values and `memory` is the caller memory. Before telling the user the code is
+verified, read the printed statement and confirm:
 
 - It quantifies over every input the user cares about, not a few concrete values.
+- The caller memory is either quantified or a fixed one such as `Examples.empty` (no
+  allocations). A fixed memory is an assumption to state; it is harmless only for methods that
+  take and return scalars and never touch memory.
 - It states success with a result (`= .ok ...` or `Ensures`), not only a relation between
   outcomes; "equal for both argument orders" also holds for a method that always fails.
 - Its preconditions are ones callers actually guarantee, and none of them contradict each other.
-- The profile and any `--assume-initialized` types, which are printed as preconditions, match the
-  deployment.
+- The profile matches the deployment. It is not part of the statement: `leancil check` prints it
+  and `identity.json` records it. `--assume-initialized` types are printed with the statement as
+  preconditions and must hold in the deployment too.
 - Axioms are only `propext`, `Quot.sound` and `Classical.choice`; `verify` rejects anything else.
 
 Say what the theorem guarantees in plain words, and name what it does not cover: the JIT,
@@ -75,7 +84,7 @@ On failure `verify` exits nonzero, prints `Invalid:` with the Lean errors, and w
 - No `sorry`, `admit`, custom `axiom`, or `native_decide`; the verifier rejects them anyway.
 - Editor checks (`lake build`, `leancil workspace`) are not verification. Only `leancil verify`
   produces a result to report.
-- A theorem about fixed inputs or a fixed caller memory is a test, not a contract; say so.
+- A theorem about fixed argument values is a test, not a contract; say so.
 - Unsupported features (class allocation, virtual dispatch, recursion, exception handlers,
   floating point, arbitrary external calls) fail at `extract` with the rejected item named;
   report it rather than rewriting the user's code without asking.

@@ -5,10 +5,14 @@ The user has a `.lean` file that imports `Extracted` and states a theorem about
 
 ## Gather the inputs
 
-1. The assembly: build it in Release and use that DLL, not a Debug or stale build.
+1. The assembly: build it in Release and use that DLL, not a Debug or stale build. If the user
+   hands over only a DLL, say that its build configuration and source are unverified.
 2. The method selector: if the proof's author did not record it, run `leancil list Lib.dll` and
    match the signature the proof expects (parameter count and types in its `invoke` arguments).
-3. The profile: the one the proof was written for. Profile names and what they assume are in
+   If several types declare a matching method, ask which one, or report the one you checked.
+3. The profile: the one the proof was written for, recorded in the author's `identity.json` if
+   they sent their artifacts. Otherwise ask; without an answer use the default `scalar` and say
+   so. Profile names and what they assume are in
    [runtime profiles](https://github.com/NethermindEth/LeanCIL/blob/main/docs/RUNTIME-PROFILES.md).
 4. The theorem name: the fully qualified name, such as `MyProof.correctness`.
 5. Whether the proof imports the user's own modules. If it does, it needs `--proof-root` pointing
@@ -40,7 +44,7 @@ Failure: read `artifacts/Method/failed.json` and act on `kind`:
 | `invalid-request` | Proof path or theorem name is wrong | Fix `--proof` / `--theorem` |
 | `elaboration-error` | Any other Lean error: a failed tactic (`Tactic rfl failed`), missing import, renamed API | A failed tactic can mean the code is wrong; see below. Otherwise fix the proof |
 | `unsolved-goal` | A tactic block left goals open | The code may not satisfy the theorem; see below |
-| `resource-limit` | Heartbeats or recursion depth ran out | Report it; do not raise limits blindly |
+| `resource-limit` | Heartbeats or recursion depth ran out | Confirm the method and profile first; a proof run on the wrong method or a false property can also exhaust limits. Do not raise limits blindly |
 | `replay-or-audit-rejected` | Kernel replay or the axiom audit failed | Treat as a failed proof; look for `sorry` or extra axioms |
 
 LeanCIL does not tell "the code is wrong" apart from "the proof is broken": both surface as
