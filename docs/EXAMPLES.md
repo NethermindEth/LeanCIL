@@ -3,6 +3,8 @@
 ## Independent examples
 
 - `Add`: universal modular arithmetic correctness in the specified empty initial memory.
+- `AddModel`: carries a theorem about a pure Lean model to the compiled `Add` through one theorem
+  that the method returns the model's result, without re-proving the model theorem.
 - `CheckedArithmetic.Add64`: universal checked addition for every pair whose sum fits, over arbitrary caller memory, with exact memory preservation. The checked automation follows generated instruction lookups; the same contract is tested after inserting NOPs and rejected for subtraction.
 - `Choose`: universal checked selection for both Boolean inputs and every pair of 64-bit values, preserving arbitrary caller memory exactly.
 - `GenericIdentity`: universal identity through direct, repeated and nested generic calls in C#, and a compiled F# identity wrapper, preserving arbitrary caller memory exactly.

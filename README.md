@@ -131,6 +131,7 @@ See [validation coverage and suite commands](docs/VALIDATION.md) and [CI operati
 | --- | --- |
 | First proof and failure diagnostics | [Getting started](docs/GETTING-STARTED.md) |
 | Proofs, contracts, loops and automation | [Writing proofs](docs/PROOFS.md) |
+| Checking proofs against your library with a coding agent | [Agent skill](skills/leancil/SKILL.md) |
 | Modules and proof APIs | [Architecture](docs/ARCHITECTURE.md) |
 | Cross-assembly contracts | [Contract interfaces](docs/CONTRACT-INTERFACES.md) |
 | Independently checking imported implementations | [Full verification](docs/FULL_VERIFICATION.md) |

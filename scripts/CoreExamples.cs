@@ -4,6 +4,7 @@ partial class Program
     static readonly Dictionary<string, string> CoreExampleSignatures = new()
     {
         ["Add"] = "System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64)",
+        ["AddModel"] = "System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64)",
         ["Choose"] = "System.UInt64 Examples.Arithmetic::Choose(System.Boolean,System.UInt64,System.UInt64)",
         ["Calls"] = "System.UInt64 Examples.Arithmetic::Calls(System.UInt64)",
         ["Alias"] = "System.UInt64 Examples.Arithmetic::Alias(System.UInt64&,System.UInt64&)",

@@ -32,7 +32,7 @@ if (args is ["--check-existing", var existing])
     }
     finally { File.WriteAllBytes(batch, original); }
     checker.Verify(assembly, "Examples", CoreExampleSignatures["Add"], At("Examples/Proofs/Add.lean"), output, check: true);
-    Console.WriteLine("PASS all ten reports retain independent proof identity and reject changed batch source");
+    Console.WriteLine($"PASS all {CoreExampleSignatures.Count} reports retain independent proof identity and reject changed batch source");
     return;
 }
 if (args is not ([] or ["--separate"]))
