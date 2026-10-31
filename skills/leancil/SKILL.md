@@ -38,13 +38,17 @@ leancil verify artifacts/Method --proof proofs/Method.lean --theorem MyProof.cor
   accepted when unique; `leancil list` prints the full forms. Use `ulong&` for `ref`/`out`.
   Several types can declare a method with the same name and parameters: the `Entry:` line of
   `verify` shows the method actually checked; report it, and ask the user when the choice is unclear.
-- The profile defaults to `scalar`. Pick the profile matching the deployment runtime and
-  architecture; it is recorded and `check`/`verify` reuse it.
+- The profile defaults to `scalar` (no hardware intrinsics). Built-in names are `scalar`,
+  `x64-sse2`, `x64-sse42`, `x64-v3`, `x64-v4` and `arm64-advsimd`; custom ones are JSON
+  ([runtime profiles](https://github.com/NethermindEth/LeanCIL/blob/main/docs/RUNTIME-PROFILES.md)).
+  Pick the one matching the deployment; if the user does not say, use `scalar` and state it.
+  The profile is recorded and `check`/`verify` reuse it.
 - `--theorem` defaults to `ExampleProof.correctness`. The first `verify` saves proof and theorem
   in `verification.json`, so later runs need only `leancil verify artifacts/Method`.
-- `Extracted` (the generated code), `CIL.*` and `Examples.Support` (example caller memories such
-  as `Examples.empty`) ship with the tool. Proofs that also import the user's own Lean modules
-  need `--proof-root <lake package root>`; see the model reference for the package setup.
+- `Extracted` (the generated code) and `CIL.*` ship with the tool. `Examples.Support` (example
+  caller memories such as `Examples.empty`) is available only to single-file proofs. Proofs that
+  import the user's own Lean modules need `--proof-root <lake package root>`; see the model
+  reference for the package setup.
 - After changing the C# code, rebuild and re-run `extract` before `verify`; `check` reports a
   changed assembly.
 
