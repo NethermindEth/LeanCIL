@@ -7,7 +7,8 @@ using System.Diagnostics;
 var output = At("artifacts/VerificationReuse");
 Directory.CreateDirectory(output);
 var proof = Path.Combine(output, "Contract.lean");
-var baseline = File.ReadAllText(At("Examples/Proofs/Add.lean"));
+// The support import makes a new session exercise certified dependency reuse, not only proof reuse.
+var baseline = "import Tests.Support\n" + File.ReadAllText(At("Examples/Proofs/Add.lean"));
 File.WriteAllText(proof, baseline);
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 const string entry = "Arithmetic::Add(ulong,ulong)";

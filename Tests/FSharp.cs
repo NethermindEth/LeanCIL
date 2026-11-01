@@ -45,7 +45,7 @@ foreach (var name in new[] { "Add", "Minimum", "Calls", "Mutate", "Store" })
             "Store" => $"Tests.reference, .scalar (.i64 {x})",
             _ => $".scalar (.i64 {x})"
         };
-        claims.Add($"(CIL.Safety.invoke Extracted.program 64 0 [{values}] Examples.{(name == "Store" ? "caller" : "empty")}).map Prod.snd = .ok [.scalar (.i64 {expected})]");
+        claims.Add($"(CIL.Safety.invoke Extracted.program 64 0 [{values}] {(name == "Store" ? "Tests.caller" : "CIL.Safety.Memory.empty")}).map Prod.snd = .ok [.scalar (.i64 {expected})]");
     }
     var proof = Path.Combine(output, "BoundaryProof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nset_option maxRecDepth 8192\n" +
