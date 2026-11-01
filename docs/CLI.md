@@ -7,6 +7,10 @@ details of each command.
 
 A regular `dotnet build Extractor -c Release` produces `Extractor/bin/leancil.exe` on Windows (`leancil` on other platforms). The managed assembly and package are named `Nethermind.LeanCIL`.
 
+## Version
+
+`leancil --version` prints the tool version, the LeanCIL commit and Lean toolchain its framework comes from, and the `[[require]]` block a [consumer package](CONSUMERS.md#consumer-proof-packages) uses to pin the matching framework. A tool built outside a git checkout reports the revision as unknown.
+
 ## Discover and select methods
 
 This lists canonical method signatures you can copy into `extract`, including overloads and non-public methods. Discovery reads metadata without executing the assembly. Listed methods are not necessarily supported: `extract` validates their signatures, CIL and reachable dependencies.
@@ -46,9 +50,9 @@ Profiles default to scalar. Pass a supported profile name or `@profile.json` as 
 
 ### Initialization assumptions
 
-Methods on types with static constructors are rejected by default. If the caller
-guarantees successful initialization before invocation, extraction can record
-that precondition explicitly:
+Methods on types with static constructors are rejected by default; the diagnostic names the
+type and the flag to pass. If the caller guarantees successful initialization before
+invocation, extraction can record that precondition explicitly:
 
 ```sh
 leancil extract assembly.dll 'Type::Method(ulong)' artifacts/Method --assume-initialized Namespace.Type
@@ -129,7 +133,7 @@ The check reads the assembly path, method and hardware profile from the manifest
 
 ## Verify
 
-`verify` first checks the extraction artifacts, reuses an integrity-checked source-keyed library cache (or builds it on a cache miss), checks and kernel-replays the selected proof, and audits its transitive axioms. Use `--fresh` to bypass proof and support reuse while retaining the source-bound library cache. Use `--rebuild-library` to rebuild the library as well; CI bypasses the local library cache automatically. Interactive terminals receive build progress on stderr; stdout and redirected stderr retain their stable formats. Only `propext`, `Quot.sound` and `Classical.choice` are permitted. It checks artifact and source identity again before writing `artifacts/Add/verified.json`. Lean and Lake must be installed; the tool includes the framework sources.
+`verify` first checks the extraction artifacts, reuses an integrity-checked source-keyed library cache (or builds it on a cache miss), checks and kernel-replays the selected proof, and audits its transitive axioms. Use `--fresh` to bypass proof and support reuse while retaining the source-bound library cache. Use `--rebuild-library` to rebuild the library as well; CI bypasses the local library cache automatically. Interactive terminals receive build progress on stderr; stdout and redirected stderr retain their stable formats. Only `propext`, `Quot.sound` and `Classical.choice` are permitted. It checks artifact and source identity again before writing `artifacts/Add/verified.json`. Lean and Lake must be installed. The tool ships the framework's `CIL` sources only: proofs import `Extracted` and `CIL.*`, and `CIL.Safety.Memory.empty` is the caller memory with no allocations. LeanCIL's own example and test modules are not shipped; a proof importing one is rejected as `invalid-request`.
 
 The theorem defaults to `ExampleProof.correctness`; select another with `--theorem Namespace.theoremName`. The first invocation saves the selection in `artifacts/Add/verification.json`, independently of the generated success report:
 

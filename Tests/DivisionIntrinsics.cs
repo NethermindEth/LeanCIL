@@ -40,7 +40,7 @@ foreach (var name in new[] { "DefinedLocal", "PrunedUnsafeLocal" })
     var proof = Path.Combine(output, "Proof.lean");
     File.WriteAllText(proof, $$"""
 import Extracted
-import Examples.Support
+import Tests.Support
 namespace ExampleProof
 theorem byte_homes : Extracted.method0.opaqueVectorLocals = [] := rfl
 #print axioms byte_homes
@@ -50,7 +50,7 @@ theorem forged_opaque_rejected : ¬ CIL.Extraction.OpaqueLocalsValid Extracted.m
     { Extracted.method0 with opaqueVectorLocals := [{{local}}] } := by decide +kernel
 #print axioms forged_opaque_rejected
 theorem correctness :
-    (CIL.Safety.invoke Extracted.program 256 0 [.scalar (.i64 7)] Examples.empty).map Prod.snd =
+    (CIL.Safety.invoke Extracted.program 256 0 [.scalar (.i64 7)] CIL.Safety.Memory.empty).map Prod.snd =
       .ok [.scalar (.i64 14)] := by rfl
 #print axioms correctness
 end ExampleProof
@@ -130,19 +130,19 @@ foreach ((string name, ulong left, ulong right, ulong expected, bool wide) in ne
     };
     string BroadcastProof(string operation, int lane, string lemma) =>
         $"exact congrArg (Except.map Prod.snd) (CIL.Safety.invoke_broadcastBinary_word " +
-        $"Extracted.profile .{operation} {lane} {left} {right} {expected} Examples.empty " +
+        $"Extracted.profile .{operation} {lane} {left} {right} {expected} CIL.Safety.Memory.empty " +
         $"rfl (by decide) (CIL.Safety.checked_broadcast_{lemma} {left} {right}))";
     string ShiftProof(string operation, int lane, string lemma) =>
         $"exact congrArg (Except.map Prod.snd) (CIL.Safety.invoke_broadcastShift " +
-        $"Extracted.profile .{operation} {lane} {left} {right} {expected} Examples.empty " +
+        $"Extracted.profile .{operation} {lane} {left} {right} {expected} CIL.Safety.Memory.empty " +
         $"rfl (by decide) (CIL.Safety.checked_broadcast_{lemma} {left} {right}))";
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\n" +
+    File.WriteAllText(proof, "import Extracted\nimport Tests.Support\n" +
         "import CIL.Safety.IntrinsicExecution\nnamespace ExampleProof\n" +
         (wide ? "private theorem ok_of_toOption {error value : Type} {result : Except error value} {expected : value}\n" +
             "    (observed : result.toOption = some expected) : result = .ok expected := by\n" +
             "  cases result <;> simp_all [Except.toOption]\n" : "") +
         "theorem correctness : (CIL.Safety.invoke Extracted.program 256 0 [.scalar (.i64 " + left +
-        "), .scalar (.i64 " + right + ")] Examples.empty).map Prod.snd = .ok [.scalar (." + word + " " + expected +
+        "), .scalar (.i64 " + right + ")] CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (." + word + " " + expected +
         ")] := by " + executionProof + "\n#print axioms correctness\nend ExampleProof\n");
     pending.Add((new(selectors[name], proof, output), wide ? "x64-v4" : "x64-v3", () =>
     {
@@ -190,7 +190,7 @@ foreach ((string name, int width, object initial) in new (string, int, object)[]
     string proof = Path.Combine(output, "Proof.lean");
     File.WriteAllText(proof, $$"""
 import Extracted
-import Examples.Support
+import Tests.Support
 namespace ExampleProof
 private def memory (size : Nat) : CIL.Safety.Memory := {
   allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨size, 1, []⟩, true, [size]⟩ else none
@@ -198,10 +198,10 @@ private def memory (size : Nat) : CIL.Safety.Memory := {
   views := [⟨0, 0, size, true, true⟩]
   nextIdentity := 1 }
 theorem correctness :
-    (CIL.Safety.invoke Extracted.program 16 0 [Examples.reference] (memory {{width}})).map
+    (CIL.Safety.invoke Extracted.program 16 0 [Tests.reference] (memory {{width}})).map
       (fun result => ((List.range {{width}}).map (fun offset => result.1.cells 0 offset), result.2)) =
       .ok (List.replicate {{width}} (⟨0, true⟩ : CIL.Safety.Cell), []) ∧
-    (CIL.Safety.invoke Extracted.program 16 0 [Examples.reference] (memory {{width - 1}})).map Prod.snd =
+    (CIL.Safety.invoke Extracted.program 16 0 [Tests.reference] (memory {{width - 1}})).map Prod.snd =
       .error ⟨0, 1, .memory .outsideAllocation (.address ⟨0, 0⟩) {{width}}⟩ := by
   exact ⟨rfl, rfl⟩
 end ExampleProof
@@ -286,7 +286,7 @@ foreach ((string name, int width, string profile, string unavailable, string fea
     }
     File.WriteAllText(proof, $$"""
         import Extracted
-        import Examples.Support
+        import Tests.Support
         namespace ExampleProof
         /-- Successful observations identify the successful checked execution result. -/
         private theorem result_of_toOption {error value : Type} {result : Except error value}
@@ -294,7 +294,7 @@ foreach ((string name, int width, string profile, string unavailable, string fea
           cases result <;> simp_all [Except.toOption]
         #print axioms result_of_toOption
         /-- Disjoint read-only storage for the source and control byte spans. -/
-        private def memory (source control : List (BitVec 8)) : CIL.Safety.Memory := { Examples.empty with
+        private def memory (source control : List (BitVec 8)) : CIL.Safety.Memory := { CIL.Safety.Memory.empty with
           allocations := fun identity => if identity < 2 then
             some ⟨.callerStack, ⟨{{width}}, 1, []⟩, true, [{{width}}]⟩ else none
           cells := fun identity offset => ⟨(if identity == 0 then source else control).getD offset 0, true⟩

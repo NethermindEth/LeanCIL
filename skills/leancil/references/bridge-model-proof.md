@@ -65,11 +65,10 @@ model module is compiled and its hash recorded in `verified.json`.
   A conversion is usually not definitionally equal to the CIL result, so prove the model equals
   the word expression first (as `model_eq` above), rewrite, then close by `rfl`.
 - Quantify over `memory : CIL.Safety.Memory` for methods that take and return scalars; it is the
-  stronger statement and still closes by `rfl`. Methods reading or writing caller memory need
+  stronger statement and still closes by `rfl`. `CIL.Safety.Memory.empty`, a caller memory with
+  no allocations, is the fixed alternative. Methods reading or writing caller memory need
   preconditions describing it; use `MethodContract`
   ([contracts](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md)).
-- Do not import `Examples.Support` (for `Examples.empty`) in a package verified with
-  `--proof-root`: the bundled library does not ship it there.
 - Loops, calls and memory need the techniques in [write-new-proof.md](write-new-proof.md); the
   bridge is then the theorem being written.
 - The bridge must cover every input the transferred theorem uses. If it needs a precondition
@@ -87,15 +86,16 @@ name = "mylib_proofs"
 [[require]]
 name = "leancil"
 git = "https://github.com/NethermindEth/LeanCIL.git"
-rev = "<full commit of the LeanCIL release the installed leancil tool was built from>"
+rev = "<the revision leancil --version prints>"
 
 [[lean_lib]]
 name = "MyLib"
 ```
 
-- Use the `lean-toolchain` from that LeanCIL commit and run `lake update`.
+- `leancil --version` prints this block with the matching revision, and the Lean toolchain to put
+  in the package's `lean-toolchain`. Then run `lake update`.
 - The pinned LeanCIL `CIL` sources must match the framework bundled with the installed tool;
-  `verify` rejects a mismatch, so a wrong pin is caught rather than silently used.
+  `verify` rejects a mismatch and names the revision to pin.
 - Put the model in `MyLib/Model.lean` and the bridge in `MyLib/AddBridge.lean`, starting with
   `import Extracted` and `import MyLib.Model`. Lean requires imports before the `/-! -/` module
   docstring.

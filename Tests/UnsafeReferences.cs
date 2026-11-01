@@ -16,7 +16,7 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var queue = new GeneratedQueue(verification, assembly);
 var root = At("artifacts/UnsafeReferences");
 const string memory = """
-def memory : CIL.Safety.Memory := { Examples.caller with
+def memory : CIL.Safety.Memory := { Tests.caller with
   allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨32, 1, []⟩, true, [32]⟩ else none
   cells := fun _ _ => ⟨37, false⟩
   views := [⟨0, 0, 32, true, true⟩] }
@@ -26,24 +26,24 @@ void Prove(string name, string selector, string claim)
     var output = Path.Combine(root, name);
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "Proof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + memory +
+    File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nnamespace ExampleProof\n" + memory +
         "\ntheorem correctness : " + claim + " := by rfl\n#print axioms correctness\nend ExampleProof\n");
     queue.Add(new(selector, proof, output),
         () => Console.WriteLine("PASS checked byref reinterpretation: " + name));
 }
 foreach (var name in new[] { "Word", "Half", "Vector", "Mutable" })
     Prove(name, $"UnsafeReferences::{name}(Examples.FourLimbs&)",
-        "CIL.Safety.invoke Extracted.program 4 0 [Examples.reference] memory = .ok (memory, [Examples.reference])");
+        "CIL.Safety.invoke Extracted.program 4 0 [Tests.reference] memory = .ok (memory, [Tests.reference])");
 Prove("Null", "UnsafeReferences::Word(Examples.FourLimbs&)",
     "CIL.Safety.invoke Extracted.program 4 0 [.reference .null] memory = .ok (memory, [.reference .null])");
 Prove("Pointer", "UnsafeReferences::Pointer(byte*)",
-    "CIL.Safety.invoke Extracted.program 4 0 [Examples.reference] memory = .ok (memory, [Examples.reference])");
+    "CIL.Safety.invoke Extracted.program 4 0 [Tests.reference] memory = .ok (memory, [Tests.reference])");
 Prove("Expired", "UnsafeReferences::Word(Examples.FourLimbs&)",
-    "CIL.Safety.invoke Extracted.program 4 0 [Examples.reference] (CIL.Safety.expire memory 0) = .error ⟨0, 0, .memory .expiredLifetime (.address ⟨0, 0⟩) 0⟩");
+    "CIL.Safety.invoke Extracted.program 4 0 [Tests.reference] (CIL.Safety.expire memory 0) = .error ⟨0, 0, .memory .expiredLifetime (.address ⟨0, 0⟩) 0⟩");
 Prove("VectorUninitialized", "UnsafeReferences::ReadHalf(Examples.FourLimbs&)",
-    "CIL.Safety.invoke Extracted.program 8 0 [Examples.reference] memory = .ok (memory, [.scalar (.snapshot .vector128 (List.replicate 16 (37, false)))])");
+    "CIL.Safety.invoke Extracted.program 8 0 [Tests.reference] memory = .ok (memory, [.scalar (.snapshot .vector128 (List.replicate 16 (37, false)))])");
 Prove("VectorBounds", "UnsafeReferences::ReadHalf(Examples.FourLimbs&)", """
-    CIL.Safety.invoke Extracted.program 8 0 [Examples.reference]
+    CIL.Safety.invoke Extracted.program 8 0 [Tests.reference]
       { memory with
         allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨8, 1, []⟩, true, [8]⟩ else none
         views := [⟨0, 0, 8, true, true⟩] } =
@@ -54,15 +54,15 @@ verification.Verify(assembly, "Examples", "UnsafeReferences::Word(Examples.FourL
 Console.WriteLine("PASS reference reinterpretation preserves arbitrary caller memory and provenance");
 Prove("Store", "UnsafeReferences::Store(Examples.FourLimbs&,ulong,ulong,ulong,ulong)", """
     (CIL.Safety.invoke Extracted.program 32 0
-      [Examples.reference, .scalar (.i64 1), .scalar (.i64 2), .scalar (.i64 3), .scalar (.i64 18446744073709551615)] memory).map
+      [Tests.reference, .scalar (.i64 1), .scalar (.i64 2), .scalar (.i64 3), .scalar (.i64 18446744073709551615)] memory).map
       (fun (final, values) => (values, [0, 8, 16, 24].map fun offset =>
         CIL.Safety.loadValue final (.address ⟨0, offset⟩) 8)) =
       .ok ([.scalar (.i64 18446744073709551615)], [.ok (.i64 1), .ok (.i64 2), .ok (.i64 3), .ok (.i64 18446744073709551615)])
     """);
 Prove("Uninitialized", "UnsafeReferences::Read(Examples.FourLimbs&)",
-    "CIL.Safety.invoke Extracted.program 8 0 [Examples.reference] memory = .error ⟨0, 2, .memory .uninitialized (.address ⟨0, 0⟩) 8⟩");
+    "CIL.Safety.invoke Extracted.program 8 0 [Tests.reference] memory = .error ⟨0, 2, .memory .uninitialized (.address ⟨0, 0⟩) 8⟩");
 Prove("PastEnd", "UnsafeReferences::PastEnd(Examples.FourLimbs&)",
-    "CIL.Safety.invoke Extracted.program 8 0 [Examples.reference] memory = .error ⟨0, 4, .memory .outsideAllocation (.address ⟨0, 32⟩) 8⟩");
+    "CIL.Safety.invoke Extracted.program 8 0 [Tests.reference] memory = .error ⟨0, 4, .memory .outsideAllocation (.address ⟨0, 32⟩) 8⟩");
 
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.UnsafeReferences")!;
 var bytes = new byte[32];
@@ -198,7 +198,7 @@ foreach (var (name, width) in new[]
     Boundary(name, "negative_element_offset",
         $"[.reference (.address ⟨0, {expected}⟩), .scalar (.i32 (-1))]",
         $".ok (memory, [.reference (.address ⟨0, {origin}⟩)])");
-    Boundary(name, "outside_element_offset", "[Examples.reference, .scalar (.i32 5)]",
+    Boundary(name, "outside_element_offset", "[Tests.reference, .scalar (.i32 5)]",
         ".error ⟨0, 2, .memory .invalidReference (.address ⟨0, 0⟩) 0⟩");
     Boundary(name, "null_element_offset", "[.reference .null, .scalar (.i32 0)]",
         ".error ⟨0, 2, .memory .nullDereference .null 0⟩");

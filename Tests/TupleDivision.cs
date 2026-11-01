@@ -102,12 +102,12 @@ foreach (var (name, result) in methods)
         }
         var outcome = expected is { } value ? $".ok [{result(value.Quotient, value.Remainder)}]"
             : $".error ⟨0, 3, .arithmetic .{(divisor == 0 ? "divideByZero" : "overflow")}⟩";
-        claims.Add($"(CIL.Safety.invoke Extracted.program 16 0 [.scalar (.i64 {lower}), .scalar (.i64 {upper}), .scalar (.i64 {divisor})] Examples.empty).map Prod.snd = {outcome}");
+        claims.Add($"(CIL.Safety.invoke Extracted.program 16 0 [.scalar (.i64 {lower}), .scalar (.i64 {upper}), .scalar (.i64 {divisor})] CIL.Safety.Memory.empty).map Prod.snd = {outcome}");
     }
     var output = Path.Combine(root, name);
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" +
+    File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nnamespace ExampleProof\n" +
         string.Join("", claims.Select((claim, index) => $"theorem case{index} : {claim} := by rfl\n")) +
         "theorem correctness :\n" + Balanced(claims, false) + " :=\n" +
         Balanced(Enumerable.Range(0, claims.Count).Select(index => "case" + index).ToArray(), true) + "\nend ExampleProof\n");
@@ -243,8 +243,8 @@ var operands = new Dictionary<Type, object[]>
     [typeof(nuint)] = new object[] { (nuint)0, (nuint)1, (nuint)3, (nuint)(1UL << 63), nuint.MaxValue }
 };
 string BoundaryProof(IReadOnlyList<string> claims) =>
-    "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" +
-    "def memory : CIL.Safety.Memory := { Examples.caller with cells := fun _ _ => ⟨93, false⟩ }\n" +
+    "import Extracted\nimport Tests.Support\nnamespace ExampleProof\n" +
+    "def memory : CIL.Safety.Memory := { Tests.caller with cells := fun _ _ => ⟨93, false⟩ }\n" +
     string.Join("", claims.Select((claim, index) => $"theorem case{index} : {claim} := by rfl\n")) +
     "theorem correctness :\n" + Balanced(claims, false) + " :=\n" +
     Balanced(Enumerable.Range(0, claims.Count).Select(index => "case" + index).ToArray(), true) +
@@ -290,7 +290,7 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
             var bytes = (byte[])runtimeBytes.MakeGenericMethod(method.ReturnType).Invoke(null, [value])!;
             outcome = $".ok [.scalar (.aggregate [{string.Join(", ", bytes)}])]";
         }
-        claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 {arguments} Examples.empty).map Prod.snd = " +
+        claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 {arguments} CIL.Safety.Memory.empty).map Prod.snd = " +
             outcome);
     }
     AddBoundary(method.Name, $"TupleDivision::{method.Name}({LeanType(type)},{LeanType(type)})", claims);
@@ -305,7 +305,7 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         var (value, fault) = Observe(method, [left, right]);
         var outcome = fault is null ? $".ok [{StackArgument(value!)}]" : $".error ⟨0, 2, .arithmetic .{fault}⟩";
         claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 [{StackArgument(left)}, {StackArgument(right)}] " +
-            $"Examples.empty).map Prod.snd = {outcome}");
+            $"CIL.Safety.Memory.empty).map Prod.snd = {outcome}");
     }
     AddBoundary("MathSByteRemainder", "TupleDivision::MathSByteRemainder(sbyte,sbyte)", claims);
 }
@@ -324,13 +324,13 @@ foreach (var (name, type, width) in new[] { ("MathOutInt32", typeof(int), 4), ("
             ? $".ok ([{StackArgument(value!)}], .ok {StackArgument(inputs[2]!)[".scalar ".Length..]})"
             : $".error ⟨0, 3, .arithmetic .{fault}⟩";
         claims.Add("(CIL.Safety.invoke Extracted.program 8 0 " +
-            $"[{StackArgument(left)}, {StackArgument(right)}, Examples.reference] memory).map " +
+            $"[{StackArgument(left)}, {StackArgument(right)}, Tests.reference] memory).map " +
             $"(fun (final, result) => (result, CIL.Safety.loadValue final (.address ⟨0, 0⟩) {width})) = {outcome}");
     }
     // The division faults before the store, so a null destination still reports DivideByZeroException.
     string NullDestination(int left, int right) => "CIL.Safety.invoke Extracted.program 8 0 " +
         $"[{StackArgument(Convert.ChangeType(left, type))}, {StackArgument(Convert.ChangeType(right, type))}, " +
-        ".reference .null] Examples.caller";
+        ".reference .null] Tests.caller";
     claims.Add($"{NullDestination(1, 0)} = .error ⟨0, 3, .arithmetic .divideByZero⟩");
     claims.Add($"{NullDestination(7, 2)} = .error ⟨0, 3, .memory .nullDereference .null 0⟩");
     AddBoundary(name, $"TupleDivision::{name}({LeanType(type)},{LeanType(type)},{LeanType(type)}&)", claims);

@@ -1,5 +1,4 @@
 import Extracted
-import Examples.Support
 import CIL.Safety.SymbolicExecution
 import CIL.Safety.LoopScaffold
 import CIL.Safety.ReturnMemory

@@ -27,12 +27,12 @@ string Scalar(object value) => value switch
     _ => throw new InvalidOperationException("Unexpected result type")
 };
 string Claim(string dll, string name, int[] input, string outcome) =>
-    $"(CIL.Safety.invoke Extracted.program 64 0 [{string.Join(", ", input.Select(v => Scalar(v)))}] Examples.empty).map Prod.snd = {outcome}";
+    $"(CIL.Safety.invoke Extracted.program 64 0 [{string.Join(", ", input.Select(v => Scalar(v)))}] CIL.Safety.Memory.empty).map Prod.snd = {outcome}";
 void Prove(string dll, string selector, string folder, IReadOnlyList<string> claims, Action passed,
     string control = "")
 {
     var proof = Path.Combine(root, folder + ".lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\ntheorem correctness :\n" +
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\ntheorem correctness :\n" +
         string.Join(" ∧\n", claims) + " := by\n  and_intros <;> rfl\nend ExampleProof\n" + control);
     queue.Add(new(selector, proof, Path.Combine(root, folder), Assembly: dll), passed);
 }

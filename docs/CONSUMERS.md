@@ -21,7 +21,9 @@ resolved `lake-manifest.json` (`lake update`). Both `lakefile.toml` and
 `lakefile.lean` are supported. Dependencies must be resolved git packages pinned
 to full revisions, using the standard `.lake/packages` directory. The consumer's
 CIL sources must match the verifier's bundled framework, allowing LF/CRLF
-differences. Mismatches fail explicitly.
+differences. Mismatches fail explicitly and name the revision to pin; `leancil --version`
+prints that revision, the toolchain and the `[[require]]` block. Only `CIL.*` modules come
+from the framework; LeanCIL's own example and test modules are not available to consumers.
 
 Verification copies the consumer's Lean sources, Lake configuration and resolved
 dependency sources into a temporary package, without trusting the package's compiled caches.

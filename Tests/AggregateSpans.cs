@@ -64,9 +64,9 @@ foreach (var profile in method.Name.StartsWith("Layout", StringComparison.Ordina
             "(result.1.cells 0 96).bits]) = .ok [0, 63, 96]",
         _ => null
     };
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + """
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" + """
         /-- Existing initialized caller storage shared by overlapping aggregate views. -/
-        def memory : CIL.Safety.Memory := { Examples.empty with
+        def memory : CIL.Safety.Memory := { CIL.Safety.Memory.empty with
           allocations := fun identity => if identity == 0 then
             some ⟨.callerStack, ⟨128, 16, []⟩, true, [128]⟩ else none
           cells := fun _ _ => ⟨0, true⟩

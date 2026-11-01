@@ -1,7 +1,7 @@
 import CIL.Safety.ConstructSetup
 import CIL.Safety.ConstructComposition
 import CIL.Safety.AggregateLocals
-import Examples.Support
+import CIL.Safety.Execution
 
 namespace Tests.AggregateSetup
 open CIL CIL.Safety
@@ -39,7 +39,7 @@ theorem composed_constructor (size : Fin (2^64)) (positive : 0 < size.val)
     (child temporary updated stepped) (load_local_aggregate_of_read loaded)
     (continuation temporary updated loaded)
 
-def initial : CIL.Safety.Memory := Examples.empty
+def initial : CIL.Safety.Memory := Memory.empty
 
 -- Packed/non-word width and the 32-byte consumer width both execute complete
 -- constructor invocation, including fresh-frame expiration and value readback.

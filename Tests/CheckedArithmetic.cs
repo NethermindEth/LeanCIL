@@ -93,11 +93,11 @@ foreach (var operation in new[] { OpCodes.Add_Ovf, OpCodes.Add_Ovf_Un, OpCodes.S
         }
 
         var resultClaim = fault is null ? $".ok [.scalar (.i{width} {expected})]" : $".error ⟨0, 2, .arithmetic .{fault}⟩";
-        claims.Add($"(CIL.Safety.invoke Extracted.program 4 0 [.scalar (.i{width} {left}), .scalar (.i{width} {right})] Examples.empty).map Prod.snd = {resultClaim}");
+        claims.Add($"(CIL.Safety.invoke Extracted.program 4 0 [.scalar (.i{width} {left}), .scalar (.i{width} {right})] CIL.Safety.Memory.empty).map Prod.snd = {resultClaim}");
     }
 
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 4096\nnamespace ExampleProof\ntheorem correctness :\n" +
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nset_option maxRecDepth 4096\nnamespace ExampleProof\ntheorem correctness :\n" +
         string.Join(" ∧\n", claims) + " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
     queue.Add(new(selector, proof, output, Assembly: dll), () =>
     {

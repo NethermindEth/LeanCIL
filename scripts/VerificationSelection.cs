@@ -157,7 +157,7 @@ internal static class VerificationSelection
             if (path.StartsWith(".github/workflows/", StringComparison.Ordinal) && path != ".github/workflows/verification.yml") continue;
             if (path == "scripts/ExportVerificationSuites.cs") return all;
             if (new[] { "CIL/", "Extractor/", "Examples/Assembly/", "Examples/FSharp/" }
-                    .Any(prefix => path.StartsWith(prefix, StringComparison.Ordinal)) || path == "Examples/Support.lean")
+                    .Any(prefix => path.StartsWith(prefix, StringComparison.Ordinal)) || path == "Tests/Support.lean")
                 return all;
             var owners = inputs.Where(pair => pair.Value.Contains(path)).Select(pair => pair.Key).ToArray();
             if (owners.Length == 0) return all;

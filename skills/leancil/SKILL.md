@@ -28,6 +28,7 @@ The tool is the `Nethermind.LeanCIL` .NET tool (`leancil`); it needs Lean throug
 version pinned in LeanCIL's `lean-toolchain`. Build the assembly in Release first.
 
 ```sh
+leancil --version                                              # tool, framework revision, toolchain
 leancil list path/to/Lib.dll                                   # canonical method selectors
 leancil extract path/to/Lib.dll 'Type::Method(ulong,ulong)' artifacts/Method [profile]
 leancil check artifacts/Method                                 # artifacts still match the DLL
@@ -45,10 +46,9 @@ leancil verify artifacts/Method --proof proofs/Method.lean --theorem MyProof.cor
   The profile is recorded and `check`/`verify` reuse it.
 - `--theorem` defaults to `ExampleProof.correctness`. The first `verify` saves proof and theorem
   in `verification.json`, so later runs need only `leancil verify artifacts/Method`.
-- `Extracted` (the generated code) and `CIL.*` ship with the tool. `Examples.Support` (example
-  caller memories such as `Examples.empty`) is available only to single-file proofs. Proofs that
-  import the user's own Lean modules need `--proof-root <lake package root>`; see the model
-  reference for the package setup.
+- Proofs can import `Extracted` (the generated code) and the framework's `CIL.*` modules.
+  LeanCIL's own `Examples` and `Tests` modules are not shipped. Proofs that import the user's own
+  Lean modules need `--proof-root <lake package root>`; see the model reference for the setup.
 - After changing the C# code, rebuild and re-run `extract` before `verify`; `check` reports a
   changed assembly.
 
@@ -61,7 +61,7 @@ are the argument values and `memory` is the caller memory. Before telling the us
 verified, read the printed statement and confirm:
 
 - It quantifies over every input the user cares about, not a few concrete values.
-- The caller memory is either quantified or a fixed one such as `Examples.empty` (no
+- The caller memory is either quantified or a fixed one such as `CIL.Safety.Memory.empty` (no
   allocations). A fixed memory is an assumption to state; it is harmless only for methods that
   take and return scalars and never touch memory.
 - It states success with a result (`= .ok ...` or `Ensures`), not only a relation between

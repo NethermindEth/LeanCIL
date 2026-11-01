@@ -425,10 +425,15 @@ internal static class MetadataValidation
                     method.HasGenericParameters || (method.DeclaringType.HasGenericParameters &&
                         MethodSpecialization.OwnerArguments(method).Count == 0) ||
                     method.Body.Instructions.Count == 0 || method.Body.ExceptionHandlers.Count != 0 ||
-                    (method.IsConstructor && method.IsStatic) ||
-                    (method.DeclaringType.Methods.Any(m => m.IsConstructor && m.IsStatic) &&
-                        !initializedTypes.Contains(method.DeclaringType.FullName, StringComparer.Ordinal)))
+                    (method.IsConstructor && method.IsStatic))
                     throw new InvalidDataException($"Unsupported method metadata or static initialisation: {method.FullName}");
+                var owner = method.DeclaringType.FullName;
+                if (method.DeclaringType.Methods.Any(m => m.IsConstructor && m.IsStatic) &&
+                    !initializedTypes.Contains(owner, StringComparer.Ordinal))
+                    throw new InvalidDataException($"Unsupported static initialisation: {method.FullName}\n" +
+                        $"  {owner} has a static constructor, which is never extracted. If every caller runs it " +
+                        $"first, pass --assume-initialized {owner}; this records a caller precondition and " +
+                        "does not prove it.");
                 InReferences.RejectTwins(method);
             })) return;
             Check(method, null, () =>

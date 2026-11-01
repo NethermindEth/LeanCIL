@@ -20,14 +20,14 @@ void Reject(string[] command, string marker)
 
 const string type = "Examples.InitializedTypes";
 const string add = "InitializedTypes::Add(ulong,ulong)";
-Reject(Command(add), "static initialisation");
+Reject(Command(add), "--assume-initialized Examples.InitializedTypes;");
 Reject(Command(add, "Examples.Arithmetic"), "type with a static constructor");
 Reject(Command(add, type, type), "Duplicate initialization assumption");
 Reject(Command("InitializedTypes::.cctor()", type), "static initialisation");
 Reject(Command("InitializedTypes::ReadConstant()"), "static initialisation");
 Run(Command("InitializedTypes::ReadConstant()", type));
 Run([.. cli, "check", output]);
-Reject(Command("InitializedTypes::CallHelper(ulong)", type), "static initialisation");
+Reject(Command("InitializedTypes::CallHelper(ulong)", type), "--assume-initialized Examples.InitializedHelper;");
 Run(Command("InitializedTypes::CallHelper(ulong)", type, "Examples.InitializedHelper"));
 Run([.. cli, "check", output]);
 Run(Command(add, type));

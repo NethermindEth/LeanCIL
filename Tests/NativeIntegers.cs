@@ -34,7 +34,7 @@ void Prove(string dll, string selector, string name, List<string> claims)
     var output = Path.Combine(root, name);
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 4096\nnamespace ExampleProof\ntheorem correctness :\n" +
+    File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nset_option maxRecDepth 4096\nnamespace ExampleProof\ntheorem correctness :\n" +
         string.Join(" ∧\n", claims) + " := by\n  exact " + (claims.Count == 1 ? "rfl" : "⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩") + "\nend ExampleProof\n");
     queue.Add(new(selector, proof, output, Assembly: dll), () =>
     {
@@ -73,7 +73,7 @@ foreach (var method in owner.GetMethods(BindingFlags.Public | BindingFlags.Stati
         {
             if (type.IsByRef)
             {
-                next.Add(([.. actual, Activator.CreateInstance(type.GetElementType()!)!], [.. lean, "Examples.reference"]));
+                next.Add(([.. actual, Activator.CreateInstance(type.GetElementType()!)!], [.. lean, "Tests.reference"]));
                 continue;
             }
             foreach (var bits in Values(type))
@@ -84,7 +84,7 @@ foreach (var method in owner.GetMethods(BindingFlags.Public | BindingFlags.Stati
 
     var claims = new List<string>();
     var resultWidth = method.ReturnType == typeof(int) || method.ReturnType == typeof(uint) ? 32 : 64;
-    var memory = method.Name == "Fields" ? "{ Examples.caller with allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨16, 1, []⟩, true, []⟩ else none, views := [⟨0, 0, 16, true, true⟩] }" : "Examples.caller";
+    var memory = method.Name == "Fields" ? "{ Tests.caller with allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨16, 1, []⟩, true, []⟩ else none, views := [⟨0, 0, 16, true, true⟩] }" : "Tests.caller";
     foreach (var (actual, lean) in combinations)
     {
         string outcome;
@@ -189,7 +189,7 @@ foreach (var (operations, group) in candidates.Chunk(6).Select((ops, index) => (
             var fault = error.InnerException is DivideByZeroException ? "divideByZero" : "overflow";
             outcome = $".error ⟨0, {faultSites[index]}, .arithmetic .{fault}⟩";
         }
-        claims.Add($"(CIL.Safety.invoke Extracted.program 12 0 [.scalar (.i32 {index}), .scalar (.i64 {wide}), .scalar (.i32 {narrow})] Examples.empty).map Prod.snd = {outcome}");
+        claims.Add($"(CIL.Safety.invoke Extracted.program 12 0 [.scalar (.i32 {index}), .scalar (.i64 {wide}), .scalar (.i32 {narrow})] CIL.Safety.Memory.empty).map Prod.snd = {outcome}");
     }
     Prove(dll, selector, name, claims);
 }

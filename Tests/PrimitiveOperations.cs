@@ -23,7 +23,7 @@ void Prove(string dll, string selector, string name, IEnumerable<string> stateme
     Directory.CreateDirectory(output);
     var claims = statements.ToArray();
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 4096\n" +
+    File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nset_option maxRecDepth 4096\n" +
         "namespace ExampleProof\ntheorem correctness :\n  " + string.Join(" ∧\n  ", claims) +
         " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
     queue.Add(new(selector, proof, output, Assembly: dll), () =>
@@ -33,10 +33,10 @@ void Prove(string dll, string selector, string name, IEnumerable<string> stateme
     });
 }
 
-string Executes(string arguments, string memory = "Examples.caller") =>
+string Executes(string arguments, string memory = "Tests.caller") =>
     $"CIL.Safety.invoke Extracted.program 32 0 [{arguments}] ({memory})";
 
-string Returns(string arguments, BigInteger value, int width = 32, string memory = "Examples.caller") =>
+string Returns(string arguments, BigInteger value, int width = 32, string memory = "Tests.caller") =>
     $"({Executes(arguments, memory)}).map Prod.snd = .ok [.scalar (.i{width} {value})]";
 
 BigInteger[] Boundaries(int width) => [0, 1, 127, 128, 255, 256, 32767, 32768, 65535, 65536,
@@ -54,13 +54,13 @@ BigInteger Extended(BigInteger value, int bytes, bool signed, int stackWidth)
 verification.Verify(assembly, "Examples", "PrimitiveOperations::ReadWrite(int&,int)",
     At("Examples/Proofs/PrimitiveReadWrite.lean"), Path.Combine(root, "ReadWrite"));
 Prove(assembly, "PrimitiveOperations::Alias(short&,short&,int)", "Alias",
-    Boundaries(32).Select(value => Returns($"Examples.reference, Examples.reference, .scalar (.i32 {value})",
+    Boundaries(32).Select(value => Returns($"Tests.reference, Tests.reference, .scalar (.i32 {value})",
         Extended(value, 2, true, 32))));
 Prove(assembly, "PrimitiveOperations::Choose(int)", "CSharpSwitch",
     new BigInteger[] { 0, 1, 2, 3, 4, 5, 2147483648, 4294967295 }.Select(value =>
         Returns($".scalar (.i32 {value})", value < 5 ? new[] { 13, 29, 7, 41, 19 }[(int)value] : 4294967295)));
 Prove(assembly, "PrimitiveOperations::PacketSize()", "CSharpSizeof",
-    [Returns("", 12), Returns("", 12, memory: "Examples.empty")]);
+    [Returns("", 12), Returns("", 12, memory: "CIL.Safety.Memory.empty")]);
 
 // Each fixture uses actual CIL, without a source-level arithmetic summary.
 string Fixture(string name, Action<ModuleDefinition, MethodDefinition> emit)
@@ -121,17 +121,17 @@ foreach (var initialize in new[] { false, true })
         code.Add(Instruction.Create(OpCodes.Ldobj, type));
         code.Add(Instruction.Create(OpCodes.Ret));
     });
-    var claims = Boundaries(stackWidth).Select(value => Returns($"Examples.reference, .scalar (.i{stackWidth} {value})",
+    var claims = Boundaries(stackWidth).Select(value => Returns($"Tests.reference, .scalar (.i{stackWidth} {value})",
         initialize ? 0 : Extended(value, width, signed, stackWidth), stackWidth)).ToList();
-    var arguments = $"Examples.reference, .scalar (.i{stackWidth} 17)";
+    var arguments = $"Tests.reference, .scalar (.i{stackWidth} 17)";
     var pc = initialize ? 1 : 2;
-    claims.Add($"({Executes(arguments, "{ Examples.caller with views := [⟨0, 0, 8, true, false⟩] }")}) = " +
+    claims.Add($"({Executes(arguments, "{ Tests.caller with views := [⟨0, 0, 8, true, false⟩] }")}) = " +
         $".error ⟨0, {pc}, .memory .unwritable (.address ⟨0, 0⟩) {width}⟩");
     // Starting with unknown bytes is valid for stores and initialization.
     claims.Add(Returns(arguments, initialize ? 0 : 17, stackWidth,
-        "{ Examples.caller with cells := fun _ _ => ⟨255, false⟩ }"));
+        "{ Tests.caller with cells := fun _ _ => ⟨255, false⟩ }"));
     if (width < 8)
-        claims.Add($"({Executes(arguments, "{ Examples.caller with cells := fun _ _ => ⟨255, true⟩ }")}).map " +
+        claims.Add($"({Executes(arguments, "{ Tests.caller with cells := fun _ _ => ⟨255, true⟩ }")}).map " +
             $"(fun result => result.1.cells 0 {width}) = .ok ⟨255, true⟩");
     Prove(dll, FixtureSelector(dll), name, claims);
 }
@@ -156,7 +156,7 @@ foreach (var (load, store, width, signed) in new[]
             method.Body.Instructions.Add(Instruction.Create(op));
     });
     Prove(dll, FixtureSelector(dll), name, Boundaries(stackWidth).Select(value =>
-        Returns($"Examples.reference, .scalar (.i{stackWidth} {value})", Extended(value, width, signed, stackWidth), stackWidth)));
+        Returns($"Tests.reference, .scalar (.i{stackWidth} {value})", Extended(value, width, signed, stackWidth), stackWidth)));
 
     var readName = name + "-faults";
     var readDll = Fixture(readName, (module, method) =>
@@ -169,11 +169,11 @@ foreach (var (load, store, width, signed) in new[]
     });
     Prove(readDll, FixtureSelector(readDll), readName,
     [
-        $"({Executes("Examples.reference", "{ Examples.caller with cells := fun _ _ => ⟨0, false⟩ }")}) = .error ⟨0, 1, .memory .uninitialized (.address ⟨0, 0⟩) {width}⟩",
+        $"({Executes("Tests.reference", "{ Tests.caller with cells := fun _ _ => ⟨0, false⟩ }")}) = .error ⟨0, 1, .memory .uninitialized (.address ⟨0, 0⟩) {width}⟩",
         $"({Executes(".reference (.address ⟨0, 8⟩)")}) = .error ⟨0, 1, .memory .outsideAllocation (.address ⟨0, 8⟩) {width}⟩",
         $"({Executes(".reference .null")}) = .error ⟨0, 1, .memory .nullDereference .null {width}⟩",
-        $"({Executes("Examples.reference", "CIL.Safety.expire Examples.caller 0")}) = .error ⟨0, 0, .memory .expiredLifetime (.address ⟨0, 0⟩) 0⟩",
-        $"({Executes("Examples.reference", "{ Examples.caller with views := [⟨0, 0, 8, false, true⟩] }")}) = .error ⟨0, 1, .memory .unreadable (.address ⟨0, 0⟩) {width}⟩"
+        $"({Executes("Tests.reference", "CIL.Safety.expire Tests.caller 0")}) = .error ⟨0, 0, .memory .expiredLifetime (.address ⟨0, 0⟩) 0⟩",
+        $"({Executes("Tests.reference", "{ Tests.caller with views := [⟨0, 0, 8, false, true⟩] }")}) = .error ⟨0, 1, .memory .unreadable (.address ⟨0, 0⟩) {width}⟩"
     ]);
 }
 

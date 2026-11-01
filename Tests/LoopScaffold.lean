@@ -1,6 +1,6 @@
 import CIL.Safety.LoopScaffold
 import CIL.Safety.LoopVC
-import Examples.Support
+import CIL.Safety.Execution
 import CIL.StructuralLabels
 
 /-! Kernel-checked frame and cutpoint generation, including rejected ambiguous scaffolds. -/
@@ -13,7 +13,7 @@ def body : CIL.Method := {
   locals := [.i32 0], localKinds := [.word32], returnsValue := true
   code := [.local 0, .brnonzero 0, .ret] }
 
-bind_entry entry := body with [] from Examples.empty
+bind_entry entry := body with [] from Memory.empty
 bind_cutpoint header := body matching
   (fun op => match op with | .brnonzero _ => true | _ => false) with entry.frame
 
@@ -37,7 +37,7 @@ def missingArgument : CIL.Method := {
 
 /-- error: Frame entry must reduce to a successful checked allocation -/
 #guard_msgs in
-bind_entry invalid := missingArgument with [] from Examples.empty
+bind_entry invalid := missingArgument with [] from Memory.empty
 
 end Tests.LoopScaffold
 
@@ -79,11 +79,11 @@ def addressed : CIL.Method := {
   code := [.ret], locals := [], returnsValue := false, parameterHomes := [(0, .word32)] }
 
 bind_entry parameter (value : CIL.W32) := addressed
-  with [.scalar (.i32 value)] from Examples.empty
+  with [.scalar (.i32 value)] from Memory.empty
 
 /-- The generated frame equation holds for every parameter value, not just a sample. -/
 theorem parameter_entry (value : CIL.W32) :
-    enterFrame addressed [.scalar (.i32 value)] Examples.empty =
+    enterFrame addressed [.scalar (.i32 value)] Memory.empty =
       .ok (parameter.frame value, parameter.memory value) := parameter.checked value
 #print axioms parameter_entry
 
@@ -92,11 +92,11 @@ def vectorBody : CIL.Method := {
   code := [.ret], locals := [], returnsValue := false, vectorArgs := [0] }
 
 bind_entry vector (bits : BitVec 256) := vectorBody
-  with [.scalar (.v256 bits)] from Examples.empty
+  with [.scalar (.v256 bits)] from Memory.empty
 
 /-- Vector entry uses the supplied bits and is checked for every vector. -/
 theorem vector_entry (bits : BitVec 256) :
-    enterFrame vectorBody [.scalar (.v256 bits)] Examples.empty =
+    enterFrame vectorBody [.scalar (.v256 bits)] Memory.empty =
       .ok (vector.frame bits, vector.memory bits) := vector.checked bits
 #print axioms vector_entry
 
@@ -138,7 +138,7 @@ def body : CIL.Method := {
   code := [.ret], locals := [.unmodeled, .unmodeled], returnsValue := false
   localKinds := [.reference, .span 4 false] }
 
-bind_entry entry := body with [] from Examples.empty
+bind_entry entry := body with [] from Memory.empty
 
 /-- The generated slot aliases expose the exact uninitialized storage from frame entry. -/
 theorem initial_slots : entry.slot0 = .root none ∧ entry.slot1 = .span 4 false none :=
@@ -166,10 +166,10 @@ theorem root_replacement (memory : Memory) (reference : ManagedReference)
 
 /-- Home facts do not initialize empty slots or permit a different width or capability. -/
 theorem rejected_homes :
-    loadLocal Examples.empty entry.slot1 = .error .invalidState ∧
-    storeLocal Examples.empty entry.slot1 (.bufferSpan ⟨.null, 0, 8, false⟩) =
+    loadLocal Memory.empty entry.slot1 = .error .invalidState ∧
+    storeLocal Memory.empty entry.slot1 (.bufferSpan ⟨.null, 0, 8, false⟩) =
       .error .invalidState ∧
-    storeLocal Examples.empty entry.slot1 (.bufferSpan ⟨.null, 0, 4, true⟩) =
+    storeLocal Memory.empty entry.slot1 (.bufferSpan ⟨.null, 0, 4, true⟩) =
       .error .invalidState := ⟨rfl, rfl, rfl⟩
 #print axioms rejected_homes
 
@@ -184,7 +184,7 @@ def body (width : Nat) (writable : Bool) : CIL.Method := {
   localKinds := [.span width writable] }
 
 bind_entry entry (width : Nat) (writable : Bool) (bounded : 0 < width ∧ width < 2^64) :=
-  (body width writable) with [] from Examples.empty simplifying [body, bounded]
+  (body width writable) with [] from Memory.empty simplifying [body, bounded]
 
 /-- Parameterized home facts retain their storage-kind binders and replacement checks. -/
 theorem generated (width : Nat) (writable : Bool) (bounded : 0 < width ∧ width < 2^64)

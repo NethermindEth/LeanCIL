@@ -1,7 +1,7 @@
 import CIL.Safety.StaticLinking
 import CIL.Safety.StaticMemoryBelow
 import CIL.Safety.WordMemory
-import Examples.Support
+import CIL.Safety.Execution
 
 /-! Checked static-table linking and loaded-world premises for modular consumer contracts. -/
 
@@ -25,15 +25,15 @@ def linked : CIL.Program := link [appBody] [library]
 
 example : linkChecked [appBody] [library] = .ok linked := rfl
 example : linkChecked [appBody] [library] = .ok linked := linkChecked_of_compatible (by decide +kernel)
-example : (invoke linked 16 0 [] Examples.empty).map Prod.snd = .ok [.scalar (.i64 17)] := rfl
-example : (invoke linked 16 0 [] Examples.empty).map (fun result => result.1.staticBindings.map Prod.fst) =
+example : (invoke linked 16 0 [] Memory.empty).map Prod.snd = .ok [.scalar (.i64 17)] := rfl
+example : (invoke linked 16 0 [] Memory.empty).map (fun result => result.1.staticBindings.map Prod.fst) =
     .ok [202, 101] := rfl
 
 private def afterApp : Safety.Memory :=
-  ((staticReference appField Examples.empty).toOption.getD (Examples.empty, ⟨0, 0⟩)).1
-private theorem app_loaded : staticReference appField Examples.empty = .ok (afterApp, ⟨0, 0⟩) := rfl
-private theorem empty_formed : Examples.empty.WellFormed := by
-  simp [Safety.Memory.WellFormed, Examples.empty]
+  ((staticReference appField Memory.empty).toOption.getD (Memory.empty, ⟨0, 0⟩)).1
+private theorem app_loaded : staticReference appField Memory.empty = .ok (afterApp, ⟨0, 0⟩) := rfl
+private theorem empty_formed : Memory.empty.WellFormed := by
+  simp [Safety.Memory.WellFormed, Memory.empty]
 private theorem app_formed : afterApp.WellFormed :=
   staticReference_preserves_wellFormed _ _ _ _ empty_formed app_loaded
 

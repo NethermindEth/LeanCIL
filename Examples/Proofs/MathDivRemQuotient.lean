@@ -1,5 +1,4 @@
 import Extracted
-import Examples.Support
 import CIL.Safety.SymbolicExecution
 import CIL.Safety.TupleDivision
 
@@ -21,18 +20,18 @@ def inputs (left right : W32) : List CIL.Safety.Value := [.scalar (.i32 left), .
     succeeds, and otherwise raises its divide-by-zero or overflow fault. -/
 theorem correctness (left right : W32) :
     (right ≠ 0 → (left ≠ BitVec.intMin 32 ∨ right ≠ -1) → ∃ quotient : W32,
-      (invoke Extracted.program 8 0 (inputs left right) Examples.empty).map Prod.snd =
+      (invoke Extracted.program 8 0 (inputs left right) Memory.empty).map Prod.snd =
         .ok [.scalar (.i32 quotient)] ∧
       quotient.toInt = left.toInt.tdiv right.toInt) ∧
-    invoke Extracted.program 8 0 (inputs left 0) Examples.empty =
+    invoke Extracted.program 8 0 (inputs left 0) Memory.empty =
       .error ⟨0, 2, .arithmetic .divideByZero⟩ ∧
-    invoke Extracted.program 8 0 (inputs (BitVec.intMin 32) (-1)) Examples.empty =
+    invoke Extracted.program 8 0 (inputs (BitVec.intMin 32) (-1)) Memory.empty =
       .error ⟨0, 2, .arithmetic .overflow⟩ := by
   refine ⟨fun nonzero representable => ?_, ?_, ?_⟩
   · obtain ⟨evaluated, exact, -⟩ := divRemBits_signed (by decide) nonzero representable
     refine ⟨left.sdiv right, ?_, exact⟩
-    have returned : invoke Extracted.program 8 0 (inputs left right) Examples.empty =
-        .ok (Examples.empty, [.scalar (.i32 (left.sdiv right))]) := by
+    have returned : invoke Extracted.program 8 0 (inputs left right) Memory.empty =
+        .ok (Memory.empty, [.scalar (.i32 (left.sdiv right))]) := by
       cil_checked_steps [inputs, mathDivRem32_eq, evaluated, item1_of_int_tuple]
     rw [returned]
     rfl

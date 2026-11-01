@@ -80,8 +80,8 @@ name, not by line number.
 
 The separate scheduled/manual consumer advisory checks a pinned int256 library
 and four compiled-method certificates. It does not participate in PR checks.
-When upgrading the pin, follow the [consumer API migration notes](CONSUMER-MIGRATION.md)
-and validate both the supporting library and those certificates.
+Keep it out of required branch-protection checks. Advance the pin through a reviewed PR and
+validate both the supporting library and those certificates.
 
 The [fixed-consumer performance report](performance/issue270/README.md) separates
 historical extraction-certificate costs from consumer proof checking and joint replay.

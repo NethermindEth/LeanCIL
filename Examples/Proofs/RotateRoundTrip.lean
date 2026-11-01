@@ -1,11 +1,11 @@
 import Extracted
-import Examples.Support
 
 namespace ExampleProof
 
 theorem correctness (x : CIL.W64) :
-    (CIL.Safety.invoke Extracted.program 8 0 [.scalar (.i64 x)] Examples.empty).map Prod.snd =
-      .ok [.scalar (.i64 x)] := by
+    (CIL.Safety.invoke Extracted.program 8 0 [.scalar (.i64 x)]
+      CIL.Safety.Memory.empty).map Prod.snd =
+        .ok [.scalar (.i64 x)] := by
   change (Except.ok [CIL.Safety.Value.scalar (.i64 ((x.rotateLeft 13).rotateRight 13))] :
     Except CIL.Safety.LocatedFault (List CIL.Safety.Value)) = _
   have identity : (x.rotateLeft 13).rotateRight 13 = x := by

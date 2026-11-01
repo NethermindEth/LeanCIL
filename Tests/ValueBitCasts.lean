@@ -1,5 +1,5 @@
 import CIL.Safety.ValueBitCasts
-import Examples.Support
+import CIL.Safety.Execution
 
 namespace Tests.ValueBitCasts
 open CIL CIL.Safety
@@ -8,7 +8,7 @@ def cells : List (BitVec 8 × Bool) :=
   (List.range 16).map fun i => (BitVec.ofNat 8 (17 * i), i % 2 == 0)
 
 def memory : CIL.Safety.Memory := {
-  Examples.empty with
+  Memory.empty with
   allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨16, 1, []⟩, true, [16]⟩ else none
   nextIdentity := 1
   views := [⟨0, 0, 16, true, true⟩]

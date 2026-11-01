@@ -66,14 +66,14 @@ foreach (var method in metadata.GetType("Examples.AggregateSpanFill").Methods.Wh
     var output = Path.Combine(root, name);
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "Proof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + """
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" + """
         /-- Successful observations identify the checked execution result. -/
         private theorem result_of_toOption {error value : Type} {result : Except error value}
             {expected : value} (observed : result.toOption = some expected) : result = .ok expected := by
           cases result <;> simp_all [Except.toOption]
         #print axioms result_of_toOption
         /-- Writable caller storage includes sentinel bytes outside the filled view. -/
-        def memory : CIL.Safety.Memory := { Examples.empty with
+        def memory : CIL.Safety.Memory := { CIL.Safety.Memory.empty with
           allocations := fun identity => if identity == 0 then
             some ⟨.callerStack, ⟨256, 16, []⟩, true, [256]⟩ else none
           cells := fun _ offset => ⟨if 16 ≤ offset && offset < 48 then 7 else 11, true⟩

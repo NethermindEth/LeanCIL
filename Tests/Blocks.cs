@@ -32,7 +32,7 @@ void Prove(string dll, string selector, string name, List<string> claims)
     var output = Path.Combine(root, name);
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 8192\nnamespace ExampleProof\n" + memory +
+    File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nset_option maxRecDepth 8192\nnamespace ExampleProof\n" + memory +
         "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by\n  exact " +
         (claims.Count == 1 ? "rfl" : "⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩") +
         "\n#print axioms correctness\nend ExampleProof\n");
@@ -53,7 +53,7 @@ foreach (var aligned in new[] { false, true })
     var parameters = copy ? "byte*,byte*,uint" : "byte*,byte,uint";
     var claims = new List<string>
     {
-        $"(CIL.Safety.invoke Extracted.program 16 0 [Examples.reference, {second}, .scalar (.i32 3)] " +
+        $"(CIL.Safety.invoke Extracted.program 16 0 [Tests.reference, {second}, .scalar (.i32 3)] " +
          "memory).map (fun result => (List.range 4).map (fun offset => " +
          $"(result.1.cells 0 offset).bits.toNat)) = .ok {expected}"
     };
@@ -174,28 +174,28 @@ foreach (var alignment in new[] { 0, 1, 2, 4, 8 })
     string Invoke(string args, string state = "memory") => $"CIL.Safety.invoke Extracted.program 16 0 [{args}] ({state})";
     string Fault(string args, string rule, string state = "memory") =>
         $"(({Invoke(args, state)}).map (fun _ => false)).mapError (fun f => match f.fault with | .memory .{rule} _ _ => true | _ => false) = .error true";
-    claims.Add(Fault($"Examples.reference, {sourceArgument}, .scalar (.i32 17)", "outsideAllocation"));
-    claims.Add(Fault($"Examples.reference, {sourceArgument}, .scalar (.i32 4294967295)", "outsideAllocation"));
-    claims.Add(Fault($"Examples.reference, {sourceArgument}, .scalar (.i32 1)", "unwritable", "{ memory with views := [⟨1, 0, 16, true, true⟩] }"));
+    claims.Add(Fault($"Tests.reference, {sourceArgument}, .scalar (.i32 17)", "outsideAllocation"));
+    claims.Add(Fault($"Tests.reference, {sourceArgument}, .scalar (.i32 4294967295)", "outsideAllocation"));
+    claims.Add(Fault($"Tests.reference, {sourceArgument}, .scalar (.i32 1)", "unwritable", "{ memory with views := [⟨1, 0, 16, true, true⟩] }"));
     claims.Add(Fault($".reference .null, {sourceArgument}, .scalar (.i32 1)", "nullDereference"));
-    claims.Add(Fault($"Examples.reference, {sourceArgument}, .scalar (.i32 1)", "expiredLifetime", "{ memory with allocations := fun _ => some ⟨.callerStack, ⟨16, 8, []⟩, false, []⟩ }"));
-    claims.Add(Fault($"Examples.reference, {sourceArgument}, .scalar (.i32 1)", "unsupportedLayout", "{ memory with allocations := fun _ => some ⟨.callerStack, ⟨16, 8, [(0, 8)]⟩, true, []⟩ }"));
-    claims.Add(Fault($"Examples.reference, {sourceArgument}, .scalar (.i32 1)", "unwritable", "{ memory with allocations := fun _ => some ⟨.immutableStatic, ⟨16, 8, []⟩, true, []⟩ }"));
+    claims.Add(Fault($"Tests.reference, {sourceArgument}, .scalar (.i32 1)", "expiredLifetime", "{ memory with allocations := fun _ => some ⟨.callerStack, ⟨16, 8, []⟩, false, []⟩ }"));
+    claims.Add(Fault($"Tests.reference, {sourceArgument}, .scalar (.i32 1)", "unsupportedLayout", "{ memory with allocations := fun _ => some ⟨.callerStack, ⟨16, 8, [(0, 8)]⟩, true, []⟩ }"));
+    claims.Add(Fault($"Tests.reference, {sourceArgument}, .scalar (.i32 1)", "unwritable", "{ memory with allocations := fun _ => some ⟨.immutableStatic, ⟨16, 8, []⟩, true, []⟩ }"));
     if (alignment > 1)
         claims.Add(Fault($".reference (.address ⟨0, 1⟩), {sourceArgument}, .scalar (.i32 1)", "alignment"));
     if (copy)
     {
-        claims.Add(Fault($"Examples.reference, {sourceArgument}, .scalar (.i32 1)", "uninitialized", "{ memory with cells := fun _ _ => ⟨0, false⟩ }"));
-        claims.Add(Fault($"Examples.reference, {sourceArgument}, .scalar (.i32 1)", "unreadable", "{ memory with views := [⟨0, 0, 16, true, true⟩] }"));
+        claims.Add(Fault($"Tests.reference, {sourceArgument}, .scalar (.i32 1)", "uninitialized", "{ memory with cells := fun _ _ => ⟨0, false⟩ }"));
+        claims.Add(Fault($"Tests.reference, {sourceArgument}, .scalar (.i32 1)", "unreadable", "{ memory with views := [⟨0, 0, 16, true, true⟩] }"));
         foreach (var start in new[] { 0, 1 })
-            claims.Add($"({Invoke($"Examples.reference, .reference (.address ⟨0, {start}⟩), .scalar (.i32 2)")}).map Prod.snd = .error ⟨0, {(alignment is 1 or 2 or 4 ? 4 : 3)}, .unsupported \"Overlapping block copy\"⟩");
+            claims.Add($"({Invoke($"Tests.reference, .reference (.address ⟨0, {start}⟩), .scalar (.i32 2)")}).map Prod.snd = .error ⟨0, {(alignment is 1 or 2 or 4 ? 4 : 3)}, .unsupported \"Overlapping block copy\"⟩");
     }
     var emptySource = copy ? ".reference .null" : ".scalar (.i32 0)";
     if (copy) move!(ref Unsafe.NullRef<byte>(), ref Unsafe.NullRef<byte>(), 0);
     else fill!(ref Unsafe.NullRef<byte>(), 0, 0);
     claims.Add($"({Invoke($".reference .null, {emptySource}, .scalar (.i32 0)")}).map Prod.snd = .ok []");
     if (!copy && alignment == 0)
-        claims.Add("(CIL.Safety.memoryInstruction (.initBlock 1) [.scalar (.i32 1), .scalar (.i32 4660), Examples.reference] memory).map (fun (m, _) => (m.cells 0 0).bits.toNat) = .ok 52");
+        claims.Add("(CIL.Safety.memoryInstruction (.initBlock 1) [.scalar (.i32 1), .scalar (.i32 4660), Tests.reference] memory).map (fun (m, _) => (m.cells 0 0).bits.toNat) = .ok 52");
     Prove(dll, selector, name, claims);
 }
 

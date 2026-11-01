@@ -34,7 +34,7 @@ void Prove(MethodDefinition method, List<string> claims, string definitions = ""
     var output = Path.Combine(root, method.Name);
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nimport Tests.UnsafeWrappers\nnamespace ExampleProof\n" + definitions +
+    File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nimport Tests.UnsafeWrappers\nnamespace ExampleProof\n" + definitions +
         "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by\n  exact " +
         (term ?? (claims.Count == 1 ? "rfl" : "⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩")) + "\nend ExampleProof\n");
     pending.Add((new GeneratedVerification(method.FullName, proof, output), method.Name, claims.Count));
@@ -44,7 +44,7 @@ void Prove(MethodDefinition method, List<string> claims, string definitions = ""
 foreach (var method in owner.Methods.Where(m => m.Name.StartsWith("Size", StringComparison.Ordinal)))
 {
     var size = (int)runtime.GetMethod(method.Name)!.Invoke(null, null)!;
-    Prove(method, [$"(CIL.Safety.invoke Extracted.program 8 0 [] Examples.empty).map Prod.snd = .ok [.scalar (.i32 {size})]"], term: "Tests.UnsafeWrappers.size_ok _ _ _");
+    Prove(method, [$"(CIL.Safety.invoke Extracted.program 8 0 [] CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i32 {size})]"], term: "Tests.UnsafeWrappers.size_ok _ _ _");
 }
 
 // Runtime byte offsets and Lean references must agree for each element type and offset overload.
@@ -57,14 +57,14 @@ foreach (var method in owner.Methods.Where(m => m.Name.StartsWith("Add", StringC
     var type = measure.GetParameters()[0].ParameterType;
     var stackWidth = type == typeof(int) ? 32 : 64;
     var claims = new List<string>();
-    var memory = $"def memory : CIL.Safety.Memory := {{ Examples.empty with\n" +
+    var memory = $"def memory : CIL.Safety.Memory := {{ CIL.Safety.Memory.empty with\n" +
         $"  allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨{size * 4}, 1, []⟩, true, [{size * 4}]⟩ else none\n" +
         $"  nextIdentity := 1 }}\n";
     foreach (var count in new[] { 0, 1, 3, 4 })
     {
         object value = type == typeof(int) ? count : type == typeof(nint) ? (object)(nint)count : (nuint)count;
         var offset = (long)measure.Invoke(null, [value])!;
-        claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 [Examples.reference, .scalar (.i{stackWidth} {count})] memory).map Prod.snd = .ok [.reference (.address ⟨0, {offset}⟩)]");
+        claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 [Tests.reference, .scalar (.i{stackWidth} {count})] memory).map Prod.snd = .ok [.reference (.address ⟨0, {offset}⟩)]");
     }
 
     object backwards = type == typeof(int) ? -1 : type == typeof(nint) ? (object)(nint)(-1) : nuint.MaxValue;
@@ -73,7 +73,7 @@ foreach (var method in owner.Methods.Where(m => m.Name.StartsWith("Add", StringC
     claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 [.reference (.address ⟨0, {size * 2}⟩), .scalar (.i{stackWidth} {backwardsBits})] memory).map Prod.snd = .ok [.reference (.address ⟨0, {size * 2 + backwardsOffset}⟩)]");
 
     // Forming an address beyond the allocation fails before any dereference.
-    claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 [Examples.reference, .scalar (.i{stackWidth} 5)] memory).map Prod.snd = .error ⟨0, 2, .memory .invalidReference (.address ⟨0, 0⟩) 0⟩");
+    claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 [Tests.reference, .scalar (.i{stackWidth} 5)] memory).map Prod.snd = .error ⟨0, 2, .memory .invalidReference (.address ⟨0, 0⟩) 0⟩");
     claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 [.reference .null, .scalar (.i{stackWidth} 0)] memory).map Prod.snd = .error ⟨0, 2, .memory .nullDereference .null 0⟩");
     var success = "Tests.UnsafeWrappers.add_ok _ _ _ _ _ _ _ rfl rfl rfl rfl";
     var failure = "Tests.UnsafeWrappers.add_error _ _ _ _ _ _ _ rfl rfl rfl rfl";

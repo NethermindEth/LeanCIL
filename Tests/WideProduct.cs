@@ -22,27 +22,27 @@ foreach (var right in values)
     var high = Math.BigMul(left, right, out var low);
     var exact = (UInt128)left * right;
     if (low != (ulong)exact || high != (ulong)(exact >> 64)) throw new Exception("Runtime product mismatch");
-    claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 [.scalar (.i64 {left}), .scalar (.i64 {right}), Examples.reference] memory).map " +
+    claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 [.scalar (.i64 {left}), .scalar (.i64 {right}), Tests.reference] memory).map " +
         $"(fun (final, result) => (result, CIL.Safety.loadValue final (.address ⟨0, 0⟩) 8)) = .ok ([.scalar (.i64 {high})], .ok (.i64 {low}))");
 }
 var proof = Path.Combine(output, "Proof.lean");
-File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" +
-    "def memory : CIL.Safety.Memory := { Examples.caller with cells := fun _ _ => ⟨93, false⟩ }\n" +
+File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nnamespace ExampleProof\n" +
+    "def memory : CIL.Safety.Memory := { Tests.caller with cells := fun _ _ => ⟨93, false⟩ }\n" +
     "theorem correctness :\n" + string.Join(" ∧\n", claims) + " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "by rfl")) + "⟩\nend ExampleProof\n");
 verification.Verify(assembly, "Examples", selector, proof, output);
 Console.WriteLine($"PASS {claims.Count} BigMul boundary comparisons with uninitialized output storage");
 foreach (var (name, setup, argument, fault) in new[]
 {
-    ("Null", "Examples.caller", ".reference .null", "⟨0, 3, .memory .nullDereference .null 0⟩"),
-    ("Bounds", "{ Examples.caller with allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨4, 1, []⟩, true, [4]⟩ else none, views := [⟨0, 0, 4, true, true⟩] }", "Examples.reference", "⟨0, 3, .memory .outsideAllocation (.address ⟨0, 0⟩) 8⟩"),
-    ("Readonly", "{ Examples.caller with views := [⟨0, 0, 8, true, false⟩] }", "Examples.reference", "⟨0, 3, .memory .unwritable (.address ⟨0, 0⟩) 8⟩"),
-    ("Expired", "{ Examples.caller with allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨8, 1, []⟩, false, [8]⟩ else none }", "Examples.reference", "⟨0, 0, .memory .expiredLifetime (.address ⟨0, 0⟩) 0⟩")
+    ("Null", "Tests.caller", ".reference .null", "⟨0, 3, .memory .nullDereference .null 0⟩"),
+    ("Bounds", "{ Tests.caller with allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨4, 1, []⟩, true, [4]⟩ else none, views := [⟨0, 0, 4, true, true⟩] }", "Tests.reference", "⟨0, 3, .memory .outsideAllocation (.address ⟨0, 0⟩) 8⟩"),
+    ("Readonly", "{ Tests.caller with views := [⟨0, 0, 8, true, false⟩] }", "Tests.reference", "⟨0, 3, .memory .unwritable (.address ⟨0, 0⟩) 8⟩"),
+    ("Expired", "{ Tests.caller with allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨8, 1, []⟩, false, [8]⟩ else none }", "Tests.reference", "⟨0, 0, .memory .expiredLifetime (.address ⟨0, 0⟩) 0⟩")
 })
 {
     var faultOutput = Path.Combine(root, name);
     Directory.CreateDirectory(faultOutput);
     var faultProof = Path.Combine(faultOutput, "Proof.lean");
-    File.WriteAllText(faultProof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" +
+    File.WriteAllText(faultProof, "import Extracted\nimport Tests.Support\nnamespace ExampleProof\n" +
         $"def memory : CIL.Safety.Memory := {setup}\n" +
         $"theorem correctness : CIL.Safety.invoke Extracted.program 8 0 [.scalar (.i64 2), .scalar (.i64 3), {argument}] memory = .error {fault} := by rfl\nend ExampleProof\n");
     verification.Verify(assembly, "Examples", selector, faultProof, faultOutput);
@@ -92,13 +92,13 @@ foreach (var right in signedValues)
     var exact = (BigInteger)left * right;
     if (((BigInteger)high << 64) + (ulong)low != exact) throw new Exception("Runtime signed product mismatch");
     signedClaims.Add("(CIL.Safety.invoke Extracted.program 8 0 " +
-        $"[.scalar (.i64 {unchecked((ulong)left)}), .scalar (.i64 {unchecked((ulong)right)}), Examples.reference] " +
+        $"[.scalar (.i64 {unchecked((ulong)left)}), .scalar (.i64 {unchecked((ulong)right)}), Tests.reference] " +
         "memory).map (fun (final, result) => (result, CIL.Safety.loadValue final (.address ⟨0, 0⟩) 8)) = " +
         $".ok ([.scalar (.i64 {unchecked((ulong)high)})], .ok (.i64 {unchecked((ulong)low)}))");
 }
 var signedProof = Path.Combine(signedOutput, "Proof.lean");
-File.WriteAllText(signedProof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" +
-    "def memory : CIL.Safety.Memory := { Examples.caller with cells := fun _ _ => ⟨93, false⟩ }\n" +
+File.WriteAllText(signedProof, "import Extracted\nimport Tests.Support\nnamespace ExampleProof\n" +
+    "def memory : CIL.Safety.Memory := { Tests.caller with cells := fun _ _ => ⟨93, false⟩ }\n" +
     "theorem correctness :\n" + string.Join(" ∧\n", signedClaims) + " := by\n  exact ⟨" +
     string.Join(", ", signedClaims.Select(_ => "by rfl")) + "⟩\nend ExampleProof\n");
 verification.Verify(assembly, "Examples", signedSelector, signedProof, signedOutput);
@@ -129,12 +129,12 @@ foreach (var (gridName, gridSelector, gridClaims) in new (string, string, IEnume
         intValues.SelectMany(left => intValues.Select(right =>
         "(CIL.Safety.invoke Extracted.program 8 0 " +
         $"[.scalar (.i32 {unchecked((uint)left)}), .scalar (.i32 {unchecked((uint)right)})] " +
-        "Examples.empty).map Prod.snd = " +
+        "CIL.Safety.Memory.empty).map Prod.snd = " +
         $".ok [.scalar (.i64 {unchecked((ulong)Math.BigMul(left, right))})]"))),
     ("Unsigned32", "WideProduct::UnsignedBigMul32(uint,uint)",
         uintValues.SelectMany(left => uintValues.Select(right =>
         $"(CIL.Safety.invoke Extracted.program 8 0 [.scalar (.i32 {left}), .scalar (.i32 {right})] " +
-        "Examples.empty).map Prod.snd = " +
+        "CIL.Safety.Memory.empty).map Prod.snd = " +
         $".ok [.scalar (.i64 {Math.BigMul(left, right)})]")))
 })
 {
@@ -142,7 +142,7 @@ foreach (var (gridName, gridSelector, gridClaims) in new (string, string, IEnume
     Directory.CreateDirectory(gridOutput);
     var list = gridClaims.ToList();
     var gridProof = Path.Combine(gridOutput, "Proof.lean");
-    File.WriteAllText(gridProof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" +
+    File.WriteAllText(gridProof, "import Extracted\nimport Tests.Support\nnamespace ExampleProof\n" +
         "theorem correctness :\n" + string.Join(" ∧\n", list) + " := by\n  exact ⟨" +
         string.Join(", ", list.Select(_ => "by rfl")) + "⟩\nend ExampleProof\n");
     verification.Verify(assembly, "Examples", gridSelector, gridProof, gridOutput);

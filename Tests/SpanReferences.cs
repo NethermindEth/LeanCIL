@@ -21,7 +21,7 @@ MethodDefinition Method(ModuleDefinition module, string name) =>
 // Bytes 0..31 hold their own offsets, so every expected value is a closed numeral.
 const string memory = """
     /-- Readable and writable caller storage whose byte at offset `i` is `i`. -/
-    def memory : CIL.Safety.Memory := { Examples.empty with
+    def memory : CIL.Safety.Memory := { CIL.Safety.Memory.empty with
       allocations := fun identity => if identity == 0 then
         some ⟨.callerStack, ⟨32, 8, []⟩, true, [32]⟩ else none
       cells := fun _ offset => ⟨BitVec.ofNat 8 offset, true⟩
@@ -164,7 +164,7 @@ foreach (var (name, arguments, results, extra) in cases)
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "Proof.lean");
     var outcome = results.StartsWith(".error", StringComparison.Ordinal) ? results : $".ok [{results}]";
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + memory +
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" + memory +
         "\n/-- A readonly span reference reads and writes exactly as the referenced view. -/\n" +
         $"theorem correctness : (CIL.Safety.invoke Extracted.program 200 0 [{arguments}] memory).map " +
         $"Prod.snd = {outcome} := by rfl\n#print axioms correctness\n" + extra + "\nend ExampleProof\n");

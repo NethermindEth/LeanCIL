@@ -87,14 +87,14 @@ foreach (var method in methods.Where(method => method.IsPublic))
         Success($"({run}).map Prod.snd = " +
             ".ok [.scalar (.snapshot (.aggregate 32) (List.replicate 32 (9, false)))]");
     }
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + """
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" + """
         /-- Successful observations identify the successful checked execution result. -/
         private theorem result_of_toOption {error value : Type} {result : Except error value}
             {expected : value} (observed : result.toOption = some expected) : result = .ok expected := by
           cases result <;> simp_all [Except.toOption]
         #print axioms result_of_toOption
         /-- Disjoint supplied storage for the byte span and an in/out value reference. -/
-        def memory : CIL.Safety.Memory := { Examples.empty with
+        def memory : CIL.Safety.Memory := { CIL.Safety.Memory.empty with
           allocations := fun identity => if identity < 2 then
             some ⟨.callerStack, ⟨66, 1, []⟩, true, [66]⟩ else none
           cells := fun identity _ => ⟨if identity == 0 then 9 else 255, true⟩

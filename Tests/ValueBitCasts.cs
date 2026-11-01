@@ -23,7 +23,7 @@ void Prove(string name, int width, string source, string target)
     foreach (var mask in new[] { "full", "partial", "unknown" })
     {
         var cells = "[" + string.Join(", ", bytes.Select((b, i) => $"({b}, {(mask == "full" || mask == "partial" && i % 3 != 0 ? "true" : "false")})")) + "]";
-        claims.Add($"(CIL.Safety.invoke Extracted.program 64 0 [.scalar (CIL.Safety.snapshotValue {source} {cells})] Examples.empty).map Prod.snd = " +
+        claims.Add($"(CIL.Safety.invoke Extracted.program 64 0 [.scalar (CIL.Safety.snapshotValue {source} {cells})] CIL.Safety.Memory.empty).map Prod.snd = " +
             $".ok [.scalar (CIL.Safety.snapshotValue {target} {cells})]");
         if (mask != "full" && name is "To128Byte" or "To256Int32" or "To256Int64")
             claims.Add($"CIL.Safety.checkedIntrinsic (.vector (.equalsAll {width * 8})) " +
@@ -33,7 +33,7 @@ void Prove(string name, int width, string source, string target)
     var output = Path.Combine(root, name);
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "Proof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\ntheorem correctness :\n" +
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\ntheorem correctness :\n" +
         string.Join(" ∧\n", claims) + " := by exact ⟨" +
         string.Join(", ", claims.Select(_ => "by rfl")) + "⟩\n" +
         "#print axioms correctness\nend ExampleProof\n");

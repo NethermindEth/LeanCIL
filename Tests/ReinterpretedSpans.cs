@@ -51,9 +51,9 @@ foreach (var method in methods.Where(method => method.IsPublic))
         var noAuthority = Run(7).Replace("] memory", "] { memory with views := [] }", StringComparison.Ordinal);
         claims.Add($"({noAuthority}).map Prod.snd = .ok [{View(7 * sourceWidth / targetWidth, targetWidth)}]");
     }
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + """
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" + """
         /-- Sparse caller storage permits boundary lengths without allocating their byte contents. -/
-        def memory : CIL.Safety.Memory := { Examples.empty with
+        def memory : CIL.Safety.Memory := { CIL.Safety.Memory.empty with
           allocations := fun identity => if identity == 0 then
             some ⟨.callerStack, ⟨2^35, 1, []⟩, true, [2^35]⟩ else none
           cells := fun _ _ => ⟨0, true⟩

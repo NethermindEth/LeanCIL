@@ -90,8 +90,8 @@ Keep application specifications and proofs in your own Lean package, with LeanCI
 a dependency. Methods can publish contracts for separately compiled callers; consumer proofs
 can span multiple modules and share checked support across batch requests.
 
-See [consumer packages and workspaces](docs/CONSUMERS.md),
-[contract interfaces](docs/CONTRACT-INTERFACES.md) and [integration guidance](docs/MIGRATION.md).
+See [consumer packages and workspaces](docs/CONSUMERS.md) and
+[contract interfaces](docs/CONTRACT-INTERFACES.md).
 Lake configuration and Lean elaborators execute code, so use packages you trust.
 
 ## Supported subset and limits

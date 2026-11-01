@@ -90,11 +90,11 @@ foreach (var operation in operations)
             _ => throw new InvalidOperationException("Missing test oracle")
         };
         var arguments = $"[.scalar (.i{width} {left})" + (unary ? "]" : $", .scalar (.i{width} {right})]");
-        claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 {arguments} Examples.empty).map Prod.snd = .ok [.scalar (.i{(unary ? width : 32)} {result})]");
+        claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 {arguments} CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i{(unary ? width : 32)} {result})]");
     }
 
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\ntheorem correctness :\n  " +
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\ntheorem correctness :\n  " +
         string.Join(" ∧\n  ", claims) + " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
     var type = width == 32 ? "int" : "long";
     var parameters = operation == OpCodes.Nop || operation == OpCodes.Neg ? type : $"{type},{type}";

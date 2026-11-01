@@ -22,7 +22,7 @@ void Prove(string dll, string selector, string name, IEnumerable<string> stateme
     Directory.CreateDirectory(output);
     var claims = statements.ToArray();
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 4096\n" +
+    File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nset_option maxRecDepth 4096\n" +
         "namespace ExampleProof\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by\n  exact " +
         (claims.Length == 1 ? "rfl" : "⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩") + "\nend ExampleProof\n");
     queue.Add(new(selector, proof, output, Assembly: dll), () =>
@@ -32,7 +32,7 @@ void Prove(string dll, string selector, string name, IEnumerable<string> stateme
     });
 }
 
-string Returns(string arguments, BigInteger result, int width = 32, string memory = "Examples.empty") =>
+string Returns(string arguments, BigInteger result, int width = 32, string memory = "CIL.Safety.Memory.empty") =>
     $"(CIL.Safety.invoke Extracted.program 64 0 [{arguments}] ({memory})).map Prod.snd = .ok [.scalar (.i{width} {result})]";
 
 BigInteger[] Boundaries(int width) => [0, 1, 127, 128, 255, 256, 32767, 32768, 65535, 65536,
@@ -66,8 +66,8 @@ foreach (var name in new[] { "Alias", "Address", "CallerIsolation", "Native", "N
 // Two disjoint four-byte locations make an accidental write through the old root observable.
 Prove(assembly, "Arguments::ReassignReference(uint&,uint&)", "ReassignReference",
 [
-    Returns("Examples.reference, .reference (.address ⟨0, 4⟩)", 17, memory: "Examples.caller"),
-    "(CIL.Safety.invoke Extracted.program 64 0 [Examples.reference, .reference (.address ⟨0, 4⟩)] Examples.caller).map " +
+    Returns("Tests.reference, .reference (.address ⟨0, 4⟩)", 17, memory: "Tests.caller"),
+    "(CIL.Safety.invoke Extracted.program 64 0 [Tests.reference, .reference (.address ⟨0, 4⟩)] Tests.caller).map " +
         "(fun result => (result.1.cells 0 0).bits) = .ok 0"
 ]);
 Prove(assembly, "Arguments::Struct(Examples.Packet)", "Struct", [Returns(".scalar (.aggregate (List.replicate 12 0))", 23, 64)]);
@@ -90,15 +90,15 @@ using (var module = ModuleDefinition.ReadModule(assembly))
 var escapeProof = Path.Combine(escapeOutput, "EscapeProof.lean");
 File.WriteAllText(escapeProof, """
     import Extracted
-    import Examples.Support
+    import Tests.Support
     import CIL.Safety.FuelLemmas
     open CIL.Safety
     namespace ExampleProof
     def fault : LocatedFault := ⟨0, 1, .memory .expiredLifetime (.address ⟨0, 0⟩) 0⟩
     theorem witness (x : CIL.W32) :
-        invoke Extracted.program 2 0 [.scalar (.i32 x)] Examples.empty = .error fault := rfl
+        invoke Extracted.program 2 0 [.scalar (.i32 x)] CIL.Safety.Memory.empty = .error fault := rfl
     theorem correctness (x : CIL.W32) (fuel : Nat) (result : Memory × List Value) :
-        invoke Extracted.program fuel 0 [.scalar (.i32 x)] Examples.empty ≠ .ok result :=
+        invoke Extracted.program fuel 0 [.scalar (.i32 x)] CIL.Safety.Memory.empty ≠ .ok result :=
       invoke_fault_refutes_success _ 2 _ _ _ fault (by decide) (witness x) fuel result
     #print axioms correctness
     end ExampleProof

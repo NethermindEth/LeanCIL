@@ -82,6 +82,14 @@ structure Memory where
       Zero is the default, so existing memory grants no dynamic stack storage. -/
   stackLimit : Nat := 0
 
+/-- Caller memory with no allocations, views or static bindings. It describes a caller that
+    passes only scalars, so it grants no storage a method could read or write. -/
+def Memory.empty : Memory where
+  allocations := fun _ => none
+  cells := fun _ _ => ⟨0, false⟩
+  views := []
+  nextIdentity := 0
+
 /-- Why a memory operation was rejected. -/
 inductive Fault where
   | nullDereference | missingAllocation | expiredLifetime | invalidReference

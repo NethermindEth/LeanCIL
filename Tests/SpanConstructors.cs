@@ -41,9 +41,9 @@ foreach (var profile in method.Name == "LayoutLocal" ? new[] { "x64-sse2", "arm6
         name.EndsWith("Local", StringComparison.Ordinal) || name == "Local"
         ? $".scalar (.i32 {length})"
         : $".bufferSpan ⟨.address ⟨0, 0⟩, {length}, {width}, {writable.ToString().ToLowerInvariant()}⟩";
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + """
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" + """
         /-- View construction needs live storage but neither readable bytes nor byte authority. -/
-        def memory : CIL.Safety.Memory := { Examples.empty with
+        def memory : CIL.Safety.Memory := { CIL.Safety.Memory.empty with
           allocations := fun identity => if identity == 0 then
             some ⟨.callerStack, ⟨128, 16, []⟩, true, [128]⟩ else none
           nextIdentity := 1 }

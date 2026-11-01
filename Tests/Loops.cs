@@ -200,7 +200,7 @@ object Outcome(string dll, string name, uint value, uint limit)
 (uint Value, uint Limit)[] untilInputs = [(0, 0), (3, 7), (3, 3), (5, 2), (4, 0)];
 var untilClaims = untilInputs.Select(input => (input, Outcome(assembly, "CountUntil", input.Value, input.Limit))).Select(pair =>
 {
-    var invocation = $"CIL.Safety.invoke Extracted.program {32 + 16 * pair.input.Value} 0 [.scalar (.i32 {pair.input.Value}), .scalar (.i32 {pair.input.Limit})] Examples.empty";
+    var invocation = $"CIL.Safety.invoke Extracted.program {32 + 16 * pair.input.Value} 0 [.scalar (.i32 {pair.input.Value}), .scalar (.i32 {pair.input.Limit})] CIL.Safety.Memory.empty";
     return pair.Item2 is uint result
         ? $"({invocation}).map Prod.snd = .ok [.scalar (.i32 {result})]"
         : $"(match {invocation} with | .error fault => fault.fault | .ok _ => .invalidState) = .thrown \"{pair.Item2}\"";
@@ -331,19 +331,19 @@ void Prove(string dll, string selector, string name, string source)
     var output = Path.Combine(root, name);
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nimport CIL.Safety.StepComposition\n" +
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nimport CIL.Safety.StepComposition\n" +
         "set_option maxRecDepth 16384\nset_option maxHeartbeats 2000000\nnamespace ExampleProof\n" + source + "\nend ExampleProof\n");
     verification.Verify(dll, "Examples", selector, proof, output);
 }
 
 Prove(assembly, "Loops::Countdown(uint)", "Boundaries", """
 theorem correctness :
-    CIL.Safety.invoke Extracted.program 6 0 [.scalar (.i32 0)] Examples.empty =
+    CIL.Safety.invoke Extracted.program 6 0 [.scalar (.i32 0)] CIL.Safety.Memory.empty =
       .error ⟨0, 10, .fuelExhausted⟩ ∧
     Extracted.method0.code[5]? = some .sub ∧
     CIL.Safety.step Extracted.method0 .sub 5 [] ⟨0, [], [], [], 0⟩
-      [.scalar (.i32 1), .scalar (.i32 4294967295)] Examples.empty =
-      .ok (.next 6 [.scalar (.i32 4294967294)] ⟨0, [], [], [], 0⟩ Examples.empty) := ⟨rfl, rfl, rfl⟩
+      [.scalar (.i32 1), .scalar (.i32 4294967295)] CIL.Safety.Memory.empty =
+      .ok (.next 6 [.scalar (.i32 4294967294)] ⟨0, [], [], [], 0⟩ CIL.Safety.Memory.empty) := ⟨rfl, rfl, rfl⟩
 """);
 Console.WriteLine("PASS insufficient fuel and maximum unsigned decrement boundary");
 
@@ -355,7 +355,7 @@ foreach (var name in new[] { "Countdown", "WrongCountdown" })
     var method = runtime.GetMethod(name)!;
     uint[] inputs = [0, 1, 2, 3, 7, 16];
     var claims = inputs.Select(value =>
-        $"(CIL.Safety.invoke Extracted.program {16 + 8 * value} 0 [.scalar (.i32 {value})] Examples.empty).map Prod.snd = .ok [.scalar (.i32 {method.Invoke(null, [value])})]");
+        $"(CIL.Safety.invoke Extracted.program {16 + 8 * value} 0 [.scalar (.i32 {value})] CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i32 {method.Invoke(null, [value])})]");
     Prove(assembly, $"Loops::{name}(uint)", name + "Runtime",
         "theorem correctness :\n" + string.Join(" ∧\n", claims) +
         " := by\n  exact ⟨" + string.Join(", ", inputs.Select(_ => "rfl")) + "⟩");
@@ -365,7 +365,7 @@ foreach (var name in new[] { "Countdown", "WrongCountdown" })
 // A profile-fixed false feature remains false even across a backedge. The array
 // operation is unreachable under scalar, and must be rejected under AVX2.
 Prove(assembly, "Loops::FeatureCountdown(uint)", "FeatureLoop",
-    "theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [.scalar (.i32 3)] Examples.empty).map Prod.snd = .ok [.scalar (.i32 0)] := rfl");
+    "theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [.scalar (.i32 3)] CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i32 0)] := rfl");
 var feature = Execute(Extract("extract", assembly, "Examples", "Loops::FeatureCountdown(uint)", Path.Combine(root, "FeatureReject"), "x64-v3"));
 if (feature.Code == 0 || !feature.Output.Contains("Unsupported instruction"))
     throw new InvalidOperationException("Feature loop failed to reject reachable array: " + feature.Output);
@@ -566,7 +566,7 @@ theorem exhausted (fuel : Nat) (args : List CIL.Safety.Value)
         .ok (.next 0 [] frame memory) from rfl)]
     exact ih
 theorem correctness (fuel : Nat) (x : CIL.W32) :
-    CIL.Safety.invoke Extracted.program fuel 0 [.scalar (.i32 x)] Examples.empty =
+    CIL.Safety.invoke Extracted.program fuel 0 [.scalar (.i32 x)] CIL.Safety.Memory.empty =
       .error ⟨0, 0, .fuelExhausted⟩ := by
   exact exhausted fuel _ _ _
 """);
@@ -584,9 +584,9 @@ var backwardSwitch = Fixture("BackwardSwitch", (_, method) =>
 });
 Prove(backwardSwitch, "Loops::Countdown(uint)", "BackwardSwitchProof", """
 theorem correctness :
-    CIL.Safety.invoke Extracted.program 8 0 [.scalar (.i32 0)] Examples.empty =
+    CIL.Safety.invoke Extracted.program 8 0 [.scalar (.i32 0)] CIL.Safety.Memory.empty =
       .error ⟨0, 0, .fuelExhausted⟩ ∧
-    (CIL.Safety.invoke Extracted.program 4 0 [.scalar (.i32 1)] Examples.empty).map Prod.snd =
+    (CIL.Safety.invoke Extracted.program 4 0 [.scalar (.i32 1)] CIL.Safety.Memory.empty).map Prod.snd =
       .ok [.scalar (.i32 0)] := ⟨rfl, rfl⟩
 """);
 Console.WriteLine("PASS backward switch dispatch and fuel exhaustion");
@@ -616,7 +616,7 @@ var nativeRuntime = Assembly.Load(File.ReadAllBytes(native)).GetType("Examples.L
 if ((uint)nativeRuntime.Invoke(null, [0u])! != 3u)
     throw new InvalidOperationException("Explicitly widened native loop changed its runtime result");
 Prove(native, "Loops::Countdown(uint)", "NativeLoopProof", """
-theorem correctness : (CIL.Safety.invoke Extracted.program 32 0 [.scalar (.i32 0)] Examples.empty).map Prod.snd =
+theorem correctness : (CIL.Safety.invoke Extracted.program 32 0 [.scalar (.i32 0)] CIL.Safety.Memory.empty).map Prod.snd =
     .ok [.scalar (.i32 3)] := rfl
 """);
 Console.WriteLine("PASS native stack typing through backward-reachable body");

@@ -65,7 +65,9 @@ if (!baseline)
     var corpus = Path.Combine(importedTool, "verification");
     var scripts = Path.Combine(corpus, "scripts");
     Directory.CreateDirectory(scripts);
-    Directory.CreateDirectory(Path.Combine(corpus, "Extractor"));
+    // Checkout inputs enumerate these folders; the packaged corpus has no sources in them.
+    foreach (var folder in new[] { "Extractor", "Examples", "Tests" })
+        Directory.CreateDirectory(Path.Combine(corpus, folder));
     foreach (var name in new[]
              { "PrepareLibrary.cs", "Verification.cs", "ConsumerVerification.cs", "LeanDiagnostics.cs" })
         File.Copy(At("scripts/" + name), Path.Combine(scripts, name));

@@ -86,10 +86,10 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     {
         var value = Enum.ToObject(type, bits);
         var expected = method.Invoke(null, [value])!;
-        claims.Add($"(CIL.Safety.invoke Extracted.program 64 0 [{LeanValue(value)}] Examples.empty).map Prod.snd = .ok [{LeanValue(expected)}]");
+        claims.Add($"(CIL.Safety.invoke Extracted.program 64 0 [{LeanValue(value)}] CIL.Safety.Memory.empty).map Prod.snd = .ok [{LeanValue(expected)}]");
     }
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 8192\n" +
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nset_option maxRecDepth 8192\n" +
         "namespace ExampleProof\ntheorem correctness :\n" + string.Join(" ∧\n", claims) +
         " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
     var dll = method.Name.StartsWith("Storage", StringComparison.Ordinal) ? storageAssembly : assembly;
