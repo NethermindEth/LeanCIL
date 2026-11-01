@@ -101,14 +101,14 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         var fuel = narrow ? 96 : method.Name.StartsWith("PrimitiveCounts", StringComparison.Ordinal) ? 32 : 8;
         claims.Add($"""
             (CIL.Safety.invoke Extracted.program {fuel} 0
-              [{string.Join(", ", inputs.Select(LeanValue))}] Examples.empty).map Prod.snd =
+              [{string.Join(", ", inputs.Select(LeanValue))}] CIL.Safety.Memory.empty).map Prod.snd =
               .ok [{LeanValue(expected)}]
             """);
     }
     var proof = Path.Combine(output, "BoundaryProof.lean");
     File.WriteAllText(proof, $"""
         import Extracted
-        import Examples.Support
+        import CIL.Safety.Execution
         set_option maxRecDepth 8192
         namespace ExampleProof
         theorem correctness :

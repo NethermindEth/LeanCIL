@@ -1,5 +1,4 @@
 import Extracted
-import Examples.Support
 import CIL.Verification
 import CIL.Safety.LoopScaffold
 import CIL.Safety.LoopVC

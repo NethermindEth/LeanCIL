@@ -28,13 +28,13 @@ ulong[] Limbs(string field)
 }
 // The theorem names each limb, so a wrong byte order or value cannot satisfy it.
 string Claim(string method, ulong[] limbs) =>
-    $"∃ bytes, (CIL.Safety.invoke Extracted.program 64 0 [] Examples.empty).map Prod.snd = .ok [.scalar (.aggregate bytes)] ∧\n" +
+    $"∃ bytes, (CIL.Safety.invoke Extracted.program 64 0 [] CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.aggregate bytes)] ∧\n" +
     $"  (List.range {limbs.Length}).map (fun i => CIL.Safety.byteNumber ((bytes.drop (8 * i)).take 8)) = [{string.Join(", ", limbs)}]";
 void Prove(string dll, string selector, string folder, string claim, Action<JsonElement> passed)
 {
     var output = Path.Combine(root, folder);
     var proof = Path.Combine(root, folder + ".lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\ntheorem correctness :\n" +
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\ntheorem correctness :\n" +
         claim + " :=\n  ⟨_, rfl, by decide⟩\n#print axioms correctness\nend ExampleProof\n");
     void Report()
     {
@@ -75,7 +75,7 @@ var select = Path.Combine(root, "Select");
 var selectProof = Path.Combine(root, "Select.lean");
 File.WriteAllText(selectProof, """
     import Extracted
-    import Examples.Support
+    import CIL.Safety.Execution
     namespace ExampleProof
     open CIL.Safety
     def out : Memory := {
@@ -116,10 +116,10 @@ foreach (var (method, result) in new[]
     var proof = Path.Combine(root, method + ".lean");
     File.WriteAllText(proof, $$"""
         import Extracted
-        import Examples.Support
+        import CIL.Safety.Execution
         namespace ExampleProof
         theorem correctness :
-            (CIL.Safety.invoke Extracted.program 64 0 [] Examples.empty).map Prod.snd = {{result}} := by
+            (CIL.Safety.invoke Extracted.program 64 0 [] CIL.Safety.Memory.empty).map Prod.snd = {{result}} := by
           rfl
         #print axioms correctness
         end ExampleProof
@@ -130,9 +130,9 @@ foreach (var (method, result) in new[]
 var writeProof = Path.Combine(root, "Overwrite.lean");
 File.WriteAllText(writeProof, """
     import Extracted
-    import Examples.Support
+    import CIL.Safety.Execution
     namespace ExampleProof
-    def denied : Bool := match CIL.Safety.invoke Extracted.program 64 0 [] Examples.empty with
+    def denied : Bool := match CIL.Safety.invoke Extracted.program 64 0 [] CIL.Safety.Memory.empty with
       | .error ⟨_, _, .memory .unwritable _ _⟩ => true
       | _ => false
     theorem correctness : denied = true := by decide +kernel

@@ -115,7 +115,7 @@ foreach (var (suffix, width, shape, alignment) in new[]
         };
         File.WriteAllText(proof, $$"""
             import Extracted
-            import Examples.Support
+            import CIL.Safety.Execution
             namespace ExampleProof
             /-- A successful observable result determines the execution result. -/
             private theorem result_of_toOption {error value : Type} {result : Except error value}
@@ -123,7 +123,7 @@ foreach (var (suffix, width, shape, alignment) in new[]
                 result = .ok expected := by
               cases result <;> simp_all [Except.toOption]
             #print axioms result_of_toOption
-            def memory : CIL.Safety.Memory := { Examples.empty with
+            def memory : CIL.Safety.Memory := { CIL.Safety.Memory.empty with
               allocations := fun identity => if identity == 0 then
                 some ⟨.callerStack, ⟨{{width + alignment + 1}}, {{alignment}}, []⟩, true,
                   [{{width + alignment + 1}}]⟩ else none

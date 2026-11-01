@@ -26,7 +26,7 @@ void Compare(string dll, string name, string suffix = "")
     foreach (var bits in values)
     {
         object[] inputs = name == "Default" ? [] : [bits];
-        var invocation = $"CIL.Safety.invoke Extracted.program 128 0 [{(inputs.Length == 0 ? "" : $".scalar (.i64 {bits})")}] Examples.empty";
+        var invocation = $"CIL.Safety.invoke Extracted.program 128 0 [{(inputs.Length == 0 ? "" : $".scalar (.i64 {bits})")}] CIL.Safety.Memory.empty";
         try
         {
             var expected = (ulong)method.Invoke(null, inputs)!;
@@ -38,7 +38,7 @@ void Compare(string dll, string name, string suffix = "")
         }
     }
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 8192\n" +
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nset_option maxRecDepth 8192\n" +
         "namespace ExampleProof\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by\n  exact " +
         (claims.Count == 1 ? "rfl" : "⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩") + "\nend ExampleProof\n");
     var selector = $"Constructors::{name}({(name == "Default" ? "" : "ulong")})";

@@ -27,10 +27,10 @@ void Compare(string dll, string name, string suffix = "")
     {
         object value = narrow ? (object)unchecked((byte)bits) : bits;
         var expected = method.Invoke(null, [value])!;
-        claims.Add($"(CIL.Safety.invoke Extracted.program 128 0 [.scalar (.i{width} {value})] Examples.empty).map Prod.snd = .ok [.scalar (.i{width} {expected})]");
+        claims.Add($"(CIL.Safety.invoke Extracted.program 128 0 [.scalar (.i{width} {value})] CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i{width} {expected})]");
     }
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 8192\n" +
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nset_option maxRecDepth 8192\n" +
         "namespace ExampleProof\ntheorem correctness :\n" + string.Join(" ∧\n", claims) +
         " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
     queue.Add(new($"StructMethods::{name}({(narrow ? "byte" : "ulong")})", proof, output, Assembly: dll), () =>

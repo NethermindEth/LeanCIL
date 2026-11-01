@@ -634,7 +634,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         {
             var consumer = Path.Combine(framework.Source, Path.GetRelativePath(Root, path));
             if (!File.Exists(consumer) || File.ReadAllText(consumer).ReplaceLineEndings("\n") != File.ReadAllText(path).ReplaceLineEndings("\n"))
-                throw new InvalidDataException("Consumer leancil sources differ from the verifier's bundled framework: " + consumer);
+                throw new InvalidDataException("Consumer leancil sources differ from the verifier's bundled framework: " + consumer +
+                    (SourceRevision is { } revision ? $"\n  Pin leancil to rev \"{revision}\" (see leancil --version)." : ""));
         }
         if (File.ReadAllText(Path.Combine(root, "lean-toolchain")).Trim() != File.ReadAllText(At("lean-toolchain")).Trim())
             throw new InvalidDataException("Consumer and verifier Lean toolchains differ.");

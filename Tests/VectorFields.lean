@@ -1,6 +1,6 @@
 import CIL.Safety.InstructionMemory
 import CIL.Extraction.LayoutCoverage
-import Examples.Support
+import Tests.Support
 
 namespace Tests.VectorFields
 open CIL CIL.Safety CIL.Extraction
@@ -9,15 +9,15 @@ def cells : List (BitVec 8 × Bool) :=
   (List.range 32).map fun index => (BitVec.ofNat 8 (17 * index + 3), index % 3 != 0)
 
 def memory : CIL.Safety.Memory := {
-  Examples.empty with
+  Memory.empty with
   allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨35, 1, []⟩, true, [35]⟩ else none
   nextIdentity := 1
   views := [⟨0, 0, 35, true, true⟩] }
 
 example : (do
     let (stored, _) ← instruction (.setFieldAt 3 32)
-      [.scalar (.snapshot .vector256 cells), Examples.reference] memory
-    instruction (.fieldAt 3 32) [Examples.reference] stored).map Prod.snd =
+      [.scalar (.snapshot .vector256 cells), Tests.reference] memory
+    instruction (.fieldAt 3 32) [Tests.reference] stored).map Prod.snd =
     .ok [.scalar (.snapshot .vector256 cells)] := by rfl
 
 example : instruction (.fieldAt 3 32)
@@ -30,10 +30,10 @@ example : instruction (.fieldAt 0 32)
 example : instruction (.fieldAt 4 32)
     [.scalar (.aggregate (List.replicate 35 0))] memory = .error .invalidState := by rfl
 
-example : instruction (.setFieldAt 3 32) [.scalar (.v128 0), Examples.reference] memory =
+example : instruction (.setFieldAt 3 32) [.scalar (.v128 0), Tests.reference] memory =
     .error .invalidState := by rfl
 
-example : instruction (.setFieldAt 4 32) [.scalar (.v256 0), Examples.reference] memory =
+example : instruction (.setFieldAt 4 32) [.scalar (.v256 0), Tests.reference] memory =
     .error (.memory .outsideAllocation (.address ⟨0, 4⟩) 32) := by rfl
 
 example : instruction (.setFieldAt 3 32) [.scalar (.v256 0), .reference .null] memory =

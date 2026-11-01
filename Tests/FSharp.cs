@@ -42,13 +42,13 @@ foreach (var name in new[] { "Add", "Minimum", "Calls", "Mutate", "Store" })
         var values = name switch
         {
             "Add" or "Minimum" => $".scalar (.i64 {x}), .scalar (.i64 {y})",
-            "Store" => $"Examples.reference, .scalar (.i64 {x})",
+            "Store" => $"Tests.reference, .scalar (.i64 {x})",
             _ => $".scalar (.i64 {x})"
         };
         claims.Add($"(CIL.Safety.invoke Extracted.program 64 0 [{values}] Examples.{(name == "Store" ? "caller" : "empty")}).map Prod.snd = .ok [.scalar (.i64 {expected})]");
     }
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 8192\n" +
+    File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nset_option maxRecDepth 8192\n" +
         "namespace ExampleProof\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by\n  exact ⟨" +
         string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
     var parameters = name switch

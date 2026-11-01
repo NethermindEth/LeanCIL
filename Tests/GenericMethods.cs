@@ -70,11 +70,11 @@ foreach (var name in names)
     foreach (var parameter in parameters)
         inputs = inputs.SelectMany(previous => Values(parameter.ParameterType).Select(value => previous.Append(value).ToArray())).ToList();
     var claims = inputs.Select(input =>
-        $"(CIL.Safety.invoke Extracted.program 64 0 [{string.Join(", ", input.Select(LeanValue))}] Examples.empty).map Prod.snd = .ok [{LeanValue(method.Invoke(null, input)!)}]").ToList();
+        $"(CIL.Safety.invoke Extracted.program 64 0 [{string.Join(", ", input.Select(LeanValue))}] CIL.Safety.Memory.empty).map Prod.snd = .ok [{LeanValue(method.Invoke(null, input)!)}]").ToList();
     var output = Path.Combine(root, identity + "-" + name);
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 8192\nnamespace ExampleProof\ntheorem correctness :\n" +
+    File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nset_option maxRecDepth 8192\nnamespace ExampleProof\ntheorem correctness :\n" +
         string.Join(" ∧\n", claims) + " := by\n  exact " + (claims.Count == 1 ? "rfl" : "⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩") + "\nend ExampleProof\n");
     var selector = $"GenericMethods::{name}({string.Join(",", parameters.Select(p => p.ParameterType.FullName))})";
     var queue = identity == "Examples" ? examples : fsharpExamples;
@@ -93,13 +93,13 @@ foreach (var name in new[] { "Read32", "NextPacked" })
     var proof = Path.Combine(output, "BoundaryProof.lean");
     var claims = name == "Read32"
         ? new[] { 0U, 1U, uint.MaxValue, 0x80000000U }.Select(value =>
-            $"(CIL.Safety.invoke Extracted.program 16 0 [Examples.reference] {{ Examples.caller with cells := fun _ i => ⟨BitVec.ofNat 8 ({value} / 256^i), true⟩ }}).map Prod.snd = .ok [.scalar (.i32 {value})]").ToList()
+            $"(CIL.Safety.invoke Extracted.program 16 0 [Tests.reference] {{ Tests.caller with cells := fun _ i => ⟨BitVec.ofNat 8 ({value} / 256^i), true⟩ }}).map Prod.snd = .ok [.scalar (.i32 {value})]").ToList()
         : new List<string>
         {
-            "(CIL.Safety.invoke Extracted.program 16 0 [Examples.reference, .scalar (.i32 1)] Examples.caller).map Prod.snd = .ok [.reference (.address ⟨0, 5⟩)]",
-            "((CIL.Safety.invoke Extracted.program 16 0 [Examples.reference, .scalar (.i32 2)] Examples.caller).map (fun _ => false)).mapError (fun f => match f.fault with | .memory .invalidReference _ _ => true | _ => false) = .error true"
+            "(CIL.Safety.invoke Extracted.program 16 0 [Tests.reference, .scalar (.i32 1)] Tests.caller).map Prod.snd = .ok [.reference (.address ⟨0, 5⟩)]",
+            "((CIL.Safety.invoke Extracted.program 16 0 [Tests.reference, .scalar (.i32 2)] Tests.caller).map (fun _ => false)).mapError (fun f => match f.fault with | .memory .invalidReference _ _ => true | _ => false) = .error true"
         };
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\ntheorem correctness :\n" +
+    File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nnamespace ExampleProof\ntheorem correctness :\n" +
         string.Join(" ∧\n", claims) + " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
     var selector = name == "Read32"
         ? "GenericMethods::Read32(int&)" : "GenericMethods::NextPacked(Examples.PackedLeaf&,int)";

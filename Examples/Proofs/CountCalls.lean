@@ -1,5 +1,4 @@
 import Extracted
-import Examples.Support
 import CIL.Verification
 import CIL.MethodIdentity
 import CIL.StructuralLabels
@@ -126,13 +125,13 @@ theorem terminates (holds : decrementContract.Holds Extracted.program decrement)
 /-- `CountCalls` returns its input for every `uint`, given only the helper's contract. -/
 theorem count_calls (holds : decrementContract.Holds Extracted.program decrement) :
     CIL.Safety.Ensures Extracted.program countCalls
-      (fun args initial => ∃ x : W32, args = [.scalar (.i32 x)] ∧ initial = Examples.empty)
+      (fun args initial => ∃ x : W32, args = [.scalar (.i32 x)] ∧ initial = Memory.empty)
       (fun args _ _ values => values = args) := by
   apply ensures_of_loop
   intro args initial permitted
   obtain ⟨x, rfl, rfl⟩ := permitted
-  let entered := ((enterFrame countBody [] Examples.empty).toOption.getD (frame, Examples.empty)).2
-  have setup : enterFrame countBody [.scalar (.i32 x)] Examples.empty = .ok (frame, entered) := by
+  let entered := ((enterFrame countBody [] Memory.empty).toOption.getD (frame, Memory.empty)).2
+  have setup : enterFrame countBody [.scalar (.i32 x)] Memory.empty = .ok (frame, entered) := by
     rfl
   have writable0 : access entered ⟨0, 0⟩ 4 1 true = .ok () := by rfl
   have writable1 : access entered ⟨1, 0⟩ 4 1 true = .ok () := by rfl
@@ -163,7 +162,7 @@ theorem count_calls (holds : decrementContract.Holds Extracted.program decrement
   exact ⟨countBody, frame, entered, countCalls.found, rfl, setup, fuel, final, values, executed, satisfied⟩
 
 theorem correctness : CIL.Safety.Ensures Extracted.program countCalls
-    (fun args initial => ∃ x : W32, args = [.scalar (.i32 x)] ∧ initial = Examples.empty)
+    (fun args initial => ∃ x : W32, args = [.scalar (.i32 x)] ∧ initial = Memory.empty)
     (fun args _ _ values => values = args) :=
   count_calls decrement_holds
 

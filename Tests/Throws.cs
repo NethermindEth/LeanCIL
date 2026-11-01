@@ -66,10 +66,10 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         string outcome;
         try { outcome = $".ok [.scalar (.i32 {(uint)runtime.GetMethod(name)!.Invoke(null, [.. input.Cast<object>()])!})]"; }
         catch (TargetInvocationException error) { outcome = $".error ⟨{method}, {pc}, .thrown \"{error.InnerException!.GetType().FullName}\"⟩"; }
-        return $"(CIL.Safety.invoke Extracted.program 64 0 [{string.Join(", ", input.Select(v => $".scalar (.i32 {v})"))}] Examples.empty).map Prod.snd = {outcome}";
+        return $"(CIL.Safety.invoke Extracted.program 64 0 [{string.Join(", ", input.Select(v => $".scalar (.i32 {v})"))}] CIL.Safety.Memory.empty).map Prod.snd = {outcome}";
     }).ToList();
     var proof = Path.Combine(folder, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\ntheorem correctness :\n" +
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\ntheorem correctness :\n" +
         string.Join(" ∧\n", claims) + " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) +
         "⟩\n#print axioms correctness\nend ExampleProof\n");
     queue.Add(new(selector, proof, Path.Combine(root, name + "-Verified")), () =>

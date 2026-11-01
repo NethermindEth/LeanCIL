@@ -1,5 +1,4 @@
 import Extracted
-import Examples.Support
 import CIL.Verification
 import CIL.MethodIdentity
 import CIL.StructuralLabels
@@ -161,13 +160,13 @@ def untilOutcome : List Value → Memory → Option String
 theorem count_until (holds : bumpContract.Holds Extracted.program bump) :
     EnsuresOutcome Extracted.program countUntil
       (fun args initial => ∃ value limit : W32,
-        args = [.scalar (.i32 value), .scalar (.i32 limit)] ∧ initial = Examples.empty)
+        args = [.scalar (.i32 value), .scalar (.i32 limit)] ∧ initial = Memory.empty)
       (fun args _ _ values => values = args.take 1) untilOutcome := by
   apply ensures_outcome_of_loop
   intro args initial permitted
   obtain ⟨value, limit, rfl, rfl⟩ := permitted
-  let entered := ((enterFrame untilBody [] Examples.empty).toOption.getD (frame, Examples.empty)).2
-  have setup : enterFrame untilBody [.scalar (.i32 value), .scalar (.i32 limit)] Examples.empty =
+  let entered := ((enterFrame untilBody [] Memory.empty).toOption.getD (frame, Memory.empty)).2
+  have setup : enterFrame untilBody [.scalar (.i32 value), .scalar (.i32 limit)] Memory.empty =
       .ok (frame, entered) := by
     rfl
   have writable0 : access entered ⟨0, 0⟩ 4 1 true = .ok () := by rfl
@@ -199,7 +198,7 @@ theorem count_until (holds : bumpContract.Holds Extracted.program bump) :
 
 theorem correctness : EnsuresOutcome Extracted.program countUntil
     (fun args initial => ∃ value limit : W32,
-      args = [.scalar (.i32 value), .scalar (.i32 limit)] ∧ initial = Examples.empty)
+      args = [.scalar (.i32 value), .scalar (.i32 limit)] ∧ initial = Memory.empty)
     (fun args _ _ values => values = args.take 1) untilOutcome :=
   count_until bump_holds
 

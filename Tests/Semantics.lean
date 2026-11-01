@@ -1,7 +1,7 @@
 import Tests.AggregateSetup
 import Tests.ValueBitCasts
 import Tests.ViewReuse
-import Examples.Support
+import Tests.Support
 import CIL.Safety.ExecutionInvariants
 import CIL.Safety.NumericLocalLoad
 
@@ -45,12 +45,12 @@ theorem checked_disabled_intrinsic (body : CIL.Method) (operation : CIL.Intrinsi
 
 theorem checked_avx2_enabled :
     step { scalarBody with profile := { avx2 := true } } (.intrinsic (.avx2 .add64) 2)
-      0 [] scalarFrame [.scalar (.v256 1), .scalar (.v256 2)] Examples.empty =
-      .ok (.next 1 [.scalar (.v256 3)] scalarFrame Examples.empty) := rfl
+      0 [] scalarFrame [.scalar (.v256 1), .scalar (.v256 2)] Memory.empty =
+      .ok (.next 1 [.scalar (.v256 3)] scalarFrame Memory.empty) := rfl
 
 theorem checked_avx512_disabled :
     step scalarBody (.intrinsic (.avx512 .ltu64) 2) 0 [] scalarFrame
-      [.scalar (.v256 1), .scalar (.v256 2)] Examples.empty =
+      [.scalar (.v256 1), .scalar (.v256 2)] Memory.empty =
       .error (.unsupported "Intrinsic unavailable in target profile") := rfl
 
 theorem checked_avx512_invocation_disabled (memory : Memory) :
@@ -63,61 +63,61 @@ theorem nop_preserves_stack (stack : List Value) (memory : Memory) :
       .ok (.next 8 stack scalarFrame memory) := rfl
 
 theorem neg_underflow :
-    (step scalarBody .neg 0 [] scalarFrame [] Examples.empty).isOk = false := rfl
+    (step scalarBody .neg 0 [] scalarFrame [] Memory.empty).isOk = false := rfl
 
 theorem neg_reference_rejected :
-    (step scalarBody .neg 0 [] scalarFrame [Examples.reference] Examples.caller).isOk = false := rfl
+    (step scalarBody .neg 0 [] scalarFrame [Tests.reference] Tests.caller).isOk = false := rfl
 
 theorem gt_mixed_width_rejected :
-    (step scalarBody .gt 0 [] scalarFrame [.scalar (.i32 0), .scalar (.i64 0)] Examples.empty).isOk = false := rfl
+    (step scalarBody .gt 0 [] scalarFrame [.scalar (.i32 0), .scalar (.i64 0)] Memory.empty).isOk = false := rfl
 
 theorem branches_reject_underflow :
     ([CIL.Op.bgt 1, .ble 1, .bleu 1].all fun op =>
-      !(step scalarBody op 0 [] scalarFrame [.scalar (.i32 0)] Examples.empty).isOk) = true := rfl
+      !(step scalarBody op 0 [] scalarFrame [.scalar (.i32 0)] Memory.empty).isOk) = true := rfl
 
 theorem signed_branches_reject_references :
     ([CIL.Op.bgt 1, .ble 1].all fun op =>
-      !(step scalarBody op 0 [] scalarFrame [Examples.reference, Examples.reference] Examples.caller).isOk) = true := rfl
+      !(step scalarBody op 0 [] scalarFrame [Tests.reference, Tests.reference] Tests.caller).isOk) = true := rfl
 
 #print axioms signed_branches_reject_references
 
 theorem branches_reject_mixed_widths :
     ([CIL.Op.bgt 1, .ble 1, .bleu 1].all fun op =>
-      !(step scalarBody op 0 [] scalarFrame [.scalar (.i32 0), .scalar (.i64 0)] Examples.empty).isOk) = true := rfl
+      !(step scalarBody op 0 [] scalarFrame [.scalar (.i32 0), .scalar (.i64 0)] Memory.empty).isOk) = true := rfl
 
 theorem narrow_conversions_reject_references :
     ([CIL.Op.convI1, .convI2, .convU2].all fun op =>
-      !(step scalarBody op 0 [] scalarFrame [Examples.reference] Examples.caller).isOk) = true := rfl
+      !(step scalarBody op 0 [] scalarFrame [Tests.reference] Tests.caller).isOk) = true := rfl
 
 theorem narrow_read_bounds :
-    loadValue Examples.caller (.address ⟨0, 7⟩) 2 true =
+    loadValue Tests.caller (.address ⟨0, 7⟩) 2 true =
       .error (.memory .outsideAllocation (.address ⟨0, 7⟩) 2) := rfl
 
 theorem scalar_load_rejects_snapshot :
-    (instruction (.loadScalar 2) [.scalar (.aggregate [1, 2])] Examples.caller).isOk = false := rfl
+    (instruction (.loadScalar 2) [.scalar (.aggregate [1, 2])] Tests.caller).isOk = false := rfl
 
 theorem scalar_width_rejected :
-    instruction (.loadScalar 16) [Examples.reference] Examples.caller =
+    instruction (.loadScalar 16) [Tests.reference] Tests.caller =
       .error (.unsupported "Scalar memory width") := rfl
 
 theorem scalar_load_null :
-    instruction (.loadScalar 4) [.reference .null] Examples.caller =
+    instruction (.loadScalar 4) [.reference .null] Tests.caller =
       .error (.memory .nullDereference .null 4) := rfl
 
 theorem scalar_store_null :
-    instruction (.storeScalar 4) [.scalar (.i32 7), .reference .null] Examples.caller =
+    instruction (.storeScalar 4) [.scalar (.i32 7), .reference .null] Tests.caller =
       .error (.memory .nullDereference .null 0) := rfl
 
 theorem scalar_store_wrong_width :
-    instruction (.storeScalar 2) [.scalar (.i64 7), Examples.reference] Examples.caller =
+    instruction (.storeScalar 2) [.scalar (.i64 7), Tests.reference] Tests.caller =
       .error .invalidState := rfl
 
 theorem scalar_store_bounds :
-    instruction (.storeScalar 4) [.scalar (.i32 7), .reference (.address ⟨0, 6⟩)] Examples.caller =
+    instruction (.storeScalar 4) [.scalar (.i32 7), .reference (.address ⟨0, 6⟩)] Tests.caller =
       .error (.memory .outsideAllocation (.address ⟨0, 6⟩) 4) := rfl
 
 theorem scalar_store_lifetime :
-    instruction (.storeScalar 2) [.scalar (.i32 7), Examples.reference] (expire Examples.caller 0) =
+    instruction (.storeScalar 2) [.scalar (.i32 7), Tests.reference] (expire Tests.caller 0) =
       .error (.memory .expiredLifetime (.address ⟨0, 0⟩) 2) := rfl
 
 theorem scalar_store_load {memory : Memory} {reference : Reference} (bits : CIL.W32)
@@ -142,19 +142,19 @@ theorem scalar_store_load {memory : Memory} {reference : Reference} (bits : CIL.
         Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 theorem switch_unsigned_default :
-    step scalarBody (.switch [10, 20]) 3 [] scalarFrame [.scalar (.i32 4294967295)] Examples.empty =
-      .ok (.next 4 [] scalarFrame Examples.empty) := rfl
+    step scalarBody (.switch [10, 20]) 3 [] scalarFrame [.scalar (.i32 4294967295)] Memory.empty =
+      .ok (.next 4 [] scalarFrame Memory.empty) := rfl
 
 theorem switch_rejects_non_i32 :
-    (step scalarBody (.switch [10]) 0 [] scalarFrame [.scalar (.i64 0)] Examples.empty).isOk = false := rfl
+    (step scalarBody (.switch [10]) 0 [] scalarFrame [.scalar (.i64 0)] Memory.empty).isOk = false := rfl
 
 theorem narrow_read_lifetime :
-    loadValue (expire Examples.caller 0) (.address ⟨0, 0⟩) 2 true =
+    loadValue (expire Tests.caller 0) (.address ⟨0, 0⟩) 2 true =
       .error (.memory .expiredLifetime (.address ⟨0, 0⟩) 2) := rfl
 
 theorem narrow_write_permission :
-    instruction (.setFieldAt 0 2) [.scalar (.i32 65535), Examples.reference]
-      { Examples.caller with views := [⟨0, 0, 8, true, false⟩] } =
+    instruction (.setFieldAt 0 2) [.scalar (.i32 65535), Tests.reference]
+      { Tests.caller with views := [⟨0, 0, 8, true, false⟩] } =
         .error (.memory .unwritable (.address ⟨0, 0⟩) 2) := rfl
 
 theorem narrow_local_roundtrip {memory : Memory} {reference : Reference}
@@ -167,28 +167,28 @@ theorem narrow_local_roundtrip {memory : Memory} {reference : Reference}
   exact store_load_numeric_local (.narrow kind) (.i32 bits) bits.toNat rfl ready
 
 theorem uninitialized_rejected :
-    read { Examples.caller with cells := fun _ _ => ⟨0, false⟩ } ⟨0, 0⟩ 8 1 = .error .uninitialized := rfl
+    read { Tests.caller with cells := fun _ _ => ⟨0, false⟩ } ⟨0, 0⟩ 8 1 = .error .uninitialized := rfl
 
-theorem expired_rejected : read (expire Examples.caller 0) ⟨0, 0⟩ 8 1 = .error .expiredLifetime := rfl
+theorem expired_rejected : read (expire Tests.caller 0) ⟨0, 0⟩ 8 1 = .error .expiredLifetime := rfl
 
-theorem sentinel_forms : form Examples.caller ⟨0, 8⟩ = .ok ⟨0, 8⟩ := rfl
+theorem sentinel_forms : form Tests.caller ⟨0, 8⟩ = .ok ⟨0, 8⟩ := rfl
 
-theorem sentinel_cannot_read : read Examples.caller ⟨0, 8⟩ 1 1 = .error .outsideAllocation := rfl
+theorem sentinel_cannot_read : read Tests.caller ⟨0, 8⟩ 1 1 = .error .outsideAllocation := rfl
 
 theorem no_write_permission :
-    write { Examples.caller with views := [⟨0, 0, 8, true, false⟩] } ⟨0, 0⟩ [1] 1 = .error .unwritable := rfl
+    write { Tests.caller with views := [⟨0, 0, 8, true, false⟩] } ⟨0, 0⟩ [1] 1 = .error .unwritable := rfl
 
-theorem null_rejected : dereference Examples.caller .null 8 1 = .error .nullDereference := rfl
+theorem null_rejected : dereference Tests.caller .null 8 1 = .error .nullDereference := rfl
 
 theorem malformed_allocation :
-    (allocate Examples.empty ⟨.callerStack, ⟨8, 0, []⟩, true, []⟩).isOk = false := rfl
+    (allocate Memory.empty ⟨.callerStack, ⟨8, 0, []⟩, true, []⟩).isOk = false := rfl
 
 theorem gc_slot_rejected :
-    read { Examples.caller with allocations := fun _ => some ⟨.managedHeap, ⟨8, 1, [(0, 8)]⟩, true, []⟩ }
+    read { Tests.caller with allocations := fun _ => some ⟨.managedHeap, ⟨8, 1, [(0, 8)]⟩, true, []⟩ }
       ⟨0, 0⟩ 8 1 = .error .unsupportedLayout := rfl
 
 theorem unknown_instruction_rejected :
-    (instruction (.unsupported "test") [] Examples.empty).isOk = false := rfl
+    (instruction (.unsupported "test") [] Memory.empty).isOk = false := rfl
 
 -- Generic round-trip theorem now covers arbitrary bounded aggregate lengths.
 theorem aggregate_roundtrip {memory : Memory} {reference : Reference}
@@ -204,26 +204,26 @@ theorem aggregate_roundtrip {memory : Memory} {reference : Reference}
 
 #print axioms aggregate_roundtrip
 theorem missing_parameter_rejected :
-    CIL.Safety.makeParameterHomes 0 [(0, .word32)] [] Examples.empty = .error .invalidState := rfl
+    CIL.Safety.makeParameterHomes 0 [(0, .word32)] [] Memory.empty = .error .invalidState := rfl
 
 theorem reference_parameter_rejects_integer :
-    CIL.Safety.makeParameterHomes 0 [(0, .reference)] [.scalar (.i32 0)] Examples.empty =
+    CIL.Safety.makeParameterHomes 0 [(0, .reference)] [.scalar (.i32 0)] Memory.empty =
       .error .invalidState := rfl
 
 theorem scalar_parameter_rejects_reference :
-    (CIL.Safety.makeParameterHomes 0 [(0, .word32)] [.reference .null] Examples.empty).isOk = false := rfl
+    (CIL.Safety.makeParameterHomes 0 [(0, .word32)] [.reference .null] Memory.empty).isOk = false := rfl
 
 theorem parameter_initialization_narrows :
     (do
       let (homes, _, memory) ← CIL.Safety.makeParameterHomes 0 [(0, .narrow .signed8)]
-        [.scalar (.i32 255)] Examples.empty
+        [.scalar (.i32 255)] Memory.empty
       let some (_, slot) := homes[0]? | .error .invalidState
       CIL.Safety.loadLocal memory slot : CIL.Safety.ExecutionResult CIL.Safety.Value) =
       .ok (.scalar (.i32 4294967295)) := rfl
 
 -- Typed copies share scalar memory permissions, lifetime and initialization checks.
 def copyMemory : Memory := {
-  Examples.empty with
+  Memory.empty with
   allocations := fun id => if id < 2 then some ⟨.callerStack, ⟨12, 1, []⟩, true, [12]⟩ else none
   cells := fun _ _ => ⟨42, true⟩
   views := [⟨0, 0, 12, true, true⟩, ⟨1, 0, 12, true, true⟩]
@@ -297,104 +297,104 @@ theorem scalar_helper_zero_counts :
 #print axioms scalar_helper_zero_counts
 
 theorem nested_snapshot_bounds :
-    (instruction (.aggregateFieldAt 3 2) [.scalar (.aggregate [1, 2, 3, 4])] Examples.empty).map Prod.snd =
+    (instruction (.aggregateFieldAt 3 2) [.scalar (.aggregate [1, 2, 3, 4])] Memory.empty).map Prod.snd =
       .error .invalidState := rfl
 
 theorem nested_store_size :
-    (instruction (.setAggregateFieldAt 0 8) [.scalar (.aggregate [1]), Examples.reference] Examples.caller).map Prod.snd =
+    (instruction (.setAggregateFieldAt 0 8) [.scalar (.aggregate [1]), Tests.reference] Tests.caller).map Prod.snd =
       .error .invalidState := rfl
 
 theorem nested_null :
-    (instruction (.aggregateFieldAt 0 8) [.reference .null] Examples.empty).map Prod.snd =
+    (instruction (.aggregateFieldAt 0 8) [.reference .null] Memory.empty).map Prod.snd =
       .error (.memory .nullDereference .null 0) := rfl
 
 theorem null_reference_pushed :
-    instruction (.memory .nullRef) [.scalar (.i32 7)] Examples.empty =
-      .ok (Examples.empty, [.reference .null, .scalar (.i32 7)]) := rfl
+    instruction (.memory .nullRef) [.scalar (.i32 7)] Memory.empty =
+      .ok (Memory.empty, [.reference .null, .scalar (.i32 7)]) := rfl
 
 theorem null_reference_detected :
-    instruction (.memory .isNullRef) [.reference .null] Examples.empty =
-      .ok (Examples.empty, [.scalar (.i32 1)]) := rfl
+    instruction (.memory .isNullRef) [.reference .null] Memory.empty =
+      .ok (Memory.empty, [.scalar (.i32 1)]) := rfl
 
 theorem live_reference_not_null :
-    instruction (.memory .isNullRef) [Examples.reference] Examples.caller =
-      .ok (Examples.caller, [.scalar (.i32 0)]) := rfl
+    instruction (.memory .isNullRef) [Tests.reference] Tests.caller =
+      .ok (Tests.caller, [.scalar (.i32 0)]) := rfl
 
 -- Testing performs no access, so an expired reference is still not null.
 theorem expired_reference_not_null :
-    instruction (.memory .isNullRef) [Examples.reference] (expire Examples.caller 0) =
-      .ok (expire Examples.caller 0, [.scalar (.i32 0)]) := rfl
+    instruction (.memory .isNullRef) [Tests.reference] (expire Tests.caller 0) =
+      .ok (expire Tests.caller 0, [.scalar (.i32 0)]) := rfl
 
 theorem null_test_requires_reference :
-    instruction (.memory .isNullRef) [.scalar (.i64 0)] Examples.empty = .error .invalidState := rfl
+    instruction (.memory .isNullRef) [.scalar (.i64 0)] Memory.empty = .error .invalidState := rfl
 
 -- Every load and store through `NullRef` faults as a null dereference.
 theorem null_reference_accesses_fault :
-    instructions [.memory .nullRef, .load64] [] Examples.empty =
+    instructions [.memory .nullRef, .load64] [] Memory.empty =
       .error (.memory .nullDereference .null 8) ∧
-    instructions [.memory .nullRef, .loadScalar 4 true] [] Examples.empty =
+    instructions [.memory .nullRef, .loadScalar 4 true] [] Memory.empty =
       .error (.memory .nullDereference .null 4) ∧
-    instructions [.memory .nullRef, .const64 7, .store64] [] Examples.empty =
+    instructions [.memory .nullRef, .const64 7, .store64] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
-    instructions [.memory .nullRef, .const32 7, .storeScalar 4] [] Examples.empty =
+    instructions [.memory .nullRef, .const32 7, .storeScalar 4] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
-    instructions [.memory .nullRef, .loadAggregate 32] [] Examples.empty =
+    instructions [.memory .nullRef, .loadAggregate 32] [] Memory.empty =
       .error (.memory .nullDereference .null 32) ∧
-    instructions [.memory .nullRef, .initAggregate 32] [] Examples.empty =
+    instructions [.memory .nullRef, .initAggregate 32] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
-    instructions [.memory .nullRef, .memory .load256] [] Examples.empty =
+    instructions [.memory .nullRef, .memory .load256] [] Memory.empty =
       .error (.memory .nullDereference .null 32) ∧
-    instructions [.memory .nullRef, .fieldAt 8 8] [] Examples.empty =
+    instructions [.memory .nullRef, .fieldAt 8 8] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
-    instructions [.memory .nullRef, .fieldAddress 8] [] Examples.empty =
+    instructions [.memory .nullRef, .fieldAddress 8] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
-    instructions [.memory .nullRef, .const64 7, .setFieldAt 8 8] [] Examples.empty =
+    instructions [.memory .nullRef, .const64 7, .setFieldAt 8 8] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
-    instructions [.memory .nullRef, .lane 1] [] Examples.empty =
+    instructions [.memory .nullRef, .lane 1] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
-    instructions [.memory .nullRef, .laneAddress 1] [] Examples.empty =
+    instructions [.memory .nullRef, .laneAddress 1] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
-    instructions [.memory .nullRef, .const64 7, .setLane 1] [] Examples.empty =
+    instructions [.memory .nullRef, .const64 7, .setLane 1] [] Memory.empty =
       .error (.memory .nullDereference .null 0) :=
   ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 
 theorem nested_uninitialized :
-    (instruction (.aggregateFieldAt 0 8) [Examples.reference]
-      { Examples.caller with cells := fun _ _ => ⟨0, false⟩ }).map Prod.snd =
+    (instruction (.aggregateFieldAt 0 8) [Tests.reference]
+      { Tests.caller with cells := fun _ _ => ⟨0, false⟩ }).map Prod.snd =
       .error (.memory .uninitialized (.address ⟨0, 0⟩) 8) := rfl
 
 theorem nested_bounds :
-    (instruction (.aggregateFieldAt 4 8) [Examples.reference] Examples.caller).map Prod.snd =
+    (instruction (.aggregateFieldAt 4 8) [Tests.reference] Tests.caller).map Prod.snd =
       .error (.memory .outsideAllocation (.address ⟨0, 4⟩) 8) := rfl
 
 theorem nested_unwritable :
-    (instruction (.setAggregateFieldAt 0 8) [.scalar (.aggregate (List.replicate 8 0)), Examples.reference]
-      { Examples.caller with views := [⟨0, 0, 8, true, false⟩] }).map Prod.snd =
+    (instruction (.setAggregateFieldAt 0 8) [.scalar (.aggregate (List.replicate 8 0)), Tests.reference]
+      { Tests.caller with views := [⟨0, 0, 8, true, false⟩] }).map Prod.snd =
       .error (.memory .unwritable (.address ⟨0, 0⟩) 8) := rfl
 
 theorem nested_expired :
-    (instruction (.aggregateFieldAt 0 8) [Examples.reference] { Examples.caller with
+    (instruction (.aggregateFieldAt 0 8) [Tests.reference] { Tests.caller with
       allocations := fun _ => some ⟨.callerStack, ⟨8, 1, []⟩, false, []⟩ }).map Prod.snd =
       .error (.memory .expiredLifetime (.address ⟨0, 0⟩) 0) := rfl
 
 theorem constructor_zero_size :
     step { returnsValue := true, locals := [], code := [] } (.newAggregate 1 0 0)
-      0 [] ⟨0, [], [], [], 0⟩ [] Examples.empty = .error .invalidState := rfl
+      0 [] ⟨0, [], [], [], 0⟩ [] Memory.empty = .error .invalidState := rfl
 
 theorem constructor_stack_underflow :
     step { returnsValue := true, locals := [], code := [] } (.newAggregate 1 1 3)
-      0 [] ⟨0, [], [], [], 0⟩ [] Examples.empty = .error .invalidState := rfl
+      0 [] ⟨0, [], [], [], 0⟩ [] Memory.empty = .error .invalidState := rfl
 
 def constructorCaller : CIL.Method := {
   returnsValue := true, locals := [], code := [.newAggregate 1 0 3, .ret] }
 
 theorem constructor_zero_initialization :
     (invoke [constructorCaller, { returnsValue := false, locals := [], code := [.ret] }]
-      8 0 [] Examples.empty).map Prod.snd = .ok [.scalar (.aggregate [0, 0, 0])] := rfl
+      8 0 [] Memory.empty).map Prod.snd = .ok [.scalar (.aggregate [0, 0, 0])] := rfl
 
 theorem constructor_must_return_void :
     (invoke [constructorCaller, { returnsValue := true, locals := [], code := [.const32 7, .ret] }]
-      8 0 [] Examples.empty).map Prod.snd = .error ⟨0, 0, .invalidState⟩ := rfl
+      8 0 [] Memory.empty).map Prod.snd = .error ⟨0, 0, .invalidState⟩ := rfl
 
 end Tests
 
@@ -468,12 +468,12 @@ theorem division_zero (signed remainder : Bool) (x : CIL.W64) :
 
 theorem division_underflow :
     (CIL.Safety.step { returnsValue := true, locals := [], code := [] }
-      (.divide false false) 0 [] ⟨0, [], [], [], 0⟩ [] Examples.empty).isOk = false := rfl
+      (.divide false false) 0 [] ⟨0, [], [], [], 0⟩ [] Memory.empty).isOk = false := rfl
 
 theorem division_managed_reference_rejected :
     (CIL.Safety.step { returnsValue := true, locals := [], code := [] }
       (.divide false false) 0 [] ⟨0, [], [], [], 0⟩
-      [.scalar (.i32 2), .reference .null] Examples.empty).isOk = false := rfl
+      [.scalar (.i32 2), .reference .null] Memory.empty).isOk = false := rfl
 
 
 -- DivRem: (upper:lower) / divisor with Item1 = quotient, Item2 = remainder; upper ≥ divisor faults.
@@ -488,12 +488,12 @@ def divRemMethod (profile : CIL.FeatureProfile) : CIL.Method :=
 
 theorem divRem_checked_fault :
     CIL.Safety.step (divRemMethod { architecture := .x64, x86Base64 := true }) (.intrinsic (.x86Base .divRem64) 3) 0 []
-      ⟨0, [], [], [], 0⟩ [.scalar (.i64 3), .scalar (.i64 3), .scalar (.i64 0)] Examples.empty =
+      ⟨0, [], [], [], 0⟩ [.scalar (.i64 3), .scalar (.i64 3), .scalar (.i64 0)] Memory.empty =
       .error (.arithmetic .overflow) := rfl
 
 theorem divRem_requires_x86Base :
     CIL.Safety.step (divRemMethod CIL.FeatureProfile.scalar) (.intrinsic (.x86Base .divRem64) 3) 0 []
-      ⟨0, [], [], [], 0⟩ [.scalar (.i64 3), .scalar (.i64 0), .scalar (.i64 7)] Examples.empty =
+      ⟨0, [], [], [], 0⟩ [.scalar (.i64 3), .scalar (.i64 0), .scalar (.i64 7)] Memory.empty =
       .error (.unsupported "Intrinsic unavailable in target profile") := rfl
 
 theorem divRem_pure_fault :

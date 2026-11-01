@@ -119,6 +119,29 @@ if (memory.Code != 0 || memory.Stderr.Length != 0 || !memory.Stdout.Contains("St
     throw new InvalidOperationException("Missing checked invalid-access theorem: " + memory.Output);
 Console.WriteLine("PASS CLI invalid memory-access theorem");
 
+// The tool ships only CIL; a proof importing a repository fixture must name it, not fail inside Lake.
+foreach (var module in new[] { "Tests.Support", "Examples.Support" })
+{
+    var fixtureProof = Path.Combine(auditOutput, "Fixture.lean");
+    File.WriteAllText(fixtureProof, $"import Extracted\nimport {module}\n");
+    var fixtureImport = Execute([.. cli, "verify", auditOutput, "--proof", fixtureProof]);
+    var failure = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(auditOutput, "failed.json")));
+    if (fixtureImport.Code != 1 || !fixtureImport.Stderr.Contains("Stage: proof selection") ||
+        !fixtureImport.Stderr.Contains($"imports {module}, a LeanCIL repository module") ||
+        failure.GetProperty("kind").GetString() != "invalid-request")
+        throw new InvalidOperationException("Repository fixture import was not rejected by name: " + fixtureImport.Output);
+}
+Console.WriteLine("PASS CLI rejects proofs importing repository fixtures the tool does not ship");
+
+// Consumers pin the framework from this report, so it must name the commit the tool was built from.
+var version = Execute([.. cli, "--version"]);
+var head = Execute(["git", "-C", Root, "rev-parse", "HEAD"]).Stdout.Trim();
+if (version.Code != 0 || !version.Stdout.Contains($"LeanCIL revision: {head}") ||
+    !version.Stdout.Contains($"rev = \"{head}\"") ||
+    !version.Stdout.Contains("Lean toolchain: " + File.ReadAllText(At("lean-toolchain")).Trim()))
+    throw new InvalidOperationException("Version report does not name the built revision: " + version.Output);
+Console.WriteLine("PASS CLI version names the framework revision and toolchain");
+
 if (args.Length == 0)
     Run(["dotnet", "run", "--file", At("Tests/CliImportedKernelAudit.cs")],
         streamOutput: true, progress: "CLI imported helper kernel audit");

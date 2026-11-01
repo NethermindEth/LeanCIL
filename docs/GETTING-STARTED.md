@@ -41,7 +41,7 @@ Verified: ExampleProof.correctness
       ∃ result,
         Except.map Prod.snd
               (CIL.Safety.invoke Extracted.program 4 0
-                [CIL.Safety.Value.scalar (CIL.Value.i64 x), CIL.Safety.Value.scalar (CIL.Value.i64 y)] Examples.empty) =
+                [CIL.Safety.Value.scalar (CIL.Value.i64 x), CIL.Safety.Value.scalar (CIL.Value.i64 y)] CIL.Safety.Memory.empty) =
             Except.ok [CIL.Safety.Value.scalar (CIL.Value.i64 result)] ∧
           BitVec.toNat result = (BitVec.toNat x + BitVec.toNat y) % 2 ^ 64
 ```

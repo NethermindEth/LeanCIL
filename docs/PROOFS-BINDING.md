@@ -6,7 +6,7 @@ Import `CIL.Safety.LoopScaffold` to derive a concrete checked entry and a unique
 instruction from an extracted method:
 
 ```lean
-bind_entry entry := Extracted.method0 with [] from Examples.empty
+bind_entry entry := Extracted.method0 with [] from CIL.Safety.Memory.empty
 bind_cutpoint cutpoint := Extracted.method0 matching (· matches .brnonzero _) with entry.frame
 ```
 
@@ -25,7 +25,7 @@ Binders parameterize the generated declarations, including memory stores for sym
 
 ```lean
 bind_entry entry (value : CIL.W32) := body
-  with [.scalar (.i32 value)] from Examples.empty
+  with [.scalar (.i32 value)] from CIL.Safety.Memory.empty
 ```
 
 For symbolic initial memory or reference and span arguments, append `using success`, where

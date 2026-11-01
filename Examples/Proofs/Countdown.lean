@@ -1,5 +1,4 @@
 import Extracted
-import Examples.Support
 import CIL.Verification
 import CIL.Safety.LoopVC
 import CIL.Safety.LoopScaffold
@@ -8,7 +7,7 @@ open CIL.Safety
 open CIL (W32)
 namespace ExampleProof
 
-bind_entry entry := Extracted.method0 with [] from Examples.empty
+bind_entry entry := Extracted.method0 with [] from Memory.empty
 bind_cutpoint cutpoint := Extracted.method0 matching
   (fun op => match op with | .brnonzero _ => true | _ => false) with entry.frame
 private def header (state : W32 × Memory) : LoopState :=
@@ -20,7 +19,7 @@ private def invariant (state : W32 × Memory) : Prop :=
 -- The invariant cutpoint is found in compiled code. Every path and its cost are
 -- derived by checked stepping, so instruction positions and block order are not assumptions.
 theorem correctness : CIL.Safety.Ensures Extracted.program 0
-    (fun args initial => ∃ x : W32, args = [.scalar (.i32 x)] ∧ initial = Examples.empty)
+    (fun args initial => ∃ x : W32, args = [.scalar (.i32 x)] ∧ initial = Memory.empty)
     (fun _ _ _ values => values = [.scalar (.i32 0)]) := by
   rintro args initial ⟨x, rfl, rfl⟩
   have writable : access entry.memory entry.home0 4 1 true = .ok () := by rfl

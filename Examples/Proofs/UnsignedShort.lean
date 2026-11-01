@@ -1,5 +1,4 @@
 import Extracted
-import Examples.Support
 
 namespace ExampleProof
 
@@ -7,7 +6,7 @@ namespace ExampleProof
 theorem correctness (x : CIL.W32) :
     ∃ result : CIL.W32,
       (CIL.Safety.invoke Extracted.program 3 0
-        [.scalar (.i32 x)] Examples.empty).map Prod.snd = .ok [.scalar (.i32 result)] ∧
+        [.scalar (.i32 x)] CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i32 result)] ∧
       result.toNat = x.toNat % 65536 := by
   refine ⟨(x.setWidth 16).zeroExtend 32, rfl, ?_⟩
   simp

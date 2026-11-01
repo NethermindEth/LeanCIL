@@ -1,5 +1,4 @@
 import Extracted
-import Examples.Support
 import CIL.Safety.SymbolicExecution
 import CIL.Safety.TupleDivision
 
@@ -21,18 +20,18 @@ def inputs (lower upper divisor : W64) : List CIL.Safety.Value :=
     otherwise. -/
 theorem correctness (lower upper divisor : W64) :
     (upper.toNat < divisor.toNat → ∃ quotient : W64,
-      (invoke Extracted.program 8 0 (inputs lower upper divisor) Examples.empty).map Prod.snd =
+      (invoke Extracted.program 8 0 (inputs lower upper divisor) Memory.empty).map Prod.snd =
         .ok [.scalar (.i64 quotient)] ∧
       quotient.toNat = (upper.toNat * 2 ^ 64 + lower.toNat) / divisor.toNat) ∧
     (divisor.toNat ≤ upper.toNat →
-      invoke Extracted.program 8 0 (inputs lower upper divisor) Examples.empty =
+      invoke Extracted.program 8 0 (inputs lower upper divisor) Memory.empty =
         .error ⟨0, 3, .arithmetic (if divisor = 0 then .divideByZero else .overflow)⟩) := by
   refine ⟨fun fits => ?_, fun overflows => ?_⟩
   · obtain ⟨quotient, remainder, evaluated, -, -, exact, -⟩ :=
-      divRem_fields (lower := lower) fits [] Examples.empty
+      divRem_fields (lower := lower) fits [] Memory.empty
     refine ⟨quotient, ?_, exact⟩
-    have returned : invoke Extracted.program 8 0 (inputs lower upper divisor) Examples.empty =
-        .ok (Examples.empty, [.scalar (.i64 quotient)]) := by
+    have returned : invoke Extracted.program 8 0 (inputs lower upper divisor) Memory.empty =
+        .ok (Memory.empty, [.scalar (.i64 quotient)]) := by
       cil_checked_steps [inputs, evaluated, item1_of_tuple]
     rw [returned]
     rfl

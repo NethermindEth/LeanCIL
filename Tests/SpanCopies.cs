@@ -76,14 +76,14 @@ foreach (var method in methods.Where(method => method.IsPublic))
             ".error ⟨0, 2, .thrown \"System.ArgumentException\"⟩");
         proofs.Add("by rfl");
     }
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + """
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" + """
         /-- Successful observations identify the checked execution result. -/
         private theorem result_of_toOption {error value : Type} {result : Except error value}
             {expected : value} (observed : result.toOption = some expected) : result = .ok expected := by
           cases result <;> simp_all [Except.toOption]
         #print axioms result_of_toOption
         /-- One allocation exposes overlapping and disjoint slices plus neighboring bytes. -/
-        def memory : CIL.Safety.Memory := { Examples.empty with
+        def memory : CIL.Safety.Memory := { CIL.Safety.Memory.empty with
           allocations := fun identity => if identity == 0 then
             some ⟨.callerStack, ⟨32, 1, []⟩, true, [32]⟩ else none
           cells := fun _ offset => ⟨BitVec.ofNat 8 offset, true⟩

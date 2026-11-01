@@ -19,7 +19,7 @@ var requests = Enumerable.Range(0, benchmark ? 8 : 2).Select(i =>
     var output = Path.Combine(root, "Case" + i);
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "Proof.lean");
-    File.WriteAllText(proof, $"import Extracted\nimport Examples.Support\nnamespace ExampleProof\ntheorem correctness : (CIL.Safety.invoke Extracted.program 8 0 [.scalar (.i64 {i}), .scalar (.i64 1)] Examples.empty).map Prod.snd = .ok [.scalar (.i64 {i + 1})] := rfl\nend ExampleProof\n");
+    File.WriteAllText(proof, $"import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\ntheorem correctness : (CIL.Safety.invoke Extracted.program 8 0 [.scalar (.i64 {i}), .scalar (.i64 1)] CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 {i + 1})] := rfl\nend ExampleProof\n");
     return new GeneratedVerification("Arithmetic::Add(ulong,ulong)", proof, output);
 }).ToArray();
 using var verification = new Program();

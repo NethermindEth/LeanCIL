@@ -65,7 +65,7 @@ void Reject(string name, string dll, string method, string marker, bool assume =
     Console.WriteLine("PASS scalar rejection: " + name);
 }
 
-Reject("unassumed", assembly, "ReadByte", "Unsupported method metadata or static initialisation", assume: false);
+Reject("unassumed", assembly, "ReadByte", "Unsupported static initialisation", assume: false);
 foreach (var name in new[] { "mutable", "twice", "branch", "address" })
 {
     var dll = Path.Combine(root, name + ".dll");

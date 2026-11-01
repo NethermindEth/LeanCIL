@@ -116,7 +116,7 @@ void Prove(string name, int width, int offset = 0, bool copy = false, bool allMa
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "Proof.lean");
     var size = width + offset;
-    var definitions = $"def memory : CIL.Safety.Memory := {{ Examples.empty with\n" +
+    var definitions = $"def memory : CIL.Safety.Memory := {{ CIL.Safety.Memory.empty with\n" +
         $"  allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨{size}, 1, []⟩, true, [{size}]⟩ else none\n" +
         $"  cells := fun _ _ => ⟨173, true⟩\n  views := [⟨0, 0, {size}, true, true⟩]\n  nextIdentity := 1 }}\n";
     var claims = new List<string>();
@@ -126,7 +126,7 @@ void Prove(string name, int width, int offset = 0, bool copy = false, bool allMa
         var cells = "[" + string.Join(", ", Enumerable.Range(0, width).Select(index =>
             $"({index * 7 % 256}, {(mask == "full" || mask == "partial" && index % 3 != 0 ? "true" : "false")})")) + "]";
         var value = $"CIL.Safety.snapshotValue .vector{width * 8} {cells}";
-        var arguments = $"[Examples.reference, .scalar ({value})]";
+        var arguments = $"[Tests.reference, .scalar ({value})]";
         var initial = "memory";
         if (copy)
         {
@@ -135,7 +135,7 @@ void Prove(string name, int width, int offset = 0, bool copy = false, bool allMa
                 $"  allocations := fun id => if id < 2 then some ⟨.callerStack, ⟨{width}, 1, []⟩, true, [{width}]⟩ else none\n" +
                 $"  cells := fun id index => if id = 1 then let cell := {cells}[index]?.getD (0, false); ⟨cell.1, cell.2⟩ else ⟨173, true⟩\n" +
                 $"  views := [⟨0, 0, {width}, true, true⟩, ⟨1, 0, {width}, true, true⟩]\n  nextIdentity := 2 }}\n";
-            arguments = "[Examples.reference, .reference (.address ⟨1, 0⟩)]";
+            arguments = "[Tests.reference, .reference (.address ⟨1, 0⟩)]";
             initial = inputMemory;
         }
         var invocation = $"CIL.Safety.invoke Extracted.program 128 0 {arguments} {initial}";
@@ -152,7 +152,7 @@ void Prove(string name, int width, int offset = 0, bool copy = false, bool allMa
         proofs.Add("by apply result_of_toOption; decide +kernel");
         proofs.Add("by apply result_of_toOption; decide +kernel");
     }
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + """
+    File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nnamespace ExampleProof\n" + """
         private theorem result_of_toOption {error value : Type} {result : Except error value}
             {expected : value} (observed : result.toOption = some expected) : result = .ok expected := by
           cases result <;> simp_all [Except.toOption]
@@ -195,9 +195,9 @@ Directory.CreateDirectory(sizeOutput);
 var sizeProof = Path.Combine(sizeOutput, "Proof.lean");
 File.WriteAllText(sizeProof, $$"""
 import Extracted
-import Examples.Support
+import Tests.Support
 namespace ExampleProof
-theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [] Examples.empty).map Prod.snd =
+theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [] CIL.Safety.Memory.empty).map Prod.snd =
     .ok [.scalar (.i32 {{sizes}})] := by rfl
 #print axioms correctness
 end ExampleProof
@@ -233,10 +233,10 @@ foreach (var item in portableCases)
         string Value(byte[] bytes) => $".scalar (.v{item.Bits} {new BigInteger(bytes, isUnsigned: true)})";
         claims.Add($"((CIL.Safety.invoke Extracted.program 192 0 " +
             $"[{Value(left)}, {Value(right)}, .scalar (.i32 {(suppliedEquality ? 1 : 0)})] " +
-            $"Examples.empty).map Prod.snd).toOption = some [{Value(expected)}]");
+            $"CIL.Safety.Memory.empty).map Prod.snd).toOption = some [{Value(expected)}]");
     }
     var proof = Path.Combine(output, "Proof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" +
+    File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nnamespace ExampleProof\n" +
         "theorem correctness :\n" + string.Join(" ∧\n", claims) + " := by decide +kernel\n" +
         "#print axioms correctness\nend ExampleProof\n");
     if (item.Element == "byte" && item.Bits != 256)

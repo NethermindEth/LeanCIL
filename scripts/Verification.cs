@@ -656,11 +656,13 @@ partial class Program : IDisposable
         foreach (var name in new[] { "lean-toolchain", "lakefile.toml", "lake-manifest.json", "CIL.lean" })
             result[name] = Sha(At(name));
 
-        var folders = new List<(string, string[])> { ("CIL", [".lean"]), ("Examples", [".lean"]), ("Tests", [".lean"]) };
+        var folders = new List<(string, string[])> { ("CIL", [".lean"]) };
 #if !LEANCIL_TOOL
+        // The repository's examples and tests are checkout inputs; the tool ships only the framework.
         foreach (var name in new[] { "global.json", "Directory.Build.props", "Directory.Packages.props", ".editorconfig" })
             result[name] = Sha(At(name));
-        folders.AddRange([("Extractor", [".cs", ".csproj"]), ("scripts", [".cs"])]);
+        folders.AddRange([("Examples", [".lean"]), ("Tests", [".lean"]), ("Extractor", [".cs", ".csproj"]),
+            ("scripts", [".cs"])]);
 #endif
 
         foreach (var (folder, extensions) in folders)
@@ -1557,6 +1559,16 @@ partial class Program : IDisposable
             }
         }
     }
+
+    /// <summary>The build's informational version: the package version, then `+` and the git commit.</summary>
+    static string? InformationalVersion => System.Reflection.CustomAttributeExtensions
+        .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(typeof(Program).Assembly)
+        ?.InformationalVersion;
+
+    /// <summary>The LeanCIL commit this build was made from, or null when it was built outside git.</summary>
+    // A build from a modified checkout still names its base commit; framework source checks catch the drift.
+    internal static string? SourceRevision =>
+        InformationalVersion is { } version && version.IndexOf('+') is var plus and >= 0 ? version[(plus + 1)..] : null;
 
     static string ExtractorPath =>
 #if LEANCIL_TOOL

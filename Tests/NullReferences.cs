@@ -20,7 +20,7 @@ Run(["lake", "build", "Tests.UnsafeCallEvidence"], verification.CheckoutPackage(
 
 // Every byte of the caller's 32-byte struct is 0x25, so each limb is 0x2525252525252525.
 const string memory = """
-def memory : CIL.Safety.Memory := { Examples.caller with
+def memory : CIL.Safety.Memory := { Tests.caller with
   allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨32, 1, []⟩, true, [32]⟩ else none
   cells := fun _ _ => ⟨37, true⟩
   views := [⟨0, 0, 32, true, true⟩] }
@@ -52,25 +52,25 @@ string Claim(string name, object[] input, string args, string state, string faul
 
 var cases = new (string Name, string[] Claims)[]
 {
-    ("IsNull", [Claim("IsNull", [], "", "Examples.empty", "")]),
-    ("IsLive", [Claim("IsLive", [0UL], "Examples.reference", "Examples.caller", "")]),
-    ("Read", [Claim("Read", [], "", "Examples.empty", "1, .memory .nullDereference .null 8")]),
-    ("Write", [Claim("Write", [7UL], ".scalar (.i64 7)", "Examples.empty", "2, .memory .nullDereference .null 0")]),
-    ("ReadField", [Claim("ReadField", [], "", "Examples.empty", "1, .memory .nullDereference .null 0")]),
-    ("WriteField", [Claim("WriteField", [7UL], ".scalar (.i64 7)", "Examples.empty", "2, .memory .nullDereference .null 0")]),
+    ("IsNull", [Claim("IsNull", [], "", "CIL.Safety.Memory.empty", "")]),
+    ("IsLive", [Claim("IsLive", [0UL], "Tests.reference", "Tests.caller", "")]),
+    ("Read", [Claim("Read", [], "", "CIL.Safety.Memory.empty", "1, .memory .nullDereference .null 8")]),
+    ("Write", [Claim("Write", [7UL], ".scalar (.i64 7)", "CIL.Safety.Memory.empty", "2, .memory .nullDereference .null 0")]),
+    ("ReadField", [Claim("ReadField", [], "", "CIL.Safety.Memory.empty", "1, .memory .nullDereference .null 0")]),
+    ("WriteField", [Claim("WriteField", [7UL], ".scalar (.i64 7)", "CIL.Safety.Memory.empty", "2, .memory .nullDereference .null 0")]),
     ("Optional", [
-        Claim("Optional", [caller, false], "Examples.reference, .scalar (.i32 0)", "memory", ""),
-        Claim("Optional", [caller, true], "Examples.reference, .scalar (.i32 1)", "memory", "")]),
+        Claim("Optional", [caller, false], "Tests.reference, .scalar (.i32 0)", "memory", ""),
+        Claim("Optional", [caller, true], "Tests.reference, .scalar (.i32 1)", "memory", "")]),
     ("Unchecked", [
-        Claim("Unchecked", [caller, false], "Examples.reference, .scalar (.i32 0)", "memory", "7, .memory .nullDereference .null 0"),
-        Claim("Unchecked", [caller, true], "Examples.reference, .scalar (.i32 1)", "memory", "")])
+        Claim("Unchecked", [caller, false], "Tests.reference, .scalar (.i32 0)", "memory", "7, .memory .nullDereference .null 0"),
+        Claim("Unchecked", [caller, true], "Tests.reference, .scalar (.i32 1)", "memory", "")])
 };
 var requests = cases.Select(item =>
 {
     var output = Path.Combine(root, item.Name);
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + memory +
+    File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nnamespace ExampleProof\n" + memory +
         "\ntheorem correctness :\n" + string.Join(" ∧\n", item.Claims) + " := by\n  exact " +
         (item.Claims.Length == 1 ? "rfl" : "⟨" + string.Join(", ", item.Claims.Select(_ => "rfl")) + "⟩") + "\nend ExampleProof\n");
     return new GeneratedVerification(methods.Single(m => m.Name == item.Name).FullName, proof, output);

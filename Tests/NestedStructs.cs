@@ -21,7 +21,7 @@ void Prove(string dll, string selector, string name, IEnumerable<string> stateme
     Directory.CreateDirectory(output);
     var claims = statements.ToArray();
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 8192\n" +
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nset_option maxRecDepth 8192\n" +
         "namespace ExampleProof\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by\n  exact " +
         (claims.Length == 1 ? "rfl" : "⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩") + "\nend ExampleProof\n");
     queue.Add(new(selector, proof, output, Assembly: dll), () =>
@@ -77,7 +77,7 @@ foreach (var name in new[] { "Snapshot", "Copy", "Alias", "Pass", "Packed", "Exp
     {
         object value = narrow ? (object)unchecked((uint)bits) : bits;
         var expected = method.Invoke(null, [value])!;
-        claims.Add($"(CIL.Safety.invoke Extracted.program 128 0 [.scalar (.i{width} {value})] Examples.empty).map Prod.snd = .ok [.scalar (.i{width} {expected})]");
+        claims.Add($"(CIL.Safety.invoke Extracted.program 128 0 [.scalar (.i{width} {value})] CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i{width} {expected})]");
     }
     Prove(assembly, $"Nested::{name}({(narrow ? "uint" : "ulong")})", name, claims);
 }

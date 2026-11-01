@@ -1,5 +1,4 @@
 import Extracted
-import Examples.Support
 
 /-!
 # BigMul(int, int) contract
@@ -12,7 +11,7 @@ open CIL.Safety
 
 /-- The call returns `left * right` as a `long`, and its signed reading is the `Int` product. -/
 theorem correctness (left right : CIL.W32) :
-    (invoke Extracted.program 8 0 [.scalar (.i32 left), .scalar (.i32 right)] Examples.empty).map
+    (invoke Extracted.program 8 0 [.scalar (.i32 left), .scalar (.i32 right)] Memory.empty).map
         Prod.snd = .ok [.scalar (.i64 (BitVec.ofInt 64 (left.toInt * right.toInt)))] ∧
     (BitVec.ofInt 64 (left.toInt * right.toInt)).toInt = left.toInt * right.toInt := by
   refine ⟨rfl, ?_⟩

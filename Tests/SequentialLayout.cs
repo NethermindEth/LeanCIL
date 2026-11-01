@@ -24,7 +24,7 @@ void Prove(string dll, string selector, string name, IEnumerable<string> stateme
     Directory.CreateDirectory(output);
     var claims = statements.ToArray();
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 4096\n" +
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nset_option maxRecDepth 4096\n" +
         "namespace ExampleProof\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by\n  exact " +
         (claims.Length == 1 ? "rfl" : "⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩") + "\nend ExampleProof\n");
     queue.Add(new(selector, proof, output, Assembly: dll), () =>
@@ -65,7 +65,7 @@ verification.Verify(assembly, "Examples", "Sequential::ReadWrite(Examples.Record
     At("Examples/Proofs/SequentialReadWrite.lean"), Path.Combine(root, "UniversalField"));
 Prove(assembly, "Sequential::Packed(ulong)", "Packed",
     new ulong[] { 0, 1, uint.MaxValue, long.MaxValue, ulong.MaxValue }.Select(value =>
-        $"(CIL.Safety.invoke Extracted.program 64 0 [.scalar (.i64 {value})] Examples.empty).map Prod.snd = .ok [.scalar (.i64 {value})]"));
+        $"(CIL.Safety.invoke Extracted.program 64 0 [.scalar (.i64 {value})] CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 {value})]"));
 
 var variants = new List<(int Pack, int Size, bool Empty)>();
 variants.AddRange(new[] { 0, 1, 2, 4, 8, 16, 32, 64, 128 }.Select(pack => (pack, 0, false)));
@@ -135,7 +135,7 @@ foreach (var (pack, size, empty) in variants)
     foreach (var value in new ulong[] { 0, 1, 127, 128, 255, 256, 32767, 32768, uint.MaxValue, long.MaxValue, ulong.MaxValue })
     {
         var result = (ulong)methodInfo.Invoke(null, [value])!;
-        claims.Add($"(CIL.Safety.invoke Extracted.program 128 0 [.scalar (.i64 {value})] Examples.empty).map Prod.snd = .ok [.scalar (.i64 {result})]");
+        claims.Add($"(CIL.Safety.invoke Extracted.program 128 0 [.scalar (.i64 {value})] CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 {result})]");
     }
     Prove(dll, selector, name, claims);
 }

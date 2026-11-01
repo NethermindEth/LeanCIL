@@ -91,11 +91,11 @@ foreach (var (operation, width, signed, unsignedInput, native) in operations)
         }
 
         var outcome = overflow ? ".error ⟨0, 1, .arithmetic .overflow⟩" : $".ok [.scalar (.i{stackWidth} {expected})]";
-        claims.Add($"(CIL.Safety.invoke Extracted.program 4 0 [.scalar (.i{inputWidth} {bits})] Examples.empty).map Prod.snd = {outcome}");
+        claims.Add($"(CIL.Safety.invoke Extracted.program 4 0 [.scalar (.i{inputWidth} {bits})] CIL.Safety.Memory.empty).map Prod.snd = {outcome}");
     }
 
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 4096\nnamespace ExampleProof\ntheorem correctness :\n" +
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nset_option maxRecDepth 4096\nnamespace ExampleProof\ntheorem correctness :\n" +
         string.Join(" ∧\n", claims) + " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
     queue.Add(new(selector, proof, output, Assembly: dll), () =>
     {

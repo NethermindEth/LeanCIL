@@ -8,7 +8,7 @@ defaultTargets = ["CIL"]
 name = "CIL"
 
 [[lean_lib]]
-name = "Examples.Support"
+name = "Tests.Support"
 
 [[lean_lib]]
 name = "Tests.Semantics"

@@ -17,7 +17,8 @@ The user has a `.lean` file that imports `Extracted` and states a theorem about
 4. The theorem name: the fully qualified name, such as `MyProof.correctness`.
 5. Whether the proof imports the user's own modules. If it does, it needs `--proof-root` pointing
    at their Lake package (setup in [bridge-model-proof.md](bridge-model-proof.md#package-setup)).
-6. Any `--assume-initialized` types the extraction needs (types with static constructors).
+6. Any `--assume-initialized` types the extraction needs. `extract` names each type with a static
+   constructor and the flag; pass it only if every caller really runs that constructor first.
 
 ## Run
 

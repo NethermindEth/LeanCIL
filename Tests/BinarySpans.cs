@@ -80,14 +80,14 @@ foreach (var method in methods)
         claims.Add("(match CIL.Safety.invoke Extracted.program 512 0 " +
             "[.bufferSpan ⟨.address ⟨0, 1⟩, 28, 1, true⟩] readOnlyMemory with " +
             "| .error ⟨_, _, .memory .unwritable _ _⟩ => true | _ => false) = true");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + """
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" + """
         /-- Successful observations identify the checked execution result. -/
         private theorem result_of_toOption {error value : Type} {result : Except error value}
             {expected : value} (observed : result.toOption = some expected) : result = .ok expected := by
           cases result <;> simp_all [Except.toOption]
         #print axioms result_of_toOption
         /-- Misaligned caller storage exposes signed high bits and neighboring sentinel bytes. -/
-        def memory : CIL.Safety.Memory := { Examples.empty with
+        def memory : CIL.Safety.Memory := { CIL.Safety.Memory.empty with
           allocations := fun identity => if identity == 0 then
             some ⟨.callerStack, ⟨48, 1, []⟩, true, [48]⟩ else none
           cells := fun _ offset => ⟨BitVec.ofNat 8 (offset * 37 + 128), true⟩

@@ -20,7 +20,7 @@ var addProof = File.ReadAllText(At("Examples/Proofs/Add.lean"));
 // The addition contract, proved for any program from an unapproved axiom.
 const string axiomProof = """
     import Extracted
-    import Examples.Support
+    import CIL.Safety.Execution
 
     open CIL
     namespace ExampleProof
@@ -28,7 +28,7 @@ const string axiomProof = """
     theorem correctness (x y : W64) :
         ∃ result : W64,
           (CIL.Safety.invoke Extracted.program 4 0
-            [.scalar (.i64 x), .scalar (.i64 y)] Examples.empty).map Prod.snd =
+            [.scalar (.i64 x), .scalar (.i64 y)] CIL.Safety.Memory.empty).map Prod.snd =
               .ok [.scalar (.i64 result)] ∧
           result.toNat = (x.toNat + y.toNat) % 2^64 := bogus.elim
     end ExampleProof

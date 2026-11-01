@@ -36,7 +36,7 @@ void VerifyCases(string dll, string selector, string output, int inputWidth,
 
     foreach (var value in Boundaries(inputWidth))
     {
-        var execution = $"CIL.Safety.invoke Extracted.program 32 0 [.scalar (.i{inputWidth} {value})] Examples.empty";
+        var execution = $"CIL.Safety.invoke Extracted.program 32 0 [.scalar (.i{inputWidth} {value})] CIL.Safety.Memory.empty";
         if (fault is not null)
         {
             claims.Add($"({execution}) = .error {fault}");
@@ -50,7 +50,7 @@ void VerifyCases(string dll, string selector, string output, int inputWidth,
     }
 
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nset_option maxRecDepth 4096\n" +
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nset_option maxRecDepth 4096\n" +
         "namespace ExampleProof\ntheorem correctness :\n  " + string.Join(" ∧\n  ", claims) +
         " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\nend ExampleProof\n");
     queue.Add(new(selector, proof, output, Assembly: dll), () =>

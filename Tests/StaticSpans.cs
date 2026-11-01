@@ -15,13 +15,13 @@ void Prove(string name, string dll, string selector, string claim)
     var output = Path.Combine(root, name);
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "Proof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" +
+    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" +
         "theorem correctness : " + claim + " := by rfl\nend ExampleProof\n");
     queue.Add(new(selector, proof, output, Assembly: dll),
         () => Console.WriteLine("PASS checked static byte span: " + name));
 }
 string Result(string value, string args = "[]") =>
-    $"(CIL.Safety.invoke Extracted.program 16 0 {args} Examples.empty).map Prod.snd = {value}";
+    $"(CIL.Safety.invoke Extracted.program 16 0 {args} CIL.Safety.Memory.empty).map Prod.snd = {value}";
 Prove("First", assembly, "StaticSpans::First()", Result(".ok [.scalar (.i32 1)]"));
 Prove("Last", assembly, "StaticSpans::Last()", Result(".ok [.scalar (.i32 16)]"));
 Prove("PastEnd", assembly, "StaticSpans::PastEnd()",

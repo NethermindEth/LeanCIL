@@ -14,6 +14,45 @@ partial class Program
 
     const string BatchUsage = "Usage: leancil verify-batch requests.json [--fresh] [--rebuild-library] [--parallel count] [--results results.json]";
 
+    /// <summary>
+    /// The tool version, the LeanCIL revision and Lean toolchain its framework comes from, and the
+    /// Lake requirement a consumer package pins to match it.
+    /// </summary>
+    internal static string VersionReport()
+    {
+        var version = InformationalVersion;
+        var toolchain = File.ReadAllText(At("lean-toolchain")).Trim();
+        var revision = SourceRevision;
+        var report = new System.Text.StringBuilder()
+            .AppendLine($"leancil {version?.Split('+')[0] ?? "unknown"}")
+            .AppendLine($"LeanCIL revision: {revision ?? "unknown (built outside a git checkout)"}")
+            .AppendLine($"Lean toolchain: {toolchain}");
+        if (revision is not null)
+            report.AppendLine("Consumer lakefile.toml requirement:")
+                .AppendLine("[[require]]")
+                .AppendLine("name = \"leancil\"")
+                .AppendLine("git = \"https://github.com/NethermindEth/LeanCIL.git\"")
+                .AppendLine($"rev = \"{revision}\"");
+        return report.ToString();
+    }
+
+    /// <summary>LeanCIL's own example and test modules, which the tool does not ship.</summary>
+    static HashSet<string> RepositoryModules() => [.. Regex.Matches(File.ReadAllText(At("lakefile.toml")),
+            @"^\[\[lean_lib\]\]\r?\nname = ""([^""]+)""", RegexOptions.Multiline)
+        .Select(match => match.Groups[1].Value).Where(name => name != "CIL"), "Examples.Support"];
+
+    // Importing one fails later as a missing Lake source; name the module and its replacement instead.
+    static void RejectRepositoryImports(string proof)
+    {
+        var repository = RepositoryModules();
+        var imported = SourceImport().Matches(File.ReadAllText(proof)).Select(import => import.Groups[1].Value)
+            .FirstOrDefault(repository.Contains);
+        if (imported is not null)
+            throw new InvalidDataException($"{CliPaths.Display(proof)} imports {imported}, a LeanCIL repository " +
+                "module that the tool does not ship. Import CIL modules instead; CIL.Safety.Memory.empty replaces " +
+                "Examples.empty.");
+    }
+
     internal static int VerifyBatch(string[] args)
     {
         if (args.Length == 0 || args[0].StartsWith("--", StringComparison.Ordinal))
@@ -80,6 +119,7 @@ partial class Program
                     throw new ArgumentException("Invalid theorem name");
                 if (!File.Exists(proofs[i]))
                     throw new FileNotFoundException($"Proof file not found: {CliPaths.Display(proofs[i])}", proofs[i]);
+                RejectRepositoryImports(proofs[i]);
                 var settingsPath = Path.Combine(outputs[i], "verification.json");
                 // As in sequential runs, the last request for an output owns its settings.
                 if (lastForOutput.Contains(i))
@@ -266,6 +306,7 @@ partial class Program
                 throw new ArgumentException("Invalid theorem name");
             if (!File.Exists(proof))
                 throw new FileNotFoundException($"Proof file not found: {CliPaths.Display(proof)}", proof);
+            RejectRepositoryImports(proof);
 
             // Settings are reusable inputs and survive both successful and failed proofs.
             Directory.CreateDirectory(output);

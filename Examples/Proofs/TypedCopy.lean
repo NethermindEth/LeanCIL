@@ -1,5 +1,4 @@
 import Extracted
-import Examples.Support
 import CIL.Safety.ByteRoundTrip
 
 open CIL.Safety

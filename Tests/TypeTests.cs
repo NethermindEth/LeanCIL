@@ -37,11 +37,11 @@ void QueueRuntime(string name, string folder)
     var budget = name == "ReferenceCases" ? 128 : 64;
     var claims = new[] { 0, 1, -1, int.MaxValue, int.MinValue }.Select(input =>
         $"(CIL.Safety.invoke Extracted.program {budget} 0 " +
-        $"[.scalar (.i32 {unchecked((uint)input)})] Examples.empty).map Prod.snd = " +
+        $"[.scalar (.i32 {unchecked((uint)input)})] CIL.Safety.Memory.empty).map Prod.snd = " +
         $".ok [.scalar (.i32 {unchecked((uint)(int)runtime.GetMethod(name)!.Invoke(null, [input])!)})]").ToList();
     var proof = Path.Combine(folder, "BoundaryProof.lean");
     File.WriteAllText(proof,
-        "import Extracted\nimport Examples.Support\nnamespace ExampleProof\ntheorem correctness :\n" +
+        "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\ntheorem correctness :\n" +
         string.Join(" ∧\n", claims) + " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) +
         "⟩\n#print axioms correctness\nend ExampleProof\n");
     queue.Add(new($"TypeTests::{name}(int)", proof, Path.Combine(root, name + "-Verified")),

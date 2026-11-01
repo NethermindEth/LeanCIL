@@ -88,13 +88,13 @@ partial class Program
                 var valueBits = signature.Width == 32 ? unchecked((uint)value) : value;
                 claims.Add($"(CIL.Safety.invoke Extracted.program 16 0 " +
                     $"[.scalar (.i32 {operation}), .scalar (.i{signature.Width} {valueBits}), " +
-                    $".scalar (.i64 {count})] Examples.empty).map Prod.snd = " +
+                    $".scalar (.i64 {count})] CIL.Safety.Memory.empty).map Prod.snd = " +
                     $".ok [.scalar (.i{signature.Width} {resultBits})]");
             }
             var output = Path.Combine(directory, signature.Name);
             Directory.CreateDirectory(output);
             var proof = Path.Combine(output, "BoundaryProof.lean");
-            File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" +
+            File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" +
                 "theorem correctness :\n" + string.Join(" ∧\n", claims) + " := by\n  exact ⟨" +
                 string.Join(", ", claims.Select(_ => "rfl")) + "⟩\n#print axioms correctness\nend ExampleProof\n");
             queue.Add(new(signature.Selector, proof, output, Assembly: dll),

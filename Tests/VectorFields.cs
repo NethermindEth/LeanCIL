@@ -58,7 +58,7 @@ void Prove(string name, List<string> claims, string definitions = "")
     string output = Path.Combine(root, name);
     Directory.CreateDirectory(output);
     string proof = Path.Combine(output, "Proof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Examples.Support\nnamespace ExampleProof\n" + definitions +
+    File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nnamespace ExampleProof\n" + definitions +
         "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by exact ⟨" +
         string.Join(", ", claims.Select(_ => "by rfl")) + "⟩\nend ExampleProof\n");
     pending.Add((new GeneratedVerification(selectors[name], proof, output), name,
@@ -76,7 +76,7 @@ foreach ((string name, string holder, int width, bool write) in new[]
     int size = Size(type);
     int offset = holder == "Words256" ? 0 : Offset(type);
     List<string> claims = [];
-    string definitions = $"def memory : CIL.Safety.Memory := {{ Examples.empty with\n" +
+    string definitions = $"def memory : CIL.Safety.Memory := {{ CIL.Safety.Memory.empty with\n" +
         $"  allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨{size}, 1, []⟩, true, [{size}]⟩ else none\n" +
         $"  cells := fun _ _ => ⟨173, true⟩\n  views := [⟨0, 0, {size}, true, true⟩]\n  nextIdentity := 1 }}\n";
     foreach (string mask in new[] { "full", "partial", "unknown" })
@@ -84,7 +84,7 @@ foreach ((string name, string holder, int width, bool write) in new[]
         string cells = "[" + string.Join(", ", Enumerable.Range(0, width).Select(index =>
             $"({index * 7 % 256}, {(mask == "full" || mask == "partial" && index % 3 != 0 ? "true" : "false")})")) + "]";
         string value = $"CIL.Safety.snapshotValue .vector{width * 8} {cells}";
-        string input = write ? $"[Examples.reference, .scalar ({value})]" :
+        string input = write ? $"[Tests.reference, .scalar ({value})]" :
             $"[.scalar (CIL.Safety.snapshotValue (.aggregate {size}) " +
             $"(List.replicate {offset} (173, true) ++ {cells} ++ List.replicate {size - offset - width} (173, true)))]";
         claims.Add($"(CIL.Safety.invoke Extracted.program 64 0 {input} memory).map Prod.snd = .ok [.scalar ({value})]");
@@ -121,16 +121,16 @@ int runtimeNestedSize = (int)owner.GetMethod("NestedSize")!.Invoke(null, null)!;
 if (runtimeNestedSize != nestedSize)
     throw new InvalidOperationException("Nested vector size differs from the independent sizeof measurement");
 Prove("NestedSize", [
-    $"(CIL.Safety.invoke Extracted.program 8 0 [] Examples.empty).map Prod.snd = .ok [.scalar (.i32 {nestedSize})]",
+    $"(CIL.Safety.invoke Extracted.program 8 0 [] CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i32 {nestedSize})]",
     $"Extracted.layout0.size = {nestedSize}"]);
 
 Type holder256 = owner.GetNestedType("Holder256")!;
 int addressOffset = Offset(holder256);
 int addressSize = Size(holder256);
 Prove("Address256", [
-    $"(CIL.Safety.invoke Extracted.program 16 0 [Examples.reference] memory).map Prod.snd = .ok [.reference (.address ⟨0, {addressOffset}⟩)]",
+    $"(CIL.Safety.invoke Extracted.program 16 0 [Tests.reference] memory).map Prod.snd = .ok [.reference (.address ⟨0, {addressOffset}⟩)]",
     $"Extracted.layout0.size = {addressSize}"],
-    $"def memory : CIL.Safety.Memory := {{ Examples.empty with allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨{addressSize}, 1, []⟩, true, [{addressSize}]⟩ else none, nextIdentity := 1 }}\n");
+    $"def memory : CIL.Safety.Memory := {{ CIL.Safety.Memory.empty with allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨{addressSize}, 1, []⟩, true, [{addressSize}]⟩ else none, nextIdentity := 1 }}\n");
 
 // The extraction files remain available for the evidence mutations below.
 foreach (var group in pending.GroupBy(item => item.Profile))
