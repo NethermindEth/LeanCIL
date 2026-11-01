@@ -40,7 +40,7 @@ single-file verification. `verification.json` remembers the package root.
 Materialize the same source package and selected extraction for editor tooling:
 
 ```sh
-leancil workspace path/to/Nethermind.Int256.dll 'Type::Method(parameter-types)' --profile arm64-armbase --proof proofs/Method.lean --proof-root .
+leancil workspace path/to/Nethermind.Int256.dll 'Type::Method(parameter-types)' --profile arm64-advsimd --proof proofs/Method.lean --proof-root .
 ```
 
 Use the exact assembly and method selector for the consumer build. The command
@@ -83,7 +83,7 @@ trusted support manifest or verification receipt. Copy only the edited proof
 source back to the original consumer proof path, then run ordinary verification:
 
 ```sh
-leancil extract path/to/Nethermind.Int256.dll 'Type::Method(parameter-types)' artifacts/Method arm64-armbase
+leancil extract path/to/Nethermind.Int256.dll 'Type::Method(parameter-types)' artifacts/Method arm64-advsimd
 leancil verify artifacts/Method --proof proofs/Method.lean --proof-root . --theorem MyProof.correctness --fresh
 ```
 
