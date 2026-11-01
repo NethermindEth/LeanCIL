@@ -65,21 +65,6 @@ when unfolding the full `CIL.step` dispatcher, `CIL.StepEquations` (about
 checked-step fallback unfolds `CIL.step`. `CIL.Safety.Execution` provides `CIL.step.eq_def` and
 `CIL.Safety.step.eq_def`, which tactic macros cannot generate themselves.
 
-## Framework-only tool package
-
-- The `leancil` tool ships only the framework's `CIL` sources. LeanCIL's own `Examples.*` and
-  `Tests.*` modules are repository fixtures; a proof importing one is rejected at proof selection
-  with kind `invalid-request`, naming the module.
-- `Examples.Support` is removed. Replace `Examples.empty` with `CIL.Safety.Memory.empty` and drop
-  the import: `Extracted` already imports `CIL.Safety.Execution`. Define any fixed caller memory
-  with allocations in the proof itself, as the repository's `PastEnd` example does.
-- `leancil --version` prints the framework revision, the Lean toolchain and the `[[require]]`
-  block for a consumer package; a framework mismatch names the revision to pin.
-- A method on a type with a static constructor now fails with `Unsupported static
-  initialisation`, naming the type and the `--assume-initialized` argument.
-- The certified library's sources changed, so its key changes: republish release library assets
-  and expect a library rebuild on first use.
-
 ## Extension points
 
 Loops are now extractable: reachable branch and switch backedges use fixed-point feature reachability and stack-join validation. Recursive calls remain unsupported. Regenerate artifacts when upgrading. `CIL.Safety.Loops` provides `LoopState`, `LoopSegment`, `LoopTerminates` and `loop_terminates`; `CIL.Verification.ensures_of_loop` connects successful loop execution and frame setup to total correctness. Proofs supply their own invariant and decreasing measure. The existing instruction-count `executionBound` remains only a candidate budget and is generally insufficient for input-dependent loops.
