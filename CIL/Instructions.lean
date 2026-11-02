@@ -190,6 +190,9 @@ structure StaticDescriptor where
   /-- Guaranteed alignment of the field's storage: the declared packing of RVA data, which the
       extractor checked divides the field's RVA. `1` promises nothing beyond byte alignment. -/
   alignment : Nat := 1
+  /-- A constructor-fixed value extraction cannot compute. Loads read the caller's static binding
+      and fault without one; `bytes` gives only the width and its contents are never read. -/
+  opaqueValue : Bool := false
   deriving DecidableEq, Repr
 
 /-- An extracted method body with the frame layout the interpreter needs. -/

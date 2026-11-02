@@ -38,6 +38,17 @@ using (var module = ModuleDefinition.ReadModule(assembly))
         var value = Resolve(context, field);
         var bytes = (byte[])value.GetType().GetProperty("Bytes")!.GetValue(value)!;
         if (bytes.Length == 0) throw new Exception("Missing scalar bytes");
+        // A value extraction can compute must stay a computed constant, never an unknown.
+        if ((bool)value.GetType().GetProperty("Opaque")!.GetValue(value)!)
+            throw new Exception("Computable scalar resolved as unknown: " + field.FullName);
+    }
+    foreach (var field in module.GetType("Examples.SeededHash").Fields
+        .Where(field => field.Name.StartsWith("Seed", StringComparison.Ordinal)))
+    {
+        var value = Resolve(context, field);
+        if (!(bool)value.GetType().GetProperty("Opaque")!.GetValue(value)! ||
+            value.GetType().GetProperty("Initializer")!.GetValue(value) is not null)
+            throw new Exception("Random seed did not resolve as an unknown value: " + field.FullName);
     }
 }
 foreach (var scenario in new[] { "twice", "flow", "branch", "switch", "foreign", "outside", "address", "fresh" })

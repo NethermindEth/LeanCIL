@@ -383,7 +383,11 @@ restricted references. Both run in the evidence suite.
 integer widths, Boolean/Char, native integers, signed/unsigned enums, helper initialization and
 copies. It rejects missing initialization assumptions, mutable fields, repeated stores, branches and
 address-taking during initialization. Independent Lean checks reject forged scalar signedness, width
-and literal evidence. It runs in the evidence suite.
+and literal evidence. For `SeededHash`, whose seeds come from `RandomNumberGenerator`, it verifies
+`OpaqueSeeds.lean` for every seed, checks the reported `opaqueStaticValues`, and rejects a proof
+that reads a seed without a caller binding, a value forged into a seed's placeholder, `ldsflda` of
+a seed, and missing assumptions, mutable fields, repeated stores and outside stores. It runs in the
+evidence suite.
 
 The repository pins .NET SDK **10.0.403** and Lean **4.35.0**. The checks below cover semantic
 behavior, extracted contracts, artifact integrity and rejection cases.

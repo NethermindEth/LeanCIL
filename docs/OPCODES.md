@@ -70,7 +70,7 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `ldobj`, `stobj` | Partial | Load/store admitted integer types through checked references, with narrow truncation/extension derived from the validated type token. Also copy validated aggregates of 1–65,536 bytes or admitted Vector128/256/512 integer values, retaining initialization masks. No general objects, reference-bearing storage or floating-point tokens. Native-integer tokens use eight-byte storage. `ldobj` of an admitted span type copies the view addressed by the immediately preceding argument, parameter-address or local-address load; span `stobj` is rejected. |
 | `cpobj` | Partial | Copy validated integer, aggregate or admitted Vector128/256/512 integer storage through checked references. Requires initialized readable source and writable destination; self-copy is supported, partial overlap is rejected. No reference-bearing or floating-point tokens. |
 | `initobj` | Partial | Zero the validated width of an admitted integer type, same-assembly explicit- or sequential-layout aggregate, or admitted Vector128/256/512 integer value. A checked `ldloca; initobj` pair resets an admitted span local to its empty view. Byte initialization leaves neighboring storage unchanged. No managed-object initialization. |
-| `ldsfld` | Partial | Value of a same-assembly `static readonly` integer, enum or reference-free struct field that its static constructor fixes, with the declaring type named by `--assume-initialized` (see [static readonly values](#static-readonly-values)). System.Runtime's `BitConverter.IsLittleEndian` is the profile constant `true`. Other static fields are rejected. |
+| `ldsfld` | Partial | Value of a same-assembly `static readonly` integer, enum or reference-free struct field that its static constructor fixes, with the declaring type named by `--assume-initialized` (see [static readonly values](#static-readonly-values)). An integer or enum field whose stored value extraction cannot compute is read from the caller's static binding instead (see [unknown readonly values](#unknown-readonly-values)). System.Runtime's `BitConverter.IsLittleEndian` is the profile constant `true`. Other static fields are rejected. |
 | `ldsflda` | Partial | Address of validated same-assembly static readonly RVA data, or a constructor-initialized readonly value under the initialization assumption. Uses identity-keyed immutable storage with checked write denial. See [static span tables](#static-span-tables) and [static readonly values](#static-readonly-values). Not arbitrary static fields or mutable global state. |
 | `call` | Partial | Acyclic calls to supported static methods or reference-free struct instance methods (including direct constructor calls) in the same assembly, concrete generic-method specializations, or exact runtime/intrinsic signatures in the allowlist, including integer BinaryPrimitives byte-span transfers and no-read span/array accessors. Closed generic declaring types are admitted for static calls, including nested owners; validated closed sequential structs also admit direct instance methods and constructors. No arbitrary external calls, class instance methods or general virtual dispatch. |
 | `newobj` | Partial | Same-assembly constructors of validated reference-free structs: zero-initialize caller-owned storage, invoke the constructor with managed-reference `this`, then return a checked value snapshot. Also admitted `Span<T>` and `ReadOnlySpan<T>` constructors over checked existing storage for supported integer, enum, aggregate and integer-vector elements, from a single reference, `(void*, int)`, an array, or `(array, start, length)`. Class construction and unsupported generic constructors or cyclic dependencies are rejected. |
@@ -414,9 +414,25 @@ data. Repeated accesses share one allocation; distinct fields remain distinct ev
 bytes agree. The reference can be passed to supported helpers and instance methods. Checked
 writes through it fail, including writes through `Unsafe.AsRef`.
 
-Rejected: a declaring type without the assumption; values built by other code shapes; a second
-store, a store outside the static constructor, or `ldsflda` of the field during initialization;
-and `stsfld` in an extracted method.
+Rejected: a declaring type without the assumption; aggregate values built by other code shapes;
+a second store, a store outside the static constructor, or `ldsflda` of the field during
+initialization; and `stsfld` in an extracted method.
+
+#### Unknown readonly values
+
+An integer, Boolean, Char or enum field that passes the same store checks, but whose stored value
+comes from code extraction does not evaluate (such as a hash seed drawn from
+`RandomNumberGenerator`), is admitted as fixed but unknown. Its static site has
+`opaqueValue := true`, no initializer and zero placeholder bytes that give only the width;
+`StaticValuesValid` requires exactly that shape. `ldsfld` reads the field from the caller's static
+binding for its identity, with the field's width and signedness, and faults as `unsupported` when
+the caller's memory has no binding. The placeholder is never read, so a proof about the method holds
+for whatever value the binding holds and cannot fix a particular one. `Memory.boundStatics` in
+[StaticBindings.lean](../CIL/Safety/StaticBindings.lean) builds caller memory that binds chosen
+values; [OpaqueSeeds.lean](../Examples/Proofs/OpaqueSeeds.lean) proves a seeded hash for every pair
+of seeds. Symbolic values stop evaluation, so such proofs use `with_unfolding_all rfl` or stepping
+rather than plain `rfl` evaluation. `ldsflda` of an unknown field is rejected, as are aggregate fields whose value
+cannot be computed. Each such field is listed in `opaqueStaticValues`.
 
 Release configuration is required, but it does not guarantee that a compiler emits only supported instructions. For example, reachable reference-element array allocation or exception handling is still rejected.
 

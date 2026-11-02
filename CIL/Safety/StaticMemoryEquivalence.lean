@@ -28,6 +28,12 @@ theorem Memory.Equivalent.staticReference {m n : Memory} (same : m.Equivalent n)
       | (apply ResultEquivalent.bind_same; intro)
       | split
   | none =>
+    dsimp only
+    cases flagged : descriptor.opaqueValue
+    case true =>
+      simp only [↓reduceIte, Bind.bind, Except.bind]
+      exact .error _
+    simp only [Bool.false_eq_true, ↓reduceIte]
     apply ResultEquivalent.bind (same.allocate _ |>.mapError _)
     intro left right related
     obtain ⟨id, memory⟩ := left
@@ -58,7 +64,14 @@ theorem Memory.Equivalent.staticInstruction {m n : Memory} (same : m.Equivalent 
        obtain ⟨memory, reference⟩ := left
        obtain ⟨otherMemory, otherReference⟩ := right
        obtain ⟨equivalent, rfl⟩ := related
-       exact .ok ⟨equivalent, rfl⟩)
+       first
+         | exact .ok ⟨equivalent, rfl⟩
+         | (simp only [equivalent.read]
+            repeat first
+              | exact .ok ⟨equivalent, rfl⟩
+              | exact .error _
+              | (apply ResultEquivalent.bind_same; intro)
+              | split))
     | split
 
 #print axioms Memory.Equivalent.staticInstruction

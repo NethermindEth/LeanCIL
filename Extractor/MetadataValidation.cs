@@ -545,6 +545,9 @@ internal static class MetadataValidation
                     if (!initializedTypes.Contains(field.DeclaringType.FullName, StringComparer.Ordinal))
                         throw new InvalidDataException($"Unsupported static field load: {loaded.FullName}\n  Loading it requires --assume-initialized {field.DeclaringType.FullName}.");
                     value = staticValues.Resolve(loaded, profile.Architecture);
+                    if (value.Opaque && instruction.OpCode.Code == Code.Ldsflda)
+                        throw new InvalidDataException($"Unsupported static field address: {loaded.FullName}\n  " +
+                            "Its value is not computed by extraction, so only ldsfld of it is supported.");
                 }
                 catch (InvalidDataException error) when (Rejections.Of(error) is null)
                 {

@@ -417,7 +417,8 @@ module-wide persistent index cache. The existing field/architecture value cache 
 
 `Tests.StaticValueIndexes.cs` checks scalar copies, duplicate stores, prefix control flow,
 branch/switch and foreign targets, first outside writer, closure address-taking, fresh contexts and
-resolution-error ordering. Index construction records resolution failures so a later failure cannot
+resolution-error ordering, and that computable scalars never resolve as unknown while random seeds
+do. Index construction records resolution failures so a later failure cannot
 replace the original earlier writer diagnostic. Twenty-four extraction requests (eight scalar loads
 across three profiles) retain all 48 generated Lean file hashes.
 

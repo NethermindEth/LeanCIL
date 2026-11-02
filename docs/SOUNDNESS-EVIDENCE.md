@@ -16,7 +16,7 @@ cannot substitute for it.
 | Scalar translations | Exact literal values, arithmetic, comparisons, conversion flags and branch targets | Other operations require specialized checks or retain stack-effect fallback |
 | Managed/imported calls | Target slot, scoped identity, full signature, argument count, receiver and result | An import slot does not prove its implementation contract |
 | Constrained calls | Resolve serialized interface/override declarations to the emitted closed direct target | Complete metadata serialization; no general vtable/boxing model |
-| Static values | Checked execution yields emitted bytes without circular reads of the values being justified | Initializer recognition and deployment initialization/immutability |
+| Static values | Checked execution yields emitted bytes without circular reads of the values being justified; unknown values have no initializer and are read only from the caller's binding | Initializer recognition and deployment initialization/immutability |
 
 Exact scalar matching covers integer literals, wrapping/checked add/subtract/multiply, signed and
 unsigned divide/remainder, bitwise operations, shifts, negation, integer comparisons, admitted integer

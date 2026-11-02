@@ -29,6 +29,8 @@ theorem staticReference_new_binding_valid (descriptor : CIL.StaticDescriptor) (m
     (h : staticReference descriptor m = .ok (result, reference)) :
     StaticBindingValid result descriptor reference := by
   simp only [staticReference, missing] at h
+  split at h
+  · cases h
   cases ha : allocate m ⟨.immutableStatic,
       ⟨descriptor.bytes.length, descriptor.alignment, []⟩, true, [descriptor.bytes.length]⟩ <;>
     simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind,
@@ -38,7 +40,7 @@ theorem staticReference_new_binding_valid (descriptor : CIL.StaticDescriptor) (m
     obtain ⟨id, memory⟩ := allocated
     cases h
     have lookup := allocation_lookup m _ id memory ha
-    refine ⟨rfl, _, lookup, rfl, rfl, rfl, rfl, ?_⟩
+    refine ⟨rfl, _, lookup, rfl, rfl, rfl, rfl, descriptor.bytes, ?_, fun _ => rfl⟩
     let initialized : Memory := { memory with
       cells := fun other offset => if other == id then
         match descriptor.bytes[offset]? with
@@ -82,6 +84,8 @@ theorem staticReference_preserves_immutable (descriptor : CIL.StaticDescriptor)
     exact .refl _
   | none =>
     simp only [staticReference, hc] at h
+    split at h
+    · cases h
     cases ha : allocate m ⟨.immutableStatic,
         ⟨descriptor.bytes.length, descriptor.alignment, []⟩, true, [descriptor.bytes.length]⟩ <;>
       simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind,
@@ -119,6 +123,8 @@ theorem staticReference_preserves_static_world (descriptor : CIL.StaticDescripto
     have initialized := staticReference_new_binding_valid _ _ _ _ hc h
     have retained := staticReference_preserves_immutable _ _ _ _ hm h
     simp only [staticReference, hc] at h
+    split at h
+    · cases h
     cases ha : allocate m ⟨.immutableStatic,
         ⟨descriptor.bytes.length, descriptor.alignment, []⟩, true, [descriptor.bytes.length]⟩ <;>
       simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind,
@@ -162,13 +168,15 @@ theorem staticReference_preserves_static_world (descriptor : CIL.StaticDescripto
         · exact retained.binding _ _ (world.2.2.2 other selectedOther binding member key)
 
 /-- In a valid static world, resolving one of its descriptors succeeds, keeps the world valid
-    and returns a valid binding. -/
+    and returns a valid binding; an opaque value must already be bound. -/
 theorem staticReference_valid_result (descriptor : CIL.StaticDescriptor)
     (descriptors : List CIL.StaticDescriptor) (m : Memory) (hm : m.WellFormed)
-    (world : StaticWorldValid descriptors m) (selected : descriptor ∈ descriptors) :
+    (world : StaticWorldValid descriptors m) (selected : descriptor ∈ descriptors)
+    (bound : descriptor.opaqueValue = true →
+      ∃ binding ∈ m.staticBindings, binding.1 = descriptor.identity) :
     ∃ result reference, staticReference descriptor m = .ok (result, reference) ∧
       StaticWorldValid descriptors result ∧ StaticBindingValid result descriptor reference := by
-  obtain ⟨result, reference, success⟩ := staticReference_succeeds _ _ _ hm world selected
+  obtain ⟨result, reference, success⟩ := staticReference_succeeds _ _ _ hm world selected bound
   refine ⟨result, reference, success,
     staticReference_preserves_static_world _ _ _ _ _ hm world selected success, ?_⟩
   cases hc : m.staticBindings.find? (fun binding => binding.1 == descriptor.identity) with

@@ -48,6 +48,19 @@ internal static class LeanEmitter
             _ => throw new InvalidDataException($"Unsupported local: {type.FullName}")
         };
     }
+    // An opaque value names no initializer; its zero bytes fix only the load width.
+    static string OpaqueSite(int pc, StaticValues.Value value)
+    {
+        StaticIdentityRecord identity = StaticIdentity.Of(value.Field);
+        return $$"""
+            ({{pc}}, { identity := {{identity.Identity}},
+            assemblyIdentity := {{JsonSerializer.Serialize(identity.AssemblyIdentity)}},
+            fieldName := {{JsonSerializer.Serialize(value.Field.FullName)}},
+            bytes := {{StaticData.LeanBytes(value.Bytes)}}, scalar := {{StaticValues.Scalar(value.Field)}},
+            opaqueValue := true })
+            """.ReplaceLineEndings(" ");
+    }
+
     static bool StaticSite(Instruction i) => i.OpCode.Code == Code.Ldsflda || StaticValues.IsLoad(i) ||
         (i.OpCode.Code == Code.Ldtoken && i.Operand is FieldReference);
     static FieldDefinition StaticField(Instruction i, ModuleDefinition module, string architecture) => StaticValues.IsLoad(i)
@@ -184,6 +197,7 @@ internal static class LeanEmitter
                     if (StaticValues.IsLoad(s.i))
                     {
                         StaticValues.Value value = StaticValues.Resolve((FieldReference)s.i.Operand, m.Module, profile.Architecture);
+                        if (value.Opaque) return OpaqueSite(s.pc, value);
                         var initializer = value.Initializer is null ? 0 : methodIndices.GetValueOrDefault(value.Initializer, -1);
                         if (initializer < 0)
                             throw new InvalidDataException($"Missing static initializer: {value.Initializer!.FullName}");
