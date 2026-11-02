@@ -474,7 +474,8 @@ internal static class MetadataValidation
             }
             void CallSite(Instruction instruction, MethodReference reference)
             {
-                if (instruction.OpCode.Code == Code.Callvirt)
+                if (instruction.OpCode.Code == Code.Callvirt ||
+                    instruction is { OpCode.Code: Code.Call, Previous.OpCode.Code: Code.Constrained })
                 {
                     var resolved = ConstrainedCalls.Resolve(method, instruction, instructions, profile.Architecture);
                     Enter(ConstrainedCalls.Specialize(resolved, instruction, specializations), reference, instruction);

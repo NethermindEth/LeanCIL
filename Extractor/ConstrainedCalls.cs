@@ -4,6 +4,7 @@ using Mono.Cecil.Cil;
 namespace Nethermind.LeanCIL;
 
 // Resolve a constrained receiver to a method declared by that concrete struct. No boxing fallback exists.
+// `callvirt` dispatches an instance slot; `call` dispatches a static interface slot to a static implementation.
 internal static class ConstrainedCalls
 {
     internal sealed record Resolution(TypeDefinition Receiver, MethodDefinition Slot, MethodDefinition Target);
@@ -40,9 +41,10 @@ internal static class ConstrainedCalls
     internal static Resolution Resolve(MethodDefinition caller, Instruction call,
         InstructionIndex instructions, string architecture)
     {
-        if (call.OpCode.Code != Code.Callvirt || call.Operand is not MethodReference reference ||
+        if (call.OpCode.Code is not (Code.Callvirt or Code.Call) || call.Operand is not MethodReference reference ||
             call.Previous is not { OpCode.Code: Code.Constrained, Operand: TypeReference receiver })
             throw new InvalidDataException("callvirt requires an adjacent concrete constrained receiver");
+        var instance = call.OpCode.Code == Code.Callvirt;
         if (receiver is GenericParameter || receiver is TypeSpecification && !GenericStructs.Is(receiver) ||
             receiver.Resolve() is not { } concrete || concrete.Module != caller.Module || !concrete.IsValueType ||
             receiver.ContainsGenericParameter || LayoutEvidence.Scope(receiver) != LayoutEvidence.Scope(concrete) ||
@@ -57,7 +59,8 @@ internal static class ConstrainedCalls
             !reference.Parameters.Select(parameter => MethodSpecialization.SignatureType(parameter.ParameterType))
                 .SequenceEqual(slot.Parameters.Select(parameter =>
                     MethodSpecialization.SignatureType(parameter.ParameterType))) ||
-            reference.HasThis != slot.HasThis || !slot.HasThis || slot.IsStatic || slot.IsConstructor ||
+            reference.HasThis != slot.HasThis || slot.HasThis != instance || slot.IsStatic == instance ||
+            slot.IsConstructor ||
             slot.HasGenericParameters || reference.ExplicitThis ||
             reference.CallingConvention != MethodCallingConvention.Default)
             throw new InvalidDataException("Unsupported constrained method slot");
@@ -69,7 +72,7 @@ internal static class ConstrainedCalls
             (slotOwner?.GenericArguments.Count ?? 0) != slot.DeclaringType.GenericParameters.Count ||
             LayoutEvidence.Scope(reference.DeclaringType) != LayoutEvidence.Scope(slot.DeclaringType))
             throw new InvalidDataException("Unsupported constrained method owner");
-        if (slot.DeclaringType == concrete)
+        if (slot.DeclaringType == concrete && instance)
         {
             if (!SameType(reference.DeclaringType, receiver))
                 throw new InvalidDataException("Constrained direct slot must match its receiver owner");
@@ -87,7 +90,7 @@ internal static class ConstrainedCalls
                     reference.DeclaringType))).ToArray();
         var targets = explicitTargets.Length != 0 ? explicitTargets : concrete.Methods.Where(method =>
             method.IsPublic && !method.HasGenericParameters && method.Name == slot.Name &&
-            SignatureMatches(method, reference, owner)).ToArray();
+            method.HasThis == instance && SignatureMatches(method, reference, owner)).ToArray();
         if (targets.Length != 1)
             throw new InvalidDataException("Constrained interface slot has no unique struct implementation");
         return Checked(concrete, reference, targets[0], owner);
@@ -96,7 +99,8 @@ internal static class ConstrainedCalls
     static Resolution Checked(TypeDefinition receiver, MethodReference slot, MethodDefinition target,
         GenericInstanceType? owner)
     {
-        if (target.DeclaringType != receiver || !target.HasThis || target.IsStatic || target.IsAbstract ||
+        if (target.DeclaringType != receiver || target.HasThis != slot.HasThis || target.IsStatic == slot.HasThis ||
+            target.IsAbstract ||
             !target.HasBody || target.IsConstructor || target.HasGenericParameters || target.ExplicitThis ||
             target.CallingConvention != MethodCallingConvention.Default || !SignatureMatches(target, slot, owner))
             throw new InvalidDataException("Constrained call would require boxing or unsupported dispatch");

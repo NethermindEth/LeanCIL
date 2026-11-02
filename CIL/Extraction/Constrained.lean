@@ -11,7 +11,8 @@ private def branchesTo (pc : Nat) (instruction : RawInstruction) : Bool :=
   | .targets targets => targets.contains pc
   | _ => false
 
-/-- The selected program entry must be precisely the resolved struct implementation. -/
+/-- The selected program entry must be precisely the resolved struct implementation, with a
+    receiver argument exactly when the implementation is an instance method. -/
 private def selectedImplementation (methods : Nat → Option SpecializedMethod) (receiver : TypeExpr)
     (resolved : DispatchMethod) (emitted : Op) : Bool :=
   match emitted, namedType (if resolved.ownerArguments.isEmpty then receiver else resolved.owner) with
@@ -21,13 +22,18 @@ private def selectedImplementation (methods : Nat → Option SpecializedMethod) 
       method.arguments == resolved.ownerArguments && method.closed.token == resolved.token &&
       method.closed.ownerArgumentCount == resolved.ownerArguments.length &&
       method.closed.owner == String.ofList scope ++ "::" ++ String.ofList name &&
-      method.closed.hasThis && !method.closed.explicitThis &&
+      method.closed.hasThis == resolved.hasThis && !method.closed.explicitThis &&
       method.closed.callingConvention == 0 && method.closed.genericParameters.isEmpty &&
       !method.closed.code.isEmpty && method.closed.attributes == resolved.attributes &&
       method.closed.implementation == resolved.implementation &&
       method.closed.returnType == resolved.returnType &&
-      method.closed.parameters == resolved.parameters && count == resolved.parameters.length + 1
+      method.closed.parameters == resolved.parameters &&
+      count == resolved.parameters.length + (if resolved.hasThis then 1 else 0)
   | _, _ => false
+
+/-- The call opcode a constrained prefix may precede: `callvirt` for an instance slot and
+    `call` for a static one. -/
+def constrainedCallOpcode (site : CallSite) : Nat := if site.hasThis then 111 else 40
 
 /-- Check prefix adjacency, branch integrity, metadata resolution and the emitted target. -/
 def constrainedSiteWindow (resolve : TypeExpr → CallSite → Option DispatchMethod)
@@ -38,15 +44,25 @@ def constrainedSiteWindow (resolve : TypeExpr → CallSite → Option DispatchMe
   match current with
   | some ⟨_, 65046, .type _⟩ =>
     (match emitted with | some .nop => true | _ => false) &&
-      (next.map (·.opcode)) == some 111 && nextLive == some true
+      (match next with
+        | some ⟨_, opcode, .call site⟩ => opcode == constrainedCallOpcode site
+        | _ => false) && nextLive == some true
   | some ⟨_, 111, .call site⟩ =>
-    if pc == 0 || targeted pc then false else
+    if pc == 0 || targeted pc || !site.hasThis then false else
     match previous, emitted with
     | some ⟨_, 65046, .type receiver⟩, some emitted =>
       match resolve receiver site with
       | some resolved => selectedImplementation methods receiver resolved emitted
       | none => false
     | _, _ => false
+  | some ⟨_, 40, .call site⟩ =>
+    match previous with
+    | some ⟨_, 65046, .type receiver⟩ =>
+      if pc == 0 || targeted pc || site.hasThis then false else
+      match emitted, resolve receiver site with
+      | some emitted, some resolved => selectedImplementation methods receiver resolved emitted
+      | _, _ => false
+    | _ => true
   | some ⟨_, 65046, _⟩ | some ⟨_, 111, _⟩ => false
   | _ => true
 
@@ -217,6 +233,12 @@ def lowerConstrainedInstruction (resolve : TypeExpr → CallSite → Option Disp
       | some target => ⟨offset, 40, .call (constrainedTargetSite receiver site target)⟩
       | none => instruction
     | _ => instruction
+  | ⟨offset, 40, .call site⟩ =>
+    match previous with
+    | some ⟨_, 65046, .type receiver⟩ => match resolve receiver site with
+      | some target => ⟨offset, 40, .call (constrainedTargetSite receiver site target)⟩
+      | none => instruction
+    | _ => instruction
   | _ => instruction
 
 /-- Lower instructions in one pass, retaining the raw predecessor before rewriting it. -/
@@ -261,6 +283,12 @@ theorem lowerConstrainedRaw_eq_original (types : List DispatchType) (raw : RawMe
       match instruction with
       | ⟨offset, 65046, _⟩ => ⟨offset, 0, .none⟩
       | ⟨offset, 111, .call site⟩ =>
+        match raw.code[pc - 1]? with
+        | some ⟨_, 65046, .type receiver⟩ => match resolveConstrained types receiver site with
+          | some target => ⟨offset, 40, .call (constrainedTargetSite receiver site target)⟩
+          | none => instruction
+        | _ => instruction
+      | ⟨offset, 40, .call site⟩ =>
         match raw.code[pc - 1]? with
         | some ⟨_, 65046, .type receiver⟩ => match resolveConstrained types receiver site with
           | some target => ⟨offset, 40, .call (constrainedTargetSite receiver site target)⟩

@@ -97,14 +97,14 @@ internal static class InstructionTranslation
             ConstrainedCalls.Resolve(m, i.Next, instructions, profile.Architecture);
             return ".nop";
         }
-        if (i.OpCode.Code == Code.Callvirt)
+        if (i.OpCode.Code == Code.Callvirt || i is { OpCode.Code: Code.Call, Previous.OpCode.Code: Code.Constrained })
         {
             var resolved = ConstrainedCalls.Resolve(m, i, instructions, profile.Architecture).Target;
             resolved = (constrainedTargets ?? new ConstrainedCalls.TargetIndex(methods.Keys))
                 .Find(resolved, (TypeReference)i.Previous.Operand);
             var index = methods.GetValueOrDefault(resolved, -1);
             if (index <= methodIndex) throw new InvalidDataException("Unresolved constrained implementation");
-            return $".call {index} {resolved.Parameters.Count + 1}";
+            return $".call {index} {resolved.Parameters.Count + (resolved.HasThis ? 1 : 0)}";
         }
         if (throws.Raises.TryGetValue(i, out string? raised)) return $".throw \"{raised}\"";
         var spans = Spans.Analyze(m, profile);
