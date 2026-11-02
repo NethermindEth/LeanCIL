@@ -120,11 +120,10 @@ internal static class ConstrainedCalls
             method.Name == slot.Name && method.HasThis == instance &&
             SignatureMatches(method, reference, owner, methodArguments)).ToArray();
         if (defaultBody && implicitTargets.Length == 0)
-            return Reimplemented(concrete.Interfaces.Select(implementation =>
-                    GenericStructs.Substitute(implementation.InterfaceType, owner)), slot, reference.DeclaringType, [])
-                ? throw new InvalidDataException(
-                    "Another interface of the receiver re-implements the static virtual slot")
-                : Default(concrete, reference, slot, methodArguments);
+        {
+            RequireUnshadowed(concrete, owner, slot, reference.DeclaringType);
+            return Default(concrete, reference, slot, methodArguments);
+        }
         // A default slot with an unrecorded same-signature struct method is ambiguous, so it is rejected.
         if (implicitTargets.Length != 1 || defaultBody)
             throw new InvalidDataException("Constrained interface slot has no unique struct implementation");
@@ -156,26 +155,28 @@ internal static class ConstrainedCalls
         return new(receiver, target, target, slot.DeclaringType, methodArguments);
     }
 
-    // An interface-level MethodImpl of the slot, on any interface the receiver implements directly or by
-    // inheritance, is more specific than the default body. Unresolvable interfaces count as one.
-    static bool Reimplemented(IEnumerable<TypeReference> interfaces, MethodDefinition slot,
-        TypeReference closedSlotOwner, HashSet<string> visited)
+    // An interface-level MethodImpl of the slot on any interface of the receiver is more specific than the
+    // default body. As in Lean, the receiver's interfaces must all be same-assembly and closed under inheritance.
+    static void RequireUnshadowed(TypeDefinition concrete, GenericInstanceType? owner, MethodDefinition slot,
+        TypeReference closedSlotOwner)
     {
-        foreach (var candidate in interfaces)
+        var listed = concrete.Interfaces.Select(implementation =>
+            GenericStructs.Substitute(implementation.InterfaceType, owner)).ToArray();
+        var names = listed.Select(MethodSpecialization.SignatureType).ToHashSet(StringComparer.Ordinal);
+        foreach (var candidate in listed)
         {
-            if (!visited.Add(MethodSpecialization.SignatureType(candidate))) continue;
-            if (candidate.Resolve() is not { } declared) return true;
-            var arguments = candidate as GenericInstanceType;
-            bool Overrides(MethodReference overridden) => overridden.Resolve() is not { } resolved ||
-                resolved == slot && SameType(GenericStructs.Substitute(overridden.DeclaringType, arguments),
-                    closedSlotOwner);
-            var inherited = declared.Interfaces.Select(implementation =>
-                GenericStructs.Substitute(implementation.InterfaceType, arguments));
-            if (declared.Methods.Any(method => method.Overrides.Any(Overrides)) ||
-                Reimplemented(inherited, slot, closedSlotOwner, visited))
-                return true;
+            if (candidate.Resolve() is not { } declared || declared.Module != concrete.Module ||
+                !declared.Interfaces.All(implementation => names.Contains(MethodSpecialization.SignatureType(
+                    GenericStructs.Substitute(implementation.InterfaceType, candidate as GenericInstanceType)))))
+                throw new InvalidDataException("A static virtual default body requires every interface of the " +
+                    "receiver, including inherited ones, to be listed and declared in this assembly");
+            if (declared.Methods.Any(method => method.Overrides.Any(overridden =>
+                    overridden.Resolve() is not { } resolved || resolved == slot && SameType(
+                        GenericStructs.Substitute(overridden.DeclaringType, candidate as GenericInstanceType),
+                        closedSlotOwner))))
+                throw new InvalidDataException(
+                    "Another interface of the receiver re-implements the static virtual slot");
         }
-        return false;
     }
 
     static MethodDefinition Slot(MethodReference slot) =>

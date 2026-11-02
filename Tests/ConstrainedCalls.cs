@@ -325,7 +325,13 @@ Console.WriteLine("PASS static default extraction rejection: derived interface r
 
 // An abstract generic slot has no fallback, and an unrecorded same-signature struct method beside a
 // default body is ambiguous: neither may resolve to the interface body.
-foreach (var mutation in new[] { "abstract-generic-slot", "unrecorded-implementation" })
+// A receiver interface from another assembly cannot be checked for a re-implementation, so it fails closed.
+foreach (var (mutation, marker) in new[]
+{
+    ("abstract-generic-slot", "has no unique struct implementation"),
+    ("unrecorded-implementation", "has no unique struct implementation"),
+    ("external-interface", "requires every interface of the receiver")
+})
 {
     var dll = Path.Combine(root, mutation + ".dll");
     using (var module = ModuleDefinition.ReadModule(assembly))
@@ -337,6 +343,9 @@ foreach (var mutation in new[] { "abstract-generic-slot", "unrecorded-implementa
             slot.Body = null;
             slot.Attributes |= MethodAttributes.Abstract;
         }
+        else if (mutation == "external-interface")
+            module.GetType("Examples.Allowance").Interfaces.Add(
+                new InterfaceImplementation(module.ImportReference(typeof(IDisposable))));
         else
         {
             var receiver = module.GetType("Examples.Allowance");
@@ -353,7 +362,7 @@ foreach (var mutation in new[] { "abstract-generic-slot", "unrecorded-implementa
     var defaultRejection = Execute(["dotnet", ExtractorPath, "extract", dll,
         "StaticVirtualDefaults::SpendDefault(Examples.Allowance&)", Path.Combine(root, "Reject-" + mutation)]);
     if (defaultRejection.Code == 0 ||
-        !defaultRejection.Output.Contains("has no unique struct implementation", StringComparison.Ordinal))
+        !defaultRejection.Output.Contains(marker, StringComparison.Ordinal))
         throw new Exception("Incorrect static default rejection: " + mutation + "\n" + defaultRejection.Output);
     Console.WriteLine("PASS static default extraction rejection: " + mutation);
 }

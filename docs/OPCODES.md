@@ -263,8 +263,9 @@ member) that `T` does not implement runs that default body, instantiated at the 
 interface and method type arguments; a public same-signature method of `T` without a `MethodImpl`
 beside a default body is ambiguous and rejected, and so is a receiver with another interface,
 direct or inherited, that re-implements the slot: the runtime would prefer that more specific
-body, and most-specific resolution is not modeled. An abstract slot without an implementation is
-rejected. The slot may be a generic method: the site's method type arguments must be closed and
+body, and most-specific resolution is not modeled. A default body also requires every interface
+of the receiver, including inherited ones, to be listed on it and declared in the same assembly.
+An abstract slot without an implementation is rejected. The slot may be a generic method: the site's method type arguments must be closed and
 match its arity, and the selected override or default body is instantiated at them. The call
 passes no receiver. `callvirt` never dispatches a static slot and `call` never dispatches an
 instance slot.
