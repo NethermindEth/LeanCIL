@@ -265,8 +265,8 @@ that zero readback as a precondition. `run_construct_of_contract` and
 `run_call_of_contract`; they cover aggregate storage only. `read_append` joins adjacent field reads
 into the full readback, and `Confined.write_within` confines a field write to the whole struct.
 
-`Tests/ConstructContract.lean` proves a caller that constructs a 16-byte and a 32-byte (four-limb,
-`UInt256`-shaped) struct and reads a field of each, from the constructors' contracts alone; a
+`Tests/ConstructContract.lean` proves a caller that constructs a 16-byte and a 32-byte (four-limb)
+struct and reads a field of each, from the constructors' contracts alone; a
 constructor that assigns one of two fields; and rejections: a contract without write authority over
 its storage, a constructor that writes outside its footprint, and an 8-byte readback at a 16-byte
 site. `Tests/ConstructContract.cs` verifies that caller proof unedited against a build whose
@@ -323,7 +323,7 @@ arithmetic operands, invalid bounds, memory faults, unsupported instructions, in
 exhaustion have no name in this mode. `Raises` and `.thrown` keep their existing meaning.
 `OutcomeContract.Holds.clr` lifts an existing thrown-outcome proof.
 
-For a UInt256 `Divide` or `Mod` contract, select `some "System.DivideByZeroException"` in `raises`
+For a wide-integer `Divide` or `Mod` contract, select `some "System.DivideByZeroException"` in `raises`
 when its divisor is zero and prove `HoldsCLR`. Both an explicit throw and the mapped arithmetic
 failure can establish this exact outcome. The proof must still reach that fault through the actual
 extracted program. `run_fault_raisesCLR`, `run_next_raisesCLR` and `raisesCLR_of_run` compose that

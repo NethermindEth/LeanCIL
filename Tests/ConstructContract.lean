@@ -63,7 +63,7 @@ def wordBytes (input : WordInput) : List (BitVec 8) :=
   numberBytes input.u0.toNat 8 ++ numberBytes input.u1.toNat 8 ++ numberBytes input.u2.toNat 8 ++
     numberBytes input.u3.toNat 8
 
-/-- The 32-byte, four-limb layout of a `UInt256`. -/
+/-- The 32-byte layout of a four-limb 256-bit integer. -/
 def wordContract : MethodContract WordInput Unit where
   args input := [.reference (.address input.this), .scalar (.i64 input.u0), .scalar (.i64 input.u1),
     .scalar (.i64 input.u2), .scalar (.i64 input.u3)]

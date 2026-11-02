@@ -129,8 +129,8 @@ The exporter kernel-checks and structurally audits equality with the generated
 `Extracted.initializationAssumptions` list. Callers propagate this list into their
 generated source, identity and report; exporting such a caller propagates it again.
 These are deployment premises that initialization completed successfully, not CLR
-initialization theorems or field-value guarantees. Recorded `staticValues` remain
-unexportable, and forced full verification still rejects initialization premises.
+initialization theorems or field-value guarantees. Recorded `staticValues`, including unknown
+ones, remain unexportable, and forced full verification still rejects initialization premises.
 Each node's static identities are checked with those of its direct imports before
 output. A collision reports both scoped field names. Full verification uses
 `linkChecked` to check all descriptors in its linked program, including those of

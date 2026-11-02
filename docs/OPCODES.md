@@ -70,13 +70,13 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `ldobj`, `stobj` | Partial | Load/store admitted integer types through checked references, with narrow truncation/extension derived from the validated type token. Also copy validated aggregates of 1–65,536 bytes or admitted Vector128/256/512 integer values, retaining initialization masks. No general objects, reference-bearing storage or floating-point tokens. Native-integer tokens use eight-byte storage. `ldobj` of an admitted span type copies the view addressed by the immediately preceding argument, parameter-address or local-address load; span `stobj` is rejected. |
 | `cpobj` | Partial | Copy validated integer, aggregate or admitted Vector128/256/512 integer storage through checked references. Requires initialized readable source and writable destination; self-copy is supported, partial overlap is rejected. No reference-bearing or floating-point tokens. |
 | `initobj` | Partial | Zero the validated width of an admitted integer type, same-assembly explicit- or sequential-layout aggregate, or admitted Vector128/256/512 integer value. A checked `ldloca; initobj` pair resets an admitted span local to its empty view. Byte initialization leaves neighboring storage unchanged. No managed-object initialization. |
-| `ldsfld` | Partial | Value of a same-assembly `static readonly` integer, enum or reference-free struct field that its static constructor fixes, with the declaring type named by `--assume-initialized` (see [static readonly values](#static-readonly-values)). System.Runtime's `BitConverter.IsLittleEndian` is the profile constant `true`. Other static fields are rejected. |
+| `ldsfld` | Partial | Value of a same-assembly `static readonly` integer, enum or reference-free struct field that its static constructor fixes, with the declaring type named by `--assume-initialized` (see [static readonly values](#static-readonly-values)). An integer or enum field whose stored value extraction cannot compute is read from the caller's static binding instead (see [unknown readonly values](#unknown-readonly-values)). System.Runtime's `BitConverter.IsLittleEndian` is the profile constant `true`. Other static fields are rejected. |
 | `ldsflda` | Partial | Address of validated same-assembly static readonly RVA data, or a constructor-initialized readonly value under the initialization assumption. Uses identity-keyed immutable storage with checked write denial. See [static span tables](#static-span-tables) and [static readonly values](#static-readonly-values). Not arbitrary static fields or mutable global state. |
 | `call` | Partial | Acyclic calls to supported static methods or reference-free struct instance methods (including direct constructor calls) in the same assembly, concrete generic-method specializations, or exact runtime/intrinsic signatures in the allowlist, including integer BinaryPrimitives byte-span transfers and no-read span/array accessors. Closed generic declaring types are admitted for static calls, including nested owners; validated closed sequential structs also admit direct instance methods and constructors. No arbitrary external calls, class instance methods or general virtual dispatch. |
 | `newobj` | Partial | Same-assembly constructors of validated reference-free structs: zero-initialize caller-owned storage, invoke the constructor with managed-reference `this`, then return a checked value snapshot. Also admitted `Span<T>` and `ReadOnlySpan<T>` constructors over checked existing storage for supported integer, enum, aggregate and integer-vector elements, from a single reference, `(void*, int)`, an array, or `(array, start, length)`. Class construction and unsupported generic constructors or cyclic dependencies are rejected. |
 | `ldtoken` | Partial | A type token as an operand of a decided closed type test, which emits a no-op, or a static data field token for `RuntimeHelpers.CreateSpan<T>`, which emits the field's address (see below). Other tokens are rejected. |
 | `throw` | Partial | Exact `throw new E(...)` with `ldstr`/`ldnull` arguments raises a located `thrown "E"` fault. Adjacent `ldnull; throw` raises `System.NullReferenceException`. Other throws are rejected. |
-| `constrained.`, `callvirt` | Partial | Adjacent prefix and call resolving to a concrete same-assembly struct implementation; see [constrained struct calls](#constrained-struct-calls). No boxing or general virtual dispatch. |
+| `constrained.`, `callvirt` | Partial | Adjacent prefix and `callvirt` (instance slot) or `call` (static interface slot) resolving to a concrete same-assembly struct implementation; see [constrained struct calls](#constrained-struct-calls). No boxing or general virtual dispatch. |
 | `ldftn` | Partial | Exact static same-assembly managed method addresses, retaining scoped identity and closed signature. Callable values have no numeric address representation. See typed indirect dispatch below. |
 | `calli` | Partial | Static default-managed signatures over admitted integer/enum, reference-free aggregate and integer-vector values, and managed references to these types. The pointer must identify an authenticated catalog entry with the exact signature. Ordinary indirect calls select a forward target; tail calls permit cycles. Supplied immutable native tables also admit checked byte offsets and `ldind.i` with authenticated target provenance. No unmanaged conventions or arbitrary numeric targets. |
 | `tail.` | Partial | Adjacent `tail. call ret` or `tail. calli ret` with exactly its arguments and optional function pointer on the stack and the same return type. Retires caller storage before entering the callee and revalidates argument lifetimes. Admitted same-assembly transfers may form cycles; virtual, imported and intrinsic tail calls remain unsupported. |
@@ -108,7 +108,7 @@ loading it is not. Each body requires one exact supported managed indirect-call 
 signatures carrying native table pointers are not supported.
 
 Table allocation, updates, null entries, pointer fields and numeric-address conversions are
-not supported. Mutable raw-pointer EVM tables therefore need further work. All-tail cycles are supported; mixed ordinary/tail recursive graphs may be rejected. Tail cycles consume ordinary
+not supported. Mutable raw-pointer dispatch tables therefore need further work. All-tail cycles are supported; mixed ordinary/tail recursive graphs may be rejected. Tail cycles consume ordinary
 execution fuel; admitting a cycle neither proves termination nor makes exhaustion successful.
 
 ## Dynamic stack allocation
@@ -254,11 +254,19 @@ Closed generic helpers can use a directly implemented closed interface constrain
 The original managed-reference receiver is passed to the resolved implementation, so mutations
 remain visible to the caller without boxing.
 
+A `constrained. T; call` pair dispatches a static abstract interface member, such as an operation
+or flag struct selected by a type argument. The slot must be static, abstract and virtual on a
+same-assembly interface that the non-generic struct `T` implements directly, and the target must
+be a static method of `T`: its explicit `MethodImpl` override, or else the unique public static
+method with the slot's name and signature. The call passes no receiver. `callvirt` never
+dispatches a static slot and `call` never dispatches an instance slot.
+
 The Lean certificate independently resolves serialized type, interface and method metadata and
 checks the selected method token, signature, closed owner arguments and argument count.
 A branch cannot bypass the prefix.
 Reference receivers, boxing fallbacks, inherited or default-interface dispatch, generic methods
-on interfaces, open interface constraints and ordinary unconstrained virtual calls remain unsupported.
+on interfaces (instance or static), static slots on generic struct receivers, open interface
+constraints and ordinary unconstrained virtual calls remain unsupported.
 
 ### Static span tables
 
@@ -393,7 +401,7 @@ field of the same type. Loads truncate to the declared storage width and sign-ex
 the load width and signedness to the raw field type. Mutable fields, address-taking during
 initialization, repeated stores and conditional initialization remain rejected.
 
-`public static readonly UInt256 One = 1ul;` compiles to `ldc.i4.1; conv.i8; call op_Implicit(ulong); stsfld One` in the static constructor. A reachable `ldsfld` of such a field emits `.staticValue bytes`, which pushes the field's value as an aggregate and touches no memory. The static constructor must store the field exactly once, unconditionally (no control flow before the store and no branch back to it). A helper-call initializer uses a same-assembly static call whose arguments are integer constants (`ldc.i4*`, `ldc.i8` with `conv.i4`/`conv.u4`/`conv.i8`/`conv.u8`/`conv.i`/`conv.u`). A field may instead copy (`ldsfld G; stsfld F`) such a field stored earlier, as in `MinValue = Zero`. The field's declaring type must be named by `--assume-initialized`. The called method and its callees become part of the extracted program and must not access static fields. The static site records the call, and the extraction certificate reruns it in the checked interpreter: the result must be exactly the emitted bytes, or `translation_valid` fails.
+`public static readonly Word256 One = 1ul;` compiles to `ldc.i4.1; conv.i8; call op_Implicit(ulong); stsfld One` in the static constructor. A reachable `ldsfld` of such a field emits `.staticValue bytes`, which pushes the field's value as an aggregate and touches no memory. The static constructor must store the field exactly once, unconditionally (no control flow before the store and no branch back to it). A helper-call initializer uses a same-assembly static call whose arguments are integer constants (`ldc.i4*`, `ldc.i8` with `conv.i4`/`conv.u4`/`conv.i8`/`conv.u8`/`conv.i`/`conv.u`). A field may instead copy (`ldsfld G; stsfld F`) such a field stored earlier, as in `MinValue = Zero`. The field's declaring type must be named by `--assume-initialized`. The called method and its callees become part of the extracted program and must not access static fields. The static site records the call, and the extraction certificate reruns it in the checked interpreter: the result must be exactly the emitted bytes, or `translation_valid` fails.
 
 Direct `new T(integer constants)` initialization is also admitted for same-assembly
 reference-free structs, including closed generic structs stored on nongeneric declaring types.
@@ -406,9 +414,25 @@ data. Repeated accesses share one allocation; distinct fields remain distinct ev
 bytes agree. The reference can be passed to supported helpers and instance methods. Checked
 writes through it fail, including writes through `Unsafe.AsRef`.
 
-Rejected: a declaring type without the assumption; values built by other code shapes; a second
-store, a store outside the static constructor, or `ldsflda` of the field during initialization;
-and `stsfld` in an extracted method.
+Rejected: a declaring type without the assumption; aggregate values built by other code shapes;
+a second store, a store outside the static constructor, or `ldsflda` of the field during
+initialization; and `stsfld` in an extracted method.
+
+#### Unknown readonly values
+
+An integer, Boolean, Char or enum field that passes the same store checks, but whose stored value
+comes from code extraction does not evaluate (such as a hash seed drawn from
+`RandomNumberGenerator`), is admitted as fixed but unknown. Its static site has
+`opaqueValue := true`, no initializer and zero placeholder bytes that give only the width;
+`StaticValuesValid` requires exactly that shape. `ldsfld` reads the field from the caller's static
+binding for its identity, with the field's width and signedness, and faults as `unsupported` when
+the caller's memory has no binding. The placeholder is never read, so a proof about the method holds
+for whatever value the binding holds and cannot fix a particular one. `Memory.boundStatics` in
+[StaticBindings.lean](../CIL/Safety/StaticBindings.lean) builds caller memory that binds chosen
+values; [OpaqueSeeds.lean](../Examples/Proofs/OpaqueSeeds.lean) proves a seeded hash for every pair
+of seeds. Symbolic values stop evaluation, so such proofs use `with_unfolding_all rfl` or stepping
+rather than plain `rfl` evaluation. `ldsflda` of an unknown field is rejected, as are aggregate fields whose value
+cannot be computed. Each such field is listed in `opaqueStaticValues`.
 
 Release configuration is required, but it does not guarantee that a compiler emits only supported instructions. For example, reachable reference-element array allocation or exception handling is still rejected.
 
@@ -421,7 +445,10 @@ equality or observation of unspecified lanes.
 
 Reachable same-assembly generic methods are specialized for supported primitive, enum, reference-free aggregate and vector type arguments. This substitutes types in the original CIL parameters, locals, type operands and nested generic calls; it does not replace method bodies with functional summaries. Repeated uses share a specialization, while different type arguments retain separate bodies. Ordinary calls retain an acyclic order; tail transfers may form cycles. Extraction rejects more than 256 distinct specializations.
 
-Select a non-generic entry method whose compiled calls supply the concrete type arguments.
+Select a non-generic entry method whose compiled calls supply the concrete type arguments, or
+close a generic entry with `--type-argument`: a primitive integer, or a non-generic value type
+of the selected module that specialization then validates like any other argument. Typed
+contract imports admit only primitive integer arguments, since they bind across assemblies.
 Static calls on closed same-assembly generic declaring types support nested owners and combined
 owner/method type arguments. Closed same-assembly sequential generic structs admit reference-free
 storage, field accesses, direct instance methods and constructors after substituting their

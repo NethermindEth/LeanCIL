@@ -14,14 +14,16 @@ only extends allocations, and every static instruction satisfies a
 namespace CIL.Safety
 
 /-- A successful resolution through a cached binding leaves memory unchanged, returns the
-    cached reference, and implies the binding holds exactly the descriptor's bytes. -/
+    cached reference, and implies the binding is readable at the descriptor's width and,
+    unless the value is opaque, holds exactly the descriptor's bytes. -/
 theorem cached_static_reference_checked (descriptor : CIL.StaticDescriptor) (m final : Memory)
     (name : Nat) (reference result : Reference)
     (cache : m.staticBindings.find? (fun binding => binding.1 == descriptor.identity) =
       some (name, reference))
     (success : staticReference descriptor m = .ok (final, result)) :
-    final = m ∧ result = reference ∧
-      read m reference descriptor.bytes.length 1 = .ok descriptor.bytes := by
+    final = m ∧ result = reference ∧ ∃ bytes,
+      read m reference descriptor.bytes.length 1 = .ok bytes ∧
+      (descriptor.opaqueValue = false → bytes = descriptor.bytes) := by
   simp only [staticReference, cache] at success
   cases hl : liveAllocation m reference.allocation with
   | error fault => simp [hl, checkedAt, Except.mapError, Bind.bind, Except.bind] at success
@@ -35,9 +37,10 @@ theorem cached_static_reference_checked (descriptor : CIL.StaticDescriptor) (m f
         simp only [hr] at success
         split at success
         · simp only [Except.ok.injEq, Prod.mk.injEq] at success
-          have he : bytes = descriptor.bytes := by
-            simpa using (by assumption : (bytes == descriptor.bytes) = true)
-          exact ⟨success.1.symm, success.2.symm, congrArg Except.ok he⟩
+          refine ⟨success.1.symm, success.2.symm, bytes, rfl, fun transparent => ?_⟩
+          have admitted : (descriptor.opaqueValue || bytes == descriptor.bytes) = true := by
+            assumption
+          simpa [transparent] using admitted
         · cases success
     · cases success
 #print axioms cached_static_reference_checked
@@ -52,6 +55,8 @@ theorem staticReference_preserves_wellFormed (descriptor : CIL.StaticDescriptor)
     exact hm
   | none =>
     simp only [staticReference, hc] at h
+    split at h
+    · cases h
     cases ha : allocate m ⟨.immutableStatic,
         ⟨descriptor.bytes.length, descriptor.alignment, []⟩, true, [descriptor.bytes.length]⟩ <;>
       simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind,
@@ -82,6 +87,8 @@ theorem staticReference_extends_allocations (descriptor : CIL.StaticDescriptor)
     exact .refl _
   | none =>
     simp only [staticReference, hc] at h
+    split at h
+    · cases h
     cases ha : allocate m ⟨.immutableStatic,
         ⟨descriptor.bytes.length, descriptor.alignment, []⟩, true, [descriptor.bytes.length]⟩ <;>
       simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind,
@@ -145,10 +152,12 @@ theorem staticReference_reference_valid (descriptor : CIL.StaticDescriptor) (m r
   cases hc : m.staticBindings.find? (fun binding => binding.1 == descriptor.identity) with
   | some binding =>
     obtain ⟨key, cached⟩ := binding
-    obtain ⟨rfl, rfl, bytes⟩ := cached_static_reference_checked _ _ _ _ _ _ hc h
-    exact read_reference_valid _ _ _ _ _ bytes
+    obtain ⟨rfl, rfl, bytes, readable, _⟩ := cached_static_reference_checked _ _ _ _ _ _ hc h
+    exact read_reference_valid _ _ _ _ _ readable
   | none =>
     simp only [staticReference, hc] at h
+    split at h
+    · cases h
     cases ha : allocate m ⟨.immutableStatic,
         ⟨descriptor.bytes.length, descriptor.alignment, []⟩, true, [descriptor.bytes.length]⟩ <;>
       simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind,

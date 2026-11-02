@@ -6,8 +6,10 @@ import CIL.Safety.Execution
 A `static readonly` integer, enum or struct field set once by its static constructor loads
 as a constant. The extractor records the literal, call or construction with constant arguments
 that produced the value. `StaticValuesValid` checks literal storage or reruns the initializer in the
-interpreter from empty memory and requires exactly the emitted bytes. See the static-value
-section of `docs/SOUNDNESS.md` for what stays trusted.
+interpreter from empty memory and requires exactly the emitted bytes. An opaque value has no
+initializer and zero placeholder bytes: loads read it from the caller's memory, so a proof holds
+for every value it may take. See the static-value section of `docs/SOUNDNESS.md` for what stays
+trusted.
 -/
 
 namespace CIL.Extraction
@@ -56,9 +58,12 @@ def constructorYields (program : Program) (descriptor : StaticDescriptor)
     | _ => return false
   else return false
 
-/-- Initializers reproduce exactly the descriptor's bytes; RVA descriptors have none. -/
+/-- Initializers reproduce exactly the descriptor's bytes; RVA descriptors have none. An opaque
+    scalar has no initializer and only zero bytes, so no value can be pinned through it. -/
 def initializerYields (program : Program) (descriptor : StaticDescriptor) : Bool :=
-  match descriptor.initializer with
+  if descriptor.opaqueValue then
+    descriptor.initializer.isNone && descriptor.scalar.isSome && descriptor.bytes.all (· == 0)
+  else match descriptor.initializer with
   | none => true
   | some init =>
     match init.literal with

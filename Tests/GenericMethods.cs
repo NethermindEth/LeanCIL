@@ -85,6 +85,34 @@ foreach (var name in names)
     });
 }
 
+// A generic entry closes over value types of its own module, matching the runtime instantiation.
+foreach (var (name, argument) in new[] { ("Size", "Examples.PackedLeaf"), ("Choose", "Examples.Signed8") })
+{
+    var closedType = runtime.Assembly.GetType(argument)!;
+    var method = runtime.GetMethods().Single(candidate => candidate.Name == name && candidate.IsGenericMethodDefinition)
+        .MakeGenericMethod(closedType);
+    var inputs = new List<object[]> { Array.Empty<object>() };
+    foreach (var parameter in method.GetParameters())
+        inputs = inputs.SelectMany(previous => Values(parameter.ParameterType)
+            .Select(value => previous.Append(value).ToArray())).ToList();
+    var claims = inputs.Select(input =>
+        $"(CIL.Safety.invoke Extracted.program 64 0 [{string.Join(", ", input.Select(LeanValue))}] " +
+        $"CIL.Safety.Memory.empty).map Prod.snd = .ok [{LeanValue(method.Invoke(null, input)!)}]").ToList();
+    var output = Path.Combine(root, "Entry-" + name);
+    Directory.CreateDirectory(output);
+    var proof = Path.Combine(output, "BoundaryProof.lean");
+    File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nset_option maxRecDepth 8192\n" +
+        "namespace ExampleProof\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by\n  exact " +
+        (claims.Count == 1 ? "rfl" : "⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩") +
+        "\nend ExampleProof\n");
+    var selector = name == "Size" ? "GenericMethods::Size()" : "GenericMethods::Choose(bool,T,T)";
+    examples.Add(new(selector, proof, output, TypeArguments: [argument]), () =>
+    {
+        comparisons += claims.Count;
+        Console.WriteLine($"PASS entry {name}<{closedType.Name}>: {claims.Count} runtime comparisons");
+    });
+}
+
 // Generic loads and reference offsets retain checked memory behaviour.
 foreach (var name in new[] { "Read32", "NextPacked" })
 {
@@ -213,6 +241,19 @@ foreach (var mutation in new[] { "class", "float", "byref", "arity", "return", "
         !(result.Output.Contains("Unsupported") || result.Output.Contains("Unresolved") || result.Output.Contains("Recursive")))
         throw new InvalidOperationException("Incorrect generic rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS rejection: " + mutation);
+}
+
+// Entry type arguments outside the selected module's non-generic value types are rejected.
+foreach (var argument in new[] { "System.String", "System.Guid", "Examples.GenericMethods", "Examples.GenericPair`1" })
+{
+    var output = Path.Combine(root, "RejectEntry-" + argument.Replace('`', '-'));
+    var result = Execute([.. Extract("extract", assembly, "Examples", "GenericMethods::Size()", output),
+        "--type-argument", argument]);
+    if (result.Code == 0 || File.Exists(Path.Combine(output, "Extracted.lean")) ||
+        !result.Output.Contains("Closed entry type arguments require", StringComparison.Ordinal))
+        throw new InvalidOperationException(
+            "Incorrect entry type argument rejection: " + argument + "\n" + result.Output);
+    Console.WriteLine("PASS entry type argument rejection: " + argument);
 }
 
 // Provenance participates in regeneration-based artifact identity checks.

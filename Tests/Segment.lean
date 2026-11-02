@@ -4,7 +4,7 @@ import CIL.Safety.SegmentLocals
 # Composable placed-segment contracts
 
 Checked prefixes are composed through exact intermediate states. The vector-input slices
-mirror UInt256 Add's reference prefix and Multiply's AVX input loads; placements, formation
+mirror a 256-bit Add's reference prefix and Multiply's AVX input loads; placements, formation
 and successful memory operations remain explicit premises.
 -/
 

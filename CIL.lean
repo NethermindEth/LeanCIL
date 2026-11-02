@@ -131,6 +131,7 @@ import CIL.Safety.StaticInitialization
 import CIL.Safety.StaticInstructionWorld
 import CIL.Safety.StaticLifetime
 import CIL.Safety.StaticMemory
+import CIL.Safety.StaticBindings
 import CIL.Safety.StaticMemoryBelow
 import CIL.Safety.StaticMemoryLemmas
 import CIL.Safety.StaticReferences

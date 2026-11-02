@@ -65,7 +65,9 @@ static constructors. They do enable `ldsfld` of the type's static readonly struc
 fields whose value its static constructor fixes (see
 [static readonly values](OPCODES.md#static-readonly-values)); each such field is
 recorded in `staticValues` and reported as a caller assumption that it keeps the
-value its static constructor stored. The generated Lean source and identity
+value its static constructor stored. A field whose value extraction cannot compute is
+also listed in `opaqueStaticValues` and reported as `Unknown static value`; its loads
+read the caller's static binding. The generated Lean source and identity
 manifest retain the assumptions; `check` reuses them and rejects conflicting
 explicit assumptions. Verification binds the manifest hash, prints the
 initialization preconditions with the theorem and copies both lists into
@@ -86,13 +88,15 @@ leancil blockers assembly.dll --manifest blockers-manifest.json [--output blocke
   "initializedTypes": ["Namespace.Type"],
   "entries": [
     { "signature": "Type::Method(ulong)", "profile": "scalar" },
-    { "signature": "Type::Method(ulong)", "profile": "@profiles/x64-v3.json" }
+    { "signature": "Type::Method(ulong)", "profile": "@profiles/x64-v3.json" },
+    { "signature": "Type::Size()", "profile": "scalar", "typeArguments": ["Namespace.Pair"] }
   ]
 }
 ```
 
 `profile` is a profile name or `@file`, resolved against the manifest's directory;
-`initializedTypes` applies `--assume-initialized` to every entry. The report goes to
+`initializedTypes` applies `--assume-initialized` to every entry, and an entry's optional
+`typeArguments` applies `--type-argument` to it. The report goes to
 `--output`, by default `blockers.json` next to the manifest, and a short summary goes to standard
 output. Each entry is `admitted` (extraction would succeed), `blocked`, or `notChecked` with the
 reason: a selector that matches no method or several, an unknown profile, or an assembly or

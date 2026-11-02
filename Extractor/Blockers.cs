@@ -62,7 +62,11 @@ internal static class Blockers
             reach.AddChain(chain);
         }
     }
-    sealed record Outcome(string? Signature, string? Profile, string Status, string? Method, string? Reason, int? ReachableMethods, List<Finding> Findings);
+    sealed record Outcome(string? Signature, string? Profile, string Status, string? Method, string? Reason,
+        int? ReachableMethods, List<Finding> Findings)
+    {
+        internal string[] TypeArguments { get; init; } = [];
+    }
 
     static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 
@@ -127,10 +131,24 @@ internal static class Blockers
             var signature = entry.ValueKind == JsonValueKind.Object ? Text(entry, "signature") : null;
             var profileName = entry.ValueKind == JsonValueKind.Object ? Text(entry, "profile") : null;
             Outcome NotChecked(string reason) => new(signature, profileName, "notChecked", null, reason, null, []);
-            if (entry.ValueKind != JsonValueKind.Object || entry.EnumerateObject().Any(p => p.Name is not ("signature" or "profile")))
+            if (entry.ValueKind != JsonValueKind.Object ||
+                entry.EnumerateObject().Any(p => p.Name is not ("signature" or "profile" or "typeArguments")))
             {
-                outcomes.Add(NotChecked("Entry must be an object with only `signature` and `profile`."));
+                outcomes.Add(NotChecked(
+                    "Entry must be an object with only `signature`, `profile` and `typeArguments`."));
                 continue;
+            }
+            string[] typeArguments = [];
+            if (entry.TryGetProperty("typeArguments", out var arguments))
+            {
+                if (arguments.ValueKind != JsonValueKind.Array ||
+                    arguments.EnumerateArray().Any(argument => argument.ValueKind != JsonValueKind.String ||
+                        string.IsNullOrWhiteSpace(argument.GetString())))
+                {
+                    outcomes.Add(NotChecked("`typeArguments` must be an array of full type names."));
+                    continue;
+                }
+                typeArguments = arguments.EnumerateArray().Select(argument => argument.GetString()!).ToArray();
             }
             if (signature is null || profileName is null)
             {
@@ -154,7 +172,11 @@ internal static class Blockers
             Symbols.Read(module, assemblyPath, out _);
             var blocked = new List<MetadataValidation.Blocked>();
             MethodDefinition[] methods;
-            try { methods = MetadataValidation.Validate(module, expectedAssembly ?? identity, signature, profile, initializedTypes, blocked); }
+            try
+            {
+                methods = MetadataValidation.Validate(module, expectedAssembly ?? identity, signature, profile,
+                    initializedTypes, blocked, typeArguments: typeArguments);
+            }
             catch (Exception error)
             {
                 // Only selection, profile, assumption and assembly checks throw once blockers are collected.
@@ -172,7 +194,8 @@ internal static class Blockers
             }
             if (blocked.Count == 0)
             {
-                outcomes.Add(new(signature, profileName, "admitted", methods[0].FullName, null, methods.Length, []));
+                outcomes.Add(new(signature, profileName, "admitted", methods[0].FullName, null, methods.Length, [])
+                    { TypeArguments = typeArguments });
                 continue;
             }
             var entryFindings = new List<Finding>();
@@ -191,7 +214,8 @@ internal static class Blockers
                 finding.Add(site, chain[0], profileName, chain);
                 if (knownFindings.Add(finding)) entryFindings.Add(finding);
             }
-            outcomes.Add(new(signature, profileName, "blocked", blocked[0].Chain[0].FullName, null, null, entryFindings));
+            outcomes.Add(new(signature, profileName, "blocked", blocked[0].Chain[0].FullName, null, null, entryFindings)
+                { TypeArguments = typeArguments });
         }
 
         // The most widely reached blockers lead; identifiers follow that order.
@@ -221,7 +245,8 @@ internal static class Blockers
             },
             entries = outcomes.Select(o => new
             {
-                signature = o.Signature, profile = o.Profile, status = o.Status, method = o.Method, reason = o.Reason,
+                signature = o.Signature, typeArguments = o.TypeArguments, profile = o.Profile, status = o.Status,
+                method = o.Method, reason = o.Reason,
                 reachableMethods = o.ReachableMethods, blockers = o.Findings.Select(f => f.Id)
             }),
             blockers = ordered.Select(f => new
@@ -248,7 +273,10 @@ internal static class Blockers
             $"{outcomes.Count(o => o.Status == "notChecked")} not checked");
         foreach (var outcome in outcomes)
             text.AppendLine($"  {outcome.Status switch { "admitted" => "admitted   ", "blocked" => "blocked    ", _ => "not checked" }} " +
-                $"{(outcome.Method is { } method ? Short(method) : outcome.Signature ?? "(no signature)")} [{Profile(outcome.Profile)}]" +
+                $"{(outcome.Method is { } method ? Short(method) : outcome.Signature ?? "(no signature)")}" +
+                (outcome.Method is not null || outcome.TypeArguments.Length == 0 ? "" :
+                    $"<{string.Join(", ", outcome.TypeArguments.Select(Short))}>") +
+                $" [{Profile(outcome.Profile)}]" +
                 (outcome.Status == "admitted" ? $" ({Count(outcome.ReachableMethods!.Value, "reachable method", "reachable methods")})" :
                  outcome.Status == "blocked" ? ": " + string.Join(", ", outcome.Findings.Select(f => f.Id)) :
                  ": " + Line(outcome.Reason!)));

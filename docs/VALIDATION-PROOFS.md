@@ -23,7 +23,7 @@ b - c` and the flag words in source form, through both `cil_checked_steps` and `
 A wrong stored value, address or source memory leaves the run stuck at that store, with the exact
 unsolved goal asserted.
 
-`Tests.Segment` composes the UInt256 Add Vector128 eight-op reference prefix and Multiply AVX2 input
+`Tests.Segment` composes a 256-bit Add Vector128 eight-op reference prefix and Multiply AVX2 input
 stages at positions 44–56. Formation, checked loads and stores, intrinsic availability and exact
 permutation semantics remain premises. Two actual vector writes frame all other numeric snapshots
 using separated homes. Negative cases reject aliased homes, hidden indirect writes, changed endpoint
@@ -130,10 +130,14 @@ unsigned and signed compare, `MoveMask`, shifts by immediate and by vector count
 even-lane multiply) rewrites a packed or symbolic operand to its lane values, the bitwise lane
 projections cover a mask blend, and concrete 256-bit values are checked by kernel evaluation. A
 method steps through a shift and an even-lane multiply with those lemmas as facts. The byte
-shuffle is pinned on concrete vectors for bit-7 zeroing, half isolation and int256's byte
+shuffle is pinned on concrete vectors for bit-7 zeroing, half isolation and 32-byte
 reversal, which mutants that ignore bit 7 or cross halves fail. The AES round steps reproduce round 1
 of the FIPS-197 example cipher, which a reversed ShiftRows, an unreduced MixColumns and an AESE that
-adds its key after SubBytes fail.
+adds its key after SubBytes fail. REV64, the two-table quadword permutation, signed lane comparison
+and 32-bit lane creation are pinned on vectors that a whole-vector byte reversal, a bit-3 table select,
+an unsigned comparison and a reversed lane order fail. `Tests.MemorySpanExecution` checks the
+`Vector128` byte loads and stores at an offset, across the end of an allocation and through a readonly
+reference.
 
 Run the focused Lean targets and extracted-loop suite with:
 

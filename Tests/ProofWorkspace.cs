@@ -10,18 +10,31 @@ var consumer = Path.Combine(root, "Consumer");
 var package = Path.Combine(root, "Package");
 var workspace = Path.Combine(root, "Workspace");
 Directory.CreateDirectory(Path.Combine(package, "Client"));
-const string consumerRevision = "00fcecf53e22b5c9090052779e14b3ba246fb117";
-const string method = "Nethermind.Int256.UInt256::get_IsZeroOrOne()";
-const string initializedType = "Nethermind.Int256.UInt256";
-Run(["git", "init", consumer]);
-Run(["git", "remote", "add", "origin", "https://github.com/NethermindEth/int256.git"], consumer);
-Run(["git", "fetch", "--depth", "1", "origin", consumerRevision], consumer);
-Run(["git", "checkout", "--detach", "FETCH_HEAD"], consumer);
-Console.WriteLine("Building pinned Nethermind.Int256 consumer " + consumerRevision);
-Run(["dotnet", "build", Path.Combine(consumer, "src", "Nethermind.Int256", "Nethermind.Int256.csproj"),
-    "-c", "Release"]);
-var assembly = Path.Combine(consumer, "src", "artifacts", "bin", "Nethermind.Int256", "release",
-    "Nethermind.Int256.dll");
+// A four-limb struct with a static constructor and symbols stands in for any consumer library type.
+const string method = "Workspace.Wide::get_IsZeroOrOne()";
+const string initializedType = "Workspace.Wide";
+Directory.CreateDirectory(consumer);
+File.WriteAllText(Path.Combine(consumer, "Workspace.csproj"), """
+    <Project Sdk="Microsoft.NET.Sdk">
+      <PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
+    </Project>
+    """);
+File.WriteAllText(Path.Combine(consumer, "Wide.cs"), """
+    namespace Workspace;
+
+    public readonly struct Wide(ulong u0, ulong u1, ulong u2, ulong u3)
+    {
+        public static readonly Wide Zero = default;
+        public static readonly Wide One = new(1, 0, 0, 0);
+
+        readonly ulong u0 = u0, u1 = u1, u2 = u2, u3 = u3;
+
+        public bool IsZeroOrOne => ((u0 >> 1) | u1 | u2 | u3) == 0;
+    }
+    """);
+Console.WriteLine("Building the workspace consumer fixture");
+Run(["dotnet", "build", Path.Combine(consumer, "Workspace.csproj"), "-c", "Release"]);
+var assembly = Path.Combine(consumer, "bin", "Workspace.dll");
 var revision = Run(["git", "rev-parse", "HEAD"], Root).Trim();
 File.WriteAllText(Path.Combine(package, "lakefile.toml"),
     "name = \"consumer\"\n[[require]]\nname = \"leancil\"\ngit = " + JsonSerializer.Serialize(Root.Replace('\\', '/')) +
@@ -34,7 +47,7 @@ import ExtractedSymbols
 namespace Client
 theorem methodCount : Extracted.program.length = 1 := rfl
 theorem methodIdentity : Extracted.method0Signature =
-    "System.Boolean Nethermind.Int256.UInt256::get_IsZeroOrOne()" := rfl
+    "System.Boolean Workspace.Wide::get_IsZeroOrOne()" := rfl
 #print axioms methodCount
 #print axioms methodIdentity
 end Client
@@ -44,13 +57,13 @@ File.WriteAllText(proof, """
 import Client.Support
 namespace WorkspaceProof
 theorem selectedMethod : Extracted.program.length = 1 ∧ Extracted.method0Signature =
-    "System.Boolean Nethermind.Int256.UInt256::get_IsZeroOrOne()" :=
+    "System.Boolean Workspace.Wide::get_IsZeroOrOne()" :=
   ⟨Client.methodCount, Client.methodIdentity⟩
 #print axioms selectedMethod
 end WorkspaceProof
 """);
 Run(["lake", "update"], package);
-Console.WriteLine("Checking the real UInt256 editor workspace and preserving proof edits");
+Console.WriteLine("Checking the consumer editor workspace and preserving proof edits");
 string[] command = [.. cli, "workspace", assembly, method,
     "--profile", "scalar", "--proof", proof, "--assume-initialized", initializedType, "--output", workspace];
 var created = Run(command);
@@ -76,7 +89,7 @@ var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combi
 if (!report.GetProperty("extractionAudit").GetString()!.Contains("Extracted.translation_valid", StringComparison.Ordinal) ||
     report.GetProperty("libraryBuild").GetString() == "consumer-proof-cache")
     throw new InvalidOperationException("Workspace proof did not pass ordinary fresh extraction audit and hermetic verification.");
-Console.WriteLine("PASS real pinned UInt256 workspace, transitive symbols import, editable proof and fresh certification");
+Console.WriteLine("PASS consumer workspace, transitive symbols import, editable proof and fresh certification");
 
 void Reject(string[] arguments, string marker)
 {

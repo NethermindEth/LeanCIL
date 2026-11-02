@@ -188,9 +188,11 @@ First-use absence and repeated-call world-validity are distinct caller premises.
 Constructor-initialized readonly values require named initialization assumptions and no later
 unmodeled mutation. Recognizing unconditional permitted initializer stores and faithfully decoding
 metadata are trusted. `StaticValuesValid` checks literal bytes or re-executes admitted initializer
-computation without circular access to the values being justified. Profile-dependent initialization
-must match deployment. Reflection and other unmodeled writers are excluded. Reports expose these
-assumptions; they do not establish that initialization occurred.
+computation without circular access to the values being justified. A scalar whose initializer is
+not computed is opaque: loads read the caller's binding, so a theorem binds no value the deployment
+might not store, and `StaticValuesValid` only checks its width and empty initializer.
+Profile-dependent initialization must match deployment. Reflection and other unmodeled writers are
+excluded. Reports expose these assumptions; they do not establish that initialization occurred.
 
 ## Argument storage
 

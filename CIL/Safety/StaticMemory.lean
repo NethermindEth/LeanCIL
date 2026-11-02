@@ -4,9 +4,11 @@ import CIL.Safety.InstructionMemory
 # Readonly statics in the checked interpreter
 
 `staticReference` resolves an extracted readonly static field to immutable storage, creating
-it on first use and revalidating a cached binding on every later use. `staticInstruction`
-runs the static and span instructions on top of it and hands every other memory instruction
-to `memoryInstruction`. `staticSpanAligned` is the element alignment a typed static span needs.
+it on first use and revalidating a cached binding on every later use. An opaque field's value
+is not extracted, so it must already be bound by the caller and is never created.
+`staticInstruction` runs the static and span instructions on top of it and hands every other
+memory instruction to `memoryInstruction`. `staticSpanAligned` is the element alignment a typed
+static span needs.
 -/
 
 namespace CIL.Safety
@@ -28,7 +30,9 @@ def staticLoadedValue (descriptor : CIL.StaticDescriptor) : Option CIL.Value :=
 
 /-- Static initialization occurs before exposing the readonly view. Existing
     bindings are checked against the freshly extracted field bytes, lifetime
-    and layout; cached contents are never trusted just because names match. -/
+    and layout; cached contents are never trusted just because names match.
+    An opaque binding may hold any bytes of the field's width, and without one the
+    lookup faults: nothing supplies an opaque value except the caller's memory. -/
 def staticReference (descriptor : CIL.StaticDescriptor) (m : Memory) :
     ExecutionResult (Memory × Reference) := do
   match m.staticBindings.find? (fun binding => binding.1 == descriptor.identity) with
@@ -40,8 +44,11 @@ def staticReference (descriptor : CIL.StaticDescriptor) (m : Memory) :
         allocation.layout.alignment == descriptor.alignment then pure () else .error .invalidState
     let bytes ← checkedAt (.address reference) descriptor.bytes.length
       (read m reference descriptor.bytes.length 1)
-    if bytes == descriptor.bytes then return (m, reference) else .error .invalidState
+    if descriptor.opaqueValue || bytes == descriptor.bytes then return (m, reference)
+    else .error .invalidState
   | none =>
+    if descriptor.opaqueValue then
+      .error (.unsupported "Opaque static field value is not bound by the caller")
     let (id, memory) ← checkedAt .null descriptor.bytes.length (allocate m {
       kind := .immutableStatic
       layout := ⟨descriptor.bytes.length, descriptor.alignment, []⟩
@@ -75,8 +82,18 @@ def staticInstruction (body : CIL.Method) (pc : Nat) (operation : CIL.MemoryOp)
   | .staticValue bytes, _ =>
     let some (_, descriptor) := body.staticSites.find? (fun site => site.1 == pc) |
       .error (.unsupported "Missing extracted static field identity")
+    -- An opaque value is whatever the caller's binding holds; `bytes` fixes only its width.
+    if descriptor.opaqueValue then
+      if descriptor.bytes == bytes then
+        let (memory, reference) ← staticReference descriptor m
+        let loaded ← checkedAt (.address reference) bytes.length
+          (read memory reference bytes.length 1)
+        let some value := staticLoadedValue { descriptor with bytes := loaded } |
+          .error .invalidState
+        return (memory, .scalar value :: stack)
+      else .error .invalidState
     -- The translation certificate checks each initializer's result against these bytes.
-    if descriptor.bytes == bytes && descriptor.initializer.isSome then
+    else if descriptor.bytes == bytes && descriptor.initializer.isSome then
       let some value := staticLoadedValue descriptor | .error .invalidState
       return (m, .scalar value :: stack)
     else .error .invalidState

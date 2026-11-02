@@ -105,7 +105,7 @@ theorem Memory.Renamed.freshStatic {mapping : AllocationRenaming}
     (staticBounds : ∀ binding ∈ source.staticBindings,
       binding.2.allocation < mapping.sourceLimit)
     (descriptor : CIL.StaticDescriptor) (bounded : descriptor.bytes.length < nativeLimit)
-    (aligned : 0 < descriptor.alignment)
+    (aligned : 0 < descriptor.alignment) (transparent : descriptor.opaqueValue = false)
     (missing : source.staticBindings.find? (fun binding => binding.1 == descriptor.identity) =
       none) :
     ∃ sourceAfter targetAfter,
@@ -128,12 +128,14 @@ theorem Memory.Renamed.freshStatic {mapping : AllocationRenaming}
     rw [← related.sourceLimit, mapping.allocate_fresh, related.targetLimit]
   refine ⟨initializedStatic descriptor source.nextIdentity sourceAllocated,
     initializedStatic descriptor target.nextIdentity targetAllocated, ?_, ?_, ?_⟩
-  · simp only [CIL.Safety.staticReference, missing, sourceMade, checkedAt, Except.mapError,
-      Bind.bind, Except.bind, Pure.pure, Except.pure, initializedStatic]
+  · simp only [CIL.Safety.staticReference, missing, transparent, Bool.false_eq_true, ↓reduceIte,
+      sourceMade, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure,
+      initializedStatic]
     rfl
   · rw [CIL.Safety.staticReference, related.staticLookup descriptor.identity, missing]
-    simp only [Option.map_none, targetMade, checkedAt, Except.mapError,
-      Bind.bind, Except.bind, Pure.pure, Except.pure, initializedStatic]
+    simp only [Option.map_none, transparent, Bool.false_eq_true, ↓reduceIte, targetMade,
+      checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure,
+      initializedStatic]
     rfl
   · simpa only [freshImage] using
       initializedStatic_related allocations descriptor source.nextIdentity freshBound
@@ -162,23 +164,29 @@ theorem Memory.Renamed.staticReference {mapping : AllocationRenaming}
       corresponding.success
     exact ⟨mapping, targetAfter, .refl mapping, references ▸ targetLoaded, memories⟩
   | none =>
+    have transparent : descriptor.opaqueValue = false := by
+      cases flagged : descriptor.opaqueValue
+      · rfl
+      · simp [CIL.Safety.staticReference, cached, flagged, Bind.bind, Except.bind] at loaded
     have bounded : descriptor.bytes.length < nativeLimit := by
       by_cases outside : descriptor.bytes.length < nativeLimit
       · exact outside
-      simp only [CIL.Safety.staticReference, cached, CIL.Safety.allocate, Allocation.valid,
+      simp only [CIL.Safety.staticReference, cached, transparent, Bool.false_eq_true,
+        ↓reduceIte, CIL.Safety.allocate, Allocation.valid,
         outside, decide_false, Bool.false_and, Bool.not_false, ite_true, checkedAt,
         Except.mapError, Bind.bind, Except.bind] at loaded
       cases loaded
     have aligned : 0 < descriptor.alignment := by
       by_cases positive : 0 < descriptor.alignment
       · exact positive
-      simp only [CIL.Safety.staticReference, cached, CIL.Safety.allocate, Allocation.valid,
+      simp only [CIL.Safety.staticReference, cached, transparent, Bool.false_eq_true,
+        ↓reduceIte, CIL.Safety.allocate, Allocation.valid,
         positive, decide_false, Bool.and_false, Bool.false_and, Bool.not_false, ite_true,
         checkedAt, Except.mapError, Bind.bind, Except.bind] at loaded
       cases loaded
     obtain ⟨sourceAllocated, targetAllocated, sourceLoaded, targetLoaded, memories⟩ :=
       related.freshStatic sourceFormed targetFormed staticBounds descriptor bounded aligned
-        cached
+        transparent cached
     rw [sourceLoaded] at loaded
     cases loaded
     refine ⟨mapping.allocate, targetAllocated, mapping.allocate_extends, ?_, memories⟩

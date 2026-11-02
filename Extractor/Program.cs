@@ -141,7 +141,7 @@ internal static partial class Program
                 else if (args[index] == "--type-argument")
                 {
                     if (++index == args.Length || string.IsNullOrWhiteSpace(args[index]) || args[index].StartsWith("--", StringComparison.Ordinal))
-                        throw new ArgumentException("--type-argument requires a closed primitive full type name.");
+                        throw new ArgumentException("--type-argument requires a closed full type name.");
                     entryTypeArguments.Add(args[index]);
                 }
                 else if (args[index] == "--assume-initialized")
@@ -285,9 +285,12 @@ internal static partial class Program
             LeanEmitter.Emission emitted = LeanEmitter.Emit(methods, profile, originalModule, imports,
                 staticIdentities, collectTemplates: checkedTemplate is not null);
             string source = emitted.Source;
-            var staticValues = new SortedSet<string>(methods.SelectMany(m => Reachability.Analyze(m, profile))
-                .Where(StaticValues.IsLoad)
-                .Select(i => StaticValues.Resolve((FieldReference)i.Operand, module, profile.Architecture).Field.FullName), StringComparer.Ordinal);
+            var loadedValues = methods.SelectMany(m => Reachability.Analyze(m, profile)).Where(StaticValues.IsLoad)
+                .Select(i => StaticValues.Resolve((FieldReference)i.Operand, module, profile.Architecture)).ToArray();
+            var staticValues = new SortedSet<string>(loadedValues.Select(value => value.Field.FullName),
+                StringComparer.Ordinal);
+            var opaqueStaticValues = new SortedSet<string>(loadedValues.Where(value => value.Opaque)
+                .Select(value => value.Field.FullName), StringComparer.Ordinal);
             if (initializedTypes.Count > 0)
                 source += "\n-- Caller assumption: these types completed initialization successfully before invocation.\n" +
                     "def Extracted.initializedTypes : List String := " + JsonSerializer.Serialize(initializedTypes) + "\n";
@@ -300,6 +303,10 @@ internal static partial class Program
             if (staticValues.Count > 0)
                 source += "-- Caller assumption: these fields keep the values their static constructors stored.\n" +
                     "def Extracted.staticValues : List String := " + JsonSerializer.Serialize(staticValues) + "\n";
+            if (opaqueStaticValues.Count > 0)
+                source += "-- Not computed by extraction: loads read the caller's static binding.\n" +
+                    "def Extracted.opaqueStaticValues : List String := " +
+                    JsonSerializer.Serialize(opaqueStaticValues) + "\n";
             SortedDictionary<string, string> importModules = imports.InterfaceModules();
             if (imports.Bindings.Count > 0) importModules.Add("ExtractedImports", imports.EmitImports(methods.Length));
             SortedDictionary<string, string> importModuleHashes = new(importModules.ToDictionary(pair => pair.Key,
@@ -326,6 +333,7 @@ internal static partial class Program
                 layoutIdentities = emitted.LayoutIdentities, profile, initializedTypes,
                 initializationAssumptions = JsonSerializer.SerializeToElement(initializationAssumptions, ContractInterface.Json),
                 staticValues,
+                opaqueStaticValues,
                 staticIdentities = staticIdentities.Select(identity => JsonSerializer.SerializeToElement(identity, ContractInterface.Json)),
                 generatedSha256 = Hash(Encoding.UTF8.GetBytes(source)),
                 extractorSha256 = extractorHash,
@@ -388,6 +396,9 @@ internal static partial class Program
                     "initialization completed successfully before invocation.");
             foreach (var name in staticValues)
                 report.WriteLine($"  Caller assumption: {name} keeps the value its static constructor stored.");
+            foreach (var name in opaqueStaticValues)
+                report.WriteLine($"  Unknown static value: {name} is not computed; " +
+                    "loads read the caller's static binding.");
             checkedTemplate?.Invoke(new(output, assemblyHash, profile, emitted.Templates));
         }
         catch (Exception exception)

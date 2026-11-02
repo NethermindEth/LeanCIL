@@ -1614,7 +1614,7 @@ partial class Program : IDisposable
             .. identity is null ? Array.Empty<string>() : ["--assembly", identity]];
 
     sealed record GeneratedExtraction(string Assembly, string Entry, string Output, string Profile = "scalar",
-        string[]? InitializedTypes = null);
+        string[]? InitializedTypes = null, string[]? TypeArguments = null);
 
     // Share immutable assembly bytes and signature validation, retaining fresh modules per request
     // and the extractor's final check that every assembly, symbol and profile input is unchanged.
@@ -1627,7 +1627,8 @@ partial class Program : IDisposable
             File.WriteAllText(path, JsonSerializer.Serialize(requests.Select(request => new
             {
                 assembly = request.Assembly, identity, entry = request.Entry, output = request.Output,
-                profile = request.Profile, initializedTypes = request.InitializedTypes
+                profile = request.Profile, initializedTypes = request.InitializedTypes,
+                typeArguments = request.TypeArguments
             })));
             Run(["dotnet", extractor ?? ExtractorPath, "generated-extraction-batch", mode, path]);
         }
@@ -2060,7 +2061,7 @@ partial class Program : IDisposable
         string? batchSourceSha256 = null, string? batchTheorem = null, string? consumerSupportSha256 = null,
         string[]? staticValues = null, string[]? contractImports = null, PublishedImport[]? imports = null,
         DeploymentDependency[]? contractDependencies = null, string? compositionTheorem = null, string? compositionAudit = null,
-        JsonElement[]? initializationAssumptions = null);
+        JsonElement[]? initializationAssumptions = null, string[]? opaqueStaticValues = null);
 
     static JsonElement[] InitializationAssumptions(JsonElement extraction) =>
         extraction.TryGetProperty("initializationAssumptions", out var assumptions)
@@ -2068,6 +2069,10 @@ partial class Program : IDisposable
 
     static string[] StaticValueAssumptions(JsonElement extraction) =>
         extraction.TryGetProperty("staticValues", out var values) ? values.Deserialize<string[]>() ?? [] : [];
+
+    // Fields the theorem reads from the caller's static bindings instead of a computed constant.
+    static string[] OpaqueStaticValues(JsonElement extraction) =>
+        extraction.TryGetProperty("opaqueStaticValues", out var values) ? values.Deserialize<string[]>() ?? [] : [];
 
     Report Verify(string assembly, string identity, string entry, string proof, string output,
         string profile = "scalar", string theorem = "ExampleProof.correctness", bool check = false, bool existingArtifacts = false,
@@ -2398,7 +2403,9 @@ partial class Program : IDisposable
                 ? assumptions.Deserialize<string[]>() : [];
             RequireImplementationImports(extraction);
             var report = new Report(4, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild, extractionAudit, initializedTypes,
-                staticValues: StaticValueAssumptions(extraction.Root), contractImports: ContractImportAssumptions(extraction.Root),
+                staticValues: StaticValueAssumptions(extraction.Root),
+                opaqueStaticValues: OpaqueStaticValues(extraction.Root),
+                contractImports: ContractImportAssumptions(extraction.Root),
                 imports: fullResult?.Imports ?? PublishedImports(extraction.Root),
                 contractDependencies: fullResult?.Dependencies ?? DeploymentDependencies(extraction.Root),
                 compositionTheorem: fullResult?.Theorem, compositionAudit: fullResult?.Audit,

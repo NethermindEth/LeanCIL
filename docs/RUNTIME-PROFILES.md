@@ -139,8 +139,7 @@ a custom profile with `aes: true` (x64) or `armAes: true` (ARM64); a proof of a 
 reads AES transfers to it through `Program.ProfileAgreement`. `Pclmulqdq`, which shares the x86
 AES group, remains unclassified.
 
-Custom consumer profiles, including int256's historical `x64-avx2-bmi2.json` and
-`x64-avx512dqvl.json`, must obey the same constraints. Set AVX2/BMI1/BMI2 together;
+Custom consumer profiles must obey the same constraints. Set AVX2/BMI1/BMI2 together;
 set all four modeled AVX-512 flags together; set `avx512Vbmi` only with them; set `aes` only on x64
 and `armAes` only on ARM64; set all three
 modeled SSE4.2-group flags together. Custom profiles written before `avx512Vbmi` existed are
@@ -148,13 +147,6 @@ rejected for the missing field, as are those written before `aes` and `armAes`; 
 value the deployment reports. ARM64 profiles
 must set ArmBase/AdvSimd/Vector128 together and cannot enable Vector256 acceleration. A reduced-width x64 profile may retain
 `vector256Accelerated: false` with the full AVX2 group enabled.
-
-int256 migrated under these constraints. Before migration, 161 of its 256 gates
-used invalid profiles (all 14 custom profiles and the retired built-ins), and none
-covered v3/v4. After the migration in int256#141 it had 188 gates, all on valid
-profiles: scalar, ARM64 AdvSimd, x64 SSE4.2, x64-v3, x64-v4, and custom
-`x64-v3-v128`/`x64-v4-v128` reduced-width profiles. Split-group variants collapsed
-into v3/v4, and each method is gated once per distinct reachable body.
 
 These changes can select different CIL branches. Regenerate extraction, reprove
 each affected method/profile, re-export interfaces and rebuild full-verification

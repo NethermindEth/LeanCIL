@@ -1,5 +1,6 @@
 import CIL.Safety.MemoryInstructionRenaming
 import CIL.Safety.StaticReferenceRenaming
+import CIL.Safety.StaticMemoryLemmas
 
 /-!
 # Static instruction simulation under allocation renaming
@@ -71,6 +72,45 @@ theorem Memory.Renamed.staticInstructionResult {mapping : AllocationRenaming}
               AllocationRenaming.managedReference, extension.values stack bounds]⟩
       · simp only [matched, Bool.false_eq_true, ite_false, Bind.bind, Except.bind,
           SuccessOrThrow] at observable
+  case h_2 =>
+    rename_i bytes
+    refine ⟨mapping, .refl mapping, ?_⟩
+    cases found : body.staticSites.find? (fun site => site.1 == pc) with
+    | none => exact .error _
+    | some site =>
+      obtain ⟨key, descriptor⟩ := site
+      simp only [found] at observable ⊢
+      cases flagged : descriptor.opaqueValue
+      case false =>
+        simp only [Bool.false_eq_true, ite_false]
+        repeat first
+          | exact .ok ⟨related, rfl⟩
+          | exact .error _
+          | (split <;> try simp only [Bind.bind, Except.bind])
+      simp only [flagged, ite_true] at observable ⊢
+      split
+      case isFalse => exact .error _
+      -- An opaque value is only ever read through the caller's cached binding.
+      cases cached : source.staticBindings.find? (fun binding => binding.1 == descriptor.identity)
+      case none =>
+        simp only [CIL.Safety.staticReference, related.staticLookup descriptor.identity, cached,
+          Option.map_none, flagged, ite_true, Bind.bind, Except.bind]
+        exact .error _
+      rename_i binding
+      obtain ⟨name, address⟩ := binding
+      have bound := staticBounds (name, address) (List.mem_of_find?_eq_some cached)
+      apply (related.cachedStatic descriptor name address bound cached).bindWithSuccess
+      intro sourceResult targetResult sourceLoaded paired
+      obtain ⟨sourceAfter, sourceReference⟩ := sourceResult
+      obtain ⟨targetAfter, targetReference⟩ := targetResult
+      obtain ⟨memories, rfl⟩ := paired
+      obtain ⟨rfl, rfl, _⟩ := cached_static_reference_checked _ _ _ _ _ _ cached sourceLoaded
+      dsimp only
+      rw [memories.read sourceReference bound]
+      apply ((ResultEquivalent.eq_refl _).checkedAt (.address sourceReference) _).bind
+      intro loaded other same
+      subst same
+      split <;> first | exact .ok ⟨memories, rfl⟩ | exact .error _
   case h_6 =>
     refine ⟨mapping, .refl mapping, ?_⟩
     cases operation <;> first

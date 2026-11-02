@@ -10,15 +10,15 @@ Values are modelled as bit patterns with lane zero in the least-significant bits
 
 | Family | Extractable operations |
 | --- | --- |
-| [Portable vectors](#portable-vector-operations) | Selected integer arithmetic, bitwise/equality operators, lane comparisons, construction (including from a byte span), extraction, reductions, arithmetic shifts and bit reinterpretation |
+| [Portable vectors](#portable-vector-operations) | Selected integer arithmetic, bitwise/equality operators, lane comparisons, construction (including from a byte span), unaligned `Vector128<byte>` loads and stores through a reference, extraction, reductions, arithmetic shifts and bit reinterpretation |
 | [SSE](#sse) | `Sse2.ShiftLeftLogical128BitLane`, `Ssse3.AlignRight`, `Ssse3.Shuffle`; SSE4.1/4.2 getters only |
 | [AVX](#avx) | Selected `MoveMask`, `Blend`, `TestZ` overloads |
 | [AVX2](#avx2) | `Permute4x64`, byte `Shuffle`, `Blend`, `Add`, `CompareEqual`, `CompareGreaterThan`, widening even-lane `Multiply`, bitwise operations, logical shifts |
-| [AVX512](#avx512) | F.VL alignment, ternary logic and unsigned comparisons; DQ mask extraction and DQ.VL low multiplication on 256-bit vectors; F unsigned comparisons and DQ mask extraction on 512-bit vectors |
+| [AVX512](#avx512) | F.VL alignment, ternary logic, two-table quadword permutation and unsigned comparisons; DQ mask extraction and DQ.VL low multiplication on 256-bit vectors; F unsigned comparisons and DQ mask extraction on 512-bit vectors |
 | [BMI](#bmi) | `Bmi1.BitFieldExtract(uint, byte, byte)`, `Bmi2.X64.MultiplyNoFlags(ulong, ulong)` |
 | [X86Base](#x86base) | `X86Base.X64.DivRem(ulong, ulong, ulong)` returning `(ulong Quotient, ulong Remainder)` |
 | [AES](#aes) | x86 `Aes.Encrypt`; ARM64 `Aes.Encrypt` and `Aes.MixColumns` |
-| [ARM](#arm) | `AdvSimd.ExtractVector128` on `ulong` lanes, `ArmBase.Arm64.MultiplyHigh(ulong, ulong)` |
+| [ARM](#arm) | `AdvSimd.ExtractVector128` and `AdvSimd.ReverseElement8` on `ulong` lanes, `ArmBase.Arm64.MultiplyHigh(ulong, ulong)` |
 
 An enabled CPU feature does not imply support for all of its APIs. Float/double vectors are used only for selected bit operations, not floating-point arithmetic. Vector64 is not supported, and Vector512 only through the rows below that name it. See the [profile table](#feature-getters-profiles-and-execution-restrictions) for the exact flags enabled by each built-in profile.
 
@@ -32,22 +32,25 @@ Rows apply to the named widths, with matching input/output widths. The bitwise a
 | Operators `&`, `\|`, `^`, `~` | `T = byte`, `int`, `uint`, `long`, `ulong` | Bitwise operations on the complete vector |
 | Operator `==` | `T = byte`, `int`, `uint`, `long`, `ulong` | Boolean equality of all bits; `!=` is not mapped |
 | `Vector128.LessThan<ulong>`, `Vector256.LessThan<ulong>` | Two vectors of `ulong` | Unsigned per-lane comparison; each result lane is all ones or zero |
+| `Vector128.LessThan<long>`, `Vector256.LessThan<long>` | Two vectors of `long` | Signed per-lane comparison; each result lane is all ones or zero |
 | `Vector128.Equals<ulong>`, `Vector256.Equals<ulong>` | Two vectors of `ulong` | Per-lane equality masks |
 | `Vector128.EqualsAll<T>`, `Vector256.EqualsAll<T>`, `Vector512.EqualsAll<T>` | `T = byte`, `int`, `uint`, `long`, `ulong` | One Boolean result |
 | `Vector128.GetElement<ulong>`, `Vector256.GetElement<ulong>` | Vector and `int` index | Return one `ulong`; valid indices are 0–1 / 0–3; other indices fail |
 | `Vector128<T>.Zero`, `Vector256<T>.Zero`, `Vector512<T>.Zero` | `T = byte`, `int`, `uint`, `long`, `ulong` | All-zero vector |
 | `Vector128<T>.AllBitsSet`, `Vector256<T>.AllBitsSet`, `Vector512<T>.AllBitsSet` | `T = byte`, `int`, `uint`, `long`, `ulong` | All-one vector |
 | `Vector128.Create`, `Vector256.Create` | One `ulong`, or respectively two/four `ulong` arguments | Broadcast one value, or construct the individual lanes |
+| `Vector128.Create`, `Vector256.Create` | Respectively four/eight `uint` arguments | Construct the 32-bit lanes, first argument lowest |
 | `Vector128.CreateScalar`, `Vector256.CreateScalar` | One `ulong` or one `uint` | Put the value in the low lane and zero the remaining bits |
 | `Vector128.CreateScalarUnsafe` (128-bit only) | One `ulong` | Put the value in the low lane; the upper lane is unspecified, and only `GetElement(0)`, `As*` and the AVX2 shift counts may read the result (see [SOUNDNESS](SOUNDNESS-RUNTIME.md#runtime-assumptions)) |
 | `Vector512.Create` (512-bit only) | Two `V256<ulong>` | Concatenate, first operand in the low half |
 | `Vector128.Create<byte>`, `Vector256.Create<byte>` | One `ReadOnlySpan<byte>` | Read the first 16/32 bytes; a shorter span throws `ArgumentOutOfRangeException`. Shares the `MemoryMarshal.Read` model ([opcodes](OPCODES.md)), including its bounds, initialization and lifetime checks |
+| `Vector128.LoadUnsafe<byte>`, `Vector128.StoreUnsafe<byte>` (128-bit only) | `ref byte`, optionally a `nuint` element offset; the store takes the `V128<byte>` first | `Unsafe.Add` by the offset, then the 16-byte `Unsafe.ReadUnaligned` or `WriteUnaligned` of the vector. There is no span bound, but the checked interpreter applies the reference's allocation bounds, initialization, lifetime and write-authority checks. `CIL.Safety.vector128LoadAt_eq_add_load128` and `vector128StoreAt_eq_add_store128` prove each offset form equals the add followed by the existing transfer |
 | `Vector128.ShiftRightArithmetic`, `Vector256.ShiftRightArithmetic` | Vector of `long` and `int` count | Signed 64-bit lane shifts; count modulo 64 |
 | `Vector128.ExtractMostSignificantBits<ulong>`, `Vector256.ExtractMostSignificantBits<ulong>` | Vector of `ulong` | Return a `uint` containing the two/four lane sign bits |
 | `Vector128.Sum<ulong>`, `Vector256.Sum<ulong>` | Vector of `ulong` | Wrapping sum of the 64-bit lanes |
 | `AsByte`, `AsUInt32`, `AsInt64`, `AsDouble`, `AsUInt64`, `AsInt32`, `AsSingle` on `Vector128` / `Vector256` | Source element type is `ulong`, `byte`, `uint`, `long`, `int` or `float`; target is the named type | Preserve the bit pattern. The extractor does not currently accept `double` as a source for these casts |
 
-No other element types or operators are implied. In particular, portable vector multiplication is present as a Lean operation but has no generic vector-operator mapping in the extractor. There is no Vector64 support, Vector512 is limited to bitwise/equality operators, the rows naming it and to `ldobj`/`stobj`/`initobj` of `V512<ulong>`, and there is no general vector load/store API coverage beyond the byte-span `Create` row. The specific vector `ldobj`/`stobj` cases are documented in the [opcode table](OPCODES.md).
+No other element types or operators are implied. In particular, portable vector multiplication is present as a Lean operation but has no generic vector-operator mapping in the extractor. There is no Vector64 support, Vector512 is limited to bitwise/equality operators, the rows naming it and to `ldobj`/`stobj`/`initobj` of `V512<ulong>`, and there is no general vector load/store API coverage beyond the byte-span `Create` and `Vector128<byte>` `LoadUnsafe`/`StoreUnsafe` rows. `Vector256.Create<ulong>(ReadOnlySpan<ulong>)` and the other element types of `LoadUnsafe`/`StoreUnsafe` are not mapped. The specific vector `ldobj`/`stobj` cases are documented in the [opcode table](OPCODES.md).
 
 ## SSE
 
@@ -99,6 +102,7 @@ The AVX512 operations use **256-bit operands**, including the VL APIs, except th
 | --- | --- | --- | --- |
 | `Avx512F.VL.AlignRight64` | Two `V256<ulong>`, then `byte` → `V256<ulong>` | `Avx512FVL` | Extract four lanes from the concatenation, second operand low; control modulo four |
 | `Avx512F.VL.TernaryLogic` | Three `V256<ulong>`, then `byte` → `V256<ulong>` | `Avx512FVL` | Per-bit 3-input truth table; control index is `4*a + 2*b + c` |
+| `Avx512F.VL.PermuteVar4x64x2` | `V256<ulong> lower, V256<ulong> indices, V256<ulong> upper` → `V256<ulong>` | `Avx512FVL` | VPERMI2Q/VPERMT2Q: bits 1:0 of each index lane pick a lane and bit 2 the table, `lower` when clear; higher bits are ignored |
 | `Avx512F.VL.CompareLessThan` | Two `V256<ulong>` → `V256<ulong>` | `Avx512FVL` | Unsigned per-lane less-than masks |
 | `Avx512F.VL.CompareGreaterThan` | Two `V256<ulong>` → `V256<ulong>` | `Avx512FVL` | Unsigned per-lane greater-than masks |
 | `Avx512F.VL.CompareGreaterThanOrEqual` | Two `V256<ulong>` → `V256<ulong>` | `Avx512FVL` | Unsigned per-lane greater-than-or-equal masks |
@@ -136,16 +140,17 @@ The precondition is `upper < divisor`, so the quotient fits in 64 bits. Otherwis
 | `Arm.Aes.Encrypt` | `V128<byte> state, V128<byte> roundKey` → `V128<byte>` | `armAes` | AESE: XOR with the round key, then ShiftRows and SubBytes |
 | `Arm.Aes.MixColumns` | `V128<byte>` → `V128<byte>` | `armAes` | AESMC: FIPS-197 MixColumns |
 
-Byte `i` of the vector is AES state byte `i` (row `i % 4`, column `i / 4`), as when a block is loaded from memory. The S-box is computed as the GF(2^8) inverse followed by the FIPS-197 affine map, and [AES.lean](../CIL/SIMD/AES.lean) proves `armAes_round_eq_aesEncryptRound`: `MixColumns(AESE(state, 0)) ^ roundKey` equals AESENC for every state and key, so a hash round written either way, as in int256's `GetHashCode` and Nethermind's `FastHash`, computes the same value on both architectures. No built-in profile enables AES; declare `aes` or `armAes` in a custom profile ([runtime profiles](RUNTIME-PROFILES.md)). Decryption, key generation, `Pclmulqdq` and the VAES widths are not mapped.
+Byte `i` of the vector is AES state byte `i` (row `i % 4`, column `i / 4`), as when a block is loaded from memory. The S-box is computed as the GF(2^8) inverse followed by the FIPS-197 affine map, and [AES.lean](../CIL/SIMD/AES.lean) proves `armAes_round_eq_aesEncryptRound`: `MixColumns(AESE(state, 0)) ^ roundKey` equals AESENC for every state and key, so a hash round written either way computes the same value on both architectures. No built-in profile enables AES; declare `aes` or `armAes` in a custom profile ([runtime profiles](RUNTIME-PROFILES.md)). Decryption, key generation, `Pclmulqdq` and the VAES widths are not mapped.
 
 ## ARM
 
 | Exact API | Arguments → result | Required feature | Model |
 | --- | --- | --- | --- |
 | `AdvSimd.ExtractVector128` | `V128<ulong>, V128<ulong>, byte index` → `V128<ulong>` | `AdvSimd` | Extract two 64-bit lanes from the concatenation, first operand low. Only indices 0 and 1 are admitted |
+| `AdvSimd.ReverseElement8` | `V128<ulong>` → `V128<ulong>` | `AdvSimd` | REV64 on bytes: reverse the bytes of each 64-bit lane, as `BinaryPrimitives.ReverseEndianness` does, without moving the lanes |
 | `ArmBase.Arm64.MultiplyHigh` | `ulong, ulong` → `ulong` | `ArmBase64` | High 64 bits of the unsigned 128-bit product |
 
-No other AdvSimd operations, signed `MultiplyHigh` overload or ARM ISA family besides [AES](#aes) is mapped. Portable Vector128 operations can still be used under an ARM profile when their signatures match the first table.
+No other AdvSimd operations or `ReverseElement8` overloads, signed `MultiplyHigh` overload or ARM ISA family besides [AES](#aes) is mapped. No ARM64 host runs the REV64 check; the intrinsics suite compares it with `ReverseEndianness` of each lane. Portable Vector128 operations can still be used under an ARM profile when their signatures match the first table.
 
 ## Feature getters, profiles and execution restrictions
 

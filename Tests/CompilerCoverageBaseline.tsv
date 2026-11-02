@@ -114,6 +114,7 @@ Examples:System.Boolean Examples.Capabilities::Crc64()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.Capabilities::Rdm64()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.Capabilities::Vbmi2()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.DivisionIntrinsics::UnsafeEquals(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.IStepFlag::get_IsActive()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.IntegerOperations::Greater32(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.IntegerOperations::Greater64(System.Int64,System.Int64)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.Loops::AllZero(System.ReadOnlySpan`1<System.UInt32>)	A	A	A	A	A	A	A	A
@@ -134,6 +135,8 @@ Examples:System.Boolean Examples.SpanCopies::TryCopyReadOnly(System.ReadOnlySpan
 Examples:System.Boolean Examples.StaticScalars::ReadBoolean()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.StaticValues::DifferentAddresses()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.StaticValues::SameAddress()	B	B	B	B	B	B	B	B
+Examples:System.Boolean Examples.StepOff::get_IsActive()	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.StepOn::get_IsActive()	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.UnsafeReferences::AreSame(System.Byte&,System.Byte&)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.UnsafeReferences::Greater(System.Byte&,System.Byte&)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.UnsafeReferences::Less(System.Byte&,System.Byte&)	A	A	A	A	A	A	A	A
@@ -529,6 +532,7 @@ Examples:System.Runtime.Intrinsics.Vector128`1<System.Byte> Examples.ValueBitCas
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt32> Examples.ValueBitCasts::To128UInt32(Examples.ValueBitCasts/Pair)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64> Examples.AggregateArrays::ReadVector(System.Runtime.Intrinsics.Vector128`1<System.UInt64>[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64> Examples.AggregateSpans::ReadVector(System.ReadOnlySpan`1<System.Runtime.Intrinsics.Vector128`1<System.UInt64>>)	A	A	A	A	A	A	A	A
+Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64> Examples.DivisionIntrinsics::ReverseLimbs(System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64> Examples.DivisionIntrinsics::UnsafeReturn(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64> Examples.IndirectValues::Vector(System.Runtime.Intrinsics.Vector128`1<System.UInt64>)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64> Examples.UnsafeReferences::ReadHalf(Examples.FourLimbs&)	A	A	A	A	A	A	A	A
@@ -544,8 +548,10 @@ Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64>& Examples.UnsafeRe
 Examples:System.Runtime.Intrinsics.Vector256`1<System.Byte> Examples.DivisionIntrinsics::Shuffle256(System.ReadOnlySpan`1<System.Byte>,System.ReadOnlySpan`1<System.Byte>)	B	B	B	B	B	B	B	B
 Examples:System.Runtime.Intrinsics.Vector256`1<System.Int32> Examples.ValueBitCasts::To256Int32(Examples.ValueBitCasts/Limbs)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector256`1<System.Int64> Examples.ValueBitCasts::To256Int64(Examples.ValueBitCasts/Limbs)	A	A	A	A	A	A	A	A
+Examples:System.Runtime.Intrinsics.Vector256`1<System.UInt32> Examples.DivisionIntrinsics::CreateWords(System.UInt32,System.UInt32,System.UInt32,System.UInt32,System.UInt32,System.UInt32,System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector256`1<System.UInt32> Examples.ValueBitCasts::To256UInt32(Examples.ValueBitCasts/Limbs)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector256`1<System.UInt32>& Examples.UnsafeReferences::Vector(Examples.FourLimbs&)	A	A	A	A	A	A	A	A
+Examples:System.Runtime.Intrinsics.Vector256`1<System.UInt64> Examples.DivisionIntrinsics::SignWindow(System.UInt64,System.UInt64,System.UInt64,System.UInt64,System.UInt64,System.UInt64,System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.Runtime.Intrinsics.Vector256`1<System.UInt64> Examples.ValueBitCasts::CopyLocal(Examples.ValueBitCasts/Limbs)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector256`1<System.UInt64> Examples.ValueBitCasts::ReadLocal(System.Runtime.Intrinsics.Vector256`1<System.UInt64>&)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector256`1<System.UInt64> Examples.ValueBitCasts::To256UInt64(Examples.ValueBitCasts/Limbs)	A	A	A	A	A	A	A	A
@@ -669,6 +675,7 @@ Examples:System.UInt32 SelectorExamples.One.Collision::Add(System.UInt32,System.
 Examples:System.UInt32& Examples.UnsafeLayouts::Add7int(System.UInt32&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32& Examples.UnsafeLayouts::Add7nint(System.UInt32&,System.IntPtr)	A	A	A	A	A	A	A	A
 Examples:System.UInt32& Examples.UnsafeLayouts::Add7nuint(System.UInt32&,System.UIntPtr)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.AddStep::Apply(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Arguments::Struct(Examples.Packet)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Arithmetic::Alias(System.UInt64&,System.UInt64&)	A	A	A	A	A	A	A	A
@@ -740,6 +747,7 @@ Examples:System.UInt64 Examples.GenericOwners::NestedSpanFirst(System.ReadOnlySp
 Examples:System.UInt64 Examples.GenericOwners::OwnerSpanFirst(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.GenericOwners::SpanFirst(System.ReadOnlySpan`1<System.UInt64>&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.GenericOwners::SpanSecond(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.IBinaryStep::Apply(System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.IInWord`1::Sum(System.ReadOnlySpan`1<System.UInt64>& modreq(System.Runtime.InteropServices.InAttribute))	N	N	N	N	N	N	N	N
 Examples:System.UInt64 Examples.InParameters::Constrained(Examples.InWord&,Examples.InWord&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.InParameters::ConstrainedSum(Examples.InWord&,System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
@@ -772,6 +780,11 @@ Examples:System.UInt64 Examples.NullReferences::Unchecked(Examples.FourLimbs&,Sy
 Examples:System.UInt64 Examples.PackedConstructor::Sum()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.PointerOperations::WriteEnum(Examples.Unsigned64*,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.PrimitiveArrays::ReadUInt64(System.UInt64[],System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.SeededHash::ByReference()	B	B	B	B	B	B	B	B
+Examples:System.UInt64 Examples.SeededHash::CreateSeed()	B	B	B	B	B	B	B	B
+Examples:System.UInt64 Examples.SeededHash::Hash(System.UInt64)	B	B	B	B	B	B	B	B
+Examples:System.UInt64 Examples.SeededHash::Read(System.UInt64&)	B	B	B	B	B	B	B	B
+Examples:System.UInt64 Examples.SeededHash::Twice()	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.Sequential::Packed(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SkipInitialization::Read(System.UInt64&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanReferences::Back(System.ReadOnlySpan`1<System.UInt64>&)	A	A	A	A	A	A	A	A
@@ -789,6 +802,9 @@ Examples:System.UInt64 Examples.SpanReferences::Second(System.ReadOnlySpan`1<Sys
 Examples:System.UInt64 Examples.SpanReferences::Word(System.ReadOnlySpan`1<System.UInt64>&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanTables::First()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanTables::Power(System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.StaticInterfaces::AddCounted(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.StaticInterfaces::Step(System.UInt64,System.UInt64)	N	N	N	N	N	N	N	N
+Examples:System.UInt64 Examples.StaticInterfaces::XorPlain(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.StaticScalars::ReadLong()	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.StaticValues::Read(Examples.Word256&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.StaticValues::ReadAddress()	B	B	B	B	B	B	B	B
@@ -811,6 +827,7 @@ Examples:System.UInt64 Examples.UnsafeReferences::Read(Examples.FourLimbs&)	A	A	
 Examples:System.UInt64 Examples.UnsafeReferences::Store(Examples.FourLimbs&,System.UInt64,System.UInt64,System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.WideProduct::BigMul(System.UInt64,System.UInt64,System.UInt64&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.WideProduct::UnsignedBigMul32(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.XorStep::Examples.IBinaryStep.Apply(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 SelectorExamples.One.Collision::Add(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 SelectorExamples.Two.Collision::Add(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64& Examples.Arithmetic::Escape()	A	A	A	A	A	A	A	A
@@ -889,6 +906,7 @@ Examples:System.Void Examples.DefaultConstructor::.ctor()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.DivisionIntrinsics::Init128(System.Runtime.Intrinsics.Vector128`1<System.UInt64>&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.DivisionIntrinsics::Init256(System.Runtime.Intrinsics.Vector256`1<System.UInt64>&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.DivisionIntrinsics::Init512(System.Runtime.Intrinsics.Vector512`1<System.UInt64>&)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.DivisionIntrinsics::SwapHalves(System.ReadOnlySpan`1<System.Byte>,System.Span`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.DivisionIntrinsics::UnsafeStore(System.Runtime.Intrinsics.Vector128`1<System.UInt64>&,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Enums::Assign(Examples.Unsigned64&,Examples.Unsigned64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ExceptionDocumentation::Reference(System.UInt64&)	A	A	A	A	A	A	A	A
@@ -942,6 +960,7 @@ Examples:System.Void Examples.PrimitiveArrays::WriteUInt16(System.UInt16[],Syste
 Examples:System.Void Examples.PrimitiveArrays::WriteUInt32(System.UInt32[],System.Int32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PrimitiveArrays::WriteUInt64(System.UInt64[],System.Int32,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PrimitiveArrays::WriteUIntPtr(System.UIntPtr[],System.Int32,System.UIntPtr)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.SeededHash::.cctor()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.SkipInitialization::Skip(Examples.FourLimbs&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.SkipInitialization::Store(Examples.FourLimbs&,System.UInt64,System.UInt64,System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.SpanCopies::Copy(System.Span`1<System.Byte>,System.Span`1<System.Byte>)	A	A	A	A	A	A	A	A

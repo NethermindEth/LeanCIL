@@ -73,7 +73,7 @@ cross-allocation, invalid-position and signed-comparison rejection.
 
 Managed-call proof construction is covered by `Tests/ExtractionGenerics.lean` and the 15 generated
 generic-method samples in `Tests/GenericEvidence.cs`. Direct tactic rejection checks cover changed
-signedness, assembly scope, generic arguments and argument count. The fixed three-method int256
+signedness, assembly scope, generic arguments and argument count. The fixed three-method four-limb
 scalar Equality extraction retains every public certificate proposition and all program/metadata
 definitions. Replaying every generated theorem reduces kernel work from 36,782,462 to 32,494,315 raw
 heartbeats (11.7%); the structural proofs introduce additional auxiliary theorems, increasing the
@@ -99,7 +99,7 @@ byte constants, UTF-8 proofs and exact equality proofs:
 
 | Fixed input | Before raw heartbeats | After raw heartbeats |
 | --- | ---: | ---: |
-| int256 scalar Equality, three methods | 26,209,754 | 21,765,190 |
+| Four-limb scalar Equality, three methods | 26,209,754 | 21,765,190 |
 | `DivisionIntrinsics.UnsafeEquals`, x64-v3 | 28,184,308 | 22,519,141 |
 | `VectorFields.Reinterpret`, x64-v3 | 15,047,351 | 14,850,377 |
 | `Arithmetic.Add`, scalar, no calls | 1,397,796 | 1,397,796 |
@@ -417,7 +417,8 @@ module-wide persistent index cache. The existing field/architecture value cache 
 
 `Tests.StaticValueIndexes.cs` checks scalar copies, duplicate stores, prefix control flow,
 branch/switch and foreign targets, first outside writer, closure address-taking, fresh contexts and
-resolution-error ordering. Index construction records resolution failures so a later failure cannot
+resolution-error ordering, and that computable scalars never resolve as unknown while random seeds
+do. Index construction records resolution failures so a later failure cannot
 replace the original earlier writer diagnostic. Twenty-four extraction requests (eight scalar loads
 across three profiles) retain all 48 generated Lean file hashes.
 

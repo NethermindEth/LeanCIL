@@ -96,11 +96,50 @@ theorem explicit_override_precedes_implicit :
       receiver site).map (·.token) = some 22 := by decide +kernel
 #print axioms explicit_override_precedes_implicit
 
-/-- Static virtual interface members (ECMA-335 augments) are outside the admitted subset. -/
-theorem static_virtual_slot_rejected :
-    resolveConstrained [concrete, { declared with methods := [{ slot with hasThis := false }] }]
-      receiver { site with hasThis := false } = none := by decide +kernel
-#print axioms static_virtual_slot_rejected
+private def staticSlot : DispatchMethod := { slot with token := 6, hasThis := false }
+private def staticImplementation : DispatchMethod := {
+  staticSlot with token := 31, isAbstract := false, isVirtual := false, hasBody := true }
+private def staticTypes : List DispatchType :=
+  [{ concrete with methods := [staticImplementation] }, { declared with methods := [staticSlot] }]
+private def staticSite : CallSite := { site with target := .managed 6, hasThis := false }
+private def staticRaw : RawMethod := { raw with
+  parameters := [], code := [⟨0, 65046, .type receiver⟩, ⟨6, 40, .call staticSite⟩, ⟨11, 42, .none⟩] }
+private def staticTarget : SpecializedMethod := ⟨[], { raw with
+  token := 31, owner := "Fixture::Counter", parameters := [],
+  code := [⟨0, 22, .none⟩, ⟨1, 42, .none⟩] }⟩
+private def staticMethods := [⟨[], staticRaw⟩, staticTarget]
+private def staticEmitted : Method := {
+  locals := [], returnsValue := true, code := [.nop, .call 1 0, .ret] }
+
+/-- A static interface slot (`constrained. T; call`) resolves to the receiver's static
+    implementation, called without a receiver argument. -/
+theorem static_call_valid :
+    ConstrainedCallsValid staticTypes staticMethods staticRaw [true, true, true] staticEmitted := by
+  decide +kernel
+#print axioms static_call_valid
+
+theorem static_call_with_receiver_rejected :
+    ¬ ConstrainedCallsValid staticTypes staticMethods staticRaw [true, true, true]
+      { staticEmitted with code := staticEmitted.code.set 1 (.call 1 1) } := by decide +kernel
+#print axioms static_call_with_receiver_rejected
+
+/-- `callvirt` never dispatches a static slot, and `call` never dispatches an instance slot. -/
+theorem call_opcode_mismatch_rejected :
+    ¬ ConstrainedCallsValid staticTypes staticMethods
+      { staticRaw with code := staticRaw.code.set 1 ⟨6, 111, .call staticSite⟩ }
+      [true, true, true] staticEmitted ∧
+    ¬ ConstrainedCallsValid types methods
+      { raw with code := raw.code.set 2 ⟨7, 40, .call site⟩ }
+      [true, true, true, true] emitted := by decide +kernel
+#print axioms call_opcode_mismatch_rejected
+
+/-- A static slot is never implemented by an instance method or declared on the struct itself. -/
+theorem static_slot_mismatches_rejected :
+    resolveConstrained [concrete, { declared with methods := [staticSlot] }]
+      receiver staticSite = none ∧
+    resolveConstrained [{ concrete with methods := [{ staticImplementation with token := 6 }] }]
+      receiver { staticSite with declaringType := receiver } = none := by decide +kernel
+#print axioms static_slot_mismatches_rejected
 
 /-- A default interface method slot is rejected even when the struct implements it. -/
 theorem default_interface_slot_rejected :

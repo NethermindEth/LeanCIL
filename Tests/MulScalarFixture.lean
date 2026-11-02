@@ -1,7 +1,7 @@
 import CIL.Instructions
 
-/-! Plain-data copies of an int256 multiply body: `actual` is a fresh scalar-profile extraction of
-    `MultiplyLimbs4x4<DirectOperands>`; `fullBody` is the older proof literal (int256 0e868d4). -/
+/-! Plain-data copies of a four-limb 256-bit multiply body: `actual` is a scalar-profile
+    extraction of `MultiplyLimbs4x4<DirectOperands>`; `fullBody` is an older proof literal. -/
 
 namespace Tests.MulScalarFixture
 

@@ -10,6 +10,9 @@ where a single repair hop is wrong and on symbolic inputs; intrinsic results on 
 rewrite to their lane values; and a method steps through shift and multiply with them as facts.
 The byte shuffles are pinned on concrete vectors that a bit-7 or lane-crossing mutant fails.
 The AES round is pinned on the FIPS-197 example cipher, which mutants of each round step fail.
+REV64, the two-table quadword permutation, signed lane comparison and 32-bit lane creation are
+pinned on vectors that a whole-vector reversal, a bit-3 table select, an unsigned comparison
+and a reversed lane order each fail.
 -/
 
 open CIL CIL.Vector
@@ -469,8 +472,8 @@ private def laneIdentity : V256 :=
 private def evenZeroed : V256 :=
   BitVec.ofNat 256 0x8102830485068708890a8b0c8d0e8f008102830485068708890a8b0c8d0e8f
 
-/-- The int256 big-endian control: indices 31 down to 0, whose bit 4 the shuffle ignores. -/
-private def int256Reversal : V256 :=
+/-- A 32-byte big-endian control: indices 31 down to 0, whose bit 4 the shuffle ignores. -/
+private def byteReversal : V256 :=
   pack256 0x18191a1b1c1d1e1f 0x1011121314151617 0x08090a0b0c0d0e0f 0x0001020304050607
 
 /-- Bytes 31 down to 0. -/
@@ -503,11 +506,11 @@ theorem shuffle_bit7_zeroes : shuffleBytes256 ascending evenZeroed = BitVec.ofNa
   decide +kernel
 #print axioms shuffle_bit7_zeroes
 
-/-- int256's control reverses each half; swapping the halves completes the 32-byte reversal. -/
-theorem shuffle_int256_reversal :
-    permute4x64 (shuffleBytes256 ascending int256Reversal) 0x4E = descending := by
+/-- The reversal control reverses each half; swapping the halves completes the 32-byte reversal. -/
+theorem shuffle_byte_reversal :
+    permute4x64 (shuffleBytes256 ascending byteReversal) 0x4E = descending := by
   decide +kernel
-#print axioms shuffle_int256_reversal
+#print axioms shuffle_byte_reversal
 
 /-- `Avx2.Shuffle` and `Ssse3.Shuffle` evaluate to the shared per-half model. -/
 theorem shuffle_intrinsics :
@@ -524,7 +527,7 @@ theorem shuffle_intrinsics :
 theorem shuffle_mutants_rejected :
     ignoreBit7 ascending evenZeroed ≠ shuffleBytes256 ascending evenZeroed ∧
     crossLane ascending laneIdentity ≠ shuffleBytes256 ascending laneIdentity ∧
-    crossLane ascending int256Reversal ≠ shuffleBytes256 ascending int256Reversal := by
+    crossLane ascending byteReversal ≠ shuffleBytes256 ascending byteReversal := by
   decide +kernel
 #print axioms shuffle_mutants_rejected
 
@@ -625,5 +628,72 @@ theorem aes_mutants_rejected :
       armAesEncrypt roundStart roundKey1 := by
   decide +kernel
 #print axioms aes_mutants_rejected
+
+/-- Bytes 0 to 15 in order, byte zero lowest. -/
+private def countingBytes : V128 := pack128 0x0706050403020100 0x0f0e0d0c0b0a0908
+
+/-- `AdvSimd.ReverseElement8` reverses the bytes of each 64-bit lane and keeps the lanes in place,
+    which a reversal of all sixteen bytes would swap. -/
+theorem reverseElement8_lanes :
+    evalIntrinsic (.advSimd .reverseElement8) [.v128 countingBytes] =
+      some (.v128 (pack128 0x0001020304050607 0x08090a0b0c0d0e0f)) ∧
+    reverseBytes countingBytes ≠ reverseElement8 countingBytes := by
+  decide +kernel
+#print axioms reverseElement8_lanes
+
+/-- Each lane of the REV64 result is `BinaryPrimitives.ReverseEndianness` of the same lane. -/
+theorem reverseElement8_lane (value : V128) :
+    lane64 (reverseElement8 value) 0 = reverseBytes (lane64 value 0) ∧
+    lane64 (reverseElement8 value) 1 = reverseBytes (lane64 value 1) := by
+  simp only [reverseElement8, map128]
+  exact ⟨lane128_0 _ _, lane128_1 _ _⟩
+#print axioms reverseElement8_lane
+
+/-- Tables 10 to 13 and 20 to 23, and indices whose bits above 2 are set or clear. -/
+private def lowerTable : V256 := pack256 10 11 12 13
+private def upperTable : V256 := pack256 20 21 22 23
+private def windowIndices : V256 := pack256 0 5 3 0xf6
+
+/-- The permutation with the table chosen by index bit 3 instead of bit 2. -/
+private def permuteBit3 (lower indices upper : V256) : V256 :=
+  map256 (fun index => lane64 (if index.getLsbD 3 then upper else lower) (index.toNat % 4)) indices
+
+/-- Bits 1:0 pick the lane and bit 2 the table, `lower` when clear; bits above 2 are ignored. -/
+theorem permuteVar4x64x2_lanes :
+    evalIntrinsic (.avx512 .permuteVar4x64x2)
+      [.v256 lowerTable, .v256 windowIndices, .v256 upperTable] =
+      some (.v256 (pack256 10 21 13 22)) ∧
+    permuteBit3 lowerTable windowIndices upperTable ≠
+      permuteVar4x64x2 lowerTable windowIndices upperTable ∧
+    permuteVar4x64x2 upperTable windowIndices lowerTable ≠
+      permuteVar4x64x2 lowerTable windowIndices upperTable := by
+  decide +kernel
+#print axioms permuteVar4x64x2_lanes
+
+/-- `Vector256.LessThan<long>` compares lanes as signed, which the unsigned comparison does not. -/
+theorem lessThan_signed_lanes :
+    evalIntrinsic (.vector (.lt64 256))
+      [.v256 (pack256 ones 0 5 0x8000000000000000), .v256 (pack256 0 ones 5 0)] =
+      some (.v256 (pack256 ones 0 0 ones)) ∧
+    evalIntrinsic (.vector (.ltu64 256))
+      [.v256 (pack256 ones 0 5 0x8000000000000000), .v256 (pack256 0 ones 5 0)] ≠
+      some (.v256 (pack256 ones 0 0 ones)) := by
+  decide +kernel
+#print axioms lessThan_signed_lanes
+
+/-- `Vector256.Create` of eight `uint`s puts its first argument in the lowest 32 bits. -/
+theorem create32_lane_order :
+    evalIntrinsic (.vector (.create32 256))
+      [.i32 0, .i32 1, .i32 2, .i32 3, .i32 4, .i32 5, .i32 6, .i32 7] =
+      some (.v256 (pack256 0x0000000100000000 0x0000000300000002 0x0000000500000004
+        0x0000000700000006)) ∧
+    evalIntrinsic (.vector (.create32 256))
+      [.i32 7, .i32 6, .i32 5, .i32 4, .i32 3, .i32 2, .i32 1, .i32 0] ≠
+      evalIntrinsic (.vector (.create32 256))
+        [.i32 0, .i32 1, .i32 2, .i32 3, .i32 4, .i32 5, .i32 6, .i32 7] ∧
+    evalIntrinsic (.vector (.create32 128)) [.i32 0, .i32 1, .i32 2, .i32 3] =
+      some (.v128 (pack128 0x0000000100000000 0x0000000300000002)) := by
+  decide +kernel
+#print axioms create32_lane_order
 
 end Tests.SimdLanes

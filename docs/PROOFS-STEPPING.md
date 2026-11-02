@@ -284,7 +284,7 @@ one frame-rule application replaces separate disjoint-read proofs for all retain
 numeric slot identities must remain fixed, and the frame-rule placement must belong to the running
 method and end at the contract boundary. Indirect writes and calls need a proved memory effect;
 absence of a direct `setLocal` is not evidence that an aliased byte-backed local keeps its value.
-[Tests/Segment](../Tests/Segment.lean) composes the UInt256 Add Vector128 reference prefix and
+[Tests/Segment](../Tests/Segment.lean) composes a 256-bit Add Vector128 reference prefix and
 Multiply AVX2 vector-input stages with these rules.
 
 For steps depending on hypotheses, use `cil_checked_steps [facts]` with the relevant proved facts.

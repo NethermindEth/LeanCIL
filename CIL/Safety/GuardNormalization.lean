@@ -126,6 +126,14 @@ namespace CIL.Safety
 @[cil_guard] theorem guard_count_store256 : CIL.MemoryOp.store256.argumentCount = 2 := rfl
 @[cil_guard] theorem guard_count_store512 : CIL.MemoryOp.store512.argumentCount = 2 := rfl
 @[cil_guard] theorem guard_count_init256 : CIL.MemoryOp.init256.argumentCount = 1 := rfl
+@[cil_guard] theorem guard_count_vector128Load :
+    (CIL.MemoryOp.vector128Unsafe false false).argumentCount = 1 := rfl
+@[cil_guard] theorem guard_count_vector128LoadAt :
+    (CIL.MemoryOp.vector128Unsafe false true).argumentCount = 2 := rfl
+@[cil_guard] theorem guard_count_vector128Store :
+    (CIL.MemoryOp.vector128Unsafe true false).argumentCount = 2 := rfl
+@[cil_guard] theorem guard_count_vector128StoreAt :
+    (CIL.MemoryOp.vector128Unsafe true true).argumentCount = 3 := rfl
 @[cil_guard] theorem guard_count_asRef : CIL.MemoryOp.asRef.argumentCount = 1 := rfl
 @[cil_guard] theorem guard_count_add (size : Nat) (signed : Bool) :
     (CIL.MemoryOp.add size signed).argumentCount = 2 := rfl

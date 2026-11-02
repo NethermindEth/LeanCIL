@@ -588,6 +588,61 @@ private theorem Memory.Renamed.pointerTransferInstructionResult {mapping : Alloc
        exact .ok ⟨memoryRelated, rfl⟩)
 #print axioms Memory.Renamed.pointerTransferInstructionResult
 
+/-- A successful displacement stays in the allocation it started from. -/
+private theorem displaceReference_below {limit : Nat} {memory : Memory}
+    {reference moved : ManagedReference} {size : Nat} {displacement : Int}
+    (bound : reference.Below limit)
+    (success : displaceReference memory reference size displacement = .ok moved) :
+    moved.Below limit := by
+  cases reference with
+  | null => cases success
+  | address address =>
+    simp only [displaceReference, referenceAt, Bind.bind, Except.bind, Pure.pure,
+      Except.pure] at success
+    split at success
+    · cases success
+    · rename_i result added
+      cases success
+      have provenance := add_preserves_provenance _ _ _ _ _ (checkedAt_ok added)
+      simp only [ManagedReference.Below] at bound ⊢
+      exact provenance ▸ bound
+#print axioms displaceReference_below
+
+/-- Unaligned `Vector128` byte loads and stores, with or without an offset, transfer through the
+    renamed reference. -/
+private theorem Memory.Renamed.vector128UnsafeInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (store offset : Bool)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (vector128UnsafeInstruction store offset stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (vector128UnsafeInstruction store offset stack source)
+      (vector128UnsafeInstruction store offset (stack.map mapping.value) target) := by
+  unfold vector128UnsafeInstruction at observable ⊢
+  split at observable
+  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try solve | repeat first | contradiction | cases observable | split at observable
+  all_goals clear observable
+  all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
+  all_goals repeat' rcases bounds with ⟨_, bounds⟩
+  all_goals repeat first
+    | exact .ok ⟨related, rfl⟩
+    | exact .error _
+    | (apply (related.displaceReference _ (by assumption) _ _).bindWithSuccess
+       intro first second sourceStep same
+       have movedBound := displaceReference_below (by assumption) sourceStep
+       subst second)
+    | (apply (related.loadValue _ (by assumption) _ _).bind
+       intro first second same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply (related.storeValue _ (by assumption) _).bind
+       intro first second memoryRelated
+       exact .ok ⟨memoryRelated, rfl⟩)
+#print axioms Memory.Renamed.vector128UnsafeInstructionResult
+
 /-- A memory instruction's successful effect is preserved on the corresponding allocations. -/
 theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -609,6 +664,7 @@ theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
     split at observable
     · exact related.referenceAddInstructionResult _ _ _ bounds observable
     · exact related.pointerTransferInstructionResult _ _ _ _ bounds observable
+    · exact related.vector128UnsafeInstructionResult _ _ _ bounds observable
     · exact related.arrayTransferInstructionResult formed _ _ _ bounds observable
     · exact related.binaryTransferInstructionResult _ _ _ _ _ _ bounds observable
     · exact related.binaryTransferInstructionResult _ _ _ _ _ _ bounds observable

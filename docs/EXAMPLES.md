@@ -26,7 +26,8 @@
 - A separate `Examples.Hardware` assembly, built from the file-based library `Examples/Hardware/Hardware.cs`, tests runtime capability extraction.
 - A Cecil-generated independent fixture tests extraction-bound static RVA bytes.
 - `StaticSpans` reads a 16-byte `ReadOnlySpan<byte>` lookup table; out-of-bounds reads, writes and tampered RVA bytes are checked.
-- `StaticValues` loads `Word256.Zero`, `One` and `MinValue`, fixed by `UInt256`-shaped implicit conversions in the static constructor, proves their limbs and stores them through an out parameter; `MaxValue`, writes and stores outside the static constructor are rejected.
+- `StaticValues` loads `Word256.Zero`, `One` and `MinValue`, fixed by implicit conversions in the static constructor, proves their limbs and stores them through an out parameter; `MaxValue`, writes and stores outside the static constructor are rejected.
+- `SeededHash` mixes a value with two `static readonly ulong` seeds drawn from `RandomNumberGenerator`; `OpaqueSeeds.lean` proves the hash for every seed pair and that a fixed seed is not the contract.
 - `SpanTables` indexes `ReadOnlySpan<uint>` and `ReadOnlySpan<ulong>` tables, reads a length and the first element, and faults with `System.IndexOutOfRangeException` out of range.
 - `NullReferences` tests `Unsafe.NullRef<T>` with `Unsafe.IsNullRef<T>`, faults on loads, stores and field accesses through it, and selects an optional `ref` argument that is either unset or bound, as optional outputs do.
 

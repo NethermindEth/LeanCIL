@@ -56,16 +56,25 @@ declaring its flag. `Pclmulqdq` stays unclassified, and observations that omit o
 and lookalike scopes, fields and same-named module types are rejected by the extractor.
 `Tests/ExactIntrinsics.cs` compares `Avx2.Shuffle` and `Ssse3.Shuffle`, fed by
 `Vector256.Create<byte>` and `Vector128.Create<byte>` over byte spans, with the host CPU on twelve
-seeded span pairs each, one of them int256's byte-reversal mask. Both short-span calls raise
+seeded span pairs each, one of them a 32-byte reversal mask. Both short-span calls raise
 `ArgumentOutOfRangeException` in the runtime and the model. The test fails if its inputs do not
 separate the model from shuffles that ignore bit 7 or cross 128-bit halves. Each shuffle is rejected
 under a profile without its feature, and forged load widths or substituted intrinsics are rejected.
-`Tests/ExactIntrinsics.cs` also runs the int256 and Nethermind hash round on the host CPU's `Aes.Encrypt`
+`Tests/ExactIntrinsics.cs` also runs a portable AES hash round on the host CPU's `Aes.Encrypt`
 for eight seeded blocks and proves that its extraction returns the same vectors under a custom x64 profile
 declaring `aes` and under a custom ARM64 profile declaring `armAes`, where it uses AESE and AESMC. Every
 built-in profile rejects the reachable ARM64 calls, and forged evidence substituting another AES step is
 rejected. `Tests/AesHardware.cs` checks the host's own AES instructions against the Lean model on sixteen
 seeded blocks: x86 AESENC in the intrinsics suite, and ARM64 AESE and AESMC in the ARM64 AES workflow.
+A 256-bit arithmetic shift window, `Avx512F.VL.PermuteVar4x64x2` over a sign fill from
+`Vector256.LessThan<long>`, runs on the host CPU for the five windows such a shift loads and seven
+random index vectors, and its x64-v4 extraction returns the same vectors; the inputs must separate
+the model from a bit-3 table select and from swapped tables. `Vector256.Create` of eight `uint`s is
+compared the same way. Under arm64-advsimd, `AdvSimd.ReverseElement8` is checked against
+`BinaryPrimitives.ReverseEndianness` of each lane, since no ARM64 host runs it, and a method that swaps
+two halves through `Vector128.LoadUnsafe` and `StoreUnsafe`, with and without an offset, matches the
+host and faults on the second store into a 31-byte destination. Profiles without AdvSimd or AVX-512
+VL reject the reachable calls, and forged permutations, reversals and transfer offset forms are rejected.
 
 The array, generic, layout and parameter evidence fixtures submit their 63 independent positive
 extractions in six batches. Each method retains fresh mutable metadata; immutable assembly bytes,
@@ -374,7 +383,11 @@ restricted references. Both run in the evidence suite.
 integer widths, Boolean/Char, native integers, signed/unsigned enums, helper initialization and
 copies. It rejects missing initialization assumptions, mutable fields, repeated stores, branches and
 address-taking during initialization. Independent Lean checks reject forged scalar signedness, width
-and literal evidence. It runs in the evidence suite.
+and literal evidence. For `SeededHash`, whose seeds come from `RandomNumberGenerator`, it verifies
+`OpaqueSeeds.lean` for every seed, checks the reported `opaqueStaticValues`, and rejects a proof
+that reads a seed without a caller binding, a value forged into a seed's placeholder, `ldsflda` of
+a seed, and missing assumptions, mutable fields, repeated stores and outside stores. It runs in the
+evidence suite.
 
 The repository pins .NET SDK **10.0.403** and Lean **4.35.0**. The checks below cover semantic
 behavior, extracted contracts, artifact integrity and rejection cases.

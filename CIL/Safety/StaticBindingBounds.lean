@@ -85,6 +85,8 @@ theorem staticReference_staticBindingsBounded {source target : Memory}
     exact bounded
   | none =>
     simp only [staticReference, cached] at success
+    split at success
+    · cases success
     cases allocated : allocate source
         ⟨.immutableStatic,
           ⟨descriptor.bytes.length, descriptor.alignment, []⟩, true, [descriptor.bytes.length]⟩ <;>
