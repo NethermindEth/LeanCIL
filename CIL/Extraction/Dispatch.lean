@@ -91,14 +91,15 @@ private def declaringIdentity (receiver : TypeExpr) (site : CallSite) : TypeExpr
       then receiver else site.declaringType
   | _ => site.declaringType
 
-/-- Owner arguments are the site's closed owner arguments; method arguments precede them and
-    must be closed. -/
+/-- Owner arguments are the site's closed owner arguments; method arguments precede them, must
+    be closed, and are admitted only for static slots. -/
 private def slotArgumentsValid (site : CallSite) : Bool :=
   match managedOwner site.declaringType with
   | some (_, arguments) => arguments.length == site.ownerArgumentCount &&
       site.ownerArgumentCount ≤ site.typeArguments.length &&
       site.typeArguments.drop (site.typeArguments.length - site.ownerArgumentCount) ==
         arguments &&
+      (!site.hasThis || (siteMethodArguments site).isEmpty) &&
       (siteMethodArguments site).all fun argument => substituteType [] argument == some argument
   | none => false
 

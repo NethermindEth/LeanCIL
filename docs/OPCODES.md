@@ -254,19 +254,25 @@ Closed generic helpers can use a directly implemented closed interface constrain
 The original managed-reference receiver is passed to the resolved implementation, so mutations
 remain visible to the caller without boxing.
 
-A `constrained. T; call` pair dispatches a static abstract interface member, such as an operation
-or flag struct selected by a type argument. The slot must be static, abstract and virtual on a
-same-assembly interface that the non-generic struct `T` implements directly, and the target must
-be a static method of `T`: its explicit `MethodImpl` override, or else the unique public static
-method with the slot's name and signature. The call passes no receiver. `callvirt` never
-dispatches a static slot and `call` never dispatches an instance slot.
+A `constrained. T; call` pair dispatches a static virtual interface member, such as an operation
+or flag struct selected by a type argument. The slot must be static and virtual on a same-assembly
+interface, possibly generic such as `I<T>`, that the non-generic struct `T` implements directly.
+The target is a static method of `T`: its explicit `MethodImpl` override, or else the unique public
+static method with the slot's name and signature. A slot with a body (a C# `static virtual`
+member) that `T` does not implement runs that default body, instantiated at the site's closed
+interface and method type arguments; a public same-signature method of `T` without a `MethodImpl`
+beside a default body is ambiguous and rejected. An abstract slot without an implementation is
+rejected. The slot may be a generic method: the site's method type arguments must be closed and
+match its arity, and the selected override or default body is instantiated at them. The call
+passes no receiver. `callvirt` never dispatches a static slot and `call` never dispatches an
+instance slot.
 
 The Lean certificate independently resolves serialized type, interface and method metadata and
 checks the selected method token, signature, closed owner arguments and argument count.
 A branch cannot bypass the prefix.
-Reference receivers, boxing fallbacks, inherited or default-interface dispatch, generic methods
-on interfaces (instance or static), static slots on generic struct receivers, open interface
-constraints and ordinary unconstrained virtual calls remain unsupported.
+Reference receivers, boxing fallbacks, inherited dispatch, instance default-interface methods,
+generic instance methods on interfaces, static slots on generic struct receivers and ordinary
+unconstrained virtual calls remain unsupported.
 
 ### Static span tables
 
@@ -455,13 +461,17 @@ storage, field accesses, direct instance methods and constructors after substitu
 owner arguments. Every specialized body's instructions undergo the normal validation.
 
 Generic methods and generic struct owners admit a closed same-assembly interface constraint
-when the concrete struct directly declares that exact interface. Dispatch follows the
+when the concrete struct directly declares that exact interface. Generic methods, including
+static methods of generic interfaces, also admit an interface constraint naming their own type
+parameters, such as `where T : struct, I<T>`: the certificate closes it at each instantiation's
+arguments and requires the struct to declare the closed interface directly. Dispatch follows the
 [constrained struct-call rules](#constrained-struct-calls). Unconstrained parameters and admitted
 value-type, default-constructor and unmanaged constraints support the reference-free value
 types above.
 
 Explicit/auto generic layouts, reference-containing instantiations, reference constraints,
-open interface constraints and inherited interface matching remain unsupported, as do boxing
+open interface constraints on generic struct owners and inherited interface matching remain
+unsupported, as do boxing
 and general runtime dispatch. Runtime members called on a type built from the helper's own type
 parameters, such as `ReadOnlySpan<T>.Length`, `Slice` or its indexer in a generic method or on a
 generic (including nested) owner, are admitted: the open call target spells the owner with ECMA-335

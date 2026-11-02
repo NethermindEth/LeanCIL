@@ -226,8 +226,8 @@ theorem static_default_ambiguity_rejected :
       allowance defaultSite = none := by decide +kernel
 #print axioms static_default_ambiguity_rejected
 
-/-- The emitted instance must carry the site's method type argument, and the site must supply
-    exactly the slot's method arity, closed. -/
+/-- The emitted instance must carry the site's method type argument, the site must supply
+    exactly the slot's method arity, closed, and instance slots take no method arguments. -/
 theorem static_default_arguments_rejected :
     ¬ ConstrainedCallsValid defaultTypes
       [⟨[], defaultRaw⟩, { defaultTarget with arguments := [allowance, allowance] }]
@@ -237,7 +237,13 @@ theorem static_default_arguments_rejected :
     resolveConstrained defaultTypes allowance
       { defaultSite with typeArguments := [price, price, allowance] } = none ∧
     resolveConstrained defaultTypes allowance
-      { defaultSite with typeArguments := [.parameter 0, allowance] } = none := by decide +kernel
+      { defaultSite with typeArguments := [.parameter 0, allowance] } = none ∧
+    resolveConstrained
+      [{ concrete with methods :=
+          [{ implementation with genericArity := 1, callingConvention := 16 }] },
+        { declared with methods := [{ slot with genericArity := 1, callingConvention := 16 }] }]
+      receiver { site with typeArguments := [integer] } = none := by
+  decide +kernel
 #print axioms static_default_arguments_rejected
 
 /-- A default body is never reached through another interface instantiation, a receiver that

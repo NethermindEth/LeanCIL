@@ -66,6 +66,8 @@ internal static class ConstrainedCalls
             receiver.ContainsGenericParameter || LayoutEvidence.Scope(receiver) != LayoutEvidence.Scope(concrete) ||
             receiver is not GenericInstanceType && receiver.FullName != concrete.FullName)
             throw new InvalidDataException("Constrained receiver must be a concrete same-assembly struct");
+        if (!instance && receiver is GenericInstanceType)
+            throw new InvalidDataException("Static constrained slots on generic struct receivers are unsupported");
         MetadataValidation.Layout(receiver, caller.Module, architecture);
         if (instructions.IsTarget(call))
             throw new InvalidDataException("Branch bypasses constrained receiver prefix");
@@ -80,6 +82,7 @@ internal static class ConstrainedCalls
                     MethodSpecialization.SignatureType(parameter.ParameterType))) ||
             member.HasThis != slot.HasThis || slot.HasThis != instance || slot.IsStatic == instance ||
             slot.IsConstructor || slot.GenericParameters.Count != methodArguments.Length ||
+            instance && methodArguments.Length != 0 ||
             methodArguments.Any(argument => argument.ContainsGenericParameter) || member.ExplicitThis ||
             member.CallingConvention != Convention(methodArguments.Length))
             throw new InvalidDataException("Unsupported constrained method slot");
