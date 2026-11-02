@@ -62,10 +62,18 @@ public static class Application
         Library.Copy(in source, out var middle);
         Library.Copy(in middle, out destination);
     }
+    // Roslyn reads this field through `ldloc`, a by-value use of the local.
     public static ulong LocalField(in Pair source)
     {
         Library.Copy(in source, out var middle);
         return middle.Head.Value;
+    }
+    static ulong Read(in Leaf leaf) => 0;
+    // Passing the field by reference keeps the local's address and takes the field's with `ldflda`.
+    public static ulong LocalFieldAddress(in Pair source)
+    {
+        Library.Copy(in source, out var middle);
+        return Read(in middle.Head);
     }
     public static void LocalCopy(in Pair source, out Pair destination)
     {
@@ -234,6 +242,10 @@ Reject("Unlisted", "Contract export not present", app, "TypedFixture.Application
 Reject("ByValue", "Unsupported type", app, "TypedFixture.Application::ByValue(TypedFixture.Pair)", sidecar, interfaceDigest);
 Reject("Local", "admitted only by address", app, "TypedFixture.Application::Local()", sidecar, interfaceDigest);
 Reject("LocalField", "admitted only by address", app, "TypedFixture.Application::LocalField(TypedFixture.Pair&)",
+    sidecar, interfaceDigest);
+Reject("LocalFieldAddress", "Failed to resolve assembly", app,
+    "TypedFixture.Application::LocalFieldAddress(TypedFixture.Pair&)", sidecar, interfaceDigest);
+Reject("LocalInitialize", "Unsupported type identity", app, "TypedFixture.Application::LocalOnly()",
     sidecar, interfaceDigest);
 Reject("LocalCopy", "admitted only by address", app,
     "TypedFixture.Application::LocalCopy(TypedFixture.Pair&,TypedFixture.Pair&)", sidecar, interfaceDigest);

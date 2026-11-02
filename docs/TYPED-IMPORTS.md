@@ -45,8 +45,10 @@ App can also declare a local of such a struct and pass its address on, as
 does. The interface must publish the struct's whole layout closure with values
 equal to the pinned DLL metadata, and a call bound in the same extraction must
 carry that closure in its typed signature. The local is admitted only by
-address: `ldloc`, `stloc` and field access through it are rejected, so its bytes
-never cross the App's evaluation stack. Its layouts join the App's layout table,
+address: `ldloc`, `stloc`, `initobj` and field access through it are rejected, so
+its bytes never cross the App's evaluation stack. The extractor never resolves an
+external field, so `ldflda` on the local fails resolution; a zero-initialized
+`Pair value = default` is rejected at its `initobj`. Its layouts join the App's layout table,
 computed from the selected module, and `ImportedLocalLayoutsBound` in
 `TranslationValid` requires each such entry to equal the selected layout of every
 slot that publishes its identity. Imported entries carry no interfaces, so they
@@ -84,7 +86,7 @@ No new method-summary axiom or native proof evaluation is introduced.
 the nested `in`/`out` forwarding contract, a chain through an imported local and
 `Identity<UInt64>`, then checks the linked claims with full verification. It also
 exercises a private layout before the public nested closure, metadata tampering
-seen only through a local, by-value and field uses of an imported local, an
+seen only through a local, by-value, field and `initobj` uses of an imported local, an
 unpublished local type, wrong/open/unlisted instances, custom modifiers from two
 assemblies and the canonical format 2 sidecar digest. `Tests/ImportedLayouts.lean`
 directly checks malformed validator inputs independently of DLL hashes.
