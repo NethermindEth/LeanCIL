@@ -452,10 +452,8 @@ rejectedRounds.Check();
 Run(["dotnet", "run", "--file", At("Tests/AesHardware.cs")], cwd: Root);
 Console.WriteLine("PASS host AES instructions match the Lean AES model");
 
-// The sign window and eight-lane creation run on the host CPU; their x64-v4 extractions must return the
-// same vectors. The windows a 256-bit arithmetic shift loads come first, then indices with random high bits.
-if (!Avx512F.VL.IsSupported)
-    throw new InvalidOperationException("The permutation differential test needs an AVX-512 host");
+// The x64-v4 sign window extraction must return VPERMT2Q's documented result, which an AVX-512 host must
+// also produce. The windows a 256-bit arithmetic shift loads come first, then indices with random high bits.
 const int WindowCases = 12;
 var windowRandom = new Random(0x5257);
 ulong WindowWord()
@@ -471,27 +469,36 @@ for (var shift = 0UL; shift <= 4; shift++)
 while (windowInputs.Count < WindowCases)
     windowInputs.Add(Enumerable.Range(0, 8).Select(_ => WindowWord()).ToArray());
 string VectorBits(byte[] bytes) => $"0x{Convert.ToHexString(bytes.Reverse().ToArray())}";
-var signWindow = runtime.GetMethod("SignWindow")!;
-var windowObserved = windowInputs.Select(input =>
+// Index bits 0-1 pick a lane and bit 2 picks the fill table; the mutants change which bit or table it is.
+byte[] Window(ulong[] input, int tableBit, bool swapTables)
 {
-    var bytes = new byte[32];
-    ((Vector256<ulong>)signWindow.Invoke(null, input.Cast<object>().ToArray())!).AsByte().CopyTo(bytes);
-    return bytes;
-}).ToArray();
-// The cases must separate the model from a table chosen by index bit 3 or a swapped pair of tables.
+    ulong fill = (long)input[3] < 0 ? ulong.MaxValue : 0;
+    return input[4..].SelectMany(selector => BitConverter.GetBytes(
+        (((selector >> tableBit) & 1) == 1) != swapTables ? fill : input[(int)(selector & 3)])).ToArray();
+}
+var windowObserved = windowInputs.Select(input => Window(input, 2, false)).ToArray();
+if (Avx512F.VL.IsSupported)
+{
+    var signWindow = runtime.GetMethod("SignWindow")!;
+    foreach ((ulong[] input, byte[] expected) in windowInputs.Zip(windowObserved))
+    {
+        var bytes = new byte[32];
+        ((Vector256<ulong>)signWindow.Invoke(null, input.Cast<object>().ToArray())!).AsByte().CopyTo(bytes);
+        if (!bytes.SequenceEqual(expected))
+            throw new InvalidOperationException("Host VPERMT2Q differs from its documented sign window");
+    }
+    Console.WriteLine($"PASS host VPERMT2Q matches the sign window reference on {WindowCases} inputs");
+}
+else
+    Console.WriteLine("SKIP host VPERMT2Q comparison: no AVX-512VL; the extraction is checked against the reference");
+// The cases must separate the reference from a table chosen by index bit 3 or a swapped pair of tables.
 foreach ((string mutant, int tableBit, bool swapTables) in new[]
 {
     ("bit 3 table", 3, false), ("swapped tables", 2, true)
 })
 {
-    var agrees = windowInputs.Select((input, index) =>
-    {
-        ulong fill = (long)input[3] < 0 ? ulong.MaxValue : 0;
-        var lanes = input[4..].Select(selector =>
-            (((selector >> tableBit) & 1) == 1) != swapTables ? fill : input[(int)(selector & 3)]);
-        return lanes.SelectMany(BitConverter.GetBytes).SequenceEqual(windowObserved[index]);
-    });
-    if (agrees.All(same => same))
+    if (windowInputs.Select((input, index) => Window(input, tableBit, swapTables).SequenceEqual(windowObserved[index]))
+        .All(same => same))
         throw new InvalidOperationException($"Permutation inputs do not reject the {mutant} mutant");
 }
 uint[] words = Enumerable.Range(0, 8).Select(_ => (uint)WindowWord()).ToArray();
@@ -524,7 +531,7 @@ foreach ((string name, string[] claims) in new[]
             {expected : value} (observed : result.toOption = some expected) : result = .ok expected := by
           cases result <;> simp_all [Except.toOption]
         #print axioms result_of_toOption
-        /-- The host CPU's results on the same arguments. -/
+        /-- The documented results on the same arguments, which an AVX-512 host reproduces. -/
         theorem correctness :
             {{string.Join(" ∧\n    ", claims)}} := by
           exact {{Conjunction(claims.Select(_ => "by apply result_of_toOption; decide +kernel"))}}
@@ -532,7 +539,7 @@ foreach ((string name, string[] claims) in new[]
         end ExampleProof
         """);
     pending.Add((new(selectors[name], proof, output), "x64-v4",
-        () => Console.WriteLine($"PASS {name} matches the host CPU on {claims.Length} inputs")));
+        () => Console.WriteLine($"PASS {name} extraction matches its reference on {claims.Length} inputs")));
 }
 
 // No host here runs AdvSimd, so REV64 is checked against BinaryPrimitives.ReverseEndianness of each lane. The
