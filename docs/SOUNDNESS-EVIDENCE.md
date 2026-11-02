@@ -106,7 +106,9 @@ Resolution never searches directories. A pinned full name resolves to its pinned
 four framework public-key tokens resolve to the runtime's trusted platform list as runtime
 models, and anything else fails. A referenced type with a static constructor, a static field load
 or `calli` in a referenced body, and a method signature shared by two pinned assemblies are
-rejected.
+rejected. Constrained dispatch to a referenced struct resolves within the struct's own assembly;
+the Lean resolver requires the target's and the slot's owners to share a scope, and the selected
+program method must carry the target's token and scoped owner, so its attribution is checked too.
 
 ## Typed import metadata
 

@@ -76,7 +76,7 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `newobj` | Partial | Same-assembly constructors of validated reference-free structs: zero-initialize caller-owned storage, invoke the constructor with managed-reference `this`, then return a checked value snapshot. Also admitted `Span<T>` and `ReadOnlySpan<T>` constructors over checked existing storage for supported integer, enum, aggregate and integer-vector elements, from a single reference, `(void*, int)`, an array, or `(array, start, length)`. Class construction and unsupported generic constructors or cyclic dependencies are rejected. |
 | `ldtoken` | Partial | A type token as an operand of a decided closed type test, which emits a no-op, or a static data field token for `RuntimeHelpers.CreateSpan<T>`, which emits the field's address (see below). Other tokens are rejected. |
 | `throw` | Partial | Exact `throw new E(...)` with `ldstr`/`ldnull` arguments raises a located `thrown "E"` fault. Adjacent `ldnull; throw` raises `System.NullReferenceException`. Other throws are rejected. |
-| `constrained.`, `callvirt` | Partial | Adjacent prefix and `callvirt` (instance slot) or `call` (static interface slot) resolving to a concrete same-assembly struct implementation; see [constrained struct calls](#constrained-struct-calls). No boxing or general virtual dispatch. |
+| `constrained.`, `callvirt` | Partial | Adjacent prefix and `callvirt` (instance slot) or `call` (static interface slot) resolving to a concrete struct implementation in the receiver's own assembly; see [constrained struct calls](#constrained-struct-calls). No boxing or general virtual dispatch. |
 | `ldftn` | Partial | Exact static same-assembly managed method addresses, retaining scoped identity and closed signature. Callable values have no numeric address representation. See typed indirect dispatch below. |
 | `calli` | Partial | Static default-managed signatures over admitted integer/enum, reference-free aggregate and integer-vector values, and managed references to these types. The pointer must identify an authenticated catalog entry with the exact signature. Ordinary indirect calls select a forward target; tail calls permit cycles. Supplied immutable native tables also admit checked byte offsets and `ldind.i` with authenticated target provenance. No unmanaged conventions or arbitrary numeric targets. |
 | `tail.` | Partial | Adjacent `tail. call ret` or `tail. calli ret` with exactly its arguments and optional function pointer on the stack and the same return type. Retires caller storage before entering the callee and revalidates argument lifetimes. Admitted same-assembly transfers may form cycles; virtual, imported and intrinsic tail calls remain unsupported. |
@@ -242,8 +242,11 @@ expressions with effects or faults are not discarded. Prefix recognition inspect
 
 ### Constrained struct calls
 
-An adjacent `constrained. T; callvirt` pair supports a concrete, reference-free same-assembly
-struct `T` and a method declared on that struct or a directly implemented same-assembly interface.
+An adjacent `constrained. T; callvirt` pair supports a concrete, reference-free struct `T` and a
+method declared on that struct or a directly implemented interface. `T`, the slot's interface and,
+for a default body, every interface of `T` must be declared in one assembly: the extracted one or a
+[pinned reference](CLI.md#extract-from-referenced-assemblies), so a caller's struct cannot implement
+a slot of a referenced interface.
 Closed sequential generic structs admit direct slots and directly implemented interface slots,
 including closed generic interfaces. The slot's closed declaring owner must match exactly.
 Implicit implementations must uniquely match the public name and signature; explicit `MethodImpl`
