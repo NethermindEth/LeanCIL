@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
   pull_request:
     paths: ['CIL/SIMD/AES.lean', 'Tests/AesHardware.cs', 'scripts/ProbeRuntimeProfiles.cs',
-      'scripts/*RuntimeProfile*.cs', 'docs/evidence/runtime-profiles/macos-arm64-net10.json',
+      'scripts/*RuntimeProfile*.cs',
       '.github/workflows/arm64-aes.yml']
 
 permissions:
