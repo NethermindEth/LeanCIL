@@ -250,11 +250,12 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     {
         var receivers = method.Body.Instructions.Where(instruction => instruction.OpCode.Code == Code.Constrained)
             .Select(instruction => (TypeReference)instruction.Operand)
-            .Where(type => type.Resolve().Module == method.Module).ToArray();
+            .Where(type => ConstrainedCalls.Extracted(type.Resolve().Module, method.Module)).ToArray();
+        // Each receiver's interfaces are cataloged from the receiver's own assembly, as resolution requires.
         var types = receivers.Concat(receivers.SelectMany(type => type.Resolve().Interfaces
                 .Select(implementation => GenericStructs.Substitute(implementation.InterfaceType,
-                    type as GenericInstanceType)))
-                .Where(type => type.Resolve().Module == method.Module))
+                    type as GenericInstanceType))
+                .Where(implementation => implementation.Resolve().Module == type.Resolve().Module)))
             .DistinctBy(LayoutEvidence.Identity).OrderBy(LayoutEvidence.Identity, StringComparer.Ordinal);
         return List(types.Select(type =>
         {
