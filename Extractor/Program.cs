@@ -275,6 +275,11 @@ internal static partial class Program
             {
                 if (importSources.Any(source => source.SidecarPath == sidecar)) continue;
                 ContractInterface contract = ContractInterface.Read(File.ReadAllBytes(sidecar));
+                // Rejected before import validation, so a pinned assembly never silently loses its contract.
+                if (pinned.Pins.Any(pin => pin.Identity == contract.AssemblyIdentity))
+                    throw new InvalidDataException(
+                        "An assembly cannot be both a typed import and an extracted reference: " +
+                        contract.AssemblyIdentity);
                 string name = AssemblyNameReference.Parse(contract.AssemblyIdentity).Name;
                 string adjacent = Path.Combine(Path.GetDirectoryName(sidecar)!, name + ".dll");
                 string implementation = implementationPaths.GetValueOrDefault(name) ?? (File.Exists(adjacent) ? adjacent :
