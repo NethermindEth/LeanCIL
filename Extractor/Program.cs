@@ -275,8 +275,9 @@ internal static partial class Program
             {
                 if (importSources.Any(source => source.SidecarPath == sidecar)) continue;
                 ContractInterface contract = ContractInterface.Read(File.ReadAllBytes(sidecar));
-                // Rejected before import validation, so a pinned assembly never silently loses its contract.
-                if (pinned.Pins.Any(pin => pin.Identity == contract.AssemblyIdentity))
+                // Rejected before import validation, so a pinned reference never silently loses its contract.
+                // The selected assembly is not a reference; importing its own sidecar keeps its usual checks.
+                if (pinned.References.Any(reference => reference.Pin.Identity == contract.AssemblyIdentity))
                     throw new InvalidDataException(
                         "An assembly cannot be both a typed import and an extracted reference: " +
                         contract.AssemblyIdentity);
@@ -302,7 +303,7 @@ internal static partial class Program
             MethodDefinition[] methods = MetadataValidation.Validate(module, expectedAssembly ?? assemblyIdentity, entry, profile, initializedTypes, imports: imports,
                 typeArguments: entryTypeArguments.ToArray(), importedByref: type => imports.ValidateByref(type, profile));
             foreach (var node in imports.Nodes)
-                if (pinned.Pins.Any(pin => pin.Identity == node.AssemblyIdentity))
+                if (pinned.References.Any(reference => reference.Pin.Identity == node.AssemblyIdentity))
                     throw new InvalidDataException(
                         "An assembly cannot be both a typed import and an extracted reference: " +
                         node.AssemblyIdentity);
