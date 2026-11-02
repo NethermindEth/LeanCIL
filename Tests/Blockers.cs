@@ -29,11 +29,19 @@ public static class Fixture
 
     public static int External(int x) => x + System.Environment.ProcessorCount;
 
+    public static int Size<T>() where T : unmanaged => Unsafe.SizeOf<T>();
+
     public static ulong Excluded(ulong x, ulong y)
     {
         if (Avx2.IsSupported) return (ulong)System.GC.GetGeneration(new double[(int)x]);
         return x + y;
     }
+}
+
+public struct Pair
+{
+    public int First;
+    public long Second;
 }
 """;
 File.WriteAllText(Path.Combine(source, "Fixture.cs"), fixture);
@@ -53,7 +61,10 @@ File.WriteAllText(manifest, JsonSerializer.Serialize(new
         new { signature = "Fixture::Excluded(ulong,ulong)", profile = "x64-v3" },
         new { signature = "Fixture::Missing(int)", profile = "scalar" },
         new { signature = "Fixture::Admitted(ulong,ulong)", profile = "x64-unknown" },
-        new { signature = "Fixture::External(int)", profile = "scalar" }
+        new { signature = "Fixture::External(int)", profile = "scalar" },
+        new { signature = "Fixture::Size()", profile = "scalar", typeArguments = new[] { "Pair" } },
+        new { signature = "Fixture::Size()", profile = "scalar", typeArguments = new[] { "System.String" } },
+        new { signature = "Fixture::Size()", profile = "scalar", typeArguments = "Pair" }
     }
 }));
 var report = Path.Combine(directory, "blockers.json");
@@ -70,7 +81,8 @@ void Require(bool condition, string message)
 }
 string[] Ids(int index) => entries[index].GetProperty("blockers").EnumerateArray().Select(e => e.GetString()!).ToArray();
 
-string[] expected = ["admitted", "blocked", "blocked", "admitted", "blocked", "notChecked", "notChecked", "blocked"];
+string[] expected = ["admitted", "blocked", "blocked", "admitted", "blocked", "notChecked", "notChecked", "blocked",
+    "admitted", "notChecked", "notChecked"];
 Require(entries.Select(e => e.GetProperty("status").GetString()).SequenceEqual(expected), "Wrong entry classification");
 Require(entries[0].GetProperty("method").GetString() == "System.UInt64 Fixture::Admitted(System.UInt64,System.UInt64)" &&
     entries[0].GetProperty("reachableMethods").GetInt32() == 1, "Admitted entry lost its resolved method");
@@ -139,7 +151,14 @@ Require(!blockers.Any(b => b.GetProperty("construct").GetString()!.StartsWith("U
     "Rejected call reported again by translation");
 Require(entries[5].GetProperty("reason").GetString()!.Contains("No method matches selector"), "Bad signature lacks its reason");
 Require(entries[6].GetProperty("reason").GetString()!.Contains("Unknown execution profile"), "Bad profile lacks its reason");
-Require(summary.Contains("2 admitted, 4 blocked, 2 not checked") && summary.Contains("nothing here is proved") &&
+// A generic entry closes over a value type of its own module, and the report keeps the type arguments.
+Require(entries[8].GetProperty("typeArguments").EnumerateArray().Select(e => e.GetString()).SequenceEqual(["Pair"]) &&
+    summary.Contains("Fixture::Size<Pair>()"), "Closed generic entry lost its type arguments");
+Require(entries[9].GetProperty("reason").GetString()!.Contains("Closed entry type arguments require"),
+    "Reference type argument not rejected at selection");
+Require(entries[10].GetProperty("reason").GetString()!.Contains("`typeArguments` must be an array"),
+    "Malformed type arguments accepted");
+Require(summary.Contains("3 admitted, 4 blocked, 4 not checked") && summary.Contains("nothing here is proved") &&
     !summary.Contains("verified", StringComparison.OrdinalIgnoreCase), "Summary overstates or misses counts");
 // Distinct arrays and sites are compared by content, while output keeps first discovery order.
 var blockersType = Assembly.LoadFrom(ExtractorPath).GetType("Nethermind.LeanCIL.Blockers", true)!;

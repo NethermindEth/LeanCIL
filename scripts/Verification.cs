@@ -1614,7 +1614,7 @@ partial class Program : IDisposable
             .. identity is null ? Array.Empty<string>() : ["--assembly", identity]];
 
     sealed record GeneratedExtraction(string Assembly, string Entry, string Output, string Profile = "scalar",
-        string[]? InitializedTypes = null);
+        string[]? InitializedTypes = null, string[]? TypeArguments = null);
 
     // Share immutable assembly bytes and signature validation, retaining fresh modules per request
     // and the extractor's final check that every assembly, symbol and profile input is unchanged.
@@ -1627,7 +1627,8 @@ partial class Program : IDisposable
             File.WriteAllText(path, JsonSerializer.Serialize(requests.Select(request => new
             {
                 assembly = request.Assembly, identity, entry = request.Entry, output = request.Output,
-                profile = request.Profile, initializedTypes = request.InitializedTypes
+                profile = request.Profile, initializedTypes = request.InitializedTypes,
+                typeArguments = request.TypeArguments
             })));
             Run(["dotnet", extractor ?? ExtractorPath, "generated-extraction-batch", mode, path]);
         }

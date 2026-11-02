@@ -57,6 +57,9 @@ internal static class ContractMethodMetadata
         for (int index = 0; index < arguments.Length; index++)
             if (signature.Arguments[index].Kind != "atom" || signature.Arguments[index].Name != arguments[index])
                 throw new InvalidDataException("Contract argument names differ from their scoped signature.");
+        // Importers bind only primitive arguments, so an entry closed over its own value type cannot be published.
+        if (!arguments.All(PrimitiveName))
+            throw new InvalidDataException("Contract type arguments require exact scoped primitive integers.");
     }
 
     internal static void ValidateType(ContractType type)
@@ -107,12 +110,21 @@ internal static class ContractMethodMetadata
     }
 
     internal static bool Primitive(TypeReference type) => type is not TypeSpecification &&
-        RuntimeModels.ExactScope(type.Scope, "System.Runtime") && type.IsValueType && type.FullName is
+        RuntimeModels.ExactScope(type.Scope, "System.Runtime") && type.IsValueType && PrimitiveName(type.FullName);
+
+    static bool PrimitiveName(string name) => name is
         "System.SByte" or "System.Byte" or "System.Boolean" or "System.Int16" or "System.UInt16" or
         "System.Char" or "System.Int32" or "System.UInt32" or "System.Int64" or "System.UInt64" or
         "System.IntPtr" or "System.UIntPtr";
 
-    static TypeReference Primitive(ModuleDefinition module, string name) => name switch
+    // An entry may also close over a non-generic value type of its own module; specialization validates its layout.
+    static TypeReference EntryArgument(ModuleDefinition module, string name) =>
+        Primitive(module, name) ?? (module.GetType(name) is { IsValueType: true, HasGenericParameters: false } local
+            ? local : throw new InvalidDataException(
+                "Closed entry type arguments require a primitive integer or a non-generic value type " +
+                "of the selected module: " + name));
+
+    static TypeReference? Primitive(ModuleDefinition module, string name) => name switch
     {
         "System.SByte" => module.TypeSystem.SByte, "System.Byte" => module.TypeSystem.Byte,
         "System.Boolean" => module.TypeSystem.Boolean, "System.Int16" => module.TypeSystem.Int16,
@@ -120,23 +132,25 @@ internal static class ContractMethodMetadata
         "System.Int32" => module.TypeSystem.Int32, "System.UInt32" => module.TypeSystem.UInt32,
         "System.Int64" => module.TypeSystem.Int64, "System.UInt64" => module.TypeSystem.UInt64,
         "System.IntPtr" => module.TypeSystem.IntPtr, "System.UIntPtr" => module.TypeSystem.UIntPtr,
-        _ => throw new InvalidDataException("Closed contract type arguments require a primitive integer type: " + name)
+        _ => null
     };
 
     internal static Selection Select(ModuleDefinition module, string selector, string[] arguments, string architecture)
     {
         MethodDefinition definition = MethodSelector.Resolve(module, selector);
-        TypeReference[] types = arguments.Select(name => Primitive(module, name)).ToArray();
-        return Instantiate(definition, types, architecture);
+        TypeReference[] types = arguments.Select(name => EntryArgument(module, name)).ToArray();
+        return Instantiate(definition, types, architecture, entry: true);
     }
 
-    static Selection Instantiate(MethodDefinition definition, TypeReference[] arguments, string architecture)
+    static Selection Instantiate(MethodDefinition definition, TypeReference[] arguments, string architecture,
+        bool entry = false)
     {
         RejectModifiers(definition, inParameters: true);
         InReferences.RejectTwins(definition);
         if (definition.DeclaringType.HasGenericParameters || definition.GenericParameters.Count != arguments.Length)
             throw new InvalidDataException("Contract method requires an exact closed generic instantiation.");
-        if (arguments.Any(type => !Primitive(type)))
+        // Imported calls bind across assemblies, so only an entry may close over its own module's value types.
+        if (arguments.Any(type => !Primitive(type) && !(entry && type.Module == definition.Module && type.IsValueType)))
             throw new InvalidDataException("Contract type arguments require exact scoped primitive integers.");
         if (arguments.Length == 0)
             return new(definition, definition, definition, [], definition.Module.Assembly.Name.FullName + "::" + definition.FullName);

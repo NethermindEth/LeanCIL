@@ -421,7 +421,10 @@ equality or observation of unspecified lanes.
 
 Reachable same-assembly generic methods are specialized for supported primitive, enum, reference-free aggregate and vector type arguments. This substitutes types in the original CIL parameters, locals, type operands and nested generic calls; it does not replace method bodies with functional summaries. Repeated uses share a specialization, while different type arguments retain separate bodies. Ordinary calls retain an acyclic order; tail transfers may form cycles. Extraction rejects more than 256 distinct specializations.
 
-Select a non-generic entry method whose compiled calls supply the concrete type arguments.
+Select a non-generic entry method whose compiled calls supply the concrete type arguments, or
+close a generic entry with `--type-argument`: a primitive integer, or a non-generic value type
+of the selected module that specialization then validates like any other argument. Typed
+contract imports admit only primitive integer arguments, since they bind across assemblies.
 Static calls on closed same-assembly generic declaring types support nested owners and combined
 owner/method type arguments. Closed same-assembly sequential generic structs admit reference-free
 storage, field accesses, direct instance methods and constructors after substituting their
