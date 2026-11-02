@@ -60,7 +60,7 @@ seeded span pairs each, one of them int256's byte-reversal mask. Both short-span
 `ArgumentOutOfRangeException` in the runtime and the model. The test fails if its inputs do not
 separate the model from shuffles that ignore bit 7 or cross 128-bit halves. Each shuffle is rejected
 under a profile without its feature, and forged load widths or substituted intrinsics are rejected.
-`Tests/ExactIntrinsics.cs` also runs the int256 and Nethermind hash round on the host CPU's `Aes.Encrypt`
+`Tests/ExactIntrinsics.cs` also runs a portable AES hash round on the host CPU's `Aes.Encrypt`
 for eight seeded blocks and proves that its extraction returns the same vectors under a custom x64 profile
 declaring `aes` and under a custom ARM64 profile declaring `armAes`, where it uses AESE and AESMC. Every
 built-in profile rejects the reachable ARM64 calls, and forged evidence substituting another AES step is

@@ -1,7 +1,7 @@
 namespace Examples;
 
-// Static abstract interface members select an operation and a flag at compile time, as EVM opcode
-// handlers do with their operation and tracing structs.
+// Static abstract interface members select an operation and a flag at compile time through struct
+// type arguments, so each closed instantiation dispatches without a receiver or boxing.
 public interface IBinaryStep
 {
     static abstract ulong Apply(ulong left, ulong right);
