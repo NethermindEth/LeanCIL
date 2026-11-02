@@ -12,14 +12,16 @@ step over static loads without a fault case.
 
 namespace CIL.Safety
 
-/-- Loaded readonly field storage, described independently of executing a lookup. -/
+/-- Loaded readonly field storage, described independently of executing a lookup. The bytes
+    are the descriptor's own, except that an opaque value may be any readable bytes. -/
 def StaticBindingValid (m : Memory) (descriptor : CIL.StaticDescriptor) (reference : Reference) :
     Prop :=
   reference.offset = 0 ∧ ∃ allocation,
     m.allocations reference.allocation = some allocation ∧ allocation.live = true ∧
     allocation.kind = .immutableStatic ∧ allocation.layout.size = descriptor.bytes.length ∧
-    allocation.layout.alignment = descriptor.alignment ∧
-    read m reference descriptor.bytes.length 1 = .ok descriptor.bytes
+    allocation.layout.alignment = descriptor.alignment ∧ ∃ bytes,
+    read m reference descriptor.bytes.length 1 = .ok bytes ∧
+    (descriptor.opaqueValue = false → bytes = descriptor.bytes)
 
 /-- The static registry binds each identity once, to distinct allocations that are all live
     immutable statics. -/
@@ -49,9 +51,15 @@ theorem cached_static_reference_succeeds (m : Memory) (descriptor : CIL.StaticDe
       some (key, reference))
     (valid : StaticBindingValid m descriptor reference) :
     staticReference descriptor m = .ok (m, reference) := by
-  obtain ⟨offset, allocation, present, live, kind, size, alignment, bytes⟩ := valid
+  obtain ⟨offset, allocation, present, live, kind, size, alignment, bytes, readable, same⟩ :=
+    valid
+  have admitted : (descriptor.opaqueValue || bytes == descriptor.bytes) = true := by
+    cases flagged : descriptor.opaqueValue
+    · simp [same flagged]
+    · rfl
   simp [staticReference, cache, checkedAt, liveAllocation, present, live, kind, offset, size,
-    alignment, bytes, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+    alignment, readable, admitted, Except.mapError, Bind.bind, Except.bind, Pure.pure,
+    Except.pure]
 
 theorem wellFormed_next_unused (m : Memory) (hm : m.WellFormed) :
     m.allocations m.nextIdentity = none := by
@@ -62,10 +70,13 @@ theorem wellFormed_next_unused (m : Memory) (hm : m.WellFormed) :
     exact False.elim (Nat.lt_irrefl _ bad)
 
 /-- In a valid static world, loading any of its descriptors succeeds: from the cache if bound,
-    otherwise by allocating a fresh immutable static. -/
+    otherwise by allocating a fresh immutable static. An opaque value has no fresh storage, so
+    it must already be bound. -/
 theorem staticReference_succeeds (m : Memory) (descriptor : CIL.StaticDescriptor)
     (descriptors : List CIL.StaticDescriptor) (hm : m.WellFormed)
-    (world : StaticWorldValid descriptors m) (member : descriptor ∈ descriptors) :
+    (world : StaticWorldValid descriptors m) (member : descriptor ∈ descriptors)
+    (bound : descriptor.opaqueValue = true →
+      ∃ binding ∈ m.staticBindings, binding.1 = descriptor.identity) :
     ∃ result reference, staticReference descriptor m = .ok (result, reference) := by
   cases hc : m.staticBindings.find? (fun binding => binding.1 == descriptor.identity) with
   | some binding =>
@@ -76,14 +87,20 @@ theorem staticReference_succeeds (m : Memory) (descriptor : CIL.StaticDescriptor
     have valid := world.2.2.2 descriptor member binding bindingMember found.symm
     exact ⟨m, binding.2, cached_static_reference_succeeds _ _ _ _ hc valid⟩
   | none =>
+    have transparent : descriptor.opaqueValue = false := by
+      cases flagged : descriptor.opaqueValue
+      · rfl
+      · obtain ⟨binding, present, key⟩ := bound flagged
+        have := List.find?_eq_none.mp hc binding present
+        simp [key] at this
     have unused := wellFormed_next_unused m hm
     have ⟨size, aligned⟩ := world.1 descriptor member
     have valid : (Allocation.mk .immutableStatic
         ⟨descriptor.bytes.length, descriptor.alignment, []⟩
         true [descriptor.bytes.length]).valid = true := by
       simp [Allocation.valid, size, aligned]
-    simp only [staticReference, hc, allocate, valid, Bool.not_true, Bool.false_eq_true,
-      ite_false, unused, Option.isSome_none, checkedAt, Except.mapError, Bind.bind,
+    simp only [staticReference, hc, transparent, allocate, valid, Bool.not_true,
+      Bool.false_eq_true, ite_false, unused, Option.isSome_none, checkedAt, Except.mapError, Bind.bind,
       Except.bind, Pure.pure, Except.pure]
     exact ⟨_, _, rfl⟩
 

@@ -14,8 +14,8 @@ namespace CIL.Safety
 theorem StaticBindingValid.reference_valid {m : Memory} {descriptor : CIL.StaticDescriptor}
     {reference : Reference} (valid : StaticBindingValid m descriptor reference) :
     form m reference = .ok reference := by
-  obtain ⟨_, _, _, _, _, _, _, bytes⟩ := valid
-  exact read_reference_valid _ _ _ _ _ bytes
+  obtain ⟨_, _, _, _, _, _, _, _, readable, _⟩ := valid
+  exact read_reference_valid _ _ _ _ _ readable
 
 /-- A successful static memory instruction pushes only values valid in the resulting memory. -/
 theorem staticInstruction_values_valid (body : CIL.Method) (pc : Nat) (operation : CIL.MemoryOp)
