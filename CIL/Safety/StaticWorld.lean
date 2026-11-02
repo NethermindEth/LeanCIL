@@ -100,8 +100,8 @@ theorem staticReference_succeeds (m : Memory) (descriptor : CIL.StaticDescriptor
         true [descriptor.bytes.length]).valid = true := by
       simp [Allocation.valid, size, aligned]
     simp only [staticReference, hc, transparent, allocate, valid, Bool.not_true,
-      Bool.false_eq_true, ite_false, unused, Option.isSome_none, checkedAt, Except.mapError, Bind.bind,
-      Except.bind, Pure.pure, Except.pure]
+      Bool.false_eq_true, ite_false, unused, Option.isSome_none, checkedAt, Except.mapError,
+      Bind.bind, Except.bind, Pure.pure, Except.pure]
     exact ⟨_, _, rfl⟩
 
 #print axioms cached_static_reference_succeeds

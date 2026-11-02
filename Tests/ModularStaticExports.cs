@@ -153,10 +153,13 @@ theorem correctness : PublishedTable.read.Holds Extracted.program 0 := by
   rintro input memory ⟨formed, published⟩
   have same : descriptor = PublishedTable.table := by decide +kernel
   have world : StaticWorldValid [descriptor] memory := by rw [same]; exact published
-  obtain ⟨result, reference, resolved, _, valid⟩ := staticReference_valid_result descriptor [descriptor] memory formed world (by simp)
+  have transparent : descriptor.opaqueValue = false := by decide +kernel
+  obtain ⟨result, reference, resolved, _, valid⟩ := staticReference_valid_result descriptor
+    [descriptor] memory formed world (by simp) (fun flagged => nomatch transparent.symm.trans flagged)
   have contents : descriptor.bytes = numberBytes (17#64).toNat 8 := by decide +kernel
   have loaded : read result reference 8 1 = .ok (numberBytes (17#64).toNat 8) := by
-    have actual := valid.2.choose_spec.2.2.2.2.2
+    obtain ⟨bytes, actual, fixed⟩ := valid.2.choose_spec.2.2.2.2.2
+    rw [fixed transparent] at actual
     change read result reference 8 1 = .ok descriptor.bytes at actual
     simpa only [contents] using actual
   have load := load_word64_of_read loaded
