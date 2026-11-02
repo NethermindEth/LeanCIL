@@ -258,8 +258,7 @@ var carryless = Execute(Extract("extract", assembly, "Examples", "Capabilities::
 if (carryless.Code == 0 || !carryless.Output.Contains(
         "Unclassified feature getter: System.Boolean System.Runtime.Intrinsics.X86.Pclmulqdq::get_IsSupported()",
         StringComparison.Ordinal))
-    throw new InvalidOperationException($"Pclmulqdq getter was classified:
-{carryless.Output}");
+    throw new InvalidOperationException($"Pclmulqdq getter was classified:\n{carryless.Output}");
 Console.WriteLine("PASS getter outside the modeled AES calls rejected: Pclmulqdq");
 // The unmodeled ARM64 body is pruned without AdvSimd and blocks extraction with it.
 foreach (var profile in new[] { "scalar", "x64-v4", "arm64-advsimd" })
