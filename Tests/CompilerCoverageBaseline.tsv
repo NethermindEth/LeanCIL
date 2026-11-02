@@ -532,6 +532,7 @@ Examples:System.Runtime.Intrinsics.Vector128`1<System.Byte> Examples.ValueBitCas
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt32> Examples.ValueBitCasts::To128UInt32(Examples.ValueBitCasts/Pair)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64> Examples.AggregateArrays::ReadVector(System.Runtime.Intrinsics.Vector128`1<System.UInt64>[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64> Examples.AggregateSpans::ReadVector(System.ReadOnlySpan`1<System.Runtime.Intrinsics.Vector128`1<System.UInt64>>)	A	A	A	A	A	A	A	A
+Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64> Examples.DivisionIntrinsics::ReverseLimbs(System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64> Examples.DivisionIntrinsics::UnsafeReturn(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64> Examples.IndirectValues::Vector(System.Runtime.Intrinsics.Vector128`1<System.UInt64>)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64> Examples.UnsafeReferences::ReadHalf(Examples.FourLimbs&)	A	A	A	A	A	A	A	A
@@ -547,8 +548,10 @@ Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64>& Examples.UnsafeRe
 Examples:System.Runtime.Intrinsics.Vector256`1<System.Byte> Examples.DivisionIntrinsics::Shuffle256(System.ReadOnlySpan`1<System.Byte>,System.ReadOnlySpan`1<System.Byte>)	B	B	B	B	B	B	B	B
 Examples:System.Runtime.Intrinsics.Vector256`1<System.Int32> Examples.ValueBitCasts::To256Int32(Examples.ValueBitCasts/Limbs)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector256`1<System.Int64> Examples.ValueBitCasts::To256Int64(Examples.ValueBitCasts/Limbs)	A	A	A	A	A	A	A	A
+Examples:System.Runtime.Intrinsics.Vector256`1<System.UInt32> Examples.DivisionIntrinsics::CreateWords(System.UInt32,System.UInt32,System.UInt32,System.UInt32,System.UInt32,System.UInt32,System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector256`1<System.UInt32> Examples.ValueBitCasts::To256UInt32(Examples.ValueBitCasts/Limbs)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector256`1<System.UInt32>& Examples.UnsafeReferences::Vector(Examples.FourLimbs&)	A	A	A	A	A	A	A	A
+Examples:System.Runtime.Intrinsics.Vector256`1<System.UInt64> Examples.DivisionIntrinsics::SignWindow(System.UInt64,System.UInt64,System.UInt64,System.UInt64,System.UInt64,System.UInt64,System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.Runtime.Intrinsics.Vector256`1<System.UInt64> Examples.ValueBitCasts::CopyLocal(Examples.ValueBitCasts/Limbs)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector256`1<System.UInt64> Examples.ValueBitCasts::ReadLocal(System.Runtime.Intrinsics.Vector256`1<System.UInt64>&)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector256`1<System.UInt64> Examples.ValueBitCasts::To256UInt64(Examples.ValueBitCasts/Limbs)	A	A	A	A	A	A	A	A
@@ -898,6 +901,7 @@ Examples:System.Void Examples.DefaultConstructor::.ctor()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.DivisionIntrinsics::Init128(System.Runtime.Intrinsics.Vector128`1<System.UInt64>&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.DivisionIntrinsics::Init256(System.Runtime.Intrinsics.Vector256`1<System.UInt64>&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.DivisionIntrinsics::Init512(System.Runtime.Intrinsics.Vector512`1<System.UInt64>&)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.DivisionIntrinsics::SwapHalves(System.ReadOnlySpan`1<System.Byte>,System.Span`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.DivisionIntrinsics::UnsafeStore(System.Runtime.Intrinsics.Vector128`1<System.UInt64>&,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Enums::Assign(Examples.Unsigned64&,Examples.Unsigned64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ExceptionDocumentation::Reference(System.UInt64&)	A	A	A	A	A	A	A	A

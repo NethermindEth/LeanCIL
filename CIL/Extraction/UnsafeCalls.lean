@@ -101,6 +101,7 @@ def UnsafeCallsValid (layouts : List RawLayout) (closed : RawMethod)
   all3 (fun instruction live emitted => !live ||
       unsafeTransferMatches layouts instruction emitted &&
       unsafeBlockMatches instruction emitted &&
+      vector128UnsafeMatches instruction emitted &&
       marshalTransferMatches layouts instruction emitted &&
       viewObservationMatches instruction emitted &&
       binaryTransferMatches instruction emitted &&

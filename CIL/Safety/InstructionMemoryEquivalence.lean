@@ -276,6 +276,24 @@ theorem Memory.Equivalent.pointerTransferInstruction {m n : Memory} (same : m.Eq
     | split
 #print axioms Memory.Equivalent.pointerTransferInstruction
 
+/-- Vector128 byte loads and stores displace, read and write identically over equivalent
+    memories. -/
+theorem Memory.Equivalent.vector128UnsafeInstruction {m n : Memory} (same : m.Equivalent n)
+    (store offset : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (vector128UnsafeInstruction store offset stack m)
+      (vector128UnsafeInstruction store offset stack n) := by
+  unfold CIL.Safety.vector128UnsafeInstruction CIL.Safety.displaceReference
+  split <;> try simp only [same.add, same.loadValue]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind (same.storeValue _ _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.vector128UnsafeInstruction
+
 /-- Opcode dispatch preserves the memory equivalence of each checked family. -/
 theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent n)
     (operation : CIL.MemoryOp) (stack : List Value) :
@@ -287,6 +305,7 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
   · split
     · exact same.referenceAddInstruction _ _ _
     · exact same.pointerTransferInstruction _ _ _ _
+    · exact same.vector128UnsafeInstruction _ _ _
     · exact same.arrayTransferInstruction _ _ _
     · exact same.binaryTransferInstruction _ _ _ _ _ _
     · exact same.binaryTransferInstruction _ _ _ _ _ _

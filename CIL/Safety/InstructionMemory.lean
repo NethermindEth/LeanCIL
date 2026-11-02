@@ -513,6 +513,36 @@ def displaceReference (memory : Memory) (reference : ManagedReference) (size : N
   let result ← checkedAt reference 0 (add memory address size (BitVec.ofInt 64 displacement))
   return .address result
 
+/-- `Vector128.LoadUnsafe` and `StoreUnsafe` on bytes, top of stack first. A `nuint` byte offset,
+    when present, displaces the reference exactly as `Unsafe.Add` does; sixteen bytes then move
+    through the checks of `load128` and `store128`. A store through a readonly reference is
+    unwritable, and a store of anything but a 128-bit vector is an invalid state. -/
+def vector128UnsafeInstruction (store offset : Bool) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  match store, offset, stack with
+  | false, false, .reference r :: rest | false, false, .readOnlyReference r :: rest =>
+    return (memory, .scalar (← loadValue memory r 16) :: rest)
+  | false, true, .scalar (.i64 bytes) :: .reference r :: rest
+  | false, true, .scalar (.i64 bytes) :: .readOnlyReference r :: rest =>
+    let moved ← displaceReference memory r 1 (bytes.toNat : Int)
+    return (memory, .scalar (← loadValue memory moved 16) :: rest)
+  | true, false, .reference r :: .scalar (.v128 bits) :: rest =>
+    return (← storeValue memory r (.v128 bits), rest)
+  | true, false, .reference r :: .scalar (.snapshot .vector128 snapshot) :: rest =>
+    return (← storeValue memory r (.snapshot .vector128 snapshot), rest)
+  | true, true, .scalar (.i64 bytes) :: .reference r :: .scalar (.v128 bits) :: rest =>
+    let moved ← displaceReference memory r 1 (bytes.toNat : Int)
+    return (← storeValue memory moved (.v128 bits), rest)
+  | true, true, .scalar (.i64 bytes) :: .reference r ::
+      .scalar (.snapshot .vector128 snapshot) :: rest =>
+    let moved ← displaceReference memory r 1 (bytes.toNat : Int)
+    return (← storeValue memory moved (.snapshot .vector128 snapshot), rest)
+  | true, false, .readOnlyReference r :: _ => .error (.memory .unwritable r 16)
+  | true, true, .scalar (.i64 bytes) :: .readOnlyReference r :: _ =>
+    let moved ← displaceReference memory r 1 (bytes.toNat : Int)
+    .error (.memory .unwritable moved 16)
+  | _, _, _ => .error .invalidState
+
 /-- Adds a scalar offset to a checked reference while preserving its allocation identity and
     its write capability: a readonly reference yields a readonly result. -/
 def referenceAddInstruction (size : Nat) (signed : Bool) (stack : List Value) (memory : Memory) :
@@ -825,6 +855,7 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .add size signed => referenceAddInstruction size signed stack memory
   | .pointerTransfer kind alignment store =>
     pointerTransferInstruction kind alignment store stack memory
+  | .vector128Unsafe store offset => vector128UnsafeInstruction store offset stack memory
   | .arrayTransfer element store => arrayTransferInstruction element store stack memory
   | .binaryRead width signed bigEndian trying =>
     binaryTransferInstruction width signed bigEndian true trying stack memory

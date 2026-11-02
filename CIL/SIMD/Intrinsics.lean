@@ -27,11 +27,12 @@ namespace CIL
     `width` is the vector width in bits; lanes are 64 bits unless named otherwise. -/
 inductive VectorIntrinsic where
   | add64 (width : Nat) | sub64 (width : Nat) | ltu64 (width : Nat) | eq64 (width : Nat)
+  | lt64 (width : Nat)
   | equalsAll (width : Nat)
   | band (width : Nat) | bor (width : Nat) | bxor (width : Nat) | bnot (width : Nat)
   | reinterpret (width : Nat) | zero (width : Nat) | ones (width : Nat)
   | create64 (width : Nat) | extract64 (width : Nat) | ashr64 (width : Nat)
-  | createScalar32 (width : Nat) | createScalar64 (width : Nat)
+  | create32 (width : Nat) | createScalar32 (width : Nat) | createScalar64 (width : Nat)
   | extractMSB64 (width : Nat) | sum64 (width : Nat) | mul64 (width : Nat)
   | createScalarUnsafe64
   | combine256
@@ -40,7 +41,7 @@ inductive VectorIntrinsic where
 
 /-- ARM AdvSimd intrinsics. -/
 inductive AdvSimdIntrinsic where
-  | extract64
+  | extract64 | reverseElement8
   deriving DecidableEq, Repr
 
 /-- SSE2 and SSSE3 intrinsics. -/
@@ -56,7 +57,7 @@ inductive AVX2Intrinsic where
 
 /-- AVX-512F intrinsics; the 512-bit comparisons need only AVX-512F, the rest also VL. -/
 inductive AVX512Intrinsic where
-  | alignRight64 | ternaryLogic | ltu64 | gtu64 | geu64 | ltu512 | gtu512
+  | alignRight64 | ternaryLogic | ltu64 | gtu64 | geu64 | ltu512 | gtu512 | permuteVar4x64x2
   deriving DecidableEq, Repr
 
 /-- AVX intrinsics on 256-bit vectors. -/
@@ -152,6 +153,7 @@ def evalIntrinsic (op : Intrinsic) (args : List Value) : Option Value := do
   | .vector (.sub64 w), xs => binaryLanes w (· - ·) xs
   | .vector (.mul64 w), xs => binaryLanes w (· * ·) xs
   | .vector (.ltu64 w), xs => binaryLanes w (fun a b => Vector.mask64 (a.ult b)) xs
+  | .vector (.lt64 w), xs => binaryLanes w (fun a b => Vector.mask64 (a.slt b)) xs
   | .vector (.eq64 w), xs => binaryLanes w (fun a b => Vector.mask64 (a == b)) xs
   | .vector (.band w), xs => binaryVector w (fun a b => a &&& b) xs
   | .vector (.bor w), xs => binaryVector w (fun a b => a ||| b) xs
@@ -177,6 +179,11 @@ def evalIntrinsic (op : Intrinsic) (args : List Value) : Option Value := do
     some (.v256 (Vector.pack256 a b c d))
   | .vector (.create64 128), [.i64 a] => some (.v128 (Vector.pack128 a a))
   | .vector (.create64 256), [.i64 a] => some (.v256 (Vector.pack256 a a a a))
+  | .vector (.create32 128), [.i32 a0, .i32 a1, .i32 a2, .i32 a3] =>
+    some (.v128 (Vector.pack128 (a1 ++ a0) (a3 ++ a2)))
+  | .vector (.create32 256), [.i32 a0, .i32 a1, .i32 a2, .i32 a3, .i32 a4, .i32 a5, .i32 a6,
+      .i32 a7] =>
+    some (.v256 (Vector.pack256 (a1 ++ a0) (a3 ++ a2) (a5 ++ a4) (a7 ++ a6)))
   | .vector (.createScalar32 128), [.i32 a] => some (.v128 (a.zeroExtend 128))
   | .vector (.createScalar32 256), [.i32 a] => some (.v256 (a.zeroExtend 256))
   | .vector (.createScalar64 128), [.i64 a] => some (.v128 (a.zeroExtend 128))
@@ -211,6 +218,7 @@ def evalIntrinsic (op : Intrinsic) (args : List Value) : Option Value := do
   | .advSimd .extract64, [.v128 a, .v128 b, i] =>
     let c ← immediate i
     if c.toNat < 2 then some (.v128 (Vector.advExtract64 a b c.toNat)) else none
+  | .advSimd .reverseElement8, [.v128 a] => some (.v128 (Vector.reverseElement8 a))
   | .sse .shiftLeftBytes, [.v128 a, i] =>
     let c ← immediate i
     some (.v128 (Vector.sseShiftLeftBytes a c.toNat))
@@ -269,6 +277,8 @@ def evalIntrinsic (op : Intrinsic) (args : List Value) : Option Value := do
   | .avx512 .ternaryLogic, [.v256 a, .v256 b, .v256 c, i] =>
     let control ← immediate i
     some (.v256 (Vector.ternaryLogic a b c control))
+  | .avx512 .permuteVar4x64x2, [.v256 lower, .v256 indices, .v256 upper] =>
+    some (.v256 (Vector.permuteVar4x64x2 lower indices upper))
   | .avx512 .ltu64, [.v256 a, .v256 b] =>
     some (.v256 (Vector.zip256 (fun x y => Vector.mask64 (x.ult y)) a b))
   | .avx512 .gtu64, [.v256 a, .v256 b] =>

@@ -6,6 +6,7 @@
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
 
+using System.Buffers.Binary;
 using System.Reflection;
 using System.Text.Json;
 using System.Runtime.Intrinsics;
@@ -451,6 +452,201 @@ rejectedRounds.Check();
 Run(["dotnet", "run", "--file", At("Tests/AesHardware.cs")], cwd: Root);
 Console.WriteLine("PASS host AES instructions match the Lean AES model");
 
+// The sign window and eight-lane creation run on the host CPU; their x64-v4 extractions must return the
+// same vectors. The windows a 256-bit arithmetic shift loads come first, then indices with random high bits.
+if (!Avx512F.VL.IsSupported)
+    throw new InvalidOperationException("The permutation differential test needs an AVX-512 host");
+const int WindowCases = 12;
+var windowRandom = new Random(0x5257);
+ulong WindowWord()
+{
+    var bytes = new byte[sizeof(ulong)];
+    windowRandom.NextBytes(bytes);
+    return BitConverter.ToUInt64(bytes);
+}
+var windowInputs = new List<ulong[]>();
+for (var shift = 0UL; shift <= 4; shift++)
+    windowInputs.Add([WindowWord(), WindowWord(), WindowWord(), WindowWord() | (1UL << 63),
+        shift, shift + 1, shift + 2, shift + 3]);
+while (windowInputs.Count < WindowCases)
+    windowInputs.Add(Enumerable.Range(0, 8).Select(_ => WindowWord()).ToArray());
+string VectorBits(byte[] bytes) => $"0x{Convert.ToHexString(bytes.Reverse().ToArray())}";
+var signWindow = runtime.GetMethod("SignWindow")!;
+var windowObserved = windowInputs.Select(input =>
+{
+    var bytes = new byte[32];
+    ((Vector256<ulong>)signWindow.Invoke(null, input.Cast<object>().ToArray())!).AsByte().CopyTo(bytes);
+    return bytes;
+}).ToArray();
+// The cases must separate the model from a table chosen by index bit 3 or a swapped pair of tables.
+foreach ((string mutant, int tableBit, bool swapTables) in new[]
+{
+    ("bit 3 table", 3, false), ("swapped tables", 2, true)
+})
+{
+    var agrees = windowInputs.Select((input, index) =>
+    {
+        ulong fill = (long)input[3] < 0 ? ulong.MaxValue : 0;
+        var lanes = input[4..].Select(selector =>
+            (((selector >> tableBit) & 1) == 1) != swapTables ? fill : input[(int)(selector & 3)]);
+        return lanes.SelectMany(BitConverter.GetBytes).SequenceEqual(windowObserved[index]);
+    });
+    if (agrees.All(same => same))
+        throw new InvalidOperationException($"Permutation inputs do not reject the {mutant} mutant");
+}
+uint[] words = Enumerable.Range(0, 8).Select(_ => (uint)WindowWord()).ToArray();
+var wordBytes = new byte[32];
+((Vector256<uint>)runtime.GetMethod("CreateWords")!.Invoke(null, words.Cast<object>().ToArray())!)
+    .AsByte().CopyTo(wordBytes);
+string Invocation(IEnumerable<string> arguments, string result) =>
+    $"(CIL.Safety.invoke Extracted.program 64 0 [{string.Join(", ", arguments)}] CIL.Safety.Memory.empty)" +
+    $".map Prod.snd =\n      .ok [.scalar ({result})]";
+// A single proof is not an anonymous-constructor conjunction, so it stays unwrapped.
+string Conjunction(IEnumerable<string> proofs) =>
+    proofs.Count() == 1 ? $"({proofs.Single()})" : $"⟨{string.Join(", ", proofs)}⟩";
+foreach ((string name, string[] claims) in new[]
+{
+    ("SignWindow", windowInputs.Select((input, index) => Invocation(input.Select(word => $".scalar (.i64 {word})"),
+        $".v256 {VectorBits(windowObserved[index])}")).ToArray()),
+    ("CreateWords",
+        [Invocation(words.Select(word => $".scalar (.i32 {word})"), $".v256 {VectorBits(wordBytes)}")])
+})
+{
+    var output = Path.Combine(root, name);
+    Directory.CreateDirectory(output);
+    var proof = Path.Combine(output, "Proof.lean");
+    File.WriteAllText(proof, $$"""
+        import Extracted
+        import CIL.Safety.Execution
+        namespace ExampleProof
+        /-- Successful observations identify the successful checked execution result. -/
+        private theorem result_of_toOption {error value : Type} {result : Except error value}
+            {expected : value} (observed : result.toOption = some expected) : result = .ok expected := by
+          cases result <;> simp_all [Except.toOption]
+        #print axioms result_of_toOption
+        /-- The host CPU's results on the same arguments. -/
+        theorem correctness :
+            {{string.Join(" ∧\n    ", claims)}} := by
+          exact {{Conjunction(claims.Select(_ => "by apply result_of_toOption; decide +kernel"))}}
+        #print axioms correctness
+        end ExampleProof
+        """);
+    pending.Add((new(selectors[name], proof, output), "x64-v4",
+        () => Console.WriteLine($"PASS {name} matches the host CPU on {claims.Length} inputs")));
+}
+
+// No host here runs AdvSimd, so REV64 is checked against BinaryPrimitives.ReverseEndianness of each lane. The
+// halves are checked against the host's own Load/StoreUnsafe; a destination one byte short faults on the second store.
+var reverseClaims = new[] { (0x0706050403020100UL, 0x0f0e0d0c0b0a0908UL), (WindowWord(), WindowWord()) }
+    .Select(input =>
+    {
+        var bytes = new byte[16];
+        Vector128.Create(BinaryPrimitives.ReverseEndianness(input.Item1),
+            BinaryPrimitives.ReverseEndianness(input.Item2)).AsByte().CopyTo(bytes);
+        return Invocation([$".scalar (.i64 {input.Item1})", $".scalar (.i64 {input.Item2})"],
+            $".v128 {VectorBits(bytes)}");
+    }).ToArray();
+var reverseOutput = Path.Combine(root, "ReverseLimbs");
+Directory.CreateDirectory(reverseOutput);
+var reverseProof = Path.Combine(reverseOutput, "Proof.lean");
+File.WriteAllText(reverseProof, $$"""
+    import Extracted
+    import CIL.Safety.Execution
+    namespace ExampleProof
+    /-- Each 64-bit lane byte-reversed in place, as BinaryPrimitives.ReverseEndianness reverses it. -/
+    theorem correctness :
+        {{string.Join(" ∧\n    ", reverseClaims)}} := by
+      exact ⟨{{string.Join(", ", reverseClaims.Select(_ => "by rfl"))}}⟩
+    #print axioms correctness
+    end ExampleProof
+    """);
+pending.Add((new(selectors["ReverseLimbs"], reverseProof, reverseOutput), "arm64-advsimd",
+    () => Console.WriteLine("PASS ReverseLimbs reverses the bytes of each lane under arm64-advsimd")));
+var halves = new byte[32];
+windowRandom.NextBytes(halves);
+var swappedHalves = new byte[32];
+runtime.GetMethod("SwapHalves")!.CreateDelegate<HalfSwap>()(halves, swappedHalves);
+if (!swappedHalves.SequenceEqual(halves[16..].Concat(halves[..16])))
+    throw new InvalidOperationException("Runtime SwapHalves did not swap the 16-byte halves");
+var halvesOutput = Path.Combine(root, "SwapHalves");
+Directory.CreateDirectory(halvesOutput);
+var halvesProof = Path.Combine(halvesOutput, "Proof.lean");
+File.WriteAllText(halvesProof, $$"""
+    import Extracted
+    import CIL.Safety.Execution
+    namespace ExampleProof
+    /-- The source bytes. -/
+    private def source : List (BitVec 8) := [{{string.Join(", ", halves)}}]
+    /-- A read-only 32-byte source and a zeroed writable destination of `length` bytes. -/
+    private def memory (length : Nat) : CIL.Safety.Memory := { CIL.Safety.Memory.empty with
+      allocations := fun identity => if identity == 0 then some ⟨.callerStack, ⟨32, 1, []⟩, true, [32]⟩
+        else if identity == 1 then some ⟨.callerStack, ⟨length, 1, []⟩, true, [length]⟩ else none
+      cells := fun identity offset => ⟨if identity == 0 then source.getD offset 0 else 0, true⟩
+      views := [⟨0, 0, 32, true, false⟩, ⟨1, 0, length, true, true⟩]
+      nextIdentity := 2 }
+    /-- The method over the source and a destination span of `length` bytes. -/
+    private def run (length : Nat) :=
+      CIL.Safety.invoke Extracted.program 64 0
+        [.bufferSpan ⟨.address ⟨0, 0⟩, 32, 1, false⟩, .bufferSpan ⟨.address ⟨1, 0⟩, length, 1, true⟩]
+        (memory length)
+    /-- The destination holds the host's swapped halves and nothing is returned. -/
+    theorem correctness :
+        (run 32).map (fun result =>
+          ((List.range 32).map fun offset => (result.1.cells 1 offset).1.toNat, result.2)) =
+          .ok ([{{string.Join(", ", swappedHalves)}}], []) := by
+      rfl
+    #print axioms correctness
+    /-- The second store into a 31-byte destination is outside the allocation. -/
+    theorem short_destination_faults :
+        ((run 31).mapError (fun fault => fault.fault)).map Prod.snd =
+          .error (.memory .outsideAllocation (.address ⟨1, 16⟩) 16) := by
+      rfl
+    #print axioms short_destination_faults
+    end ExampleProof
+    """);
+pending.Add((new(selectors["SwapHalves"], halvesProof, halvesOutput), "arm64-advsimd",
+    () => Console.WriteLine("PASS SwapHalves matches the host's halves and faults past a short destination")));
+Flush();
+// Without AdvSimd or AVX-512 VL the reachable calls are rejected before any evidence is written.
+foreach ((string name, string profile, string feature) in new[]
+{
+    ("ReverseLimbs", "x64-v4", "AdvSimd"), ("SignWindow", "x64-v3", "Avx512FVL")
+})
+{
+    var rejectedOutput = Path.Combine(root, $"{name}-{profile}");
+    Directory.CreateDirectory(rejectedOutput);
+    File.Delete(Path.Combine(rejectedOutput, "Extracted.lean"));
+    var rejectedCall = Execute(Extract("extract", assembly, "Examples", selectors[name], rejectedOutput, profile));
+    if (rejectedCall.Code == 0 || File.Exists(Path.Combine(rejectedOutput, "Extracted.lean")) ||
+        !rejectedCall.Output.Contains($"Reachable intrinsic lacks {feature}", StringComparison.Ordinal))
+        throw new InvalidOperationException(
+            $"{name} admitted without {feature} under {profile}: {rejectedCall.Output}");
+    Console.WriteLine($"PASS {name} rejected under {profile}");
+}
+// Forged evidence must not change the table select, the lane reversal, or a transfer's offset form.
+var rejectedEndian = new RejectedEvidence(Path.Combine(root, "RejectedEndian"));
+foreach ((string name, string theorem, string before, string after, string validator, int index) in new[]
+{
+    ("SignWindow", "method0_intrinsics_validated", ".avx512 .permuteVar4x64x2", ".avx512 .ternaryLogic",
+        "ExactIntrinsicsValid", 0),
+    ("ReverseLimbs", "method0_intrinsics_validated", ".advSimd .reverseElement8", ".avx2 .shuffleBytes",
+        "ExactIntrinsicsValid", 1),
+    ("SwapHalves", "method0_unsafe_validated", ".vector128Unsafe true true", ".vector128Unsafe true false",
+        "UnsafeCallsValid", 2),
+    ("SwapHalves", "method0_unsafe_validated", ".memory (.vector128Unsafe false false)", ".memory .load128",
+        "UnsafeCallsValid", 3)
+})
+{
+    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")), theorem);
+    if (!source.Contains(before, StringComparison.Ordinal))
+        throw new InvalidOperationException($"Missing {name} mutation: {before}");
+    var path = Path.Combine(root, "RejectedEndian", $"{name}-{index}.lean");
+    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+    File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
+    rejectedEndian.Add(path, $"PASS forged {name} evidence rejected by {validator}", validator);
+}
+rejectedEndian.Check();
+
 // Runs the compiled example on the host CPU and returns the vector's bytes, lane zero first.
 static byte[] RuntimeShuffle(MethodInfo method, byte[] source, byte[] control)
 {
@@ -476,4 +672,5 @@ partial class Program
 {
     delegate Vector256<byte> WideShuffle(ReadOnlySpan<byte> source, ReadOnlySpan<byte> control);
     delegate Vector128<byte> NarrowShuffle(ReadOnlySpan<byte> source, ReadOnlySpan<byte> control);
+    delegate void HalfSwap(ReadOnlySpan<byte> source, Span<byte> destination);
 }

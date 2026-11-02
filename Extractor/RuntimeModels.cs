@@ -472,6 +472,23 @@ internal static class RuntimeModels
         return null;
     }
 
+    // Vector128.LoadUnsafe<byte> and StoreUnsafe<byte> are Unsafe.Add by the unsigned byte offset, when
+    // present, then the unaligned 16-byte transfer of Unsafe.ReadUnaligned or WriteUnaligned.
+    private static string? Vector128ByteTransfer(string signature)
+    {
+        const string owner = $"{Intrinsics}.Vector128";
+        foreach (var offset in new[] { "false", "true" })
+        {
+            var offsetParameter = offset == "true" ? ",System.UIntPtr" : "";
+            if (signature == $"{Vector(128, "!!0")} {owner}::LoadUnsafe<System.Byte>(!!0&{offsetParameter})")
+                return $".memory (.vector128Unsafe false {offset})";
+            if (signature ==
+                $"System.Void {owner}::StoreUnsafe<System.Byte>({Vector(128, "!!0")},!!0&{offsetParameter})")
+                return $".memory (.vector128Unsafe true {offset})";
+        }
+        return null;
+    }
+
     private static string? Intrinsic(string signature, FeatureProfile profile)
     {
         if (PortableVectorOperations.TryGetValue(signature, out var operation)) return operation;
@@ -504,6 +521,7 @@ internal static class RuntimeModels
         if (signature == $"{V128UInt64} {Intrinsics}.Vector128::CreateScalarUnsafe(System.UInt64)")
             return Finish(".vector .createScalarUnsafe64", 1);
         if (VectorFromByteSpan(signature) is { } load) return load;
+        if (Vector128ByteTransfer(signature) is { } transfer) return transfer;
         foreach (int width in new[] { 128, 256 })
         {
             string ulongVector = Vector(width, "System.UInt64");
@@ -517,6 +535,8 @@ internal static class RuntimeModels
             foreach ((string name, string op) in new[] { ("LessThan", "ltu64"), ("Equals", "eq64") })
                 if (signature == $"{genericVector} {owner}::{name}<System.UInt64>({genericVector},{genericVector})")
                     return Finish($".vector (.{op} {width})", 2);
+            if (signature == $"{genericVector} {owner}::LessThan<System.Int64>({genericVector},{genericVector})")
+                return Finish($".vector (.lt64 {width})", 2);
             if (signature == $"!!0 {owner}::GetElement<System.UInt64>({genericVector},System.Int32)")
                 return Finish($".vector (.extract64 {width})", 2);
             foreach ((string method, string target) in new[] { ("AsByte", "System.Byte"), ("AsUInt32", "System.UInt32"),
@@ -536,6 +556,9 @@ internal static class RuntimeModels
                 return Finish($".vector (.create64 {width})", width / 64);
             if (signature == $"{ulongVector} {owner}::Create(System.UInt64)")
                 return Finish($".vector (.create64 {width})", 1);
+            string uintLanes = string.Join(",", Enumerable.Repeat("System.UInt32", width / 32));
+            if (signature == $"{Vector(width, "System.UInt32")} {owner}::Create({uintLanes})")
+                return Finish($".vector (.create32 {width})", width / 32);
             if (signature == $"{ulongVector} {owner}::CreateScalar(System.UInt64)")
                 return Finish($".vector (.createScalar64 {width})", 1);
             if (signature == $"{Vector(width, "System.UInt32")} {owner}::CreateScalar(System.UInt32)")
@@ -549,6 +572,8 @@ internal static class RuntimeModels
         {
             $"{V128UInt64} {Intrinsics}.Arm.AdvSimd::ExtractVector128({V128UInt64},{V128UInt64},System.Byte)" =>
                 Finish(".advSimd .extract64", 3, Feature.AdvSimd),
+            $"{V128UInt64} {Intrinsics}.Arm.AdvSimd::ReverseElement8({V128UInt64})" =>
+                Finish(".advSimd .reverseElement8", 1, Feature.AdvSimd),
             $"{V128UInt64} {X86}.Sse2::ShiftLeftLogical128BitLane({V128UInt64},System.Byte)" =>
                 Finish(".sse .shiftLeftBytes", 2, Feature.Sse2),
             $"{V128Byte} {X86}.Ssse3::AlignRight({V128Byte},{V128Byte},System.Byte)" =>
@@ -584,6 +609,8 @@ internal static class RuntimeModels
                 Finish(".avx512 .alignRight64", 3, Feature.Avx512FVL),
             $"{V256UInt64} {Avx512FVL}::TernaryLogic({V256UInt64},{V256UInt64},{V256UInt64},System.Byte)" =>
                 Finish(".avx512 .ternaryLogic", 4, Feature.Avx512FVL),
+            $"{V256UInt64} {Avx512FVL}::PermuteVar4x64x2({V256UInt64},{V256UInt64},{V256UInt64})" =>
+                Finish(".avx512 .permuteVar4x64x2", 3, Feature.Avx512FVL),
             $"{V256UInt64} {Avx512FVL}::CompareLessThan({V256UInt64},{V256UInt64})" =>
                 Finish(".avx512 .ltu64", 2, Feature.Avx512FVL),
             $"{V256UInt64} {Avx512FVL}::CompareGreaterThan({V256UInt64},{V256UInt64})" =>
