@@ -65,7 +65,9 @@ static constructors. They do enable `ldsfld` of the type's static readonly struc
 fields whose value its static constructor fixes (see
 [static readonly values](OPCODES.md#static-readonly-values)); each such field is
 recorded in `staticValues` and reported as a caller assumption that it keeps the
-value its static constructor stored. The generated Lean source and identity
+value its static constructor stored. A field whose value extraction cannot compute is
+also listed in `opaqueStaticValues` and reported as `Unknown static value`; its loads
+read the caller's static binding. The generated Lean source and identity
 manifest retain the assumptions; `check` reuses them and rejects conflicting
 explicit assumptions. Verification binds the manifest hash, prints the
 initialization preconditions with the theorem and copies both lists into
