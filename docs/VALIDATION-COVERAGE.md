@@ -60,6 +60,10 @@ seeded span pairs each, one of them a 32-byte reversal mask. Both short-span cal
 `ArgumentOutOfRangeException` in the runtime and the model. The test fails if its inputs do not
 separate the model from shuffles that ignore bit 7 or cross 128-bit halves. Each shuffle is rejected
 under a profile without its feature, and forged load widths or substituted intrinsics are rejected.
+`Tests/ExactIntrinsics.cs` compares `Sse2.Multiply` on `Vector128.Create` lanes reinterpreted as `uint` with the host CPU on twelve argument sets.
+Two of them are chosen with set high halves and both 32-bit extremes.
+The test fails if its inputs do not separate the model from odd lanes, a signed product or a full 64-bit product.
+The call is rejected under `scalar`, and forged evidence substituting the 256-bit multiply or another exact SSE call is rejected.
 `Tests/ExactIntrinsics.cs` also runs a portable AES hash round on the host CPU's `Aes.Encrypt`
 for eight seeded blocks and proves that its extraction returns the same vectors under a custom x64 profile
 declaring `aes` and under a custom ARM64 profile declaring `armAes`, where it uses AESE and AESMC. Every

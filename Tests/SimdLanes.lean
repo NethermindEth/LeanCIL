@@ -13,6 +13,8 @@ The AES round is pinned on the FIPS-197 example cipher, which mutants of each ro
 REV64, the two-table quadword permutation, signed lane comparison and 32-bit lane creation are
 pinned on vectors that a whole-vector reversal, a bit-3 table select, an unsigned comparison
 and a reversed lane order each fail.
+The 128-bit even-lane multiply is pinned on vectors that odd, signed and full products fail.
+Its lane products are proved exact and equal to those of the 256-bit multiply.
 -/
 
 open CIL CIL.Vector
@@ -695,5 +697,59 @@ theorem create32_lane_order :
       some (.v128 (pack128 0x0000000100000000 0x0000000300000002)) := by
   decide +kernel
 #print axioms create32_lane_order
+
+/-- Left operand: the largest 32-bit low half in lane 0, a small one in lane 1, junk above both. -/
+private def multiplyLeft : V128 := pack128 0xFFFFFFFFFFFFFFFF 0x0000000300000002
+/-- Right operand: the same shape as `multiplyLeft` with different junk in the high halves. -/
+private def multiplyRight : V128 := pack128 0x00000005FFFFFFFF 0x0000000700000004
+
+/-- PMULUDQ over the odd 32-bit lanes instead of the even ones. -/
+private def multiplyOdd32 (x y : V128) : V128 :=
+  pack128 ((lane32 x 1).zeroExtend 64 * (lane32 y 1).zeroExtend 64)
+    ((lane32 x 3).zeroExtend 64 * (lane32 y 3).zeroExtend 64)
+
+/-- PMULDQ: the even 32-bit lanes sign-extended rather than zero-extended. -/
+private def multiplySigned32 (x y : V128) : V128 :=
+  pack128 ((lane32 x 0).signExtend 64 * (lane32 y 0).signExtend 64)
+    ((lane32 x 2).signExtend 64 * (lane32 y 2).signExtend 64)
+
+/-- `Sse2.Multiply` multiplies the unsigned low 32 bits of each lane into the whole lane.
+    Odd lanes, a signed product and a wrapped 64-bit product each give another vector. -/
+theorem sseMultiplyEven32_lanes :
+    evalIntrinsic (.sse .multiplyEven32) [.v128 multiplyLeft, .v128 multiplyRight] =
+      some (.v128 (pack128 0xFFFFFFFE00000001 8)) ∧
+    multiplyOdd32 multiplyLeft multiplyRight ≠ sseMultiplyEven32 multiplyLeft multiplyRight ∧
+    multiplySigned32 multiplyLeft multiplyRight ≠ sseMultiplyEven32 multiplyLeft multiplyRight ∧
+    zip128 (· * ·) multiplyLeft multiplyRight ≠ sseMultiplyEven32 multiplyLeft multiplyRight := by
+  decide +kernel
+#print axioms sseMultiplyEven32_lanes
+
+/-- SSE2 even-lane products on packed lanes. -/
+example (a0 a1 b0 b1 : W64) :
+    evalIntrinsic (.sse .multiplyEven32) [.v128 (pack128 a0 a1), .v128 (pack128 b0 b1)] =
+      some (.v128 (pack128 ((a0.setWidth 32).zeroExtend 64 * (b0.setWidth 32).zeroExtend 64)
+        ((a1.setWidth 32).zeroExtend 64 * (b1.setWidth 32).zeroExtend 64))) := by
+  rw [intrinsic_sseMultiplyEven32, sseMultiplyEven32_pack128]
+
+/-- Lane `i` of the 128-bit even-lane product is the natural product of the low halves.
+    A dot product over operands below 2^32 therefore loses no bit in the multiply. -/
+theorem sse_even_product_exact (x y : V128) {i : Nat} (lane : i < 2) :
+    (lane64 (sseMultiplyEven32 x y) i).toNat =
+      (lane64 x i).toNat % 2 ^ 32 * ((lane64 y i).toNat % 2 ^ 32) := by
+  rw [lane64_sseMultiplyEven32 x y lane, toNat_even_product]
+#print axioms sse_even_product_exact
+
+/-- Each 128-bit lane product equals the 256-bit one on the same lane values.
+    A kernel may switch between `Sse2.Multiply` and `Avx2.Multiply` without changing a lane. -/
+theorem sseMultiplyEven32_agrees_avx2 (a0 a1 a2 a3 b0 b1 b2 b3 : W64) :
+    lane64 (sseMultiplyEven32 (pack128 a0 a1) (pack128 b0 b1)) 0 =
+        lane64 (multiplyEven32 (pack256 a0 a1 a2 a3) (pack256 b0 b1 b2 b3)) 0 ∧
+      lane64 (sseMultiplyEven32 (pack128 a0 a1) (pack128 b0 b1)) 1 =
+        lane64 (multiplyEven32 (pack256 a0 a1 a2 a3) (pack256 b0 b1 b2 b3)) 1 := by
+  rw [lane64_sseMultiplyEven32 (i := 0) _ _ (by decide),
+    lane64_sseMultiplyEven32 (i := 1) _ _ (by decide),
+    lane64_multiplyEven32 (i := 0) _ _ (by decide), lane64_multiplyEven32 (i := 1) _ _ (by decide)]
+  simp only [lane128_0, lane128_1, lane256_0, lane256_1, and_self]
+#print axioms sseMultiplyEven32_agrees_avx2
 
 end Tests.SimdLanes

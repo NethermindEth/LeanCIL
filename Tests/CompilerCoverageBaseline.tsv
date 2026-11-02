@@ -532,6 +532,7 @@ Examples:System.Runtime.Intrinsics.Vector128`1<System.Byte> Examples.ValueBitCas
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt32> Examples.ValueBitCasts::To128UInt32(Examples.ValueBitCasts/Pair)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64> Examples.AggregateArrays::ReadVector(System.Runtime.Intrinsics.Vector128`1<System.UInt64>[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64> Examples.AggregateSpans::ReadVector(System.ReadOnlySpan`1<System.Runtime.Intrinsics.Vector128`1<System.UInt64>>)	A	A	A	A	A	A	A	A
+Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64> Examples.DivisionIntrinsics::MultiplyEven128(System.UInt64,System.UInt64,System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64> Examples.DivisionIntrinsics::ReverseLimbs(System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64> Examples.DivisionIntrinsics::UnsafeReturn(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64> Examples.IndirectValues::Vector(System.Runtime.Intrinsics.Vector128`1<System.UInt64>)	A	A	A	A	A	A	A	A
