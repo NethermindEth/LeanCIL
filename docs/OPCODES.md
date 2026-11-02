@@ -76,7 +76,7 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `newobj` | Partial | Same-assembly constructors of validated reference-free structs: zero-initialize caller-owned storage, invoke the constructor with managed-reference `this`, then return a checked value snapshot. Also admitted `Span<T>` and `ReadOnlySpan<T>` constructors over checked existing storage for supported integer, enum, aggregate and integer-vector elements, from a single reference, `(void*, int)`, an array, or `(array, start, length)`. Class construction and unsupported generic constructors or cyclic dependencies are rejected. |
 | `ldtoken` | Partial | A type token as an operand of a decided closed type test, which emits a no-op, or a static data field token for `RuntimeHelpers.CreateSpan<T>`, which emits the field's address (see below). Other tokens are rejected. |
 | `throw` | Partial | Exact `throw new E(...)` with `ldstr`/`ldnull` arguments raises a located `thrown "E"` fault. Adjacent `ldnull; throw` raises `System.NullReferenceException`. Other throws are rejected. |
-| `constrained.`, `callvirt` | Partial | Adjacent prefix and call resolving to a concrete same-assembly struct implementation; see [constrained struct calls](#constrained-struct-calls). No boxing or general virtual dispatch. |
+| `constrained.`, `callvirt` | Partial | Adjacent prefix and `callvirt` (instance slot) or `call` (static interface slot) resolving to a concrete same-assembly struct implementation; see [constrained struct calls](#constrained-struct-calls). No boxing or general virtual dispatch. |
 | `ldftn` | Partial | Exact static same-assembly managed method addresses, retaining scoped identity and closed signature. Callable values have no numeric address representation. See typed indirect dispatch below. |
 | `calli` | Partial | Static default-managed signatures over admitted integer/enum, reference-free aggregate and integer-vector values, and managed references to these types. The pointer must identify an authenticated catalog entry with the exact signature. Ordinary indirect calls select a forward target; tail calls permit cycles. Supplied immutable native tables also admit checked byte offsets and `ldind.i` with authenticated target provenance. No unmanaged conventions or arbitrary numeric targets. |
 | `tail.` | Partial | Adjacent `tail. call ret` or `tail. calli ret` with exactly its arguments and optional function pointer on the stack and the same return type. Retires caller storage before entering the callee and revalidates argument lifetimes. Admitted same-assembly transfers may form cycles; virtual, imported and intrinsic tail calls remain unsupported. |
@@ -254,11 +254,19 @@ Closed generic helpers can use a directly implemented closed interface constrain
 The original managed-reference receiver is passed to the resolved implementation, so mutations
 remain visible to the caller without boxing.
 
+A `constrained. T; call` pair dispatches a static abstract interface member, such as an operation
+or flag struct selected by a type argument. The slot must be static, abstract and virtual on a
+same-assembly interface that the non-generic struct `T` implements directly, and the target must
+be a static method of `T`: its explicit `MethodImpl` override, or else the unique public static
+method with the slot's name and signature. The call passes no receiver. `callvirt` never
+dispatches a static slot and `call` never dispatches an instance slot.
+
 The Lean certificate independently resolves serialized type, interface and method metadata and
 checks the selected method token, signature, closed owner arguments and argument count.
 A branch cannot bypass the prefix.
 Reference receivers, boxing fallbacks, inherited or default-interface dispatch, generic methods
-on interfaces, open interface constraints and ordinary unconstrained virtual calls remain unsupported.
+on interfaces (instance or static), static slots on generic struct receivers, open interface
+constraints and ordinary unconstrained virtual calls remain unsupported.
 
 ### Static span tables
 
@@ -421,7 +429,10 @@ equality or observation of unspecified lanes.
 
 Reachable same-assembly generic methods are specialized for supported primitive, enum, reference-free aggregate and vector type arguments. This substitutes types in the original CIL parameters, locals, type operands and nested generic calls; it does not replace method bodies with functional summaries. Repeated uses share a specialization, while different type arguments retain separate bodies. Ordinary calls retain an acyclic order; tail transfers may form cycles. Extraction rejects more than 256 distinct specializations.
 
-Select a non-generic entry method whose compiled calls supply the concrete type arguments.
+Select a non-generic entry method whose compiled calls supply the concrete type arguments, or
+close a generic entry with `--type-argument`: a primitive integer, or a non-generic value type
+of the selected module that specialization then validates like any other argument. Typed
+contract imports admit only primitive integer arguments, since they bind across assemblies.
 Static calls on closed same-assembly generic declaring types support nested owners and combined
 owner/method type arguments. Closed same-assembly sequential generic structs admit reference-free
 storage, field accesses, direct instance methods and constructors after substituting their

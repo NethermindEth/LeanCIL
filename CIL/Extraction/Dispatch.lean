@@ -44,9 +44,10 @@ private def unique : List α → Option α
   | [value] => some value
   | _ => none
 
-/-- The signature must agree before a method can implement the declared slot. -/
+/-- The signature, including whether a receiver is passed, must agree before a method can
+    implement the declared slot. -/
 private def signatureMatches (method : DispatchMethod) (site : CallSite) : Bool :=
-  method.hasThis && !method.explicitThis && method.callingConvention == 0 &&
+  method.hasThis == site.hasThis && !method.explicitThis && method.callingConvention == 0 &&
     method.genericArity == 0 && method.returnType == site.returnType &&
     (method.returnType != .void) == site.returnsValue &&
     method.parameters == site.parameterTypes && method.parameters.length == site.parameterCount
@@ -85,13 +86,14 @@ private def slotArgumentsValid (site : CallSite) : Bool :=
       arguments.length == site.ownerArgumentCount
   | none => false
 
-/-- Resolve a concrete value-type method or a directly implemented interface slot.
+/-- Resolve a concrete value-type method or a directly implemented interface slot. A static
+    slot resolves only through an interface to a static implementation on the receiver.
     Explicit overrides take precedence; missing, ambiguous and boxing cases fail.
     This list-based specification states the equivalence of indexed production resolution. -/
 def resolveConstrained (types : List DispatchType) (receiver : TypeExpr) (site : CallSite) :
     Option DispatchMethod := do
   let .aggregate .. := receiver | none
-  if !site.hasThis || !slotArgumentsValid site then
+  if !slotArgumentsValid site then
     none else pure ()
   let .managed token := site.target | none
   let concrete ← unique (types.filter fun type => type.identity == receiver)
@@ -99,7 +101,8 @@ def resolveConstrained (types : List DispatchType) (receiver : TypeExpr) (site :
   let declaring ← unique (types.filter fun type => type.identity == declaringIdentity receiver site)
   let slot ← unique (declaring.methods.filter fun method => method.token == token)
   if slot.name != site.name || !signatureMatches slot site then none else pure ()
-  let target ← if receiver == declaring.identity then some slot else do
+  let target ← if receiver == declaring.identity then
+      (if site.hasThis then some slot else none) else do
     if !declaring.interfaceType || !slot.isAbstract || !slot.isVirtual ||
         !concrete.interfaces.contains declaring.identity then none else pure ()
     let explicit := concrete.methods.filter fun method =>
@@ -249,7 +252,7 @@ theorem DispatchIndex.findType_ofTypes (types : List DispatchType) (identity : T
 def DispatchIndex.resolve (index : DispatchIndex) (receiver : TypeExpr) (site : CallSite) :
     Option DispatchMethod := do
   let .aggregate .. := receiver | none
-  if !site.hasThis || !slotArgumentsValid site then
+  if !slotArgumentsValid site then
     none else pure ()
   let .managed token := site.target | none
   let concrete ← index.findType receiver
@@ -257,7 +260,8 @@ def DispatchIndex.resolve (index : DispatchIndex) (receiver : TypeExpr) (site : 
   let declaring ← index.findType (declaringIdentity receiver site)
   let slot ← unique (declaring.tokens.getD token [])
   if slot.name != site.name || !signatureMatches slot site then none else pure ()
-  let target ← if receiver == declaring.raw.identity then some slot else do
+  let target ← if receiver == declaring.raw.identity then
+      (if site.hasThis then some slot else none) else do
     if !declaring.raw.interfaceType || !slot.isAbstract || !slot.isVirtual ||
         !concrete.raw.interfaces.contains declaring.raw.identity then none else pure ()
     let explicit := (concrete.overrides.getD token []).filter fun method =>

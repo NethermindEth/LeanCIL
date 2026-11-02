@@ -141,7 +141,7 @@ internal static partial class Program
                 else if (args[index] == "--type-argument")
                 {
                     if (++index == args.Length || string.IsNullOrWhiteSpace(args[index]) || args[index].StartsWith("--", StringComparison.Ordinal))
-                        throw new ArgumentException("--type-argument requires a closed primitive full type name.");
+                        throw new ArgumentException("--type-argument requires a closed full type name.");
                     entryTypeArguments.Add(args[index]);
                 }
                 else if (args[index] == "--assume-initialized")

@@ -9,7 +9,7 @@ partial class Program
     // Assembly overrides the batch assembly for fixtures generated from a modified copy.
     sealed record GeneratedVerification(string Entry, string Proof, string Output,
         string Theorem = "ExampleProof.correctness", string? Assembly = null, string? Profile = null,
-        string[]? InitializedTypes = null);
+        string[]? InitializedTypes = null, string[]? TypeArguments = null);
 
     // Per-fixture checks are dominated by Lean startup; passes are reported only after the whole batch is certified.
     sealed class GeneratedQueue(Program verification, string assembly, string identity = "Examples")
@@ -30,7 +30,7 @@ partial class Program
     static void ExtractGeneratedBatch(string mode, string identity, IReadOnlyList<GeneratedVerification> requests,
         string profile) => ExtractBatch(mode, identity, requests.Select(request =>
             new GeneratedExtraction(request.Assembly!, request.Entry, request.Output,
-                request.Profile ?? profile, request.InitializedTypes)));
+                request.Profile ?? profile, request.InitializedTypes, request.TypeArguments)));
 
     // More Lean processes add memory pressure without shortening a typical fixture batch.
     const int MaxBatchShards = 8;

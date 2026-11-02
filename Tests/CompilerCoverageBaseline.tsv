@@ -114,6 +114,7 @@ Examples:System.Boolean Examples.Capabilities::Crc64()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.Capabilities::Rdm64()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.Capabilities::Vbmi2()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.DivisionIntrinsics::UnsafeEquals(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.IStepFlag::get_IsActive()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.IntegerOperations::Greater32(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.IntegerOperations::Greater64(System.Int64,System.Int64)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.Loops::AllZero(System.ReadOnlySpan`1<System.UInt32>)	A	A	A	A	A	A	A	A
@@ -134,6 +135,8 @@ Examples:System.Boolean Examples.SpanCopies::TryCopyReadOnly(System.ReadOnlySpan
 Examples:System.Boolean Examples.StaticScalars::ReadBoolean()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.StaticValues::DifferentAddresses()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.StaticValues::SameAddress()	B	B	B	B	B	B	B	B
+Examples:System.Boolean Examples.StepOff::get_IsActive()	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.StepOn::get_IsActive()	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.UnsafeReferences::AreSame(System.Byte&,System.Byte&)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.UnsafeReferences::Greater(System.Byte&,System.Byte&)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.UnsafeReferences::Less(System.Byte&,System.Byte&)	A	A	A	A	A	A	A	A
@@ -669,6 +672,7 @@ Examples:System.UInt32 SelectorExamples.One.Collision::Add(System.UInt32,System.
 Examples:System.UInt32& Examples.UnsafeLayouts::Add7int(System.UInt32&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32& Examples.UnsafeLayouts::Add7nint(System.UInt32&,System.IntPtr)	A	A	A	A	A	A	A	A
 Examples:System.UInt32& Examples.UnsafeLayouts::Add7nuint(System.UInt32&,System.UIntPtr)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.AddStep::Apply(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Arguments::Struct(Examples.Packet)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Arithmetic::Alias(System.UInt64&,System.UInt64&)	A	A	A	A	A	A	A	A
@@ -740,6 +744,7 @@ Examples:System.UInt64 Examples.GenericOwners::NestedSpanFirst(System.ReadOnlySp
 Examples:System.UInt64 Examples.GenericOwners::OwnerSpanFirst(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.GenericOwners::SpanFirst(System.ReadOnlySpan`1<System.UInt64>&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.GenericOwners::SpanSecond(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.IBinaryStep::Apply(System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.IInWord`1::Sum(System.ReadOnlySpan`1<System.UInt64>& modreq(System.Runtime.InteropServices.InAttribute))	N	N	N	N	N	N	N	N
 Examples:System.UInt64 Examples.InParameters::Constrained(Examples.InWord&,Examples.InWord&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.InParameters::ConstrainedSum(Examples.InWord&,System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
@@ -789,6 +794,9 @@ Examples:System.UInt64 Examples.SpanReferences::Second(System.ReadOnlySpan`1<Sys
 Examples:System.UInt64 Examples.SpanReferences::Word(System.ReadOnlySpan`1<System.UInt64>&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanTables::First()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SpanTables::Power(System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.StaticInterfaces::AddCounted(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.StaticInterfaces::Step(System.UInt64,System.UInt64)	N	N	N	N	N	N	N	N
+Examples:System.UInt64 Examples.StaticInterfaces::XorPlain(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.StaticScalars::ReadLong()	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.StaticValues::Read(Examples.Word256&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.StaticValues::ReadAddress()	B	B	B	B	B	B	B	B
@@ -811,6 +819,7 @@ Examples:System.UInt64 Examples.UnsafeReferences::Read(Examples.FourLimbs&)	A	A	
 Examples:System.UInt64 Examples.UnsafeReferences::Store(Examples.FourLimbs&,System.UInt64,System.UInt64,System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.WideProduct::BigMul(System.UInt64,System.UInt64,System.UInt64&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.WideProduct::UnsignedBigMul32(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.XorStep::Examples.IBinaryStep.Apply(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 SelectorExamples.One.Collision::Add(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 SelectorExamples.Two.Collision::Add(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64& Examples.Arithmetic::Escape()	A	A	A	A	A	A	A	A

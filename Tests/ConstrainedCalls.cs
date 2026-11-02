@@ -178,9 +178,58 @@ foreach (var (name, selector, claim) in new[]
     evidence.Add(proof, "PASS in-modifier reference parameter: " + name);
 }
 
+// Static interface slots dispatch through the closed operation and flag structs, as the runtime does.
+var staticInterfaces = System.Reflection.Assembly.Load(File.ReadAllBytes(assembly))
+    .GetType("Examples.StaticInterfaces")!;
+foreach (var name in new[] { "AddCounted", "XorPlain" })
+{
+    var output = Path.Combine(root, "Static-" + name);
+    Run(["dotnet", ExtractorPath, "extract", assembly, $"StaticInterfaces::{name}(ulong,ulong)", output]);
+    var claims = new[] { (0UL, 0UL), (5UL, 7UL), (ulong.MaxValue, 1UL), (1UL << 63, ulong.MaxValue) }
+        .Select(input => (input,
+            result: (ulong)staticInterfaces.GetMethod(name)!.Invoke(null, [input.Item1, input.Item2])!))
+        .Select(pair => $"(CIL.Safety.invoke Extracted.program 32 0 [.scalar (.i64 {pair.input.Item1}), " +
+            $".scalar (.i64 {pair.input.Item2})] CIL.Safety.Memory.empty).map Prod.snd = " +
+            $".ok [.scalar (.i64 {pair.result})]").ToArray();
+    var proof = Path.Combine(root, "Static-" + name + ".lean");
+    File.WriteAllText(proof, File.ReadAllText(Path.Combine(output, "Extracted.lean")) +
+        "\ntheorem static_result :\n    " + string.Join(" ∧\n    ", claims) +
+        " :=\n  ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\n#print axioms static_result\n");
+    evidence.Add(proof, "PASS static interface dispatch: " + name);
+}
+
 AddTailCallFixtures(assembly, root, evidence, rejected);
 evidence.Check();
 rejected.Check();
+
+// A static slot needs `call` and a unique static implementation on the receiver.
+foreach (var (mutation, marker) in new[]
+{
+    ("static-callvirt", "Unsupported constrained method slot"),
+    ("static-implementation", "has no unique struct implementation")
+})
+{
+    var dll = Path.Combine(root, mutation + ".dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        var step = module.GetType("Examples.StaticInterfaces").Methods.Single(method => method.Name == "Step");
+        var flag = step.Body.Instructions.First(instruction => instruction.OpCode.Code == Code.Constrained).Next;
+        if (mutation == "static-callvirt") flag.OpCode = OpCodes.Callvirt;
+        else
+        {
+            // Roslyn records even an implicit static implementation as an explicit override.
+            var getter = module.GetType("Examples.StepOn").Methods.Single(method => method.Name == "get_IsActive");
+            getter.Overrides.Clear();
+            getter.Name = "get_Inactive";
+        }
+        module.Write(dll);
+    }
+    var staticRejection = Execute(["dotnet", ExtractorPath, "extract", dll,
+        "StaticInterfaces::AddCounted(ulong,ulong)", Path.Combine(root, "Reject-" + mutation)]);
+    if (staticRejection.Code == 0 || !staticRejection.Output.Contains(marker, StringComparison.Ordinal))
+        throw new Exception("Incorrect static constrained rejection: " + mutation + "\n" + staticRejection.Output);
+    Console.WriteLine("PASS static constrained extraction rejection: " + mutation);
+}
 
 foreach (var (mutation, marker) in new[]
 {
