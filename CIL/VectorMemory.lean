@@ -160,6 +160,10 @@ inductive MemoryOp where
   | divRemOut (width : Nat)
   | copyBlock (alignment : Nat) | initBlock (alignment : Nat)
   | load128 | load256 | load512 | store128 | store256 | store512 | init256
+  /-- `Vector128.LoadUnsafe` or `StoreUnsafe` on bytes: an unsigned native byte offset, when
+      present, displaces the reference as `Unsafe.Add` does, then sixteen bytes move as in
+      `load128` or `store128`. The store takes its vector below the reference. -/
+  | vector128Unsafe (store offset : Bool)
   | asRef | add (sizeBytes : Nat) (signed : Bool)
   /-- The target-minus-origin byte displacement within one live allocation. -/
   | byteOffset
@@ -204,6 +208,7 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .marshalRead _ tryRead => if tryRead then 2 else 1
   | .marshalWrite .. => 2
   | .pointerTransfer _ _ store => if store then 2 else 1
+  | .vector128Unsafe store offset => (if store then 2 else 1) + (if offset then 1 else 0)
   | .bigMul64 _ | .divRemOut _ | .copyBlock _ | .initBlock _ => 3
   | .spanSlice explicitLength => if explicitLength then 3 else 2
   | .spanFromReference .. | .byteOffset => 2
@@ -251,6 +256,17 @@ def evalMemory (op : MemoryOp) (stack : List Value) (memory : Memory) :
   | .store256, .v256 bits :: .object base :: rest =>
     return (← write256 memory (.byte base) bits, rest)
   | .init256, .ref address :: rest => return (← write256 memory address 0, rest)
+  -- `Vector128.LoadUnsafe` and `StoreUnsafe`, the offset in bytes above the reference.
+  | .vector128Unsafe false false, .ref address :: rest =>
+    return (memory, (← read128 memory address) :: rest)
+  | .vector128Unsafe false true, offset :: .ref address :: rest =>
+    let moved ← unsafeAdd 1 (← offsetValue false offset) address
+    return (memory, (← read128 memory moved) :: rest)
+  | .vector128Unsafe true false, .ref address :: .v128 bits :: rest =>
+    return (← write128 memory address bits, rest)
+  | .vector128Unsafe true true, offset :: .ref address :: .v128 bits :: rest =>
+    let moved ← unsafeAdd 1 (← offsetValue false offset) address
+    return (← write128 memory moved bits, rest)
   | .init256, .object base :: rest => return (← write256 memory (.byte base) 0, rest)
   -- `Unsafe` reinterpretation, offsets and skipped initialization.
   | .asRef, v :: rest => return (memory, (← unsafeAsRef v) :: rest)

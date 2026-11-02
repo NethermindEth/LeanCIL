@@ -20,6 +20,7 @@ private theorem bind_ite {α β : Type} (c : Prop) [Decidable c] (a b : Executio
 local macro "memory_step_proof" : tactic => `(tactic| (
   simp only [step, staticInstruction, memoryInstruction, spanFillInstruction, spanCopyInstruction,
     otherMemoryInstruction, wideArithmeticInstruction, referenceAddInstruction,
+    vector128UnsafeInstruction,
     displaceReference, observerCount,
     CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
     Bool.or_false, Bool.false_eq_true, ite_false, ite_true, CIL.offsetValue, cil_guard, bind_ite,
@@ -220,6 +221,79 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 @[cil_step high] theorem step_memory_init256_eq (r : ManagedReference) (rest : List Value) :
     step body (.memory .init256) pc args frame (.reference r :: rest) memory = do
       let stored ← storeValue memory r (.v256 0)
+      return .next (pc + 1) rest frame stored := by
+  memory_step_proof
+
+-- `Vector128.LoadUnsafe` and `StoreUnsafe` on bytes, without and with a `nuint` byte offset.
+@[cil_step high] theorem step_memory_vector128Load_eq (r : ManagedReference) (rest : List Value) :
+    step body (.memory (.vector128Unsafe false false)) pc args frame (.reference r :: rest)
+      memory = do
+      let value ← loadValue memory r 16
+      return .next (pc + 1) (.scalar value :: rest) frame memory := by
+  memory_step_proof
+
+@[cil_step high] theorem step_memory_vector128Load_readOnly_eq (r : ManagedReference)
+    (rest : List Value) :
+    step body (.memory (.vector128Unsafe false false)) pc args frame
+      (.readOnlyReference r :: rest) memory = do
+      let value ← loadValue memory r 16
+      return .next (pc + 1) (.scalar value :: rest) frame memory := by
+  memory_step_proof
+
+@[cil_step high] theorem step_memory_vector128LoadAt_eq (offset : CIL.W64) (r : ManagedReference)
+    (rest : List Value) :
+    step body (.memory (.vector128Unsafe false true)) pc args frame
+      (.scalar (.i64 offset) :: .reference r :: rest) memory = do
+      let address ← referenceAt r
+      let moved ← checkedAt r 0 (add memory address 1 (BitVec.ofInt 64 (offset.toNat : Int)))
+      let value ← loadValue memory (.address moved) 16
+      return .next (pc + 1) (.scalar value :: rest) frame memory := by
+  memory_step_proof
+
+@[cil_step high] theorem step_memory_vector128LoadAt_readOnly_eq (offset : CIL.W64)
+    (r : ManagedReference) (rest : List Value) :
+    step body (.memory (.vector128Unsafe false true)) pc args frame
+      (.scalar (.i64 offset) :: .readOnlyReference r :: rest) memory = do
+      let address ← referenceAt r
+      let moved ← checkedAt r 0 (add memory address 1 (BitVec.ofInt 64 (offset.toNat : Int)))
+      let value ← loadValue memory (.address moved) 16
+      return .next (pc + 1) (.scalar value :: rest) frame memory := by
+  memory_step_proof
+
+@[cil_step high] theorem step_memory_vector128Store_eq (bits : BitVec 128) (r : ManagedReference)
+    (rest : List Value) :
+    step body (.memory (.vector128Unsafe true false)) pc args frame
+      (.reference r :: .scalar (.v128 bits) :: rest) memory = do
+      let stored ← storeValue memory r (.v128 bits)
+      return .next (pc + 1) rest frame stored := by
+  memory_step_proof
+
+@[cil_step high] theorem step_memory_vector128Store_snapshot_eq (bytes : List (BitVec 8 × Bool))
+    (r : ManagedReference) (rest : List Value) :
+    step body (.memory (.vector128Unsafe true false)) pc args frame
+      (.reference r :: .scalar (.snapshot .vector128 bytes) :: rest) memory = do
+      let stored ← storeValue memory r (.snapshot .vector128 bytes)
+      return .next (pc + 1) rest frame stored := by
+  memory_step_proof
+
+@[cil_step high] theorem step_memory_vector128StoreAt_eq (offset : CIL.W64) (bits : BitVec 128)
+    (r : ManagedReference) (rest : List Value) :
+    step body (.memory (.vector128Unsafe true true)) pc args frame
+      (.scalar (.i64 offset) :: .reference r :: .scalar (.v128 bits) :: rest) memory = do
+      let address ← referenceAt r
+      let moved ← checkedAt r 0 (add memory address 1 (BitVec.ofInt 64 (offset.toNat : Int)))
+      let stored ← storeValue memory (.address moved) (.v128 bits)
+      return .next (pc + 1) rest frame stored := by
+  memory_step_proof
+
+@[cil_step high] theorem step_memory_vector128StoreAt_snapshot_eq (offset : CIL.W64)
+    (bytes : List (BitVec 8 × Bool)) (r : ManagedReference) (rest : List Value) :
+    step body (.memory (.vector128Unsafe true true)) pc args frame
+      (.scalar (.i64 offset) :: .reference r :: .scalar (.snapshot .vector128 bytes) :: rest)
+      memory = do
+      let address ← referenceAt r
+      let moved ← checkedAt r 0 (add memory address 1 (BitVec.ofInt 64 (offset.toNat : Int)))
+      let stored ← storeValue memory (.address moved) (.snapshot .vector128 bytes)
       return .next (pc + 1) rest frame stored := by
   memory_step_proof
 
@@ -483,6 +557,14 @@ end MemoryEquations
 #print axioms step_memory_store512_eq
 #print axioms step_memory_store512_snapshot_eq
 #print axioms step_memory_init256_eq
+#print axioms step_memory_vector128Load_eq
+#print axioms step_memory_vector128Load_readOnly_eq
+#print axioms step_memory_vector128LoadAt_eq
+#print axioms step_memory_vector128LoadAt_readOnly_eq
+#print axioms step_memory_vector128Store_eq
+#print axioms step_memory_vector128Store_snapshot_eq
+#print axioms step_memory_vector128StoreAt_eq
+#print axioms step_memory_vector128StoreAt_snapshot_eq
 #print axioms step_memory_asRef_eq
 #print axioms step_memory_add_signed_i32_eq
 #print axioms step_memory_add_signed_i64_eq

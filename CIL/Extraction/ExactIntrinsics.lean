@@ -128,7 +128,19 @@ private def exactSignatures : List (String × String × String × Intrinsic × N
     "System.Runtime.Intrinsics.Vector128`1<System.Byte> \
       System.Runtime.Intrinsics.Arm.Aes::MixColumns(\
       System.Runtime.Intrinsics.Vector128`1<System.Byte>)",
-    .armAes .mixColumns, 1)]
+    .armAes .mixColumns, 1),
+  ("System.Runtime.Intrinsics.Arm.AdvSimd", "ReverseElement8",
+    "System.Runtime.Intrinsics.Vector128`1<System.UInt64> \
+      System.Runtime.Intrinsics.Arm.AdvSimd::ReverseElement8(\
+      System.Runtime.Intrinsics.Vector128`1<System.UInt64>)",
+    .advSimd .reverseElement8, 1),
+  ("System.Runtime.Intrinsics.X86.Avx512F/VL", "PermuteVar4x64x2",
+    "System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
+      System.Runtime.Intrinsics.X86.Avx512F/VL::PermuteVar4x64x2(\
+      System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
+      System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
+      System.Runtime.Intrinsics.Vector256`1<System.UInt64>)",
+    .avx512 .permuteVar4x64x2, 3)]
 
 /-- `Vector{width}<ulong>` with exact scopes. -/
 private def ulongVector (width : String) : TypeExpr :=
@@ -159,6 +171,9 @@ private def exactCallTypes : Intrinsic → Option (TypeExpr × List TypeExpr)
   | .sse .shuffleBytes | .aes .encrypt | .armAes .encrypt =>
     some (byteVector "128", [byteVector "128", byteVector "128"])
   | .armAes .mixColumns => some (byteVector "128", [byteVector "128"])
+  | .advSimd .reverseElement8 => some (ulongVector "128", [ulongVector "128"])
+  | .avx512 .permuteVar4x64x2 =>
+    some (ulongVector "256", [ulongVector "256", ulongVector "256", ulongVector "256"])
   | _ => none
 
 /-- Lane-independent integer operations share vector semantics at each supported width. -/
@@ -370,6 +385,7 @@ def emittedExactIntrinsic : Op → Option (Intrinsic × Nat)
     | .avx512DQ .moveMask512 | .avx512DQ .moveMask64 | .vector .combine256
     | .vector .createScalarUnsafe64 | .avx2 .shuffleBytes | .sse .shuffleBytes
     | .aes .encrypt | .armAes .encrypt | .armAes .mixColumns
+    | .advSimd .reverseElement8 | .avx512 .permuteVar4x64x2
     | .vector (.band _) | .vector (.bor _) | .vector (.bxor _) | .vector (.bnot _)
     | .vector (.equalsAll _) | .vector (.zero _) | .vector (.ones _) => some (intrinsic, arity)
     | _ => none

@@ -27,7 +27,8 @@ private def primitiveWidth (type : TypeExpr) : Option Nat := do
 /-- Whether an emitted memory operation transfers a vector snapshot. -/
 private def vectorMemory : Op → Bool
   | .memory .load128 | .memory .load256 | .memory .load512
-  | .memory .store128 | .memory .store256 | .memory .store512 => true
+  | .memory .store128 | .memory .store256 | .memory .store512
+  | .memory (.vector128Unsafe ..) => true
   | _ => false
 
 /-- Vector object operations preserve the exact token's storage width and opcode semantics. -/

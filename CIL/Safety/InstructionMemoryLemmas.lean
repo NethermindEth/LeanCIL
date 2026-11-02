@@ -691,6 +691,83 @@ theorem pointerTransferInstruction_contract (kind : CIL.TransferKind) (alignment
     | split at transferred
 #print axioms pointerTransferInstruction_contract
 
+/-- Vector128 byte loads and stores have the checked load and store effects of `load128` and
+    `store128` and return only valid scalars. -/
+theorem vector128UnsafeInstruction_contract (store offset : Bool) (stack values : List Value)
+    (memory result : Memory)
+    (transferred : vector128UnsafeInstruction store offset stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold vector128UnsafeInstruction displaceReference at transferred
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at transferred
+  repeat' first
+    | solve | cases transferred; instruction_contract_close
+    | cases transferred
+    | split at transferred
+#print axioms vector128UnsafeInstruction_contract
+
+/-- `Vector128.LoadUnsafe(ref source)` is the checked `load128`. -/
+theorem vector128Load_eq_load128 (reference : ManagedReference) (rest : List Value)
+    (memory : Memory) :
+    memoryInstruction (.vector128Unsafe false false) (.reference reference :: rest) memory =
+      memoryInstruction .load128 (.reference reference :: rest) memory := by
+  simp [memoryInstruction, vector128UnsafeInstruction, otherMemoryInstruction,
+    unspecifiedOperands, CIL.MemoryOp.argumentCount, Value.hasUnspecified]
+#print axioms vector128Load_eq_load128
+
+/-- `Vector128.LoadUnsafe(ref source, offset)` is `Unsafe.Add` by `offset` bytes, then the
+    checked `load128` of the displaced reference. -/
+theorem vector128LoadAt_eq_add_load128 (offset : CIL.W64) (reference : ManagedReference)
+    (rest : List Value) (memory : Memory) :
+    memoryInstruction (.vector128Unsafe false true)
+      (.scalar (.i64 offset) :: .reference reference :: rest) memory =
+    (memoryInstruction (.add 1 false) (.scalar (.i64 offset) :: .reference reference :: rest)
+      memory).bind fun (added, stack) => memoryInstruction .load128 stack added := by
+  rcases located : referenceAt reference with _ | address
+  · simp [memoryInstruction, vector128UnsafeInstruction, referenceAddInstruction,
+      displaceReference, unspecifiedOperands, CIL.MemoryOp.argumentCount, CIL.offsetValue,
+      Value.hasUnspecified, CIL.Value.hasUnspecified, located, Bind.bind, Except.bind]
+  · rcases moved : checkedAt reference 0 (add memory address 1 offset) with _ | target <;>
+    simp [memoryInstruction, vector128UnsafeInstruction, referenceAddInstruction,
+      otherMemoryInstruction, displaceReference, unspecifiedOperands, CIL.MemoryOp.argumentCount,
+      CIL.offsetValue, Value.hasUnspecified, CIL.Value.hasUnspecified, located, moved, Bind.bind,
+      Except.bind, Pure.pure, Except.pure]
+#print axioms vector128LoadAt_eq_add_load128
+
+/-- `Vector128.StoreUnsafe(source, ref destination)` is the checked `store128`, which takes
+    its operands in the other order. -/
+theorem vector128Store_eq_store128 (bits : BitVec 128) (reference : ManagedReference)
+    (rest : List Value) (memory : Memory) :
+    memoryInstruction (.vector128Unsafe true false)
+      (.reference reference :: .scalar (.v128 bits) :: rest) memory =
+      memoryInstruction .store128 (.scalar (.v128 bits) :: .reference reference :: rest)
+        memory := by
+  simp [memoryInstruction, vector128UnsafeInstruction, otherMemoryInstruction,
+    unspecifiedOperands, CIL.MemoryOp.argumentCount, Value.hasUnspecified,
+    CIL.Value.hasUnspecified]
+#print axioms vector128Store_eq_store128
+
+/-- `Vector128.StoreUnsafe(source, ref destination, offset)` is `Unsafe.Add` by `offset`
+    bytes, then the checked `store128` through the displaced reference. -/
+theorem vector128StoreAt_eq_add_store128 (offset : CIL.W64) (bits : BitVec 128)
+    (reference : ManagedReference) (rest : List Value) (memory : Memory) :
+    memoryInstruction (.vector128Unsafe true true)
+      (.scalar (.i64 offset) :: .reference reference :: .scalar (.v128 bits) :: rest) memory =
+    (memoryInstruction (.add 1 false) (.scalar (.i64 offset) :: .reference reference :: rest)
+      memory).bind fun (added, stack) => match stack with
+        | .reference moved :: rest =>
+          memoryInstruction .store128 (.scalar (.v128 bits) :: .reference moved :: rest) added
+        | _ => .error .invalidState := by
+  rcases located : referenceAt reference with _ | address
+  · simp [memoryInstruction, vector128UnsafeInstruction, referenceAddInstruction,
+      displaceReference, unspecifiedOperands, CIL.MemoryOp.argumentCount, CIL.offsetValue,
+      Value.hasUnspecified, CIL.Value.hasUnspecified, located, Bind.bind, Except.bind]
+  · rcases moved : checkedAt reference 0 (add memory address 1 offset) with _ | target <;>
+    simp [memoryInstruction, vector128UnsafeInstruction, referenceAddInstruction,
+      otherMemoryInstruction, displaceReference, unspecifiedOperands, CIL.MemoryOp.argumentCount,
+      CIL.offsetValue, Value.hasUnspecified, CIL.Value.hasUnspecified, located, moved, Bind.bind,
+      Except.bind, Pure.pure, Except.pure]
+#print axioms vector128StoreAt_eq_add_store128
+
 /-- Checked memory dispatch preserves the effects and stack validity of its selected family. -/
 theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : List Value)
     (m result : Memory) (h : memoryInstruction operation stack m = .ok (result, values)) :
@@ -701,6 +778,7 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
   · split at h
     · exact referenceAddInstruction_contract _ _ _ _ _ _ h
     · exact pointerTransferInstruction_contract _ _ _ _ _ _ _ h
+    · exact vector128UnsafeInstruction_contract _ _ _ _ _ _ h
     · exact arrayTransferInstruction_contract _ _ _ _ _ _ h
     · exact binaryTransferInstruction_contract _ _ _ _ _ _ _ _ _ h
     · exact binaryTransferInstruction_contract _ _ _ _ _ _ _ _ _ h

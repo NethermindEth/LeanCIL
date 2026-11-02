@@ -133,7 +133,11 @@ method steps through a shift and an even-lane multiply with those lemmas as fact
 shuffle is pinned on concrete vectors for bit-7 zeroing, half isolation and int256's byte
 reversal, which mutants that ignore bit 7 or cross halves fail. The AES round steps reproduce round 1
 of the FIPS-197 example cipher, which a reversed ShiftRows, an unreduced MixColumns and an AESE that
-adds its key after SubBytes fail.
+adds its key after SubBytes fail. REV64, the two-table quadword permutation, signed lane comparison
+and 32-bit lane creation are pinned on vectors that a whole-vector byte reversal, a bit-3 table select,
+an unsigned comparison and a reversed lane order fail. `Tests.MemorySpanExecution` checks the
+`Vector128` byte loads and stores at an offset, across the end of an allocation and through a readonly
+reference.
 
 Run the focused Lean targets and extracted-loop suite with:
 
