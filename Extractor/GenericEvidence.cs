@@ -62,9 +62,15 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
             return $".enum {Quote(LayoutEvidence.Identity(type))} ({Type(underlying)})";
         }
         var index = layouts.Index(type);
-        if (index >= 0) return $".aggregate {Quote(LayoutEvidence.Identity(type))} {index}";
+        if (index >= 0 && !layouts.Metadata.IsImported(type))
+            return $".aggregate {Quote(LayoutEvidence.Identity(type))} {index}";
         return $".atom {Scope(type)} {Quote(type.FullName)}";
     }
+
+    // Signatures name an imported layout by scoped atom, as the import boundary requires; only a
+    // local declaration binds it to the table entry that sizes its storage.
+    string LocalType(TypeReference type) => layouts.Metadata.IsImported(type)
+        ? $".aggregate {Quote(LayoutEvidence.Identity(type))} {layouts.Index(type)}" : Type(type);
 
     string Call(MethodReference reference, Instruction instruction, IReadOnlySet<Instruction> reachable)
     {
@@ -204,7 +210,7 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
             return $"{{ offset := {instruction.Offset}, opcode := {(ushort)instruction.OpCode.Value}, " +
                 $"operand := {operand} }}";
         });
-        return $"{{ token := {method.MetadataToken.ToUInt32()}, owner := {Quote(LayoutEvidence.Identity(method.DeclaringType))}, ownerParameters := {List(ownerConstraints)}, ownerArgumentCount := {MethodSpecialization.OwnerArguments(method).Count}, hasThis := {Bool(method.HasThis)}, explicitThis := {Bool(method.ExplicitThis)}, callingConvention := {(byte)method.CallingConvention}, attributes := {(uint)method.Attributes}, implementation := {(uint)method.ImplAttributes}, returnType := {Type(method.ReturnType)}, parameters := {List(method.Parameters.Select(parameter => Parameter(parameter.ParameterType)))}, locals := {List(method.Body.Variables.Select(local => Type(local.VariableType)))}, initLocals := {Bool(method.Body.InitLocals)}, maxStack := {method.Body.MaxStackSize}, genericParameters := {List(constraints)}, code := {List(code)} }}";
+        return $"{{ token := {method.MetadataToken.ToUInt32()}, owner := {Quote(LayoutEvidence.Identity(method.DeclaringType))}, ownerParameters := {List(ownerConstraints)}, ownerArgumentCount := {MethodSpecialization.OwnerArguments(method).Count}, hasThis := {Bool(method.HasThis)}, explicitThis := {Bool(method.ExplicitThis)}, callingConvention := {(byte)method.CallingConvention}, attributes := {(uint)method.Attributes}, implementation := {(uint)method.ImplAttributes}, returnType := {Type(method.ReturnType)}, parameters := {List(method.Parameters.Select(parameter => Parameter(parameter.ParameterType)))}, locals := {List(method.Body.Variables.Select(local => LocalType(local.VariableType)))}, initLocals := {Bool(method.Body.InitLocals)}, maxStack := {method.Body.MaxStackSize}, genericParameters := {List(constraints)}, code := {List(code)} }}";
     }
 
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number,

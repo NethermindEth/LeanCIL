@@ -41,6 +41,7 @@ internal sealed class ImportResolution : IDisposable
     readonly List<Binding> bindings = [];
     readonly Dictionary<string, int> bindingSlots = new(StringComparer.Ordinal);
     readonly Dictionary<Instruction, int> sites = [];
+    readonly Dictionary<string, TypeDefinition> localLayouts = new(StringComparer.Ordinal);
     internal IReadOnlyList<Binding> Bindings => bindings;
     internal Node[] Nodes => libraries.OrderBy(library => library.Interface.AssemblyIdentity, StringComparer.Ordinal)
         .Select(library => new Node(library.Interface.AssemblyIdentity, library.Interface.ImplementationSha256,
@@ -296,8 +297,51 @@ internal sealed class ImportResolution : IDisposable
             RuntimeModels.SupportedType(reference.ElementType) || ValueTuples.Is(reference.ElementType) ||
             reference.ElementType.Scope is not AssemblyNameReference scope) return false;
         // Framework layouts stay on the existing runtime-model path, which checks their exact scope and shape.
-        if (scope.Name is "System.Runtime" or "System.Runtime.Intrinsics" or "System.Memory") return false;
+        if (FrameworkScope(scope)) return false;
         ContractMethodMetadata.RejectModifiers(reference);
+        Library library = TypedLibrary(scope, "Imported byref layout", reference);
+        PublishedClosure(reference.ElementType, library, profile, requirePublished: false);
+        return true;
+    }
+
+    /// <summary>
+    /// Admits a local whose value type is defined directly in a pinned typed import and whose whole
+    /// layout closure that import publishes with metadata equal to the selected DLL.
+    /// </summary>
+    internal bool ValidateLocal(TypeReference type, FeatureProfile profile)
+    {
+        if (type is TypeSpecification || !type.IsValueType || ContractMethodMetadata.Primitive(type) ||
+            type.Scope is not AssemblyNameReference scope || FrameworkScope(scope)) return false;
+        ContractMethodMetadata.RejectModifiers(type);
+        Library library = TypedLibrary(scope, "Imported aggregate local", type);
+        TypeDefinition definition = ImportedLayoutMetadata.Definition(type, library.Module);
+        if (MetadataValidation.IsByRefLike(definition))
+            throw new InvalidDataException("Unsupported byref-like imported aggregate local: " + type.FullName);
+        foreach (ContractLayout layout in PublishedClosure(definition, library, profile, requirePublished: true))
+            localLayouts.TryAdd(layout.Identity, library.Module.GetTypes()
+                .Single(candidate => LayoutEvidence.Identity(candidate) == layout.Identity));
+        return true;
+    }
+
+    /// <summary>
+    /// The selected definitions of every admitted imported local layout. Each must also be carried by
+    /// a bound typed call, so the kernel binds the caller's table entry to that slot's metadata.
+    /// </summary>
+    internal TypeDefinition[] LocalLayouts()
+    {
+        foreach (string identity in localLayouts.Keys)
+            if (!bindings.Any(binding => binding.ActualLayouts.Any(layout => layout.Identity == identity)))
+                throw new InvalidDataException(
+                    "Imported aggregate local has no bound typed call that publishes its layout: " + identity);
+        return [.. localLayouts.Values];
+    }
+
+    // Framework layouts stay on the existing runtime-model path, which checks their exact scope and shape.
+    static bool FrameworkScope(AssemblyNameReference scope) =>
+        scope.Name is "System.Runtime" or "System.Runtime.Intrinsics" or "System.Memory";
+
+    Library TypedLibrary(AssemblyNameReference scope, string use, TypeReference type)
+    {
         if (allowedDependencies is not null && !allowedDependencies.Contains(scope.FullName))
             throw new InvalidDataException("Undeclared imported layout dependency: " + scope.FullName);
         if (!librariesByIdentity.ContainsKey(scope.FullName) &&
@@ -308,16 +352,26 @@ internal sealed class ImportResolution : IDisposable
         }
         Library? library = librariesByIdentity.GetValueOrDefault(scope.FullName);
         if (library is null || library.Interface.FormatVersion != 2)
-            throw new InvalidDataException("Imported byref layout requires a pinned typed interface: " + reference.FullName);
-        ContractLayout[] actual = ImportedLayoutMetadata.ForType(reference.ElementType, library.Module, profile.Architecture);
+            throw new InvalidDataException(use + " requires a pinned typed interface: " + type.FullName);
+        return library;
+    }
+
+    // Every layout in the selected closure must equal each published copy; locals also need one.
+    ContractLayout[] PublishedClosure(TypeReference element, Library library, FeatureProfile profile,
+        bool requirePublished)
+    {
+        ContractLayout[] actual = ImportedLayoutMetadata.ForType(element, library.Module, profile.Architecture);
         foreach (ContractLayout layout in actual)
         {
             ContractLayout[] published = library.Interface.Exports.SelectMany(export => export.Layouts ?? [])
                 .Where(candidate => candidate.Identity == layout.Identity).ToArray();
+            if (requirePublished && published.Length == 0)
+                throw new InvalidDataException(
+                    "Imported layout is not published by its typed interface: " + layout.Identity);
             if (published.Length == 0 || published.Any(candidate => !MetadataEqual(candidate, layout)))
                 throw new InvalidDataException("Imported raw layout differs from selected implementation metadata: " + layout.Identity);
         }
-        return true;
+        return actual;
     }
 
     internal static string LeanSlot(Binding binding) =>

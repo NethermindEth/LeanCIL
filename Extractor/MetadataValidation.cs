@@ -112,8 +112,27 @@ internal static class MetadataValidation
     {
         readonly Dictionary<string, AggregateInfo> validated = new(StringComparer.Ordinal);
         readonly Dictionary<TypeReference, FieldSet> fields = new(ReferenceEqualityComparer.Instance);
+        // Selected definitions of admitted imported layouts; the ambient resolver never supplies one.
+        readonly Dictionary<string, TypeDefinition> imported = new(StringComparer.Ordinal);
         Dictionary<string, int>? typeCounts;
         internal string Architecture => architecture;
+
+        internal void AddImported(IEnumerable<TypeDefinition> definitions)
+        {
+            foreach (TypeDefinition definition in definitions)
+                imported.TryAdd(LayoutEvidence.Identity(definition), definition);
+        }
+
+        /// <summary>The type names an admitted layout of another assembly.</summary>
+        internal bool IsImported(TypeReference type) =>
+            type is not TypeSpecification && imported.ContainsKey(LayoutEvidence.Identity(type));
+
+        /// <summary>The type has a layout table entry: one of this module's aggregates or an imported layout.</summary>
+        internal bool IsLayout(TypeReference type) => IsAggregate(type, module) || IsImported(type);
+
+        /// <summary>An imported reference replaced by its selected definition; other types unchanged.</summary>
+        internal TypeReference Canonical(TypeReference type) => type is not TypeSpecification &&
+            imported.TryGetValue(LayoutEvidence.Identity(type), out TypeDefinition? definition) ? definition : type;
 
         internal void Require(ModuleDefinition owner, string requestedArchitecture)
         {
@@ -146,17 +165,24 @@ internal static class MetadataValidation
             return snapshot;
         }
 
-        internal InstanceField[] Fields(TypeReference owner) => FieldSnapshot(owner).Fields;
+        internal InstanceField[] Fields(TypeReference owner) => FieldSnapshot(Canonical(owner)).Fields;
 
         internal int FieldIndex(TypeReference owner, FieldDefinition field, bool includeStatic = false)
         {
-            var snapshot = FieldSnapshot(owner);
+            var snapshot = FieldSnapshot(Canonical(owner));
             return (includeStatic ? snapshot.AllIndices : snapshot.InstanceIndices).GetValueOrDefault(field, -1);
         }
 
         internal AggregateInfo AggregateLayout(TypeReference reference)
         {
             if (validated.TryGetValue(LayoutEvidence.Identity(reference), out var cached)) return cached;
+            if (imported.TryGetValue(LayoutEvidence.Identity(reference), out TypeDefinition? definition))
+            {
+                // The selected module's own metadata computes an imported layout, as admission did.
+                var external = MetadataValidation.AggregateLayout(definition, definition.Module, architecture);
+                validated.Add(LayoutEvidence.Identity(reference), external);
+                return external;
+            }
             typeCounts ??= module.GetTypes().CountBy(type => type.FullName, StringComparer.Ordinal).ToDictionary();
             // A new root keeps its own recursion-depth check, even if a child was validated earlier.
             var layout = MetadataValidation.AggregateLayout(reference, module, architecture, [],
@@ -166,7 +192,7 @@ internal static class MetadataValidation
         }
 
         internal int Size(TypeReference reference) => AggregateLayout(reference).Size;
-        internal int FieldSize(TypeReference type) => IsAggregate(type, module)
+        internal int FieldSize(TypeReference type) => IsLayout(type)
             ? Size(type) : VectorFieldWidth(type) ?? PrimitiveWidth(type);
         internal int FieldOffset(TypeReference owner, FieldDefinition field) =>
             AggregateLayout(owner).Offsets[field.FullName];
@@ -333,6 +359,22 @@ internal static class MetadataValidation
         RuntimeModels.ValidateTypeIdentity(type, module, architecture);
     }
 
+    // An imported local is sized storage whose address is passed on; copying it by value would
+    // move external bytes through this assembly's evaluation stack.
+    static void ImportedLocal(MethodDefinition method, VariableDefinition local)
+    {
+        foreach (Instruction instruction in method.Body.Instructions)
+            if (instruction.Operand == local ? instruction.OpCode.Code is not (Code.Ldloca or Code.Ldloca_S) :
+                instruction.OpCode.Code switch
+                {
+                    Code.Ldloc_0 or Code.Stloc_0 => local.Index == 0, Code.Ldloc_1 or Code.Stloc_1 => local.Index == 1,
+                    Code.Ldloc_2 or Code.Stloc_2 => local.Index == 2, Code.Ldloc_3 or Code.Stloc_3 => local.Index == 3,
+                    _ => false
+                })
+                throw new InvalidDataException("Imported aggregate locals are admitted only by address: " +
+                    local.VariableType.FullName);
+    }
+
     internal sealed record Blocked(MethodDefinition Method, Instruction? At, Exception Error, MethodDefinition[] Chain);
 
     // With `blocked`, failures after entry selection are recorded and the walk continues past them;
@@ -454,8 +496,11 @@ internal static class MetadataValidation
                 }, named: true);
             if (Check(method, null, () => Spans.Analyze(method, profile), named: true))
                 foreach (VariableDefinition local in method.Body.Variables)
-                    Check(method, null, () => Type(local.VariableType, module,
-                        architecture: profile.Architecture), named: true);
+                    Check(method, null, () =>
+                    {
+                        if (imports?.ValidateLocal(local.VariableType, profile) == true) ImportedLocal(method, local);
+                        else Type(local.VariableType, module, architecture: profile.Architecture);
+                    }, named: true);
             HashSet<Instruction> reachable = [];
             TypeTests.Analysis? typeTests = null;
             Throws.Analysis? throws = null;
