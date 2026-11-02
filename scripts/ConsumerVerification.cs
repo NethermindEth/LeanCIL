@@ -2195,7 +2195,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     audits[i].Audit, before[i], libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes,
                     consumerSupportSha256: baseUnchanged && portableSupport.Count > 0
                         ? Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256") : null,
-                    staticValues: StaticValueAssumptions(extraction), contractImports: ContractImportAssumptions(extraction), imports: fullResult?.Imports ?? PublishedImports(extraction),
+                    staticValues: StaticValueAssumptions(extraction),
+                    opaqueStaticValues: OpaqueStaticValues(extraction),
+                    contractImports: ContractImportAssumptions(extraction),
+                    imports: fullResult?.Imports ?? PublishedImports(extraction),
                     contractDependencies: fullResult?.Dependencies ?? DeploymentDependencies(extraction),
                     compositionTheorem: fullResult?.Theorem, compositionAudit: fullResult?.Audit,
                     initializationAssumptions: InitializationAssumptions(extraction));

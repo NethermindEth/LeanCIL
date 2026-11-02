@@ -8,10 +8,12 @@ namespace Nethermind.LeanCIL;
 
 // Readonly fields have one unconditional store, from a literal, M(constants) or new T(constants).
 // Lean rechecks stored bytes; recognizing the constructor store remains trusted.
+// A scalar whose stored value cannot be computed is opaque: proofs read it from the caller's memory.
 internal static partial class StaticValues
 {
+    // Opaque values carry zero bytes that give only the width; no initializer is extracted.
     internal sealed record Value(FieldDefinition Field, MethodDefinition? Initializer, string[] Arguments,
-        byte[] Bytes, string? Literal = null, bool Construct = false);
+        byte[] Bytes, string? Literal = null, bool Construct = false, bool Opaque = false);
 
     // BitConverter.IsLittleEndian is a profile constant, never a module static value.
     internal static bool IsLoad(Instruction instruction) => instruction.OpCode.Code == Code.Ldsfld &&
@@ -98,6 +100,21 @@ internal static partial class StaticValues
             throw Unsupported(field, $"It is also stored outside its static constructor, in {writer.FullName}.");
         if (context.AddressTaken(field, constructor) is { } addressMethod)
             throw Unsupported(field, $"Its address is taken during initialization, in {addressMethod.FullName}.");
+        try
+        {
+            return Computed(field, module, architecture, context, constructorIndex, code, store);
+        }
+        // The single constructor store fixes the value even when extraction cannot compute it.
+        catch (InvalidDataException) when (!MetadataValidation.IsAggregate(field.FieldType, module))
+        {
+            return new(field, null, [], new byte[Width(field, architecture)], Opaque: true);
+        }
+    }
+
+    // The value the constructor stores, or a rejection when it is not a recognized computable shape.
+    static Value Computed(FieldDefinition field, ModuleDefinition module, string architecture, Context context,
+        ConstructorIndex constructorIndex, IList<Instruction> code, int store)
+    {
         if (store > 0 && Stored(code[store - 1], Code.Ldsfld) is { } source && source != field)
         {
             if (source.DeclaringType != field.DeclaringType || source.FieldType.FullName != field.FieldType.FullName ||

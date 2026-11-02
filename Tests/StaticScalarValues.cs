@@ -115,4 +115,84 @@ foreach (var (name, before, after, marker) in new[]
     rejected.Add(proof, "PASS Lean scalar evidence rejects " + name, marker);
 }
 
+// Seeds from a source extraction cannot run load from the caller's binding: proofs cover every seed.
+const string seededType = "Examples.SeededHash";
+string[] seedFields = [$"System.UInt64 {seededType}::Seed0", $"System.UInt64 {seededType}::Seed1"];
+string[] ExtractSeeded(string dll, string method, string output, bool assume = true) =>
+    ["dotnet", ExtractorPath, "extract", dll, "SeededHash::" + method, output,
+        .. assume ? new[] { "--assume-initialized", seededType } : []];
+var mix = Path.Combine(root, "Opaque-Mix");
+Run(ExtractSeeded(assembly, "Hash(ulong)", mix));
+var verified = Run(["dotnet", ExtractorPath, "verify", mix, "--proof", At("Examples/Proofs/OpaqueSeeds.lean")]);
+if (seedFields.Any(field =>
+        !verified.Contains($"Unknown static value: {field} is not computed", StringComparison.Ordinal)) ||
+    !verified.Contains(" (seed0 seed1 value : CIL.W64),", StringComparison.Ordinal))
+    throw new Exception("Verification omitted the unknown seeds or their quantifier:\n" + verified);
+var seededReport = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(mix, "verified.json")))
+    .RootElement.GetProperty("opaqueStaticValues").EnumerateArray().Select(item => item.GetString());
+if (!seededReport.SequenceEqual(seedFields))
+    throw new Exception("verified.json omitted the unknown seeds");
+Console.WriteLine("PASS hash proved for every seed; a fixed seed is refuted and unbound seeds fault");
+
+var mixSource = File.ReadAllText(Path.Combine(mix, "Extracted.lean"));
+const string seedBytes = "SeededHash::Seed0\", bytes := [(BitVec.ofNat 8 0)";
+if (!mixSource.Contains(seedBytes, StringComparison.Ordinal)) throw new Exception("Missing unknown seed descriptor");
+var guessedProof = Path.Combine(root, "Opaque-guessed.lean");
+// The zero placeholder is not a value: without a caller binding the load faults instead of reading it.
+File.WriteAllText(guessedProof, mixSource + """
+
+    theorem guessed_seed : (CIL.Safety.invoke Extracted.program 16 0 [.scalar (.i64 0)]
+        CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 0)] := by rfl
+    """);
+rejected.Add(guessedProof, "PASS unknown seed is never read as its zero placeholder",
+    "CIL.Safety.Memory.empty", "is not definitionally equal");
+var forgedSeed = Path.Combine(root, "Opaque-forged.lean");
+File.WriteAllText(forgedSeed, mixSource.Replace(seedBytes, seedBytes[..^2] + "5)", StringComparison.Ordinal));
+rejected.Add(forgedSeed, "PASS Lean evidence rejects a value written into an unknown seed",
+    "StaticValuesValid");
+
+void RejectSeeded(string name, string dll, string method, string marker, bool assume = true)
+{
+    var result = Execute(ExtractSeeded(dll, method, Path.Combine(root, "Reject-seeded-" + name), assume));
+    if (result.Code == 0 || !result.Output.Contains(marker, StringComparison.Ordinal))
+        throw new Exception("Incorrect unknown seed rejection: " + name + "\n" + result.Output);
+    Console.WriteLine("PASS unknown seed rejection: " + name);
+}
+RejectSeeded("address", assembly, "ByReference()", $"Unsupported static field address: {seedFields[0]}");
+RejectSeeded("unassumed", assembly, "Hash(ulong)", "Unsupported static initialisation", assume: false);
+foreach (var name in new[] { "mutable", "twice", "outside" })
+{
+    var dll = Path.Combine(root, "seeded-" + name + ".dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        var type = module.GetType(seededType);
+        var field = type.Fields.Single(field => field.Name == "Seed0");
+        var code = type.Methods.Single(method => method.IsConstructor && method.IsStatic).Body;
+        var store = code.Instructions.Single(instruction => instruction.OpCode.Code == Code.Stsfld &&
+            ((FieldReference)instruction.Operand).Name == field.Name);
+        if (name == "mutable") field.IsInitOnly = false;
+        else if (name == "twice")
+        {
+            code.GetILProcessor().InsertBefore(store, Instruction.Create(OpCodes.Dup));
+            code.GetILProcessor().InsertAfter(store, Instruction.Create(OpCodes.Stsfld, field));
+        }
+        else
+        {
+            var writer = new MethodDefinition("Overwrite", Mono.Cecil.MethodAttributes.Public |
+                Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Void);
+            writer.Body.Instructions.Add(Instruction.Create(OpCodes.Ldc_I8, 0L));
+            writer.Body.Instructions.Add(Instruction.Create(OpCodes.Stsfld, field));
+            writer.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
+            type.Methods.Add(writer);
+        }
+        module.Write(dll);
+    }
+    RejectSeeded(name, dll, "Hash(ulong)", name switch
+    {
+        "mutable" => "Unsupported static field load",
+        "twice" => "stores it 2 times",
+        _ => "It is also stored outside its static constructor"
+    });
+}
+
 rejected.Check();

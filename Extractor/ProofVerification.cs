@@ -342,6 +342,10 @@ partial class Program
             if (manifest.TryGetProperty("staticValues", out var staticValues))
                 foreach (var name in staticValues.EnumerateArray())
                     Console.WriteLine($"  Caller assumption: {name.GetString()} keeps the value its static constructor stored.");
+            if (manifest.TryGetProperty("opaqueStaticValues", out var opaqueValues))
+                foreach (var name in opaqueValues.EnumerateArray())
+                    Console.WriteLine($"  Unknown static value: {name.GetString()} is not computed; " +
+                        "loads read the caller's static binding.");
             foreach (string assumption in ContractImportAssumptions(manifest))
                 Console.WriteLine(report.compositionTheorem is null
                     ? "  Conditional verification: assumes " + assumption + "; implementation contracts are not discharged by hashes or certification records."
