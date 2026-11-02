@@ -82,10 +82,5 @@ The ARM64 AES workflow runs only `Tests/AesHardware.cs` and the runtime probe on
 silicon runner, for changes to the AES model, its hardware check, the probe or the macOS evidence;
 see [runtime profiles](RUNTIME-PROFILES.md). The x64 suites check x86 AESENC.
 
-The separate scheduled/manual consumer advisory checks a pinned int256 library
-and four compiled-method certificates. It does not participate in PR checks.
-Keep it out of required branch-protection checks. Advance the pin through a reviewed PR and
-validate both the supporting library and those certificates.
-
-The [fixed-consumer performance report](performance/issue270/README.md) separates
-historical extraction-certificate costs from consumer proof checking and joint replay.
+Downstream libraries check their own compatibility with LeanCIL in their own CI, pinning a
+LeanCIL revision and advancing it through a reviewed change; LeanCIL's checks build no consumer.

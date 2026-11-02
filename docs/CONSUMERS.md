@@ -42,7 +42,7 @@ single-file verification. `verification.json` remembers the package root.
 Materialize the same source package and selected extraction for editor tooling:
 
 ```sh
-leancil workspace path/to/Nethermind.Int256.dll 'Type::Method(parameter-types)' --profile arm64-advsimd --proof proofs/Method.lean --proof-root .
+leancil workspace path/to/Library.dll 'Type::Method(parameter-types)' --profile arm64-advsimd --proof proofs/Method.lean --proof-root .
 ```
 
 Use the exact assembly and method selector for the consumer build. The command
@@ -85,7 +85,7 @@ trusted support manifest or verification receipt. Copy only the edited proof
 source back to the original consumer proof path, then run ordinary verification:
 
 ```sh
-leancil extract path/to/Nethermind.Int256.dll 'Type::Method(parameter-types)' artifacts/Method arm64-advsimd
+leancil extract path/to/Library.dll 'Type::Method(parameter-types)' artifacts/Method arm64-advsimd
 leancil verify artifacts/Method --proof proofs/Method.lean --proof-root . --theorem MyProof.correctness --fresh
 ```
 
@@ -93,14 +93,12 @@ Keep workspace generated files, caches and manifests out of that source package.
 The ordinary verifier still requires extraction identity checks, its fresh source
 package, exact theorem and certificate audits, and independent kernel replay.
 The workspace root itself is not a supported `--proof-root` because it contains
-reserved generated modules. The CI workspace fixture builds the real `Nethermind.Int256`
-consumer at revision `00fcecf53e22b5c9090052779e14b3ba246fb117` and opens
-`Nethermind.Int256.UInt256::get_IsZeroOrOne()` under the scalar profile. It uses the
-existing `--assume-initialized Nethermind.Int256.UInt256` caller premise; assembly
-and method admission rules are unchanged. The fixture checks transitive consumer and
+reserved generated modules. The CI workspace fixture builds a small in-repo library with a
+four-limb `Workspace.Wide` struct and opens `Workspace.Wide::get_IsZeroOrOne()` under the
+scalar profile. It uses the existing `--assume-initialized Workspace.Wide` caller premise;
+assembly and method admission rules are unchanged. The fixture checks transitive consumer and
 symbol imports, then verifies the unchanged selected-method proof through ordinary fresh
-verification. This tests workspace reproducibility, not an arithmetic contract for every
-UInt256 operation.
+verification. This tests workspace reproducibility, not an arithmetic contract.
 
 ## Local support cache
 

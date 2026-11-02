@@ -111,9 +111,9 @@ Test("shared unknown and workflow inputs", () =>
 });
 Test("other workflows do not rerun suites", () =>
 {
-    Equal(VerificationSelection.Select([".github/workflows/consumer.yml", ".github/workflows/runtime-profiles.yml"]),
+    Equal(VerificationSelection.Select([".github/workflows/arm64-aes.yml", ".github/workflows/runtime-profiles.yml"]),
         []);
-    Equal(VerificationSelection.Select([".github/workflows/consumer.yml", "Tests/Loops.cs"]), ["loops"]);
+    Equal(VerificationSelection.Select([".github/workflows/arm64-aes.yml", "Tests/Loops.cs"]), ["loops"]);
 });
 Test("multiple changes and deleted paths", () =>
 {
