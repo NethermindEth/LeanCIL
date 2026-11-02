@@ -452,8 +452,8 @@ rejectedRounds.Check();
 Run(["dotnet", "run", "--file", At("Tests/AesHardware.cs")], cwd: Root);
 Console.WriteLine("PASS host AES instructions match the Lean AES model");
 
-// The int256 sign window and eight-lane creation run on the host CPU; their x64-v4 extractions must return the
-// same vectors. The windows Int256.Rsh loads come first, then indices with random high bits.
+// The sign window and eight-lane creation run on the host CPU; their x64-v4 extractions must return the
+// same vectors. The windows a 256-bit arithmetic shift loads come first, then indices with random high bits.
 if (!Avx512F.VL.IsSupported)
     throw new InvalidOperationException("The permutation differential test needs an AVX-512 host");
 const int WindowCases = 12;

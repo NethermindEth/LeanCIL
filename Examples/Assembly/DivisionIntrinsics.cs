@@ -70,7 +70,7 @@ public static class DivisionIntrinsics
             ? X86Aes.Encrypt(state, roundKey)
             : ArmAes.MixColumns(ArmAes.Encrypt(state, Vector128<byte>.Zero)) ^ roundKey;
     }
-    // The int256 arithmetic shift window: index k takes limb k below 4 and a lane of the sign fill above it.
+    // A 256-bit arithmetic shift window: index k takes limb k below 4 and a lane of the sign fill above it.
     public static Vector256<ulong> SignWindow(ulong v0, ulong v1, ulong v2, ulong v3,
         ulong index0, ulong index1, ulong index2, ulong index3)
     {
@@ -81,10 +81,10 @@ public static class DivisionIntrinsics
     }
     public static Vector256<uint> CreateWords(uint r0, uint r1, uint r2, uint r3,
         uint r4, uint r5, uint r6, uint r7) => Vector256.Create(r0, r1, r2, r3, r4, r5, r6, r7);
-    // The int256 ARM64 big-endian limb reversal of one 16-byte half.
+    // An ARM64 big-endian limb reversal of one 16-byte half.
     public static Vector128<ulong> ReverseLimbs(ulong low, ulong high) =>
         AdvSimd.ReverseElement8(Vector128.Create(low, high));
-    // The int256 ARM64 read and write: each 16-byte half moves whole, the second at byte offset 16.
+    // A 32-byte ARM64 read and write: each 16-byte half moves whole, the second at byte offset 16.
     public static void SwapHalves(ReadOnlySpan<byte> source, Span<byte> destination)
     {
         ref byte from = ref MemoryMarshal.GetReference(source);
