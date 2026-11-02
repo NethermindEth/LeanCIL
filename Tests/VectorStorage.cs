@@ -248,7 +248,7 @@ foreach (var item in portableCases)
         // The helper's isolated declarations must match its certificate in the complete caller.
         var callEvidence = File.ReadAllText(Path.Combine(callOutput, "Extracted.lean"))
             .Replace("method0", "method1", StringComparison.Ordinal);
-        const string portableObligation = "method1_division_validated";
+        const string portableObligation = "method1_intrinsics_validated";
         File.AppendAllText(proof, CheckedEvidenceControl(evidence,
             NarrowEvidence(callEvidence, portableObligation), [portableObligation], 1));
     }
@@ -295,9 +295,9 @@ void RejectPortable(string original, string name, string changed)
 {
     if (changed == original) throw new InvalidOperationException("Ineffective portable mutation: " + name);
     var path = Path.Combine(root, name + ".lean");
-    File.WriteAllText(path, NarrowEvidence(changed, "method1_division_validated"));
+    File.WriteAllText(path, NarrowEvidence(changed, "method1_intrinsics_validated"));
     rejected.Add(path, "PASS independently rejected portable vector evidence: " + name,
-        "Extraction.DivisionIntrinsicsValid method1Closed", "is false");
+        "Extraction.ExactIntrinsicsValid method1Closed", "is false");
 }
 foreach (var (name, changed) in new[]
 {

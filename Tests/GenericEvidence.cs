@@ -237,7 +237,7 @@ void CheckExternalCallTargets()
     Run(Extract("extract", assembly, "Examples", "DivisionIntrinsics::UnsafeEquals(ulong)", folder, "x64-v3"));
     var path = Path.Combine(folder, "Extracted.lean");
     var baseline = File.ReadAllText(path);
-    const string theorem = "method0_division_validated";
+    const string theorem = "method0_intrinsics_validated";
     var control = NarrowEvidence(baseline, theorem);
     var positive = Path.Combine(folder, "Checked.lean");
     File.WriteAllText(positive, baseline + "\n" + CheckedEvidenceControl(baseline, control, [theorem], 0));
@@ -254,6 +254,6 @@ void CheckExternalCallTargets()
         var rejectedPath = Path.Combine(folder, name + ".lean");
         File.WriteAllText(rejectedPath, NarrowEvidence(source, theorem));
         rejected.Add(rejectedPath, "PASS materialized external call rejects " + name,
-            "Extraction.DivisionIntrinsicsValid", "is false");
+            "Extraction.ExactIntrinsicsValid", "is false");
     }
 }

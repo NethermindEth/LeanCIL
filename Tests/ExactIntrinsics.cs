@@ -147,7 +147,7 @@ foreach ((string name, ulong left, ulong right, ulong expected, bool wide) in ne
     pending.Add((new(selectors[name], proof, output), wide ? "x64-v4" : "x64-v3", () =>
     {
         RequireRuntimeGroups(output, wide);
-        Console.WriteLine("PASS compiled division intrinsic: " + name);
+        Console.WriteLine("PASS compiled exact intrinsic: " + name);
     }));
     if (wide ? Avx512DQ.IsSupported && Avx512F.IsSupported : Avx2.IsSupported)
     {
@@ -333,9 +333,9 @@ var rejectedShuffles = new RejectedEvidence(Path.Combine(root, "RejectedShuffles
 foreach ((string name, string theorem, string before, string after, string validator) in new[]
 {
     ("Shuffle256", "method0_unsafe_validated", ".snapshot .vector256", ".snapshot .vector128", "UnsafeCallsValid"),
-    ("Shuffle256", "method0_division_validated", ".avx2 .shuffleBytes", ".avx2 .add64", "DivisionIntrinsicsValid"),
-    ("Shuffle128", "method0_division_validated", ".sse .shuffleBytes", ".sse .shiftLeftBytes",
-        "DivisionIntrinsicsValid")
+    ("Shuffle256", "method0_intrinsics_validated", ".avx2 .shuffleBytes", ".avx2 .add64", "ExactIntrinsicsValid"),
+    ("Shuffle128", "method0_intrinsics_validated", ".sse .shuffleBytes", ".sse .shiftLeftBytes",
+        "ExactIntrinsicsValid")
 })
 {
     var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")), theorem);
@@ -366,7 +366,7 @@ static void RequireRuntimeGroups(string output, bool wide)
     bool v3 = Flag("Avx2") && Flag("Bmi1") && Flag("Bmi2");
     bool v4 = Flag("Avx512F") && Flag("Avx512FVL") && Flag("Avx512DQ") && Flag("Avx512DQVL");
     if (!v3 || v4 != wide)
-        throw new InvalidOperationException("Division profile matches no .NET 10 x64 ISA level: " + profile);
+        throw new InvalidOperationException("Exact intrinsic profile matches no .NET 10 x64 ISA level: " + profile);
 }
 
 partial class Program

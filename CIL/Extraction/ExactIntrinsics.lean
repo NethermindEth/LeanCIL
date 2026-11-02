@@ -5,7 +5,7 @@ import Lean.Elab.Tactic.BuiltinTactic
 /-!
 # Exact vector calls and opaque vector locals
 
-`DivisionIntrinsicsValid` checks selected hardware calls, used by vectorized division and
+`ExactIntrinsicsValid` checks selected hardware calls, used by vectorized division and
 byte reversal, and lane-independent portable integer vector calls. Each covered call requires
 exact raw metadata and the matching emitted intrinsic, available under the method's profile.
 Other intrinsic families retain their existing extraction checks.
@@ -21,7 +21,7 @@ namespace CIL.Extraction
 
 /-- Each admitted intrinsic: owner class, method name, full signature, emitted intrinsic and
     arity. -/
-private def divisionSignatures : List (String × String × String × Intrinsic × Nat) := [
+private def exactSignatures : List (String × String × String × Intrinsic × Nat) := [
   ("System.Runtime.Intrinsics.X86.Avx2", "And",
     "System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
       System.Runtime.Intrinsics.X86.Avx2::And(\
@@ -114,7 +114,7 @@ private def divisionSignatures : List (String × String × String × Intrinsic �
     .sse .shuffleBytes, 2)]
 
 /-- `Vector{width}<ulong>` with exact scopes. -/
-private def divisionVector (width : String) : TypeExpr :=
+private def ulongVector (width : String) : TypeExpr :=
   .apply (.constructor intrinsicsScope ("System.Runtime.Intrinsics.Vector" ++ width ++ "`1"))
     (.atom runtimeScope "System.UInt64")
 
@@ -124,20 +124,20 @@ private def byteVector (width : String) : TypeExpr :=
     (.atom runtimeScope "System.Byte")
 
 /-- The return and parameter types each admitted intrinsic's call site must declare. -/
-private def divisionCallTypes : Intrinsic → Option (TypeExpr × List TypeExpr)
+private def exactCallTypes : Intrinsic → Option (TypeExpr × List TypeExpr)
   | .avx2 .band | .avx2 .bor | .avx2 .bxor | .avx2 .andNot =>
-    some (divisionVector "256", [divisionVector "256", divisionVector "256"])
+    some (ulongVector "256", [ulongVector "256", ulongVector "256"])
   | .avx2 .shl64Count | .avx2 .shr64Count =>
-    some (divisionVector "256", [divisionVector "256", divisionVector "128"])
+    some (ulongVector "256", [ulongVector "256", ulongVector "128"])
   | .avx2 .shl64 | .avx2 .shr64 =>
-    some (divisionVector "256", [divisionVector "256", .atom runtimeScope "System.Byte"])
+    some (ulongVector "256", [ulongVector "256", .atom runtimeScope "System.Byte"])
   | .avx512 .ltu512 | .avx512 .gtu512 =>
-    some (divisionVector "512", [divisionVector "512", divisionVector "512"])
-  | .avx512DQ .moveMask512 => some (.atom runtimeScope "System.Int32", [divisionVector "512"])
-  | .avx512DQ .moveMask64 => some (.atom runtimeScope "System.Int32", [divisionVector "256"])
-  | .vector .combine256 => some (divisionVector "512", [divisionVector "256", divisionVector "256"])
+    some (ulongVector "512", [ulongVector "512", ulongVector "512"])
+  | .avx512DQ .moveMask512 => some (.atom runtimeScope "System.Int32", [ulongVector "512"])
+  | .avx512DQ .moveMask64 => some (.atom runtimeScope "System.Int32", [ulongVector "256"])
+  | .vector .combine256 => some (ulongVector "512", [ulongVector "256", ulongVector "256"])
   | .vector .createScalarUnsafe64 =>
-    some (divisionVector "128", [.atom runtimeScope "System.UInt64"])
+    some (ulongVector "128", [.atom runtimeScope "System.UInt64"])
   | .avx2 .shuffleBytes => some (byteVector "256", [byteVector "256", byteVector "256"])
   | .sse .shuffleBytes => some (byteVector "128", [byteVector "128", byteVector "128"])
   | _ => none
@@ -194,61 +194,61 @@ private def portableVectorOwner (owner : String) : Bool :=
   owner.startsWith "System.Runtime.Intrinsics.Vector512`1"
 
 /-- The intrinsic and arity of an exact admitted call, including its generic types and identity. -/
-def divisionIntrinsic (instruction : RawInstruction) : Option (Intrinsic × Nat) :=
+def exactIntrinsic (instruction : RawInstruction) : Option (Intrinsic × Nat) :=
   portableVectorIntrinsic instruction <|> do
   if instruction.opcode != 40 then none else
   let .call site := instruction.operand | none
   if site.hasThis || !site.returnsValue || !site.typeArguments.isEmpty then none else
   let (_, _, _, intrinsic, arity) ←
-    divisionSignatures.find? fun (owner, name, signature, _, arity) =>
+    exactSignatures.find? fun (owner, name, signature, _, arity) =>
       site.name == name && site.parameterCount == arity &&
       site.declaringType == .atom intrinsicsScope owner &&
       site.target == .external (intrinsicsScope ++ "::" ++ signature)
-  let (returnType, parameterTypes) ← divisionCallTypes intrinsic
+  let (returnType, parameterTypes) ← exactCallTypes intrinsic
   if site.returnType != returnType || site.parameterTypes != parameterTypes then none else
   return (intrinsic, arity)
 
 /-- Checking names and arities first preserves the original admitted-signature lookup and metadata
     checks, without any assumptions on the raw instruction. -/
-theorem divisionIntrinsic_eq_original (instruction : RawInstruction) :
-    divisionIntrinsic instruction = (portableVectorIntrinsic instruction <|> do
+theorem exactIntrinsic_eq_original (instruction : RawInstruction) :
+    exactIntrinsic instruction = (portableVectorIntrinsic instruction <|> do
       if instruction.opcode != 40 then none else
       let .call site := instruction.operand | none
       if site.hasThis || !site.returnsValue || !site.typeArguments.isEmpty then none else
       let (_, _, _, intrinsic, arity) ←
-        divisionSignatures.find? fun (owner, name, signature, _, arity) =>
+        exactSignatures.find? fun (owner, name, signature, _, arity) =>
           site.declaringType == .atom intrinsicsScope owner && site.name == name &&
           site.parameterCount == arity &&
           site.target == .external (intrinsicsScope ++ "::" ++ signature)
-      let (returnType, parameterTypes) ← divisionCallTypes intrinsic
+      let (returnType, parameterTypes) ← exactCallTypes intrinsic
       if site.returnType != returnType || site.parameterTypes != parameterTypes then none else
       return (intrinsic, arity)) := by
-  simp only [divisionIntrinsic, Bool.and_assoc, Bool.and_left_comm, Bool.and_comm]
-#print axioms divisionIntrinsic_eq_original
+  simp only [exactIntrinsic, Bool.and_assoc, Bool.and_left_comm, Bool.and_comm]
+#print axioms exactIntrinsic_eq_original
 
 /-- The exact UTF-8 bytes of an identity, including non-ASCII metadata. -/
 private def identityBytes (identity : String) : List UInt8 :=
   identity.toByteArray.data.toList
 
 /-- Signature bytes materialized once; the kernel checks their equality to the signature table. -/
-private def divisionSignatureBytes : List (String × String × List UInt8) := by
+private def exactSignatureBytes : List (String × String × List UInt8) := by
   run_tac do
     let expression ← Lean.Elab.Term.elabTerm
-      (← `(divisionSignatures.map fun (owner, name, signature, _, _) =>
+      (← `(exactSignatures.map fun (owner, name, signature, _, _) =>
         (owner, name, identityBytes signature))) none
     Lean.Elab.Term.synthesizeSyntheticMVarsNoPostponing
     let expression ← Lean.instantiateMVars expression
     let values ← unsafe Lean.Meta.evalExpr (List (String × String × List UInt8))
       (← Lean.Meta.inferType expression) expression
-    Lean.Elab.Tactic.closeMainGoal `divisionSignatureBytes (Lean.toExpr values)
+    Lean.Elab.Tactic.closeMainGoal `exactSignatureBytes (Lean.toExpr values)
 
 set_option maxRecDepth 4096 in
 /-- The materialized bytes contain exactly the original signatures and owner/name metadata. -/
-private theorem divisionSignatureBytes_eq : divisionSignatureBytes =
-    divisionSignatures.map (fun (owner, name, signature, _, _) =>
+private theorem exactSignatureBytes_eq : exactSignatureBytes =
+    exactSignatures.map (fun (owner, name, signature, _, _) =>
       (owner, name, identityBytes signature)) := by
   decide +kernel
-#print axioms divisionSignatureBytes_eq
+#print axioms exactSignatureBytes_eq
 
 /-- The unqualified signature of an external target under the exact intrinsic scope. -/
 private def intrinsicSignature (target : MethodId) : Option (List UInt8) :=
@@ -311,14 +311,14 @@ private def portableVectorFamily (instruction : RawInstruction) : Bool :=
 
 /-- A call that resembles an admitted entry by identity, or by owner and name; such a call
     must then match an entry exactly. -/
-private def divisionCallFamily (instruction : RawInstruction) : Bool :=
+private def exactCallFamily (instruction : RawInstruction) : Bool :=
   portableVectorFamily instruction || match instruction.operand with
   | .call site => match intrinsicSignature site.target with
-    | none => divisionSignatures.any fun (owner, name, _, _, _) =>
+    | none => exactSignatures.any fun (owner, name, _, _, _) =>
         site.name == name && match site.declaringType with
           | .atom _ declared => declared == owner
           | _ => false
-    | some signature => divisionSignatureBytes.any fun (owner, name, expected) =>
+    | some signature => exactSignatureBytes.any fun (owner, name, expected) =>
         (some signature == some expected) ||
         site.name == name && match site.declaringType with
           | .atom _ declared => declared == owner
@@ -326,24 +326,24 @@ private def divisionCallFamily (instruction : RawInstruction) : Bool :=
   | _ => false
 
 /-- Sharing scope removal preserves family recognition by either full identity or owner/name. -/
-private theorem divisionCallFamily_eq_original (instruction : RawInstruction) :
-    divisionCallFamily instruction = (portableVectorFamily instruction ||
+private theorem exactCallFamily_eq_original (instruction : RawInstruction) :
+    exactCallFamily instruction = (portableVectorFamily instruction ||
       match instruction.operand with
-      | .call site => divisionSignatures.any fun (owner, name, signature, _, _) =>
+      | .call site => exactSignatures.any fun (owner, name, signature, _, _) =>
           site.target == .external (intrinsicsScope ++ "::" ++ signature) ||
           site.name == name && match site.declaringType with
             | .atom _ declared => declared == owner
             | _ => false
       | _ => false) := by
-  cases operand : instruction.operand <;> simp only [divisionCallFamily, operand]
+  cases operand : instruction.operand <;> simp only [exactCallFamily, operand]
   rename_i site
   cases signature : intrinsicSignature site.target <;>
-    simp [divisionSignatureBytes_eq, List.any_map, Function.comp_def,
+    simp [exactSignatureBytes_eq, List.any_map, Function.comp_def,
       ← intrinsicSignature_matches, signature]
-#print axioms divisionCallFamily_eq_original
+#print axioms exactCallFamily_eq_original
 
 /-- The intrinsic and arity of an emitted admitted intrinsic. -/
-def emittedDivisionIntrinsic : Op → Option (Intrinsic × Nat)
+def emittedExactIntrinsic : Op → Option (Intrinsic × Nat)
   | .intrinsic intrinsic arity => match intrinsic with
     | .avx2 .band | .avx2 .bor | .avx2 .bxor | .avx2 .andNot
     | .avx2 .shl64Count | .avx2 .shr64Count | .avx2 .shl64 | .avx2 .shr64
@@ -355,69 +355,69 @@ def emittedDivisionIntrinsic : Op → Option (Intrinsic × Nat)
     | _ => none
   | _ => none
 
-/-- An emitted division intrinsic must match the raw call and be available. Other emitted
+/-- An emitted exact intrinsic must match the raw call and be available. Other emitted
     operations must not replace a call in the admitted family, including malformed calls. -/
-private def divisionSiteMatches (profile : FeatureProfile) (raw : RawInstruction)
+private def exactSiteMatches (profile : FeatureProfile) (raw : RawInstruction)
     (emitted : Op) : Bool :=
-  match emittedDivisionIntrinsic emitted with
-  | none => !divisionCallFamily raw
-  | some expected => match divisionIntrinsic raw with
+  match emittedExactIntrinsic emitted with
+  | none => !exactCallFamily raw
+  | some expected => match exactIntrinsic raw with
     | none => false
     | some actual => decide (actual = expected) && Intrinsic.available profile expected.1
 
 /-- Dispatching on the emitted operation preserves every original site check, including
     malformed raw metadata, arity mismatches and unavailable intrinsics. -/
-private theorem divisionSiteMatches_eq (profile : FeatureProfile) (raw : RawInstruction)
+private theorem exactSiteMatches_eq (profile : FeatureProfile) (raw : RawInstruction)
     (emitted : Op) :
-    divisionSiteMatches profile raw emitted =
-      ((if divisionCallFamily raw || (emittedDivisionIntrinsic emitted).isSome then
-        (divisionIntrinsic raw).isSome &&
-          decide (divisionIntrinsic raw = emittedDivisionIntrinsic emitted)
+    exactSiteMatches profile raw emitted =
+      ((if exactCallFamily raw || (emittedExactIntrinsic emitted).isSome then
+        (exactIntrinsic raw).isSome &&
+          decide (exactIntrinsic raw = emittedExactIntrinsic emitted)
        else true) &&
-      match emittedDivisionIntrinsic emitted with
+      match emittedExactIntrinsic emitted with
       | some (intrinsic, _) => Intrinsic.available profile intrinsic
       | none => true) := by
-  cases emittedResult : emittedDivisionIntrinsic emitted with
+  cases emittedResult : emittedExactIntrinsic emitted with
   | none =>
-    cases rawResult : divisionIntrinsic raw <;> cases family : divisionCallFamily raw <;>
-      simp [divisionSiteMatches, emittedResult, family]
+    cases rawResult : exactIntrinsic raw <;> cases family : exactCallFamily raw <;>
+      simp [exactSiteMatches, emittedResult, family]
   | some expected =>
     rcases expected with ⟨intrinsic, arity⟩
-    cases rawResult : divisionIntrinsic raw <;>
-      simp [divisionSiteMatches, emittedResult, rawResult]
+    cases rawResult : exactIntrinsic raw <;>
+      simp [exactSiteMatches, emittedResult, rawResult]
 
-#print axioms divisionSiteMatches_eq
+#print axioms exactSiteMatches_eq
 
 /-- The profile is valid, the three lists have equal length, and at every live pc a
     resembling call or an emitted admitted intrinsic requires an exact match between the two,
     and every emitted one is available under the profile. -/
-def DivisionIntrinsicsValid (closed : RawMethod) (reachable : List Bool) (method : Method) :
+def ExactIntrinsicsValid (closed : RawMethod) (reachable : List Bool) (method : Method) :
     Prop :=
   method.profile.Valid ∧ closed.code.length = reachable.length ∧
     closed.code.length = method.code.length ∧
-  all3 (fun raw live emitted => !live || divisionSiteMatches method.profile raw emitted)
+  all3 (fun raw live emitted => !live || exactSiteMatches method.profile raw emitted)
     closed.code reachable method.code = true
 
 /-- The optimized validator is equivalent to the original signature-family, exact-call
     and availability rules for all inputs, including unequal certificate lengths. -/
-theorem DivisionIntrinsicsValid_iff_original (closed : RawMethod) (reachable : List Bool)
+theorem ExactIntrinsicsValid_iff_original (closed : RawMethod) (reachable : List Bool)
     (method : Method) :
-    DivisionIntrinsicsValid closed reachable method ↔
+    ExactIntrinsicsValid closed reachable method ↔
     let classify := fun instruction : RawInstruction => (portableVectorIntrinsic instruction <|> do
       if instruction.opcode != 40 then none else
       let .call site := instruction.operand | none
       if site.hasThis || !site.returnsValue || !site.typeArguments.isEmpty then none else
       let (_, _, _, intrinsic, arity) ←
-        divisionSignatures.find? fun (owner, name, signature, _, arity) =>
+        exactSignatures.find? fun (owner, name, signature, _, arity) =>
           site.declaringType == .atom intrinsicsScope owner && site.name == name &&
           site.parameterCount == arity &&
           site.target == .external (intrinsicsScope ++ "::" ++ signature)
-      let (returnType, parameterTypes) ← divisionCallTypes intrinsic
+      let (returnType, parameterTypes) ← exactCallTypes intrinsic
       if site.returnType != returnType || site.parameterTypes != parameterTypes then none else
       return (intrinsic, arity))
     let family := fun instruction : RawInstruction =>
       portableVectorFamily instruction || match instruction.operand with
-      | .call site => divisionSignatures.any fun (owner, name, signature, _, _) =>
+      | .call site => exactSignatures.any fun (owner, name, signature, _, _) =>
           site.target == .external (intrinsicsScope ++ "::" ++ signature) ||
           site.name == name && match site.declaringType with
             | .atom _ declared => declared == owner
@@ -426,19 +426,19 @@ theorem DivisionIntrinsicsValid_iff_original (closed : RawMethod) (reachable : L
     method.profile.Valid ∧ closed.code.length = reachable.length ∧
     closed.code.length = method.code.length ∧
     all3 (fun raw live emitted => !live ||
-    (if family raw || (emittedDivisionIntrinsic emitted).isSome then
-      (classify raw).isSome && decide (classify raw = emittedDivisionIntrinsic emitted)
+    (if family raw || (emittedExactIntrinsic emitted).isSome then
+      (classify raw).isSome && decide (classify raw = emittedExactIntrinsic emitted)
      else true) &&
-    match emittedDivisionIntrinsic emitted with
+    match emittedExactIntrinsic emitted with
     | some (intrinsic, _) => Intrinsic.available method.profile intrinsic
     | none => true) closed.code reachable method.code = true := by
-  simp only [DivisionIntrinsicsValid, divisionSiteMatches_eq, divisionIntrinsic_eq_original,
-    divisionCallFamily_eq_original]
+  simp only [ExactIntrinsicsValid, exactSiteMatches_eq, exactIntrinsic_eq_original,
+    exactCallFamily_eq_original]
 
-#print axioms DivisionIntrinsicsValid_iff_original
+#print axioms ExactIntrinsicsValid_iff_original
 
 instance (closed : RawMethod) (reachable : List Bool) (method : Method) :
-    Decidable (DivisionIntrinsicsValid closed reachable method) :=
+    Decidable (ExactIntrinsicsValid closed reachable method) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
 
 /-- Whether a raw local is the whole-vector type eligible for opaque storage. -/
