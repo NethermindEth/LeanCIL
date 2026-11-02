@@ -31,8 +31,10 @@ namespace TypedFixture;
 internal struct A_Private { public uint Tag; public A_Private(uint tag) { Tag = tag; } }
 public struct Leaf { public ulong Value; }
 public struct Pair { public Leaf Head; }
+public struct Hidden { public ulong Value; }
 public static class Library
 {
+    public static void Fill(out Hidden value) => value.Value = 0;
     public static void Copy(in Pair source, out Pair destination)
     {
         if (Avx2.IsSupported) GC.KeepAlive(typeof(A_Private));
@@ -55,6 +57,39 @@ public static class Application
     public static uint Unlisted(uint value) => Library.Identity(value);
     public static ulong ByValue(Pair value) => value.Head.Value;
     public static ulong Local() { Pair value = default; return value.Head.Value; }
+    public static void Chain(in Pair source, out Pair destination)
+    {
+        Library.Copy(in source, out var middle);
+        Library.Copy(in middle, out destination);
+    }
+    // Roslyn reads this field through `ldloc`, a by-value use of the local.
+    public static ulong LocalField(in Pair source)
+    {
+        Library.Copy(in source, out var middle);
+        return middle.Head.Value;
+    }
+    static ulong Read(in Leaf leaf) => 0;
+    // Passing the field by reference keeps the local's address and takes the field's with `ldflda`.
+    public static ulong LocalFieldAddress(in Pair source)
+    {
+        Library.Copy(in source, out var middle);
+        return Read(in middle.Head);
+    }
+    public static void LocalCopy(in Pair source, out Pair destination)
+    {
+        Library.Copy(in source, out var middle);
+        destination = middle;
+    }
+    public static void LocalOnly()
+    {
+        Pair source = default;
+        Library.Copy(in source, out var copy);
+    }
+    public static void Unpublished(in Pair source, out Pair destination)
+    {
+        Library.Fill(out var hidden);
+        Library.Copy(in source, out destination);
+    }
 }
 """);
 Run(["dotnet", "build", appProject, "-c", "Release"]);
@@ -106,9 +141,10 @@ Run(["lake", "update"], package);
 File.WriteAllText(Path.Combine(callerPackage, "lakefile.toml"),
     "name = \"typed-import-callers\"\n[[require]]\nname = \"leancil\"\ngit = " + JsonSerializer.Serialize(Root.Replace('\\', '/')) +
     "\nrev = " + JsonSerializer.Serialize(revision) +
-    "\n[[lean_lib]]\nname = \"TypedIdentityCaller\"\n[[lean_lib]]\nname = \"TypedCopyCaller\"\n");
+    "\n[[lean_lib]]\nname = \"TypedIdentityCaller\"\n[[lean_lib]]\nname = \"TypedCopyCaller\"\n" +
+    "[[lean_lib]]\nname = \"TypedChainCaller\"\n");
 File.Copy(At("lean-toolchain"), Path.Combine(callerPackage, "lean-toolchain"));
-foreach (string name in new[] { "TypedIdentityCaller", "TypedCopyCaller" })
+foreach (string name in new[] { "TypedIdentityCaller", "TypedCopyCaller", "TypedChainCaller" })
     File.Copy(At("Tests/ContractImports/" + name + ".lean"), Path.Combine(callerPackage, name + ".lean"));
 Run(["lake", "update"], callerPackage);
 string copyArtifact = Path.Combine(root, "Copy");
@@ -198,11 +234,23 @@ foreach ((string name, Action<JsonObject> mutate) in new (string, Action<JsonObj
     string tampered = Path.Combine(root, name + ".leancil.contracts");
     File.WriteAllText(tampered, changed.ToJsonString());
     Reject(name, "raw layout differs", app, "TypedFixture.Application::Forward(TypedFixture.Pair&,TypedFixture.Pair&)", tampered, digest);
+    // Only a local names the imported layout here, so its admission alone must compare the metadata.
+    Reject("Local" + name, "raw layout differs", app, "TypedFixture.Application::LocalOnly()", tampered, digest);
 }
 
 Reject("Unlisted", "Contract export not present", app, "TypedFixture.Application::Unlisted(uint)", sidecar, interfaceDigest);
 Reject("ByValue", "Unsupported type", app, "TypedFixture.Application::ByValue(TypedFixture.Pair)", sidecar, interfaceDigest);
-Reject("Local", "Unsupported type", app, "TypedFixture.Application::Local()", sidecar, interfaceDigest);
+Reject("Local", "admitted only by address", app, "TypedFixture.Application::Local()", sidecar, interfaceDigest);
+Reject("LocalField", "admitted only by address", app, "TypedFixture.Application::LocalField(TypedFixture.Pair&)",
+    sidecar, interfaceDigest);
+Reject("LocalFieldAddress", "Failed to resolve assembly", app,
+    "TypedFixture.Application::LocalFieldAddress(TypedFixture.Pair&)", sidecar, interfaceDigest);
+Reject("LocalInitialize", "Unsupported type identity", app, "TypedFixture.Application::LocalOnly()",
+    sidecar, interfaceDigest);
+Reject("LocalCopy", "admitted only by address", app,
+    "TypedFixture.Application::LocalCopy(TypedFixture.Pair&,TypedFixture.Pair&)", sidecar, interfaceDigest);
+Reject("Unpublished", "not published by its typed interface", app,
+    "TypedFixture.Application::Unpublished(TypedFixture.Pair&,TypedFixture.Pair&)", sidecar, interfaceDigest);
 Reject("Open", "primitive integer", lib, "TypedFixture.Library::Identity(T)", sidecar, interfaceDigest, "--type-argument", "!!0");
 Reject("WrongArity", "exact closed generic", lib, "TypedFixture.Library::Identity(T)", sidecar, interfaceDigest,
     "--type-argument", "System.UInt64", "--type-argument", "System.UInt32");
@@ -242,6 +290,7 @@ if (InterfaceDigest(original) != interfaceDigest)
 foreach ((string name, string selector, string proof) in new[]
 {
     ("Forward", "TypedFixture.Application::Forward(TypedFixture.Pair&,TypedFixture.Pair&)", "TypedCopyCaller"),
+    ("Chain", "TypedFixture.Application::Chain(TypedFixture.Pair&,TypedFixture.Pair&)", "TypedChainCaller"),
     ("Identity", "TypedFixture.Application::Identity(ulong)", "TypedIdentityCaller")
 })
 {

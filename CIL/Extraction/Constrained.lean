@@ -11,23 +11,27 @@ private def branchesTo (pc : Nat) (instruction : RawInstruction) : Bool :=
   | .targets targets => targets.contains pc
   | _ => false
 
-/-- The selected program entry must be precisely the resolved struct implementation, with a
-    receiver argument exactly when the implementation is an instance method. -/
+/-- The selected program entry must be precisely the resolved target, declared by its closed
+    owner and instantiated at the site's method type arguments, with a receiver argument exactly
+    when the target is an instance method. -/
 private def selectedImplementation (methods : Nat → Option SpecializedMethod) (receiver : TypeExpr)
-    (resolved : DispatchMethod) (emitted : Op) : Bool :=
-  match emitted, namedType (if resolved.ownerArguments.isEmpty then receiver else resolved.owner) with
+    (site : CallSite) (target : ConstrainedTarget) (emitted : Op) : Bool :=
+  let resolved := target.method
+  let arguments := siteMethodArguments site
+  match emitted, namedType (ownerBase (target.declaringType receiver site)) with
   | .call index count, some (scope, name) => match methods index with
     | none => false
     | some method =>
-      method.arguments == resolved.ownerArguments && method.closed.token == resolved.token &&
+      method.arguments == arguments ++ resolved.ownerArguments &&
+      method.closed.token == resolved.token &&
       method.closed.ownerArgumentCount == resolved.ownerArguments.length &&
       method.closed.owner == String.ofList scope ++ "::" ++ String.ofList name &&
       method.closed.hasThis == resolved.hasThis && !method.closed.explicitThis &&
       method.closed.callingConvention == 0 && method.closed.genericParameters.isEmpty &&
       !method.closed.code.isEmpty && method.closed.attributes == resolved.attributes &&
       method.closed.implementation == resolved.implementation &&
-      method.closed.returnType == resolved.returnType &&
-      method.closed.parameters == resolved.parameters &&
+      substituteType arguments resolved.returnType == some method.closed.returnType &&
+      resolved.parameters.mapM (substituteType arguments) == some method.closed.parameters &&
       count == resolved.parameters.length + (if resolved.hasThis then 1 else 0)
   | _, _ => false
 
@@ -36,7 +40,7 @@ private def selectedImplementation (methods : Nat → Option SpecializedMethod) 
 def constrainedCallOpcode (site : CallSite) : Nat := if site.hasThis then 111 else 40
 
 /-- Check prefix adjacency, branch integrity, metadata resolution and the emitted target. -/
-def constrainedSiteWindow (resolve : TypeExpr → CallSite → Option DispatchMethod)
+def constrainedSiteWindow (resolve : TypeExpr → CallSite → Option ConstrainedTarget)
     (methods : Nat → Option SpecializedMethod)
     (current previous next : Option RawInstruction) (live nextLive : Option Bool)
     (emitted : Option Op) (targeted : Nat → Bool) (pc : Nat) : Bool :=
@@ -52,7 +56,7 @@ def constrainedSiteWindow (resolve : TypeExpr → CallSite → Option DispatchMe
     match previous, emitted with
     | some ⟨_, 65046, .type receiver⟩, some emitted =>
       match resolve receiver site with
-      | some resolved => selectedImplementation methods receiver resolved emitted
+      | some resolved => selectedImplementation methods receiver site resolved emitted
       | none => false
     | _, _ => false
   | some ⟨_, 40, .call site⟩ =>
@@ -60,14 +64,15 @@ def constrainedSiteWindow (resolve : TypeExpr → CallSite → Option DispatchMe
     | some ⟨_, 65046, .type receiver⟩ =>
       if pc == 0 || targeted pc || site.hasThis then false else
       match emitted, resolve receiver site with
-      | some emitted, some resolved => selectedImplementation methods receiver resolved emitted
+      | some emitted, some resolved =>
+        selectedImplementation methods receiver site resolved emitted
       | _, _ => false
     | _ => true
   | some ⟨_, 65046, _⟩ | some ⟨_, 111, _⟩ => false
   | _ => true
 
 /-- The instruction window supplied through arbitrary optional lookup functions. -/
-def constrainedSiteCheckWith (resolve : TypeExpr → CallSite → Option DispatchMethod)
+def constrainedSiteCheckWith (resolve : TypeExpr → CallSite → Option ConstrainedTarget)
     (methods : Nat → Option SpecializedMethod)
     (rawAt : Nat → Option RawInstruction) (liveAt : Nat → Option Bool)
     (codeAt : Nat → Option Op) (targeted : Nat → Bool) (pc : Nat) : Bool :=
@@ -107,7 +112,7 @@ theorem constrainedBranchTargets_contains (raw : List RawInstruction) (pc : Nat)
 #print axioms constrainedBranchTargets_contains
 
 /-- Traverse adjacent raw instructions and parallel state/code lists without positional lookup. -/
-def constrainedSites (resolve : TypeExpr → CallSite → Option DispatchMethod)
+def constrainedSites (resolve : TypeExpr → CallSite → Option ConstrainedTarget)
     (methods : Nat → Option SpecializedMethod)
     (targeted : Nat → Bool) : Nat → Option RawInstruction →
       List RawInstruction → List Bool → List Op → Bool
@@ -119,7 +124,7 @@ def constrainedSites (resolve : TypeExpr → CallSite → Option DispatchMethod)
   | _, _, _, _, _ => false
 
 /-- Streaming windows agree with the indexed rule on equally long evidence suffixes. -/
-theorem constrainedSites_eq (resolve : TypeExpr → CallSite → Option DispatchMethod)
+theorem constrainedSites_eq (resolve : TypeExpr → CallSite → Option ConstrainedTarget)
     (methods : Nat → Option SpecializedMethod) (targeted : Nat → Bool)
     (wholeRaw : List RawInstruction) (wholeStates : List Bool) (wholeCode : List Op)
     (raw : List RawInstruction) (states : List Bool) (code : List Op)
@@ -213,16 +218,18 @@ instance (types : List DispatchType) (methods : List SpecializedMethod) (raw : R
     Decidable (ConstrainedCallsValid types methods raw reachable emitted) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _))
 
-/-- A generic implementation retains its owner arguments for ordinary managed-call validation. -/
-def constrainedTargetSite (receiver : TypeExpr) (site : CallSite) (target : DispatchMethod) : CallSite :=
+/-- The direct call to a resolved target retains its closed owner and the site's method type
+    arguments, ahead of the owner's, for ordinary managed-call validation. -/
+def constrainedTargetSite (receiver : TypeExpr) (site : CallSite) (target : ConstrainedTarget) :
+    CallSite :=
   { site with
-    target := .managed target.token,
-    declaringType := (if target.ownerArguments.isEmpty then receiver else
-      target.ownerArguments.foldl TypeExpr.apply target.owner),
-    typeArguments := target.ownerArguments, ownerArgumentCount := target.ownerArguments.length }
+    target := .managed target.method.token,
+    declaringType := target.declaringType receiver site,
+    typeArguments := siteMethodArguments site ++ target.method.ownerArguments,
+    ownerArgumentCount := target.method.ownerArguments.length }
 
 /-- Lower a constrained prefix or call using the immediately preceding raw instruction. -/
-def lowerConstrainedInstruction (resolve : TypeExpr → CallSite → Option DispatchMethod)
+def lowerConstrainedInstruction (resolve : TypeExpr → CallSite → Option ConstrainedTarget)
     (previous : Option RawInstruction)
     (instruction : RawInstruction) : RawInstruction :=
   match instruction with
@@ -242,14 +249,14 @@ def lowerConstrainedInstruction (resolve : TypeExpr → CallSite → Option Disp
   | _ => instruction
 
 /-- Lower instructions in one pass, retaining the raw predecessor before rewriting it. -/
-def lowerConstrainedCode (resolve : TypeExpr → CallSite → Option DispatchMethod) :
+def lowerConstrainedCode (resolve : TypeExpr → CallSite → Option ConstrainedTarget) :
     Option RawInstruction → List RawInstruction → List RawInstruction
   | _, [] => []
   | previous, instruction :: rest => lowerConstrainedInstruction resolve previous instruction ::
     lowerConstrainedCode resolve (some instruction) rest
 
 /-- Streaming lowering agrees with positional predecessor lookup, including pc zero. -/
-theorem lowerConstrainedCode_eq (resolve : TypeExpr → CallSite → Option DispatchMethod)
+theorem lowerConstrainedCode_eq (resolve : TypeExpr → CallSite → Option ConstrainedTarget)
     (whole raw : List RawInstruction)
     (pc : Nat)
     (previous : Option RawInstruction) (suffix : raw = whole.drop pc)

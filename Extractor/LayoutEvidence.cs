@@ -46,12 +46,19 @@ internal sealed class LayoutEvidence
 
     internal static string Identity(TypeReference type)
     {
-        if (type is GenericInstanceType generic && GenericStructs.Is(type))
-            return Identity(generic.ElementType) + "<" + string.Join(",", generic.GenericArguments.Select(argument =>
-                MetadataValidation.IsAggregate(argument, type.Module)
-                    ? Identity(argument) : MethodSpecialization.SignatureType(argument))) + ">";
+        if (type is GenericInstanceType generic && GenericStructs.Is(type)) return ScopedArguments(generic);
         return Scope(type) + "::" + type.FullName;
     }
+
+    // Same-assembly generic interfaces spell scoped arguments, as Lean closes interface constraints.
+    internal static string InterfaceIdentity(TypeReference type) =>
+        type is GenericInstanceType generic && generic.ElementType.Scope is ModuleDefinition
+            ? ScopedArguments(generic) : Identity(type);
+
+    static string ScopedArguments(GenericInstanceType generic) =>
+        Identity(generic.ElementType) + "<" + string.Join(",", generic.GenericArguments.Select(argument =>
+            MetadataValidation.IsAggregate(argument, generic.Module)
+                ? Identity(argument) : MethodSpecialization.SignatureType(argument))) + ">";
 
     internal MetadataValidation.LayoutContext Metadata => layouts;
 
@@ -61,7 +68,7 @@ internal sealed class LayoutEvidence
 
     internal string RawFieldType(TypeReference type, ModuleDefinition module)
     {
-        if (MetadataValidation.IsAggregate(type, module))
+        if (MetadataValidation.IsAggregate(type, module) || layouts.IsImported(type))
         {
             var index = Index(type);
             if (index < 0) throw new InvalidDataException("Missing raw aggregate metadata: " + type.FullName);
@@ -105,9 +112,10 @@ internal sealed class LayoutEvidence
                 $"explicit := {metadata.IsExplicitLayout.ToString().ToLowerInvariant()}, " +
                 (metadata.IsAutoLayout ? "auto := true, " : "") +
                 (MetadataValidation.IsByRefLike(type) ? "byRefLike := true, " : "") +
-                $"interfaces := [{string.Join(", ", metadata.Interfaces.Select(implementation =>
-                    JsonSerializer.Serialize(Identity(GenericStructs.Substitute(implementation.InterfaceType,
-                        type as GenericInstanceType)))))}], " +
+                // An imported entry repeats its published layout, which carries no interfaces.
+                (layouts.IsImported(type) ? "" : $"interfaces := [{string.Join(", ", metadata.Interfaces.Select(
+                    implementation => JsonSerializer.Serialize(InterfaceIdentity(GenericStructs.Substitute(
+                        implementation.InterfaceType, type as GenericInstanceType)))))}], ") +
                 $"packing := {metadata.PackingSize}, declaredSize := {metadata.ClassSize}, fields := [{string.Join(", ", fields)}] }}";
         })));
         lean.AppendLine("]");
@@ -206,7 +214,7 @@ internal sealed class LayoutEvidence
             }
         }
         foreach (var local in method.Body.Variables)
-            if (MetadataValidation.IsAggregate(local.VariableType, method.Module))
+            if (layouts.IsLayout(local.VariableType))
                 uses.Add($".local {local.Index} {Index(local.VariableType)}");
         for (int home = 0; home < parameterIndices.Length; home++)
         {

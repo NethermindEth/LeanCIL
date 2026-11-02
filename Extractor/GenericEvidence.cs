@@ -62,9 +62,15 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
             return $".enum {Quote(LayoutEvidence.Identity(type))} ({Type(underlying)})";
         }
         var index = layouts.Index(type);
-        if (index >= 0) return $".aggregate {Quote(LayoutEvidence.Identity(type))} {index}";
+        if (index >= 0 && !layouts.Metadata.IsImported(type))
+            return $".aggregate {Quote(LayoutEvidence.Identity(type))} {index}";
         return $".atom {Scope(type)} {Quote(type.FullName)}";
     }
+
+    // Signatures name an imported layout by scoped atom, as the import boundary requires; only a
+    // local declaration binds it to the table entry that sizes its storage.
+    string LocalType(TypeReference type) => layouts.Metadata.IsImported(type)
+        ? $".aggregate {Quote(LayoutEvidence.Identity(type))} {layouts.Index(type)}" : Type(type);
 
     string Call(MethodReference reference, Instruction instruction, IReadOnlySet<Instruction> reachable)
     {
@@ -167,7 +173,7 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
 
     internal static string ConstraintType(TypeReference type) => type is RequiredModifierType modifier
         ? LayoutEvidence.Identity(modifier.ModifierType) + "!" + LayoutEvidence.Identity(modifier.ElementType)
-        : LayoutEvidence.Identity(type);
+        : LayoutEvidence.InterfaceIdentity(type);
 
     static string Constraint(TypeReference type)
     {
@@ -181,17 +187,23 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
         };
     }
 
+    // A constraint naming generic parameters, such as `T : I<T>`, is closed per instantiation in Lean.
+    string ParameterConstraint(GenericParameter parameter)
+    {
+        var types = parameter.Constraints.Select(constraint => constraint.ConstraintType).ToArray();
+        var open = types.Where(type => type.ContainsGenericParameter).Select(Type).ToArray();
+        return $"{{ flags := {(uint)parameter.Attributes}, " +
+            $"types := {List(types.Where(type => !type.ContainsGenericParameter).Select(Constraint))}" +
+            (open.Length == 0 ? "" : $", interfaces := {List(open)}") + " }";
+    }
+
     string Method(MethodDefinition method, MethodDefinition admitted, IReadOnlySet<Instruction> reachable)
     {
         methodParameterCount = method.GenericParameters.Count;
         var instructions = new InstructionIndex(method);
-        var constraints = method.GenericParameters.Select(parameter =>
-            $"{{ flags := {(uint)parameter.Attributes}, types := " +
-            $"{List(parameter.Constraints.Select(constraint => Constraint(constraint.ConstraintType)))} }}");
+        var constraints = method.GenericParameters.Select(ParameterConstraint).ToArray();
         var ownerConstraints = MethodSpecialization.Source(method) is null
-            ? method.DeclaringType.GenericParameters.Select(parameter =>
-                $"{{ flags := {(uint)parameter.Attributes}, types := " +
-                $"{List(parameter.Constraints.Select(constraint => Constraint(constraint.ConstraintType)))} }}") : [];
+            ? method.DeclaringType.GenericParameters.Select(ParameterConstraint).ToArray() : [];
         if (method.MetadataToken.ToUInt32() != admitted.MetadataToken.ToUInt32() ||
             method.Body.Instructions.Count != admitted.Body.Instructions.Count)
             throw new InvalidDataException("Specialization instruction mapping differs from the original method.");
@@ -204,7 +216,7 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
             return $"{{ offset := {instruction.Offset}, opcode := {(ushort)instruction.OpCode.Value}, " +
                 $"operand := {operand} }}";
         });
-        return $"{{ token := {method.MetadataToken.ToUInt32()}, owner := {Quote(LayoutEvidence.Identity(method.DeclaringType))}, ownerParameters := {List(ownerConstraints)}, ownerArgumentCount := {MethodSpecialization.OwnerArguments(method).Count}, hasThis := {Bool(method.HasThis)}, explicitThis := {Bool(method.ExplicitThis)}, callingConvention := {(byte)method.CallingConvention}, attributes := {(uint)method.Attributes}, implementation := {(uint)method.ImplAttributes}, returnType := {Type(method.ReturnType)}, parameters := {List(method.Parameters.Select(parameter => Parameter(parameter.ParameterType)))}, locals := {List(method.Body.Variables.Select(local => Type(local.VariableType)))}, initLocals := {Bool(method.Body.InitLocals)}, maxStack := {method.Body.MaxStackSize}, genericParameters := {List(constraints)}, code := {List(code)} }}";
+        return $"{{ token := {method.MetadataToken.ToUInt32()}, owner := {Quote(LayoutEvidence.Identity(method.DeclaringType))}, ownerParameters := {List(ownerConstraints)}, ownerArgumentCount := {MethodSpecialization.OwnerArguments(method).Count}, hasThis := {Bool(method.HasThis)}, explicitThis := {Bool(method.ExplicitThis)}, callingConvention := {(byte)method.CallingConvention}, attributes := {(uint)method.Attributes}, implementation := {(uint)method.ImplAttributes}, returnType := {Type(method.ReturnType)}, parameters := {List(method.Parameters.Select(parameter => Parameter(parameter.ParameterType)))}, locals := {List(method.Body.Variables.Select(local => LocalType(local.VariableType)))}, initLocals := {Bool(method.Body.InitLocals)}, maxStack := {method.Body.MaxStackSize}, genericParameters := {List(constraints)}, code := {List(code)} }}";
     }
 
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number,
@@ -253,8 +265,14 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
 
     string DispatchMethod(MethodDefinition method, GenericInstanceType? owner)
     {
-        TypeReference Closed(TypeReference type) => owner is null || method.HasGenericParameters
-            ? type : GenericStructs.Substitute(type, owner);
+        // Method type parameters stay `.parameter i`; dispatch closes them at each site's arguments.
+        TypeReference Closed(TypeReference type) => owner is null ? type : type switch
+        {
+            GenericParameter { Type: GenericParameterType.Method } => type,
+            GenericParameter => GenericStructs.Substitute(type, owner),
+            ArrayType array => new ArrayType(Closed(array.ElementType), array.Rank),
+            _ => TypeSubstitution.Components(type, Closed)
+        };
         var specialization = owner is null ? "" :
             $", owner := .constructor {Scope(owner.ElementType)} {Quote(owner.ElementType.FullName)}, " +
             $"ownerArguments := {List(owner.GenericArguments.Select(Type))}";

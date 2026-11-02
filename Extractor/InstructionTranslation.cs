@@ -99,9 +99,8 @@ internal static class InstructionTranslation
         }
         if (i.OpCode.Code == Code.Callvirt || i is { OpCode.Code: Code.Call, Previous.OpCode.Code: Code.Constrained })
         {
-            var resolved = ConstrainedCalls.Resolve(m, i, instructions, profile.Architecture).Target;
-            resolved = (constrainedTargets ?? new ConstrainedCalls.TargetIndex(methods.Keys))
-                .Find(resolved, (TypeReference)i.Previous.Operand);
+            var resolved = (constrainedTargets ?? new ConstrainedCalls.TargetIndex(methods.Keys))
+                .Find(ConstrainedCalls.Resolve(m, i, instructions, profile.Architecture));
             var index = methods.GetValueOrDefault(resolved, -1);
             if (index <= methodIndex) throw new InvalidDataException("Unresolved constrained implementation");
             return $".call {index} {resolved.Parameters.Count + (resolved.HasThis ? 1 : 0)}";

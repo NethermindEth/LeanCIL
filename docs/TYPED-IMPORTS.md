@@ -37,8 +37,22 @@ and its nested aggregate dependencies directly. The interface contains their
 ordered field types/names, scope, value-type encoding/base, layout kind, packing,
 declared size and offsets. Import admission compares those values with the pinned
 DLL metadata. It does not use Cecil's ambient resolver to approve an external
-layout. By-value imported aggregates, imported aggregate locals and direct
-external field access remain unsupported.
+layout. By-value imported aggregates and direct external field access remain
+unsupported.
+
+App can also declare a local of such a struct and pass its address on, as
+`Library.Copy(in source, out var middle); Library.Copy(in middle, out destination)`
+does. The interface must publish the struct's whole layout closure with values
+equal to the pinned DLL metadata, and a call bound in the same extraction must
+carry that closure in its typed signature. The local is admitted only by
+address: `ldloc`, `stloc`, `initobj` and field access through it are rejected, so
+its bytes never cross the App's evaluation stack. The extractor never resolves an
+external field, so `ldflda` on the local fails resolution; a zero-initialized
+`Pair value = default` is rejected at its `initobj`. Its layouts join the App's layout table,
+computed from the selected module, and `ImportedLocalLayoutsBound` in
+`TranslationValid` requires each such entry to equal the selected layout of every
+slot that publishes its identity. Imported entries carry no interfaces, so they
+cannot yet satisfy a generic constraint.
 
 The public catalog is a signature closure, not the full implementation layout
 table. Private layouts can occur before or between its entries. The generated
@@ -69,8 +83,10 @@ extraction, relocation and linked caller proof through its existing replay path.
 No new method-summary axiom or native proof evaluation is introduced.
 
 `Tests/GenericLayoutImports.cs` builds real Lib/App SDK assemblies. It verifies
-the nested `in`/`out` forwarding contract and `Identity<UInt64>`, then checks the
-linked claims with full verification. It also exercises a private layout before
-the public nested closure, metadata tampering, wrong/open/unlisted instances,
-custom modifiers from two assemblies and the canonical format 2 sidecar digest. `Tests/ImportedLayouts.lean` directly checks malformed validator
-inputs independently of DLL hashes.
+the nested `in`/`out` forwarding contract, a chain through an imported local and
+`Identity<UInt64>`, then checks the linked claims with full verification. It also
+exercises a private layout before the public nested closure, metadata tampering
+seen only through a local, by-value, field and `initobj` uses of an imported local, an
+unpublished local type, wrong/open/unlisted instances, custom modifiers from two
+assemblies and the canonical format 2 sidecar digest. `Tests/ImportedLayouts.lean`
+directly checks malformed validator inputs independently of DLL hashes.
