@@ -42,3 +42,63 @@ public static class StaticInterfaces
 
     public static ulong XorPlain(ulong left, ulong right) => Step<XorStep, StepOff>(left, right);
 }
+
+// A generic static virtual slot with a default body forwards to the struct's static abstract slot.
+// A struct that does not implement the generic slot runs the interface default, specialized at itself.
+public interface IAllowance<TSelf> where TSelf : struct, IAllowance<TSelf>
+{
+    static abstract bool Spend(ref TSelf self, ulong amount);
+
+    static virtual bool Spend<TPrice>(ref TSelf self) where TPrice : struct, IPrice =>
+        TSelf.Spend(ref self, TPrice.Price);
+}
+
+public interface IPrice
+{
+    static abstract ulong Price { get; }
+}
+
+public struct TriplePrice : IPrice
+{
+    public static ulong Price => 3;
+}
+
+public struct Allowance : IAllowance<Allowance>
+{
+    public ulong Left;
+
+    public static bool Spend(ref Allowance self, ulong amount)
+    {
+        if (self.Left < amount) return false;
+        self.Left -= amount;
+        return true;
+    }
+}
+
+// Overrides the generic slot, so the interface default must not run for this receiver.
+public struct DoublingAllowance : IAllowance<DoublingAllowance>
+{
+    public ulong Left;
+
+    public static bool Spend(ref DoublingAllowance self, ulong amount)
+    {
+        if (self.Left < amount) return false;
+        self.Left -= amount;
+        return true;
+    }
+
+    static bool IAllowance<DoublingAllowance>.Spend<TPrice>(ref DoublingAllowance self) =>
+        Spend(ref self, TPrice.Price * 2);
+}
+
+public static class StaticVirtualDefaults
+{
+    public static ulong Spend<TAllowance, TPrice>(ref TAllowance allowance)
+        where TAllowance : struct, IAllowance<TAllowance> where TPrice : struct, IPrice =>
+        TAllowance.Spend<TPrice>(ref allowance) ? 1UL : 0UL;
+
+    public static ulong SpendDefault(ref Allowance allowance) => Spend<Allowance, TriplePrice>(ref allowance);
+
+    public static ulong SpendOverride(ref DoublingAllowance allowance) =>
+        Spend<DoublingAllowance, TriplePrice>(ref allowance);
+}

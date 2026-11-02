@@ -7,6 +7,7 @@
 #:include RejectedEvidence.cs
 #:include TailCallFixtures.cs
 
+using System.Text;
 using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -17,6 +18,25 @@ Directory.CreateDirectory(root);
 var evidence = new GeneratedEvidence(root);
 var rejected = new RejectedEvidence(root);
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "Tests.ConstrainedEvidence");
+
+// Keep the exact emitted definitions and constrained obligations; unrelated certificates
+// are covered by the complete positive extraction, not recomputed for each mutation.
+static string Narrowed(string source, out string control)
+{
+    var obligations = Regex.Matches(source,
+        @"(?m)^theorem method\d+_constrained_validated : [^\r\n]+\r?$");
+    var methodCount = Regex.Matches(source, @"(?m)^def method\d+ : Method :=").Count;
+    if (methodCount == 0 || obligations.Count != methodCount)
+        throw new Exception("Unexpected constrained obligation count");
+    var declarations = Regex.Replace(source,
+        @"(?m)^(?:@\[[^\r\n]*\] )?theorem [^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*\r?\n", "");
+    declarations = Regex.Replace(declarations, @"(?m)^#print axioms [^\r\n]*\r?\n", "");
+    var names = obligations.Select(match => Regex.Match(match.Value, @"theorem (\w+)").Groups[1].Value).ToArray();
+    var narrowed = declarations.Replace("end Extracted", string.Join("\n", obligations.Zip(names).Select(pair =>
+        pair.First.Value + "\n#print axioms " + pair.Second)) + "\nend Extracted", StringComparison.Ordinal);
+    control = CheckedEvidenceControl(source, narrowed, names, 0);
+    return narrowed;
+}
 
 var directAssembly = Path.Combine(root, "direct-generic.dll");
 using (var module = ModuleDefinition.ReadModule(assembly))
@@ -65,21 +85,7 @@ foreach (var (name, type, expected) in new[]
     var call = name == "DirectGeneric" ? ".call 1 2" : ".call 2 1";
     if (!source.Contains(call, StringComparison.Ordinal)) throw new Exception("Missing constrained call mutation target");
     var forged = Path.Combine(root, name + "-wrong-target.lean");
-    // Keep the exact emitted definitions and constrained obligations; unrelated certificates
-    // are covered by the complete positive extraction above, not recomputed for each mutation.
-    var obligations = Regex.Matches(source,
-        @"(?m)^theorem method\d+_constrained_validated : [^\r\n]+\r?$");
-    var methodCount = Regex.Matches(source, @"(?m)^def method\d+ : Method :=").Count;
-    if (methodCount == 0 || obligations.Count != methodCount)
-        throw new Exception("Unexpected constrained obligation count");
-    var declarations = Regex.Replace(source,
-        @"(?m)^(?:@\[[^\r\n]*\] )?theorem [^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*\r?\n", "");
-    declarations = Regex.Replace(declarations, @"(?m)^#print axioms [^\r\n]*\r?\n", "");
-    var narrowed = declarations.Replace("end Extracted", string.Join("\n", obligations.Select(match =>
-        match.Value + "\n#print axioms " + Regex.Match(match.Value, @"theorem (\w+)").Groups[1].Value)) +
-        "\nend Extracted", StringComparison.Ordinal);
-    var control = CheckedEvidenceControl(source, narrowed, obligations.Select(match =>
-        Regex.Match(match.Value, @"theorem (\w+)").Groups[1].Value), 0);
+    var narrowed = Narrowed(source, out var control);
     File.AppendAllText(proof, "\n" + control);
     evidence.Add(proof, "PASS compiled constrained call, certificate and obligation eligibility: " + name);
     if (!type.Contains('`') && !name.StartsWith("Closed", StringComparison.Ordinal))
@@ -198,6 +204,75 @@ foreach (var name in new[] { "AddCounted", "XorPlain" })
     evidence.Add(proof, "PASS static interface dispatch: " + name);
 }
 
+// A generic static virtual slot runs the interface default for a struct without an override and the
+// override otherwise; the balance left behind (less the price or twice it) tells them apart.
+var examples = System.Reflection.Assembly.Load(File.ReadAllBytes(assembly));
+var defaultNarrowed = new Dictionary<string, string>();
+foreach (var (name, type) in new[] { ("SpendDefault", "Allowance"), ("SpendOverride", "DoublingAllowance") })
+{
+    var output = Path.Combine(root, "Static-" + name);
+    Run(["dotnet", ExtractorPath, "extract", assembly, $"StaticVirtualDefaults::{name}(Examples.{type}&)", output]);
+    var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    var receiverType = examples.GetType("Examples." + type)!;
+    var left = receiverType.GetField("Left")!;
+    var memories = new StringBuilder();
+    var claims = new[] { 42UL, 6UL, 5UL, 0UL }.Select(balance =>
+    {
+        var receiver = Activator.CreateInstance(receiverType)!;
+        left.SetValue(receiver, balance);
+        object[] arguments = [receiver];
+        var result = (ulong)examples.GetType("Examples.StaticVirtualDefaults")!.GetMethod(name)!
+            .Invoke(null, arguments)!;
+        memories.Append($$"""
+
+            private def memory{{balance}} : CIL.Safety.Memory := {
+              allocations := fun identity => if identity == 0 then
+                some ⟨.callerStack, ⟨8, 8, []⟩, true, []⟩ else none
+              cells := fun _ offset => ⟨if offset == 0 then {{balance}} else 0, true⟩
+              views := [⟨0, 0, 8, true, true⟩]
+              nextIdentity := 1 }
+            """);
+        return $"((CIL.Safety.invoke Extracted.program 32 0 [.reference (.address ⟨0, 0⟩)] memory{balance}).map " +
+            $"fun result => ((result.1.cells 0 0).bits, result.2)) = " +
+            $".ok ({left.GetValue(arguments[0])}, [.scalar (.i64 {result})])";
+    }).ToArray();
+    var proof = Path.Combine(root, "Static-" + name + ".lean");
+    File.WriteAllText(proof, source + memories + "\n\ntheorem default_result :\n    " +
+        string.Join(" ∧\n    ", claims) + " :=\n  ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\n" +
+        "#print axioms default_result\n");
+    defaultNarrowed[name] = Narrowed(source, out var control);
+    File.AppendAllText(proof, "\n" + control);
+    evidence.Add(proof, "PASS static virtual default dispatch: " + name);
+}
+
+// The emitted call must name the resolved instance: another method, a hidden override or a changed
+// method type argument each leave the caller's constrained obligation unprovable.
+var (spendDefault, spendOverride) = (defaultNarrowed["SpendDefault"], defaultNarrowed["SpendOverride"]);
+var defaultSite = Regex.Match(spendDefault, @"target := \.managed (\d+), typeArguments := \[(\.aggregate ""[^""]+" +
+    @"TriplePrice"" \d+), (\.aggregate ""[^""]+Allowance"" \d+)\], ownerArgumentCount := 1");
+var overrideSite = Regex.Match(spendOverride, @"target := \.managed (\d+), typeArguments := \[\.aggregate ""[^""]+" +
+    @"TriplePrice"" \d+, \.aggregate ""[^""]+DoublingAllowance"" \d+\], ownerArgumentCount := 1");
+var hiddenOverride = overrideSite.Success ? Regex.Match(spendOverride,
+    @"overrides := \[\(" + overrideSite.Groups[1].Value + @", [^\r\n]+?DoublingAllowance"" \d+\)\)\]") : Match.Empty;
+var defaultBody = Regex.Match(spendDefault, @"def method(\d+)Original : Extraction.RawMethod := " +
+    @"\{ token := \d+, owner := ""[^""]+::Examples.IAllowance\\u00601""");
+var defaultCalls = Regex.Matches(spendDefault, @"(?m)^  \.call " + defaultBody.Groups[1].Value + @" 1,\r?$");
+if (!defaultSite.Success || !hiddenOverride.Success || !defaultBody.Success || defaultCalls.Count != 1)
+    throw new Exception("Missing static virtual default mutation target");
+foreach (var (mutation, forgedSource) in new[]
+{
+    ("wrong-target", spendDefault.Replace(defaultCalls[0].Value, "  .call 0 1,", StringComparison.Ordinal)),
+    ("hidden-override", spendOverride.Replace(hiddenOverride.Value, "overrides := []", StringComparison.Ordinal)),
+    ("method-argument", spendDefault.Replace(defaultSite.Value, defaultSite.Value.Replace(
+        defaultSite.Groups[2].Value + ", ", defaultSite.Groups[3].Value + ", ", StringComparison.Ordinal),
+        StringComparison.Ordinal))
+})
+{
+    var forged = Path.Combine(root, "Static-default-" + mutation + ".lean");
+    File.WriteAllText(forged, forgedSource);
+    rejected.Add(forged, "PASS forged static virtual default dispatch: " + mutation, "ConstrainedCallsValid");
+}
+
 AddTailCallFixtures(assembly, root, evidence, rejected);
 evidence.Check();
 rejected.Check();
@@ -229,6 +304,41 @@ foreach (var (mutation, marker) in new[]
     if (staticRejection.Code == 0 || !staticRejection.Output.Contains(marker, StringComparison.Ordinal))
         throw new Exception("Incorrect static constrained rejection: " + mutation + "\n" + staticRejection.Output);
     Console.WriteLine("PASS static constrained extraction rejection: " + mutation);
+}
+
+// An abstract generic slot has no fallback, and an unrecorded same-signature struct method beside a
+// default body is ambiguous: neither may resolve to the interface body.
+foreach (var mutation in new[] { "abstract-generic-slot", "unrecorded-implementation" })
+{
+    var dll = Path.Combine(root, mutation + ".dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        var slot = module.GetType("Examples.IAllowance`1").Methods
+            .Single(method => method.Name == "Spend" && method.HasGenericParameters);
+        if (mutation == "abstract-generic-slot")
+        {
+            slot.Body = null;
+            slot.Attributes |= MethodAttributes.Abstract;
+        }
+        else
+        {
+            var receiver = module.GetType("Examples.Allowance");
+            var unrecorded = new MethodDefinition("Spend", MethodAttributes.Public | MethodAttributes.Static |
+                MethodAttributes.HideBySig, slot.ReturnType);
+            unrecorded.GenericParameters.Add(new GenericParameter("TPrice", unrecorded));
+            unrecorded.Parameters.Add(new ParameterDefinition(new ByReferenceType(receiver)));
+            unrecorded.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ldc_I4_0));
+            unrecorded.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ret));
+            receiver.Methods.Add(unrecorded);
+        }
+        module.Write(dll);
+    }
+    var defaultRejection = Execute(["dotnet", ExtractorPath, "extract", dll,
+        "StaticVirtualDefaults::SpendDefault(Examples.Allowance&)", Path.Combine(root, "Reject-" + mutation)]);
+    if (defaultRejection.Code == 0 ||
+        !defaultRejection.Output.Contains("has no unique struct implementation", StringComparison.Ordinal))
+        throw new Exception("Incorrect static default rejection: " + mutation + "\n" + defaultRejection.Output);
+    Console.WriteLine("PASS static default extraction rejection: " + mutation);
 }
 
 foreach (var (mutation, marker) in new[]

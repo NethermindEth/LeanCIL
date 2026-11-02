@@ -3,39 +3,55 @@ using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
-// Resolve a constrained receiver to a method declared by that concrete struct. No boxing fallback exists.
+// Resolve a constrained receiver to a struct method or a static interface default body. No boxing fallback exists.
 // `callvirt` dispatches an instance slot; `call` dispatches a static interface slot to a static implementation.
 internal static class ConstrainedCalls
 {
-    internal sealed record Resolution(TypeDefinition Receiver, MethodDefinition Slot, MethodDefinition Target);
+    // `Owner` is the closed type declaring the selected instance: the receiver, or the slot's interface for a
+    // default body. `MethodArguments` are the site's method type arguments, empty for a non-generic slot.
+    internal sealed record Resolution(TypeDefinition Receiver, MethodDefinition Slot, MethodDefinition Target,
+        TypeReference Owner, TypeReference[] MethodArguments)
+    {
+        internal bool Specialized => Owner is GenericInstanceType || MethodArguments.Length != 0;
+    }
 
     internal sealed class TargetIndex(IEnumerable<MethodDefinition> methods)
     {
-        readonly Dictionary<(MethodDefinition Definition, string Owner), MethodDefinition> targets = methods
-            .Where(method => method.HasThis && MethodSpecialization.OwnerArguments(method).Count != 0 &&
-                !MethodSpecialization.Definition(method).HasGenericParameters)
-            .ToDictionary(method => (MethodSpecialization.Definition(method),
-                MethodSpecialization.SignatureType(MethodSpecialization.DeclaringType(method))));
+        readonly Dictionary<(MethodDefinition Definition, string Owner, string Arguments), MethodDefinition> targets =
+            methods.Where(method => MethodSpecialization.Source(method) is not null)
+                .ToDictionary(method => (MethodSpecialization.Definition(method),
+                    MethodSpecialization.SignatureType(MethodSpecialization.DeclaringType(method)),
+                    ArgumentKey(MethodSpecialization.Arguments(method)
+                        .Take(MethodSpecialization.Arguments(method).Count -
+                            MethodSpecialization.OwnerArguments(method).Count))));
 
-        internal MethodDefinition Find(MethodDefinition definition, TypeReference receiver) =>
-            receiver is not GenericInstanceType ? definition :
-                targets.GetValueOrDefault((definition, MethodSpecialization.SignatureType(receiver))) ??
+        internal MethodDefinition Find(Resolution resolution) =>
+            !resolution.Specialized ? resolution.Target :
+                targets.GetValueOrDefault((resolution.Target, MethodSpecialization.SignatureType(resolution.Owner),
+                    ArgumentKey(resolution.MethodArguments))) ??
                     throw new InvalidDataException("Unresolved constrained owner specialization");
+
+        static string ArgumentKey(IEnumerable<TypeReference> arguments) =>
+            string.Join(",", arguments.Select(MethodSpecialization.SignatureType));
     }
 
-    internal static MethodDefinition Specialize(Resolution resolution, Instruction call,
-        MethodSpecialization specializations)
+    internal static MethodDefinition Specialize(Resolution resolution, MethodSpecialization specializations)
     {
-        if (call.Previous.Operand is not GenericInstanceType owner) return resolution.Target;
+        if (!resolution.Specialized) return resolution.Target;
         var definition = resolution.Target;
-        var reference = new MethodReference(definition.Name, definition.ReturnType, owner)
+        var member = new MethodReference(definition.Name, definition.ReturnType, resolution.Owner)
         {
             HasThis = definition.HasThis,
             CallingConvention = definition.CallingConvention
         };
         foreach (var parameter in definition.Parameters)
-            reference.Parameters.Add(new ParameterDefinition(parameter.ParameterType));
-        return specializations.Instantiate(reference);
+            member.Parameters.Add(new ParameterDefinition(parameter.ParameterType));
+        foreach (var parameter in definition.GenericParameters)
+            member.GenericParameters.Add(new GenericParameter(parameter.Name, member));
+        if (resolution.MethodArguments.Length == 0) return specializations.Instantiate(member);
+        var instance = new GenericInstanceMethod(member);
+        foreach (var argument in resolution.MethodArguments) instance.GenericArguments.Add(argument);
+        return specializations.Instantiate(instance);
     }
 
     internal static Resolution Resolve(MethodDefinition caller, Instruction call,
@@ -53,16 +69,19 @@ internal static class ConstrainedCalls
         MetadataValidation.Layout(receiver, caller.Module, architecture);
         if (instructions.IsTarget(call))
             throw new InvalidDataException("Branch bypasses constrained receiver prefix");
-        if (reference is GenericInstanceMethod || reference.Resolve() is not { } slot ||
-            slot.Module != caller.Module || reference.Name != slot.Name ||
-            !SameType(reference.ReturnType, slot.ReturnType) ||
-            !reference.Parameters.Select(parameter => MethodSpecialization.SignatureType(parameter.ParameterType))
+        TypeReference[] methodArguments = reference is GenericInstanceMethod generic
+            ? [.. generic.GenericArguments] : [];
+        var member = reference is GenericInstanceMethod specialized ? specialized.ElementMethod : reference;
+        if (member.Resolve() is not { } slot ||
+            slot.Module != caller.Module || member.Name != slot.Name ||
+            !SameType(member.ReturnType, slot.ReturnType) ||
+            !member.Parameters.Select(parameter => MethodSpecialization.SignatureType(parameter.ParameterType))
                 .SequenceEqual(slot.Parameters.Select(parameter =>
                     MethodSpecialization.SignatureType(parameter.ParameterType))) ||
-            reference.HasThis != slot.HasThis || slot.HasThis != instance || slot.IsStatic == instance ||
-            slot.IsConstructor ||
-            slot.HasGenericParameters || reference.ExplicitThis ||
-            reference.CallingConvention != MethodCallingConvention.Default)
+            member.HasThis != slot.HasThis || slot.HasThis != instance || slot.IsStatic == instance ||
+            slot.IsConstructor || slot.GenericParameters.Count != methodArguments.Length ||
+            methodArguments.Any(argument => argument.ContainsGenericParameter) || member.ExplicitThis ||
+            member.CallingConvention != Convention(methodArguments.Length))
             throw new InvalidDataException("Unsupported constrained method slot");
         InReferences.RejectTwins(slot);
 
@@ -76,10 +95,11 @@ internal static class ConstrainedCalls
         {
             if (!SameType(reference.DeclaringType, receiver))
                 throw new InvalidDataException("Constrained direct slot must match its receiver owner");
-            return Checked(concrete, reference, slot, owner);
+            return Checked(concrete, receiver, reference, slot, methodArguments);
         }
-        if (!slot.DeclaringType.IsInterface ||
-            !slot.IsAbstract || !slot.IsVirtual ||
+        // A static virtual slot with a body runs only when the receiver records no implementation of it.
+        var defaultBody = !instance && !slot.IsAbstract && slot.HasBody;
+        if (!slot.DeclaringType.IsInterface || !slot.IsVirtual || !slot.IsAbstract && !defaultBody ||
             !concrete.Interfaces.Any(implementation => SameType(
                 GenericStructs.Substitute(implementation.InterfaceType, owner), reference.DeclaringType)))
             throw new InvalidDataException("Constrained call requires a directly implemented same-assembly interface");
@@ -88,31 +108,73 @@ internal static class ConstrainedCalls
             method.Overrides.Any(overridden => overridden.Resolve() == slot &&
                 SameType(GenericStructs.Substitute(overridden.DeclaringType, owner),
                     reference.DeclaringType))).ToArray();
-        var targets = explicitTargets.Length != 0 ? explicitTargets : concrete.Methods.Where(method =>
-            method.IsPublic && !method.HasGenericParameters && method.Name == slot.Name &&
-            method.HasThis == instance && SignatureMatches(method, reference, owner)).ToArray();
-        if (targets.Length != 1)
+        if (explicitTargets.Length != 0)
+            return explicitTargets.Length == 1
+                ? Checked(concrete, receiver, reference, explicitTargets[0], methodArguments)
+                : throw new InvalidDataException("Constrained interface slot has no unique struct implementation");
+        var implicitTargets = concrete.Methods.Where(method =>
+            method.IsPublic && method.GenericParameters.Count == methodArguments.Length &&
+            method.Name == slot.Name && method.HasThis == instance &&
+            SignatureMatches(method, reference, owner, methodArguments)).ToArray();
+        if (defaultBody && implicitTargets.Length == 0)
+            return Default(concrete, reference, slot, methodArguments);
+        // A default slot with an unrecorded same-signature struct method is ambiguous, so it is rejected.
+        if (implicitTargets.Length != 1 || defaultBody)
             throw new InvalidDataException("Constrained interface slot has no unique struct implementation");
-        return Checked(concrete, reference, targets[0], owner);
+        return Checked(concrete, receiver, reference, implicitTargets[0], methodArguments);
     }
 
-    static Resolution Checked(TypeDefinition receiver, MethodReference slot, MethodDefinition target,
-        GenericInstanceType? owner)
+    static Resolution Checked(TypeDefinition receiver, TypeReference closedReceiver, MethodReference slot,
+        MethodDefinition target, TypeReference[] methodArguments)
     {
+        var owner = closedReceiver as GenericInstanceType;
         if (target.DeclaringType != receiver || target.HasThis != slot.HasThis || target.IsStatic == slot.HasThis ||
-            target.IsAbstract ||
-            !target.HasBody || target.IsConstructor || target.HasGenericParameters || target.ExplicitThis ||
-            target.CallingConvention != MethodCallingConvention.Default || !SignatureMatches(target, slot, owner))
+            target.IsAbstract || !target.HasBody || target.IsConstructor ||
+            target.GenericParameters.Count != methodArguments.Length || target.ExplicitThis ||
+            target.CallingConvention != Convention(methodArguments.Length) ||
+            !SignatureMatches(target, slot, owner, methodArguments))
             throw new InvalidDataException("Constrained call would require boxing or unsupported dispatch");
-        return new(receiver, slot.Resolve(), target);
+        return new(receiver, Slot(slot), target, closedReceiver, methodArguments);
     }
 
-    static bool SignatureMatches(MethodReference implementation, MethodReference slot, GenericInstanceType? owner)
+    // The default body is the slot itself, instantiated at the site's closed interface and method arguments.
+    static Resolution Default(TypeDefinition receiver, MethodReference slot, MethodDefinition target,
+        TypeReference[] methodArguments)
     {
-        return SameType(GenericStructs.Substitute(implementation.ReturnType, owner), CallReturnType.Resolve(slot)) &&
+        if (!target.IsStatic || target.HasThis || target.IsAbstract || !target.HasBody || !target.IsVirtual ||
+            !target.DeclaringType.IsInterface || target.ExplicitThis ||
+            target.CallingConvention != Convention(methodArguments.Length) ||
+            !SignatureMatches(target, slot, slot.DeclaringType as GenericInstanceType, methodArguments))
+            throw new InvalidDataException("Constrained call would require boxing or unsupported dispatch");
+        return new(receiver, target, target, slot.DeclaringType, methodArguments);
+    }
+
+    static MethodDefinition Slot(MethodReference slot) =>
+        (slot is GenericInstanceMethod generic ? generic.ElementMethod : slot).Resolve();
+
+    static MethodCallingConvention Convention(int methodArity) =>
+        methodArity == 0 ? MethodCallingConvention.Default : MethodCallingConvention.Generic;
+
+    // The implementation's owner and method parameters are closed at the site's arguments before comparison.
+    static bool SignatureMatches(MethodReference implementation, MethodReference slot, GenericInstanceType? owner,
+        TypeReference[] methodArguments)
+    {
+        return SameType(Close(implementation.ReturnType, owner, methodArguments), CallReturnType.Resolve(slot)) &&
             implementation.Parameters.Count == slot.Parameters.Count &&
             implementation.Parameters.Zip(CallReturnType.Parameters(slot)).All(pair =>
-                SameType(GenericStructs.Substitute(pair.First.ParameterType, owner), pair.Second));
+                SameType(Close(pair.First.ParameterType, owner, methodArguments), pair.Second));
+    }
+
+    static TypeReference Close(TypeReference type, GenericInstanceType? owner, TypeReference[] methodArguments)
+    {
+        if (type is GenericParameter { Type: GenericParameterType.Method } parameter)
+            return parameter.Position >= 0 && parameter.Position < methodArguments.Length
+                ? methodArguments[parameter.Position]
+                : throw new InvalidDataException("Unbound constrained method type parameter");
+        if (type is GenericParameter) return GenericStructs.Substitute(type, owner);
+        if (type is ArrayType { IsVector: true } array) return new ArrayType(Close(array.ElementType, owner,
+            methodArguments));
+        return TypeSubstitution.Components(type, component => Close(component, owner, methodArguments));
     }
 
     static bool SameType(TypeReference left, TypeReference right) =>
