@@ -22,6 +22,8 @@ reference-pack version, acceptance and rejection diagnostics.
 
 The whole-corpus scan recompiles the C# sources in `Examples/Assembly`, the contract-import
 library and application, and `Tests/NativeProbe` with each compiler/language combination.
+The application is scanned a second time, as `ImportFixture.App+ImportFixture.Lib`, with its
+library pinned through the blocker manifest's `references`.
 It runs the extractor's blocker analysis under the scalar profile over every metadata method,
 including constructors and open generic methods. The checked-in
 [baseline](../Tests/CompilerCoverageBaseline.tsv) records each method as admitted (`A`),

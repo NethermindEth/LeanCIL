@@ -84,6 +84,30 @@ propagated through dependencies into reports. They identify assumptions, not evi
 initializer ran. Constructor-derived exported field values and forced-full initialization premises
 are unsupported. Reference-only authoring checks do not issue deployment certificates.
 
+## Pinned referenced assemblies
+
+An extraction may include bodies and layouts from each `--reference` assembly. Those DLLs are
+trusted inputs on the same terms as the selected one; no other assembly can contribute code.
+
+- `Extracted.assemblies` lists every pin (identity, MVID, SHA-256), the selected assembly first,
+  and each `MethodEvidence` carries the pin of the assembly its body came from.
+- `TranslationValid` requires `AssemblyPinsValid`: every pin is well formed, no identity or digest
+  names two different pins, and each body's owner identity is scoped by its own pin's identity.
+  A body attributed to the wrong assembly, a duplicate identity or a shared digest fails the
+  kernel check ([tests](../Tests/AssemblyPins.lean)).
+- Lean cannot hash bytes. `check`, and so `verify`, rehashes the selected and every referenced
+  DLL against `identity.json` and regenerates the certificate, so a substituted DLL or a changed
+  recorded hash is rejected before the proof is compiled.
+- A reference that contributes only layouts appears in `Extracted.assemblies`,
+  `assemblies_validated`, the manifest and the hash recheck, but not in `TranslationValid`;
+  its layouts are bound by their assembly-qualified identities in the layout evidence.
+
+Resolution never searches directories. A pinned full name resolves to its pinned module, the
+four framework public-key tokens resolve to the runtime's trusted platform list as runtime
+models, and anything else fails. A referenced type with a static constructor, a static field load
+or `calli` in a referenced body, and a method signature shared by two pinned assemblies are
+rejected.
+
 ## Typed import metadata
 
 `LayoutProjectionValid` and `ImportedLayoutsValid` bind closed generic identities and admitted byref
