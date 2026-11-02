@@ -48,6 +48,10 @@ scalar, x64 and ARM64 profiles, that the unmodeled ARM64 body it guards blocks o
 that `Avx512Vbmi.VL` agrees with `Avx512Vbmi`: both are false under the built-in profiles and
 true under a custom v4 profile declaring VBMI, where the unmodeled VBMI body blocks extraction;
 `Avx512Vbmi2.VL` stays unclassified, and observations that omit or split `avx512VbmiVL` are rejected.
+The x86 `Aes` and `Aes.X64` getters read `aes`, and ARM64 `Aes` and `Aes.Arm64` read `armAes`: all four
+are false under the built-in profiles, and each architecture's pair is true only under a custom profile
+declaring its flag. `Pclmulqdq` stays unclassified, and observations that omit or split `aesX64` or
+`armAes64` are rejected.
 `BitConverter.IsLittleEndian` prunes its big-endian branch on those profiles; forged owners and values are rejected by both certificates,
 and lookalike scopes, fields and same-named module types are rejected by the extractor.
 `Tests/ExactIntrinsics.cs` compares `Avx2.Shuffle` and `Ssse3.Shuffle`, fed by
@@ -56,6 +60,12 @@ seeded span pairs each, one of them int256's byte-reversal mask. Both short-span
 `ArgumentOutOfRangeException` in the runtime and the model. The test fails if its inputs do not
 separate the model from shuffles that ignore bit 7 or cross 128-bit halves. Each shuffle is rejected
 under a profile without its feature, and forged load widths or substituted intrinsics are rejected.
+`Tests/ExactIntrinsics.cs` also runs the int256 and Nethermind hash round on the host CPU's `Aes.Encrypt`
+for eight seeded blocks and proves that its extraction returns the same vectors under a custom x64 profile
+declaring `aes` and under a custom ARM64 profile declaring `armAes`, where it uses AESE and AESMC. Every
+built-in profile rejects the reachable ARM64 calls, and forged evidence substituting another AES step is
+rejected. `Tests/AesHardware.cs` checks the host's own AES instructions against the Lean model on sixteen
+seeded blocks: x86 AESENC in the intrinsics suite, and ARM64 AESE and AESMC in the ARM64 AES workflow.
 
 The array, generic, layout and parameter evidence fixtures submit their 63 independent positive
 extractions in six batches. Each method retains fresh mutable metadata; immutable assembly bytes,

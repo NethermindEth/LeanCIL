@@ -78,6 +78,10 @@ name. A label may also be the file's own path. A rename or deletion fails select
 text names a `.lean` or `.cs` line, or whose target has a `#L` line anchor, also fails: cite code by
 name, not by line number.
 
+The ARM64 AES workflow runs only `Tests/AesHardware.cs` and the runtime probe on a macOS Apple
+silicon runner, for changes to the AES model, its hardware check, the probe or the macOS evidence;
+see [runtime profiles](RUNTIME-PROFILES.md). The x64 suites check x86 AESENC.
+
 The separate scheduled/manual consumer advisory checks a pinned int256 library
 and four compiled-method certificates. It does not participate in PR checks.
 Keep it out of required branch-protection checks. Advance the pin through a reviewed PR and

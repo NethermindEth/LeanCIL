@@ -45,8 +45,8 @@ Neither scan establishes coverage over arbitrary programs or future compiler rel
 
 Run `dotnet run --file Tests/RuntimeModelInventory.cs` to check the production runtime-call
 translator against the pinned reference metadata. The checked-in
-[catalog](../Tests/RuntimeModelInventory.txt) contains 451 admitted method definitions in
-39 API-owner groups. The fixed primitive domain produces 1,893 admitted closed instances;
+[catalog](../Tests/RuntimeModelInventory.txt) contains 454 admitted method definitions in
+41 API-owner groups. The fixed primitive domain produces 1,896 admitted closed instances;
 these are reported separately to avoid counting each generic instantiation as a new definition.
 The artifact `artifacts/RuntimeModelInventory/inventory.json` records the complete inventory
 and counts by API owner. Additions and removals fail with a diff; after reviewing the model
@@ -54,7 +54,8 @@ and its assumptions, update the catalog with `--update`.
 
 The probe covers public methods in System.Runtime, System.Memory and System.Runtime.Intrinsics,
 up to one owner type parameter and two method type parameters, instantiated over the fixed
-primitive domain in the script. It checks scalar, x64-v4 and arm64-advsimd profiles. It does
+primitive domain in the script. It checks scalar, x64-v4 and arm64-advsimd profiles, and x64-v4 and
+arm64-advsimd with their AES capability declared, since no built-in enables AES. It does
 not enumerate arbitrary aggregate specializations or separately folded instruction patterns.
 Feature and process-width getters handled by `FeatureProfiles` are outside this dispatcher
 catalog; their exact signatures and constants are checked by the feature-evidence tests.

@@ -10,6 +10,7 @@ import CIL.SIMD.BMI2
 import CIL.SIMD.ArmBase
 import CIL.SIMD.AVX512DQ
 import CIL.SIMD.X86Base
+import CIL.SIMD.AES
 
 /-!
 # Intrinsics
@@ -88,6 +89,16 @@ inductive X86BaseIntrinsic where
   | divRem64
   deriving DecidableEq, Repr
 
+/-- x86 AES intrinsics on 128-bit byte vectors. -/
+inductive AESIntrinsic where
+  | encrypt
+  deriving DecidableEq, Repr
+
+/-- ARM64 AES intrinsics on 128-bit byte vectors. -/
+inductive ArmAESIntrinsic where
+  | encrypt | mixColumns
+  deriving DecidableEq, Repr
+
 /-- ISA families are explicit; the common family contains portable bit-pattern operations. -/
 inductive Intrinsic where
   | scalar (op : ScalarIntrinsic)
@@ -102,6 +113,8 @@ inductive Intrinsic where
   | armBase64 (op : ArmBaseIntrinsic)
   | avx512DQ (op : AVX512DQIntrinsic)
   | x86Base (op : X86BaseIntrinsic)
+  | aes (op : AESIntrinsic)
+  | armAes (op : ArmAESIntrinsic)
   deriving DecidableEq, Repr
 
 /-- A `bool` result as the `i32` the evaluation stack holds. -/
@@ -273,6 +286,12 @@ def evalIntrinsic (op : Intrinsic) (args : List Value) : Option Value := do
   | .bmi2 .multiplyHigh64, [.i64 a, .i64 b] => some (.i64 (X86.multiplyNoFlags64 a b))
   | .armBase64 .multiplyHigh64, [.i64 a, .i64 b] => some (.i64 (Arm.multiplyHigh64 a b))
   | .x86Base .divRem64, xs => (X86.divRemValue xs).toOption
+  -- AES rounds: x86 AESENC, and ARM64 AESE and AESMC.
+  | .aes .encrypt, [.v128 state, .v128 roundKey] =>
+    some (.v128 (Vector.aesEncryptRound state roundKey))
+  | .armAes .encrypt, [.v128 state, .v128 roundKey] =>
+    some (.v128 (Vector.armAesEncrypt state roundKey))
+  | .armAes .mixColumns, [.v128 state] => some (.v128 (Vector.aesMixColumns state))
   | _, _ => none
 
 /-- The only consumers of unspecified upper lanes; each reads lane 0 alone, and every other

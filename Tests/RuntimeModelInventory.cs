@@ -12,7 +12,20 @@ var extractor = Assembly.LoadFrom(ExtractorPath);
 var flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
 var translate = extractor.GetType("Nethermind.LeanCIL.RuntimeModels", true)!.GetMethod("Translate", flags)!;
 var select = extractor.GetType("Nethermind.LeanCIL.FeatureProfile", true)!.GetMethod("Select", flags)!;
-var profiles = new[] { "scalar", "x64-v4", "arm64-advsimd" }.Select(name => select.Invoke(null, [name])).ToArray();
+// No built-in declares AES, so each architecture's widest built-in is also probed with its AES flag.
+object Declaring(string name, string flag)
+{
+    var profile = JsonSerializer.SerializeToNode(select.Invoke(null, [name]),
+        new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase })!;
+    profile["name"] = $"{name}-{flag}";
+    profile[flag] = true;
+    var path = At($"artifacts/RuntimeModelInventory/{name}-{flag}.json");
+    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+    File.WriteAllText(path, profile.ToJsonString());
+    return select.Invoke(null, ["@" + path])!;
+}
+var profiles = new[] { "scalar", "x64-v4", "arm64-advsimd" }.Select(name => select.Invoke(null, [name]))
+    .Append(Declaring("x64-v4", "aes")).Append(Declaring("arm64-advsimd", "armAes")).ToArray();
 var toolchain = RestoreCompilerToolchain();
 using var probe = ModuleDefinition.CreateModule("RuntimeModelInventory", ModuleKind.Dll);
 var admitted = new SortedDictionary<string, SortedSet<string>>(StringComparer.Ordinal);

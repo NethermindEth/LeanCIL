@@ -3,6 +3,8 @@ using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
+using ArmAes = System.Runtime.Intrinsics.Arm.Aes;
+using X86Aes = System.Runtime.Intrinsics.X86.Aes;
 
 namespace Examples;
 
@@ -35,6 +37,14 @@ public static class Capabilities
     public static bool Crc64() => Crc32.Arm64.IsSupported;
 
     public static bool Rdm64() => Rdm.Arm64.IsSupported;
+
+    // Aes.X64 and Aes.Arm64 fold with their base classes; each architecture's AES flag is separate.
+    public static uint AesFlags() =>
+        (X86Aes.IsSupported ? 1u : 0u) | (X86Aes.X64.IsSupported ? 2u : 0u) |
+        (ArmAes.IsSupported ? 4u : 0u) | (ArmAes.Arm64.IsSupported ? 8u : 0u);
+
+    // Pclmulqdq shares .NET's AES group but stays unclassified until a modeled call needs it.
+    public static bool CarrylessMultiply() => Pclmulqdq.IsSupported;
 
     // Avx512Vbmi.VL folds with Avx512Vbmi, so the two flags always agree.
     public static uint VbmiFlags() => (Avx512Vbmi.VL.IsSupported ? 1u : 0u) | (Avx512Vbmi.IsSupported ? 2u : 0u);

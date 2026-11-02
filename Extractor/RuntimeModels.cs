@@ -557,6 +557,11 @@ internal static class RuntimeModels
                 Finish(".sse .shuffleBytes", 2, Feature.Ssse3),
             $"{V256Byte} {Avx2}::Shuffle({V256Byte},{V256Byte})" =>
                 Finish(".avx2 .shuffleBytes", 2, Feature.Avx2),
+            $"{V128Byte} {X86}.Aes::Encrypt({V128Byte},{V128Byte})" => Finish(".aes .encrypt", 2, Feature.Aes),
+            $"{V128Byte} {Intrinsics}.Arm.Aes::Encrypt({V128Byte},{V128Byte})" =>
+                Finish(".armAes .encrypt", 2, Feature.ArmAes),
+            $"{V128Byte} {Intrinsics}.Arm.Aes::MixColumns({V128Byte})" =>
+                Finish(".armAes .mixColumns", 1, Feature.ArmAes),
             $"{V256UInt64} {Avx2}::Permute4x64({V256UInt64},System.Byte)" =>
                 Finish(".avx2 .permute4x64", 2, Feature.Avx2),
             $"{V256UInt32} {Avx2}::Blend({V256UInt32},{V256UInt32},System.Byte)" =>

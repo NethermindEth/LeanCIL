@@ -27,7 +27,11 @@ theorem supported :
     featureGetter (getter "Arm.ArmBase/Arm64" "get_IsSupported") = some .armBase64 ∧
     featureGetter (getter "Arm.AdvSimd/Arm64" "get_IsSupported") = some .advSimd ∧
     featureGetter (getter "X86.Avx512Vbmi" "get_IsSupported") = some .avx512Vbmi ∧
-    featureGetter (getter "X86.Avx512Vbmi/VL" "get_IsSupported") = some .avx512Vbmi := by
+    featureGetter (getter "X86.Avx512Vbmi/VL" "get_IsSupported") = some .avx512Vbmi ∧
+    featureGetter (getter "X86.Aes" "get_IsSupported") = some .aes ∧
+    featureGetter (getter "X86.Aes/X64" "get_IsSupported") = some .aes ∧
+    featureGetter (getter "Arm.Aes" "get_IsSupported") = some .armAes ∧
+    featureGetter (getter "Arm.Aes/Arm64" "get_IsSupported") = some .armAes := by
   decide +kernel
 #print axioms supported
 
@@ -45,7 +49,9 @@ theorem unclassified_nested :
     featureGetter (getter "Arm.Rdm/Arm64" "get_IsSupported") = none ∧
     featureGetter (getter "Arm.AdvSimd/Arm64" "get_IsHardwareAccelerated") = none ∧
     featureGetter (getter "X86.Avx512Vbmi2/VL" "get_IsSupported") = none ∧
-    featureGetter (getter "X86.Avx512Vbmi/VL" "get_IsHardwareAccelerated") = none := by
+    featureGetter (getter "X86.Avx512Vbmi/VL" "get_IsHardwareAccelerated") = none ∧
+    featureGetter (getter "X86.Pclmulqdq" "get_IsSupported") = none ∧
+    featureGetter (getter "X86.Aes/X86" "get_IsSupported") = none := by
   decide +kernel
 #print axioms unclassified_nested
 
@@ -63,6 +69,20 @@ theorem vbmi_profiles :
     ¬ { v3Profile with avx512Vbmi := true }.Valid := by
   decide +kernel
 #print axioms vbmi_profiles
+
+/-- The `arm64-advsimd` capabilities, with AES left to each case. -/
+def armProfile : FeatureProfile := {
+  architecture := .arm64, armBase64 := true, advSimd := true, vector128Accelerated := true }
+
+/-- AES needs only its architecture's base: any x64 or ARM64 profile may declare its own AES,
+    but not the other architecture's, and a scalar profile declares neither. -/
+theorem aes_profiles :
+    { v3Profile with aes := true }.Valid ∧ { armProfile with armAes := true }.Valid ∧
+    ¬ { v3Profile with armAes := true }.Valid ∧ ¬ { armProfile with aes := true }.Valid ∧
+    ¬ { FeatureProfile.scalar with aes := true }.Valid ∧
+    ¬ { FeatureProfile.scalar with armAes := true }.Valid := by
+  decide +kernel
+#print axioms aes_profiles
 
 /-- Truncation, an incorrect assembly and trailing signature bytes all fail exact matching. -/
 theorem wrong_prefix_or_tail :

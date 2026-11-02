@@ -5,6 +5,15 @@ using System.Text.Json.Nodes;
 
 internal static class RuntimeProfileValidation
 {
+    // Observation fields for getters that extraction answers with their base class's capability.
+    internal static readonly (string Nested, string Base, string Getter, string BaseGetter)[] NestedGetters =
+    [
+        ("advSimd64", "advSimd", "AdvSimd.Arm64", "AdvSimd"),
+        ("avx512VbmiVL", "avx512Vbmi", "Avx512Vbmi.VL", "Avx512Vbmi"),
+        ("aesX64", "aes", "Aes.X64", "Aes"),
+        ("armAes64", "armAes", "Aes.Arm64", "Arm Aes")
+    ];
+
     internal static IEnumerable<(string Json, bool Valid)> Observations(IEnumerable<string> files)
     {
         foreach (var file in files)
@@ -14,16 +23,14 @@ internal static class RuntimeProfileValidation
             foreach (var observation in observations)
             {
                 var profile = observation!["observed"]!.DeepClone().AsObject();
-                // Feature getters read AdvSimd.Arm64 as AdvSimd; a split observation refutes that model.
-                if (profile["advSimd64"]?.GetValue<bool>() is not bool advSimd64 ||
-                    advSimd64 != profile["advSimd"]!.GetValue<bool>())
-                    throw new InvalidDataException("AdvSimd.Arm64 is missing or differs from AdvSimd: " + file);
-                profile.Remove("advSimd64");
-                // Feature getters read Avx512Vbmi.VL as Avx512Vbmi; a split observation refutes that model.
-                if (profile["avx512VbmiVL"]?.GetValue<bool>() is not bool avx512VbmiVL ||
-                    avx512VbmiVL != profile["avx512Vbmi"]?.GetValue<bool>())
-                    throw new InvalidDataException($"Avx512Vbmi.VL is missing or differs from Avx512Vbmi: {file}");
-                profile.Remove("avx512VbmiVL");
+                // Feature getters read each nested class as its base; a split observation refutes that model.
+                foreach (var (nested, baseFlag, getter, baseGetter) in NestedGetters)
+                {
+                    if (profile[nested]?.GetValue<bool>() is not bool value ||
+                        value != profile[baseFlag]?.GetValue<bool>())
+                        throw new InvalidDataException($"{getter} is missing or differs from {baseGetter}: {file}");
+                    profile.Remove(nested);
+                }
                 profile.Remove("runtime");
                 profile.Remove("runtimeVersion");
                 profile.Remove("os");

@@ -11,6 +11,7 @@ using System.Text.Json;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using Mono.Cecil;
+using X86Aes = System.Runtime.Intrinsics.X86.Aes;
 
 using Program verification = new();
 string assembly = At("Examples/Assembly/bin/Examples.dll");
@@ -347,6 +348,108 @@ foreach ((string name, string theorem, string before, string after, string valid
     rejectedShuffles.Add(path, $"PASS forged {name} evidence rejected by {validator}", validator);
 }
 rejectedShuffles.Check();
+
+// The hash round is compared with the host CPU's AESENC under a custom x64 and a custom ARM64 AES
+// profile; the ARM64 extraction must agree, since AESE with a zero key, AESMC and the key are AESENC.
+if (!X86Aes.IsSupported) throw new InvalidOperationException("The AES differential test needs an x86 AES host");
+verification.EnsureExtractorBuilt();
+var profileType = Assembly.Load(File.ReadAllBytes(ExtractorPath))
+    .GetType("Nethermind.LeanCIL.FeatureProfile", throwOnError: true)!;
+var selectProfile = profileType.GetMethod("Select", BindingFlags.Static | BindingFlags.NonPublic)!;
+string DeclareAes(string name, string flag)
+{
+    var profile = JsonSerializer.SerializeToNode(selectProfile.Invoke(null, [name]),
+        new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase })!;
+    profile["name"] = $"{name}-{flag}";
+    profile[flag] = true;
+    var path = Path.Combine(root, $"{name}-{flag}.json");
+    File.WriteAllText(path, profile.ToJsonString());
+    return "@" + path;
+}
+const int AesCases = 8;
+var aesRandom = new Random(20261102);
+ulong RandomWord()
+{
+    var bytes = new byte[sizeof(ulong)];
+    aesRandom.NextBytes(bytes);
+    return BitConverter.ToUInt64(bytes);
+}
+var aesInputs = Enumerable.Range(0, AesCases)
+    .Select(_ => new[] { RandomWord(), RandomWord(), RandomWord(), RandomWord() }).ToArray();
+var aesRound = runtime.GetMethod("AesRound")!;
+var aesObserved = aesInputs.Select(input =>
+{
+    var bytes = new byte[16];
+    ((Vector128<byte>)aesRound.Invoke(null, input.Cast<object>().ToArray())!).CopyTo(bytes);
+    return $"0x{Convert.ToHexString(bytes.Reverse().ToArray())}";
+}).ToArray();
+foreach (var (label, profile) in new[]
+{
+    ("AesRound-x64", DeclareAes("x64-v4", "aes")), ("AesRound-arm64", DeclareAes("arm64-advsimd", "armAes"))
+})
+{
+    var output = Path.Combine(root, label);
+    Directory.CreateDirectory(output);
+    var proof = Path.Combine(output, "Proof.lean");
+    var claims = aesInputs.Select((input, index) =>
+    {
+        var arguments = string.Join(", ", input.Select(word => $".scalar (.i64 {word})"));
+        return $"(CIL.Safety.invoke Extracted.program 64 0 [{arguments}] CIL.Safety.Memory.empty).map Prod.snd =\n" +
+            $"      .ok [.scalar (.v128 {aesObserved[index]})]";
+    }).ToList();
+    File.WriteAllText(proof, $$"""
+        import Extracted
+        import CIL.Safety.Execution
+        namespace ExampleProof
+        /-- Successful observations identify the successful checked execution result. -/
+        private theorem result_of_toOption {error value : Type} {result : Except error value}
+            {expected : value} (observed : result.toOption = some expected) : result = .ok expected := by
+          cases result <;> simp_all [Except.toOption]
+        #print axioms result_of_toOption
+        /-- The host CPU's AESENC rounds of seeded random states and keys. -/
+        theorem correctness :
+            {{string.Join(" ∧\n    ", claims)}} := by
+          exact ⟨{{string.Join(", ", claims.Select(_ => "by apply result_of_toOption; decide +kernel"))}}⟩
+        #print axioms correctness
+        end ExampleProof
+        """);
+    pending.Add((new(selectors["AesRound"], proof, output), profile,
+        () => Console.WriteLine($"PASS hash round matches the host CPU's AESENC on {AesCases} blocks: {label}")));
+}
+Flush();
+// Without AES the x86 getter folds false, so the reachable ARM64 calls are rejected on every built-in.
+foreach (var profile in new[] { "x64-v4", "arm64-advsimd" })
+{
+    var rejectedOutput = Path.Combine(root, $"AesRound-{profile}");
+    Directory.CreateDirectory(rejectedOutput);
+    File.Delete(Path.Combine(rejectedOutput, "Extracted.lean"));
+    var rejectedRound = Execute(
+        Extract("extract", assembly, "Examples", selectors["AesRound"], rejectedOutput, profile));
+    if (rejectedRound.Code == 0 || File.Exists(Path.Combine(rejectedOutput, "Extracted.lean")) ||
+        !rejectedRound.Output.Contains("Reachable intrinsic lacks ArmAes", StringComparison.Ordinal))
+        throw new InvalidOperationException($"AesRound admitted without AES under {profile}: {rejectedRound.Output}");
+    Console.WriteLine($"PASS AesRound rejected under {profile}");
+}
+// Forged evidence must not substitute another AES step for the one the raw call names.
+var rejectedRounds = new RejectedEvidence(Path.Combine(root, "RejectedAes"));
+foreach ((string name, string before, string after) in new[]
+{
+    ("AesRound-x64", ".aes .encrypt", ".armAes .encrypt"),
+    ("AesRound-arm64", ".armAes .mixColumns", ".armAes .encrypt")
+})
+{
+    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")),
+        "method0_intrinsics_validated");
+    if (!source.Contains(before, StringComparison.Ordinal))
+        throw new InvalidOperationException($"Missing AES mutation: {before}");
+    var path = Path.Combine(root, "RejectedAes", $"{name}.lean");
+    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+    File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
+    rejectedRounds.Add(path, $"PASS forged {name} evidence rejected by ExactIntrinsicsValid", "ExactIntrinsicsValid");
+}
+rejectedRounds.Check();
+Run(["dotnet", "run", "--file", At("Tests/AesHardware.cs")], cwd: Root);
+Console.WriteLine("PASS host AES instructions match the Lean AES model");
 
 // Runs the compiled example on the host CPU and returns the vector's bytes, lane zero first.
 static byte[] RuntimeShuffle(MethodInfo method, byte[] source, byte[] control)
