@@ -90,7 +90,10 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
                     modifier.ModifierType.FullName == "System.Runtime.InteropServices.UnmanagedType" &&
                     RuntimeModels.ExactScope(modifier.ModifierType.Scope, "System.Runtime"))
                     type = modifier.ElementType;
-                if (GenericStructs.DirectInterfaceConstraint(type, argument, module))
+                // A constraint naming parameters, such as `T : I<T>`, is checked at these arguments.
+                if (GenericStructs.DirectInterfaceConstraint(
+                        type.ContainsGenericParameter && type is GenericInstanceType ? Substitute(type) : type,
+                        argument, module))
                     continue;
                 if (type.FullName != "System.ValueType" || !RuntimeModels.ExactScope(type.Scope, "System.Runtime"))
                     throw new InvalidDataException($"Unsupported generic method constraints: {definition.FullName}");

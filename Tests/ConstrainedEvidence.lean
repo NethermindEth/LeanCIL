@@ -93,7 +93,7 @@ theorem explicit_override_precedes_implicit :
       [{ concrete with methods := [implementation,
         { implementation with
           token := 22, name := "IValue.Read", isPublic := false, overrides := [(5, interface)] }] }, declared]
-      receiver site).map (·.token) = some 22 := by decide +kernel
+      receiver site).map (·.method.token) = some 22 := by decide +kernel
 #print axioms explicit_override_precedes_implicit
 
 private def staticSlot : DispatchMethod := { slot with token := 6, hasThis := false }
@@ -141,12 +141,157 @@ theorem static_slot_mismatches_rejected :
       receiver { staticSite with declaringType := receiver } = none := by decide +kernel
 #print axioms static_slot_mismatches_rejected
 
-/-- A default interface method slot is rejected even when the struct implements it. -/
+/-- An instance default interface method slot is rejected even when the struct implements it:
+    its body would run on a boxed receiver. -/
 theorem default_interface_slot_rejected :
     resolveConstrained
       [concrete, { declared with methods := [{ slot with isAbstract := false, hasBody := true }] }]
       receiver site = none := by decide +kernel
 #print axioms default_interface_slot_rejected
+
+private def boolean : TypeExpr := .atom runtimeScope "System.Boolean"
+private def allowance : TypeExpr := .aggregate "Fixture::Allowance" 0
+private def price : TypeExpr := .aggregate "Fixture::Price" 1
+private def allowanceOwner : TypeExpr := .constructor "Fixture" "IAllowance`1"
+private def allowanceInterface : TypeExpr := .apply allowanceOwner allowance
+/-- `static virtual bool Spend<TPrice>(ref TSelf self)` with a body, on `IAllowance<Allowance>`. -/
+private def defaultSlot : DispatchMethod := {
+  token := 40, name := "Spend", hasThis := false, isPublic := true, isAbstract := false,
+  isVirtual := true, hasBody := true, genericArity := 1, explicitThis := false,
+  callingConvention := 16, attributes := 0, implementation := 0,
+  returnType := boolean, parameters := [.byref allowance], overrides := [],
+  owner := allowanceOwner, ownerArguments := [allowance] }
+/-- The struct's recorded generic implementation of the default slot. -/
+private def genericOverride : DispatchMethod := {
+  defaultSlot with
+    token := 41, name := "IAllowance.Spend", isPublic := false, isVirtual := false,
+    overrides := [(40, allowanceInterface)], owner := .void, ownerArguments := [] }
+private def defaultConcrete : DispatchType := {
+  identity := allowance, valueType := true, interfaceType := false,
+  interfaces := [allowanceInterface], methods := [] }
+private def defaultDeclared : DispatchType := {
+  identity := allowanceInterface, valueType := false, interfaceType := true,
+  interfaces := [], methods := [defaultSlot] }
+private def defaultTypes := [defaultConcrete, defaultDeclared]
+private def overrideTypes :=
+  [{ defaultConcrete with methods := [genericOverride] }, defaultDeclared]
+/-- `constrained. Allowance; call bool IAllowance<Allowance>::Spend<Price>(TSelf&)`. -/
+private def defaultSite : CallSite := {
+  declaringType := allowanceInterface, name := "Spend", target := .managed 40,
+  typeArguments := [price, allowance], ownerArgumentCount := 1, parameterCount := 1,
+  hasThis := false, returnsValue := true, returnType := boolean,
+  parameterTypes := [.byref allowance] }
+private def defaultRaw : RawMethod := { raw with
+  parameters := [.byref allowance],
+  code := [⟨0, 2, .none⟩, ⟨1, 65046, .type allowance⟩, ⟨7, 40, .call defaultSite⟩,
+    ⟨12, 42, .none⟩] }
+/-- The default body instantiated at `TPrice := Price` and `TSelf := Allowance`. -/
+private def defaultTarget : SpecializedMethod := ⟨[price, allowance], { raw with
+  token := 40, owner := "Fixture::IAllowance`1", ownerArgumentCount := 1,
+  returnType := boolean, parameters := [.byref allowance],
+  code := [⟨0, 2, .none⟩, ⟨1, 42, .none⟩] }⟩
+/-- The recorded override instantiated at `TPrice := Price`. -/
+private def overrideTarget : SpecializedMethod := ⟨[price], { defaultTarget.closed with
+  token := 41, owner := "Fixture::Allowance", ownerArgumentCount := 0 }⟩
+private def defaultEmitted : Method := {
+  locals := [], returnsValue := true, code := [.arg 0, .nop, .call 1 1, .ret] }
+
+/-- Without an implementation on the receiver, a generic static virtual slot runs its own body,
+    instantiated at the site's method and interface arguments. -/
+theorem static_default_valid :
+    resolveConstrained defaultTypes allowance defaultSite = some (.interfaceDefault defaultSlot) ∧
+    ConstrainedCallsValid defaultTypes [⟨[], defaultRaw⟩, defaultTarget] defaultRaw
+      [true, true, true, true] defaultEmitted := by decide +kernel
+#print axioms static_default_valid
+
+/-- A recorded generic override wins over the default body, and only it may be emitted. -/
+theorem static_override_precedes_default :
+    (resolveConstrained overrideTypes allowance defaultSite).map (·.method.token) = some 41 ∧
+    ConstrainedCallsValid overrideTypes [⟨[], defaultRaw⟩, overrideTarget] defaultRaw
+      [true, true, true, true] defaultEmitted ∧
+    ¬ ConstrainedCallsValid overrideTypes [⟨[], defaultRaw⟩, defaultTarget] defaultRaw
+      [true, true, true, true] defaultEmitted ∧
+    ¬ ConstrainedCallsValid defaultTypes [⟨[], defaultRaw⟩, overrideTarget] defaultRaw
+      [true, true, true, true] defaultEmitted := by decide +kernel
+#print axioms static_override_precedes_default
+
+/-- An unrecorded public same-signature method beside a default body is ambiguous, and an
+    abstract generic slot with no implementation has no target. -/
+theorem static_default_ambiguity_rejected :
+    resolveConstrained [{ defaultConcrete with methods := [{ genericOverride with
+        name := "Spend", isPublic := true, overrides := [] }] }, defaultDeclared]
+      allowance defaultSite = none ∧
+    resolveConstrained [defaultConcrete, { defaultDeclared with methods :=
+        [{ defaultSlot with isAbstract := true, hasBody := false }] }]
+      allowance defaultSite = none := by decide +kernel
+#print axioms static_default_ambiguity_rejected
+
+/-- The emitted instance must carry the site's method type argument, the site must supply
+    exactly the slot's method arity, closed, and instance slots take no method arguments. -/
+theorem static_default_arguments_rejected :
+    ¬ ConstrainedCallsValid defaultTypes
+      [⟨[], defaultRaw⟩, { defaultTarget with arguments := [allowance, allowance] }]
+      defaultRaw [true, true, true, true] defaultEmitted ∧
+    resolveConstrained defaultTypes allowance
+      { defaultSite with typeArguments := [allowance] } = none ∧
+    resolveConstrained defaultTypes allowance
+      { defaultSite with typeArguments := [price, price, allowance] } = none ∧
+    resolveConstrained defaultTypes allowance
+      { defaultSite with typeArguments := [.parameter 0, allowance] } = none ∧
+    resolveConstrained
+      [{ concrete with methods :=
+          [{ implementation with genericArity := 1, callingConvention := 16 }] },
+        { declared with methods := [{ slot with genericArity := 1, callingConvention := 16 }] }]
+      receiver { site with typeArguments := [integer] } = none := by
+  decide +kernel
+#print axioms static_default_arguments_rejected
+
+/-- A default body is never reached through another interface instantiation, a receiver that
+    does not implement it, or a default declared with mismatched owner metadata. -/
+theorem static_default_owner_rejected :
+    resolveConstrained [{ defaultConcrete with interfaces := [] }, defaultDeclared]
+      allowance defaultSite = none ∧
+    resolveConstrained [defaultConcrete, { defaultDeclared with methods :=
+        [{ defaultSlot with ownerArguments := [price] }] }] allowance defaultSite = none ∧
+    resolveConstrained [defaultConcrete, { defaultDeclared with methods :=
+        [{ defaultSlot with owner := .constructor "Other" "IAllowance`1" }] }]
+      allowance defaultSite = none := by decide +kernel
+#print axioms static_default_owner_rejected
+
+private def derivedInterface : TypeExpr := .apply (.constructor "Fixture" "IRefund`1") allowance
+/-- `IRefund<TSelf> : IAllowance<TSelf>` re-implementing `IAllowance<TSelf>.Spend<TPrice>`. -/
+private def derivedDeclared : DispatchType := {
+  identity := derivedInterface, valueType := false, interfaceType := true,
+  interfaces := [allowanceInterface], methods := [{ genericOverride with
+    token := 50, owner := .constructor "Fixture" "IRefund`1", ownerArguments := [allowance] }] }
+private def derivedConcrete : DispatchType :=
+  { defaultConcrete with interfaces := [allowanceInterface, derivedInterface] }
+
+/-- A derived interface of the receiver that re-implements the slot is more specific than the
+    default body, so the default is never selected; an interface missing from the catalog or an
+    inherited interface the receiver does not list fails closed. -/
+theorem static_default_shadowed_rejected :
+    resolveConstrained [derivedConcrete, defaultDeclared, derivedDeclared]
+      allowance defaultSite = none ∧
+    ¬ ConstrainedCallsValid [derivedConcrete, defaultDeclared, derivedDeclared]
+      [⟨[], defaultRaw⟩, defaultTarget] defaultRaw [true, true, true, true] defaultEmitted ∧
+    resolveConstrained [derivedConcrete, defaultDeclared, { derivedDeclared with methods := [] }]
+      allowance defaultSite = some (.interfaceDefault defaultSlot) ∧
+    resolveConstrained [derivedConcrete, defaultDeclared] allowance defaultSite = none ∧
+    resolveConstrained [defaultConcrete, { defaultDeclared with interfaces := [derivedInterface] }]
+      allowance defaultSite = none := by decide +kernel
+#print axioms static_default_shadowed_rejected
+
+/-- Lowering keeps the default body's closed interface and method type argument, and moves an
+    override to the receiver with only the method type argument. -/
+theorem lowered_default_exact :
+    (lowerConstrainedRaw defaultTypes defaultRaw).code[2]? =
+      some ⟨7, 40, .call defaultSite⟩ ∧
+    (lowerConstrainedRaw overrideTypes defaultRaw).code[2]? =
+      some ⟨7, 40, .call { defaultSite with
+        target := .managed 41, declaringType := allowance, typeArguments := [price],
+        ownerArgumentCount := 0 }⟩ := by decide +kernel
+#print axioms lowered_default_exact
 
 theorem missing_interface_rejected :
     resolveConstrained [{ concrete with interfaces := [] }, declared] receiver site = none := by
@@ -219,7 +364,7 @@ theorem indexed_override_precedence :
     ((DispatchIndex.ofTypes [{ concrete with methods := [implementation,
       { implementation with
         token := 22, name := "IValue.Read", isPublic := false, overrides := [(5, interface), (5, interface)] }] },
-      declared]).resolve receiver site).map (·.token) = some 22 := by
+      declared]).resolve receiver site).map (·.method.token) = some 22 := by
   decide +kernel
 #print axioms indexed_override_precedence
 

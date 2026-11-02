@@ -552,7 +552,7 @@ internal static class MetadataValidation
                     instruction is { OpCode.Code: Code.Call, Previous.OpCode.Code: Code.Constrained })
                 {
                     var resolved = ConstrainedCalls.Resolve(method, instruction, instructions, profile.Architecture);
-                    Enter(ConstrainedCalls.Specialize(resolved, instruction, specializations), reference, instruction);
+                    Enter(ConstrainedCalls.Specialize(resolved, specializations), reference, instruction);
                     return;
                 }
                 var pinnedCallee = reference.DeclaringType.Scope is AssemblyNameReference &&

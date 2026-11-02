@@ -35,12 +35,12 @@ def site : CallSite := {
 def baseline (count : Nat) : Bool :=
   let catalog := types count
   (List.range count).all fun index =>
-    (resolveConstrained catalog (receiver index) site).map (·.token) == some (index + 21)
+    (resolveConstrained catalog (receiver index) site).map (·.method.token) == some (index + 21)
 /-- Resolve the same calls, including building the shared index. -/
 def indexed (count : Nat) : Bool :=
   let catalog := DispatchIndex.ofTypes (types count)
   (List.range count).all fun index =>
-    (catalog.resolve (receiver index) site).map (·.token) == some (index + 21)
+    (catalog.resolve (receiver index) site).map (·.method.token) == some (index + 21)
 /-- Every list resolution selects the expected implementation token. -/
 theorem baseline32 : baseline 32 = true := by decide +kernel
 #print axioms baseline32

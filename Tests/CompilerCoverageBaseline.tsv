@@ -97,6 +97,7 @@ Examples:Examples.Word256 Examples.Word256::op_Implicit(System.UInt64)	B	B	B	B	B
 Examples:System.Boolean Examples.AggregateSpans::Copy(System.ReadOnlySpan`1<Examples.AggregateSpans/Words>,System.Span`1<Examples.AggregateSpans/Words>)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.AggregateSpans::IsEmpty(System.Span`1<Examples.AggregateSpans/Words>)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.AggregateSpans::VectorIsEmpty(System.ReadOnlySpan`1<System.Runtime.Intrinsics.Vector128`1<System.UInt64>>)	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.Allowance::Spend(Examples.Allowance&,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.Bits::PowerI32(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.Bits::PowerI64(System.Int64)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.Bits::PowerNative(System.IntPtr)	A	A	A	A	A	A	A	A
@@ -114,6 +115,11 @@ Examples:System.Boolean Examples.Capabilities::Crc64()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.Capabilities::Rdm64()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.Capabilities::Vbmi2()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.DivisionIntrinsics::UnsafeEquals(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.DoublingAllowance::Examples.IAllowance<Examples.DoublingAllowance>.Spend(Examples.DoublingAllowance&)	N	N	N	N	N	N	N	N
+Examples:System.Boolean Examples.DoublingAllowance::Spend(Examples.DoublingAllowance&,System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.IAllowance`1::Spend(TSelf&)	N	N	N	N	N	N	N	N
+Examples:System.Boolean Examples.IAllowance`1::Spend(TSelf&,System.UInt64)	N	N	N	N	N	N	N	N
+Examples:System.Boolean Examples.IRefundingAllowance`1::Examples.IAllowance<TSelf>.Spend(TSelf&)	N	N	N	N	N	N	N	N
 Examples:System.Boolean Examples.IStepFlag::get_IsActive()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.IntegerOperations::Greater32(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.IntegerOperations::Greater64(System.Int64,System.Int64)	A	A	A	A	A	A	A	A
@@ -129,6 +135,7 @@ Examples:System.Boolean Examples.PointerOperations::GreaterEqual(System.Byte*,Sy
 Examples:System.Boolean Examples.PointerOperations::Less(System.Byte*,System.Byte*)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.PointerOperations::LessEqual(System.Byte*,System.Byte*)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.PrimitiveArrays::ReadBoolean(System.Boolean[],System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.RefundingAllowance::Spend(Examples.RefundingAllowance&,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.SpanCopies::TryCopy(System.Span`1<System.Byte>,System.Span`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.SpanCopies::TryCopyEnum(System.ReadOnlySpan`1<Examples.CopyCode>,System.Span`1<Examples.CopyCode>)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.SpanCopies::TryCopyReadOnly(System.ReadOnlySpan`1<System.Byte>,System.Span`1<System.Byte>)	A	A	A	A	A	A	A	A
@@ -709,6 +716,12 @@ Examples:System.UInt64 Examples.Blocks::CopyParameter(System.UInt64,System.UInt6
 Examples:System.UInt64 Examples.Blocks::FillLocal(System.Byte,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Blocks::FillParameter(System.UInt64,System.Byte,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.CheckedArithmetic::Add64(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.ConstantFlags::Count(System.UInt64)	N	N	N	N	N	N	N	N
+Examples:System.UInt64 Examples.ConstantFlags::CountOn(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.ConstantFlags::Trace(System.UInt64)	N	N	N	N	N	N	N	N
+Examples:System.UInt64 Examples.ConstantFlags::TraceOff(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.ConstantFlags::TraceOn(System.UInt64)	B	B	B	B	B	B	B	B
+Examples:System.UInt64 Examples.ConstantFlags::TraceThenCount(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Constructors::Checked(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Constructors::Default()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Constructors::Nested(System.UInt64)	A	A	A	A	A	A	A	A
@@ -749,6 +762,7 @@ Examples:System.UInt64 Examples.GenericOwners::SpanFirst(System.ReadOnlySpan`1<S
 Examples:System.UInt64 Examples.GenericOwners::SpanSecond(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.IBinaryStep::Apply(System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.IInWord`1::Sum(System.ReadOnlySpan`1<System.UInt64>& modreq(System.Runtime.InteropServices.InAttribute))	N	N	N	N	N	N	N	N
+Examples:System.UInt64 Examples.IPrice::get_Price()	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.InParameters::Constrained(Examples.InWord&,Examples.InWord&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.InParameters::ConstrainedSum(Examples.InWord&,System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.InParameters::Sum(T&,System.ReadOnlySpan`1<System.UInt64>&)	N	N	N	N	N	N	N	N
@@ -808,11 +822,16 @@ Examples:System.UInt64 Examples.StaticInterfaces::XorPlain(System.UInt64,System.
 Examples:System.UInt64 Examples.StaticScalars::ReadLong()	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.StaticValues::Read(Examples.Word256&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.StaticValues::ReadAddress()	B	B	B	B	B	B	B	B
+Examples:System.UInt64 Examples.StaticVirtualDefaults::Spend(TAllowance&)	N	N	N	N	N	N	N	N
+Examples:System.UInt64 Examples.StaticVirtualDefaults::SpendDefault(Examples.Allowance&)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.StaticVirtualDefaults::SpendOverride(Examples.DoublingAllowance&)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.StaticVirtualDefaults::SpendRefunding(Examples.RefundingAllowance&)	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.StructMethods::Arguments(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.StructMethods::ByValue(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.StructMethods::ConstructLocal(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.StructMethods::Mutate(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.StructMethods::Replace(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.TriplePrice::get_Price()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.TupleDivision::Deconstruct(System.UInt64,System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.TupleDivision::Item1(System.ValueTuple`2<System.UInt64,System.UInt64>&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.TupleDivision::Local(System.UInt64,System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B

@@ -264,6 +264,7 @@ internal static class LeanEmitter
         lean.AppendLine("def imports : List ImportSlot := [" + string.Join(", ", importBindings.Select(ImportResolution.LeanSlot)) + "]");
         for (var n = 0; n < methods.Length; n++)
         {
+            FeatureEvidence.EmitTheorem(lean, n);
             var facts = $"specializedMethods, imports, Extraction.lowerConstrainedRaw, {callDefinitions[n]}, " +
                 $"method{n}, method{n}Reachable, method{n}DispatchTypes";
             var proof = callDefinitions[n] is null ? Decide : $"by cil_managed_calls [{facts}]";

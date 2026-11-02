@@ -46,12 +46,19 @@ internal sealed class LayoutEvidence
 
     internal static string Identity(TypeReference type)
     {
-        if (type is GenericInstanceType generic && GenericStructs.Is(type))
-            return Identity(generic.ElementType) + "<" + string.Join(",", generic.GenericArguments.Select(argument =>
-                MetadataValidation.IsAggregate(argument, type.Module)
-                    ? Identity(argument) : MethodSpecialization.SignatureType(argument))) + ">";
+        if (type is GenericInstanceType generic && GenericStructs.Is(type)) return ScopedArguments(generic);
         return Scope(type) + "::" + type.FullName;
     }
+
+    // Same-assembly generic interfaces spell scoped arguments, as Lean closes interface constraints.
+    internal static string InterfaceIdentity(TypeReference type) =>
+        type is GenericInstanceType generic && generic.ElementType.Scope is ModuleDefinition
+            ? ScopedArguments(generic) : Identity(type);
+
+    static string ScopedArguments(GenericInstanceType generic) =>
+        Identity(generic.ElementType) + "<" + string.Join(",", generic.GenericArguments.Select(argument =>
+            MetadataValidation.IsAggregate(argument, generic.Module)
+                ? Identity(argument) : MethodSpecialization.SignatureType(argument))) + ">";
 
     internal MetadataValidation.LayoutContext Metadata => layouts;
 
@@ -107,7 +114,7 @@ internal sealed class LayoutEvidence
                 (MetadataValidation.IsByRefLike(type) ? "byRefLike := true, " : "") +
                 // An imported entry repeats its published layout, which carries no interfaces.
                 (layouts.IsImported(type) ? "" : $"interfaces := [{string.Join(", ", metadata.Interfaces.Select(
-                    implementation => JsonSerializer.Serialize(Identity(GenericStructs.Substitute(
+                    implementation => JsonSerializer.Serialize(InterfaceIdentity(GenericStructs.Substitute(
                         implementation.InterfaceType, type as GenericInstanceType)))))}], ") +
                 $"packing := {metadata.PackingSize}, declaredSize := {metadata.ClassSize}, fields := [{string.Join(", ", fields)}] }}";
         })));

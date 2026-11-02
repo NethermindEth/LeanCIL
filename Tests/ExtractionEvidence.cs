@@ -12,7 +12,8 @@ fixtures.PrepareLeanFixtures(
     "Tests.ImportEvidence", "Tests.ImportedLayouts", "Tests.AssemblyPins", "Tests.StaticValueEvidence", "Tests.SpanViews",
     "Tests.MemorySpanExecution", "Tests.ConstrainedEvidence", "Tests.ManagedPointerValues", "Tests.StackAllocationEvidence",
     "Tests.StackAllocation", "Tests.PrimitiveArrays", "Tests.ArrayElementReferences", "Tests.ReadOnlyArrayReferences",
-    "Tests.ExtractionGenerics", "Tests.ReferenceTests", "Tests.PointerOperations", "Tests.NativeMethodTables");
+    "Tests.ExtractionGenerics", "Tests.ReferenceTests", "Tests.PointerOperations", "Tests.NativeMethodTables",
+    "Tests.ConstantCalls");
 if (args is ["--prepare-only"]) return;
 Run(["dotnet", "run", "--file", "Tests/RuntimeModelInventory.cs"], streamOutput: true,
     progress: "Runtime model catalog");

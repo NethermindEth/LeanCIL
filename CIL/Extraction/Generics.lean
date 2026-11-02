@@ -237,7 +237,11 @@ structure RawInstruction where
 /-- A generic parameter's attribute flags and constraint types. -/
 structure GenericConstraint where
   flags : Nat
+  /-- Closed constraint identities. -/
   types : List String
+  /-- Interface constraints naming generic parameters, such as `T : I<T>`, in the method-then-owner
+      parameter numbering; each is closed at the instantiation's arguments before it is checked. -/
+  interfaces : List TypeExpr := []
   deriving DecidableEq, Repr
 
 /-- A method definition as read from metadata: signature, locals and body. -/
@@ -358,6 +362,27 @@ private def admittedTypeArgument (layouts : List RawLayout) (type : TypeExpr) : 
     | some .reference | some (.span ..) | some (.aggregateSpan ..) | some (.array _) | none => false
     | some _ => true
 
+/-- A generic type application split into its constructor and ordered arguments. -/
+private def appliedArguments : TypeExpr → TypeExpr × List TypeExpr
+  | .apply constructor argument =>
+    let (head, arguments) := appliedArguments constructor
+    (head, arguments ++ [argument])
+  | type => (type, [])
+
+/-- An interface constraint naming generic parameters holds when its closure at `arguments`
+    is among the direct interfaces of the constrained argument's layout. -/
+def openConstraintValid (layouts : List RawLayout) (arguments : List TypeExpr)
+    (argument constraint : TypeExpr) : Bool :=
+  match substituteType arguments constraint with
+  | none => false
+  | some closed =>
+    let (owner, ownerArguments) := appliedArguments closed
+    match genericOwnerIdentity owner ownerArguments, argument with
+    | some identity, .aggregate argumentIdentity index => match layouts[index]? with
+      | some layout => layout.identity == argumentIdentity && layout.interfaces.contains identity
+      | none => false
+    | _, _ => false
+
 /-- Instantiation preserves instruction encodings, offsets and branch targets exactly. -/
 def instantiateMethod (layouts : List RawLayout) (original : RawMethod)
     (arguments : List TypeExpr) : Option RawMethod := do
@@ -366,7 +391,8 @@ def instantiateMethod (layouts : List RawLayout) (original : RawMethod)
       !arguments.all (admittedTypeArgument layouts) ||
       !((original.genericParameters ++ original.ownerParameters).zip arguments).all
         (fun (constraint, argument) =>
-          genericConstraintValid layouts argument constraint.flags constraint.types) then none
+          genericConstraintValid layouts argument constraint.flags constraint.types &&
+            constraint.interfaces.all (openConstraintValid layouts arguments argument)) then none
   else
     let returnType ← substituteStorageType layouts arguments original.returnType
     let parameters ← original.parameters.mapM (substituteStorageType layouts arguments)

@@ -39,6 +39,7 @@ internal static class Reachability
         var typeTests = TypeTests.Analyze(method);
         var throws = Throws.Analyze(method);
         var spans = Spans.Analyze(method, profile);
+        InstructionIndex? positions = null;
         Queue<Instruction> pending = new();
         HashSet<Instruction> queued = [instructions[0]];
         pending.Enqueue(instructions[0]);
@@ -53,7 +54,9 @@ internal static class Reachability
             if (conditional && folded) condition = same;
             var selector = i.OpCode.Code == Code.Switch && state.Stack.Count != 0 ? state.Stack[^1] : null;
             state = state.Copy();
-            state.Step(i, method, profile, addressed, folded && !conditional ? same : null);
+            var constant = i.OpCode.Code == Code.Call && i.Previous?.OpCode.Code == Code.Constrained
+                ? ConstrainedCalls.ConstantResult(method, i, positions ??= new(method), profile.Architecture) : null;
+            state.Step(i, method, profile, addressed, folded && !conditional ? same : null, constant);
 
             void Successor(Instruction target)
             {
