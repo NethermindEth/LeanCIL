@@ -1025,6 +1025,9 @@ Examples:U Examples.OwnerOuter`1/Inner`1::First(System.ReadOnlySpan`1<U>)	N	N	N	
 Examples:U Examples.OwnerOuter`1/Inner`1::Identity(U)	N	N	N	N	N	N	N	N
 Examples:method System.Int32 *(System.Int32)[] Examples.ManagedDispatch::NullTable()	A	A	A	A	A	A	A	A
 Examples:method System.Single *(System.Single) Examples.ManagedDispatch::UnrelatedTarget()	B	B	B	B	B	B	B	B
+ImportFixture.App+ImportFixture.Lib:System.UInt64 ImportFixture.Application::Entry(System.UInt64)	A	A	A	A	A	A	A	A
+ImportFixture.App+ImportFixture.Lib:System.UInt64 ImportFixture.Application::Generic(System.UInt64)	B	B	B	B	B	B	B	B
+ImportFixture.App+ImportFixture.Lib:System.UInt64 ImportFixture.Application::Unrelated(System.UInt64)	A	A	A	A	A	A	A	A
 ImportFixture.App:System.UInt64 ImportFixture.Application::Entry(System.UInt64)	B	B	B	B	B	B	B	B
 ImportFixture.App:System.UInt64 ImportFixture.Application::Generic(System.UInt64)	B	B	B	B	B	B	B	B
 ImportFixture.App:System.UInt64 ImportFixture.Application::Unrelated(System.UInt64)	A	A	A	A	A	A	A	A
