@@ -91,6 +91,13 @@ aggregate layouts: raw catalog, selected entries, nested reindexing, computed la
 and signature coverage. Extraction also compares the pinned DLL metadata. These checks do not
 verify Cecil or remove runtime assumptions. See [typed imports](TYPED-IMPORTS.md).
 
+An imported aggregate local sizes caller frame storage from the same pinned metadata that byref
+contracts already trust; it adds a consumer, not a trusted source. `ImportedLocalLayoutsBound`
+requires every caller layout entry whose identity a slot publishes to equal that slot's selected
+layout, nested indices bound by identity, with the same computed layout, for every such slot.
+Extraction admits such a local only when its whole closure is published and one bound typed call
+carries it, so the kernel link is never vacuous for an admitted local.
+
 ## Reference observations
 
 Truth tests and equality check formation/lifetime without reading bytes or granting authority.

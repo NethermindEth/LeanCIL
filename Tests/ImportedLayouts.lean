@@ -131,4 +131,53 @@ theorem complete_certificate_rejects_changed_layout :
   decide +kernel
 #print axioms complete_certificate_rejects_changed_layout
 
+/-! A caller table holding imported layouts for a local: `artifactRaw` puts an unrelated entry
+first, so the imported Pair names its nested Leaf at a different index than the slot does. -/
+
+theorem imported_local_bound :
+    ImportedLocalLayoutsBound artifactRaw artifactComputed [copySlot] := by decide +kernel
+#print axioms imported_local_bound
+theorem imported_local_certificate :
+    TranslationValid artifactRaw artifactComputed [] [copySlot] [] := by decide +kernel
+#print axioms imported_local_certificate
+
+/-- A caller layout that no slot publishes is not bound by an import. -/
+theorem unpublished_layout_unbound :
+    ImportedLocalLayoutsBound [privateRaw] #[privateLayout] [copySlot] := by decide +kernel
+#print axioms unpublished_layout_unbound
+
+def pairArtifact : RawLayout :=
+  { pairRaw with fields := [⟨.aggregate 1, none⟩, ⟨.unsigned64, none⟩] }
+
+theorem local_rejects_changed_packing : ¬ ImportedLocalLayoutsBound
+    [privateRaw, leafRaw, { pairArtifact with packing := 1 }] artifactComputed [copySlot] := by
+  decide +kernel
+#print axioms local_rejects_changed_packing
+theorem local_rejects_rebound_nested : ¬ ImportedLocalLayoutsBound
+    [privateRaw, leafRaw,
+      { pairRaw with fields := [⟨.aggregate 0, none⟩, ⟨.unsigned64, none⟩] }]
+    artifactComputed [copySlot] := by decide +kernel
+#print axioms local_rejects_rebound_nested
+theorem local_rejects_missing_nested : ¬ ImportedLocalLayoutsBound
+    [privateRaw, pairArtifact] #[privateLayout, pairLayout] [copySlot] := by decide +kernel
+#print axioms local_rejects_missing_nested
+theorem local_rejects_changed_computed : ¬ ImportedLocalLayoutsBound artifactRaw
+    #[privateLayout, leafLayout, { pairLayout with alignment := 4 }] [copySlot] := by decide +kernel
+#print axioms local_rejects_changed_computed
+theorem local_rejects_added_interface : ¬ ImportedLocalLayoutsBound
+    [privateRaw, leafRaw, { pairArtifact with interfaces := ["Library::Library.IFace"] }]
+    artifactComputed [copySlot] := by decide +kernel
+#print axioms local_rejects_added_interface
+
+/-- Every slot that publishes an identity binds it, not only the first. -/
+theorem local_rejects_disagreeing_slot : ¬ ImportedLocalLayoutsBound artifactRaw artifactComputed
+    [copySlot, { copySlot with layouts := { catalog with actual := [leafRaw, { pairRaw with
+      declaredSize := 32 }] } }] := by decide +kernel
+#print axioms local_rejects_disagreeing_slot
+
+theorem complete_certificate_rejects_changed_local :
+    ¬ TranslationValid [privateRaw, leafRaw, { pairArtifact with packing := 1 }] artifactComputed
+      [] [copySlot] [] := by decide +kernel
+#print axioms complete_certificate_rejects_changed_local
+
 end Tests.ImportedLayouts

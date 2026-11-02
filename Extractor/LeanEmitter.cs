@@ -32,7 +32,7 @@ internal static class LeanEmitter
         if (Arrays.Of(type, architecture) is { } element) return $".array {element.Expression}";
         if (Spans.Width(type, architecture) is { } width)
             return $".span {width} {(Spans.Writable(type) ? "true" : "false")}";
-        if (MetadataValidation.IsAggregate(type, module))
+        if (MetadataValidation.IsAggregate(type, module) || layouts?.IsImported(type) == true)
         {
             var size = layouts?.Size(type) ?? MetadataValidation.Layout(type, module, architecture);
             return $".aggregate {size}";
@@ -95,7 +95,7 @@ internal static class LeanEmitter
             .Select(t => t is ByReferenceType r ? r.ElementType : t)
             .Select(t => t is ArrayType array ? array.ElementType : t)
             .Select(t => Spans.Is(t) ? ((GenericInstanceType)t).GenericArguments[0] : t)
-            .Where(t => MetadataValidation.IsAggregate(t, methods[0].Module)).DistinctBy(LayoutEvidence.Identity).ToArray();
+            .Where(metadata.IsLayout).Select(metadata.Canonical).DistinctBy(LayoutEvidence.Identity).ToArray();
         List<TypeReference> layouts = [];
         HashSet<string> seenLayouts = new(StringComparer.Ordinal);
         void IncludeLayout(TypeReference type)
@@ -103,7 +103,7 @@ internal static class LeanEmitter
             if (!seenLayouts.Add(LayoutEvidence.Identity(type))) return;
             layouts.Add(type);
             foreach (MetadataValidation.InstanceField field in metadata.Fields(type))
-                if (MetadataValidation.IsAggregate(field.Type, methods[0].Module)) IncludeLayout(field.Type);
+                if (metadata.IsLayout(field.Type)) IncludeLayout(metadata.Canonical(field.Type));
         }
         foreach (TypeReference type in types) IncludeLayout(type);
         return layouts.ToArray();
@@ -142,6 +142,7 @@ internal static class LeanEmitter
         lean.AppendLine("theorem profile_valid : profile.Valid := " + Decide);
         StaticIdentity.Validate(staticIdentities ?? StaticIdentities(methods, profile));
         var layoutContext = new MetadataValidation.LayoutContext(methods[0].Module, profile.Architecture);
+        if (importResolution is not null) layoutContext.AddImported(importResolution.LocalLayouts());
         TypeReference[] types = LayoutTypes(methods, layoutContext);
         for (int i = 0; i < types.Length; i++)
         {
@@ -151,7 +152,7 @@ internal static class LeanEmitter
                 {
                     var offset = layoutContext.FieldOffset(types[i], field.Definition);
                     var width = layoutContext.FieldSize(field.Type);
-                    var aggregate = MetadataValidation.IsAggregate(field.Type, methods[0].Module);
+                    var aggregate = layoutContext.IsLayout(field.Type);
                     return $"⟨{offset}, {width}, {aggregate.ToString().ToLowerInvariant()}⟩";
                 }));
             lean.AppendLine($"def layout{i} : AggregateLayout := ⟨{size}, [{fields}]⟩");
@@ -284,8 +285,11 @@ internal static class LeanEmitter
         }
         lean.AppendLine("theorem import_layouts_validated : Extraction.ImportedLayoutsValid imports profile.architecture := " + Decide);
         lean.AppendLine("#print axioms import_layouts_validated");
+        lean.AppendLine("theorem imported_locals_validated : " +
+            "Extraction.ImportedLocalLayoutsBound rawLayouts computedLayouts imports := " + Decide);
         lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence imports program := by");
         lean.AppendLine("  apply Extraction.translation_of_methods (program := program) layouts_validated statics_validated import_layouts_validated");
+        lean.AppendLine("    imported_locals_validated");
         for (int n = 0; n < methods.Length; n++)
             lean.AppendLine($"  refine Extraction.MethodsChecked.cons method{n}_evidence_validated ?_");
         lean.AppendLine("  exact Extraction.MethodsChecked.nil");
