@@ -7,7 +7,7 @@ namespace Nethermind.LeanCIL;
 
 internal static partial class Program
 {
-    const string Usage = "Usage: leancil list assembly.dll\n       leancil templates output-directory extraction-directory...\n       leancil lint-exceptions output-directory --documentation assembly.xml\n       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory [profile|@profile.json] [--assembly 'assembly name or full identity'] [--type-argument System.UInt64]... [--assume-initialized Namespace.Type]... [--import Lib.leancil.contracts] [--import-implementation Lib=path] [--import-sha256 Lib=hex] [--import-interface-sha256 Lib=hex]\n       leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]\n       leancil workspace assembly.dll method --profile profile --proof proof.lean [--proof-root package-directory] [--output workspace-directory]\n       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] [--assembly 'assembly name or full identity']\n       leancil check output-directory [--assembly-path assembly.dll] [--assembly 'assembly name or full identity']\n       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--rebuild-library] [--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory]...\n       leancil verify-batch requests.json [--fresh] [--rebuild-library] [--parallel count] [--results results.json]\n       leancil audit-library --project package-directory --module M... --prefix P... [--axioms a,b,c] [--results results.json]\n       leancil --version";
+    const string Usage = "Usage: leancil list assembly.dll\n       leancil templates output-directory extraction-directory...\n       leancil lint-exceptions output-directory --documentation assembly.xml\n       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory [profile|@profile.json] [--assembly 'assembly name or full identity'] [--type-argument System.UInt64]... [--assume-initialized Namespace.Type]... [--reference Lib.dll]... [--import Lib.leancil.contracts] [--import-implementation Lib=path] [--import-sha256 Lib=hex] [--import-interface-sha256 Lib=hex]\n       leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]\n       leancil workspace assembly.dll method --profile profile --proof proof.lean [--proof-root package-directory] [--output workspace-directory]\n       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] [--assembly 'assembly name or full identity'] [--reference Lib.dll]...\n       leancil check output-directory [--assembly-path assembly.dll] [--assembly 'assembly name or full identity']\n       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--rebuild-library] [--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory]...\n       leancil verify-batch requests.json [--fresh] [--rebuild-library] [--parallel count] [--results results.json]\n       leancil audit-library --project package-directory --module M... --prefix P... [--axioms a,b,c] [--results results.json]\n       leancil --version";
 
     internal static int CheckExtraction(string output) => Main(["check", output]);
 
@@ -114,6 +114,7 @@ internal static partial class Program
             string? assemblyOverride = null;
             List<string> importPaths = [];
             List<string> entryTypeArguments = [];
+            List<string> referencePaths = [];
             Dictionary<string, string> implementationPaths = new(StringComparer.Ordinal);
             Dictionary<string, string> importHashes = new(StringComparer.Ordinal);
             Dictionary<string, string> interfaceHashes = new(StringComparer.Ordinal);
@@ -143,6 +144,12 @@ internal static partial class Program
                     if (++index == args.Length || string.IsNullOrWhiteSpace(args[index]) || args[index].StartsWith("--", StringComparison.Ordinal))
                         throw new ArgumentException("--type-argument requires a closed full type name.");
                     entryTypeArguments.Add(args[index]);
+                }
+                else if (args[index] == "--reference")
+                {
+                    if (++index == args.Length || string.IsNullOrWhiteSpace(args[index]) || args[index].StartsWith("--", StringComparison.Ordinal))
+                        throw new ArgumentException("--reference requires a DLL path.");
+                    referencePaths.Add(Path.GetFullPath(args[index]));
                 }
                 else if (args[index] == "--assume-initialized")
                 {
@@ -211,7 +218,28 @@ internal static partial class Program
             stage = "metadata and CIL validation";
             if (assemblySnapshot is null) VectorSignatures.Validate(assembly);
             else assemblySnapshot.ValidateSignatures();
-            using ModuleDefinition module = StaticData.ReadModule(assembly);
+            string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+            var assemblyHash = assemblySnapshot?.Hash ?? Hash(assembly);
+            List<PinnedAssemblies.Source> referenceSources = [];
+            JsonElement[] recordedReferences = recorded is { } pinnedGraph &&
+                pinnedGraph.TryGetProperty("references", out JsonElement pinnedRecords)
+                    ? [.. pinnedRecords.EnumerateArray()] : [];
+            if (recorded is not null && referencePaths.Count > 0)
+                throw new ArgumentException(
+                    "check replays the recorded --reference assemblies; do not pass them again.");
+            foreach (JsonElement pin in recordedReferences)
+                referenceSources.Add(new(
+                    global::Program.ExtractionIdentity.Resolve(output, pin.GetProperty("path").GetString()!),
+                    pin.GetProperty("sha256").GetString()!));
+            referenceSources.AddRange(referencePaths.Select(path => new PinnedAssemblies.Source(path)));
+            using PinnedAssemblies pinned = new(assembly, assemblyHash, referenceSources);
+            ModuleDefinition module = pinned.Selected;
+            foreach ((JsonElement record, var reference) in recordedReferences.Zip(pinned.References))
+                if (record.GetProperty("assemblyIdentity").GetString() != reference.Pin.Identity ||
+                    record.GetProperty("mvid").GetGuid() != reference.Pin.Mvid)
+                    throw new InvalidDataException("Stale or mismatched verification artifact: referenced assembly " +
+                        $"{CliPaths.Display(reference.Path)} is not the recorded " +
+                        $"{record.GetProperty("assemblyIdentity").GetString()}.");
             var symbols = Symbols.Read(module, assemblyPath, out var symbolNotice);
             var assemblyIdentity = module.Assembly?.Name.FullName ?? throw new InvalidDataException("Input must contain assembly metadata.");
             stage = "contract import validation";
@@ -256,6 +284,7 @@ internal static partial class Program
             // check replays only the recorded import graph; sidecars appearing after extraction are outside it.
             foreach (AssemblyNameReference reference in recorded is null ? module.AssemblyReferences : [])
             {
+                if (pinned.References.Any(pin => pin.Module.Assembly.Name.Name == reference.Name)) continue;
                 string discovered = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!, reference.Name + ".leancil.contracts");
                 if (File.Exists(discovered) && !importSources.Any(source => source.SidecarPath == discovered))
                     importSources.Add(new(discovered, Path.GetFullPath(implementationPaths.GetValueOrDefault(reference.Name) ??
@@ -267,10 +296,13 @@ internal static partial class Program
             stage = "metadata and CIL validation";
             MethodDefinition[] methods = MetadataValidation.Validate(module, expectedAssembly ?? assemblyIdentity, entry, profile, initializedTypes, imports: imports,
                 typeArguments: entryTypeArguments.ToArray(), importedByref: type => imports.ValidateByref(type, profile));
+            foreach (var node in imports.Nodes)
+                if (pinned.Pins.Any(pin => pin.Identity == node.AssemblyIdentity))
+                    throw new InvalidDataException(
+                        "An assembly cannot be both a typed import and an extracted reference: " +
+                        node.AssemblyIdentity);
             StaticIdentityRecord[] staticIdentities = LeanEmitter.StaticIdentities(methods, profile);
             imports.ValidateStatics(staticIdentities);
-            string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-            var assemblyHash = assemblySnapshot?.Hash ?? Hash(assembly);
             var extractorHash = batch?.ExtractorHash ?? Hash(File.ReadAllBytes(typeof(LeanEmitter).Assembly.Location));
             if (recorded is { } prior)
             {
@@ -281,8 +313,7 @@ internal static partial class Program
                     throw new InvalidDataException("Stale or mismatched verification artifact: extractor has changed since extraction.");
             }
             stage = "metadata and CIL validation";
-            using var originalModule = StaticData.ReadModule(assembly);
-            LeanEmitter.Emission emitted = LeanEmitter.Emit(methods, profile, originalModule, imports,
+            LeanEmitter.Emission emitted = LeanEmitter.Emit(methods, profile, pinned, imports,
                 staticIdentities, collectTemplates: checkedTemplate is not null);
             string source = emitted.Source;
             var loadedValues = methods.SelectMany(m => Reachability.Analyze(m, profile)).Where(StaticValues.IsLoad)
@@ -328,7 +359,13 @@ internal static partial class Program
                 assemblyPath = recorded?.GetProperty("assemblyPath").GetString()
                     ?? Path.GetRelativePath(output, Path.GetFullPath(assemblyPath)).Replace('\\', '/'),
                 assemblyIdentity = module.Assembly.Name.FullName, mvid = module.Mvid,
-                assemblySha256 = assemblyHash, entry = methods[0].FullName,
+                assemblySha256 = assemblyHash,
+                references = pinned.References.Select(reference => new
+                {
+                    path = Path.GetRelativePath(output, reference.Path).Replace('\\', '/'),
+                    assemblyIdentity = reference.Pin.Identity, mvid = reference.Pin.Mvid, sha256 = reference.Pin.Sha256
+                }),
+                entry = methods[0].FullName,
                 entryDefinition = MethodSpecialization.Definition(methods[0]).FullName, entryTypeArguments,
                 layoutIdentities = emitted.LayoutIdentities, profile, initializedTypes,
                 initializationAssumptions = JsonSerializer.SerializeToElement(initializationAssumptions, ContractInterface.Json),

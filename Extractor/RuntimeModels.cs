@@ -60,7 +60,7 @@ internal static class RuntimeModels
     internal static void ValidateTypeIdentity(TypeReference type, ModuleDefinition module,
         string architecture = "scalar")
     {
-        if (type.Scope == module && type.IsValueType && type is not TypeSpecification)
+        if (PinnedAssemblies.Declares(type, module) && type.IsValueType && type is not TypeSpecification)
         {
             if (EnumTypes.IsEnum(type)) EnumTypes.Storage(type);
             else MetadataValidation.Layout(type, module, architecture);

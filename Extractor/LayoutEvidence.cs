@@ -88,7 +88,7 @@ internal sealed class LayoutEvidence
             var genericEvidence = "";
             if (GenericStructs.Is(type) && type is GenericInstanceType closed)
             {
-                var serializer = new GenericEvidence(type.Module, this);
+                var serializer = new GenericEvidence(null, this);
                 genericEvidence = $"generic := some {{ owner := .constructor " +
                     $"{JsonSerializer.Serialize(Scope(type))} {JsonSerializer.Serialize(metadata.FullName)}, " +
                     $"arity := {metadata.GenericParameters.Count}, arguments := " +

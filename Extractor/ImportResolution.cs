@@ -296,8 +296,9 @@ internal sealed class ImportResolution : IDisposable
         if (type is not ByReferenceType reference || ContractMethodMetadata.Primitive(reference.ElementType) ||
             RuntimeModels.SupportedType(reference.ElementType) || ValueTuples.Is(reference.ElementType) ||
             reference.ElementType.Scope is not AssemblyNameReference scope) return false;
-        // Framework layouts stay on the existing runtime-model path, which checks their exact scope and shape.
-        if (FrameworkScope(scope)) return false;
+        // Framework layouts stay on the existing runtime-model path, which checks their exact scope and shape;
+        // a pinned reference's layout is extracted from its own metadata instead.
+        if (FrameworkScope(scope) || PinnedAssemblies.Active?.ModuleOf(reference.ElementType) is not null) return false;
         ContractMethodMetadata.RejectModifiers(reference);
         Library library = TypedLibrary(scope, "Imported byref layout", reference);
         PublishedClosure(reference.ElementType, library, profile, requirePublished: false);
@@ -311,7 +312,8 @@ internal sealed class ImportResolution : IDisposable
     internal bool ValidateLocal(TypeReference type, FeatureProfile profile)
     {
         if (type is TypeSpecification || !type.IsValueType || ContractMethodMetadata.Primitive(type) ||
-            type.Scope is not AssemblyNameReference scope || FrameworkScope(scope)) return false;
+            type.Scope is not AssemblyNameReference scope || FrameworkScope(scope) ||
+            PinnedAssemblies.Active?.ModuleOf(type) is not null) return false;
         ContractMethodMetadata.RejectModifiers(type);
         Library library = TypedLibrary(scope, "Imported aggregate local", type);
         TypeDefinition definition = ImportedLayoutMetadata.Definition(type, library.Module);

@@ -118,11 +118,31 @@ internal static class ContractMethodMetadata
         "System.IntPtr" or "System.UIntPtr";
 
     // An entry may also close over a non-generic value type of its own module; specialization validates its layout.
-    static TypeReference EntryArgument(ModuleDefinition module, string name) =>
-        Primitive(module, name) ?? (module.GetType(name) is { IsValueType: true, HasGenericParameters: false } local
+    static TypeReference EntryArgument(ModuleDefinition module, string name)
+    {
+        if (Primitive(module, name) is { } primitive) return primitive;
+        // `Type, Assembly` names a value type of a pinned reference by simple or full assembly name.
+        int separator = name.IndexOf(", ", StringComparison.Ordinal);
+        if (separator > 0)
+        {
+            string assembly = name[(separator + 2)..];
+            var owner = PinnedAssemblies.Active?.References.Select(reference => reference.Module)
+                .Where(candidate => candidate.Assembly.Name.Name == assembly ||
+                    candidate.Assembly.Name.FullName == assembly).ToArray() ?? [];
+            if (owner.Length != 1)
+                throw new InvalidDataException(
+                    "Closed entry type argument names no single pinned --reference assembly: " + name);
+            if (owner[0].GetType(name[..separator]) is not
+                { IsValueType: true, HasGenericParameters: false } referenced)
+                throw new InvalidDataException("Closed entry type argument is not a non-generic value type of " +
+                    owner[0].Assembly.Name.FullName + ": " + name);
+            return module.ImportReference(referenced);
+        }
+        return module.GetType(name) is { IsValueType: true, HasGenericParameters: false } local
             ? local : throw new InvalidDataException(
-                "Closed entry type arguments require a primitive integer or a non-generic value type " +
-                "of the selected module: " + name));
+                "Closed entry type arguments require a primitive integer, a non-generic value type " +
+                "of the selected module, or `Type, Assembly` for a pinned reference: " + name);
+    }
 
     static TypeReference? Primitive(ModuleDefinition module, string name) => name switch
     {
@@ -150,7 +170,8 @@ internal static class ContractMethodMetadata
         if (definition.DeclaringType.HasGenericParameters || definition.GenericParameters.Count != arguments.Length)
             throw new InvalidDataException("Contract method requires an exact closed generic instantiation.");
         // Imported calls bind across assemblies, so only an entry may close over its own module's value types.
-        if (arguments.Any(type => !Primitive(type) && !(entry && type.Module == definition.Module && type.IsValueType)))
+        if (arguments.Any(type => !Primitive(type) && !(entry && type.IsValueType &&
+                (type.Module == definition.Module || PinnedAssemblies.Active?.ModuleOf(type) is not null))))
             throw new InvalidDataException("Contract type arguments require exact scoped primitive integers.");
         if (arguments.Length == 0)
             return new(definition, definition, definition, [], definition.Module.Assembly.Name.FullName + "::" + definition.FullName);

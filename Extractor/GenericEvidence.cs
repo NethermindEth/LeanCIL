@@ -8,10 +8,15 @@ namespace Nethermind.LeanCIL;
 
 // Read original definitions from a separate, untouched module over the same assembly
 // bytes. The call-graph walk rewrites call operands in the working module.
-internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvidence layouts, ImportResolution? imports = null)
+internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence layouts,
+    ImportResolution? imports = null)
 {
     readonly ExternalIdentityEvidence externalIdentities = new();
     int methodParameterCount;
+
+    // Type serialization needs no method bodies; only method and dispatch evidence read originals.
+    ModuleDefinition Original(ModuleDefinition module) => (pinned ??
+        throw new InvalidOperationException("Method evidence requires the pinned assemblies.")).Original(module);
 
     static string Quote(string value) => JsonSerializer.Serialize(value);
     static string Bool(bool value) => value.ToString().ToLowerInvariant();
@@ -77,7 +82,10 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
         var definition = reference is GenericInstanceMethod generic ? generic.ElementMethod : reference;
         var arguments = reference is GenericInstanceMethod instance ? instance.GenericArguments.ToArray() :
             reference is MethodDefinition specialized ? MethodSpecialization.Arguments(specialized).ToArray() : [];
-        var owners = definition.DeclaringType.Scope is not ModuleDefinition ? [] :
+        // A pinned referenced callee is extracted like a same-assembly one, so its call is managed.
+        var extracted = definition.DeclaringType.Scope is ModuleDefinition ||
+            PinnedAssemblies.Active?.ModuleOf(definition.DeclaringType) is not null;
+        var owners = !extracted ? [] :
             reference.DeclaringType is GenericInstanceType owner
             ? owner.GenericArguments.ToArray() : reference is MethodDefinition closed
                 ? MethodSpecialization.OwnerArguments(closed).ToArray() : [];
@@ -89,13 +97,14 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
             foreach (var argument in owners) closedOwner.GenericArguments.Add(argument);
             declaringType = closedOwner;
         }
-        var target = definition.DeclaringType.Scope is ModuleDefinition
+        var target = extracted
             ? $".managed {definition.Resolve().MetadataToken.ToUInt32()}"
             : ".external " + externalIdentities.Reference(imports?.Identity(instruction) ??
                 (LayoutEvidence.Scope(definition.DeclaringType) + "::" + ExternalSignature(definition)),
                 reachable.Contains(instruction));
-        var name = definition.DeclaringType.Scope is ModuleDefinition
-            ? ((MethodDefinition)originalModule.LookupToken(definition.Resolve().MetadataToken)).Name : definition.Name;
+        var name = extracted
+            ? ((MethodDefinition)Original(definition.Resolve().Module)
+                .LookupToken(definition.Resolve().MetadataToken)).Name : definition.Name;
         return $"{{ declaringType := {Type(declaringType, true)}, name := {Quote(name)}, target := {target}, typeArguments := {List(arguments.Select(Type))}, ownerArgumentCount := {owners.Length}, parameterCount := {reference.Parameters.Count}, hasThis := {Bool(reference.HasThis)}, returnsValue := {Bool(reference.ReturnType.FullName != "System.Void")}, returnType := {Type(CallReturnType.Resolve(reference))}, parameterTypes := {List(CallReturnType.Parameters(reference).Select(Parameter))} }}";
     }
 
@@ -147,7 +156,8 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
                 var isStatic = instruction.OpCode.Code is Code.Ldsfld or Code.Stsfld or Code.Ldsflda or Code.Ldtoken;
                 var index = 0;
                 var fieldType = field.FieldType;
-                if (field.DeclaringType.Scope is ModuleDefinition)
+                if (field.DeclaringType.Scope is ModuleDefinition ||
+                    PinnedAssemblies.Active?.ModuleOf(field.DeclaringType) is not null)
                 {
                     var resolved = field.Resolve();
                     index = layouts.Metadata.FieldIndex(field.DeclaringType, resolved, isStatic);
@@ -216,7 +226,7 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number,
         IReadOnlySet<Instruction> reachable)
     {
-        var original = (MethodDefinition)originalModule.LookupToken(method.MetadataToken);
+        var original = (MethodDefinition)Original(method.Module).LookupToken(method.MetadataToken);
         var originalEvidence = Method(original, method, reachable);
         var closedEvidence = Method(method, method, reachable);
         externalIdentities.Emit(lean);
@@ -242,7 +252,7 @@ internal sealed class GenericEvidence(ModuleDefinition originalModule, LayoutEvi
             .DistinctBy(LayoutEvidence.Identity).OrderBy(LayoutEvidence.Identity, StringComparer.Ordinal);
         return List(types.Select(type =>
         {
-            var original = (TypeDefinition)originalModule.LookupToken(type.Resolve().MetadataToken);
+            var original = (TypeDefinition)Original(type.Resolve().Module).LookupToken(type.Resolve().MetadataToken);
             GenericInstanceType? owner = null;
             if (type is GenericInstanceType closed)
             {

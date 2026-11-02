@@ -16,12 +16,13 @@ internal static class StaticData
     /// Reads a module from its image and records the image's section headers, which <see cref="Validate"/>
     /// requires to admit any static data of that module.
     /// </summary>
-    internal static ModuleDefinition ReadModule(byte[] assembly)
+    internal static ModuleDefinition ReadModule(byte[] assembly, IAssemblyResolver? resolver = null)
     {
         SectionHeader[] headers;
         using (PEReader image = new(new MemoryStream(assembly, writable: false)))
             headers = [.. image.PEHeaders.SectionHeaders];
-        ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(assembly, writable: false));
+        ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(assembly, writable: false),
+            resolver is null ? new ReaderParameters() : new ReaderParameters { AssemblyResolver = resolver });
         sections.AddOrUpdate(module, headers);
         return module;
     }

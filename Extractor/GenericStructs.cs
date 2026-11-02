@@ -7,12 +7,15 @@ internal static class GenericStructs
 {
     internal static bool DirectInterfaceConstraint(TypeReference constraint, TypeReference argument,
         ModuleDefinition module) =>
-        constraint.Scope is ModuleDefinition && !constraint.ContainsGenericParameter &&
-        constraint.Resolve() is { IsInterface: true } declared && declared.Module == module &&
-        argument.Resolve() is { } concrete && concrete.Module == module && concrete.IsValueType &&
+        PinnedAssemblies.Declares(constraint, module) && !constraint.ContainsGenericParameter &&
+        constraint.Resolve() is { IsInterface: true } declared && Pinned(declared.Module, module) &&
+        argument.Resolve() is { } concrete && Pinned(concrete.Module, module) && concrete.IsValueType &&
         concrete.Interfaces.Any(implemented => MethodSpecialization.SignatureType(Substitute(
             implemented.InterfaceType, argument as GenericInstanceType)) ==
             MethodSpecialization.SignatureType(constraint));
+
+    static bool Pinned(ModuleDefinition candidate, ModuleDefinition module) =>
+        candidate == module || PinnedAssemblies.Active?.Contains(candidate) == true;
 
     internal static bool Is(TypeReference type) => type is GenericInstanceType generic &&
         generic.ElementType.Scope is ModuleDefinition && generic.IsValueType;
