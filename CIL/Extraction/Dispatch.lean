@@ -44,16 +44,28 @@ private def unique : List α → Option α
   | [value] => some value
   | _ => none
 
-/-- The signature, including whether a receiver is passed, must agree before a method can
-    implement the declared slot. -/
-private def signatureMatches (method : DispatchMethod) (site : CallSite) : Bool :=
-  method.hasThis == site.hasThis && !method.explicitThis && method.callingConvention == 0 &&
-    method.genericArity == 0 && method.returnType == site.returnType &&
-    (method.returnType != .void) == site.returnsValue &&
-    method.parameters == site.parameterTypes && method.parameters.length == site.parameterCount
+/-- The method type arguments of a call: the prefix of `typeArguments` before the owner's. -/
+def siteMethodArguments (site : CallSite) : List TypeExpr :=
+  site.typeArguments.take (site.typeArguments.length - site.ownerArgumentCount)
 
-/-- Restrict both sides of dispatch to one assembly identity. -/
-private def ownerBase : TypeExpr → TypeExpr
+/-- The ECMA-335 calling-convention bit of a generic method signature. -/
+private def genericCallingConvention : Nat := 16
+
+/-- The signature, including whether a receiver is passed, must agree before a method can
+    implement the declared slot. A generic method's own parameters are closed at the site's
+    method type arguments, whose count must equal its arity. -/
+private def signatureMatches (method : DispatchMethod) (site : CallSite) : Bool :=
+  let arguments := siteMethodArguments site
+  method.hasThis == site.hasThis && !method.explicitThis &&
+    method.callingConvention == (if arguments.isEmpty then 0 else genericCallingConvention) &&
+    method.genericArity == arguments.length &&
+    substituteType arguments method.returnType == some site.returnType &&
+    (method.returnType != .void) == site.returnsValue &&
+    method.parameters.mapM (substituteType arguments) == some site.parameterTypes &&
+    method.parameters.length == site.parameterCount
+
+/-- The generic type definition of a closed owner, which carries its assembly scope. -/
+def ownerBase : TypeExpr → TypeExpr
   | .apply owner _ => ownerBase owner
   | type => type
 
@@ -79,19 +91,83 @@ private def declaringIdentity (receiver : TypeExpr) (site : CallSite) : TypeExpr
       then receiver else site.declaringType
   | _ => site.declaringType
 
-/-- Only closed owner arguments are admitted; generic method slots remain unsupported. -/
+/-- Owner arguments are the site's closed owner arguments; method arguments precede them, must
+    be closed, and are admitted only for static slots. -/
 private def slotArgumentsValid (site : CallSite) : Bool :=
   match managedOwner site.declaringType with
-  | some (_, arguments) => arguments == site.typeArguments &&
-      arguments.length == site.ownerArgumentCount
+  | some (_, arguments) => arguments.length == site.ownerArgumentCount &&
+      site.ownerArgumentCount ≤ site.typeArguments.length &&
+      site.typeArguments.drop (site.typeArguments.length - site.ownerArgumentCount) ==
+        arguments &&
+      (!site.hasThis || (siteMethodArguments site).isEmpty) &&
+      (siteMethodArguments site).all fun argument => substituteType [] argument == some argument
   | none => false
 
+/-- Where a constrained call lands: a method declared on the receiver, or the default body of a
+    static virtual interface slot that the receiver does not implement. -/
+inductive ConstrainedTarget where
+  | implementation (method : DispatchMethod)
+  | interfaceDefault (method : DispatchMethod)
+  deriving DecidableEq, Repr
+
+/-- The selected declaration, before instantiation at the site's method type arguments. -/
+def ConstrainedTarget.method : ConstrainedTarget → DispatchMethod
+  | .implementation method | .interfaceDefault method => method
+
+/-- The closed type declaring the target: the receiver or its generic owner application for an
+    implementation, and the call site's closed interface for a default body. -/
+def ConstrainedTarget.declaringType (receiver : TypeExpr) (site : CallSite) :
+    ConstrainedTarget → TypeExpr
+  | .implementation method => if method.ownerArguments.isEmpty then receiver else
+      method.ownerArguments.foldl TypeExpr.apply method.owner
+  | .interfaceDefault _ => site.declaringType
+
+/-- No interface of the receiver re-implements the slot at the site's closed interface, so the
+    slot's own body is the most specific one. Every listed interface must be in the catalog and
+    the list must be closed under interface inheritance; otherwise the check fails. -/
+private def defaultUnshadowed (find : TypeExpr → Option DispatchType) (concrete : DispatchType)
+    (token : Nat) (site : CallSite) : Bool :=
+  concrete.interfaces.all fun identity => match find identity with
+    | none => false
+    | some entry => entry.interfaces.all concrete.interfaces.contains &&
+        entry.methods.all fun method => !method.overrides.contains (token, site.declaringType)
+
+/-- Recorded overrides take precedence. Otherwise an abstract slot needs exactly one public
+    same-signature method, and a static slot with a body runs only when there is none and no
+    other interface of the receiver re-implements it: anything else is ambiguous. -/
+private def selectTarget (site : CallSite) (slot : DispatchMethod)
+    (explicit implicit : List DispatchMethod) (unshadowed : Bool) : Option ConstrainedTarget :=
+  if !explicit.isEmpty then ConstrainedTarget.implementation <$> unique explicit
+  else if slot.isAbstract then ConstrainedTarget.implementation <$> unique implicit
+  else if !site.hasThis && slot.hasBody && implicit.isEmpty && unshadowed then
+    some (.interfaceDefault slot)
+  else none
+
+/-- Generic owner metadata must name the receiver for an implementation, and the site's closed
+    interface for a default body. -/
+private def targetOwnerMatches (receiver : TypeExpr) (site : CallSite) :
+    ConstrainedTarget → Bool
+  | .implementation method => dispatchOwnerMatches receiver method
+  | .interfaceDefault method => method.ownerArguments.length == site.ownerArgumentCount &&
+      if method.ownerArguments.isEmpty then method.owner == .void else
+        method.ownerArguments.foldl TypeExpr.apply method.owner == site.declaringType
+
+/-- A selected target must have a body, match the site and belong to the site's assembly. -/
+private def checkedTarget (receiver : TypeExpr) (site : CallSite) (target : ConstrainedTarget) :
+    Option ConstrainedTarget :=
+  if target.method.isAbstract || !target.method.hasBody ||
+      target.method.name ∈ [".ctor", ".cctor"] || !signatureMatches target.method site ||
+      !targetOwnerMatches receiver site target ||
+      !sameScope (target.declaringType receiver site) site.declaringType then none
+  else some target
+
 /-- Resolve a concrete value-type method or a directly implemented interface slot. A static
-    slot resolves only through an interface to a static implementation on the receiver.
-    Explicit overrides take precedence; missing, ambiguous and boxing cases fail.
-    This list-based specification states the equivalence of indexed production resolution. -/
+    slot resolves only through an interface, to a static implementation on the receiver or to
+    the slot's own default body. Explicit overrides take precedence; missing, ambiguous and
+    boxing cases fail. This list-based specification states the equivalence of indexed
+    production resolution. -/
 def resolveConstrained (types : List DispatchType) (receiver : TypeExpr) (site : CallSite) :
-    Option DispatchMethod := do
+    Option ConstrainedTarget := do
   let .aggregate .. := receiver | none
   if !slotArgumentsValid site then
     none else pure ()
@@ -102,17 +178,17 @@ def resolveConstrained (types : List DispatchType) (receiver : TypeExpr) (site :
   let slot ← unique (declaring.methods.filter fun method => method.token == token)
   if slot.name != site.name || !signatureMatches slot site then none else pure ()
   let target ← if receiver == declaring.identity then
-      (if site.hasThis then some slot else none) else do
-    if !declaring.interfaceType || !slot.isAbstract || !slot.isVirtual ||
+      (if site.hasThis then some (.implementation slot) else none) else do
+    if !declaring.interfaceType || !slot.isVirtual ||
         !concrete.interfaces.contains declaring.identity then none else pure ()
-    let explicit := concrete.methods.filter fun method =>
-      method.overrides.contains (token, site.declaringType)
-    unique (if explicit.isEmpty then concrete.methods.filter fun method =>
-      method.isPublic && method.name == slot.name && signatureMatches method site else explicit)
-  if target.isAbstract || !target.hasBody || target.name ∈ [".ctor", ".cctor"] ||
-      !signatureMatches target site || !dispatchOwnerMatches receiver target ||
-      !sameScope (if target.ownerArguments.isEmpty then receiver else target.owner)
-        site.declaringType then none else some target
+    selectTarget site slot
+      (concrete.methods.filter fun method => method.overrides.contains (token, site.declaringType))
+      (concrete.methods.filter fun method =>
+        method.isPublic && method.name == slot.name && signatureMatches method site)
+      (defaultUnshadowed
+        (fun identity => unique (types.filter fun type => type.identity == identity))
+        concrete token site)
+  checkedTarget receiver site target
 
 
 /-- Ordered candidate buckets retain every matching metadata entry. -/
@@ -250,7 +326,7 @@ theorem DispatchIndex.findType_ofTypes (types : List DispatchType) (identity : T
 
 /-- Resolve a constrained call against indexed candidates, retaining all original filters. -/
 def DispatchIndex.resolve (index : DispatchIndex) (receiver : TypeExpr) (site : CallSite) :
-    Option DispatchMethod := do
+    Option ConstrainedTarget := do
   let .aggregate .. := receiver | none
   if !slotArgumentsValid site then
     none else pure ()
@@ -261,17 +337,17 @@ def DispatchIndex.resolve (index : DispatchIndex) (receiver : TypeExpr) (site : 
   let slot ← unique (declaring.tokens.getD token [])
   if slot.name != site.name || !signatureMatches slot site then none else pure ()
   let target ← if receiver == declaring.raw.identity then
-      (if site.hasThis then some slot else none) else do
-    if !declaring.raw.interfaceType || !slot.isAbstract || !slot.isVirtual ||
+      (if site.hasThis then some (.implementation slot) else none) else do
+    if !declaring.raw.interfaceType || !slot.isVirtual ||
         !concrete.raw.interfaces.contains declaring.raw.identity then none else pure ()
-    let explicit := (concrete.overrides.getD token []).filter fun method =>
-      method.overrides.contains (token, site.declaringType)
-    unique (if explicit.isEmpty then (concrete.names.getD slot.name []).filter fun method =>
-      method.isPublic && signatureMatches method site else explicit)
-  if target.isAbstract || !target.hasBody || target.name ∈ [".ctor", ".cctor"] ||
-      !signatureMatches target site || !dispatchOwnerMatches receiver target ||
-      !sameScope (if target.ownerArguments.isEmpty then receiver else target.owner)
-        site.declaringType then none else some target
+    selectTarget site slot
+      ((concrete.overrides.getD token []).filter fun method =>
+        method.overrides.contains (token, site.declaringType))
+      ((concrete.names.getD slot.name []).filter fun method =>
+        method.isPublic && signatureMatches method site)
+      (defaultUnshadowed (fun identity => (index.findType identity).map (·.raw)) concrete.raw
+        token site)
+  checkedTarget receiver site target
 
 /-- Indexed dispatch preserves ambiguity, explicit overrides, signatures and all failures. -/
 theorem DispatchIndex.resolve_ofTypes (types : List DispatchType) (receiver : TypeExpr)
@@ -288,6 +364,7 @@ theorem DispatchIndex.resolve_ofTypes (types : List DispatchType) (receiver : Ty
       simp [present, mapped]
     · simp [present]
   simp only [DispatchIndex.resolve, resolveConstrained, DispatchIndex.findType_ofTypes,
+    Option.map_map, Option.map_id',
     Bind.bind, Option.bind_map, Function.comp_def, DispatchTypeIndex.ofType,
     groupIndex_get, multiGroup_get,
     List.filter_filter, overrideFilter]

@@ -79,9 +79,10 @@ partial class Program
             if (name != "Forward") continue;
             foreach (var (mutation, before, after, marker) in new[]
             {
-                ("dropped", tail, ".call 1 1", "Extraction.FeatureFlowValid rawLayouts.toArray method0Closed"),
+                ("dropped", tail, ".call 1 1",
+                    "Extraction.FeatureFlowValid rawLayouts.toArray specializedMethods method0Closed"),
                 ("prefix", "opcode := 65044", "opcode := 0",
-                    "Extraction.FeatureFlowValid rawLayouts.toArray method0Closed"),
+                    "Extraction.FeatureFlowValid rawLayouts.toArray specializedMethods method0Closed"),
                 ("target", tail, ".tailCall 0 1", "Extraction.ManagedCallsValid")
             })
             {

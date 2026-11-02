@@ -83,7 +83,7 @@ internal sealed class FeatureConstants
     }
 
     internal void Step(Instruction instruction, MethodDefinition method, FeatureProfile profile, HashSet<int> addressed,
-        bool? typeTest = null)
+        bool? typeTest = null, bool? constantCall = null)
     {
         Code code = instruction.OpCode.Code;
         if (typeTest is bool same)
@@ -145,7 +145,9 @@ internal sealed class FeatureConstants
             case Code.Call: case Code.Callvirt: case Code.Newobj:
                 MethodReference callee = (MethodReference)instruction.Operand;
                 for (int i = 0; i < callee.Parameters.Count + (code != Code.Newobj && callee.HasThis ? 1 : 0); i++) Pop();
-                if ((ReferenceQueries.Constant(callee, profile.Architecture) ??
+                if (constantCall is bool result)
+                    _stack.Add(result ? 1 : 0);
+                else if ((ReferenceQueries.Constant(callee, profile.Architecture) ??
                     FeatureProfile.PlatformConstant(callee)) is int constant)
                     _stack.Add(constant);
                 else if (FeatureProfile.Getter(callee) is Feature feature)
