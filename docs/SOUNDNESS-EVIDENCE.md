@@ -93,15 +93,15 @@ trusted inputs on the same terms as the selected one; no other assembly can cont
   `MethodEvidence` carries the identity of the assembly its body came from. Hashes and MVIDs
   are not in the certificate, so `Extracted.lean` depends on the extracted program alone.
 - `TranslationValid` requires `AttributionValid`: each body's owner identity is scoped by its
-  own pin's colon-free identity. `assemblies_validated` also requires the listed identities to
-  be distinct and to cover every body. A body attributed to the wrong assembly fails the kernel
-  check ([tests](../Tests/AssemblyPins.lean)).
+  own pin's colon-free identity, so a body attributed to the wrong assembly fails the kernel
+  check ([tests](../Tests/AssemblyPins.lean)). Distinct pins and a complete `assemblies` list
+  are extractor output that `check` regenerates, not a Lean obligation.
 - Lean cannot hash bytes. `identity.json` records each assembly's identity, MVID and SHA-256;
   `check`, and so `verify`, rehashes the selected and every referenced DLL against it and
   regenerates the certificate, so a substituted DLL or a changed recorded hash is rejected
   before the proof is compiled.
-- A reference that contributes only layouts appears in `Extracted.assemblies`,
-  `assemblies_validated`, the manifest and the hash recheck, but not in `TranslationValid`;
+- A reference that contributes only layouts appears in `Extracted.assemblies`, the manifest and
+  the hash recheck, but not in `TranslationValid`;
   its layouts are bound by their assembly-qualified identities in the layout evidence.
 
 Resolution never searches directories. A pinned full name resolves to its pinned module, the

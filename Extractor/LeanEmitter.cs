@@ -298,8 +298,6 @@ internal static class LeanEmitter
             "Extraction.ImportedLocalLayoutsBound rawLayouts computedLayouts imports := " + Decide);
         lean.AppendLine("theorem attribution_validated : " +
             "Extraction.AttributionValid (Extraction.bodyOwners methodEvidence) = true := " + Decide);
-        lean.AppendLine("theorem assemblies_validated : Extraction.AssemblyPinsValid assemblies " +
-            "(Extraction.bodyOwners methodEvidence) := " + Decide);
         lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence imports program := by");
         lean.AppendLine("  apply Extraction.translation_of_methods (program := program) layouts_validated statics_validated import_layouts_validated");
         lean.AppendLine("    imported_locals_validated attribution_validated");

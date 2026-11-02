@@ -4,9 +4,8 @@ import CIL.Extraction.Translation
 # Assembly attribution checks
 
 Kernel-checked accept and reject cases for `AttributionValid`, the certificate conjunct that
-names the pinned assembly of every extracted body, and for `AssemblyPinsValid`, which also
-lists every pinned assembly once. Rejections cover a body owned by another assembly, an
-unlisted or duplicated assembly and malformed identities.
+names the pinned assembly of every extracted body. Rejections cover a body owned by another
+assembly, a body attributed to its caller's assembly and malformed identities.
 -/
 
 namespace Tests.AssemblyPins
@@ -23,26 +22,17 @@ private def libOwner : String := lib.identity ++ "::Fixture.Mix"
 
 /-- Bodies from two pinned assemblies, each owned by its own pin, are accepted. -/
 theorem two_assemblies_accepted :
-    AssemblyPinsValid [app, lib] [(app, appOwner), (lib, libOwner)] := by decide +kernel
+    AttributionValid [(app, appOwner), (lib, libOwner)] = true := by decide +kernel
 #print axioms two_assemblies_accepted
-
-/-- The certificate conjunct accepts the same attribution. -/
-theorem attribution_accepted : AttributionValid [(app, appOwner), (lib, libOwner)] = true := by
-  decide +kernel
-#print axioms attribution_accepted
 
 /-- A body whose owner is scoped by another assembly is rejected. -/
 theorem wrong_assembly_rejected : AttributionValid [(app, libOwner)] = false := by decide +kernel
 #print axioms wrong_assembly_rejected
 
-/-- A body attributed to an assembly outside the pin list is rejected. -/
-theorem unlisted_pin_rejected : ¬ AssemblyPinsValid [app] [(lib, libOwner)] := by decide +kernel
-#print axioms unlisted_pin_rejected
-
-/-- One assembly listed twice is rejected, so each pin names one input. -/
-theorem duplicate_identity_rejected : ¬ AssemblyPinsValid [app, app] [(app, appOwner)] := by
-  decide +kernel
-#print axioms duplicate_identity_rejected
+/-- A referenced body attributed to the caller's assembly is rejected. -/
+theorem caller_attribution_rejected :
+    AttributionValid [(app, appOwner), (app, libOwner)] = false := by decide +kernel
+#print axioms caller_attribution_rejected
 
 /-- An identity containing `::` could prefix another scope, so it is rejected. -/
 theorem scoped_identity_rejected :

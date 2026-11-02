@@ -31,16 +31,6 @@ def ownedBy (identity owner : String) : Bool :=
 def AttributionValid (owners : List (AssemblyPin × String)) : Bool :=
   owners.all fun entry => pinIdentityValid entry.1.identity && ownedBy entry.1.identity entry.2
 
-/-- The listed assemblies are valid and distinct, every body is attributed correctly, and
-    every body's assembly is listed. -/
-def AssemblyPinsValid (pins : List AssemblyPin) (owners : List (AssemblyPin × String)) : Prop :=
-  pins.all (pinIdentityValid ·.identity) = true ∧ (pins.map (·.identity)).Nodup ∧
-    AttributionValid owners = true ∧ ∀ entry ∈ owners, entry.1 ∈ pins
-
-instance (pins : List AssemblyPin) (owners : List (AssemblyPin × String)) :
-    Decidable (AssemblyPinsValid pins owners) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
-
 /-- A colon-free scope is determined by any string it prefixes before `::`. -/
 private theorem scope_prefix_unique : ∀ {left right leftRest rightRest : List Char},
     ':' ∉ left → ':' ∉ right →
