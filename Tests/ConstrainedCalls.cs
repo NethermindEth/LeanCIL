@@ -306,6 +306,23 @@ foreach (var (mutation, marker) in new[]
     Console.WriteLine("PASS static constrained extraction rejection: " + mutation);
 }
 
+// The runtime runs a derived interface's re-implementation (price less one), not the default body, so
+// extraction must not select the default for that receiver.
+var refunding = examples.GetType("Examples.RefundingAllowance")!;
+var refundingReceiver = Activator.CreateInstance(refunding)!;
+refunding.GetField("Left")!.SetValue(refundingReceiver, 42UL);
+object[] refundingArguments = [refundingReceiver];
+examples.GetType("Examples.StaticVirtualDefaults")!.GetMethod("SpendRefunding")!.Invoke(null, refundingArguments);
+if ((ulong)refunding.GetField("Left")!.GetValue(refundingArguments[0])! != 40)
+    throw new Exception("Derived interface re-implementation did not run");
+var shadowed = Execute(["dotnet", ExtractorPath, "extract", assembly,
+    "StaticVirtualDefaults::SpendRefunding(Examples.RefundingAllowance&)",
+    Path.Combine(root, "Reject-shadowed-default")]);
+if (shadowed.Code == 0 ||
+    !shadowed.Output.Contains("Another interface of the receiver re-implements", StringComparison.Ordinal))
+    throw new Exception("Incorrect shadowed default rejection\n" + shadowed.Output);
+Console.WriteLine("PASS static default extraction rejection: derived interface re-implementation");
+
 // An abstract generic slot has no fallback, and an unrecorded same-signature struct method beside a
 // default body is ambiguous: neither may resolve to the interface body.
 foreach (var mutation in new[] { "abstract-generic-slot", "unrecorded-implementation" })

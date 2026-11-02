@@ -122,14 +122,24 @@ def ConstrainedTarget.declaringType (receiver : TypeExpr) (site : CallSite) :
       method.ownerArguments.foldl TypeExpr.apply method.owner
   | .interfaceDefault _ => site.declaringType
 
+/-- No interface of the receiver re-implements the slot at the site's closed interface, so the
+    slot's own body is the most specific one. Every listed interface must be in the catalog and
+    the list must be closed under interface inheritance; otherwise the check fails. -/
+private def defaultUnshadowed (find : TypeExpr → Option DispatchType) (concrete : DispatchType)
+    (token : Nat) (site : CallSite) : Bool :=
+  concrete.interfaces.all fun identity => match find identity with
+    | none => false
+    | some entry => entry.interfaces.all concrete.interfaces.contains &&
+        entry.methods.all fun method => !method.overrides.contains (token, site.declaringType)
+
 /-- Recorded overrides take precedence. Otherwise an abstract slot needs exactly one public
-    same-signature method, and a static slot with a body runs only when there is none: an
-    unrecorded candidate beside a default body is ambiguous. -/
+    same-signature method, and a static slot with a body runs only when there is none and no
+    other interface of the receiver re-implements it: anything else is ambiguous. -/
 private def selectTarget (site : CallSite) (slot : DispatchMethod)
-    (explicit implicit : List DispatchMethod) : Option ConstrainedTarget :=
+    (explicit implicit : List DispatchMethod) (unshadowed : Bool) : Option ConstrainedTarget :=
   if !explicit.isEmpty then ConstrainedTarget.implementation <$> unique explicit
   else if slot.isAbstract then ConstrainedTarget.implementation <$> unique implicit
-  else if !site.hasThis && slot.hasBody && implicit.isEmpty then
+  else if !site.hasThis && slot.hasBody && implicit.isEmpty && unshadowed then
     some (.interfaceDefault slot)
   else none
 
@@ -175,6 +185,9 @@ def resolveConstrained (types : List DispatchType) (receiver : TypeExpr) (site :
       (concrete.methods.filter fun method => method.overrides.contains (token, site.declaringType))
       (concrete.methods.filter fun method =>
         method.isPublic && method.name == slot.name && signatureMatches method site)
+      (defaultUnshadowed
+        (fun identity => unique (types.filter fun type => type.identity == identity))
+        concrete token site)
   checkedTarget receiver site target
 
 
@@ -332,6 +345,8 @@ def DispatchIndex.resolve (index : DispatchIndex) (receiver : TypeExpr) (site : 
         method.overrides.contains (token, site.declaringType))
       ((concrete.names.getD slot.name []).filter fun method =>
         method.isPublic && signatureMatches method site)
+      (defaultUnshadowed (fun identity => (index.findType identity).map (·.raw)) concrete.raw
+        token site)
   checkedTarget receiver site target
 
 /-- Indexed dispatch preserves ambiguity, explicit overrides, signatures and all failures. -/
@@ -349,6 +364,7 @@ theorem DispatchIndex.resolve_ofTypes (types : List DispatchType) (receiver : Ty
       simp [present, mapped]
     · simp [present]
   simp only [DispatchIndex.resolve, resolveConstrained, DispatchIndex.findType_ofTypes,
+    Option.map_map, Option.map_id',
     Bind.bind, Option.bind_map, Function.comp_def, DispatchTypeIndex.ofType,
     groupIndex_get, multiGroup_get,
     List.filter_filter, overrideFilter]

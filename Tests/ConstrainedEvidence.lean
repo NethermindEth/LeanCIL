@@ -258,6 +258,30 @@ theorem static_default_owner_rejected :
       allowance defaultSite = none := by decide +kernel
 #print axioms static_default_owner_rejected
 
+private def derivedInterface : TypeExpr := .apply (.constructor "Fixture" "IRefund`1") allowance
+/-- `IRefund<TSelf> : IAllowance<TSelf>` re-implementing `IAllowance<TSelf>.Spend<TPrice>`. -/
+private def derivedDeclared : DispatchType := {
+  identity := derivedInterface, valueType := false, interfaceType := true,
+  interfaces := [allowanceInterface], methods := [{ genericOverride with
+    token := 50, owner := .constructor "Fixture" "IRefund`1", ownerArguments := [allowance] }] }
+private def derivedConcrete : DispatchType :=
+  { defaultConcrete with interfaces := [allowanceInterface, derivedInterface] }
+
+/-- A derived interface of the receiver that re-implements the slot is more specific than the
+    default body, so the default is never selected; an interface missing from the catalog or an
+    inherited interface the receiver does not list fails closed. -/
+theorem static_default_shadowed_rejected :
+    resolveConstrained [derivedConcrete, defaultDeclared, derivedDeclared]
+      allowance defaultSite = none ∧
+    ¬ ConstrainedCallsValid [derivedConcrete, defaultDeclared, derivedDeclared]
+      [⟨[], defaultRaw⟩, defaultTarget] defaultRaw [true, true, true, true] defaultEmitted ∧
+    resolveConstrained [derivedConcrete, defaultDeclared, { derivedDeclared with methods := [] }]
+      allowance defaultSite = some (.interfaceDefault defaultSlot) ∧
+    resolveConstrained [derivedConcrete, defaultDeclared] allowance defaultSite = none ∧
+    resolveConstrained [defaultConcrete, { defaultDeclared with interfaces := [derivedInterface] }]
+      allowance defaultSite = none := by decide +kernel
+#print axioms static_default_shadowed_rejected
+
 /-- Lowering keeps the default body's closed interface and method type argument, and moves an
     override to the receiver with only the method type argument. -/
 theorem lowered_default_exact :

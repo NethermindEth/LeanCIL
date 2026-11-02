@@ -120,7 +120,11 @@ internal static class ConstrainedCalls
             method.Name == slot.Name && method.HasThis == instance &&
             SignatureMatches(method, reference, owner, methodArguments)).ToArray();
         if (defaultBody && implicitTargets.Length == 0)
-            return Default(concrete, reference, slot, methodArguments);
+            return Reimplemented(concrete.Interfaces.Select(implementation =>
+                    GenericStructs.Substitute(implementation.InterfaceType, owner)), slot, reference.DeclaringType, [])
+                ? throw new InvalidDataException(
+                    "Another interface of the receiver re-implements the static virtual slot")
+                : Default(concrete, reference, slot, methodArguments);
         // A default slot with an unrecorded same-signature struct method is ambiguous, so it is rejected.
         if (implicitTargets.Length != 1 || defaultBody)
             throw new InvalidDataException("Constrained interface slot has no unique struct implementation");
@@ -150,6 +154,28 @@ internal static class ConstrainedCalls
             !SignatureMatches(target, slot, slot.DeclaringType as GenericInstanceType, methodArguments))
             throw new InvalidDataException("Constrained call would require boxing or unsupported dispatch");
         return new(receiver, target, target, slot.DeclaringType, methodArguments);
+    }
+
+    // An interface-level MethodImpl of the slot, on any interface the receiver implements directly or by
+    // inheritance, is more specific than the default body. Unresolvable interfaces count as one.
+    static bool Reimplemented(IEnumerable<TypeReference> interfaces, MethodDefinition slot,
+        TypeReference closedSlotOwner, HashSet<string> visited)
+    {
+        foreach (var candidate in interfaces)
+        {
+            if (!visited.Add(MethodSpecialization.SignatureType(candidate))) continue;
+            if (candidate.Resolve() is not { } declared) return true;
+            var arguments = candidate as GenericInstanceType;
+            bool Overrides(MethodReference overridden) => overridden.Resolve() is not { } resolved ||
+                resolved == slot && SameType(GenericStructs.Substitute(overridden.DeclaringType, arguments),
+                    closedSlotOwner);
+            var inherited = declared.Interfaces.Select(implementation =>
+                GenericStructs.Substitute(implementation.InterfaceType, arguments));
+            if (declared.Methods.Any(method => method.Overrides.Any(Overrides)) ||
+                Reimplemented(inherited, slot, closedSlotOwner, visited))
+                return true;
+        }
+        return false;
     }
 
     static MethodDefinition Slot(MethodReference slot) =>

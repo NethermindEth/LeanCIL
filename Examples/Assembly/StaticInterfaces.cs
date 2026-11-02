@@ -91,6 +91,24 @@ public struct DoublingAllowance : IAllowance<DoublingAllowance>
         Spend(ref self, TPrice.Price * 2);
 }
 
+// Re-implements the generic slot in a derived interface, which the runtime prefers over the default body.
+public interface IRefundingAllowance<TSelf> : IAllowance<TSelf> where TSelf : struct, IRefundingAllowance<TSelf>
+{
+    static bool IAllowance<TSelf>.Spend<TPrice>(ref TSelf self) => TSelf.Spend(ref self, TPrice.Price - 1);
+}
+
+public struct RefundingAllowance : IRefundingAllowance<RefundingAllowance>
+{
+    public ulong Left;
+
+    public static bool Spend(ref RefundingAllowance self, ulong amount)
+    {
+        if (self.Left < amount) return false;
+        self.Left -= amount;
+        return true;
+    }
+}
+
 public static class StaticVirtualDefaults
 {
     public static ulong Spend<TAllowance, TPrice>(ref TAllowance allowance)
@@ -101,4 +119,7 @@ public static class StaticVirtualDefaults
 
     public static ulong SpendOverride(ref DoublingAllowance allowance) =>
         Spend<DoublingAllowance, TriplePrice>(ref allowance);
+
+    public static ulong SpendRefunding(ref RefundingAllowance allowance) =>
+        Spend<RefundingAllowance, TriplePrice>(ref allowance);
 }
