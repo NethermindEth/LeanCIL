@@ -9,6 +9,7 @@ from intrinsic comparison masks reproduces the 256-bit sum and difference on con
 where a single repair hop is wrong and on symbolic inputs; intrinsic results on packed lanes
 rewrite to their lane values; and a method steps through shift and multiply with them as facts.
 The byte shuffles are pinned on concrete vectors that a bit-7 or lane-crossing mutant fails.
+The AES round is pinned on the FIPS-197 example cipher, which mutants of each round step fail.
 -/
 
 open CIL CIL.Vector
@@ -554,5 +555,75 @@ theorem shuffle_high_half (source control : V256) :
       shuffleBytes128 (source.extractLsb' 128 128) (control.extractLsb' 128 128) :=
   append_high _ _
 #print axioms shuffle_high_half
+
+/-- The AES state whose byte `i` is the `i`th listed byte, as FIPS-197 writes a block. -/
+private def block (bytes : List Nat) : V128 :=
+  aesState fun index => BitVec.ofNat 8 (bytes.getD index 0)
+
+/-- FIPS-197 Appendix B: the state entering round 1, its SubBytes, ShiftRows and MixColumns
+    results, the round 1 key and the state entering round 2. -/
+private def roundStart := block
+  [0x19, 0x3d, 0xe3, 0xbe, 0xa0, 0xf4, 0xe2, 0x2b, 0x9a, 0xc6, 0x8d, 0x2a, 0xe9, 0xf8, 0x48, 0x08]
+private def afterSubBytes := block
+  [0xd4, 0x27, 0x11, 0xae, 0xe0, 0xbf, 0x98, 0xf1, 0xb8, 0xb4, 0x5d, 0xe5, 0x1e, 0x41, 0x52, 0x30]
+private def afterShiftRows := block
+  [0xd4, 0xbf, 0x5d, 0x30, 0xe0, 0xb4, 0x52, 0xae, 0xb8, 0x41, 0x11, 0xf1, 0x1e, 0x27, 0x98, 0xe5]
+private def afterMixColumns := block
+  [0x04, 0x66, 0x81, 0xe5, 0xe0, 0xcb, 0x19, 0x9a, 0x48, 0xf8, 0xd3, 0x7a, 0x28, 0x06, 0x26, 0x4c]
+private def roundKey1 := block
+  [0xa0, 0xfa, 0xfe, 0x17, 0x88, 0x54, 0x2c, 0xb1, 0x23, 0xa3, 0x39, 0x39, 0x2a, 0x6c, 0x76, 0x05]
+private def round2Start := block
+  [0xa4, 0x9c, 0x7f, 0xf2, 0x68, 0x9f, 0x35, 0x2b, 0x6b, 0x5b, 0xea, 0x43, 0x02, 0x6a, 0x50, 0x49]
+
+/-- FIPS-197 Section 5.1.1 S-box entries, including the inverse-free zero and the 0x53 example. -/
+theorem aes_sbox :
+    aesSubByte 0x00 = 0x63 ∧ aesSubByte 0x53 = 0xed ∧ aesSubByte 0xff = 0x16 := by
+  decide +kernel
+#print axioms aes_sbox
+
+/-- Each round step and AESENC reproduce round 1 of the FIPS-197 example cipher. -/
+theorem aes_fips_round :
+    aesSubBytes roundStart = afterSubBytes ∧ aesShiftRows afterSubBytes = afterShiftRows ∧
+    aesMixColumns afterShiftRows = afterMixColumns ∧
+    aesEncryptRound roundStart roundKey1 = round2Start := by
+  decide +kernel
+#print axioms aes_fips_round
+
+/-- `Aes.Encrypt`, and `Arm.Aes.MixColumns` after a zero-key `Arm.Aes.Encrypt`, evaluate to the
+    FIPS-197 round; ARM64's AESE applies its key before SubBytes. -/
+theorem aes_intrinsics :
+    evalIntrinsic (.aes .encrypt) [.v128 roundStart, .v128 roundKey1] =
+      some (.v128 round2Start) ∧
+    evalIntrinsic (.armAes .encrypt) [.v128 roundStart, .v128 0] =
+      some (.v128 afterShiftRows) ∧
+    evalIntrinsic (.armAes .mixColumns) [.v128 afterShiftRows] = some (.v128 afterMixColumns) ∧
+    evalIntrinsic (.armAes .encrypt) [.v128 (roundStart ^^^ roundKey1), .v128 roundKey1] =
+      some (.v128 afterShiftRows) := by
+  decide +kernel
+#print axioms aes_intrinsics
+
+/-- ShiftRows rotating each row right instead of left. -/
+private def shiftRowsRight (state : V128) : V128 :=
+  aesState fun index =>
+    let row := index % 4
+    lane8 state (row + 4 * ((index / 4 + 4 - row) % 4))
+
+/-- MixColumns doubling without reducing by the AES polynomial. -/
+private def mixColumnsUnreduced (state : V128) : V128 :=
+  aesState fun index =>
+    let column := 4 * (index / 4)
+    let entry (row : Nat) := lane8 state (column + (index % 4 + row) % 4)
+    let double (value : BitVec 8) := value <<< 1
+    double (entry 0) ^^^ (double (entry 1) ^^^ entry 1) ^^^ entry 2 ^^^ entry 3
+
+/-- The FIPS-197 vectors reject a reversed ShiftRows, an unreduced MixColumns and an AESE that
+    adds its key after SubBytes. -/
+theorem aes_mutants_rejected :
+    shiftRowsRight afterSubBytes ≠ afterShiftRows ∧
+    mixColumnsUnreduced afterShiftRows ≠ afterMixColumns ∧
+    aesSubBytes (aesShiftRows roundStart) ^^^ roundKey1 ≠
+      armAesEncrypt roundStart roundKey1 := by
+  decide +kernel
+#print axioms aes_mutants_rejected
 
 end Tests.SimdLanes

@@ -520,6 +520,7 @@ Examples:System.ReadOnlySpan`1<System.Runtime.Intrinsics.Vector128`1<System.UInt
 Examples:System.ReadOnlySpan`1<System.UInt16> Examples.ReinterpretedSpans::ReadOnlyWords(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.ReadOnlySpan`1<System.UInt32> Examples.SpanTables::get_Words()	A	A	A	A	A	A	A	A
 Examples:System.ReadOnlySpan`1<System.UInt64> Examples.SpanTables::get_Powers()	A	A	A	A	A	A	A	A
+Examples:System.Runtime.Intrinsics.Vector128`1<System.Byte> Examples.DivisionIntrinsics::AesRound(System.UInt64,System.UInt64,System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.Runtime.Intrinsics.Vector128`1<System.Byte> Examples.DivisionIntrinsics::Shuffle128(System.ReadOnlySpan`1<System.Byte>,System.ReadOnlySpan`1<System.Byte>)	B	B	B	B	B	B	B	B
 Examples:System.Runtime.Intrinsics.Vector128`1<System.Byte> Examples.MarshaledMemory::ReadVector(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector128`1<System.Byte> Examples.UnalignedMemory::Read128(System.Byte&)	A	A	A	A	A	A	A	A

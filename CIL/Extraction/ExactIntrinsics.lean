@@ -111,7 +111,24 @@ private def exactSignatures : List (String × String × String × Intrinsic × N
       System.Runtime.Intrinsics.X86.Ssse3::Shuffle(\
       System.Runtime.Intrinsics.Vector128`1<System.Byte>,\
       System.Runtime.Intrinsics.Vector128`1<System.Byte>)",
-    .sse .shuffleBytes, 2)]
+    .sse .shuffleBytes, 2),
+  ("System.Runtime.Intrinsics.X86.Aes", "Encrypt",
+    "System.Runtime.Intrinsics.Vector128`1<System.Byte> \
+      System.Runtime.Intrinsics.X86.Aes::Encrypt(\
+      System.Runtime.Intrinsics.Vector128`1<System.Byte>,\
+      System.Runtime.Intrinsics.Vector128`1<System.Byte>)",
+    .aes .encrypt, 2),
+  ("System.Runtime.Intrinsics.Arm.Aes", "Encrypt",
+    "System.Runtime.Intrinsics.Vector128`1<System.Byte> \
+      System.Runtime.Intrinsics.Arm.Aes::Encrypt(\
+      System.Runtime.Intrinsics.Vector128`1<System.Byte>,\
+      System.Runtime.Intrinsics.Vector128`1<System.Byte>)",
+    .armAes .encrypt, 2),
+  ("System.Runtime.Intrinsics.Arm.Aes", "MixColumns",
+    "System.Runtime.Intrinsics.Vector128`1<System.Byte> \
+      System.Runtime.Intrinsics.Arm.Aes::MixColumns(\
+      System.Runtime.Intrinsics.Vector128`1<System.Byte>)",
+    .armAes .mixColumns, 1)]
 
 /-- `Vector{width}<ulong>` with exact scopes. -/
 private def ulongVector (width : String) : TypeExpr :=
@@ -139,7 +156,9 @@ private def exactCallTypes : Intrinsic → Option (TypeExpr × List TypeExpr)
   | .vector .createScalarUnsafe64 =>
     some (ulongVector "128", [.atom runtimeScope "System.UInt64"])
   | .avx2 .shuffleBytes => some (byteVector "256", [byteVector "256", byteVector "256"])
-  | .sse .shuffleBytes => some (byteVector "128", [byteVector "128", byteVector "128"])
+  | .sse .shuffleBytes | .aes .encrypt | .armAes .encrypt =>
+    some (byteVector "128", [byteVector "128", byteVector "128"])
+  | .armAes .mixColumns => some (byteVector "128", [byteVector "128"])
   | _ => none
 
 /-- Lane-independent integer operations share vector semantics at each supported width. -/
@@ -350,6 +369,7 @@ def emittedExactIntrinsic : Op → Option (Intrinsic × Nat)
     | .avx512 .ltu512 | .avx512 .gtu512
     | .avx512DQ .moveMask512 | .avx512DQ .moveMask64 | .vector .combine256
     | .vector .createScalarUnsafe64 | .avx2 .shuffleBytes | .sse .shuffleBytes
+    | .aes .encrypt | .armAes .encrypt | .armAes .mixColumns
     | .vector (.band _) | .vector (.bor _) | .vector (.bxor _) | .vector (.bnot _)
     | .vector (.equalsAll _) | .vector (.zero _) | .vector (.ones _) => some (intrinsic, arity)
     | _ => none

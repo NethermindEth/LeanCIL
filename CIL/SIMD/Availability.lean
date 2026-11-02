@@ -27,6 +27,8 @@ def Intrinsic.available (profile : FeatureProfile) : Intrinsic → Bool
   | .bmi2 _ => profile.bmi2
   | .armBase64 _ => profile.armBase64
   | .x86Base _ => profile.x86Base64
+  | .aes _ => profile.aes
+  | .armAes _ => profile.armAes
   | .avx512DQ .moveMask64 | .avx512DQ .moveMask512 => profile.avx512DQ
   | .avx512DQ .mul64 =>
     profile.avx512DQ && profile.avx512DQVL && profile.avx512F && profile.avx512FVL

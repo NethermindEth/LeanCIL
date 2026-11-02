@@ -1,0 +1,48 @@
+name: ARM64 AES hardware
+
+# The suites run on x64, so ARM64 AESE and AESMC and the macOS runtime groups are checked here alone.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ['CIL/SIMD/AES.lean', 'Tests/AesHardware.cs', 'scripts/ProbeRuntimeProfiles.cs',
+      'scripts/*RuntimeProfile*.cs', 'docs/evidence/runtime-profiles/macos-arm64-net10.json',
+      '.github/workflows/arm64-aes.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  aes:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+          dotnet-version: '10.0.x'
+      - uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
+        with:
+          auto-config: false
+          use-github-cache: false
+          use-mathlib-cache: false
+      - name: Compare ARM64 AESE and AESMC with the Lean model
+        run: dotnet run --file Tests/AesHardware.cs
+      - name: Record the installed servicing runtime
+        run: |
+          mkdir -p artifacts
+          dotnet run --file scripts/ProbeRuntimeProfiles.cs -- artifacts/macos-runtime.json
+      - name: Check observed profiles in both validators
+        run: |
+          dotnet build Extractor/Extractor.csproj
+          lake build CIL.Features
+          dotnet run --file scripts/ValidateRuntimeProfiles.cs -- Extractor/bin/Nethermind.LeanCIL.dll artifacts/macos-runtime.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: arm64-aes-macos-15
+          path: |
+            artifacts/macos-runtime.json
+            artifacts/AesHardware/AesHardware.lean

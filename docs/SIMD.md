@@ -17,6 +17,7 @@ Values are modelled as bit patterns with lane zero in the least-significant bits
 | [AVX512](#avx512) | F.VL alignment, ternary logic and unsigned comparisons; DQ mask extraction and DQ.VL low multiplication on 256-bit vectors; F unsigned comparisons and DQ mask extraction on 512-bit vectors |
 | [BMI](#bmi) | `Bmi1.BitFieldExtract(uint, byte, byte)`, `Bmi2.X64.MultiplyNoFlags(ulong, ulong)` |
 | [X86Base](#x86base) | `X86Base.X64.DivRem(ulong, ulong, ulong)` returning `(ulong Quotient, ulong Remainder)` |
+| [AES](#aes) | x86 `Aes.Encrypt`; ARM64 `Aes.Encrypt` and `Aes.MixColumns` |
 | [ARM](#arm) | `AdvSimd.ExtractVector128` on `ulong` lanes, `ArmBase.Arm64.MultiplyHigh(ulong, ulong)` |
 
 An enabled CPU feature does not imply support for all of its APIs. Float/double vectors are used only for selected bit operations, not floating-point arithmetic. Vector64 is not supported, and Vector512 only through the rows below that name it. See the [profile table](#feature-getters-profiles-and-execution-restrictions) for the exact flags enabled by each built-in profile.
@@ -127,6 +128,16 @@ The pointer-output `MultiplyNoFlags` overload is not mapped. The .NET 10 CoreCLR
 
 The precondition is `upper < divisor`, so the quotient fits in 64 bits. Otherwise the instruction raises #DE, and the checked interpreter fails with a located arithmetic fault, never a wrapped result: `.divideByZero` for a zero divisor and `.overflow` for any other `upper >= divisor`, matching CoreCLR's `DivideByZeroException` and `OverflowException`. `CIL.Safety.divRem_fields` proves that Item1 and Item2 of a successful call are the `Nat` quotient and remainder, and `CIL.Safety.divRem_fault` that every input violating the precondition faults. The result is a 16-byte aggregate with Item1 at offset 0 and Item2 at offset 8; extraction requires the recomputed `ValueTuple<ulong, ulong>` layout to match it. The 32-bit `X86Base.DivRem` and the signed overloads are not mapped. The API is marked experimental (`SYSLIB5004`) in .NET 10, and only this exact signature is recognised.
 
+## AES
+
+| Exact API | Arguments → result | Required feature | Model |
+| --- | --- | --- | --- |
+| `X86.Aes.Encrypt` | `V128<byte> state, V128<byte> roundKey` → `V128<byte>` | `aes` | AESENC: ShiftRows, SubBytes and MixColumns of the state, then XOR with the round key |
+| `Arm.Aes.Encrypt` | `V128<byte> state, V128<byte> roundKey` → `V128<byte>` | `armAes` | AESE: XOR with the round key, then ShiftRows and SubBytes |
+| `Arm.Aes.MixColumns` | `V128<byte>` → `V128<byte>` | `armAes` | AESMC: FIPS-197 MixColumns |
+
+Byte `i` of the vector is AES state byte `i` (row `i % 4`, column `i / 4`), as when a block is loaded from memory. The S-box is computed as the GF(2^8) inverse followed by the FIPS-197 affine map, and [AES.lean](../CIL/SIMD/AES.lean) proves `armAes_round_eq_aesEncryptRound`: `MixColumns(AESE(state, 0)) ^ roundKey` equals AESENC for every state and key, so a hash round written either way, as in int256's `GetHashCode` and Nethermind's `FastHash`, computes the same value on both architectures. No built-in profile enables AES; declare `aes` or `armAes` in a custom profile ([runtime profiles](RUNTIME-PROFILES.md)). Decryption, key generation, `Pclmulqdq` and the VAES widths are not mapped.
+
 ## ARM
 
 | Exact API | Arguments → result | Required feature | Model |
@@ -134,7 +145,7 @@ The precondition is `upper < divisor`, so the quotient fits in 64 bits. Otherwis
 | `AdvSimd.ExtractVector128` | `V128<ulong>, V128<ulong>, byte index` → `V128<ulong>` | `AdvSimd` | Extract two 64-bit lanes from the concatenation, first operand low. Only indices 0 and 1 are admitted |
 | `ArmBase.Arm64.MultiplyHigh` | `ulong, ulong` → `ulong` | `ArmBase64` | High 64 bits of the unsigned 128-bit product |
 
-No other AdvSimd operations, signed `MultiplyHigh` overload or ARM ISA family is mapped. Portable Vector128 operations can still be used under an ARM profile when their signatures match the first table.
+No other AdvSimd operations, signed `MultiplyHigh` overload or ARM ISA family besides [AES](#aes) is mapped. Portable Vector128 operations can still be used under an ARM profile when their signatures match the first table.
 
 ## Feature getters, profiles and execution restrictions
 

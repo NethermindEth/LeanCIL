@@ -131,7 +131,9 @@ even-lane multiply) rewrites a packed or symbolic operand to its lane values, th
 projections cover a mask blend, and concrete 256-bit values are checked by kernel evaluation. A
 method steps through a shift and an even-lane multiply with those lemmas as facts. The byte
 shuffle is pinned on concrete vectors for bit-7 zeroing, half isolation and int256's byte
-reversal, which mutants that ignore bit 7 or cross halves fail.
+reversal, which mutants that ignore bit 7 or cross halves fail. The AES round steps reproduce round 1
+of the FIPS-197 example cipher, which a reversed ShiftRows, an unreduced MixColumns and an AESE that
+adds its key after SubBytes fail.
 
 Run the focused Lean targets and extracted-loop suite with:
 

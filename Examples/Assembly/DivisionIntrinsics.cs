@@ -1,6 +1,8 @@
 using System;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
+using ArmAes = System.Runtime.Intrinsics.Arm.Aes;
+using X86Aes = System.Runtime.Intrinsics.X86.Aes;
 
 namespace Examples;
 
@@ -57,4 +59,13 @@ public static class DivisionIntrinsics
         Avx2.Shuffle(Vector256.Create(source), Vector256.Create(control));
     public static Vector128<byte> Shuffle128(ReadOnlySpan<byte> source, ReadOnlySpan<byte> control) =>
         Ssse3.Shuffle(Vector128.Create(source), Vector128.Create(control));
+    // The int256 and Nethermind hash round: x86 AESENC, else ARM64 AESE with a zero key, AESMC and the key.
+    public static Vector128<byte> AesRound(ulong state0, ulong state1, ulong key0, ulong key1)
+    {
+        Vector128<byte> state = Vector128.Create(state0, state1).AsByte();
+        Vector128<byte> roundKey = Vector128.Create(key0, key1).AsByte();
+        return X86Aes.IsSupported
+            ? X86Aes.Encrypt(state, roundKey)
+            : ArmAes.MixColumns(ArmAes.Encrypt(state, Vector128<byte>.Zero)) ^ roundKey;
+    }
 }
