@@ -178,7 +178,10 @@ foreach (var closedInterface in new[] { false, true })
         """);
     evidence.Add(path, "PASS generic owner with direct interface constraint: " + name, "layouts_validated");
     var invalid = Path.Combine(root, name + "-missing-interface.lean");
-    var marker = closedInterface ? "::Examples.IClosedCounter`1<System.Int32>" : "::Examples.ICounterValue";
+    // Same-assembly generic interface identities spell each argument with its assembly scope.
+    const string runtimeScope = "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a";
+    var marker = closedInterface ? $"::Examples.IClosedCounter`1<{runtimeScope}::System.Int32>"
+        : "::Examples.ICounterValue";
     marker = System.Text.Json.JsonSerializer.Serialize(marker)[1..^1];
     var start = narrow.IndexOf("interfaces := [", StringComparison.Ordinal);
     var interfaces = narrow.IndexOf(marker, start, StringComparison.Ordinal);
