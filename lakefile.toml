@@ -110,6 +110,9 @@ name = "Tests.ExtractionParameters"
 name = "Tests.FeatureEvidence"
 
 [[lean_lib]]
+name = "Tests.ConstantCalls"
+
+[[lean_lib]]
 name = "Tests.LayoutCoverage"
 
 [[lean_lib]]

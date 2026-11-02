@@ -35,6 +35,29 @@ internal static class ConstrainedCalls
             string.Join(",", arguments.Select(MethodSpecialization.SignatureType));
     }
 
+    // A static slot whose resolved body is exactly `ldc.i4.0` or `ldc.i4.1; ret` returns that Boolean.
+    // Lean recomputes the answer from the called program method, so this must never be broader.
+    internal static bool? ConstantResult(MethodDefinition caller, Instruction call, InstructionIndex instructions,
+        string architecture)
+    {
+        if (call.OpCode.Code != Code.Call || call.Previous?.OpCode.Code != Code.Constrained) return null;
+        MethodDefinition target;
+        try
+        {
+            target = Resolve(caller, call, instructions, architecture).Target;
+        }
+        catch (InvalidDataException)
+        {
+            // Validation reports the same failure for a reachable site; here it only means unknown.
+            return null;
+        }
+        if (target.HasThis || target.Parameters.Count != 0 || target.ReturnType.FullName != "System.Boolean" ||
+            LayoutEvidence.Scope(target.ReturnType) != TypeTests.RuntimeScope ||
+            target.Body?.Instructions is not [var load, { OpCode.Code: Code.Ret }])
+            return null;
+        return load.OpCode.Code switch { Code.Ldc_I4_0 => false, Code.Ldc_I4_1 => true, _ => null };
+    }
+
     internal static MethodDefinition Specialize(Resolution resolution, MethodSpecialization specializations)
     {
         if (!resolution.Specialized) return resolution.Target;

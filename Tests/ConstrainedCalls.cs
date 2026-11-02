@@ -17,7 +17,8 @@ var root = At("artifacts/ConstrainedCalls");
 Directory.CreateDirectory(root);
 var evidence = new GeneratedEvidence(root);
 var rejected = new RejectedEvidence(root);
-RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "Tests.ConstrainedEvidence");
+RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "Tests.ConstrainedEvidence",
+    "Tests.ConstantCalls");
 
 // Keep the exact emitted definitions and constrained obligations; unrelated certificates
 // are covered by the complete positive extraction, not recomputed for each mutation.
@@ -202,6 +203,93 @@ foreach (var name in new[] { "AddCounted", "XorPlain" })
         "\ntheorem static_result :\n    " + string.Join(" ∧\n    ", claims) +
         " :=\n  ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\n#print axioms static_result\n");
     evidence.Add(proof, "PASS static interface dispatch: " + name);
+}
+
+// A flag getter whose body is a constant return prunes the block it guards, so the process clock read
+// there is never extracted; results match the runtime, which runs neither read for these flags.
+var constantFlags = staticInterfaces.Assembly.GetType("Examples.ConstantFlags")!;
+foreach (var name in new[] { "TraceOff", "CountOn" })
+{
+    var output = Path.Combine(root, "Flags-" + name);
+    Run(["dotnet", ExtractorPath, "extract", assembly, $"ConstantFlags::{name}(ulong)", output]);
+    var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    if (!source.Contains(".unsupported \"Unreachable under selected profile\"", StringComparison.Ordinal))
+        throw new Exception("Constant flag block was not pruned: " + name);
+    var claims = new[] { 0UL, 5UL, ulong.MaxValue, 1UL << 63 }
+        .Select(input => (input, result: (ulong)constantFlags.GetMethod(name)!.Invoke(null, [input])!))
+        .Select(pair => $"(CIL.Safety.invoke Extracted.program 32 0 [.scalar (.i64 {pair.input})] " +
+            $"CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 {pair.result})]").ToArray();
+    var proof = Path.Combine(root, "Flags-" + name + ".lean");
+    File.WriteAllText(proof, source + "\ntheorem flag_result :\n    " + string.Join(" ∧\n    ", claims) +
+        " :=\n  ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\n#print axioms flag_result\n");
+    evidence.Add(proof, "PASS constant flag pruning: " + name);
+}
+
+// The caller's certificate is rechecked against the called getter: pointing the call at the other
+// getter, claiming the other word or changing the getter's loaded word each fail feature flow.
+var flagsOutput = Path.Combine(root, "Flags-TraceThenCount");
+Run(["dotnet", ExtractorPath, "extract", assembly, "ConstantFlags::TraceThenCount(ulong)", flagsOutput]);
+var flags = File.ReadAllText(Path.Combine(flagsOutput, "Extracted.lean"));
+var offCaller = Regex.Match(flags, @"(?m)^def method(\d+)Signature : String := ""[^""]+Trace\\u003CExamples\.StepOff");
+var offGetter = Regex.Match(flags, @"(?m)^def method(\d+)Signature : String := ""[^""]+StepOff::get_IsActive");
+var onGetter = Regex.Match(flags, @"(?m)^def method(\d+)Signature : String := ""[^""]+StepOn::get_IsActive");
+if (!offCaller.Success || !offGetter.Success || !onGetter.Success)
+    throw new Exception("Missing constant flag mutation targets");
+var (callerIndex, offIndex, onIndex) =
+    (offCaller.Groups[1].Value, offGetter.Groups[1].Value, onGetter.Groups[1].Value);
+var offCall = $".call {offIndex} 0";
+var callerStates = Regex.Match(flags, $@"(?m)^def method{callerIndex}FeatureStates : [^\r\n]+");
+var offBody = Regex.Match(flags, $@"(?m)^def method{offIndex}Closed : [^\r\n]+");
+const string offWord = "stack := [some (BitVec.ofInt 32 (0))]";
+const string offLoad = "{ offset := 0, opcode := 22, operand := .none }";
+if (!flags.Contains(offCall, StringComparison.Ordinal) ||
+    !callerStates.Value.Contains(offWord, StringComparison.Ordinal) ||
+    !offBody.Value.Contains(offLoad, StringComparison.Ordinal))
+    throw new Exception("Missing constant flag mutation sites");
+foreach (var (mutation, forgedSource) in new[]
+{
+    ("swapped-callee", flags.Replace(offCall, $".call {onIndex} 0", StringComparison.Ordinal)),
+    ("forged-word", flags.Replace(callerStates.Value, new Regex(Regex.Escape(offWord)).Replace(
+        callerStates.Value, "stack := [some (BitVec.ofInt 32 (1))]", 1), StringComparison.Ordinal)),
+    ("callee-word", flags.Replace(offBody.Value, offBody.Value.Replace(offLoad,
+        "{ offset := 0, opcode := 21, operand := .none }", StringComparison.Ordinal), StringComparison.Ordinal))
+})
+{
+    var forged = Path.Combine(root, "Flags-" + mutation + ".lean");
+    File.WriteAllText(forged, forgedSource);
+    rejected.Add(forged, "PASS forged constant flag: " + mutation,
+        $"Extraction.FeatureFlowValid rawLayouts.toArray specializedMethods method{callerIndex}Closed");
+}
+
+// Extraction keeps the guarded block, and so rejects its clock read, whenever the flag is live or the
+// getter is anything but an exact constant return, even one that still evaluates to false.
+const string clockRejection = "Contract imports from framework assemblies are not supported";
+foreach (var (mutation, selector) in new[]
+{
+    ("live-flag", "TraceOn"), ("swapped-flag", "TraceOff"), ("computed-flag", "TraceOff")
+})
+{
+    var dll = assembly;
+    if (mutation != "live-flag")
+    {
+        dll = Path.Combine(root, "flags-" + mutation + ".dll");
+        using var module = ModuleDefinition.ReadModule(assembly);
+        var getter = module.GetType("Examples.StepOff").Methods.Single(method => method.Name == "get_IsActive");
+        var body = getter.Body.GetILProcessor();
+        var load = getter.Body.Instructions[0];
+        if (mutation == "swapped-flag") load.OpCode = OpCodes.Ldc_I4_1;
+        else
+        {
+            body.InsertAfter(load, Instruction.Create(OpCodes.Ldc_I4_0));
+            body.InsertAfter(load.Next, Instruction.Create(OpCodes.Or));
+        }
+        module.Write(dll);
+    }
+    var result = Execute(["dotnet", ExtractorPath, "extract", dll, $"ConstantFlags::{selector}(ulong)",
+        Path.Combine(root, "Reject-flags-" + mutation)]);
+    if (result.Code == 0 || !result.Output.Contains(clockRejection, StringComparison.Ordinal))
+        throw new Exception("Incorrect live constant flag rejection: " + mutation + "\n" + result.Output);
+    Console.WriteLine("PASS live constant flag rejection: " + mutation);
 }
 
 // A generic static virtual slot runs the interface default for a struct without an override and the

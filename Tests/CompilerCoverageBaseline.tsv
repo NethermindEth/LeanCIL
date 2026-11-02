@@ -716,6 +716,12 @@ Examples:System.UInt64 Examples.Blocks::CopyParameter(System.UInt64,System.UInt6
 Examples:System.UInt64 Examples.Blocks::FillLocal(System.Byte,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Blocks::FillParameter(System.UInt64,System.Byte,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.CheckedArithmetic::Add64(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.ConstantFlags::Count(System.UInt64)	N	N	N	N	N	N	N	N
+Examples:System.UInt64 Examples.ConstantFlags::CountOn(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.ConstantFlags::Trace(System.UInt64)	N	N	N	N	N	N	N	N
+Examples:System.UInt64 Examples.ConstantFlags::TraceOff(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.ConstantFlags::TraceOn(System.UInt64)	B	B	B	B	B	B	B	B
+Examples:System.UInt64 Examples.ConstantFlags::TraceThenCount(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Constructors::Checked(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Constructors::Default()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Constructors::Nested(System.UInt64)	A	A	A	A	A	A	A	A

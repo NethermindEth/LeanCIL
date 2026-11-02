@@ -277,6 +277,15 @@ Reference receivers, boxing fallbacks, inherited dispatch, instance default-inte
 generic instance methods on interfaces, static slots on generic struct receivers and ordinary
 unconstrained virtual calls remain unsupported.
 
+A static Boolean slot used as a compile-time flag selects code the way the JIT does: when the
+resolved target of `constrained. T; call` takes no parameters, returns `System.Boolean` and its
+body is exactly `ldc.i4.0` or `ldc.i4.1` followed by `ret`, the pushed word feeds the
+[feature-flow analysis](#runtime-calls-and-simd) and the block it rules out is emitted
+as unsupported placeholders, so code there is never translated or validated. The call itself is
+still emitted and executed. Lean reads the word from the called program method's raw body, which
+that method's own evidence binds to its emitted `const32; ret`; any other body, including one
+that computes the same value, leaves both edges live.
+
 ### Static span tables
 
 `Span<T>` and `ReadOnlySpan<T>` over the eight fixed-width integer types, `nint`, `nuint`,

@@ -20,8 +20,11 @@ internal static class FeatureEvidence
                 $"locals := [{string.Join(", ", state.Locals.Select(Fact))}] }}";
         });
         lean.AppendLine($"def method{number}FeatureStates : Extraction.FeatureCertificate := [{string.Join(", ", states)}]");
-        lean.AppendLine($"theorem method{number}_features_validated : Extraction.FeatureFlowValid rawLayouts.toArray " +
-            $"method{number}Closed profile method{number}FeatureStates method{number}Reachable " +
-            $"method{number}.code := {LeanEmitter.Decide}");
     }
+
+    // Follows `specializedMethods`, which supplies the callee bodies that constant calls push.
+    internal static void EmitTheorem(StringBuilder lean, int number) =>
+        lean.AppendLine($"theorem method{number}_features_validated : Extraction.FeatureFlowValid rawLayouts.toArray " +
+            $"specializedMethods method{number}Closed profile method{number}FeatureStates method{number}Reachable " +
+            $"method{number}.code := {LeanEmitter.Decide}");
 }

@@ -31,7 +31,7 @@ def code (count : Nat) : List Op :=
 
 set_option profiler true in
 /-- Fixed feature validation workload, reduced by the kernel. -/
-theorem feature_valid : FeatureFlowValid #[] (raw 512) .scalar (features 512)
+theorem feature_valid : FeatureFlowValid #[] [] (raw 512) .scalar (features 512)
     (List.replicate 513 true) (code 512) := by decide
 #print axioms feature_valid
 

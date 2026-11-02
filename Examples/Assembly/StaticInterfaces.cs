@@ -123,3 +123,31 @@ public static class StaticVirtualDefaults
     public static ulong SpendRefunding(ref RefundingAllowance allowance) =>
         Spend<RefundingAllowance, TriplePrice>(ref allowance);
 }
+
+// A flag type argument whose static getter returns a constant selects code at compile time; the
+// JIT drops the other block. Each guarded block here reads the process clock, which extraction
+// rejects, so a closed instantiation extracts only when that block is dead under its flag.
+public static class ConstantFlags
+{
+    public static ulong Trace<TFlag>(ulong value) where TFlag : struct, IStepFlag
+    {
+        if (TFlag.IsActive) value += (ulong)System.Environment.TickCount64;
+        if (typeof(TFlag) != typeof(StepOff)) value ^= (ulong)System.Environment.TickCount64;
+        return value + 1;
+    }
+
+    public static ulong Count<TFlag>(ulong value) where TFlag : struct, IStepFlag
+    {
+        if (TFlag.IsActive) value = value * 3 + 1;
+        if (typeof(TFlag) != typeof(StepOn)) value ^= (ulong)System.Environment.TickCount64;
+        return value;
+    }
+
+    public static ulong TraceOff(ulong value) => Trace<StepOff>(value);
+
+    public static ulong TraceOn(ulong value) => Trace<StepOn>(value);
+
+    public static ulong CountOn(ulong value) => Count<StepOn>(value);
+
+    public static ulong TraceThenCount(ulong value) => Count<StepOn>(Trace<StepOff>(value));
+}
