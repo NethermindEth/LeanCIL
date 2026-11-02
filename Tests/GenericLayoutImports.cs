@@ -243,7 +243,7 @@ Reject("ByValue", "Unsupported type", app, "TypedFixture.Application::ByValue(Ty
 Reject("Local", "admitted only by address", app, "TypedFixture.Application::Local()", sidecar, interfaceDigest);
 Reject("LocalField", "admitted only by address", app, "TypedFixture.Application::LocalField(TypedFixture.Pair&)",
     sidecar, interfaceDigest);
-Reject("LocalFieldAddress", "Failed to resolve assembly", app,
+Reject("LocalFieldAddress", "Unpinned assembly reference", app,
     "TypedFixture.Application::LocalFieldAddress(TypedFixture.Pair&)", sidecar, interfaceDigest);
 Reject("LocalInitialize", "Unsupported type identity", app, "TypedFixture.Application::LocalOnly()",
     sidecar, interfaceDigest);
