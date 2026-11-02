@@ -557,6 +557,8 @@ internal static class MetadataValidation
                 }
                 var pinnedCallee = reference.DeclaringType.Scope is AssemblyNameReference &&
                     PinnedAssemblies.Active?.ModuleOf(reference.DeclaringType) is not null;
+                if (!pinnedCallee && reference.DeclaringType.Scope is AssemblyNameReference calleeScope)
+                    PinnedAssemblies.Active?.RejectMismatch(calleeScope);
                 if (!pinnedCallee && ImportResolution.External(reference, module))
                 {
                     if (imports is null)

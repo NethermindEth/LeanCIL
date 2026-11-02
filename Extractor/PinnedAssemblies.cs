@@ -107,6 +107,14 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
         references.FindIndex(reference => reference.Module == module) is >= 0 and var index ? index + 1 :
             throw Outside(module);
 
+    /// <summary>Rejects a reference whose simple name is pinned under another identity, so a version
+    /// mismatch never falls back to the typed-import path.</summary>
+    internal void RejectMismatch(AssemblyNameReference name)
+    {
+        if (!modules.ContainsKey(name.FullName) && modules.Values.Any(pinned => pinned.Assembly.Name.Name == name.Name))
+            Resolve(name);
+    }
+
     public AssemblyDefinition Resolve(AssemblyNameReference name) => Resolve(name, new ReaderParameters());
 
     public AssemblyDefinition Resolve(AssemblyNameReference name, ReaderParameters parameters)
