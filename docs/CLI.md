@@ -84,8 +84,8 @@ leancil extract App.dll 'App.Application::Direct(ulong)' artifacts/Direct --refe
 
 Referenced assemblies are trusted inputs like the selected one
 ([soundness](SOUNDNESS-EVIDENCE.md#pinned-referenced-assemblies)). Each is recorded in
-`identity.json` by relative path, full identity, MVID and SHA-256, emitted as an
-`Extraction.AssemblyPin` in `Extracted.lean`, and attributed to every body it supplies. `check`
+`identity.json` by relative path, full identity, MVID and SHA-256. `Extracted.lean` names it by
+identity only, as an `Extraction.AssemblyPin` attributed to every body it supplies. `check`
 replays the recorded references and rejects a changed hash or identity; it does not accept
 `--reference` itself. Assemblies resolve only against this pinned set and the runtime's platform
 assemblies, so an unpinned reference, a name pinned under another version, a duplicate identity

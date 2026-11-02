@@ -100,9 +100,13 @@ void Proved(string name, string selector, string proof, bool referencedBody, par
         throw new InvalidOperationException("Artifact did not record the pinned reference: " + pin);
     string extracted = File.ReadAllText(Path.Combine(artifact, "Extracted.lean"));
     if (!extracted.Contains("def assembly1 : Extraction.AssemblyPin", StringComparison.Ordinal) ||
-        !extracted.Contains($"sha256 := \"{libSha}\"", StringComparison.Ordinal) ||
         extracted.Contains("assembly := assembly1", StringComparison.Ordinal) != referencedBody)
         throw new InvalidOperationException("Certificate misattributes the referenced assembly's bodies: " + name);
+    // The certificate depends on the program alone; byte hashes and MVIDs stay in identity.json.
+    string[] rebuildSensitive = [libSha, Sha(app), pin.GetProperty("mvid").GetString()!,
+        identity.GetProperty("mvid").GetString()!];
+    if (rebuildSensitive.Any(value => extracted.Contains(value, StringComparison.OrdinalIgnoreCase)))
+        throw new InvalidOperationException("Extracted.lean depends on assembly bytes: " + name);
     Run([.. cli, "verify", artifact, "--proof", At(proof),
         "--theorem", "MultiAssemblyProof.correctness"]);
     Console.WriteLine("PASS cross-assembly " + name + ": pinned reference, attributed body and proof");
@@ -225,27 +229,25 @@ string dropped = Copy("Dropped");
 Edit(Path.Combine(dropped, "identity.json"), identity => identity["references"] = new JsonArray());
 Rejected("dropped reference", "External managed dependency", Verify(dropped));
 
-// `check` regenerates the certificate. Lean rejects inconsistent pins; only `check` hashes the bytes.
+// `check` regenerates the certificate and hashes the bytes; Lean rejects a misattributed body.
 string extractedSource = File.ReadAllText(Path.Combine(Artifact("Direct"), "Extracted.lean"));
 string libIdentity = libName + ", Version=0.1.0.0" + unsigned;
 string appIdentity = "MultiFixture.App, Version=0.1.0.0" + unsigned;
 if (!extractedSource.Contains($"identity := \"{libIdentity}\"", StringComparison.Ordinal))
     throw new InvalidOperationException("Precondition: the certificate must pin " + libIdentity);
-foreach ((string name, string from, string to, bool leanRejects) in new[]
+foreach ((string name, string from, string to) in new[]
 {
-    ("misattributed body", "assembly := assembly1", "assembly := assembly0", true),
-    ("duplicate certificate identity", $"identity := \"{libIdentity}\"", $"identity := \"{appIdentity}\"", true),
-    ("changed certificate hash", $"sha256 := \"{libSha}\"", $"sha256 := \"{new string('0', 64)}\"", false)
+    ("misattributed body", "assembly := assembly1", "assembly := assembly0"),
+    ("duplicate certificate identity", $"identity := \"{libIdentity}\"", $"identity := \"{appIdentity}\"")
 })
 {
     string forged = Copy(name.Replace(' ', '-'));
     string lean = Path.Combine(forged, "Extracted.lean");
     File.WriteAllText(lean, extractedSource.Replace(from, to, StringComparison.Ordinal));
     Rejected(name, "Stale", Verify(forged));
-    if (!leanRejects) continue;
     (int Code, string Output, string Stdout, string Stderr) kernel =
         Execute(["lake", "env", "lean", lean], cwd: FixturePackage());
-    if (kernel.Code == 0 || !kernel.Output.Contains("Extraction.AssemblyPinsValid", StringComparison.Ordinal))
+    if (kernel.Code == 0 || !kernel.Output.Contains("Extraction.AttributionValid", StringComparison.Ordinal))
         throw new InvalidOperationException($"Lean accepted the forged certificate {name}: {kernel.Output}");
     Console.WriteLine("PASS Lean rejected " + name);
 }
@@ -266,4 +268,45 @@ Rejected("moved dispatch catalog", "Stale", [.. cli, "verify", catalogued, "--pr
 if (moved.Code == 0 || !moved.Output.Contains("ConstrainedCallsValid", StringComparison.Ordinal))
     throw new InvalidOperationException("Lean accepted a dispatch catalog moved to another assembly: " + moved.Output);
 Console.WriteLine("PASS Lean rejected moved dispatch catalog");
+// A well-formed sidecar for Lib: the explicit import is rejected because Lib is also a pinned reference.
+JsonObject contract = JsonNode.Parse(File.ReadAllText(At("Tests/ContractImports/Lib.leancil.contracts")))!.AsObject();
+IEnumerable<string> framework = Directory.EnumerateFiles(At("CIL"), "*.lean", SearchOption.AllDirectories)
+    .Append(At("CIL.lean")).Append(At("lean-toolchain"));
+contract["frameworkKey"] = ContentKey(string.Join("\n", framework
+    .Select(path => (Name: Path.GetRelativePath(Root, path).Replace('\\', '/'), Path: path))
+    .OrderBy(item => item.Name, StringComparer.Ordinal).Select(item => item.Name + "=" + Sha(item.Path))));
+JsonElement libPin = JsonSerializer.Deserialize<JsonElement>(
+    File.ReadAllText(Path.Combine(Artifact("Direct"), "identity.json"))).GetProperty("references")[0];
+string placeholder = new('0', 64);
+string export = libIdentity + "::System.UInt64 MultiFixture.Mix::Step(System.UInt64)";
+contract["assemblyIdentity"] = libIdentity;
+contract["mvid"] = libPin.GetProperty("mvid").GetString();
+contract["implementationSha256"] = libSha;
+contract["interfaceModules"]![0]!["name"] = "LibContract";
+contract["interfaceModules"]![0]!["source"] = "-- not compiled: extraction rejects the import first";
+contract["exports"]![0]!["identity"] = export;
+contract["exports"]![0]!["closureDigest"] = placeholder;
+contract["certifications"]![0]!["identity"] = export;
+contract["certifications"]![0]!["closureDigest"] = placeholder;
+contract["certifications"]![0]!["implementationSha256"] = libSha;
+JsonObject descriptor = [];
+foreach (string field in new[] { "schema", "semanticsVersion", "formatVersion", "frameworkKey", "assemblyIdentity",
+    "targetFramework", "interfaceModules", "exports", "dependencies" })
+    descriptor[field] = contract[field]!.DeepClone();
+string interfaceDigest = ContentKey(descriptor.ToJsonString());
+contract["interfaceDigest"] = interfaceDigest;
+contract["certifications"]![0]!["interfaceDigest"] = interfaceDigest;
+string libSidecar = Path.Combine(root, libName + ".leancil.contracts");
+File.WriteAllText(libSidecar, contract.ToJsonString());
+string[] import = ["--import", libSidecar, "--import-sha256", libName + "=" + libSha,
+    "--import-interface-sha256", libName + "=" + interfaceDigest];
+// Without the pin the same sidecar passes reading, so the rejection below is the conflict itself.
+(int Code, string Output, string Stdout, string Stderr) imported =
+    Execute([.. cli, "extract", app, direct, Path.Combine(root, "r-import-only"), .. import]);
+if (imported.Output.Contains("framework key mismatch", StringComparison.Ordinal) ||
+    imported.Output.Contains("Invalid contract", StringComparison.Ordinal) ||
+    imported.Output.Contains("cannot be both", StringComparison.Ordinal))
+    throw new InvalidOperationException("Precondition: the Lib sidecar must read as a contract: " + imported.Output);
+RejectedExtract("import and reference", "An assembly cannot be both a typed import and an extracted reference",
+    direct, [.. import, .. Reference(lib)]);
 Console.WriteLine("PASS pinned referenced assemblies: proofs, missing, duplicate, substituted, misattributed");

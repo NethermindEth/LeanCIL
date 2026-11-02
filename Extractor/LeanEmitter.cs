@@ -251,12 +251,11 @@ internal static class LeanEmitter
             foreach (string field in new[] { "profile", "locals", "localKinds", "returnsValue", "staticSites", "vectorLocals", "vectorArgs" })
                 lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({(field == "profile" ? "profile" : field == "locals" ? $"[{locals}]" : field == "localKinds" ? $"[{kinds}]" : field == "returnsValue" ? (m.ReturnType.FullName == "System.Void" ? "false" : "true") : field == "staticSites" ? $"[{sites}]" : "[]")}) := rfl");
         }
+        // Identities only: hashes and MVIDs change with every rebuild, so they stay in identity.json for `check`.
         PinnedAssemblies.Pin[] pins = pinned.Pins.ToArray();
         for (var k = 0; k < pins.Length; k++)
-            lean.AppendLine($"def assembly{k} : Extraction.AssemblyPin := {{ " +
-                $"identity := {JsonSerializer.Serialize(pins[k].Identity)}, " +
-                $"mvid := {JsonSerializer.Serialize(pins[k].Mvid.ToString())}, " +
-                $"sha256 := {JsonSerializer.Serialize(pins[k].Sha256)} }}");
+            lean.AppendLine($"def assembly{k} : Extraction.AssemblyPin := " +
+                $"{{ identity := {JsonSerializer.Serialize(pins[k].Identity)} }}");
         lean.AppendLine("def assemblies : List Extraction.AssemblyPin := [" +
             string.Join(", ", Enumerable.Range(0, pins.Length).Select(k => $"assembly{k}")) + "]");
         lean.AppendLine("def specializedMethods : List Extraction.SpecializedMethod := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"⟨method{n}TypeArgumentsRaw, method{n}Closed⟩")) + "]");
@@ -297,8 +296,8 @@ internal static class LeanEmitter
         lean.AppendLine("#print axioms import_layouts_validated");
         lean.AppendLine("theorem imported_locals_validated : " +
             "Extraction.ImportedLocalLayoutsBound rawLayouts computedLayouts imports := " + Decide);
-        lean.AppendLine("theorem attribution_validated : Extraction.AssemblyPinsValid " +
-            "(methodEvidence.map (·.assembly)) (Extraction.bodyOwners methodEvidence) := " + Decide);
+        lean.AppendLine("theorem attribution_validated : " +
+            "Extraction.AttributionValid (Extraction.bodyOwners methodEvidence) = true := " + Decide);
         lean.AppendLine("theorem assemblies_validated : Extraction.AssemblyPinsValid assemblies " +
             "(Extraction.bodyOwners methodEvidence) := " + Decide);
         lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence imports program := by");

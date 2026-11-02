@@ -216,7 +216,7 @@ def TranslationValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayo
   StaticValuesValid program ∧
   ImportedLayoutsValid imports (programArchitecture program) ∧
   ImportedLocalLayoutsBound rawLayouts layouts imports ∧
-  AssemblyPinsValid (evidence.map (·.assembly)) (bodyOwners evidence)
+  AttributionValid (bodyOwners evidence) = true
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (evidence : List MethodEvidence) (imports : List ImportSlot) (program : Program) :
@@ -240,7 +240,7 @@ theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array Co
     (statics : StaticValuesValid program)
     (importLayouts : ImportedLayoutsValid imports (programArchitecture program))
     (importedLocals : ImportedLocalLayoutsBound rawLayouts layouts imports)
-    (attribution : AssemblyPinsValid (evidence.map (·.assembly)) (bodyOwners evidence))
+    (attribution : AttributionValid (bodyOwners evidence) = true)
     (methods : MethodsChecked rawLayouts layouts evidence imports evidence program) :
     TranslationValid rawLayouts layouts evidence imports program := by
   have compose {items code}

@@ -89,15 +89,17 @@ are unsupported. Reference-only authoring checks do not issue deployment certifi
 An extraction may include bodies and layouts from each `--reference` assembly. Those DLLs are
 trusted inputs on the same terms as the selected one; no other assembly can contribute code.
 
-- `Extracted.assemblies` lists every pin (identity, MVID, SHA-256), the selected assembly first,
-  and each `MethodEvidence` carries the pin of the assembly its body came from.
-- `TranslationValid` requires `AssemblyPinsValid`: every pin is well formed, no identity or digest
-  names two different pins, and each body's owner identity is scoped by its own pin's identity.
-  A body attributed to the wrong assembly, a duplicate identity or a shared digest fails the
-  kernel check ([tests](../Tests/AssemblyPins.lean)).
-- Lean cannot hash bytes. `check`, and so `verify`, rehashes the selected and every referenced
-  DLL against `identity.json` and regenerates the certificate, so a substituted DLL or a changed
-  recorded hash is rejected before the proof is compiled.
+- `Extracted.assemblies` lists every pinned identity, the selected assembly first, and each
+  `MethodEvidence` carries the identity of the assembly its body came from. Hashes and MVIDs
+  are not in the certificate, so `Extracted.lean` depends on the extracted program alone.
+- `TranslationValid` requires `AttributionValid`: each body's owner identity is scoped by its
+  own pin's colon-free identity. `assemblies_validated` also requires the listed identities to
+  be distinct and to cover every body. A body attributed to the wrong assembly fails the kernel
+  check ([tests](../Tests/AssemblyPins.lean)).
+- Lean cannot hash bytes. `identity.json` records each assembly's identity, MVID and SHA-256;
+  `check`, and so `verify`, rehashes the selected and every referenced DLL against it and
+  regenerates the certificate, so a substituted DLL or a changed recorded hash is rejected
+  before the proof is compiled.
 - A reference that contributes only layouts appears in `Extracted.assemblies`,
   `assemblies_validated`, the manifest and the hash recheck, but not in `TranslationValid`;
   its layouts are bound by their assembly-qualified identities in the layout evidence.

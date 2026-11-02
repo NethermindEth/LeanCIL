@@ -18,7 +18,7 @@ private def nativeType : TypeExpr := .atom runtime "System.IntPtr"
 private def i (opcode : Nat) (operand : RawOperand := .none) : RawInstruction := ⟨0, opcode, operand⟩
 /-- The pinned assembly owning `Scope::Fixture`; every certificate attributes its bodies to it. -/
 private def scope : AssemblyPin :=
-  { identity := "Scope", mvid := "fixture", sha256 := String.ofList (List.replicate sha256Digits '0') }
+  { identity := "Scope" }
 private def raw (code : List RawInstruction) (parameters : List TypeExpr := [word, word]) : RawMethod := {
   token := 1, owner := "Scope::Fixture", hasThis := false, explicitThis := false,
   callingConvention := 0, attributes := 0, implementation := 0,
