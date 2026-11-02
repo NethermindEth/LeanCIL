@@ -4,7 +4,7 @@ using System.Security.Cryptography;
 
 namespace Examples;
 
-// Process-random hash seeds, as in Nethermind.Int256: extraction cannot run their initializer.
+// Process-random hash seeds: extraction cannot run their initializer.
 public static class SeededHash
 {
     private const ulong Multiplier = 0x9E3779B97F4A7C15;
