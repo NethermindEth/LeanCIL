@@ -170,6 +170,9 @@ name = "Tests.ImportEvidence"
 name = "Tests.ImportedLayouts"
 
 [[lean_lib]]
+name = "Tests.AssemblyPins"
+
+[[lean_lib]]
 name = "Tests.ContractClosure"
 
 [[lean_lib]]

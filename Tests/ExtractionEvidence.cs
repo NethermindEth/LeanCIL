@@ -9,7 +9,7 @@ using var fixtures = new Program();
 fixtures.PrepareLeanFixtures(
     "Tests.ExtractionLayout", "Tests.ExtractionParameters", "Tests.FeatureEvidence", "Tests.ScalarEvidence",
     "Tests.LayoutCoverage", "Tests.TypeTestEvidence", "Tests.ThrowEvidence", "Tests.SpanEvidence",
-    "Tests.ImportEvidence", "Tests.ImportedLayouts", "Tests.StaticValueEvidence", "Tests.SpanViews",
+    "Tests.ImportEvidence", "Tests.ImportedLayouts", "Tests.AssemblyPins", "Tests.StaticValueEvidence", "Tests.SpanViews",
     "Tests.MemorySpanExecution", "Tests.ConstrainedEvidence", "Tests.ManagedPointerValues", "Tests.StackAllocationEvidence",
     "Tests.StackAllocation", "Tests.PrimitiveArrays", "Tests.ArrayElementReferences", "Tests.ReadOnlyArrayReferences",
     "Tests.ExtractionGenerics", "Tests.ReferenceTests", "Tests.PointerOperations", "Tests.NativeMethodTables");
