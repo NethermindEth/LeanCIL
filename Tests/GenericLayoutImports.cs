@@ -238,6 +238,10 @@ foreach ((string name, Action<JsonObject> mutate) in new (string, Action<JsonObj
     Reject("Local" + name, "raw layout differs", app, "TypedFixture.Application::LocalOnly()", tampered, digest);
 }
 
+// One assembly is either behind its typed contract or extracted from its pinned DLL, never both.
+Reject("ImportAndReference", "cannot be both a typed import and an extracted reference", app,
+    "TypedFixture.Application::Forward(TypedFixture.Pair&,TypedFixture.Pair&)", sidecar, interfaceDigest,
+    "--reference", lib);
 Reject("Unlisted", "Contract export not present", app, "TypedFixture.Application::Unlisted(uint)", sidecar, interfaceDigest);
 Reject("ByValue", "Unsupported type", app, "TypedFixture.Application::ByValue(TypedFixture.Pair)", sidecar, interfaceDigest);
 Reject("Local", "admitted only by address", app, "TypedFixture.Application::Local()", sidecar, interfaceDigest);

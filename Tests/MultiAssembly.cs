@@ -24,6 +24,15 @@ public static class Seeded
     static Seeded() { System.GC.KeepAlive(new object()); }
     public static ulong Get(ulong x) => x;
 }
+public interface IFlag { static abstract bool IsActive { get; } }
+public struct On : IFlag { public static bool IsActive => true; }
+public struct Off : IFlag { public static bool IsActive => false; }
+public interface IScale { static virtual ulong Scale(ulong x) => x * 2; }
+public struct Plain : IScale { }
+public interface IScaleTwice : IScale { static ulong IScale.Scale(ulong x) => x * 4; }
+public struct Shadowed : IScaleTwice { }
+public interface IGet { ulong Get(); }
+public struct Holder : IGet { public ulong Value; public ulong Get() => Value + 1; }
 """;
 
 string Project(string name, string assembly, string properties = "", string references = "")
@@ -62,7 +71,13 @@ public static class Application
     public static ulong Local(ulong x) { Cell cell = default; cell.Value = x; Mix.Bump(ref cell); return cell.Value; }
     public static ulong Size<T>(ulong x) where T : struct => x + (ulong)Unsafe.SizeOf<T>();
     public static ulong Seeded(ulong x) => MultiFixture.Seeded.Get(x);
+    public static ulong Run<TFlag>(ulong x) where TFlag : struct, IFlag => TFlag.IsActive ? Mix.Step(x) : x;
+    public static ulong Scaled<T>(ulong x) where T : struct, IScale => T.Scale(x);
+    public static ulong Got(ulong x) { Holder holder = default; holder.Value = x; return Use(ref holder); }
+    static ulong Use<T>(ref T value) where T : struct, IGet => value.Get();
+    public static ulong Mine(ulong x) => Scaled<AppScale>(x);
 }
+public struct AppScale : IScale { public static ulong Scale(ulong x) => x + 9; }
 """);
 Run(["dotnet", "build", Path.Combine(appDirectory, "App.csproj"), "-c", "Release"]);
 string app = Path.Combine(appDirectory, "bin", "MultiFixture.App.dll");
@@ -100,6 +115,21 @@ Proved("Local", "MultiFixture.Application::Local(ulong)", "Tests/MultiAssembly/L
 Proved("Size", "MultiFixture.Application::Size(ulong)", "Tests/MultiAssembly/Size.lean", referencedBody: false,
     "--type-argument", "MultiFixture.Cell, " + libName);
 
+// Constrained static dispatch to flag structs declared in Lib; each constant getter folds its branch away.
+const string run = "MultiFixture.Application::Run(ulong)";
+Proved("RunOff", run, "Tests/MultiAssembly/RunOff.lean", referencedBody: true,
+    "--type-argument", "MultiFixture.Off, " + libName);
+Proved("RunOn", run, "Tests/MultiAssembly/RunOn.lean", referencedBody: true,
+    "--type-argument", "MultiFixture.On, " + libName);
+foreach ((string name, bool stepped) in new[] { ("RunOff", false), ("RunOn", true) })
+    if (File.ReadAllText(Path.Combine(Artifact(name), "Extracted.lean"))
+            .Contains("::MultiFixture.Mix\"", StringComparison.Ordinal) != stepped)
+        throw new InvalidOperationException("Constant flag did not decide which branch is extracted: " + name);
+// A Lib interface's static virtual default body, and an instance slot reached through a Lib struct.
+Proved("Scaled", "MultiFixture.Application::Scaled(ulong)", "Tests/MultiAssembly/Scaled.lean",
+    referencedBody: true, "--type-argument", "MultiFixture.Plain, " + libName);
+Proved("Got", "MultiFixture.Application::Got(ulong)", "Tests/MultiAssembly/Got.lean", referencedBody: true);
+
 void Rejected(string name, string marker, string[] command)
 {
     (int Code, string Output, string Stdout, string Stderr) result = Execute(command);
@@ -129,13 +159,34 @@ RejectedExtract("referenced static initialiser", "Unsupported static initialisat
     "MultiFixture.Application::Seeded(ulong)", Reference(lib));
 RejectedExtract("unpinned entry type argument", "no single pinned --reference assembly",
     "MultiFixture.Application::Size(ulong)", "--type-argument", "MultiFixture.Cell, Other");
+// The runtime runs the derived interface's re-implementation, so the Lib default must not be selected.
+RejectedExtract("shadowed referenced default", "Another interface of the receiver re-implements",
+    "MultiFixture.Application::Scaled(ulong)",
+    [.. Reference(lib), "--type-argument", "MultiFixture.Shadowed, " + libName]);
+// Dispatch stays inside one assembly: an App struct cannot implement a slot declared in Lib.
+RejectedExtract("slot from another assembly", "Unsupported constrained method slot",
+    "MultiFixture.Application::Mine(ulong)", Reference(lib));
+
+// Proofs bind bodies by unscoped signature, so a same-named type in two pinned assemblies is rejected.
+string aliasDirectory = Project("Alias", "MultiFixture.Alias", "",
+    """<ProjectReference Include="../Lib/Lib.csproj" Aliases="lib" />""");
+File.WriteAllText(Path.Combine(aliasDirectory, "Twin.cs"), """
+extern alias lib;
+namespace MultiFixture;
+public static class Mix { public static ulong Step(ulong x) => x + 7; }
+public static class Twin { public static ulong Both(ulong x) => lib::MultiFixture.Mix.Step(x) + Mix.Step(x); }
+""");
+Run(["dotnet", "build", Path.Combine(aliasDirectory, "Alias.csproj"), "-c", "Release"]);
+Rejected("ambiguous signature", "Ambiguous method signature across pinned assemblies",
+    [.. cli, "extract", Path.Combine(aliasDirectory, "bin", "MultiFixture.Alias.dll"),
+        "MultiFixture.Twin::Both(ulong)", Path.Combine(root, "r-ambiguous"), .. Reference(lib)]);
 
 // Each tampered copy starts from a verified artifact; `verify` must recheck every pinned reference.
-string Copy(string name)
+string Copy(string name, string source = "Direct")
 {
     string copy = Path.Combine(root, "t-" + name);
     Directory.CreateDirectory(copy);
-    foreach (string file in Directory.EnumerateFiles(Artifact("Direct")))
+    foreach (string file in Directory.EnumerateFiles(Artifact(source)))
         File.Copy(file, Path.Combine(copy, Path.GetFileName(file)));
     return copy;
 }
@@ -198,4 +249,21 @@ foreach ((string name, string from, string to, bool leanRejects) in new[]
         throw new InvalidOperationException($"Lean accepted the forged certificate {name}: {kernel.Output}");
     Console.WriteLine("PASS Lean rejected " + name);
 }
+// A dispatch catalog that moves the Lib interface into App no longer resolves the Lib receiver's slot.
+string catalogued = Copy("Catalog", "RunOn");
+string catalog = Path.Combine(catalogued, "Extracted.lean");
+string[] catalogLines = File.ReadAllLines(catalog);
+int dispatch = Array.FindIndex(catalogLines,
+    line => line.StartsWith("def method0DispatchTypes", StringComparison.Ordinal));
+if (dispatch < 0 || !catalogLines[dispatch].Contains(libIdentity, StringComparison.Ordinal))
+    throw new InvalidOperationException("Precondition: Run<On> must catalog the Lib flag interface.");
+catalogLines[dispatch] = catalogLines[dispatch].Replace(libIdentity, appIdentity, StringComparison.Ordinal);
+File.WriteAllLines(catalog, catalogLines);
+Rejected("moved dispatch catalog", "Stale", [.. cli, "verify", catalogued, "--proof",
+    At("Tests/MultiAssembly/RunOn.lean"), "--theorem", "MultiAssemblyProof.correctness"]);
+(int Code, string Output, string Stdout, string Stderr) moved =
+    Execute(["lake", "env", "lean", catalog], cwd: FixturePackage());
+if (moved.Code == 0 || !moved.Output.Contains("ConstrainedCallsValid", StringComparison.Ordinal))
+    throw new InvalidOperationException("Lean accepted a dispatch catalog moved to another assembly: " + moved.Output);
+Console.WriteLine("PASS Lean rejected moved dispatch catalog");
 Console.WriteLine("PASS pinned referenced assemblies: proofs, missing, duplicate, substituted, misattributed");
