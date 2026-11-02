@@ -48,6 +48,10 @@ scalar, x64 and ARM64 profiles, that the unmodeled ARM64 body it guards blocks o
 that `Avx512Vbmi.VL` agrees with `Avx512Vbmi`: both are false under the built-in profiles and
 true under a custom v4 profile declaring VBMI, where the unmodeled VBMI body blocks extraction;
 `Avx512Vbmi2.VL` stays unclassified, and observations that omit or split `avx512VbmiVL` are rejected.
+The x86 `Aes` and `Aes.X64` getters read `aes`, and ARM64 `Aes` and `Aes.Arm64` read `armAes`: all four
+are false under the built-in profiles, and each architecture's pair is true only under a custom profile
+declaring its flag. `Pclmulqdq` stays unclassified, and observations that omit or split `aesX64` or
+`armAes64` are rejected.
 `BitConverter.IsLittleEndian` prunes its big-endian branch on those profiles; forged owners and values are rejected by both certificates,
 and lookalike scopes, fields and same-named module types are rejected by the extractor.
 `Tests/ExactIntrinsics.cs` compares `Avx2.Shuffle` and `Ssse3.Shuffle`, fed by

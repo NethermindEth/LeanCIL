@@ -8,7 +8,7 @@ internal enum Feature
 {
     AdvSimd, Sse2, Ssse3, Sse42, Avx, Avx2, Avx512F, Avx512FVL, Bmi1,
     Sse41, Avx512DQ, Avx512DQVL, Bmi2, ArmBase64, Vector256Accelerated,
-    X86Base64, Vector128Accelerated, Avx512Vbmi
+    X86Base64, Vector128Accelerated, Avx512Vbmi, Aes, ArmAes
 }
 
 // Runtime-visible capabilities for .NET 10 CoreCLR, including runtime disabling.
@@ -19,7 +19,8 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
     bool Avx512F = false, bool Avx512FVL = false, bool Bmi1 = false,
     bool Sse41 = false, bool Avx512DQ = false, bool Avx512DQVL = false,
     bool Bmi2 = false, bool ArmBase64 = false, bool Vector256Accelerated = false,
-    bool X86Base64 = false, bool Vector128Accelerated = false, bool Avx512Vbmi = false)
+    bool X86Base64 = false, bool Vector128Accelerated = false, bool Avx512Vbmi = false,
+    bool Aes = false, bool ArmAes = false)
 {
     internal static FeatureProfile Scalar { get; } = new("scalar", "scalar", 64, true);
 
@@ -32,7 +33,7 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
         Feature.Avx512DQVL => Avx512DQVL, Feature.Bmi2 => Bmi2, Feature.ArmBase64 => ArmBase64,
         Feature.Vector256Accelerated => Vector256Accelerated,
         Feature.X86Base64 => X86Base64, Feature.Vector128Accelerated => Vector128Accelerated,
-        Feature.Avx512Vbmi => Avx512Vbmi,
+        Feature.Avx512Vbmi => Avx512Vbmi, Feature.Aes => Aes, Feature.ArmAes => ArmAes,
         _ => throw new InvalidDataException($"Unknown feature: {feature}")
     };
 
@@ -48,11 +49,13 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
             (Avx512DQ && !Avx512F) || (Avx512DQVL && (!Avx512DQ || !Avx512FVL)) ||
             (AdvSimd && !ArmBase64) ||
             // VBMI (.NET 10's AVX512v2 group) requires AVX-512, but x64-v4 machines differ on it.
-            (Avx512Vbmi && !Avx512F))
+            (Avx512Vbmi && !Avx512F) ||
+            // AES is its own group on each architecture and requires only that architecture's base.
+            (ArmAes && !ArmBase64))
             throw new InvalidDataException($"Invalid execution profile: {Name}");
         // Every x86 ISA class derives from X86Base.
         if ((Sse2 || Ssse3 || Sse42 || Avx || Avx2 || Avx512F || Avx512FVL || Bmi1 || Sse41 || Avx512DQ || Avx512DQVL ||
-                Bmi2 || Avx512Vbmi) && !X86Base64)
+                Bmi2 || Avx512Vbmi || Aes) && !X86Base64)
             throw new InvalidDataException($"Invalid execution profile: {Name}: x86 ISA flags require x86Base64");
         if (Sse2 != X86Base64 || Ssse3 != Sse41 || Sse41 != Sse42 ||
             Avx2 != Bmi1 || Avx2 != Bmi2 ||
@@ -90,6 +93,7 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
             "x64-sse42" => new(name, "x64", 64, true, Sse2: true, Ssse3: true, Sse41: true, Sse42: true, X86Base64: true, Vector128Accelerated: true),
             // .NET 10 enables x86-64-v3 (AVX2 with BMI1/BMI2) and v4 (AVX-512 F/DQ/VL) only as whole groups.
             // x86-64-v4 excludes VBMI, so x64-v4 covers only deployments where Avx512Vbmi is unsupported.
+            // No x86-64 level includes AES, so every built-in covers only deployments without it.
             "x64-v3" or "x64-v4" => new(name, "x64", 64, true,
                 Sse2: true, Ssse3: true, Sse41: true, Sse42: true, Avx: true, Avx2: true, Bmi1: true, Bmi2: true,
                 Avx512F: name == "x64-v4", Avx512FVL: name == "x64-v4", Avx512DQ: name == "x64-v4", Avx512DQVL: name == "x64-v4",
@@ -114,7 +118,7 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
         avx512DQVL := {{Bool(Avx512DQVL)}}, bmi2 := {{Bool(Bmi2)}}, armBase64 := {{Bool(ArmBase64)}},
         vector256Accelerated := {{Bool(Vector256Accelerated)}},
         x86Base64 := {{Bool(X86Base64)}}, vector128Accelerated := {{Bool(Vector128Accelerated)}},
-        avx512Vbmi := {{Bool(Avx512Vbmi)}} }
+        avx512Vbmi := {{Bool(Avx512Vbmi)}}, aes := {{Bool(Aes)}}, armAes := {{Bool(ArmAes)}} }
         """.ReplaceLineEndings(" ");
 
     internal static string LeanFeature(Feature feature) =>
@@ -201,6 +205,9 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
             // .NET 10 sets Avx512Vbmi_VL exactly when Avx512Vbmi is set; see docs/RUNTIME-PROFILES.md.
             "System.Runtime.Intrinsics.X86.Avx512Vbmi" or
                 "System.Runtime.Intrinsics.X86.Avx512Vbmi/VL" => Feature.Avx512Vbmi,
+            // .NET 10 sets each 64-bit Aes variant exactly when its base Aes is set; see docs/RUNTIME-PROFILES.md.
+            "System.Runtime.Intrinsics.X86.Aes" or "System.Runtime.Intrinsics.X86.Aes/X64" => Feature.Aes,
+            "System.Runtime.Intrinsics.Arm.Aes" or "System.Runtime.Intrinsics.Arm.Aes/Arm64" => Feature.ArmAes,
             _ => throw new InvalidDataException($"Unclassified feature getter: {reference.FullName}")
         };
     }

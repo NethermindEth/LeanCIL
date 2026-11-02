@@ -35,6 +35,10 @@ if (args is ["--child"])
         avx512DQVL = Avx512DQ.VL.IsSupported,
         avx512Vbmi = Avx512Vbmi.IsSupported,
         avx512VbmiVL = Avx512Vbmi.VL.IsSupported,
+        aes = System.Runtime.Intrinsics.X86.Aes.IsSupported,
+        aesX64 = System.Runtime.Intrinsics.X86.Aes.X64.IsSupported,
+        armAes = System.Runtime.Intrinsics.Arm.Aes.IsSupported,
+        armAes64 = System.Runtime.Intrinsics.Arm.Aes.Arm64.IsSupported,
         vector128Accelerated = Vector128.IsHardwareAccelerated,
         vector256Accelerated = Vector256.IsHardwareAccelerated
     }));
@@ -45,7 +49,7 @@ if (args is not [var output])
 
 string[] switches = ["EnableHWIntrinsic", "EnableSSE2", "EnableSSSE3", "EnableSSE41", "EnableSSE42",
     "EnableAVX", "EnableAVX2", "EnableBMI1", "EnableBMI2", "EnableAVX512", "EnableAVX512DQ", "EnableAVX512v2",
-    "EnableAVX512F_VL", "EnableArm64AdvSimd", "EnableArm64", "PreferredVectorBitWidth"];
+    "EnableAVX512F_VL", "EnableAES", "EnableArm64AdvSimd", "EnableArm64Aes", "EnableArm64", "PreferredVectorBitWidth"];
 var configurations = new List<(string Name, string? Switch, string? Value)> { ("default", null, null) };
 configurations.AddRange(switches.Where(name => name != "PreferredVectorBitWidth").Select(name => (name + "=0", (string?)name, (string?)"0")));
 configurations.Add(("PreferredVectorBitWidth=128", "PreferredVectorBitWidth", "128"));

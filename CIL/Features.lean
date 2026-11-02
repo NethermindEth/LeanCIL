@@ -12,6 +12,8 @@ Supported deployment policy: .NET 10 CoreCLR on 64-bit little-endian hosts.
 IsSupported includes OS support and runtime disabling, not just CPU capability.
 The runtime enables SSE4.2, AVX2/BMI and AVX-512 capabilities in whole groups;
 AVX-512 VBMI is its own group, which requires AVX-512 and lies outside x86-64-v4.
+AES is its own group on each architecture, requiring only X86Base or ArmBase; no x86-64 level
+includes it.
 ARM64 enables ArmBase and AdvSimd together. Vector128 acceleration follows the
 baseline SIMD group; Vector256 acceleration requires AVX2 but may be disabled
 independently by the preferred vector width.
@@ -28,7 +30,7 @@ namespace CIL
 inductive Feature where
   | advSimd | sse2 | ssse3 | sse42 | avx | avx2 | avx512F | avx512FVL | bmi1
   | sse41 | avx512DQ | avx512DQVL | bmi2 | armBase64 | vector256Accelerated
-  | x86Base64 | vector128Accelerated | avx512Vbmi
+  | x86Base64 | vector128Accelerated | avx512Vbmi | aes | armAes
   deriving DecidableEq, Repr
 
 /-- The target instruction set; `scalar` is a profile with no ISA-specific capability. -/
@@ -60,6 +62,8 @@ structure FeatureProfile where
   x86Base64 : Bool := false
   vector128Accelerated : Bool := false
   avx512Vbmi : Bool := false
+  aes : Bool := false
+  armAes : Bool := false
   deriving DecidableEq, Repr
 
 /-- The profile with every capability off, so only portable code paths run. -/
@@ -85,6 +89,8 @@ def FeatureProfile.evaluate (p : FeatureProfile) : Feature → Bool
   | .x86Base64 => p.x86Base64
   | .vector128Accelerated => p.vector128Accelerated
   | .avx512Vbmi => p.avx512Vbmi
+  | .aes => p.aes
+  | .armAes => p.armAes
 
 -- One equation per `Feature`: a known feature test reduces to the profile field a caller's
 -- fact names, and a symbolic `evaluate id` stays folded so a fact about it still applies.
@@ -108,6 +114,8 @@ def FeatureProfile.Valid (p : FeatureProfile) : Prop :=
   (p.avx = true → p.sse42 = true) ∧ (p.sse42 = true → p.sse2 = true) ∧
   -- VBMI (.NET's AVX512v2 group) requires AVX-512, but x64-v4 machines differ on it.
   (p.avx512Vbmi = true → p.avx512F = true) ∧
+  -- AES is a separate group on each architecture, but some hosts and switches disable it.
+  (p.aes = true → p.x86Base64 = true) ∧ (p.armAes = true → p.armBase64 = true) ∧
   -- .NET 10 CoreCLR runtime groups; see docs/RUNTIME-PROFILES.md.
   p.sse2 = p.x86Base64 ∧ p.ssse3 = p.sse41 ∧ p.sse41 = p.sse42 ∧
   p.avx2 = p.bmi1 ∧ p.avx2 = p.bmi2 ∧
@@ -128,7 +136,7 @@ theorem FeatureProfile.valid_iff_prerequisites (p : FeatureProfile) : p.Valid �
     p.nativeWidth = 64 ∧ p.littleEndian = true ∧
     (p.advSimd = true → p.architecture = .arm64) ∧
     ((p.sse2 || p.ssse3 || p.sse42 || p.avx || p.avx2 || p.avx512F || p.avx512FVL || p.bmi1 ||
-        p.sse41 || p.avx512DQ || p.avx512DQVL || p.bmi2 || p.avx512Vbmi) = true →
+        p.sse41 || p.avx512DQ || p.avx512DQVL || p.bmi2 || p.avx512Vbmi || p.aes) = true →
       p.x86Base64 = true) ∧
     (p.x86Base64 = true → p.architecture = .x64) ∧
     (p.ssse3 = true → p.sse2 = true) ∧
@@ -144,6 +152,7 @@ theorem FeatureProfile.valid_iff_prerequisites (p : FeatureProfile) : p.Valid �
     (p.avx512Vbmi = true → p.avx512F = true ∧ p.avx512DQVL = true) ∧
     (p.armBase64 = true → p.architecture = .arm64) ∧
     (p.advSimd = true → p.armBase64 = true) ∧
+    (p.armAes = true → p.armBase64 = true) ∧
     -- .NET 10 CoreCLR runtime groups; see docs/RUNTIME-PROFILES.md.
     p.sse2 = p.x86Base64 ∧ p.ssse3 = p.sse41 ∧ p.sse41 = p.sse42 ∧
     p.avx2 = p.bmi1 ∧ p.avx2 = p.bmi2 ∧

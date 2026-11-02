@@ -109,6 +109,7 @@ Examples:System.Boolean Examples.Bits::PrimitivePowerNative(System.IntPtr)	A	A	A
 Examples:System.Boolean Examples.Bits::PrimitivePowerU32(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.Bits::PrimitivePowerU64(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.Bits::PrimitivePowerUNative(System.UIntPtr)	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.Capabilities::CarrylessMultiply()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.Capabilities::Crc64()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.Capabilities::Rdm64()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.Capabilities::Vbmi2()	B	B	B	B	B	B	B	B
@@ -624,6 +625,7 @@ Examples:System.UInt32 Examples.Bits::PrimitiveTrailingU32(System.UInt32)	A	A	A	
 Examples:System.UInt32 Examples.Bits::ReverseU32(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Bits::Right32(System.UInt32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Bits::RoundUp32(System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt32 Examples.Capabilities::AesFlags()	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Capabilities::ArmFlags()	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Capabilities::Flags()	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Capabilities::VbmiFlags()	A	A	A	A	A	A	A	A

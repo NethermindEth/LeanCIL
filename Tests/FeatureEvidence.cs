@@ -28,14 +28,11 @@ object SelectProfile(string name) => selectProfile.Invoke(null, [name])!;
 var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 var sharedCases = RuntimeProfileValidation.Observations(
     Directory.GetFiles(At("docs/evidence/runtime-profiles"), "*.json")).ToList();
-// Getters read AdvSimd.Arm64 as AdvSimd and Avx512Vbmi.VL as Avx512Vbmi, so observations that
-// omit or split either nested flag are refused.
-foreach (var (evidence, nested, baseFlag, getter) in new[]
+// Getters read each nested class, such as AdvSimd.Arm64 or Aes.X64, as its base class, so observations
+// that omit or split a nested flag are refused.
+foreach (var (nested, baseFlag, getter, _) in RuntimeProfileValidation.NestedGetters)
 {
-    ("macos-arm64-net10.json", "advSimd64", "advSimd", "AdvSimd.Arm64"),
-    ("windows-x64-net10.json", "avx512VbmiVL", "avx512Vbmi", "Avx512Vbmi.VL")
-})
-{
+    var evidence = nested is "advSimd64" or "armAes64" ? "macos-arm64-net10.json" : "windows-x64-net10.json";
     var recorded = JsonNode.Parse(File.ReadAllText(At($"docs/evidence/runtime-profiles/{evidence}")))!;
     foreach (var (name, mutate) in new (string, Action<JsonObject>)[]
     {
@@ -75,7 +72,11 @@ foreach (var (name, flag, value, accepted) in new[]
     ("arm64-advsimd", "vector128Accelerated", false, false), ("arm64-advsimd", "vector256Accelerated", true, false),
     // VBMI is an optional group above AVX-512: x64-v4 may add it, but nothing below v4 may.
     ("x64-v4", "avx512Vbmi", true, true), ("x64-v3", "avx512Vbmi", true, false),
-    ("arm64-advsimd", "avx512Vbmi", true, false)
+    ("arm64-advsimd", "avx512Vbmi", true, false),
+    // AES is an optional group on each architecture that needs only that architecture's base.
+    ("x64-sse2", "aes", true, true), ("x64-v4", "aes", true, true), ("arm64-advsimd", "aes", true, false),
+    ("arm64-advsimd", "armAes", true, true), ("x64-v4", "armAes", true, false), ("scalar", "aes", true, false),
+    ("scalar", "armAes", true, false)
 })
 {
     var profile = JsonSerializer.SerializeToNode(SelectProfile(name), jsonOptions)!;
@@ -217,6 +218,49 @@ if (vbmi2.Code == 0 || !vbmi2.Output.Contains(
         StringComparison.Ordinal))
     throw new InvalidOperationException($"Avx512Vbmi2.VL getter was classified:\n{vbmi2.Output}");
 Console.WriteLine("PASS unmeasured AVX-512 getter rejected: Avx512Vbmi2/VL");
+// No x86-64 level includes AES, so only custom profiles declare it; each architecture's getters read its own flag.
+string CustomProfile(string baseName, string name, string flag)
+{
+    var node = JsonSerializer.SerializeToNode(SelectProfile(baseName), jsonOptions)!;
+    node["name"] = name;
+    node[flag] = true;
+    var path = Path.Combine(output, $"{name}.json");
+    File.WriteAllText(path, node.ToJsonString());
+    return path;
+}
+var aesProfile = CustomProfile("x64-v4", "x64-v4-aes", "aes");
+var armAesProfile = CustomProfile("arm64-advsimd", "arm64-advsimd-aes", "armAes");
+foreach (var (profile, label, aesFlags) in new[]
+{
+    ("scalar", "scalar", 0), ("x64-v4", "x64-v4", 0), ("arm64-advsimd", "arm64-advsimd", 0),
+    ($"@{aesProfile}", "x64-v4-aes", 3), ($"@{armAesProfile}", "arm64-advsimd-aes", 12)
+})
+{
+    var aesFolder = Path.Combine(output, $"Aes-{label}");
+    Directory.CreateDirectory(aesFolder);
+    var aesProof = Path.Combine(aesFolder, "AesFlags.lean");
+    File.WriteAllText(aesProof, $$"""
+        import Extracted
+        import CIL.Safety.Execution
+        namespace ExampleProof
+        theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [] CIL.Safety.Memory.empty).map Prod.snd =
+            .ok [.scalar (.i32 {{aesFlags}})] := rfl
+        #print axioms correctness
+        end ExampleProof
+
+        """);
+    capabilitiesQueue.Add(
+        new("Capabilities::AesFlags()", aesProof, Path.Combine(aesFolder, "AesFlags"), Profile: profile),
+        () => Console.WriteLine($"PASS Aes getters follow their architecture's flag under {label}: {aesFlags}"));
+}
+var carryless = Execute(Extract("extract", assembly, "Examples", "Capabilities::CarrylessMultiply()",
+    Path.Combine(output, "Unclassified-Pclmulqdq"), $"@{aesProfile}"));
+if (carryless.Code == 0 || !carryless.Output.Contains(
+        "Unclassified feature getter: System.Boolean System.Runtime.Intrinsics.X86.Pclmulqdq::get_IsSupported()",
+        StringComparison.Ordinal))
+    throw new InvalidOperationException($"Pclmulqdq getter was classified:
+{carryless.Output}");
+Console.WriteLine("PASS getter outside the modeled AES calls rejected: Pclmulqdq");
 // The unmodeled ARM64 body is pruned without AdvSimd and blocks extraction with it.
 foreach (var profile in new[] { "scalar", "x64-v4", "arm64-advsimd" })
 {
@@ -506,7 +550,7 @@ File.WriteAllText(noBase, """
     { "name": "bmi2-only", "architecture": "x64", "nativeWidth": 64, "littleEndian": true, "advSimd": false, "sse2": false,
       "ssse3": false, "sse42": false, "avx": false, "avx2": false, "avx512F": false, "avx512FVL": false, "bmi1": false,
       "sse41": false, "avx512DQ": false, "avx512DQVL": false, "bmi2": true, "armBase64": false, "vector256Accelerated": false,
-      "x86Base64": false, "vector128Accelerated": false, "avx512Vbmi": false }
+      "x86Base64": false, "vector128Accelerated": false, "avx512Vbmi": false, "aes": false, "armAes": false }
     """);
 var invalid = Execute(Extract("extract", assembly, "Examples", "Capabilities::Flags()", Path.Combine(output, "Reject-profile"), "@" + noBase));
 if (invalid.Code == 0 || !invalid.Output.Contains("bmi2-only: x86 ISA flags require x86Base64"))

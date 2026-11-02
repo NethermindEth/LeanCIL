@@ -23,6 +23,9 @@ The runtime sources pin this policy to .NET 10:
   Machines with AVX-512 F/BW/CD/DQ/VL, such as Skylake-SP and Cascade Lake, lack VBMI, so
   x86-64-v4 hardware differs on it. InstructionSetDesc.txt, codeman.cpp and cpufeatures.c are
   unchanged between v10.0.13 and v10.0.14.
+- The same InstructionSetDesc.txt puts x86 Aes and Pclmulqdq in an AES group that implies only
+  X86Base, and ARM64 Aes in its own set that implies only ArmBase. No x86-64-v2/v3/v4 group
+  includes either, and each has a 64-bit variant (`Aes.X64`, `Aes.Arm64`).
 - [corinfoinstructionset.h, v10.0.13](https://github.com/dotnet/runtime/blob/v10.0.13/src/coreclr/inc/corinfoinstructionset.h)
   defines ArmBase_Arm64 and AdvSimd_Arm64 only for ARM64 targets. `Set64BitInstructionSetVariants`
   adds each exactly when its base set is enabled, and `EnsureInstructionSetFlagsAreValid`
@@ -57,6 +60,8 @@ supported deployment boundary.
 | AVX2, BMI1, BMI2 | Equal; require AVX |
 | AVX-512 F, F.VL, DQ, DQ.VL | Equal; require AVX2 |
 | AVX-512 VBMI, VBMI.VL | Equal; require AVX-512; off in x64-v4 |
+| x86 AES, AES.X64 | Equal; require X86Base; off in every built-in |
+| ARM64 AES, AES.Arm64 | Equal; require ArmBase; off in every built-in |
 | ArmBase.Arm64, AdvSimd, AdvSimd.Arm64 | Equal; ARM64 only |
 | Vector128 acceleration | Equal to SSE2 or AdvSimd |
 | Vector256 acceleration | Requires AVX2; may be disabled independently |
@@ -65,7 +70,9 @@ On the measured x64 runtime, EnableSSE42, EnableAVX, EnableAVX2 and EnableAVX512
 disable whole groups and their dependents. EnableAVX512v2=0 disables VBMI and VBMI.VL
 and leaves AVX-512 F/DQ/VL enabled, which is exactly x64-v4; EnableAVX512=0 disables both.
 The default configuration on the measured Ryzen 9 9950X reports VBMI, so it matches x64-v4
-plus `avx512Vbmi`, not x64-v4. Legacy individual switches such as
+plus `avx512Vbmi`, not x64-v4. It also reports AES by default; EnableAES=0 disables AES and
+AES.X64 alone, leaving SSE4.2, AVX2 and AVX-512 enabled, and EnableSSE42=0 leaves AES enabled.
+Legacy individual switches such as
 EnableBMI2 and EnableAVX512DQ have no effect. PreferredVectorBitWidth=128 disables
 Vector256 acceleration without disabling AVX2. On the measured ARM64 runtime,
 EnableHWIntrinsic=0 disables ArmBase, AdvSimd, AdvSimd.Arm64 and Vector128 acceleration
@@ -118,11 +125,23 @@ transfers between the two through
 [`Program.ProfileAgreement`](../CIL/ProfileEquivalence.lean), which compares only the flags a
 program reads. Other AVX-512 getters, such as `Avx512BW` and `Avx512Vbmi2`, remain unclassified.
 
+Evidence fields `aes` and `armAes` are `X86.Aes.IsSupported` and `Arm.Aes.IsSupported`, and are
+profile fields; `aesX64` and `armAes64` are their nested 64-bit getters, which extraction answers
+with the base flag, so validation rejects an observation that lacks either or records a different
+value. Every built-in profile sets both to false: no x86-64 level includes AES, `DOTNET_EnableAES=0`
+removes it from v3/v4 hardware, and AES is optional on ARMv8. Proofs of a method that reads an AES
+getter under a built-in therefore cover only deployments without AES. For the usual hardware, use
+a custom profile with `aes: true` (x64) or `armAes: true` (ARM64); a proof of a method that never
+reads AES transfers to it through `Program.ProfileAgreement`. `Pclmulqdq`, which shares the x86
+AES group, remains unclassified.
+
 Custom consumer profiles, including int256's historical `x64-avx2-bmi2.json` and
 `x64-avx512dqvl.json`, must obey the same constraints. Set AVX2/BMI1/BMI2 together;
-set all four modeled AVX-512 flags together; set `avx512Vbmi` only with them; set all three
+set all four modeled AVX-512 flags together; set `avx512Vbmi` only with them; set `aes` only on x64
+and `armAes` only on ARM64; set all three
 modeled SSE4.2-group flags together. Custom profiles written before `avx512Vbmi` existed are
-rejected for the missing field; add it with the value the deployment reports. ARM64 profiles
+rejected for the missing field, as are those written before `aes` and `armAes`; add each with the
+value the deployment reports. ARM64 profiles
 must set ArmBase/AdvSimd/Vector128 together and cannot enable Vector256 acceleration. A reduced-width x64 profile may retain
 `vector256Accelerated: false` with the full AVX2 group enabled.
 
