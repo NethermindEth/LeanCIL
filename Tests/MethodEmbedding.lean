@@ -137,7 +137,7 @@ section MulScalar
 
 open Tests.MulScalarFixture
 
-/-- The int256 scalar multiply as extracted under the scalar profile, with two dead blocks. -/
+/-- A four-limb scalar multiply as extracted under the scalar profile, with two dead blocks. -/
 def mulScalar : Program := [actual]
 
 -- The literal body the consumer proof was written against omits the 12 dead instructions.

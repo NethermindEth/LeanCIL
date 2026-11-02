@@ -15,7 +15,7 @@ public readonly struct StaticPair<T> where T : unmanaged
     }
 }
 
-// Shaped like UInt256: the static constructor fixes Zero and One through an implicit conversion.
+// A four-limb 256-bit value: the static constructor fixes Zero and One through an implicit conversion.
 public readonly struct Word256
 {
     public readonly ulong U0, U1, U2, U3;

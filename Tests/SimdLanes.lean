@@ -469,8 +469,8 @@ private def laneIdentity : V256 :=
 private def evenZeroed : V256 :=
   BitVec.ofNat 256 0x8102830485068708890a8b0c8d0e8f008102830485068708890a8b0c8d0e8f
 
-/-- The int256 big-endian control: indices 31 down to 0, whose bit 4 the shuffle ignores. -/
-private def int256Reversal : V256 :=
+/-- A 32-byte big-endian control: indices 31 down to 0, whose bit 4 the shuffle ignores. -/
+private def byteReversal : V256 :=
   pack256 0x18191a1b1c1d1e1f 0x1011121314151617 0x08090a0b0c0d0e0f 0x0001020304050607
 
 /-- Bytes 31 down to 0. -/
@@ -503,11 +503,11 @@ theorem shuffle_bit7_zeroes : shuffleBytes256 ascending evenZeroed = BitVec.ofNa
   decide +kernel
 #print axioms shuffle_bit7_zeroes
 
-/-- int256's control reverses each half; swapping the halves completes the 32-byte reversal. -/
-theorem shuffle_int256_reversal :
-    permute4x64 (shuffleBytes256 ascending int256Reversal) 0x4E = descending := by
+/-- The reversal control reverses each half; swapping the halves completes the 32-byte reversal. -/
+theorem shuffle_byte_reversal :
+    permute4x64 (shuffleBytes256 ascending byteReversal) 0x4E = descending := by
   decide +kernel
-#print axioms shuffle_int256_reversal
+#print axioms shuffle_byte_reversal
 
 /-- `Avx2.Shuffle` and `Ssse3.Shuffle` evaluate to the shared per-half model. -/
 theorem shuffle_intrinsics :
@@ -524,7 +524,7 @@ theorem shuffle_intrinsics :
 theorem shuffle_mutants_rejected :
     ignoreBit7 ascending evenZeroed ≠ shuffleBytes256 ascending evenZeroed ∧
     crossLane ascending laneIdentity ≠ shuffleBytes256 ascending laneIdentity ∧
-    crossLane ascending int256Reversal ≠ shuffleBytes256 ascending int256Reversal := by
+    crossLane ascending byteReversal ≠ shuffleBytes256 ascending byteReversal := by
   decide +kernel
 #print axioms shuffle_mutants_rejected
 

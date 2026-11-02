@@ -397,7 +397,7 @@ For numeric or interspersed dead locals, keep the extracted declarations and ori
 in the expected body and use ordinary `MethodEmbeds`. Unreachable code can still be omitted or
 marked `.unsupported`; declaring an unused numeric local continues to allocate its home. This
 preserves the identities of later parent and callee allocations and allows exact-memory contract
-transport. The int256 multiply fixture follows this route: its scalar body retains all 22 word64 and
+transport. The four-limb multiply fixture follows this route: its scalar body retains all 22 word64 and
 four vector256 homes used across its architecture-specific paths. See
 [Tests/RetainedNumericLocals.lean](../Tests/RetainedNumericLocals.lean) for a smaller example with
 dead numeric locals on both sides of a live reference local and an allocating child call. This route
@@ -421,7 +421,7 @@ This entry route requires `OrdinaryFrame` on both sides: `opaqueVectorLocals`, `
 `parameterHomes` are empty. Retained initializers stay exact, including initialized numeric helpers;
 their successful setup is derived from the actual source execution. Local widths must fit the native
 range; span element widths must be positive and less than `2^64`. These are explicit, checked
-metadata conditions, not assumed target frame-entry success. The audited int256 Multiply body across
+metadata conditions, not assumed target frame-entry success. The audited four-limb Multiply body across
 all fourteen profiles has 22 word64 and four vector256 unmodeled locals. Its reachable helper
 method4 has an initialized word64 zero local in every profile. The full extracted programs have no
 opaque, vector-argument or parameter homes; the relation preserves that helper initializer rather

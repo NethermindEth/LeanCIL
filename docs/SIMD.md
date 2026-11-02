@@ -136,7 +136,7 @@ The precondition is `upper < divisor`, so the quotient fits in 64 bits. Otherwis
 | `Arm.Aes.Encrypt` | `V128<byte> state, V128<byte> roundKey` → `V128<byte>` | `armAes` | AESE: XOR with the round key, then ShiftRows and SubBytes |
 | `Arm.Aes.MixColumns` | `V128<byte>` → `V128<byte>` | `armAes` | AESMC: FIPS-197 MixColumns |
 
-Byte `i` of the vector is AES state byte `i` (row `i % 4`, column `i / 4`), as when a block is loaded from memory. The S-box is computed as the GF(2^8) inverse followed by the FIPS-197 affine map, and [AES.lean](../CIL/SIMD/AES.lean) proves `armAes_round_eq_aesEncryptRound`: `MixColumns(AESE(state, 0)) ^ roundKey` equals AESENC for every state and key, so a hash round written either way, as in int256's `GetHashCode` and Nethermind's `FastHash`, computes the same value on both architectures. No built-in profile enables AES; declare `aes` or `armAes` in a custom profile ([runtime profiles](RUNTIME-PROFILES.md)). Decryption, key generation, `Pclmulqdq` and the VAES widths are not mapped.
+Byte `i` of the vector is AES state byte `i` (row `i % 4`, column `i / 4`), as when a block is loaded from memory. The S-box is computed as the GF(2^8) inverse followed by the FIPS-197 affine map, and [AES.lean](../CIL/SIMD/AES.lean) proves `armAes_round_eq_aesEncryptRound`: `MixColumns(AESE(state, 0)) ^ roundKey` equals AESENC for every state and key, so a hash round written either way computes the same value on both architectures. No built-in profile enables AES; declare `aes` or `armAes` in a custom profile ([runtime profiles](RUNTIME-PROFILES.md)). Decryption, key generation, `Pclmulqdq` and the VAES widths are not mapped.
 
 ## ARM
 
