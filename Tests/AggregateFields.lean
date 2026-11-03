@@ -8,6 +8,10 @@ Field laws on a 12-byte layout with a word at offset 0 and an int at offset 8, c
 steps through a struct home, and a remembered struct local beside a word local. An overlapping
 explicit layout fails the disjointness check, so no field law instantiates on it, and a store
 spanning two fields changes both: these stay at the byte level.
+
+A 40-byte `mixed` layout with a signed byte, a short, a vector and a nested struct checks signed
+loads, vector and nested stores read back with the other fields kept, and the rejections: a store
+of the wrong shape, a load of the wrong width or sign, and a nested field overlapping the vector.
 -/
 
 namespace Tests.AggregateFields

@@ -67,6 +67,26 @@ theorem AggregateLayout.Disjoint.apart {layout : AggregateLayout} (disjoint : la
   · exact pairs _ _ indexBound otherBound before
   · exact (pairs _ _ otherBound indexBound after).symm
 
+/-- The widths a valid layout gives a scalar field are scalar load widths. -/
+theorem AggregateLayout.Valid.scalar {layout : AggregateLayout} (valid : layout.Valid)
+    {offset width : Nat} (member : (⟨offset, width, false⟩ : FieldLayout) ∈ layout.fields) :
+    ScalarWidth width := by
+  have shape := (valid.2.2 _ member).1
+  simp at shape
+  unfold ScalarWidth
+  omega
+
+/-- Every field of a valid layout is at least one byte wide. -/
+theorem AggregateLayout.Valid.positive {layout : AggregateLayout} (valid : layout.Valid)
+    {field : FieldLayout} (member : field ∈ layout.fields) : 0 < field.width := by
+  have shape := (valid.2.2 _ member).1
+  split at shape
+  · exact shape
+  · simp at shape; omega
+
+#print axioms AggregateLayout.Valid.scalar
+#print axioms AggregateLayout.Valid.positive
+
 /-- The bytes `field` occupies in `bytes`. -/
 def FieldLayout.bytesIn (field : FieldLayout) (bytes : List (BitVec 8)) : List (BitVec 8) :=
   (bytes.drop field.offset).take field.width
@@ -210,7 +230,7 @@ theorem numberBytes_mod (number width : Nat) :
 
 /-- The number a checked `stfld` of `value` writes in `width` bytes, reduced to that width:
     an int or word at 1, 2, 4 or 8 bytes, or a 16- or 32-byte vector. `none` where the store
-    faults or writes a snapshot whose bytes are not all known. -/
+    faults or the value is a snapshot. -/
 def fieldStoreNumber : Nat → CIL.Value → Option Nat
   | 1, .i32 bits => some (bits.toNat % 256)
   | 2, .i32 bits => some (bits.toNat % 256 ^ 2)
@@ -597,23 +617,6 @@ theorem LocalSnapshots.zero_aggregate {entered memory : Memory} {boundary : Nat}
     write_preserves_memory_below _ _ _ _ _ _ (homes.home_bound index _ home slot) written,
     kept, access_reference_valid _ _ _ _ _ kept, written⟩
 
-/-- The widths a valid layout gives a scalar field are scalar load widths. -/
-theorem AggregateLayout.Valid.scalar {layout : AggregateLayout} (valid : layout.Valid)
-    {offset width : Nat} (member : (⟨offset, width, false⟩ : FieldLayout) ∈ layout.fields) :
-    ScalarWidth width := by
-  have shape := (valid.2.2 _ member).1
-  simp at shape
-  unfold ScalarWidth
-  omega
-
-/-- Every field of a valid layout is at least one byte wide. -/
-theorem AggregateLayout.Valid.positive {layout : AggregateLayout} (valid : layout.Valid)
-    {field : FieldLayout} (member : field ∈ layout.fields) : 0 < field.width := by
-  have shape := (valid.2.2 _ member).1
-  split at shape
-  · exact shape
-  · simp at shape; omega
-
 /-- A write of a `width`-byte number into field `fieldIndex` of a remembered aggregate local of a
     valid, disjoint `layout` whose bytes decode to `values`: the local is remembered with that
     field stored, its fields then decode to `values` with the number at `fieldIndex`, and every
@@ -751,7 +754,7 @@ theorem LocalSnapshots.store_aggregate_field {entered memory : Memory} {boundary
   have member := List.mem_of_getElem? found
   have within : offset + width ≤ bytes.length :=
     (length.trans sized.symm) ▸ field_within_layout layout valid _ member
-  have positive := AggregateLayout.Valid.positive valid member
+  have positive := valid.positive member
   obtain ⟨after, stepped, written, -⟩ := step_setAggregateFieldAt_home
     (field := ⟨offset, width, aggregate⟩) formed loaded (length ▸ writable) within positive
     fieldSized
@@ -802,7 +805,7 @@ theorem LocalSnapshots.load_field {memory : Memory} {slots : List LocalSlot}
     snapshots.field_value slot specified valid sized decoded found present
   rw [← number]
   exact step_fieldAt_home (field := ⟨offset, width, false⟩) formed loaded within
-    (AggregateLayout.Valid.scalar valid (List.mem_of_getElem? found))
+    (valid.scalar (List.mem_of_getElem? found))
 
 /-- A signed `ldfld` of field `fieldIndex` through the address of a remembered aggregate local
     of a valid `layout` whose bytes decode to `values` pushes that field's value, sign extended
@@ -824,7 +827,7 @@ theorem LocalSnapshots.load_signed_field {memory : Memory} {slots : List LocalSl
     snapshots.field_value slot specified valid sized decoded found present
   rw [← number]
   exact step_fieldAt_signed_home (field := ⟨offset, width, false⟩) formed loaded within
-    (AggregateLayout.Valid.scalar valid (List.mem_of_getElem? found))
+    (valid.scalar (List.mem_of_getElem? found))
 
 /-- A nested struct load of field `fieldIndex` through the address of a remembered aggregate
     local of a valid `layout` whose bytes decode to `values` pushes the field's bytes, the
@@ -846,7 +849,7 @@ theorem LocalSnapshots.load_aggregate_field {memory : Memory} {slots : List Loca
   obtain ⟨loaded, within, number⟩ :=
     snapshots.field_value slot specified valid sized decoded found present
   have member := List.mem_of_getElem? found
-  have positive := AggregateLayout.Valid.positive valid member
+  have positive := valid.positive member
   let field : FieldLayout := ⟨offset, width, aggregate⟩
   have fieldLength : (field.bytesIn bytes).length = width := by
     simp only [field, FieldLayout.bytesIn, List.length_take, List.length_drop]
@@ -867,8 +870,6 @@ theorem LocalSnapshots.load_aggregate_field {memory : Memory} {slots : List Loca
 #print axioms LocalSnapshots.store_field
 #print axioms LocalSnapshots.store_aggregate_field
 #print axioms LocalSnapshots.field_value
-#print axioms AggregateLayout.Valid.scalar
-#print axioms AggregateLayout.Valid.positive
 #print axioms LocalSnapshots.load_field
 #print axioms LocalSnapshots.load_signed_field
 #print axioms LocalSnapshots.load_aggregate_field
