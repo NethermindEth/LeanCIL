@@ -21,6 +21,17 @@ void Verified(params string[] options)
         !result.Stdout.Contains("(x y : CIL.W64)"))
         throw new InvalidOperationException("CLI proof failed: " + result.Output);
 
+    // Authors read the statement in Lean notation, as Unicode, and the proof's own `#print` output.
+    var entry = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")))
+        .GetProperty("entry").GetString();
+    var stdout = result.Stdout.ReplaceLineEndings("\n");
+    if (!stdout.Contains("\u2203 result,") || stdout.Contains("Exists fun") || stdout.Contains("HMod.hMod") ||
+        !stdout.Contains($"  Subject: {entry} (method 0) via CIL.Safety.invoke\n") ||
+        !stdout.Contains($"  Extraction entry: {entry}\n") || stdout.Contains("  Entry:") ||
+        !stdout.Contains("Add.lean:15:0: info: 'ExampleProof.correctness' depends on axioms"))
+        throw new InvalidOperationException(
+            "CLI verification did not print the readable statement, subject and messages: " + result.Output);
+
     var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
     if (report.GetProperty("schema").GetInt32() != 4 ||
         !report.GetProperty("extractionAudit").GetString()!.Contains("Extracted.translation_valid"))
@@ -132,6 +143,55 @@ foreach (var module in new[] { "Tests.Support", "Examples.Support" })
         throw new InvalidOperationException("Repository fixture import was not rejected by name: " + fixtureImport.Output);
 }
 Console.WriteLine("PASS CLI rejects proofs importing repository fixtures the tool does not ship");
+
+// Query commands are how authors explore the API: their output must survive a failed audit, located
+// in the author's file, and long output must say where the rest is rather than vanish.
+var queryProof = Path.Combine(auditOutput, "Query.lean");
+File.WriteAllText(queryProof, "import Extracted\n#check CIL.Safety.invoke\n" +
+    string.Concat(Enumerable.Range(0, 70).Select(i => $"#eval {i} + 1000\n")));
+var query = Execute([.. cli, "verify", auditOutput, "--proof", queryProof]);
+var queryErrors = query.Stderr.ReplaceLineEndings("\n");
+var fullMessages = Path.Combine(auditOutput, "proof-messages.txt");
+if (query.Code != 1 || !queryErrors.Contains("Stage: theorem audit") ||
+    !queryErrors.Contains("Query.lean:2:0: info: CIL.Safety.invoke (program : CIL.Program) (fuel method : Nat)") ||
+    !queryErrors.Contains("Except CIL.Safety.LocatedFault (CIL.Safety.Memory \u00d7 List CIL.Safety.Value)\n") ||
+    !queryErrors.Contains("Query.lean:3:0: info: 1000\n") || queryErrors.Contains("info: 1069\n") ||
+    !queryErrors.Contains(" more lines in artifacts/CliKernelAudit/proof-messages.txt\n") ||
+!File.ReadAllText(fullMessages).Contains("info: 1069\n"))
+    throw new InvalidOperationException("Proof query output was not shown with its location: " + query.Output);
+Console.WriteLine("PASS CLI shows located #check and #eval output and keeps long output in proof-messages.txt");
+
+// The report names the method a theorem is about, not the extraction entry, and claims nothing for an open index.
+var subjectOutput = At("artifacts/CliSubjects");
+Run([.. cli, "extract", demoAssembly, "Examples.Loops::TallyTwice(uint)", subjectOutput]);
+var subjectProof = Path.Combine(subjectOutput, "Subjects.lean");
+File.WriteAllText(subjectProof, """
+    import Extracted
+    import CIL.MethodIdentity
+    import CIL.Safety.MethodContract
+    namespace ExampleProof
+    bind_method tally tallyBody := "System.UInt32 Examples.Loops::TallyTwice(System.UInt32)"
+    bind_callee addTwo addTwoBody := "System.UInt32 Examples.Loops::AddTwo(System.UInt32)" from tallyBody
+    theorem helper (contract : CIL.Safety.MethodContract CIL.W32 CIL.W32)
+        (holds : contract.Holds Extracted.program addTwo) : contract.Holds Extracted.program addTwo := holds
+    theorem unfixed (contract : CIL.Safety.MethodContract CIL.W32 CIL.W32) (method : Nat)
+        (holds : contract.Holds Extracted.program method) : contract.Holds Extracted.program method := holds
+    end ExampleProof
+    """);
+const string addTwo =
+    "System.UInt32 Examples.Loops::AddTwo(System.UInt32) (method 1) via CIL.Safety.MethodContract.Holds";
+var helper = Execute([.. cli, "verify", subjectOutput, "--proof", subjectProof, "--theorem", "ExampleProof.helper"])
+    .Stdout.ReplaceLineEndings("\n");
+if (!helper.Contains($"  Subject: {addTwo}\n") || !helper.Contains($"  Premise: {addTwo}\n") ||
+    helper.Contains("Subject: System.UInt32 Examples.Loops::TallyTwice") ||
+    !helper.Contains("  Extraction entry: System.UInt32 Examples.Loops::TallyTwice(System.UInt32)\n"))
+    throw new InvalidOperationException("Helper theorem was not labelled by its subject: " + helper);
+var unfixed = Execute([.. cli, "verify", subjectOutput, "--theorem", "ExampleProof.unfixed"])
+    .Stdout.ReplaceLineEndings("\n");
+if (!unfixed.Contains("  Subject: a method index the statement does not fix via CIL.Safety.MethodContract.Holds\n") ||
+    unfixed.Contains("Examples.Loops::AddTwo") || unfixed.Contains("Subject: System.UInt32"))
+    throw new InvalidOperationException("An unfixed method index was labelled as a specific method: " + unfixed);
+Console.WriteLine("PASS CLI labels a theorem by the methods its statement names");
 
 // Consumers pin the framework from this report, so it must name the commit the tool was built from.
 var version = Execute([.. cli, "--version"]);

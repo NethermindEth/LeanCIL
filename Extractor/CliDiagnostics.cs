@@ -23,6 +23,9 @@ internal static class Rejections
 
 internal static class CliDiagnostics
 {
+    /// <summary>Exception data key holding the failed proof's located Lean messages.</summary>
+    internal const string ProofMessagesKey = "LeanCIL.ProofMessages";
+
     internal static void Write(Exception error, string stage, bool invalid)
     {
         if (error is CliFailure failure)
@@ -72,5 +75,7 @@ internal static class CliDiagnostics
                 Console.Error.Write(lean + "Full Lean output follows under Details.\n");
             Console.Error.WriteLine("Details:\n" + error.Message);
         }
+        if (error.Data[ProofMessagesKey] is string messages)
+            Console.Error.Write(messages);
     }
 }
