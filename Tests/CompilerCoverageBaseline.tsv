@@ -119,6 +119,10 @@ Examples:System.Boolean Examples.DoublingAllowance::Examples.IAllowance<Examples
 Examples:System.Boolean Examples.DoublingAllowance::Spend(Examples.DoublingAllowance&,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.IAllowance`1::Spend(TSelf&)	N	N	N	N	N	N	N	N
 Examples:System.Boolean Examples.IAllowance`1::Spend(TSelf&,System.UInt64)	N	N	N	N	N	N	N	N
+Examples:System.Boolean Examples.ILoud::Examples.IQuietByDefault.get_IsActive()	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.ILoudByDefault::get_IsActive()	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.IQuiet::Examples.ILoudByDefault.get_IsActive()	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.IQuietByDefault::get_IsActive()	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.IRefundingAllowance`1::Examples.IAllowance<TSelf>.Spend(TSelf&)	N	N	N	N	N	N	N	N
 Examples:System.Boolean Examples.IStepFlag::get_IsActive()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.IntegerOperations::Greater32(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
@@ -732,6 +736,10 @@ Examples:System.UInt64 Examples.Counter::Mix(System.UInt64,System.UInt32,System.
 Examples:System.UInt64 Examples.Counter::Read()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Counter::WriteRead(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Counter::WrongWriteRead(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.DerivedFlags::Count(System.UInt64)	N	N	N	N	N	N	N	N
+Examples:System.UInt64 Examples.DerivedFlags::CountLoud(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.DerivedFlags::Trace(System.UInt64)	N	N	N	N	N	N	N	N
+Examples:System.UInt64 Examples.DerivedFlags::TraceQuiet(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Division::Quotient64(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.DivisionIntrinsics::And(System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.DivisionIntrinsics::AndNot(System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
@@ -762,7 +770,13 @@ Examples:System.UInt64 Examples.GenericOwners::SpanFirst(System.ReadOnlySpan`1<S
 Examples:System.UInt64 Examples.GenericOwners::SpanSecond(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.IBinaryStep::Apply(System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.IInWord`1::Sum(System.ReadOnlySpan`1<System.UInt64>& modreq(System.Runtime.InteropServices.InAttribute))	N	N	N	N	N	N	N	N
+Examples:System.UInt64 Examples.IMeasure::Measure(System.UInt64)	B	B	B	B	B	B	B	B
+Examples:System.UInt64 Examples.IMeasureFive::Examples.IMeasure.Measure(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.IPrice::get_Price()	B	B	B	B	B	B	B	B
+Examples:System.UInt64 Examples.IScale::Scale(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.IScaleMore::Examples.IScale.Scale(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.IScaleMost::Examples.IScale.Scale(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.IScaleSide::Examples.IScale.Scale(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.InParameters::Constrained(Examples.InWord&,Examples.InWord&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.InParameters::ConstrainedSum(Examples.InWord&,System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.InParameters::Sum(T&,System.ReadOnlySpan`1<System.UInt64>&)	N	N	N	N	N	N	N	N
@@ -777,6 +791,12 @@ Examples:System.UInt64 Examples.IntegerMath::MaxUInt64(System.UInt64,System.UInt
 Examples:System.UInt64 Examples.IntegerMath::MinUInt64(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Loops::Sum(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.MarshaledMemory::Read(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.MostSpecificBodies::Five(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.MostSpecificBodies::Measured(System.UInt64)	N	N	N	N	N	N	N	N
+Examples:System.UInt64 Examples.MostSpecificBodies::More(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.MostSpecificBodies::Most(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.MostSpecificBodies::Own(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.MostSpecificBodies::Scaled(System.UInt64)	N	N	N	N	N	N	N	N
 Examples:System.UInt64 Examples.Nested::Alias(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Nested::Copy(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Nested::Explicit(System.UInt64)	A	A	A	A	A	A	A	A
@@ -794,6 +814,7 @@ Examples:System.UInt64 Examples.NullReferences::Unchecked(Examples.FourLimbs&,Sy
 Examples:System.UInt64 Examples.PackedConstructor::Sum()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.PointerOperations::WriteEnum(Examples.Unsigned64*,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.PrimitiveArrays::ReadUInt64(System.UInt64[],System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.ScaleOwn::Scale(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.SeededHash::ByReference()	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.SeededHash::CreateSeed()	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.SeededHash::Hash(System.UInt64)	B	B	B	B	B	B	B	B
@@ -825,7 +846,7 @@ Examples:System.UInt64 Examples.StaticValues::ReadAddress()	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.StaticVirtualDefaults::Spend(TAllowance&)	N	N	N	N	N	N	N	N
 Examples:System.UInt64 Examples.StaticVirtualDefaults::SpendDefault(Examples.Allowance&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.StaticVirtualDefaults::SpendOverride(Examples.DoublingAllowance&)	A	A	A	A	A	A	A	A
-Examples:System.UInt64 Examples.StaticVirtualDefaults::SpendRefunding(Examples.RefundingAllowance&)	B	B	B	B	B	B	B	B
+Examples:System.UInt64 Examples.StaticVirtualDefaults::SpendRefunding(Examples.RefundingAllowance&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.StructMethods::Arguments(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.StructMethods::ByValue(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.StructMethods::ConstructLocal(System.UInt64)	A	A	A	A	A	A	A	A
