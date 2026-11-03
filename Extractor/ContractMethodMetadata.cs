@@ -167,16 +167,21 @@ internal static class ContractMethodMetadata
     {
         RejectModifiers(definition, inParameters: true);
         InReferences.RejectTwins(definition);
-        if (definition.DeclaringType.HasGenericParameters || definition.GenericParameters.Count != arguments.Length)
-            throw new InvalidDataException("Contract method requires an exact closed generic instantiation.");
+        // An entry may be a static method of a generic class: method arguments come first, then the owner's.
+        int ownerArity = definition.DeclaringType.GenericParameters.Count;
+        if ((ownerArity != 0 && (!entry || !definition.IsStatic)) ||
+            definition.GenericParameters.Count + ownerArity != arguments.Length)
+            throw new InvalidDataException("Contract method requires an exact closed generic instantiation." +
+                (ownerArity == 0 ? "" : $"\n  Pass {definition.GenericParameters.Count} method type argument(s) " +
+                    $"followed by {ownerArity} for {definition.DeclaringType.FullName}; only static methods " +
+                    "of a generic type can be an entry."));
         // Imported calls bind across assemblies, so only an entry may close over its own module's value types.
         if (arguments.Any(type => !Primitive(type) && !(entry && type.IsValueType &&
                 (type.Module == definition.Module || PinnedAssemblies.Active?.ModuleOf(type) is not null))))
             throw new InvalidDataException("Contract type arguments require exact scoped primitive integers.");
         if (arguments.Length == 0)
             return new(definition, definition, definition, [], definition.Module.Assembly.Name.FullName + "::" + definition.FullName);
-        GenericInstanceMethod reference = new(definition);
-        foreach (TypeReference argument in arguments) reference.GenericArguments.Add(argument);
+        MethodReference reference = Closed(definition, arguments);
         MethodDefinition closed = new MethodSpecialization(definition.Module, architecture).Instantiate(reference);
         // Scalar certificates read the closed return and parameter types from the identity.
         // Keep definition and scoped argument keys before the parameter list.
@@ -190,6 +195,31 @@ internal static class ContractMethodMetadata
         }
         identity.Append('(').AppendJoin(',', closed.Parameters.Select(parameter => parameter.ParameterType.FullName)).Append(')');
         return new(definition, closed, reference, arguments, identity.ToString());
+    }
+
+    // The closed reference a call site would spell: the owner closed over the trailing arguments.
+    static MethodReference Closed(MethodDefinition definition, TypeReference[] arguments)
+    {
+        int methodArity = definition.GenericParameters.Count;
+        MethodReference member = definition;
+        if (definition.DeclaringType.HasGenericParameters)
+        {
+            GenericInstanceType owner = new(definition.DeclaringType);
+            foreach (TypeReference argument in arguments.Skip(methodArity)) owner.GenericArguments.Add(argument);
+            member = new MethodReference(definition.Name, definition.ReturnType, owner)
+            {
+                HasThis = definition.HasThis, ExplicitThis = definition.ExplicitThis,
+                CallingConvention = definition.CallingConvention
+            };
+            foreach (ParameterDefinition parameter in definition.Parameters)
+                member.Parameters.Add(new ParameterDefinition(parameter.ParameterType));
+            foreach (GenericParameter parameter in definition.GenericParameters)
+                member.GenericParameters.Add(new GenericParameter(parameter.Name, member));
+        }
+        if (methodArity == 0) return member;
+        GenericInstanceMethod generic = new(member);
+        foreach (TypeReference argument in arguments.Take(methodArity)) generic.GenericArguments.Add(argument);
+        return generic;
     }
 
     internal static Selection ResolveImported(MethodReference reference, ModuleDefinition selected, string architecture)
