@@ -90,6 +90,9 @@ which needs no Lean, so every PR runs it:
   code by name, not by line number.
 - Every `bind_*` and `cil_*` command, tactic or attribute named in prose or in an unelaborated
   block must still be declared under `CIL/`.
+- Every line of a Lean block other than an excerpt fits in 100 characters, the limit of the
+  library's own Lean. An excerpt begins each line of its source as written, so only the source can
+  wrap it.
 - A document's audience decides what it may cite. Documents are for users unless they declare
   `<!-- audience: maintainers -->` below their title; maintainers documents describe how LeanCIL
   itself is built, validated and audited (the `VALIDATION*`, `SOUNDNESS-*` detail pages, this page,
@@ -103,7 +106,7 @@ Every fenced Lean block is elaborated unless its info string says why not:
 
 | Info string | Check |
 | --- | --- |
-| `lean` | Elaborated by the `docs` suite against the current library, after `import CIL` and the block's own imports, in a namespace of its own and with no implicit `open`. Imports must name library modules; a block that needs `Extracted` fails until it is marked. |
+| `lean` | Elaborated by the `docs` suite against the current library with exactly the block's own imports, as if it were a file of its own: nothing is imported or opened implicitly, so a block starts with `import CIL` or the modules it needs. Imports must name library modules; a block that needs `Extracted` fails until it is marked. |
 | `lean excerpt PATH` | Every non-blank line, in order, must begin a line of `PATH`, a file the suites verify, such as an example under `Examples/Proofs`. |
 | `lean extracted` | Code that needs a generated `Extracted` module. Its imports and commands are checked statically and its `CIL.` names by the `docs` suite. |
 | `lean illustrative` | A shape rather than code to run, checked like `extracted`. |
@@ -112,12 +115,30 @@ Any other info string fails. Prefer an elaborated block, then an excerpt of a ve
 `extracted` and `illustrative` blocks can drift in ways only a reader notices. Never mark a block
 to hide an error.
 
-The `docs` suite (`Tests/DocSnippets.cs`) needs the certified library. It writes all elaborated
-blocks into one Lean file and every `CIL.`-rooted name cited in prose or in an unelaborated block
-into a second file that imports every library module. Each name must be a declaration or namespace
-unless it is a module path. Each diagnostic, warning or `sorryAx` is reported at the document line
-it came from. The suite then checks that a pre-`Except` `invoke` statement and removed names fail
-at their own lines while the current form passes. Run it locally with
+The `docs` suite (`Tests/DocSnippets.cs`) needs the certified library. It writes the elaborated
+blocks into one Lean file per distinct import set, so a block sees only the modules it imports, and
+the names cited outside elaborated code into a file that imports every library module; the files
+elaborate concurrently. Names are probed by these rules:
+
+- A `CIL.`-rooted name in prose or in an unelaborated block must be a declaration or namespace as
+  written, unless it is a module path.
+- A code span in prose that is wholly a `bind_*` or `cil_*` word must start a tactic, command or
+  other syntax, or be an attribute, of the library.
+- A code span in prose that is wholly a snake_case word (`invoke_loop_induction`), or a dotted name
+  whose first component is capitalised (`LoopFrame.store_field`), must be a declaration, namespace,
+  syntax or attribute of the environment, or the suffix of a declaration or namespace of a `CIL`
+  module. A dotted name whose part before the last component is no namespace, such as
+  `X86.Aes.Encrypt`, is .NET's and not probed; so are names rooted at `Extracted`,
+  `ExtractedSymbols`, `Examples`, `Tests` or `System`, file names, and .NET accessor names such as
+  `get_Item`, which capitalise after the underscore. A lowercase dotted span such as `entry.memory`
+  or `ldind.i` is a term or an opcode, not a name.
+- A name that a Lean block of the documentation declares, or binds with `have`, needs no probe; in
+  a maintainers document neither does a name declared under `Tests/`, which its own suite checks.
+
+Each diagnostic, warning or `sorryAx` is reported at the document line it came from. The suite then
+checks that a pre-`Except` `invoke` statement, a removed or renamed name, a removed tactic and a
+block using a module it does not import each fail at their own lines, while the current forms and
+names outside the library pass. Run it locally with
 `dotnet run --file scripts/Test.cs -- --suite docs`; `scripts/TestCheckDocReferences.cs` tests the
 static rules.
 
