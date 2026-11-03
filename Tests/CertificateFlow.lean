@@ -54,7 +54,8 @@ theorem bounds_rejected :
     ([4, 1000000] : List Nat).all (fun target =>
       let body := { forward with code := forward.code.set 0 ⟨0, 43, .target target⟩ }
       let emitted := forwardCode.set 0 (.branch target)
-      !decide (FeatureFlowValid #[] (fun _ => none) body .scalar forwardFeatures [true, false, false, true] emitted) &&
+      !decide (FeatureFlowValid #[] (fun _ => none) body .scalar forwardFeatures
+        [true, false, false, true] emitted) &&
       !decide (ScalarFlowValid #[] body forwardFeatures forwardScalars emitted)) = true := by decide
 #print axioms bounds_rejected
 

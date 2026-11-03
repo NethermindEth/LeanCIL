@@ -86,7 +86,8 @@ private def guardStates : FeatureCertificate :=
 private def guardCode : List Op :=
   [.arg 0, .brnonzero 5, .nop, .nop, .throw "System.ArgumentException", .arg 0, .ret none]
 
-example : FeatureFlowValid #[] (fun _ => none) guardRaw .scalar guardStates (List.replicate 7 true) guardCode := by decide
+example : FeatureFlowValid #[] (fun _ => none) guardRaw .scalar guardStates
+    (List.replicate 7 true) guardCode := by decide
 -- The raised type is the constructed one, and the fold cannot be emitted as a hole.
 example : ¬ FeatureFlowValid #[] (fun _ => none)
     guardRaw .scalar guardStates (List.replicate 7 true)

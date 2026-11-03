@@ -370,7 +370,10 @@ foreach (var (mutation, selector) in new[]
 var examples = System.Reflection.Assembly.Load(File.ReadAllBytes(assembly));
 var defaultNarrowed = new Dictionary<string, string>();
 foreach (var (name, type) in new[]
-    { ("SpendDefault", "Allowance"), ("SpendOverride", "DoublingAllowance"), ("SpendRefunding", "RefundingAllowance") })
+    {
+        ("SpendDefault", "Allowance"), ("SpendOverride", "DoublingAllowance"),
+        ("SpendRefunding", "RefundingAllowance")
+    })
 {
     var output = Path.Combine(root, "Static-" + name);
     Run(["dotnet", ExtractorPath, "extract", assembly, $"StaticVirtualDefaults::{name}(Examples.{type}&)", output]);

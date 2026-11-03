@@ -69,9 +69,12 @@ private def foldCode : List Op := [.nop, .nop, .nop, .nop, .const32 1, .brzero 8
 example : FeatureFlowValid #[] (fun _ => none)
     foldRaw .scalar foldStates foldMask foldCode := by decide
 -- A forged constant fails even with matching facts, and forged facts cannot prune the live branch.
-example : ¬ FeatureFlowValid #[] (fun _ => none) foldRaw .scalar foldStates foldMask (foldCode.set 4 (.const32 0)) := by decide
-example : ¬ FeatureFlowValid #[] (fun _ => none) foldRaw .scalar (foldStates.set 5 (state [some 0])) foldMask foldCode := by decide
-example : ¬ FeatureFlowValid #[] (fun _ => none) foldRaw .scalar foldStates foldMask (foldCode.set 2 (.const32 0)) := by decide
+example : ¬ FeatureFlowValid #[] (fun _ => none) foldRaw .scalar foldStates foldMask
+    (foldCode.set 4 (.const32 0)) := by decide
+example : ¬ FeatureFlowValid #[] (fun _ => none) foldRaw .scalar
+    (foldStates.set 5 (state [some 0])) foldMask foldCode := by decide
+example : ¬ FeatureFlowValid #[] (fun _ => none) foldRaw .scalar foldStates foldMask
+    (foldCode.set 2 (.const32 0)) := by decide
 -- Distinct types decide the opposite edge.
 private def distinctRaw := raw (test marker other ++ [i 44 (.target 8), i 23, i 42, i 22, i 42])
 example : ¬ FeatureFlowValid #[] (fun _ => none)
@@ -88,7 +91,8 @@ example : ¬ FeatureFlowValid #[] (fun _ => none) enteredRaw .scalar
     [true, true, false, false, true, true, true, true]
     [.const32 0, .branch 4, .unsupported "", .unsupported "", .nop, .nop, .const32 1, .ret none] := by decide
 -- The same facts are accepted once the edge enters at the first operand.
-example : FeatureFlowValid #[] (fun _ => none) (raw ([i 22, i 43 (.target 2)] ++ test marker marker ++ [i 42])) .scalar
+example : FeatureFlowValid #[] (fun _ => none)
+    (raw ([i 22, i 43 (.target 2)] ++ test marker marker ++ [i 42])) .scalar
     [state [], state [some 0], state [some 0], state [none, some 0], state [none, some 0], state [none, none, some 0], state [none, none, some 0], state [some 1, some 0]]
     [true, true, true, true, true, true, true, true]
     [.const32 0, .branch 2, .nop, .nop, .nop, .nop, .const32 1, .ret none] := by decide

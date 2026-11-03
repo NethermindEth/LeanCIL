@@ -185,8 +185,10 @@ private def floatEvidence (opcode : Nat) : MethodEvidence := {
   parameterInput := { arguments := [], locals := [], code := List.replicate 4 .other },
   reachable := List.replicate 4 true, featureStates := floatFeatures, scalarStates := floatStates, layoutUses := [], assembly := scope }
 private def floatMethod : Method := { locals := [], returnsValue := true, code := [.const32 1, .neg, .convI8, .ret] }
-example : FeatureFlowValid #[] (fun _ => none) (floatRaw 107) .scalar floatFeatures (List.replicate 4 true) floatMethod.code := by decide
-example : FeatureFlowValid #[] (fun _ => none) (floatRaw 108) .scalar floatFeatures (List.replicate 4 true) floatMethod.code := by decide
+example : FeatureFlowValid #[] (fun _ => none) (floatRaw 107) .scalar floatFeatures
+    (List.replicate 4 true) floatMethod.code := by decide
+example : FeatureFlowValid #[] (fun _ => none) (floatRaw 108) .scalar floatFeatures
+    (List.replicate 4 true) floatMethod.code := by decide
 example : scalarTransfer (floatRaw 107) (i 107) [.word32] = some [.other] := by decide
 example : scalarTransfer (floatRaw 108) (i 108) [.word32] = some [.other] := by decide
 example : ¬ TranslationValid [] #[] [floatEvidence 107] [] [floatMethod] := by decide
@@ -218,7 +220,8 @@ private def localEvidence : MethodEvidence := {
 private def localMethod : Method := {
   locals := [.i32 0], localKinds := [.word32], returnsValue := true,
   code := [.const32 1, .neg, .setLocal 0, .local 0, .convI8, .ret] }
-example : FeatureFlowValid #[] (fun _ => none) localRaw .scalar localFeatures (List.replicate 6 true) localMethod.code := by decide
+example : FeatureFlowValid #[] (fun _ => none) localRaw .scalar localFeatures
+    (List.replicate 6 true) localMethod.code := by decide
 example : ¬ TranslationValid [] #[] [localEvidence] [] [localMethod] := by decide
 
 private def argumentRaw := raw [i 23, i 108, i 16 (.argument 0), i 2, i 106, i 42] [intType]
@@ -230,7 +233,8 @@ private def argumentEvidence : MethodEvidence := {
 private def argumentMethod : Method := {
   locals := [], parameterHomes := [(0, .word32)], returnsValue := true,
   code := [.const32 1, .neg, .setLocal 0, .local 0, .convI8, .ret] }
-example : FeatureFlowValid #[] (fun _ => none) argumentRaw .scalar argumentFeatures (List.replicate 6 true) argumentMethod.code := by decide
+example : FeatureFlowValid #[] (fun _ => none) argumentRaw .scalar argumentFeatures
+    (List.replicate 6 true) argumentMethod.code := by decide
 example : ¬ TranslationValid [] #[] [argumentEvidence] [] [argumentMethod] := by decide
 
 private def mixedRaw := { raw [i 2, i 3, i 88, i 42] [nativeType, intType] with returnType := nativeType }

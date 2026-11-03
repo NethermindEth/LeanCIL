@@ -201,7 +201,8 @@ private def defaultEmitted : Method := {
 /-- Without an implementation on the receiver, a generic static virtual slot runs its own body,
     instantiated at the site's method and interface arguments. -/
 theorem static_default_valid :
-    resolveConstrained defaultTypes allowance defaultSite = some (.interfaceBody allowanceInterface defaultSlot) ∧
+    resolveConstrained defaultTypes allowance defaultSite =
+      some (.interfaceBody allowanceInterface defaultSlot) ∧
     ConstrainedCallsValid defaultTypes [⟨[], defaultRaw⟩, defaultTarget] defaultRaw
       [true, true, true, true] defaultEmitted := by decide +kernel
 #print axioms static_default_valid

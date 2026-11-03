@@ -70,7 +70,8 @@ partial class Program
             static ulong SizeOf<T>(ulong x) where T : unmanaged => x + (ulong)Unsafe.SizeOf<T>();
             public static ulong WrapLocal(ulong x)
             { Wrapper<Cell> w = default; w.Inner.Value = x; w.Tag = 1; return w.Inner.Value + w.Tag; }
-            public static ulong WrapByRef(ulong x) { Wrapper<Cell> w = default; w.Inner.Value = x; return Read(ref w); }
+            public static ulong WrapByRef(ulong x)
+            { Wrapper<Cell> w = default; w.Inner.Value = x; return Read(ref w); }
             static ulong Read(ref Wrapper<Cell> w) => w.Inner.Value + 1;
             public static ulong PairMine(ulong x)
             { Pair<Mine> pair = default; pair.A.Value = (uint)x; return pair.A.Value; }
@@ -97,7 +98,8 @@ partial class Program
                 where TGas : unmanaged => handlers[index](x) + (ulong)Unsafe.SizeOf<TGas>();
             public static unsafe ulong CallDispatch(delegate*<ulong, ulong>[] handlers, ulong x) =>
                 Dispatch<Mine>(handlers, 0, x);
-            public static unsafe void Targets(delegate*<ulong, ulong>[] handlers) => handlers[0] = &LocalAlgo<Mine>.Run;
+            public static unsafe void Targets(delegate*<ulong, ulong>[] handlers) =>
+                handlers[0] = &LocalAlgo<Mine>.Run;
             public static unsafe ulong PointerTable<TGas>(delegate*<ulong, ulong>* table, ulong x)
                 where TGas : unmanaged => table[0](x);
             public static unsafe ulong Unmanaged<TGas>(delegate* unmanaged<ulong, ulong>[] table, ulong x)
@@ -161,7 +163,8 @@ partial class Program
 
                 /-- `{{name}} 5 = {{result}}`, with every layout and body bound to its pinned assembly. -/
                 theorem generic_result :
-                    (CIL.Safety.invoke Extracted.program 64 0 [.scalar (.i64 5)] CIL.Safety.Memory.empty).map Prod.snd =
+                    (CIL.Safety.invoke Extracted.program 64 0 [.scalar (.i64 5)] CIL.Safety.Memory.empty).map
+                      Prod.snd =
                       .ok [.scalar (.i64 {{result}})] := by rfl
                 #print axioms generic_result
                 """);
@@ -224,7 +227,8 @@ partial class Program
             Match catalogued = Regex.Match(extracted,
                 @"identity := (\{ owner := ""[^""]*::GenericFixture\.LocalAlgo\\u00601"", [^}]*\})");
             if (!catalogued.Success)
-                throw new InvalidOperationException("Precondition: the catalog must hold LocalAlgo<Mine>.Run: " + name);
+                throw new InvalidOperationException(
+                    "Precondition: the catalog must hold LocalAlgo<Mine>.Run: " + name);
             string identity = catalogued.Groups[1].Value;
             string uncatalogued = Regex.Replace(identity, @"arguments := \[.*\]",
                 "arguments := [.atom CIL.Extraction.runtimeScope \"System.UInt64\"]");
@@ -296,7 +300,8 @@ partial class Program
             [.. Reference(lib), "--type-argument", "GenericFixture.Mine"]);
         RejectedExtract("open function pointer table entry",
             "Contract method requires an exact closed generic instantiation",
-            app, Table("Dispatch", "System.UInt64 *(System.UInt64)[]") + "System.Int32,System.UInt64)", Reference(lib));
+            app, Table("Dispatch", "System.UInt64 *(System.UInt64)[]") + "System.Int32,System.UInt64)",
+            Reference(lib));
         // A pointer to function pointers is not an admitted storage type; tables are arrays or `nint*`.
         RejectedExtract("function pointer pointer table", "Unsupported stack-storage pointer element type",
             app, Table("PointerTable", "System.UInt64 *(System.UInt64)*") + "System.UInt64)",

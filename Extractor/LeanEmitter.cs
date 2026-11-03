@@ -263,8 +263,14 @@ internal static class LeanEmitter
         lean.AppendLine("def imports : List ImportSlot := [" + string.Join(", ", importBindings.Select(ImportResolution.LeanSlot)) + "]");
         // Whole-program data, so it stays after the `specializedMethods` boundary of per-method components;
         // feature obligations read callee certificates through it.
-        lean.AppendLine("def methodEvidence : List Extraction.MethodEvidence := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"{{ original := method{n}Original, arguments := method{n}TypeArgumentsRaw, closed := method{n}Closed, parameterInput := method{n}RawArguments, reachable := method{n}Reachable, featureStates := method{n}FeatureStates, scalarStates := method{n}ScalarStates, layoutUses := method{n}LayoutUses, dispatchTypes := method{n}DispatchTypes, " +
-            $"assembly := assembly{pinned.Index(methods[n].Module)} }}")) + "]");
+        lean.AppendLine("def methodEvidence : List Extraction.MethodEvidence := [" + string.Join(", ",
+            Enumerable.Range(0, methods.Length).Select(n =>
+                $"{{ original := method{n}Original, arguments := method{n}TypeArgumentsRaw, " +
+                $"closed := method{n}Closed, parameterInput := method{n}RawArguments, " +
+                $"reachable := method{n}Reachable, featureStates := method{n}FeatureStates, " +
+                $"scalarStates := method{n}ScalarStates, layoutUses := method{n}LayoutUses, " +
+                $"dispatchTypes := method{n}DispatchTypes, " +
+                $"assembly := assembly{pinned.Index(methods[n].Module)} }}")) + "]");
         for (var n = 0; n < methods.Length; n++)
         {
             FeatureEvidence.EmitTheorem(lean, n);

@@ -79,7 +79,8 @@ private def loopStates : FeatureCertificate := [state [] [none], state [some 0] 
   state [] [some 1], state [] [none]]
 private def loopCode : List Op := [.const32 0, .setLocal 0, .local 0, .const32 0, .bne 8,
   .const32 1, .setLocal 0, .branch 2, .ret]
-example : FeatureFlowValid #[] (fun _ => none) loopRaw .scalar loopStates (List.replicate 9 true) loopCode := by decide
+example : FeatureFlowValid #[] (fun _ => none) loopRaw .scalar loopStates
+    (List.replicate 9 true) loopCode := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none)
     loopRaw .scalar (loopStates.set 2 (state [] [some 0]))
     (List.replicate 9 true) loopCode := by decide
@@ -96,7 +97,8 @@ private def switchRaw := raw [i 2, i 69 (.targets [4, 6]), i 23, i 42, i 24, i 4
 private def switchStates : FeatureCertificate := [state [], state [none], state [], state [some 1],
   state [], state [some 2], state [], state [some 3]]
 private def switchCode : List Op := [.arg 0, .switch [4, 6], .const32 1, .ret, .const32 2, .ret, .const32 3, .ret]
-example : FeatureFlowValid #[] (fun _ => none) switchRaw .scalar switchStates (List.replicate 8 true) switchCode := by decide
+example : FeatureFlowValid #[] (fun _ => none) switchRaw .scalar switchStates
+    (List.replicate 8 true) switchCode := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none) switchRaw .scalar (switchStates.set 6 none)
     [true, true, true, true, true, true, false, true] (switchCode.set 6 (.unsupported "missing switch edge")) := by decide
 
@@ -119,8 +121,10 @@ private def nopStates : FeatureCertificate := [state [], state [some 0], state [
   state [], state [some 0], none, none]
 private def nopCode : List Op := [.const32 0, .nop, .brnonzero 5, .const32 0, .ret,
   .unsupported "pruned", .unsupported "pruned"]
-example : FeatureFlowValid #[] (fun _ => none) nopRaw .scalar nopStates [true, true, true, true, true, false, false] nopCode := by decide
-example : ¬ FeatureFlowValid #[] (fun _ => none) nopRaw .scalar nopStates [true, true, true, true, true, false, false]
+example : FeatureFlowValid #[] (fun _ => none) nopRaw .scalar nopStates
+    [true, true, true, true, true, false, false] nopCode := by decide
+example : ¬ FeatureFlowValid #[] (fun _ => none) nopRaw .scalar nopStates
+    [true, true, true, true, true, false, false]
     (nopCode.set 1 (.const32 1)) := by decide
 example : featureOpMatches #[] loopRaw (i 0) (.setLocal 0) = false := by decide
 example : featureOpMatches #[] loopRaw (i 38) (.setLocal 0) = false := by decide

@@ -26,6 +26,7 @@ internal static class FeatureEvidence
     // therefore depends on the whole program and must stay out of any per-method component.
     internal static void EmitTheorem(StringBuilder lean, int number) =>
         lean.AppendLine($"theorem method{number}_features_validated : Extraction.FeatureFlowValid rawLayouts.toArray " +
-            $"(Extraction.evidenceConstants methodEvidence) method{number}Closed profile method{number}FeatureStates " +
+            $"(Extraction.evidenceConstants methodEvidence) method{number}Closed profile " +
+            $"method{number}FeatureStates " +
             $"method{number}Reachable method{number}.code := {LeanEmitter.Decide}");
 }

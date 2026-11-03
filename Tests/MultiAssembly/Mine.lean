@@ -7,7 +7,8 @@ namespace MultiAssemblyProof
 
 /-- `Scaled<AppScale>` runs App's own `Scale`, adding nine to every input. -/
 theorem correctness (x : W64) :
-    (CIL.Safety.invoke Extracted.program 64 0 [.scalar (.i64 x)] Safety.Memory.empty).map Prod.snd =
+    (CIL.Safety.invoke Extracted.program 64 0 [.scalar (.i64 x)] Safety.Memory.empty).map
+      Prod.snd =
       .ok [.scalar (.i64 (x + 9))] := by
   rfl
 
