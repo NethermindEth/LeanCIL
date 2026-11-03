@@ -251,15 +251,18 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var receivers = method.Body.Instructions.Where(instruction => instruction.OpCode.Code == Code.Constrained)
             .Select(instruction => (TypeReference)instruction.Operand)
             .Where(type => ConstrainedCalls.Extracted(type.Resolve().Module, method.Module)).ToArray();
-        // Each receiver's interfaces are cataloged from the receiver's own assembly, as resolution requires.
+        // Each receiver's interfaces are cataloged from whichever extracted assembly declares them, as resolution
+        // requires; an interface outside them is left out, so Lean cannot select an interface-level body past it.
         var types = receivers.Concat(receivers.SelectMany(type => type.Resolve().Interfaces
                 .Select(implementation => GenericStructs.Substitute(implementation.InterfaceType,
                     type as GenericInstanceType))
-                .Where(implementation => implementation.Resolve().Module == type.Resolve().Module)))
+                .Where(implementation => implementation.Resolve() is { } declared &&
+                    ConstrainedCalls.Extracted(declared.Module, method.Module))))
             .DistinctBy(LayoutEvidence.Identity).OrderBy(LayoutEvidence.Identity, StringComparer.Ordinal);
         return List(types.Select(type =>
         {
-            var original = (TypeDefinition)Original(type.Resolve().Module).LookupToken(type.Resolve().MetadataToken);
+            var module = type.Resolve().Module;
+            var original = (TypeDefinition)Original(module).LookupToken(type.Resolve().MetadataToken);
             GenericInstanceType? owner = null;
             if (type is GenericInstanceType closed)
             {
@@ -270,9 +273,15 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 $"interfaceType := {Bool(original.IsInterface)}, " +
                 $"interfaces := {List(original.Interfaces.Select(implementation =>
                     Type(GenericStructs.Substitute(implementation.InterfaceType, owner))))}, " +
-                $"methods := {List(original.Methods.Select(member => DispatchMethod(member, owner)))} }}";
+                $"methods := {List(original.Methods.Select(member => DispatchMethod(member, owner)))}, " +
+                $"assembly := {{ identity := {Quote(PinIdentity(module))} }} }}";
         }));
     }
+
+    // The pin whose metadata supplied a catalog entry; Lean requires it to scope the entry's type.
+    string PinIdentity(ModuleDefinition module) =>
+        (pinned ?? throw new InvalidOperationException("Dispatch evidence requires the pinned assemblies."))
+            .Pins.ElementAt(pinned.Index(module)).Identity;
 
     string DispatchMethod(MethodDefinition method, GenericInstanceType? owner)
     {
@@ -296,7 +305,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         $"attributes := {(uint)method.Attributes}, implementation := {(uint)method.ImplAttributes}, " +
         $"returnType := {Type(Closed(method.ReturnType))}, " +
         $"parameters := {List(method.Parameters.Select(parameter => Parameter(Closed(parameter.ParameterType))))}, " +
-        $"overrides := {List(method.Overrides.Where(slot => slot.DeclaringType.Scope is ModuleDefinition)
+        // A slot of any extracted assembly is recorded: dropping one would let a weaker candidate win in Lean.
+        $"overrides := {List(method.Overrides.Where(slot => PinnedAssemblies.Declares(slot.DeclaringType, method.Module))
             .Select(slot => $"({slot.Resolve().MetadataToken.ToUInt32().ToString(CultureInfo.InvariantCulture)}, " +
                 $"{Type(GenericStructs.Substitute(slot.DeclaringType, owner))})"))}{specialization} }}";
     }

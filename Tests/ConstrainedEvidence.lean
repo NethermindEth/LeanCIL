@@ -16,6 +16,8 @@ theorem named_metadata_decoding :
     namedType (.atom "" "Counter") = none := by decide +kernel
 #print axioms named_metadata_decoding
 
+/-- The assembly every fixture type is declared in. -/
+private def fixturePin : AssemblyPin := { identity := "Fixture" }
 private def integer : TypeExpr := .atom runtimeScope "System.Int32"
 private def receiver : TypeExpr := .aggregate "Fixture::Counter" 0
 private def interface : TypeExpr := .atom "Fixture" "IValue"
@@ -28,10 +30,10 @@ private def implementation : DispatchMethod := {
   slot with token := 21, isAbstract := false, hasBody := true }
 private def concrete : DispatchType := {
   identity := receiver, valueType := true, interfaceType := false,
-  interfaces := [interface], methods := [implementation] }
+  interfaces := [interface], methods := [implementation], assembly := fixturePin }
 private def declared : DispatchType := {
   identity := interface, valueType := false, interfaceType := true,
-  interfaces := [], methods := [slot] }
+  interfaces := [], methods := [slot], assembly := fixturePin }
 private def types := [concrete, declared]
 private def site : CallSite := {
   declaringType := interface, name := "Read", target := .managed 5, typeArguments := [],
@@ -168,10 +170,10 @@ private def genericOverride : DispatchMethod := {
     overrides := [(40, allowanceInterface)], owner := .void, ownerArguments := [] }
 private def defaultConcrete : DispatchType := {
   identity := allowance, valueType := true, interfaceType := false,
-  interfaces := [allowanceInterface], methods := [] }
+  interfaces := [allowanceInterface], methods := [], assembly := fixturePin }
 private def defaultDeclared : DispatchType := {
   identity := allowanceInterface, valueType := false, interfaceType := true,
-  interfaces := [], methods := [defaultSlot] }
+  interfaces := [], methods := [defaultSlot], assembly := fixturePin }
 private def defaultTypes := [defaultConcrete, defaultDeclared]
 private def overrideTypes :=
   [{ defaultConcrete with methods := [genericOverride] }, defaultDeclared]
@@ -199,7 +201,7 @@ private def defaultEmitted : Method := {
 /-- Without an implementation on the receiver, a generic static virtual slot runs its own body,
     instantiated at the site's method and interface arguments. -/
 theorem static_default_valid :
-    resolveConstrained defaultTypes allowance defaultSite = some (.interfaceDefault defaultSlot) ∧
+    resolveConstrained defaultTypes allowance defaultSite = some (.interfaceBody allowanceInterface defaultSlot) ∧
     ConstrainedCallsValid defaultTypes [⟨[], defaultRaw⟩, defaultTarget] defaultRaw
       [true, true, true, true] defaultEmitted := by decide +kernel
 #print axioms static_default_valid
@@ -259,28 +261,191 @@ theorem static_default_owner_rejected :
 #print axioms static_default_owner_rejected
 
 private def derivedInterface : TypeExpr := .apply (.constructor "Fixture" "IRefund`1") allowance
+/-- `IRefund<TSelf>`'s `MethodImpl` of `IAllowance<TSelf>.Spend<TPrice>`, closed at `Allowance`. -/
+private def derivedBody : DispatchMethod := { genericOverride with
+  token := 50, owner := .constructor "Fixture" "IRefund`1", ownerArguments := [allowance] }
 /-- `IRefund<TSelf> : IAllowance<TSelf>` re-implementing `IAllowance<TSelf>.Spend<TPrice>`. -/
 private def derivedDeclared : DispatchType := {
   identity := derivedInterface, valueType := false, interfaceType := true,
-  interfaces := [allowanceInterface], methods := [{ genericOverride with
-    token := 50, owner := .constructor "Fixture" "IRefund`1", ownerArguments := [allowance] }] }
+  interfaces := [allowanceInterface], methods := [derivedBody], assembly := fixturePin }
 private def derivedConcrete : DispatchType :=
   { defaultConcrete with interfaces := [allowanceInterface, derivedInterface] }
+private def derivedTypes := [derivedConcrete, defaultDeclared, derivedDeclared]
+/-- The derived interface's body instantiated at `TPrice := Price` and `TSelf := Allowance`. -/
+private def derivedTarget : SpecializedMethod := ⟨[price, allowance], { defaultTarget.closed with
+  token := 50, owner := "Fixture::IRefund`1" }⟩
 
-/-- A derived interface of the receiver that re-implements the slot is more specific than the
-    default body, so the default is never selected; an interface missing from the catalog or an
-    inherited interface the receiver does not list fails closed. -/
-theorem static_default_shadowed_rejected :
-    resolveConstrained [derivedConcrete, defaultDeclared, derivedDeclared]
-      allowance defaultSite = none ∧
-    ¬ ConstrainedCallsValid [derivedConcrete, defaultDeclared, derivedDeclared]
-      [⟨[], defaultRaw⟩, defaultTarget] defaultRaw [true, true, true, true] defaultEmitted ∧
+/-- A derived interface of the receiver that re-implements the generic slot is more specific than
+    the default body, so it runs, specialized at its own closed interface; emitting the less
+    specific default instead is rejected. -/
+theorem static_derived_body_valid :
+    resolveConstrained derivedTypes allowance defaultSite =
+      some (.interfaceBody derivedInterface derivedBody) ∧
+    ConstrainedCallsValid derivedTypes [⟨[], defaultRaw⟩, derivedTarget] defaultRaw
+      [true, true, true, true] defaultEmitted ∧
+    ¬ ConstrainedCallsValid derivedTypes [⟨[], defaultRaw⟩, defaultTarget] defaultRaw
+      [true, true, true, true] defaultEmitted ∧
     resolveConstrained [derivedConcrete, defaultDeclared, { derivedDeclared with methods := [] }]
-      allowance defaultSite = some (.interfaceDefault defaultSlot) ∧
+      allowance defaultSite = some (.interfaceBody allowanceInterface defaultSlot) := by
+  decide +kernel
+#print axioms static_derived_body_valid
+
+/-- Without the derived interface's entry, or when the receiver omits an inherited interface,
+    an unseen body could be more specific, so selection fails closed. -/
+theorem static_interface_closure_rejected :
     resolveConstrained [derivedConcrete, defaultDeclared] allowance defaultSite = none ∧
     resolveConstrained [defaultConcrete, { defaultDeclared with interfaces := [derivedInterface] }]
       allowance defaultSite = none := by decide +kernel
-#print axioms static_default_shadowed_rejected
+#print axioms static_interface_closure_rejected
+
+private def scaleInterface : TypeExpr := .atom "Fixture" "IScale"
+private def moreInterface : TypeExpr := .atom "Fixture" "IScaleMore"
+private def mostInterface : TypeExpr := .atom "Fixture" "IScaleMost"
+private def sideInterface : TypeExpr := .atom "Fixture" "IScaleSide"
+private def scaled : TypeExpr := .aggregate "Fixture::Scaled" 2
+/-- `static virtual int Scale()` with a body, declared on `IScale`. -/
+private def scaleSlot : DispatchMethod := {
+  staticSlot with token := 60, name := "Scale", isAbstract := false, hasBody := true }
+/-- An interface-level `MethodImpl` of `IScale.Scale`, as C# emits for `static int IScale.Scale()`
+    in a derived interface: private, static and not virtual. -/
+private def scaleBody (token : Nat) : DispatchMethod :=
+  { scaleSlot with
+    token := token, name := "IScale.Scale", isPublic := false, isVirtual := false
+    overrides := [(60, scaleInterface)] }
+private def scaleEntry : DispatchType := {
+  identity := scaleInterface, valueType := false, interfaceType := true, interfaces := [],
+  methods := [scaleSlot], assembly := fixturePin }
+/-- `IScaleMore : IScale`, `IScaleMost : IScaleMore` (listing only its direct base) and the
+    unrelated `IScaleSide : IScale`, each re-implementing the slot. -/
+private def moreEntry : DispatchType := { scaleEntry with
+  identity := moreInterface, interfaces := [scaleInterface], methods := [scaleBody 61] }
+private def mostEntry : DispatchType := { scaleEntry with
+  identity := mostInterface, interfaces := [moreInterface], methods := [scaleBody 62] }
+private def sideEntry : DispatchType := { scaleEntry with
+  identity := sideInterface, interfaces := [scaleInterface], methods := [scaleBody 63] }
+/-- An empty struct listing `interfaces`, which must include every inherited interface. -/
+private def scaledEntry (interfaces : List TypeExpr) : DispatchType := {
+  identity := scaled, valueType := true, interfaceType := false, interfaces, methods := [],
+  assembly := fixturePin }
+private def scaleSite : CallSite := {
+  staticSite with declaringType := scaleInterface, name := "Scale", target := .managed 60 }
+private def scaleRaw : RawMethod := { staticRaw with
+  code := [⟨0, 65046, .type scaled⟩, ⟨6, 40, .call scaleSite⟩, ⟨11, 42, .none⟩] }
+/-- The program body of the interface-level method `token` declared by `owner`. -/
+private def scaleProgram (token : Nat) (owner : String) : SpecializedMethod :=
+  ⟨[], { staticTarget.closed with token, owner }⟩
+private def scaleChain := [scaledEntry [moreInterface, scaleInterface], scaleEntry, moreEntry]
+
+/-- A derived interface's override of a static virtual slot runs instead of the default, and
+    only its own program body may be emitted for the call. -/
+theorem derived_override_valid :
+    resolveConstrained scaleChain scaled scaleSite =
+      some (.interfaceBody moreInterface (scaleBody 61)) ∧
+    ConstrainedCallsValid scaleChain
+      [⟨[], scaleRaw⟩, scaleProgram 61 "Fixture::IScaleMore"] scaleRaw [true, true, true]
+      staticEmitted ∧
+    ¬ ConstrainedCallsValid scaleChain
+      [⟨[], scaleRaw⟩, scaleProgram 60 "Fixture::IScale"] scaleRaw [true, true, true]
+      staticEmitted ∧
+    ¬ ConstrainedCallsValid scaleChain
+      [⟨[], scaleRaw⟩, scaleProgram 61 "Fixture::IScale"] scaleRaw [true, true, true]
+      staticEmitted := by decide +kernel
+#print axioms derived_override_valid
+
+/-- A derived interface supplies the body of a base `static abstract` slot. -/
+theorem derived_body_for_abstract_valid :
+    resolveConstrained [scaledEntry [moreInterface, scaleInterface],
+        { scaleEntry with methods := [{ scaleSlot with isAbstract := true, hasBody := false }] },
+        moreEntry] scaled scaleSite =
+      some (.interfaceBody moreInterface (scaleBody 61)) := by decide +kernel
+#print axioms derived_body_for_abstract_valid
+
+/-- In a chain the most derived body wins, found through inheritance the catalog lists only
+    transitively; a forged program method naming the intermediate body is rejected. -/
+theorem most_derived_body_valid :
+    resolveConstrained
+      [scaledEntry [mostInterface, moreInterface, scaleInterface], scaleEntry, moreEntry,
+        mostEntry] scaled scaleSite = some (.interfaceBody mostInterface (scaleBody 62)) ∧
+    ¬ ConstrainedCallsValid
+      [scaledEntry [mostInterface, moreInterface, scaleInterface], scaleEntry, moreEntry,
+        mostEntry]
+      [⟨[], scaleRaw⟩, scaleProgram 61 "Fixture::IScaleMore"] scaleRaw [true, true, true]
+      staticEmitted := by decide +kernel
+#print axioms most_derived_body_valid
+
+/-- Two unrelated interfaces overriding the slot leave no most specific body, so the call is
+    rejected rather than resolved to either or to the default. -/
+theorem diamond_rejected :
+    resolveConstrained
+      [scaledEntry [moreInterface, sideInterface, scaleInterface], scaleEntry, moreEntry,
+        sideEntry] scaled scaleSite = none ∧
+    ¬ ConstrainedCallsValid
+      [scaledEntry [moreInterface, sideInterface, scaleInterface], scaleEntry, moreEntry,
+        sideEntry]
+      [⟨[], scaleRaw⟩, scaleProgram 60 "Fixture::IScale"] scaleRaw [true, true, true]
+      staticEmitted ∧
+    resolveConstrained [scaledEntry [moreInterface, scaleInterface], scaleEntry,
+        { moreEntry with methods := [scaleBody 61, scaleBody 64] }] scaled scaleSite = none := by
+  decide +kernel
+#print axioms diamond_rejected
+
+/-- A derived interface that re-abstracts the slot is the most specific declaration, so the call
+    has no body: neither the default nor a less derived body is selected. -/
+theorem reabstraction_rejected :
+    resolveConstrained [scaledEntry [moreInterface, scaleInterface], scaleEntry,
+        { moreEntry with methods := [{ scaleBody 61 with isAbstract := true, hasBody := false }] }]
+      scaled scaleSite = none ∧
+    resolveConstrained
+      [scaledEntry [mostInterface, moreInterface, scaleInterface], scaleEntry, moreEntry,
+        { mostEntry with methods := [{ scaleBody 62 with isAbstract := true, hasBody := false }] }]
+      scaled scaleSite = none := by decide +kernel
+#print axioms reabstraction_rejected
+
+/-- The receiver's own `MethodImpl` beats every interface-level body. -/
+theorem struct_override_precedes_interfaces :
+    resolveConstrained
+      [{ scaledEntry [mostInterface, moreInterface, scaleInterface] with methods :=
+          [{ staticImplementation with token := 70, overrides := [(60, scaleInterface)] }] },
+        scaleEntry, moreEntry, mostEntry] scaled scaleSite =
+      some (.implementation
+        { staticImplementation with token := 70, overrides := [(60, scaleInterface)] }) := by
+  decide +kernel
+#print axioms struct_override_precedes_interfaces
+
+private def appPin : AssemblyPin := { identity := "App" }
+private def appReceiver : TypeExpr := .aggregate "App::Mine" 3
+private def appConcrete : DispatchType :=
+  { concrete with identity := appReceiver, methods := [staticImplementation], assembly := appPin }
+private def appDeclared : DispatchType := { declared with methods := [staticSlot] }
+private def appTypes : List DispatchType := [appConcrete, appDeclared]
+private def appRaw : RawMethod := { staticRaw with
+  code := [⟨0, 65046, .type appReceiver⟩, ⟨6, 40, .call staticSite⟩, ⟨11, 42, .none⟩] }
+private def appTarget : SpecializedMethod :=
+  ⟨[], { staticTarget.closed with owner := "App::Mine" }⟩
+
+/-- A struct of one pinned assembly implements a slot of another pinned assembly's interface, and
+    the emitted body must carry the struct's own scope. -/
+theorem cross_pin_implementation_valid :
+    ConstrainedCallsValid appTypes [⟨[], appRaw⟩, appTarget] appRaw [true, true, true]
+      staticEmitted ∧
+    ¬ ConstrainedCallsValid appTypes [⟨[], appRaw⟩, staticTarget] appRaw [true, true, true]
+      staticEmitted := by decide +kernel
+#print axioms cross_pin_implementation_valid
+
+/-- Every catalog entry dispatch reads must name a valid pin scoping its type: a receiver, slot
+    interface or inherited interface moved to another scope, or with no pin, fails closed. -/
+theorem unpinned_catalog_rejected :
+    resolveConstrained [{ appConcrete with assembly := fixturePin }, appDeclared]
+      appReceiver staticSite = none ∧
+    resolveConstrained [appConcrete, { appDeclared with assembly := appPin }]
+      appReceiver staticSite = none ∧
+    resolveConstrained [appConcrete, { appDeclared with assembly := {} }]
+      appReceiver staticSite = none ∧
+    resolveConstrained [appConcrete, { appDeclared with assembly := { identity := "A:B" } }]
+      appReceiver staticSite = none ∧
+    resolveConstrained [scaledEntry [moreInterface, scaleInterface], scaleEntry,
+        { moreEntry with assembly := appPin }] scaled scaleSite = none := by decide +kernel
+#print axioms unpinned_catalog_rejected
 
 /-- Lowering keeps the default body's closed interface and method type argument, and moves an
     override to the receiver with only the method type argument. -/
