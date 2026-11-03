@@ -81,11 +81,13 @@ theorem loop_reaches_terminates {program : CIL.Program} {method : Nat} {args : L
 #print axioms loop_reaches_terminates
 
 /-- Where a loop stepping tactic takes its goal: to the target state of a `LoopReaches`, or along
-    a `LoopTerminates` through its return or only up to a call or return. -/
+    a `LoopTerminates` through its return, only up to a call or return, or up to the pc `target`
+    and any struct store before it. -/
 inductive LoopStepping where
   | reach
   | finish
   | advance
+  | resume (target : Nat)
   deriving BEq
 
 /-- The list lemmas that put a stepped stack in literal form. -/
@@ -201,9 +203,10 @@ def loopTargetMismatch (tactic : String) (position : Nat) (source target : Expr)
 open Lean Elab Tactic Meta in
 /-- Step a loop goal through fetched instructions with the raw `facts` and their normalised
     `prepared` forms as `mode` directs, failing through `loopStuck` or `loopTargetMismatch`
-    where it cannot go on. -/
-def loopSteps (tactic : String) (mode : LoopStepping) (facts prepared : Array Term) :
-    TacticM Unit := do
+    where it cannot go on. A resumed walk stops at its target pc once a step is taken, which
+    `stepped` says happened before this call. -/
+def loopSteps (tactic : String) (mode : LoopStepping) (facts prepared : Array Term)
+    (stepped : Bool := false) : TacticM Unit := do
   let stackLemmas : Array Term := loopStackLemmas.map fun name => mkIdent (`_root_ ++ name)
   let rewriting := facts ++ stackLemmas
   let rewrite ← `(tactic| simp only [$[$rewriting:term],*])
@@ -242,10 +245,17 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts prepared : Array Te
     let some position ← literalNat? parts[0]! | return none
     unless (← literalNat? targetParts[0]!) == some position do return none
     return some (position, source, target)
+  let currentPc : TacticM (Option Nat) := withMainContext do
+    let some (source, _) ← loopGoalStates (← getMainTarget) | return none
+    let some parts ← loopStateParts? source | return none
+    literalNat? parts[0]!
   let mut taken := 0
   repeat
     if (← getGoals).isEmpty then return
     if ← attempt rewrite then continue
+    if let .resume target := mode then
+      if taken > 0 || stepped then
+        if (← currentPc) == some target then return
     if mode == .reach then
       if ← attempt close then return
       if taken > 0 then
@@ -260,6 +270,7 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts prepared : Array Te
       | .reach => fun _ => false
       | .finish => (· == ``CIL.Op.ret)
       | .advance => fun op => op == ``CIL.Op.call || op == ``CIL.Op.ret
+      | .resume _ => fun op => op == ``CIL.Op.setFieldAt || op == ``CIL.Op.initAggregate
     loopStuck tactic facts prepared stops
     return
 

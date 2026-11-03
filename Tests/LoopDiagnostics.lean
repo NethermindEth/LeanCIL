@@ -58,19 +58,21 @@ bind_cutpoint header (memory : Memory) (value : W32) (home : Reference)
   tally matching (fun op => op matches .bne _) with entry.frame memory home,
     [.scalar (.i32 value), .scalar (.i32 state.values.1)], state.memory
 
-/-- With no facts passed, the gathered frame facts step the struct's zeroing, its by-value field
-    reads, the call through `addTwo`'s contract, both field stores and the return: the loop
-    doubles its input and allocates nothing the caller sees. -/
+/-- The frame lemmas compose by hand: the struct's zeroing and stores are named, the call is
+    crossed with `after_confined`, and each path to the loop head is checked by `cil_loop_steps`
+    with no facts passed. The loop doubles its input and allocates nothing the caller sees. -/
 theorem doubles (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) :
     ∃ fuel final, invoke program fuel 0 [.scalar (.i32 value)] memory =
       .ok (final, [.scalar (.i32 (2 * value))]) ∧
       MemoryBelow memory.nextIdentity memory final := by
   obtain ⟨home, entered, setup, -, -, entryFrame⟩ := entry.checked memory value wellFormed
-  obtain ⟨zeroed, zeroing, frame, -⟩ := (entryFrame []).zero_aggregate 0 layout [.i32 0, .i32 0]
   refine invoke_loop_induction (by rfl) rfl setup (header memory value home)
     (fun state => state.values.2 = 2 * state.values.1)
-    (fun state => (value - state.values.1).toNat) ⟨(0, 0), zeroed, frame⟩ (by cil_loop_steps)
-    (by simp) ?_
+    (fun state => (value - state.values.1).toNat) (fun start => ?_) ?_
+  · obtain ⟨zeroed, zeroing, frame, -⟩ :=
+      (entryFrame []).zero_aggregate 0 layout [.i32 0, .i32 0]
+    exact loop_reaches_terminates (target := header memory value home ⟨(0, 0), zeroed, frame⟩)
+      (by cil_loop_steps) (start _ rfl)
   rintro ⟨⟨count, sum⟩, current, frame⟩ doubled recurse
   dsimp only at doubled
   by_cases done : count = value
@@ -78,7 +80,11 @@ theorem doubles (memory : Memory) (value : W32) (wellFormed : memory.WellFormed)
     rw [← doubled]
     cil_loop_finish
   · cil_loop_advance [done]
-    cil_loop_call addTwo_holds sum
+    apply loop_terminates_call addTwo_holds sum
+    · rfl
+    · cil_lookup []
+    · cil_checked_step []
+    · rfl
     · trivial
     rintro final _ ⟨_, invoked⟩ framed ⟨_, rfl, rfl⟩
     dsimp only [addTwoContract] at framed ⊢
@@ -96,6 +102,59 @@ theorem doubles (memory : Memory) (value : W32) (wellFormed : memory.WellFormed)
     · show (value - (count + 1)).toNat < (value - count).toNat
       bv_omega
 #print axioms doubles
+
+/-- By default the loop tactics take the struct's zeroing and stores through its frame, decide
+    the branch from `count ≠ value`, and continue the call with the frame after it: the proof
+    names no frame lemma, memory or step and supplies only the invariant and the arithmetic. -/
+theorem doubles_by_default (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) :
+    ∃ fuel final, invoke program fuel 0 [.scalar (.i32 value)] memory =
+      .ok (final, [.scalar (.i32 (2 * value))]) ∧
+      MemoryBelow memory.nextIdentity memory final := by
+  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := entry.checked memory value wellFormed
+  refine invoke_loop_induction (by rfl) rfl setup (header memory value home)
+    (fun state => state.values.2 = 2 * state.values.1)
+    (fun state => (value - state.values.1).toNat) (fun start => ?_) ?_
+  · cil_loop_recurse start (0, 0)
+    rfl
+  rintro ⟨⟨count, sum⟩, current, frame⟩ doubled recurse
+  dsimp only at doubled
+  by_cases done : count = value
+  · subst done
+    rw [← doubled]
+    cil_loop_finish
+  · cil_loop_advance
+    cil_loop_call addTwo_holds sum
+    cil_loop_recurse recurse (count + 1, sum + 2)
+    · show sum + 2 = 2 * (count + 1)
+      rw [doubled]
+      bv_omega
+    · show (value - (count + 1)).toNat < (value - count).toNat
+      bv_omega
+#print axioms doubles_by_default
+
+-- Loop values that are not the reached head state's are refused, showing the reached state.
+/-- error: cil_loop_recurse: the reached state is not the head of recurse at -/
+#guard_msgs (whitespace := lax, substring := true) in
+example (memory : Memory) (value count sum : W32) (home : Reference) (current : Memory)
+    (frame : LoopFrame [] memory current [.aggregate 8] [.bytes (.aggregate 8) home]
+      (knownLocals [some (.aggregate (layout.encode [.i32 count, .i32 sum]))]))
+    (recurse : ∀ next : State memory home, LoopTerminates program 0 [.scalar (.i32 value)]
+      (fun _ _ => True) (header memory value home next)) :
+    LoopTerminates program 0 [.scalar (.i32 value)] (fun _ _ => True)
+      ⟨14, entry.frame memory home, [], current⟩ := by
+  cil_loop_recurse recurse (count + 1, sum)
+
+-- A store whose home has no frame fact at its memory stops the walk at that store.
+/-- error: cil_loop_recurse: cannot step pc 7 (CIL.Op.setFieldAt 4 4) at memory
+  final -/
+#guard_msgs (whitespace := lax, substring := true) in
+example (memory : Memory) (value sum : W32) (home : Reference) (final : Memory)
+    (recurse : ∀ next : State memory home, LoopTerminates program 0 [.scalar (.i32 value)]
+      (fun _ _ => True) (header memory value home next)) :
+    LoopTerminates program 0 [.scalar (.i32 value)] (fun _ _ => True)
+      ⟨7, entry.frame memory home, [.scalar (.i32 (sum + 2)), .reference (.address home)],
+        final⟩ := by
+  cil_loop_recurse recurse (0, sum + 2)
 
 -- A contract applied before the loop reaches its call names the instruction it is at.
 /-- error: cil_loop_call: pc 3 is CIL.Op.localAddr 0, not a call; step to the call first with

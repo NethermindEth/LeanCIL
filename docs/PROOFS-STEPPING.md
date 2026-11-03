@@ -289,8 +289,9 @@ For loops, import [LoopAutomation](../CIL/Safety/LoopAutomation.lean). `cil_loop
 composes an execution segment and `cil_loop_finish [facts]` proves an exit path and its
 postcondition. The list is optional: both tactics add the facts
 [`gatherLoopFacts`](../CIL/Safety/LoopFacts.lean) finds, described under [loop verification
-conditions](#loop-verification-conditions), so the list carries only case hypotheses, invariant
-equations and other facts of no recognized shape. A step equation in the context, quantified or not,
+conditions](#loop-verification-conditions), so the list carries only invariant equations, the
+positive side of a case split and other facts of no recognized shape.
+A case split's negative side, such as `¬count = value`, is gathered and decides the branch. A step equation in the context, quantified or not,
 is used whenever its instruction is reached, so a run that used to stop at an instruction such a
 hypothesis justifies now continues past it. The exit closes with the normalised facts, then again
 after unfolding `leaveFrame` and narrow extension, so a fact about the exited frame's memory is
@@ -316,18 +317,33 @@ A loop body that calls a helper composes through the helper's `MethodContract`
 continuation budget, which a contract's existential fuel cannot supply, so
 `loop_terminates_induction` asks each iteration for `LoopTerminates` at its own state while assuming
 it at every invariant state of smaller measure.
-[`invoke_loop_induction`](../CIL/Safety/LoopContract.lean) joins it with frame entry: from the
-lookup, checked arguments, `setup`, the configuration, invariant, measure, first state and checked
-path to it, its one goal is that iteration, and its result is the `∃ fuel final, invoke ... =
-.ok (final, values) ∧ kept final` of `invoke_loop_results`. `CIL.Safety.LoopScaffold` imports
-it. Step to the call with `cil_loop_advance [facts]`, which stops at a call or return and fails
-as `cil_loop_steps` does on anything else, and apply the contract with `cil_loop_call holds input
-at site [facts]` (`loop_terminates_call`, or `loop_terminates_call_formed` for `WellFormed` and
-the static world). Both gather facts as the other loop tactics do, so the list is optional;
-without `at site` the call is the fetched instruction, and a goal not at a call fails naming its
-pc and instruction. Re-establish the invariant
-from `Returns` and `Confined` in the continuation, reach the next head with `cil_loop_steps`, and
-close with `loop_reaches_terminates` and the assumption. The [counted-loop
+[`invoke_loop_induction`](../CIL/Safety/LoopContract.lean) joins it with frame entry. From the
+lookup, checked arguments, `setup`, the configuration, invariant and measure, it leaves two
+goals: the entry state terminates given that every invariant head state does, and the iteration.
+Its result is the `∃ fuel final, invoke ... = .ok (final, values) ∧ kept final` of
+`invoke_loop_results`.
+
+The tactics of [LoopFrameSteps](../CIL/Safety/LoopFrameSteps.lean), which
+`CIL.Safety.LoopScaffold` imports, walk these goals while keeping the loop's `LoopFrame` current:
+
+- `cil_loop_advance [facts]` steps to a call or return and fails as `cil_loop_steps` does on
+  anything else.
+- `cil_loop_call holds input at site [facts]` applies the contract (`loop_terminates_call`) at
+  the `bind_call` site or, without `at site`, at the fetched call, and fails naming the pc and
+  instruction when the goal is not at a call. It leaves the precondition unless `trivial` proves
+  it, then continues: it names the returned memory, unfolds the contract, substitutes an output
+  its postcondition states as an equation, and, when the callee's footprint lies inside the
+  frame's, proves the frame at the returned memory with `LoopFrame.after_confined`.
+- `cil_loop_recurse hypothesis values` steps to the loop head of `hypothesis`, the entry goal's
+  or the iteration's statement that every (smaller) invariant head state terminates. It takes
+  each struct zeroing and field store on the way through `LoopFrame.zero_aggregate` and
+  `store_field`, naming the memory each produces, and applies `hypothesis` at the head state
+  with loop values `values`, the reached memory and its frame. The invariant and the decrease
+  are left as goals; a state that is not the head's at `values` fails, showing the reached state.
+
+All gather facts as the other loop tactics do, so the lists are optional.
+`loop_terminates_call_formed` gives the continuation `WellFormed` and the static world when a
+proof composes the call by hand. The [counted-loop
 proof](../Examples/Proofs/CountCalls.lean) never unfolds the helper or names its fuel; the loop
 suite reuses it unedited for a reimplemented helper and requires it to reject a discarded helper
 result and a broken count. On the correct build, a nondecreasing measure and an invariant that holds

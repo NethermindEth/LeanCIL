@@ -5,9 +5,9 @@ import CIL.StructuralLabels
 import CIL.Safety.LoopScaffold
 
 /-! `TallyTwice` counts a struct's `count` field up to its input, adding two to its `sum` field
-through `AddTwo` each time, and returns `sum`. The loop tactics gather the struct's field reads,
-its home and the call from the frame facts in scope; the proof supplies the invariant, the
-measure and the arithmetic. -/
+through `AddTwo` each time, and returns `sum`. The loop tactics zero and store the struct, read
+its fields and cross the call through `AddTwo`'s contract with the frame facts they carry; the
+proof supplies the invariant, the measure and the arithmetic. -/
 
 open CIL.Safety
 open CIL (W32)
@@ -53,31 +53,20 @@ theorem correctness (memory : Memory) (value : W32) (wellFormed : memory.WellFor
       .ok (final, [.scalar (.i32 (2 * value))]) ∧
       MemoryBelow memory.nextIdentity memory final := by
   obtain ⟨home, entered, setup, -, -, entryFrame⟩ := entry.checked memory value wellFormed
-  obtain ⟨zeroed, zeroing, frame, -⟩ :=
-    (entryFrame []).zero_aggregate 0 Extracted.layout0 [.i32 0, .i32 0]
   refine invoke_loop_induction tally.found rfl setup (header memory value home)
     (fun state => state.values.2 = 2 * state.values.1)
-    (fun state => (value - state.values.1).toNat) ⟨(0, 0), zeroed, frame⟩ (by cil_loop_steps)
-    (by simp) ?_
+    (fun state => (value - state.values.1).toNat) (fun start => ?_) ?_
+  · cil_loop_recurse start (0, 0)
+    rfl
   rintro ⟨⟨count, sum⟩, current, frame⟩ doubled recurse
   dsimp only at doubled
   by_cases done : count = value
   · subst done
     rw [← doubled]
     cil_loop_finish
-  · cil_loop_advance [done]
+  · cil_loop_advance
     cil_loop_call addTwo_holds sum at addTwoSite
-    · trivial
-    rintro final _ ⟨_, invoked⟩ framed ⟨_, rfl, rfl⟩
-    dsimp only [addTwoContract] at framed ⊢
-    have called := frame.after_confined framed
-      (invoke_preserves_wellFormed _ _ _ _ _ _ _ frame.wellFormed invoked) (by simp) (by simp)
-    obtain ⟨summed, summing, summedFrame, -⟩ :=
-      called.store_field 0 Extracted.layout0_valid 1 (.i32 (sum + 2))
-    obtain ⟨counted, counting, countedFrame, -⟩ :=
-      summedFrame.store_field 0 Extracted.layout0_valid 0 (.i32 (count + 1))
-    refine loop_reaches_terminates (target := header memory value home
-      ⟨(count + 1, sum + 2), counted, countedFrame⟩) (by cil_loop_steps) (recurse _ ?_ ?_)
+    cil_loop_recurse recurse (count + 1, sum + 2)
     · show sum + 2 = 2 * (count + 1)
       rw [doubled]
       bv_omega

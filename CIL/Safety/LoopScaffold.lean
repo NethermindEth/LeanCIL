@@ -3,7 +3,7 @@ import CIL.Safety.FrameProgress
 import CIL.Safety.NumericLocals
 import CIL.Safety.LoopFrames
 import CIL.Safety.LoopFrameFields
-import CIL.Safety.LoopContract
+import CIL.Safety.LoopFrameSteps
 import CIL.MethodIdentity
 import Lean
 
@@ -14,8 +14,8 @@ Proof-local generators derive entry frames and cutpoints from extracted methods.
 equations are checked by the kernel; no frame layout or instruction position is assumed.
 Only proofs requesting the scaffold elaborate it, so extraction certificates stay unchanged.
 Importing the scaffold brings the rest of a loop proof: the frame lemmas of
-`CIL.Safety.LoopFrames` and `CIL.Safety.LoopFrameFields`, and `invoke_loop_induction` with the
-call rules of `CIL.Safety.LoopContract`.
+`CIL.Safety.LoopFrames` and `CIL.Safety.LoopFrameFields`, `invoke_loop_induction` with the
+call rules of `CIL.Safety.LoopContract`, and the tactics of `CIL.Safety.LoopFrameSteps`.
 -/
 
 namespace CIL.Safety

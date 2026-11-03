@@ -226,8 +226,9 @@ equation, the frame after it and `MemoryBelow`; the slot, the field and its widt
 A by-value read, `ldloc` then `ldfld`, loads the struct and reads the field with
 `step_fieldAt_encode`.
 
-The loop tactics gather the field reads and the home's `form` from each frame in scope, so a proof
-states only the zeroing and the stores, which fix the next memory. A field reads back as the value
-stored, such as `.i32 (count + 1)`, with no `toNat` round trip through bytes.
-[TallyTwice](../Examples/Proofs/TallyTwice.lean) counts and sums in a struct across a helper call
-this way, passing no facts to the loop tactics.
+The loop tactics gather the field reads and the home's `form` from each frame in scope, and
+`cil_loop_recurse` takes the zeroing and the stores itself, so a proof names neither. A zeroed
+struct's layout is one its loop head remembers, and its fields must be 4, 8, 16 or 32-byte
+scalars. A field reads back as the value stored, such as `.i32 (count + 1)`, with no `toNat`
+round trip through bytes. [TallyTwice](../Examples/Proofs/TallyTwice.lean) counts and sums in a
+struct across a helper call this way, naming no frame lemma, memory or step.

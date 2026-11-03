@@ -39,6 +39,16 @@ partial def loopFactSides? (type : Expr) : MetaM (Option (Array FVarId × Array 
     return some (outer lhs, outer rhs)
 
 open Lean Meta in
+/-- A case split's negative side, `a ≠ b` or `¬a = b` over data: it decides a branch the loop
+    tactics reach, and as a rewrite to `False` it cannot loop. -/
+def isCaseDisequality (type : Expr) : MetaM Bool := do
+  let type := type.consumeMData
+  if type.isAppOfArity ``Ne 3 then return !(← isProp type.appFn!.appFn!.appArg!)
+  unless type.isAppOfArity ``Not 1 do return false
+  let some (carrier, _, _) := type.appArg!.consumeMData.eq? | return false
+  return !(← isProp carrier)
+
+open Lean Meta in
 /-- The memories the left sides of a `loopFactSides?` fact read: their arguments of type `Memory`
     that do not depend on its quantifiers. -/
 partial def loopFactMemories (type : Expr) : MetaM (Array Expr) :=
@@ -284,6 +294,8 @@ def gatherLoopFacts (facts : Array Term) : TacticM (Array Term) := withMainConte
     else if let some (subject, produced) ← loopFactSides? type then
       let memories ← loopFactMemories type
       candidates := candidates.push (.anonymous, fact, subject, memories, produced)
+    else if ← isCaseDisequality type then
+      candidates := candidates.push (.anonymous, fact, variables #[type], #[], #[])
     let arguments := type.getAppArgs
     if type.isAppOfArity `CIL.Safety.CheckedSpan 5 then
       let subject := variables #[arguments[0]!, arguments[1]!]
@@ -339,14 +351,14 @@ def gatherLoopFacts (facts : Array Term) : TacticM (Array Term) := withMainConte
           -- A struct remembered by its field values reads each field by value and by address.
           let some (layout, values) ← encodedStruct? entry | continue
           let valid ← layoutValidity layout
-          -- The literal list is the form stepping leaves on the stack, whatever spelled it.
+          -- The literal list, projections reduced, is the form stepping leaves on the stack.
           let entries ← listEntries values
           let literal ← mkListLit (mkConst ``CIL.Value) (entries.toList.map (·.2))
-          let valuesTerm ← Term.exprToSyntax literal
+          let valuesTerm ← Term.exprToSyntax (← dsimp literal (← Simp.mkContext)).1
           let fields ← listEntries (mkApp (mkConst `CIL.AggregateLayout.fields) layout)
           for field in [:fields.size] do
             candidates := candidates.push (`fieldRead, applied `step_fieldAt_encode
-              #[valid, numeral field, valuesTerm], variables #[values], memory, #[])
+              #[valid, numeral field, valuesTerm], subject, memory, #[])
             candidates := candidates.push (`fieldLoad, applied `LoopFrame.load_field
               #[frameTerm, numeral index, valid, numeral field], subject, memory, #[])
     if type.isAppOfArity `CIL.Safety.LoopFrame 6 && isLive arguments[2]! then
