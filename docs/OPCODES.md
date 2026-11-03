@@ -262,7 +262,10 @@ remain visible to the caller without boxing.
 
 A `constrained. T; call` pair dispatches a static virtual interface member, such as an operation
 or flag struct selected by a type argument. The slot must be static and virtual on an interface,
-possibly generic such as `I<T>`, that the non-generic struct `T` implements directly. The target
+possibly generic such as `I<T>`, that the struct `T` implements directly. A closed generic struct
+such as `G<uint>` dispatches through the interface its `InterfaceImpl` names, instantiated at its
+type arguments, so `struct G<T> : IScale<T>` implements `IScale<uint>`, and the selected
+implementation or interface-level body is closed at those arguments. The target
 is, in the runtime's order, `T`'s explicit `MethodImpl` override, else the unique public static
 method of `T` with the slot's name and signature, else the most specific interface-level body.
 The candidates for that last step are the slot's own body (a C# `static virtual` member) and every
@@ -286,7 +289,7 @@ arguments and argument count. Each catalog entry names the pinned assembly its m
 from, and resolution reads only entries whose pin scopes their type.
 A branch cannot bypass the prefix.
 Reference receivers, boxing fallbacks, inherited dispatch, instance default-interface methods,
-generic instance methods on interfaces, static slots on generic struct receivers and ordinary
+generic instance methods on interfaces, receivers left open after specialization and ordinary
 unconstrained virtual calls remain unsupported.
 
 A static Boolean getter used as a compile-time flag selects code the way the JIT does: when a

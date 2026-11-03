@@ -67,8 +67,6 @@ internal static class ConstrainedCalls
             receiver.ContainsGenericParameter || LayoutEvidence.Scope(receiver) != LayoutEvidence.Scope(concrete) ||
             receiver is not GenericInstanceType && receiver.FullName != concrete.FullName)
             throw new InvalidDataException("Constrained receiver must be a concrete struct of an extracted assembly");
-        if (!instance && receiver is GenericInstanceType)
-            throw new InvalidDataException("Static constrained slots on generic struct receivers are unsupported");
         MetadataValidation.Layout(receiver, caller.Module, architecture);
         if (instructions.IsTarget(call))
             throw new InvalidDataException("Branch bypasses constrained receiver prefix");

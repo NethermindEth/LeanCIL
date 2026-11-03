@@ -328,3 +328,57 @@ public static class ComputedFlags
 
     public static ulong CountPing(ulong value) => Ping ? value + 1 : value;
 }
+
+// Static slots on closed generic struct receivers: the receiver's implementation is closed at its
+// type arguments, and the interface it lists is instantiated through its InterfaceImpl at them, so
+// the type argument both selects the interface instantiation and decides closed type tests.
+public struct WordFlag<T> : IStepFlag where T : unmanaged
+{
+    public static bool IsActive => typeof(T) == typeof(ulong);
+}
+
+public interface IWidth<T> where T : unmanaged
+{
+    static abstract ulong Width(ulong value);
+}
+
+public interface IPadded<T> where T : unmanaged
+{
+    static virtual ulong Pad(ulong value) => typeof(T) == typeof(uint) ? value + 4 : value + 8;
+}
+
+public struct Measured<T> : IWidth<T>, IPadded<T> where T : unmanaged
+{
+    public static ulong Width(ulong value) => typeof(T) == typeof(uint) ? value * 4 : value * 8;
+}
+
+public static class GenericReceivers
+{
+    static ulong Trace<TFlag>(ulong value) where TFlag : struct, IStepFlag
+    {
+        if (TFlag.IsActive) value += (ulong)System.Environment.TickCount64;
+        return value + 1;
+    }
+
+    static ulong Count<TFlag>(ulong value) where TFlag : struct, IStepFlag =>
+        TFlag.IsActive ? value * 3 + 1 : value;
+
+    static ulong Width<TMeasure, T>(ulong value) where TMeasure : struct, IWidth<T> where T : unmanaged =>
+        TMeasure.Width(value);
+
+    static ulong Pad<TPad, T>(ulong value) where TPad : struct, IPadded<T> where T : unmanaged =>
+        TPad.Pad(value);
+
+    // The narrow flag is false, so the clock read it guards is pruned.
+    public static ulong TraceNarrow(ulong value) => Trace<WordFlag<uint>>(value);
+
+    public static ulong CountWide(ulong value) => Count<WordFlag<ulong>>(value);
+
+    public static ulong WidthNarrow(ulong value) => Width<Measured<uint>, uint>(value);
+
+    public static ulong WidthWide(ulong value) => Width<Measured<ulong>, ulong>(value);
+
+    public static ulong PadNarrow(ulong value) => Pad<Measured<uint>, uint>(value);
+
+    public static ulong PadWide(ulong value) => Pad<Measured<ulong>, ulong>(value);
+}

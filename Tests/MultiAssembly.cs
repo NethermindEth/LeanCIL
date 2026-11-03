@@ -33,6 +33,8 @@ public interface IScaleTwice : IScale { static ulong IScale.Scale(ulong x) => x 
 public struct Shadowed : IScaleTwice { }
 public interface IGet { ulong Get(); }
 public struct Holder : IGet { public ulong Value; public ulong Get() => Value + 1; }
+public struct GenericOn<T> : IFlag where T : unmanaged { public static bool IsActive => true; }
+public struct GenericPlain<T> : IScale where T : unmanaged { }
 """;
 
 string Project(string name, string assembly, string properties = "", string references = "")
@@ -80,6 +82,9 @@ public static class Application
     public static ulong Got(ulong x) { Holder holder = default; holder.Value = x; return Use(ref holder); }
     static ulong Use<T>(ref T value) where T : struct, IGet => value.Get();
     public static ulong Mine(ulong x) => Scaled<AppScale>(x);
+    public static ulong RunGenericOn(ulong x) => Run<GenericOn<uint>>(x);
+    public static ulong RunAppGenericOff(ulong x) => Run<AppGenericOff<uint>>(x);
+    public static ulong ScaledGenericPlain(ulong x) => Scaled<GenericPlain<uint>>(x);
 }
 // App structs and interfaces built on Lib's interfaces: dispatch reads both pinned assemblies.
 public struct AppScale : IScale { public static ulong Scale(ulong x) => x + 9; }
@@ -89,6 +94,7 @@ public struct AppPlain : IScale { }
 public interface IAppScale : IScale { static ulong IScale.Scale(ulong x) => x * 4; }
 public struct AppDerived : IAppScale { }
 public struct Marked : IScale, MultiFixture.Other.IMarker { }
+public struct AppGenericOff<T> : IFlag where T : unmanaged { public static bool IsActive => false; }
 """);
 Run(["dotnet", "build", Path.Combine(appDirectory, "App.csproj"), "-c", "Release"]);
 string app = Path.Combine(appDirectory, "bin", "MultiFixture.App.dll");
@@ -123,6 +129,15 @@ void Proved(string name, string selector, string proof, bool referencedBody, par
     Console.WriteLine("PASS cross-assembly " + name + ": pinned reference, attributed body and proof");
 }
 
+// Each constant flag decides whether Lib's `Mix.Step` is extracted at all.
+void Decided(params (string Name, bool Stepped)[] runs)
+{
+    foreach ((string name, bool stepped) in runs)
+        if (File.ReadAllText(Path.Combine(Artifact(name), "Extracted.lean"))
+                .Contains("::MultiFixture.Mix\"", StringComparison.Ordinal) != stepped)
+            throw new InvalidOperationException("Constant flag did not decide which branch is extracted: " + name);
+}
+
 Proved("Direct", "MultiFixture.Application::Direct(ulong)", "Tests/MultiAssembly/Direct.lean", referencedBody: true);
 Proved("Nested", "MultiFixture.Application::Nested(ulong)", "Tests/MultiAssembly/Nested.lean", referencedBody: true);
 Proved("Local", "MultiFixture.Application::Local(ulong)", "Tests/MultiAssembly/Local.lean", referencedBody: true);
@@ -136,10 +151,7 @@ Proved("RunOff", run, "Tests/MultiAssembly/RunOff.lean", referencedBody: true,
     "--type-argument", "MultiFixture.Off, " + libName);
 Proved("RunOn", run, "Tests/MultiAssembly/RunOn.lean", referencedBody: true,
     "--type-argument", "MultiFixture.On, " + libName);
-foreach ((string name, bool stepped) in new[] { ("RunOff", false), ("RunOn", true) })
-    if (File.ReadAllText(Path.Combine(Artifact(name), "Extracted.lean"))
-            .Contains("::MultiFixture.Mix\"", StringComparison.Ordinal) != stepped)
-        throw new InvalidOperationException("Constant flag did not decide which branch is extracted: " + name);
+Decided(("RunOff", false), ("RunOn", true));
 // A Lib interface's static virtual default body, and an instance slot reached through a Lib struct.
 Proved("Scaled", "MultiFixture.Application::Scaled(ulong)", "Tests/MultiAssembly/Scaled.lean",
     referencedBody: true, "--type-argument", "MultiFixture.Plain, " + libName);
@@ -155,15 +167,22 @@ Proved("RunAppOn", run, "Tests/MultiAssembly/RunOn.lean", referencedBody: true,
     "--type-argument", "MultiFixture.AppOn");
 Proved("RunAppOff", run, "Tests/MultiAssembly/RunOff.lean", referencedBody: false,
     "--type-argument", "MultiFixture.AppOff");
-foreach ((string name, bool stepped) in new[] { ("RunAppOff", false), ("RunAppOn", true) })
-    if (File.ReadAllText(Path.Combine(Artifact(name), "Extracted.lean"))
-            .Contains("::MultiFixture.Mix\"", StringComparison.Ordinal) != stepped)
-        throw new InvalidOperationException("Constant flag did not decide which branch is extracted: " + name);
+Decided(("RunAppOff", false), ("RunAppOn", true));
 Proved("Mine", "MultiFixture.Application::Mine(ulong)", "Tests/MultiAssembly/Mine.lean", referencedBody: false);
 Proved("ScaledAppPlain", scaled, "Tests/MultiAssembly/Scaled.lean", referencedBody: true,
     "--type-argument", "MultiFixture.AppPlain");
 Proved("ScaledAppDerived", scaled, "Tests/MultiAssembly/Quadrupled.lean", referencedBody: false,
     "--type-argument", "MultiFixture.AppDerived");
+
+// Closed generic struct receivers of either assembly: a Lib flag and an App flag, each closed at its type
+// argument, fold their branch, and a Lib generic struct runs Lib's default body.
+Proved("RunGenericOn", "MultiFixture.Application::RunGenericOn(ulong)", "Tests/MultiAssembly/RunOn.lean",
+    referencedBody: true);
+Proved("RunAppGenericOff", "MultiFixture.Application::RunAppGenericOff(ulong)",
+    "Tests/MultiAssembly/RunOff.lean", referencedBody: false);
+Decided(("RunAppGenericOff", false), ("RunGenericOn", true));
+Proved("ScaledGenericPlain", "MultiFixture.Application::ScaledGenericPlain(ulong)",
+    "Tests/MultiAssembly/Scaled.lean", referencedBody: true);
 
 void Rejected(string name, string marker, string[] command)
 {

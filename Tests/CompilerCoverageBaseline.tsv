@@ -166,6 +166,7 @@ Examples:System.Boolean Examples.ViewAccessors::ReadOnlyEmpty(System.ReadOnlySpa
 Examples:System.Boolean Examples.ViewAccessors::ReadOnlyPinnableNull(System.ReadOnlySpan`1<System.Int32>)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.ViewAccessors::ReadOnlyReferenceNull(System.ReadOnlySpan`1<System.Int32>)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.ViewAccessors::ReferenceNull(System.Span`1<System.Int32>)	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.WordFlag`1::get_IsActive()	N	N	N	N	N	N	N	N
 Examples:System.Boolean& Examples.UnsafeLayouts::Add0int(System.Boolean&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Boolean& Examples.UnsafeLayouts::Add0nint(System.Boolean&,System.IntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Boolean& Examples.UnsafeLayouts::Add0nuint(System.Boolean&,System.UIntPtr)	A	A	A	A	A	A	A	A
@@ -787,15 +788,27 @@ Examples:System.UInt64 Examples.GenericOwners::NestedSpanFirst(System.ReadOnlySp
 Examples:System.UInt64 Examples.GenericOwners::OwnerSpanFirst(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.GenericOwners::SpanFirst(System.ReadOnlySpan`1<System.UInt64>&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.GenericOwners::SpanSecond(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.GenericReceivers::Count(System.UInt64)	N	N	N	N	N	N	N	N
+Examples:System.UInt64 Examples.GenericReceivers::CountWide(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.GenericReceivers::Pad(System.UInt64)	N	N	N	N	N	N	N	N
+Examples:System.UInt64 Examples.GenericReceivers::PadNarrow(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.GenericReceivers::PadWide(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.GenericReceivers::Trace(System.UInt64)	N	N	N	N	N	N	N	N
+Examples:System.UInt64 Examples.GenericReceivers::TraceNarrow(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.GenericReceivers::Width(System.UInt64)	N	N	N	N	N	N	N	N
+Examples:System.UInt64 Examples.GenericReceivers::WidthNarrow(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.GenericReceivers::WidthWide(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.IBinaryStep::Apply(System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.IInWord`1::Sum(System.ReadOnlySpan`1<System.UInt64>& modreq(System.Runtime.InteropServices.InAttribute))	N	N	N	N	N	N	N	N
 Examples:System.UInt64 Examples.IMeasure::Measure(System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.IMeasureFive::Examples.IMeasure.Measure(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.IPadded`1::Pad(System.UInt64)	N	N	N	N	N	N	N	N
 Examples:System.UInt64 Examples.IPrice::get_Price()	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.IScale::Scale(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.IScaleMore::Examples.IScale.Scale(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.IScaleMost::Examples.IScale.Scale(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.IScaleSide::Examples.IScale.Scale(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.IWidth`1::Width(System.UInt64)	N	N	N	N	N	N	N	N
 Examples:System.UInt64 Examples.InParameters::Constrained(Examples.InWord&,Examples.InWord&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.InParameters::ConstrainedSum(Examples.InWord&,System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.InParameters::Sum(T&,System.ReadOnlySpan`1<System.UInt64>&)	N	N	N	N	N	N	N	N
@@ -810,6 +823,7 @@ Examples:System.UInt64 Examples.IntegerMath::MaxUInt64(System.UInt64,System.UInt
 Examples:System.UInt64 Examples.IntegerMath::MinUInt64(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Loops::Sum(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.MarshaledMemory::Read(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Measured`1::Width(System.UInt64)	N	N	N	N	N	N	N	N
 Examples:System.UInt64 Examples.MostSpecificBodies::Five(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.MostSpecificBodies::Measured(System.UInt64)	N	N	N	N	N	N	N	N
 Examples:System.UInt64 Examples.MostSpecificBodies::More(System.UInt64)	A	A	A	A	A	A	A	A

@@ -226,30 +226,51 @@ foreach (var name in new[] { "TraceOff", "CountOn" })
 }
 
 // A getter computed from other getters folds through their certificates: conjunction, negation, a chain of
-// getters, generic type tests and derived-interface bodies each prune the clock read they guard.
-var computedFlags = staticInterfaces.Assembly.GetType("Examples.ComputedFlags")!;
-foreach (var (name, assume) in new[]
+// getters, generic type tests and derived-interface bodies each prune the clock read they guard. Static slots
+// on closed generic struct receivers run the receiver's closed implementation or the default body of the
+// interface instantiated at its type arguments; a flag there folds like any other.
+string? widthNarrow = null;
+foreach (var (type, name, pruned, assume) in new (string, string, bool?, bool)[]
 {
-    ("TraceBoth", false), ("TraceNotOff", false), ("TraceChained", false), ("TraceGated", false),
-    ("TraceSilent", false), ("CountConfigured", true)
+    ("ComputedFlags", "TraceBoth", true, false), ("ComputedFlags", "TraceNotOff", true, false),
+    ("ComputedFlags", "TraceChained", true, false), ("ComputedFlags", "TraceGated", true, false),
+    ("ComputedFlags", "TraceSilent", true, false),
+    // A getter reading a static field is never constant, so neither of its blocks is pruned.
+    ("ComputedFlags", "CountConfigured", false, true),
+    ("GenericReceivers", "TraceNarrow", true, false), ("GenericReceivers", "CountWide", null, false),
+    ("GenericReceivers", "WidthNarrow", null, false), ("GenericReceivers", "WidthWide", null, false),
+    ("GenericReceivers", "PadNarrow", null, false), ("GenericReceivers", "PadWide", null, false)
 })
 {
-    var output = Path.Combine(root, "Computed-" + name);
-    Run(["dotnet", ExtractorPath, "extract", assembly, $"ComputedFlags::{name}(ulong)", output,
+    var output = Path.Combine(root, type + "-" + name);
+    Run(["dotnet", ExtractorPath, "extract", assembly, $"{type}::{name}(ulong)", output,
         .. assume ? new[] { "--assume-initialized", "Examples.StaticScalars" } : []]);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    // A getter reading a static field is never constant, so neither of its blocks is pruned.
-    if (source.Contains(".unsupported \"Unreachable under selected profile\"", StringComparison.Ordinal) == assume)
-        throw new Exception("Unexpected computed flag pruning: " + name);
+    if (pruned is bool expected && expected !=
+        source.Contains(".unsupported \"Unreachable under selected profile\"", StringComparison.Ordinal))
+        throw new Exception("Unexpected flag pruning: " + name);
+    if (name == "WidthNarrow") widthNarrow = source;
+    var entry = staticInterfaces.Assembly.GetType("Examples." + type)!.GetMethod(name)!;
     var claims = new[] { 0UL, 5UL, ulong.MaxValue, 1UL << 63 }
-        .Select(input => (input, result: (ulong)computedFlags.GetMethod(name)!.Invoke(null, [input])!))
+        .Select(input => (input, result: (ulong)entry.Invoke(null, [input])!))
         .Select(pair => $"(CIL.Safety.invoke Extracted.program 64 0 [.scalar (.i64 {pair.input})] " +
             $"CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 {pair.result})]").ToArray();
-    var proof = Path.Combine(root, "Computed-" + name + ".lean");
+    var proof = Path.Combine(root, type + "-" + name + ".lean");
     File.WriteAllText(proof, source + "\ntheorem flag_result :\n    " + string.Join(" ∧\n    ", claims) +
         " :=\n  ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\n#print axioms flag_result\n");
-    evidence.Add(proof, "PASS computed flag: " + name);
+    evidence.Add(proof, $"PASS {type}: {name}");
 }
+
+// The receiver's catalog lists the interface instantiated at its own type argument; listing another
+// instantiation leaves the slot unimplemented.
+const string narrowWidth = "interfaces := [.apply (.constructor \"Examples, Version=1.0.0.0, Culture=neutral, " +
+    "PublicKeyToken=null\" \"Examples.IWidth\\u00601\") (.atom Extraction.runtimeScope \"System.UInt32\")";
+if (widthNarrow?.Contains(narrowWidth, StringComparison.Ordinal) != true)
+    throw new Exception("Missing generic receiver interface mutation target");
+var wrongInstance = Path.Combine(root, "WidthNarrow-wrong-instance.lean");
+File.WriteAllText(wrongInstance, Narrowed(widthNarrow, out _).Replace(narrowWidth,
+    narrowWidth.Replace("System.UInt32", "System.UInt64"), StringComparison.Ordinal));
+rejected.Add(wrongInstance, "PASS forged generic receiver interface instantiation", "ConstrainedCallsValid");
 
 // A recursive pair of getters never folds; extraction terminates and rejects the recursion.
 var recursive = Execute(["dotnet", ExtractorPath, "extract", assembly, "ComputedFlags::CountPing(ulong)",
@@ -619,6 +640,24 @@ foreach (var (mutation, marker) in new[]
         throw new Exception("Incorrect constrained rejection: " + mutation + "\n" + extractionRejection.Output);
     Console.WriteLine("PASS constrained extraction rejection: " + mutation);
 }
+
+// A receiver still open after specialization names no implementation to run, so specialization rejects it.
+var openDll = Path.Combine(root, "open-receiver.dll");
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var flag = module.GetType("Examples.WordFlag`1");
+    var trace = module.GetType("Examples.GenericReceivers").Methods.Single(method => method.Name == "Trace");
+    var open = new GenericInstanceType(flag);
+    open.GenericArguments.Add(flag.GenericParameters[0]);
+    trace.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Constrained).Operand = open;
+    module.Write(openDll);
+}
+var openRejection = Execute(["dotnet", ExtractorPath, "extract", openDll, "GenericReceivers::TraceNarrow(ulong)",
+    Path.Combine(root, "Reject-open-receiver")]);
+const string openMarker = "Foreign generic parameter owner in specialized body";
+if (openRejection.Code == 0 || !openRejection.Output.Contains(openMarker, StringComparison.Ordinal))
+    throw new Exception("Incorrect open generic receiver rejection" + Environment.NewLine + openRejection.Output);
+Console.WriteLine("PASS constrained extraction rejection: open-generic-receiver");
 
 // Only System.Runtime's modreq(InAttribute) directly on a by-reference parameter is admitted.
 const string modifierRejection = "except System.Runtime's modreq(InAttribute) directly on a by-reference parameter";

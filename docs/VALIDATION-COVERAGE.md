@@ -645,7 +645,10 @@ non-constant bodies and a callee certificate claiming a word its body does not c
 the runtime, keeps a static-field getter live, rejects live, swapped and untracked flags, forged
 caller and callee certificates and a recursive getter pair, and prunes a getter computing false. It also proves compiled most specific bodies
 (`MostSpecificBodies`, the derived generic `SpendRefunding` and derived flag getters in
-`DerivedFlags`) against the runtime, rejects a compiled diamond, re-abstraction, unlisted base
+`DerivedFlags`) and static slots on closed generic struct receivers (`GenericReceivers`: a
+type-argument flag that keeps or prunes its block, an implementation and an interface default
+whose interface is instantiated at the receiver's argument) against the runtime, rejects a catalog
+listing another instantiation of that interface and an open receiver, rejects a compiled diamond, re-abstraction, unlisted base
 interface and live derived flag, and has Lean reject a catalog hiding the most specific
 `MethodImpl` or moving its interface outside its pin. These run in the `evidence` suite.
 
