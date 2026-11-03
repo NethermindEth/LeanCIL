@@ -85,6 +85,17 @@ theorem Confined.ofMemoryBelow {footprint : List (Reference × Nat)} {before aft
     fun id bound offset => preserved.permissions id (old bound) offset true,
     fun id bound offset _ => preserved.permissions id (old bound) offset false⟩
 
+/-- A change confined to no storage keeps all memory that existed before it. -/
+theorem Confined.nil_memoryBelow {before after : Memory} (framed : Confined [] before after) :
+    MemoryBelow before.nextIdentity before after :=
+  ⟨framed.allocations,
+    fun id bound offset => framed.cells id bound offset (fun _ member => nomatch member),
+    fun id bound offset writing => by
+      cases writing
+      · exact framed.readable id bound offset fun _ member => nomatch member
+      · exact framed.writable id bound offset⟩
+#print axioms Confined.nil_memoryBelow
+
 /-- Interval `inner` lies wholly inside interval `outer` of the same allocation. -/
 def Within (inner outer : Reference × Nat) : Prop :=
   inner.1.allocation = outer.1.allocation ∧ outer.1.offset ≤ inner.1.offset ∧

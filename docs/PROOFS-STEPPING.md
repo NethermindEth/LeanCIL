@@ -369,14 +369,13 @@ an unrelated context adds nothing to simp:
   `staticInstruction`, `loadLocal`, `storeLocal`, `loadValue`, `storeValue` and the span
   `element`, `slice`, `validate`, `width` and `writable` checks;
 - for a [`CheckedSpan`](../CIL/Safety/SpanContents.lean), its `facts`, `length_nil` or
-  `length_cons` when its values are `[]` or a cons, and, for each `EntryMemory` from its memory
+  `length_cons` when its values are `[]` or a cons, and, for each `LoopFrame []` from its memory
   with that memory's `WellFormed` in context, the facts of
-  [`CheckedSpan.within`](../CIL/Safety/LoopVC.lean) in the frame's memory;
+  [`CheckedSpan.within`](../CIL/Safety/LoopFrames.lean) in the frame's memory;
 - `elementWidth` of a `SpanContents`;
-- the load of a [`NumericEntryHome`](../CIL/Safety/NumericLocals.lean) whose number is a word's
-  `toNat` or a literal, through [`NumericEntryHome.load`](../CIL/Safety/LoopVC.lean), with
-  `localResult`;
-- [`EntryMemory.leave`](../CIL/Safety/LoopVC.lean) of each `EntryMemory` with the entry's
+- for a [`LoopFrame`](../CIL/Safety/LoopFrames.lean) over `knownLocals` of a list, the load of each
+  listed home through `LoopFrame.load`, with `localResult`;
+- [`LoopFrame.leave_kept`](../CIL/Safety/LoopFrames.lean) of each `LoopFrame []` with the entry's
   `setup` equation, when the goal is an exit;
 - `numericOfWidth` and `BitVec.ofNat_toNat` when a gathered fact loads at a literal width.
 
@@ -391,15 +390,14 @@ hypotheses, so the stepper looks them up by name instead of elaborating a proof 
 step, and a statement already gathered is not added again. `SpanSum` names no fact but its
 invariant equation.
 
-A loop over symbolic caller memory keeps the frame part of its state as the `EntryMemory` and
-`NumericEntryHome` facts that `bind_entry ... allocating` returns.
-`cil_home_store updated stored loaded frame home := value using frame home` stores into the home
-through [`NumericEntryHome.store`](../CIL/Safety/LoopVC.lean) and names the step's store and load
-equations and both facts after the store, without composing `MemoryBelow` by hand.
-[`NumericEntryHome.load`](../CIL/Safety/LoopVC.lean) reads the home at a loop head, and
-[`EntryMemory.leave`](../CIL/Safety/LoopVC.lean) `setup` is the exit's `MemoryBelow` fact for any
-exited frame with the entry's owned identities, closing a postcondition such as `SpanSum`'s; the
-loop tactics derive both from the state's facts. `Tests/LoopScaffold.lean` proves a countdown and
+A loop over symbolic caller memory keeps the frame part of its state as the
+[`LoopFrame`](../CIL/Safety/LoopFrames.lean) that `bind_entry ... allocating` returns, in a
+`FrameState`. `frame.store index value rfl` stores into a home and gives the step's store
+equation and the frame after the store, without composing `MemoryBelow` by hand.
+`LoopFrame.load` reads a home at a loop head, and `LoopFrame.leave_kept` `setup` is the exit's
+`MemoryBelow` fact for a frame confined to no caller storage, for any exited frame with the
+entry's owned identities, closing a postcondition such as `SpanSum`'s; the loop tactics derive
+both from the state's frame. `Tests/LoopScaffold.lean` proves a countdown and
 a span fold over symbolic memory this way, naming no frame or span fact, and shows for each that
 a constant measure fails at the decrease goal and an invariant that is not preserved at its
 preservation goal.

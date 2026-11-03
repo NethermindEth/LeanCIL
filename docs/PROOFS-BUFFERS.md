@@ -21,8 +21,8 @@ is a loop state over such a view. `span.facts` is the view's validity, width and
 stepper; `span.head` gives the passing guard, a positive length and the first element's
 reference and load; `span.length_cons` is the passing guard alone and `span.length_nil` makes it
 fail; `span.tail` gives `Slice(1)` and the checked suffix; `span.below` moves a checked span into
-any memory that keeps the caller's, [`CheckedSpan.within`](../CIL/Safety/LoopVC.lean) into the
-memory of a frame entered from it, and `span.tail_below` slices there while keeping the suffix
+any memory that keeps the caller's, [`CheckedSpan.within`](../CIL/Safety/LoopFrames.lean) into
+the memory of a `LoopFrame` confined to no caller storage, and `span.tail_below` slices there while keeping the suffix
 checked in caller memory. The loop tactics take these facts from a `CheckedSpan` in context.
 
 Callee frames allocate locals above the caller's memory. For well-formed caller memory,
@@ -52,8 +52,8 @@ and exact memory preservation. The [Sum span fold](../Examples/Proofs/SpanSum.le
 wrapping sum of a `ReadOnlySpan<ulong>` with the invariant `total + remaining.sum = values.sum`; its
 running total lives in a frame home, so its state keeps the `CheckedSpan` suffix in caller memory,
 which the loop tactics move to the current frame memory with `span.within`. Its entry comes from
-`bind_entry ... allocating wellFormed`, and its state carries the returned `EntryMemory` and
-`NumericEntryHome` across each store with `cil_home_store`; see [loop verification
+`bind_entry ... allocating wellFormed`, and its `FrameState` carries the returned `LoopFrame`
+across each store with `frame.store`; see [loop verification
 conditions](PROOFS-STEPPING.md#loop-verification-conditions). Both measure the remaining length,
 prove the loop inside the public theorem through `invoke_loop_returns` or `invoke_loop_results`, and
 cover null empty spans.
@@ -202,7 +202,10 @@ are the lemmas it composes.
 Each lemma proves the frame after one step. `load` and `store` read and write a remembered local;
 `write` and `write_element` keep the frame across a write inside the footprint; `after_confined`
 keeps it across a call whose footprint entries lie inside it; `form` and `leave` give the caller
-reference's `form` fact and the confined, `MemoryBelow` result on return. A local whose address is
+reference's `form` fact and the confined, `MemoryBelow` result on return. A frame confined to no
+caller storage, `LoopFrame []`, has `kept` all of it, `leave_kept` gives the exit's `MemoryBelow`
+fact from the entry's `setup`, and `CheckedSpan.within` reads a caller span in its memory, as
+[SpanSum](../Examples/Proofs/SpanSum.lean) does. A local whose address is
 taken can change through that reference, so `write` and `after_confined` require every written
 allocation to be older than the frame (`allocation < caller.nextIdentity`); a write or callee that
 reaches a home does not elaborate and the snapshot stays the author's obligation.

@@ -265,7 +265,37 @@ theorem LoopFrame.leave {known : Nat → Option CIL.Value} {body : CIL.Method} {
   ⟨frame.confined.after_leaveFrame owned,
     leaveFrame_preserves_memory_below entering current _ owned⟩
 
+/-- A frame confined to no caller storage has kept all of it. -/
+theorem LoopFrame.kept {known : Nat → Option CIL.Value}
+    (frame : LoopFrame [] caller current kinds slots known) :
+    MemoryBelow caller.nextIdentity caller current :=
+  frame.confined.nil_memoryBelow
+
+/-- Leaving a frame confined to no caller storage, through any frame that owns what the entry
+    allocated, keeps all of the caller's memory. -/
+theorem LoopFrame.leave_kept {known : Nat → Option CIL.Value} {body : CIL.Method}
+    {args : List Value} {entered : Memory} {entering : Frame}
+    (setup : enterFrame body args caller = .ok (entering, entered))
+    (frame : LoopFrame [] caller current kinds slots known) (exited : Frame)
+    (owned : exited.owned = entering.owned) :
+    MemoryBelow caller.nextIdentity caller (leaveFrame exited current) :=
+  frame.kept.trans (leaveFrame_preserves_memory_below exited current _ fun id member =>
+    ((enterFrame_fresh _ _ _ _ _ setup).2 id (owned ▸ member)).1)
+
+/-- A checked span of well-formed caller memory stays checked in the memory of a frame confined
+    to no caller storage, so a loop state keeps its span in caller memory and reads it in frame
+    memory. -/
+theorem CheckedSpan.within {known : Nat → Option CIL.Value} {view : SpanView} {width : Nat}
+    {writable : Bool} {values : List (BitVec (8 * width))}
+    (span : CheckedSpan caller view width writable values) (wellFormed : caller.WellFormed)
+    (frame : LoopFrame [] caller current kinds slots known) :
+    CheckedSpan current view width writable values :=
+  span.below wellFormed frame.kept
+
 #print axioms LoopFrame.ofEntry
+#print axioms LoopFrame.kept
+#print axioms LoopFrame.leave_kept
+#print axioms CheckedSpan.within
 #print axioms LoopFrame.load
 #print axioms LoopFrame.store
 #print axioms LoopFrame.write
