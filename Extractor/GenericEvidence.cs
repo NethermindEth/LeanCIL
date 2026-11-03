@@ -306,7 +306,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         $"returnType := {Type(Closed(method.ReturnType))}, " +
         $"parameters := {List(method.Parameters.Select(parameter => Parameter(Closed(parameter.ParameterType))))}, " +
         // A slot of any extracted assembly is recorded: dropping one would let a weaker candidate win in Lean.
-        $"overrides := {List(method.Overrides.Where(slot => PinnedAssemblies.Declares(slot.DeclaringType, method.Module))
+        $"overrides := {List(method.Overrides
+            .Where(slot => PinnedAssemblies.Declares(slot.DeclaringType, method.Module))
             .Select(slot => $"({slot.Resolve().MetadataToken.ToUInt32().ToString(CultureInfo.InvariantCulture)}, " +
                 $"{Type(GenericStructs.Substitute(slot.DeclaringType, owner))})"))}{specialization} }}";
     }
