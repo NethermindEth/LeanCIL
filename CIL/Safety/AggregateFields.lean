@@ -481,20 +481,23 @@ theorem LocalSnapshots.aggregate {memory : Memory} {slots : List LocalSlot}
   simpa [localWidth, decoded, ← length, numberBytes_byteNumber] using loaded
 
 /-- `initobj` through the address of an aggregate local's writable home remembers it as zeros
-    and keeps every other snapshot; no earlier value of the local is needed. -/
+    and keeps every other snapshot; no earlier value of the local is needed. The write
+    equation states the exact footprint. -/
 theorem LocalSnapshots.zero_aggregate {entered memory : Memory} {boundary : Nat} {kinds slots}
     {known : Nat → Option CIL.Value} (snapshots : LocalSnapshots memory slots known)
     (homes : WritableHomes entered boundary kinds slots) (formed : memory.WellFormed)
-    {index : Nat} {size : Fin (2^64)} {home : Reference}
+    {index : Nat} {size : Fin (2^64)} {home : Reference} {width : Nat}
     (slot : slots[index]? = some (.bytes (.aggregate size) home))
-    (writable : access memory home size 1 true = .ok ()) :
+    (writable : access memory home width 1 true = .ok ()) (sized : size.val = width) :
     ∃ after,
       (∀ body pc args frame rest,
-        step body (.initAggregate size) pc args frame (.reference (.address home) :: rest)
+        step body (.initAggregate width) pc args frame (.reference (.address home) :: rest)
           memory = .ok (.next (pc + 1) rest frame after)) ∧
       LocalSnapshots after slots
-        (rememberLocal known index (.aggregate (List.replicate size 0))) ∧
-      after.WellFormed ∧ MemoryBelow boundary memory after := by
+        (rememberLocal known index (.aggregate (List.replicate width 0))) ∧
+      after.WellFormed ∧ MemoryBelow boundary memory after ∧
+      write memory home (List.replicate width 0) 1 = .ok after := by
+  subst sized
   obtain ⟨after, stepped, written, _⟩ := step_initAggregate_home writable
   have encoded : localNumber (.aggregate size) (.aggregate (List.replicate size 0)) =
       .ok (byteNumber (List.replicate size 0)) := by
@@ -507,11 +510,12 @@ theorem LocalSnapshots.zero_aggregate {entered memory : Memory} {boundary : Nat}
   exact ⟨after, stepped,
     snapshots.after_write homes index (.aggregate size) home _ _ encoded slot zeros,
     write_preserves_wellFormed _ _ _ _ _ formed written,
-    write_preserves_memory_below _ _ _ _ _ _ (homes.home_bound index _ home slot) written⟩
+    write_preserves_memory_below _ _ _ _ _ _ (homes.home_bound index _ home slot) written,
+    written⟩
 
 /-- `stfld` through the address of a remembered aggregate local stores one field: the local is
     then remembered with that field's bytes replaced, and every other snapshot is kept, since
-    distinct writable homes never share an allocation. -/
+    distinct writable homes never share an allocation. The write covers only the field. -/
 theorem LocalSnapshots.store_field {entered memory : Memory} {boundary : Nat} {kinds slots}
     {known : Nat → Option CIL.Value} (snapshots : LocalSnapshots memory slots known)
     (homes : WritableHomes entered boundary kinds slots) (formed : memory.WellFormed)
@@ -519,7 +523,7 @@ theorem LocalSnapshots.store_field {entered memory : Memory} {boundary : Nat} {k
     (slot : slots[index]? = some (.bytes (.aggregate size) home))
     (specified : known index = some (.aggregate bytes))
     (writable : access memory home size 1 true = .ok ()) {field : FieldLayout}
-    (within : field.offset + field.width ≤ size) {value : CIL.Value} {number : Nat}
+    (within : field.offset + field.width ≤ size) (value : CIL.Value) {number : Nat}
     (encoded : fieldStoreNumber field.width value = some number) :
     ∃ after,
       (∀ body pc args frame rest,
@@ -528,13 +532,15 @@ theorem LocalSnapshots.store_field {entered memory : Memory} {boundary : Nat} {k
           .ok (.next (pc + 1) rest frame after)) ∧
       LocalSnapshots after slots
         (rememberLocal known index (.aggregate (field.setIn bytes number))) ∧
-      after.WellFormed ∧ MemoryBelow boundary memory after := by
+      after.WellFormed ∧ MemoryBelow boundary memory after ∧
+      write memory { home with offset := home.offset + field.offset }
+        (numberBytes number field.width) 1 = .ok after := by
   obtain ⟨length, loaded⟩ := snapshots.aggregate slot specified
   obtain ⟨after, stepped, written, stored⟩ := step_setFieldAt_home formed loaded
     (length ▸ writable) (length ▸ within) encoded
   refine ⟨after, stepped, ?_, write_preserves_wellFormed _ _ _ _ _ formed written,
     write_preserves_memory_below _ _ _ _ _ _ (by exact homes.home_bound index _ home slot)
-      written⟩
+      written, written⟩
   have storedLength := FieldLayout.length_setIn (length ▸ within) number
   intro other remembered specifiedOther
   by_cases same : other = index
