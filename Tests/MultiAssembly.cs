@@ -59,8 +59,12 @@ string lib = Library("Lib", "3 + 1");
 // Same identity with a different body, and the same body under a different version.
 string substitute = Library("Substitute", "3 + 2");
 string versioned = Library("Versioned", "3 + 1", "<AssemblyVersion>2.0.0.0</AssemblyVersion>");
+// An assembly App references but extraction never pins.
+string otherDirectory = Project("Other", "MultiFixture.Other");
+File.WriteAllText(Path.Combine(otherDirectory, "Other.cs"),
+    "namespace MultiFixture.Other;\npublic interface IMarker { }\n");
 string appDirectory = Project("App", "MultiFixture.App", "",
-    """<ProjectReference Include="../Lib/Lib.csproj" />""");
+    """<ProjectReference Include="../Lib/Lib.csproj" /><ProjectReference Include="../Other/Other.csproj" />""");
 File.WriteAllText(Path.Combine(appDirectory, "Application.cs"), """
 using System.Runtime.CompilerServices;
 namespace MultiFixture;
@@ -77,7 +81,14 @@ public static class Application
     static ulong Use<T>(ref T value) where T : struct, IGet => value.Get();
     public static ulong Mine(ulong x) => Scaled<AppScale>(x);
 }
+// App structs and interfaces built on Lib's interfaces: dispatch reads both pinned assemblies.
 public struct AppScale : IScale { public static ulong Scale(ulong x) => x + 9; }
+public struct AppOn : IFlag { public static bool IsActive => true; }
+public struct AppOff : IFlag { public static bool IsActive => false; }
+public struct AppPlain : IScale { }
+public interface IAppScale : IScale { static ulong IScale.Scale(ulong x) => x * 4; }
+public struct AppDerived : IAppScale { }
+public struct Marked : IScale, MultiFixture.Other.IMarker { }
 """);
 Run(["dotnet", "build", Path.Combine(appDirectory, "App.csproj"), "-c", "Release"]);
 string app = Path.Combine(appDirectory, "bin", "MultiFixture.App.dll");
@@ -133,6 +144,26 @@ foreach ((string name, bool stepped) in new[] { ("RunOff", false), ("RunOn", tru
 Proved("Scaled", "MultiFixture.Application::Scaled(ulong)", "Tests/MultiAssembly/Scaled.lean",
     referencedBody: true, "--type-argument", "MultiFixture.Plain, " + libName);
 Proved("Got", "MultiFixture.Application::Got(ulong)", "Tests/MultiAssembly/Got.lean", referencedBody: true);
+// Lib's derived interface re-implements its own default, which the runtime prefers.
+const string scaled = "MultiFixture.Application::Scaled(ulong)";
+Proved("Shadowed", scaled, "Tests/MultiAssembly/Quadrupled.lean", referencedBody: true,
+    "--type-argument", "MultiFixture.Shadowed, " + libName);
+
+// App structs implementing Lib interfaces: App's own getter and Scale, Lib's default body and App's derived
+// interface body. Each constant App getter decides which branch is extracted, as a Lib one does.
+Proved("RunAppOn", run, "Tests/MultiAssembly/RunOn.lean", referencedBody: true,
+    "--type-argument", "MultiFixture.AppOn");
+Proved("RunAppOff", run, "Tests/MultiAssembly/RunOff.lean", referencedBody: false,
+    "--type-argument", "MultiFixture.AppOff");
+foreach ((string name, bool stepped) in new[] { ("RunAppOff", false), ("RunAppOn", true) })
+    if (File.ReadAllText(Path.Combine(Artifact(name), "Extracted.lean"))
+            .Contains("::MultiFixture.Mix\"", StringComparison.Ordinal) != stepped)
+        throw new InvalidOperationException("Constant flag did not decide which branch is extracted: " + name);
+Proved("Mine", "MultiFixture.Application::Mine(ulong)", "Tests/MultiAssembly/Mine.lean", referencedBody: false);
+Proved("ScaledAppPlain", scaled, "Tests/MultiAssembly/Scaled.lean", referencedBody: true,
+    "--type-argument", "MultiFixture.AppPlain");
+Proved("ScaledAppDerived", scaled, "Tests/MultiAssembly/Quadrupled.lean", referencedBody: false,
+    "--type-argument", "MultiFixture.AppDerived");
 
 void Rejected(string name, string marker, string[] command)
 {
@@ -163,13 +194,9 @@ RejectedExtract("referenced static initialiser", "Unsupported static initialisat
     "MultiFixture.Application::Seeded(ulong)", Reference(lib));
 RejectedExtract("unpinned entry type argument", "no single pinned --reference assembly",
     "MultiFixture.Application::Size(ulong)", "--type-argument", "MultiFixture.Cell, Other");
-// The runtime runs the derived interface's re-implementation, so the Lib default must not be selected.
-RejectedExtract("shadowed referenced default", "Another interface of the receiver re-implements",
-    "MultiFixture.Application::Scaled(ulong)",
-    [.. Reference(lib), "--type-argument", "MultiFixture.Shadowed, " + libName]);
-// Dispatch stays inside one assembly: an App struct cannot implement a slot declared in Lib.
-RejectedExtract("slot from another assembly", "Unsupported constrained method slot",
-    "MultiFixture.Application::Mine(ulong)", Reference(lib));
+// An interface of an unpinned assembly could hide a more specific body, so the default is not selected.
+RejectedExtract("unpinned receiver interface", "Unpinned assembly reference: MultiFixture.Other",
+    scaled, [.. Reference(lib), "--type-argument", "MultiFixture.Marked"]);
 
 // Proofs bind bodies by unscoped signature, so a same-named type in two pinned assemblies is rejected.
 string aliasDirectory = Project("Alias", "MultiFixture.Alias", "",
@@ -268,6 +295,20 @@ Rejected("moved dispatch catalog", "Stale", [.. cli, "verify", catalogued, "--pr
 if (moved.Code == 0 || !moved.Output.Contains("ConstrainedCallsValid", StringComparison.Ordinal))
     throw new InvalidOperationException("Lean accepted a dispatch catalog moved to another assembly: " + moved.Output);
 Console.WriteLine("PASS Lean rejected moved dispatch catalog");
+// The App receiver's catalog reads Lib's IScale entry; attributing that entry to App's pin fails dispatch.
+string repinned = Copy("Repinned", "ScaledAppDerived");
+string repinnedCatalog = Path.Combine(repinned, "Extracted.lean");
+string libPinText = $"assembly := {{ identity := \"{libIdentity}\" }}";
+string repinnedSource = File.ReadAllText(repinnedCatalog);
+if (!repinnedSource.Contains(libPinText, StringComparison.Ordinal))
+    throw new InvalidOperationException("Precondition: Scaled<AppDerived> must catalog a Lib entry.");
+File.WriteAllText(repinnedCatalog, repinnedSource.Replace(libPinText,
+    $"assembly := {{ identity := \"{appIdentity}\" }}", StringComparison.Ordinal));
+(int Code, string Output, string Stdout, string Stderr) repinnedKernel =
+    Execute(["lake", "env", "lean", repinnedCatalog], cwd: FixturePackage());
+if (repinnedKernel.Code == 0 || !repinnedKernel.Output.Contains("ConstrainedCallsValid", StringComparison.Ordinal))
+    throw new InvalidOperationException("Lean accepted a catalog entry outside its pin: " + repinnedKernel.Output);
+Console.WriteLine("PASS Lean rejected catalog entry attributed to another pin");
 // A well-formed sidecar for Lib: the explicit import is rejected because Lib is also a pinned reference.
 JsonObject contract = JsonNode.Parse(File.ReadAllText(At("Tests/ContractImports/Lib.leancil.contracts")))!.AsObject();
 IEnumerable<string> framework = Directory.EnumerateFiles(At("CIL"), "*.lean", SearchOption.AllDirectories)
