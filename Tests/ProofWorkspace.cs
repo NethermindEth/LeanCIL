@@ -91,6 +91,37 @@ if (!report.GetProperty("extractionAudit").GetString()!.Contains("Extracted.tran
     throw new InvalidOperationException("Workspace proof did not pass ordinary fresh extraction audit and hermetic verification.");
 Console.WriteLine("PASS consumer workspace, transitive symbols import, editable proof and fresh certification");
 
+// A scratch proof has no Lake package above it; the temp directory keeps the checkout's lakefile out of reach.
+var standalone = Path.Combine(Path.GetTempPath(), "leancil-standalone-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(standalone);
+try
+{
+    var scratchProof = Path.Combine(standalone, "Scratch.lean");
+    File.WriteAllText(scratchProof, """
+        import Extracted
+        theorem scratch : Extracted.program.length = 1 := rfl
+        #print axioms scratch
+        """);
+    string[] open = [.. cli, "workspace", assembly, method, "--profile", "scalar", "--proof", scratchProof,
+        "--assume-initialized", initializedType];
+    var opened = Run(open);
+    var scratchWorkspace = Directory.EnumerateDirectories(Path.Combine(standalone, ".work", "leancil"))
+        .Single(directory => !Path.GetFileName(directory).StartsWith("package-", StringComparison.Ordinal));
+    var scratchEditor = Path.Combine(scratchWorkspace, "LeanCILProofWorkspace.lean");
+    if (!opened.Contains("Generated package (no lakefile above the proof)", StringComparison.Ordinal) ||
+        Sha(scratchEditor) != Sha(scratchProof) || File.Exists(Path.Combine(standalone, "lakefile.toml")))
+        throw new InvalidOperationException("A standalone proof did not open in a generated package: " + opened);
+    Run(["lake", "build", "+LeanCILProofWorkspace:olean"], scratchWorkspace);
+    Run(open);
+    File.AppendAllText(scratchProof, "\n-- edited\n");
+    var stale = Execute(open);
+    if (stale.Code == 0 || !stale.Output.Contains("Stale editor workspace", StringComparison.Ordinal))
+        throw new InvalidOperationException("An edited standalone proof did not leave its workspace stale: " +
+            stale.Output);
+}
+finally { Directory.Delete(standalone, true); }
+Console.WriteLine("PASS standalone proof opens in a generated package without setup and rejects stale reuse");
+
 void Reject(string[] arguments, string marker)
 {
     var result = Execute(arguments);
