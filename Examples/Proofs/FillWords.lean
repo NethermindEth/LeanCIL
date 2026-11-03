@@ -40,10 +40,10 @@ theorem fill_words (initial : Memory) (base : Reference) (v : W64) (n : W32) (fo
         initial = .ok (final, []) ∧
       Contents final base 8 (List.replicate n.toNat (v : BitVec (8 * 8))) ∧
       Confined [(base, 8 * n.toNat)] initial final := by
-  obtain ⟨home, entered, setup, numeric, entryMemory⟩ := entry.checked initial base v n formed
+  obtain ⟨home, entered, setup, -, entryMemory, entryFrame⟩ :=
+    entry.checked initial base v n formed
   have old := formed.form_bound valid
-  obtain ⟨m0, stored0, frame0, below0⟩ := (LoopFrame.ofEntry [(base, 8 * n.toNat)] entryMemory
-    numeric.homes (numeric.snapshots (.i32 0) rfl)).store 0 (.i32 0) rfl
+  obtain ⟨m0, stored0, frame0, below0⟩ := (entryFrame [(base, 8 * n.toNat)]).store 0 (.i32 0) rfl
   have loaded0 := frame0.load 0
   have room := (writable.after_below entryMemory.kept old).after_below below0 old
   refine invoke_loop_results (by rfl) ?_ setup (header initial base home n)

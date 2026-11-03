@@ -20,11 +20,11 @@ bind_entry entry (memory : Memory) (x : CIL.W64) (wellFormed : memory.WellFormed
 theorem correctness (memory : Memory) (x : CIL.W64) (wellFormed : memory.WellFormed) :
     ∃ fuel result, invoke Extracted.program fuel 0 [.scalar (.i64 x)] memory =
       .ok (result, [.scalar (.i64 x)]) ∧ MemoryBelow memory.nextIdentity memory result := by
-  obtain ⟨reference, entered, setup, home, entryMemory⟩ := entry.checked memory x wellFormed
-  have homes := home.homes
+  obtain ⟨reference, entered, setup, home, -, frame⟩ := entry.checked memory x wellFormed
+  have homes := (frame []).homes
   have slot : [LocalSlot.bytes (.aggregate 12) reference][0]? = _ := rfl
   obtain ⟨zeroed, zeroStep, zeroSnapshots, zeroFormed, zeroBelow, zeroReady, zeroForm, -⟩ :=
-    (LocalSnapshots.empty entered _).zero_aggregate homes entryMemory.wellFormed slot home.writable
+    (frame []).snapshots.zero_aggregate homes (frame []).wellFormed slot home.writable
   obtain ⟨payload, storePayload, payloadSnapshots, payloadFormed, payloadBelow, payloadReady,
     payloadForm, payloadValues, -⟩ := zeroSnapshots.store_field homes zeroFormed slot rfl zeroReady
       Extracted.layout0_valid (by decide) rfl rfl (fieldIndex := 0) rfl (.i64 x) rfl

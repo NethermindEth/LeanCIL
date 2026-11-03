@@ -41,7 +41,7 @@ theorem correctness (memory : Memory) (view : SpanView) (values : List W64)
     (readOnly : view.writable = false) (contents : SpanContents memory view 8 values) :
     ∃ fuel final, invoke Extracted.program fuel 0 [.bufferSpan view] memory =
       .ok (final, [.scalar (.i64 values.sum)]) ∧ MemoryBelow memory.nextIdentity memory final := by
-  obtain ⟨home, entered, setup, numeric, entryMemory⟩ :=
+  obtain ⟨home, entered, setup, numeric, entryMemory, -⟩ :=
     entry.checked memory view wellFormed valid contents.elementWidth readOnly
   cil_home_store started stored loaded frame holds := (.i64 0) using entryMemory numeric
   have span : CheckedSpan memory view 8 false values := ⟨valid, readOnly, contents⟩
