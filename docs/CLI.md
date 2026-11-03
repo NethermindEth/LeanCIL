@@ -231,18 +231,19 @@ Verified: ExampleProof.addTwo_holds
   quantifies over is reported as not fixed, and predicates the proof defines are not looked into,
   so a line never names more than the statement does. `Extraction entry:` is the method the
   extraction started from; it says nothing about which method the theorem concerns.
-- `Statement:` is printed in Lean notation from the audited `Proof.olean`. Only the notation of
-  the modules the proof imports applies; the proof's own declarations are loaded without their
-  extensions, so notation a proof defines cannot change the text. `verified.json` keeps the
-  auditor's text in `theoremAudit`, which is printed instead if Lean cannot print the statement.
-  Proofs checked in a consumer package (`--proof-root`) import consumer modules whose notation
-  would apply, so they print the auditor's text, `Subject: not identified`, and no Lean messages.
+- `Statement:` is printed in Lean notation from the audited proof module. Only the notation of
+  the modules the proof imports applies, including consumer modules under `--proof-root`; the
+  proof's own declarations are loaded without their extensions, so notation a proof defines cannot
+  change the text. `verified.json` keeps the auditor's text in `theoremAudit`, which is printed
+  instead, with `Subject: not identified`, if Lean cannot print the statement.
 - `Lean messages` lists the informational and warning messages of the proof file, such as
-  `#check`, `#eval` and `#print axioms` output, at `file:line:column` in the proof. They are printed
-  on failure too, after the diagnostic, so query commands work while a proof is unfinished. The
-  first 60 lines are shown; `proof-messages.txt` in the artifact directory holds the full text, and
-  the report names it when lines are omitted. Messages are stored with the cached proof, so a run
-  that reuses the proof shows them as well.
+  `#check`, `#eval` and `#print axioms` output, at `file:line:column` in the proof. The first 60
+  lines are shown; `proof-messages.txt` in the artifact directory holds the full text, and the
+  report names it when lines are omitted. Messages are stored with the cached proof, so a run that
+  reuses the proof shows them as well. They are printed on failure too, after the diagnostic, so
+  query commands work while a proof is unfinished. Under `--proof-root`, Lake records messages only
+  for a module that checks, so when proof checking itself fails they appear in the Lake output
+  under `Details:` instead.
 
 Release packages can include a certified-library descriptor for the current runtime. On the first
 cache miss, the CLI downloads that exact release asset from the official LeanCIL GitHub repository.

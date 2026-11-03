@@ -2046,10 +2046,10 @@ partial class Program : IDisposable
     /// <summary>Set by callers that print <see cref="VerifiedStatement"/>; printing costs one Lean run.</summary>
     bool viewsStatement { get; init; }
 
-    /// <summary>Messages from the last direct proof check, kept for display; no check reads them.</summary>
+    /// <summary>Messages from the last proof check, kept for display; no check reads them.</summary>
     internal ProofMessage[]? ProofMessages { get; private set; }
 
-    /// <summary>The display form of the last directly verified statement; null when not printed.</summary>
+    /// <summary>The display form of the last verified statement; null when not printed.</summary>
     internal StatementView? VerifiedStatement { get; private set; }
 
     const string ProofMessagesFile = "Proof.messages.json";
@@ -2095,14 +2095,51 @@ partial class Program : IDisposable
         return (text.ToString(), [.. messages]);
     }
 
+    /// <summary>
+    /// The non-error messages of `source` in a Lake module trace: Lake checks the module with `lean --json`
+    /// and logs each message as `file:line:column: text`, with `file` relative to `package`.
+    /// </summary>
+    static ProofMessage[] LakeTraceMessages(string trace, string package, string source)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var messages = new List<ProofMessage>();
+        JsonElement record;
+        // Display only: an unreadable trace shows no messages rather than failing verification.
+        try { record = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(trace)); }
+        catch (Exception error) when (error is IOException or JsonException) { return []; }
+        if (record.ValueKind != JsonValueKind.Object || !record.TryGetProperty("log", out var log) ||
+            log.ValueKind != JsonValueKind.Array)
+            return [];
+        foreach (var entry in log.EnumerateArray())
+        {
+            if (entry.ValueKind != JsonValueKind.Object || !entry.TryGetProperty("level", out var level) ||
+                !entry.TryGetProperty("message", out var text) || text.ValueKind != JsonValueKind.String)
+                continue;
+            var label = level.ValueKind == JsonValueKind.String ? level.GetString() switch
+            {
+                "info" => "info", "warning" => "warning", _ => null
+            } : null;
+            var located = LocatedMessage().Match(text.GetString()!);
+            if (label is null || !located.Success ||
+                !Path.GetFullPath(located.Groups["file"].Value, package).Equals(source, comparison))
+                continue;
+            messages.Add(new(label, int.Parse(located.Groups["line"].Value),
+                int.Parse(located.Groups["column"].Value), located.Groups["text"].Value.TrimEnd('\n')));
+        }
+        return [.. messages];
+    }
+
+    [GeneratedRegex(@"\A(?<file>[^\n]+?):(?<line>[0-9]+):(?<column>[0-9]+): (?<text>.*)\z", RegexOptions.Singleline)]
+    private static partial Regex LocatedMessage();
+
     static string LeanString(string value) => "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
 
     /// <summary>
-    /// Prints `theorem` from the checked `Proof.olean` in `directory` with only its imports' notation:
-    /// the proof's own declarations are added without its extensions, so proof code cannot change the
-    /// text. Display only; returns null when Lean cannot print it.
+    /// Prints `theorem` from the checked proof module `olean` with only its imports' notation, writing the
+    /// view to `directory`: the proof's own declarations are added without its extensions, so proof code
+    /// cannot change the text. Display only; returns null when Lean cannot print it.
     /// </summary>
-    StatementView? ViewStatement(string directory, string leanPath, string proofSource, string theorem)
+    StatementView? ViewStatement(string directory, string olean, string leanPath, string proofSource, string theorem)
     {
         var imports = SourceImport().Matches(proofSource).Select(import => import.Groups[1].Value)
             .Concat(["Lean", "Extracted", "CIL.MethodIdentity"]).Distinct(StringComparer.Ordinal);
@@ -2151,7 +2188,7 @@ partial class Program : IDisposable
               found.get
 
             #eval show CommandElabM Unit from do
-              let (data, _) <- readModuleData {{LeanString(Path.Combine(directory, "Proof.olean").Replace('\\', '/'))}}
+              let (data, _) <- readModuleData {{LeanString(olean.Replace('\\', '/'))}}
               let mut env <- getEnv
               let mut proof : NameSet := {}
               for info in data.constants do
@@ -2548,7 +2585,7 @@ partial class Program : IDisposable
             var statementView = Path.Combine(fresh, StatementViewFile);
             if (viewsStatement)
                 VerifiedStatement = proofRestored && File.Exists(statementView) ? ReadStatementView(statementView)
-                    : ViewStatement(fresh, leanPath, proofSource, theorem);
+                    : ViewStatement(fresh, Path.Combine(fresh, "Proof.olean"), leanPath, proofSource, theorem);
             if (!proofRestored)
             {
                 var publication = Path.Combine(fresh, "proof-cache");

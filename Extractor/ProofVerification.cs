@@ -338,8 +338,7 @@ partial class Program
 
             Console.WriteLine($"Verified: {report.theorem}");
             Console.WriteLine($"  Assembly: {identity}");
-            // Direct verification prints the statement it audited; consumer packages fall back to the audit text.
-            var view = proofRoot is null ? verification.VerifiedStatement : null;
+            var view = verification.VerifiedStatement;
             foreach (var line in SubjectLines(view))
                 Console.WriteLine("  " + line);
             Console.WriteLine($"  Extraction entry: {entry}");
