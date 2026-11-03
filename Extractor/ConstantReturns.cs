@@ -35,9 +35,22 @@ internal static class ConstantReturns
             GenericInstanceMethod or { DeclaringType: GenericInstanceType } => Close(call, architecture,
                 () => reference.Resolve() is { } definition
                     ? new MethodSpecialization(definition.Module, architecture).Instantiate(reference) : null),
-            _ => reference.Resolve()
+            _ => Resolved(reference)
         };
         return callee is not null && ConstrainedCalls.Extracted(callee.Module, caller.Module) ? callee : null;
+    }
+
+    // A callee in an imported or otherwise unpinned assembly fails resolution; for folding that only means unknown.
+    static MethodDefinition? Resolved(MethodReference reference)
+    {
+        try
+        {
+            return reference.Resolve();
+        }
+        catch (InvalidDataException)
+        {
+            return null;
+        }
     }
 
     // The resolved body, closed over the receiver's and site's type arguments when it is generic.
