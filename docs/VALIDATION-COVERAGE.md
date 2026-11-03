@@ -463,13 +463,14 @@ regression alongside the authentication tests.
 The runner accepts `--suite <name>` after `--`, with names `core`, `cli`, `integer`, `narrow`,
 `primitive`, `division`, `checked`, `conversions`, `native`, `arguments`, `layout`, `copy`, `bits`,
 `enums`, `nested`, `instance`, `constructors`, `fsharp`, `math`, `divrem`, `unsafe`, `blocks`,
-`generics`, `loops`, `contracts`, `evidence`, `scaling`, `excluded`, `identity`, `labels`, `names`,
-`symbols`, `workspace`, `templates`, `callers`, `construction`, `outcomes` and `audit`. These
-partitions cover the same check groups as the full command and can run concurrently in separate
-checkouts. Each partition builds its own prerequisites (in CI, one job builds the extractor and
-example assembly with `--build-tools` and suite jobs set `LEANCIL_PREBUILT_TOOLS=true` to use them),
-retains fresh Lean proof checking and writes `artifacts/test-results-<suite>.json`; running without
-arguments checks everything and writes `artifacts/test-results.json`.
+`generics`, `loops`, `contracts`, `evidence`, `dispatch`, `scaling`, `excluded`, `identity`,
+`labels`, `names`, `symbols`, `workspace`, `templates`, `callers`, `construction`, `outcomes` and
+`audit`. These partitions cover the same check groups as the full command and can run concurrently
+in separate checkouts. Each partition builds its own prerequisites (in CI, one job builds the
+extractor and example assembly with `--build-tools` and suite jobs set
+`LEANCIL_PREBUILT_TOOLS=true` to use them), retains fresh Lean proof checking and writes
+`artifacts/test-results-<suite>.json`; running without arguments checks everything and writes
+`artifacts/test-results.json`.
 
 | Coverage | Result |
 | --- | --- |
@@ -621,7 +622,7 @@ and without localsinit, rejects uninitialized reads and escaped storage, and che
 insufficient-budget failure. Mutating the emitted initialization flag is rejected by the Lean
 certificate. `Tests/StackAllocation.lean` covers alignment, repeated allocations and expiry;
 `Tests/StackAllocationEvidence.lean` rejects forged flags, injected allocations, extra stack items
-and non-native 64-bit size operands. These run in the `evidence` suite.
+and non-native 64-bit size operands. These run in the `dispatch` suite.
 
 `Tests/ConstrainedCalls.cs` checks compiled implicit and explicit struct-interface calls, including
 closed generic owners and mutation through the receiver, and rejects forged generated call targets,
@@ -650,7 +651,7 @@ type-argument flag that keeps or prunes its block, an implementation and an inte
 whose interface is instantiated at the receiver's argument) against the runtime, rejects a catalog
 listing another instantiation of that interface and an open receiver, rejects a compiled diamond, re-abstraction, unlisted base
 interface and live derived flag, and has Lean reject a catalog hiding the most specific
-`MethodImpl` or moving its interface outside its pin. These run in the `evidence` suite.
+`MethodImpl` or moving its interface outside its pin. These run in the `dispatch` suite.
 
 The core and universal-contract suites cover checked execution and memory preservation. Choose and
 GenericIdentity preserve arbitrary caller memory exactly; Struct preserves preexisting caller memory

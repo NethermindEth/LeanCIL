@@ -661,8 +661,9 @@ The evidence runner compiles its test modules once against the authenticated CIL
 asking Lake to rebuild that library from copied build traces. Test dependencies are ordered before
 their importers, with at most two independent compilations running together. Child fixtures validate
 the parent's source/output hashes before reusing a completed test; standalone fixture invocations
-retain their original build path. Reproduce this preparation with `dotnet run --file
-Tests/ExtractionEvidence.cs -- --prepare-only`.
+retain their original build path. The `dispatch` runner prepares its own modules the same way.
+Reproduce this preparation with `dotnet run --file Tests/ExtractionEvidence.cs -- --prepare-only`
+or `Tests/DispatchEvidence.cs -- --prepare-only`.
 
 Generated rejection batches retain each mutation's original expected diagnostic markers. A Lean
 command saves and restores the complete command state around each case, including its declarations,

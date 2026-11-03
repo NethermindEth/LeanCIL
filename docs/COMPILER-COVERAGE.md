@@ -1,6 +1,6 @@
 # Compiler coverage and runtime-model inventory
 
-The evidence suite checks a pinned source corpus against Roslyn 4.14.0, 5.0.0 and 5.9.0,
+The `dispatch` suite checks a pinned source corpus against Roslyn 4.14.0, 5.0.0 and 5.9.0,
 using the same .NET 10.0.0 reference pack and optimized compilation. Each compiler runs at its
 default language version and at `latest`; compilers supporting C# 14 also run explicitly at `14`.
 The default column omits `/langversion`, so it tests the compiler default, not an SDK-selected
@@ -65,6 +65,6 @@ The count measures admitted API definitions, not independent semantic assumption
 CLR implementations. Changing the meaning of an existing mapping still requires semantic review
 and its targeted proof tests, even when the catalog is unchanged.
 
-The pinned compiler check and inventory run inside the existing evidence suite. Compiler checks
+The pinned compiler check and inventory run inside the `dispatch` suite. Compiler checks
 share reference downloads and batch their Lean evidence checks rather than duplicating runtime
 proofs for every compiler.

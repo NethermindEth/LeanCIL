@@ -78,13 +78,18 @@ Test("test entry points", () =>
         Equal(VerificationSelection.Select([$"Tests/{name}.cs"]), ["core"]);
     Equal(VerificationSelection.Select(["Tests/StaticScalarValues.cs"]), ["evidence"]);
     Equal(VerificationSelection.Select(["Tests/GeneratedEvidence.cs"]),
-        ["assemblies", "blocks", "enums", "evidence", "excluded", "generics", "intrinsics", "scaling", "unsafe"]);
+        ["assemblies", "blocks", "dispatch", "enums", "evidence", "excluded", "generics", "intrinsics", "scaling",
+            "unsafe"]);
     Equal(VerificationSelection.Select(["Tests/GenericOwners.cs"]), ["generics"]);
     Equal(VerificationSelection.Select(["Tests/MultiAssemblyGenerics.cs"]), ["assemblies"]);
     Equal(VerificationSelection.Select(["Tests/MultiAssemblyFixture.cs"]), ["assemblies"]);
     Equal(VerificationSelection.Select(["Tests/GenericLayouts.cs"]), ["generics"]);
-    Equal(VerificationSelection.Select(["Tests/NativeManagedDispatch.cs"]), ["evidence"]);
-    Equal(VerificationSelection.Select(["Tests/NativeMethodTables.lean"]), ["evidence"]);
+    Equal(VerificationSelection.Select(["Tests/NativeManagedDispatch.cs"]), ["dispatch"]);
+    Equal(VerificationSelection.Select(["Tests/NativeMethodTables.lean"]), ["dispatch"]);
+    Equal(VerificationSelection.Select(["Tests/ConstrainedEvidence.lean"]), ["dispatch"]);
+    Equal(VerificationSelection.Select(["Tests/StackAllocationEvidence.lean"]), ["dispatch"]);
+    Equal(VerificationSelection.Select(["Tests/ManagedPointerValues.lean"]), ["evidence"]);
+    Equal(VerificationSelection.Select(["Tests/CompilerCorpusCoverage.cs"]), ["dispatch"]);
     foreach (var name in new[]
         { "AggregateSpans", "ViewAccessors", "BinarySpans", "SpanConstructors", "AggregateSpanFill", "AggregateArrays" })
         Equal(VerificationSelection.Select([$"Tests/{name}.cs"]), ["unsafe"]);
@@ -125,7 +130,8 @@ Test("multiple changes and deleted paths", () =>
 Test("every registered suite has its entry point", () =>
 {
     string runner = File.ReadAllText(Path.Combine(root, "scripts/Test.cs"));
-    string accepted = Regex.Match(runner, """\["--suite", (.*?)\] =>""").Groups[1].Value;
+    string accepted = Regex.Match(runner, """\["--suite", ("all" .*?)\] =>""",
+        RegexOptions.Singleline).Groups[1].Value;
     IEnumerable<string> names = Regex.Matches(accepted, @"""([a-z]+)""").Select(match => match.Groups[1].Value)
         .Where(name => name != "all").Concat(ExportVerificationSuites.Plan().Select(entry => entry.Name))
         .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal);

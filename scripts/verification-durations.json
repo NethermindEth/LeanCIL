@@ -1,5 +1,5 @@
 {
-  "source": "Maximum verification-step duration from runs 40746599661 and 40734844413; excludes job setup",
+  "source": "Maximum verification-step duration from runs 40746599661 and 40734844413; excludes job setup; dispatch and evidence split that evidence measurement by their measured local shares",
   "seconds": {
     "arguments": 76.0,
     "audit": 53.0,
@@ -18,7 +18,8 @@
     "division": 69.0,
     "divrem": 73.0,
     "enums": 45.0,
-    "evidence": 451.0,
+    "dispatch": 219.0,
+    "evidence": 232.0,
     "exceptionlint": 19.0,
     "excluded": 151.0,
     "exports": 106.0,
