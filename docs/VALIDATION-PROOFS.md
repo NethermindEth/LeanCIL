@@ -118,6 +118,13 @@ signature through `bind_method` is entered over its body name, cut with the bind
 `bind_cutpoint ... matching`, and proved to return zero, so frame setup must unfold the bound name
 to the extracted method.
 
+`Tests.LoopDiagnostics` proves a loop over a struct local that calls a method, passing no facts to
+the loop tactics: the gathered frame facts read the struct's fields by value and by address, and
+the call is crossed by its contract. Each loop tactic failure names its pc and instruction: a
+contract applied before the call, a call reached by `cil_loop_steps`, a store with no frame fact at
+its memory and a path back to the cutpoint in another state. A field store outside the layout or of
+the wrong kind, and a by-value read of a field narrower than its value, do not elaborate.
+
 `Tests.ProfileContract` proves a contract for a method that tests AVX2 once, under x86-64-v3, and
 carries it to x86-64-v4, to v3 without 256-bit acceleration and to every profile with AVX2 on. A
 raising method's outcome contract carries over too, in outcome, CLR-named and descriptor-indexed
@@ -159,7 +166,7 @@ reference.
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.RetainedNumericLocals Tests.AllocationRenaming Tests.AllocationExecutionRenaming Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.AggregateFields Tests.LoopFrames Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations Tests.CodeAt Tests.Segment Tests.SimdLanes
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.RetainedNumericLocals Tests.AllocationRenaming Tests.AllocationExecutionRenaming Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.AggregateFields Tests.LoopFrames Tests.LoopDiagnostics Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations Tests.CodeAt Tests.Segment Tests.SimdLanes
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 

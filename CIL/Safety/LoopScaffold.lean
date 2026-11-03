@@ -2,6 +2,8 @@ import CIL.Safety.LoopAutomation
 import CIL.Safety.FrameProgress
 import CIL.Safety.NumericLocals
 import CIL.Safety.LoopFrames
+import CIL.Safety.LoopFrameFields
+import CIL.Safety.LoopContract
 import Lean
 
 /-!
@@ -10,6 +12,9 @@ import Lean
 Proof-local generators derive entry frames and cutpoints from extracted methods. Generated
 equations are checked by the kernel; no frame layout or instruction position is assumed.
 Only proofs requesting the scaffold elaborate it, so extraction certificates stay unchanged.
+Importing the scaffold brings the rest of a loop proof: the frame lemmas of
+`CIL.Safety.LoopFrames` and `CIL.Safety.LoopFrameFields`, and `invoke_loop_induction` with the
+call rules of `CIL.Safety.LoopContract`.
 -/
 
 namespace CIL.Safety
@@ -492,9 +497,24 @@ elab_rules : command
 
 /-- Derive the unique matching cutpoint and a state constructor from the extracted body, over
     binders the frame may mention. Ambiguous or missing matches fail the kernel-checked
-    uniqueness obligation. The state unfolds in the loop tactics in this scope. -/
+    uniqueness obligation. Given as `with frame, stack, memory`, the state fixes all three
+    instead of taking the stack and memory as arguments. The state unfolds in the loop tactics in
+    this scope. -/
 syntax "bind_cutpoint " ident bracketedBinder* " := " term:max " matching " term:max
-  " with " term : command
+  " with " term ("," term "," term)? : command
+
+/-- Define the cutpoint state `name` at `pc`: fixed when the stack and memory are given, else a
+    function of them; it unfolds in the loop tactics in this scope. -/
+def elabCutpointState (name : Ident)
+    (binders : Array (TSyntax ``Lean.Parser.Term.bracketedBinder)) (pc : Ident) (frame : Term)
+    (stack memory : Option Term) : CommandElabM Unit := do
+  match stack, memory with
+  | some stack, some memory =>
+    elabCommand (← `(def $name $binders* : LoopState := ⟨$pc, $frame, $stack, $memory⟩))
+  | _, _ =>
+    elabCommand (← `(def $name $binders* (stack : List Value) (memory : Memory) : LoopState :=
+      ⟨$pc, $frame, stack, memory⟩))
+  elabCommand (← `(attribute [local cil_loop_unfold] $name))
 
 /-- Select an instruction explicitly, including a structural label in a multi-loop method.
     The requested instruction must exist and satisfy the supplied predicate. Given as
@@ -519,16 +539,11 @@ elab_rules : command
     elabCommand (← `(theorem $checked :
       ($body).code[$pc]?.map $predicate = some true := by decide +kernel))
     elabCommand (← `(#print axioms $checked))
-    match stack, memory with
-    | some stack, some memory =>
-      elabCommand (← `(def $name $binders* : LoopState := ⟨$pc, $frame, $stack, $memory⟩))
-    | _, _ =>
-      elabCommand (← `(def $name $binders* (stack : List Value) (memory : Memory) : LoopState :=
-        ⟨$pc, $frame, stack, memory⟩))
-    elabCommand (← `(attribute [local cil_loop_unfold] $name))
+    elabCutpointState name binders pc frame stack memory
 
 elab_rules : command
-  | `(bind_cutpoint $name $binders* := $body matching $predicate with $frame) => do
+  | `(bind_cutpoint $name $binders* := $body matching $predicate with $frame
+      $[, $stack, $memory]?) => do
     let pc := mkIdent (name.getId ++ `pc)
     let checked := mkIdent (name.getId ++ `checked)
     let location ← liftTermElabM do
@@ -548,8 +563,6 @@ elab_rules : command
       ($body).code[$pc]?.map $predicate = some true ∧
         (($body).code.filter $predicate).length = 1 := by decide +kernel))
     elabCommand (← `(#print axioms $checked))
-    elabCommand (← `(def $name $binders* (stack : List Value) (memory : Memory) : LoopState :=
-      ⟨$pc, $frame, stack, memory⟩))
-    elabCommand (← `(attribute [local cil_loop_unfold] $name))
+    elabCutpointState name binders pc frame stack memory
 
 end CIL.Safety
