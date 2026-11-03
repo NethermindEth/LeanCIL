@@ -1,13 +1,18 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
+#:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include GeneratedEvidence.cs
+#:include MultiAssemblyFixture.cs
+#:include MultiAssemblyGenerics.cs
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
 // Two SDK-built assemblies: App calls into Lib, and Lib is passed as a pinned `--reference`.
-string root = At("artifacts/MultiAssembly-" + Guid.NewGuid().ToString("N"));
-string[] cli = ["dotnet", ExtractorPath];
+MultiAssemblyFixture fixture = new("MultiAssembly");
+string root = fixture.Root;
+string[] cli = fixture.Cli;
 const string libName = "MultiFixture.Lib";
 const string unsigned = ", Culture=neutral, PublicKeyToken=null";
 const string libraryText = """
@@ -37,35 +42,16 @@ public struct GenericOn<T> : IFlag where T : unmanaged { public static bool IsAc
 public struct GenericPlain<T> : IScale where T : unmanaged { }
 """;
 
-string Project(string name, string assembly, string properties = "", string references = "")
-{
-    string directory = Path.Combine(root, name);
-    Directory.CreateDirectory(directory);
-    File.WriteAllText(Path.Combine(directory, name + ".csproj"), $"""
-        <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework>
-        <AssemblyName>{assembly}</AssemblyName><Optimize>true</Optimize>{properties}</PropertyGroup>
-        <ItemGroup>{references}</ItemGroup></Project>
-        """);
-    return directory;
-}
-
-string Library(string name, string step, string properties = "")
-{
-    string directory = Project(name, libName, properties);
-    File.WriteAllText(Path.Combine(directory, "Library.cs"), libraryText.Replace("STEP", step));
-    Run(["dotnet", "build", Path.Combine(directory, name + ".csproj"), "-c", "Release"]);
-    return Path.Combine(directory, "bin", libName + ".dll");
-}
+string Library(string name, string step, string properties = "") =>
+    fixture.Build(name, libName, libraryText.Replace("STEP", step), properties);
 
 string lib = Library("Lib", "3 + 1");
 // Same identity with a different body, and the same body under a different version.
 string substitute = Library("Substitute", "3 + 2");
 string versioned = Library("Versioned", "3 + 1", "<AssemblyVersion>2.0.0.0</AssemblyVersion>");
 // An assembly App references but extraction never pins.
-string otherDirectory = Project("Other", "MultiFixture.Other");
-File.WriteAllText(Path.Combine(otherDirectory, "Other.cs"),
-    "namespace MultiFixture.Other;\npublic interface IMarker { }\n");
-string appDirectory = Project("App", "MultiFixture.App", "",
+fixture.Build("Other", "MultiFixture.Other", "namespace MultiFixture.Other;\npublic interface IMarker { }\n");
+string appDirectory = fixture.Project("App", "MultiFixture.App", "",
     """<ProjectReference Include="../Lib/Lib.csproj" /><ProjectReference Include="../Other/Other.csproj" />""");
 File.WriteAllText(Path.Combine(appDirectory, "Application.cs"), """
 using System.Runtime.CompilerServices;
@@ -102,10 +88,12 @@ string libSha = Sha(lib);
 if (Sha(substitute) == libSha)
     throw new InvalidOperationException("Precondition: the substitute must differ from the pinned reference.");
 
-string Artifact(string name) => Path.Combine(root, "x-" + name);
-string[] Reference(string path) => ["--reference", path];
+string Artifact(string name) => fixture.Artifact(name);
+string[] Reference(string path) => MultiAssemblyFixture.Reference(path);
+// One Lean check covers every accepted case; `leancil verify` runs only where its recheck is tested.
+GeneratedEvidence evidence = new(Path.Combine(root, "accepted"));
 
-void Proved(string name, string selector, string proof, bool referencedBody, params string[] extra)
+string Extract(string name, string selector, bool referencedBody, string[] extra)
 {
     string artifact = Artifact(name);
     Run([.. cli, "extract", app, selector, artifact, .. Reference(lib), .. extra]);
@@ -124,9 +112,24 @@ void Proved(string name, string selector, string proof, bool referencedBody, par
         identity.GetProperty("mvid").GetString()!];
     if (rebuildSensitive.Any(value => extracted.Contains(value, StringComparison.OrdinalIgnoreCase)))
         throw new InvalidOperationException("Extracted.lean depends on assembly bytes: " + name);
-    Run([.. cli, "verify", artifact, "--proof", At(proof),
-        "--theorem", "MultiAssemblyProof.correctness"]);
-    Console.WriteLine("PASS cross-assembly " + name + ": pinned reference, attributed body and proof");
+    return extracted;
+}
+
+// The certificate and its proof module, without its import, join the batch.
+void Proved(string name, string selector, string proof, bool referencedBody, params string[] extra)
+{
+    string path = Path.Combine(root, "accepted-" + name + ".lean");
+    File.WriteAllText(path, Extract(name, selector, referencedBody, extra) + "\n" +
+        File.ReadAllText(At(proof)).Replace("import Extracted", "", StringComparison.Ordinal));
+    evidence.Add(path, "PASS cross-assembly " + name + ": pinned reference, attributed body and proof");
+}
+
+// The CLI path: `check` rehashes the pinned reference and regenerates the certificate first.
+void Verified(string name, string selector, string proof, bool referencedBody, params string[] extra)
+{
+    _ = Extract(name, selector, referencedBody, extra);
+    Run([.. cli, "verify", Artifact(name), "--proof", At(proof), "--theorem", "MultiAssemblyProof.correctness"]);
+    Console.WriteLine("PASS cross-assembly " + name + ": verified through the CLI");
 }
 
 // Each constant flag decides whether Lib's `Mix.Step` is extracted at all.
@@ -138,7 +141,7 @@ void Decided(params (string Name, bool Stepped)[] runs)
             throw new InvalidOperationException("Constant flag did not decide which branch is extracted: " + name);
 }
 
-Proved("Direct", "MultiFixture.Application::Direct(ulong)", "Tests/MultiAssembly/Direct.lean", referencedBody: true);
+Verified("Direct", "MultiFixture.Application::Direct(ulong)", "Tests/MultiAssembly/Direct.lean", referencedBody: true);
 Proved("Nested", "MultiFixture.Application::Nested(ulong)", "Tests/MultiAssembly/Nested.lean", referencedBody: true);
 Proved("Local", "MultiFixture.Application::Local(ulong)", "Tests/MultiAssembly/Local.lean", referencedBody: true);
 // Only the layout comes from Lib here, so no body is attributed to it.
@@ -184,22 +187,12 @@ Decided(("RunAppGenericOff", false), ("RunGenericOn", true));
 Proved("ScaledGenericPlain", "MultiFixture.Application::ScaledGenericPlain(ulong)",
     "Tests/MultiAssembly/Scaled.lean", referencedBody: true);
 
-void Rejected(string name, string marker, string[] command)
-{
-    (int Code, string Output, string Stdout, string Stderr) result = Execute(command);
-    if (result.Code == 0 || !result.Output.Contains(marker, StringComparison.Ordinal))
-        throw new InvalidOperationException($"Expected rejection {name} ({marker}): {result.Output}");
-    Console.WriteLine("PASS rejected " + name);
-}
+evidence.Check();
 
-string RejectedExtract(string name, string marker, string selector, params string[] extra)
-{
-    string output = Path.Combine(root, "r-" + name);
-    Rejected(name, marker, [.. cli, "extract", app, selector, output, .. extra]);
-    if (File.Exists(Path.Combine(output, "Extracted.lean")))
-        throw new InvalidOperationException("Rejected extraction left a certificate: " + name);
-    return output;
-}
+void Rejected(string name, string marker, string[] command) => MultiAssemblyFixture.Rejected(name, marker, command);
+
+string RejectedExtract(string name, string marker, string selector, params string[] extra) =>
+    fixture.RejectedExtract(name, marker, app, selector, extra);
 
 const string direct = "MultiFixture.Application::Direct(ulong)";
 // Cecil's ambient resolver would find Lib beside App; without a pin the call stays external.
@@ -218,7 +211,7 @@ RejectedExtract("unpinned receiver interface", "Unpinned assembly reference: Mul
     scaled, [.. Reference(lib), "--type-argument", "MultiFixture.Marked"]);
 
 // Proofs bind bodies by unscoped signature, so a same-named type in two pinned assemblies is rejected.
-string aliasDirectory = Project("Alias", "MultiFixture.Alias", "",
+string aliasDirectory = fixture.Project("Alias", "MultiFixture.Alias", "",
     """<ProjectReference Include="../Lib/Lib.csproj" Aliases="lib" />""");
 File.WriteAllText(Path.Combine(aliasDirectory, "Twin.cs"), """
 extern alias lib;
@@ -370,3 +363,6 @@ if (imported.Output.Contains("framework key mismatch", StringComparison.Ordinal)
 RejectedExtract("import and reference", "An assembly cannot be both a typed import and an extracted reference",
     direct, [.. import, .. Reference(lib)]);
 Console.WriteLine("PASS pinned referenced assemblies: proofs, missing, duplicate, substituted, misattributed");
+
+// Generic structs and generic class statics run in the same job with their own Lib and App.
+CheckGenericAssemblies();
