@@ -173,16 +173,16 @@ keeps any field apart from the written one. An explicit layout with overlapping 
 check, so these laws do not apply to it and its proofs stay at the byte level.
 
 A struct local is tracked in the same `LocalSnapshots` set as numeric locals, remembered as its
-bytes. `LocalSnapshots.zero_aggregate`, `store_field` and `load_field` return the step equations for
-`initobj`, a field store and an unsigned field load through the local's address. Zeroing and
-stores also return the updated snapshots, well-formedness, `MemoryBelow` for the step, continued
-write access, the address's `form` fact for the next step and the write equation; a store also
-returns the decoded field values, which the next store or load takes. Every other local's snapshot
-is kept. A frame from
-`bind_entry ... allocating` supplies its `LoopFrame`, whose `homes` and `snapshots` start the
-chain, and
-`MemoryBelow.frame_round_trip` composes the per-step facts on return. Loads cover widths 1, 2, 4
-and 8 without sign extension; signed narrow and vector fields use the byte-level lemmas.
+bytes. `LocalSnapshots.zero_aggregate` returns the step equation for `initobj` through the local's
+address. `store_field` and `load_field` cover int, word and 16- or 32-byte vector fields,
+`load_signed_field` sign extends a 1- or 2-byte field as `signedOfWidth`, and
+`store_aggregate_field` and `load_aggregate_field` cover a nested struct field, whose value is the
+number of its bytes. Zeroing and stores also return the updated snapshots, well-formedness,
+`MemoryBelow` for the step, continued write access, the address's `form` fact for the next step
+and the write equation; a store also returns the decoded field values, which the next store or
+load takes. Every other local's snapshot is kept. A frame from `bind_entry ... allocating`
+supplies its `LoopFrame`, whose `homes` and `snapshots` start the chain, and
+`MemoryBelow.frame_round_trip` composes the per-step facts on return.
 [Struct](../Examples/Proofs/Struct.lean) and [Tests/AggregateFields](../Tests/AggregateFields.lean)
 show the frame-entry and remembered-local forms and the rejections.
 

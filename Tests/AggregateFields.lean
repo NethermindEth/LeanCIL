@@ -165,4 +165,182 @@ theorem struct_beside_word {entered memory : Memory} {frame : Frame} {boundary :
 
 #print axioms struct_beside_word
 
+/-- `Mixed`: a signed byte at 0, a short at 2, a 16-byte vector at 8 and a nested 12-byte
+    struct at 24, in 40 bytes. -/
+def mixed : AggregateLayout :=
+  ⟨40, [⟨0, 1, false⟩, ⟨2, 2, false⟩, ⟨8, 16, false⟩, ⟨24, 12, true⟩]⟩
+
+/-- An explicit layout whose nested struct at 16 overlaps the vector's upper half. -/
+def nestedOverVector : AggregateLayout := ⟨40, [⟨8, 16, false⟩, ⟨16, 12, true⟩]⟩
+
+/-- The vector field of `mixed`. -/
+abbrev vector : FieldLayout := ⟨8, 16, false⟩
+
+/-- Forty zero bytes. -/
+def zeros40 : List (BitVec 8) := List.replicate 40 0
+
+/-- The most a 16-byte vector can hold. -/
+def vectorOnes : Nat := 2 ^ 128 - 1
+
+theorem mixed_checked : mixed.Valid ∧ mixed.Disjoint := by decide
+
+#print axioms mixed_checked
+
+/-- A byte field stored with `0xFF` loads sign extended as `-1`, and as `255` without sign. -/
+theorem signed_byte_load {entered memory : Memory} {boundary : Nat} {kinds slots}
+    {known : Nat → Option CIL.Value} (snapshots : LocalSnapshots memory slots known)
+    (homes : WritableHomes entered boundary kinds slots) (formed : memory.WellFormed)
+    {home : Reference} {bytes : List (BitVec 8)}
+    (slot : slots[0]? = some (.bytes (.aggregate 40) home))
+    (specified : known 0 = some (.aggregate bytes))
+    (writable : access memory home 40 1 true = .ok ()) :
+    ∃ after,
+      (∀ body pc args frame rest,
+        step body (.fieldAt 0 1 true) pc args frame (.reference (.address home) :: rest) after =
+          .ok (.next (pc + 1) (.scalar (.i32 (-1)) :: rest) frame after)) ∧
+      ∀ body pc args frame rest,
+        step body (.fieldAt 0 1 false) pc args frame (.reference (.address home) :: rest) after =
+          .ok (.next (pc + 1) (.scalar (.i32 255) :: rest) frame after) := by
+  obtain ⟨after, -, stored, storedFormed, -, -, -, storedValues, -⟩ :=
+    snapshots.store_field homes formed slot specified writable mixed_checked.1 mixed_checked.2
+      rfl rfl (fieldIndex := 0) rfl (.i32 0xFF) rfl
+  have present : ((mixed.values bytes).set 0 ((0xFF : BitVec 32).toNat % 256))[0]? =
+      some 255 := by simp [AggregateLayout.values, mixed]
+  exact ⟨after,
+    stored.load_signed_field storedFormed slot rfl mixed_checked.1 rfl storedValues
+      (fieldIndex := 0) rfl present,
+    stored.load_field storedFormed slot rfl mixed_checked.1 rfl storedValues
+      (fieldIndex := 0) rfl present⟩
+
+/-- A load without sign of that byte does not give the sign-extended value, and the two loads
+    agree from four bytes up. -/
+theorem unsigned_load_loses_sign :
+    numericOfWidth 1 255 ≠ signedOfWidth 1 255 ∧ signedOfWidth 1 255 = .i32 (-1) ∧
+      signedOfWidth 4 255 = numericOfWidth 4 255 := by decide
+
+#print axioms signed_byte_load
+#print axioms unsigned_load_loses_sign
+
+/-- Storing the vector and then the nested struct of a remembered `mixed` local: both load back
+    as stored, and the signed byte keeps its value. -/
+theorem vector_and_nested_store_then_load {entered memory : Memory} {boundary : Nat}
+    {kinds slots} {known : Nat → Option CIL.Value}
+    (snapshots : LocalSnapshots memory slots known)
+    (homes : WritableHomes entered boundary kinds slots) (formed : memory.WellFormed)
+    {home : Reference} {bytes : List (BitVec 8)}
+    (slot : slots[0]? = some (.bytes (.aggregate 40) home))
+    (specified : known 0 = some (.aggregate bytes))
+    (writable : access memory home 40 1 true = .ok ()) (bits : BitVec 128)
+    (inner : List (BitVec 8)) (innerSized : inner.length = 12) (sign : Nat)
+    (present : (mixed.values bytes)[0]? = some sign) :
+    ∃ vectored nested,
+      (∀ body pc args frame rest,
+        step body (.setFieldAt 8 16) pc args frame
+          (.scalar (.v128 bits) :: .reference (.address home) :: rest) memory =
+          .ok (.next (pc + 1) rest frame vectored)) ∧
+      (∀ body pc args frame rest,
+        step body (.setAggregateFieldAt 24 12) pc args frame
+          (.scalar (.aggregate inner) :: .reference (.address home) :: rest) vectored =
+          .ok (.next (pc + 1) rest frame nested)) ∧
+      (∀ body pc args frame rest,
+        step body (.aggregateFieldAt 24 12) pc args frame (.reference (.address home) :: rest)
+          nested = .ok (.next (pc + 1) (.scalar (.aggregate inner) :: rest) frame nested)) ∧
+      (∀ body pc args frame rest,
+        step body (.fieldAt 8 16 false) pc args frame (.reference (.address home) :: rest)
+          nested = .ok (.next (pc + 1) (.scalar (.v128 bits) :: rest) frame nested)) ∧
+      ∀ body pc args frame rest,
+        step body (.fieldAt 0 1 true) pc args frame (.reference (.address home) :: rest)
+          nested = .ok (.next (pc + 1) (.scalar (signedOfWidth 1 sign) :: rest) frame nested) := by
+  obtain ⟨vectored, storeVector, vectorSnapshots, vectorFormed, -, vectorReady, -,
+    vectorValues, -⟩ :=
+    snapshots.store_field homes formed slot specified writable mixed_checked.1 mixed_checked.2
+      rfl rfl (fieldIndex := 2) rfl (.v128 bits) rfl
+  obtain ⟨nested, storeNested, nestedSnapshots, nestedFormed, -, -, -, nestedValues, -⟩ :=
+    vectorSnapshots.store_aggregate_field homes vectorFormed slot rfl vectorReady
+      mixed_checked.1 mixed_checked.2 rfl vectorValues (fieldIndex := 3) rfl inner innerSized
+  have length : (mixed.values bytes).length = 4 := by simp [AggregateLayout.values, mixed]
+  have loadNested := nestedSnapshots.load_aggregate_field nestedFormed slot rfl mixed_checked.1
+    rfl nestedValues (fieldIndex := 3) rfl (value := byteNumber inner) (by simp [length])
+  have loadVector := nestedSnapshots.load_field nestedFormed slot rfl mixed_checked.1 rfl
+    nestedValues (fieldIndex := 2) rfl (value := bits.toNat) (by simp [length])
+  have loadSign := nestedSnapshots.load_signed_field nestedFormed slot rfl mixed_checked.1 rfl
+    nestedValues (fieldIndex := 0) rfl (value := sign) (by simpa using present)
+  have encoding : numberBytes (byteNumber inner) 12 = inner := by
+    rw [← innerSized]; exact numberBytes_byteNumber inner
+  rw [encoding] at loadNested
+  simp only [numericOfWidth, BitVec.ofNat_toNat, BitVec.setWidth_eq] at loadVector
+  exact ⟨vectored, nested, storeVector, storeNested, loadNested, loadVector, loadSign⟩
+
+#print axioms vector_and_nested_store_then_load
+
+/-- A vector field store needs a vector of the field's width, and a nested store bytes of the
+    field's size: an i64 into the vector or eight bytes into the nested struct is rejected, while
+    the vector itself goes through. -/
+theorem mismatched_stores_rejected {entered memory : Memory} {boundary : Nat} {kinds slots}
+    {known : Nat → Option CIL.Value} (snapshots : LocalSnapshots memory slots known)
+    (homes : WritableHomes entered boundary kinds slots) (formed : memory.WellFormed)
+    {home : Reference} {bytes : List (BitVec 8)}
+    (slot : slots[0]? = some (.bytes (.aggregate 40) home))
+    (specified : known 0 = some (.aggregate bytes))
+    (writable : access memory home 40 1 true = .ok ()) (bits : BitVec 128) :
+    ∃ after, LocalSnapshots after slots
+      (rememberLocal known 0 (.aggregate (vector.setIn bytes bits.toNat))) := by
+  fail_if_success
+    have := snapshots.store_field homes formed slot specified writable mixed_checked.1
+      mixed_checked.2 rfl rfl (fieldIndex := 2) rfl (.i64 0) rfl
+  fail_if_success
+    have := snapshots.store_aggregate_field homes formed slot specified writable mixed_checked.1
+      mixed_checked.2 rfl rfl (fieldIndex := 3) rfl (List.replicate 8 0) rfl
+  obtain ⟨after, -, stored, -⟩ := snapshots.store_field homes formed slot specified writable
+    mixed_checked.1 mixed_checked.2 rfl rfl (fieldIndex := 2) rfl (.v128 bits) rfl
+  exact ⟨after, stored⟩
+
+#print axioms mismatched_stores_rejected
+
+/-- A word load at the vector's offset is not a field of `mixed`, unlike the vector load, and
+    it reads only the low half of a stored vector. -/
+theorem narrow_vector_load_unavailable {memory : Memory} {slots : List LocalSlot}
+    {known : Nat → Option CIL.Value} (snapshots : LocalSnapshots memory slots known)
+    (formed : memory.WellFormed) {home : Reference} {bytes : List (BitVec 8)}
+    (slot : slots[0]? = some (.bytes (.aggregate 40) home))
+    (specified : known 0 = some (.aggregate bytes)) (vectorValue : Nat)
+    (present : (mixed.values bytes)[2]? = some vectorValue) :
+    (∀ body pc args frame rest,
+      step body (.fieldAt 8 16 false) pc args frame (.reference (.address home) :: rest) memory =
+        .ok (.next (pc + 1) (.scalar (numericOfWidth 16 vectorValue) :: rest) frame memory)) ∧
+      (⟨8, 8, false⟩ : FieldLayout).numberIn (vector.setIn zeros40 vectorOnes) ≠ vectorOnes := by
+  fail_if_success
+    have := snapshots.load_field formed slot specified mixed_checked.1 rfl rfl
+      (offset := 8) (width := 8) (fieldIndex := 2) rfl present
+  exact ⟨snapshots.load_field formed slot specified mixed_checked.1 rfl rfl (fieldIndex := 2)
+    rfl present, by decide⟩
+
+#print axioms narrow_vector_load_unavailable
+
+/-- The overlapping layout fails the disjointness check, so no nested store goes through it,
+    while one goes through on `mixed`; a nested store over the vector's upper half changes the
+    vector's value. -/
+theorem nested_over_vector_rejected {entered memory : Memory} {boundary : Nat} {kinds slots}
+    {known : Nat → Option CIL.Value} (snapshots : LocalSnapshots memory slots known)
+    (homes : WritableHomes entered boundary kinds slots) (formed : memory.WellFormed)
+    {home : Reference} {bytes : List (BitVec 8)}
+    (slot : slots[0]? = some (.bytes (.aggregate 40) home))
+    (specified : known 0 = some (.aggregate bytes))
+    (writable : access memory home 40 1 true = .ok ()) (inner : List (BitVec 8))
+    (innerSized : inner.length = 12) :
+    nestedOverVector.Valid ∧ ¬ nestedOverVector.Disjoint ∧
+      vector.numberIn ((⟨16, 12, true⟩ : FieldLayout).setIn zeros40 (2 ^ 96 - 1)) ≠
+        vector.numberIn zeros40 ∧
+      ∃ after, LocalSnapshots after slots (rememberLocal known 0
+        (.aggregate ((⟨24, 12, true⟩ : FieldLayout).setIn bytes (byteNumber inner)))) := by
+  fail_if_success
+    have := snapshots.store_aggregate_field homes formed slot specified writable
+      (layout := nestedOverVector) (by decide) (by decide) rfl rfl (fieldIndex := 1) rfl
+      inner innerSized
+  obtain ⟨after, -, stored, -⟩ := snapshots.store_aggregate_field homes formed slot specified
+    writable mixed_checked.1 mixed_checked.2 rfl rfl (fieldIndex := 3) rfl inner innerSized
+  exact ⟨by decide, by decide, by decide, after, stored⟩
+
+#print axioms nested_over_vector_rejected
+
 end Tests.AggregateFields
