@@ -63,14 +63,9 @@ theorem terminates (holds : decrementContract.Holds Extracted.program decrement)
     cil_loop_finish [entry.frame, header, loaded0, loaded1]
   · have nonzero : x ≠ 0#32 := zero
     cil_loop_advance [entry.frame, header, loaded0, nonzero]
+    -- The callee may change only its empty footprint, so both locals survive in `calledFrame`.
     cil_loop_call holds x at decrementSite [entry.frame, loaded0]
-    · trivial
-    rintro final _ ⟨_, invoked⟩ framed ⟨_, rfl, rfl⟩
-    dsimp only [decrementContract, List.nil_append, List.cons_append, Nat.reduceAdd] at framed ⊢
-    -- The callee may change only its empty footprint, so both locals survive the call.
-    have called := frame.after_confined framed
-      (invoke_preserves_wellFormed _ _ _ _ _ _ _ frame.wellFormed invoked) (by simp) (by simp)
-    obtain ⟨m1, stored0, frame1, -⟩ := called.store 0 (.i32 (x - 1)) rfl
+    obtain ⟨m1, stored0, frame1, -⟩ := calledFrame.store 0 (.i32 (x - 1)) rfl
     obtain ⟨m2, stored1, frame2, -⟩ := frame1.store 1 (.i32 (count + 1)) rfl
     -- The next head is chosen only now, from the memory the contract returned.
     refine loop_reaches_terminates (target := header remaining counted ⟨(x - 1, count + 1), m2,
