@@ -6,6 +6,8 @@
 // document with the citation fixed, or addressed to maintainers where that is allowed, must pass.
 var root = Path.Combine(Path.GetTempPath(), $"leancil-doc-references-{Guid.NewGuid():N}");
 var checks = 0;
+const string WideSource =
+    "theorem wide_source : CIL.sample = 1 := rfl -- an example line wider than the documentation may wrap its own";
 try
 {
     Write("CIL/Sample.lean", """
@@ -14,10 +16,11 @@ try
         syntax "bind_entry " ident : command
         end CIL
         """);
-    Write("Examples/Proofs/Sample.lean", """
+    Write("Examples/Proofs/Sample.lean", $$"""
         import Extracted
         theorem sample_holds : CIL.sample = 1 := by
           rfl
+        {{WideSource}}
         """);
     Write("Tests/Fixture.lean", "def helper : Nat := 0\n");
 
@@ -87,6 +90,16 @@ try
         """,
         "is not in `Examples/Proofs/Sample.lean`");
     Fails("an unclosed fence", "```lean\nexample : True := trivial\n", "never closed");
+
+    // Lean style caps lines at 100 characters; an excerpt can only be as wrapped as its source.
+    var atLimit = $"theorem wide : {new string('x', 100 - "theorem wide : ".Length)}";
+    const string TooLong = "the Lean line has 101 characters";
+    Passes("Lean lines of exactly 100 characters", $"```lean extracted\n{atLimit}\n```\n\n```lean\n{atLimit}\n```");
+    Fails("an extracted Lean line over 100 characters", $"```lean extracted\n{atLimit}y\n```", TooLong);
+    Fails("a checked Lean line over 100 characters", $"```lean\n{atLimit}y\n```", TooLong);
+    Fails("an illustrative Lean line over 100 characters", $"```lean illustrative\n{atLimit}y\n```", TooLong);
+    Passes("an excerpt of a source line over 100 characters",
+        $"```lean excerpt Examples/Proofs/Sample.lean\n{WideSource}\n```");
     Console.WriteLine($"All {checks} documentation reference checks passed.");
     return 0;
 }

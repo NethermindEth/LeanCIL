@@ -314,7 +314,8 @@ proof that imports it can name locals by their C# names, resolved in the scope t
 ```lean extracted
 import ExtractedSymbols
 
-theorem stores : sumBody.code[atWide + 1]? = some (.setLocal (local_named sum "carry" at (atWide + 1))) := rfl
+theorem stores :
+    sumBody.code[atWide + 1]? = some (.setLocal (local_named sum "carry" at (atWide + 1))) := rfl
 ```
 
 A name used for one slot needs no `at`; a name the PDB gives two slots, such as `carry` declared in
@@ -349,6 +350,7 @@ and transport it with the lemmas in `CIL.Safety.Embedding.Simulation`:
 ```lean
 import CIL.Embedding.Tactic
 import CIL.Safety.Embedding.Simulation
+import CIL.SymbolicExecution
 
 open CIL.Safety
 open CIL (Method MethodEmbeds)
@@ -416,6 +418,7 @@ require an element width greater than zero and less than `2^64` bytes. For those
 `CIL.Safety.Embedding.DeadLocals`):
 
 ```lean
+import CIL.Embedding.Tactic
 import CIL.Safety.Embedding.DeadLocals
 
 open CIL

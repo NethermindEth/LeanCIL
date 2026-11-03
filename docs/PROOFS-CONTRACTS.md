@@ -7,6 +7,8 @@ callee's interface as a `MethodContract` instead (`CIL.Safety.MethodContract`) a
 against it:
 
 ```lean
+import CIL
+
 open CIL.Safety
 open CIL (W64)
 
@@ -32,7 +34,8 @@ The caller's theorem then takes the callee's contract as a hypothesis, so it hol
 implementation that meets it:
 
 ```lean extracted
-theorem root_holds (add : addContract.Holds Extracted.program addTo) : rootContract.Holds Extracted.program root
+theorem root_holds (add : addContract.Holds Extracted.program addTo) :
+    rootContract.Holds Extracted.program root
 ```
 
 [CountCalls](../Examples/Proofs/CountCalls.lean) proves a loop through its helper's contract this
@@ -150,6 +153,8 @@ out` for some `out` satisfying `post`. Without `Output`, `results` is the identi
 the values:
 
 ```lean
+import CIL
+
 open CIL.Safety
 
 def mixContract : MethodContract (CIL.W64 × CIL.W64) CIL.W64 where
@@ -252,6 +257,8 @@ then runs the constructor with that storage as `this`. The constructor's interfa
 that it returns no values and that `post` reads back all `size` bytes at `this` as `value`:
 
 ```lean
+import CIL
+
 open CIL.Safety
 open CIL (W64)
 
@@ -272,7 +279,8 @@ def pairContract : MethodContract PairInput Unit where
   footprint input := [(input.this, 16)]
   post input _ final _ := read final input.this 16 1 = .ok (pairBytes input)
 
-theorem pair_constructs : pairContract.Constructs 16 PairInput.this fun input _ => pairBytes input :=
+theorem pair_constructs :
+    pairContract.Constructs 16 PairInput.this fun input _ => pairBytes input :=
   ⟨fun _ => rfl, fun _ _ _ _ readback => readback⟩
 ```
 
@@ -304,6 +312,8 @@ Memory after a throw is not observable to the caller, so `Raises` states none; r
 count only where the semantics models them as `.thrown`.
 
 ```lean
+import CIL
+
 open CIL.Safety
 
 def percentContract : OutcomeContract CIL.W64 CIL.W64 where
@@ -358,6 +368,8 @@ A method's proved contract can be more detailed than its callers need. Export a 
 proving that the internal contract refines it, without unfolding or executing the method again:
 
 ```lean
+import CIL
+
 open CIL.Safety
 open CIL (W64)
 
@@ -459,9 +471,11 @@ false, so a theorem assuming it proves nothing.
 Prove the caller over every program that links its own, assuming only the import's contract:
 
 ```lean extracted
-def importsAdd (linked : CIL.Program) : Prop := addContract.Holds linked (importIndex Extracted.program 0)
+def importsAdd (linked : CIL.Program) : Prop :=
+  addContract.Holds linked (importIndex Extracted.program 0)
 
-theorem root_given : HoldsGiven Extracted.program importsAdd (fun linked => rootContract.Holds linked root)
+theorem root_given :
+    HoldsGiven Extracted.program importsAdd (fun linked => rootContract.Holds linked root)
 ```
 
 `Links base linked` means `linked = base ++ rest`, so every extracted method keeps its index

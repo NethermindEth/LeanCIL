@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 /// <summary>How a Lean code block in the documentation is checked; the info string after `lean` selects it.</summary>
 enum SnippetKind
 {
-    /// <summary>No marker: elaborated after `import CIL` and its own imports, in a namespace of its own.</summary>
+    /// <summary>No marker: elaborated with exactly its own imports, in a namespace of its own.</summary>
     Checked,
     /// <summary>`excerpt PATH`: every line, in order, begins a line of that verified repository file.</summary>
     Excerpt,
@@ -12,6 +12,17 @@ enum SnippetKind
     Extracted,
     /// <summary>`illustrative`: a shape, not code; only its imports, commands and names are checked.</summary>
     Illustrative
+}
+
+/// <summary>How the `docs` suite resolves a name cited outside elaborated code.</summary>
+enum CitedKind
+{
+    /// <summary>A `CIL.`-rooted name: a constant or namespace exactly as written.</summary>
+    Rooted,
+    /// <summary>An unrooted name: also a suffix of a library constant or namespace, or syntax.</summary>
+    Library,
+    /// <summary>A `bind_` or `cil_` word: a tactic, command or attribute.</summary>
+    Keyword
 }
 
 /// <summary>A fenced Lean block: <c>Line</c> is the document line of its first code line.</summary>
@@ -209,6 +220,9 @@ static partial class Documentation
 
     const string NotCommand = "is not a LeanCIL command, tactic or attribute";
 
+    /// <summary>The longest Lean line the repository's style allows, in or out of the documentation.</summary>
+    const int LeanLineLimit = 100;
+
     static string ModulePath(string module) => $"{module.Replace('.', '/')}.lean";
 
     // GitHub's heading anchors: lowercased, punctuation dropped, spaces to hyphens, repeats numbered.
@@ -247,9 +261,15 @@ static partial class Documentation
     {
         var at = $"{block.Document}:{block.Line}";
         for (var offset = 0; offset < block.Lines.Length; offset++)
+        {
             if (Patterns.Import().Match(block.Lines[offset]) is { Success: true } import &&
                 ImportProblem(root, import.Groups["module"].Value, block.Kind) is { } problem)
                 yield return $"{block.Document}:{block.Line + offset}: {problem}";
+            // An excerpt must begin each line of its source as written, so only the source can wrap it.
+            if (block.Kind != SnippetKind.Excerpt && block.Lines[offset].Length > LeanLineLimit)
+                yield return $"{block.Document}:{block.Line + offset}: the Lean line has " +
+                    $"{block.Lines[offset].Length} characters; wrap it within {LeanLineLimit}";
+        }
         switch (block.Kind)
         {
             case SnippetKind.Checked when block.Lines.Any(line => Patterns.Extraction().IsMatch(StripComment(line))):
@@ -312,33 +332,42 @@ static partial class Documentation
         return names;
     }
 
-    /// <summary>One Lean file holding every checked snippet, each in a namespace of its own.</summary>
-    internal static SnippetBatch Snippets(IEnumerable<DocumentPage> pages)
+    /// <summary>
+    /// One Lean file per distinct import set, holding every checked snippet with exactly that set, each
+    /// in a namespace of its own; no import is implied, so a snippet's import list is shown sufficient.
+    /// </summary>
+    internal static SnippetBatch[] Snippets(IEnumerable<DocumentPage> pages)
     {
-        var batch = new BatchWriter();
-        var checkedBlocks = pages.SelectMany(page => page.Blocks).Where(block => block.Kind == SnippetKind.Checked)
-            .ToArray();
-        var imports = checkedBlocks.SelectMany(block => block.Lines.Select((line, offset) =>
-                (Module: Patterns.Import().Match(line).Groups["module"].Value,
-                    Origin: new SnippetOrigin(block.Document, block.Line + offset))))
-            .Where(import => import.Module is not ("" or "CIL")).DistinctBy(import => import.Module);
-        batch.Emit("import CIL");
-        foreach (var (module, origin) in imports) batch.Emit($"import {module}", origin);
-        foreach (var block in checkedBlocks)
+        static (string Module, int Offset)[] Imports(LeanBlock block) => block.Lines
+            .Select((line, offset) => (Patterns.Import().Match(line).Groups["module"].Value, offset))
+            .Where(import => import.Item1 != "").DistinctBy(import => import.Item1).ToArray();
+        var batches = new List<SnippetBatch>();
+        var checkedBlocks = pages.SelectMany(page => page.Blocks).Where(block => block.Kind == SnippetKind.Checked);
+        var groups = checkedBlocks.GroupBy(block =>
+            string.Join(' ', Imports(block).Select(import => import.Module).Order(StringComparer.Ordinal)));
+        foreach (var group in groups)
         {
-            batch.Emit($"namespace DocSnippet{++batch.Count}");
-            for (var offset = 0; offset < block.Lines.Length; offset++)
-                batch.Emit(Patterns.Import().IsMatch(block.Lines[offset]) ? "" : block.Lines[offset],
-                    new(block.Document, block.Line + offset));
-            batch.Emit($"end DocSnippet{batch.Count}");
+            var batch = new BatchWriter();
+            var first = group.First();
+            foreach (var (module, offset) in Imports(first))
+                batch.Emit($"import {module}", new(first.Document, first.Line + offset));
+            foreach (var block in group)
+            {
+                batch.Emit($"namespace DocSnippet{++batch.Count}");
+                for (var offset = 0; offset < block.Lines.Length; offset++)
+                    batch.Emit(Patterns.Import().IsMatch(block.Lines[offset]) ? "" : block.Lines[offset],
+                        new(block.Document, block.Line + offset));
+                batch.Emit($"end DocSnippet{batch.Count}");
+            }
+            batches.Add(batch.Finish());
         }
-        return batch.Finish();
+        return batches.ToArray();
     }
 
     /// <summary>
-    /// One Lean file importing every library module and probing each `CIL.`-rooted name that prose and
-    /// unelaborated blocks cite; a name that is a module or module folder of <paramref name="library"/>
-    /// is not probed.
+    /// One Lean file importing every library module and probing each name that prose and unelaborated
+    /// blocks cite, by the rules of <see cref="CitedNames"/>; a name that is a module or module folder of
+    /// <paramref name="library"/> is not probed.
     /// </summary>
     internal static SnippetBatch Names(string library, IEnumerable<DocumentPage> pages)
     {
@@ -348,13 +377,16 @@ static partial class Documentation
             .Prepend("CIL").Order(StringComparer.Ordinal);
         foreach (var module in modules) batch.Emit($"import {module}");
         foreach (var line in NameProbe.Split('\n')) batch.Emit(line);
-        batch.Emit("namespace DocNames");
-        foreach (var (name, origin) in CitedNames(library, pages.ToArray()))
+        var cited = CitedNames(library, pages.ToArray()).ToArray();
+        foreach (var kind in Enum.GetValues<CitedKind>())
         {
-            batch.Emit($"#doc_name {name}", origin);
-            batch.Count++;
+            batch.Emit($"#doc_names {kind.ToString().ToLowerInvariant()}");
+            foreach (var (_, name, origin) in cited.Where(name => name.Kind == kind))
+            {
+                batch.Emit($"  \"{name}\"", origin);
+                batch.Count++;
+            }
         }
-        batch.Emit("end DocNames");
         return batch.Finish();
     }
 
@@ -373,41 +405,125 @@ static partial class Documentation
         internal SnippetBatch Finish() => new(text.ToString(), origins.ToArray(), Count);
     }
 
-    // `CIL.`-rooted names outside checked blocks, minus module names; each with where it is cited.
-    static IEnumerable<(string Name, SnippetOrigin Origin)> CitedNames(string root, DocumentPage[] pages)
+    /// <summary>
+    /// The cited names, each with its kind and where it is cited. `CIL.`-rooted names anywhere in prose
+    /// or an unelaborated block are <see cref="CitedKind.Rooted"/>, minus module names. A code span in
+    /// prose that is wholly a `bind_` or `cil_` word is <see cref="CitedKind.Keyword"/>; one that is a
+    /// snake_case word, or a dotted name with a capitalised first component, is
+    /// <see cref="CitedKind.Library"/>, unless it is a file name, is rooted where the library has no
+    /// names, or is declared by a documentation Lean block or, for maintainers, under Tests/.
+    /// </summary>
+    static IEnumerable<(CitedKind Kind, string Name, SnippetOrigin Origin)> CitedNames(string root,
+        DocumentPage[] pages)
     {
         var seen = new HashSet<(string, string, int)>();
-        IEnumerable<(string Text, SnippetOrigin Origin)> Texts(DocumentPage page)
+        bool IsModule(string name) => File.Exists(Path.Combine(root, name)) ||
+            File.Exists(Path.Combine(root, ModulePath(name))) ||
+            Directory.Exists(Path.Combine(root, name.Replace('.', '/')));
+        var documented = DeclaredNames(pages.SelectMany(page => page.Blocks).Select(block =>
+            string.Join('\n', block.Lines)));
+        var tests = Path.Combine(root, "Tests");
+        var fixtures = pages.Any(page => page.Audience == Maintainers) && Directory.Exists(tests)
+            ? DeclaredNames(Directory.EnumerateFiles(tests, "*.lean", SearchOption.AllDirectories)
+                .Select(File.ReadAllText))
+            : [];
+        IEnumerable<(string Text, bool Prose, SnippetOrigin Origin)> Texts(DocumentPage page)
         {
             foreach (var line in page.Prose)
                 foreach (Match span in Patterns.CodeSpan().Matches(line.Text))
-                    yield return (span.Groups["span"].Value, new(line.Document, line.Line));
+                    yield return (span.Groups["span"].Value, true, new(line.Document, line.Line));
             foreach (var block in page.Blocks.Where(block => block.Kind is SnippetKind.Extracted
                          or SnippetKind.Illustrative))
                 for (var offset = 0; offset < block.Lines.Length; offset++)
-                    yield return (StripComment(block.Lines[offset]), new(block.Document, block.Line + offset));
+                    yield return (StripComment(block.Lines[offset]), false,
+                        new(block.Document, block.Line + offset));
         }
         foreach (var page in pages)
-            foreach (var (text, origin) in Texts(page))
+            foreach (var (text, prose, origin) in Texts(page))
+            {
                 foreach (Match match in Patterns.LibraryName().Matches(text))
-                {
-                    var name = match.Value;
-                    if (File.Exists(Path.Combine(root, name)) ||
-                        File.Exists(Path.Combine(root, ModulePath(name))) ||
-                        Directory.Exists(Path.Combine(root, name.Replace('.', '/'))) ||
-                        !seen.Add((name, origin.Document, origin.Line)))
-                        continue;
-                    yield return (name, origin);
-                }
+                    if (!IsModule(match.Value) && seen.Add((match.Value, origin.Document, origin.Line)))
+                        yield return (CitedKind.Rooted, match.Value, origin);
+                if (!prose || Unrooted(text) is not { } kind || documented.Contains(text) ||
+                    page.Audience == Maintainers && fixtures.Contains(text) ||
+                    !seen.Add((text, origin.Document, origin.Line)))
+                    continue;
+                yield return (kind, text, origin);
+            }
+    }
+
+    // Each name `sources` declare or bind with `have`, and each dotted suffix of it a citation could write.
+    static HashSet<string> DeclaredNames(IEnumerable<string> sources)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var source in sources)
+            foreach (var match in Patterns.LeanDeclaration().Matches(source).Concat(Patterns.Have().Matches(source)))
+            {
+                var name = match.Groups["name"].Value;
+                names.Add(name);
+                for (var dot = name.IndexOf('.'); dot >= 0; dot = name.IndexOf('.', dot + 1))
+                    names.Add(name[(dot + 1)..]);
+            }
+        return names;
+    }
+
+    // Roots of names the probed library cannot hold: generated, example, test and .NET names.
+    static readonly string[] ForeignRoots = ["Extracted", "ExtractedSymbols", "Examples", "Tests", "System"];
+
+    static readonly string[] FileExtensions =
+        ["lean", "olean", "cs", "csproj", "props", "md", "json", "toml", "yml", "dll", "exe", "txt"];
+
+    static CitedKind? Unrooted(string span)
+    {
+        if (Patterns.CommandSpan().Match(span) is { Success: true } command && command.Length == span.Length)
+            return CitedKind.Keyword;
+        if (Patterns.SnakeName().IsMatch(span)) return CitedKind.Library;
+        if (!Patterns.CapitalDottedName().IsMatch(span) || Patterns.LibraryName().IsMatch(span)) return null;
+        var parts = span.Split('.');
+        return ForeignRoots.Contains(parts[0]) || FileExtensions.Contains(parts[^1]) ? null : CitedKind.Library;
     }
 
     const string NameProbe = """
         open Lean Elab Command in
-        /-- Fails unless the name is a constant or a namespace of the imported library. -/
-        elab "#doc_name " name:ident : command => do
+        /-- Fails at each cited name the imported library does not resolve. A `rooted` name must be a
+        constant or namespace as written; a `keyword` name must start a tactic, command or other syntax,
+        or be an attribute. A `library` name may be any of these, or a suffix of a constant or
+        namespace of a `CIL` module. A dotted one is Lean's only when the part before its last
+        component is a namespace, so .NET names such as `X86.Aes.Encrypt` are not probed. -/
+        elab "#doc_names " kind:ident names:str* : command => do
           let environment <- getEnv
-          unless environment.contains name.getId || environment.isNamespace name.getId do
-            throwErrorAt name m!"unknown library name {name.getId}"
+          let mut lastNames : Std.HashMap String (Array Name) := {}
+          let mut spaces : Array Name := #[]
+          if kind.getId == `library then
+            let modules := environment.header.moduleNames.zip environment.header.moduleData
+            for (module, data) in modules do
+              if module.getRoot == `CIL then
+                for constant in data.constNames do
+                  if let .str _ last := constant then
+                    lastNames := lastNames.alter last fun names => some ((names.getD #[]).push constant)
+            for space in environment.getNamespaces do
+              if let .str _ last := space then
+                if space.getRoot == `CIL then
+                  spaces := spaces.push space
+                  lastNames := lastNames.alter last fun names => some ((names.getD #[]).push space)
+          let categories := (Parser.parserExtension.getState environment).categories
+          for literal in names do
+            let name := literal.getString.toName
+            let exact := environment.contains name || environment.isNamespace name
+            let syntactic := isAttribute environment name ||
+              categories.toList.any fun (_, category) => category.tables.leadingTable.contains name
+            let suffix := match name with
+              | .str _ last => (lastNames.getD last #[]).any name.isSuffixOf
+              | _ => false
+            let owner := name.getPrefix
+            let lean := owner.isAnonymous || environment.isNamespace owner ||
+              spaces.any owner.isSuffixOf
+            let resolved := match kind.getId with
+              | `rooted => exact
+              | `keyword => syntactic
+              | _ => !lean || exact || syntactic || suffix
+            unless resolved do
+              logErrorAt literal m!"unknown library name {name}"
         """;
 
     /// <summary>
@@ -557,6 +673,16 @@ static partial class Patterns
 
     [GeneratedRegex(@"(?<![\w.'])CIL(?:\.[A-Za-z_][\w'!?]*)+")]
     internal static partial Regex LibraryName();
+
+    // .NET accessor and operator names (`get_Item`, `op_Equality`) capitalise after the underscore.
+    [GeneratedRegex(@"\A[a-z][a-z0-9']*(?:_[a-z0-9][A-Za-z0-9']*)+[!?]?\z")]
+    internal static partial Regex SnakeName();
+
+    [GeneratedRegex(@"\A[A-Z][\w']*(?:\.[A-Za-z_][\w'!?]*)+\z")]
+    internal static partial Regex CapitalDottedName();
+
+    [GeneratedRegex(@"\bhave\s+(?<name>[A-Za-z_][\w']*)\s*:")]
+    internal static partial Regex Have();
 
     [GeneratedRegex(
         @"^(?<path>.+?):(?<line>\d+):(?<column>\d+): (?<severity>error|warning|info)(?:\([^)]*\))?: ?(?<message>.*)$")]

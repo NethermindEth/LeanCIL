@@ -8,7 +8,7 @@
 - `CheckedArithmetic.Add64`: universal checked addition for every pair whose sum fits, over arbitrary caller memory, with exact memory preservation. The checked automation follows generated instruction lookups; the same contract is tested after inserting NOPs and rejected for subtraction.
 - `Choose`: universal checked selection for both Boolean inputs and every pair of 64-bit values, preserving arbitrary caller memory exactly.
 - `GenericIdentity`: universal identity through direct, repeated and nested generic calls in C#, and a compiled F# identity wrapper, preserving arbitrary caller memory exactly.
-- `Loops.Countdown`: universal termination and a zero result for every `uint`, including zero and `UInt32.MaxValue`, using a decreasing natural-number measure over checked local storage.
+- `Loops.Countdown`: universal termination and a zero result for every `uint`, including zero and `uint.MaxValue`, using a decreasing natural-number measure over checked local storage.
 - `Loops.Drain`: universal termination of a reassigned `ReadOnlySpan<int>` parameter, returning
   zero after repeated slicing and preserving arbitrary caller memory exactly.
 - `Loops.AllZero` and `Loops.Sum`: an early-exit predicate and a wrapping fold over the symbolic

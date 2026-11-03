@@ -669,7 +669,7 @@ or `Tests/DispatchEvidence.cs -- --prepare-only`.
 
 Generated rejection batches retain each mutation's original expected diagnostic markers. A Lean
 command saves and restores the complete command state around each case, including its declarations,
-attributes, scopes and options. Messages are collected with Lean's `guard_msgs` helper, then
+attributes, scopes and options. Messages are collected with Lean's `#guard_msgs` command, then
 associated with the original case's line range. A rejected neighbor, missing marker, successful
 mutation or leaked failed simp theorem cannot satisfy another case's check;
 `Tests/RejectedEvidenceTests.cs` exercises these failures. No rejection result is published until
