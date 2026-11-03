@@ -225,12 +225,26 @@ internal static class MetadataValidation
     }
 
     // A pinned referenced type is laid out from its own module's definition, never the referencing module.
-    static (TypeReference Type, ModuleDefinition Module) Home(TypeReference reference, ModuleDefinition module) =>
-        reference is not TypeSpecification && reference.Scope != module &&
+    // A closed generic struct keeps its arguments, which may name types of any pinned module.
+    static (TypeReference Type, ModuleDefinition Module) Home(TypeReference reference, ModuleDefinition module)
+    {
+        if (reference is GenericInstanceType closed && GenericStructs.Is(closed) && closed.Scope != module &&
+            PinnedAssemblies.Active?.ModuleOf(closed.ElementType) is { } owner)
+        {
+            var definition = closed.ElementType.Resolve() ??
+                throw new InvalidDataException("Unresolved pinned aggregate: " + closed.FullName);
+            if (definition.Module != owner || !definition.IsValueType || closed.ElementType.IsValueType != true)
+                throw new InvalidDataException("Unsupported aggregate layout: " + closed.FullName);
+            var homed = new GenericInstanceType(definition);
+            foreach (var argument in closed.GenericArguments) homed.GenericArguments.Add(argument);
+            return (homed, owner);
+        }
+        return reference is not TypeSpecification && reference.Scope != module &&
             PinnedAssemblies.Active?.ModuleOf(reference) is { } home
             ? (reference.Resolve() ??
                 throw new InvalidDataException("Unresolved pinned aggregate: " + reference.FullName), home)
             : (reference, module);
+    }
 
     static AggregateInfo AggregateLayout(TypeReference reference, ModuleDefinition module, string architecture,
         HashSet<string> active, Dictionary<string, AggregateInfo> layouts, Dictionary<string, int> typeCounts)
@@ -254,7 +268,8 @@ internal static class MetadataValidation
             foreach (var argument in instance.GenericArguments)
             {
                 if (IsAggregate(argument, module))
-                    _ = AggregateLayout(argument, module, architecture, active, layouts, typeCounts);
+                    _ = Home(argument, module).Module != module ? AggregateLayout(argument, module, architecture)
+                        : AggregateLayout(argument, module, architecture, active, layouts, typeCounts);
                 else
                 {
                     RuntimeModels.ValidateTypeIdentity(argument, module, architecture);

@@ -53,7 +53,9 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
         var declaringArguments = reference.DeclaringType is GenericInstanceType genericOwner
             ? genericOwner.GenericArguments.ToArray() : [];
         var member = reference is GenericInstanceMethod instance ? instance.ElementMethod : reference;
-        if (definition.Module != module || reference.HasThis != definition.HasThis ||
+        // A pinned reference's definition is specialized against its own module's metadata.
+        var pinned = definition.Module == module || PinnedAssemblies.Active?.Contains(definition.Module) == true;
+        if (!pinned || reference.HasThis != definition.HasThis ||
             reference.ExplicitThis || methodArguments.Length != definition.GenericParameters.Count ||
             declaringArguments.Length != definition.DeclaringType.GenericParameters.Count ||
             (methodArguments.Length == 0 && declaringArguments.Length == 0) ||
