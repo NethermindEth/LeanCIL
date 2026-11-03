@@ -634,10 +634,17 @@ modifier are rejected, as are a `ref readonly` return and both members of a modi
 overload pair.
 `Tests/ConstrainedResolution.cs` checks the extractor's resolution rules;
 `Tests/ConstrainedEvidence.lean` independently checks Lean resolution, target, signature, ambiguity
-and prefix rejection. `Tests/ConstantCalls.lean` checks that a constant flag getter prunes only
+and prefix rejection, most specific interface bodies (derived over default, deepest in a chain, a
+body for a base abstract slot, the receiver's own override over all), diamond, re-abstraction and
+incomplete-closure rejection, a forged less specific target, a struct implementing another pin's
+interface and catalog entries outside their pin. `Tests/ConstantCalls.lean` checks that a constant flag getter prunes only
 the block its word rules out, and rejects a swapped getter, a forged word and non-constant
 bodies; `Tests/ConstrainedCalls.cs` proves the pruned `ConstantFlags` entry points against the
-runtime and rejects live, swapped and computed flags. These run in the `evidence` suite.
+runtime and rejects live, swapped and computed flags. It also proves compiled most specific bodies
+(`MostSpecificBodies`, the derived generic `SpendRefunding` and derived flag getters in
+`DerivedFlags`) against the runtime, rejects a compiled diamond, re-abstraction, unlisted base
+interface and live derived flag, and has Lean reject a catalog hiding the most specific
+`MethodImpl` or moving its interface outside its pin. These run in the `evidence` suite.
 
 The core and universal-contract suites cover checked execution and memory preservation. Choose and
 GenericIdentity preserve arbitrary caller memory exactly; Struct preserves preexisting caller memory

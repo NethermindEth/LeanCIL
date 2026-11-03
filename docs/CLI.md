@@ -93,8 +93,9 @@ or a framework DLL passed as a reference fails. One assembly cannot be both a ty
 reference.
 
 A referenced assembly's static methods are admitted as direct `call` and `ldftn` targets, and its
-structs as layouts and [constrained receivers](OPCODES.md#constrained-struct-calls), including
-static flag getters that fold a branch. Its generic methods and generic structs, static field
+structs and interfaces as layouts and [constrained dispatch](OPCODES.md#constrained-struct-calls),
+including static flag getters that fold a branch; a struct of the selected assembly may implement a
+referenced interface or rely on its interface-level bodies. Its generic methods and generic structs, static field
 loads, `calli` and types with static constructors are rejected. A closed entry type argument may
 name one of its structs as `Namespace.Type, Assembly`, by simple or full assembly name:
 

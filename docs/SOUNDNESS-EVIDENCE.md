@@ -108,9 +108,14 @@ Resolution never searches directories. A pinned full name resolves to its pinned
 four framework public-key tokens resolve to the runtime's trusted platform list as runtime
 models, and anything else fails. A referenced type with a static constructor, a static field load
 or `calli` in a referenced body, and a method signature shared by two pinned assemblies are
-rejected. Constrained dispatch to a referenced struct resolves within the struct's own assembly;
-the Lean resolver requires the target's and the slot's owners to share a scope, and the selected
-program method must carry the target's token and scoped owner, so its attribution is checked too.
+rejected. Constrained dispatch reads metadata from the selected assembly and the pinned
+references only, so a struct may implement an interface of another pinned assembly. The rule's
+invariant is catalog completeness: the receiver's interface list is closed under inheritance and
+every entry is present, so no unseen override can be more specific than the selected body, and
+every entry comes from hashed bytes `check` replays. In Lean each dispatch catalog entry names the
+pin its metadata came from and resolution reads only entries whose pin scopes their type; the
+selected program method must carry the target's token and scoped owner, so `AttributionValid`
+binds its body to a pin as well. An interface of an unpinned assembly fails resolution.
 
 ## Typed import metadata
 
