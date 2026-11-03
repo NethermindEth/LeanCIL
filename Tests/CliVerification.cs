@@ -193,6 +193,49 @@ if (!unfixed.Contains("  Subject: a method index the statement does not fix via 
     throw new InvalidOperationException("An unfixed method index was labelled as a specific method: " + unfixed);
 Console.WriteLine("PASS CLI labels a theorem by the methods its statement names");
 
+// A proof checked inside a consumer package is read by its author exactly like a standalone one, fresh or cached.
+var consumerRoot = At("artifacts/CliConsumer");
+if (Directory.Exists(consumerRoot)) Directory.Delete(consumerRoot, true);
+var consumerPackage = Path.Combine(consumerRoot, "Package");
+Directory.CreateDirectory(Path.Combine(consumerPackage, "Proofs"));
+var revision = Execute(["git", "-C", Root, "rev-parse", "HEAD"]).Stdout.Trim();
+File.WriteAllText(Path.Combine(consumerPackage, "lakefile.toml"), $$"""
+    name = "consumer"
+    [[require]]
+    name = "leancil"
+    git = {{JsonSerializer.Serialize(Root.Replace('\\', '/'))}}
+    rev = "{{revision}}"
+    [[lean_lib]]
+    name = "Proofs"
+    """);
+File.Copy(At("lean-toolchain"), Path.Combine(consumerPackage, "lean-toolchain"));
+var consumerProof = Path.Combine(consumerPackage, "Proofs", "Add.lean");
+File.Copy(proof, consumerProof);
+Run(["lake", "update"], consumerPackage);
+var consumerOutput = Path.Combine(consumerRoot, "Extraction");
+Run([.. cli, "extract", demoAssembly, "Arithmetic::Add(ulong,ulong)", consumerOutput]);
+var consumerEntry = JsonSerializer.Deserialize<JsonElement>(
+    File.ReadAllText(Path.Combine(consumerOutput, "identity.json"))).GetProperty("entry").GetString();
+// A fresh run publishes nothing; the first ordinary run may reuse an earlier test run's result, the second must.
+foreach (var (options, cached) in new[]
+    { (new[] { "--fresh" }, (bool?)false), (Array.Empty<string>(), null), (Array.Empty<string>(), true) })
+{
+    var consumer = Execute([.. cli, "verify", consumerOutput, "--proof", consumerProof,
+        "--proof-root", consumerPackage, .. options]);
+    var consumerText = consumer.Stdout.ReplaceLineEndings("\n");
+    var libraryBuild = JsonSerializer.Deserialize<JsonElement>(
+        File.ReadAllText(Path.Combine(consumerOutput, "verified.json"))).GetProperty("libraryBuild").GetString();
+    if (consumer.Code != 0 || (cached is { } reused && (libraryBuild == "consumer-proof-cache") != reused) ||
+        !consumerText.Contains("∃ result,") || consumerText.Contains("Exists fun") ||
+        consumerText.Contains("Subject: not identified") ||
+        !consumerText.Contains($"  Subject: {consumerEntry} (method 0) via CIL.Safety.invoke\n") ||
+        !consumerText.Contains("  Lean messages (1):\n") ||
+        !consumerText.Contains("Add.lean:15:0: info: 'ExampleProof.correctness' depends on axioms"))
+        throw new InvalidOperationException(
+            "Consumer verification did not print the readable statement, subject and messages: " + consumer.Output);
+}
+Console.WriteLine("PASS CLI prints the readable statement, subject and Lean messages for --proof-root proofs");
+
 // Consumers pin the framework from this report, so it must name the commit the tool was built from.
 var version = Execute([.. cli, "--version"]);
 var head = Execute(["git", "-C", Root, "rev-parse", "HEAD"]).Stdout.Trim();
