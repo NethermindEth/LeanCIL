@@ -225,8 +225,42 @@ foreach (var name in new[] { "TraceOff", "CountOn" })
     evidence.Add(proof, "PASS constant flag pruning: " + name);
 }
 
-// The caller's certificate is rechecked against the called getter: pointing the call at the other
-// getter, claiming the other word or changing the getter's loaded word each fail feature flow.
+// A getter computed from other getters folds through their certificates: conjunction, negation, a chain of
+// getters, generic type tests and derived-interface bodies each prune the clock read they guard.
+var computedFlags = staticInterfaces.Assembly.GetType("Examples.ComputedFlags")!;
+foreach (var (name, assume) in new[]
+{
+    ("TraceBoth", false), ("TraceNotOff", false), ("TraceChained", false), ("TraceGated", false),
+    ("TraceSilent", false), ("CountConfigured", true)
+})
+{
+    var output = Path.Combine(root, "Computed-" + name);
+    Run(["dotnet", ExtractorPath, "extract", assembly, $"ComputedFlags::{name}(ulong)", output,
+        .. assume ? new[] { "--assume-initialized", "Examples.StaticScalars" } : []]);
+    var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    // A getter reading a static field is never constant, so neither of its blocks is pruned.
+    if (source.Contains(".unsupported \"Unreachable under selected profile\"", StringComparison.Ordinal) == assume)
+        throw new Exception("Unexpected computed flag pruning: " + name);
+    var claims = new[] { 0UL, 5UL, ulong.MaxValue, 1UL << 63 }
+        .Select(input => (input, result: (ulong)computedFlags.GetMethod(name)!.Invoke(null, [input])!))
+        .Select(pair => $"(CIL.Safety.invoke Extracted.program 64 0 [.scalar (.i64 {pair.input})] " +
+            $"CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 {pair.result})]").ToArray();
+    var proof = Path.Combine(root, "Computed-" + name + ".lean");
+    File.WriteAllText(proof, source + "\ntheorem flag_result :\n    " + string.Join(" ∧\n    ", claims) +
+        " :=\n  ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\n#print axioms flag_result\n");
+    evidence.Add(proof, "PASS computed flag: " + name);
+}
+
+// A recursive pair of getters never folds; extraction terminates and rejects the recursion.
+var recursive = Execute(["dotnet", ExtractorPath, "extract", assembly, "ComputedFlags::CountPing(ulong)",
+    Path.Combine(root, "Reject-computed-recursion")]);
+if (recursive.Code == 0 || !recursive.Output.Contains("Recursive managed dependency", StringComparison.Ordinal))
+    throw new Exception("Incorrect recursive flag rejection\n" + recursive.Output);
+Console.WriteLine("PASS recursive flag rejection");
+
+// The caller's certificate is rechecked against the called getter's: pointing the call at the other
+// getter or claiming the other word fails the caller's feature flow, and changing the getter's loaded
+// word or claiming the getter returns 1 fails the getter's own.
 var flagsOutput = Path.Combine(root, "Flags-TraceThenCount");
 Run(["dotnet", ExtractorPath, "extract", assembly, "ConstantFlags::TraceThenCount(ulong)", flagsOutput]);
 var flags = File.ReadAllText(Path.Combine(flagsOutput, "Extracted.lean"));
@@ -240,33 +274,41 @@ var (callerIndex, offIndex, onIndex) =
 var offCall = $".call {offIndex} 0";
 var callerStates = Regex.Match(flags, $@"(?m)^def method{callerIndex}FeatureStates : [^\r\n]+");
 var offBody = Regex.Match(flags, $@"(?m)^def method{offIndex}Closed : [^\r\n]+");
+var offStates = Regex.Match(flags, $@"(?m)^def method{offIndex}FeatureStates : [^\r\n]+");
 const string offWord = "stack := [some (BitVec.ofInt 32 (0))]";
 const string offLoad = "{ offset := 0, opcode := 22, operand := .none }";
 if (!flags.Contains(offCall, StringComparison.Ordinal) ||
     !callerStates.Value.Contains(offWord, StringComparison.Ordinal) ||
-    !offBody.Value.Contains(offLoad, StringComparison.Ordinal))
+    !offBody.Value.Contains(offLoad, StringComparison.Ordinal) ||
+    !offStates.Value.Contains(offWord, StringComparison.Ordinal))
     throw new Exception("Missing constant flag mutation sites");
-foreach (var (mutation, forgedSource) in new[]
+foreach (var (mutation, forgedSource, obligation) in new[]
 {
-    ("swapped-callee", flags.Replace(offCall, $".call {onIndex} 0", StringComparison.Ordinal)),
+    ("swapped-callee", flags.Replace(offCall, $".call {onIndex} 0", StringComparison.Ordinal), callerIndex),
     ("forged-word", flags.Replace(callerStates.Value, new Regex(Regex.Escape(offWord)).Replace(
-        callerStates.Value, "stack := [some (BitVec.ofInt 32 (1))]", 1), StringComparison.Ordinal)),
+        callerStates.Value, "stack := [some (BitVec.ofInt 32 (1))]", 1), StringComparison.Ordinal), callerIndex),
     ("callee-word", flags.Replace(offBody.Value, offBody.Value.Replace(offLoad,
-        "{ offset := 0, opcode := 21, operand := .none }", StringComparison.Ordinal), StringComparison.Ordinal))
+        "{ offset := 0, opcode := 21, operand := .none }", StringComparison.Ordinal), StringComparison.Ordinal),
+        offIndex),
+    ("callee-certificate", flags.Replace(offStates.Value, offStates.Value.Replace(offWord,
+        "stack := [some (BitVec.ofInt 32 (1))]", StringComparison.Ordinal), StringComparison.Ordinal), offIndex)
 })
 {
     var forged = Path.Combine(root, "Flags-" + mutation + ".lean");
     File.WriteAllText(forged, forgedSource);
     rejected.Add(forged, "PASS forged constant flag: " + mutation,
-        $"Extraction.FeatureFlowValid rawLayouts.toArray specializedMethods method{callerIndex}Closed");
+        $"Extraction.FeatureFlowValid rawLayouts.toArray (Extraction.evidenceConstants methodEvidence) " +
+            $"method{obligation}Closed");
 }
 
 // Extraction keeps the guarded block, and so rejects its clock read, whenever the flag is live or the
-// getter is anything but an exact constant return, even one that still evaluates to false.
+// getter's certificate shows no single word, even for a getter that still evaluates to false. A getter
+// computing false from tracked words prunes the block like a constant return.
 const string clockRejection = "Contract imports from framework assemblies are not supported";
 foreach (var (mutation, selector) in new[]
 {
-    ("live-flag", "TraceOn"), ("swapped-flag", "TraceOff"), ("computed-flag", "TraceOff")
+    ("live-flag", "TraceOn"), ("swapped-flag", "TraceOff"), ("untracked-flag", "TraceOff"),
+    ("computed-flag", "TraceOff")
 })
 {
     var dll = assembly;
@@ -278,6 +320,8 @@ foreach (var (mutation, selector) in new[]
         var body = getter.Body.GetILProcessor();
         var load = getter.Body.Instructions[0];
         if (mutation == "swapped-flag") load.OpCode = OpCodes.Ldc_I4_1;
+        // Feature flow tracks no conversion, so the narrowed false is unknown.
+        else if (mutation == "untracked-flag") body.InsertAfter(load, Instruction.Create(OpCodes.Conv_U1));
         else
         {
             body.InsertAfter(load, Instruction.Create(OpCodes.Ldc_I4_0));
@@ -285,8 +329,15 @@ foreach (var (mutation, selector) in new[]
         }
         module.Write(dll);
     }
-    var result = Execute(["dotnet", ExtractorPath, "extract", dll, $"ConstantFlags::{selector}(ulong)",
-        Path.Combine(root, "Reject-flags-" + mutation)]);
+    var output = Path.Combine(root, "Reject-flags-" + mutation);
+    var result = Execute(["dotnet", ExtractorPath, "extract", dll, $"ConstantFlags::{selector}(ulong)", output]);
+    if (mutation == "computed-flag")
+    {
+        if (result.Code != 0)
+            throw new Exception("Computed constant flag was not pruned\n" + result.Output);
+        evidence.Add(Path.Combine(output, "Extracted.lean"), "PASS computed constant flag pruning");
+        continue;
+    }
     if (result.Code == 0 || !result.Output.Contains(clockRejection, StringComparison.Ordinal))
         throw new Exception("Incorrect live constant flag rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS live constant flag rejection: " + mutation);

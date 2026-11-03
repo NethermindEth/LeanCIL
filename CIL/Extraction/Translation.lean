@@ -48,6 +48,11 @@ def bodyOwners (evidence : List MethodEvidence) : List (AssemblyPin × String) :
 def specializationTable (evidence : List MethodEvidence) : List SpecializedMethod :=
   evidence.map fun item => ⟨item.arguments, item.closed⟩
 
+/-- The word each program method returns, by emitted index, as its own feature certificate
+    shows. An index past the program, such as a contract import, has none. -/
+def evidenceConstants (evidence : List MethodEvidence) (index : Nat) : Option W32 :=
+  evidence[index]?.bind fun item => constantReturn item.closed item.featureStates
+
 /-- The zero value of each local kind, used when the method zero-initializes its locals. -/
 private def initialLocal : LocalKind → Value
   | .reference | .span .. | .array _ | .methodPointer _ | .methodTable _ => .nullRef
@@ -167,7 +172,7 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   SpecializationValid rawLayouts item.original item.arguments item.closed item.parameterInput ∧
   ParameterHomesValid layouts item.parameterInput item.reachable method ∧
   MethodLayoutsValid rawLayouts layouts method item.layoutUses ∧
-  FeatureFlowValid rawLayouts.toArray (specializationTable all) item.closed method.profile
+  FeatureFlowValid rawLayouts.toArray (evidenceConstants all) item.closed method.profile
     item.featureStates item.reachable method.code ∧
   ManagedCallsValid (specializationTable all) imports
     (lowerConstrainedRaw item.dispatchTypes item.closed) item.reachable method ∧

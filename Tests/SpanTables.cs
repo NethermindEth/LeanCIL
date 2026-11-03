@@ -78,7 +78,8 @@ foreach (var (name, selector, inputs) in new (string, string, int[][])[]
     File.WriteAllText(forged, NarrowEvidence(source.Replace(".nop", ".localAddr 0"), obligation));
     rejected.Add(forged, $"PASS {name}: forged span receiver rejected by the feature certificate",
         diagnostic => Regex.IsMatch(diagnostic,
-            @"Extraction\.FeatureFlowValid rawLayouts\.toArray specializedMethods method\d+Closed"), "is false");
+            @"Extraction\.FeatureFlowValid rawLayouts\.toArray \(Extraction\.evidenceConstants methodEvidence\) " +
+                @"method\d+Closed"), "is false");
 }
 
 // The proved value comes from the assembly's RVA blob through ldtoken.

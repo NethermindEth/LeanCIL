@@ -54,8 +54,7 @@ internal static class Reachability
             if (conditional && folded) condition = same;
             var selector = i.OpCode.Code == Code.Switch && state.Stack.Count != 0 ? state.Stack[^1] : null;
             state = state.Copy();
-            var constant = i.OpCode.Code == Code.Call && i.Previous?.OpCode.Code == Code.Constrained
-                ? ConstrainedCalls.ConstantResult(method, i, positions ??= new(method), profile.Architecture) : null;
+            var constant = ConstantReturns.Of(method, i, () => positions ??= new(method), profile);
             state.Step(i, method, profile, addressed, folded && !conditional ? same : null, constant);
 
             void Successor(Instruction target)

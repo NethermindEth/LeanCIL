@@ -287,15 +287,17 @@ Reference receivers, boxing fallbacks, inherited dispatch, instance default-inte
 generic instance methods on interfaces, static slots on generic struct receivers and ordinary
 unconstrained virtual calls remain unsupported.
 
-A static Boolean slot used as a compile-time flag selects code the way the JIT does: when the
-resolved target of `constrained. T; call` takes no parameters, returns `System.Boolean` and its
-body is exactly `ldc.i4.0` or `ldc.i4.1` followed by `ret`, the pushed word feeds the
-[feature-flow analysis](#runtime-calls-and-simd) and the block it rules out is emitted
-as unsupported placeholders, so code there is never translated or validated. The call itself is
-still emitted and executed. Lean reads the word from the called program method's raw body, which
-that method's own evidence binds to its emitted `const32; ret`; any other body, including one
-that computes the same value, leaves both edges live. A getter supplied by a derived interface
-folds the same way, since it is the resolved target.
+A static Boolean getter used as a compile-time flag selects code the way the JIT does: when a
+plain `call` or the resolved target of `constrained. T; call` takes no parameters, returns
+`System.Boolean` and its own feature certificate shows the same 0 or 1 at every reachable `ret`,
+the pushed word feeds the [feature-flow analysis](#runtime-calls-and-simd) and the block it rules
+out is emitted as unsupported placeholders, so code there is never translated or validated. The
+getter may compute its word from other flag getters, type tests and feature tests, as in
+`=> A.IsActive && !B.IsActive` or `=> TFlag.IsActive || typeof(TFlag) == typeof(Forced)` in a
+closed generic type; a getter supplied by a derived interface folds the same way. The call itself
+is still emitted and executed. Lean reads the word from the callee's certificate, which the
+callee's own obligation validates. A getter that reads a static field or an untracked value, a
+tail call, a call cycle and a call to an imported method leave both edges live.
 
 ### Static span tables
 

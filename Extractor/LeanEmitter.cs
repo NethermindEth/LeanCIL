@@ -261,6 +261,10 @@ internal static class LeanEmitter
         lean.AppendLine("def specializedMethods : List Extraction.SpecializedMethod := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"⟨method{n}TypeArgumentsRaw, method{n}Closed⟩")) + "]");
         IReadOnlyList<ImportResolution.Binding> importBindings = importResolution?.Bindings ?? [];
         lean.AppendLine("def imports : List ImportSlot := [" + string.Join(", ", importBindings.Select(ImportResolution.LeanSlot)) + "]");
+        // Whole-program data, so it stays after the `specializedMethods` boundary of per-method components;
+        // feature obligations read callee certificates through it.
+        lean.AppendLine("def methodEvidence : List Extraction.MethodEvidence := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"{{ original := method{n}Original, arguments := method{n}TypeArgumentsRaw, closed := method{n}Closed, parameterInput := method{n}RawArguments, reachable := method{n}Reachable, featureStates := method{n}FeatureStates, scalarStates := method{n}ScalarStates, layoutUses := method{n}LayoutUses, dispatchTypes := method{n}DispatchTypes, " +
+            $"assembly := assembly{pinned.Index(methods[n].Module)} }}")) + "]");
         for (var n = 0; n < methods.Length; n++)
         {
             FeatureEvidence.EmitTheorem(lean, n);
@@ -278,8 +282,6 @@ internal static class LeanEmitter
         lean.AppendLine("def importSignatures : List String := [" + string.Join(", ", importBindings.Select(binding => JsonSerializer.Serialize(binding.Identity))) + "]");
         lean.AppendLine("theorem importSignatures_length : importSignatures.length = imports.length := rfl");
         lean.AppendLine("theorem statics_validated : Extraction.StaticValuesValid program := " + Decide);
-        lean.AppendLine("def methodEvidence : List Extraction.MethodEvidence := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"{{ original := method{n}Original, arguments := method{n}TypeArgumentsRaw, closed := method{n}Closed, parameterInput := method{n}RawArguments, reachable := method{n}Reachable, featureStates := method{n}FeatureStates, scalarStates := method{n}ScalarStates, layoutUses := method{n}LayoutUses, dispatchTypes := method{n}DispatchTypes, " +
-            $"assembly := assembly{pinned.Index(methods[n].Module)} }}")) + "]");
         for (int n = 0; n < methods.Length; n++)
         {
             lean.AppendLine($"theorem method{n}_coverage_validated : Extraction.LayoutUsesComplete rawLayouts method{n}Closed method{n}RawArguments method{n}Reachable method{n}LayoutUses := {Decide}");

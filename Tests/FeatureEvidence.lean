@@ -50,19 +50,23 @@ private def branchStates : FeatureCertificate := [state [], state [some 0], stat
 private def branchCode : List Op := [.feature .sse2, .brnonzero 4, .const32 0, .ret, .unsupported "pruned", .unsupported "pruned"]
 private def branchMask := [true, true, true, true, false, false]
 
-example : FeatureFlowValid #[] [] branchRaw .scalar branchStates branchMask branchCode := by decide
+example : FeatureFlowValid #[] (fun _ => none)
+    branchRaw .scalar branchStates branchMask branchCode := by decide
 -- A forged incoming constant cannot justify deleting the actual fallthrough.
-example : ¬ FeatureFlowValid #[] [] branchRaw .scalar (branchStates.set 1 (state [some 1]))
+example : ¬ FeatureFlowValid #[] (fun _ => none)
+    branchRaw .scalar (branchStates.set 1 (state [some 1]))
     branchMask branchCode := by decide
-example : ¬ FeatureFlowValid #[] [] branchRaw .scalar (branchStates.set 2 none)
+example : ¬ FeatureFlowValid #[] (fun _ => none) branchRaw .scalar (branchStates.set 2 none)
     (branchMask.set 2 false) (branchCode.set 2 (.unsupported "false pruning")) := by decide
-example : ¬ FeatureFlowValid #[] [] branchRaw .scalar branchStates branchMask
+example : ¬ FeatureFlowValid #[] (fun _ => none) branchRaw .scalar branchStates branchMask
     (branchCode.set 0 (.feature .avx2)) := by decide
-example : ¬ FeatureFlowValid #[] [] branchRaw .scalar branchStates branchMask
+example : ¬ FeatureFlowValid #[] (fun _ => none) branchRaw .scalar branchStates branchMask
     (branchCode.set 1 (.brnonzero 5)) := by decide
-example : ¬ FeatureFlowValid #[] [] branchRaw .scalar (branchStates.set 0 (state [none]))
+example : ¬ FeatureFlowValid #[] (fun _ => none)
+    branchRaw .scalar (branchStates.set 0 (state [none]))
     branchMask branchCode := by decide
-example : ¬ FeatureFlowValid #[] [] branchRaw .scalar branchStates (branchMask.set 0 false)
+example : ¬ FeatureFlowValid #[] (fun _ => none)
+    branchRaw .scalar branchStates (branchMask.set 0 false)
     branchCode := by decide
 
 -- A backedge changes a local from zero to one. The join must forget the constant,
@@ -75,14 +79,15 @@ private def loopStates : FeatureCertificate := [state [] [none], state [some 0] 
   state [] [some 1], state [] [none]]
 private def loopCode : List Op := [.const32 0, .setLocal 0, .local 0, .const32 0, .bne 8,
   .const32 1, .setLocal 0, .branch 2, .ret]
-example : FeatureFlowValid #[] [] loopRaw .scalar loopStates (List.replicate 9 true) loopCode := by decide
-example : ¬ FeatureFlowValid #[] [] loopRaw .scalar (loopStates.set 2 (state [] [some 0]))
+example : FeatureFlowValid #[] (fun _ => none) loopRaw .scalar loopStates (List.replicate 9 true) loopCode := by decide
+example : ¬ FeatureFlowValid #[] (fun _ => none)
+    loopRaw .scalar (loopStates.set 2 (state [] [some 0]))
     (List.replicate 9 true) loopCode := by decide
-example : ¬ FeatureFlowValid #[] [] loopRaw .scalar (loopStates.set 8 none)
+example : ¬ FeatureFlowValid #[] (fun _ => none) loopRaw .scalar (loopStates.set 8 none)
     [true, true, true, true, true, true, true, true, false]
     (loopCode.set 8 (.unsupported "pruned backedge exit")) := by decide
 -- Taking a local's address anywhere invalidates constant facts for that local.
-example : ¬ FeatureFlowValid #[] []
+example : ¬ FeatureFlowValid #[] (fun _ => none)
     { loopRaw with code := loopRaw.code ++ [i 18 (.local 0)] }
     .scalar (loopStates ++ [none]) ((List.replicate 9 true) ++ [false])
     (loopCode ++ [.unsupported "unreachable address"]) := by decide
@@ -91,8 +96,8 @@ private def switchRaw := raw [i 2, i 69 (.targets [4, 6]), i 23, i 42, i 24, i 4
 private def switchStates : FeatureCertificate := [state [], state [none], state [], state [some 1],
   state [], state [some 2], state [], state [some 3]]
 private def switchCode : List Op := [.arg 0, .switch [4, 6], .const32 1, .ret, .const32 2, .ret, .const32 3, .ret]
-example : FeatureFlowValid #[] [] switchRaw .scalar switchStates (List.replicate 8 true) switchCode := by decide
-example : ¬ FeatureFlowValid #[] [] switchRaw .scalar (switchStates.set 6 none)
+example : FeatureFlowValid #[] (fun _ => none) switchRaw .scalar switchStates (List.replicate 8 true) switchCode := by decide
+example : ¬ FeatureFlowValid #[] (fun _ => none) switchRaw .scalar (switchStates.set 6 none)
     [true, true, true, true, true, true, false, true] (switchCode.set 6 (.unsupported "missing switch edge")) := by decide
 
 -- Bitwise feature expressions preserve exact int32 words, including negative
@@ -114,8 +119,8 @@ private def nopStates : FeatureCertificate := [state [], state [some 0], state [
   state [], state [some 0], none, none]
 private def nopCode : List Op := [.const32 0, .nop, .brnonzero 5, .const32 0, .ret,
   .unsupported "pruned", .unsupported "pruned"]
-example : FeatureFlowValid #[] [] nopRaw .scalar nopStates [true, true, true, true, true, false, false] nopCode := by decide
-example : ¬ FeatureFlowValid #[] [] nopRaw .scalar nopStates [true, true, true, true, true, false, false]
+example : FeatureFlowValid #[] (fun _ => none) nopRaw .scalar nopStates [true, true, true, true, true, false, false] nopCode := by decide
+example : ¬ FeatureFlowValid #[] (fun _ => none) nopRaw .scalar nopStates [true, true, true, true, true, false, false]
     (nopCode.set 1 (.const32 1)) := by decide
 example : featureOpMatches #[] loopRaw (i 0) (.setLocal 0) = false := by decide
 example : featureOpMatches #[] loopRaw (i 38) (.setLocal 0) = false := by decide
@@ -186,10 +191,12 @@ theorem comparison_certificate :
       state [], state [some 1]]
     let code := [.const32 (-1), .const32 0, .blt 5, .unsupported "pruned", .unsupported "pruned",
       .const32 1, .ret]
-    FeatureFlowValid #[] [] body .scalar facts [true, true, true, false, false, true, true] code ∧
-    ¬ FeatureFlowValid #[] [] body .scalar facts [true, true, true, false, false, true, true]
+    FeatureFlowValid #[] (fun _ => none)
+        body .scalar facts [true, true, true, false, false, true, true] code ∧
+    ¬ FeatureFlowValid #[] (fun _ => none)
+        body .scalar facts [true, true, true, false, false, true, true]
       (code.set 2 (.bltu 5)) ∧
-    ¬ FeatureFlowValid #[] [] body .scalar (facts.set 5 none)
+    ¬ FeatureFlowValid #[] (fun _ => none) body .scalar (facts.set 5 none)
       [true, true, true, false, false, false, true] code := by decide +kernel
 #print axioms comparison_certificate
 
@@ -230,11 +237,13 @@ theorem switch_certificate_targets :
     let code := [.const32 0, .switch [4, 6], .unsupported "pruned", .unsupported "pruned",
       .const32 2, .ret, .unsupported "pruned", .unsupported "pruned"]
     let mask := [true, true, false, false, true, true, false, false]
-    FeatureFlowValid #[] [] body .scalar facts mask code ∧
-    ¬ FeatureFlowValid #[] [] body .scalar facts mask (code.set 1 (.switch [4, 5])) ∧
-    ¬ FeatureFlowValid #[] [] { body with code := body.code.set 1 (i 69 (.targets [4, 100])) }
+    FeatureFlowValid #[] (fun _ => none) body .scalar facts mask code ∧
+    ¬ FeatureFlowValid #[] (fun _ => none) body .scalar facts mask
+      (code.set 1 (.switch [4, 5])) ∧
+    ¬ FeatureFlowValid #[] (fun _ => none)
+        { body with code := body.code.set 1 (i 69 (.targets [4, 100])) }
       .scalar facts mask (code.set 1 (.switch [4, 100])) ∧
-    ¬ FeatureFlowValid #[] [] body .scalar (facts.set 4 none) (mask.set 4 false)
+    ¬ FeatureFlowValid #[] (fun _ => none) body .scalar (facts.set 4 none) (mask.set 4 false)
       (code.set 4 (.unsupported "false pruning")) := by decide +kernel
 #print axioms switch_certificate_targets
 
@@ -250,16 +259,17 @@ theorem pruned_tail_entry_rejected :
       none, none, none]
     let branchCode := [.const32 0, .const32 0, .bne 6, .const32 1, .ret,
       .unsupported "pruned", .unsupported "pruned", .unsupported "pruned"]
-    FeatureFlowValid #[] []
+    FeatureFlowValid #[] (fun _ => none)
       { switchBody with code := switchBody.code.set 1 (i 69 (.targets [2, 4])) }
       .scalar switchFacts [true, true, true, true, false, false, false]
       (switchCode.set 1 (.switch [2, 4])) ∧
-    ¬ FeatureFlowValid #[] [] switchBody .scalar switchFacts
+    ¬ FeatureFlowValid #[] (fun _ => none) switchBody .scalar switchFacts
       [true, true, true, true, false, false, false] switchCode ∧
-    FeatureFlowValid #[] [] { branchBody with code := branchBody.code.set 2 (i 51 (.target 5)) }
+    FeatureFlowValid #[] (fun _ => none)
+        { branchBody with code := branchBody.code.set 2 (i 51 (.target 5)) }
       .scalar branchFacts [true, true, true, true, true, false, false, false]
       (branchCode.set 2 (.bne 5)) ∧
-    ¬ FeatureFlowValid #[] [] branchBody .scalar branchFacts
+    ¬ FeatureFlowValid #[] (fun _ => none) branchBody .scalar branchFacts
       [true, true, true, true, true, false, false, false] branchCode := by decide +kernel
 #print axioms pruned_tail_entry_rejected
 
@@ -271,10 +281,10 @@ theorem switch_backedge_weakening :
       state [] [none], state [some 1] [none], state [] [some 1], state [] [none]]
     let code := [.const32 0, .setLocal 0, .local 0, .switch [4, 7], .const32 1, .setLocal 0,
       .branch 2, .ret]
-    FeatureFlowValid #[] [] body .scalar facts (List.replicate 8 true) code ∧
-    ¬ FeatureFlowValid #[] [] body .scalar (facts.set 2 (state [] [some 0]))
+    FeatureFlowValid #[] (fun _ => none) body .scalar facts (List.replicate 8 true) code ∧
+    ¬ FeatureFlowValid #[] (fun _ => none) body .scalar (facts.set 2 (state [] [some 0]))
       (List.replicate 8 true) code ∧
-    ¬ FeatureFlowValid #[] [] body .scalar (facts.set 7 none)
+    ¬ FeatureFlowValid #[] (fun _ => none) body .scalar (facts.set 7 none)
       [true, true, true, true, true, true, true, false]
       (code.set 7 (.unsupported "pruned backedge exit")) := by decide +kernel
 #print axioms switch_backedge_weakening

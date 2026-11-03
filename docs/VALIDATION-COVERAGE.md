@@ -637,10 +637,13 @@ overload pair.
 and prefix rejection, most specific interface bodies (derived over default, deepest in a chain, a
 body for a base abstract slot, the receiver's own override over all), diamond, re-abstraction and
 incomplete-closure rejection, a forged less specific target, a struct implementing another pin's
-interface and catalog entries outside their pin. `Tests/ConstantCalls.lean` checks that a constant flag getter prunes only
-the block its word rules out, and rejects a swapped getter, a forged word and non-constant
-bodies; `Tests/ConstrainedCalls.cs` proves the pruned `ConstantFlags` entry points against the
-runtime and rejects live, swapped and computed flags. It also proves compiled most specific bodies
+interface and catalog entries outside their pin. `Tests/ConstantCalls.lean` checks that constant and computed flag getters
+prune only the block their word rules out, and rejects a swapped getter, a forged word,
+non-constant bodies and a callee certificate claiming a word its body does not compute;
+`Tests/ConstrainedCalls.cs` proves the pruned `ConstantFlags` and `ComputedFlags` entry points
+(conjunction, negation, a getter chain, generic type tests and derived-interface bodies) against
+the runtime, keeps a static-field getter live, rejects live, swapped and untracked flags, forged
+caller and callee certificates and a recursive getter pair, and prunes a getter computing false. It also proves compiled most specific bodies
 (`MostSpecificBodies`, the derived generic `SpendRefunding` and derived flag getters in
 `DerivedFlags`) against the runtime, rejects a compiled diamond, re-abstraction, unlisted base
 interface and live derived flag, and has Lean reject a catalog hiding the most specific

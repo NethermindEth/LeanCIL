@@ -66,34 +66,36 @@ private def foldMask := [true, true, true, true, true, true, true, true, false, 
 private def foldCode : List Op := [.nop, .nop, .nop, .nop, .const32 1, .brzero 8, .const32 1, .ret none,
   .unsupported "pruned", .unsupported "pruned"]
 
-example : FeatureFlowValid #[] [] foldRaw .scalar foldStates foldMask foldCode := by decide
+example : FeatureFlowValid #[] (fun _ => none)
+    foldRaw .scalar foldStates foldMask foldCode := by decide
 -- A forged constant fails even with matching facts, and forged facts cannot prune the live branch.
-example : ¬ FeatureFlowValid #[] [] foldRaw .scalar foldStates foldMask (foldCode.set 4 (.const32 0)) := by decide
-example : ¬ FeatureFlowValid #[] [] foldRaw .scalar (foldStates.set 5 (state [some 0])) foldMask foldCode := by decide
-example : ¬ FeatureFlowValid #[] [] foldRaw .scalar foldStates foldMask (foldCode.set 2 (.const32 0)) := by decide
+example : ¬ FeatureFlowValid #[] (fun _ => none) foldRaw .scalar foldStates foldMask (foldCode.set 4 (.const32 0)) := by decide
+example : ¬ FeatureFlowValid #[] (fun _ => none) foldRaw .scalar (foldStates.set 5 (state [some 0])) foldMask foldCode := by decide
+example : ¬ FeatureFlowValid #[] (fun _ => none) foldRaw .scalar foldStates foldMask (foldCode.set 2 (.const32 0)) := by decide
 -- Distinct types decide the opposite edge.
 private def distinctRaw := raw (test marker other ++ [i 44 (.target 8), i 23, i 42, i 22, i 42])
-example : ¬ FeatureFlowValid #[] [] distinctRaw .scalar foldStates foldMask foldCode := by decide
-example : FeatureFlowValid #[] [] distinctRaw .scalar
+example : ¬ FeatureFlowValid #[] (fun _ => none)
+    distinctRaw .scalar foldStates foldMask foldCode := by decide
+example : FeatureFlowValid #[] (fun _ => none) distinctRaw .scalar
     ((foldStates.set 5 (state [some 0])).set 6 none |>.set 7 none |>.set 8 (state []) |>.set 9 (state [some 0]))
     [true, true, true, true, true, true, false, false, true, true]
     [.nop, .nop, .nop, .nop, .const32 0, .brzero 8, .unsupported "pruned", .unsupported "pruned", .const32 0, .ret none] := by decide
 
 -- A branch into the operands would reach the comparison with a different emitted stack.
 private def enteredRaw := raw ([i 22, i 43 (.target 4)] ++ test marker marker ++ [i 42])
-example : ¬ FeatureFlowValid #[] [] enteredRaw .scalar
+example : ¬ FeatureFlowValid #[] (fun _ => none) enteredRaw .scalar
     [state [], state [some 0], none, none, state [some 0], state [none, some 0], state [none, some 0], state [some 1]]
     [true, true, false, false, true, true, true, true]
     [.const32 0, .branch 4, .unsupported "", .unsupported "", .nop, .nop, .const32 1, .ret none] := by decide
 -- The same facts are accepted once the edge enters at the first operand.
-example : FeatureFlowValid #[] [] (raw ([i 22, i 43 (.target 2)] ++ test marker marker ++ [i 42])) .scalar
+example : FeatureFlowValid #[] (fun _ => none) (raw ([i 22, i 43 (.target 2)] ++ test marker marker ++ [i 42])) .scalar
     [state [], state [some 0], state [some 0], state [none, some 0], state [none, some 0], state [none, none, some 0], state [none, none, some 0], state [some 1, some 0]]
     [true, true, true, true, true, true, true, true]
     [.const32 0, .branch 2, .nop, .nop, .nop, .nop, .const32 1, .ret none] := by decide
 
 -- Undecided comparisons and stray type handles have no admitted translation.
 private def undecidedRaw := raw (test (.atom "Forwarder" "System.UInt64") word ++ [i 42])
-example : ¬ FeatureFlowValid #[] [] undecidedRaw .scalar
+example : ¬ FeatureFlowValid #[] (fun _ => none) undecidedRaw .scalar
     [state [], state [none], state [none], state [none, none], state [none, none], state [none]]
     (List.replicate 6 true) [.nop, .nop, .nop, .nop, .const32 0, .ret none] := by decide
 example : featureOpMatchesAt #[] foldRaw none (i 208 (.type marker)) (.const32 0) = false := by decide
@@ -131,7 +133,7 @@ theorem reference_type_branches :
       let taken := same == (opcode == 46 || opcode == 59)
       let body := branchRaw same opcode
       let states := branchStates taken
-      decide (FeatureFlowValid #[] [] body .scalar states (states.map Option.isSome)
+      decide (FeatureFlowValid #[] (fun _ => none) body .scalar states (states.map Option.isSome)
         (branchCode taken)) &&
       decide (ScalarFlowValid #[] body states (branchKinds taken) (branchCode taken))) = true := by
   decide +kernel
@@ -144,16 +146,16 @@ theorem reference_type_branch_rejections :
     let code := branchCode true
     let forwarded := raw ((branchRaw true 46).code.set 2
       (i 208 (.type (.atom "Forwarder" "System.UInt64"))))
-    (¬ FeatureFlowValid #[] [] (branchRaw true 46) .scalar states mask
+    (¬ FeatureFlowValid #[] (fun _ => none) (branchRaw true 46) .scalar states mask
       (code.set 4 (.branch 5))) ∧
-    (¬ FeatureFlowValid #[] [] (branchRaw true 47) .scalar states mask code) ∧
-    (¬ FeatureFlowValid #[] [] (branchRaw true 46) .scalar
+    (¬ FeatureFlowValid #[] (fun _ => none) (branchRaw true 47) .scalar states mask code) ∧
+    (¬ FeatureFlowValid #[] (fun _ => none) (branchRaw true 46) .scalar
       (branchStates false) ((branchStates false).map Option.isSome) (branchCode false)) ∧
     ([1, 4, 9].all fun target =>
       let untouched := branchStates false
-      !decide (FeatureFlowValid #[] [] (branchRaw false 46 target) .scalar untouched
+      !decide (FeatureFlowValid #[] (fun _ => none) (branchRaw false 46 target) .scalar untouched
         (untouched.map Option.isSome) (branchCode false))) = true ∧
-    (¬ FeatureFlowValid #[] [] forwarded .scalar states mask code) := by
+    (¬ FeatureFlowValid #[] (fun _ => none) forwarded .scalar states mask code) := by
   decide +kernel
 #print axioms reference_type_branch_rejections
 
@@ -165,13 +167,15 @@ theorem reference_type_results :
       let states := (branchStates false).take 5 ++ [state [some result]]
       let kinds := (branchKinds false).take 5 ++ [some [.word32]]
       let code := [.nop, .nop, .nop, .nop, .const32 result, .ret none]
-      decide (FeatureFlowValid #[] [] body .scalar states (List.replicate 6 true) code) &&
+      decide (FeatureFlowValid #[] (fun _ => none)
+          body .scalar states (List.replicate 6 true) code) &&
       decide (ScalarFlowValid #[] body states kinds code) &&
-      !decide (FeatureFlowValid #[] [] { body with code := body.code.set 4 (i 65026) }
+      !decide (FeatureFlowValid #[] (fun _ => none) { body with code := body.code.set 4 (i 65026) }
         .scalar states (List.replicate 6 true) code) &&
-      !decide (FeatureFlowValid #[] [] { body with code := body.code.set 4 (i 65025 (.target 5)) }
+      !decide (FeatureFlowValid #[] (fun _ => none)
+          { body with code := body.code.set 4 (i 65025 (.target 5)) }
         .scalar states (List.replicate 6 true) code) &&
-      !decide (FeatureFlowValid #[] [] body .scalar states (List.replicate 6 true)
+      !decide (FeatureFlowValid #[] (fun _ => none) body .scalar states (List.replicate 6 true)
         (code.set 4 (.const32 (if same then 0 else 1)))) &&
       !decide (ScalarFlowValid #[] body states kinds
         (code.set 4 (.const32 (if same then 0 else 1))))) = true := by

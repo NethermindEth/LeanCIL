@@ -258,3 +258,73 @@ public static class DerivedFlags
 
     public static ulong TraceQuiet(ulong value) => Trace<Quiet>(value);
 }
+
+// A flag getter computed from other getters, at any depth and through generic or derived-interface
+// bodies, folds through each callee's own certificate. Each guarded block reads the process clock,
+// which extraction rejects, so these methods extract only when their computed flag prunes it.
+public struct Forced : IStepFlag
+{
+    public static bool IsActive => false;
+}
+
+public static class Gate<TFlag> where TFlag : struct, IStepFlag
+{
+    public static bool Open => TFlag.IsActive || typeof(TFlag) == typeof(Forced);
+}
+
+public static class Hush<TFlag> where TFlag : struct, ILoudByDefault
+{
+    public static bool Silent => !TFlag.IsActive;
+}
+
+public static class ComputedFlags
+{
+    static bool Both => StepOn.IsActive && StepOff.IsActive;
+
+    static bool NotOff => !StepOff.IsActive;
+
+    static bool Outer => Middle;
+
+    static bool Middle => !Both;
+
+    // A recursive pair never returns, so neither getter is a constant.
+    static bool Ping => Pong;
+
+    static bool Pong => Ping;
+
+    public static ulong TraceBoth(ulong value)
+    {
+        if (Both) value += (ulong)System.Environment.TickCount64;
+        return value + 1;
+    }
+
+    public static ulong TraceNotOff(ulong value)
+    {
+        if (!NotOff) value += (ulong)System.Environment.TickCount64;
+        return value * 3;
+    }
+
+    public static ulong TraceChained(ulong value)
+    {
+        if (!Outer) value += (ulong)System.Environment.TickCount64;
+        return value ^ 5;
+    }
+
+    public static ulong TraceGated(ulong value)
+    {
+        if (Gate<StepOff>.Open) value += (ulong)System.Environment.TickCount64;
+        if (!Gate<Forced>.Open) value ^= (ulong)System.Environment.TickCount64;
+        return value + 2;
+    }
+
+    public static ulong TraceSilent(ulong value)
+    {
+        if (!Hush<Quiet>.Silent) value += (ulong)System.Environment.TickCount64;
+        return value + 3;
+    }
+
+    // A getter reading a static field is not a constant, so both blocks stay live.
+    public static ulong CountConfigured(ulong value) => StaticScalars.ReadBoolean() ? value + 1 : value;
+
+    public static ulong CountPing(ulong value) => Ping ? value + 1 : value;
+}
