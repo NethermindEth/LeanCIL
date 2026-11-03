@@ -3,6 +3,7 @@ import CIL.Safety.SymbolicExecution
 import CIL.Safety.LoopScaffold
 import CIL.Safety.LoopVC
 import CIL.Safety.AggregateFields
+import CIL.Safety.LoopFrames
 
 /-! A zeroed 12-byte struct local, stored field by field and read through a byref helper,
     returns its input; the local's snapshot carries each store and its decoded field values. -/
@@ -20,9 +21,8 @@ theorem correctness (memory : Memory) (x : CIL.W64) (wellFormed : memory.WellFor
     ∃ fuel result, invoke Extracted.program fuel 0 [.scalar (.i64 x)] memory =
       .ok (result, [.scalar (.i64 x)]) ∧ MemoryBelow memory.nextIdentity memory result := by
   obtain ⟨reference, entered, setup, home, entryMemory⟩ := entry.checked memory x wellFormed
-  have homes : WritableHomes entered _ _ (entry.frame memory reference).locals :=
-    .cons _ _ home.fresh home.writable (.nil _)
-  have slot : (entry.frame memory reference).locals[0]? = _ := rfl
+  have homes := home.homes
+  have slot : [LocalSlot.bytes (.aggregate 12) reference][0]? = _ := rfl
   obtain ⟨zeroed, zeroStep, zeroSnapshots, zeroFormed, zeroBelow, zeroReady, zeroForm, -⟩ :=
     (LocalSnapshots.empty entered _).zero_aggregate homes entryMemory.wellFormed slot home.writable
   obtain ⟨payload, storePayload, payloadSnapshots, payloadFormed, payloadBelow, payloadReady,
