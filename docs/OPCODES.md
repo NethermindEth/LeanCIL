@@ -375,7 +375,7 @@ bytes, including other slices in the same allocation. Readonly views do not admi
 `MemoryMarshal.AsBytes` and `Cast<TFrom,TTo>` reinterpret admitted integer, enum, aggregate
 and integer-vector spans without copying or reading their bytes. They retain allocation identity,
 lifetime and write capability. The result length is the source byte extent divided by the target element
-width, rounded down; a length exceeding `Int32.MaxValue` raises `OverflowException`.
+width, rounded down; a length exceeding `int.MaxValue` raises `OverflowException`.
 Readonly views stay readonly, and reinterpreting uninitialized storage does not initialize it.
 
 `CopyTo` and `TryCopyTo` accept writable destination spans of the same element type, from
@@ -437,7 +437,7 @@ field of the same type. Loads truncate to the declared storage width and sign-ex
 the load width and signedness to the raw field type. Mutable fields, address-taking during
 initialization, repeated stores and conditional initialization remain rejected.
 
-`public static readonly Word256 One = 1ul;` compiles to `ldc.i4.1; conv.i8; call op_Implicit(ulong); stsfld One` in the static constructor. A reachable `ldsfld` of such a field emits `.staticValue bytes`, which pushes the field's value as an aggregate and touches no memory. The static constructor must store the field exactly once, unconditionally (no control flow before the store and no branch back to it). A helper-call initializer uses a same-assembly static call whose arguments are integer constants (`ldc.i4*`, `ldc.i8` with `conv.i4`/`conv.u4`/`conv.i8`/`conv.u8`/`conv.i`/`conv.u`). A field may instead copy (`ldsfld G; stsfld F`) such a field stored earlier, as in `MinValue = Zero`. The field's declaring type must be named by `--assume-initialized`. The called method and its callees become part of the extracted program and must not access static fields. The static site records the call, and the extraction certificate reruns it in the checked interpreter: the result must be exactly the emitted bytes, or `translation_valid` fails.
+`public static readonly Word256 One = 1ul;` compiles to `ldc.i4.1; conv.i8; call op_Implicit(ulong); stsfld One` in the static constructor. A reachable `ldsfld` of such a field emits `.staticValue bytes`, which pushes the field's value as an aggregate and touches no memory. The static constructor must store the field exactly once, unconditionally (no control flow before the store and no branch back to it). A helper-call initializer uses a same-assembly static call whose arguments are integer constants (`ldc.i4*`, `ldc.i8` with `conv.i4`/`conv.u4`/`conv.i8`/`conv.u8`/`conv.i`/`conv.u`). A field may instead copy (`ldsfld G; stsfld F`) such a field stored earlier, as in `MinValue = Zero`. The field's declaring type must be named by `--assume-initialized`. The called method and its callees become part of the extracted program and must not access static fields. The static site records the call, and the extraction certificate reruns it in the checked interpreter: the result must be exactly the emitted bytes, or `Extracted.translation_valid` fails.
 
 Direct `new T(integer constants)` initialization is also admitted for same-assembly
 reference-free structs, including closed generic structs stored on nongeneric declaring types.
