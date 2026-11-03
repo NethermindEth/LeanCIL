@@ -80,6 +80,7 @@ Test("test entry points", () =>
     Equal(VerificationSelection.Select(["Tests/GeneratedEvidence.cs"]),
         ["blocks", "enums", "evidence", "excluded", "generics", "intrinsics", "scaling", "unsafe"]);
     Equal(VerificationSelection.Select(["Tests/GenericOwners.cs"]), ["generics"]);
+    Equal(VerificationSelection.Select(["Tests/MultiAssemblyGenerics.cs"]), ["assemblygenerics"]);
     Equal(VerificationSelection.Select(["Tests/GenericLayouts.cs"]), ["generics"]);
     Equal(VerificationSelection.Select(["Tests/NativeManagedDispatch.cs"]), ["evidence"]);
     Equal(VerificationSelection.Select(["Tests/NativeMethodTables.lean"]), ["evidence"]);
