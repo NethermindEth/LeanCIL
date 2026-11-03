@@ -1,5 +1,7 @@
 # Imported contract declaration discovery
 
+<!-- audience: maintainers -->
+
 `interfaceDeclarations` uses Lean's staged constant map to find current-file declarations.
 Imported declarations occupy the first map and declarations added in the current module
 occupy the second. A current-file query therefore traverses local declarations rather than

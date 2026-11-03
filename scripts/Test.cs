@@ -32,12 +32,12 @@ string suite = args switch
         or "generics" or "loops" or "evidence" or "dispatch" or "identity" or "labels" or "names" or "symbols"
         or "callers" or "construction" or "outcomes" or "scaling" or "excluded" or "blockers" or "divrem"
         or "imports" or "exports" or "exceptionlint" or "intrinsics" or "audit" or "workspace" or "templates"
-        or "assemblies"] => args[1],
+        or "assemblies" or "docs"] => args[1],
     _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|contracts|" +
         "cli|failures|integer|narrow|primitive|division|checked|conversions|native|arguments|layout|copy|bits|" +
         "enums|nested|instance|constructors|fsharp|math|unsafe|blocks|generics|loops|evidence|dispatch|" +
         "identity|labels|names|symbols|callers|construction|outcomes|scaling|excluded|blockers|divrem|imports|" +
-        "exports|exceptionlint|intrinsics|audit|workspace|templates|assemblies]")
+        "exports|exceptionlint|intrinsics|audit|workspace|templates|assemblies|docs]")
 };
 
 using var verification = new Program();
@@ -102,7 +102,8 @@ var independentSuites = new Dictionary<string, (string Script, string Descriptio
         "bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and " +
         "substitution rejection"),
     ["blockers"] = ("Tests/Blockers.cs", "admission reports with deduplicated blockers, call chains and profile-excluded branches"),
-    ["audit"] = ("Tests/OleanAudit.cs", "theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts cannot forge")
+    ["audit"] = ("Tests/OleanAudit.cs", "theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts cannot forge"),
+    ["docs"] = ("Tests/DocSnippets.cs", "documentation Lean snippets and cited library names against the current library")
 };
 foreach (ExportSuite entry in ExportVerificationSuites.Plan())
     independentSuites.Add(entry.Name, (entry.Script, entry.Description));

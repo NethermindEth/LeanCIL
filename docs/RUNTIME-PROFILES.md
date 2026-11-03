@@ -98,7 +98,7 @@ custom JSON for SSE4.2+AVX without AVX2 and for v3/v4 with
 `vector256Accelerated: false`. The validators accept these observed states;
 their absence from the built-in list is not a deployment restriction.
 
-`Tests/FeatureEvidence.cs` runs the same built-in, mutated and recorded-observation
+The `evidence` suite runs the same built-in, mutated and recorded-observation
 cases through the production C# validator and generated kernel-checked Lean
 theorems. The runtime-profile drift workflow probes Linux x64 and ARM64 weekly,
 on demand and on policy changes, using the installed .NET 10 servicing runtime.
@@ -106,7 +106,7 @@ Its artifacts record the actual runtime version and architecture; a successful
 job validates only those observations, not every possible deployment.
 The ARM64 AES workflow runs on a macOS Apple silicon runner when the AES model, its hardware
 check, the probe or the macOS evidence changes. It compares the runner's AESE and AESMC with the
-Lean model through `Tests/AesHardware.cs`, then probes and validates the runner's runtime groups
+Lean model through its AES hardware check, then probes and validates the runner's runtime groups
 and uploads the observation; it runs no other suite.
 
 Evidence field `bmi2` is `Bmi2.X64.IsSupported`, `x86Base64` is

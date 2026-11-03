@@ -22,8 +22,9 @@ stepper; `span.head` gives the passing guard, a positive length and the first el
 reference and load; `span.length_cons` is the passing guard alone and `span.length_nil` makes it
 fail; `span.tail` gives `Slice(1)` and the checked suffix; `span.below` moves a checked span into
 any memory that keeps the caller's, [`CheckedSpan.within`](../CIL/Safety/LoopFrames.lean) into
-the memory of a `LoopFrame` confined to no caller storage, and `span.tail_below` slices there while keeping the suffix
-checked in caller memory. The loop tactics take these facts from a `CheckedSpan` in context.
+the memory of a `LoopFrame` confined to no caller storage, and `span.tail_below` slices there while
+keeping the suffix checked in caller memory. The loop tactics take these facts from a `CheckedSpan`
+in context.
 
 Callee frames allocate locals above the caller's memory. For well-formed caller memory,
 `SpanView.validate_below`, `SpanView.slice_below` and `SpanContents.after_below` transport validity,
@@ -43,8 +44,6 @@ result memory, which the caller's frame exit relates only by its entry watermark
 [`SpanView.validate_eq_below`](../CIL/Safety/SpanContents.lean) transport them, given the view is
 valid in the caller's well-formed entry memory. `Contents.after_below` does the same for a
 `Contents` fact once `SpanView.allocation_below` bounds its allocation.
-[Tests/BufferContents](../Tests/BufferContents.lean) composes two calls and refutes composition
-without growth.
 
 The [AllZero span loop](../Examples/Proofs/SpanAllZero.lean) decides whether every element of an
 arbitrary-length `ReadOnlySpan<uint>` is zero, with the invariant `remaining.all (· == 0) = result`
@@ -86,8 +85,8 @@ extends the prefix by one element write without reading the room. `Filled.fill` 
 `Contents.transform` prove fill and in-place map loops of any length (`writeElements`,
 `transformElements`) as sequence properties confined to the buffer; `add_element` steps `Unsafe.Add`
 to an element, and the [buffer fill proof](../Examples/Proofs/FillWords.lean) carries `Filled` as
-the invariant of a compiled loop. `Tests/BufferContents.lean` checks unchanged neighbouring bytes
-and sibling slices, and refutes uninitialized, past-end, overlapping, unjoined and stale claims.
+the invariant of a compiled loop. The [proof regressions](VALIDATION-PROOFS.md#proof-automation)
+list the neighbouring-byte, sibling-slice and rejected claims these lemmas are checked against.
 
 `SpanView.slice_reference` identifies the allocation-relative start of a successful addressed
 slice; `SpanContents.drop` combines it with `Contents.drop`. Slice validity alone does not assert
@@ -114,53 +113,45 @@ existing sequence-content lemmas. Vector loads and stores preserve initializatio
 copies require readable, initialized source bytes. View creation and reinterpretation alone
 establish neither initialization nor read/write authority.
 
-`Tests/AggregateSpans.cs` demonstrates aggregate buffers, vector masks, overlap-safe copying and
-target-dependent layouts. `Tests/AggregateSpanFill.cs` checks repeated masked snapshots, aliased
-inputs and neighboring bytes. `Tests/SpanConstructors.cs` checks single-reference and pointer
-constructors, including target-dependent layouts, empty getters and in-place local resets.
+Single-reference and pointer span constructors, empty getters and in-place local resets use the
+same views; the [coverage reference](VALIDATION-COVERAGE.md) lists the runtime comparisons for each.
 `memoryInstruction_emptySpan` proves that every supported element width and capability produces
 a null, zero-length view without changing memory. `SpanConstructor.empty` uses that same operation
 when `initializeSpanLocal` replaces a local's previous view.
 An `in` or `ref readonly` span parameter is passed as the referenced `.bufferSpan` view, so a
 contract states the same view argument as a by-value span and reuses `SpanView.validate`,
-`Contents` and the span element lemmas; `Tests/SpanReferenceContracts.lean` proves an indexed
-read this way and `Tests/SpanReferences.cs` covers callers that pass span locals and temporaries.
+`Contents` and the span element lemmas, whether the caller passes a span local or a temporary.
 `MemoryMarshal.GetReference` of a readonly view steps by `step_memory_spanReference_readOnlyView_eq`
-to a `.readOnlyReference`; loads, field loads and `ldflda` accept it, so
-`Tests/SpanReferenceWordContract.lean` proves the first-element load with the same lemmas.
+to a `.readOnlyReference`; loads, field loads and `ldflda` accept it, so the first-element load
+is proved with the same lemmas.
 Element and byte offsets of a readonly reference step by the `step_memory_add_readOnly_*`
 equations to a `.readOnlyReference` with the writable form's address, so `add_element` applies
-unchanged; `Tests/SpanReferenceSecondContract.lean` proves `Unsafe.Add(..., 1)` this way.
-`Tests/BinarySpans.cs` demonstrates integer byte-order transfers and short-span behavior.
-`Tests/ViewAccessors.cs` checks observations without byte authority. Supplied aggregate/vector
-arrays reuse the same checked snapshot loads/stores, indexed references and span conversions; no
-backing storage is allocated. `Tests/AggregateArrays.cs` and `Tests/AggregateArrayStorage.lean`
-cover exact types, masks, authority and lifetime. `ArrayView.null_valid` requires a valid element
-width, and `InitializerFits` includes that condition for array locals, even when initialized to
-null.
+unchanged, including for `Unsafe.Add(..., 1)`. Integer byte-order transfers and view observations
+without byte authority follow the same rules. Supplied aggregate/vector arrays reuse the same
+checked snapshot loads/stores, indexed references and span conversions; no backing storage is
+allocated. `ArrayView.null_valid` requires a valid element width, and
+`InitializerFits` includes that condition for array locals, even when initialized to null.
 
-Closed generic-owner helpers use the ordinary specialized managed-call proof interface;
-`Tests/GenericOwners.cs` covers nested owners and mixed owner/method arguments. Closed sequential
-generic structs use the existing checked layout, field and construction rules after substituting the
-owner arguments. Prove calls against the specialized closed body; no separate generic runtime or
-heap representation is introduced. `Tests/GenericLayouts.cs` covers fields, nested layouts, instance
-calls and construction. Constrained interface calls on these closed owners use the same direct-call
-proof interface after the certificate resolves and binds the exact implementation;
-`Tests/ConstrainedCalls.cs` covers implicit and explicit mutating implementations.
+Closed generic-owner helpers, including nested owners and mixed owner/method arguments, use the
+ordinary specialized managed-call proof interface. Closed sequential generic structs
+use the existing checked layout, field and construction rules after substituting the owner
+arguments. Prove calls against the specialized closed body; no separate generic runtime or
+heap representation is introduced. Constrained interface calls on these closed owners, with
+implicit or explicit mutating implementations, use the same direct-call proof interface after the
+certificate resolves and binds the exact implementation.
 
 For supplied native dispatch tables, provide an immutable allocation binding and exact catalog
 target identities in `MethodTable.backing`. Checked byte offsets and `ldind.i` preserve
-authenticated callable provenance; numeric address bytes alone are insufficient.
-`Tests/NativeManagedDispatch.cs` and `Tests/NativeMethodTables.lean` cover dispatch and rejection
-obligations. These tables require a unique supported managed indirect-call signature in each body;
-handler signatures cannot carry native table pointers. Ordinary call and tail-call lifetime and fuel
+authenticated callable provenance; numeric address bytes alone are insufficient. These tables
+require a unique supported managed indirect-call signature in each body; handler
+signatures cannot carry native table pointers. Ordinary call and tail-call lifetime and fuel
 obligations still apply.
 
 Managed indirect calls admit aggregate and integer-vector values and references through the ordinary
-checked argument/return storage. `Tests/ManagedDispatch.cs` covers normal and tail transfers, exact
-closed generic identities, initialization masks and rejected unspecified lanes. Pointer overloads of
-`Unsafe` block helpers use the same block operations and proof rules as their managed-reference
-overloads; `Tests/Blocks.cs` covers exact overload/alignment evidence.
+checked argument/return storage, for normal and tail transfers alike; unspecified lanes are
+rejected. Pointer overloads of `Unsafe` block helpers use the same block operations and proof rules
+as their managed-reference overloads. The [coverage reference](VALIDATION-COVERAGE.md) lists the
+suites that check each of these interfaces.
 
 ## View struct fields
 
@@ -183,8 +174,8 @@ and the write equation; a store also returns the decoded field values, which the
 load takes. Every other local's snapshot is kept. A frame from `bind_entry ... allocating`
 supplies its `LoopFrame`, whose `homes` and `snapshots` start the chain, and
 `MemoryBelow.frame_round_trip` composes the per-step facts on return.
-[Struct](../Examples/Proofs/Struct.lean) and [Tests/AggregateFields](../Tests/AggregateFields.lean)
-show the frame-entry and remembered-local forms and the rejections.
+[Struct](../Examples/Proofs/Struct.lean) shows the frame-entry and remembered-local forms; the
+[proof regressions](VALIDATION-PROOFS.md#proof-automation) list the rejected overlapping layouts.
 
 ## Carry frame facts through a loop
 
@@ -218,5 +209,5 @@ offset and its compare. The [buffer fill proof](../Examples/Proofs/FillWords.lea
 an invariant of only `Filled` and `k <= n`. [Countdown](../Examples/Proofs/Countdown.lean) needs
 no invariant beyond the frame, and [CountCalls](../Examples/Proofs/CountCalls.lean) and
 [CountUntil](../Examples/Proofs/CountUntil.lean) keep two locals across a helper call with
-`after_confined`. [Tests/LoopFrames](../Tests/LoopFrames.lean) shows the rejections, including a
-write through the second home of a generated two-local frame.
+`after_confined`. The [proof regressions](VALIDATION-PROOFS.md#proof-automation) list the
+rejected writes, including one through the second home of a generated two-local frame.

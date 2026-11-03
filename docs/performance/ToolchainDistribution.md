@@ -1,5 +1,7 @@
 # Lean toolchain distribution
 
+<!-- audience: maintainers -->
+
 The preparation job installs the pinned Lean toolchain once and publishes the complete
 installation, Elan launchers and settings. Each suite checks the archive and toolchain-file
 hashes against the producer's outputs before extracting or executing anything. The immutable

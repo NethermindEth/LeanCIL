@@ -39,7 +39,8 @@ cover all eight wrapper combinations under a fixed heartbeat budget.
 `cil_segment` proves an exact-state contract from `CodeAt` placements and checked step facts.
 A local frame rule preserves untouched numeric snapshots from actual write effects and
 separate writable homes; placement alone never grants memory preservation.
-See [composable segments](PROOFS.md) and [their acceptance tests](../Tests/Segment.lean).
+See [composable segments](PROOFS-STEPPING.md) and their
+[regression coverage](VALIDATION-PROOFS.md#proof-automation).
 
 `CodeAt` facts let the tactics resolve instructions within a known code segment without
 expanding the whole method. `cil_checked_steps (snapshots := snapshots) [facts]` also
@@ -58,8 +59,8 @@ Contract refinement derives a public interface from a stronger proved
 contract; that interface can be exported and imported by callers.
 For unused numeric locals, retain the extracted declarations and local indices in
 the expected body and use ordinary embedding. This preserves later allocation
-identities; [the retained-local example](../Tests/RetainedNumericLocals.lean) covers
-interspersed numeric homes and nested allocating calls. Numeric-local deletion
+identities, including for interspersed numeric homes and nested allocating calls; see
+[dead-local refinement](PROOFS-BINDING.md#bodies-modulo-dead-code). Numeric-local deletion
 still requires a separate allocation-renaming simulation.
 
 `cil_embed [facts]` binds a shared body template to an extraction using proved feature

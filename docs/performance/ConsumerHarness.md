@@ -1,5 +1,7 @@
 # Consumer harness compilation reuse
 
+<!-- audience: maintainers -->
+
 `Tests/ConsumerVerification.cs` includes six checks in one executable and dispatches them
 through `--check` in separate processes, sharing compilation of the verifier code.
 Environment changes, private caches and fingerprint worker processes remain isolated. No proof,

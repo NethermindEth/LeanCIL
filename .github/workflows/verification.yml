@@ -32,6 +32,7 @@ jobs:
       - name: Test verification helpers
         run: |
           dotnet run --file scripts/CheckDocReferences.cs
+          dotnet run --file scripts/TestCheckDocReferences.cs
           dotnet run --file scripts/TestSelectVerification.cs
           dotnet run --file scripts/TestVerificationGroup.cs -c Release
           dotnet run --file scripts/TestFindCertifiedLibrary.cs

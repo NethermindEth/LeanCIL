@@ -1,5 +1,7 @@
 # Execution model and preservation guarantees
 
+<!-- audience: maintainers -->
+
 ## What is defined and proved
 
 `CIL.Safety.run` and `CIL.Safety.invoke` execute methods over allocation-aware memory.

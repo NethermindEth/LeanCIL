@@ -108,13 +108,14 @@ theorem checked_arithmetic (memory : CIL.Safety.Memory) (left right : CIL.W32) :
       [.scalar (.i32 left), .scalar (.i32 right)] memory =
       .ok (memory, [.scalar (.i32 (if left + (right <<< 1) > 0 then 1 else 0))]) := by
   cil_checked_steps
+#print axioms checked_arithmetic
 
 end ProofGuide
 ```
 
-The [automation regression](../Tests/Automation.lean) checks this pattern and symbolic branch
-proofs. This handwritten body demonstrates the tactic; a proof about an assembly must bind its body
-to the generated program, as described in in [Bind bodies to the
+The [proof automation regressions](VALIDATION-PROOFS.md#proof-automation) check this pattern and
+symbolic branch proofs. This handwritten body demonstrates the tactic; a proof about an assembly
+must bind its body to the generated program, as described in [Bind bodies to the
 extraction](PROOFS-BINDING.md#bind-bodies-to-the-extraction), and pass verification.
 
 `cil_checked_steps` composes `invoke_of_run`, `run_next`, `run_return` and `run_call_of_invoke`. It
@@ -228,28 +229,19 @@ field or first run `simp only [CIL.Safety.reduceMethodProfile, cil_feature] at h
 
 ### Consumer stepping regressions
 
-The consumer failures reported in #252 are covered by the following proofs. These use the public
-tactics with symbolic values and memory; they do not replace the checked interpreter with
-consumer-specific execution rules.
+The public tactics, with symbolic values and memory and no consumer-specific execution rules, handle
+these cases that consumer proofs rely on:
 
-| Case | Regression |
-| --- | --- |
-| Supplied store/load facts take priority over generic equations | `Tests.Automation.step_facts_first`, `applied_step_facts_first` |
-| Zero, nonzero and literal branch conditions | `Tests.Automation.branch_from_zero`, `branch_from_nonzero`, `literal_branch` |
-| Memory operations use their own equations | `Tests.Automation.asRef_fact_stack`, `load128_fact_stack`, `add_fact_stack` |
-| Profile facts decide instruction lookup | `Tests.Automation.feature_op_checked`, `Tests.MethodContract.feature_op_contract_steps` |
-| Intrinsic evaluation facts normalize the next stack | `Tests.Automation.evaluated_then_stored`, `evaluated_by_applied_hypothesis` |
-| Signed, unsigned and loaded-limb comparisons | `Tests.MethodContract.loaded_signed_branch`, `loaded_unsigned_branch`, `loaded_limb_branch` |
-| Signed/unsigned widening and both argument orders | `Tests.MethodContract.ordered_widening` |
+- supplied store and load facts take priority over generic equations;
+- zero, nonzero and literal branch conditions decide the next program counter;
+- memory operations use their own equations;
+- profile facts decide instruction lookup;
+- intrinsic evaluation facts normalize the next stack;
+- signed, unsigned and loaded-limb comparisons, and signed or unsigned widening in both argument
+  orders, step within fixed heartbeat budgets.
 
-Each comparison proof has a 2,000-heartbeat budget. The widening proof handles all eight
-combinations of signed conversion, scalar position and reversed arguments in 12,000 heartbeats,
-using one `cil_contract_steps 3` invocation per case. Its arbitrary continuation preserves the
-actual widened stack and memory, rather than merely checking that some execution exists. These
-budgets detect elaboration regressions independently of machine speed; they are not wall-clock
-benchmarks. `ordered_widening_returns` composes that prefix with a concrete suffix which discards
-both operands and returns zero, proving that the continuation premise is satisfiable for every case.
-The widened value is checked by the prefix theorem.
+The [proof automation regressions](VALIDATION-PROOFS.md#consumer-stepping-regressions) name the
+proof that pins each case and its budget.
 
 Every stepping, call and loop tactic closes lookups with `cil_lookup [facts]`: by evaluation of an
 `@[cil_code]` extraction, by `rfl`, from a lookup hypothesis such as `found : program[index]? = some
@@ -265,9 +257,8 @@ A segment theorem over an abstract body states where its code sits with `CodeAt 
 + 2`. It also finds local placement hypotheses without listing them and accepts supplied placement
 expressions such as `region.append_left`. The fetched instruction must be inside the segment and
 agree with its code. `append`, `middle`, `take` and `drop` move a placement between a region and its
-segments, and `rfl` closes a concrete one. [Tests/CodeAt](../Tests/CodeAt.lean) steps a segment this
-way. `Segment program method start finish pre post` packages a checked prefix as a composable
-contract. Assertions take the unchanged arguments and a `SegmentState` containing the frame, stack
+segments, and `rfl` closes a concrete one. `Segment program method start finish pre post`
+packages a checked prefix as a composable contract. Assertions take the unchanged arguments and a `SegmentState` containing the frame, stack
 and memory. Each admitted input supplies an output state and a cost, with an exact `run (fuel +
 cost) = run fuel` equation for every continuation fuel. `Segment.trans` composes adjacent contracts
 and adds their costs; `Segment.run_exists` applies a successful continuation. `Segment.consequence`
@@ -284,8 +275,8 @@ one frame-rule application replaces separate disjoint-read proofs for all retain
 numeric slot identities must remain fixed, and the frame-rule placement must belong to the running
 method and end at the contract boundary. Indirect writes and calls need a proved memory effect;
 absence of a direct `setLocal` is not evidence that an aliased byte-backed local keeps its value.
-[Tests/Segment](../Tests/Segment.lean) composes a 256-bit Add Vector128 reference prefix and
-Multiply AVX2 vector-input stages with these rules.
+The [proof automation regressions](VALIDATION-PROOFS.md#proof-automation) step a placed segment and
+compose vector-input stages with these rules.
 
 For steps depending on hypotheses, use `cil_checked_steps [facts]` with the relevant proved facts.
 Branches always use equations before reflexivity, so a fact can decide the next program counter
@@ -342,9 +333,9 @@ expected exception from any settled run that does not throw it.
 The [outcome loop proof](../Examples/Proofs/CountUntil.lean) propagates its helper's exception after
 earlier successful calls. The loop suite reuses it unedited for a reimplemented helper and rejects a
 helper that raises another type; on the correct build, a nondecreasing measure, a non-inductive
-invariant and a wrong specified exception each fail at that obligation. `Tests/LoopOutcome.lean`
-derives the normal-only rules as the `none` instances and proves that unsupported execution, invalid
-state and fuel exhaustion never satisfy an expected loop exception.
+invariant and a wrong specified exception each fail at that obligation. The normal-only rules are
+the `none` instances of the outcome rules, and unsupported execution, invalid state and fuel
+exhaustion never satisfy an expected loop exception.
 
 ### Loop verification conditions
 
@@ -397,10 +388,9 @@ equation and the frame after the store, without composing `MemoryBelow` by hand.
 `LoopFrame.load` reads a home at a loop head, and `LoopFrame.leave_kept` `setup` is the exit's
 `MemoryBelow` fact for a frame confined to no caller storage, for any exited frame with the
 entry's owned identities, closing a postcondition such as `SpanSum`'s; the loop tactics derive
-both from the state's frame. `Tests/LoopScaffold.lean` proves a countdown and
-a span fold over symbolic memory this way, naming no frame or span fact, and shows for each that
-a constant measure fails at the decrease goal and an invariant that is not preserved at its
-preservation goal.
+both from the state's frame. [Countdown](../Examples/Proofs/Countdown.lean) and
+[SpanSum](../Examples/Proofs/SpanSum.lean) store through their frames this way; SpanSum's loop
+steps name no frame or span fact.
 
 ## Read control flow off one step
 

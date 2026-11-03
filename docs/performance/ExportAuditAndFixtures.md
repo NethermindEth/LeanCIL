@@ -1,5 +1,7 @@
 # Export audits and fixture reuse
 
+<!-- audience: maintainers -->
+
 Contract closures use the replay's checked declaration-owner map. They retain the same
 serialization, permitted-declaration checks and recursive axiom inspection. Missing owners
 fail closed. Eligible interface validation also reuses that environment; see

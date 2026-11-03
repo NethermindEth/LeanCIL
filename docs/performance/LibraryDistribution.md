@@ -1,5 +1,7 @@
 # Certified library distribution
 
+<!-- audience: maintainers -->
+
 CI uploads the complete certified library as one `certified-library.tar.zst` file with
 artifact compression disabled. The packer streams all regular files, including the hidden
 `.lake` tree, through zstd level 6 with two workers. Hard-linked files are stored as independent

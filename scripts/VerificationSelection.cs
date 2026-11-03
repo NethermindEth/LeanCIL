@@ -152,7 +152,15 @@ internal static class VerificationSelection
         var selected = new HashSet<string>(StringComparer.Ordinal);
         foreach (var path in paths)
         {
-            if (path.EndsWith(".md", StringComparison.Ordinal) || path == "LICENSE") continue;
+            // Markdown that users read carries Lean snippets and library names that the docs suite checks.
+            if (path.EndsWith(".md", StringComparison.Ordinal))
+            {
+                if (path == "README.md" || path.StartsWith("docs/", StringComparison.Ordinal) ||
+                    path.StartsWith("skills/", StringComparison.Ordinal))
+                    selected.Add("docs");
+                continue;
+            }
+            if (path == "LICENSE") continue;
             // Other workflows run in their own jobs; only this workflow's definition feeds the suites.
             if (path.StartsWith(".github/workflows/", StringComparison.Ordinal) && path != ".github/workflows/verification.yml") continue;
             if (path == "scripts/ExportVerificationSuites.cs") return all;

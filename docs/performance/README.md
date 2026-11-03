@@ -1,5 +1,7 @@
 # Performance
 
+<!-- audience: maintainers -->
+
 Measurements here describe their exact workloads, machines and validation boundaries.
 Local gains are not automatically whole-job CI gains; inclusive stage times can overlap.
 

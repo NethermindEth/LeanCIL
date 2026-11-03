@@ -1,5 +1,7 @@
 # Trusted verification and artifact integrity
 
+<!-- audience: maintainers -->
+
 ## Trusted computing base
 
 The [trust table](SOUNDNESS.md#trusted-components-and-deployment-assumptions) identifies the trusted
