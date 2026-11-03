@@ -119,7 +119,13 @@ try
         throw new InvalidOperationException("An edited standalone proof did not leave its workspace stale: " +
             stale.Output);
 }
-finally { Directory.Delete(standalone, true); }
+finally
+{
+    // Git marks pack files read-only, which Windows refuses to delete.
+    foreach (var file in Directory.EnumerateFiles(standalone, "*", SearchOption.AllDirectories))
+        File.SetAttributes(file, FileAttributes.Normal);
+    Directory.Delete(standalone, true);
+}
 Console.WriteLine("PASS standalone proof opens in a generated package without setup and rejects stale reuse");
 
 void Reject(string[] arguments, string marker)

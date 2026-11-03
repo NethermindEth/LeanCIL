@@ -110,16 +110,24 @@ partial class Program
                 File.WriteAllText(Path.Combine(staging, "lakefile.toml"), lakefile);
                 File.Copy(At("lean-toolchain"), Path.Combine(staging, "lean-toolchain"));
                 Run(["lake", "update"], staging);
-                if (Directory.Exists(package)) Directory.Delete(package, true);
+                if (Directory.Exists(package)) DeleteGitTree(package);
                 Directory.Move(staging, package);
             }
             finally
             {
-                if (Directory.Exists(staging)) Directory.Delete(staging, true);
+                if (Directory.Exists(staging)) DeleteGitTree(staging);
             }
         }
         if (!File.Exists(copy) || Sha(copy) != Sha(proof)) File.Copy(proof, copy, true);
         return (package, copy);
+    }
+
+    // Git marks object files read-only, which Windows refuses to delete.
+    static void DeleteGitTree(string directory)
+    {
+        foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+            File.SetAttributes(file, FileAttributes.Normal);
+        Directory.Delete(directory, true);
     }
 
     /// <summary>
@@ -152,7 +160,7 @@ partial class Program
         }
         finally
         {
-            if (Directory.Exists(staging)) Directory.Delete(staging, true);
+            if (Directory.Exists(staging)) DeleteGitTree(staging);
         }
         return repository;
     }
