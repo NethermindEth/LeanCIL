@@ -185,7 +185,7 @@ internal static class ContractMethodMetadata
         MethodDefinition closed = new MethodSpecialization(definition.Module, architecture).Instantiate(reference);
         // Scalar certificates read the closed return and parameter types from the identity.
         // Keep definition and scoped argument keys before the parameter list.
-        string definitionHash = ContractInterface.Hash(Encoding.UTF8.GetBytes(DefinitionKey(definition)));
+        string definitionHash = ContractInterface.Hash(Encoding.UTF8.GetBytes(DefinitionKey(definition, entry)));
         StringBuilder identity = new(definition.Module.Assembly.Name.FullName + "::" + closed.ReturnType.FullName + " " +
             closed.DeclaringType.FullName + "::" + closed.Name + "|definition|" + definitionHash + "|arguments|");
         foreach (TypeReference argument in arguments)
@@ -251,8 +251,9 @@ internal static class ContractMethodMetadata
                 reference.Parameters.Select(parameter => OpenType(parameter.ParameterType)), StringComparer.Ordinal);
     }
 
-    static string DefinitionKey(MethodDefinition definition)
+    static string DefinitionKey(MethodDefinition definition, bool entry)
     {
+        Func<TypeReference, string> parameterKey = entry ? EntryParameter : OpenParameter;
         StringBuilder key = new("contract-definition-v1:");
         key.Append(Part(OpenType(definition.DeclaringType))).Append(Part(definition.Name))
             .Append(Part(definition.GenericParameters.Count.ToString(CultureInfo.InvariantCulture)))
@@ -261,7 +262,7 @@ internal static class ContractMethodMetadata
             .Append(Part(OpenType(definition.ReturnType)))
             .Append(Part(definition.Parameters.Count.ToString(CultureInfo.InvariantCulture)));
         foreach (ParameterDefinition parameter in definition.Parameters)
-            key.Append(Part(OpenParameter(parameter.ParameterType)));
+            key.Append(Part(parameterKey(parameter.ParameterType)));
         return key.ToString();
     }
 
@@ -270,6 +271,30 @@ internal static class ContractMethodMetadata
     // The `in:` tag keeps an `in` reference distinct from a plain one; plain parameters keep their encoding.
     static string OpenParameter(TypeReference type) =>
         InReferences.Unwrap(type) is { } reference ? "in:" + Part(OpenType(reference)) : OpenType(type);
+
+    // An entry parameter may also be a vector or pointer over a managed function pointer, the
+    // handler-table shapes; imported signatures keep the stricter encoding below.
+    static string EntryParameter(TypeReference type) =>
+        InReferences.Unwrap(type) is { } reference ? "in:" + Part(EntryType(reference)) : EntryType(type);
+
+    static string EntryType(TypeReference type)
+    {
+        RejectModifiers(type);
+        return type switch
+        {
+            ByReferenceType reference => "byref:" + Part(EntryType(reference.ElementType)),
+            ArrayType { IsVector: true } array => "vector:" + Part(EntryType(array.ElementType)),
+            PointerType pointer => "pointer:" + Part(EntryType(pointer.ElementType)),
+            FunctionPointerType callable when !callable.HasThis && !callable.ExplicitThis &&
+                callable.CallingConvention == MethodCallingConvention.Default =>
+                "managed:" + Part(EntryType(callable.ReturnType)) +
+                Part(callable.Parameters.Count.ToString(CultureInfo.InvariantCulture)) +
+                string.Concat(callable.Parameters.Select(parameter => Part(EntryType(parameter.ParameterType)))),
+            FunctionPointerType => throw new InvalidDataException(
+                "Unsupported entry function pointer calling convention: " + type.FullName),
+            _ => OpenType(type)
+        };
+    }
 
     internal static string OpenType(TypeReference type)
     {

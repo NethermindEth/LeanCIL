@@ -3,6 +3,7 @@
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
 
+using System.Text.RegularExpressions;
 using Mono.Cecil;
 
 // Generic structs and static methods of generic classes across an SDK-built Lib and App pair.
@@ -92,6 +93,17 @@ public static class Application
     public static ulong Holding(ulong x) { Holder<ulong> holder = default; holder.Item = x; return holder.Item; }
     public static ulong ReferenceArgument(ulong x) => Free<string>.Self(x);
     public static ulong Cycle(ulong x) { Loop loop = default; loop.Pair.A = x; return loop.Pair.A; }
+    public static unsafe ulong Dispatch<TGas>(delegate*<ulong, ulong>[] handlers, int index, ulong x)
+        where TGas : unmanaged => handlers[index](x) + (ulong)Unsafe.SizeOf<TGas>();
+    public static unsafe ulong CallDispatch(delegate*<ulong, ulong>[] handlers, ulong x) =>
+        Dispatch<Mine>(handlers, 0, x);
+    public static unsafe void Targets(delegate*<ulong, ulong>[] handlers) => handlers[0] = &LocalAlgo<Mine>.Run;
+    public static unsafe ulong PointerTable<TGas>(delegate*<ulong, ulong>* table, ulong x)
+        where TGas : unmanaged => table[0](x);
+    public static unsafe ulong Unmanaged<TGas>(delegate* unmanaged<ulong, ulong>[] table, ulong x)
+        where TGas : unmanaged => x;
+    public static unsafe ulong Narrow<TGas>(delegate*<uint, ulong>[] table, uint x)
+        where TGas : unmanaged => table[0](x);
 }
 """;
 
@@ -181,6 +193,59 @@ Proved("EntryCell", localRun, 13, referencedBody: false, "--type-argument", "Gen
 // The open type name assumes every instantiation's initializer ran.
 Proved("Seeded", Entry("LocalSeeded"), 5, referencedBody: false, "--assume-initialized", "GenericFixture.Seeded`1");
 
+// Supplied handler tables: a generic entry and a generic callee take `delegate*<ulong, ulong>[]`.
+// The catalog comes from the closed `&LocalAlgo<Mine>.Run` in `Targets`; any other identity is
+// outside it and stops with `invalidState`, even a real instantiation no extracted body addresses.
+const string tableSelector = "(method System.UInt64 *(System.UInt64)[],";
+foreach ((string name, string selector, string arguments, ulong result, string[] extra) in new[]
+{
+    ("Dispatch", "Dispatch" + tableSelector + "System.Int32,System.UInt64)", ".scalar (.i32 0), .scalar (.i64 5)",
+        13ul, new[] { "--type-argument", "GenericFixture.Mine" }),
+    ("CallDispatch", "CallDispatch" + tableSelector + "System.UInt64)", ".scalar (.i64 5)", 13ul, [])
+})
+{
+    string artifact = Artifact(name);
+    Run([.. cli, "extract", app, "GenericFixture.Application::" + selector, artifact, .. Reference(lib), .. extra]);
+    string extracted = File.ReadAllText(Path.Combine(artifact, "Extracted.lean"));
+    Match catalogued = Regex.Match(extracted,
+        @"identity := (\{ owner := ""[^""]*::GenericFixture\.LocalAlgo\\u00601"", [^}]*\})");
+    if (!catalogued.Success)
+        throw new InvalidOperationException("Precondition: the catalog must hold LocalAlgo<Mine>.Run: " + name);
+    string identity = catalogued.Groups[1].Value;
+    string uncatalogued = Regex.Replace(identity, @"arguments := \[.*\]",
+        "arguments := [.atom CIL.Extraction.runtimeScope \"System.UInt64\"]");
+    string proof = Path.Combine(root, name + ".lean");
+    File.WriteAllText(proof, $$"""
+        import Extracted
+
+        /-! `{{name}}` calls through a supplied table of `LocalAlgo<Mine>.Run` from the input 5. -/
+
+        open CIL
+        namespace MultiAssemblyGenericsProof
+
+        /-- The exact managed signature of `delegate*<ulong, ulong>`. -/
+        def signature : CIL.ManagedSignature :=
+          ⟨.atom CIL.Extraction.runtimeScope "System.UInt64",
+            [.atom CIL.Extraction.runtimeScope "System.UInt64"]⟩
+
+        /-- A catalogued handler runs; `LocalAlgo<ulong>.Run`, addressed by no extracted body, does not. -/
+        theorem correctness :
+            (CIL.Safety.invoke Extracted.program 64 0
+              [.methodTable ⟨signature, some #[{{identity}}], none⟩, {{arguments}}]
+              Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 {{result}})] ∧
+            (match CIL.Safety.invoke Extracted.program 64 0
+              [.methodTable ⟨signature, some #[{{uncatalogued}}], none⟩, {{arguments}}]
+              Safety.Memory.empty with
+              | .error fault => some fault.fault | .ok _ => none) = some .invalidState :=
+          ⟨by rfl, by rfl⟩
+
+        #print axioms correctness
+        end MultiAssemblyGenericsProof
+        """);
+    Run([.. cli, "verify", artifact, "--proof", proof, "--theorem", "MultiAssemblyGenericsProof.correctness"]);
+    Console.WriteLine("PASS supplied handler table: " + name);
+}
+
 void Rejected(string name, string marker, string[] command)
 {
     (int Code, string Output, string Stdout, string Stderr) result = Execute(command);
@@ -213,6 +278,20 @@ RejectedExtract("instance entry of a generic class", "only static methods of a g
     app, "GenericFixture.Instance`1::Get(ulong)", "--type-argument", "GenericFixture.Mine");
 RejectedExtract("open generic class entry", "followed by 1 for GenericFixture.LocalAlgo`1", app, localRun);
 RejectedExtract("static field of a generic class", "Unsupported static field load", app, Entry("LocalStatic"));
+string Table(string method, string signature) => $"GenericFixture.Application::{method}(method {signature},";
+RejectedExtract("unmanaged function pointer table", "Unsupported entry function pointer calling convention",
+    app, Table("Unmanaged", "System.UInt64 *(System.UInt64)[]") + "System.UInt64)",
+    [.. Reference(lib), "--type-argument", "GenericFixture.Mine"]);
+// No addressed method has the signature `ulong(uint)`, so the indirect call has no target.
+RejectedExtract("mismatched function pointer table", "Empty managed pointer target catalog",
+    app, Table("Narrow", "System.UInt64 *(System.UInt32)[]") + "System.UInt32)",
+    [.. Reference(lib), "--type-argument", "GenericFixture.Mine"]);
+RejectedExtract("open function pointer table entry", "Contract method requires an exact closed generic instantiation",
+    app, Table("Dispatch", "System.UInt64 *(System.UInt64)[]") + "System.Int32,System.UInt64)", Reference(lib));
+// A pointer to function pointers is not an admitted storage type; tables are arrays or `nint*`.
+RejectedExtract("function pointer pointer table", "Unsupported stack-storage pointer element type",
+    app, Table("PointerTable", "System.UInt64 *(System.UInt64)*") + "System.UInt64)",
+    [.. Reference(lib), "--type-argument", "GenericFixture.Mine"]);
 RejectedExtract("generic class initializer", "pass --assume-initialized GenericFixture.Seeded`1",
     app, Entry("LocalSeeded"));
 
