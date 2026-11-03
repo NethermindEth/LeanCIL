@@ -17,8 +17,8 @@ interface that expresses the result:
 | Establish buffer contents and preserve neighbours | [Buffer predicates](PROOFS-BUFFERS.md#describe-buffer-contents) | [FillWords](../Examples/Proofs/FillWords.lean) |
 | Keep frame facts out of a loop invariant | [Loop frames](PROOFS-BUFFERS.md#carry-frame-facts-through-a-loop) | [FillWords](../Examples/Proofs/FillWords.lean) |
 | Specify normal and exceptional outcomes | [Outcome contracts](PROOFS-CONTRACTS.md#name-exceptional-outcomes) | [CountUntil](../Examples/Proofs/CountUntil.lean) |
-| Publish a smaller public guarantee | [Contract consequence](PROOFS-CONTRACTS.md#derive-public-contracts) | [Contract consequence tests](../Tests/ContractConsequence.lean) |
-| Bind or transport a proof to extracted code | [Binding and transport](PROOFS-BINDING.md) | [Method binding tests](../Tests/MethodBinding.lean) |
+| Publish a smaller public guarantee | [Contract consequence](PROOFS-CONTRACTS.md#derive-public-contracts) | The guide's checked `increment_refines` snippet |
+| Bind or transport a proof to extracted code | [Binding and transport](PROOFS-BINDING.md) | [CountCalls](../Examples/Proofs/CountCalls.lean) |
 | Import a separately proved interface | [Imported contracts](PROOFS-CONTRACTS.md#compose-through-imported-contracts) | [Interface guide](CONTRACT-INTERFACES.md) |
 
 ## Keep proof work local

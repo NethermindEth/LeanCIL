@@ -16,13 +16,14 @@ The snippets assume `open CIL` and the model's namespace.
 
    ```lean
    def addMod (a b : Nat) : Nat := (a + b) % 2 ^ 64
-   theorem addMod_zero (a : Nat) (h : a < 2 ^ 64) : addMod a 0 = a
+   theorem addMod_zero (a : Nat) (h : a < 2 ^ 64) : addMod a 0 = a := by
+     simp [addMod, Nat.mod_eq_of_lt h]
    ```
 
 2. **Bridge**: for every input and caller memory, the extracted method succeeds and returns the
    model's result, converted to the CIL word type.
 
-   ```lean
+   ```lean extracted
    theorem refines (x y : W64) (memory : Safety.Memory) :
        (Safety.invoke Extracted.program 4 0
          [.scalar (.i64 x), .scalar (.i64 y)] memory).map Prod.snd =
@@ -38,7 +39,7 @@ The snippets assume `open CIL` and the model's namespace.
    method proved by rewriting with the bridge and applying the model theorem. A model hypothesis
    such as `a < 2 ^ 64` is discharged from the word type (`a.isLt`):
 
-   ```lean
+   ```lean extracted
    theorem correctness (a : W64) (memory : Safety.Memory) :
        (Safety.invoke Extracted.program 4 0
          [.scalar (.i64 a), .scalar (.i64 0)] memory).map Prod.snd =

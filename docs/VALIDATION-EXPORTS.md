@@ -1,5 +1,7 @@
 # Contract export and consumer validation
 
+<!-- audience: maintainers -->
+
 ## Export suite selection
 
 `dotnet run --file Tests/ContractExport.cs` runs every export cohort once. `dotnet run --file

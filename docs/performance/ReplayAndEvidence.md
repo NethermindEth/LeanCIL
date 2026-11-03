@@ -1,5 +1,7 @@
 # Replay environments and evidence checks
 
+<!-- audience: maintainers -->
+
 ## Published-interface validation
 
 The auditor validates eligible published interfaces in the kernel-replayed environment,

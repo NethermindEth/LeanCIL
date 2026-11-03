@@ -183,9 +183,8 @@ Generated components are not exported as portable consumer support.
 
 This first implementation shares components available in the initial checked workspace. It does
 not rename method indices to discover structurally equivalent methods, and unrelated groups can
-still repeat evidence that is absent from that workspace. `Tests/ConsumerComponents.cs` records
-build/replay counts, source size and wall time for four wrappers around one helper; `--measure`
-accepts a baseline extractor DLL without requiring component reuse.
+still repeat evidence that is absent from that workspace. The
+[coverage reference](VALIDATION-COVERAGE.md) records the build and replay counts this saves.
 
 `leancil verify-batch requests.json` verifies many requests against one consumer
 snapshot in one session:

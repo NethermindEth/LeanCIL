@@ -7,15 +7,37 @@ callee's interface as a `MethodContract` instead (`CIL.Safety.MethodContract`) a
 against it:
 
 ```lean
+open CIL.Safety
+open CIL (W64)
+
+/-- Three 8-byte cells: two inputs read as words and one output. -/
+structure AddInput where
+  a : Reference
+  b : Reference
+  res : Reference
+  x : W64
+  y : W64
+
 def addContract : MethodContract AddInput where
-  args input := [.reference (.address input.a), .reference (.address input.b), .reference (.address input.res)]
+  args input := [.reference (.address input.a), .reference (.address input.b),
+    .reference (.address input.res)]
   pre input m := read m input.a 8 1 = .ok (numberBytes input.x.toNat 8) ∧
     read m input.b 8 1 = .ok (numberBytes input.y.toNat 8) ∧ access m input.res 8 1 true = .ok ()
   footprint input := [(input.res, 8)]
-  post input _ final values := values = [] ∧ read final input.res 8 1 = .ok (numberBytes (input.x + input.y).toNat 8)
+  post input _ final values :=
+    values = [] ∧ read final input.res 8 1 = .ok (numberBytes (input.x + input.y).toNat 8)
+```
 
+The caller's theorem then takes the callee's contract as a hypothesis, so it holds for any
+implementation that meets it:
+
+```lean extracted
 theorem root_holds (add : addContract.Holds Extracted.program addTo) : rootContract.Holds Extracted.program root
 ```
+
+[CountCalls](../Examples/Proofs/CountCalls.lean) proves a loop through its helper's contract this
+way, with `decrementContract.Holds Extracted.program decrement` as its only assumption about the
+helper.
 
 `pre` holds formation, authority and the permitted aliasing; the example lets `res` overlap either
 input. `Holds` is `Ensures` with the footprint added to the postcondition (`Holds.ensures`), and
@@ -55,9 +77,8 @@ each store's new memory, updated snapshots and preserved access facts, so later 
 manually split execution segments. Loads use the latest remembered value; overwrites replace it. It
 stops at an unsupported step or an unproved obligation, and fails if it takes no step. It does not
 infer authority, initialization, or preservation across calls and unrelated writes. Ordinary
-`cil_checked_steps [facts]` is unchanged.
-[Tests/LocalSnapshotSteps](../Tests/LocalSnapshotSteps.lean) contains complete vector/int32
-store-and-reload examples and rejection tests.
+`cil_checked_steps [facts]` is unchanged. Its vector and int32 store-and-reload regressions are
+listed in [coverage](VALIDATION-COVERAGE.md).
 
 A snapshot overlapping the footprint needs a postcondition instead. The contract fixes no profile:
 the program does. `MethodContract.Holds.reprofile` (`CIL.Safety.ProfileContract`, with
@@ -121,9 +142,7 @@ remain bound to each exported profile; static-value assumptions remain unsupport
 source-bundle verification rejects initialization premises, as for single-profile exports.
 
 For a program with no profile reads, use the same `ProfileAgreement.of_flags` rule: an equality
-`empty : program.profileReads = []` discharges its premise with `by simp [empty]`. This replaces
-`profileIndependentCheck` and `profile_independent_agreement`; no separate profile-independent
-checker is needed.
+`empty : program.profileReads = []` discharges its premise with `by simp [empty]`.
 
 A contract may also type its result: `MethodContract Input Output` adds `results : Output → List
 Value`, and `post` speaks of the `Output`. `Returns` requires the returned values to equal `results
@@ -131,6 +150,8 @@ out` for some `out` satisfying `post`. Without `Output`, `results` is the identi
 the values:
 
 ```lean
+open CIL.Safety
+
 def mixContract : MethodContract (CIL.W64 × CIL.W64) CIL.W64 where
   args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
   results v := [.scalar (.i64 v)]
@@ -193,18 +214,13 @@ Fin constructor indices and the projection of the literal `3`. For example, a fa
 applies to a value read as `words ⟨1, proof⟩`.
 
 Enable `trace.CIL.factNormalize` to see one event per supplied local proposition when it is
-prepared. `Tests/StoreFacts.lean` counts exactly 12 such events for a 27-instruction run. This count
-checks normalization frequency; it is not an elapsed-time measurement.
+prepared; the count measures normalization frequency, not elapsed time.
 
-[`Tests/StoreFacts.lean`](../Tests/StoreFacts.lean) checks carry and borrow stores and rejects a
-wrong value, address or memory state.
-
-`Tests/MethodContract.lean` proves a caller from two contracts without unfolding either callee.
-`Tests/MethodContract.cs` verifies that caller proof unedited against a build whose helpers are
-reimplemented and renumbered, and refutes each contract with a concrete run on builds with an
-arithmetic or an aliasing bug; `invoke_ok_unique` ties a computed run to the contract's existential
-one, and `invoke_ok_observation_unique` does so for one observation of it, such as the returned
-values, so the refutation never compares memories.
+To refute a contract with a concrete run, `invoke_ok_unique` ties a computed run to the contract's
+existential one, and `invoke_ok_observation_unique` does so for one observation of it, such as the
+returned values, so the refutation never compares memories. The regressions for contract
+composition, store facts and refutation are described in [proof
+validation](VALIDATION-PROOFS.md#proof-automation).
 
 A contract whose precondition implies well-formed memory and a valid static world can also keep the
 `InvocationCertificate` of each call: `MethodContract.Holds.certified` turns `Holds` into
@@ -218,7 +234,7 @@ world) hand the continuation the callee's certificate, which `run_call_of_contra
 fetched call, `cil_certified_call certified input [facts]` leaves the precondition and then the
 continuation, and `cil_contract_certified_call holds input [facts]` leaves the precondition, the
 caller memory's `WellFormed`, its static world and then the continuation. Both accept `at site` like
-`cil_contract_call`. `Tests/InvocationCertificates.lean` uses each of them.
+`cil_contract_call`.
 
 `ValidCall memory inputs outputs` states that memory is well formed, every input buffer is readable
 and every output buffer writable. `CIL.Safety.CallingTransport` carries it to later memory so a
@@ -236,8 +252,21 @@ then runs the constructor with that storage as `this`. The constructor's interfa
 that it returns no values and that `post` reads back all `size` bytes at `this` as `value`:
 
 ```lean
+open CIL.Safety
+open CIL (W64)
+
+/-- A 16-byte struct of two words, constructed at `this`. -/
+structure PairInput where
+  this : Reference
+  low : W64
+  high : W64
+
+def pairBytes (input : PairInput) : List (BitVec 8) :=
+  numberBytes input.low.toNat 8 ++ numberBytes input.high.toNat 8
+
 def pairContract : MethodContract PairInput Unit where
-  args input := [.reference (.address input.this), .scalar (.i64 input.low), .scalar (.i64 input.high)]
+  args input := [.reference (.address input.this), .scalar (.i64 input.low),
+    .scalar (.i64 input.high)]
   results _ := []
   pre input m := m.WellFormed ∧ access m input.this 16 1 true = .ok ()
   footprint input := [(input.this, 16)]
@@ -265,14 +294,6 @@ that zero readback as a precondition. `run_construct_of_contract` and
 `run_call_of_contract`; they cover aggregate storage only. `read_append` joins adjacent field reads
 into the full readback, and `Confined.write_within` confines a field write to the whole struct.
 
-`Tests/ConstructContract.lean` proves a caller that constructs a 16-byte and a 32-byte (four-limb)
-struct and reads a field of each, from the constructors' contracts alone; a
-constructor that assigns one of two fields; and rejections: a contract without write authority over
-its storage, a constructor that writes outside its footprint, and an 8-byte readback at a 16-byte
-site. `Tests/ConstructContract.cs` verifies that caller proof unedited against a build whose
-constructors write their fields in the opposite order, and refutes the constructor's contract on a
-build that stores a wrong field.
-
 ## Name exceptional outcomes
 
 An `OutcomeContract` (`CIL.Safety.OutcomeContract`) adds `raises : Input → Memory → Option String`
@@ -283,6 +304,8 @@ Memory after a throw is not observable to the caller, so `Raises` states none; r
 count only where the semantics models them as `.thrown`.
 
 ```lean
+open CIL.Safety
+
 def percentContract : OutcomeContract CIL.W64 CIL.W64 where
   args v := [.scalar (.i64 v)]
   results out := [.scalar (.i64 out)]
@@ -298,11 +321,10 @@ returns or raises, and `cil_outcome_raise holds input at site [facts]` closes a 
 propagating the exception the callee's contract names. `MethodContract.Holds.outcomes` lifts a
 normal-only contract, and `invoke_unique` ties a computed fault to the contract's existential one.
 
-`Tests/OutcomeContract.lean` proves every outcome of a two-level chain from the callees' contracts:
-`Strict` propagates `Percent`'s exception, returns, or raises its own after `Percent` returns, and
-`Root` reads all three off `Strict`'s contract. `Tests/OutcomeContract.cs` verifies those proofs
-against the compiled build, and refutes the callee's contract with concrete runs on builds with an
-off-by-one threshold or a different exception type.
+[CountUntil](../Examples/Proofs/CountUntil.lean) proves `bumpContract`, which raises
+`System.InvalidOperationException` when its two arguments are equal, with `cil_raise_steps` and
+`cil_checked_steps`, then proves its loop returns or propagates that exception through the contract
+alone.
 
 Import `CIL.Safety.RuntimeExceptions` to name modeled arithmetic failures with `RaisesCLR` and
 `OutcomeContract.HoldsCLR`. This contract mode uses the existing arguments, preconditions,
@@ -330,18 +352,41 @@ extracted program. `run_fault_raisesCLR`, `run_next_raisesCLR` and `raisesCLR_of
 execution; `run_call_raisesCLR_of_contract` propagates a callee contract's named outcome.
 `RaisesCLR.not_of_invoke` refutes a wrong name from a settled checked invocation.
 
-`Tests/RuntimeExceptions.lean` proves all mapped cases and refutes wrong names. It also proves
-unsigned division and remainder by zero for every dividend and caller memory.
-`Tests/RuntimeExceptions.cs`, run by the outcomes suite, checks the CLR type and verifies each
-positive contract and wrong-name refutation against its compiled C# method.
-
 ## Derive public contracts
 
 A method's proved contract can be more detailed than its callers need. Export a smaller interface by
 proving that the internal contract refines it, without unfolding or executing the method again:
 
 ```lean
-theorem add_public : addPublic.Holds Extracted.program addTo := add_internal.weaken add_public_refines
+open CIL.Safety
+open CIL (W64)
+
+/-- The proved contract: the result is the argument plus one. -/
+def increment : MethodContract W64 W64 where
+  args v := [.scalar (.i64 v)]
+  results out := [.scalar (.i64 out)]
+  pre _ _ := True
+  footprint _ := []
+  post v _ _ out := out = v + 1
+
+/-- The published contract: the result differs from the argument. -/
+def changes : MethodContract W64 W64 := { increment with post := fun v _ _ out => out ≠ v }
+
+theorem increment_refines : increment.Refines changes where
+  args _ := rfl
+  results _ := rfl
+  pre _ _ permitted := permitted
+  footprint _ _ _ _ member := nomatch member
+  post v _ _ out _ _ incremented := by
+    show out ≠ v
+    rw [incremented]
+    bv_omega
+
+/-- Any method proved against `increment` satisfies `changes`, without running it again. -/
+theorem changes_holds {program : CIL.Program} {method : Nat}
+    (proved : increment.Holds program method) : changes.Holds program method :=
+  proved.weaken increment_refines
+#print axioms changes_holds
 ```
 
 `MethodContract.Refines internal exported` requires the same `args` and `results` encodings, the
@@ -359,22 +404,16 @@ normal return. `OutcomeContract.Holds.weaken` derives the exported outcome contr
 A stronger precondition can exclude every exception, after which `OutcomeContract.Holds.normal`
 yields a normal-only contract. Both `Refines` are reflexive and transitive.
 
-`Tests/ContractConsequence.lean` derives a bounded `Percent` contract and a framed `AddTo` contract
-over an enclosing region, and proves callers through the derived contracts at their call sites, in
-both returning and raising outcomes. Its rejections are proved negations: an unjustified stronger
-postcondition, a weaker precondition, a smaller footprint and a changed exception type each refute
-the `Refines` premise and the derived `Holds` on a concrete input.
-
 ## Inherit a callee's contract in a forwarder
 
 Overload forwarders and instance-to-static wrappers compile to `ldarg*; call k; ret`.
 `MethodContract.Holds.forward` (`CIL.Safety.Forwarders`) gives such a method its callee's contract
 with the forwarder's own argument encoding, `contract.withArgs forwarded`, without stepping either
-body:
+body. Given `add_holds : addContract.Holds Extracted.program addTo`:
 
-```lean
+```lean extracted
 theorem sum_forwards : sumContract.Holds Extracted.program sum :=
-  add_public.forward (loads := plainLoads [0, 1, 2]) (narrow := none) sum.found addTo.found
+  add_holds.forward (loads := plainLoads [0, 1, 2]) (narrow := none) sum.found addTo.found
     ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ _ => plainLoads_unchanged _ _)
     (fun _ _ _ _ member => .inl member)
     (fun _ _ _ => rfl) (fun _ _ _ _ _ => trivial)
@@ -419,7 +458,7 @@ false, so a theorem assuming it proves nothing.
 
 Prove the caller over every program that links its own, assuming only the import's contract:
 
-```lean
+```lean extracted
 def importsAdd (linked : CIL.Program) : Prop := addContract.Holds linked (importIndex Extracted.program 0)
 
 theorem root_given : HoldsGiven Extracted.program importsAdd (fun linked => rootContract.Holds linked root)
@@ -443,11 +482,8 @@ through `Extracted.importSignatures` and defines `addTo` as `Extracted.program.l
 the extractor does not resolve imports yet, so `Extracted.imports` and `Extracted.importSignatures`
 are empty.
 
-`Tests/Imports.lean` proves `Root` against an imported `AddTo` while reusing the closed `Mix` proof,
-discharges it for one appended implementation, shows the unlinked program faults at the import's
-call so its contract holds only vacuously, and composes an imported raising `Percent` through both
-outcomes of `Strict` and `Root`. The identity checks that bind a slot to a certified library
-implementation are not part of this rule; relocating a library into the slot is described next.
+The identity checks that bind a slot to a certified library implementation are not part of this
+rule; relocating a library into the slot is described next.
 
 ## Link separately extracted libraries
 
@@ -466,7 +502,7 @@ at import slot `importIndex app j` and all helpers after the entries, library by
 (`linkSlot`). `link_links` and `link_relocates` hold by construction, so `composed` discharges a
 caller's `HoldsGiven` for the concrete linked program from contracts proved on each library alone:
 
-```lean
+```lean extracted
 theorem root_composed : rootContract.Holds (link Extracted.program [addLib]) root :=
   composed (specs := [addContract.relocatable]) (root_given.mono fun _ met => met 0 (by decide)) rfl
     closed proved
@@ -476,11 +512,9 @@ Here `closed` and `proved` are each library's `Closed` and `Holds` facts. `Impor
 one `Relocatable` property per slot, so libraries may export contracts of different types. Each
 library exports only its index-0 method. Static identities are not renamed: two linked libraries
 that use the same identity for different bytes fault `invalidState` at the second static access, so
-a collision can only make a proof fail, never prove a false statement.
-
-`Tests/Linking.lean` links an `AddTo` library whose entry calls its own `Sum` helper (renamed from
-index 1 to 3) and proves the imported `Root` for the concrete linked program, then links a `Percent`
-library whose helper raises and shows the exception reaches `Root` through two relocated calls.
+a collision can only make a proof fail, never prove a false statement. The regressions for
+imported and linked contracts are described in
+[proof validation](VALIDATION-PROOFS.md#proof-automation).
 
 ## Reuse framework contracts
 

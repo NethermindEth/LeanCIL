@@ -1,5 +1,7 @@
 # Excluded-branch certificate checks
 
+<!-- audience: maintainers -->
+
 The excluded-branch fixture retains the same compiled method, 802 excluded sites under the
 scalar profile and 804 live sites under `x64-v3`. Both full certificates still compile at the
 default heartbeat budget. The scalar certificate is compiled by the consumer verifier once,

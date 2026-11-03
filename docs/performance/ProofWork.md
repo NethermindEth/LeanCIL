@@ -1,5 +1,7 @@
 # Proof work measurements
 
+<!-- audience: maintainers -->
+
 Measured on Windows, AMD Ryzen 9 9950X, Lean 4.35.0. Each pair uses the same compiled
 imports and toolchain, with no concurrent benchmark. Module times include process startup,
 imports and elaboration. They are not whole-job CI timings.

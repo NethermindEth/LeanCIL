@@ -1,5 +1,7 @@
 # Runtime and storage assumptions
 
+<!-- audience: maintainers -->
+
 ## Runtime assumptions
 
 Deployment must use the selected supported 64-bit, little-endian .NET 10 profile. Feature flags

@@ -1,5 +1,7 @@
 # Compiler coverage and runtime-model inventory
 
+<!-- audience: maintainers -->
+
 The `dispatch` suite checks a pinned source corpus against Roslyn 4.14.0, 5.0.0 and 5.9.0,
 using the same .NET 10.0.0 reference pack and optimized compilation. Each compiler runs at its
 default language version and at `latest`; compilers supporting C# 14 also run explicitly at `14`.

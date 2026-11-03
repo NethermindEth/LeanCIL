@@ -1,5 +1,7 @@
 # Scalar evidence regression proof work
 
+<!-- audience: maintainers -->
+
 The scalar evidence fixtures repeat signature, span, and instruction metadata across
 nearby positive and negative cases. Eleven bounded conjunctions check those related
 cases together, allowing a single kernel decision to reuse their common reductions.

@@ -5,7 +5,7 @@
 Import `CIL.Safety.LoopScaffold` to derive a concrete checked entry and a uniquely identified
 instruction from an extracted method:
 
-```lean
+```lean extracted
 bind_entry entry := Extracted.method0 with [] from CIL.Safety.Memory.empty
 bind_cutpoint cutpoint := Extracted.method0 matching (· matches .brnonzero _) with entry.frame
 ```
@@ -24,6 +24,11 @@ These facts do not make an uninitialized slot readable or grant backing-memory a
 Binders parameterize the generated declarations, including memory stores for symbolic arguments:
 
 ```lean
+import CIL.Safety.LoopScaffold
+
+/-- Returns its 32-bit argument. -/
+def body : CIL.Method := { code := [.arg 0, .ret], locals := [], returnsValue := true }
+
 bind_entry entry (value : CIL.W32) := body
   with [.scalar (.i32 value)] from CIL.Safety.Memory.empty
 ```
@@ -41,7 +46,7 @@ When the success premises are available as rewrite facts, use `simplifying [fact
 `using`. This derives an explicit frame and memory expression and checks the resulting entry
 equation, allowing stepping to inspect the local slots:
 
-```lean
+```lean excerpt Examples/Proofs/SpanDrain.lean
 bind_entry entry (memory : Memory) (view : SpanView)
     (valid : view.validate memory = .ok ()) (width : view.width = 4)
     (readOnly : view.writable = false) := Extracted.method0
@@ -68,7 +73,7 @@ step equations retaining their memory, bounds and capability checks.
 A method whose numeric locals allocate homes in symbolic memory adds `allocating wellFormed`,
 where `wellFormed` proves `memory.WellFormed`; `simplifying [facts]` stays optional:
 
-```lean
+```lean excerpt Examples/Proofs/SpanSum.lean
 bind_entry entry (memory : Memory) (view : SpanView) (wellFormed : memory.WellFormed)
     (valid : view.validate memory = .ok ()) (width : view.width = 8)
     (readOnly : view.writable = false) := Extracted.method0
@@ -123,7 +128,7 @@ with frame` checks that particular instruction rather than requiring a unique pr
 `location` is an emitted instruction index, not a raw CIL byte offset. Reuse `bind_loop` from
 `CIL.StructuralLabels` to select nested or sequential loops:
 
-```lean
+```lean extracted
 bind_loop outer := Extracted.method0 [0]
 bind_loop inner := Extracted.method0 [1]
 bind_cutpoint cutpoint (frame : Frame) := Extracted.method0 at inner.latch matching
@@ -166,8 +171,8 @@ lower)` suffixes (`inStarts`). `AgreesOn program other region` says `other` has 
 metadata and the same instruction at every region pc; `AgreesOn.set` and `code_agrees_of_drop` build
 it for one replaced body. Then `run_congr_region` gives equal runs from any region pc, faults
 included. Masking the code outside the region with `.unsupported` makes it dead for `Embeds`, so
-`run_refines` carries the suffix run on to a body with a different prefix; `Tests/RegionRun.lean`
-moves a suffix after inline code to the same suffix after a helper call, one pc earlier.
+`run_refines` carries the suffix run on to a body with a different prefix, for example a suffix
+after inline code to the same suffix after a helper call, one pc earlier.
 
 For a long suffix, import `CIL.Safety.Embedding.Suffix` and use
 `CIL.Embedding.BodyRefines.of_relocated_suffix`. It uses one list equality: `actual.code.drop start
@@ -178,10 +183,8 @@ lookups at each moved pc. If `lower = 0`, `start` must also be zero to preserve 
 
 The resulting map, `suffixRename lower start`, sends prefix pcs to zero and suffix pcs to `pc -
 lower + start`. Pass the proof to `ProgramRefines.set_body` and then `run_refines`. This avoids
-evaluating `sites` and `pick` for each instruction. `Tests/RegionRun.lean` combines it with
-`run_congr_region` for a 100-instruction suffix with a symbolic feature profile and callee index.
-The test includes conditional, switch, and wrapped native branch targets and uses the default
-heartbeat limit.
+evaluating `sites` and `pick` for each instruction, so a suffix of a hundred instructions with
+conditional, switch and native branch targets checks within the default heartbeat limit.
 
 ## Bind bodies to the extraction
 
@@ -192,7 +195,14 @@ extraction by a method-body equality. Prove those equalities with `cil_body` (fr
 ```lean
 import CIL.MethodBinding
 
-have found : Extracted.program[2]? = some (Full.fullBody Extracted.profile 9 5 7) := by cil_body
+/-- The body a proof expects at index 1 of the program. -/
+def double : CIL.Method :=
+  { code := [.arg 0, .arg 0, .add, .ret], locals := [], returnsValue := true }
+
+def program : CIL.Program := [{ code := [.ret], locals := [], returnsValue := false }, double]
+
+-- Against an extraction the goal reads `Extracted.program[1]? = some double`.
+theorem found : program[1]? = some double := by cil_body
 ```
 
 `cil_body` runs `rfl`, so the proof is the same kernel-checked `Eq.refl`. Only when `rfl` fails does
@@ -209,8 +219,7 @@ field code: first difference at index 1 (left length 6, right length 6)
 
 The left side is the extraction's body. An index past the end of the program is reported with the
 program's length. The diagnostic is computed after the failure through compiled evaluation and is
-never proof evidence; it also works for `Method = Method` goals. `Tests/MethodBinding.lean` covers
-both outcomes.
+never proof evidence; it also works for `Method = Method` goals.
 
 ### Methods by signature
 
@@ -218,20 +227,34 @@ Extraction numbers methods by the reachable call graph, so adding or reordering 
 unrelated methods and breaks every literal index. Name them by their exact emitted signature
 (`Extracted.signatures`) instead:
 
-```lean
+```lean excerpt Examples/Proofs/CountCalls.lean
 import CIL.MethodIdentity
 
-bind_method root rootBody := "System.UInt64 Examples.Calls::Root(System.UInt64,System.UInt64)"
-bind_callee left leftBody := "System.UInt64 Examples.Calls::Left(System.UInt64,System.UInt64)" from rootBody
+bind_method countCalls countBody := "System.UInt32 Examples.Loops::CountCalls(System.UInt32)"
+bind_callee decrement decrementBody := "System.UInt32 Examples.Loops::Decrement(System.UInt32)" from countBody
 
-theorem left_spec (x y : W64) (m : Memory) :
-    invoke Extracted.program 4 left [.i64 x, .i64 y] m = some (m, [.i64 (x - y)]) := rfl
+def decrementContract : MethodContract W32 W32 where
+  args x := [.scalar (.i32 x)]
+  results v := [.scalar (.i32 v)]
+  pre _ _ := True
+  footprint _ := []
+  post x _ _ v := v = x - 1
+
+theorem decrement_holds : decrementContract.Holds Extracted.program decrement := by
+  rintro x m -
+  dsimp only [decrementContract]
+  refine ⟨8, m, _, ?_, Confined.refl _ m, _, rfl, rfl⟩
+  cil_checked_steps
 ```
 
-`bind_method` defines `root` (the index), `rootBody` (the extracted body) and the `rfl` theorems
-`root.signature` and `root.found` (`@[cil_code]`). `bind_callee` also requires the parent to call
-that method and adds `left.call`, the instruction at its call site (`from rootBody [k]` selects one
-of several); expected bodies take the index as a parameter, so `.call left 2` survives renumbering.
+`bind_method` defines `countCalls` (the index), `countBody` (the extracted body) and the `rfl`
+theorems `countCalls.signature` and `countCalls.found` (`@[cil_code]`). `bind_callee` also requires
+the parent to call that method and adds `decrement.call`, the instruction at its call site
+(`from countBody [k]` selects one of several); expected bodies take the index as a parameter, so
+`.call decrement 1` survives renumbering. A statement about the callee alone runs it by that index,
+as in `invoke Extracted.program 8 decrement [.scalar (.i32 x)] memory`, which returns
+`.ok (memory, [.scalar (.i32 (x - 1))])`. [CountCalls](../Examples/Proofs/CountCalls.lean) proves
+the contract above and the loop that calls the helper through it.
 `method_named "sig"` is the bare index as a term. A missing signature lists the methods with the
 same name, or every method; a duplicate lists each index; a parent that does not call the method
 lists what it does call:
@@ -252,15 +275,14 @@ otherwise the error lists each site's pc and callee.
 The signature is the Cecil full name, matched exactly. Resolution only locates an index; the body is
 still bound by the kernel and the extraction certificate. `bind_import` reports a missing import
 signature the same way, listing imports with the same name or every import, and says when the
-extraction has no imports. `Tests/MethodIdentity.lean` covers the diagnostics, and
-`Tests/MethodIdentity.cs` verifies one unedited proof against two builds with different numbering.
+extraction has no imports.
 
 ### Loop heads and call sites
 
 Inside a method, name positions by structure instead of by pc, so a statement inserted elsewhere
 moves the label with the code (`CIL.StructuralLabels`):
 
-```lean
+```lean extracted
 import CIL.StructuralLabels
 
 bind_loop reduce := rootBody [1]     -- the second loop head in pc order
@@ -282,8 +304,6 @@ rootBody has 2 loops; select one with [i]:
 
 Labels read the compiled layout, so a compiler that rotates a loop moves its head; a cutpoint that
 must survive that, such as `Examples/Proofs/Countdown.lean`, keeps a unique-instruction predicate.
-`Tests/StructuralLabels.lean` covers the diagnostics, and `Tests/StructuralLabels.cs` verifies one
-unedited proof against a build with a statement inserted before both loops.
 
 ### PDB local names and source locations
 
@@ -291,7 +311,7 @@ When a portable PDB matches the assembly (next to it, or embedded), extraction a
 `Symbols.lean`, the module `ExtractedSymbols`; `Extracted.lean` is byte-identical either way. A
 proof that imports it can name locals by their C# names, resolved in the scope that contains a pc:
 
-```lean
+```lean extracted
 import ExtractedSymbols
 
 theorem stores : sumBody.code[atWide + 1]? = some (.setLocal (local_named sum "carry" at (atWide + 1))) := rfl
@@ -315,10 +335,7 @@ source of actual pc 23: Names.cs:12:9
 
 Extraction errors for an unsupported instruction add `Source: Names.cs:16:21` after the method
 whenever the PDB is present, imported or not. Source paths are relative to the directory the method
-documents share. Without a PDB every message is unchanged. `Tests/DebugNames.lean` covers scoping
-and both diagnostics, and `Tests/DebugNames.cs` checks byte-identical extraction, an unedited proof
-across an inserted local, and each message with and without a PDB; `Tests/ConsumerSymbols.cs` covers
-consumer packages, batches and PDB-only changes.
+documents share. Without a PDB every message is unchanged.
 
 ### Bodies modulo dead code
 
@@ -333,12 +350,26 @@ and transport it with the lemmas in `CIL.Safety.Embedding.Simulation`:
 import CIL.Embedding.Tactic
 import CIL.Safety.Embedding.Simulation
 
-theorem bound : CIL.MethodEmbeds Extracted.program 2 (Full.fullBody Extracted.profile 9 5 7) := by cil_embed
+open CIL.Safety
+open CIL (Method MethodEmbeds)
+
+/-- Returns argument 1 on both paths; pc 4 is reached only by the branch. -/
+@[cil_code] def body : Method := {
+  code := [.arg 0, .brzero 4, .arg 1, .ret, .arg 1, .ret]
+  locals := [], returnsValue := true }
+
+/-- `body` as a profile-specific extraction emits it, with a dead block before the branch target. -/
+def extracted : Method := {
+  code := [.arg 0, .brzero 6, .arg 1, .ret,
+    .unsupported "Unreachable under selected profile", .const32 9, .arg 1, .ret]
+  locals := [], returnsValue := true }
+
+theorem bound : MethodEmbeds [extracted] 0 body := by cil_embed
 
 -- A run proved over the literal body holds for the extraction with the same fuel.
-example {fuel : Nat} {args : List CIL.Safety.Value} {m : CIL.Safety.Memory} {r : CIL.Safety.Memory × List CIL.Safety.Value}
-    (h : CIL.Safety.invoke (Extracted.program.set 2 (Full.fullBody Extracted.profile 9 5 7)) fuel 2 args m = .ok r) :
-    CIL.Safety.invoke Extracted.program fuel 2 args m = .ok r := bound.invoke h
+example {fuel : Nat} {args : List Value} {memory : Memory} {result : Memory × List Value}
+    (run : invoke ([extracted].set 0 body) fuel 0 args memory = .ok result) :
+    invoke [extracted] fuel 0 args memory = .ok result := bound.invoke run
 ```
 
 An expected body can be a shared template with local flag and callee parameters. Use `cil_embed
@@ -349,11 +380,10 @@ remain open are rejected. The rewrite proof and the complete instruction map are
 including branch targets and callee indices. The no-argument form still handles closed bodies
 directly.
 
-`Tests/ProfileEmbedding.lean` binds one template and one open theorem to three valid profiles,
-including shifted branch targets, without restating the template body for each profile. It also
-rejects unresolved flags, incorrect flag and callee values, and a changed branch target. An
-irrelevant open argument may be removed by supplying the definition that ignores it in the fact
-list; this is justified by reduction, not an assumption about that argument's value.
+One template and one open theorem about it thus bind to every valid profile, including shifted
+branch targets, without restating the body for each profile. An irrelevant open argument may be
+removed by supplying the definition that ignores it in the fact list; this is justified by
+reduction, not an assumption about that argument's value.
 
 `bound.certificate` transports an `InvocationCertificate` and `bound.descriptors` the program's
 static descriptor list; `ProgramRefines.set` composes several bound methods. Named exceptions
@@ -375,10 +405,8 @@ expected pc 1 maps to actual pc 1
 ```
 
 The kernel check takes about 0.12 s for a 202-instruction body and 1.3 s for 1,414 instructions. See
-[docs/SOUNDNESS.md](SOUNDNESS-EXECUTION.md#method-body-embedding) for the exact conditions and
-limits; `Tests/MethodEmbedding.lean` covers both outcomes, and `Tests/OutcomeEmbedding.lean`
-transfers a raising helper and its caller across an inserted dead block, with the relocated throw
-pc.
+[method-body embedding](SOUNDNESS-EXECUTION.md#method-body-embedding) for the exact conditions and
+limits.
 
 An extraction can also declare locals the literal body never uses. Exact-memory embedding covers
 dead locals that trail the body's own locals and are references or spans initialized to their empty
@@ -388,12 +416,33 @@ require an element width greater than zero and less than `2^64` bytes. For those
 `CIL.Safety.Embedding.DeadLocals`):
 
 ```lean
+import CIL.Safety.Embedding.DeadLocals
+
+open CIL
+
+/-- Reads its one local, a null reference, then returns argument 0. -/
+@[cil_code] def stored : Method := {
+  code := [.local 0, .pop, .arg 0, .ret]
+  locals := [.nullRef], localKinds := [.reference], returnsValue := true }
+
+/-- `stored` with two unused reference locals after its own, as a profile can extract it. -/
+def storedDead : Method := {
+  stored with
+  locals := [.nullRef, .nullRef, .unmodeled]
+  localKinds := [.reference, .reference, .reference] }
+
+theorem stored_invocation (memory : Safety.Memory) (value : W32) :
+    Safety.invoke [stored] (executionBound [stored] 0) 0 [.scalar (.i32 value)] memory =
+      .ok (memory, [.scalar (.i32 value)]) := by
+  cil_checked_steps
+
 theorem stored_dead_embeds : MethodEmbedsDeadLocals [storedDead] 0 stored := by cil_embed
 
 theorem stored_dead_returns (memory : Safety.Memory) (value : W32) :
     Safety.invoke [storedDead] (executionBound [stored] 0) 0 [.scalar (.i32 value)] memory =
       .ok (memory, [.scalar (.i32 value)]) :=
   stored_dead_embeds.invoke (stored_invocation memory value)
+#print axioms stored_dead_returns
 ```
 
 `.raises`, `.method_holds` and `.holds` transfer as for `MethodEmbeds`. A numeric dead local, such
@@ -407,10 +456,8 @@ in the expected body and use ordinary `MethodEmbeds`. Unreachable code can still
 marked `.unsupported`; declaring an unused numeric local continues to allocate its home. This
 preserves the identities of later parent and callee allocations and allows exact-memory contract
 transport. The four-limb multiply fixture follows this route: its scalar body retains all 22 word64 and
-four vector256 homes used across its architecture-specific paths. See
-[Tests/RetainedNumericLocals.lean](../Tests/RetainedNumericLocals.lean) for a smaller example with
-dead numeric locals on both sides of a live reference local and an allocating child call. This route
-retains exact final memory and remains useful when a postcondition names fresh references.
+four vector256 homes used across its architecture-specific paths. This route retains exact final
+memory and remains useful when a postcondition names fresh references.
 
 To omit numeric or interspersed declarations from the proof body, import
 `CIL.Safety.AllocationRefinement` explicitly; `import CIL` leaves this optional proof library
@@ -454,9 +501,6 @@ actual paired executions; it does not replace the contract with a weaker one.
 This is not exact-memory transport: extra homes change counters and fresh references. Arbitrary
 reference results and postconditions naming fresh allocations need a statement modulo the allocation
 relation. The existing `MethodEmbedsDeadLocals` tactic continues to handle its exact-memory subset.
-See [Tests/AllocationExecutionRenaming.lean](../Tests/AllocationExecutionRenaming.lean) for two live
-numeric locals interspersed with three dead ones, an initialized nested helper followed by dynamic
-allocation, exact scalar results, caller-prefix preservation and a named exception.
 
 ### Generated profile templates
 
@@ -491,12 +535,6 @@ different instruction counts, or different instructions under identical observed
 Static-site metadata, imported callee slots and the model's `newVector256` constructor form are
 currently unsupported in template generation.
 
-`Tests/ProfileTemplates.cs` compiles a real AVX2/SSE4.2 dispatch helper and checks one shared proof
-from `Tests/ProfileTemplatesProof.lean` against three profiles. A fourth extraction changes the
-managed callee numbering through a wrapper entry point. The suite replays the generated equations,
-extraction certificates, bindings and consumer proofs in the kernel, and rejects changed flag
-values, callees, branch targets, instruction equations, stale extraction source and incompatible
-profile-dependent parameter homes.
 
 ### Instruction equations for parametric bodies
 
@@ -534,6 +572,3 @@ A body whose code length depends on a parameter, such as an `if` around a whole 
 with the first pc that is not determined. Only the kernel checks the equations: 100 instructions
 take about 0.1 s, 400 take 2.4 s and 1,500 take 32 s, growing with the square of the length like the
 extractor's own equations, and about eight times faster than writing each `:= rfl` by hand.
-`Tests/InstructionEquations.lean` covers lookups on symbolic flags and on concrete profiles, with
-the body sealed so only the equations can fetch, and a `cil_checked_steps` run decided by a fact
-about a symbolic flag.

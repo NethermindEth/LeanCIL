@@ -1,5 +1,7 @@
 # Coverage and verification infrastructure
 
+<!-- audience: maintainers -->
+
 ## Preparation and shared infrastructure
 
 The workflow builds `scripts/Test.cs`, `Tests/ContractExport.cs` and
