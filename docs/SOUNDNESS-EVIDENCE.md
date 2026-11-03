@@ -103,6 +103,13 @@ trusted inputs on the same terms as the selected one; no other assembly can cont
 - A reference that contributes only layouts appears in `Extracted.assemblies`, the manifest and
   the hash recheck, but not in `TranslationValid`;
   its layouts are bound by their assembly-qualified identities in the layout evidence.
+- A closed generic struct of a referenced assembly is laid out from its defining module, and
+  its `RawLayout.generic` evidence names that module's scope as the owner constructor;
+  `genericLayoutValid` rederives the layout identity from the owner and every scoped argument,
+  so an owner moved to another assembly fails `LayoutsValid`
+  ([test](../Tests/MultiAssemblyGenerics.cs)). Specialized generic methods and static methods
+  of generic classes keep their definition's module, so `AttributionValid` binds them to their
+  defining pin.
 
 Resolution never searches directories. A pinned full name resolves to its pinned module, the
 four framework public-key tokens resolve to the runtime's trusted platform list as runtime

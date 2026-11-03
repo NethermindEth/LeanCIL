@@ -92,8 +92,10 @@ immutable single-dimensional handler tables support `ldlen` and `ldelem.i`; entr
 one exact signature and must name non-null catalog targets. A null table raises
 `NullReferenceException`, and invalid indexes raise `IndexOutOfRangeException`.
 
-Catalog discovery uses same-assembly `ldftn` references and already extracted methods with
-matching signatures. Each entry binds the scoped metadata identity, generic arguments and
+Catalog discovery uses closed same-assembly `ldftn` references and already extracted methods with
+matching signatures. An open address such as `&Algo<TGas>.Run` in a generic body is catalogued
+only through a specialized body that takes it, so a supplied table can reach a generic target
+only if some extracted body takes that closed address. Each entry binds the scoped metadata identity, generic arguments and
 program index to an extracted body. Pointer identities stay stable when linking relocates
 program indices. Supported signatures contain primitive integer, enum, reference-free aggregate or
 integer-vector parameters/results, managed references to those types, and void results. Closed

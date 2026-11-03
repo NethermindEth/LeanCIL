@@ -225,12 +225,36 @@ internal static class MetadataValidation
     }
 
     // A pinned referenced type is laid out from its own module's definition, never the referencing module.
-    static (TypeReference Type, ModuleDefinition Module) Home(TypeReference reference, ModuleDefinition module) =>
-        reference is not TypeSpecification && reference.Scope != module &&
+    // A closed generic struct keeps its arguments, which may name types of any pinned module.
+    static (TypeReference Type, ModuleDefinition Module) Home(TypeReference reference, ModuleDefinition module)
+    {
+        if (reference is GenericInstanceType closed && GenericStructs.Is(closed) && closed.Scope != module &&
+            PinnedAssemblies.Active?.ModuleOf(closed.ElementType) is { } owner)
+        {
+            var definition = closed.ElementType.Resolve() ??
+                throw new InvalidDataException("Unresolved pinned aggregate: " + closed.FullName);
+            if (definition.Module != owner || !definition.IsValueType || !closed.ElementType.IsValueType)
+                throw new InvalidDataException("Unsupported aggregate layout: " + closed.FullName);
+            var homed = new GenericInstanceType(definition);
+            foreach (var argument in closed.GenericArguments) homed.GenericArguments.Add(argument);
+            return (homed, owner);
+        }
+        return reference is not TypeSpecification && reference.Scope != module &&
             PinnedAssemblies.Active?.ModuleOf(reference) is { } home
             ? (reference.Resolve() ??
                 throw new InvalidDataException("Unresolved pinned aggregate: " + reference.FullName), home)
             : (reference, module);
+    }
+
+    // A child in another pinned module shares the root's active set, so a cycle through modules is rejected.
+    static AggregateInfo Nested(TypeReference type, ModuleDefinition module, string architecture,
+        HashSet<string> active, Dictionary<string, AggregateInfo> layouts, Dictionary<string, int> typeCounts)
+    {
+        var (home, owner) = Home(type, module);
+        return owner == module ? AggregateLayout(type, module, architecture, active, layouts, typeCounts)
+            : AggregateLayout(home, owner, architecture, active, layouts,
+                owner.GetTypes().CountBy(definition => definition.FullName, StringComparer.Ordinal).ToDictionary());
+    }
 
     static AggregateInfo AggregateLayout(TypeReference reference, ModuleDefinition module, string architecture,
         HashSet<string> active, Dictionary<string, AggregateInfo> layouts, Dictionary<string, int> typeCounts)
@@ -254,7 +278,7 @@ internal static class MetadataValidation
             foreach (var argument in instance.GenericArguments)
             {
                 if (IsAggregate(argument, module))
-                    _ = AggregateLayout(argument, module, architecture, active, layouts, typeCounts);
+                    _ = Nested(argument, module, architecture, active, layouts, typeCounts);
                 else
                 {
                     RuntimeModels.ValidateTypeIdentity(argument, module, architecture);
@@ -281,9 +305,7 @@ internal static class MetadataValidation
             int? vectorWidth = VectorFieldWidth(fieldType);
             if (fieldType is TypeSpecification && vectorWidth is null && !aggregate)
                 throw new InvalidDataException($"Unsupported field type: {fieldType.FullName}");
-            var nested = aggregate
-                ? Home(fieldType, module).Module != module ? AggregateLayout(fieldType, module, architecture)
-                    : AggregateLayout(fieldType, module, architecture, active, layouts, typeCounts) : null;
+            var nested = aggregate ? Nested(fieldType, module, architecture, active, layouts, typeCounts) : null;
             int width = nested?.Size ?? vectorWidth ?? PrimitiveWidth(fieldType);
             if (vectorWidth == 32 && pack > 16 && architecture is not ("x64" or "arm64"))
                 throw new InvalidDataException($"Unsupported vector field packing: {field.FullName}");
@@ -649,8 +671,14 @@ internal static class MetadataValidation
                         var signature = ManagedPointers.SignatureEvidence(site);
                         if (!indirectTargets.TryGetValue(signature, out var targets))
                         {
+                            // An open address is reached only through a specialized body's own ldftn. A
+                            // closed owner's member signature still spells `!0`, so only the instantiation counts.
                             addressedMethods ??= ManagedPointers.AddressedMethods(module)
-                                .Where(target => target.DeclaringType.Scope == module).ToArray();
+                                .Where(target => target.DeclaringType.Scope == module &&
+                                    !target.DeclaringType.ContainsGenericParameter &&
+                                    !(target is GenericInstanceMethod instance &&
+                                        instance.GenericArguments.Any(argument => argument.ContainsGenericParameter)))
+                                .ToArray();
                             targets = addressedMethods
                                 .Where(target => ManagedPointers.SameSignature(site, ManagedPointers.ReferenceSignature(target)))
                                 .Select(target => target is GenericInstanceMethod ||
