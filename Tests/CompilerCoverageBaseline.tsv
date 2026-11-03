@@ -656,6 +656,7 @@ Examples:System.UInt32 Examples.GenericOwners::Identity(System.UInt32)	A	A	A	A	A
 Examples:System.UInt32 Examples.GenericOwners::Nested(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.GenericOwners::NestedHelper(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.GenericOwners::Repeated(System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt32 Examples.GenericOwners::TableFirst(method System.UInt32 *(System.UInt32)[],System.UInt32)	N	N	N	N	N	N	N	N
 Examples:System.UInt32 Examples.IntegerMath::ClampUInt32(System.UInt32,System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.IntegerMath::MaxUInt32(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.IntegerMath::MinUInt32(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A

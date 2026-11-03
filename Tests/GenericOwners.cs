@@ -219,6 +219,29 @@ foreach (var (name, fixture, definition, change) in targetCases)
         #print axioms nested_owner_entry
         """);
     evidence.Add(nestedPath, "PASS nested generic class entry: OwnerOuter<ulong>.Inner<uint>.Identity");
+    // A generic entry over a supplied table; the closed address in `Address` is its only target.
+    var table = Path.Combine(root, "TableFirst");
+    Run(["dotnet", ExtractorPath, "extract", assembly,
+        "Examples.GenericOwners::TableFirst(method System.UInt32 *(System.UInt32)[],System.UInt32)", table,
+        "--type-argument", "System.UInt64"]);
+    var tableSource = File.ReadAllText(Path.Combine(table, "Extracted.lean"));
+    var target = Regex.Match(tableSource,
+        @"identity := (\{ owner := ""[^""]*::Examples\.OwnerHelper\\u00601"", [^}]*\})");
+    if (!target.Success) throw new InvalidOperationException("Closed generic address was not catalogued");
+    var tablePath = Path.Combine(root, "TableFirst.lean");
+    File.WriteAllText(tablePath, tableSource + $$"""
+
+        /-- The entry `TableFirst<ulong>` calls the catalogued `OwnerHelper<uint>.Identity`. -/
+        theorem generic_table_entry :
+            (CIL.Safety.invoke Extracted.program 64 0
+              [.methodTable ⟨⟨.atom CIL.Extraction.runtimeScope "System.UInt32",
+                [.atom CIL.Extraction.runtimeScope "System.UInt32"]⟩, some #[{{target.Groups[1].Value}}], none⟩,
+                .scalar (.i32 42)]
+              { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩,
+                views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 42)] := by rfl
+        #print axioms generic_table_entry
+        """);
+    evidence.Add(tablePath, "PASS generic entry over a supplied table: TableFirst<ulong>");
     var unclosed = Execute(["dotnet", ExtractorPath, "extract", assembly, "Examples.OwnerHelper`1::Identity(T)",
         Path.Combine(root, "OwnerEntryUnclosed")]);
     if (unclosed.Code == 0 || !unclosed.Output.Contains("followed by 1 for Examples.OwnerHelper`1",

@@ -19,6 +19,10 @@ public static class GenericOwners
     public static unsafe uint Address(uint value) =>
         ((delegate* managed<uint, uint>)&OwnerHelper<uint>.Identity)(value);
 
+    /// <summary>A generic entry over a supplied handler table; `Address` catalogues its only target.</summary>
+    public static unsafe uint TableFirst<T>(delegate* managed<uint, uint>[] handlers, uint value)
+        where T : unmanaged => handlers[0](value);
+
     public static ulong SpanFirst(in ReadOnlySpan<ulong> values) => SpanHelpers.First(values);
 
     public static int SpanCount(ReadOnlySpan<ulong> values) => SpanHelpers.Count(values);
