@@ -43,6 +43,7 @@ theorem addTwo_holds : addTwoContract.Holds program 1 := by
   cil_checked_steps
 #print axioms addTwo_holds
 
+/-- The entered frame of `tally`. -/
 bind_entry entry (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) :=
   tally with [.scalar (.i32 value)] from memory allocating wellFormed
 
@@ -51,6 +52,7 @@ abbrev State (memory : Memory) (home : Reference) :=
   FrameState [] memory [.aggregate 8] (W32 × W32) (fun _ => [.bytes (.aggregate 8) home])
     fun state => [some (.aggregate (layout.encode [.i32 state.1, .i32 state.2]))]
 
+/-- The loop test, with the input and `count` on the stack. -/
 bind_cutpoint header (memory : Memory) (value : W32) (home : Reference)
     (state : State memory home) :=
   tally matching (fun op => op matches .bne _) with entry.frame memory home,
@@ -161,5 +163,15 @@ example (memory current : Memory) (home : Reference)
 /-- error: could not synthesize default value for parameter 'exact' using tactics -/
 #guard_msgs (substring := true) in
 example := step_fieldAt_encode layout_valid 0 [.i64 0, .i32 0]
+
+-- A docstring before `bind_entry` documents its checked entry, and before `bind_cutpoint` its
+-- state.
+/-- info: [some "The entered frame of `tally`. ",
+  some "The loop test, with the input and `count` on the stack. "] -/
+#guard_msgs (whitespace := lax) in
+open Lean in
+#eval show MetaM _ from do
+  let env ← getEnv
+  [``entry.checked, ``header].mapM fun name => liftM (findDocString? env name : IO _)
 
 end Tests.LoopDiagnostics

@@ -41,7 +41,7 @@ private abbrev State (memory : Memory) (home : Reference) :=
   FrameState [] memory [.aggregate 8] (W32 × W32) (fun _ => [.bytes (.aggregate 8) home])
     fun state => [some (.aggregate (Extracted.layout0.encode [.i32 state.1, .i32 state.2]))]
 
--- The loop test, with the input and `count` on the stack.
+/-- The loop test, with the input and `count` on the stack. -/
 bind_cutpoint header (memory : Memory) (value : W32) (home : Reference)
     (state : State memory home) :=
   tallyBody at loop.latch matching (fun op => op matches .bne _) with entry.frame memory home,

@@ -20,6 +20,16 @@ namespace CIL.MethodIdentity
 open Lean Meta Elab Term Command
 open CIL.DebugNames (visible)
 
+/-- Attach `doc`, the docstring written before a binding command, to the declaration `name`
+    the command generated, so hovering the bound name shows the author's description. -/
+def documentBinding (doc : Option (TSyntax ``Lean.Parser.Command.docComment)) (name : Ident) :
+    CommandElabM Unit := do
+  let some doc := doc | return
+  let declaration := (← getCurrNamespace) ++ name.getId
+  unless (← getEnv).contains declaration do
+    throwError "the binding generated no declaration {declaration} to document"
+  liftTermElabM <| addDocString declaration mkNullNode doc
+
 /-- The string literals of a closed `List String`, reduced one cell at a time. -/
 partial def strings (list : Expr) (found : Array String := #[]) : MetaM (Array String) := do
   match (← whnf list).getAppFnArgs with
@@ -116,11 +126,13 @@ def emit (index body : Ident) (signature : StrLit) (method : Nat) : CommandElabM
 /-- `bind_method index body := "signature"` defines `index` as the extraction index of
 the method with that exact signature and `body` as its extracted body, with
 `index.signature` and `index.found` checked by `rfl`. -/
-syntax (name := bindMethod) "bind_method " ident ppSpace ident " := " str : command
+syntax (name := bindMethod) (docComment)? "bind_method " ident ppSpace ident " := " str :
+  command
 
 elab_rules : command
-  | `(bind_method $index $body := $signature) => do
+  | `($[$doc:docComment]? bind_method $index $body := $signature) => do
     emit index body signature (← liftTermElabM (resolve signature.getString))
+    documentBinding doc index
 
 /-- The `(pc, argc)` of each call to `method` in `parent`, failing with what it does call. -/
 def callSites (parent : Term) (method : Nat) (callee : String) :
@@ -149,14 +161,17 @@ also requires `parent` to call that method; `index.call` states the instruction 
 call site, and `[k]` selects one of several. Expected bodies take `index` as a parameter,
 `.call index argc`, so a renumbered extraction never changes them. -/
 syntax (name := bindCallee)
-  "bind_callee " ident ppSpace ident " := " str " from " term:max (" [" num "]")? : command
+  (docComment)? "bind_callee " ident ppSpace ident " := " str " from " term:max (" [" num "]")? :
+    command
 
 elab_rules : command
-  | `(bind_callee $index $body := $signature from $parent $[[$occurrence]]?) => do
+  | `($[$doc:docComment]? bind_callee $index $body := $signature from $parent
+      $[[$occurrence]]?) => do
     let (method, site) ← liftTermElabM do
       let method ← resolve signature.getString
       return (method, ← callSite parent method signature.getString (occurrence.map (·.getNat)))
     emit index body signature method
+    documentBinding doc index
     let (pc, argc) := site
     elabAtPc pc (← `(@[cil_code] theorem $(mkIdent (index.getId ++ `call)) :
       ($parent).code[$(quote pc)]? = some (CIL.Op.call $index $(quote argc)) := rfl))
@@ -165,11 +180,12 @@ elab_rules : command
 `argc` arguments, for helpers whose names are not stable; `[k]` selects one of several such
 calls. It emits the same theorems as the signature form, with the signature from the table. -/
 syntax (name := bindCalleeShape)
-  "bind_callee " ident ppSpace ident " := " &"call " num " from " term:max (" [" num "]")? :
-    command
+  (docComment)? "bind_callee " ident ppSpace ident " := " &"call " num " from " term:max
+    (" [" num "]")? : command
 
 elab_rules : command
-  | `(bind_callee $index $body := call $argc from $parent $[[$occurrence]]?) => do
+  | `($[$doc:docComment]? bind_callee $index $body := call $argc from $parent
+      $[[$occurrence]]?) => do
     let (method, pc, signature) ← liftTermElabM do
       let sites ←
         calls (← instantiateMVars (← elabTermEnsuringType parent (some (mkConst ``CIL.Method))))
@@ -187,6 +203,7 @@ elab_rules : command
       let (pc, callee, _) := shaped[chosen]!
       return (callee, pc, table[callee]?.getD "")
     emit index body (Syntax.mkStrLit signature) method
+    documentBinding doc index
     elabAtPc pc (← `(@[cil_code] theorem $(mkIdent (index.getId ++ `call)) :
       ($parent).code[$(quote pc)]? = some (CIL.Op.call $index $(quote argc.getNat)) := rfl))
 
@@ -200,16 +217,17 @@ partial def cells (list : Expr) (count : Nat := 0) : MetaM Nat := do
 
 /-- `bind_import index := "signature"` defines `index` as import slot `j`,
     `Extracted.program.length + j`, by its exact signature. -/
-syntax (name := bindImport) "bind_import " ident " := " str : command
+syntax (name := bindImport) (docComment)? "bind_import " ident " := " str : command
 
 elab_rules : command
-  | `(bind_import $index := $signature) => do
+  | `($[$doc:docComment]? bind_import $index := $signature) => do
     let (slot, length) ← liftTermElabM do
       let slot ←
         resolveIn `Extracted.importSignatures signature.getString "imported method" "import"
       return (slot, ← cells (mkConst (← visible `Extracted.program)))
     let program := mkIdent `Extracted.program
     elabCommand (← `(@[cil_code] def $index : Nat := $(quote (length + slot))))
+    documentBinding doc index
     elabCommand (← `(theorem $(mkIdent (index.getId ++ `slot)) :
       $index = ($program).length + $(quote slot) := rfl))
     elabCommand (← `(theorem $(mkIdent (index.getId ++ `signature)) :

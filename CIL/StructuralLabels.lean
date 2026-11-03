@@ -44,10 +44,11 @@ def loops (method : Expr) : MetaM (Array (Nat × Nat)) := do
 
 /-- `bind_loop head := body` names the only loop head of `body`, and `[k]` the `k`-th in pc
 order. `head.latch` is the last back edge into it; `head.backEdge` checks both. -/
-syntax (name := bindLoop) "bind_loop " ident " := " term:max (" [" num "]")? : command
+syntax (name := bindLoop) (docComment)? "bind_loop " ident " := " term:max (" [" num "]")? :
+  command
 
 elab_rules : command
-  | `(bind_loop $head := $body $[[$occurrence]]?) => do
+  | `($[$doc:docComment]? bind_loop $head := $body $[[$occurrence]]?) => do
     let (pc, latch) ← liftTermElabM do
       let found ←
         loops (← instantiateMVars (← elabTermEnsuringType body (some (mkConst ``CIL.Method))))
@@ -59,6 +60,7 @@ elab_rules : command
       return found[chosen]!
     let latchName := mkIdent (head.getId ++ `latch)
     elabCommand (← `(@[cil_code] def $head : Nat := $(quote pc)))
+    CIL.MethodIdentity.documentBinding doc head
     elabCommand (← `(@[cil_code] def $latchName : Nat := $(quote latch)))
     elabAtPc latch (← `(theorem $(mkIdent (head.getId ++ `backEdge)) :
       ($body).code[$latchName]?.map (fun op => op.targets.contains $head) = some true ∧
@@ -68,10 +70,10 @@ elab_rules : command
 /-- `bind_call site := callee from parent` names the only call from `parent` to the bound
 method `callee`, and `[k]` the `k`-th in pc order; `site.call` states its instruction. -/
 syntax (name := bindCall)
-  "bind_call " ident " := " term:max " from " term:max (" [" num "]")? : command
+  (docComment)? "bind_call " ident " := " term:max " from " term:max (" [" num "]")? : command
 
 elab_rules : command
-  | `(bind_call $site := $callee from $parent $[[$occurrence]]?) => do
+  | `($[$doc:docComment]? bind_call $site := $callee from $parent $[[$occurrence]]?) => do
     let (pc, argc) ← liftTermElabM do
       let some method ←
           (evalNat (← whnf (← elabTermEnsuringType callee (some (mkConst ``Nat))))).run
@@ -79,6 +81,7 @@ elab_rules : command
       let table ← strings (mkConst (← visible `Extracted.signatures))
       callSite parent method (table[method]?.getD s!"method {method}") (occurrence.map (·.getNat))
     elabCommand (← `(@[cil_code] def $site : Nat := $(quote pc)))
+    CIL.MethodIdentity.documentBinding doc site
     elabAtPc pc (← `(@[cil_code] theorem $(mkIdent (site.getId ++ `call)) :
       ($parent).code[$site]? = some (CIL.Op.call $callee $(quote argc)) := rfl))
 
