@@ -204,6 +204,21 @@ foreach (var (name, fixture, definition, change) in targetCases)
         #print axioms generic_owner_entry
         """);
     evidence.Add(proofPath, "PASS generic class entry: OwnerHelper<uint>.Identity");
+    // Owner arguments follow ECMA-335 numbering: the outer `T` before the nested `U`.
+    var nested = Path.Combine(root, "NestedEntry");
+    Run(["dotnet", ExtractorPath, "extract", assembly, "Examples.OwnerOuter`1/Inner`1::Identity(U)", nested,
+        "--type-argument", "System.UInt64", "--type-argument", "System.UInt32"]);
+    var nestedPath = Path.Combine(root, "NestedEntry.lean");
+    File.WriteAllText(nestedPath, File.ReadAllText(Path.Combine(nested, "Extracted.lean")) + """
+
+        /-- The entry `OwnerOuter<ulong>.Inner<uint>.Identity` takes and returns the inner `uint`. -/
+        theorem nested_owner_entry :
+            (CIL.Safety.invoke Extracted.program 64 0 [.scalar (.i32 42)]
+              { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩,
+                views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 42)] := rfl
+        #print axioms nested_owner_entry
+        """);
+    evidence.Add(nestedPath, "PASS nested generic class entry: OwnerOuter<ulong>.Inner<uint>.Identity");
     var unclosed = Execute(["dotnet", ExtractorPath, "extract", assembly, "Examples.OwnerHelper`1::Identity(T)",
         Path.Combine(root, "OwnerEntryUnclosed")]);
     if (unclosed.Code == 0 || !unclosed.Output.Contains("followed by 1 for Examples.OwnerHelper`1",

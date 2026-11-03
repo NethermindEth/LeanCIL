@@ -233,7 +233,7 @@ internal static class MetadataValidation
         {
             var definition = closed.ElementType.Resolve() ??
                 throw new InvalidDataException("Unresolved pinned aggregate: " + closed.FullName);
-            if (definition.Module != owner || !definition.IsValueType || closed.ElementType.IsValueType != true)
+            if (definition.Module != owner || !definition.IsValueType || !closed.ElementType.IsValueType)
                 throw new InvalidDataException("Unsupported aggregate layout: " + closed.FullName);
             var homed = new GenericInstanceType(definition);
             foreach (var argument in closed.GenericArguments) homed.GenericArguments.Add(argument);

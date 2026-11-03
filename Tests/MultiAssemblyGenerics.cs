@@ -23,7 +23,13 @@ public static class PairOps
     public static T First<T>(T value) where T : unmanaged => value;
     public static ulong Size<T>(ulong x) where T : unmanaged => x + (ulong)Unsafe.SizeOf<T>();
 }
-public struct Box<T> where T : unmanaged { public T Item; public static ulong Twice(ulong x) => x * 2; }
+public struct Box<T> where T : unmanaged
+{
+    public T Item;
+    public ulong Tag;
+    public static ulong Twice(ulong x) => x * 2;
+    public ulong Get() => Tag + 1;
+}
 public static class Algo<T> where T : unmanaged
 {
     public static ulong Run(ulong x) => x * 3 + (ulong)Unsafe.SizeOf<T>();
@@ -71,6 +77,7 @@ public static class Application
     public static ulong LibFirst(ulong x) => PairOps.First(x);
     public static ulong LibSize(ulong x) => PairOps.Size<Mine>(x);
     public static ulong LibBoxStatic(ulong x) => Box<ulong>.Twice(x);
+    public static ulong BoxGet(ulong x) { Box<uint> box = default; box.Tag = x; return box.Get(); }
     public static ulong AlgoDirect(ulong x) => Algo<ulong>.Run(x);
     public static ulong AlgoCell(ulong x) => Algo<Cell>.Run(x);
     public static ulong AlgoMine(ulong x) => Algo<Mine>.Run(x);
@@ -158,6 +165,8 @@ Proved("PairMine", Entry("PairMine"), 5, referencedBody: false);
 Proved("LibFirst", Entry("LibFirst"), 5, referencedBody: true);
 Proved("LibSize", Entry("LibSize"), 9, referencedBody: true);
 Proved("LibBoxStatic", Entry("LibBoxStatic"), 10, referencedBody: true);
+// An instance method of a Lib generic struct on an App local.
+Proved("BoxGet", Entry("BoxGet"), 6, referencedBody: true);
 Proved("AlgoDirect", Entry("AlgoDirect"), 23, referencedBody: true);
 Proved("AlgoCell", Entry("AlgoCell"), 23, referencedBody: true);
 Proved("AlgoMine", Entry("AlgoMine"), 19, referencedBody: true);
