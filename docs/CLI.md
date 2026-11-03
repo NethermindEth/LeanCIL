@@ -208,6 +208,42 @@ leancil verify artifacts/Add
 
 Every invocation checks the proof afresh. A failed proof removes the previous verification report. `extract` generates definitions and `check` validates extraction consistency; `verify` establishes the selected theorem about those definitions. Its guarantee is exactly the theorem's statement, including its preconditions and quantifiers.
 
+### Reading the report
+
+A successful run prints, among the assumptions and paths:
+
+```text
+Verified: ExampleProof.addTwo_holds
+  Assembly: Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null
+  Subject: System.UInt32 Examples.Loops::AddTwo(System.UInt32) (method 1) via CIL.Safety.MethodContract.Holds
+  Extraction entry: System.UInt32 Examples.Loops::TallyTwice(System.UInt32)
+  ...
+  Statement:
+    ExampleProof.addTwo_holds : ExampleProof.addTwoContract.Holds Extracted.program ExampleProof.addTwo
+  Lean messages (1):
+    TallyTwice.lean:38:0: info: 'ExampleProof.addTwo_holds' depends on axioms: [propext, Quot.sound]
+```
+
+- `Subject:` names each method the statement's conclusion is about, and `Premise:` each method a
+  hypothesis names. A method counts when a framework predicate with `program : CIL.Program` and
+  `method : Nat` parameters (`CIL.Safety.invoke`, `MethodContract.Holds`, `LoopTerminates`, ...) is
+  applied to `Extracted.program` and an index that reduces to a literal. An index the statement
+  quantifies over is reported as not fixed, and predicates the proof defines are not looked into,
+  so a line never names more than the statement does. `Extraction entry:` is the method the
+  extraction started from; it says nothing about which method the theorem concerns.
+- `Statement:` is printed in Lean notation from the audited `Proof.olean`. Only the notation of
+  the modules the proof imports applies; the proof's own declarations are loaded without their
+  extensions, so notation a proof defines cannot change the text. `verified.json` keeps the
+  auditor's text in `theoremAudit`, which is printed instead if Lean cannot print the statement.
+  Proofs checked in a consumer package (`--proof-root`) import consumer modules whose notation
+  would apply, so they print the auditor's text, `Subject: not identified`, and no Lean messages.
+- `Lean messages` lists the informational and warning messages of the proof file, such as
+  `#check`, `#eval` and `#print axioms` output, at `file:line:column` in the proof. They are printed
+  on failure too, after the diagnostic, so query commands work while a proof is unfinished. The
+  first 60 lines are shown; `proof-messages.txt` in the artifact directory holds the full text, and
+  the report names it when lines are omitted. Messages are stored with the cached proof, so a run
+  that reuses the proof shows them as well.
+
 Release packages can include a certified-library descriptor for the current runtime. On the first
 cache miss, the CLI downloads that exact release asset from the official LeanCIL GitHub repository.
 The installed package pins its archive hash, producer manifest hash, runtime and source/toolchain
@@ -255,6 +291,10 @@ When proof checking fails, the report leads with `Lean errors (N):`: each
 its full message block, omitting axiom reports, traces and warnings. Long
 messages are truncated in this summary only; the unmodified Lake output follows
 under `Details:` (and in the `LEANCIL_TRACE_DIRECTORY` transcripts when set).
+Direct verification checks the proof with `lean --json` and renders each message
+in Lean's `file:line:col: severity:` form; informational messages, which plain
+Lean output prints without a position, appear there as `info:` entries, and the
+proof's own messages follow under `Lean messages` as described above.
 
 ## Failure reports
 
@@ -388,6 +428,8 @@ No documentation text becomes evidence or a contract premise.
 ## Editor workspace
 
 `leancil workspace <assembly> <method> --profile <profile> --proof <file>` creates a
-source package for Lake and the Lean language server. See
+source package for Lake and the Lean language server. A proof outside any Lake package gets a
+generated package pinned to the bundled framework, so no `lake update` or `--proof-root` is
+needed. See
 [Proof-authoring workspace](CONSUMERS.md#proof-authoring-workspace) for pinned imports,
 stale-input rejection and the separate certification step. Editor checking is not a certificate.

@@ -274,6 +274,7 @@ partial class Program
         var reportPath = Path.Combine(output, "verified.json");
         var settingsPath = Path.Combine(output, "verification.json");
         var stage = "proof selection";
+        Program? verification = null;
         try
         {
             if (File.Exists(settingsPath))
@@ -297,6 +298,7 @@ partial class Program
             }
 
             File.Delete(reportPath);
+            File.Delete(Path.Combine(output, ProofMessagesText));
             if (fullArtifacts.Count > 0 && !forceFull)
                 throw new ArgumentException("--full-artifact requires --force-full-verify.");
             FailureReports.Delete(output);
@@ -319,11 +321,12 @@ partial class Program
             var identity = manifest.GetProperty("assemblyIdentity").GetString()!;
             var entry = manifest.GetProperty("entry").GetString()!;
 
-            using Program verification = new()
+            verification = new()
             {
                 freshProofs = fresh || forceFull,
                 freshLibrary = rebuildLibrary,
-                forceFullVerification = forceFull
+                forceFullVerification = forceFull,
+                viewsStatement = true
             };
             if (forceFull) verification.fullImportAudit = (artifact, session, module, leanPath) =>
                 verification.VerifyFullImports(artifact, session, module, theorem, leanPath, fullArtifacts);
@@ -335,7 +338,11 @@ partial class Program
 
             Console.WriteLine($"Verified: {report.theorem}");
             Console.WriteLine($"  Assembly: {identity}");
-            Console.WriteLine($"  Entry: {entry}");
+            // Direct verification prints the statement it audited; consumer packages fall back to the audit text.
+            var view = proofRoot is null ? verification.VerifiedStatement : null;
+            foreach (var line in SubjectLines(view))
+                Console.WriteLine("  " + line);
+            Console.WriteLine($"  Extraction entry: {entry}");
             if (manifest.TryGetProperty("initializedTypes", out var initializedTypes))
                 foreach (var name in initializedTypes.EnumerateArray())
                     Console.WriteLine($"  Caller assumption: {name.GetString()} initialization completed successfully before invocation.");
@@ -371,16 +378,76 @@ partial class Program
             Console.WriteLine($"  Settings: {CliPaths.Display(settingsPath)}");
             Console.WriteLine($"  Report: {CliPaths.Display(reportPath)}");
             Console.WriteLine("  Statement:");
-            var statement = report.theoremAudit.Split("'" + report.theorem + "'", 2)[0].Trim();
+            var statement = view?.statement ?? report.theoremAudit.Split("'" + report.theorem + "'", 2)[0].Trim();
             foreach (var line in statement.Split('\n'))
                 Console.WriteLine("    " + line.TrimEnd());
+            Console.Write(ProofMessagesReport(verification.ProofMessages, proof, output));
         }
         catch (Exception error)
         {
             File.Delete(reportPath);
             FailureReports.Write(output, FailureReports.Failed(stage, error, theorem ?? "ExampleProof.correctness",
                 proof ?? Path.Combine(output, "Proof.lean"), output, proofRoot));
-            throw new CliFailure(stage, error);
+            var failure = new CliFailure(stage, error);
+            var messages = proof is null ? "" : ProofMessagesReport(verification?.ProofMessages, proof, output);
+            if (messages.Length > 0) failure.Data[CliDiagnostics.ProofMessagesKey] = messages;
+            throw failure;
         }
+        finally
+        {
+            ((IDisposable?)verification)?.Dispose();
+        }
+    }
+
+    const string ProofMessagesText = "proof-messages.txt";
+    const int ProofMessageLines = 60;
+
+    /// <summary>
+    /// The proof's informational and warning messages located in its source, bounded for the terminal;
+    /// the full text is written to proof-messages.txt in the output directory.
+    /// </summary>
+    static string ProofMessagesReport(ProofMessage[]? messages, string proof, string output)
+    {
+        if (messages is not { Length: > 0 }) return "";
+        var full = string.Concat(messages.Select(message =>
+            $"{CliPaths.Display(proof)}:{message.line}:{message.column}: {message.severity}: {message.text}\n"));
+        var path = Path.Combine(output, ProofMessagesText);
+        File.WriteAllText(path, full);
+        var lines = full.TrimEnd('\n').Split('\n');
+        var report = new System.Text.StringBuilder($"  Lean messages ({messages.Length}):\n");
+        foreach (var line in lines.Take(ProofMessageLines))
+            report.Append(("    " + line).TrimEnd()).Append('\n');
+        if (lines.Length > ProofMessageLines)
+            report.Append($"    ... {lines.Length - ProofMessageLines} more lines in {CliPaths.Display(path)}\n");
+        return report.ToString();
+    }
+
+    /// <summary>
+    /// Report lines naming each method the statement names through a framework predicate: `Subject` in
+    /// its conclusion, `Premise` in a hypothesis. Nothing is claimed for a method the statement leaves open.
+    /// </summary>
+    static IEnumerable<string> SubjectLines(StatementView? view)
+    {
+        if (view is null)
+        {
+            yield return "Subject: not identified; read the statement below";
+            yield break;
+        }
+        var subjects = view.subjects
+            .DistinctBy(subject => (subject.role, subject.head, subject.extracted, subject.method)).ToArray();
+        foreach (var subject in subjects)
+        {
+            var label = subject.role == "premise" ? "Premise" : "Subject";
+            var method = subject switch
+            {
+                { extracted: false } => "a method of a program other than Extracted.program",
+                { method: null } => "a method index the statement does not fix",
+                { signature: { } signature } => $"{signature} (method {subject.method})",
+                _ => $"method {subject.method}, which Extracted.program does not contain"
+            };
+            yield return $"{label}: {method} via {subject.head}";
+        }
+        if (!subjects.Any(subject => subject.role != "premise"))
+            yield return "Subject: none identified; the conclusion names no method through a framework predicate";
     }
 }
