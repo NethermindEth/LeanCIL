@@ -94,8 +94,8 @@ reference.
 
 A referenced assembly's static methods are admitted as direct `call` and `ldftn` targets, and its
 structs as layouts and [constrained receivers](OPCODES.md#constrained-struct-calls), including
-static flag getters that fold a branch. Its generic methods and the static methods of its generic
-classes are specialized from its own metadata, so their bodies stay attributed to its pin. A
+static flag getters that fold a branch. Its generic methods, the static methods of its generic
+classes and the methods of its closed generic structs are specialized from its own metadata, so their bodies stay attributed to its pin. A
 closed generic struct such as `Lib.Pair<ulong>` is laid out from the assembly that defines it,
 and its type arguments may be value types of the selected assembly or of any pinned reference, in
 either direction. Reference-type arguments, reference fields and layout cycles are rejected.
