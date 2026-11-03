@@ -225,6 +225,24 @@ def loadsAtLiteralWidth (type : Expr) : Bool :=
   (type.find? fun e => e.isAppOfArity `CIL.Safety.numericOfWidth 2 &&
     (e.appFn!.appArg!.nat? <|> e.appFn!.appArg!.rawNatLit?).isSome).isSome
 
+/-- The facts a loop tactic steps with: `core` at every instruction, and groups that speak only
+    to some instructions, so each step's simp set holds only facts it can use. -/
+structure LoopFacts where
+  /-- The explicit facts, unfolds and gathered facts for every instruction. -/
+  core : Array Lean.Syntax.Term
+  /-- Each byte home's `form` with `localAddress`, which only taking a local's address reads;
+      derived facts are proof terms, asserted by `assertLoopFacts` when first read. -/
+  addresses : Array Lean.Syntax.Term := #[]
+  /-- The field reads of remembered structs, which only `fieldAt` reads, as proof terms. -/
+  fields : Array Lean.Syntax.Term := #[]
+  /-- The negative sides of case splits, which only instructions testing or computing on data
+      read. -/
+  cases : Array Lean.Syntax.Term := #[]
+
+/-- Every fact, for a tactic that does not step instruction by instruction. -/
+def LoopFacts.all (facts : LoopFacts) : Array Lean.Syntax.Term :=
+  facts.core ++ facts.addresses ++ facts.fields ++ facts.cases
+
 open Lean Elab Tactic Meta in
 /-- `facts`, followed by the facts a loop proof's context determines, each at most once:
     * the declarations in scope with `cil_loop_unfold` that `reachableLoopUnfolds` finds from
@@ -245,8 +263,9 @@ open Lean Elab Tactic Meta in
     a derived fact must be about variables reached without an equation. An equation is kept only
     at a memory that a state of the goal holds or a kept equation or explicit fact mentions, and
     a derived fact only at a state's memory. Derived facts are asserted as hygienic hypotheses,
-    skipping any statement already gathered. -/
-def gatherLoopFacts (facts : Array Term) : TacticM (Array Term) := withMainContext do
+    skipping any statement already gathered. Home forms, field reads and the negative sides of
+    case splits are grouped apart from the rest, for the instructions that read them. -/
+def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainContext do
   let context ← getLCtx
   let explicitNames ← facts.filterMapM fun fact => do
     unless fact.raw.isIdent do return none
@@ -284,6 +303,18 @@ def gatherLoopFacts (facts : Array Term) : TacticM (Array Term) := withMainConte
   let asTerms (ids : Array FVarId) : Array Expr := ids.map .fvar
   let mut reached := variables scope.parts
   let mut known : Array Expr := #[]
+  -- An explicit proof term's statement is not derived again from the frames in scope.
+  for fact in facts do
+    if fact.raw.isIdent then continue
+    let saved ← saveState
+    let type? ← try
+        let proof ← Term.withoutErrToSorry <| Term.elabTerm fact none
+        Term.synthesizeSyntheticMVarsNoPostponing
+        pure (some (← instantiateMVars (← inferType proof)))
+      catch _ => pure none
+    saved.restore
+    if let some type := type? then
+      unless type.hasMVar do known := known.push type.consumeMData
   for (declaration, type) in typed do
     let fact := named declaration
     if explicitNames.contains declaration.userName then
@@ -295,7 +326,7 @@ def gatherLoopFacts (facts : Array Term) : TacticM (Array Term) := withMainConte
       let memories ← loopFactMemories type
       candidates := candidates.push (.anonymous, fact, subject, memories, produced)
     else if ← isCaseDisequality type then
-      candidates := candidates.push (.anonymous, fact, variables #[type], #[], #[])
+      candidates := candidates.push (`caseSplit, fact, variables #[type], #[], #[])
     let arguments := type.getAppArgs
     if type.isAppOfArity `CIL.Safety.CheckedSpan 5 then
       let subject := variables #[arguments[0]!, arguments[1]!]
@@ -378,7 +409,7 @@ def gatherLoopFacts (facts : Array Term) : TacticM (Array Term) := withMainConte
     changed := false
     for index in [:candidates.size] do
       let (base, _, subject, memories, produced) := candidates[index]!
-      let visible := if base.isAnonymous then reached else direct
+      let visible := if base.isAnonymous || base == `caseSplit then reached else direct
       if !kept[index]! && subject.all visible.contains &&
           memories.all fun memory => live.all (·.contains memory) then
         kept := kept.set! index true
@@ -387,8 +418,11 @@ def gatherLoopFacts (facts : Array Term) : TacticM (Array Term) := withMainConte
         changed := changed || !produced.isEmpty
   let mut literalWidth := false
   let mut homeLoads := false
-  let mut homeForms := false
+  let mut addresses : Array Term := #[]
+  let mut fields : Array Term := #[]
+  let mut cases : Array Term := #[]
   for ((base, fact, _, _, _), keep) in candidates.zip kept do
+    if keep && base == `caseSplit then cases := cases.push fact
     unless keep && base.isAnonymous do continue
     gathered := gathered.push fact
     if let some declaration := context.findFromUserName? fact.raw.getId then
@@ -397,21 +431,42 @@ def gatherLoopFacts (facts : Array Term) : TacticM (Array Term) := withMainConte
       constants := constants ++ type.getUsedConstants
       known := known.push type.consumeMData
   for ((base, fact, _, _, _), keep) in candidates.zip kept do
-    unless keep && !base.isAnonymous do continue
+    unless keep && !base.isAnonymous && base != `caseSplit do continue
+    -- Home forms and field reads are asserted only once an instruction reads them.
+    if base == `homeForm then addresses := addresses.push fact; continue
+    if base == `fieldRead || base == `fieldLoad then fields := fields.push fact; continue
     if let some (asserted, type) ← assertLoopFact base fact known then
-      gathered := gathered.push asserted
       known := known.push type
+      gathered := gathered.push asserted
       homeLoads := homeLoads || base == `homeLoad
-      homeForms := homeForms || base == `homeForm
   if homeLoads && !explicitNames.contains ``localResult then
     gathered := gathered.push (global ``localResult)
-  if homeForms && !explicitNames.contains ``localAddress then
-    gathered := gathered.push (global ``localAddress)
+  if !addresses.isEmpty && !explicitNames.contains ``localAddress then
+    addresses := addresses.push (global ``localAddress)
   if literalWidth then
     for name in [`CIL.Safety.numericOfWidth, ``BitVec.ofNat_toNat] do
       unless explicitNames.contains name do gathered := gathered.push (global name)
   let unfolds ← reachableLoopUnfolds constants
   let unfolds := unfolds.filter (!explicitNames.contains ·)
-  return facts ++ unfolds.map global ++ gathered
+  return { core := facts ++ unfolds.map global ++ gathered, addresses, fields, cases }
+
+open Lean Elab Tactic in
+/-- `terms` with each proof term asserted as a hygienic hypothesis named from `base`, skipping
+    any that do not elaborate to a closed proposition; names stay as given. -/
+def assertLoopFacts (base : Name) (terms : Array Term) : TacticM (Array Term) := do
+  let mut asserted := #[]
+  let mut known := #[]
+  for term in terms do
+    if term.raw.isIdent then asserted := asserted.push term; continue
+    if let some (name, type) ← assertLoopFact base term known then
+      asserted := asserted.push name
+      known := known.push type
+  return asserted
+
+open Lean Elab Tactic in
+/-- `gatherLoopFactGroups` as one list, for a tactic that does not step instruction by
+    instruction. -/
+def gatherLoopFacts (facts : Array Term) : TacticM (Array Term) :=
+  return (← gatherLoopFactGroups facts).all
 
 end CIL.Safety

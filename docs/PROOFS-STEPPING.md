@@ -424,6 +424,11 @@ hypotheses, so the stepper looks them up by name instead of elaborating a proof 
 step, and a statement already gathered is not added again. `SpanSum` names no fact but its
 invariant equation.
 
+The stepping tactics give each instruction only the facts it can read. Home forms reach only
+`ldloca`, field reads only `ldfld`, and the negative sides of case splits only instructions that
+test or compute on data, while `ret` reads them all; each group is added and normalised the first time such an
+instruction is reached. Stack lemmas join the rewrite only when the goal holds a stack operation.
+
 A loop over symbolic caller memory keeps the frame part of its state as the
 [`LoopFrame`](../CIL/Safety/LoopFrames.lean) that `bind_entry ... allocating` returns, in a
 `FrameState`. `frame.store index value rfl` stores into a home and gives the step's store

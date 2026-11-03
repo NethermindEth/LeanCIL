@@ -96,7 +96,7 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
   let some parts ← loopStateParts? source | return false
   let fetched ← observing? (loopFetch facts)
   saved.restore
-  let some (op, _) := fetched | return false
+  let some { op, .. } := fetched | return false
   let op ← whnfR op
   let memory := parts[3]!
   let stack ← listEntries parts[2]!
@@ -144,9 +144,9 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
     store the frame lemmas take; fails as `tactic` naming the pc where it cannot go on. -/
 partial def loopResume (tactic : String) (target : Nat) (layouts : Array Expr)
     (footprint : Expr) (stepped : Bool := false) : TacticM Unit := do
-  let facts ← gatherLoopFacts #[]
+  let facts ← gatherLoopFactGroups #[]
   let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
-    (#[← `(CIL.truth)] ++ facts)
+    (#[← `(CIL.truth)] ++ facts.core)
   loopSteps tactic (.resume target) facts prepared stepped
   if (← getGoals).isEmpty then return
   let position ← withMainContext do
@@ -154,8 +154,8 @@ partial def loopResume (tactic : String) (target : Nat) (layouts : Array Expr)
     let some parts ← loopStateParts? source | return none
     literalNat? parts[0]!
   if position == some target then return
-  unless ← loopFrameStore facts layouts footprint do
-    loopStuck tactic facts prepared fun _ => false
+  unless ← loopFrameStore facts.core layouts footprint do
+    loopStuck tactic facts.all prepared fun _ => false
   loopResume tactic target layouts footprint true
 
 /-- The layouts each `AggregateLayout.encode` in `expression` names. -/
@@ -179,9 +179,9 @@ syntax "cil_loop_advance" (" [" term,* "]")? : tactic
 
 elab_rules : tactic
   | `(tactic| cil_loop_advance $[[$facts:term,*]]?) => do
-    let facts ← gatherLoopFacts (facts.map (·.getElems) |>.getD #[])
+    let facts ← gatherLoopFactGroups (facts.map (·.getElems) |>.getD #[])
     let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
-      (#[← `(CIL.truth)] ++ facts)
+      (#[← `(CIL.truth)] ++ facts.core)
     loopSteps "cil_loop_advance" .advance facts prepared
 
 /-- Continue a call's `LoopTerminates` continuation with its results and the frame after it:
@@ -262,7 +262,7 @@ elab_rules : tactic
         let some position ← literalNat? parts[0]! | throw error
         let fetched ← observing? (loopFetch facts)
         saved.restore
-        let some (op, _) := fetched
+        let some { op, .. } := fetched
           | throwError "cil_loop_call: cannot fetch the instruction at pc {position}"
         unless (← whnfR op).isAppOf ``CIL.Op.call do
           throwError "cil_loop_call: pc {position} is {op}, not a call; step to the call first \

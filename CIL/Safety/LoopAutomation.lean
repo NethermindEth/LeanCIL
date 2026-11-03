@@ -121,10 +121,22 @@ def loopStateParts? (state : Expr) : MetaM (Option (Array Expr)) := do
   unless state.isAppOfArity ``LoopState.mk 4 do return none
   return some state.getAppArgs
 
+/-- The instruction a loop goal's source state fetches, the proofs of its method and
+    instruction lookups, and the step obligation taking it leaves. -/
+structure LoopFetched where
+  /-- The fetched instruction. -/
+  op : Lean.Expr
+  /-- A proof that the program holds the goal's method. -/
+  found : Lean.Expr
+  /-- A proof that the method's code holds `op` at the goal's pc. -/
+  instruction : Lean.Expr
+  /-- The obligation that `op` steps to a next state. -/
+  step : Lean.MVarId
+
 open Lean Elab Tactic Meta in
-/-- The instruction a loop goal's source state fetches, and the step obligation taking it
-    leaves, with the lookups closed by `cil_lookup [facts]`. Fails when they do not close. -/
-def loopFetch (facts : Array Term) : TacticM (Expr × MVarId) := withMainContext do
+/-- The instruction a loop goal's source state fetches, with the lookups closed by
+    `cil_lookup [facts]`. Fails when they do not close. -/
+def loopFetch (facts : Array Term) : TacticM LoopFetched := withMainContext do
   let target := (← instantiateMVars (← getMainTarget)).consumeMData
   let lemma := if target.isAppOfArity ``LoopReaches 5 then ``loop_reaches_next
     else ``loop_terminates_next
@@ -137,8 +149,25 @@ def loopFetch (facts : Array Term) : TacticM (Expr × MVarId) := withMainContext
       evalTactic (← `(tactic| cil_lookup [$facts,*]))
     unless remaining.isEmpty do throwError "the method or instruction lookup did not close"
   let fetched ← instantiateMVars (← inferType premises[lookups + 1]!)
-  let some (_, _, found) := fetched.eq? | throwError "unexpected instruction lookup"
-  return (found.appArg!, premises[lookups + 2]!.mvarId!)
+  let some (_, _, op) := fetched.eq? | throwError "unexpected instruction lookup"
+  let found ← instantiateMVars premises[lookups]!
+  let instruction ← instantiateMVars premises[lookups + 1]!
+  return { op := op.appArg!, found, instruction, step := premises[lookups + 2]!.mvarId! }
+
+/-- Instructions that only move values, which no case split decides. -/
+def loopMovesOnly : List Lean.Name :=
+  [``CIL.Op.nop, ``CIL.Op.arg, ``CIL.Op.vectorArg, ``CIL.Op.vectorArgAddr, ``CIL.Op.local,
+    ``CIL.Op.vectorLocal, ``CIL.Op.vectorLocalAddr, ``CIL.Op.setVectorLocal, ``CIL.Op.localAddr,
+    ``CIL.Op.setLocal, ``CIL.Op.const32, ``CIL.Op.const64, ``CIL.Op.branch, ``CIL.Op.skipInit,
+    ``CIL.Op.initAggregate, ``CIL.Op.fieldAddress]
+
+/-- The groups of `facts` the instruction `op` reads besides its core: a return reads them all,
+    since its postcondition may speak of anything the loop proved. -/
+def LoopFacts.readBy (facts : LoopFacts) (op : Lean.Name) : Array (Array Lean.Syntax.Term) :=
+  if op == ``CIL.Op.ret then #[facts.addresses, facts.fields, facts.cases] else
+  #[if op == ``CIL.Op.localAddr || op == ``CIL.Op.vectorLocalAddr then facts.addresses else #[],
+    if op == ``CIL.Op.fieldAt then facts.fields else #[],
+    if loopMovesOnly.contains op then #[] else facts.cases]
 
 open Lean Elab Tactic Meta in
 /-- Fail, as `tactic`, naming why the loop goal cannot be stepped: an undecided branch, an
@@ -155,9 +184,11 @@ def loopStuck (tactic : String) (facts prepared : Array Term)
   let some position ← literalNat? parts[0]!
     | throwError "{tactic}: the pc is not a literal, so a branch was not decided; supply a fact \
         deciding its condition. The pc is{indentExpr parts[0]!}"
-  let (op, stepGoal) ← try loopFetch facts catch error =>
+  let fetched ← try loopFetch facts catch error =>
     saved.restore
     throwError "{tactic}: cannot fetch the instruction at pc {position}: {error.toMessageData}"
+  let op := fetched.op
+  let stepGoal := fetched.step
   let opName := ((← whnfR op).getAppFn.constName?).getD Name.anonymous
   if stops opName then saved.restore; return
   if opName == ``CIL.Op.call then
@@ -201,38 +232,29 @@ def loopTargetMismatch (tactic : String) (position : Nat) (source target : Expr)
     the reached form, or state the target in it."
 
 open Lean Elab Tactic Meta in
-/-- Step a loop goal through fetched instructions with the raw `facts` and their normalised
-    `prepared` forms as `mode` directs, failing through `loopStuck` or `loopTargetMismatch`
-    where it cannot go on. A resumed walk stops at its target pc once a step is taken, which
-    `stepped` says happened before this call. -/
-def loopSteps (tactic : String) (mode : LoopStepping) (facts prepared : Array Term)
+/-- Whether a loop goal mentions a list operation that `loopStackLemmas` puts in literal form. -/
+def loopMentionsStackOperations : TacticM Bool := withMainContext do
+  let operations := [``List.drop, ``List.take, ``List.reverse, ``HAppend.hAppend]
+  return ((← instantiateMVars (← getMainTarget)).find? fun term =>
+    term.isConst && operations.contains term.constName!).isSome
+
+open Lean Elab Tactic Meta in
+/-- Step a loop goal through fetched instructions with the `facts` as `mode` directs, failing
+    through `loopStuck` or `loopTargetMismatch` where it cannot go on. Each instruction steps with
+    `prepared`, the normalised core, and the groups about it, each normalised once when first
+    read. A resumed walk stops at its target pc once a step is taken, which `stepped` says
+    happened before this call. -/
+def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepared : Array Term)
     (stepped : Bool := false) : TacticM Unit := do
   let stackLemmas : Array Term := loopStackLemmas.map fun name => mkIdent (`_root_ ++ name)
-  let rewriting := facts ++ stackLemmas
-  let rewrite ← `(tactic| simp only [$[$rewriting:term],*])
+  let core := facts.core
+  let withStack := core ++ stackLemmas
+  let rewrite ← `(tactic| simp only [$[$core:term],*])
+  let rewriteStack ← `(tactic| simp only [$[$withStack:term],*])
   let close ← `(tactic| exact CIL.Safety.loop_reaches_refl)
-  let next ← match mode with
-    | .reach => `(tactic| (
-        apply CIL.Safety.loop_reaches_next
-        · cil_lookup [$[$facts:term],*]
-        · cil_lookup [$[$facts:term],*]
-        · cil_checked_step_normalized [$[$prepared:term],*]))
-    | _ => `(tactic| (
-        apply CIL.Safety.loop_terminates_next
-        · cil_lookup [$[$facts:term],*]
-        · cil_lookup [$[$facts:term],*]
-        · cil_checked_step_normalized [$[$prepared:term],*]))
-  let finish ← `(tactic| (
-      apply CIL.Safety.loop_terminates_return (op := .ret _)
-      · cil_lookup [$[$facts:term],*]
-      · cil_lookup [$[$facts:term],*]
-      · cil_checked_step_normalized [$[$prepared:term],*]
-      · rfl
-      · first
-        | simp [$[$prepared:term],*]; done
-        -- Frame cleanup only after the facts fail, since unfolding `leaveFrame` first
-        -- would hide it from a supplied fact about the exited frame's memory.
-        | simp [CIL.Safety.leaveFrame, CIL.NarrowKind.extend, $[$prepared:term],*]))
+  -- Each group of `LoopFacts.readBy`, once normalised.
+  let mut normalised : Array (Option (Array Term)) := #[none, none, none]
+  let groupBases := #[`homeForm, `fieldRead, `caseSplit]
   let attempt (step : Syntax) : TacticM Bool := do
     let saved ← saveState
     -- Without recovery a failed alternative throws instead of logging an error and admitting.
@@ -249,10 +271,16 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts prepared : Array Te
     let some (source, _) ← loopGoalStates (← getMainTarget) | return none
     let some parts ← loopStateParts? source | return none
     literalNat? parts[0]!
+  let stops : Lean.Name → Bool := match mode with
+    | .reach => fun _ => false
+    | .finish => (· == ``CIL.Op.ret)
+    | .advance => fun op => op == ``CIL.Op.call || op == ``CIL.Op.ret
+    | .resume _ => fun op => op == ``CIL.Op.setFieldAt || op == ``CIL.Op.initAggregate
   let mut taken := 0
   repeat
     if (← getGoals).isEmpty then return
-    if ← attempt rewrite then continue
+    let rewriting := if ← loopMentionsStackOperations then rewriteStack else rewrite
+    if ← attempt rewriting then continue
     if let .resume target := mode then
       if taken > 0 || stepped then
         if (← currentPc) == some target then return
@@ -261,17 +289,55 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts prepared : Array Te
       if taken > 0 then
         if let some (position, source, target) ← reachedPc then
           loopTargetMismatch tactic position source target
-    if mode == .finish then
+    -- Fetching unifies the goal with a step lemma; only its closed lookup proofs are kept.
+    let saved ← saveState
+    let fetched? ← observing? (loopFetch core)
+    saved.restore
+    let some fetched := fetched? | loopStuck tactic facts.all prepared stops; return
+    let op := ((← whnfR fetched.op).getAppFn.constName?).getD Name.anonymous
+    let finishing := mode == .finish && op == ``CIL.Op.ret
+    -- A call or return ends an advance before any step; a resumed walk tries the store first,
+    -- since a store fact the frame lemmas just produced may step it.
+    let resuming := match mode with | .resume _ => true | _ => false
+    if stops op && !finishing && !resuming then return
+    -- The groups this instruction reads, normalised in the goal the first time one is read.
+    let mut reading := prepared
+    let read := facts.readBy op
+    for index in [:read.size] do
+      if read[index]!.isEmpty then continue
+      let ready ← match normalised[index]! with
+        | some ready => pure ready
+        | none => do
+          let asserted ← assertLoopFacts groupBases[index]! read[index]!
+          normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|)) asserted
+      normalised := normalised.set! index (some ready)
+      reading := reading ++ ready
+    let found ← Term.exprToSyntax fetched.found
+    let instruction ← Term.exprToSyntax fetched.instruction
+    if finishing then
+      let finish ← `(tactic| (
+          apply CIL.Safety.loop_terminates_return $found $instruction
+          · cil_checked_step_normalized [$[$reading:term],*]
+          · rfl
+          · first
+            | simp [$[$reading:term],*]; done
+            -- Frame cleanup only after the facts fail, since unfolding `leaveFrame` first
+            -- would hide it from a supplied fact about the exited frame's memory.
+            | simp [CIL.Safety.leaveFrame, CIL.NarrowKind.extend, $[$reading:term],*]))
       if ← attempt finish then continue
+      -- A return whose results or postcondition the facts do not prove is left as the goal.
+      return
+    let next ← match mode with
+      | .reach => `(tactic| (
+          apply CIL.Safety.loop_reaches_next $found $instruction
+          · cil_checked_step_normalized [$[$reading:term],*]))
+      | _ => `(tactic| (
+          apply CIL.Safety.loop_terminates_next $found $instruction
+          · cil_checked_step_normalized [$[$reading:term],*]))
     if ← attempt next then
       taken := taken + 1
       continue
-    let stops : Lean.Name → Bool := match mode with
-      | .reach => fun _ => false
-      | .finish => (· == ``CIL.Op.ret)
-      | .advance => fun op => op == ``CIL.Op.call || op == ``CIL.Op.ret
-      | .resume _ => fun op => op == ``CIL.Op.setFieldAt || op == ``CIL.Op.initAggregate
-    loopStuck tactic facts prepared stops
+    loopStuck tactic facts.all reading stops
     return
 
 /-- Compose actual fetched instructions until the requested invariant state.
@@ -283,9 +349,9 @@ syntax "cil_loop_steps" (" [" term,* "]")? : tactic
 
 elab_rules : tactic
   | `(tactic| cil_loop_steps $[[$facts:term,*]]?) => do
-    let facts ← gatherLoopFacts (facts.map (·.getElems) |>.getD #[])
+    let facts ← gatherLoopFactGroups (facts.map (·.getElems) |>.getD #[])
     let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
-      (#[← `(CIL.truth)] ++ facts)
+      (#[← `(CIL.truth)] ++ facts.core)
     loopSteps "cil_loop_steps" .reach facts prepared
 
 /-- Establish an exit path and its postcondition without choosing a fuel bound. The facts are
@@ -296,9 +362,9 @@ syntax "cil_loop_finish" (" [" term,* "]")? : tactic
 
 elab_rules : tactic
   | `(tactic| cil_loop_finish $[[$facts:term,*]]?) => do
-    let facts ← gatherLoopFacts (facts.map (·.getElems) |>.getD #[])
+    let facts ← gatherLoopFactGroups (facts.map (·.getElems) |>.getD #[])
     let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
-      (#[← `(CIL.truth)] ++ facts)
+      (#[← `(CIL.truth)] ++ facts.core)
     loopSteps "cil_loop_finish" .finish facts prepared
 
 end CIL.Safety
