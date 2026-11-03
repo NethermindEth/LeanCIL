@@ -207,6 +207,14 @@ theorem LoopFrame.ofEntry (footprint : List (Reference × Nat)) {known : Nat →
   ⟨Confined.ofMemoryBelow entered.kept (Nat.le_refl _) entered.grown, entered.wellFormed, homes,
     snapshots⟩
 
+/-- The home of each byte slot of a loop frame forms, so its address can be taken. -/
+theorem LoopFrame.form_home {known : Nat → Option CIL.Value}
+    (frame : LoopFrame footprint caller current kinds slots known) (index : Nat)
+    {kind : CIL.LocalKind} {home : Reference}
+    (slot : slots[index]? = some (.bytes kind home) := by rfl) :
+    form current home = .ok home :=
+  access_reference_valid _ _ _ _ _ (frame.homes.writable_at slot)
+
 /-- A listed local loads as its listed value. -/
 theorem LoopFrame.load {values : List (Option CIL.Value)}
     (frame : LoopFrame footprint caller current kinds slots (knownLocals values)) (index : Nat)
@@ -359,6 +367,7 @@ theorem CheckedSpan.within {known : Nat → Option CIL.Value} {view : SpanView} 
 #print axioms LoopFrame.kept
 #print axioms LoopFrame.leave_kept
 #print axioms CheckedSpan.within
+#print axioms LoopFrame.form_home
 #print axioms LoopFrame.load
 #print axioms LoopFrame.store
 #print axioms LoopFrame.set_local

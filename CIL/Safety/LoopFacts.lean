@@ -14,13 +14,14 @@ head of their type, so a context of unrelated hypotheses adds nothing to simp.
 namespace CIL.Safety
 
 /-- Heads of the equations the loop tactics take from the context: checked steps, local and
-    memory loads and stores, and span element, slice, validity, width and mode checks. -/
+    memory loads and stores, span element, slice, validity, width and mode checks, and formed
+    references. -/
 def loopFactHeads : List Lean.Name :=
   [``CIL.Safety.step, ``CIL.Safety.instruction, ``CIL.Safety.memoryInstruction,
     ``CIL.Safety.staticInstruction, ``CIL.Safety.loadLocal, ``CIL.Safety.storeLocal,
     ``CIL.Safety.loadValue, ``CIL.Safety.storeValue, ``CIL.Safety.SpanView.element,
     ``CIL.Safety.SpanView.slice, ``CIL.Safety.SpanView.validate, ``CIL.Safety.SpanView.width,
-    ``CIL.Safety.SpanView.writable]
+    ``CIL.Safety.SpanView.writable, ``CIL.Safety.form]
 
 open Lean Meta in
 /-- For an equation, possibly quantified, whose left side has a head in `loopFactHeads`, or a
@@ -177,6 +178,38 @@ partial def rememberedIndices (list : Lean.Expr) (index : Nat := 0) : MetaM (Arr
   return rest
 
 open Lean Meta in
+/-- The entries of `list` up to reduction with their positions, reading cons cells until one is
+    not. -/
+partial def listEntries (list : Lean.Expr) (index : Nat := 0) :
+    MetaM (Array (Nat × Lean.Expr)) := do
+  let cell ← whnf list
+  unless cell.isAppOfArity ``List.cons 3 do return #[]
+  return #[(index, cell.getArg! 1)] ++ (← listEntries cell.appArg! (index + 1))
+
+open Lean Meta in
+/-- The layout and field values of a remembered struct, `some (.aggregate (layout.encode
+    values))`, reading the entry only through reducible definitions. -/
+def encodedStruct? (entry : Lean.Expr) : MetaM (Option (Lean.Expr × Lean.Expr)) := do
+  let entry ← whnfR (← instantiateMVars entry)
+  unless entry.isAppOfArity ``Option.some 2 do return none
+  let value ← whnfR entry.appArg!
+  unless value.isAppOfArity ``CIL.Value.aggregate 1 do return none
+  let bytes := value.appArg!.headBeta.consumeMData
+  unless bytes.isAppOfArity `CIL.AggregateLayout.encode 2 do return none
+  return some (bytes.appFn!.appArg!, bytes.appArg!)
+
+open Lean Elab Meta in
+/-- A proof of `layout.Valid`: the extraction's `<layout>_valid` theorem when `layout` is a
+    constant that has one, else a kernel decision. -/
+def layoutValidity (layout : Lean.Expr) : MetaM Term := do
+  if let some name := layout.constName? then
+    let theoremName := name.appendAfter "_valid"
+    if let some info := (← getEnv).find? theoremName then
+      if ← isDefEq info.type (mkApp (mkConst `CIL.AggregateLayout.Valid) layout) then
+        return mkCIdent theoremName
+  `(by decide +kernel)
+
+open Lean Meta in
 /-- Whether `type` mentions `numericOfWidth` at a literal width, which unfolds to one value. -/
 def loadsAtLiteralWidth (type : Expr) : Bool :=
   (type.find? fun e => e.isAppOfArity `CIL.Safety.numericOfWidth 2 &&
@@ -277,14 +310,46 @@ def gatherLoopFacts (facts : Array Term) : TacticM (Array Term) := withMainConte
     else if type.isAppOfArity `CIL.Safety.SpanContents 4 then
       candidates := candidates.push (`elementWidth, applied `SpanContents.elementWidth #[fact],
         variables #[arguments[1]!], #[], #[])
-    else if type.isAppOfArity `CIL.Safety.LoopFrame 6 && isLive arguments[2]! then
-      let subject := variables #[arguments[2]!, arguments[4]!]
-      let remembered := arguments[5]!.consumeMData
+    -- An entry frame for every footprint gives the frame facts at the empty one.
+    let entered ← match type with
+      | .forallE _ domain body _ =>
+        if body.isAppOfArity `CIL.Safety.LoopFrame 6 && body.getArg! 0 == .bvar 0 then
+          let empty ← mkAppOptM ``List.nil #[domain.appArg!]
+          pure (some (← `(($fact [])), body.instantiate1 empty))
+        else pure none
+      | _ => pure none
+    let framed := if type.isAppOfArity `CIL.Safety.LoopFrame 6 then some (fact, type) else entered
+    if let some (frameTerm, frameType) := framed then
+      let frameArguments := frameType.getAppArgs
+      -- Facts at a frame's memory are kept once a state holds it or a kept step produces it.
+      let memory := #[frameArguments[2]!]
+      let subject := variables #[frameArguments[4]!]
+      let numeral (index : Nat) : Term := ⟨Syntax.mkNumLit (toString index)⟩
+      -- Each byte home forms, so `localAddr` of it steps.
+      for (index, slot) in ← listEntries frameArguments[4]! do
+        if (← whnf slot).isAppOfArity ``LocalSlot.bytes 2 then
+          candidates := candidates.push (`homeForm,
+            applied `LoopFrame.form_home #[frameTerm, numeral index], subject, memory, #[])
+      let remembered := frameArguments[5]!.consumeMData
       if remembered.isAppOfArity `CIL.Safety.knownLocals 1 then
-        for index in ← rememberedIndices remembered.appArg! do
+        for (index, entry) in ← listEntries remembered.appArg! do
+          unless (← whnf entry).isAppOfArity ``Option.some 2 do continue
           candidates := candidates.push (`homeLoad,
-            applied `LoopFrame.load #[fact, ⟨Syntax.mkNumLit (toString index)⟩], subject, #[],
-            #[])
+            applied `LoopFrame.load #[frameTerm, numeral index], subject, memory, #[])
+          -- A struct remembered by its field values reads each field by value and by address.
+          let some (layout, values) ← encodedStruct? entry | continue
+          let valid ← layoutValidity layout
+          -- The literal list is the form stepping leaves on the stack, whatever spelled it.
+          let entries ← listEntries values
+          let literal ← mkListLit (mkConst ``CIL.Value) (entries.toList.map (·.2))
+          let valuesTerm ← Term.exprToSyntax literal
+          let fields ← listEntries (mkApp (mkConst `CIL.AggregateLayout.fields) layout)
+          for field in [:fields.size] do
+            candidates := candidates.push (`fieldRead, applied `step_fieldAt_encode
+              #[valid, numeral field, valuesTerm], variables #[values], memory, #[])
+            candidates := candidates.push (`fieldLoad, applied `LoopFrame.load_field
+              #[frameTerm, numeral index, valid, numeral field], subject, memory, #[])
+    if type.isAppOfArity `CIL.Safety.LoopFrame 6 && isLive arguments[2]! then
       if confinedToNone type && scope.returns then
         for (setup, setupType) in typed do
           let some (_, entry, _) := setupType.eq? | continue
@@ -310,6 +375,7 @@ def gatherLoopFacts (facts : Array Term) : TacticM (Array Term) := withMainConte
         changed := changed || !produced.isEmpty
   let mut literalWidth := false
   let mut homeLoads := false
+  let mut homeForms := false
   for ((base, fact, _, _, _), keep) in candidates.zip kept do
     unless keep && base.isAnonymous do continue
     gathered := gathered.push fact
@@ -324,8 +390,11 @@ def gatherLoopFacts (facts : Array Term) : TacticM (Array Term) := withMainConte
       gathered := gathered.push asserted
       known := known.push type
       homeLoads := homeLoads || base == `homeLoad
+      homeForms := homeForms || base == `homeForm
   if homeLoads && !explicitNames.contains ``localResult then
     gathered := gathered.push (global ``localResult)
+  if homeForms && !explicitNames.contains ``localAddress then
+    gathered := gathered.push (global ``localAddress)
   if literalWidth then
     for name in [`CIL.Safety.numericOfWidth, ``BitVec.ofNat_toNat] do
       unless explicitNames.contains name do gathered := gathered.push (global name)
