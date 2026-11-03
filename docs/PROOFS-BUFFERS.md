@@ -179,7 +179,8 @@ stores also return the updated snapshots, well-formedness, `MemoryBelow` for the
 write access, the address's `form` fact for the next step and the write equation; a store also
 returns the decoded field values, which the next store or load takes. Every other local's snapshot
 is kept. A frame from
-`bind_entry ... allocating` supplies `WritableHomes` from each `NumericEntryHome`, and
+`bind_entry ... allocating` supplies its `LoopFrame`, whose `homes` and `snapshots` start the
+chain, and
 `MemoryBelow.frame_round_trip` composes the per-step facts on return. Loads cover widths 1, 2, 4
 and 8 without sign extension; signed narrow and vector fields use the byte-level lemmas.
 [Struct](../Examples/Proofs/Struct.lean) and [Tests/AggregateFields](../Tests/AggregateFields.lean)
@@ -192,8 +193,11 @@ Import `CIL.Safety.LoopFrames` to keep the frame facts of a loop out of its inva
 well-formedness, `WritableHomes` for the frame's locals and their `LocalSnapshots`, with
 `knownLocals values` naming the remembered values. `FrameState` pairs the loop's values with a
 memory and its `LoopFrame`, so an invariant over a `FrameState` states only the property.
-`LoopFrame.ofEntry` builds the frame from `EntryMemory`, and a `NumericEntryHome` from
-`bind_entry ... allocating` supplies `homes` and `snapshots` for a one-local frame.
+`bind_entry ... allocating` proves the frame of every numeric and aggregate home it allocates, for
+any footprint, with each home remembered as its initializer: `slots` lists the homes in local
+order, and `load`, `store` and `knownLocals` index that list, which is the frame's local list only
+when every local has a home. `LoopFrame.ofEntry`, `WritableHomes.entry` and `LocalSnapshots.entry`
+are the lemmas it composes.
 
 Each lemma proves the frame after one step. `load` and `store` read and write a remembered local;
 `write` and `write_element` keep the frame across a write inside the footprint; `after_confined`
@@ -204,5 +208,8 @@ allocation to be older than the frame (`allocation < caller.nextIdentity`); a wr
 reaches a home does not elaborate and the snapshot stays the author's obligation.
 `add_int_element`, `int_lt` and `toNat_succ` step a signed `int` index below `2^31` to an element
 offset and its compare. The [buffer fill proof](../Examples/Proofs/FillWords.lean) uses them with
-an invariant of only `Filled` and `k <= n`; [Tests/LoopFrames](../Tests/LoopFrames.lean) shows the
-rejections.
+an invariant of only `Filled` and `k <= n`. [Countdown](../Examples/Proofs/Countdown.lean) needs
+no invariant beyond the frame, and [CountCalls](../Examples/Proofs/CountCalls.lean) and
+[CountUntil](../Examples/Proofs/CountUntil.lean) keep two locals across a helper call with
+`after_confined`. [Tests/LoopFrames](../Tests/LoopFrames.lean) shows the rejections, including a
+write through the second home of a generated two-local frame.
