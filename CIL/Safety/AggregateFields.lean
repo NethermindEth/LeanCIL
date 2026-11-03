@@ -1,7 +1,6 @@
 import CIL.Layout
 import CIL.Safety.ByteRoundTrip
 import CIL.Safety.InstructionSteps
-import CIL.Safety.NumericLocals
 import CIL.Safety.WordMemory
 import CIL.Safety.LocalSnapshots
 
@@ -16,9 +15,9 @@ passing the decidable `AggregateLayout.Disjoint` check a store changes exactly o
 Overlapping explicit layouts fail that check and stay at the byte level.
 
 The checked `initobj`, `stfld` and `ldfld` steps through a struct home's address are proved
-against these laws. `FieldView` carries a frame entry's struct home as field values across
-them, as `NumericEntryHome` carries a numeric home; `LocalSnapshots.store_field` updates a
-remembered aggregate local and keeps every other snapshot.
+against these laws. `LocalSnapshots.zero_aggregate`, `store_field` and `load_field` take them
+through a remembered aggregate local, tracking its decoded field values and keeping every
+other local's snapshot, so struct and numeric locals share one snapshot set.
 -/
 
 namespace CIL.Safety
@@ -343,117 +342,8 @@ theorem step_initAggregate_home {memory : Memory} {home : Reference} {size : Nat
   simp only [referenceAt, ordinaryAccessAlignment, written, checkedAt, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
-/-- A write of storage the entered frame owns keeps the caller's memory and the entry facts. -/
-theorem EntryMemory.after_write {caller current after : Memory} {target : Reference}
-    {bytes : List (BitVec 8)} {alignment : Nat} (frame : EntryMemory caller current)
-    (written : write current target bytes alignment = .ok after)
-    (fresh : caller.nextIdentity ≤ target.allocation) : EntryMemory caller after :=
-  ⟨frame.kept.trans (write_preserves_memory_below _ _ _ _ _ _ fresh written),
-    write_nextIdentity written ▸ frame.grown,
-    write_preserves_wellFormed _ _ _ _ _ frame.wellFormed written⟩
-
 #print axioms step_fieldAt_home
 #print axioms step_initAggregate_home
-#print axioms EntryMemory.after_write
-
-/-- Frame memory `current`, entered from `caller`, holds a struct of `layout` at `home` whose
-    fields hold `values`: the home lies above the caller's memory, reads as bytes that decode
-    to `values`, and is writable. Padding bytes are initialized but unconstrained. -/
-structure FieldView (caller current : Memory) (layout : AggregateLayout) (home : Reference)
-    (values : List Nat) : Prop where
-  frame : EntryMemory caller current
-  fresh : caller.nextIdentity ≤ home.allocation
-  holds : ∃ bytes, read current home layout.size 1 = .ok bytes ∧ layout.values bytes = values
-  writable : access current home layout.size 1 true = .ok ()
-
-/-- A numeric home of a frame entry, read as a struct of `layout` with the home's width. -/
-theorem FieldView.ofEntry {caller current : Memory} {kind : CIL.LocalKind} {number : Nat}
-    {home : Reference} {layout : AggregateLayout} (frame : EntryMemory caller current)
-    (entered : NumericEntryHome caller current kind number home)
-    (sized : localWidth kind = layout.size) :
-    FieldView caller current layout home (layout.values (numberBytes number layout.size)) :=
-  ⟨frame, entered.fresh, ⟨_, sized ▸ entered.loaded, rfl⟩, sized ▸ entered.writable⟩
-
-/-- The home's address forms in the viewed memory. -/
-theorem FieldView.form {caller current : Memory} {layout : AggregateLayout} {home : Reference}
-    {values : List Nat} (view : FieldView caller current layout home values) :
-    form current home = .ok home :=
-  access_reference_valid _ _ _ _ _ view.writable
-
-/-- `initobj` on the viewed home zeroes every field. -/
-theorem FieldView.zero {caller current : Memory} {layout : AggregateLayout}
-    {home : Reference} {values : List Nat} (view : FieldView caller current layout home values)
-    {size : Nat} (sized : layout.size = size) :
-    ∃ after,
-      (∀ body pc args frame rest,
-        step body (.initAggregate size) pc args frame (.reference (.address home) :: rest)
-          current = .ok (.next (pc + 1) rest frame after)) ∧
-      FieldView caller after layout home (layout.fields.map fun _ => 0) := by
-  subst sized
-  obtain ⟨after, stepped, written, loaded⟩ := step_initAggregate_home view.writable
-  obtain ⟨_, ready⟩ := access_requirements view.writable
-  exact ⟨after, stepped, ⟨view.frame.after_write written view.fresh, view.fresh,
-    ⟨_, loaded, layout.values_zero _⟩, (ready.after_write written).access⟩⟩
-
-/-- `stfld` of `value` into field `index` of the viewed home: on a valid, disjoint layout the
-    field then holds the stored number and every other field keeps its value. -/
-theorem FieldView.store {caller current : Memory} {layout : AggregateLayout} {home : Reference}
-    {values : List Nat} (view : FieldView caller current layout home values)
-    (valid : layout.Valid) (disjoint : layout.Disjoint) {index offset width : Nat}
-    {aggregate : Bool} (found : layout.fields[index]? = some ⟨offset, width, aggregate⟩)
-    (value : CIL.Value) {number : Nat} (encoded : fieldStoreNumber width value = some number) :
-    ∃ after,
-      (∀ body pc args frame rest,
-        step body (.setFieldAt offset width) pc args frame
-          (.scalar value :: .reference (.address home) :: rest) current =
-          .ok (.next (pc + 1) rest frame after)) ∧
-      FieldView caller after layout home (values.set index number) := by
-  obtain ⟨bytes, loaded, decoded⟩ := view.holds
-  have sized : bytes.length = layout.size := by
-    rw [read_result_snapshot loaded]; simp
-  have within : offset + width ≤ bytes.length :=
-    sized ▸ field_within_layout layout valid _ (List.mem_of_getElem? found)
-  obtain ⟨after, stepped, written, stored⟩ := step_setFieldAt_home (field := ⟨offset, width,
-    aggregate⟩) view.frame.wellFormed (sized ▸ loaded) (sized ▸ view.writable) within encoded
-  obtain ⟨_, ready⟩ := access_requirements view.writable
-  refine ⟨after, stepped, view.frame.after_write written view.fresh, view.fresh,
-    ⟨_, sized ▸ stored, ?_⟩, (ready.after_write written).access⟩
-  rw [layout.values_setIn valid disjoint sized found, decoded,
-    Nat.mod_eq_of_lt (fieldStoreNumber_lt encoded)]
-
-/-- `ldfld` of field `index` through the viewed home's address pushes that field's value. -/
-theorem FieldView.load {caller current : Memory} {layout : AggregateLayout} {home : Reference}
-    {values : List Nat} (view : FieldView caller current layout home values)
-    (valid : layout.Valid) {index offset width : Nat}
-    (found : layout.fields[index]? = some ⟨offset, width, false⟩) {value : Nat}
-    (present : values[index]? = some value) :
-    ∀ body pc args frame rest,
-      step body (.fieldAt offset width false) pc args frame (.reference (.address home) :: rest)
-        current = .ok (.next (pc + 1) (.scalar (numericOfWidth width value) :: rest) frame
-          current) := by
-  obtain ⟨bytes, loaded, decoded⟩ := view.holds
-  have sized : bytes.length = layout.size := by
-    rw [read_result_snapshot loaded]; simp
-  have member := List.mem_of_getElem? found
-  have within : offset + width ≤ bytes.length :=
-    sized ▸ field_within_layout layout valid _ member
-  have scalar : ScalarWidth width := by
-    have shape := (valid.2.2 _ member).1
-    simp at shape
-    unfold ScalarWidth
-    omega
-  have number : (⟨offset, width, false⟩ : FieldLayout).numberIn bytes = value := by
-    rw [← decoded] at present
-    simpa [AggregateLayout.values, found] using present
-  rw [← number]
-  exact step_fieldAt_home (field := ⟨offset, width, false⟩) view.frame.wellFormed
-    (sized ▸ loaded) within scalar
-
-#print axioms FieldView.ofEntry
-#print axioms FieldView.form
-#print axioms FieldView.zero
-#print axioms FieldView.store
-#print axioms FieldView.load
 
 /-- A remembered aggregate local reads as exactly its remembered bytes, which fill its home. -/
 theorem LocalSnapshots.aggregate {memory : Memory} {slots : List LocalSlot}
@@ -481,14 +371,14 @@ theorem LocalSnapshots.aggregate {memory : Memory} {slots : List LocalSlot}
   simpa [localWidth, decoded, ← length, numberBytes_byteNumber] using loaded
 
 /-- `initobj` through the address of an aggregate local's writable home remembers it as zeros
-    and keeps every other snapshot; no earlier value of the local is needed. The write
-    equation states the exact footprint. -/
+    and keeps every other snapshot; no earlier value of the local is needed. The home stays
+    writable, its address forms, and the write equation states the exact footprint. -/
 theorem LocalSnapshots.zero_aggregate {entered memory : Memory} {boundary : Nat} {kinds slots}
     {known : Nat → Option CIL.Value} (snapshots : LocalSnapshots memory slots known)
     (homes : WritableHomes entered boundary kinds slots) (formed : memory.WellFormed)
-    {index : Nat} {size : Fin (2^64)} {home : Reference} {width : Nat}
-    (slot : slots[index]? = some (.bytes (.aggregate size) home))
-    (writable : access memory home width 1 true = .ok ()) (sized : size.val = width) :
+    {index width : Nat} {bounded : width < 2^64} {home : Reference}
+    (slot : slots[index]? = some (.bytes (.aggregate ⟨width, bounded⟩) home))
+    (writable : access memory home width 1 true = .ok ()) :
     ∃ after,
       (∀ body pc args frame rest,
         step body (.initAggregate width) pc args frame (.reference (.address home) :: rest)
@@ -496,9 +386,11 @@ theorem LocalSnapshots.zero_aggregate {entered memory : Memory} {boundary : Nat}
       LocalSnapshots after slots
         (rememberLocal known index (.aggregate (List.replicate width 0))) ∧
       after.WellFormed ∧ MemoryBelow boundary memory after ∧
+      access after home width 1 true = .ok () ∧ form after home = .ok home ∧
       write memory home (List.replicate width 0) 1 = .ok after := by
-  subst sized
+  let size : Fin (2^64) := ⟨width, bounded⟩
   obtain ⟨after, stepped, written, _⟩ := step_initAggregate_home writable
+  obtain ⟨_, ready⟩ := access_requirements writable
   have encoded : localNumber (.aggregate size) (.aggregate (List.replicate size 0)) =
       .ok (byteNumber (List.replicate size 0)) := by
     simp [localNumber, CIL.Value.hasUnspecified]
@@ -507,51 +399,73 @@ theorem LocalSnapshots.zero_aggregate {entered memory : Memory} {boundary : Nat}
     have encoding := numberBytes_byteNumber (List.replicate size.val 0)
     rw [List.length_replicate] at encoding
     rwa [localWidth, encoding]
+  have kept := (ready.after_write written).access
   exact ⟨after, stepped,
     snapshots.after_write homes index (.aggregate size) home _ _ encoded slot zeros,
     write_preserves_wellFormed _ _ _ _ _ formed written,
     write_preserves_memory_below _ _ _ _ _ _ (homes.home_bound index _ home slot) written,
-    written⟩
+    kept, access_reference_valid _ _ _ _ _ kept, written⟩
 
-/-- `stfld` through the address of a remembered aggregate local stores one field: the local is
-    then remembered with that field's bytes replaced, and every other snapshot is kept, since
-    distinct writable homes never share an allocation. The write covers only the field. -/
+/-- `stfld` of `value` into field `fieldIndex` of a remembered aggregate local of a valid,
+    disjoint `layout` whose bytes decode to `values`: the local is remembered with that field
+    stored, its fields then decode to `values` with the stored number at `fieldIndex`, and every
+    other snapshot is kept. The home stays writable, its address forms, and the write covers
+    only the field. -/
 theorem LocalSnapshots.store_field {entered memory : Memory} {boundary : Nat} {kinds slots}
     {known : Nat → Option CIL.Value} (snapshots : LocalSnapshots memory slots known)
     (homes : WritableHomes entered boundary kinds slots) (formed : memory.WellFormed)
     {index : Nat} {size : Fin (2^64)} {home : Reference} {bytes : List (BitVec 8)}
     (slot : slots[index]? = some (.bytes (.aggregate size) home))
     (specified : known index = some (.aggregate bytes))
-    (writable : access memory home size 1 true = .ok ()) {field : FieldLayout}
-    (within : field.offset + field.width ≤ size) (value : CIL.Value) {number : Nat}
-    (encoded : fieldStoreNumber field.width value = some number) :
+    (writable : access memory home (localWidth (.aggregate size)) 1 true = .ok ())
+    {layout : AggregateLayout} (valid : layout.Valid) (disjoint : layout.Disjoint)
+    (sized : layout.size = size) {values : List Nat} (decoded : layout.values bytes = values)
+    {fieldIndex offset width : Nat} {aggregate : Bool}
+    (found : layout.fields[fieldIndex]? = some ⟨offset, width, aggregate⟩)
+    (value : CIL.Value) {number : Nat} (encoded : fieldStoreNumber width value = some number) :
     ∃ after,
       (∀ body pc args frame rest,
-        step body (.setFieldAt field.offset field.width) pc args frame
+        step body (.setFieldAt offset width) pc args frame
           (.scalar value :: .reference (.address home) :: rest) memory =
           .ok (.next (pc + 1) rest frame after)) ∧
-      LocalSnapshots after slots
-        (rememberLocal known index (.aggregate (field.setIn bytes number))) ∧
+      LocalSnapshots after slots (rememberLocal known index
+        (.aggregate ((⟨offset, width, aggregate⟩ : FieldLayout).setIn bytes number))) ∧
       after.WellFormed ∧ MemoryBelow boundary memory after ∧
-      write memory { home with offset := home.offset + field.offset }
-        (numberBytes number field.width) 1 = .ok after := by
+      access after home (localWidth (.aggregate size)) 1 true = .ok () ∧
+      form after home = .ok home ∧
+      layout.values ((⟨offset, width, aggregate⟩ : FieldLayout).setIn bytes number) =
+        values.set fieldIndex number ∧
+      write memory { home with offset := home.offset + offset } (numberBytes number width) 1 =
+        .ok after := by
   obtain ⟨length, loaded⟩ := snapshots.aggregate slot specified
-  obtain ⟨after, stepped, written, stored⟩ := step_setFieldAt_home formed loaded
-    (length ▸ writable) (length ▸ within) encoded
+  have fits : bytes.length = layout.size := length.trans sized.symm
+  have within : offset + width ≤ bytes.length :=
+    fits ▸ field_within_layout layout valid _ (List.mem_of_getElem? found)
+  obtain ⟨after, stepped, written, stored⟩ := step_setFieldAt_home
+    (field := ⟨offset, width, aggregate⟩) formed loaded (length ▸ writable) within encoded
+  obtain ⟨_, ready⟩ := access_requirements writable
+  have kept := (ready.after_write written).access
+  have changed : layout.values ((⟨offset, width, aggregate⟩ : FieldLayout).setIn bytes number) =
+      values.set fieldIndex number := by
+    rw [layout.values_setIn valid disjoint fits found, decoded,
+      Nat.mod_eq_of_lt (fieldStoreNumber_lt encoded)]
   refine ⟨after, stepped, ?_, write_preserves_wellFormed _ _ _ _ _ formed written,
     write_preserves_memory_below _ _ _ _ _ _ (by exact homes.home_bound index _ home slot)
-      written, written⟩
-  have storedLength := FieldLayout.length_setIn (length ▸ within) number
+      written, kept, access_reference_valid _ _ _ _ _ kept, changed, written⟩
+  have storedLength := FieldLayout.length_setIn (field := ⟨offset, width, aggregate⟩) within number
   intro other remembered specifiedOther
   by_cases same : other = index
   · subst other
-    have result : CIL.Value.aggregate (field.setIn bytes number) = remembered := by
+    have result : CIL.Value.aggregate
+        ((⟨offset, width, aggregate⟩ : FieldLayout).setIn bytes number) = remembered := by
       simpa [rememberLocal] using specifiedOther
-    refine ⟨.aggregate size, home, _, byteNumber (field.setIn bytes number), slot,
+    refine ⟨.aggregate size, home, _,
+      byteNumber ((⟨offset, width, aggregate⟩ : FieldLayout).setIn bytes number), slot,
       by simp [localNumber, CIL.Value.hasUnspecified, storedLength, length], result, ?_⟩
-    have width : localWidth (.aggregate size) = (field.setIn bytes number).length := by
+    have fill : localWidth (.aggregate size) =
+        ((⟨offset, width, aggregate⟩ : FieldLayout).setIn bytes number).length := by
       rw [storedLength, length]; rfl
-    rw [width, numberBytes_byteNumber, storedLength]
+    rw [fill, numberBytes_byteNumber, storedLength]
     exact stored
   · have previous : known other = some remembered := by
       simpa [rememberLocal, same] using specifiedOther
@@ -561,9 +475,40 @@ theorem LocalSnapshots.store_field {entered memory : Memory} {boundary : Nat} {k
       write_preserves_disjoint_read written otherLoaded
         (Or.inl (homes.distinct other index otherKind _ otherHome home same otherSlot slot))⟩
 
+/-- `ldfld` of field `fieldIndex` through the address of a remembered aggregate local of a valid
+    `layout` whose bytes decode to `values` pushes that field's value and changes nothing. -/
+theorem LocalSnapshots.load_field {memory : Memory} {slots : List LocalSlot}
+    {known : Nat → Option CIL.Value} (snapshots : LocalSnapshots memory slots known)
+    (formed : memory.WellFormed) {index : Nat} {size : Fin (2^64)} {home : Reference}
+    {bytes : List (BitVec 8)} (slot : slots[index]? = some (.bytes (.aggregate size) home))
+    (specified : known index = some (.aggregate bytes)) {layout : AggregateLayout}
+    (valid : layout.Valid) (sized : layout.size = size) {values : List Nat}
+    (decoded : layout.values bytes = values) {fieldIndex offset width : Nat}
+    (found : layout.fields[fieldIndex]? = some ⟨offset, width, false⟩) {value : Nat}
+    (present : values[fieldIndex]? = some value) :
+    ∀ body pc args frame rest,
+      step body (.fieldAt offset width false) pc args frame (.reference (.address home) :: rest)
+        memory = .ok (.next (pc + 1) (.scalar (numericOfWidth width value) :: rest) frame
+          memory) := by
+  obtain ⟨length, loaded⟩ := snapshots.aggregate slot specified
+  have fits : bytes.length = layout.size := length.trans sized.symm
+  have member := List.mem_of_getElem? found
+  have within : offset + width ≤ bytes.length := fits ▸ field_within_layout layout valid _ member
+  have scalar : ScalarWidth width := by
+    have shape := (valid.2.2 _ member).1
+    simp at shape
+    unfold ScalarWidth
+    omega
+  have number : (⟨offset, width, false⟩ : FieldLayout).numberIn bytes = value := by
+    rw [← decoded] at present
+    simpa [AggregateLayout.values, found] using present
+  rw [← number]
+  exact step_fieldAt_home (field := ⟨offset, width, false⟩) formed loaded within scalar
+
 #print axioms LocalSnapshots.aggregate
 #print axioms LocalSnapshots.zero_aggregate
 #print axioms LocalSnapshots.store_field
+#print axioms LocalSnapshots.load_field
 
 #print axioms numberBytes_mod
 #print axioms fieldStoreNumber_lt

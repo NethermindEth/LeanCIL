@@ -172,13 +172,15 @@ byte. `AggregateLayout.values layout bytes` decodes each field's unsigned little
 keeps any field apart from the written one. An explicit layout with overlapping fields fails the
 check, so these laws do not apply to it and its proofs stay at the byte level.
 
-`FieldView caller current layout home values` packages a frame home, its decoded field values, the
-`EntryMemory` fact and write access. `FieldView.ofEntry` builds one from `bind_entry ...
-allocating`; `zero`, `store` and `load` return the step equations for `initobj`, a field store and
-an unsigned field load together with the next view, and `view.form` supplies the reference fact the
-stepping tactic needs. The final view's `frame.leave` gives `MemoryBelow` preservation on return.
-For a struct local tracked by `LocalSnapshots`, `LocalSnapshots.zero_aggregate` and `store_field`
-return the step, the updated snapshots and the write, and keep the other locals remembered.
-Loads cover widths 1, 2, 4 and 8 without sign extension; signed narrow and vector fields use the
-byte-level lemmas. [Struct](../Examples/Proofs/Struct.lean) and
-[Tests/AggregateFields](../Tests/AggregateFields.lean) show both forms and the rejections.
+A struct local is tracked in the same `LocalSnapshots` set as numeric locals, remembered as its
+bytes. `LocalSnapshots.zero_aggregate`, `store_field` and `load_field` return the step equations for
+`initobj`, a field store and an unsigned field load through the local's address. Zeroing and
+stores also return the updated snapshots, well-formedness, `MemoryBelow` for the step, continued
+write access, the address's `form` fact for the next step and the write equation; a store also
+returns the decoded field values, which the next store or load takes. Every other local's snapshot
+is kept. A frame from
+`bind_entry ... allocating` supplies `WritableHomes` from each `NumericEntryHome`, and
+`MemoryBelow.frame_round_trip` composes the per-step facts on return. Loads cover widths 1, 2, 4
+and 8 without sign extension; signed narrow and vector fields use the byte-level lemmas.
+[Struct](../Examples/Proofs/Struct.lean) and [Tests/AggregateFields](../Tests/AggregateFields.lean)
+show the frame-entry and remembered-local forms and the rejections.

@@ -102,9 +102,9 @@ unreadable, empty buffers at invalid and sentinel positions, and rejection of un
 past-end, overlapping, unjoined and stale contents.
 
 `Tests.AggregateFields` checks the struct field laws on a 12-byte word-and-int layout, steps a field
-store and a later load through a `FieldView`, and keeps a remembered struct local exact beside a
+store and a later load through a remembered struct local, and keeps a remembered struct local exact beside a
 word local. An overlapping explicit layout passes `Valid` but fails `Disjoint`, its store changes the
-neighbouring field, and neither the layout law nor the view store elaborates on it; a store that
+neighbouring field, and neither the layout law nor the snapshot store elaborates on it; a store that
 straddles both fields changes both values and is apart from neither.
 
 `Tests.ProfileContract` proves a contract for a method that tests AVX2 once, under x86-64-v3, and

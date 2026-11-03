@@ -18,7 +18,7 @@
 - `NarrowIntegers`: signed/unsigned casts, character values, calls and an eight-byte struct containing narrow fields. `UnsignedShort.lean` proves reduction modulo 65,536 for every 32-bit input.
 - `PrimitiveOperations`: reads/writes through integer references, aliasing, switch tables and aggregate `sizeof`. `PrimitiveReadWrite.lean` proves that a store followed by a load returns every 32-bit input unchanged.
 - `Alias`: two arguments naming the same caller storage.
-- `Struct`: universal return of the input through a **12-byte explicit-layout struct**, initialization, two field stores and a byref helper call. For every well-formed caller memory, all earlier allocation metadata, bytes and access permissions are preserved; temporary frame allocations are expired on return. The proof steps through `FieldView` field stores and loads decoded from the layout rather than through bytes. `StructCopy` separately checks by-value use of the same layout.
+- `Struct`: universal return of the input through a **12-byte explicit-layout struct**, initialization, two field stores and a byref helper call. For every well-formed caller memory, all earlier allocation metadata, bytes and access permissions are preserved; temporary frame allocations are expired on return. The proof tracks the struct local in `LocalSnapshots` and steps field stores and loads decoded from the layout rather than through bytes. `StructCopy` separately checks by-value use of the same layout.
 - `LargeStruct`: a **40-byte** explicit layout with a field at offset 32.
 - `PastEnd`: a permitted end sentinel whose dereference is rejected as outside the allocation, for every fuel budget.
 - `Escape`: a reference to an expired local is rejected on return, for every fuel budget.

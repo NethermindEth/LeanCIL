@@ -89,32 +89,49 @@ theorem straddling_law_unavailable :
 #print axioms straddling_changes_both
 #print axioms straddling_law_unavailable
 
-/-- Storing the int through a viewed `packet` home keeps the word that a later load reads. -/
-theorem view_store_then_load {caller current : Memory} {home : Reference} {values : List Nat}
-    (view : FieldView caller current packet home values) (bits : BitVec 32) (word : Nat)
-    (present : values[0]? = some word) :
+/-- Storing the int of a remembered `packet` local keeps the word that a later load reads. -/
+theorem store_then_load {entered memory : Memory} {boundary : Nat} {kinds slots}
+    {known : Nat → Option CIL.Value} (snapshots : LocalSnapshots memory slots known)
+    (homes : WritableHomes entered boundary kinds slots) (formed : memory.WellFormed)
+    {home : Reference} {bytes : List (BitVec 8)}
+    (slot : slots[0]? = some (.bytes (.aggregate 12) home))
+    (specified : known 0 = some (.aggregate bytes))
+    (writable : access memory home 12 1 true = .ok ()) (bits : BitVec 32) (word : Nat)
+    (present : (packet.values bytes)[0]? = some word) :
     ∃ after,
       (∀ body pc args frame rest,
         step body (.setFieldAt 8 4) pc args frame
-          (.scalar (.i32 bits) :: .reference (.address home) :: rest) current =
+          (.scalar (.i32 bits) :: .reference (.address home) :: rest) memory =
           .ok (.next (pc + 1) rest frame after)) ∧
       ∀ body pc args frame rest,
         step body (.fieldAt 0 8 false) pc args frame (.reference (.address home) :: rest) after =
           .ok (.next (pc + 1) (.scalar (.i64 (BitVec.ofNat 64 word)) :: rest) frame after) := by
-  obtain ⟨after, stored, stepped⟩ :=
-    view.store packet_checked.1 packet_checked.2 (index := 1) rfl (.i32 bits) rfl
-  exact ⟨after, stored, stepped.load packet_checked.1 (index := 0) rfl (by simpa using present)⟩
+  obtain ⟨after, stored, storedSnapshots, storedFormed, -, -, -, storedValues, -⟩ :=
+    snapshots.store_field homes formed slot specified writable packet_checked.1 packet_checked.2
+      rfl rfl (fieldIndex := 1) rfl (.i32 bits) rfl
+  exact ⟨after, stored, storedSnapshots.load_field storedFormed slot rfl packet_checked.1 rfl
+    storedValues (fieldIndex := 0) rfl (by simpa using present)⟩
 
-/-- The view's store needs the disjointness check, which the overlapping layout fails. -/
-theorem view_store_unavailable {caller current : Memory} {home : Reference}
-    {values : List Nat} (view : FieldView caller current overlapping home values) :
-    access current home 12 1 true = .ok () := by
+/-- The same int store goes through on `packet` but needs the disjointness check, which the
+    overlapping layout fails. -/
+theorem store_unavailable {entered memory : Memory} {boundary : Nat} {kinds slots}
+    {known : Nat → Option CIL.Value} (snapshots : LocalSnapshots memory slots known)
+    (homes : WritableHomes entered boundary kinds slots) (formed : memory.WellFormed)
+    {home : Reference} {bytes : List (BitVec 8)}
+    (slot : slots[0]? = some (.bytes (.aggregate 12) home))
+    (specified : known 0 = some (.aggregate bytes))
+    (writable : access memory home 12 1 true = .ok ()) :
+    ∃ after,
+      LocalSnapshots after slots (rememberLocal known 0 (.aggregate (tag.setIn bytes 3))) := by
   fail_if_success
-    have := view.store overlapping_rejected.1 (by decide) (index := 1) rfl (.i32 3) rfl
-  exact view.writable
+    have := snapshots.store_field homes formed slot specified writable overlapping_rejected.1
+      (by decide) rfl rfl (fieldIndex := 1) rfl (.i32 3) rfl
+  obtain ⟨after, -, stored, -⟩ := snapshots.store_field homes formed slot specified writable
+    packet_checked.1 packet_checked.2 rfl rfl (fieldIndex := 1) rfl (.i32 3) rfl
+  exact ⟨after, stored⟩
 
-#print axioms view_store_then_load
-#print axioms view_store_unavailable
+#print axioms store_then_load
+#print axioms store_unavailable
 
 /-- Zero a struct local, store its int field, then store and reload a word local. -/
 @[cil_code] def structAndWord : CIL.Method := {
@@ -135,20 +152,16 @@ theorem struct_beside_word {entered memory : Memory} {frame : Frame} {boundary :
     (wordReady : access memory wordHome 8 1 true = .ok ()) (bits : BitVec 32) (word : CIL.W64) :
     ∃ after, run [structAndWord] 10 0 0 [.scalar (.i32 bits), .scalar (.i64 word)] frame []
       memory = .ok (after, [.scalar (.aggregate (tag.setIn zeros bits.toNat))]) := by
-  obtain ⟨zeroed, zeroStep, zeroSnapshots, zeroFormed, _, zeroWrite⟩ :=
-    (LocalSnapshots.empty memory frame.locals).zero_aggregate homes formed structSlot
-      structReady rfl
-  obtain ⟨tagged, tagStep, tagSnapshots, _, _, tagWrite⟩ :=
-    zeroSnapshots.store_field homes zeroFormed structSlot rfl
-      (snapshot_access_after_write structReady zeroWrite) (field := tag) (by decide)
-      (.i32 bits) rfl
-  have structForm := access_reference_valid _ _ _ _ _ structReady
-  have zeroForm := access_reference_valid _ _ _ _ _
-    (snapshot_access_after_write structReady zeroWrite)
+  obtain ⟨zeroed, zeroStep, zeroSnapshots, zeroFormed, -, zeroReady, zeroForm, zeroWrite⟩ :=
+    (LocalSnapshots.empty memory frame.locals).zero_aggregate homes formed structSlot structReady
+  obtain ⟨tagged, tagStep, tagSnapshots, tagFormed, -, -, -, -, tagWrite⟩ :=
+    zeroSnapshots.store_field homes zeroFormed structSlot rfl zeroReady packet_checked.1
+      packet_checked.2 rfl rfl (fieldIndex := 1) rfl (.i32 bits) rfl
   have wordTagged := snapshot_access_after_write
     (snapshot_access_after_write wordReady zeroWrite) tagWrite
-  cil_checked_steps (snapshots := tagSnapshots) [structSlot, wordSlot, zeroStep, tagStep,
-    structForm, zeroForm, wordTagged, zeros, localAddress]
+  cil_checked_steps (snapshots := tagSnapshots) [structSlot, wordSlot, tagFormed, zeroStep,
+    tagStep, access_reference_valid _ _ _ _ _ structReady, zeroForm, wordTagged, zeros,
+    localAddress]
 
 #print axioms struct_beside_word
 
