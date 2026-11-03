@@ -101,6 +101,12 @@ bytes and sibling slices of one allocation, a producer that extends its prefix w
 unreadable, empty buffers at invalid and sentinel positions, and rejection of uninitialized,
 past-end, overlapping, unjoined and stale contents.
 
+`Tests.AggregateFields` checks the struct field laws on a 12-byte word-and-int layout, steps a field
+store and a later load through a `FieldView`, and keeps a remembered struct local exact beside a
+word local. An overlapping explicit layout passes `Valid` but fails `Disjoint`, its store changes the
+neighbouring field, and neither the layout law nor the view store elaborates on it; a store that
+straddles both fields changes both values and is apart from neither.
+
 `Tests.ProfileContract` proves a contract for a method that tests AVX2 once, under x86-64-v3, and
 carries it to x86-64-v4, to v3 without 256-bit acceleration and to every profile with AVX2 on. A
 raising method's outcome contract carries over too, in outcome, CLR-named and descriptor-indexed
@@ -142,7 +148,7 @@ reference.
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.RetainedNumericLocals Tests.AllocationRenaming Tests.AllocationExecutionRenaming Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations Tests.CodeAt Tests.Segment Tests.SimdLanes
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.RetainedNumericLocals Tests.AllocationRenaming Tests.AllocationExecutionRenaming Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.AggregateFields Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations Tests.CodeAt Tests.Segment Tests.SimdLanes
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 

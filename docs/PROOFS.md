@@ -13,6 +13,7 @@ interface that expresses the result:
 | Carry existing theorems about a Lean model to compiled code | [Model proofs](../skills/leancil/references/bridge-model-proof.md) | [AddModel](../Examples/Proofs/AddModel.lean) |
 | Call a helper through its proved contract | [Contract composition](PROOFS-CONTRACTS.md#compose-calls-through-contracts) | [CountCalls](../Examples/Proofs/CountCalls.lean) |
 | Prove a loop terminates | [Loop examples](EXAMPLES.md) and [loop cutpoints](PROOFS-BINDING.md#loop-heads-and-call-sites) | [Countdown](../Examples/Proofs/Countdown.lean) |
+| Store and load struct fields through a layout | [Struct field views](PROOFS-BUFFERS.md#view-struct-fields) | [Struct](../Examples/Proofs/Struct.lean) |
 | Establish buffer contents and preserve neighbours | [Buffer predicates](PROOFS-BUFFERS.md#describe-buffer-contents) | [FillWords](../Examples/Proofs/FillWords.lean) |
 | Specify normal and exceptional outcomes | [Outcome contracts](PROOFS-CONTRACTS.md#name-exceptional-outcomes) | [CountUntil](../Examples/Proofs/CountUntil.lean) |
 | Publish a smaller public guarantee | [Contract consequence](PROOFS-CONTRACTS.md#derive-public-contracts) | [Contract consequence tests](../Tests/ContractConsequence.lean) |

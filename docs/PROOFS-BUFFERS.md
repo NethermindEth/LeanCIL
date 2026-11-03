@@ -161,3 +161,24 @@ checked argument/return storage. `Tests/ManagedDispatch.cs` covers normal and ta
 closed generic identities, initialization masks and rejected unspecified lanes. Pointer overloads of
 `Unsafe` block helpers use the same block operations and proof rules as their managed-reference
 overloads; `Tests/Blocks.cs` covers exact overload/alignment evidence.
+
+## View struct fields
+
+Import `CIL.Safety.AggregateFields` to reason about a struct home field by field instead of byte by
+byte. `AggregateLayout.values layout bytes` decodes each field's unsigned little-endian number and
+`FieldLayout.setIn bytes number` encodes one store; both are defined over the byte semantics.
+`AggregateLayout.Disjoint` is a decidable check that no two fields share a byte. Under it and
+`Valid`, `values_setIn` replaces one field's value and keeps every other, and `numberIn_setIn_apart`
+keeps any field apart from the written one. An explicit layout with overlapping fields fails the
+check, so these laws do not apply to it and its proofs stay at the byte level.
+
+`FieldView caller current layout home values` packages a frame home, its decoded field values, the
+`EntryMemory` fact and write access. `FieldView.ofEntry` builds one from `bind_entry ...
+allocating`; `zero`, `store` and `load` return the step equations for `initobj`, a field store and
+an unsigned field load together with the next view, and `view.form` supplies the reference fact the
+stepping tactic needs. The final view's `frame.leave` gives `MemoryBelow` preservation on return.
+For a struct local tracked by `LocalSnapshots`, `LocalSnapshots.zero_aggregate` and `store_field`
+return the step, the updated snapshots and the write, and keep the other locals remembered.
+Loads cover widths 1, 2, 4 and 8 without sign extension; signed narrow and vector fields use the
+byte-level lemmas. [Struct](../Examples/Proofs/Struct.lean) and
+[Tests/AggregateFields](../Tests/AggregateFields.lean) show both forms and the rejections.
