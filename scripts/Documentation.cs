@@ -265,8 +265,7 @@ static partial class Documentation
             if (Patterns.Import().Match(block.Lines[offset]) is { Success: true } import &&
                 ImportProblem(root, import.Groups["module"].Value, block.Kind) is { } problem)
                 yield return $"{block.Document}:{block.Line + offset}: {problem}";
-            // An excerpt must begin each line of its source as written, so only the source can wrap it.
-            if (block.Kind != SnippetKind.Excerpt && block.Lines[offset].Length > LeanLineLimit)
+            if (block.Lines[offset].Length > LeanLineLimit)
                 yield return $"{block.Document}:{block.Line + offset}: the Lean line has " +
                     $"{block.Lines[offset].Length} characters; wrap it within {LeanLineLimit}";
         }

@@ -231,7 +231,8 @@ unrelated methods and breaks every literal index. Name them by their exact emitt
 import CIL.MethodIdentity
 
 bind_method countCalls countBody := "System.UInt32 Examples.Loops::CountCalls(System.UInt32)"
-bind_callee decrement decrementBody := "System.UInt32 Examples.Loops::Decrement(System.UInt32)" from countBody
+bind_callee decrement decrementBody :=
+  "System.UInt32 Examples.Loops::Decrement(System.UInt32)" from countBody
 
 def decrementContract : MethodContract W32 W32 where
   args x := [.scalar (.i32 x)]

@@ -90,9 +90,9 @@ which needs no Lean, so every PR runs it:
   code by name, not by line number.
 - Every `bind_*` and `cil_*` command, tactic or attribute named in prose or in an unelaborated
   block must still be declared under `CIL/`.
-- Every line of a Lean block other than an excerpt fits in 100 characters, the limit of the
-  library's own Lean. An excerpt begins each line of its source as written, so only the source can
-  wrap it.
+- Every line of a Lean block, excerpts included, fits in 100 characters, the limit of the
+  library's own Lean. An excerpt begins each line of its source as written, so a wide excerpt is
+  fixed by wrapping its source.
 - A document's audience decides what it may cite. Documents are for users unless they declare
   `<!-- audience: maintainers -->` below their title; maintainers documents describe how LeanCIL
   itself is built, validated and audited (the `VALIDATION*`, `SOUNDNESS-*` detail pages, this page,

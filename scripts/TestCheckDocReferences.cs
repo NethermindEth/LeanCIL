@@ -7,7 +7,8 @@
 var root = Path.Combine(Path.GetTempPath(), $"leancil-doc-references-{Guid.NewGuid():N}");
 var checks = 0;
 const string WideSource =
-    "theorem wide_source : CIL.sample = 1 := rfl -- an example line wider than the documentation may wrap its own";
+    "theorem wide_source : CIL.sample = 1 := rfl -- an example line wider than the documentation lets an excerpt be";
+const string WrappedSource = "theorem wrapped_source : CIL.sample = 1 :=\n  rfl";
 try
 {
     Write("CIL/Sample.lean", """
@@ -21,6 +22,8 @@ try
         theorem sample_holds : CIL.sample = 1 := by
           rfl
         {{WideSource}}
+        theorem wrapped_source : CIL.sample = 1 :=
+          rfl
         """);
     Write("Tests/Fixture.lean", "def helper : Nat := 0\n");
 
@@ -91,15 +94,17 @@ try
         "is not in `Examples/Proofs/Sample.lean`");
     Fails("an unclosed fence", "```lean\nexample : True := trivial\n", "never closed");
 
-    // Lean style caps lines at 100 characters; an excerpt can only be as wrapped as its source.
+    // Lean style caps lines at 100 characters; an excerpt complies only once its source is wrapped.
     var atLimit = $"theorem wide : {new string('x', 100 - "theorem wide : ".Length)}";
     const string TooLong = "the Lean line has 101 characters";
     Passes("Lean lines of exactly 100 characters", $"```lean extracted\n{atLimit}\n```\n\n```lean\n{atLimit}\n```");
     Fails("an extracted Lean line over 100 characters", $"```lean extracted\n{atLimit}y\n```", TooLong);
     Fails("a checked Lean line over 100 characters", $"```lean\n{atLimit}y\n```", TooLong);
     Fails("an illustrative Lean line over 100 characters", $"```lean illustrative\n{atLimit}y\n```", TooLong);
-    Passes("an excerpt of a source line over 100 characters",
-        $"```lean excerpt Examples/Proofs/Sample.lean\n{WideSource}\n```");
+    Fails("an excerpt of a source line over 100 characters",
+        $"```lean excerpt Examples/Proofs/Sample.lean\n{WideSource}\n```", "characters; wrap it within 100");
+    Passes("an excerpt of a wrapped source line",
+        $"```lean excerpt Examples/Proofs/Sample.lean\n{WrappedSource}\n```");
     Console.WriteLine($"All {checks} documentation reference checks passed.");
     return 0;
 }

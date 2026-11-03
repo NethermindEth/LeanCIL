@@ -11,7 +11,8 @@ open CIL (W32)
 namespace ExampleProof
 
 bind_method countCalls countBody := "System.UInt32 Examples.Loops::CountCalls(System.UInt32)"
-bind_callee decrement decrementBody := "System.UInt32 Examples.Loops::Decrement(System.UInt32)" from countBody
+bind_callee decrement decrementBody :=
+  "System.UInt32 Examples.Loops::Decrement(System.UInt32)" from countBody
 bind_call decrementSite := decrement from countBody
 
 def decrementContract : MethodContract W32 W32 where
@@ -48,8 +49,8 @@ private def invariant {remaining counted : Reference} (value : W32)
 theorem terminates (holds : decrementContract.Holds Extracted.program decrement)
     (args : List CIL.Safety.Value) (value : W32) {remaining counted : Reference}
     (state : State remaining counted) (valid : invariant value state) :
-    LoopTerminates Extracted.program countCalls args (fun _ values => values = [.scalar (.i32 value)])
-      (header remaining counted state) := by
+    LoopTerminates Extracted.program countCalls args
+      (fun _ values => values = [.scalar (.i32 value)]) (header remaining counted state) := by
   apply loop_terminates_induction Extracted.program countCalls args (header remaining counted)
     (invariant value) (fun s => s.values.1.toNat) _ ?_ state valid
   rintro ⟨⟨x, count⟩, m, frame⟩ total recurse
