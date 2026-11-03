@@ -654,6 +654,7 @@ Examples:System.UInt32 Examples.GenericOwners::Address(System.UInt32)	A	A	A	A	A	
 Examples:System.UInt32 Examples.GenericOwners::Combined(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.GenericOwners::Identity(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.GenericOwners::Nested(System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt32 Examples.GenericOwners::NestedHelper(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.GenericOwners::Repeated(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.IntegerMath::ClampUInt32(System.UInt32,System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.IntegerMath::MaxUInt32(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
@@ -667,6 +668,7 @@ Examples:System.UInt32 Examples.Loops::FeatureCountdown(System.UInt32)	A	A	A	A	A
 Examples:System.UInt32 Examples.Loops::WrongCountdown(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.NativeIntegers::NarrowUnsigned(System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Nested::Packed(System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt32 Examples.OwnerOuter`1/Helper::Identity(System.UInt32)	N	N	N	N	N	N	N	N
 Examples:System.UInt32 Examples.PrimitiveArrays::ReadUInt32(System.UInt32[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.ReinterpretedSpans::Aliased(System.Span`1<System.UInt32>)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Sequential::ReadWrite(Examples.Record&,System.UInt32)	A	A	A	A	A	A	A	A
@@ -1045,7 +1047,7 @@ Examples:U Examples.OwnerOuter`1/Inner`1::Identity(U)	N	N	N	N	N	N	N	N
 Examples:method System.Int32 *(System.Int32)[] Examples.ManagedDispatch::NullTable()	A	A	A	A	A	A	A	A
 Examples:method System.Single *(System.Single) Examples.ManagedDispatch::UnrelatedTarget()	B	B	B	B	B	B	B	B
 ImportFixture.App+ImportFixture.Lib:System.UInt64 ImportFixture.Application::Entry(System.UInt64)	A	A	A	A	A	A	A	A
-ImportFixture.App+ImportFixture.Lib:System.UInt64 ImportFixture.Application::Generic(System.UInt64)	B	B	B	B	B	B	B	B
+ImportFixture.App+ImportFixture.Lib:System.UInt64 ImportFixture.Application::Generic(System.UInt64)	A	A	A	A	A	A	A	A
 ImportFixture.App+ImportFixture.Lib:System.UInt64 ImportFixture.Application::Unrelated(System.UInt64)	A	A	A	A	A	A	A	A
 ImportFixture.App:System.UInt64 ImportFixture.Application::Entry(System.UInt64)	B	B	B	B	B	B	B	B
 ImportFixture.App:System.UInt64 ImportFixture.Application::Generic(System.UInt64)	B	B	B	B	B	B	B	B
