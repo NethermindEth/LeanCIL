@@ -53,7 +53,7 @@ string ChangeDefinition(string source, string name, Func<string, string> change)
     return source[..match.Index] + replacement + source[(match.Index + match.Length)..];
 }
 
-foreach (var name in new[] { "Identity", "Combined", "Nested", "Repeated", "Address" })
+foreach (var name in new[] { "Identity", "Combined", "Nested", "NestedHelper", "Repeated", "Address" })
 {
     var expected = name == "Repeated" ? 84u : 42u;
     if (!Equals(runtime.GetMethod(name)!.Invoke(null, [42u]), expected))
@@ -184,6 +184,70 @@ foreach (var (name, fixture, definition, change) in targetCases)
     var path = Path.Combine(root, "target-" + name + ".lean");
     File.WriteAllText(path, ChangeDefinition(narrowed, definition, line => change(narrowed, line)));
     rejected.Add(path, "PASS rejected generic span call target: " + name, "Extraction.instantiateMethod");
+}
+// A static method of a generic class is itself the entry; `--type-argument` closes its owner.
+{
+    var output = Path.Combine(root, "OwnerEntry");
+    Run(["dotnet", ExtractorPath, "extract", assembly, "Examples.OwnerHelper`1::Identity(T)", output,
+        "--type-argument", "System.UInt32"]);
+    var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    if (!source.Contains("ownerArgumentCount := 1", StringComparison.Ordinal))
+        throw new InvalidOperationException("Generic class entry did not close its owner");
+    var proofPath = Path.Combine(root, "OwnerEntry.lean");
+    File.WriteAllText(proofPath, source + """
+
+        /-- The entry `OwnerHelper<uint>.Identity` returns its argument. -/
+        theorem generic_owner_entry :
+            (CIL.Safety.invoke Extracted.program 64 0 [.scalar (.i32 42)]
+              { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩,
+                views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 42)] := rfl
+        #print axioms generic_owner_entry
+        """);
+    evidence.Add(proofPath, "PASS generic class entry: OwnerHelper<uint>.Identity");
+    // Owner arguments follow ECMA-335 numbering: the outer `T` before the nested `U`.
+    var nested = Path.Combine(root, "NestedEntry");
+    Run(["dotnet", ExtractorPath, "extract", assembly, "Examples.OwnerOuter`1/Inner`1::Identity(U)", nested,
+        "--type-argument", "System.UInt64", "--type-argument", "System.UInt32"]);
+    var nestedPath = Path.Combine(root, "NestedEntry.lean");
+    File.WriteAllText(nestedPath, File.ReadAllText(Path.Combine(nested, "Extracted.lean")) + """
+
+        /-- The entry `OwnerOuter<ulong>.Inner<uint>.Identity` takes and returns the inner `uint`. -/
+        theorem nested_owner_entry :
+            (CIL.Safety.invoke Extracted.program 64 0 [.scalar (.i32 42)]
+              { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩,
+                views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 42)] := rfl
+        #print axioms nested_owner_entry
+        """);
+    evidence.Add(nestedPath, "PASS nested generic class entry: OwnerOuter<ulong>.Inner<uint>.Identity");
+    // A generic entry over a supplied table; the closed address in `Address` is its only target.
+    var table = Path.Combine(root, "TableFirst");
+    Run(["dotnet", ExtractorPath, "extract", assembly,
+        "Examples.GenericOwners::TableFirst(method System.UInt32 *(System.UInt32)[],System.UInt32)", table,
+        "--type-argument", "System.UInt64"]);
+    var tableSource = File.ReadAllText(Path.Combine(table, "Extracted.lean"));
+    var target = Regex.Match(tableSource,
+        @"identity := (\{ owner := ""[^""]*::Examples\.OwnerHelper\\u00601"", [^}]*\})");
+    if (!target.Success) throw new InvalidOperationException("Closed generic address was not catalogued");
+    var tablePath = Path.Combine(root, "TableFirst.lean");
+    File.WriteAllText(tablePath, tableSource + $$"""
+
+        /-- The entry `TableFirst<ulong>` calls the catalogued `OwnerHelper<uint>.Identity`. -/
+        theorem generic_table_entry :
+            (CIL.Safety.invoke Extracted.program 64 0
+              [.methodTable ⟨⟨.atom CIL.Extraction.runtimeScope "System.UInt32",
+                [.atom CIL.Extraction.runtimeScope "System.UInt32"]⟩, some #[{{target.Groups[1].Value}}], none⟩,
+                .scalar (.i32 42)]
+              { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩,
+                views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 42)] := by rfl
+        #print axioms generic_table_entry
+        """);
+    evidence.Add(tablePath, "PASS generic entry over a supplied table: TableFirst<ulong>");
+    var unclosed = Execute(["dotnet", ExtractorPath, "extract", assembly, "Examples.OwnerHelper`1::Identity(T)",
+        Path.Combine(root, "OwnerEntryUnclosed")]);
+    if (unclosed.Code == 0 || !unclosed.Output.Contains("followed by 1 for Examples.OwnerHelper`1",
+            StringComparison.Ordinal))
+        throw new InvalidOperationException("Unclosed generic class entry was not rejected: " + unclosed.Output);
+    Console.WriteLine("PASS rejected generic class entry without owner type arguments");
 }
 evidence.Check();
 rejected.Check();

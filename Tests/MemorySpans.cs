@@ -151,7 +151,8 @@ foreach (var (name, signature, arguments, expected) in new[]
         File.WriteAllText(forged, source.Replace(operation,
             ".initializeSpanLocal 1 (.array .signed32 true .counted)", StringComparison.Ordinal));
         rejected.Add(forged, "PASS independent constructor destination rejection",
-            "Extraction.FeatureFlowValid rawLayouts.toArray specializedMethods method0Closed");
+            "Extraction.FeatureFlowValid rawLayouts.toArray (Extraction.evidenceConstants methodEvidence) " +
+                "method0Closed");
     }
 }
 

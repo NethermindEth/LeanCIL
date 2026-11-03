@@ -3,12 +3,12 @@ using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
-// Resolve a constrained receiver to a struct method or a static interface default body. No boxing fallback exists.
+// Resolve a constrained receiver to a struct method or the most specific static interface-level body, never boxing.
 // `callvirt` dispatches an instance slot; `call` dispatches a static interface slot to a static implementation.
 internal static class ConstrainedCalls
 {
-    // `Owner` is the closed type declaring the selected instance: the receiver, or the slot's interface for a
-    // default body. `MethodArguments` are the site's method type arguments, empty for a non-generic slot.
+    // `Owner` is the closed type declaring the selected instance: the receiver, or the declaring interface of an
+    // interface-level body. `MethodArguments` are the site's method type arguments, empty for a non-generic slot.
     internal sealed record Resolution(TypeDefinition Receiver, MethodDefinition Slot, MethodDefinition Target,
         TypeReference Owner, TypeReference[] MethodArguments)
     {
@@ -33,29 +33,6 @@ internal static class ConstrainedCalls
 
         static string ArgumentKey(IEnumerable<TypeReference> arguments) =>
             string.Join(",", arguments.Select(MethodSpecialization.SignatureType));
-    }
-
-    // A static slot whose resolved body is exactly `ldc.i4.0` or `ldc.i4.1; ret` returns that Boolean.
-    // Lean recomputes the answer from the called program method, so this must never be broader.
-    internal static bool? ConstantResult(MethodDefinition caller, Instruction call, InstructionIndex instructions,
-        string architecture)
-    {
-        if (call.OpCode.Code != Code.Call || call.Previous?.OpCode.Code != Code.Constrained) return null;
-        MethodDefinition target;
-        try
-        {
-            target = Resolve(caller, call, instructions, architecture).Target;
-        }
-        catch (InvalidDataException)
-        {
-            // Validation reports the same failure for a reachable site; here it only means unknown.
-            return null;
-        }
-        if (target.HasThis || target.Parameters.Count != 0 || target.ReturnType.FullName != "System.Boolean" ||
-            LayoutEvidence.Scope(target.ReturnType) != TypeTests.RuntimeScope ||
-            target.Body?.Instructions is not [var load, { OpCode.Code: Code.Ret }])
-            return null;
-        return load.OpCode.Code switch { Code.Ldc_I4_0 => false, Code.Ldc_I4_1 => true, _ => null };
     }
 
     internal static MethodDefinition Specialize(Resolution resolution, MethodSpecialization specializations)
@@ -90,8 +67,6 @@ internal static class ConstrainedCalls
             receiver.ContainsGenericParameter || LayoutEvidence.Scope(receiver) != LayoutEvidence.Scope(concrete) ||
             receiver is not GenericInstanceType && receiver.FullName != concrete.FullName)
             throw new InvalidDataException("Constrained receiver must be a concrete struct of an extracted assembly");
-        if (!instance && receiver is GenericInstanceType)
-            throw new InvalidDataException("Static constrained slots on generic struct receivers are unsupported");
         MetadataValidation.Layout(receiver, caller.Module, architecture);
         if (instructions.IsTarget(call))
             throw new InvalidDataException("Branch bypasses constrained receiver prefix");
@@ -99,7 +74,7 @@ internal static class ConstrainedCalls
             ? [.. generic.GenericArguments] : [];
         var member = reference is GenericInstanceMethod specialized ? specialized.ElementMethod : reference;
         if (member.Resolve() is not { } slot ||
-            slot.Module != concrete.Module || member.Name != slot.Name ||
+            !Extracted(slot.Module, caller.Module) || member.Name != slot.Name ||
             !SameType(member.ReturnType, slot.ReturnType) ||
             !member.Parameters.Select(parameter => MethodSpecialization.SignatureType(parameter.ParameterType))
                 .SequenceEqual(slot.Parameters.Select(parameter =>
@@ -124,13 +99,12 @@ internal static class ConstrainedCalls
                 throw new InvalidDataException("Constrained direct slot must match its receiver owner");
             return Checked(concrete, receiver, reference, slot, methodArguments);
         }
-        // A static virtual slot with a body runs only when the receiver records no implementation of it.
-        var defaultBody = !instance && !slot.IsAbstract && slot.HasBody;
-        if (!slot.DeclaringType.IsInterface || !slot.IsVirtual || !slot.IsAbstract && !defaultBody ||
+        // An instance slot with a body would run on a boxed receiver, so only abstract instance slots dispatch.
+        var instanceDefault = instance && !slot.IsAbstract;
+        if (!slot.DeclaringType.IsInterface || !slot.IsVirtual || instanceDefault ||
             !concrete.Interfaces.Any(implementation => SameType(
                 GenericStructs.Substitute(implementation.InterfaceType, owner), reference.DeclaringType)))
-            throw new InvalidDataException(
-                "Constrained call requires a directly implemented interface of the receiver's assembly");
+            throw new InvalidDataException("Constrained call requires a directly implemented interface");
 
         var explicitTargets = concrete.Methods.Where(method =>
             method.Overrides.Any(overridden => overridden.Resolve() == slot &&
@@ -139,21 +113,22 @@ internal static class ConstrainedCalls
         if (explicitTargets.Length != 0)
             return explicitTargets.Length == 1
                 ? Checked(concrete, receiver, reference, explicitTargets[0], methodArguments)
-                : throw new InvalidDataException("Constrained interface slot has no unique struct implementation");
+                : throw new InvalidDataException(NoStructImplementation);
         var implicitTargets = concrete.Methods.Where(method =>
             method.IsPublic && method.GenericParameters.Count == methodArguments.Length &&
             method.Name == slot.Name && method.HasThis == instance &&
             SignatureMatches(method, reference, owner, methodArguments)).ToArray();
-        if (defaultBody && implicitTargets.Length == 0)
-        {
-            RequireUnshadowed(concrete, owner, slot, reference.DeclaringType);
-            return Default(concrete, reference, slot, methodArguments);
-        }
-        // A default slot with an unrecorded same-signature struct method is ambiguous, so it is rejected.
-        if (implicitTargets.Length != 1 || defaultBody)
-            throw new InvalidDataException("Constrained interface slot has no unique struct implementation");
-        return Checked(concrete, receiver, reference, implicitTargets[0], methodArguments);
+        // An unrecorded same-signature struct method beside a slot body is ambiguous, so it is rejected.
+        if (implicitTargets.Length != 0)
+            return implicitTargets.Length == 1 && slot.IsAbstract
+                ? Checked(concrete, receiver, reference, implicitTargets[0], methodArguments)
+                : throw new InvalidDataException(NoStructImplementation);
+        if (instance) throw new InvalidDataException(NoStructImplementation);
+        var (body, bodyOwner) = MostSpecific(concrete, owner, slot, reference.DeclaringType, caller.Module);
+        return InterfaceBody(concrete, reference, slot, body, bodyOwner, methodArguments);
     }
+
+    const string NoStructImplementation = "Constrained interface slot has no unique struct implementation";
 
     static Resolution Checked(TypeDefinition receiver, TypeReference closedReceiver, MethodReference slot,
         MethodDefinition target, TypeReference[] methodArguments)
@@ -168,41 +143,64 @@ internal static class ConstrainedCalls
         return new(receiver, Slot(slot), target, closedReceiver, methodArguments);
     }
 
-    // The default body is the slot itself, instantiated at the site's closed interface and method arguments.
-    static Resolution Default(TypeDefinition receiver, MethodReference slot, MethodDefinition target,
-        TypeReference[] methodArguments)
+    // An interface-level body, the slot's own or a derived interface's MethodImpl, is instantiated at its closed
+    // declaring interface and the site's method arguments.
+    static Resolution InterfaceBody(TypeDefinition receiver, MethodReference slot, MethodDefinition slotDefinition,
+        MethodDefinition target, TypeReference owner, TypeReference[] methodArguments)
     {
-        if (!target.IsStatic || target.HasThis || target.IsAbstract || !target.HasBody || !target.IsVirtual ||
-            !target.DeclaringType.IsInterface || target.ExplicitThis ||
+        if (!target.IsStatic || target.HasThis || target.IsAbstract || !target.HasBody ||
+            !target.DeclaringType.IsInterface || target.ExplicitThis || target.IsConstructor ||
+            target.GenericParameters.Count != methodArguments.Length ||
             target.CallingConvention != Convention(methodArguments.Length) ||
-            !SignatureMatches(target, slot, slot.DeclaringType as GenericInstanceType, methodArguments))
+            !SignatureMatches(target, slot, owner as GenericInstanceType, methodArguments))
             throw new InvalidDataException("Constrained call would require boxing or unsupported dispatch");
-        return new(receiver, target, target, slot.DeclaringType, methodArguments);
+        return new(receiver, slotDefinition, target, owner, methodArguments);
     }
 
-    // An interface-level MethodImpl of the slot on any interface of the receiver is more specific than the
-    // default body. As in Lean, the receiver's interfaces must all be same-assembly and closed under inheritance.
-    static void RequireUnshadowed(TypeDefinition concrete, GenericInstanceType? owner, MethodDefinition slot,
-        TypeReference closedSlotOwner)
+    // The runtime runs the most specific interface-level body: the candidate, among the slot's own declaration
+    // and every interface MethodImpl of it, whose interface inherits every other candidate's. As in Lean, the
+    // receiver's interfaces must be closed under inheritance and declared in extracted assemblies, so no
+    // candidate is unseen.
+    static (MethodDefinition Body, TypeReference Owner) MostSpecific(TypeDefinition concrete,
+        GenericInstanceType? owner, MethodDefinition slot, TypeReference closedSlotOwner, ModuleDefinition caller)
     {
         var listed = concrete.Interfaces.Select(implementation =>
             GenericStructs.Substitute(implementation.InterfaceType, owner)).ToArray();
         var names = listed.Select(MethodSpecialization.SignatureType).ToHashSet(StringComparer.Ordinal);
+        List<(MethodDefinition Body, TypeReference Owner)> candidates = [(slot, closedSlotOwner)];
         foreach (var candidate in listed)
         {
-            if (candidate.Resolve() is not { } declared || declared.Module != concrete.Module ||
-                !declared.Interfaces.All(implementation => names.Contains(MethodSpecialization.SignatureType(
-                    GenericStructs.Substitute(implementation.InterfaceType, candidate as GenericInstanceType)))))
-                throw new InvalidDataException("A static virtual default body requires every interface of the " +
-                    "receiver, including inherited ones, to be listed and declared in the receiver's assembly");
-            if (declared.Methods.Any(method => method.Overrides.Any(overridden =>
-                    overridden.Resolve() is not { } resolved || resolved == slot && SameType(
+            if (candidate.Resolve() is not { } declared || !Extracted(declared.Module, caller) ||
+                !declared.IsInterface || !BaseInterfaces(candidate).All(parent =>
+                    names.Contains(MethodSpecialization.SignatureType(parent))))
+                throw new InvalidDataException("A static virtual slot's interface-level body requires every " +
+                    "interface of the receiver, including inherited ones, to be listed and declared in an " +
+                    "extracted assembly");
+            foreach (var method in declared.Methods)
+                if (method.Overrides.Any(overridden => (overridden.Resolve() ?? throw new InvalidDataException(
+                        "Unresolved interface-level override: " + overridden.FullName)) == slot && SameType(
                         GenericStructs.Substitute(overridden.DeclaringType, candidate as GenericInstanceType),
-                        closedSlotOwner))))
-                throw new InvalidDataException(
-                    "Another interface of the receiver re-implements the static virtual slot");
+                        closedSlotOwner)))
+                    candidates.Add((method, candidate));
         }
+        var winners = candidates.Where(candidate => candidates.All(other =>
+            Derives(candidate.Owner, other.Owner, listed.Length))).ToArray();
+        if (winners.Length != 1)
+            throw new InvalidDataException("Static virtual slot has no unique most specific interface implementation");
+        if (winners[0].Body.IsAbstract)
+            throw new InvalidDataException(winners[0].Body == slot ? NoStructImplementation
+                : "The most specific interface implementation of the static virtual slot re-abstracts it");
+        return winners[0];
     }
+
+    static IEnumerable<TypeReference> BaseInterfaces(TypeReference type) =>
+        type.Resolve().Interfaces.Select(implementation =>
+            GenericStructs.Substitute(implementation.InterfaceType, type as GenericInstanceType));
+
+    // Inheritance through at most `depth` interface lists, matching the Lean walk's bound.
+    static bool Derives(TypeReference derived, TypeReference ancestor, int depth) =>
+        SameType(derived, ancestor) ||
+        depth > 0 && BaseInterfaces(derived).Any(parent => Derives(parent, ancestor, depth - 1));
 
     // Dispatch stays inside one extracted assembly: the caller's own or a pinned reference.
     internal static bool Extracted(ModuleDefinition module, ModuleDefinition caller) =>

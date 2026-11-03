@@ -22,9 +22,11 @@ internal static class FeatureEvidence
         lean.AppendLine($"def method{number}FeatureStates : Extraction.FeatureCertificate := [{string.Join(", ", states)}]");
     }
 
-    // Follows `specializedMethods`, which supplies the callee bodies that constant calls push.
+    // Follows `methodEvidence`, whose callee certificates supply the words constant calls push. The obligation
+    // therefore depends on the whole program and must stay out of any per-method component.
     internal static void EmitTheorem(StringBuilder lean, int number) =>
         lean.AppendLine($"theorem method{number}_features_validated : Extraction.FeatureFlowValid rawLayouts.toArray " +
-            $"specializedMethods method{number}Closed profile method{number}FeatureStates method{number}Reachable " +
-            $"method{number}.code := {LeanEmitter.Decide}");
+            $"(Extraction.evidenceConstants methodEvidence) method{number}Closed profile " +
+            $"method{number}FeatureStates " +
+            $"method{number}Reachable method{number}.code := {LeanEmitter.Decide}");
 }

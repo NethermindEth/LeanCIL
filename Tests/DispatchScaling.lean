@@ -8,6 +8,8 @@ set_option maxRecDepth 65536
 set_option maxHeartbeats 0
 /-- One interface shared by every concrete type. -/
 def iface : TypeExpr := .atom "Fixture" "IValue"
+/-- The assembly declaring every fixture type. -/
+def pin : AssemblyPin := { identity := "Fixture" }
 /-- Distinct aggregate identities within one assembly. -/
 def receiver (index : Nat) : TypeExpr := .aggregate ("Fixture::T" ++ toString index) index
 /-- Abstract interface method with a simple void signature. -/
@@ -20,12 +22,12 @@ def slot : DispatchMethod := {
 def concrete (index : Nat) : DispatchType := {
   identity := receiver index, valueType := true, interfaceType := false,
   interfaces := [iface], methods := [{slot with
-    token := index + 21, isAbstract := false, hasBody := true}] }
+    token := index + 21, isAbstract := false, hasBody := true}], assembly := pin }
 /-- The complete dispatch catalog, including the interface declaration. -/
 def types (count : Nat) : List DispatchType :=
   (List.range count).map concrete ++ [{
     identity := iface, valueType := false, interfaceType := true,
-    interfaces := [], methods := [slot]}]
+    interfaces := [], methods := [slot], assembly := pin}]
 /-- Call site selecting the shared interface slot. -/
 def site : CallSite := {
   declaringType := iface, name := "Read", target := .managed 5,

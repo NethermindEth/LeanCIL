@@ -10,22 +10,11 @@ fixtures.PrepareLeanFixtures(
     "Tests.ExtractionLayout", "Tests.ExtractionParameters", "Tests.FeatureEvidence", "Tests.ScalarEvidence",
     "Tests.LayoutCoverage", "Tests.TypeTestEvidence", "Tests.ThrowEvidence", "Tests.SpanEvidence",
     "Tests.ImportEvidence", "Tests.ImportedLayouts", "Tests.AssemblyPins", "Tests.StaticValueEvidence", "Tests.SpanViews",
-    "Tests.MemorySpanExecution", "Tests.ConstrainedEvidence", "Tests.ManagedPointerValues", "Tests.StackAllocationEvidence",
-    "Tests.StackAllocation", "Tests.PrimitiveArrays", "Tests.ArrayElementReferences", "Tests.ReadOnlyArrayReferences",
-    "Tests.ExtractionGenerics", "Tests.ReferenceTests", "Tests.PointerOperations", "Tests.NativeMethodTables",
-    "Tests.ConstantCalls");
+    "Tests.MemorySpanExecution", "Tests.ManagedPointerValues", "Tests.PrimitiveArrays", "Tests.ArrayElementReferences",
+    "Tests.ReadOnlyArrayReferences", "Tests.ExtractionGenerics", "Tests.ReferenceTests", "Tests.PointerOperations");
 if (args is ["--prepare-only"]) return;
-Run(["dotnet", "run", "--file", "Tests/RuntimeModelInventory.cs"], streamOutput: true,
-    progress: "Runtime model catalog");
-Run(["dotnet", "run", "--file", "Tests/CompilerCoverage.cs"], streamOutput: true,
-    progress: "Pinned compiler coverage");
 Run(["dotnet", "run", "--file", "Tests/PreparedLeanFixturesTests.cs"]);
 Run(["dotnet", "run", "--file", "Tests/RejectedEvidenceTests.cs"]);
-Run(["dotnet", "run", "--file", "Tests/ConstrainedResolution.cs"]);
-Run(["dotnet", "run", "--file", "Tests/ConstrainedCalls.cs"]);
-Run(["dotnet", "run", "--file", "Tests/ManagedDispatch.cs"]);
-Run(["dotnet", "run", "--file", "Tests/NativeManagedDispatch.cs"]);
-Run(["dotnet", "run", "--file", "Tests/StackAllocation.cs"]);
 Run(["dotnet", "run", "--file", "Tests/PrimitiveArrays.cs"], streamOutput: true,
     progress: "Supplied primitive arrays");
 Run(["dotnet", "run", "--file", "Tests/ArrayElementReferences.cs"], streamOutput: true,

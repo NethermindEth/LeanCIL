@@ -76,7 +76,7 @@ Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`,
 | `newobj` | Partial | Same-assembly constructors of validated reference-free structs: zero-initialize caller-owned storage, invoke the constructor with managed-reference `this`, then return a checked value snapshot. Also admitted `Span<T>` and `ReadOnlySpan<T>` constructors over checked existing storage for supported integer, enum, aggregate and integer-vector elements, from a single reference, `(void*, int)`, an array, or `(array, start, length)`. Class construction and unsupported generic constructors or cyclic dependencies are rejected. |
 | `ldtoken` | Partial | A type token as an operand of a decided closed type test, which emits a no-op, or a static data field token for `RuntimeHelpers.CreateSpan<T>`, which emits the field's address (see below). Other tokens are rejected. |
 | `throw` | Partial | Exact `throw new E(...)` with `ldstr`/`ldnull` arguments raises a located `thrown "E"` fault. Adjacent `ldnull; throw` raises `System.NullReferenceException`. Other throws are rejected. |
-| `constrained.`, `callvirt` | Partial | Adjacent prefix and `callvirt` (instance slot) or `call` (static interface slot) resolving to a concrete struct implementation in the receiver's own assembly; see [constrained struct calls](#constrained-struct-calls). No boxing or general virtual dispatch. |
+| `constrained.`, `callvirt` | Partial | Adjacent prefix and `callvirt` (instance slot) or `call` (static interface slot) resolving to a concrete struct implementation or, for a static slot, the most specific interface-level body, within the extracted and pinned assemblies; see [constrained struct calls](#constrained-struct-calls). No boxing or general virtual dispatch. |
 | `ldftn` | Partial | Exact static same-assembly managed method addresses, retaining scoped identity and closed signature. Callable values have no numeric address representation. See typed indirect dispatch below. |
 | `calli` | Partial | Static default-managed signatures over admitted integer/enum, reference-free aggregate and integer-vector values, and managed references to these types. The pointer must identify an authenticated catalog entry with the exact signature. Ordinary indirect calls select a forward target; tail calls permit cycles. Supplied immutable native tables also admit checked byte offsets and `ldind.i` with authenticated target provenance. No unmanaged conventions or arbitrary numeric targets. |
 | `tail.` | Partial | Adjacent `tail. call ret` or `tail. calli ret` with exactly its arguments and optional function pointer on the stack and the same return type. Retires caller storage before entering the callee and revalidates argument lifetimes. Admitted same-assembly transfers may form cycles; virtual, imported and intrinsic tail calls remain unsupported. |
@@ -92,8 +92,10 @@ immutable single-dimensional handler tables support `ldlen` and `ldelem.i`; entr
 one exact signature and must name non-null catalog targets. A null table raises
 `NullReferenceException`, and invalid indexes raise `IndexOutOfRangeException`.
 
-Catalog discovery uses same-assembly `ldftn` references and already extracted methods with
-matching signatures. Each entry binds the scoped metadata identity, generic arguments and
+Catalog discovery uses closed same-assembly `ldftn` references and already extracted methods with
+matching signatures. An open address such as `&Algo<TGas>.Run` in a generic body is catalogued
+only through a specialized body that takes it, so a supplied table can reach a generic target
+only if some extracted body takes that closed address. Each entry binds the scoped metadata identity, generic arguments and
 program index to an extracted body. Pointer identities stay stable when linking relocates
 program indices. Supported signatures contain primitive integer, enum, reference-free aggregate or
 integer-vector parameters/results, managed references to those types, and void results. Closed
@@ -244,9 +246,10 @@ expressions with effects or faults are not discarded. Prefix recognition inspect
 
 An adjacent `constrained. T; callvirt` pair supports a concrete, reference-free struct `T` and a
 method declared on that struct or a directly implemented interface. `T`, the slot's interface and,
-for a default body, every interface of `T` must be declared in one assembly: the extracted one or a
-[pinned reference](CLI.md#extract-from-referenced-assemblies), so a caller's struct cannot implement
-a slot of a referenced interface.
+for an interface-level body, every interface of `T` must be declared in the extracted assembly or a
+[pinned reference](CLI.md#extract-from-referenced-assemblies), in any combination, so a caller's
+struct may implement a slot of a referenced interface. An interface of any other assembly is never
+read for dispatch, so a body that needs it is rejected.
 Closed sequential generic structs admit direct slots and directly implemented interface slots,
 including closed generic interfaces. The slot's closed declaring owner must match exactly.
 Implicit implementations must uniquely match the public name and signature; explicit `MethodImpl`
@@ -258,36 +261,48 @@ The original managed-reference receiver is passed to the resolved implementation
 remain visible to the caller without boxing.
 
 A `constrained. T; call` pair dispatches a static virtual interface member, such as an operation
-or flag struct selected by a type argument. The slot must be static and virtual on a same-assembly
-interface, possibly generic such as `I<T>`, that the non-generic struct `T` implements directly.
-The target is a static method of `T`: its explicit `MethodImpl` override, or else the unique public
-static method with the slot's name and signature. A slot with a body (a C# `static virtual`
-member) that `T` does not implement runs that default body, instantiated at the site's closed
-interface and method type arguments; a public same-signature method of `T` without a `MethodImpl`
-beside a default body is ambiguous and rejected, and so is a receiver with another interface,
-direct or inherited, that re-implements the slot: the runtime would prefer that more specific
-body, and most-specific resolution is not modeled. A default body also requires every interface
-of the receiver, including inherited ones, to be listed on it and declared in the same assembly.
-An abstract slot without an implementation is rejected. The slot may be a generic method: the site's method type arguments must be closed and
-match its arity, and the selected override or default body is instantiated at them. The call
-passes no receiver. `callvirt` never dispatches a static slot and `call` never dispatches an
+or flag struct selected by a type argument. The slot must be static and virtual on an interface,
+possibly generic such as `I<T>`, that the struct `T` implements directly. A closed generic struct
+such as `G<uint>` dispatches through the interface its `InterfaceImpl` names, instantiated at its
+type arguments, so `struct G<T> : IScale<T>` implements `IScale<uint>`, and the selected
+implementation or interface-level body is closed at those arguments. The target
+is, in the runtime's order, `T`'s explicit `MethodImpl` override, else the unique public static
+method of `T` with the slot's name and signature, else the most specific interface-level body.
+The candidates for that last step are the slot's own body (a C# `static virtual` member) and every
+interface `MethodImpl` of the slot (a derived interface's `static R I.M(...) => ...`) on an
+interface of `T`; the winner is the candidate whose interface inherits every other candidate's,
+so a derived interface's body beats the default and the deepest one in a chain wins. It may
+supply the body of a base `static abstract` slot. Two unrelated interfaces that both override the
+slot leave no winner, and a winner that re-abstracts the slot leaves no body: both are rejected,
+as is an abstract slot with no implementation at all. The winner is instantiated at its own
+closed interface and the site's method type arguments. A public same-signature method of `T`
+without a `MethodImpl` beside a slot body is ambiguous and rejected. Interface-level selection
+requires every interface of the receiver, including inherited ones, to be listed on it and
+declared in an extracted or pinned assembly, so no candidate is unseen. The slot may be a generic
+method: the site's method type arguments must be closed and match its arity, and the selected
+override or body is instantiated at them. The call passes no receiver. `callvirt` never dispatches a static slot and `call` never dispatches an
 instance slot.
 
-The Lean certificate independently resolves serialized type, interface and method metadata and
-checks the selected method token, signature, closed owner arguments and argument count.
+The Lean certificate independently resolves serialized type, interface and method metadata,
+including the most specific body, and checks the selected method token, signature, closed owner
+arguments and argument count. Each catalog entry names the pinned assembly its metadata came
+from, and resolution reads only entries whose pin scopes their type.
 A branch cannot bypass the prefix.
 Reference receivers, boxing fallbacks, inherited dispatch, instance default-interface methods,
-generic instance methods on interfaces, static slots on generic struct receivers and ordinary
+generic instance methods on interfaces, receivers left open after specialization and ordinary
 unconstrained virtual calls remain unsupported.
 
-A static Boolean slot used as a compile-time flag selects code the way the JIT does: when the
-resolved target of `constrained. T; call` takes no parameters, returns `System.Boolean` and its
-body is exactly `ldc.i4.0` or `ldc.i4.1` followed by `ret`, the pushed word feeds the
-[feature-flow analysis](#runtime-calls-and-simd) and the block it rules out is emitted
-as unsupported placeholders, so code there is never translated or validated. The call itself is
-still emitted and executed. Lean reads the word from the called program method's raw body, which
-that method's own evidence binds to its emitted `const32; ret`; any other body, including one
-that computes the same value, leaves both edges live.
+A static Boolean getter used as a compile-time flag selects code the way the JIT does: when a
+plain `call` or the resolved target of `constrained. T; call` takes no parameters, returns
+`System.Boolean` and its own feature certificate shows the same 0 or 1 at every reachable `ret`,
+the pushed word feeds the [feature-flow analysis](#runtime-calls-and-simd) and the block it rules
+out is emitted as unsupported placeholders, so code there is never translated or validated. The
+getter may compute its word from other flag getters, type tests and feature tests, as in
+`=> A.IsActive && !B.IsActive` or `=> TFlag.IsActive || typeof(TFlag) == typeof(Forced)` in a
+closed generic type; a getter supplied by a derived interface folds the same way. The call itself
+is still emitted and executed. Lean reads the word from the callee's certificate, which the
+callee's own obligation validates. A getter that reads a static field or an untracked value, a
+tail call, a call cycle and a call to an imported method leave both edges live.
 
 ### Static span tables
 

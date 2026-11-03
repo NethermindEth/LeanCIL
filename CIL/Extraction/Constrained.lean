@@ -18,7 +18,7 @@ private def selectedImplementation (methods : Nat → Option SpecializedMethod) 
     (site : CallSite) (target : ConstrainedTarget) (emitted : Op) : Bool :=
   let resolved := target.method
   let arguments := siteMethodArguments site
-  match emitted, namedType (ownerBase (target.declaringType receiver site)) with
+  match emitted, namedType (ownerBase (target.declaringType receiver)) with
   | .call index count, some (scope, name) => match methods index with
     | none => false
     | some method =>
@@ -224,7 +224,7 @@ def constrainedTargetSite (receiver : TypeExpr) (site : CallSite) (target : Cons
     CallSite :=
   { site with
     target := .managed target.method.token,
-    declaringType := target.declaringType receiver site,
+    declaringType := target.declaringType receiver,
     typeArguments := siteMethodArguments site ++ target.method.ownerArguments,
     ownerArgumentCount := target.method.ownerArguments.length }
 

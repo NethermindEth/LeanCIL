@@ -225,8 +225,63 @@ foreach (var name in new[] { "TraceOff", "CountOn" })
     evidence.Add(proof, "PASS constant flag pruning: " + name);
 }
 
-// The caller's certificate is rechecked against the called getter: pointing the call at the other
-// getter, claiming the other word or changing the getter's loaded word each fail feature flow.
+// A getter computed from other getters folds through their certificates: conjunction, negation, a chain of
+// getters, generic type tests and derived-interface bodies each prune the clock read they guard. Static slots
+// on closed generic struct receivers run the receiver's closed implementation or the default body of the
+// interface instantiated at its type arguments; a flag there folds like any other.
+string? widthNarrow = null;
+foreach (var (type, name, pruned, assume) in new (string, string, bool?, bool)[]
+{
+    ("ComputedFlags", "TraceBoth", true, false), ("ComputedFlags", "TraceNotOff", true, false),
+    ("ComputedFlags", "TraceChained", true, false), ("ComputedFlags", "TraceGated", true, false),
+    ("ComputedFlags", "TraceSilent", true, false),
+    // A getter reading a static field is never constant, so neither of its blocks is pruned.
+    ("ComputedFlags", "CountConfigured", false, true),
+    ("GenericReceivers", "TraceNarrow", true, false), ("GenericReceivers", "CountWide", null, false),
+    ("GenericReceivers", "WidthNarrow", null, false), ("GenericReceivers", "WidthWide", null, false),
+    ("GenericReceivers", "PadNarrow", null, false), ("GenericReceivers", "PadWide", null, false)
+})
+{
+    var output = Path.Combine(root, type + "-" + name);
+    Run(["dotnet", ExtractorPath, "extract", assembly, $"{type}::{name}(ulong)", output,
+        .. assume ? new[] { "--assume-initialized", "Examples.StaticScalars" } : []]);
+    var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    if (pruned is bool expected && expected !=
+        source.Contains(".unsupported \"Unreachable under selected profile\"", StringComparison.Ordinal))
+        throw new Exception("Unexpected flag pruning: " + name);
+    if (name == "WidthNarrow") widthNarrow = source;
+    var entry = staticInterfaces.Assembly.GetType("Examples." + type)!.GetMethod(name)!;
+    var claims = new[] { 0UL, 5UL, ulong.MaxValue, 1UL << 63 }
+        .Select(input => (input, result: (ulong)entry.Invoke(null, [input])!))
+        .Select(pair => $"(CIL.Safety.invoke Extracted.program 64 0 [.scalar (.i64 {pair.input})] " +
+            $"CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 {pair.result})]").ToArray();
+    var proof = Path.Combine(root, type + "-" + name + ".lean");
+    File.WriteAllText(proof, source + "\ntheorem flag_result :\n    " + string.Join(" ∧\n    ", claims) +
+        " :=\n  ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\n#print axioms flag_result\n");
+    evidence.Add(proof, $"PASS {type}: {name}");
+}
+
+// The receiver's catalog lists the interface instantiated at its own type argument; listing another
+// instantiation leaves the slot unimplemented.
+const string narrowWidth = "interfaces := [.apply (.constructor \"Examples, Version=1.0.0.0, Culture=neutral, " +
+    "PublicKeyToken=null\" \"Examples.IWidth\\u00601\") (.atom Extraction.runtimeScope \"System.UInt32\")";
+if (widthNarrow?.Contains(narrowWidth, StringComparison.Ordinal) != true)
+    throw new Exception("Missing generic receiver interface mutation target");
+var wrongInstance = Path.Combine(root, "WidthNarrow-wrong-instance.lean");
+File.WriteAllText(wrongInstance, Narrowed(widthNarrow, out _).Replace(narrowWidth,
+    narrowWidth.Replace("System.UInt32", "System.UInt64"), StringComparison.Ordinal));
+rejected.Add(wrongInstance, "PASS forged generic receiver interface instantiation", "ConstrainedCallsValid");
+
+// A recursive pair of getters never folds; extraction terminates and rejects the recursion.
+var recursive = Execute(["dotnet", ExtractorPath, "extract", assembly, "ComputedFlags::CountPing(ulong)",
+    Path.Combine(root, "Reject-computed-recursion")]);
+if (recursive.Code == 0 || !recursive.Output.Contains("Recursive managed dependency", StringComparison.Ordinal))
+    throw new Exception("Incorrect recursive flag rejection\n" + recursive.Output);
+Console.WriteLine("PASS recursive flag rejection");
+
+// The caller's certificate is rechecked against the called getter's: pointing the call at the other
+// getter or claiming the other word fails the caller's feature flow, and changing the getter's loaded
+// word or claiming the getter returns 1 fails the getter's own.
 var flagsOutput = Path.Combine(root, "Flags-TraceThenCount");
 Run(["dotnet", ExtractorPath, "extract", assembly, "ConstantFlags::TraceThenCount(ulong)", flagsOutput]);
 var flags = File.ReadAllText(Path.Combine(flagsOutput, "Extracted.lean"));
@@ -240,33 +295,41 @@ var (callerIndex, offIndex, onIndex) =
 var offCall = $".call {offIndex} 0";
 var callerStates = Regex.Match(flags, $@"(?m)^def method{callerIndex}FeatureStates : [^\r\n]+");
 var offBody = Regex.Match(flags, $@"(?m)^def method{offIndex}Closed : [^\r\n]+");
+var offStates = Regex.Match(flags, $@"(?m)^def method{offIndex}FeatureStates : [^\r\n]+");
 const string offWord = "stack := [some (BitVec.ofInt 32 (0))]";
 const string offLoad = "{ offset := 0, opcode := 22, operand := .none }";
 if (!flags.Contains(offCall, StringComparison.Ordinal) ||
     !callerStates.Value.Contains(offWord, StringComparison.Ordinal) ||
-    !offBody.Value.Contains(offLoad, StringComparison.Ordinal))
+    !offBody.Value.Contains(offLoad, StringComparison.Ordinal) ||
+    !offStates.Value.Contains(offWord, StringComparison.Ordinal))
     throw new Exception("Missing constant flag mutation sites");
-foreach (var (mutation, forgedSource) in new[]
+foreach (var (mutation, forgedSource, obligation) in new[]
 {
-    ("swapped-callee", flags.Replace(offCall, $".call {onIndex} 0", StringComparison.Ordinal)),
+    ("swapped-callee", flags.Replace(offCall, $".call {onIndex} 0", StringComparison.Ordinal), callerIndex),
     ("forged-word", flags.Replace(callerStates.Value, new Regex(Regex.Escape(offWord)).Replace(
-        callerStates.Value, "stack := [some (BitVec.ofInt 32 (1))]", 1), StringComparison.Ordinal)),
+        callerStates.Value, "stack := [some (BitVec.ofInt 32 (1))]", 1), StringComparison.Ordinal), callerIndex),
     ("callee-word", flags.Replace(offBody.Value, offBody.Value.Replace(offLoad,
-        "{ offset := 0, opcode := 21, operand := .none }", StringComparison.Ordinal), StringComparison.Ordinal))
+        "{ offset := 0, opcode := 21, operand := .none }", StringComparison.Ordinal), StringComparison.Ordinal),
+        offIndex),
+    ("callee-certificate", flags.Replace(offStates.Value, offStates.Value.Replace(offWord,
+        "stack := [some (BitVec.ofInt 32 (1))]", StringComparison.Ordinal), StringComparison.Ordinal), offIndex)
 })
 {
     var forged = Path.Combine(root, "Flags-" + mutation + ".lean");
     File.WriteAllText(forged, forgedSource);
     rejected.Add(forged, "PASS forged constant flag: " + mutation,
-        $"Extraction.FeatureFlowValid rawLayouts.toArray specializedMethods method{callerIndex}Closed");
+        $"Extraction.FeatureFlowValid rawLayouts.toArray (Extraction.evidenceConstants methodEvidence) " +
+            $"method{obligation}Closed");
 }
 
 // Extraction keeps the guarded block, and so rejects its clock read, whenever the flag is live or the
-// getter is anything but an exact constant return, even one that still evaluates to false.
+// getter's certificate shows no single word, even for a getter that still evaluates to false. A getter
+// computing false from tracked words prunes the block like a constant return.
 const string clockRejection = "Contract imports from framework assemblies are not supported";
 foreach (var (mutation, selector) in new[]
 {
-    ("live-flag", "TraceOn"), ("swapped-flag", "TraceOff"), ("computed-flag", "TraceOff")
+    ("live-flag", "TraceOn"), ("swapped-flag", "TraceOff"), ("untracked-flag", "TraceOff"),
+    ("computed-flag", "TraceOff")
 })
 {
     var dll = assembly;
@@ -278,6 +341,8 @@ foreach (var (mutation, selector) in new[]
         var body = getter.Body.GetILProcessor();
         var load = getter.Body.Instructions[0];
         if (mutation == "swapped-flag") load.OpCode = OpCodes.Ldc_I4_1;
+        // Feature flow tracks no conversion, so the narrowed false is unknown.
+        else if (mutation == "untracked-flag") body.InsertAfter(load, Instruction.Create(OpCodes.Conv_U1));
         else
         {
             body.InsertAfter(load, Instruction.Create(OpCodes.Ldc_I4_0));
@@ -285,18 +350,30 @@ foreach (var (mutation, selector) in new[]
         }
         module.Write(dll);
     }
-    var result = Execute(["dotnet", ExtractorPath, "extract", dll, $"ConstantFlags::{selector}(ulong)",
-        Path.Combine(root, "Reject-flags-" + mutation)]);
+    var output = Path.Combine(root, "Reject-flags-" + mutation);
+    var result = Execute(["dotnet", ExtractorPath, "extract", dll, $"ConstantFlags::{selector}(ulong)", output]);
+    if (mutation == "computed-flag")
+    {
+        if (result.Code != 0)
+            throw new Exception("Computed constant flag was not pruned\n" + result.Output);
+        evidence.Add(Path.Combine(output, "Extracted.lean"), "PASS computed constant flag pruning");
+        continue;
+    }
     if (result.Code == 0 || !result.Output.Contains(clockRejection, StringComparison.Ordinal))
         throw new Exception("Incorrect live constant flag rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS live constant flag rejection: " + mutation);
 }
 
-// A generic static virtual slot runs the interface default for a struct without an override and the
-// override otherwise; the balance left behind (less the price or twice it) tells them apart.
+// A generic static virtual slot runs the interface default for a struct without an override, the override
+// otherwise, and a derived interface's re-implementation over the default; the balance left behind (less the
+// price, twice it or the price less one) tells them apart.
 var examples = System.Reflection.Assembly.Load(File.ReadAllBytes(assembly));
 var defaultNarrowed = new Dictionary<string, string>();
-foreach (var (name, type) in new[] { ("SpendDefault", "Allowance"), ("SpendOverride", "DoublingAllowance") })
+foreach (var (name, type) in new[]
+    {
+        ("SpendDefault", "Allowance"), ("SpendOverride", "DoublingAllowance"),
+        ("SpendRefunding", "RefundingAllowance")
+    })
 {
     var output = Path.Combine(root, "Static-" + name);
     Run(["dotnet", ExtractorPath, "extract", assembly, $"StaticVirtualDefaults::{name}(Examples.{type}&)", output]);
@@ -361,6 +438,60 @@ foreach (var (mutation, forgedSource) in new[]
     rejected.Add(forged, "PASS forged static virtual default dispatch: " + mutation, "ConstrainedCallsValid");
 }
 
+// Each receiver runs its most specific interface-level body, as the runtime does: IScaleMore's over the
+// default, the deeper IScaleMost's, the struct's own over both, and IMeasureFive's for a base abstract slot.
+// A derived getter's word decides the flag: Loud keeps its block and Quiet prunes the clock read.
+var mostSpecificSources = new Dictionary<string, string>();
+foreach (var (owner, name) in new[]
+{
+    ("MostSpecificBodies", "More"), ("MostSpecificBodies", "Most"), ("MostSpecificBodies", "Own"),
+    ("MostSpecificBodies", "Five"), ("DerivedFlags", "CountLoud"), ("DerivedFlags", "TraceQuiet")
+})
+{
+    var output = Path.Combine(root, "MostSpecific-" + name);
+    Run(["dotnet", ExtractorPath, "extract", assembly, $"{owner}::{name}(ulong)", output]);
+    var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    if (name == "TraceQuiet" &&
+        !source.Contains(".unsupported \"Unreachable under selected profile\"", StringComparison.Ordinal))
+        throw new Exception("Derived constant flag block was not pruned: " + name);
+    mostSpecificSources[name] = source;
+    var method = examples.GetType("Examples." + owner)!.GetMethod(name)!;
+    var claims = new[] { 0UL, 5UL, ulong.MaxValue, 1UL << 63 }
+        .Select(input => (input, result: (ulong)method.Invoke(null, [input])!))
+        .Select(pair => $"(CIL.Safety.invoke Extracted.program 32 0 [.scalar (.i64 {pair.input})] " +
+            $"CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 {pair.result})]").ToArray();
+    var proof = Path.Combine(root, "MostSpecific-" + name + ".lean");
+    File.WriteAllText(proof, source + "\ntheorem most_specific_result :\n    " + string.Join(" ∧\n    ", claims) +
+        " :=\n  ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\n#print axioms most_specific_result\n");
+    evidence.Add(proof, "PASS most specific interface body: " + name);
+}
+
+// Hiding IScaleMost's MethodImpl from the catalog makes Lean select IScaleMore's body, so the emitted call no
+// longer matches; moving the entry outside its pin's scope leaves it unreadable for dispatch.
+static string InEntry(string source, string identity, string from, string to)
+{
+    var entry = source.IndexOf($"\"{identity}\", valueType :=", StringComparison.Ordinal);
+    var at = entry < 0 ? -1 : source.IndexOf(from, entry, StringComparison.Ordinal);
+    if (at < 0) throw new Exception("Missing dispatch catalog mutation target: " + identity + " " + from);
+    return source[..at] + to + source[(at + from.Length)..];
+}
+var most = mostSpecificSources["Most"];
+var mostOverride = Regex.Match(most[most.IndexOf("\"Examples.IScaleMost\", valueType :=", StringComparison.Ordinal)..],
+    @"overrides := \[\(\d+, [^\]]+\]");
+var examplesPin = Regex.Match(most, @"assembly := \{ identity := ""Examples, [^""]+"" \}");
+if (!mostOverride.Success || !examplesPin.Success) throw new Exception("Missing most specific mutation targets");
+foreach (var (mutation, forgedSource) in new[]
+{
+    ("hidden-override", InEntry(most, "Examples.IScaleMost", mostOverride.Value, "overrides := []")),
+    ("unpinned-interface", InEntry(most, "Examples.IScaleMost", examplesPin.Value,
+        "assembly := { identity := \"Other, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null\" }"))
+})
+{
+    var forged = Path.Combine(root, "MostSpecific-" + mutation + ".lean");
+    File.WriteAllText(forged, forgedSource);
+    rejected.Add(forged, "PASS forged most specific dispatch: " + mutation, "ConstrainedCallsValid");
+}
+
 AddTailCallFixtures(assembly, root, evidence, rejected);
 evidence.Check();
 rejected.Check();
@@ -394,8 +525,7 @@ foreach (var (mutation, marker) in new[]
     Console.WriteLine("PASS static constrained extraction rejection: " + mutation);
 }
 
-// The runtime runs a derived interface's re-implementation (price less one), not the default body, so
-// extraction must not select the default for that receiver.
+// The fixture separates the bodies only if the runtime runs the derived re-implementation (price less one).
 var refunding = examples.GetType("Examples.RefundingAllowance")!;
 var refundingReceiver = Activator.CreateInstance(refunding)!;
 refunding.GetField("Left")!.SetValue(refundingReceiver, 42UL);
@@ -403,13 +533,6 @@ object[] refundingArguments = [refundingReceiver];
 examples.GetType("Examples.StaticVirtualDefaults")!.GetMethod("SpendRefunding")!.Invoke(null, refundingArguments);
 if ((ulong)refunding.GetField("Left")!.GetValue(refundingArguments[0])! != 40)
     throw new Exception("Derived interface re-implementation did not run");
-var shadowed = Execute(["dotnet", ExtractorPath, "extract", assembly,
-    "StaticVirtualDefaults::SpendRefunding(Examples.RefundingAllowance&)",
-    Path.Combine(root, "Reject-shadowed-default")]);
-if (shadowed.Code == 0 ||
-    !shadowed.Output.Contains("Another interface of the receiver re-implements", StringComparison.Ordinal))
-    throw new Exception("Incorrect shadowed default rejection\n" + shadowed.Output);
-Console.WriteLine("PASS static default extraction rejection: derived interface re-implementation");
 
 // An abstract generic slot has no fallback, and an unrecorded same-signature struct method beside a
 // default body is ambiguous: neither may resolve to the interface body.
@@ -455,6 +578,47 @@ foreach (var (mutation, marker) in new[]
     Console.WriteLine("PASS static default extraction rejection: " + mutation);
 }
 
+// Two unrelated overriding interfaces leave no most specific body, a re-abstracting most specific
+// MethodImpl leaves none at all, and an unlisted inherited interface could hide a more specific one.
+// A derived getter's word, not the base default's, decides the flag: making Quiet's true keeps the clock.
+foreach (var (mutation, selector, marker) in new[]
+{
+    ("diamond", "MostSpecificBodies::More(ulong)", "has no unique most specific interface implementation"),
+    ("reabstraction", "MostSpecificBodies::Most(ulong)", "re-abstracts it"),
+    ("unlisted-base", "MostSpecificBodies::Most(ulong)", "requires every interface of the receiver"),
+    ("derived-flag-live", "DerivedFlags::TraceQuiet(ulong)", clockRejection)
+})
+{
+    var dll = Path.Combine(root, "most-specific-" + mutation + ".dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        MethodDefinition Body(string type) => module.GetType("Examples." + type).Methods.Single(method =>
+            method.Overrides.Count == 1);
+        if (mutation == "diamond")
+            module.GetType("Examples.ScaleMore").Interfaces.Add(
+                new InterfaceImplementation(module.GetType("Examples.IScaleSide")));
+        else if (mutation == "reabstraction")
+        {
+            var body = Body("IScaleMost");
+            body.Body = null;
+            body.Attributes |= MethodAttributes.Abstract | MethodAttributes.Virtual;
+        }
+        else if (mutation == "unlisted-base")
+        {
+            var receiver = module.GetType("Examples.ScaleMost");
+            receiver.Interfaces.Remove(receiver.Interfaces.Single(implementation =>
+                implementation.InterfaceType.Name == "IScaleMore"));
+        }
+        else Body("IQuiet").Body.Instructions[0].OpCode = OpCodes.Ldc_I4_1;
+        module.Write(dll);
+    }
+    var result = Execute(["dotnet", ExtractorPath, "extract", dll, selector,
+        Path.Combine(root, "Reject-most-specific-" + mutation)]);
+    if (result.Code == 0 || !result.Output.Contains(marker, StringComparison.Ordinal))
+        throw new Exception("Incorrect most specific rejection: " + mutation + "\n" + result.Output);
+    Console.WriteLine("PASS most specific extraction rejection: " + mutation);
+}
+
 foreach (var (mutation, marker) in new[]
 {
     ("prefix", "adjacent concrete constrained receiver"),
@@ -479,6 +643,24 @@ foreach (var (mutation, marker) in new[]
         throw new Exception("Incorrect constrained rejection: " + mutation + "\n" + extractionRejection.Output);
     Console.WriteLine("PASS constrained extraction rejection: " + mutation);
 }
+
+// A receiver still open after specialization names no implementation to run, so specialization rejects it.
+var openDll = Path.Combine(root, "open-receiver.dll");
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var flag = module.GetType("Examples.WordFlag`1");
+    var trace = module.GetType("Examples.GenericReceivers").Methods.Single(method => method.Name == "Trace");
+    var open = new GenericInstanceType(flag);
+    open.GenericArguments.Add(flag.GenericParameters[0]);
+    trace.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Constrained).Operand = open;
+    module.Write(openDll);
+}
+var openRejection = Execute(["dotnet", ExtractorPath, "extract", openDll, "GenericReceivers::TraceNarrow(ulong)",
+    Path.Combine(root, "Reject-open-receiver")]);
+const string openMarker = "Foreign generic parameter owner in specialized body";
+if (openRejection.Code == 0 || !openRejection.Output.Contains(openMarker, StringComparison.Ordinal))
+    throw new Exception("Incorrect open generic receiver rejection" + Environment.NewLine + openRejection.Output);
+Console.WriteLine("PASS constrained extraction rejection: open-generic-receiver");
 
 // Only System.Runtime's modreq(InAttribute) directly on a by-reference parameter is admitted.
 const string modifierRejection = "except System.Runtime's modreq(InAttribute) directly on a by-reference parameter";

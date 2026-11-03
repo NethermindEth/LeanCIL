@@ -64,7 +64,8 @@ selected metadata values, `LayoutsValid`, unique identities and complete typed
 signature coverage. The existing raw layout algorithm and architecture rules
 remain in force.
 
-The new signature boundary rejects open types, generic declaring types,
+The new signature boundary rejects open types, generic declaring types (an extraction entry may
+be a static method of a generic class, but such a method cannot be exported or imported),
 unsupported constraints, reference type arguments and recursively nested
 `modreq`/`modopt` nodes, including the `modreq(InAttribute)` that entry selection admits on
 `in` parameters of virtual members. Contract methods are static and non-virtual, and C# emits

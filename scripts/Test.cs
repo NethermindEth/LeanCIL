@@ -26,8 +26,18 @@ string suite = args switch
     [] => "all",
     ["--build-tools"] => "tools",
     ["--suite", string name] when ExportVerificationSuites.Plan().Any(entry => entry.Name == name) => name,
-    ["--suite", "all" or "core" or "contracts" or "cli" or "failures" or "integer" or "narrow" or "primitive" or "division" or "checked" or "conversions" or "native" or "arguments" or "layout" or "copy" or "bits" or "enums" or "nested" or "instance" or "constructors" or "fsharp" or "math" or "unsafe" or "blocks" or "generics" or "loops" or "evidence" or "identity" or "labels" or "names" or "symbols" or "callers" or "construction" or "outcomes" or "scaling" or "excluded" or "blockers" or "divrem" or "imports" or "exports" or "exceptionlint" or "intrinsics" or "audit" or "workspace" or "templates" or "assemblies"] => args[1],
-    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|contracts|cli|failures|integer|narrow|primitive|division|checked|conversions|native|arguments|layout|copy|bits|enums|nested|instance|constructors|fsharp|math|unsafe|blocks|generics|loops|evidence|identity|labels|names|symbols|callers|construction|outcomes|scaling|excluded|blockers|divrem|imports|exports|exceptionlint|intrinsics|audit|workspace|templates]")
+    ["--suite", "all" or "core" or "contracts" or "cli" or "failures" or "integer" or "narrow" or "primitive"
+        or "division" or "checked" or "conversions" or "native" or "arguments" or "layout" or "copy" or "bits"
+        or "enums" or "nested" or "instance" or "constructors" or "fsharp" or "math" or "unsafe" or "blocks"
+        or "generics" or "loops" or "evidence" or "dispatch" or "identity" or "labels" or "names" or "symbols"
+        or "callers" or "construction" or "outcomes" or "scaling" or "excluded" or "blockers" or "divrem"
+        or "imports" or "exports" or "exceptionlint" or "intrinsics" or "audit" or "workspace" or "templates"
+        or "assemblies"] => args[1],
+    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|contracts|" +
+        "cli|failures|integer|narrow|primitive|division|checked|conversions|native|arguments|layout|copy|bits|" +
+        "enums|nested|instance|constructors|fsharp|math|unsafe|blocks|generics|loops|evidence|dispatch|" +
+        "identity|labels|names|symbols|callers|construction|outcomes|scaling|excluded|blockers|divrem|imports|" +
+        "exports|exceptionlint|intrinsics|audit|workspace|templates|assemblies]")
 };
 
 using var verification = new Program();
@@ -49,6 +59,9 @@ var independentSuites = new Dictionary<string, (string Script, string Descriptio
     ["exceptionlint"] = ("Tests/ExceptionLint.cs", "diagnostic XML exception drift without proof claims"),
     ["contracts"] = ("Tests/UniversalContracts.cs", "universal checked contracts, caller memory preservation and incorrect implementations"),
     ["evidence"] = ("Tests/ExtractionEvidence.cs", "independent extraction certificates and malformed evidence rejection"),
+    // Split from evidence so neither job approaches the CI timeout.
+    ["dispatch"] = ("Tests/DispatchEvidence.cs",
+        "constrained and managed dispatch, constant calls, stack allocation and pinned compiler coverage"),
     ["loops"] = ("Tests/Loops.cs", "cyclic control-flow validation, universal termination and negative contracts"),
     ["generics"] = ("Tests/GenericMethods.cs", "C# and F# generic method specialization, provenance and rejection proofs"),
     ["blocks"] = ("Tests/Blocks.cs", "block memory, alignment prefixes, runtime comparisons and safety faults"),
@@ -86,7 +99,8 @@ var independentSuites = new Dictionary<string, (string Script, string Descriptio
     ["scaling"] = ("Tests/TranslationScaling.cs", "compositional certificate for a six-method call graph and its consumer replay"),
     ["excluded"] = ("Tests/ExcludedBranchScaling.cs", "hundreds of excluded and live sites at the default heartbeat budget"),
     ["assemblies"] = ("Tests/MultiAssembly.cs",
-        "bodies and layouts from pinned referenced assemblies, attribution and substitution rejection"),
+        "bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and " +
+        "substitution rejection"),
     ["blockers"] = ("Tests/Blockers.cs", "admission reports with deduplicated blockers, call chains and profile-excluded branches"),
     ["audit"] = ("Tests/OleanAudit.cs", "theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts cannot forge")
 };
@@ -153,16 +167,16 @@ if (suite is "all" or "core")
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/MemorySpans.cs", "Tests/ReferenceInstructions.cs", "Tests/PointerOperations.cs",
         "Tests/PrimitiveArrays.cs", "Tests/ArrayElementReferences.cs", "Tests/ReadOnlyArrayReferences.cs"]);
-if (suite is "all" or "evidence")
+if (suite is "all" or "dispatch")
     projects.AddRange(["Tests/ConstrainedResolution.cs", "Tests/ConstrainedCalls.cs", "Tests/ManagedDispatch.cs",
-        "Tests/NativeManagedDispatch.cs", "Tests/StackAllocation.cs"]);
+        "Tests/NativeManagedDispatch.cs", "Tests/StackAllocation.cs", "Tests/CompilerCoverage.cs",
+        "Tests/RuntimeModelInventory.cs", "Tests/NativeProbe"]);
 if (suite is "all" or "evidence")
     projects.AddRange([
         "Tests/PreparedLeanFixturesTests.cs", "Tests/RejectedEvidenceTests.cs", "Tests/LayoutEvidence.cs",
         "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TypeTests.cs",
-        "Tests/CompilerCoverage.cs", "Tests/RuntimeModelInventory.cs",
         "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/StaticScalarValues.cs",
-        "Tests/TranslationAudit.cs", "Tests/NativeProbe"]);
+        "Tests/TranslationAudit.cs"]);
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
 if (suite is "all" or "generics") projects.AddRange(["Tests/GenericOwners.cs", "Tests/GenericLayouts.cs"]);
 if (suite is "all" or "unsafe")

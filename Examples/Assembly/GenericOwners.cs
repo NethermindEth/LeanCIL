@@ -10,11 +10,18 @@ public static class GenericOwners
 
     public static uint Nested(uint value) => OwnerOuter<ulong>.Inner<uint>.Identity(value);
 
+    /// <summary>A non-generic class nested in a generic one: its owner is `OwnerOuter`1/Helper<!0>`.</summary>
+    public static uint NestedHelper(uint value) => OwnerOuter<ulong>.Helper.Identity(value);
+
     public static uint Repeated(uint value) =>
         OwnerHelper<uint>.Identity(value) + OwnerHelper<uint>.Identity(value);
 
     public static unsafe uint Address(uint value) =>
         ((delegate* managed<uint, uint>)&OwnerHelper<uint>.Identity)(value);
+
+    /// <summary>A generic entry over a supplied handler table; `Address` catalogues its only target.</summary>
+    public static unsafe uint TableFirst<T>(delegate* managed<uint, uint>[] handlers, uint value)
+        where T : unmanaged => handlers[0](value);
 
     public static ulong SpanFirst(in ReadOnlySpan<ulong> values) => SpanHelpers.First(values);
 
@@ -54,5 +61,10 @@ public static class OwnerOuter<T> where T : unmanaged
         public static U Identity(U value) => value;
 
         public static U First(ReadOnlySpan<U> values) => values[0];
+    }
+
+    public static class Helper
+    {
+        public static uint Identity(uint value) => value;
     }
 }

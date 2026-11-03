@@ -98,12 +98,13 @@ theorem malformed_local_operand :
 example : foldEntry (foldRoles [words] itemCode)[1]? ∧
     ¬ foldEntry (foldRoles [words] itemCode)[2]? := by decide
 
-example : FeatureFlowValid #[] [] (raw [words] itemCode) .scalar itemStates (List.replicate 7 true) itemOps := by decide
+example : FeatureFlowValid #[] (fun _ => none) (raw [words] itemCode) .scalar itemStates
+    (List.replicate 7 true) itemOps := by decide
 -- The receiver must stay on the stack: a real store or address is not the fold.
-example : ¬ FeatureFlowValid #[] [] (raw [words] itemCode) .scalar itemStates
+example : ¬ FeatureFlowValid #[] (fun _ => none) (raw [words] itemCode) .scalar itemStates
     (List.replicate 7 true)
     (itemOps.set 1 (.setLocal 0 none)) := by decide
-example : ¬ FeatureFlowValid #[] [] (raw [words] itemCode) .scalar itemStates
+example : ¬ FeatureFlowValid #[] (fun _ => none) (raw [words] itemCode) .scalar itemStates
     (List.replicate 7 true)
     (itemOps.set 2 (.localAddr 0)) := by decide
 
@@ -111,8 +112,10 @@ example : ¬ FeatureFlowValid #[] [] (raw [words] itemCode) .scalar itemStates
 private def loadCode := [i 2, i 10, i 6, i 42]
 private def loadOps : List Op := [.arg 0, .setLocal 0 none, .local 0 none, .ret none]
 private def loadStates : FeatureCertificate := [state [], state [none], state [], state [none]]
-example : FeatureFlowValid #[] [] (raw [intType] loadCode) .scalar loadStates (List.replicate 4 true) loadOps := by decide
-example : FeatureFlowValid #[] [] (raw [words] loadCode) .scalar loadStates (List.replicate 4 true) loadOps := by decide
+example : FeatureFlowValid #[] (fun _ => none) (raw [intType] loadCode) .scalar loadStates
+    (List.replicate 4 true) loadOps := by decide
+example : FeatureFlowValid #[] (fun _ => none) (raw [words] loadCode) .scalar loadStates
+    (List.replicate 4 true) loadOps := by decide
 
 -- `ldtoken` of a field is static data; only a type handle belongs to a type test.
 example : ¬ typeTestInstruction (i 208 (.field (.atom owner "<PrivateImplementationDetails>") 0 intType true)) ∧

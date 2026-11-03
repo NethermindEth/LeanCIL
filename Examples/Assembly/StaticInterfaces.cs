@@ -151,3 +151,234 @@ public static class ConstantFlags
 
     public static ulong TraceThenCount(ulong value) => Count<StepOn>(Trace<StepOff>(value));
 }
+
+// A static virtual slot runs its most specific interface-level body: a derived interface's
+// re-implementation beats the base default, and the deepest one in a chain wins.
+public interface IScale
+{
+    static virtual ulong Scale(ulong value) => value * 2;
+}
+
+public interface IScaleMore : IScale
+{
+    static ulong IScale.Scale(ulong value) => value * 4;
+}
+
+public interface IScaleMost : IScaleMore
+{
+    static ulong IScale.Scale(ulong value) => value * 8 + 1;
+}
+
+// Unrelated to IScaleMore; listing both leaves no most specific body.
+public interface IScaleSide : IScale
+{
+    static ulong IScale.Scale(ulong value) => value * 3;
+}
+
+public struct ScaleMore : IScaleMore { }
+
+public struct ScaleMost : IScaleMost { }
+
+// The struct's own implementation beats every interface-level body.
+public struct ScaleOwn : IScaleMost
+{
+    public static ulong Scale(ulong value) => value + 1;
+}
+
+// A derived interface supplies the body of a base `static abstract` slot.
+public interface IMeasure
+{
+    static abstract ulong Measure(ulong value);
+}
+
+public interface IMeasureFive : IMeasure
+{
+    static ulong IMeasure.Measure(ulong value) => value + 5;
+}
+
+public struct MeasureFive : IMeasureFive { }
+
+public static class MostSpecificBodies
+{
+    static ulong Scaled<TScale>(ulong value) where TScale : struct, IScale => TScale.Scale(value);
+
+    static ulong Measured<TMeasure>(ulong value) where TMeasure : struct, IMeasure => TMeasure.Measure(value);
+
+    public static ulong More(ulong value) => Scaled<ScaleMore>(value);
+
+    public static ulong Most(ulong value) => Scaled<ScaleMost>(value);
+
+    public static ulong Own(ulong value) => Scaled<ScaleOwn>(value);
+
+    public static ulong Five(ulong value) => Measured<MeasureFive>(value);
+}
+
+// Flag getters supplied by a derived interface fold like any constant getter: the derived body, not
+// the base default, decides which block is extracted.
+public interface IQuietByDefault
+{
+    static virtual bool IsActive => false;
+}
+
+public interface ILoud : IQuietByDefault
+{
+    static bool IQuietByDefault.IsActive => true;
+}
+
+public interface ILoudByDefault
+{
+    static virtual bool IsActive => true;
+}
+
+public interface IQuiet : ILoudByDefault
+{
+    static bool ILoudByDefault.IsActive => false;
+}
+
+public struct Loud : ILoud { }
+
+public struct Quiet : IQuiet { }
+
+public static class DerivedFlags
+{
+    public static ulong Count<TFlag>(ulong value) where TFlag : struct, IQuietByDefault
+    {
+        if (TFlag.IsActive) value = value * 3 + 1;
+        return value;
+    }
+
+    // The clock read is rejected, so this extracts only when the derived getter prunes its block.
+    public static ulong Trace<TFlag>(ulong value) where TFlag : struct, ILoudByDefault
+    {
+        if (TFlag.IsActive) value += (ulong)System.Environment.TickCount64;
+        return value + 1;
+    }
+
+    public static ulong CountLoud(ulong value) => Count<Loud>(value);
+
+    public static ulong TraceQuiet(ulong value) => Trace<Quiet>(value);
+}
+
+// A flag getter computed from other getters, at any depth and through generic or derived-interface
+// bodies, folds through each callee's own certificate. Each guarded block reads the process clock,
+// which extraction rejects, so these methods extract only when their computed flag prunes it.
+public struct Forced : IStepFlag
+{
+    public static bool IsActive => false;
+}
+
+public static class Gate<TFlag> where TFlag : struct, IStepFlag
+{
+    public static bool Open => TFlag.IsActive || typeof(TFlag) == typeof(Forced);
+}
+
+public static class Hush<TFlag> where TFlag : struct, ILoudByDefault
+{
+    public static bool Silent => !TFlag.IsActive;
+}
+
+public static class ComputedFlags
+{
+    static bool Both => StepOn.IsActive && StepOff.IsActive;
+
+    static bool NotOff => !StepOff.IsActive;
+
+    static bool Outer => Middle;
+
+    static bool Middle => !Both;
+
+    // A recursive pair never returns, so neither getter is a constant.
+    static bool Ping => Pong;
+
+    static bool Pong => Ping;
+
+    public static ulong TraceBoth(ulong value)
+    {
+        if (Both) value += (ulong)System.Environment.TickCount64;
+        return value + 1;
+    }
+
+    public static ulong TraceNotOff(ulong value)
+    {
+        if (!NotOff) value += (ulong)System.Environment.TickCount64;
+        return value * 3;
+    }
+
+    public static ulong TraceChained(ulong value)
+    {
+        if (!Outer) value += (ulong)System.Environment.TickCount64;
+        return value ^ 5;
+    }
+
+    public static ulong TraceGated(ulong value)
+    {
+        if (Gate<StepOff>.Open) value += (ulong)System.Environment.TickCount64;
+        if (!Gate<Forced>.Open) value ^= (ulong)System.Environment.TickCount64;
+        return value + 2;
+    }
+
+    public static ulong TraceSilent(ulong value)
+    {
+        if (!Hush<Quiet>.Silent) value += (ulong)System.Environment.TickCount64;
+        return value + 3;
+    }
+
+    // A getter reading a static field is not a constant, so both blocks stay live.
+    public static ulong CountConfigured(ulong value) => StaticScalars.ReadBoolean() ? value + 1 : value;
+
+    public static ulong CountPing(ulong value) => Ping ? value + 1 : value;
+}
+
+// Static slots on closed generic struct receivers: the receiver's implementation is closed at its
+// type arguments, and the interface it lists is instantiated through its InterfaceImpl at them, so
+// the type argument both selects the interface instantiation and decides closed type tests.
+public struct WordFlag<T> : IStepFlag where T : unmanaged
+{
+    public static bool IsActive => typeof(T) == typeof(ulong);
+}
+
+public interface IWidth<T> where T : unmanaged
+{
+    static abstract ulong Width(ulong value);
+}
+
+public interface IPadded<T> where T : unmanaged
+{
+    static virtual ulong Pad(ulong value) => typeof(T) == typeof(uint) ? value + 4 : value + 8;
+}
+
+public struct Measured<T> : IWidth<T>, IPadded<T> where T : unmanaged
+{
+    public static ulong Width(ulong value) => typeof(T) == typeof(uint) ? value * 4 : value * 8;
+}
+
+public static class GenericReceivers
+{
+    static ulong Trace<TFlag>(ulong value) where TFlag : struct, IStepFlag
+    {
+        if (TFlag.IsActive) value += (ulong)System.Environment.TickCount64;
+        return value + 1;
+    }
+
+    static ulong Count<TFlag>(ulong value) where TFlag : struct, IStepFlag =>
+        TFlag.IsActive ? value * 3 + 1 : value;
+
+    static ulong Width<TMeasure, T>(ulong value) where TMeasure : struct, IWidth<T> where T : unmanaged =>
+        TMeasure.Width(value);
+
+    static ulong Pad<TPad, T>(ulong value) where TPad : struct, IPadded<T> where T : unmanaged =>
+        TPad.Pad(value);
+
+    // The narrow flag is false, so the clock read it guards is pruned.
+    public static ulong TraceNarrow(ulong value) => Trace<WordFlag<uint>>(value);
+
+    public static ulong CountWide(ulong value) => Count<WordFlag<ulong>>(value);
+
+    public static ulong WidthNarrow(ulong value) => Width<Measured<uint>, uint>(value);
+
+    public static ulong WidthWide(ulong value) => Width<Measured<ulong>, ulong>(value);
+
+    public static ulong PadNarrow(ulong value) => Pad<Measured<uint>, uint>(value);
+
+    public static ulong PadWide(ulong value) => Pad<Measured<ulong>, ulong>(value);
+}

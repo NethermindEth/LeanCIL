@@ -17,8 +17,11 @@ internal static class GenericStructs
     static bool Pinned(ModuleDefinition candidate, ModuleDefinition module) =>
         candidate == module || PinnedAssemblies.Active?.Contains(candidate) == true;
 
-    internal static bool Is(TypeReference type) => type is GenericInstanceType generic &&
-        generic.ElementType.Scope is ModuleDefinition && generic.IsValueType;
+    /// <summary>A closed value type whose generic definition is declared by the selected or a pinned module;
+    /// its layout is computed from that module's own metadata.</summary>
+    internal static bool Is(TypeReference type) => type is GenericInstanceType generic && generic.IsValueType &&
+        (generic.ElementType.Scope is ModuleDefinition ||
+            PinnedAssemblies.Active?.ModuleOf(generic.ElementType) is not null);
 
     internal static TypeReference Substitute(TypeReference type, GenericInstanceType? owner)
     {
