@@ -162,24 +162,19 @@ def loopGoalScope (target : Expr) : MetaM LoopGoalScope := do
     memories := memories.push (← whnfR state.appArg!)
   return { parts, memories := some memories, returns }
 
-open Lean Elab Meta in
-/-- The value a numeric home of `kind` reads back as when it holds `number`, given as a word's
-    `toNat` or a literal; `none` for other kinds and numbers. -/
-def homeValue? (kind number : Expr) : TermElabM (Option Term) := do
-  let constructor := match (← whnfR kind).getAppFn.constName? with
-    | some ``CIL.LocalKind.word64 => some ``CIL.Value.i64
-    | some ``CIL.LocalKind.word32 | some ``CIL.LocalKind.narrow
-    | some ``CIL.LocalKind.byte => some ``CIL.Value.i32
-    | _ => none
-  let some constructor := constructor | return none
-  let number := (← instantiateMVars number).consumeMData
-  let word : Option Term ← if number.isAppOfArity ``BitVec.toNat 2 then
-      pure (some (← Term.exprToSyntax number.appArg!))
-    else match number.nat? <|> number.rawNatLit? with
-      | some literal => pure (some ⟨Syntax.mkNumLit (toString literal)⟩)
-      | none => pure none
-  let some word := word | return none
-  return some (← `($(mkCIdent constructor) $word))
+/-- Whether `type` is a `LoopFrame` whose footprint is empty, so the caller's memory is kept. -/
+def confinedToNone (type : Lean.Expr) : Bool :=
+  type.isAppOfArity `CIL.Safety.LoopFrame 6 && (type.getArg! 0).isAppOfArity ``List.nil 1
+
+open Lean Meta in
+/-- The positions of the `some` entries of `list` up to reduction, reading cons cells until one is
+    not: the locals a `knownLocals` list remembers. -/
+partial def rememberedIndices (list : Lean.Expr) (index : Nat := 0) : MetaM (Array Nat) := do
+  let cell ← whnf list
+  unless cell.isAppOfArity ``List.cons 3 do return #[]
+  let rest ← rememberedIndices cell.appArg! (index + 1)
+  if (← whnf (cell.getArg! 1)).isAppOfArity ``Option.some 2 then return #[index] ++ rest
+  return rest
 
 open Lean Meta in
 /-- Whether `type` mentions `numericOfWidth` at a literal width, which unfolds to one value. -/
@@ -194,12 +189,12 @@ open Lean Elab Tactic Meta in
     * hypotheses `loopFactSides?` recognizes;
     * for `span : CheckedSpan`, `span.facts`, `span.length_nil` or `span.length_cons` when its
       values are `[]` or a cons, and `(span.within wellFormed frame).facts` for each
-      `frame : EntryMemory` from its memory with that memory's `wellFormed` in context;
+      `frame : LoopFrame []` from its memory with that memory's `wellFormed` in context;
     * for `contents : SpanContents`, `contents.elementWidth`;
-    * for `home : NumericEntryHome`, its load when its number is a word's `toNat` or a literal,
-      with `localResult`;
-    * for `frame : EntryMemory` and the entry's `setup` equation, `frame.leave setup` when the
-      goal can return;
+    * for `frame : LoopFrame` over `knownLocals` of a list, the load of each remembered local, with
+      `localResult`;
+    * for `frame : LoopFrame []` and the entry's `setup` equation, `frame.leave_kept setup` when
+      the goal can return;
     * `numericOfWidth` and `BitVec.ofNat_toNat` when a gathered fact loads at a literal width.
     Only hypotheses reachable by name are read, so shadowed and hygienic ones are skipped. A
     fact is kept only when the goal reaches every variable it is about: those of the scope
@@ -270,30 +265,33 @@ def gatherLoopFacts (facts : Array Term) : TacticM (Array Term) := withMainConte
         candidates := candidates.push
           (`spanLength, applied `CheckedSpan.length_cons #[fact], subject, #[], #[])
       for (frame, frameType) in typed do
-        unless frameType.isAppOfArity ``EntryMemory 2 && frameType.getArg! 0 == arguments[0]! &&
-          isLive (frameType.getArg! 1) do continue
+        unless confinedToNone frameType && frameType.getArg! 1 == arguments[0]! &&
+          isLive (frameType.getArg! 2) do continue
         for (formed, formedType) in typed do
           unless formedType.isAppOfArity ``Memory.WellFormed 1 &&
             formedType.appArg! == arguments[0]! do continue
           let within := applied `CheckedSpan.within #[fact, named formed, named frame]
           candidates := candidates.push (`spanFacts,
             applied `CheckedSpan.facts #[← `(($within))],
-            variables #[frameType.getArg! 1, arguments[1]!], #[], #[])
+            variables #[frameType.getArg! 2, arguments[1]!], #[], #[])
     else if type.isAppOfArity `CIL.Safety.SpanContents 4 then
       candidates := candidates.push (`elementWidth, applied `SpanContents.elementWidth #[fact],
         variables #[arguments[1]!], #[], #[])
-    else if type.isAppOfArity ``NumericEntryHome 5 && isLive arguments[1]! then
-      if let some value ← homeValue? arguments[2]! arguments[3]! then
-        let load := mkCIdent `CIL.Safety.NumericEntryHome.load
-        candidates := candidates.push (`homeLoad, ← `($load $fact (value := $value) rfl),
-          variables #[arguments[1]!, arguments[4]!], #[], #[])
-    else if type.isAppOfArity ``EntryMemory 2 && scope.returns && isLive arguments[1]! then
-      for (setup, setupType) in typed do
-        let some (_, entry, _) := setupType.eq? | continue
-        unless entry.isAppOfArity ``enterFrame 3 && entry.appArg! == arguments[0]! do continue
-        candidates := candidates.push (`frameLeave,
-          applied `EntryMemory.leave #[named setup, fact], variables #[arguments[1]!], #[],
-          #[])
+    else if type.isAppOfArity `CIL.Safety.LoopFrame 6 && isLive arguments[2]! then
+      let subject := variables #[arguments[2]!, arguments[4]!]
+      let remembered := arguments[5]!.consumeMData
+      if remembered.isAppOfArity `CIL.Safety.knownLocals 1 then
+        for index in ← rememberedIndices remembered.appArg! do
+          candidates := candidates.push (`homeLoad,
+            applied `LoopFrame.load #[fact, ⟨Syntax.mkNumLit (toString index)⟩], subject, #[],
+            #[])
+      if confinedToNone type && scope.returns then
+        for (setup, setupType) in typed do
+          let some (_, entry, _) := setupType.eq? | continue
+          unless entry.isAppOfArity ``enterFrame 3 && entry.appArg! == arguments[1]! do continue
+          candidates := candidates.push (`frameLeave,
+            applied `LoopFrame.leave_kept #[named setup, fact], variables #[arguments[2]!], #[],
+            #[])
   -- Kept equations extend what is reached; derived facts need what the goal itself names,
   -- since a value only a step produces may never reach the goal.
   let direct := reached

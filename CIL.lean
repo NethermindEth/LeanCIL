@@ -158,6 +158,7 @@ import CIL.Safety.WordSnapshots
 import CIL.Safety.IndexedWriteLemmas
 import CIL.Safety.WriteEffects
 import CIL.Safety.TypedCopy
+import CIL.Safety.AggregateFields
 -- Mixed: symbolic execution, verification, extraction checks, interfaces, later results
 import CIL.Semantics
 import CIL.StepEquations

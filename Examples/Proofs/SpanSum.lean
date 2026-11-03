@@ -19,20 +19,18 @@ bind_entry entry (memory : Memory) (view : SpanView) (wellFormed : memory.WellFo
 
 bind_loop loop := Extracted.method0
 
-/-- The unconsumed suffix of the caller's span and the total of the consumed prefix, held in a
-    frame home of the current memory. -/
-private structure State (memory : Memory) (home : Reference) where
-  suffix : SpanSuffix memory 8 false
-  total : W64
-  current : Memory
-  frame : EntryMemory memory current
-  holds : NumericEntryHome memory current .word64 total.toNat home
+/-- The unconsumed suffix of the caller's span and the total of the consumed prefix, held in the
+    frame home, with the frame facts of the current memory. -/
+private abbrev State (memory : Memory) (home : Reference) :=
+  FrameState [] memory [.word64, .span 8 false] (SpanSuffix memory 8 false × W64)
+    (fun state => [.bytes .word64 home, .span 8 false (some state.1.view)])
+    fun state => [some (.i64 state.2), none]
 
 -- The loop guard observes the remaining span length.
 bind_cutpoint header (memory : Memory) (home : Reference) (state : State memory home) :=
   Extracted.method0 at loop.latch matching (· matches .brnonzero _)
-  with entry.frame memory state.suffix.view home,
-    [.scalar (.i32 (BitVec.ofNat 32 state.suffix.view.length))], state.current
+  with entry.frame memory state.values.1.view home,
+    [.scalar (.i32 (BitVec.ofNat 32 state.values.1.view.length))], state.memory
 
 /-- `Sum` returns the wrapping sum of a valid readonly span's contents, for any length, and
     keeps all caller memory. -/
@@ -41,23 +39,23 @@ theorem correctness (memory : Memory) (view : SpanView) (values : List W64)
     (readOnly : view.writable = false) (contents : SpanContents memory view 8 values) :
     ∃ fuel final, invoke Extracted.program fuel 0 [.bufferSpan view] memory =
       .ok (final, [.scalar (.i64 values.sum)]) ∧ MemoryBelow memory.nextIdentity memory final := by
-  obtain ⟨home, entered, setup, numeric, entryMemory⟩ :=
+  obtain ⟨home, entered, setup, -, -, entryFrame⟩ :=
     entry.checked memory view wellFormed valid contents.elementWidth readOnly
-  cil_home_store started stored loaded frame holds := (.i64 0) using entryMemory numeric
+  obtain ⟨started, stored, frame, -⟩ := (entryFrame []).store 0 (.i64 0) rfl
   have span : CheckedSpan memory view 8 false values := ⟨valid, readOnly, contents⟩
   refine invoke_loop_results Extracted.lookup0 (by simp [cil_checked, valid]) setup
-    (header memory home) (fun state => state.total + state.suffix.values.sum = values.sum)
-    (·.suffix.values.length) ⟨⟨view, values, span⟩, 0, started, frame, holds⟩
+    (header memory home) (fun state => state.values.2 + state.values.1.values.sum = values.sum)
+    (·.values.1.values.length) ⟨(⟨view, values, span⟩, 0), started, frame⟩
     (by cil_loop_steps) (by simp) ?_
-  rintro ⟨⟨view, remaining, span⟩, total, current, frame, holds⟩ invariant
+  rintro ⟨⟨⟨view, remaining, span⟩, total⟩, current, frame⟩ invariant
   cases remaining with
   | nil => exact .inl (by cil_loop_finish [invariant.symm])
   | cons value remaining =>
     obtain ⟨item, -, found, element⟩ := (span.within wellFormed frame).head (by decide)
-    cil_home_store updated stored nextLoaded nextFrame nextHolds := (.i64 (total + value))
-      using frame holds
-    obtain ⟨sliced, slicedOK, next, there⟩ := span.tail_below wellFormed nextFrame.kept
-    cil_loop_continue ⟨⟨sliced, remaining, next⟩, total + value, updated, nextFrame, nextHolds⟩
+    obtain ⟨updated, stored, nextFrame, -⟩ := frame.store 0 (.i64 (total + value)) rfl
+    obtain ⟨sliced, slicedOK, next, -⟩ := span.tail_below wellFormed nextFrame.kept
+    cil_loop_continue ⟨(⟨sliced, remaining, next⟩, total + value), updated,
+      nextFrame.set_local 1 (.span 8 false (some sliced))⟩
     · simpa [BitVec.add_assoc] using invariant
     · simp
 #print axioms correctness

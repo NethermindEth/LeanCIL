@@ -487,6 +487,27 @@ theorem Filled.push {xs : List (BitVec (8 * width))} {room : Nat} {x : BitVec (8
   · rw [Nat.add_comm room 1] at writable
     simpa using (Writable.append.mp writable).2.after_write written
 
+/-- A buffer with room left accepts its next element: that element is writable, the write
+    succeeds, and the prefix grows by the element. -/
+theorem Filled.write_next {xs : List (BitVec (8 * width))} {room : Nat}
+    (filled : Filled m base width xs room) (positive : 0 < room) (x : BitVec (8 * width)) :
+    ∃ after, access m (base.element width xs.length) width 1 true = .ok () ∧
+      write m (base.element width xs.length) (numberBytes x.toNat width) 1 = .ok after ∧
+      Filled after base width (xs ++ [x]) (room - 1) := by
+  obtain ⟨contents, writable⟩ := filled
+  have remaining : Writable m base width xs.length ((room - 1) + 1) := by
+    rwa [Nat.sub_add_cancel positive]
+  obtain ⟨after, written⟩ := remaining.write_succeeds x
+  exact ⟨after, by simpa using remaining 0 (by omega), written,
+    Filled.push ⟨contents, remaining⟩ written⟩
+
+/-- A change that keeps everything below a watermark covering the buffer keeps its contents and
+    room. -/
+theorem Filled.after_below {watermark : Nat} {after : Memory} {xs : List (BitVec (8 * width))}
+    {room : Nat} (filled : Filled m base width xs room) (preserved : MemoryBelow watermark m after)
+    (old : base.allocation < watermark) : Filled after base width xs room :=
+  ⟨filled.1.after_below preserved old, filled.2.after_below preserved old⟩
+
 /-- A full producer has written every element. -/
 theorem Filled.complete {xs : List (BitVec (8 * width))} (filled : Filled m base width xs 0) :
     Contents m base width xs := filled.1
@@ -628,6 +649,8 @@ theorem Contents.transform {m : Memory} {base : Reference} {width : Nat}
 #print axioms Writable.after_below
 #print axioms Writable.write_succeeds
 #print axioms Filled.push
+#print axioms Filled.after_below
+#print axioms Filled.write_next
 #print axioms Filled.fill
 #print axioms Contents.transform
 

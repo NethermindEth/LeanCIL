@@ -82,9 +82,13 @@ proves there exist homes and an entered memory such that `enterFrame` returns ex
 memory, each home satisfies
 [`NumericEntryHome`](../CIL/Safety/NumericLocals.lean) `memory entered kind number home` (allocated
 at or above `memory.nextIdentity` and below `entered.nextIdentity`, holding its initializer's
-bytes, writable), and [`EntryMemory`](../CIL/Safety/NumericLocals.lean) `memory entered` holds
-(caller memory kept below its watermark, identities grown, well formed). A proof opens it with
-`obtain ⟨home, entered, setup, numeric, entryMemory⟩ := entry.checked ...`; this form generates no
+bytes, writable), [`EntryMemory`](../CIL/Safety/NumericLocals.lean) `memory entered` holds
+(caller memory kept below its watermark, identities grown, well formed), and for every footprint
+the entered memory starts a [`LoopFrame`](../CIL/Safety/LoopFrames.lean) over the frame's
+locals, each home remembered as its initializer and every other local as `none`. A proof opens it
+with
+`obtain ⟨home, entered, setup, numeric, entryMemory, frame⟩ := entry.checked ...`; this form
+generates no
 `entry.result`, `entry.memory` or `homeN` abbreviations, while span and root slots still get
 `slotN`, `loadN` and `storeN`. `entry.setup` is the setup equation given each home's allocation
 equation `madeN` and `kept`; it is the proof that derived the frame, so `entry.checked` reuses it
@@ -94,8 +98,12 @@ memory = .ok ()` is also supplied in the memory after the homes through
 [`SpanView.validate_below`](../CIL/Safety/FrameMemoryBelow.lean), so an assigned span parameter
 stores without restating its validity. Every other local must allocate nothing: a numeric local
 without a checked initializer, a vector argument home or a numeric parameter home is rejected.
-[SpanSum](../Examples/Proofs/SpanSum.lean), [FillWords](../Examples/Proofs/FillWords.lean) and
-[Struct](../Examples/Proofs/Struct.lean) enter this way.
+[SpanSum](../Examples/Proofs/SpanSum.lean), [FillWords](../Examples/Proofs/FillWords.lean),
+[Struct](../Examples/Proofs/Struct.lean), [Countdown](../Examples/Proofs/Countdown.lean),
+[CountCalls](../Examples/Proofs/CountCalls.lean) and [CountUntil](../Examples/Proofs/CountUntil.lean)
+enter this way, the last three from `Memory.empty` with `Memory.empty_wellFormed`. The body may
+be a `bind_method` name: setup unfolds each definition that only names another constant, down to
+the extracted method.
 
 `bind_entry` gives `entry.frame` and, for the `simplifying` form, `entry.result` and
 `entry.memory` the `cil_loop_unfold` simp attribute in the current scope, and `bind_cutpoint` gives
@@ -104,7 +112,8 @@ verification conditions](PROOFS-STEPPING.md#loop-verification-conditions). The s
 `entry.loadN` and `entry.storeN` instantiate `cil_checked` lemmas that stepping already uses, so
 loop proofs need not pass them.
 
-`cutpoint stack memory` constructs the loop state. `cutpoint.checked` proves the selected
+`cutpoint stack memory` constructs the loop state; binders before `:=`, such as the home
+references of an allocating entry's frame, come first. `cutpoint.checked` proves the selected
 instruction satisfies the predicate and is its unique match. Missing or ambiguous matches are
 errors. The predicate locates an instruction; it does not prove that it is a loop header or that
 execution reaches it. The loop proof establishes those properties.

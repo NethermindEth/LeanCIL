@@ -124,6 +124,11 @@ def Memory.WellFormed (m : Memory) : Prop :=
   ∀ view ∈ m.views, ∃ a, m.allocations view.allocation = some a ∧
     view.start + view.length ≤ a.layout.size
 
+/-- Memory with no allocations or views is well formed. -/
+theorem Memory.empty_wellFormed : Memory.empty.WellFormed :=
+  ⟨fun _ _ absent => (nomatch absent), fun _ member => nomatch member⟩
+#print axioms Memory.empty_wellFormed
+
 /-- The allocation `id`, failing if it is missing or has expired. -/
 def liveAllocation (m : Memory) (id : AllocationId) : Checked Allocation := do
   let some a := m.allocations id | .error .missingAllocation

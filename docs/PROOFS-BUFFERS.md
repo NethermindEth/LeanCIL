@@ -21,8 +21,8 @@ is a loop state over such a view. `span.facts` is the view's validity, width and
 stepper; `span.head` gives the passing guard, a positive length and the first element's
 reference and load; `span.length_cons` is the passing guard alone and `span.length_nil` makes it
 fail; `span.tail` gives `Slice(1)` and the checked suffix; `span.below` moves a checked span into
-any memory that keeps the caller's, [`CheckedSpan.within`](../CIL/Safety/LoopVC.lean) into the
-memory of a frame entered from it, and `span.tail_below` slices there while keeping the suffix
+any memory that keeps the caller's, [`CheckedSpan.within`](../CIL/Safety/LoopFrames.lean) into
+the memory of a `LoopFrame` confined to no caller storage, and `span.tail_below` slices there while keeping the suffix
 checked in caller memory. The loop tactics take these facts from a `CheckedSpan` in context.
 
 Callee frames allocate locals above the caller's memory. For well-formed caller memory,
@@ -52,8 +52,8 @@ and exact memory preservation. The [Sum span fold](../Examples/Proofs/SpanSum.le
 wrapping sum of a `ReadOnlySpan<ulong>` with the invariant `total + remaining.sum = values.sum`; its
 running total lives in a frame home, so its state keeps the `CheckedSpan` suffix in caller memory,
 which the loop tactics move to the current frame memory with `span.within`. Its entry comes from
-`bind_entry ... allocating wellFormed`, and its state carries the returned `EntryMemory` and
-`NumericEntryHome` across each store with `cil_home_store`; see [loop verification
+`bind_entry ... allocating wellFormed`, and its `FrameState` carries the returned `LoopFrame`
+across each store with `frame.store` and each slice with `set_local`; see [loop verification
 conditions](PROOFS-STEPPING.md#loop-verification-conditions). Both measure the remaining length,
 prove the loop inside the public theorem through `invoke_loop_returns` or `invoke_loop_results`, and
 cover null empty spans.
@@ -161,3 +161,62 @@ checked argument/return storage. `Tests/ManagedDispatch.cs` covers normal and ta
 closed generic identities, initialization masks and rejected unspecified lanes. Pointer overloads of
 `Unsafe` block helpers use the same block operations and proof rules as their managed-reference
 overloads; `Tests/Blocks.cs` covers exact overload/alignment evidence.
+
+## View struct fields
+
+Import `CIL.Safety.AggregateFields` to reason about a struct home field by field instead of byte by
+byte. `AggregateLayout.values layout bytes` decodes each field's unsigned little-endian number and
+`FieldLayout.setIn bytes number` encodes one store; both are defined over the byte semantics.
+`AggregateLayout.Disjoint` is a decidable check that no two fields share a byte. Under it and
+`Valid`, `values_setIn` replaces one field's value and keeps every other, and `numberIn_setIn_apart`
+keeps any field apart from the written one. An explicit layout with overlapping fields fails the
+check, so these laws do not apply to it and its proofs stay at the byte level.
+
+A struct local is tracked in the same `LocalSnapshots` set as numeric locals, remembered as its
+bytes. `LocalSnapshots.zero_aggregate` returns the step equation for `initobj` through the local's
+address. `store_field` and `load_field` cover int, word and 16- or 32-byte vector fields,
+`load_signed_field` sign extends a 1- or 2-byte field as `signedOfWidth`, and
+`store_aggregate_field` and `load_aggregate_field` cover a nested struct field, whose value is the
+number of its bytes. Zeroing and stores also return the updated snapshots, well-formedness,
+`MemoryBelow` for the step, continued write access, the address's `form` fact for the next step
+and the write equation; a store also returns the decoded field values, which the next store or
+load takes. Every other local's snapshot is kept. A frame from `bind_entry ... allocating`
+supplies its `LoopFrame`, whose `homes` and `snapshots` start the chain, and
+`MemoryBelow.frame_round_trip` composes the per-step facts on return.
+[Struct](../Examples/Proofs/Struct.lean) and [Tests/AggregateFields](../Tests/AggregateFields.lean)
+show the frame-entry and remembered-local forms and the rejections.
+
+## Carry frame facts through a loop
+
+Import `CIL.Safety.LoopFrames` to keep the frame facts of a loop out of its invariant.
+`LoopFrame footprint caller current kinds slots known` bundles `Confined footprint caller current`,
+well-formedness, `WritableHomes` for the frame's locals and their `LocalSnapshots`, with
+`knownLocals values` naming the remembered values. `kinds`, `slots` and `values` follow the
+frame's local indices: `slots` is the frame's `locals`, a span, reference or other local without a
+byte home is a skipped `WritableHomes` slot and a `none` value, and so the lemmas stated over
+`frame.locals`, such as `LocalSnapshots.store`, apply to the loop frame directly. `FrameState`
+pairs the loop's values with a memory and its `LoopFrame`, with the slots and remembered values as
+functions of the loop's values, so an invariant over a `FrameState` states only the property.
+`bind_entry ... allocating` proves the frame of the entered locals and parameter homes for any
+footprint, with each home remembered as its initializer and every other local as `none`.
+`LoopFrame.ofEntry`, `WritableHomes.entry` and `skip`, and `LocalSnapshots.entry` and `skip` are
+the lemmas it composes. `set_local` keeps the frame when a local without a byte home is assigned,
+as the span fold slices its span; it rejects a home and a remembered local.
+
+Each lemma proves the frame after one step. `load` and `store` read and write a remembered local;
+`write` and `write_element` keep the frame across a write inside the footprint; `after_confined`
+keeps it across a call whose footprint entries lie inside it; `form` and `leave` give the caller
+reference's `form` fact and the confined, `MemoryBelow` result on return. A frame confined to no
+caller storage, `LoopFrame []`, has `kept` all of it, `leave_kept` gives the exit's `MemoryBelow`
+fact from the entry's `setup`, and `CheckedSpan.within` reads a caller span in its memory, as
+[SpanSum](../Examples/Proofs/SpanSum.lean) does. A local whose address is
+taken can change through that reference, so `write` and `after_confined` require every written
+allocation to be older than the frame (`allocation < caller.nextIdentity`); a write or callee that
+reaches a home does not elaborate and the snapshot stays the author's obligation.
+`add_int_element`, `int_lt` and `toNat_succ` step a signed `int` index below `2^31` to an element
+offset and its compare. The [buffer fill proof](../Examples/Proofs/FillWords.lean) uses them with
+an invariant of only `Filled` and `k <= n`. [Countdown](../Examples/Proofs/Countdown.lean) needs
+no invariant beyond the frame, and [CountCalls](../Examples/Proofs/CountCalls.lean) and
+[CountUntil](../Examples/Proofs/CountUntil.lean) keep two locals across a helper call with
+`after_confined`. [Tests/LoopFrames](../Tests/LoopFrames.lean) shows the rejections, including a
+write through the second home of a generated two-local frame.

@@ -12,60 +12,11 @@ A numeric store creates a post-state obligation with its checked step, readback 
 home available as hypotheses. The rule reuses checked memory progress and preservation; it
 does not assume the invariant or decreasing measure that the remaining obligation must prove.
 
-At a loop head of a frame entered over symbolic caller memory, `EntryMemory` and
-`NumericEntryHome` from `bind_entry ... allocating` stay the frame part of the invariant:
-`cil_home_store` carries both across a store and `EntryMemory.leave` across the return.
+A loop over a frame entered over symbolic caller memory carries its frame facts in a
+`LoopFrame` instead; see `CIL.Safety.LoopFrames`.
 -/
 
 namespace CIL.Safety
-
-/-- An entry home holding `value`'s number loads as `value` after the CLI's readback. -/
-theorem NumericEntryHome.load {caller current : Memory} {kind : CIL.LocalKind} {number : Nat}
-    {home : Reference} (holds : NumericEntryHome caller current kind number home)
-    {value : CIL.Value} (fits : localNumber kind value = .ok number) :
-    loadLocal current (.bytes kind home) = .ok (.scalar (localResult kind value)) :=
-  load_numeric_local kind value number fits holds.loaded
-#print axioms NumericEntryHome.load
-
-/-- A checked store into an entry home keeps the caller's memory below its watermark and the
-    frame well formed, and leaves the home holding the stored number with its authority. -/
-theorem NumericEntryHome.store {caller current : Memory} {kind : CIL.LocalKind} {number : Nat}
-    {home : Reference} (frame : EntryMemory caller current)
-    (holds : NumericEntryHome caller current kind number home) (value : CIL.Value)
-    (stored : Nat) (fits : localNumber kind value = .ok stored) :
-    ∃ updated, storeLocal current (.bytes kind home) (.scalar value) =
-        .ok (.bytes kind home, updated) ∧
-      EntryMemory caller updated ∧ NumericEntryHome caller updated kind stored home := by
-  obtain ⟨updated, written, step, readback⟩ :=
-    store_numeric_local kind value stored fits holds.writable
-  obtain ⟨_, ready⟩ := access_requirements holds.writable
-  have same := write_nextIdentity written
-  refine ⟨updated, step, ⟨?_, same ▸ frame.grown, ?_⟩, ⟨holds.fresh, same ▸ holds.bounded,
-    readback, (ready.after_write written).access⟩⟩
-  · exact frame.kept.trans
-      (store_numeric_local_preserves_memory_below _ _ _ _ _ _ _ holds.fresh step)
-  · exact write_preserves_wellFormed _ _ _ _ _ frame.wellFormed written
-#print axioms NumericEntryHome.store
-
-/-- A checked span of well-formed caller memory stays checked in the memory of a frame entered
-    from it, so a loop state keeps its span in caller memory and reads it in frame memory. -/
-theorem CheckedSpan.within {caller current : Memory} {view : SpanView} {width : Nat}
-    {writable : Bool} {values : List (BitVec (8 * width))}
-    (span : CheckedSpan caller view width writable values) (wellFormed : caller.WellFormed)
-    (frame : EntryMemory caller current) : CheckedSpan current view width writable values :=
-  span.below wellFormed frame.kept
-#print axioms CheckedSpan.within
-
-/-- Leaving any frame that owns what an entry from `caller` allocated keeps everything the frame
-    kept of the caller's memory; slot contents may differ from the entered frame's. -/
-theorem EntryMemory.leave {body : CIL.Method} {args : List Value}
-    {caller entered current : Memory} {entering : Frame}
-    (setup : enterFrame body args caller = .ok (entering, entered))
-    (kept : EntryMemory caller current) (exited : Frame) (owned : exited.owned = entering.owned) :
-    MemoryBelow caller.nextIdentity caller (leaveFrame exited current) :=
-  kept.kept.trans (leaveFrame_preserves_memory_below exited current _ fun id member =>
-    ((enterFrame_fresh _ _ _ _ _ setup).2 id (owned ▸ member)).1)
-#print axioms EntryMemory.leave
 
 /-- A writable numeric home supplies a checked store and reusable post-state facts.
     The continuation must still establish the requested goal for that state. -/
@@ -184,20 +135,6 @@ macro_rules
     `(tactic| (
       apply numeric_store_vc $kind $value _ (by rfl) $ready
       intro $updated $stored $loaded $writable
-      simp only [localResult, BitVec.ofNat_eq_ofNat] at $stored $loaded))
-
-/-- Store `value` into the entry home `holds` of frame memory `frame`, naming the memory after
-    the store, its checked store and load, and the frame and home facts that hold there. -/
-syntax "cil_home_store " ident ident ident ident ident " := " term:max
-  " using " term:max term:max : tactic
-
-macro_rules
-  | `(tactic| cil_home_store $updated $stored $loaded $frame $home := $value
-      using $entered $holds) =>
-    `(tactic| (
-      obtain ⟨$updated, $stored, $frame, $home⟩ :=
-        NumericEntryHome.store $entered $holds $value _ (by rfl)
-      have $loaded := NumericEntryHome.load $home (value := $value) (by rfl)
       simp only [localResult, BitVec.ofNat_eq_ofNat] at $stored $loaded))
 
 end CIL.Safety
