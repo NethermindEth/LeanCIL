@@ -151,3 +151,110 @@ public static class ConstantFlags
 
     public static ulong TraceThenCount(ulong value) => Count<StepOn>(Trace<StepOff>(value));
 }
+
+// A static virtual slot runs its most specific interface-level body: a derived interface's
+// re-implementation beats the base default, and the deepest one in a chain wins.
+public interface IScale
+{
+    static virtual ulong Scale(ulong value) => value * 2;
+}
+
+public interface IScaleMore : IScale
+{
+    static ulong IScale.Scale(ulong value) => value * 4;
+}
+
+public interface IScaleMost : IScaleMore
+{
+    static ulong IScale.Scale(ulong value) => value * 8 + 1;
+}
+
+// Unrelated to IScaleMore; listing both leaves no most specific body.
+public interface IScaleSide : IScale
+{
+    static ulong IScale.Scale(ulong value) => value * 3;
+}
+
+public struct ScaleMore : IScaleMore { }
+
+public struct ScaleMost : IScaleMost { }
+
+// The struct's own implementation beats every interface-level body.
+public struct ScaleOwn : IScaleMost
+{
+    public static ulong Scale(ulong value) => value + 1;
+}
+
+// A derived interface supplies the body of a base `static abstract` slot.
+public interface IMeasure
+{
+    static abstract ulong Measure(ulong value);
+}
+
+public interface IMeasureFive : IMeasure
+{
+    static ulong IMeasure.Measure(ulong value) => value + 5;
+}
+
+public struct MeasureFive : IMeasureFive { }
+
+public static class MostSpecificBodies
+{
+    static ulong Scaled<TScale>(ulong value) where TScale : struct, IScale => TScale.Scale(value);
+
+    static ulong Measured<TMeasure>(ulong value) where TMeasure : struct, IMeasure => TMeasure.Measure(value);
+
+    public static ulong More(ulong value) => Scaled<ScaleMore>(value);
+
+    public static ulong Most(ulong value) => Scaled<ScaleMost>(value);
+
+    public static ulong Own(ulong value) => Scaled<ScaleOwn>(value);
+
+    public static ulong Five(ulong value) => Measured<MeasureFive>(value);
+}
+
+// Flag getters supplied by a derived interface fold like any constant getter: the derived body, not
+// the base default, decides which block is extracted.
+public interface IQuietByDefault
+{
+    static virtual bool IsActive => false;
+}
+
+public interface ILoud : IQuietByDefault
+{
+    static bool IQuietByDefault.IsActive => true;
+}
+
+public interface ILoudByDefault
+{
+    static virtual bool IsActive => true;
+}
+
+public interface IQuiet : ILoudByDefault
+{
+    static bool ILoudByDefault.IsActive => false;
+}
+
+public struct Loud : ILoud { }
+
+public struct Quiet : IQuiet { }
+
+public static class DerivedFlags
+{
+    public static ulong Count<TFlag>(ulong value) where TFlag : struct, IQuietByDefault
+    {
+        if (TFlag.IsActive) value = value * 3 + 1;
+        return value;
+    }
+
+    // The clock read is rejected, so this extracts only when the derived getter prunes its block.
+    public static ulong Trace<TFlag>(ulong value) where TFlag : struct, ILoudByDefault
+    {
+        if (TFlag.IsActive) value += (ulong)System.Environment.TickCount64;
+        return value + 1;
+    }
+
+    public static ulong CountLoud(ulong value) => Count<Loud>(value);
+
+    public static ulong TraceQuiet(ulong value) => Trace<Quiet>(value);
+}

@@ -292,11 +292,13 @@ foreach (var (mutation, selector) in new[]
     Console.WriteLine("PASS live constant flag rejection: " + mutation);
 }
 
-// A generic static virtual slot runs the interface default for a struct without an override and the
-// override otherwise; the balance left behind (less the price or twice it) tells them apart.
+// A generic static virtual slot runs the interface default for a struct without an override, the override
+// otherwise, and a derived interface's re-implementation over the default; the balance left behind (less the
+// price, twice it or the price less one) tells them apart.
 var examples = System.Reflection.Assembly.Load(File.ReadAllBytes(assembly));
 var defaultNarrowed = new Dictionary<string, string>();
-foreach (var (name, type) in new[] { ("SpendDefault", "Allowance"), ("SpendOverride", "DoublingAllowance") })
+foreach (var (name, type) in new[]
+    { ("SpendDefault", "Allowance"), ("SpendOverride", "DoublingAllowance"), ("SpendRefunding", "RefundingAllowance") })
 {
     var output = Path.Combine(root, "Static-" + name);
     Run(["dotnet", ExtractorPath, "extract", assembly, $"StaticVirtualDefaults::{name}(Examples.{type}&)", output]);
@@ -361,6 +363,60 @@ foreach (var (mutation, forgedSource) in new[]
     rejected.Add(forged, "PASS forged static virtual default dispatch: " + mutation, "ConstrainedCallsValid");
 }
 
+// Each receiver runs its most specific interface-level body, as the runtime does: IScaleMore's over the
+// default, the deeper IScaleMost's, the struct's own over both, and IMeasureFive's for a base abstract slot.
+// A derived getter's word decides the flag: Loud keeps its block and Quiet prunes the clock read.
+var mostSpecificSources = new Dictionary<string, string>();
+foreach (var (owner, name) in new[]
+{
+    ("MostSpecificBodies", "More"), ("MostSpecificBodies", "Most"), ("MostSpecificBodies", "Own"),
+    ("MostSpecificBodies", "Five"), ("DerivedFlags", "CountLoud"), ("DerivedFlags", "TraceQuiet")
+})
+{
+    var output = Path.Combine(root, "MostSpecific-" + name);
+    Run(["dotnet", ExtractorPath, "extract", assembly, $"{owner}::{name}(ulong)", output]);
+    var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    if (name == "TraceQuiet" &&
+        !source.Contains(".unsupported \"Unreachable under selected profile\"", StringComparison.Ordinal))
+        throw new Exception("Derived constant flag block was not pruned: " + name);
+    mostSpecificSources[name] = source;
+    var method = examples.GetType("Examples." + owner)!.GetMethod(name)!;
+    var claims = new[] { 0UL, 5UL, ulong.MaxValue, 1UL << 63 }
+        .Select(input => (input, result: (ulong)method.Invoke(null, [input])!))
+        .Select(pair => $"(CIL.Safety.invoke Extracted.program 32 0 [.scalar (.i64 {pair.input})] " +
+            $"CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 {pair.result})]").ToArray();
+    var proof = Path.Combine(root, "MostSpecific-" + name + ".lean");
+    File.WriteAllText(proof, source + "\ntheorem most_specific_result :\n    " + string.Join(" ∧\n    ", claims) +
+        " :=\n  ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\n#print axioms most_specific_result\n");
+    evidence.Add(proof, "PASS most specific interface body: " + name);
+}
+
+// Hiding IScaleMost's MethodImpl from the catalog makes Lean select IScaleMore's body, so the emitted call no
+// longer matches; moving the entry outside its pin's scope leaves it unreadable for dispatch.
+static string InEntry(string source, string identity, string from, string to)
+{
+    var entry = source.IndexOf($"\"{identity}\", valueType :=", StringComparison.Ordinal);
+    var at = entry < 0 ? -1 : source.IndexOf(from, entry, StringComparison.Ordinal);
+    if (at < 0) throw new Exception("Missing dispatch catalog mutation target: " + identity + " " + from);
+    return source[..at] + to + source[(at + from.Length)..];
+}
+var most = mostSpecificSources["Most"];
+var mostOverride = Regex.Match(most[most.IndexOf("\"Examples.IScaleMost\", valueType :=", StringComparison.Ordinal)..],
+    @"overrides := \[\(\d+, [^\]]+\]");
+var examplesPin = Regex.Match(most, @"assembly := \{ identity := ""Examples, [^""]+"" \}");
+if (!mostOverride.Success || !examplesPin.Success) throw new Exception("Missing most specific mutation targets");
+foreach (var (mutation, forgedSource) in new[]
+{
+    ("hidden-override", InEntry(most, "Examples.IScaleMost", mostOverride.Value, "overrides := []")),
+    ("unpinned-interface", InEntry(most, "Examples.IScaleMost", examplesPin.Value,
+        "assembly := { identity := \"Other, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null\" }"))
+})
+{
+    var forged = Path.Combine(root, "MostSpecific-" + mutation + ".lean");
+    File.WriteAllText(forged, forgedSource);
+    rejected.Add(forged, "PASS forged most specific dispatch: " + mutation, "ConstrainedCallsValid");
+}
+
 AddTailCallFixtures(assembly, root, evidence, rejected);
 evidence.Check();
 rejected.Check();
@@ -394,8 +450,7 @@ foreach (var (mutation, marker) in new[]
     Console.WriteLine("PASS static constrained extraction rejection: " + mutation);
 }
 
-// The runtime runs a derived interface's re-implementation (price less one), not the default body, so
-// extraction must not select the default for that receiver.
+// The fixture separates the bodies only if the runtime runs the derived re-implementation (price less one).
 var refunding = examples.GetType("Examples.RefundingAllowance")!;
 var refundingReceiver = Activator.CreateInstance(refunding)!;
 refunding.GetField("Left")!.SetValue(refundingReceiver, 42UL);
@@ -403,13 +458,6 @@ object[] refundingArguments = [refundingReceiver];
 examples.GetType("Examples.StaticVirtualDefaults")!.GetMethod("SpendRefunding")!.Invoke(null, refundingArguments);
 if ((ulong)refunding.GetField("Left")!.GetValue(refundingArguments[0])! != 40)
     throw new Exception("Derived interface re-implementation did not run");
-var shadowed = Execute(["dotnet", ExtractorPath, "extract", assembly,
-    "StaticVirtualDefaults::SpendRefunding(Examples.RefundingAllowance&)",
-    Path.Combine(root, "Reject-shadowed-default")]);
-if (shadowed.Code == 0 ||
-    !shadowed.Output.Contains("Another interface of the receiver re-implements", StringComparison.Ordinal))
-    throw new Exception("Incorrect shadowed default rejection\n" + shadowed.Output);
-Console.WriteLine("PASS static default extraction rejection: derived interface re-implementation");
 
 // An abstract generic slot has no fallback, and an unrecorded same-signature struct method beside a
 // default body is ambiguous: neither may resolve to the interface body.
@@ -453,6 +501,47 @@ foreach (var (mutation, marker) in new[]
         !defaultRejection.Output.Contains(marker, StringComparison.Ordinal))
         throw new Exception("Incorrect static default rejection: " + mutation + "\n" + defaultRejection.Output);
     Console.WriteLine("PASS static default extraction rejection: " + mutation);
+}
+
+// Two unrelated overriding interfaces leave no most specific body, a re-abstracting most specific
+// MethodImpl leaves none at all, and an unlisted inherited interface could hide a more specific one.
+// A derived getter's word, not the base default's, decides the flag: making Quiet's true keeps the clock.
+foreach (var (mutation, selector, marker) in new[]
+{
+    ("diamond", "MostSpecificBodies::More(ulong)", "has no unique most specific interface implementation"),
+    ("reabstraction", "MostSpecificBodies::Most(ulong)", "re-abstracts it"),
+    ("unlisted-base", "MostSpecificBodies::Most(ulong)", "requires every interface of the receiver"),
+    ("derived-flag-live", "DerivedFlags::TraceQuiet(ulong)", clockRejection)
+})
+{
+    var dll = Path.Combine(root, "most-specific-" + mutation + ".dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        MethodDefinition Body(string type) => module.GetType("Examples." + type).Methods.Single(method =>
+            method.Overrides.Count == 1);
+        if (mutation == "diamond")
+            module.GetType("Examples.ScaleMore").Interfaces.Add(
+                new InterfaceImplementation(module.GetType("Examples.IScaleSide")));
+        else if (mutation == "reabstraction")
+        {
+            var body = Body("IScaleMost");
+            body.Body = null;
+            body.Attributes |= MethodAttributes.Abstract | MethodAttributes.Virtual;
+        }
+        else if (mutation == "unlisted-base")
+        {
+            var receiver = module.GetType("Examples.ScaleMost");
+            receiver.Interfaces.Remove(receiver.Interfaces.Single(implementation =>
+                implementation.InterfaceType.Name == "IScaleMore"));
+        }
+        else Body("IQuiet").Body.Instructions[0].OpCode = OpCodes.Ldc_I4_1;
+        module.Write(dll);
+    }
+    var result = Execute(["dotnet", ExtractorPath, "extract", dll, selector,
+        Path.Combine(root, "Reject-most-specific-" + mutation)]);
+    if (result.Code == 0 || !result.Output.Contains(marker, StringComparison.Ordinal))
+        throw new Exception("Incorrect most specific rejection: " + mutation + "\n" + result.Output);
+    Console.WriteLine("PASS most specific extraction rejection: " + mutation);
 }
 
 foreach (var (mutation, marker) in new[]
