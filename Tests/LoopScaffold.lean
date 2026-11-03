@@ -262,7 +262,8 @@ bind_entry entry (memory : Memory) (input : CIL.W32) (wellFormed : memory.WellFo
 
 /-- The remaining count, held in the frame home, with the frame facts of the current memory. -/
 abbrev State (memory : Memory) (home : Reference) :=
-  FrameState [] memory [.word32] [.bytes .word32 home] CIL.W32 fun remaining => [.i32 remaining]
+  FrameState [] memory [.word32] CIL.W32 (fun _ => [.bytes .word32 home])
+    fun remaining => [some (.i32 remaining)]
 
 -- The guard sees the remaining count.
 bind_cutpoint header (memory : Memory) (home : Reference) (state : State memory home) :=
@@ -370,8 +371,9 @@ bind_entry entry (memory : Memory) (view : SpanView) (wellFormed : memory.WellFo
 /-- The unconsumed suffix, checked in caller memory, and the consumed total in the frame home,
     with the frame facts of the current memory. -/
 abbrev State (memory : Memory) (home : Reference) :=
-  FrameState [] memory [.word64] [.bytes .word64 home] (SpanSuffix memory 8 false × CIL.W64)
-    fun state => [.i64 state.2]
+  FrameState [] memory [.word64, .span 8 false] (SpanSuffix memory 8 false × CIL.W64)
+    (fun state => [.bytes .word64 home, .span 8 false (some state.1.view)])
+    fun state => [some (.i64 state.2), none]
 
 -- The guard sees the remaining length.
 bind_cutpoint header (memory : Memory) (home : Reference) (state : State memory home) :=
@@ -400,7 +402,8 @@ theorem sum_returns (memory : Memory) (view : SpanView) (values : List CIL.W64)
     obtain ⟨item, -, found, element⟩ := (span.within wellFormed frame).head (by decide)
     obtain ⟨updated, stored, nextFrame, -⟩ := frame.store 0 (.i64 (total + value)) rfl
     obtain ⟨sliced, slicedOK, next, -⟩ := span.tail_below wellFormed nextFrame.kept
-    cil_loop_continue ⟨(⟨sliced, remaining, next⟩, total + value), updated, nextFrame⟩
+    cil_loop_continue ⟨(⟨sliced, remaining, next⟩, total + value), updated,
+      nextFrame.set_local 1 (.span 8 false (some sliced))⟩
     · simpa [BitVec.add_assoc] using invariant
     · simp
 #print axioms sum_returns
@@ -434,7 +437,8 @@ theorem zero_total (memory : Memory) (view : SpanView) (values : List CIL.W64)
     obtain ⟨item, -, found, element⟩ := (span.within wellFormed frame).head (by decide)
     obtain ⟨updated, stored, nextFrame, -⟩ := frame.store 0 (.i64 (total + value)) rfl
     obtain ⟨sliced, slicedOK, next, -⟩ := span.tail_below wellFormed nextFrame.kept
-    cil_loop_continue ⟨(⟨sliced, remaining, next⟩, total + value), updated, nextFrame⟩
+    cil_loop_continue ⟨(⟨sliced, remaining, next⟩, total + value), updated,
+      nextFrame.set_local 1 (.span 8 false (some sliced))⟩
     · refine ⟨by simpa [BitVec.add_assoc] using invariant, ?_⟩
       show total + value = 0
       exact zero
@@ -464,7 +468,8 @@ theorem constant_measure (memory : Memory) (view : SpanView) (values : List CIL.
     obtain ⟨item, -, found, element⟩ := (span.within wellFormed frame).head (by decide)
     obtain ⟨updated, stored, nextFrame, -⟩ := frame.store 0 (.i64 (total + value)) rfl
     obtain ⟨sliced, slicedOK, next, -⟩ := span.tail_below wellFormed nextFrame.kept
-    cil_loop_continue ⟨(⟨sliced, remaining, next⟩, total + value), updated, nextFrame⟩
+    cil_loop_continue ⟨(⟨sliced, remaining, next⟩, total + value), updated,
+      nextFrame.set_local 1 (.span 8 false (some sliced))⟩
     · simpa [BitVec.add_assoc] using invariant
     · decide
 

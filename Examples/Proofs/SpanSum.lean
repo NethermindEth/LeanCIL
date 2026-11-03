@@ -22,8 +22,9 @@ bind_loop loop := Extracted.method0
 /-- The unconsumed suffix of the caller's span and the total of the consumed prefix, held in the
     frame home, with the frame facts of the current memory. -/
 private abbrev State (memory : Memory) (home : Reference) :=
-  FrameState [] memory [.word64] [.bytes .word64 home] (SpanSuffix memory 8 false × W64)
-    fun state => [.i64 state.2]
+  FrameState [] memory [.word64, .span 8 false] (SpanSuffix memory 8 false × W64)
+    (fun state => [.bytes .word64 home, .span 8 false (some state.1.view)])
+    fun state => [some (.i64 state.2), none]
 
 -- The loop guard observes the remaining span length.
 bind_cutpoint header (memory : Memory) (home : Reference) (state : State memory home) :=
@@ -53,7 +54,8 @@ theorem correctness (memory : Memory) (view : SpanView) (values : List W64)
     obtain ⟨item, -, found, element⟩ := (span.within wellFormed frame).head (by decide)
     obtain ⟨updated, stored, nextFrame, -⟩ := frame.store 0 (.i64 (total + value)) rfl
     obtain ⟨sliced, slicedOK, next, -⟩ := span.tail_below wellFormed nextFrame.kept
-    cil_loop_continue ⟨(⟨sliced, remaining, next⟩, total + value), updated, nextFrame⟩
+    cil_loop_continue ⟨(⟨sliced, remaining, next⟩, total + value), updated,
+      nextFrame.set_local 1 (.span 8 false (some sliced))⟩
     · simpa [BitVec.add_assoc] using invariant
     · simp
 #print axioms correctness

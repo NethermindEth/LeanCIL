@@ -13,7 +13,8 @@ bind_cutpoint cutpoint (home : Reference) := Extracted.method0 matching
   (fun op => match op with | .brnonzero _ => true | _ => false) with entry.frame home
 /-- The remaining count, held by the frame's only local, with the frame facts. -/
 private abbrev State (home : Reference) :=
-  FrameState [] Memory.empty [.word32] [.bytes .word32 home] W32 fun x => [.i32 x]
+  FrameState [] Memory.empty [.word32] W32 (fun _ => [.bytes .word32 home])
+    fun x => [some (.i32 x)]
 private def header (home : Reference) (state : State home) : LoopState :=
   cutpoint home [.scalar (.i32 state.values)] state.memory
 

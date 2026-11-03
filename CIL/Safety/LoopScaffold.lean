@@ -183,6 +183,23 @@ private def numericLocals (body : Term) : TermElabM (Array NumericLocal) := do
     | _, _ => throwError "Local kinds and initializers must reduce to lists of equal length"
   return found
 
+/-- The kind of each slot of the entered frame of `body`: its declared locals, then its parameter
+    homes, as `enterFrame` appends them. -/
+private def frameKinds (body : Term) : TermElabM (Array Term) := do
+  let kinds ← Term.elabTerm
+    (← `(CIL.Method.localKinds $body ++ (CIL.Method.parameterHomes $body).map Prod.snd)) none
+  Term.synthesizeSyntheticMVarsNoPostponing
+  let mut cell ← instantiateMVars kinds
+  let mut found := #[]
+  repeat
+    match (← Meta.whnf cell).getAppFnArgs with
+    | (``List.cons, #[_, kind, tail]) =>
+      found := found.push (← PrettyPrinter.delab (← Meta.whnf kind))
+      cell := tail
+    | (``List.nil, _) => break
+    | _ => throwError "Local and parameter home kinds must reduce to a list"
+  return found
+
 /-- Introduce each numeric home, the memory after it and its allocation equation, passing them
     to `continuation` in that order, three per home. -/
 private partial def withNumericHomes {α : Type} (memory : Term) (homes : Array NumericLocal)
@@ -315,12 +332,27 @@ private def elabAllocatingEntry (name : Ident)
   let final := match homes.back? with
     | some home => indexed "allocated" home.index
     | none => memory
-  let kinds := homes.map (·.kind)
-  let slotTerms ← homes.mapM fun home =>
-    `(LocalSlot.bytes $(home.kind) $(indexed "home" home.index))
-  let results := homes.map (·.result)
+  -- The frame facts follow the frame's local indices: every slot, a home or not, in order.
+  let (slots, kinds) ← liftTermElabM <| Term.elabBinders binders fun _ =>
+    withHomeReferences homes.toList do
+      return (← frameSlots (← Term.elabTerm frameApplied (some (mkConst ``Frame))),
+        ← frameKinds body)
+  unless slots.size == kinds.size do
+    throwError "The entered frame has {slots.size} locals but {kinds.size} local kinds"
+  let homeAt (index : Nat) := homes.zipIdx.find? (·.1.index == index)
+  let mut slotTerms : Array Term := #[]
+  let mut remembered : Array Term := #[]
+  for (slot, index) in slots.zipIdx do
+    match homeAt index with
+    | some (home, _) =>
+      slotTerms := slotTerms.push (← `(LocalSlot.bytes $(home.kind) $(indexed "home" home.index)))
+      remembered := remembered.push (← `(some $(home.result)))
+    | none =>
+      slotTerms := slotTerms.push slot.2.1
+      remembered := remembered.push (← `(none))
   let mut statement ← `(EntryMemory $memory $entered ∧ ∀ footprint : List (Reference × Nat),
-    LoopFrame footprint $memory $entered [$kinds,*] [$slotTerms,*] (knownLocals [$results,*]))
+    LoopFrame footprint $memory $entered [$kinds,*] [$slotTerms,*]
+      (knownLocals [$remembered,*]))
   for home in homes.reverse do
     statement ← `(NumericEntryHome $memory $entered $(home.kind) $(home.number)
       $(indexed "home" home.index) ∧ $statement)
@@ -361,7 +393,10 @@ private def elabAllocatingEntry (name : Ident)
   -- Each home lies below the next, as `WritableHomes` orders them, from its allocation.
   let mut writableHomes : Term ← `(WritableHomes.nil _)
   let mut snapshots : Term ← `(LocalSnapshots.knownLocals_nil _ _)
-  for (home, position) in homes.zipIdx.reverse do
+  for index in (List.range slots.size).reverse do
+    let some (home, position) := homeAt index
+      | writableHomes ← `(WritableHomes.skip (by intro _ _ same; cases same) $writableHomes)
+        snapshots ← `(LocalSnapshots.skip $snapshots)
     let fact := entryHomes[position]!
     let fresh ← match position, homes[position - 1]? with
       | _ + 1, some prior => `(NumericEntryHome.before_made
@@ -376,9 +411,6 @@ private def elabAllocatingEntry (name : Ident)
   let checked := mkIdent (name.getId ++ `checked)
   elabCommand (← `(theorem $checked $binders* : $statement := by $steps*))
   elabCommand (← `(#print axioms $checked))
-  let slots ← liftTermElabM <| Term.elabBinders binders fun _ =>
-    withHomeReferences homes.toList do
-      frameSlots (← Term.elabTerm frameApplied (some (mkConst ``Frame)))
   emitSlots name binders slots false
 
 elab_rules : command

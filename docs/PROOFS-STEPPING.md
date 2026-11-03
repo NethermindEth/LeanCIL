@@ -374,7 +374,7 @@ an unrelated context adds nothing to simp:
   [`CheckedSpan.within`](../CIL/Safety/LoopFrames.lean) in the frame's memory;
 - `elementWidth` of a `SpanContents`;
 - for a [`LoopFrame`](../CIL/Safety/LoopFrames.lean) over `knownLocals` of a list, the load of each
-  listed home through `LoopFrame.load`, with `localResult`;
+  remembered home through `LoopFrame.load`, with `localResult`;
 - [`LoopFrame.leave_kept`](../CIL/Safety/LoopFrames.lean) of each `LoopFrame []` with the entry's
   `setup` equation, when the goal is an exit;
 - `numericOfWidth` and `BitVec.ofNat_toNat` when a gathered fact loads at a literal width.

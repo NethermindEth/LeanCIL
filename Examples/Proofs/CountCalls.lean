@@ -33,8 +33,9 @@ private def guard : Nat := instructionLocation countBody fun op =>
   match op with | .brnonzero _ => true | _ => false
 /-- The remaining count and the calls made so far, held by the frame's two locals. -/
 private abbrev State (remaining counted : Reference) :=
-  FrameState [] Memory.empty [.word32, .word32] [.bytes .word32 remaining, .bytes .word32 counted]
-    (W32 × W32) fun values => [.i32 values.1, .i32 values.2]
+  FrameState [] Memory.empty [.word32, .word32] (W32 × W32)
+    (fun _ => [.bytes .word32 remaining, .bytes .word32 counted])
+    fun values => [some (.i32 values.1), some (.i32 values.2)]
 /-- The loop head holds the remaining count on the stack. -/
 private def header (remaining counted : Reference) (state : State remaining counted) : LoopState :=
   ⟨guard, entry.frame remaining counted, [.scalar (.i32 state.values.1)], state.memory⟩

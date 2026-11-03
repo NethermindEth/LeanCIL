@@ -53,7 +53,7 @@ wrapping sum of a `ReadOnlySpan<ulong>` with the invariant `total + remaining.su
 running total lives in a frame home, so its state keeps the `CheckedSpan` suffix in caller memory,
 which the loop tactics move to the current frame memory with `span.within`. Its entry comes from
 `bind_entry ... allocating wellFormed`, and its `FrameState` carries the returned `LoopFrame`
-across each store with `frame.store`; see [loop verification
+across each store with `frame.store` and each slice with `set_local`; see [loop verification
 conditions](PROOFS-STEPPING.md#loop-verification-conditions). Both measure the remaining length,
 prove the loop inside the public theorem through `invoke_loop_returns` or `invoke_loop_results`, and
 cover null empty spans.
@@ -191,13 +191,17 @@ show the frame-entry and remembered-local forms and the rejections.
 Import `CIL.Safety.LoopFrames` to keep the frame facts of a loop out of its invariant.
 `LoopFrame footprint caller current kinds slots known` bundles `Confined footprint caller current`,
 well-formedness, `WritableHomes` for the frame's locals and their `LocalSnapshots`, with
-`knownLocals values` naming the remembered values. `FrameState` pairs the loop's values with a
-memory and its `LoopFrame`, so an invariant over a `FrameState` states only the property.
-`bind_entry ... allocating` proves the frame of every numeric and aggregate home it allocates, for
-any footprint, with each home remembered as its initializer: `slots` lists the homes in local
-order, and `load`, `store` and `knownLocals` index that list, which is the frame's local list only
-when every local has a home. `LoopFrame.ofEntry`, `WritableHomes.entry` and `LocalSnapshots.entry`
-are the lemmas it composes.
+`knownLocals values` naming the remembered values. `kinds`, `slots` and `values` follow the
+frame's local indices: `slots` is the frame's `locals`, a span, reference or other local without a
+byte home is a skipped `WritableHomes` slot and a `none` value, and so the lemmas stated over
+`frame.locals`, such as `LocalSnapshots.store`, apply to the loop frame directly. `FrameState`
+pairs the loop's values with a memory and its `LoopFrame`, with the slots and remembered values as
+functions of the loop's values, so an invariant over a `FrameState` states only the property.
+`bind_entry ... allocating` proves the frame of the entered locals and parameter homes for any
+footprint, with each home remembered as its initializer and every other local as `none`.
+`LoopFrame.ofEntry`, `WritableHomes.entry` and `skip`, and `LocalSnapshots.entry` and `skip` are
+the lemmas it composes. `set_local` keeps the frame when a local without a byte home is assigned,
+as the span fold slices its span; it rejects a home and a remembered local.
 
 Each lemma proves the frame after one step. `load` and `store` read and write a remembered local;
 `write` and `write_element` keep the frame across a write inside the footprint; `after_confined`

@@ -21,7 +21,8 @@ bind_entry entry (initial : Memory) (base : Reference) (v : W64) (n : W32)
 
 /-- The index, held by the frame's only local, with the frame facts for the words written. -/
 private abbrev State (initial : Memory) (base home : Reference) (n : W32) :=
-  FrameState [(base, 8 * n.toNat)] initial [.word32] [.bytes .word32 home] W32 fun k => [.i32 k]
+  FrameState [(base, 8 * n.toNat)] initial [.word32] W32 (fun _ => [.bytes .word32 home])
+    fun k => [some (.i32 k)]
 
 private def header (initial : Memory) (base home : Reference) (n : W32)
     (state : State initial base home n) : LoopState :=

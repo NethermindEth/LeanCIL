@@ -7,12 +7,16 @@ import CIL.Safety.FrameMemoryBelow
 Entering a method whose locals are all numeric and `.unmodeled` (no known initial bytes)
 succeeds and gives each local a fresh, writable private home, allocated in increasing
 order above the caller's memory. `WritableHomes` records this without claiming the bytes
-are initialized; consumer proofs use it to set up a frame before the first store.
+are initialized; consumer proofs use it to set up a frame before the first store. It follows the
+frame's local indices: a span, reference or other local without a byte home is skipped in place,
+so the facts hold of `frame.locals` itself.
 -/
 
 namespace CIL.Safety
 
-/-- Typed writable storage, with no assertion that its bytes are initialized. -/
+/-- Typed writable storage, with no assertion that its bytes are initialized: each byte home of
+    `slots` lies at or above `lower` and above every earlier home, and is writable at its kind's
+    width. A slot without a byte home holds no storage and is skipped. -/
 inductive WritableHomes (memory : Memory) :
     Nat → List CIL.LocalKind → List LocalSlot → Prop where
   | nil (lower : Nat) : WritableHomes memory lower [] []
@@ -21,14 +25,20 @@ inductive WritableHomes (memory : Memory) :
       (writable : access memory reference (localWidth kind) 1 true = .ok ())
       (tail : WritableHomes memory (reference.allocation + 1) kinds slots) :
       WritableHomes memory lower (kind :: kinds) (.bytes kind reference :: slots)
+  | skip {lower kinds slots} {kind : CIL.LocalKind} {slot : LocalSlot}
+      (notHome : ∀ stored reference, slot ≠ .bytes stored reference)
+      (tail : WritableHomes memory lower kinds slots) :
+      WritableHomes memory lower (kind :: kinds) (slot :: slots)
 
+/-- Homes above a bound lie above any lower one. -/
 theorem WritableHomes.weaken {memory : Memory} {lower upper : Nat} {kinds slots}
     (homes : WritableHomes memory upper kinds slots) (bound : lower ≤ upper) :
     WritableHomes memory lower kinds slots := by
-  cases homes with
+  induction homes generalizing lower with
   | nil => exact .nil lower
   | cons reference kind fresh writable tail =>
     exact .cons reference kind (Nat.le_trans bound fresh) writable tail
+  | skip notHome _ ih => exact .skip notHome (ih bound)
 
 /-- Making one numeric `.unmodeled` local allocates a single writable home. -/
 theorem make_unknown_local (memory : Memory) (activation : Nat) (kind : CIL.LocalKind)
@@ -79,10 +89,12 @@ theorem make_unknown_locals (memory : Memory) (activation : Nat) (kinds : List C
         ((retained.access reference fresh.2 (localWidth kind) 1 true).trans writable)
         (homes.weaken (Nat.succ_le_of_lt fresh.2))
 
-/-- The slot for each declared local is a writable home of its kind above `lower`. -/
+/-- The slot of each local with a byte home is a writable home of its declared kind above
+    `lower`. -/
 theorem WritableHomes.home_at {memory : Memory} {lower : Nat} {kinds slots}
     (homes : WritableHomes memory lower kinds slots) (index : Nat) (kind : CIL.LocalKind)
-    (specified : kinds[index]? = some kind) :
+    (specified : kinds[index]? = some kind)
+    (hasHome : ∃ stored reference, slots[index]? = some (.bytes stored reference)) :
     ∃ reference, slots[index]? = some (.bytes kind reference) ∧ lower ≤ reference.allocation ∧
       access memory reference (localWidth kind) 1 true = .ok () := by
   induction homes generalizing index kind with
@@ -94,9 +106,16 @@ theorem WritableHomes.home_at {memory : Memory} {lower : Nat} {kinds slots}
       subst kind
       exact ⟨reference, rfl, fresh, writable⟩
     | succ index =>
-      obtain ⟨r, slot, bound, accessOK⟩ := ih index kind (by simpa using specified)
+      obtain ⟨r, slot, bound, accessOK⟩ :=
+        ih index kind (by simpa using specified) (by simpa using hasHome)
       exact ⟨r, by simpa using slot,
         Nat.le_trans fresh (Nat.le_trans (Nat.le_succ _) bound), accessOK⟩
+  | skip notHome tail ih =>
+    cases index with
+    | zero =>
+      obtain ⟨stored, reference, slot⟩ := hasHome
+      exact absurd (by simpa using slot) (notHome stored reference)
+    | succ index => simpa using ih index kind (by simpa using specified) (by simpa using hasHome)
 
 /-- Entering a method with only numeric `.unmodeled` locals and no vector arguments,
     parameter homes or opaque vector locals succeeds, keeps the caller's memory below
@@ -141,6 +160,10 @@ theorem WritableHomes.home_bound {memory : Memory} {lower : Nat} {kinds slots}
       simpa only [same] using fresh
     | succ index =>
       exact Nat.le_trans fresh (Nat.le_trans (Nat.le_succ _) (ih index (by simpa using found)))
+  | skip notHome tail ih =>
+    cases index with
+    | zero => exact absurd (by simpa using found) (notHome kind reference)
+    | succ index => exact ih index (by simpa using found)
 
 /-- Separate private homes cannot overwrite each other's initialized bytes. -/
 theorem WritableHomes.ordered {memory : Memory} {lower : Nat} {kinds slots}
@@ -162,7 +185,16 @@ theorem WritableHomes.ordered {memory : Memory} {lower : Nat} {kinds slots}
         rw [same] at bound
         exact bound
       | succ i => exact ih i j (by omega) (by simpa using first) (by simpa using second)
+  | skip notHome tail ih =>
+    cases j with
+    | zero => omega
+    | succ j =>
+      cases i with
+      | zero => exact absurd (by simpa using first) (notHome leftKind left)
+      | succ i => exact ih i j (by omega) (by simpa using first) (by simpa using second)
 
+#print axioms WritableHomes.weaken
+#print axioms WritableHomes.home_bound
 #print axioms make_unknown_local
 #print axioms make_unknown_locals
 #print axioms WritableHomes.home_at

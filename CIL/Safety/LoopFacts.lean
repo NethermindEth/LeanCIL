@@ -167,11 +167,14 @@ def confinedToNone (type : Lean.Expr) : Bool :=
   type.isAppOfArity `CIL.Safety.LoopFrame 6 && (type.getArg! 0).isAppOfArity ``List.nil 1
 
 open Lean Meta in
-/-- The number of elements of `list` up to reduction, counting cons cells until one is not. -/
-partial def listLength (list : Lean.Expr) : MetaM Nat := do
+/-- The positions of the `some` entries of `list` up to reduction, reading cons cells until one is
+    not: the locals a `knownLocals` list remembers. -/
+partial def rememberedIndices (list : Lean.Expr) (index : Nat := 0) : MetaM (Array Nat) := do
   let cell ← whnf list
-  if cell.isAppOfArity ``List.cons 3 then return (← listLength cell.appArg!) + 1
-  return 0
+  unless cell.isAppOfArity ``List.cons 3 do return #[]
+  let rest ← rememberedIndices cell.appArg! (index + 1)
+  if (← whnf (cell.getArg! 1)).isAppOfArity ``Option.some 2 then return #[index] ++ rest
+  return rest
 
 open Lean Meta in
 /-- Whether `type` mentions `numericOfWidth` at a literal width, which unfolds to one value. -/
@@ -188,7 +191,7 @@ open Lean Elab Tactic Meta in
       values are `[]` or a cons, and `(span.within wellFormed frame).facts` for each
       `frame : LoopFrame []` from its memory with that memory's `wellFormed` in context;
     * for `contents : SpanContents`, `contents.elementWidth`;
-    * for `frame : LoopFrame` over `knownLocals` of a list, the load of each listed local, with
+    * for `frame : LoopFrame` over `knownLocals` of a list, the load of each remembered local, with
       `localResult`;
     * for `frame : LoopFrame []` and the entry's `setup` equation, `frame.leave_kept setup` when
       the goal can return;
@@ -278,7 +281,7 @@ def gatherLoopFacts (facts : Array Term) : TacticM (Array Term) := withMainConte
       let subject := variables #[arguments[2]!, arguments[4]!]
       let remembered := arguments[5]!.consumeMData
       if remembered.isAppOfArity `CIL.Safety.knownLocals 1 then
-        for index in [:← listLength remembered.appArg!] do
+        for index in ← rememberedIndices remembered.appArg! do
           candidates := candidates.push (`homeLoad,
             applied `LoopFrame.load #[fact, ⟨Syntax.mkNumLit (toString index)⟩], subject, #[],
             #[])

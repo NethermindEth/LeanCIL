@@ -84,8 +84,9 @@ memory, each home satisfies
 at or above `memory.nextIdentity` and below `entered.nextIdentity`, holding its initializer's
 bytes, writable), [`EntryMemory`](../CIL/Safety/NumericLocals.lean) `memory entered` holds
 (caller memory kept below its watermark, identities grown, well formed), and for every footprint
-the entered memory starts a [`LoopFrame`](../CIL/Safety/LoopFrames.lean) over all the homes in
-order, each remembered as its initializer. A proof opens it with
+the entered memory starts a [`LoopFrame`](../CIL/Safety/LoopFrames.lean) over the frame's
+locals, each home remembered as its initializer and every other local as `none`. A proof opens it
+with
 `obtain ⟨home, entered, setup, numeric, entryMemory, frame⟩ := entry.checked ...`; this form
 generates no
 `entry.result`, `entry.memory` or `homeN` abbreviations, while span and root slots still get
