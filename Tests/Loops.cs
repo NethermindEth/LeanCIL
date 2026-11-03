@@ -89,7 +89,7 @@ foreach (var variant in new[] { "Nops", "Reordered", "Stuttering" })
 const string CountCalls = "Loops::CountCalls(uint)";
 var countProof = File.ReadAllText(At("Examples/Proofs/CountCalls.lean"));
 var helperStart = countProof.IndexOf("theorem decrement_holds", StringComparison.Ordinal);
-var helperEnd = helperStart < 0 ? -1 : countProof.IndexOf("private def frame", helperStart, StringComparison.Ordinal);
+var helperEnd = helperStart < 0 ? -1 : countProof.IndexOf("bind_entry entry", helperStart, StringComparison.Ordinal);
 var loopStart = countProof.IndexOf("theorem terminates", StringComparison.Ordinal);
 if (helperEnd < 0 || loopStart < helperEnd)
     throw new InvalidDataException("Examples/Proofs/CountCalls.lean has no helper section before its loop proof");
@@ -161,8 +161,10 @@ int LineOf(string text) => countProof.IndexOf(text, StringComparison.Ordinal) is
     : throw new InvalidDataException("Examples/Proofs/CountCalls.lean has no line containing: " + text);
 foreach (var (name, original, mutated, obligation) in new[]
 {
-    ("CountCallsCountMeasure", "(fun s => s.1.toNat)", "(fun s => s.2.1.toNat)", "show (x - 1).toNat < x.toNat"),
-    ("CountCallsProductInvariant", "state.2.1 + state.1 = value", "state.2.1 + state.1 = value + state.2.1 * state.1",
+    ("CountCallsCountMeasure", "(fun s => s.values.1.toNat)",
+        "(fun s => s.values.2.toNat)", "show (x - 1).toNat < x.toNat"),
+    ("CountCallsProductInvariant", "state.values.2 + state.values.1 = value",
+        "state.values.2 + state.values.1 = value + state.values.2 * state.values.1",
         "show count + 1 + (x - 1) = value")
 })
 {
@@ -296,11 +298,13 @@ Console.WriteLine("PASS unchanged outcome loop proof rejects a helper that raise
 // but is not preserved, and a different specified exception each fail at exactly that obligation.
 foreach (var (name, original, mutated, obligation) in new[]
 {
-    ("CountUntilCountMeasure", "(fun s => s.1.toNat)", "(fun s => s.2.1.toNat)", "show (x - 1).toNat < x.toNat"),
-    ("CountUntilLimitInvariant", "state.2.1.toNat ≤ limit.toNat\n", "state.2.1.toNat ≤ limit.toNat - state.1.toNat\n",
+    ("CountUntilCountMeasure", "(fun s => s.values.1.toNat)",
+        "(fun s => s.values.2.toNat)", "show (x - 1).toNat < x.toNat"),
+    ("CountUntilLimitInvariant", "state.values.2.toNat ≤ limit.toNat\n",
+        "state.values.2.toNat ≤ limit.toNat - state.values.1.toNat\n",
         "show (count + 1).toNat ≤ limit.toNat"),
-    ("CountUntilWrongException", "then some \"System.InvalidOperationException\" else none\n\nprivate def frame",
-        "then some \"System.ArgumentException\" else none\n\nprivate def frame", "· simp only [bumpContract, ite_true]")
+    ("CountUntilWrongException", "then some \"System.InvalidOperationException\" else none\n\nbind_entry entry",
+        "then some \"System.ArgumentException\" else none\n\nbind_entry entry", "· simp only [bumpContract, ite_true]")
 })
 {
     if (untilProof.Split(original).Length != 2) throw new InvalidDataException("Ambiguous proof mutation: " + original);
@@ -387,7 +391,7 @@ if (!rejected || File.Exists(Path.Combine(wrong, "verified.json")))
     throw new InvalidOperationException("Incorrect countdown passed or retained a verification report");
 Console.WriteLine("PASS unchanged universal contract rejects incorrect loop");
 
-var constantMeasure = File.ReadAllText(contract).Replace("(fun s => s.1.toNat)", "(fun _ => 0)",
+var constantMeasure = File.ReadAllText(contract).Replace("(fun s => s.values.toNat)", "(fun _ => 0)",
     StringComparison.Ordinal);
 if (constantMeasure == File.ReadAllText(contract))
     throw new InvalidOperationException("Countdown measure mutation did not match");
