@@ -129,6 +129,9 @@ static partial class Documentation
         IEnumerable<DocumentPage> pages)
     {
         var sources = new Dictionary<string, DeclarationSource>(StringComparer.Ordinal);
+        var anchors = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        HashSet<string> AnchorsOf(string path) =>
+            anchors.TryGetValue(path, out var known) ? known : anchors[path] = Anchors(path);
         var commands = Commands(root);
         List<string> failures = [];
         int references = 0, blocks = 0;
@@ -145,7 +148,9 @@ static partial class Documentation
                 {
                     references++;
                     var target = match.Groups["target"].Value;
-                    if (LinkedPath(root, page.Path, target) is not { } linked) continue;
+                    var hash = target.IndexOf('#');
+                    var linked = hash == 0 ? page.Path : LinkedPath(root, page.Path, target);
+                    if (linked is null) continue;
                     var relative = Relative(root, linked);
                     if (!linked.StartsWith(root, StringComparison.Ordinal) ||
                         !File.Exists(linked) && !Directory.Exists(linked))
@@ -155,6 +160,9 @@ static partial class Documentation
                     }
                     if (userFacing && Unshipped(relative))
                         failures.Add($"{at}: `{target}`: {UnshippedReason}");
+                    if (hash >= 0 && linked.EndsWith(".md", StringComparison.Ordinal) && File.Exists(linked) &&
+                        !AnchorsOf(linked).Contains(target[(hash + 1)..]))
+                        failures.Add($"{at}: `{target}` names no heading of {relative}");
                     if (Patterns.NamedLink().Match(match.Value) is { Success: true } named &&
                         Path.GetExtension(linked) is ".lean" or ".cs" && File.Exists(linked))
                     {
@@ -202,6 +210,23 @@ static partial class Documentation
     const string NotCommand = "is not a LeanCIL command, tactic or attribute";
 
     static string ModulePath(string module) => $"{module.Replace('.', '/')}.lean";
+
+    // GitHub's heading anchors: lowercased, punctuation dropped, spaces to hyphens, repeats numbered.
+    static HashSet<string> Anchors(string path)
+    {
+        var anchors = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var line in File.ReadLines(path))
+        {
+            if (Patterns.ExplicitAnchor().Match(line) is { Success: true } named)
+                anchors.Add(named.Groups["name"].Value);
+            if (Patterns.Heading().Match(line) is not { Success: true } heading) continue;
+            var slug = Patterns.AnchorPunctuation().Replace(heading.Groups["text"].Value.Trim().ToLowerInvariant(), "")
+                .Replace(' ', '-');
+            var unique = slug;
+            for (var repeat = 1; !anchors.Add(unique); repeat++) unique = $"{slug}-{repeat}";
+        }
+        return anchors;
+    }
 
     // Tests/ holds the repository's regression fixtures; the tool ships CIL/ and Examples/ stays readable.
     static bool Unshipped(string relative) => relative.StartsWith("Tests/", StringComparison.Ordinal);
@@ -488,6 +513,15 @@ static partial class Patterns
 
     [GeneratedRegex(@"\[(?:[^\[\]]|\[[^\]]*\])*\]\((?<target>[^)\s]+)\)")]
     internal static partial Regex AnyLink();
+
+    [GeneratedRegex(@"^#{1,6}[ \t]+(?<text>.*?)[ \t#]*$")]
+    internal static partial Regex Heading();
+
+    [GeneratedRegex(@"[^\w\- ]")]
+    internal static partial Regex AnchorPunctuation();
+
+    [GeneratedRegex(@"<a\s+(?:id|name)=""(?<name>[^""]+)""")]
+    internal static partial Regex ExplicitAnchor();
 
     [GeneratedRegex(@"\A\[`(?<label>[^`\]]+)`\]\(")]
     internal static partial Regex NamedLink();

@@ -53,6 +53,14 @@ try
     Fails("an excerpt of a test", "```lean excerpt Tests/Fixture.lean\ndef helper : Nat := 0\n```", Unshipped);
     Fails("a missing repository path", "`CIL/Missing.lean` defines it.", "does not exist");
     Fails("a missing link target", "See [missing](Missing.md).", "does not exist");
+    Fails("a renamed heading", "## Kept heading\n\nSee [it](#removed-heading).", "names no heading");
+    Passes("anchors of headings with code and repeats", """
+        ## The `Kept` heading, again
+
+        ## The `Kept` heading, again
+
+        See [first](#the-kept-heading-again) and [second](Case.md#the-kept-heading-again-1).
+        """);
     Fails("a renamed declaration", "[`CIL.removed`](../CIL/Sample.lean)", "no Lean declaration");
     Fails("a line citation", "[sample](../CIL/Sample.lean#L2)", "cites a source line");
     Fails("an unknown audience", "<!-- audience: everyone -->", "audience must be");

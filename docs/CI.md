@@ -79,7 +79,8 @@ A stale document misleads as much as a missing one, so the README, `docs/` and `
 checked in two places. Selection first runs `dotnet run --file scripts/CheckDocReferences.cs`,
 which needs no Lean, so every PR runs it:
 
-- Every relative link, and every link to a file of this repository on GitHub, must resolve, and
+- Every relative link, and every link to a file of this repository on GitHub, must resolve, an
+  anchor into a Markdown file must name one of its headings, and
   every backticked repository path (`CIL/...`, `Examples/...`, `scripts/...`, `docs/...`) must
   exist. Build outputs under `bin/` or `obj/` are not paths.
 - A link whose text is one code span and whose target is a `.lean` or `.cs` file must name
