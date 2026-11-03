@@ -246,6 +246,16 @@ internal static class MetadataValidation
             : (reference, module);
     }
 
+    // A child in another pinned module shares the root's active set, so a cycle through modules is rejected.
+    static AggregateInfo Nested(TypeReference type, ModuleDefinition module, string architecture,
+        HashSet<string> active, Dictionary<string, AggregateInfo> layouts, Dictionary<string, int> typeCounts)
+    {
+        var (home, owner) = Home(type, module);
+        return owner == module ? AggregateLayout(type, module, architecture, active, layouts, typeCounts)
+            : AggregateLayout(home, owner, architecture, active, layouts,
+                owner.GetTypes().CountBy(definition => definition.FullName, StringComparer.Ordinal).ToDictionary());
+    }
+
     static AggregateInfo AggregateLayout(TypeReference reference, ModuleDefinition module, string architecture,
         HashSet<string> active, Dictionary<string, AggregateInfo> layouts, Dictionary<string, int> typeCounts)
     {
@@ -268,8 +278,7 @@ internal static class MetadataValidation
             foreach (var argument in instance.GenericArguments)
             {
                 if (IsAggregate(argument, module))
-                    _ = Home(argument, module).Module != module ? AggregateLayout(argument, module, architecture)
-                        : AggregateLayout(argument, module, architecture, active, layouts, typeCounts);
+                    _ = Nested(argument, module, architecture, active, layouts, typeCounts);
                 else
                 {
                     RuntimeModels.ValidateTypeIdentity(argument, module, architecture);
@@ -296,9 +305,7 @@ internal static class MetadataValidation
             int? vectorWidth = VectorFieldWidth(fieldType);
             if (fieldType is TypeSpecification && vectorWidth is null && !aggregate)
                 throw new InvalidDataException($"Unsupported field type: {fieldType.FullName}");
-            var nested = aggregate
-                ? Home(fieldType, module).Module != module ? AggregateLayout(fieldType, module, architecture)
-                    : AggregateLayout(fieldType, module, architecture, active, layouts, typeCounts) : null;
+            var nested = aggregate ? Nested(fieldType, module, architecture, active, layouts, typeCounts) : null;
             int width = nested?.Size ?? vectorWidth ?? PrimitiveWidth(fieldType);
             if (vectorWidth == 32 && pack > 16 && architecture is not ("x64" or "arm64"))
                 throw new InvalidDataException($"Unsupported vector field packing: {field.FullName}");
