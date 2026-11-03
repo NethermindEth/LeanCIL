@@ -184,3 +184,25 @@ is kept. A frame from
 and 8 without sign extension; signed narrow and vector fields use the byte-level lemmas.
 [Struct](../Examples/Proofs/Struct.lean) and [Tests/AggregateFields](../Tests/AggregateFields.lean)
 show the frame-entry and remembered-local forms and the rejections.
+
+## Carry frame facts through a loop
+
+Import `CIL.Safety.LoopFrames` to keep the frame facts of a loop out of its invariant.
+`LoopFrame footprint caller current kinds slots known` bundles `Confined footprint caller current`,
+well-formedness, `WritableHomes` for the frame's locals and their `LocalSnapshots`, with
+`knownLocals values` naming the remembered values. `FrameState` pairs the loop's values with a
+memory and its `LoopFrame`, so an invariant over a `FrameState` states only the property.
+`LoopFrame.ofEntry` builds the frame from `EntryMemory`, and a `NumericEntryHome` from
+`bind_entry ... allocating` supplies `homes` and `snapshots` for a one-local frame.
+
+Each lemma proves the frame after one step. `load` and `store` read and write a remembered local;
+`write` and `write_element` keep the frame across a write inside the footprint; `after_confined`
+keeps it across a call whose footprint entries lie inside it; `form` and `leave` give the caller
+reference's `form` fact and the confined, `MemoryBelow` result on return. A local whose address is
+taken can change through that reference, so `write` and `after_confined` require every written
+allocation to be older than the frame (`allocation < caller.nextIdentity`); a write or callee that
+reaches a home does not elaborate and the snapshot stays the author's obligation.
+`add_int_element`, `int_lt` and `toNat_succ` step a signed `int` index below `2^31` to an element
+offset and its compare. The [buffer fill proof](../Examples/Proofs/FillWords.lean) uses them with
+the invariant `Filled ... ∧ k ≤ n`; [Tests/LoopFrames](../Tests/LoopFrames.lean) shows the
+rejections.
