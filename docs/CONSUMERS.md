@@ -55,10 +55,13 @@ command's meaning.
 A proof with no `lakefile.toml` or `lakefile.lean` in its directory or above it
 needs no setup. The command generates a package at
 `.work/leancil/package-<key>` beside the proof, holding a copy of the proof and a
-`leancil` dependency pinned to a local Git repository of the tool's bundled
-framework sources (kept under the library cache directory, `LEANCIL_CACHE_DIR`
-or the local application data `LeanCIL/libraries`), and runs `lake update` there
-without network access. It then opens that package as above. The default output
+copy of the tool's bundled framework sources in `.lake/packages/leancil`, which
+the package requires by `path`. It runs `lake update` there without network
+access and creates no Git repository or commit, so Git settings such as
+`commit.gpgsign` do not apply. It then opens that package as above. A tool with
+different framework sources regenerates the package. Verification accepts only
+dependencies pinned by a Git revision, so the generated package cannot be passed
+to `--proof-root`. The default output
 is `.work/leancil/<request-key>` beside the proof. Each run refreshes the copy, so
 an edited source proof makes an existing workspace stale like any consumer
 source change. Copy the edited workspace proof back to the original file and

@@ -89,15 +89,23 @@ partial class Program
     const string ScratchPackageName = "leancil_scratch";
 
     /// <summary>
-    /// A Lake package at `package` holding a copy of `proof` and requiring the bundled framework, pinned
-    /// like any consumer dependency; returns the package and the copy. The copy is refreshed on each call.
+    /// A Lake package at `package` holding a copy of `proof` and requiring, by path, a copy of the bundled
+    /// framework sources inside it; returns the package and the proof copy, which is refreshed on each call.
+    /// Nothing is fetched or committed, so the user's git configuration plays no part.
     /// </summary>
     static (string Root, string Proof) ScratchProofPackage(string proof, string package)
     {
-        var framework = FrameworkRepository();
-        var revision = Run(["git", "rev-parse", "HEAD"], framework).Trim();
-        var lakefile = $"name = \"{ScratchPackageName}\"\n\n[[require]]\nname = \"leancil\"\ngit = " +
-            JsonSerializer.Serialize(framework.Replace('\\', '/')) + $"\nrev = \"{revision}\"\n";
+        var sources = LibrarySources(CommonInputs());
+        // The key regenerates the package when the tool's framework changes.
+        var lakefile = $$"""
+            name = "{{ScratchPackageName}}"
+            # Bundled LeanCIL framework {{ContentKey(JsonSerializer.Serialize(sources))[..20]}}
+
+            [[require]]
+            name = "leancil"
+            path = "{{BundledFrameworkDirectory}}"
+
+            """;
         var lakefilePath = Path.Combine(package, "lakefile.toml");
         var copy = Path.Combine(package, Path.GetFileName(proof));
         if (!File.Exists(lakefilePath) || File.ReadAllText(lakefilePath) != lakefile ||
@@ -106,68 +114,34 @@ partial class Program
             var staging = package + ".staging-" + Guid.NewGuid().ToString("N");
             try
             {
-                Directory.CreateDirectory(staging);
+                foreach (var name in sources.Keys)
+                {
+                    var destination = Path.Combine(staging, BundledFrameworkDirectory, name);
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                    File.Copy(At(name), destination);
+                }
                 File.WriteAllText(Path.Combine(staging, "lakefile.toml"), lakefile);
                 File.Copy(At("lean-toolchain"), Path.Combine(staging, "lean-toolchain"));
                 Run(["lake", "update"], staging);
-                if (Directory.Exists(package)) DeleteGitTree(package);
+                if (Directory.Exists(package)) Directory.Delete(package, true);
                 Directory.Move(staging, package);
             }
             finally
             {
-                if (Directory.Exists(staging)) DeleteGitTree(staging);
+                if (Directory.Exists(staging)) Directory.Delete(staging, true);
             }
         }
         if (!File.Exists(copy) || Sha(copy) != Sha(proof)) File.Copy(proof, copy, true);
         return (package, copy);
     }
 
-    // Git marks object files read-only, which Windows refuses to delete.
-    static void DeleteGitTree(string directory)
-    {
-        foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
-            File.SetAttributes(file, FileAttributes.Normal);
-        Directory.Delete(directory, true);
-    }
-
-    /// <summary>
-    /// A local git repository of exactly the bundled framework sources, shared by scratch packages and
-    /// keyed by their content, so a scratch dependency needs no network and matches the verifier.
-    /// </summary>
-    static string FrameworkRepository()
-    {
-        var sources = LibrarySources(CommonInputs());
-        var cacheRoot = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR") ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LeanCIL", "libraries");
-        var repository = Path.Combine(cacheRoot, "framework-" + ContentKey(JsonSerializer.Serialize(sources))[..20]);
-        if (Directory.Exists(Path.Combine(repository, ".git"))) return repository;
-        var staging = repository + ".staging-" + Guid.NewGuid().ToString("N");
-        try
-        {
-            foreach (var name in sources.Keys)
-            {
-                var destination = Path.Combine(staging, name);
-                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                File.Copy(At(name), destination);
-            }
-            string[] git = ["git", "-c", "core.autocrlf=false", "-c", "user.name=leancil",
-                "-c", "user.email=leancil@localhost"];
-            Run([.. git, "init", "--quiet"], staging);
-            Run([.. git, "add", "--all"], staging);
-            Run([.. git, "commit", "--quiet", "-m", "LeanCIL framework sources"], staging);
-            try { Directory.Move(staging, repository); }
-            catch (IOException) when (Directory.Exists(Path.Combine(repository, ".git"))) { }
-        }
-        finally
-        {
-            if (Directory.Exists(staging)) DeleteGitTree(staging);
-        }
-        return repository;
-    }
+    /// <summary>True for a workspace opened through a generated scratch package.</summary>
+    static bool Scratch(WorkspaceSettings settings) => settings.SourceProof != settings.Proof;
 
     static SortedDictionary<string, string> WorkspaceInputs(WorkspaceSettings settings)
     {
-        var inputs = ConsumerSnapshot(settings.ProofRoot, settings.Output);
+        var inputs = ConsumerSnapshot(settings.ProofRoot, settings.Output,
+            ConsumerDependencies(settings.ProofRoot, Scratch(settings)));
         foreach (var (path, hash) in LibrarySources(CommonInputs()))
             inputs["framework:" + path] = hash;
         inputs["assembly:" + settings.Assembly] = Sha(settings.Assembly);
@@ -201,8 +175,9 @@ partial class Program
                 if (!File.Exists(path) || Sha(path) != hash)
                     throw new InvalidDataException("Editor workspace generated or support source changed: " + relative + ". Select a new --output directory.");
             }
-            var sources = ConsumerSources(settings.Output).Concat(ConsumerDependencies(settings.Output)
-                .SelectMany(dependency => ConsumerSources(dependency.Directory)));
+            var sources = ConsumerSources(settings.Output).Concat(
+                ConsumerDependencies(settings.Output, Scratch(settings))
+                    .SelectMany(dependency => ConsumerSources(dependency.Directory)));
             foreach (var path in sources)
             {
                 var relative = Path.GetRelativePath(settings.Output, path).Replace('\\', '/');
@@ -222,7 +197,7 @@ partial class Program
         {
             Run([.. Extract("extract", settings.Assembly, settings.AssemblyIdentity, settings.Method, extraction, settings.Profile),
                 .. settings.InitializedTypes.SelectMany(type => new[] { "--assume-initialized", type })]);
-            var dependencies = ConsumerDependencies(settings.ProofRoot);
+            var dependencies = ConsumerDependencies(settings.ProofRoot, Scratch(settings));
             var symbols = File.Exists(Path.Combine(extraction, "Symbols.lean")) ? Sha(Path.Combine(extraction, "Symbols.lean")) : null;
             var prepared = PrepareConsumerSession(staging, settings.ProofRoot, dependencies, inputs, null,
                 ExtractionIdentity.Read(extraction), [(WorkspaceProof, settings.Proof, extraction)], symbols,
@@ -240,11 +215,11 @@ partial class Program
                 "Edit " + WorkspaceProof + ".lean. Open this directory with the Lean language server, or run `lake build +" + WorkspaceProof + ":olean`.\n\n" +
                 "Re-run the workspace command before checking after source changes. Changed inputs or generated sources cause an explicit rejection. " +
                 "Keep proof edits and choose a new output directory to refresh.\n\n" +
-                (settings.SourceProof == settings.Proof
-                    ? "Copy only the edited proof source back to the original consumer proof path, then run ordinary " +
-                        "`leancil verify` with the original package as --proof-root. "
-                    : "Copy only the edited proof source back to " + settings.SourceProof + ", then run ordinary " +
-                        "`leancil verify` on an extraction with --proof and that file. ") +
+                (Scratch(settings)
+                    ? "Copy only the edited proof source back to " + settings.SourceProof + ", then run ordinary " +
+                        "`leancil verify` on an extraction with --proof and that file. "
+                    : "Copy only the edited proof source back to the original consumer proof path, then run " +
+                        "ordinary `leancil verify` with the original package as --proof-root. ") +
                 "Do not copy workspace caches, generated modules, manifests or build artifacts into the source package.\n");
             Directory.CreateDirectory(Path.GetDirectoryName(settings.Output)!);
             Directory.Move(staging, settings.Output);
@@ -261,7 +236,7 @@ partial class Program
         Console.WriteLine("Editor workspace: " + CliPaths.Display(settings.Output));
         Console.WriteLine("  Proof: " + WorkspaceProof + ".lean");
         Console.WriteLine("  Source proof: " + CliPaths.Display(settings.SourceProof));
-        if (settings.SourceProof != settings.Proof)
+        if (Scratch(settings))
             Console.WriteLine("  Generated package (no lakefile above the proof): " +
                 CliPaths.Display(settings.ProofRoot));
         Console.WriteLine("  Editor checking is not a certificate. Run ordinary leancil verify for certification.");

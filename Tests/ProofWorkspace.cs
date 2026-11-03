@@ -94,6 +94,11 @@ Console.WriteLine("PASS consumer workspace, transitive symbols import, editable 
 // A scratch proof has no Lake package above it; the temp directory keeps the checkout's lakefile out of reach.
 var standalone = Path.Combine(Path.GetTempPath(), "leancil-standalone-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(standalone);
+// Opening must not depend on the author's git setup: with signing required and no signer, any commit fails.
+var signingConfig = Path.Combine(standalone, "signing.gitconfig");
+File.WriteAllText(signingConfig, "[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = leancil-missing-signer\n");
+var globalConfig = Environment.GetEnvironmentVariable("GIT_CONFIG_GLOBAL");
+Environment.SetEnvironmentVariable("GIT_CONFIG_GLOBAL", signingConfig);
 try
 {
     var scratchProof = Path.Combine(standalone, "Scratch.lean");
@@ -111,8 +116,18 @@ try
     if (!opened.Contains("Generated package (no lakefile above the proof)", StringComparison.Ordinal) ||
         Sha(scratchEditor) != Sha(scratchProof) || File.Exists(Path.Combine(standalone, "lakefile.toml")))
         throw new InvalidOperationException("A standalone proof did not open in a generated package: " + opened);
+    if (Directory.EnumerateDirectories(standalone, ".git", SearchOption.AllDirectories).Any())
+        throw new InvalidOperationException("A standalone workspace created a git repository.");
     Run(["lake", "build", "+LeanCILProofWorkspace:olean"], scratchWorkspace);
     Run(open);
+    // The framework copy is required by path, which certification never accepts in place of a pinned revision.
+    var scratchPackage = Directory.EnumerateDirectories(Path.Combine(standalone, ".work", "leancil"), "package-*")
+        .Single();
+    var unpinned = Execute([.. cli, "verify", output, "--proof", Path.Combine(scratchPackage, "Scratch.lean"),
+        "--proof-root", scratchPackage, "--theorem", "scratch"]);
+    if (unpinned.Code == 0 || !unpinned.Output.Contains("must be git packages pinned", StringComparison.Ordinal))
+        throw new InvalidOperationException("Verification accepted an unpinned framework dependency: " +
+            unpinned.Output);
     File.AppendAllText(scratchProof, "\n-- edited\n");
     var stale = Execute(open);
     if (stale.Code == 0 || !stale.Output.Contains("Stale editor workspace", StringComparison.Ordinal))
@@ -121,12 +136,11 @@ try
 }
 finally
 {
-    // Git marks pack files read-only, which Windows refuses to delete.
-    foreach (var file in Directory.EnumerateFiles(standalone, "*", SearchOption.AllDirectories))
-        File.SetAttributes(file, FileAttributes.Normal);
+    Environment.SetEnvironmentVariable("GIT_CONFIG_GLOBAL", globalConfig);
     Directory.Delete(standalone, true);
 }
-Console.WriteLine("PASS standalone proof opens in a generated package without setup and rejects stale reuse");
+Console.WriteLine("PASS standalone proof opens in a generated package without setup, git commits or a pinned " +
+    "framework and rejects stale reuse");
 
 void Reject(string[] arguments, string marker)
 {
