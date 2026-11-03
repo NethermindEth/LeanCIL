@@ -97,6 +97,12 @@ var loopLine = countProof[..loopStart].Count(c => c == '\n') + 1;
 verification.Verify(assembly, "Examples", CountCalls, At("Examples/Proofs/CountCalls.lean"), Path.Combine(root, "CountCalls"));
 Console.WriteLine("PASS counted loop returns its iteration count for every uint through the helper contract");
 
+// A struct local's fields are read and stored as named values, and the call crossed by its
+// contract, with no step facts passed to the loop tactics.
+verification.Verify(assembly, "Examples", "Loops::TallyTwice(uint)", At("Examples/Proofs/TallyTwice.lean"),
+    Path.Combine(root, "TallyTwice"));
+Console.WriteLine("PASS struct-local loop doubles every uint through the helper contract");
+
 string CountVariant(string name, Action<MethodDefinition, MethodDefinition> mutate)
 {
     var output = Path.Combine(root, name);
