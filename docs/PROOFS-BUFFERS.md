@@ -204,5 +204,5 @@ allocation to be older than the frame (`allocation < caller.nextIdentity`); a wr
 reaches a home does not elaborate and the snapshot stays the author's obligation.
 `add_int_element`, `int_lt` and `toNat_succ` step a signed `int` index below `2^31` to an element
 offset and its compare. The [buffer fill proof](../Examples/Proofs/FillWords.lean) uses them with
-the invariant `Filled ... ∧ k ≤ n`; [Tests/LoopFrames](../Tests/LoopFrames.lean) shows the
+an invariant of only `Filled` and `k <= n`; [Tests/LoopFrames](../Tests/LoopFrames.lean) shows the
 rejections.
