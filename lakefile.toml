@@ -59,6 +59,9 @@ name = "Tests.LocalSnapshotSteps"
 name = "Tests.AggregateFields"
 
 [[lean_lib]]
+name = "Tests.LoopFrames"
+
+[[lean_lib]]
 name = "Tests.ContractConsequence"
 
 [[lean_lib]]

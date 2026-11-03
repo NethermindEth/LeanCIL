@@ -265,7 +265,7 @@ Run(["lake", "build", "Tests.Semantics", "Tests.Automation", "Tests.MethodBindin
     "Tests.OutcomeEmbedding", "Tests.InterpreterEquations", "Tests.MethodIdentity", "Tests.StructuralLabels",
     "Tests.DebugNames", "Tests.MethodContract", "Tests.ContractCalls", "Tests.ConstructContract", "Tests.OutcomeContract",
     "Tests.RuntimeExceptions", "Tests.Imports", "Tests.LoopOutcome", "Tests.ConfinedFootprints",
-    "Tests.LocalSnapshots", "Tests.LocalSnapshotSteps", "Tests.AggregateFields",
+    "Tests.LocalSnapshots", "Tests.LocalSnapshotSteps", "Tests.AggregateFields", "Tests.LoopFrames",
     "Tests.ContractConsequence", "Tests.InvocationCertificates",
     "Tests.ValidCallTransport", "Tests.BufferContents", "Tests.Linking",
     "Tests.ModularStatics", "Tests.StepFlow", "Tests.RegionRun", "Tests.StoreFacts",
@@ -273,7 +273,7 @@ Run(["lake", "build", "Tests.Semantics", "Tests.Automation", "Tests.MethodBindin
     verification.CheckoutPackage(), streamOutput: true, progress: "Building semantics and automation tests");
 Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, "
     + "debug name, method contract, constructor contract, outcome contract, contract import, loop outcome, footprint, "
-    + "local snapshot, struct field view, contract consequence, invocation certificate, call transport, "
+    + "local snapshot, struct field view, loop frame, contract consequence, invocation certificate, call transport, "
     + "buffer contents, linking, "
     + "store fact, profile contract, instruction equation, code placement and SIMD lane tests");
 
