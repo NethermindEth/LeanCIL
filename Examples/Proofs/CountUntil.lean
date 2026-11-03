@@ -36,7 +36,7 @@ theorem bump_holds : bumpContract.Holds Extracted.program bump := by
 def untilRaises (value limit : W32) : Option String :=
   if limit.toNat < value.toNat then some "System.InvalidOperationException" else none
 
-bind_entry entry (value limit : W32) := Extracted.method0
+bind_entry entry (value limit : W32) := untilBody
   with [.scalar (.i32 value), .scalar (.i32 limit)] from Memory.empty
   allocating Memory.empty_wellFormed
 private def guard : Nat := instructionLocation untilBody fun op =>

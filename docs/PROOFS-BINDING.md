@@ -86,7 +86,8 @@ bytes, writable), [`EntryMemory`](../CIL/Safety/NumericLocals.lean) `memory ente
 (caller memory kept below its watermark, identities grown, well formed), and for every footprint
 the entered memory starts a [`LoopFrame`](../CIL/Safety/LoopFrames.lean) over all the homes in
 order, each remembered as its initializer. A proof opens it with
-`obtain ⟨home, entered, setup, numeric, entryMemory, frame⟩ := entry.checked ...`; this form generates no
+`obtain ⟨home, entered, setup, numeric, entryMemory, frame⟩ := entry.checked ...`; this form
+generates no
 `entry.result`, `entry.memory` or `homeN` abbreviations, while span and root slots still get
 `slotN`, `loadN` and `storeN`. `entry.setup` is the setup equation given each home's allocation
 equation `madeN` and `kept`; it is the proof that derived the frame, so `entry.checked` reuses it
@@ -99,7 +100,9 @@ without a checked initializer, a vector argument home or a numeric parameter hom
 [SpanSum](../Examples/Proofs/SpanSum.lean), [FillWords](../Examples/Proofs/FillWords.lean),
 [Struct](../Examples/Proofs/Struct.lean), [Countdown](../Examples/Proofs/Countdown.lean),
 [CountCalls](../Examples/Proofs/CountCalls.lean) and [CountUntil](../Examples/Proofs/CountUntil.lean)
-enter this way, the last three from `Memory.empty` with `Memory.empty_wellFormed`.
+enter this way, the last three from `Memory.empty` with `Memory.empty_wellFormed`. The body may
+be a `bind_method` name: setup unfolds each definition that only names another constant, down to
+the extracted method.
 
 `bind_entry` gives `entry.frame` and, for the `simplifying` form, `entry.result` and
 `entry.memory` the `cil_loop_unfold` simp attribute in the current scope, and `bind_cutpoint` gives

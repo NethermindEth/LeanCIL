@@ -41,10 +41,29 @@ syntax "bind_entry " ident bracketedBinder* " := " term:max
   " with " term:max " from " term:max (" using " term:max)? (" allocating " term:max)?
   (" simplifying " "[" term,* "]")? : command
 
-/-- Normalize frame setup with explicit storage facts, retaining checked allocation semantics. -/
+/-- The constant `body` names and each constant its definition names in turn, so frame setup
+    unfolds a bound method such as a `bind_method` body down to the extracted literal; a body
+    that is not a name has none. -/
+private def bodyDefinitions (body : Term) : CommandElabM (Array Term) := do
+  unless body.raw.isIdent do return #[]
+  let mut name ← liftCoreM <| realizeGlobalConstNoOverload body
+  let mut found : Array Term := #[body]
+  repeat
+    match (← getEnv).find? name with
+    | some (.defnInfo info) =>
+      match info.value with
+      | .const next _ =>
+        found := found.push ⟨(mkCIdent next).raw⟩
+        name := next
+      | _ => break
+    | _ => break
+  return found
+
+/-- Normalize frame setup with explicit storage facts, retaining checked allocation semantics;
+    `definitions` unfold the method body. -/
 private def entrySimplifier {m : Type → Type} [Monad m] [MonadQuotation m]
-    (body : TSyntax `term) (facts : Array (TSyntax `term)) : m (TSyntax `tactic) := do
-  let facts := (if body.raw.isIdent then #[body] else #[]) ++ facts
+    (definitions facts : Array (TSyntax `term)) : m (TSyntax `tactic) := do
+  let facts := definitions ++ facts
   `(tactic| (simp [enterFrame, makeSelectedLocals, makeLocals,
     makeArgumentHomes, makeParameterHomes, makeLocal, storeLocal, Value.hasUnspecified,
     checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure,
@@ -53,9 +72,9 @@ private def entrySimplifier {m : Type → Type} [Monad m] [MonadQuotation m]
 /-- Rewrite each numeric local by its allocation equation before `makeLocal` is unfolded, then
     normalize the rest of frame setup; an unmatched equation leaves allocation unresolved. -/
 private def allocationSimplifier {m : Type → Type} [Monad m] [MonadQuotation m]
-    (body : TSyntax `term) (facts made : Array (TSyntax `term)) : m (TSyntax `tactic) := do
-  let unfolded := (if body.raw.isIdent then #[body] else #[]) ++ facts ++ made
-  let normalizer ← entrySimplifier body (facts ++ made)
+    (definitions facts made : Array (TSyntax `term)) : m (TSyntax `tactic) := do
+  let unfolded := definitions ++ facts ++ made
+  let normalizer ← entrySimplifier definitions (facts ++ made)
   `(tactic| ((simp only [enterFrame, makeSelectedLocals, makeLocals, List.isEmpty, ite_true,
     Bind.bind, Except.bind, Pure.pure, Except.pure, $[$unfolded:term],*]) <;> $normalizer:tactic))
 
@@ -229,6 +248,7 @@ private def elabAllocatingEntry (name : Ident)
     (binders : TSyntaxArray ``Lean.Parser.Term.bracketedBinder)
     (body args memory wellFormed : Term) (facts : Array Term) : CommandElabM Unit := do
   let indexed (base : String) (index : Nat) := mkIdent (Name.mkSimple s!"{base}{index}")
+  let definitions ← bodyDefinitions body
   let kept := mkIdent `kept
   let setupName := (← getCurrNamespace) ++ name.getId ++ `setup
   let (homes, frameBinders, frameParameters, frameValue, parameters) ←
@@ -254,7 +274,7 @@ private def elabAllocatingEntry (name : Ident)
           saved.restore
           if accepted then transported := transported.push candidate
         let made := homes.map fun home => indexed "made" home.index
-        let normalizer ← allocationSimplifier body (facts ++ transported) made
+        let normalizer ← allocationSimplifier definitions (facts ++ transported) made
         let outcome ← Term.elabTermEnsuringType (← `(enterFrame $body $args $memory)) none
         Term.synthesizeSyntheticMVarsNoPostponing
         let pair ← Meta.mkFreshExprMVar (← Term.elabTerm (← `(Frame × Memory)) none)
@@ -348,7 +368,7 @@ private def elabAllocatingEntry (name : Ident)
           $(indexed "numeric" prior.index) $(indexed "made" home.index))
       | _, _ => `(($fact).fresh)
     writableHomes ← `(WritableHomes.entry $fact $fresh $writableHomes)
-    snapshots ← `(LocalSnapshots.entry $fact rfl rfl $snapshots)
+    snapshots ← `(LocalSnapshots.entry (stored := $(home.value)) $fact rfl rfl $snapshots)
   witnesses := witnesses.push progress
   witnesses := witnesses.push (← `(fun footprint =>
     LoopFrame.ofEntry footprint $progress $writableHomes $snapshots))
@@ -370,7 +390,7 @@ elab_rules : command
         (facts.map (·.getElems) |>.getD #[])
     if witness.isSome && facts.isSome then
       throwError "Choose a success witness or simplifying facts, not both"
-    let normalizer ← entrySimplifier body (facts.map (·.getElems) |>.getD #[])
+    let normalizer ← entrySimplifier (← bodyDefinitions body) (facts.map (·.getElems) |>.getD #[])
     let (parameters, computed) ← liftTermElabM <| Term.elabBinders binders fun variables => do
       let outcome ← Term.elabTermEnsuringType (← `(enterFrame $body $args $memory)) none
       Term.synthesizeSyntheticMVarsNoPostponing

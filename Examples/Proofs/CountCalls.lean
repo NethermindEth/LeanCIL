@@ -27,7 +27,7 @@ theorem decrement_holds : decrementContract.Holds Extracted.program decrement :=
   refine ⟨8, m, _, ?_, Confined.refl _ m, _, rfl, rfl⟩
   cil_checked_steps
 
-bind_entry entry (x : W32) := Extracted.method0 with [.scalar (.i32 x)] from Memory.empty
+bind_entry entry (x : W32) := countBody with [.scalar (.i32 x)] from Memory.empty
   allocating Memory.empty_wellFormed
 private def guard : Nat := instructionLocation countBody fun op =>
   match op with | .brnonzero _ => true | _ => false
