@@ -241,9 +241,8 @@ Verified: ExampleProof.addTwo_holds
   lines are shown; `proof-messages.txt` in the artifact directory holds the full text, and the
   report names it when lines are omitted. Messages are stored with the cached proof, so a run that
   reuses the proof shows them as well. They are printed on failure too, after the diagnostic, so
-  query commands work while a proof is unfinished. Under `--proof-root`, Lake records messages only
-  for a module that checks, so when proof checking itself fails they appear in the Lake output
-  under `Details:` instead.
+  query commands work while a proof is unfinished, including under `--proof-root` when proof
+  checking itself fails.
 
 Release packages can include a certified-library descriptor for the current runtime. On the first
 cache miss, the CLI downloads that exact release asset from the official LeanCIL GitHub repository.

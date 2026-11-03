@@ -15,7 +15,7 @@ internal static partial class LeanDiagnostics
     [GeneratedRegex(@"^(?:\u2716|\u26A0|\u2139|\u2714) \[\d+/\d+\] \S+ (?<module>\S+)")]
     private static partial Regex Job();
 
-    [GeneratedRegex(@"^(?:error|warning|info|trace): ")]
+    [GeneratedRegex(@"^(?<level>error|warning|info|trace): (?<message>.*)$")]
     private static partial Regex Entry();
 
     [GeneratedRegex(@"^error: (?:(?<location>.+?\.lean:\d+:\d+): )?(?<message>.*)$")]
@@ -60,6 +60,21 @@ internal static partial class LeanDiagnostics
             result.Add(new(module, location, block));
         }
         return result;
+    }
+
+    /// <summary>Each `level: message` entry Lake logged, with the lines its message continues on.</summary>
+    internal static IEnumerable<(string Level, string Message)> Entries(string output)
+    {
+        var lines = output.Replace("\r\n", "\n").Split('\n');
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var entry = Entry().Match(lines[i]);
+            if (!entry.Success) continue;
+            var block = new List<string> { entry.Groups["message"].Value };
+            while (i + 1 < lines.Length && !IsBoundary(lines[i + 1])) block.Add(lines[++i]);
+            while (block.Count > 1 && block[^1].Trim().Length == 0) block.RemoveAt(block.Count - 1);
+            yield return (entry.Groups["level"].Value, string.Join('\n', block));
+        }
     }
 
     static bool IsBoundary(string line) => Job().IsMatch(line) || Entry().IsMatch(line) || LeanEntry().IsMatch(line) ||

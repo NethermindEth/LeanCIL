@@ -236,6 +236,19 @@ foreach (var (options, cached) in new[]
 }
 Console.WriteLine("PASS CLI prints the readable statement, subject and Lean messages for --proof-root proofs");
 
+// Query output is what an author reads while a proof is unfinished, so a failed check must still show it.
+var unfinishedProof = Path.Combine(consumerPackage, "Proofs", "Unfinished.lean");
+File.WriteAllText(unfinishedProof, "import Extracted\n#eval 1000 + 234\n" +
+    "theorem ExampleProof.correctness : False := by\n  exact trivial\n");
+var unfinished = Execute([.. cli, "verify", consumerOutput, "--proof", unfinishedProof,
+    "--proof-root", consumerPackage]);
+var unfinishedText = unfinished.Stderr.ReplaceLineEndings("\n");
+if (unfinished.Code != 1 || !unfinishedText.Contains("Stage: proof checking") ||
+    !unfinishedText.Contains("  Lean messages (1):\n") ||
+    !unfinishedText.Contains("Unfinished.lean:2:0: info: 1234\n"))
+    throw new InvalidOperationException("A failed --proof-root check hid the proof's messages: " + unfinished.Output);
+Console.WriteLine("PASS CLI shows Lean messages when a --proof-root proof fails to check");
+
 // Consumers pin the framework from this report, so it must name the commit the tool was built from.
 var version = Execute([.. cli, "--version"]);
 var head = Execute(["git", "-C", Root, "rev-parse", "HEAD"]).Stdout.Trim();

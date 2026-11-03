@@ -1364,6 +1364,13 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return outcome.Report!;
     }
 
+    /// <summary>
+    /// The non-error messages of `source` in Lake's printed build output, which logs each message of a
+    /// module that failed to check as `level: file:line:column: text`, with `file` relative to `package`.
+    /// </summary>
+    static ProofMessage[] LakeOutputMessages(string output, string package, string source) =>
+        SourceMessages(LeanDiagnostics.Entries(output), package, source);
+
     // Capture all artifact names, including unknown parts used by module discovery.
     static SortedDictionary<string, string> ConsumerArtifactSnapshot(string directory) =>
         HashFiles(Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
@@ -1905,6 +1912,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 var i = members[k];
                 if (!built[k])
                 {
+                    // Display only: a module that failed to check has no trace, so its messages come from the log.
+                    outcomes[i].Messages = LakeOutputMessages(build.Output, session,
+                        Path.Combine(session, names[k] + ".lean"));
                     if (requests[i].ExpectRejection) rejecting.Add(i);
                     else if (members.Length == 1) Fail([i], buildFailure!);
                     else

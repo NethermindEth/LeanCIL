@@ -2101,8 +2101,6 @@ partial class Program : IDisposable
     /// </summary>
     static ProofMessage[] LakeTraceMessages(string trace, string package, string source)
     {
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        var messages = new List<ProofMessage>();
         JsonElement record;
         // Display only: an unreadable trace shows no messages rather than failing verification.
         try { record = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(trace)); }
@@ -2110,16 +2108,24 @@ partial class Program : IDisposable
         if (record.ValueKind != JsonValueKind.Object || !record.TryGetProperty("log", out var log) ||
             log.ValueKind != JsonValueKind.Array)
             return [];
-        foreach (var entry in log.EnumerateArray())
+        var entries = log.EnumerateArray()
+            .Where(entry => entry.ValueKind == JsonValueKind.Object &&
+                entry.TryGetProperty("level", out var level) && level.ValueKind == JsonValueKind.String &&
+                entry.TryGetProperty("message", out var text) && text.ValueKind == JsonValueKind.String)
+            .Select(entry => (entry.GetProperty("level").GetString()!, entry.GetProperty("message").GetString()!));
+        return SourceMessages(entries, package, source);
+    }
+
+    /// <summary>The informational and warning entries located in `source`, in their logged order.</summary>
+    static ProofMessage[] SourceMessages(IEnumerable<(string Level, string Message)> entries, string package,
+        string source)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var messages = new List<ProofMessage>();
+        foreach (var (level, text) in entries)
         {
-            if (entry.ValueKind != JsonValueKind.Object || !entry.TryGetProperty("level", out var level) ||
-                !entry.TryGetProperty("message", out var text) || text.ValueKind != JsonValueKind.String)
-                continue;
-            var label = level.ValueKind == JsonValueKind.String ? level.GetString() switch
-            {
-                "info" => "info", "warning" => "warning", _ => null
-            } : null;
-            var located = LocatedMessage().Match(text.GetString()!);
+            var label = level switch { "info" => "info", "warning" => "warning", _ => null };
+            var located = LocatedMessage().Match(text);
             if (label is null || !located.Success ||
                 !Path.GetFullPath(located.Groups["file"].Value, package).Equals(source, comparison))
                 continue;
