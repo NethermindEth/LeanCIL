@@ -94,13 +94,28 @@ reference.
 
 A referenced assembly's static methods are admitted as direct `call` and `ldftn` targets, and its
 structs as layouts and [constrained receivers](OPCODES.md#constrained-struct-calls), including
-static flag getters that fold a branch. Its generic methods and generic structs, static field
-loads, `calli` and types with static constructors are rejected. A closed entry type argument may
-name one of its structs as `Namespace.Type, Assembly`, by simple or full assembly name:
+static flag getters that fold a branch. Its generic methods and the static methods of its generic
+classes are specialized from its own metadata, so their bodies stay attributed to its pin. A
+closed generic struct such as `Lib.Pair<ulong>` is laid out from the assembly that defines it,
+and its type arguments may be value types of the selected assembly or of any pinned reference, in
+either direction. Reference-type arguments, reference fields and layout cycles are rejected.
+Static field loads, `calli` and types with static constructors in a referenced assembly are
+rejected. A closed entry type argument may name one of its structs as `Namespace.Type, Assembly`,
+by simple or full assembly name:
 
 ```sh
 leancil extract App.dll 'App.Application::Size(ulong)' artifacts/Size --reference Lib.dll   --type-argument 'Lib.Cell, Lib'
 ```
+
+A static method of a generic class can be the entry. `--type-argument` lists the method's own
+type arguments first, then the declaring type's, outer type parameters before inner ones as
+ECMA-335 numbers them; the selector names the open definition:
+
+```sh
+leancil extract App.dll 'App.Algo`1::Run(ulong)' artifacts/Run --type-argument App.Gas
+```
+
+Instance methods of generic classes remain rejected as entries and as callees.
 
 ## Report extraction blockers
 
