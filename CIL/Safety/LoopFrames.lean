@@ -9,7 +9,8 @@ A loop over a frame entered from symbolic caller memory needs the same bookkeepi
 cutpoint: caller storage changes only inside the method's footprint, the memory stays well
 formed, each local home stays writable and the locals hold the values the state names.
 `LoopFrame` is that conjunction, and `FrameState` carries it in the loop state, so an invariant
-states only the loop's property.
+states only the loop's property. `bind_entry ... allocating` proves the entered frame's
+`LoopFrame` from `LoopFrame.ofEntry`, `WritableHomes.entry` and `LocalSnapshots.entry`.
 
 Each lemma proves the frame facts after one kind of step from the semantics of that step: a
 local store (`LoopFrame.store`), a write to caller storage inside the footprint
@@ -73,35 +74,57 @@ theorem WritableHomes.writable_at {memory : Memory} {lower : Nat} {kinds slots}
       exact writable
     | succ index => exact tail (by simpa using slot)
 
-/-- The single numeric home of a frame entry is its writable homes. -/
-theorem NumericEntryHome.homes {caller current : Memory} {kind : CIL.LocalKind} {number : Nat}
-    {home : Reference} (holds : NumericEntryHome caller current kind number home) :
-    WritableHomes current caller.nextIdentity [kind] [.bytes kind home] :=
-  .cons home kind holds.fresh holds.writable (.nil _)
+/-- A numeric entry home lies below every home frame entry allocates after it. -/
+theorem NumericEntryHome.before_made {caller current result : Memory} {kind later : CIL.LocalKind}
+    {number activation : Nat} {home next : Reference} {value : CIL.Value}
+    (holds : NumericEntryHome caller current kind number home)
+    (made : makeLocal activation later value current =
+      .ok (.bytes later next, [next.allocation], result)) :
+    home.allocation + 1 ≤ next.allocation :=
+  Nat.le_trans holds.bounded ((makeLocal_fresh _ _ _ _ _ _ _ made).2 next.allocation (by simp)).1
 
-/-- The numeric home of a frame entry lists the value its number encodes. -/
-theorem NumericEntryHome.snapshots {caller current : Memory} {kind : CIL.LocalKind}
-    {number : Nat} {home : Reference} (holds : NumericEntryHome caller current kind number home)
-    (value : CIL.Value) (fits : localNumber kind value = .ok number) :
-    LocalSnapshots current [.bytes kind home] (knownLocals [localResult kind value]) := by
-  intro index remembered specified
+/-- A numeric entry home heads the writable homes allocated after it. -/
+theorem WritableHomes.entry {caller current : Memory} {lower number : Nat}
+    {kind : CIL.LocalKind} {home : Reference} {kinds slots}
+    (holds : NumericEntryHome caller current kind number home) (fresh : lower ≤ home.allocation)
+    (tail : WritableHomes current (home.allocation + 1) kinds slots) :
+    WritableHomes current lower (kind :: kinds) (.bytes kind home :: slots) :=
+  .cons home kind fresh holds.writable tail
+
+/-- An empty value list remembers no local. -/
+theorem LocalSnapshots.knownLocals_nil (memory : Memory) (slots : List LocalSlot) :
+    LocalSnapshots memory slots (knownLocals []) := by
+  intro index value listed
+  simp [knownLocals] at listed
+
+/-- A numeric entry home holding its initializer `stored`, which loads as `value`, heads the
+    snapshots of the homes after it. -/
+theorem LocalSnapshots.entry {caller current : Memory} {kind : CIL.LocalKind} {number : Nat}
+    {home : Reference} {stored value : CIL.Value} {slots : List LocalSlot}
+    {values : List CIL.Value} (holds : NumericEntryHome caller current kind number home)
+    (fits : localNumber kind stored = .ok number) (result : localResult kind stored = value)
+    (tail : LocalSnapshots current slots (knownLocals values)) :
+    LocalSnapshots current (.bytes kind home :: slots) (knownLocals (value :: values)) := by
+  intro index remembered listed
   cases index with
   | zero =>
-    exact ⟨kind, home, value, number, rfl, fits, by simpa [knownLocals] using specified,
-      holds.loaded⟩
-  | succ index => simp [knownLocals] at specified
+    exact ⟨kind, home, stored, number, rfl, fits,
+      by simpa [knownLocals, result] using listed, holds.loaded⟩
+  | succ index => simpa using tail index remembered (by simpa [knownLocals] using listed)
 
 #print axioms rememberLocal_knownLocals
-#print axioms NumericEntryHome.snapshots
 #print axioms WritableHomes.after_write
 #print axioms WritableHomes.after_confined
 #print axioms WritableHomes.writable_at
-#print axioms NumericEntryHome.homes
+#print axioms NumericEntryHome.before_made
+#print axioms WritableHomes.entry
+#print axioms LocalSnapshots.knownLocals_nil
+#print axioms LocalSnapshots.entry
 
 /-- The frame part of a loop invariant at memory `current` of a frame entered from `caller`:
     caller storage changed only inside `footprint`, the memory is well formed, every home of
     `slots` lies above the caller's memory and stays writable, and the locals of `known` hold
-    their values. -/
+    their values. `slots` and `known` index the frame's homes, not every local of the frame. -/
 structure LoopFrame (footprint : List (Reference × Nat)) (caller current : Memory)
     (kinds : List CIL.LocalKind) (slots : List LocalSlot) (known : Nat → Option CIL.Value) :
     Prop where
