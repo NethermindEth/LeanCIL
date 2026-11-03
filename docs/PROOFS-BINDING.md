@@ -136,7 +136,7 @@ bind_cutpoint cutpoint (frame : Frame) := Extracted.method0 at inner.latch match
 ```
 
 Structural loop occurrences are ordered by head index. Out-of-range locations and wrong instruction
-shapes are rejected. The explicit-location form also accepts binders for symbolic frames, and
+shapes are rejected. Both forms accept binders for symbolic frames, and
 `with frame, stack, memory` fixes the stack and memory too, so the generated state is the loop
 head itself, such as the guard stack `[.scalar (.i32 (BitVec.ofNat 32 state.view.length))]` of a
 span loop, with no separate header definition.

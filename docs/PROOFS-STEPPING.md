@@ -298,13 +298,34 @@ tried before cleanup rewrites past it. Supply an invariant and decreasing measur
 termination theorem; these tactics do not infer termination. See the [countdown
 proof](../Examples/Proofs/Countdown.lean).
 
+The loop tactics step one fetched instruction at a time, simplifying the stack with the `drop`,
+`take`, `reverse` and append lemmas after each step. When one cannot go on it fails instead of
+leaving a goal, and the message names the pc:
+
+- `cannot step pc N (op) at memory M` shows the step and what is left of it after the step
+  equations and gathered facts; this is usually a store or load at a memory with no `LoopFrame`
+  or step equation in scope;
+- `pc N is a call (op); cross it with cil_loop_call` stops `cil_loop_steps` and `cil_loop_finish`
+  at a call;
+- `target state not matched at pc N` names the frame, stack or memory that differs when the path
+  reaches the target's pc in another state, in the reached form and the target's;
+- an undecided pc asks for a fact deciding the branch condition.
+
 A loop body that calls a helper composes through the helper's `MethodContract`
 ([LoopContract](../CIL/Safety/LoopContract.lean)). `LoopSegment` fixes one cost for every
 continuation budget, which a contract's existential fuel cannot supply, so
 `loop_terminates_induction` asks each iteration for `LoopTerminates` at its own state while assuming
-it at every invariant state of smaller measure. Step to the call with `cil_loop_advance [facts]`,
-apply the contract with `cil_loop_call holds input at site [facts]` (`loop_terminates_call`, or
-`loop_terminates_call_formed` for `WellFormed` and the static world), re-establish the invariant
+it at every invariant state of smaller measure.
+[`invoke_loop_induction`](../CIL/Safety/LoopContract.lean) joins it with frame entry: from the
+lookup, checked arguments, `setup`, the configuration, invariant, measure, first state and checked
+path to it, its one goal is that iteration, and its result is the `∃ fuel final, invoke ... =
+.ok (final, values) ∧ kept final` of `invoke_loop_results`. `CIL.Safety.LoopScaffold` imports
+it. Step to the call with `cil_loop_advance [facts]`, which stops at a call or return and fails
+as `cil_loop_steps` does on anything else, and apply the contract with `cil_loop_call holds input
+at site [facts]` (`loop_terminates_call`, or `loop_terminates_call_formed` for `WellFormed` and
+the static world). Both gather facts as the other loop tactics do, so the list is optional;
+without `at site` the call is the fetched instruction, and a goal not at a call fails naming its
+pc and instruction. Re-establish the invariant
 from `Returns` and `Confined` in the continuation, reach the next head with `cil_loop_steps`, and
 close with `loop_reaches_terminates` and the assumption. The [counted-loop
 proof](../Examples/Proofs/CountCalls.lean) never unfolds the helper or names its fuel; the loop
@@ -364,8 +385,13 @@ an unrelated context adds nothing to simp:
   with that memory's `WellFormed` in context, the facts of
   [`CheckedSpan.within`](../CIL/Safety/LoopFrames.lean) in the frame's memory;
 - `elementWidth` of a `SpanContents`;
-- for a [`LoopFrame`](../CIL/Safety/LoopFrames.lean) over `knownLocals` of a list, the load of each
-  remembered home through `LoopFrame.load`, with `localResult`;
+- for a [`LoopFrame`](../CIL/Safety/LoopFrames.lean) over `knownLocals` of a list, and for the
+  entry frame `bind_entry ... allocating` proves for every footprint, the `form` of each home
+  (`LoopFrame.form_home`), so `ldloca` steps, and the load of each remembered home through
+  `LoopFrame.load`, with `localResult`;
+- for a struct local remembered as `.aggregate (layout.encode fields)`, the read of each field by
+  value (`ldloc` then `ldfld`, [`step_fieldAt_encode`](../CIL/Safety/FieldValues.lean)) and by
+  address (`LoopFrame.load_field`), as that field's value;
 - [`LoopFrame.leave_kept`](../CIL/Safety/LoopFrames.lean) of each `LoopFrame []` with the entry's
   `setup` equation, when the goal is an exit;
 - `numericOfWidth` and `BitVec.ofNat_toNat` when a gathered fact loads at a literal width.
@@ -376,7 +402,8 @@ about. [`loopGoalScope`](../CIL/Safety/LoopFacts.lean) starts from the goal's st
 postcondition, and from the method arguments only when the program reads one with `.arg`; the
 right side of each kept equation then extends it. A derived fact must be about variables reached
 without an equation. A fact about a memory that no state of the goal holds and no kept equation
-produces, such as the caller's memory once the frame has stored, is dropped. Derived facts are added as hygienic
+produces, such as the caller's memory once the frame has stored, is dropped; a frame fact at a
+memory that a kept store or call produces is kept. Derived facts are added as hygienic
 hypotheses, so the stepper looks them up by name instead of elaborating a proof term at every
 step, and a statement already gathered is not added again. `SpanSum` names no fact but its
 invariant equation.

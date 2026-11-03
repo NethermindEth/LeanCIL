@@ -211,3 +211,23 @@ no invariant beyond the frame, and [CountCalls](../Examples/Proofs/CountCalls.le
 [CountUntil](../Examples/Proofs/CountUntil.lean) keep two locals across a helper call with
 `after_confined`. The [proof regressions](VALIDATION-PROOFS.md#proof-automation) list the
 rejected writes, including one through the second home of a generated two-local frame.
+
+## Track a struct local by its fields in a loop
+
+`CIL.Safety.LoopFrameFields`, which `CIL.Safety.LoopScaffold` imports, remembers a struct local
+in a `LoopFrame` as `.aggregate (layout.encode fields)`: `AggregateLayout.encode` writes each
+field's value at its offset in zeroed bytes, so a state names the fields rather than the bytes.
+`LoopFrame.zero_aggregate frame index layout fields` steps `initobj` through the home's address
+to a frame remembering `fields`, when they encode as zeros. `store_field frame index valid
+fieldIndex value` steps `stfld` to a frame remembering `fields.set fieldIndex value`, and
+`load_field` steps `ldfld` through the address to the field's value. Each returns the step
+equation, the frame after it and `MemoryBelow`; the slot, the field and its width are checked by
+`rfl` and `decide`, so a field outside the layout or a value of another width does not elaborate.
+A by-value read, `ldloc` then `ldfld`, loads the struct and reads the field with
+`step_fieldAt_encode`.
+
+The loop tactics gather the field reads and the home's `form` from each frame in scope, so a proof
+states only the zeroing and the stores, which fix the next memory. A field reads back as the value
+stored, such as `.i32 (count + 1)`, with no `toNat` round trip through bytes.
+[TallyTwice](../Examples/Proofs/TallyTwice.lean) counts and sums in a struct across a helper call
+this way, passing no facts to the loop tactics.
