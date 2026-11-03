@@ -37,7 +37,7 @@ foreach (var (mutation, marker) in new[]
 {
     ("branch", "Branch bypasses constrained receiver prefix"),
     ("switch", "Branch bypasses constrained receiver prefix"),
-    ("reference", "concrete same-assembly struct"),
+    ("reference", "concrete struct of an extracted assembly"),
     ("missing", "no unique struct implementation"),
     ("ordinary", "adjacent concrete constrained receiver"),
     ("open-direct-owner", "Unsupported constrained method owner")

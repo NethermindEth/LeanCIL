@@ -6,6 +6,7 @@ import CIL.Extraction.VectorInitialization
 import CIL.Extraction.StaticValues
 import CIL.Extraction.ImportLayouts
 import CIL.Extraction.Constrained
+import CIL.Extraction.Assemblies
 import Std.Data.TreeMap.Lemmas
 
 /-!
@@ -13,9 +14,10 @@ import Std.Data.TreeMap.Lemmas
 
 The top of the extraction checks. `TranslationValid` conjoins the kernel-checked validators
 for one extraction: layouts recompute, every emitted method passes the per-method validators
-against its evidence record, static values are reproduced by their initializers, and import
-layouts agree. It is not a simulation proof for every raw opcode; general instruction
-translation and metadata decoding stay trusted, as `docs/SOUNDNESS.md` describes.
+against its evidence record, static values are reproduced by their initializers, import
+layouts agree, and every body is owned by the pinned assembly its evidence names. It is not a
+simulation proof for every raw opcode; general instruction translation and metadata decoding
+stay trusted, as `docs/SOUNDNESS.md` describes.
 
 Generated modules prove each method's evidence separately and assemble it with
 `translation_of_methods`, so no validator is reduced twice.
@@ -34,6 +36,13 @@ structure MethodEvidence where
   scalarStates : ScalarCertificate
   layoutUses : List LayoutUse
   dispatchTypes : List DispatchType := []
+  /-- The pinned assembly whose metadata supplied this body. -/
+  assembly : AssemblyPin := {}
+
+/-- The pin and owner identity of every original and closed body, for attribution checks. -/
+def bodyOwners (evidence : List MethodEvidence) : List (AssemblyPin × String) :=
+  evidence.flatMap fun item =>
+    [(item.assembly, item.original.owner), (item.assembly, item.closed.owner)]
 
 /-- The program's method table, as the call check sees it. -/
 def specializationTable (evidence : List MethodEvidence) : List SpecializedMethod :=
@@ -206,12 +215,13 @@ def TranslationValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayo
     MethodAtValid rawLayouts layouts evidence imports evidence[index] program[index.val]?) ∧
   StaticValuesValid program ∧
   ImportedLayoutsValid imports (programArchitecture program) ∧
-  ImportedLocalLayoutsBound rawLayouts layouts imports
+  ImportedLocalLayoutsBound rawLayouts layouts imports ∧
+  AttributionValid (bodyOwners evidence) = true
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (evidence : List MethodEvidence) (imports : List ImportSlot) (program : Program) :
     Decidable (TranslationValid rawLayouts layouts evidence imports program) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- Compose independently checked methods without reducing their validators again. -/
 inductive MethodsChecked (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
@@ -230,6 +240,7 @@ theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array Co
     (statics : StaticValuesValid program)
     (importLayouts : ImportedLayoutsValid imports (programArchitecture program))
     (importedLocals : ImportedLocalLayoutsBound rawLayouts layouts imports)
+    (attribution : AttributionValid (bodyOwners evidence) = true)
     (methods : MethodsChecked rawLayouts layouts evidence imports evidence program) :
     TranslationValid rawLayouts layouts evidence imports program := by
   have compose {items code}
@@ -245,7 +256,7 @@ theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array Co
       | zero => exact valid
       | succ index => exact ih.2 ⟨index, Nat.lt_of_succ_lt_succ bound⟩
   exact ⟨layout, (compose methods).1, (compose methods).2, statics, importLayouts,
-    importedLocals⟩
+    importedLocals, attribution⟩
 
 /-- Each method of a valid translation passes every per-method validator. -/
 theorem translation_method_checked {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}

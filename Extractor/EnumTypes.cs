@@ -44,7 +44,7 @@ internal static class EnumTypes
     }
 
     internal static bool IsEnum(TypeReference type) => type is not TypeSpecification &&
-        type.Scope == type.Module && type.Resolve() is { IsEnum: true };
+        PinnedAssemblies.Declares(type, type.Module) && type.Resolve() is { IsEnum: true };
 
     internal static TypeReference Storage(TypeReference reference)
     {

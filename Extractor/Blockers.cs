@@ -10,7 +10,7 @@ namespace Nethermind.LeanCIL;
 // Runs extraction and its validators over explicit method/profile pairs; it never checks a proof.
 internal static class Blockers
 {
-    const string Usage = "Usage: leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] [--assembly 'assembly name or full identity']";
+    const string Usage = "Usage: leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] [--assembly 'assembly name or full identity'] [--reference Lib.dll]...";
     const string Disclaimer = "Admission only: admitted entries are extractable under their profile; nothing here is proved.";
 
     sealed record Site(string Method, int? IlOffset, string? Instruction, string? Source, string Message);
@@ -85,6 +85,7 @@ internal static class Blockers
     internal static int Run(string[] args)
     {
         string? assemblyPath = null, manifestPath = null, outputPath = null, expectedAssembly = null;
+        List<string> referencePaths = [];
         for (var index = 0; index < args.Length; index++)
         {
             switch (args[index])
@@ -92,6 +93,7 @@ internal static class Blockers
                 case "--manifest" when manifestPath is null: manifestPath = Option(args, ref index); break;
                 case "--output" when outputPath is null: outputPath = Option(args, ref index); break;
                 case "--assembly" when expectedAssembly is null: expectedAssembly = Option(args, ref index); break;
+                case "--reference": referencePaths.Add(Path.GetFullPath(Option(args, ref index))); break;
                 case var option when option.StartsWith("--", StringComparison.Ordinal):
                     throw new ArgumentException($"Unknown or duplicate option: {option}\n{Usage}");
                 default:
@@ -108,8 +110,12 @@ internal static class Blockers
         using var manifest = JsonDocument.Parse(File.ReadAllText(manifestPath));
         var root = manifest.RootElement;
         if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("entries", out var entries) || entries.ValueKind != JsonValueKind.Array ||
-            root.EnumerateObject().Any(p => p.Name is not ("entries" or "initializedTypes")))
-            throw new InvalidDataException("Blocker manifest must be an object with an `entries` array and optional `initializedTypes`.");
+            root.EnumerateObject().Any(p => p.Name is not ("entries" or "initializedTypes" or "references")))
+            throw new InvalidDataException("Blocker manifest must be an object with an `entries` array, " +
+                "optional `initializedTypes` and optional `references`.");
+        if (root.TryGetProperty("references", out var listed))
+            referencePaths.AddRange((listed.Deserialize<string[]>() ?? [])
+                .Select(path => Path.GetFullPath(path, manifestDirectory)));
         var initializedTypes = root.TryGetProperty("initializedTypes", out var types)
             ? new SortedSet<string>(types.Deserialize<string[]>() ?? [], StringComparer.Ordinal) : new SortedSet<string>(StringComparer.Ordinal);
 
@@ -168,7 +174,9 @@ internal static class Blockers
             }
 
             // Validation rewrites generic call operands, so every entry gets its own module.
-            using var module = StaticData.ReadModule(assembly);
+            using var pinned = new PinnedAssemblies(assembly, Hash(assembly),
+                referencePaths.Distinct(StringComparer.Ordinal).Select(path => new PinnedAssemblies.Source(path)));
+            var module = pinned.Selected;
             Symbols.Read(module, assemblyPath, out _);
             var blocked = new List<MetadataValidation.Blocked>();
             MethodDefinition[] methods;
@@ -187,8 +195,7 @@ internal static class Blockers
             {
                 try
                 {
-                    using var original = StaticData.ReadModule(assembly);
-                    LeanEmitter.Emit(methods, profile, original);
+                    LeanEmitter.Emit(methods, profile, pinned);
                 }
                 catch (Exception error) { blocked.Add(new(methods[0], null, error, [methods[0]])); }
             }

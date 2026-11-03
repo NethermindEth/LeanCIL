@@ -52,7 +52,8 @@ internal static class MetadataValidation
     }
 
     internal static bool IsAggregate(TypeReference type, ModuleDefinition module) =>
-        (type is not TypeSpecification && type.Scope == module && type.IsValueType && !EnumTypes.IsEnum(type)) ||
+        (type is not TypeSpecification && PinnedAssemblies.Declares(type, module) && type.IsValueType &&
+            !EnumTypes.IsEnum(type)) ||
         ValueTuples.Is(type) || GenericStructs.Is(type);
 
     internal static int PrimitiveWidth(TypeReference type) => EnumTypes.Storage(type).FullName switch
@@ -136,7 +137,8 @@ internal static class MetadataValidation
 
         internal void Require(ModuleDefinition owner, string requestedArchitecture)
         {
-            if (!ReferenceEquals(module, owner) || architecture != requestedArchitecture)
+            if ((!ReferenceEquals(module, owner) && PinnedAssemblies.Active?.Contains(owner) != true) ||
+                architecture != requestedArchitecture)
                 throw new InvalidDataException("Layout context does not match module or architecture.");
         }
 
@@ -183,6 +185,12 @@ internal static class MetadataValidation
                 validated.Add(LayoutEvidence.Identity(reference), external);
                 return external;
             }
+            if (Home(reference, module).Module != module)
+            {
+                var referenced = MetadataValidation.AggregateLayout(reference, module, architecture);
+                validated.Add(LayoutEvidence.Identity(reference), referenced);
+                return referenced;
+            }
             typeCounts ??= module.GetTypes().CountBy(type => type.FullName, StringComparer.Ordinal).ToDictionary();
             // A new root keeps its own recursion-depth check, even if a child was validated earlier.
             var layout = MetadataValidation.AggregateLayout(reference, module, architecture, [],
@@ -210,8 +218,19 @@ internal static class MetadataValidation
     // Managed layout for primitive, reference-free fields on the admitted 64-bit
     // CoreCLR targets. This is not interop marshalling layout (notably for bool).
     internal static AggregateInfo AggregateLayout(TypeReference reference, ModuleDefinition module, string architecture = "scalar")
-        => AggregateLayout(reference, module, architecture, [], new Dictionary<string, AggregateInfo>(),
+    {
+        (reference, module) = Home(reference, module);
+        return AggregateLayout(reference, module, architecture, [], new Dictionary<string, AggregateInfo>(),
             module.GetTypes().CountBy(type => type.FullName, StringComparer.Ordinal).ToDictionary());
+    }
+
+    // A pinned referenced type is laid out from its own module's definition, never the referencing module.
+    static (TypeReference Type, ModuleDefinition Module) Home(TypeReference reference, ModuleDefinition module) =>
+        reference is not TypeSpecification && reference.Scope != module &&
+            PinnedAssemblies.Active?.ModuleOf(reference) is { } home
+            ? (reference.Resolve() ??
+                throw new InvalidDataException("Unresolved pinned aggregate: " + reference.FullName), home)
+            : (reference, module);
 
     static AggregateInfo AggregateLayout(TypeReference reference, ModuleDefinition module, string architecture,
         HashSet<string> active, Dictionary<string, AggregateInfo> layouts, Dictionary<string, int> typeCounts)
@@ -263,7 +282,8 @@ internal static class MetadataValidation
             if (fieldType is TypeSpecification && vectorWidth is null && !aggregate)
                 throw new InvalidDataException($"Unsupported field type: {fieldType.FullName}");
             var nested = aggregate
-                ? AggregateLayout(fieldType, module, architecture, active, layouts, typeCounts) : null;
+                ? Home(fieldType, module).Module != module ? AggregateLayout(fieldType, module, architecture)
+                    : AggregateLayout(fieldType, module, architecture, active, layouts, typeCounts) : null;
             int width = nested?.Size ?? vectorWidth ?? PrimitiveWidth(fieldType);
             if (vectorWidth == 32 && pack > 16 && architecture is not ("x64" or "arm64"))
                 throw new InvalidDataException($"Unsupported vector field packing: {field.FullName}");
@@ -453,12 +473,17 @@ internal static class MetadataValidation
                         item.Method));
             }
         }
+        var selected = module;
+        bool Pinned(ModuleDefinition candidate) =>
+            candidate == selected || PinnedAssemblies.Active?.Contains(candidate) == true;
         void Walk(MethodDefinition method)
         {
+            // A referenced body is validated against its own pinned module's metadata.
+            var module = method.Module;
             state[method] = 3;
             if (!Check(method, null, () =>
             {
-                if (method.Module != module || method.IsStatic == method.HasThis || method.ExplicitThis ||
+                if (!Pinned(method.Module) || method.IsStatic == method.HasThis || method.ExplicitThis ||
                     (!method.IsStatic && !IsAggregate(MethodSpecialization.DeclaringType(method), module)) ||
                     method.CallingConvention != MethodCallingConvention.Default || !method.HasBody ||
                     method.IsPInvokeImpl ||
@@ -470,6 +495,10 @@ internal static class MetadataValidation
                     (method.IsConstructor && method.IsStatic))
                     throw new InvalidDataException($"Unsupported method metadata or static initialisation: {method.FullName}");
                 var owner = method.DeclaringType.FullName;
+                if (method.Module != selected && method.DeclaringType.Methods.Any(m => m.IsConstructor && m.IsStatic))
+                    throw new InvalidDataException(
+                        $"Unsupported static initialisation in a referenced assembly: {method.FullName}\n" +
+                        "  Initialization assumptions name types of the selected assembly only.");
                 if (method.DeclaringType.Methods.Any(m => m.IsConstructor && m.IsStatic) &&
                     !initializedTypes.Contains(owner, StringComparer.Ordinal))
                     throw new InvalidDataException($"Unsupported static initialisation: {method.FullName}\n" +
@@ -526,7 +555,11 @@ internal static class MetadataValidation
                     Enter(ConstrainedCalls.Specialize(resolved, specializations), reference, instruction);
                     return;
                 }
-                if (ImportResolution.External(reference, module))
+                var pinnedCallee = reference.DeclaringType.Scope is AssemblyNameReference &&
+                    PinnedAssemblies.Active?.ModuleOf(reference.DeclaringType) is not null;
+                if (!pinnedCallee && reference.DeclaringType.Scope is AssemblyNameReference calleeScope)
+                    PinnedAssemblies.Active?.RejectMismatch(calleeScope);
+                if (!pinnedCallee && ImportResolution.External(reference, module))
                 {
                     if (imports is null)
                         throw Call("External managed dependency", reference, method, instruction,
@@ -562,7 +595,7 @@ internal static class MetadataValidation
                         reference.ExplicitThis ? "Explicit this is not supported" : $"Calling convention: {reference.CallingConvention}");
                 MethodDefinition callee = reference.Resolve() ??
                     throw Call("Unresolved call", reference, method, instruction, $"Callee scope: {ScopeName(reference.DeclaringType.Scope)}");
-                if (callee.Module != module)
+                if (!Pinned(callee.Module))
                 {
                     var assembly = ScopeName(callee.Module);
                     var referenced = ScopeName(reference.DeclaringType.Scope);
@@ -586,6 +619,9 @@ internal static class MetadataValidation
                 StaticValues.Value value;
                 try
                 {
+                    if (module != selected)
+                        throw new InvalidDataException(
+                            $"Unsupported static field load in a referenced assembly: {loaded.FullName}");
                     FieldDefinition field = StaticValues.Field(loaded, module, profile.Architecture);
                     if (!initializedTypes.Contains(field.DeclaringType.FullName, StringComparer.Ordinal))
                         throw new InvalidDataException($"Unsupported static field load: {loaded.FullName}\n  Loading it requires --assume-initialized {field.DeclaringType.FullName}.");
@@ -606,6 +642,9 @@ internal static class MetadataValidation
                 {
                     Check(method, instruction, () =>
                     {
+                        if (module != selected)
+                            throw new InvalidDataException(
+                                "Unsupported indirect call in a referenced assembly: " + method.FullName);
                         ManagedPointers.Validate(site, module, profile.Architecture);
                         var signature = ManagedPointers.SignatureEvidence(site);
                         if (!indirectTargets.TryGetValue(signature, out var targets))
@@ -661,6 +700,11 @@ internal static class MetadataValidation
         ordered.Reverse();
         // Validate translation before producing any artifact.
         var methods = ordered.ToArray();
+        // Proofs bind methods by unscoped signature, so one signature must name one assembly's body.
+        foreach (var group in methods.GroupBy(method => method.FullName, StringComparer.Ordinal))
+            if (group.Select(method => method.Module).Distinct().Skip(1).Any())
+                throw new InvalidDataException($"Ambiguous method signature across pinned assemblies: {group.Key}\n  " +
+                    string.Join(", ", group.Select(method => method.Module.Assembly.Name.FullName).Distinct()));
         var methodIndices = methods.Select((method, index) => (method, index))
             .ToDictionary(pair => pair.method, pair => pair.index);
         var constrainedTargets = new ConstrainedCalls.TargetIndex(methods);

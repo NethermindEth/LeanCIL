@@ -73,6 +73,35 @@ explicit assumptions. Verification binds the manifest hash, prints the
 initialization preconditions with the theorem and copies both lists into
 `verified.json`. Re-extract older artifacts to include the new manifest fields.
 
+### Extract from referenced assemblies
+
+By default a call into another assembly needs a [contract import](#verify-with-imported-contracts).
+To extract the callee's body instead, pin its DLL with `--reference`, repeated per assembly:
+
+```sh
+leancil extract App.dll 'App.Application::Direct(ulong)' artifacts/Direct --reference Lib.dll
+```
+
+Referenced assemblies are trusted inputs like the selected one
+([soundness](SOUNDNESS-EVIDENCE.md#pinned-referenced-assemblies)). Each is recorded in
+`identity.json` by relative path, full identity, MVID and SHA-256. `Extracted.lean` names it by
+identity only, as an `Extraction.AssemblyPin` attributed to every body it supplies. `check`
+replays the recorded references and rejects a changed hash or identity; it does not accept
+`--reference` itself. Assemblies resolve only against this pinned set and the runtime's platform
+assemblies, so an unpinned reference, a name pinned under another version, a duplicate identity
+or a framework DLL passed as a reference fails. One assembly cannot be both a typed import and a
+reference.
+
+A referenced assembly's static methods are admitted as direct `call` and `ldftn` targets, and its
+structs as layouts and [constrained receivers](OPCODES.md#constrained-struct-calls), including
+static flag getters that fold a branch. Its generic methods and generic structs, static field
+loads, `calli` and types with static constructors are rejected. A closed entry type argument may
+name one of its structs as `Namespace.Type, Assembly`, by simple or full assembly name:
+
+```sh
+leancil extract App.dll 'App.Application::Size(ulong)' artifacts/Size --reference Lib.dll   --type-argument 'Lib.Cell, Lib'
+```
+
 ## Report extraction blockers
 
 `leancil blockers` runs admission, the validation `extract` performs, over an explicit list of
@@ -86,6 +115,7 @@ leancil blockers assembly.dll --manifest blockers-manifest.json [--output blocke
 ```json
 {
   "initializedTypes": ["Namespace.Type"],
+  "references": ["Lib.dll"],
   "entries": [
     { "signature": "Type::Method(ulong)", "profile": "scalar" },
     { "signature": "Type::Method(ulong)", "profile": "@profiles/x64-v3.json" },
@@ -95,7 +125,8 @@ leancil blockers assembly.dll --manifest blockers-manifest.json [--output blocke
 ```
 
 `profile` is a profile name or `@file`, resolved against the manifest's directory;
-`initializedTypes` applies `--assume-initialized` to every entry, and an entry's optional
+`initializedTypes` applies `--assume-initialized` to every entry, `references` (paths relative to
+the manifest) or `--reference` pins referenced assemblies for every entry, and an entry's optional
 `typeArguments` applies `--type-argument` to it. The report goes to
 `--output`, by default `blockers.json` next to the manifest, and a short summary goes to standard
 output. Each entry is `admitted` (extraction would succeed), `blocked`, or `notChecked` with the

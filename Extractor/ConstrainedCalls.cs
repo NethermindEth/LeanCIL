@@ -85,10 +85,11 @@ internal static class ConstrainedCalls
             throw new InvalidDataException("callvirt requires an adjacent concrete constrained receiver");
         var instance = call.OpCode.Code == Code.Callvirt;
         if (receiver is GenericParameter || receiver is TypeSpecification && !GenericStructs.Is(receiver) ||
-            receiver.Resolve() is not { } concrete || concrete.Module != caller.Module || !concrete.IsValueType ||
+            receiver.Resolve() is not { } concrete || !Extracted(concrete.Module, caller.Module) ||
+            !concrete.IsValueType ||
             receiver.ContainsGenericParameter || LayoutEvidence.Scope(receiver) != LayoutEvidence.Scope(concrete) ||
             receiver is not GenericInstanceType && receiver.FullName != concrete.FullName)
-            throw new InvalidDataException("Constrained receiver must be a concrete same-assembly struct");
+            throw new InvalidDataException("Constrained receiver must be a concrete struct of an extracted assembly");
         if (!instance && receiver is GenericInstanceType)
             throw new InvalidDataException("Static constrained slots on generic struct receivers are unsupported");
         MetadataValidation.Layout(receiver, caller.Module, architecture);
@@ -98,7 +99,7 @@ internal static class ConstrainedCalls
             ? [.. generic.GenericArguments] : [];
         var member = reference is GenericInstanceMethod specialized ? specialized.ElementMethod : reference;
         if (member.Resolve() is not { } slot ||
-            slot.Module != caller.Module || member.Name != slot.Name ||
+            slot.Module != concrete.Module || member.Name != slot.Name ||
             !SameType(member.ReturnType, slot.ReturnType) ||
             !member.Parameters.Select(parameter => MethodSpecialization.SignatureType(parameter.ParameterType))
                 .SequenceEqual(slot.Parameters.Select(parameter =>
@@ -128,7 +129,8 @@ internal static class ConstrainedCalls
         if (!slot.DeclaringType.IsInterface || !slot.IsVirtual || !slot.IsAbstract && !defaultBody ||
             !concrete.Interfaces.Any(implementation => SameType(
                 GenericStructs.Substitute(implementation.InterfaceType, owner), reference.DeclaringType)))
-            throw new InvalidDataException("Constrained call requires a directly implemented same-assembly interface");
+            throw new InvalidDataException(
+                "Constrained call requires a directly implemented interface of the receiver's assembly");
 
         var explicitTargets = concrete.Methods.Where(method =>
             method.Overrides.Any(overridden => overridden.Resolve() == slot &&
@@ -192,7 +194,7 @@ internal static class ConstrainedCalls
                 !declared.Interfaces.All(implementation => names.Contains(MethodSpecialization.SignatureType(
                     GenericStructs.Substitute(implementation.InterfaceType, candidate as GenericInstanceType)))))
                 throw new InvalidDataException("A static virtual default body requires every interface of the " +
-                    "receiver, including inherited ones, to be listed and declared in this assembly");
+                    "receiver, including inherited ones, to be listed and declared in the receiver's assembly");
             if (declared.Methods.Any(method => method.Overrides.Any(overridden =>
                     overridden.Resolve() is not { } resolved || resolved == slot && SameType(
                         GenericStructs.Substitute(overridden.DeclaringType, candidate as GenericInstanceType),
@@ -201,6 +203,10 @@ internal static class ConstrainedCalls
                     "Another interface of the receiver re-implements the static virtual slot");
         }
     }
+
+    // Dispatch stays inside one extracted assembly: the caller's own or a pinned reference.
+    internal static bool Extracted(ModuleDefinition module, ModuleDefinition caller) =>
+        module == caller || PinnedAssemblies.Active?.Contains(module) == true;
 
     static MethodDefinition Slot(MethodReference slot) =>
         (slot is GenericInstanceMethod generic ? generic.ElementMethod : slot).Resolve();

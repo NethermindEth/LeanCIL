@@ -19,6 +19,7 @@ Omit `--suite` to run everything. The accepted names and fixture mapping are def
 | Arithmetic and representations | `integer`, `narrow`, `primitive`, `checked`, `conversions`, `native` |
 | Memory and references | `unsafe`, `blocks`, `copy`, `arguments`, `layout` |
 | Calls and contracts | `callers`, `contracts`, `outcomes`, `imports` |
+| Referenced assemblies and pins | `assemblies`, `evidence`, `exportstyped` |
 | Loops and shared stepping tactics | `loops`, examples, and `Tests.Automation`, `Tests.StoreFacts`, `Tests.MethodContract`, `Tests.CodeAt` |
 | CLI, artifact identity and theorem selection | `core`, `cli`, `failures`, `workspace`, `audit` |
 | Exported interfaces and implementation checks | The affected export partition from `ExportVerificationSuites.cs` |

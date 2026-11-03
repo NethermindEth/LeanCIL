@@ -82,6 +82,11 @@ verification re-extracts the current selected DLL and checks the author,
 extraction, relocation and linked caller proof through its existing replay path.
 No new method-summary axiom or native proof evaluation is introduced.
 
+A typed import keeps the callee behind its contract. To extract the callee's body instead, pass
+its DLL as a [pinned reference](CLI.md#extract-from-referenced-assemblies). The two are exclusive
+per assembly: a sidecar for a pinned assembly is not discovered, and an explicit `--import` of
+a pinned assembly is rejected. Without a pin, imports behave as before.
+
 `Tests/GenericLayoutImports.cs` builds real Lib/App SDK assemblies. It verifies
 the nested `in`/`out` forwarding contract, a chain through an imported local and
 `Identity<UInt64>`, then checks the linked claims with full verification. It also

@@ -84,6 +84,34 @@ propagated through dependencies into reports. They identify assumptions, not evi
 initializer ran. Constructor-derived exported field values and forced-full initialization premises
 are unsupported. Reference-only authoring checks do not issue deployment certificates.
 
+## Pinned referenced assemblies
+
+An extraction may include bodies and layouts from each `--reference` assembly. Those DLLs are
+trusted inputs on the same terms as the selected one; no other assembly can contribute code.
+
+- `Extracted.assemblies` lists every pinned identity, the selected assembly first, and each
+  `MethodEvidence` carries the identity of the assembly its body came from. Hashes and MVIDs
+  are not in the certificate, so `Extracted.lean` depends on the extracted program alone.
+- `TranslationValid` requires `AttributionValid`: each body's owner identity is scoped by its
+  own pin's colon-free identity, so a body attributed to the wrong assembly fails the kernel
+  check ([tests](../Tests/AssemblyPins.lean)). Distinct pins and a complete `assemblies` list
+  are extractor output that `check` regenerates, not a Lean obligation.
+- Lean cannot hash bytes. `identity.json` records each assembly's identity, MVID and SHA-256;
+  `check`, and so `verify`, rehashes the selected and every referenced DLL against it and
+  regenerates the certificate, so a substituted DLL or a changed recorded hash is rejected
+  before the proof is compiled.
+- A reference that contributes only layouts appears in `Extracted.assemblies`, the manifest and
+  the hash recheck, but not in `TranslationValid`;
+  its layouts are bound by their assembly-qualified identities in the layout evidence.
+
+Resolution never searches directories. A pinned full name resolves to its pinned module, the
+four framework public-key tokens resolve to the runtime's trusted platform list as runtime
+models, and anything else fails. A referenced type with a static constructor, a static field load
+or `calli` in a referenced body, and a method signature shared by two pinned assemblies are
+rejected. Constrained dispatch to a referenced struct resolves within the struct's own assembly;
+the Lean resolver requires the target's and the slot's owners to share a scope, and the selected
+program method must carry the target's token and scoped owner, so its attribution is checked too.
+
 ## Typed import metadata
 
 `LayoutProjectionValid` and `ImportedLayoutsValid` bind closed generic identities and admitted byref

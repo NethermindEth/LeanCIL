@@ -54,43 +54,47 @@ partial class Program
             """);
         var library = CompileCorpus(compiler, toolchain, directory, "ImportFixture.Lib",
             CorpusSources("Tests/ContractImports/Lib").Append(attributes), language);
-        var assemblies = new[]
+        var application = CompileCorpus(compiler, toolchain, directory, "ImportFixture.App",
+            CorpusSources("Tests/ContractImports/App").Append(attributes), language, [library]);
+        // The application is scanned twice: alone, and with its library pinned as an extracted reference.
+        var scans = new (string Assembly, string Label, string[] References)[]
         {
-            CompileCorpus(compiler, toolchain, directory, "Examples",
-                CorpusSources("Examples/Assembly").Append(attributes), language),
-            library,
-            CompileCorpus(compiler, toolchain, directory, "ImportFixture.App",
-                CorpusSources("Tests/ContractImports/App").Append(attributes), language, [library]),
-            CompileCorpus(compiler, toolchain, directory, "NativeProbe",
+            (CompileCorpus(compiler, toolchain, directory, "Examples",
+                CorpusSources("Examples/Assembly").Append(attributes), language), "Examples", []),
+            (library, "ImportFixture.Lib", []),
+            (application, "ImportFixture.App", []),
+            (application, "ImportFixture.App+ImportFixture.Lib", [library]),
+            (CompileCorpus(compiler, toolchain, directory, "NativeProbe",
                 CorpusSources("Tests/NativeProbe").Concat([attributes, implicitUsings]), language,
-                [typeof(ModuleDefinition).Assembly.Location], executable: true)
+                [typeof(ModuleDefinition).Assembly.Location], executable: true), "NativeProbe", [])
         };
-        foreach (var assembly in assemblies)
+        foreach (var (assembly, label, references) in scans)
         {
             using var module = ModuleDefinition.ReadModule(assembly);
             var signatures = module.GetTypes().SelectMany(type => type.Methods).Select(method => method.FullName)
                 .Order(StringComparer.Ordinal).ToArray();
-            var manifest = assembly + ".entries.json";
-            var report = assembly + ".coverage.json";
+            var manifest = Path.Combine(directory, label + ".entries.json");
+            var report = Path.Combine(directory, label + ".coverage.json");
             File.WriteAllText(manifest, JsonSerializer.Serialize(new
             {
-                entries = signatures.Select(signature => new { signature, profile = "scalar" })
+                entries = signatures.Select(signature => new { signature, profile = "scalar" }),
+                references
             }));
             Run(["dotnet", ExtractorPath, "blockers", assembly, "--manifest", manifest, "--output", report]);
             using var coverage = JsonDocument.Parse(File.ReadAllText(report));
             foreach (var entry in coverage.RootElement.GetProperty("entries").EnumerateArray())
             {
                 if (entry.GetProperty("status").GetString() == "notChecked")
-                    uncheckedEntries.Add((Path.GetFileNameWithoutExtension(assembly),
+                    uncheckedEntries.Add((label,
                         entry.GetProperty("signature").GetString()!, entry.GetProperty("reason").GetString()!));
-                results.Add(Path.GetFileNameWithoutExtension(assembly) + ":" + entry.GetProperty("signature").GetString(),
+                results.Add(label + ":" + entry.GetProperty("signature").GetString(),
                     entry.GetProperty("status").GetString() switch
                     {
                         "admitted" => 'A', "blocked" => 'B', "notChecked" => 'N',
                         var status => throw new InvalidDataException("Unexpected coverage status: " + status)
                     });
             }
-            Console.WriteLine($"COVERAGE {Path.GetFileNameWithoutExtension(assembly)} {language}: " +
+            Console.WriteLine($"COVERAGE {label} {language}: " +
                 coverage.RootElement.GetProperty("counts"));
         }
         File.WriteAllLines(Path.Combine(directory, "not-checked.tsv"),

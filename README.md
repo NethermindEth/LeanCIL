@@ -88,7 +88,9 @@ profiles, saved settings and diagnostics.
 
 Keep application specifications and proofs in your own Lean package, with LeanCIL pinned as
 a dependency. Methods can publish contracts for separately compiled callers; consumer proofs
-can span multiple modules and share checked support across batch requests.
+can span multiple modules and share checked support across batch requests. Alternatively,
+`extract --reference Lib.dll` pins a referenced assembly by SHA-256 and extracts its bodies
+into one program; see [referenced assemblies](docs/CLI.md#extract-from-referenced-assemblies).
 
 See [consumer packages and workspaces](docs/CONSUMERS.md) and
 [contract interfaces](docs/CONTRACT-INTERFACES.md).
