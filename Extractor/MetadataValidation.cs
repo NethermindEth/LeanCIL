@@ -671,8 +671,10 @@ internal static class MetadataValidation
                         var signature = ManagedPointers.SignatureEvidence(site);
                         if (!indirectTargets.TryGetValue(signature, out var targets))
                         {
+                            // An open address is reached only through a specialized body's own ldftn.
                             addressedMethods ??= ManagedPointers.AddressedMethods(module)
-                                .Where(target => target.DeclaringType.Scope == module).ToArray();
+                                .Where(target => target.DeclaringType.Scope == module &&
+                                    !target.ContainsGenericParameter).ToArray();
                             targets = addressedMethods
                                 .Where(target => ManagedPointers.SameSignature(site, ManagedPointers.ReferenceSignature(target)))
                                 .Select(target => target is GenericInstanceMethod ||
