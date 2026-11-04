@@ -458,7 +458,8 @@ instruction is reached. Stack lemmas join the rewrite only when the goal holds a
 A loop over symbolic caller memory keeps the frame part of its state as the
 [`LoopFrame`](../CIL/Safety/LoopFrames.lean) that `bind_entry ... allocating` returns, in a
 `FrameState`. `frame.store index value rfl` stores into a home and gives the step's store
-equation and the frame after the store, without composing `MemoryBelow` by hand.
+equation and the frame after the store, without composing `MemoryBelow` by hand. Its remembered
+locals are a literal list, as after the loop tactics' stores, so either frame feeds the next step.
 `LoopFrame.load` reads a home at a loop head, and `LoopFrame.leave_kept` `setup` is the exit's
 `MemoryBelow` fact for a frame confined to no caller storage, for any exited frame with the
 entry's owned identities, closing a postcondition such as `SpanSum`'s; the loop tactics derive

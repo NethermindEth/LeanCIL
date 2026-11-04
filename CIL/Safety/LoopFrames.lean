@@ -31,6 +31,15 @@ namespace CIL.Safety
 def knownLocals (values : List (Option CIL.Value)) : Nat → Option CIL.Value :=
   fun index => values[index]?.join
 
+/-- Close `listed = ?result` by choosing `?result` as `listed` with each `List.set` of a literal
+    list and every `localResult` computed, so a frame stored by hand lists its remembered locals
+    as literally as one the loop tactics store. -/
+syntax "cil_listed_locals" : tactic
+
+macro_rules
+  | `(tactic| cil_listed_locals) =>
+    `(tactic| ((conv => lhs; try simp only [List.set, CIL.Safety.localResult]) <;> rfl))
+
 /-- Remembering a new value of a listed local lists that value in its place. -/
 theorem rememberLocal_knownLocals {values : List (Option CIL.Value)} {index : Nat}
     (present : index < values.length) (value : CIL.Value) :
@@ -236,12 +245,13 @@ theorem LoopFrame.store {values : List (Option CIL.Value)}
     (value : CIL.Value) {kind : CIL.LocalKind} {home : Reference} {number : Nat}
     (fits : localNumber kind value = .ok number)
     (slot : slots[index]? = some (.bytes kind home) := by rfl)
-    (present : index < values.length := by simp) :
+    (present : index < values.length := by simp) {stored : List (Option CIL.Value)}
+    (listed : values.set index (some (localResult kind value)) = stored := by cil_listed_locals) :
     ∃ updated, storeLocal current (.bytes kind home) (.scalar value) =
         .ok (.bytes kind home, updated) ∧
-      LoopFrame footprint caller updated kinds slots
-        (knownLocals (values.set index (some (localResult kind value)))) ∧
+      LoopFrame footprint caller updated kinds slots (knownLocals stored) ∧
       MemoryBelow caller.nextIdentity current updated := by
+  subst listed
   have fresh := frame.homes.home_bound index kind home slot
   obtain ⟨updated, written, stored, _⟩ :=
     store_numeric_local kind value number fits (frame.homes.writable_at slot)

@@ -210,8 +210,6 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
   catch _ =>
     saved.restore
     return false
-  -- The remembered locals stay a literal list, so the next gathering reads each of them.
-  evalTactic (← `(tactic| try simp only [List.set, CIL.Safety.localResult] at $framed:ident))
   loopCarryBelow memory below
   -- Facts still at the caller's memory, such as a buffer the entry was handed, follow the frame.
   let caller ← withMainContext do

@@ -29,13 +29,16 @@ theorem LoopFrame.zero_aggregate {values : List (Option CIL.Value)}
     {home : Reference}
     (slot : slots[index]? = some (.bytes (.aggregate ⟨width, bounded⟩) home) := by rfl)
     (valid : layout.Valid := by decide +kernel) (sized : layout.size = width := by rfl)
-    (zeroed : fields = layout.zeros := by rfl) (present : index < values.length := by simp) :
+    (zeroed : fields = layout.zeros := by rfl) (present : index < values.length := by simp)
+    {stored : List (Option CIL.Value)}
+    (listed : values.set index (some (.aggregate (layout.encode fields))) = stored :=
+      by cil_listed_locals) :
     ∃ after, (∀ body pc args stacked rest,
         step body (.initAggregate width) pc args stacked (.reference (.address home) :: rest)
           current = .ok (.next (pc + 1) rest stacked after)) ∧
-      LoopFrame footprint caller after kinds slots
-        (knownLocals (values.set index (some (.aggregate (layout.encode fields))))) ∧
+      LoopFrame footprint caller after kinds slots (knownLocals stored) ∧
       MemoryBelow caller.nextIdentity current after := by
+  subst listed
   obtain ⟨after, stepped, snapshots, formed, below, -, -, written⟩ :=
     frame.snapshots.zero_aggregate frame.homes frame.wellFormed slot (frame.homes.writable_at slot)
   refine ⟨after, stepped, ⟨frame.confined.then_below below
@@ -57,14 +60,17 @@ theorem LoopFrame.store_field {values : List (Option CIL.Value)}
     {offset width : Nat} {aggregate : Bool}
     (found : layout.fields[fieldIndex]? = some ⟨offset, width, aggregate⟩ := by rfl)
     {number : Nat} (encoded : fieldStoreNumber width value = some number := by rfl)
-    (listed : fieldIndex < fields.length := by simp) :
+    (listed : fieldIndex < fields.length := by simp) {stored : List (Option CIL.Value)}
+    (storedFields :
+      values.set index (some (.aggregate (layout.encode (fields.set fieldIndex value)))) = stored :=
+        by cil_listed_locals) :
     ∃ after, (∀ body pc args stacked rest,
         step body (.setFieldAt offset width) pc args stacked
           (.scalar value :: .reference (.address home) :: rest) current =
           .ok (.next (pc + 1) rest stacked after)) ∧
-      LoopFrame footprint caller after kinds slots (knownLocals
-        (values.set index (some (.aggregate (layout.encode (fields.set fieldIndex value)))))) ∧
+      LoopFrame footprint caller after kinds slots (knownLocals stored) ∧
       MemoryBelow caller.nextIdentity current after := by
+  subst storedFields
   have listedLocal : index < values.length := (List.getElem?_eq_some_iff.1 present).1
   obtain ⟨after, stepped, snapshots, formed, below, -, -, -, written⟩ :=
     frame.snapshots.store_field frame.homes frame.wellFormed slot

@@ -130,6 +130,8 @@ theorem store_second_keeps_first (memory : Memory) (wellFormed : memory.WellForm
       loadLocal updated (.bytes .word32 second) = .ok (.scalar (.i32 9)) := by
   obtain ⟨first, second, entered, -, -, -, -, frame⟩ := entry.checked memory wellFormed
   obtain ⟨updated, -, next, -⟩ := (frame []).store 1 (.i32 9) rfl
+  -- A store written by hand lists the remembered locals literally, as the loop tactics' do.
+  guard_hyp next : LoopFrame [] memory updated _ _ (knownLocals [some (.i64 7), some (.i32 9)])
   exact ⟨first, second, updated, next.load 0, next.load 1⟩
 
 variable {caller current after : Memory} {first second : Reference}
