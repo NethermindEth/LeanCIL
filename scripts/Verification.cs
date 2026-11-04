@@ -836,7 +836,7 @@ partial class Program : IDisposable
                 throw new InvalidDataException("Released library exceeds extraction limits");
         // ZipFile rejects entries escaping the destination; the entire extracted tree must match the manifest.
         System.IO.Compression.ZipFile.ExtractToDirectory(archive, staging);
-        if (ReusePreparedLibrary(staging, asset.ManifestSha256) is null)
+        if (ReplayReleasedLibrary(staging, asset.ManifestSha256) is null)
             throw new InvalidDataException("Released library identity or integrity mismatch");
         var manifestBytes = File.ReadAllBytes(Path.Combine(staging, "cache-manifest.json"));
         File.WriteAllBytes(Path.Combine(staging, "cache-receipt.hmac"),
@@ -1083,7 +1083,6 @@ partial class Program : IDisposable
         }
 
         (libraryKey, var sources) = LibraryIdentity(common);
-        var toolchain = Toolchain;
         var fresh = freshLibrary ||
             string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"), "true", StringComparison.OrdinalIgnoreCase);
@@ -1153,14 +1152,9 @@ partial class Program : IDisposable
                     name.EndsWith(".lean", StringComparison.Ordinal)).Select(name => "+" + name[..^".lean".Length].Replace('/', '.'));
                 Run(["lake", "build", "CIL", "leancil-audit", .. frameworkModules], library, streamOutput: true,
                     progress: "Building fresh Lean verification library");
-                var checker = Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
-                var compiledLibrary = Path.Combine(library, ".lake/build/lib/lean");
-                string[] modules = [.. ModuleArtifacts(library).Keys.Select(ModuleName)
-                    .Distinct().Order(StringComparer.Ordinal)];
-                if (!ReplayModulesJointly(library, modules,
-                    compiledLibrary, "Joint kernel replay of fresh Lean verification library"))
-                    Run([checker, .. modules], library, compiledLibrary, streamOutput: true,
-                        progress: "Kernel replay of fresh Lean verification library");
+                // An incremental build replays donor modules too: an unchanged olean may import changed ones.
+                ReplayLibrary(library, (incrementalLibrary is null ? "fresh" : "incremental") +
+                    " Lean verification library");
                 if (!Same(sources, LibrarySources(CommonInputs())))
                     throw new InvalidDataException("Library sources changed during preparation");
                 libraryBuild = incrementalLibrary is null ? "fresh" : "incremental";
@@ -1532,27 +1526,45 @@ partial class Program : IDisposable
         finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
     }
 
-    // A manifest authenticates contents only when its digest comes independently from a trusted producer.
-    // Kernel replay cannot authenticate the native auditor or establish compiled-to-source correspondence.
+    /// <summary>
+    /// The trusted digest when every file of the library matches the manifest it names and the manifest
+    /// binds the current sources, or null. The library is not replayed: its producer, our own CI, already
+    /// kernel-replayed every module, and a compromised producer is outside what replay here defends against.
+    /// </summary>
     string? ReusePreparedLibrary(string directory, string? trustedDigest)
+    {
+        var manifest = Path.Combine(directory, "cache-manifest.json");
+        if (string.IsNullOrWhiteSpace(trustedDigest) || !File.Exists(manifest) || Sha(manifest) != trustedDigest)
+            return null;
+        var (key, sources) = LibraryIdentity(CommonInputs());
+        return ValidCertifiedLibrary(directory, trustedDigest, key, sources) ? trustedDigest : null;
+    }
+
+    /// <summary>
+    /// Like <see cref="ReusePreparedLibrary"/>, but also kernel-replays every module. Release assets are
+    /// produced outside a CI run that logged their digest, and consumers rely on the kernel, not on us.
+    /// </summary>
+    string? ReplayReleasedLibrary(string directory, string trustedDigest)
+    {
+        if (ReusePreparedLibrary(directory, trustedDigest) is null) return null;
+        ReplayLibrary(directory, "released Lean verification library");
+        return ReusePreparedLibrary(directory, trustedDigest);
+    }
+
+    /// <summary>
+    /// Kernel-replays every compiled module of a library, including modules outside the CIL aggregate,
+    /// and fails unless all of them replay.
+    /// </summary>
+    void ReplayLibrary(string directory, string description)
     {
         // Replay runs inside the library, so a relative Lean path would resolve below it.
         directory = Path.GetFullPath(directory);
-        var manifest = Path.Combine(directory, "cache-manifest.json");
-        if (string.IsNullOrWhiteSpace(trustedDigest) || !File.Exists(manifest) || Sha(manifest) != trustedDigest) return null;
-        var snapshot = Inputs(At("CIL.lean"));
-        var (key, sources) = LibraryIdentity(new(snapshot.Where(p => !p.Key.StartsWith("proof:", StringComparison.Ordinal) &&
-            !p.Key.StartsWith("settings:", StringComparison.Ordinal)).ToDictionary(), StringComparer.Ordinal));
-        if (!ValidCertifiedLibrary(directory, trustedDigest, key, sources)) return null;
         var compiled = Path.Combine(directory, ".lake/build/lib/lean");
         string[] modules = [.. ModuleArtifacts(directory).Keys.Select(ModuleName)
             .Distinct().Order(StringComparer.Ordinal)];
-        if (!ReplayModulesJointly(directory, modules,
-            compiled, "Joint kernel replay of reused Lean verification library"))
+        if (!ReplayModulesJointly(directory, modules, compiled, "Joint kernel replay of " + description))
             Run([Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker"),
-                .. modules], directory, compiled,
-                streamOutput: true, progress: "Kernel replay of reused Lean verification library");
-        return ValidCertifiedLibrary(directory, trustedDigest, key, sources) ? trustedDigest : null;
+                .. modules], directory, compiled, streamOutput: true, progress: "Kernel replay of " + description);
     }
 
     SortedDictionary<string, string> SupportInputs(string session, string[] roots, SortedDictionary<string, string> snapshot)

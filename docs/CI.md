@@ -15,8 +15,12 @@ base run that skipped preparation or has no artifact. A PR or merged-tree run do
 prepare job succeeded, even if its suites failed or are still running, since only that job
 produces the library. Every candidate still needs that successful producer job, its logged
 manifest digest and an artifact with sufficient remaining retention.
-Source/toolchain checks and kernel replay remain mandatory; changed sources use dependency-aware
-incremental preparation or fall back to a fresh build.
+A donated library is trusted because our own CI produced it: that run kernel-replayed every
+module and logged the manifest digest, and reuse checks that every file matches that digest and
+that the manifest binds the current sources and toolchain. Reuse does not replay it again, since
+replaying our own authenticated output cannot detect a compromised producer. Changed sources use
+dependency-aware incremental preparation, which replays every module of the result, or fall back
+to a fresh build, which replays everything it built.
 A library's identity covers the toolchain, `CIL.lean`, `CIL/`, `lake-manifest.json` and the
 library view of `lakefile.toml`, which is the file the library is built from: the checkout
 lakefile without blank lines, comments and plain `[[lean_lib]]` tables naming a library outside

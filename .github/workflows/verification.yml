@@ -166,8 +166,9 @@ jobs:
         run: >-
           dotnet run --file scripts/LibraryArchive.cs -c Release -- restore artifacts/library-download
           artifacts/certified-library "$MANIFEST_SHA256" "$ARCHIVE_SHA256"
-      # Reuse rechecks the source binding and kernel-replays the library; any mismatch builds from source.
-      - name: Kernel-replay a donated library or build it from source
+      # Reuse rechecks the source binding and every file against the producer's digest; the producer
+      # already kernel-replayed it. Any mismatch tries an incremental build, then a fresh one.
+      - name: Reuse a donated library or build it from source
         id: certify
         shell: bash
         env:

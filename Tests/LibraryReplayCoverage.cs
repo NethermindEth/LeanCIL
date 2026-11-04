@@ -40,11 +40,26 @@ Run([verifier.LeanExecutable, "--run", source, Path.Combine(library, ".lake/buil
 File.WriteAllText(Path.Combine(library, "library-key.txt"), key);
 File.WriteAllText(Path.Combine(library, "cache-manifest.json"), JsonSerializer.Serialize(CacheFiles(library)));
 var digest = Sha(Path.Combine(library, "cache-manifest.json"));
-try { verifier.ReusePreparedLibrary(library, digest); }
+
+// Reuse trusts the CI producer that logged this digest; accepting a forgery shows it ran no replay.
+if (verifier.ReusePreparedLibrary(library, digest) != digest)
+    throw new Exception("Authenticated reuse rejected a library its producer certified");
+Console.WriteLine("PASS reuse of an authenticated library performs no kernel replay");
+if (verifier.ReusePreparedLibrary(library, new string('0', 64)) is not null)
+    throw new Exception("Reuse accepted a manifest whose digest no producer logged");
+var forged = Path.Combine(library, ".lake/build/lib/lean/AUnaggregatedForgery.olean");
+var forgedBytes = File.ReadAllBytes(forged);
+File.AppendAllText(forged, "tampered");
+if (verifier.ReusePreparedLibrary(library, digest) is not null)
+    throw new Exception("Reuse accepted a file that differs from the authenticated manifest");
+File.WriteAllBytes(forged, forgedBytes);
+Console.WriteLine("PASS reuse without replay still rejects a digest mismatch and a tampered file");
+
+try { verifier.ReplayReleasedLibrary(library, digest); }
 catch (InvalidOperationException error) when (
     error.Message.Contains("UnaggregatedForgery.bad", StringComparison.Ordinal))
 {
-    Console.WriteLine("PASS fallback kernel replay rejects a forged module outside the CIL aggregate");
+    Console.WriteLine("PASS released library replay rejects a forged module outside the CIL aggregate");
     return;
 }
-throw new Exception("Fallback kernel replay ignored an invalid nonaggregate library module");
+throw new Exception("Released library replay ignored an invalid nonaggregate library module");

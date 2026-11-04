@@ -18,7 +18,7 @@ quantifiers/preconditions determine the theorem's practical meaning.
 
 | Mechanism | Required binding | Authority it does not provide |
 | --- | --- | --- |
-| Certified framework | CIL sources/configuration, platform, pinned Lean tools, producer manifest and independent trusted digest | Rehashing an untrusted artifact does not certify it. Transport must preserve its bytes. |
+| Certified framework | CIL sources, the library view of `lakefile.toml`, platform, pinned Lean tools, producer manifest and independent trusted digest | Rehashing an untrusted artifact does not certify it. Transport must preserve its bytes. CI reuse does not replay: it trusts the producing CI run, which replayed every module. |
 | Source-only extension | Existing sources/configuration/artifacts unchanged; added sources cannot shadow modules; stability checked before publication | Added helpers have no certified declarations until their ordinary compilation, replay and audit. |
 | Incremental preparation | Authenticated donor and matching configuration; affected declarations rebuilt and required replay performed | Import analysis alone is not proof that arbitrary elaborator dependencies are tracked. |
 | Factored extraction modules | Deterministic source transformation, exact regenerated input hash, compiled graph, stability and certificate audit | No proved Lean source-transformation theorem; module names alone grant no trust. |

@@ -422,8 +422,11 @@ to be this push and their complete Git tree to match exactly. Runs of those head
 succeeded, whatever their suites concluded, precede the main push of the checkout's first parent. API failures or absent eligible artifacts retain the
 older-main/source-build fallback. Their own trusted code built that library and printed its digest,
 so the digest is read from the donor job's log, never from the artifact. `PrepareLibrary.cs --reuse`
-then rechecks the library key and source binding and kernel-replays the library; any mismatch, or no
-donor, builds from source. It does not restore compiled libraries from the GitHub Actions cache: a
+then rechecks the library key, the source binding and every file against that manifest; any
+mismatch, or no donor, builds from source. It does not kernel-replay the library: the producing run
+replayed every module, and replaying our own authenticated output cannot detect a compromised
+producer. `Tests/LibraryReplayCoverage.cs` checks that reuse runs no replay yet rejects a changed
+file or digest, and that release replay rejects a forged module. It does not restore compiled libraries from the GitHub Actions cache: a
 cache's source key and self-described file hashes cannot authenticate the native auditor or
 establish that compiled modules came from those sources.
 
@@ -438,14 +441,15 @@ missing producer digests, and preservation of unrelated destination files.
 Main push runs publish their validated library even after exact reuse. This keeps the main run
 eligible to donate to later PRs without following a chain of earlier runs. Suite jobs prefer the
 current run's artifact when it uploaded one; PR runs that reuse a donor still consume that donor
-directly. Publication follows the existing source binding and independent kernel replay.
+directly. Publication follows the existing source binding; the library keeps its producer's replay.
 
 When only Lean sources changed, `--incremental <donor-directory> <trusted-manifest-sha256>`
 authenticates every donor file before reusing its Lake build traces in a private copy. The runtime,
 compiler, kernel checker and build configuration must match; the configuration is the library view
 of `lakefile.toml`, so a change to test libraries alone keeps the donor. Changed and removed modules lose their
 compiled artifacts; Lake checks the current source hashes and rebuilds the dependent closure. The
-native auditor is relinked, every resulting module is kernel-replayed, and canonical fingerprints
+native auditor is relinked, every resulting module is kernel-replayed, including those kept from the
+donor, since a byte-identical module can import a rebuilt one, and canonical fingerprints
 are regenerated before a new source-bound manifest is published. CI tries this after exact reuse,
 then falls back to a cold build if incremental preparation fails. `Tests/LibraryIncremental.cs`
 covers artifact tampering, incompatible identities/configuration, source removal and copy isolation.
