@@ -132,7 +132,7 @@ theorem correctness (memory : Memory) (view : SpanView) (values : List W32) (out
       cil_loop_finish [answer]
       simpa [whole] using filled.1
     · have room : (copied (value :: rest)).length = (copied rest).length + 1 := by
-        rw [copied, List.takeWhile_cons_of_pos (by simpa using zero)]; rfl
+        simp -bitVecOfNat [copied, zero]
       have short := contents.length ▸ SpanView.length_bounded view memory valid
       have lengths : done.length + 1 + rest.length = values.length := by simp [split]; omega
       have total : (copied values).length = done.length + (copied (value :: rest)).length := by
