@@ -151,10 +151,10 @@ foreach (var (name, mutate) in new (string, Action<TypeDefinition>)[]
 }
 
 // A loop over a struct with a bool field that writes caller memory through a helper and stops early.
-var copyOutput = Directory.CreateDirectory(Path.Combine(root, "CopyUntilZero")).FullName;
-Run(Extract("extract", assembly, "Examples", "Loops::CopyUntilZero(System.ReadOnlySpan`1<System.UInt32>,uint&)",
-    copyOutput));
-Console.WriteLine("PASS early-exit struct loop extracts with its ref-writing helper");
+const string CopyUntilZero = "Loops::CopyUntilZero(System.ReadOnlySpan`1<System.UInt32>,uint&)";
+var copyProof = At("Examples/Proofs/CopyUntilZero.lean");
+verification.Verify(assembly, "Examples", CopyUntilZero, copyProof, Path.Combine(root, "CopyUntilZero"));
+Console.WriteLine("PASS early-exit struct loop copies up to the first zero through the ref-writing helper's contract");
 
 var copyUntilZero = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Loops")!.GetMethod("CopyUntilZero")!
     .CreateDelegate<CopyUntilZeroDelegate>();
@@ -176,6 +176,42 @@ foreach (uint[] values in new uint[][] { [], [1, 2, 3], [5, 0, 7], [0], [9, uint
             $"CopyUntilZero([{string.Join(", ", values)}]) returned {result:X} with [{string.Join(", ", output)}]");
 }
 Console.WriteLine("PASS early-exit struct loop runtime comparisons copy up to the first zero and flag the stop");
+
+// A helper that stamps zero and a loop that copies past a zero each break the copy claim.
+foreach (var (name, mutate) in new (string, Action<TypeDefinition>)[]
+{
+    ("CopyUntilZeroStampsZero", type => type.Methods.Single(m => m.Name == "Stamp").Body.Instructions
+        .Single(i => i.OpCode == OpCodes.Ldarg_1).OpCode = OpCodes.Ldc_I4_0),
+    ("CopyUntilZeroIgnoresZero", type =>
+    {
+        var test = type.Methods.Single(m => m.Name == "CopyUntilZero").Body.Instructions
+            .First(i => i.OpCode == OpCodes.Brtrue || i.OpCode == OpCodes.Brtrue_S);
+        test.OpCode = test.OpCode == OpCodes.Brtrue ? OpCodes.Br : OpCodes.Br_S;
+        // The tested word is still loaded; an unconditional branch must not leave it on the stack.
+        test.Previous.OpCode = OpCodes.Nop;
+    })
+})
+{
+    var output = Path.Combine(root, name);
+    Directory.CreateDirectory(output);
+    var dll = Path.Combine(output, "Examples.dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        mutate(module.GetType("Examples.Loops"));
+        module.Write(dll);
+    }
+    Run(Extract("extract", dll, "Examples", CopyUntilZero, output));
+    var refused = false;
+    try { verification.Verify(dll, "Examples", CopyUntilZero, copyProof, output, existingArtifacts: true); }
+    catch (InvalidOperationException error)
+        when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
+    {
+        refused = true;
+    }
+    if (!refused || File.Exists(Path.Combine(output, "verified.json")))
+        throw new InvalidOperationException($"{name} satisfied the early-exit copy proof");
+    Console.WriteLine($"PASS unchanged early-exit copy proof rejects {name}");
+}
 
 string CountVariant(string name, Action<MethodDefinition, MethodDefinition> mutate)
 {
