@@ -370,6 +370,34 @@ theorem marked_returns_one (memory : Memory) (value : W32) (wellFormed : memory.
 #guard_msgs (whitespace := lax) in
 #print axioms marked_returns_one
 
+/-- `cil_loop_advance` takes the same exit-path store and stops at the return, which
+    `cil_loop_finish` then proves. -/
+theorem marked_advances_to_return (memory : Memory) (value : W32)
+    (wellFormed : memory.WellFormed) :
+    ∃ fuel final, invoke markedProgram fuel 0 [.scalar (.i32 value)] memory =
+      .ok (final, [.scalar (.i32 1)]) ∧ MemoryBelow memory.nextIdentity memory final := by
+  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := markedEntry.checked memory value wellFormed
+  refine invoke_loop_induction (by rfl) rfl setup (markedHeader memory value home)
+    (fun _ => True) (fun state => (value - state.values).toNat) (fun start => ?_) ?_
+  · cil_loop_recurse start 0
+    trivial
+  rintro ⟨total, current, frame⟩ - recurse
+  by_cases done : total = value
+  · subst done
+    cil_loop_advance
+    -- The store is taken: the walk is at the return, with the stored flag on the stack.
+    show LoopTerminates markedProgram 0 [.scalar (.i32 total)] _
+      ⟨18, _, [.scalar (.i32 1#32)], _⟩
+    cil_loop_finish
+  · cil_loop_recurse recurse (total + 1)
+    · trivial
+    · show (value - (total + 1)).toNat < (value - total).toNat
+      bv_omega
+/-- info: 'Tests.LoopDiagnostics.marked_advances_to_return' depends on axioms: [propext,
+ Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms marked_advances_to_return
+
 -- A remembered nested struct, spelled as `List.replicate`, still lets a 4-byte field read
 -- by value step.
 example (memory current : Memory) (value total : W32) (home : Reference)
