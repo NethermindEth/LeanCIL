@@ -7,9 +7,10 @@ import CIL.Safety.LoopFacts
 
 Fuel-free reasoning about loops in the checked interpreter. `LoopReaches` is a checked path
 between two loop states whose fuel cost is existential, so proofs compose fetched
-instructions without counting steps. `cil_loop_steps` walks a goal to an invariant cutpoint
-and `cil_loop_finish` walks it to a return; both reuse the symbolic stepping tactics and take,
-besides an explicit list, the facts `gatherLoopFacts` finds in the proof context.
+instructions without counting steps. `cil_loop_steps` walks a goal to an invariant cutpoint, and
+`loopSteps` is the walk the frame tactics of `CIL.Safety.LoopFrameSteps` share; each reuses the
+symbolic stepping tactics and takes, besides an explicit list, the facts `gatherLoopFacts` finds
+in the proof context.
 -/
 
 namespace CIL.Safety
@@ -243,7 +244,8 @@ open Lean Elab Tactic Meta in
     through `loopStuck` or `loopTargetMismatch` where it cannot go on. Each instruction steps with
     `prepared`, the normalised core, and the groups about it, each normalised once when first
     read. A resumed walk stops at its target pc once a step is taken, which `stepped` says
-    happened before this call. -/
+    happened before this call; any walk but `.reach` also stops at a struct store or zeroing no
+    fact steps. -/
 def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepared : Array Term)
     (stepped : Bool := false) : TacticM Unit := do
   let stackLemmas : Array Term := loopStackLemmas.map fun name => mkIdent (`_root_ ++ name)
@@ -276,6 +278,9 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepa
     | .finish => (· == ``CIL.Op.ret)
     | .advance => fun op => op == ``CIL.Op.call || op == ``CIL.Op.ret
     | .resume _ => fun op => op == ``CIL.Op.setFieldAt || op == ``CIL.Op.initAggregate
+  -- A struct store no fact steps ends any walk but `.reach`, for the frame lemmas to take.
+  let yields : Lean.Name → Bool := fun op => stops op || (mode != .reach &&
+    (op == ``CIL.Op.setFieldAt || op == ``CIL.Op.initAggregate))
   let mut taken := 0
   repeat
     if (← getGoals).isEmpty then return
@@ -337,7 +342,7 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepa
     if ← attempt next then
       taken := taken + 1
       continue
-    loopStuck tactic facts.all reading stops
+    loopStuck tactic facts.all reading yields
     return
 
 /-- Compose actual fetched instructions until the requested invariant state.
@@ -353,18 +358,5 @@ elab_rules : tactic
     let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
       (#[← `(CIL.truth)] ++ facts.core)
     loopSteps "cil_loop_steps" .reach facts prepared
-
-/-- Establish an exit path and its postcondition without choosing a fuel bound. The facts are
-    the optional list and those `gatherLoopFacts` finds. A return whose results or postcondition
-    the facts do not prove is left as the goal; any other step that cannot be taken fails,
-    naming the pc, the instruction and the residual step. -/
-syntax "cil_loop_finish" (" [" term,* "]")? : tactic
-
-elab_rules : tactic
-  | `(tactic| cil_loop_finish $[[$facts:term,*]]?) => do
-    let facts ← gatherLoopFactGroups (facts.map (·.getElems) |>.getD #[])
-    let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
-      (#[← `(CIL.truth)] ++ facts.core)
-    loopSteps "cil_loop_finish" .finish facts prepared
 
 end CIL.Safety

@@ -223,6 +223,164 @@ example (memory current : Memory) (home : Reference)
 #guard_msgs (substring := true) in
 example := step_fieldAt_encode layout_valid 0 [.i64 0, .i32 0]
 
+/-- A struct of a flag byte at 0, a signed 16-bit count at 2, a 32-bit total at 4 and a nested
+    8-byte struct at 8. -/
+def mixed : CIL.AggregateLayout :=
+  ⟨16, [⟨0, 1, false⟩, ⟨2, 2, false⟩, ⟨4, 4, false⟩, ⟨8, 8, true⟩]⟩
+
+/-- The layout's fields are in bounds and apart. -/
+theorem mixed_valid : mixed.Valid := by decide +kernel
+
+-- Each field's zero is the value its kind loads from zeroed bytes: an int for the narrow and
+-- 4-byte fields and zero bytes for the nested struct.
+example : mixed.zeros = [.i32 0, .i32 0, .i32 0, .aggregate (List.replicate 8 0)] := rfl
+
+/-- `s = default; while (s.flag == 0) s.flag = 1; return s.count;`, reading `flag` by value and
+    the signed `count` through the struct's address. -/
+@[cil_code] def flagged : CIL.Method := {
+  returnsValue := true, locals := [.aggregate (List.replicate 16 0)], localKinds := [.aggregate 16]
+  code := [.localAddr 0, .initAggregate 16, .branch 6, .localAddr 0, .const32 1, .setFieldAt 0 1,
+    .local 0, .fieldAt 0 1, .brzero 3, .localAddr 0, .fieldAt 2 2 true, .ret] }
+
+/-- The program of `flagged` alone. -/
+@[cil_code] def flaggedProgram : CIL.Program := [flagged]
+
+/-- The entered frame of `flagged`. -/
+bind_entry flaggedEntry (memory : Memory) (wellFormed : memory.WellFormed) :=
+  flagged with [] from memory allocating wellFormed
+
+/-- The struct local, remembered by its `flag` field; the other fields stay zero. -/
+abbrev Flagged (memory : Memory) (home : Reference) :=
+  FrameState [] memory [.aggregate 16] W32 (fun _ => [.bytes (.aggregate 16) home])
+    fun flag => [some (.aggregate (mixed.encode
+      [.i32 flag, .i32 0, .i32 0, .aggregate (List.replicate 8 0)]))]
+
+/-- The loop test, with nothing on the stack. -/
+bind_cutpoint flaggedHeader (memory : Memory) (home : Reference) (state : Flagged memory home) :=
+  flagged matching (fun op => op matches .local _) with flaggedEntry.frame memory home, [],
+    state.memory
+
+/-- `cil_loop_recurse` zeroes a struct with 1-, 2- and 4-byte and nested fields through its
+    frame, stores the flag byte, and the loop tactics read the flag by value and the signed
+    count through the address as narrow loads. -/
+theorem flagged_returns_zero (memory : Memory) (wellFormed : memory.WellFormed) :
+    ∃ fuel final, invoke flaggedProgram fuel 0 [] memory = .ok (final, [.scalar (.i32 0)]) ∧
+      MemoryBelow memory.nextIdentity memory final := by
+  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := flaggedEntry.checked memory wellFormed
+  refine invoke_loop_induction (by rfl) rfl setup (flaggedHeader memory home)
+    (fun state => state.values = 0 ∨ state.values = 1)
+    (fun state => if state.values = 0 then 1 else 0) (fun start => ?_) ?_
+  · cil_loop_recurse start 0
+    exact Or.inl rfl
+  rintro ⟨flag, current, frame⟩ (rfl | rfl) recurse
+  · cil_loop_recurse recurse 1
+    · exact Or.inr rfl
+    · simp
+  · cil_loop_finish
+/-- info: 'Tests.LoopDiagnostics.flagged_returns_zero' depends on axioms: [propext,
+ Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms flagged_returns_zero
+
+-- A zero claim that is not the layout's zeros is rejected: the nested struct's zero is its zero
+-- bytes, not an int.
+/-- error: could not synthesize default value for parameter 'zeroed' using tactics -/
+#guard_msgs (substring := true) in
+example (memory current : Memory) (home : Reference)
+    (frame : LoopFrame [] memory current [.aggregate 16] [.bytes (.aggregate 16) home]
+      (knownLocals [none])) : True := by
+  obtain ⟨-, -, -, -⟩ := frame.zero_aggregate 0 mixed [.i32 0, .i32 0, .i32 0, .i32 0]
+  trivial
+
+-- A zeroed flag byte holds zero, not one.
+/-- error: could not synthesize default value for parameter 'zeroed' using tactics -/
+#guard_msgs (substring := true) in
+example (memory current : Memory) (home : Reference)
+    (frame : LoopFrame [] memory current [.aggregate 16] [.bytes (.aggregate 16) home]
+      (knownLocals [none])) : True := by
+  obtain ⟨-, -, -, -⟩ :=
+    frame.zero_aggregate 0 mixed [.i32 1, .i32 0, .i32 0, .aggregate (List.replicate 8 0)]
+  trivial
+
+-- A narrow read of a 4-byte field is refused; that field reads back exactly.
+/-- error: could not synthesize default value for parameter 'narrow' using tactics -/
+#guard_msgs (substring := true) in
+example := step_fieldAt_encode_narrow mixed_valid 2
+  [.i32 0, .i32 0, .i32 7, .aggregate (List.replicate 8 0)]
+
+-- A stored byte reads back truncated to its field: 0x1FF in the flag byte loads as 0xFF, and
+-- as -1 signed.
+example (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (memory : Memory)
+    (rest : List Value) :
+    step body (.fieldAt 0 1 false) pc args frame (.scalar (.aggregate (mixed.encode
+      [.i32 0x1FF, .i32 0, .i32 0, .aggregate (List.replicate 8 0)])) :: rest) memory =
+      .ok (.next (pc + 1) (.scalar (.i32 0xFF) :: rest) frame memory) ∧
+    step body (.fieldAt 0 1 true) pc args frame (.scalar (.aggregate (mixed.encode
+      [.i32 0x1FF, .i32 0, .i32 0, .aggregate (List.replicate 8 0)])) :: rest) memory =
+      .ok (.next (pc + 1) (.scalar (.i32 (-1)) :: rest) frame memory) := by
+  constructor <;> rw [step_fieldAt_encode_narrow mixed_valid 0 _] <;> rfl
+
+/-- `s = default; while (s.total != value) s.total++; s.flag = 1; return s.flag;`, storing the
+    flag byte on the exit path. -/
+@[cil_code] def marked : CIL.Method := {
+  returnsValue := true, locals := [.aggregate (List.replicate 16 0)], localKinds := [.aggregate 16]
+  code := [.localAddr 0, .initAggregate 16, .branch 9, .localAddr 0, .local 0, .fieldAt 4 4,
+    .const32 1, .add, .setFieldAt 4 4, .local 0, .fieldAt 4 4, .arg 0, .bne 3, .localAddr 0,
+    .const32 1, .setFieldAt 0 1, .local 0, .fieldAt 0 1, .ret] }
+
+/-- The program of `marked` alone. -/
+@[cil_code] def markedProgram : CIL.Program := [marked]
+
+/-- The entered frame of `marked`. -/
+bind_entry markedEntry (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) :=
+  marked with [.scalar (.i32 value)] from memory allocating wellFormed
+
+/-- The struct local, remembered by its `total` field; the other fields stay zero. -/
+abbrev Marked (memory : Memory) (home : Reference) :=
+  FrameState [] memory [.aggregate 16] W32 (fun _ => [.bytes (.aggregate 16) home])
+    fun total => [some (.aggregate (mixed.encode
+      [.i32 0, .i32 0, .i32 total, .aggregate (List.replicate 8 0)]))]
+
+/-- The loop test, with the input and `total` on the stack. -/
+bind_cutpoint markedHeader (memory : Memory) (value : W32) (home : Reference)
+    (state : Marked memory home) :=
+  marked matching (fun op => op matches .bne _) with markedEntry.frame memory home,
+    [.scalar (.i32 value), .scalar (.i32 state.values)], state.memory
+
+/-- `cil_loop_finish` takes a store on the exit path through the frame and returns the stored
+    flag, leaving the frame of the stored memory. -/
+theorem marked_returns_one (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) :
+    ∃ fuel final, invoke markedProgram fuel 0 [.scalar (.i32 value)] memory =
+      .ok (final, [.scalar (.i32 1)]) ∧ MemoryBelow memory.nextIdentity memory final := by
+  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := markedEntry.checked memory value wellFormed
+  refine invoke_loop_induction (by rfl) rfl setup (markedHeader memory value home)
+    (fun _ => True) (fun state => (value - state.values).toNat) (fun start => ?_) ?_
+  · cil_loop_recurse start 0
+    trivial
+  rintro ⟨total, current, frame⟩ - recurse
+  by_cases done : total = value
+  · subst done
+    cil_loop_finish
+  · cil_loop_recurse recurse (total + 1)
+    · trivial
+    · show (value - (total + 1)).toNat < (value - total).toNat
+      bv_omega
+/-- info: 'Tests.LoopDiagnostics.marked_returns_one' depends on axioms: [propext,
+ Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms marked_returns_one
+
+-- A remembered nested struct, spelled as `List.replicate`, still lets a 4-byte field read
+-- by value step.
+example (memory current : Memory) (value total : W32) (home : Reference)
+    (frame : LoopFrame [] memory current [.aggregate 16] [.bytes (.aggregate 16) home]
+      (knownLocals [some (.aggregate (mixed.encode
+        [.i32 0, .i32 0, .i32 total, .aggregate (List.replicate 8 0)]))])) :
+    LoopReaches markedProgram 0 [.scalar (.i32 value)]
+      ⟨9, markedEntry.frame memory home, [], current⟩
+      ⟨11, markedEntry.frame memory home, [.scalar (.i32 total)], current⟩ := by
+  cil_loop_steps
+
 -- A docstring before `bind_entry` documents its checked entry, and before `bind_cutpoint` its
 -- state.
 /-- info: [some "The entered frame of `tally`. ",

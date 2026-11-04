@@ -6,11 +6,13 @@ import CIL.Safety.FieldValues
 
 The `LoopFrame` steps of a struct local remembered by its field values, as
 `.aggregate (layout.encode values)` (see `CIL.Safety.FieldValues`): `initobj` through its address
-(`LoopFrame.zero_aggregate`), a field store through its address (`LoopFrame.store_field`) and a
-field load through its address (`LoopFrame.load_field`). Each continues the frame facts with the
+(`LoopFrame.zero_aggregate`), to the layout's `zeros`, a field store through its address
+(`LoopFrame.store_field`) and a field load through its address (`LoopFrame.load_field`, and
+`LoopFrame.load_narrow_field` for a 1- or 2-byte field). Each continues the frame facts with the
 struct's new field values, from the `LocalSnapshots` laws of `CIL.Safety.AggregateFields`, so a
 loop state names the fields rather than the struct's bytes. A by-value field read, `ldloc` then
-`ldfld`, is `step_fieldAt_encode` on the value `LoopFrame.load` pushes.
+`ldfld`, is `step_fieldAt_encode` (or `step_fieldAt_encode_narrow`) on the value `LoopFrame.load`
+pushes.
 -/
 
 namespace CIL.Safety
@@ -19,15 +21,15 @@ variable {footprint : List (Reference × Nat)} {caller current : Memory}
   {kinds : List CIL.LocalKind} {slots : List LocalSlot}
 
 /-- `initobj` through the address of a listed struct home zeroes it, which lists the struct whose
-    fields hold `fields` when those encode as zeros, and keeps every other frame fact; nothing
-    below the caller's watermark changes. -/
+    fields hold `fields`, the zeros of its valid `layout`, and keeps every other frame fact;
+    nothing below the caller's watermark changes. -/
 theorem LoopFrame.zero_aggregate {values : List (Option CIL.Value)}
     (frame : LoopFrame footprint caller current kinds slots (knownLocals values)) (index : Nat)
     (layout : AggregateLayout) (fields : List CIL.Value) {width : Nat} {bounded : width < 2 ^ 64}
     {home : Reference}
     (slot : slots[index]? = some (.bytes (.aggregate ⟨width, bounded⟩) home) := by rfl)
-    (zeroed : layout.encode fields = List.replicate width 0 := by decide)
-    (present : index < values.length := by simp) :
+    (valid : layout.Valid := by decide +kernel) (sized : layout.size = width := by rfl)
+    (zeroed : fields = layout.zeros := by rfl) (present : index < values.length := by simp) :
     ∃ after, (∀ body pc args stacked rest,
         step body (.initAggregate width) pc args stacked (.reference (.address home) :: rest)
           current = .ok (.next (pc + 1) rest stacked after)) ∧
@@ -39,7 +41,7 @@ theorem LoopFrame.zero_aggregate {values : List (Option CIL.Value)}
   refine ⟨after, stepped, ⟨frame.confined.then_below below
     (Nat.le_of_eq (write_nextIdentity written).symm), formed, frame.homes.after_write written,
     ?_⟩, below⟩
-  rw [← rememberLocal_knownLocals present, zeroed]
+  rw [← rememberLocal_knownLocals present, zeroed, layout.encode_zeros valid, sized]
   exact snapshots
 
 /-- Storing `value` into field `fieldIndex` of a listed struct of a valid, disjoint layout lists
@@ -99,8 +101,31 @@ theorem LoopFrame.load_field {values : List (Option CIL.Value)}
     (by simp [knownLocals, present])
   exact fieldAt_encode_home frame.wellFormed valid disjoint loaded found listed exact
 
+/-- `ldfld` of 1- or 2-byte field `fieldIndex` through the address of a listed struct of a
+    valid, disjoint layout whose field holds the int `bits` pushes `narrowLoad` of it, and
+    changes nothing. -/
+theorem LoopFrame.load_narrow_field {values : List (Option CIL.Value)}
+    (frame : LoopFrame footprint caller current kinds slots (knownLocals values)) (index : Nat)
+    {layout : AggregateLayout} (valid : layout.Valid) (fieldIndex : Nat)
+    {size : Fin (2 ^ 64)} {home : Reference} {fields : List CIL.Value}
+    (slot : slots[index]? = some (.bytes (.aggregate size) home) := by rfl)
+    (present : values[index]? = some (some (.aggregate (layout.encode fields))) := by rfl)
+    (disjoint : layout.Disjoint := by decide) {offset width : Nat} {aggregate : Bool}
+    (found : layout.fields[fieldIndex]? = some ⟨offset, width, aggregate⟩ := by rfl)
+    {bits : BitVec 32} (listed : fields[fieldIndex]? = some (.i32 bits) := by rfl)
+    (narrow : width = 1 ∨ width = 2 := by decide) :
+    ∀ body pc args stacked rest signed,
+      step body (.fieldAt offset width signed) pc args stacked
+        (.reference (.address home) :: rest) current =
+        .ok (.next (pc + 1) (.scalar (.i32 (narrowLoad width signed bits)) :: rest) stacked
+          current) := by
+  obtain ⟨-, loaded⟩ := frame.snapshots.aggregate (bytes := layout.encode fields) slot
+    (by simp [knownLocals, present])
+  exact fieldAt_encode_home_narrow frame.wellFormed valid disjoint loaded found listed narrow
+
 #print axioms LoopFrame.zero_aggregate
 #print axioms LoopFrame.store_field
 #print axioms LoopFrame.load_field
+#print axioms LoopFrame.load_narrow_field
 
 end CIL.Safety

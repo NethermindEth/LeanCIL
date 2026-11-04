@@ -5,11 +5,12 @@ import CIL.Safety.LoopContract
 # Loop tactics that carry frame facts
 
 The tactics that walk a loop's `LoopTerminates` goals while keeping its `LoopFrame` current:
-`cil_loop_advance` steps to a call or return, `cil_loop_call` crosses a call through the callee's
-contract and continues with the frame after it, and `cil_loop_recurse` steps to a loop head,
-applying each struct zeroing and field store through the frame's lemmas, and applies the head's
-hypothesis there. A memory a store or call produces is named in the context with its frame, so
-the next step reads it like any other fact.
+`cil_loop_advance` steps to a call or return, `cil_loop_finish` through a return,
+`cil_loop_call` crosses a call through the callee's contract and continues with the frame after
+it, and `cil_loop_recurse` steps to a loop head and applies the head's hypothesis there. Each walk
+takes the struct zeroings and field stores on its way through the frame's lemmas. A memory a
+store or call produces is named in the context with its frame, so the next step reads it like any
+other fact.
 -/
 
 namespace CIL.Safety
@@ -60,19 +61,16 @@ def loopAddressOf? (value : Expr) : MetaM (Option Expr) := do
   unless reference.isAppOfArity ``ManagedReference.address 1 do return none
   return some reference.appArg!
 
-/-- The zero value each field of `layout` reads back exactly, when every field is a 4, 8, 16 or
-    32-byte scalar. -/
-def loopZeroFields? (layout : Expr) : MetaM (Option (Array Term)) := do
+/-- The layout's `AggregateLayout.zeros` as literal values, one per field, in the form a proof
+    writes them, such as `.i32 0`; none when a field's kind does not reduce to a value. -/
+def loopZeroFields? (layout : Expr) : TermElabM (Option (Array Term)) := do
   let mut zeros : Array Term := #[]
   for (_, field) in ← listEntries (mkApp (mkConst ``CIL.AggregateLayout.fields) layout) do
-    let some width ← literalNat? (mkApp (mkConst ``CIL.FieldLayout.width) field) | return none
-    let zero ← match width with
-      | 4 => `(CIL.Value.i32 0)
-      | 8 => `(CIL.Value.i64 0)
-      | 16 => `(CIL.Value.v128 0)
-      | 32 => `(CIL.Value.v256 0)
-      | _ => return none
-    zeros := zeros.push zero
+    let zero ← whnf (mkApp (mkConst ``CIL.FieldLayout.zero) field)
+    unless zero.getAppFn.constName?.any (·.getPrefix == ``CIL.Value) do return none
+    -- Projections of the literal field, such as its width in a nested zero, are reduced.
+    let zero := (← dsimp zero (← Simp.mkContext)).1
+    zeros := zeros.push (← Term.exprToSyntax zero)
   return some zeros
 
 /-- The position of the field of `layout` at `offset`. -/
@@ -96,7 +94,7 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
   let some parts ← loopStateParts? source | return false
   let fetched ← observing? (loopFetch facts)
   saved.restore
-  let some { op, .. } := fetched | return false
+  let some { op, found, instruction, .. } := fetched | return false
   let op ← whnfR op
   let memory := parts[3]!
   let stack ← listEntries parts[2]!
@@ -128,35 +126,26 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
         return (← literalNat? (mkApp (mkConst ``CIL.AggregateLayout.size) layout)) == some width
       let some layout := sized[0]? | return false
       let some zeros ← loopZeroFields? layout | return false
+      let valid ← layoutValidity layout
       let frame ← Term.exprToSyntax proof
       let layoutTerm ← Term.exprToSyntax layout
       `(tactic| obtain ⟨$after, $stepped, $framed, -⟩ := CIL.Safety.LoopFrame.zero_aggregate
-        $frame $(quote index) $layoutTerm [$zeros,*])
+        $frame $(quote index) $layoutTerm [$zeros,*] (valid := $valid))
     else return false
   try
     Term.withoutErrToSorry <| withoutRecover <| evalTactic store
-    return true
   catch _ =>
     saved.restore
     return false
-
-/-- Walk a `LoopTerminates` goal to the pc `target`, regathering the facts after each struct
-    store the frame lemmas take; fails as `tactic` naming the pc where it cannot go on. -/
-partial def loopResume (tactic : String) (target : Nat) (layouts : Array Expr)
-    (footprint : Expr) (stepped : Bool := false) : TacticM Unit := do
-  let facts ← gatherLoopFactGroups #[]
-  let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
-    (#[← `(CIL.truth)] ++ facts.core)
-  loopSteps tactic (.resume target) facts prepared stepped
-  if (← getGoals).isEmpty then return
-  let position ← withMainContext do
-    let some (source, _) ← loopGoalStates (← getMainTarget) | return none
-    let some parts ← loopStateParts? source | return none
-    literalNat? parts[0]!
-  if position == some target then return
-  unless ← loopFrameStore facts.core layouts footprint do
-    loopStuck tactic facts.all prepared fun _ => false
-  loopResume tactic target layouts footprint true
+  -- Taking the store's step puts its memory in the goal, so the regathered facts are about it.
+  let taken ← saveState
+  try
+    let found ← Term.exprToSyntax found
+    let instruction ← Term.exprToSyntax instruction
+    Term.withoutErrToSorry <| withoutRecover <| evalTactic (← `(tactic|
+      refine CIL.Safety.loop_terminates_next $found $instruction ($stepped _ _ _ _ _) ?_))
+  catch _ => taken.restore
+  return true
 
 /-- The layouts each `AggregateLayout.encode` in `expression` names. -/
 partial def encodedLayouts (expression : Expr) (found : Array Expr := #[]) : Array Expr :=
@@ -172,17 +161,68 @@ partial def encodedLayouts (expression : Expr) (found : Array Expr := #[]) : Arr
   | .mdata _ inner | .proj _ _ inner => encodedLayouts inner found
   | _ => found
 
+/-- The layouts each `AggregateLayout.encode` in the goal or a hypothesis names. -/
+def contextLayouts : TacticM (Array Expr) := withMainContext do
+  let mut found := encodedLayouts (← instantiateMVars (← getMainTarget))
+  for declaration in ← getLCtx do
+    if declaration.isImplementationDetail then continue
+    found := encodedLayouts (← instantiateMVars declaration.type) found
+  return found
+
+/-- Walk a `LoopTerminates` goal as `mode` directs, with the `explicit` facts and those
+    `gatherLoopFacts` finds, taking each struct zeroing and field store no fact steps through the
+    frame lemmas and regathering the facts after it; a zeroed struct takes the first of
+    `layouts` of its size. Fails as `tactic` naming the pc where it cannot go on. -/
+partial def loopWalk (tactic : String) (mode : LoopStepping) (explicit : Array Term)
+    (layouts : Array Expr) (footprint : Expr) (stepped : Bool := false) : TacticM Unit := do
+  let facts ← gatherLoopFactGroups explicit
+  let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
+    (#[← `(CIL.truth)] ++ facts.core)
+  loopSteps tactic mode facts prepared stepped
+  if (← getGoals).isEmpty then return
+  let position ← withMainContext do
+    let some (source, _) ← loopGoalStates (← getMainTarget) | return none
+    let some parts ← loopStateParts? source | return none
+    literalNat? parts[0]!
+  match mode with
+  | .resume target => if position == some target then return
+  -- A finish leaves a postcondition its facts do not prove as the goal.
+  | _ => if position.isNone then return
+  if ← loopFrameStore facts.core layouts footprint then
+    return ← loopWalk tactic mode explicit layouts footprint true
+  -- Where the walk stopped is the mode's stop, or a store no frame lemma takes.
+  let stops : Lean.Name → Bool := match mode with
+    | .finish => (· == ``CIL.Op.ret)
+    | .advance => fun op => op == ``CIL.Op.call || op == ``CIL.Op.ret
+    | _ => fun _ => false
+  loopStuck tactic facts.all prepared stops
+
+/-- The empty footprint, at which an entry frame proved for every footprint is taken. -/
+def noFootprint : MetaM Expr := do
+  mkAppOptM ``List.nil #[← mkAppM ``Prod #[mkConst ``Reference, mkConst ``Nat]]
+
 /-- Step a `LoopTerminates` goal through fetched instructions up to the next call or return,
-    with the optional facts and those `gatherLoopFacts` finds. Any other instruction it cannot
-    step fails, naming the pc, the instruction and the residual step. -/
+    with the optional facts and those `gatherLoopFacts` finds, taking each struct zeroing and
+    field store on the way through the frame lemmas. Any other instruction it cannot step fails,
+    naming the pc, the instruction and the residual step. -/
 syntax "cil_loop_advance" (" [" term,* "]")? : tactic
 
 elab_rules : tactic
   | `(tactic| cil_loop_advance $[[$facts:term,*]]?) => do
-    let facts ← gatherLoopFactGroups (facts.map (·.getElems) |>.getD #[])
-    let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
-      (#[← `(CIL.truth)] ++ facts.core)
-    loopSteps "cil_loop_advance" .advance facts prepared
+    loopWalk "cil_loop_advance" .advance (facts.map (·.getElems) |>.getD #[])
+      (← contextLayouts) (← noFootprint)
+
+/-- Establish an exit path and its postcondition without choosing a fuel bound, taking each
+    struct zeroing and field store on the way through the frame lemmas. The facts are the
+    optional list and those `gatherLoopFacts` finds. A return whose results or postcondition the
+    facts do not prove is left as the goal; any other step that cannot be taken fails, naming
+    the pc, the instruction and the residual step. -/
+syntax "cil_loop_finish" (" [" term,* "]")? : tactic
+
+elab_rules : tactic
+  | `(tactic| cil_loop_finish $[[$facts:term,*]]?) => do
+    loopWalk "cil_loop_finish" .finish (facts.map (·.getElems) |>.getD #[])
+      (← contextLayouts) (← noFootprint)
 
 /-- Continue a call's `LoopTerminates` continuation with its results and the frame after it:
     names the returned memory and the contract's output, substitutes an output the
@@ -308,7 +348,7 @@ elab_rules : tactic
       let layouts := encodedLayouts (← instantiateMVars (← whnfR stateType)) ++
         encodedLayouts type
       return (target, layouts, footprint, premises.size - 1)
-    loopResume "cil_loop_recurse" target layouts footprint
+    loopWalk "cil_loop_recurse" (.resume target) #[] layouts footprint
     let holes : Array Term ← (List.range conditions).toArray.mapM fun _ => `(?_)
     let (reached, memory) ← withMainContext do
       let reached ← instantiateMVars (← getMainTarget)

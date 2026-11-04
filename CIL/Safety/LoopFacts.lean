@@ -382,15 +382,23 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
           -- A struct remembered by its field values reads each field by value and by address.
           let some (layout, values) ← encodedStruct? entry | continue
           let valid ← layoutValidity layout
-          -- The literal list, projections reduced, is the form stepping leaves on the stack.
+          -- The literal list after the simprocs, such as a nested `List.replicate` spelled out, is
+          -- the form stepping leaves on the stack.
           let entries ← listEntries values
           let literal ← mkListLit (mkConst ``CIL.Value) (entries.toList.map (·.2))
-          let valuesTerm ← Term.exprToSyntax (← dsimp literal (← Simp.mkContext)).1
+          let (spelled, _) ← simp literal (← Simp.mkContext) #[← Simp.getSimprocs]
+          let valuesTerm ← Term.exprToSyntax spelled.expr
           let fields ← listEntries (mkApp (mkConst `CIL.AggregateLayout.fields) layout)
-          for field in [:fields.size] do
-            candidates := candidates.push (`fieldRead, applied `step_fieldAt_encode
+          for (field, fieldLayout) in fields do
+            -- A 1- or 2-byte field reads back truncated, through `narrowLoad`.
+            let width ← whnf (mkApp (mkConst `CIL.FieldLayout.width) fieldLayout)
+            let narrow := (← getNatValue? width) matches some 1 | some 2
+            let (base, read, load) := if narrow then
+                (`narrowRead, `step_fieldAt_encode_narrow, `LoopFrame.load_narrow_field)
+              else (`fieldRead, `step_fieldAt_encode, `LoopFrame.load_field)
+            candidates := candidates.push (base, applied read
               #[valid, numeral field, valuesTerm], subject, memory, #[])
-            candidates := candidates.push (`fieldLoad, applied `LoopFrame.load_field
+            candidates := candidates.push (base, applied load
               #[frameTerm, numeral index, valid, numeral field], subject, memory, #[])
     if type.isAppOfArity `CIL.Safety.LoopFrame 6 && isLive arguments[2]! then
       if confinedToNone type && scope.returns then
@@ -421,6 +429,7 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
   let mut addresses : Array Term := #[]
   let mut fields : Array Term := #[]
   let mut cases : Array Term := #[]
+  let mut narrowReads := false
   for ((base, fact, _, _, _), keep) in candidates.zip kept do
     if keep && base == `caseSplit then cases := cases.push fact
     unless keep && base.isAnonymous do continue
@@ -434,8 +443,11 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
     unless keep && !base.isAnonymous && base != `caseSplit do continue
     -- Home forms and field reads are asserted only once an instruction reads them.
     if base == `homeForm then addresses := addresses.push fact; continue
-    if base == `fieldRead || base == `fieldLoad then fields := fields.push fact; continue
+    if base == `fieldRead then fields := fields.push fact; continue
+    if base == `narrowRead then fields := fields.push fact; narrowReads := true; continue
     if let some (asserted, type) ← assertLoopFact base fact known then
+      -- A derived fact can name a frame the goal no longer does, such as the entry frame's owner.
+      constants := constants ++ type.getUsedConstants
       known := known.push type
       gathered := gathered.push asserted
       homeLoads := homeLoads || base == `homeLoad
@@ -443,6 +455,11 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
     gathered := gathered.push (global ``localResult)
   if !addresses.isEmpty && !explicitNames.contains ``localAddress then
     addresses := addresses.push (global ``localAddress)
+  -- A narrow read leaves `narrowLoad` on the stack; it must reduce to a literal for a later
+  -- branch or return to compare it.
+  if narrowReads then
+    for name in [`CIL.Safety.narrowLoad, ``BitVec.reduceSetWidth, ``BitVec.reduceSignExtend] do
+      unless explicitNames.contains name do gathered := gathered.push (global name)
   if literalWidth then
     for name in [`CIL.Safety.numericOfWidth, ``BitVec.ofNat_toNat] do
       unless explicitNames.contains name do gathered := gathered.push (global name)
