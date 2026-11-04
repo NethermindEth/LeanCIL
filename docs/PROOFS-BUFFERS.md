@@ -217,18 +217,26 @@ rejected writes, including one through the second home of a generated two-local 
 `CIL.Safety.LoopFrameFields`, which `CIL.Safety.LoopScaffold` imports, remembers a struct local
 in a `LoopFrame` as `.aggregate (layout.encode fields)`: `AggregateLayout.encode` writes each
 field's value at its offset in zeroed bytes, so a state names the fields rather than the bytes.
-`LoopFrame.zero_aggregate frame index layout fields` steps `initobj` through the home's address
-to a frame remembering `fields`, when they encode as zeros. `store_field frame index valid
-fieldIndex value` steps `stfld` to a frame remembering `fields.set fieldIndex value`, and
+`AggregateLayout.zeros layout` is the value each field loads from zeroed bytes: `.i32 0` for a 1-, 2-
+or 4-byte field, `.i64 0` for a word, the vector zero for a 16- or 32-byte field and
+`.aggregate (List.replicate width 0)` for a nested struct. `encode_zeros` proves the encoded
+zeros are the struct's zero bytes. `LoopFrame.zero_aggregate frame index layout fields` steps
+`initobj` through the home's address to a frame remembering `fields`; its `valid`, `sized` and
+`zeroed` arguments check by `decide` and `rfl` that the layout is valid, fills the local and that
+`fields` is `layout.zeros`, so a wrong zero claim does not elaborate. `store_field frame index
+valid fieldIndex value` steps `stfld` to a frame remembering `fields.set fieldIndex value`, and
 `load_field` steps `ldfld` through the address to the field's value. Each returns the step
 equation, the frame after it and `MemoryBelow`; the slot, the field and its width are checked by
 `rfl` and `decide`, so a field outside the layout or a value of another width does not elaborate.
 A by-value read, `ldloc` then `ldfld`, loads the struct and reads the field with
-`step_fieldAt_encode`.
+`step_fieldAt_encode`. A 1- or 2-byte field holds an `.i32` and reads back truncated to its width
+and zero or sign extended, as `narrowLoad width signed bits`: `step_fieldAt_encode_narrow` reads
+it by value and `load_narrow_field` through the address.
 
 The loop tactics gather the field reads and the home's `form` from each frame in scope, and
-`cil_loop_recurse` takes the zeroing and the stores itself, so a proof names neither. A zeroed
-struct's layout is one its loop head remembers, and its fields must be 4, 8, 16 or 32-byte
-scalars. A field reads back as the value stored, such as `.i32 (count + 1)`, with no `toNat`
-round trip through bytes. [TallyTwice](../Examples/Proofs/TallyTwice.lean) counts and sums in a
+`cil_loop_recurse`, `cil_loop_advance` and `cil_loop_finish` take the zeroing and the stores
+themselves, so a proof names neither. A zeroed struct's layout is one its loop head remembers.
+A field reads back as the value stored, such as `.i32 (count + 1)`, with no `toNat` round trip
+through bytes, and a narrow field as its `narrowLoad`, which the tactics compute for a literal.
+[TallyTwice](../Examples/Proofs/TallyTwice.lean) counts and sums in a
 struct across a helper call this way, naming no frame lemma, memory or step.

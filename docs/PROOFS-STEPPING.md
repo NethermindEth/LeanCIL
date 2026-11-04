@@ -285,9 +285,10 @@ value, or from a literal condition, so no `CIL.truth` restatement is needed. Bot
 loop-exit automation try return proofs only for fetched `.ret` instructions, including narrow
 returns, so other opcodes do not incur failed return-step simplification.
 
-For loops, import [LoopAutomation](../CIL/Safety/LoopAutomation.lean). `cil_loop_steps [facts]`
-composes an execution segment and `cil_loop_finish [facts]` proves an exit path and its
-postcondition. The list is optional: both tactics add the facts
+For loops, import [LoopAutomation](../CIL/Safety/LoopAutomation.lean) for `cil_loop_steps [facts]`,
+which composes an execution segment, and [LoopScaffold](../CIL/Safety/LoopScaffold.lean) for
+`cil_loop_finish [facts]`, which proves an exit path and its postcondition. The list is optional:
+both tactics add the facts
 [`gatherLoopFacts`](../CIL/Safety/LoopFacts.lean) finds, described under [loop verification
 conditions](#loop-verification-conditions), so the list carries only invariant equations, the
 positive side of a case split and other facts of no recognized shape.
@@ -326,8 +327,9 @@ Its result is the `∃ fuel final, invoke ... = .ok (final, values) ∧ kept fin
 The tactics of [LoopFrameSteps](../CIL/Safety/LoopFrameSteps.lean), which
 `CIL.Safety.LoopScaffold` imports, walk these goals while keeping the loop's `LoopFrame` current:
 
-- `cil_loop_advance [facts]` steps to a call or return and fails as `cil_loop_steps` does on
-  anything else.
+- `cil_loop_advance [facts]` steps to a call or return and `cil_loop_finish [facts]` through a
+  return to its postcondition. Each takes a struct zeroing or field store on the way as
+  `cil_loop_recurse` does and fails as `cil_loop_steps` does on anything else.
 - `cil_loop_call holds input at site [facts]` applies the contract (`loop_terminates_call`) at
   the `bind_call` site or, without `at site`, at the fetched call, and fails naming the pc and
   instruction when the goal is not at a call. It leaves the precondition unless `trivial` proves
