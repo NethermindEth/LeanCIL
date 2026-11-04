@@ -304,18 +304,34 @@ def loopFilledContents : TacticM Unit := withMainContext do
       return
   throwError "no `Filled` hypothesis states these contents"
 
-/-- Take the `ret` a finishing walk stopped at: with a frame fact at its memory and the entry's
-    `setup`, name what leaving the frame keeps (`exitConfined`, `exitBelow`), carry the
-    caller-buffer facts to the exit memory, and prove the step and its checks. Each conjunct of
-    the postcondition that the facts or `exitConfined` prove is closed; the rest is left as the
-    goal. -/
-def loopFinishReturn (facts : Array Term) : TacticM Unit := withMainContext do
-  let some (source, _) ← loopGoalStates (← getMainTarget) | return
-  let some parts ← loopStateParts? source | return
+/-- Take the `ret` a finishing walk fetched, stepping it with `reading`, the facts it reads. A
+    postcondition those facts prove is closed. Otherwise, with a frame fact at the return's memory
+    and the entry's `setup`, name what leaving the frame keeps (`exitConfined`, `exitBelow`), carry
+    the caller-buffer facts to the exit memory, and close each conjunct that a hypothesis, a
+    carried `Filled` fact or the facts prove; the rest is left as the goal. -/
+def loopFinishReturn (fetched : LoopFetched) (reading : Array Term) : TacticM Unit := do
+  let some (source, _) ← withMainContext do loopGoalStates (← getMainTarget) | return
+  let some parts ← withMainContext do loopStateParts? source | return
+  withMainContext do
+  let found ← Term.exprToSyntax fetched.found
+  let instruction ← Term.exprToSyntax fetched.instruction
+  evalTactic (← `(tactic| (
+    apply CIL.Safety.loop_terminates_return $found $instruction
+    · cil_checked_step_normalized [$[$reading:term],*]
+    · rfl)))
+  if (← getGoals).isEmpty then return
+  withMainContext do
+  -- Frame cleanup only after the facts fail, since unfolding `leaveFrame` first would hide it
+  -- from a supplied fact about the exited frame's memory.
+  let closed ← `(tactic| first
+    | (simp [$[$reading:term],*]; done)
+    | (simp [CIL.Safety.leaveFrame, CIL.NarrowKind.extend, $[$reading:term],*]; done))
   let saved ← saveState
-  let some fetched ← observing? (loopFetch facts) | saved.restore; return
-  saved.restore
-  unless (← whnfR fetched.op).isAppOf ``CIL.Op.ret do return
+  try
+    Term.withoutErrToSorry <| withoutRecover <| evalTactic closed
+    return
+  catch _ => saved.restore
+  evalTactic (← `(tactic| try dsimp only))
   let memory := parts[3]!
   let mut extra : Array Term := #[]
   if let some (frame, frameType) ← loopFrameAt? memory then
@@ -333,19 +349,11 @@ def loopFinishReturn (facts : Array Term) : TacticM Unit := withMainContext do
         loopCarryBelow memory exitBelow
         extra := extra.push exitConfined
       catch _ => left.restore
-  let found ← Term.exprToSyntax fetched.found
-  let instruction ← Term.exprToSyntax fetched.instruction
-  let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
-    (#[← `(CIL.truth)] ++ facts)
-  evalTactic (← `(tactic| (
-    apply CIL.Safety.loop_terminates_return $found $instruction
-    · cil_checked_step_normalized [$[$prepared:term],*]
-    · rfl
-    try dsimp only)))
+  withMainContext do
   let simplified ← `(tactic| first
-    | (simp [$[$extra:term],*, $[$prepared:term],*]; done)
+    | (simp [$[$extra:term],*, $[$reading:term],*]; done)
     | (simp [CIL.Safety.leaveFrame, CIL.NarrowKind.extend, $[$extra:term],*,
-        $[$prepared:term],*]; done))
+        $[$reading:term],*]; done))
   -- A carried `Filled` fact proves the contents it starts with.
   loopCloseConjuncts (evalTactic (← `(tactic| with_reducible assumption)) <|>
     loopFilledContents <|> evalTactic simplified)
@@ -360,26 +368,21 @@ partial def loopWalk (tactic : String) (mode : LoopStepping) (explicit : Array T
   let facts ← gatherLoopFactGroups explicit
   let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
     (#[← `(CIL.truth)] ++ facts.core)
-  loopSteps tactic mode facts prepared stepped
+  let stopped ← loopSteps tactic mode facts prepared stepped
+    (finishReturn := some loopFinishReturn)
   if (← getGoals).isEmpty then return
-  -- A walk that stops shows its pc as a literal, such as `18` rather than `17 + 1`.
-  evalTactic (← `(tactic| try simp only [Nat.reduceAdd]))
   let position ← withMainContext do
     let some (source, _) ← loopGoalStates (← getMainTarget) | return none
     let some parts ← loopStateParts? source | return none
     literalNat? parts[0]!
-  match mode with
-  | .resume target => if position == some target then return
-  | .finish =>
-    -- A return the facts do not close is taken here, leaving only what they do not prove.
-    if position.isNone then return
-    let saved ← saveState
-    let fetched ← observing? (loopFetch facts.core)
-    saved.restore
-    if let some { op, .. } := fetched then
-      if (← whnfR op).isAppOf ``CIL.Op.ret then
-        return ← loopFinishReturn facts.all
-  | _ => if position.isNone then return
+  -- A goal the walk hands back is not a loop path, or shows its pc as a literal.
+  let some _ := position | return
+  loopLiteralGoal
+  if let .resume target := mode then
+    if position == some target then return
+  -- A call or return an advance stops at is left for the next tactic.
+  if mode == .advance && stopped.any fun op => op == ``CIL.Op.call || op == ``CIL.Op.ret then
+    return
   if ← loopFrameStore facts.core layouts footprint then
     return ← loopWalk tactic mode explicit layouts footprint true
   -- Where the walk stopped is the mode's stop, or a store no frame lemma takes.
@@ -431,7 +434,8 @@ def loopCallSide (unfold : Array Ident) (facts : Array Term) : TacticM Unit := d
       | done
       | (and_intros <;> omega)
       | omega
-      | exact CIL.Safety.Memory.WellFormed.form_bound (by assumption) (by assumption)
+      | exact CIL.Safety.Memory.WellFormed.form_bound (by with_reducible assumption)
+          (by with_reducible assumption)
       | cil_caller_allocation)))
 
 /-- Continue a call's `LoopTerminates` continuation with its results and the frame after it:
@@ -541,7 +545,12 @@ def loopCallFailure (holds input : Term) (facts : Array Term) (position : Nat)
 elab_rules : tactic
   | `(tactic| cil_loop_call $holds $input $[at $site:ident]? $[[$facts:term,*]]?) => do
     let explicit := facts.map (·.getElems) |>.getD #[]
-    let facts ← gatherLoopFacts explicit
+    let groups ← gatherLoopFactGroups explicit
+    -- The call checks its arguments, so it reads the reference facts besides the core.
+    let references ← assertLoopFacts `callerFact groups.references groups.known
+    let facts := groups.core ++ references
+    let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
+      (#[← `(CIL.truth)] ++ facts)
     let instruction : Term ← match site with
       | some site => pure ⟨(mkIdent (site.getId ++ `call)).raw⟩
       | none => `(by cil_lookup [$[$facts:term],*])
@@ -554,11 +563,11 @@ elab_rules : tactic
       Term.withoutErrToSorry <| withoutRecover <|
         evalTactic (← `(tactic| refine CIL.Safety.loop_terminates_call $holds $input
           (by cil_lookup [$[$facts:term],*]) $instruction
-          (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_))
+          (by cil_checked_step_normalized [$[$prepared:term],*]) (by rfl) ?_ ?_))
     catch error =>
       saved.restore
       let some position ← withMainContext do literalNat? parts[0]! | throw error
-      loopCallFailure holds input facts position parts[2]!
+      loopCallFailure holds input groups.all position parts[2]!
     let contract ← loopHeldContract holds
     let [permitted, continuation] ← getGoals
       | throwError "cil_loop_call: expected the precondition and the continuation"

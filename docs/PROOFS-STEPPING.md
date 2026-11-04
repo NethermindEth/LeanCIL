@@ -420,8 +420,10 @@ an unrelated context adds nothing to simp:
   ([`CheckedSpan.valid_within`](../CIL/Safety/LoopCallerFacts.lean));
 - for a `form`, `add` or span `validate`, `element` or `slice` equation at the caller's memory of
   a `LoopFrame` with that memory's `WellFormed`, the equation at the frame's memory
-  (`LoopFrame.caller_form` and its kind), and for an `add` or `element` result or an `access`
-  check, the `form` fact of the reference it gives;
+  (`LoopFrame.caller_form` and its kind), and for an `add` result or an `access` check, the
+  `form` fact of the reference it gives. These, and the facts of a span only a kept equation
+  such as a slice produces, are read only by instructions that use a reference or span, so a
+  step over scalars and locals does not carry them;
 - `elementWidth` of a `SpanContents`;
 - for a [`LoopFrame`](../CIL/Safety/LoopFrames.lean) over `knownLocals` of a list, and for the
   entry frame `bind_entry ... allocating` proves for every footprint, the `form` of each home

@@ -245,8 +245,11 @@ theorem Writable.add_int {memory : Memory} {base : Reference} {width start count
 /-- Prove that a caller buffer, or an element of one, lies in an allocation below the caller's
     watermark, from a hypothesis or a `form` fact of the caller's well-formed memory. -/
 macro "cil_caller_allocation" : tactic => `(tactic| first
+  | with_reducible assumption
   | ((try simp only [Reference.element_allocation])
-     exact Memory.WellFormed.form_bound (by assumption) (by assumption))
-  | assumption)
+     first
+       | with_reducible assumption
+       | exact Memory.WellFormed.form_bound (by with_reducible assumption)
+           (by with_reducible assumption)))
 
 end CIL.Safety

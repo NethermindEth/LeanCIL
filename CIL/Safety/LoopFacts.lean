@@ -263,10 +263,16 @@ structure LoopFacts where
   /-- The negative sides of case splits, which only instructions testing or computing on data
       read. -/
   cases : Array Lean.Syntax.Term := #[]
+  /-- The `form`, `add`, element and slice facts a frame carries from its caller, the `form` of
+      each reference they or an `access` check give, and the facts of a span only a step
+      produces, which only instructions using references or spans read, as proof terms. -/
+  references : Array Lean.Syntax.Term := #[]
+  /-- The statements of the explicit and gathered facts, which no group asserts again. -/
+  known : Array Lean.Expr := #[]
 
 /-- Every fact, for a tactic that does not step instruction by instruction. -/
 def LoopFacts.all (facts : LoopFacts) : Array Lean.Syntax.Term :=
-  facts.core ++ facts.addresses ++ facts.fields ++ facts.cases
+  facts.core ++ facts.addresses ++ facts.fields ++ facts.cases ++ facts.references
 
 open Lean Elab Tactic Meta in
 /-- `facts`, followed by the facts a loop proof's context determines, each at most once:
@@ -278,8 +284,10 @@ open Lean Elab Tactic Meta in
       `frame : LoopFrame` from its memory with that memory's `wellFormed` in context;
     * for a formed reference, `Unsafe.Add` result, or span validity, element or slice equation at
       the caller memory of a `frame : LoopFrame` with that memory's `wellFormed` in context, the
-      equation at the frame's memory (`LoopFrame.caller_form` and its kind), and for an `add` or
-      `element` result or an `access` check, the `form` of the reference it gives;
+      equation at the frame's memory (`LoopFrame.caller_form` and its kind), and for an `add`
+      result or an `access` check, the `form` of the reference it gives; these, and the facts of
+      a span only a kept equation produces, are read only by instructions that use a reference
+      or span (`loopReadsReferences`);
     * for `contents : SpanContents`, `contents.elementWidth`;
     * for `frame : LoopFrame` over `knownLocals` of a list, the load of each remembered local, with
       `localResult`;
@@ -397,21 +405,21 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
       if checked.isAppOfArity `CIL.Safety.access 5 then
         for proof in formTerms (checked.getArg! 0) (applied `access_reference_valid
             #[hole, hole, hole, hole, hole, fact]) do
-          candidates := candidates.push (`referenceForm, proof, #[], #[], #[])
+          candidates := candidates.push (`referenceFact, proof, #[], #[], #[])
     if let some (carry, memory, formedResult) ← loopCallerFact? type then
-      if formedResult.isSome && !(type.consumeMData.eq?.any fun (_, lhs, _) =>
-          lhs.isAppOf ``CIL.Safety.form) then
-        let proof := if (type.consumeMData.eq?.any fun (_, lhs, _) =>
-            lhs.isAppOf ``CIL.Safety.add) then applied `add_formed #[fact]
-          else applied `SpanView.element_formed #[hole, hole, hole, hole, fact]
-        for proof in formTerms memory proof do
-          candidates := candidates.push (`referenceForm, proof, #[], #[], #[])
+      -- An `Unsafe.Add` result forms; a span element's load needs no `form` of its own.
+      if formedResult.isSome && (type.consumeMData.eq?.any fun (_, lhs, _) =>
+          lhs.isAppOf ``CIL.Safety.add) then
+        for proof in formTerms memory (applied `add_formed #[fact]) do
+          candidates := candidates.push (`referenceFact, proof, #[], #[], #[])
       -- A span fact is carried only for a span the goal names; each produces its result.
       if let some (_, lhs, rhs) := type.consumeMData.eq? then
         let subject := if formedResult.isSome then #[]
           else (variables lhs.getAppArgs).filter (· != memory.fvarId!)
+        -- A span's validity stays with every step, since loading a span local reads it.
+        let base := if carry == `LoopFrame.caller_valid then `callerFact else `referenceFact
         for (frame, formed) in carriers memory do
-          candidates := candidates.push (`callerFact,
+          candidates := candidates.push (base,
             applied carry #[named frame, named formed, fact], subject, #[], variables #[rhs])
     if type.isAppOfArity `CIL.Safety.SpanContents 4 then
       candidates := candidates.push (`elementWidth, applied `SpanContents.elementWidth #[fact],
@@ -494,6 +502,7 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
   let mut addresses : Array Term := #[]
   let mut fields : Array Term := #[]
   let mut cases : Array Term := #[]
+  let mut references : Array Term := #[]
   let mut narrowReads := false
   for ((base, fact, _, _, _), keep) in candidates.zip kept do
     if keep && base == `caseSplit then cases := cases.push fact
@@ -504,12 +513,16 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
       literalWidth := literalWidth || loadsAtLiteralWidth type
       constants := constants ++ type.getUsedConstants
       known := known.push type.consumeMData
-  for ((base, fact, _, _, _), keep) in candidates.zip kept do
+  for ((base, fact, subject, _, _), keep) in candidates.zip kept do
     unless keep && !base.isAnonymous && base != `caseSplit do continue
     -- Home forms and field reads are asserted only once an instruction reads them.
     if base == `homeForm then addresses := addresses.push fact; continue
+    -- A span only a step produces, such as a slice, is read by the instructions that use it.
+    if base == `spanFacts && !subject.all direct.contains then
+      references := references.push fact; continue
     if base == `fieldRead then fields := fields.push fact; continue
     if base == `narrowRead then fields := fields.push fact; narrowReads := true; continue
+    if base == `referenceFact then references := references.push fact; continue
     if let some (asserted, type) ← assertLoopFact base fact known then
       -- A derived fact can name a frame the goal no longer does, such as the entry frame's owner.
       constants := constants ++ type.getUsedConstants
@@ -530,14 +543,17 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
       unless explicitNames.contains name do gathered := gathered.push (global name)
   let unfolds ← reachableLoopUnfolds constants
   let unfolds := unfolds.filter (!explicitNames.contains ·)
-  return { core := facts ++ unfolds.map global ++ gathered, addresses, fields, cases }
+  let core := facts ++ unfolds.map global ++ gathered
+  return { core, addresses, fields, cases, references, known }
 
 open Lean Elab Tactic in
 /-- `terms` with each proof term asserted as a hygienic hypothesis named from `base`, skipping
-    any that do not elaborate to a closed proposition; names stay as given. -/
-def assertLoopFacts (base : Name) (terms : Array Term) : TacticM (Array Term) := do
+    any that do not elaborate to a closed proposition or state one of `known`; names stay as
+    given. -/
+def assertLoopFacts (base : Name) (terms : Array Term) (known : Array Expr := #[]) :
+    TacticM (Array Term) := do
   let mut asserted := #[]
-  let mut known := #[]
+  let mut known := known
   for term in terms do
     if term.raw.isIdent then asserted := asserted.push term; continue
     if let some (name, type) ← assertLoopFact base term known then

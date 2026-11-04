@@ -156,6 +156,33 @@ macro "cil_steps_from " message:str tactic:tacticSeq : tactic =>
     facts. -/
 syntax "cil_lookup" "[" term,* "]" : tactic
 
+/-- Close a lookup goal `lookup = result` with a hypothesis, up to reducible unfolding, trying
+    only hypotheses that are equations whose left side has the goal's head; fails otherwise. -/
+syntax "cil_lookup_assumption" : tactic
+
+open Lean Elab Tactic Meta in
+elab_rules : tactic
+  | `(tactic| cil_lookup_assumption) => withMainContext do
+    let goal ← getMainGoal
+    let head (type : Expr) : Option Expr :=
+      (type.consumeMData.eq?).map fun (_, lhs, _) => lhs.consumeMData.getAppFn
+    let some wanted := head (← instantiateMVars (← goal.getType))
+      | throwError "cil_lookup_assumption: the goal is not an equation"
+    -- A head that is not a constant may unify with anything, so every hypothesis is tried.
+    let candidate (type : Expr) : Bool := match head type with
+      | some found => !wanted.isConst || !found.isConst || found == wanted
+      | none => false
+    for declaration in ← getLCtx do
+      if declaration.isImplementationDetail then continue
+      unless candidate (← instantiateMVars declaration.type) do continue
+      let saved ← saveState
+      if ← withReducible (isDefEq (← goal.getType) declaration.type) then
+        goal.assign declaration.toExpr
+        replaceMainGoal []
+        return
+      saved.restore
+    throwError "cil_lookup_assumption: no hypothesis states this lookup"
+
 /-- A lookup that finds `a` finds every `b` equal to it. -/
 theorem lookup_eq_some_of_eq {α : Type u} {lookup : Option α} {a b : α}
     (found : lookup = some a) (reduced : a = b) : lookup = some b := by subst reduced; exact found
@@ -255,7 +282,7 @@ elab_rules : tactic
 macro_rules
   | `(tactic| cil_lookup [$facts:term,*]) =>
   `(tactic| first
-    | with_reducible assumption
+    | cil_lookup_assumption
     | (simp only [cil_code, Nat.reduceAdd]; cil_lookup_rfl [$[$facts:term],*])
     | cil_lookup_rfl [$[$facts:term],*]
     | cil_lookup_placed [$[$facts:term],*]

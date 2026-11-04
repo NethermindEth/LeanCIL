@@ -116,6 +116,25 @@ def literalNat? (value : Expr) : MetaM (Option Nat) := do
   (Meta.evalNat (← Meta.reduce value)).run
 
 open Lean Meta in
+/-- `term` with each sum of two natural-number literals, such as a stepped pc `17 + 1`, written
+    as its literal value; the result is definitionally equal to `term`. -/
+def loopLiteralSums (term : Expr) : Expr :=
+  term.replace fun part =>
+    if part.isAppOfArity ``HAdd.hAdd 6 && (part.getArg! 0).isConstOf ``Nat then
+      match (part.getArg! 4).nat?, (part.getArg! 5).nat? with
+      | some left, some right => some (mkNatLit (left + right))
+      | _, _ => none
+    else none
+
+open Lean Elab Tactic Meta in
+/-- Write the main goal's literal sums, such as its pc, as literals (`loopLiteralSums`). -/
+def loopLiteralGoal : TacticM Unit := do
+  let goal ← getMainGoal
+  let target ← instantiateMVars (← goal.getType)
+  let literal := loopLiteralSums target
+  unless literal == target do replaceMainGoal [← goal.replaceTargetDefEq literal]
+
+open Lean Meta in
 /-- The pc, frame, stack and memory of a loop state up to reduction. -/
 def loopStateParts? (state : Expr) : MetaM (Option (Array Expr)) := do
   let state ← whnf (← instantiateMVars state)
@@ -162,13 +181,86 @@ def loopMovesOnly : List Lean.Name :=
     ``CIL.Op.setLocal, ``CIL.Op.const32, ``CIL.Op.const64, ``CIL.Op.branch, ``CIL.Op.skipInit,
     ``CIL.Op.initAggregate, ``CIL.Op.fieldAddress]
 
+/-- Instructions that read no reference: they compare or compute on scalars, or move a value
+    that `loopReadsReferences` shows is a scalar. -/
+def loopScalarOnly : List Lean.Name :=
+  [``CIL.Op.nop, ``CIL.Op.arg, ``CIL.Op.local, ``CIL.Op.localAddr, ``CIL.Op.setLocal,
+    ``CIL.Op.const32, ``CIL.Op.const64, ``CIL.Op.branch, ``CIL.Op.nativeBinary, ``CIL.Op.divide,
+    ``CIL.Op.checkedArithmetic, ``CIL.Op.checkedConvert, ``CIL.Op.convU2, ``CIL.Op.bxor,
+    ``CIL.Op.pop, ``CIL.Op.gt, ``CIL.Op.bgt, ``CIL.Op.ble, ``CIL.Op.bleu, ``CIL.Op.switch,
+    ``CIL.Op.brzero, ``CIL.Op.brnonzero, ``CIL.Op.bltu, ``CIL.Op.bgeu, ``CIL.Op.bgtu,
+    ``CIL.Op.bge, ``CIL.Op.blt, ``CIL.Op.beq, ``CIL.Op.bne]
+
+open Lean Meta in
+/-- Whether the step obligation `step` of the fetched `op` can check a reference or span: any
+    instruction but `loopScalarOnly`, an argument load or local store of a non-scalar, and a load
+    of a local that is not a byte home. -/
+def loopReadsReferences (op : Expr) (step : MVarId) : MetaM Bool := do
+  let op ← whnfR op
+  let some name := op.getAppFn.constName? | return true
+  unless loopScalarOnly.contains name do return true
+  let scalar (value : Expr) : MetaM Bool := return (← whnfR value).isAppOf ``Value.scalar
+  let some (_, lhs, _) := (← instantiateMVars (← step.getType)).consumeMData.eq? | return true
+  unless lhs.isAppOf ``step && lhs.getAppNumArgs == 7 do return true
+  if name == ``CIL.Op.arg then
+    -- An argument is checked as it is loaded, so a reference argument's `form` is read.
+    let some index ← literalNat? (op.getArg! 0) | return true
+    let entries ← listEntries (lhs.getArg! 3)
+    let some (_, value) := entries.find? (·.1 == index) | return true
+    return !(← scalar value)
+  if name == ``CIL.Op.setLocal then
+    let stack ← whnfR (lhs.getArg! 5)
+    unless stack.isAppOfArity ``List.cons 3 do return true
+    return !(← scalar (stack.getArg! 1))
+  if name == ``CIL.Op.local then
+    -- Loading a span or reference local checks it.
+    let some index ← literalNat? (op.getArg! 0) | return true
+    let frame ← whnfR (lhs.getArg! 4)
+    unless frame.isAppOfArity ``Frame.mk 5 do return true
+    let some (_, slot) := (← listEntries (frame.getArg! 1)).find? (·.1 == index) | return true
+    let slot ← whnfR slot
+    unless slot.isAppOfArity ``LocalSlot.bytes 2 do return true
+    return (← whnfR (slot.getArg! 0)).isConstOf ``CIL.LocalKind.reference
+  return false
+
+open Lean Meta in
+/-- Whether the store `op` with obligation `step` can step without the frame lemmas: it is not a
+    byte home's local store or a struct field store or zeroing, or a hypothesis or one of `known`
+    states a store or step at its memory, such as the frame lemmas produce. -/
+def loopStoreKnown (op : Expr) (step : MVarId) (known : Array Expr) : MetaM Bool :=
+    step.withContext do
+  let op ← whnfR op
+  let some (_, lhs, _) := (← instantiateMVars (← step.getType)).consumeMData.eq? | return true
+  unless lhs.isAppOf ``CIL.Safety.step && lhs.getAppNumArgs == 7 do return true
+  if op.isAppOf ``CIL.Op.setLocal then
+    -- A span or reference local's store reduces without a fact.
+    let some index ← literalNat? (op.getArg! 0) | return true
+    let frame ← whnfR (lhs.getArg! 4)
+    unless frame.isAppOfArity ``Frame.mk 5 do return true
+    let some (_, slot) := (← listEntries (frame.getArg! 1)).find? (·.1 == index) | return true
+    unless (← whnfR slot).isAppOf ``LocalSlot.bytes do return true
+  else unless op.isAppOf ``CIL.Op.setFieldAt || op.isAppOf ``CIL.Op.initAggregate do
+    return true
+  let memory := lhs.getArg! 6
+  let heads := [``storeLocal, ``storeValue, ``CIL.Safety.step]
+  let states (type : Expr) : Bool := (type.find? fun part =>
+    heads.any part.isAppOf && part.getAppArgs.contains memory).isSome
+  if known.any states then return true
+  (← getLCtx).anyM fun declaration => do
+    if declaration.isImplementationDetail then return false
+    return states (← instantiateMVars declaration.type)
+
 /-- The groups of `facts` the instruction `op` reads besides its core: a return reads them all,
-    since its postcondition may speak of anything the loop proved. -/
-def LoopFacts.readBy (facts : LoopFacts) (op : Lean.Name) : Array (Array Lean.Syntax.Term) :=
-  if op == ``CIL.Op.ret then #[facts.addresses, facts.fields, facts.cases] else
+    since its postcondition may speak of anything the loop proved, and the reference facts only
+    an instruction that `references` says can check a reference or span. -/
+def LoopFacts.readBy (facts : LoopFacts) (op : Lean.Name) (references : Bool) :
+    Array (Array Lean.Syntax.Term) :=
+  if op == ``CIL.Op.ret then
+    #[facts.addresses, facts.fields, facts.cases, facts.references] else
   #[if op == ``CIL.Op.localAddr || op == ``CIL.Op.vectorLocalAddr then facts.addresses else #[],
     if op == ``CIL.Op.fieldAt then facts.fields else #[],
-    if loopMovesOnly.contains op then #[] else facts.cases]
+    if loopMovesOnly.contains op then #[] else facts.cases,
+    if references then facts.references else #[]]
 
 open Lean Meta in
 /-- A hint naming the fact a stuck step needs, from the residual of that step. -/
@@ -246,12 +338,12 @@ def loopStuck (tactic : String) (facts prepared : Array Term)
     saved.restore
     throwError "{tactic}: pc {position} is a call ({op}); cross it with `cil_loop_call` and the \
       callee's contract"
-  let obligation ← instantiateMVars (← stepGoal.getType)
+  let obligation := loopLiteralSums (← instantiateMVars (← stepGoal.getType))
   -- The step rewritten as far as its equations and the facts go shows the term left unproved.
   let residual ← loopStepResidual stepGoal prepared
   saved.restore
   let shown := match residual with
-    | some goals => MessageData.joinSep (goals.toList.map (m!"{·}")) "\n"
+    | some goals => MessageData.joinSep (goals.toList.map (m!"{loopLiteralSums ·}")) "\n"
     | none => m!"no step equation or fact rewrites it"
   let hint ← loopMissingHint (residual.getD #[obligation])
   throwError "{tactic}: cannot step pc {position} ({op}) at memory{indentExpr parts[3]!}\n\
@@ -270,8 +362,9 @@ def loopTargetMismatch (tactic : String) (position : Nat) (source target : Expr)
   let mut differing : MessageData := m!""
   for index in [:4] do
     unless ← withNewMCtxDepth (isDefEq reached[index]! expected[index]!) do
-      differing := differing ++ m!"\n{names[index]!}: reached{indentExpr reached[index]!}\n\
-        but the target has{indentExpr expected[index]!}"
+      differing := differing ++ m!"\n{names[index]!}: reached\
+        {indentExpr (loopLiteralSums reached[index]!)}\n\
+        but the target has{indentExpr (loopLiteralSums expected[index]!)}"
   throwError "{tactic}: target state not matched at pc {position}:{differing}\nState a fact in \
     the reached form, or state the target in it."
 
@@ -288,9 +381,13 @@ open Lean Elab Tactic Meta in
     `prepared`, the normalised core, and the groups about it, each normalised once when first
     read. A resumed walk stops at its target pc once a step is taken, which `stepped` says
     happened before this call; any walk but `.reach` also stops at a struct store or zeroing no
-    fact steps. -/
+    fact steps. A finishing walk takes its return through `finishReturn`, given the fetched
+    return and the facts it reads, or else leaves a return the facts do not close as the goal.
+    Returns the opcode the walk stopped at before stepping it, if any. -/
 def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepared : Array Term)
-    (stepped : Bool := false) : TacticM Unit := do
+    (stepped : Bool := false)
+    (finishReturn : Option (LoopFetched → Array Term → TacticM Unit) := none) :
+    TacticM (Option Lean.Name) := do
   let stackLemmas : Array Term := loopStackLemmas.map fun name => mkIdent (`_root_ ++ name)
   let core := facts.core
   let withStack := core ++ stackLemmas
@@ -298,8 +395,8 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepa
   let rewriteStack ← `(tactic| simp only [$[$withStack:term],*])
   let close ← `(tactic| exact CIL.Safety.loop_reaches_refl)
   -- Each group of `LoopFacts.readBy`, once normalised.
-  let mut normalised : Array (Option (Array Term)) := #[none, none, none]
-  let groupBases := #[`homeForm, `fieldRead, `caseSplit]
+  let mut normalised : Array (Option (Array Term)) := #[none, none, none, none]
+  let groupBases := #[`homeForm, `fieldRead, `caseSplit, `callerFact]
   let attempt (step : Syntax) : TacticM Bool := do
     let saved ← saveState
     -- Without recovery a failed alternative throws instead of logging an error and admitting.
@@ -326,43 +423,53 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepa
     (op == ``CIL.Op.setFieldAt || op == ``CIL.Op.initAggregate || op == ``CIL.Op.setLocal))
   let mut taken := 0
   repeat
-    if (← getGoals).isEmpty then return
+    if (← getGoals).isEmpty then return none
     let rewriting := if ← loopMentionsStackOperations then rewriteStack else rewrite
     if ← attempt rewriting then continue
     if let .resume target := mode then
       if taken > 0 || stepped then
-        if (← currentPc) == some target then return
+        if (← currentPc) == some target then return none
     if mode == .reach then
-      if ← attempt close then return
+      if ← attempt close then return none
       if taken > 0 then
         if let some (position, source, target) ← reachedPc then
           loopTargetMismatch tactic position source target
     -- Fetching unifies the goal with a step lemma; only its closed lookup proofs are kept.
     let saved ← saveState
-    let fetched? ← observing? (loopFetch core)
+    let fetched? ← observing? do
+      let fetched ← loopFetch core
+      let stores := [``CIL.Op.setLocal, ``CIL.Op.setFieldAt, ``CIL.Op.initAggregate]
+      let unknownStore ← if stores.any (← whnfR fetched.op).isAppOf then
+          pure !(← loopStoreKnown fetched.op fetched.step facts.known)
+        else pure false
+      return (fetched, ← loopReadsReferences fetched.op fetched.step, unknownStore)
     saved.restore
-    let some fetched := fetched? | loopStuck tactic facts.all prepared stops; return
+    let some (fetched, references, unknownStore) := fetched?
+      | loopStuck tactic facts.all prepared stops; return none
     let op := ((← whnfR fetched.op).getAppFn.constName?).getD Name.anonymous
     let finishing := mode == .finish && op == ``CIL.Op.ret
     -- A call or return ends an advance before any step; a resumed walk tries the store first,
     -- since a store fact the frame lemmas just produced may step it.
     let resuming := match mode with | .resume _ => true | _ => false
-    if stops op && !finishing && !resuming then return
+    if stops op && !finishing && !resuming then return some op
+    -- A store no fact states steps only through the frame lemmas.
+    if mode != .reach && unknownStore then return some op
     -- The groups this instruction reads, normalised in the goal the first time one is read.
     let mut reading := prepared
-    let read := facts.readBy op
+    let read := facts.readBy op references
     for index in [:read.size] do
       if read[index]!.isEmpty then continue
       let ready ← match normalised[index]! with
         | some ready => pure ready
         | none => do
-          let asserted ← assertLoopFacts groupBases[index]! read[index]!
+          let asserted ← assertLoopFacts groupBases[index]! read[index]! facts.known
           normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|)) asserted
       normalised := normalised.set! index (some ready)
       reading := reading ++ ready
     let found ← Term.exprToSyntax fetched.found
     let instruction ← Term.exprToSyntax fetched.instruction
     if finishing then
+      if let some take := finishReturn then take fetched reading; return none
       let finish ← `(tactic| (
           apply CIL.Safety.loop_terminates_return $found $instruction
           · cil_checked_step_normalized [$[$reading:term],*]
@@ -374,7 +481,7 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepa
             | simp [CIL.Safety.leaveFrame, CIL.NarrowKind.extend, $[$reading:term],*]))
       if ← attempt finish then continue
       -- A return whose results or postcondition the facts do not prove is left as the goal.
-      return
+      return some op
     let next ← match mode with
       | .reach => `(tactic| (
           apply CIL.Safety.loop_reaches_next $found $instruction
@@ -385,8 +492,10 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepa
     if ← attempt next then
       taken := taken + 1
       continue
+    if yields op then return some op
     loopStuck tactic facts.all reading yields
-    return
+    return none
+  return none
 
 /-- Compose actual fetched instructions until the requested invariant state.
     Fuel is inferred from the path, including NOPs and unconditional branches. The facts are
@@ -400,6 +509,6 @@ elab_rules : tactic
     let facts ← gatherLoopFactGroups (facts.map (·.getElems) |>.getD #[])
     let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
       (#[← `(CIL.truth)] ++ facts.core)
-    loopSteps "cil_loop_steps" .reach facts prepared
+    discard <| loopSteps "cil_loop_steps" .reach facts prepared
 
 end CIL.Safety
