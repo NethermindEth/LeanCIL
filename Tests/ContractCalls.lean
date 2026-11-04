@@ -151,10 +151,11 @@ theorem explicit_precondition (program : Program) (memory : Safety.Memory) (left
         ⟨0, [], [], [], 0⟩ [] memory = .ok (result, returned) ∧
         returned = [.scalar (.i32 (left + right))] := by
   cil_contract_steps [found, holds, orderedPair]
-  · change left < right
+  case precondition =>
+    change left < right
     exact later ()
-  · cil_contract_steps [found, orderedPair]
-    simp_all [orderedPair]
+  cil_contract_steps [found, orderedPair]
+  case postcondition => simp_all [orderedPair]
 #print axioms explicit_precondition
 
 /-- A registered interface may depend on an explicitly checked method binding. -/

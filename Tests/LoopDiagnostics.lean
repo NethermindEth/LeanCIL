@@ -653,6 +653,9 @@ def stampMethod : Nat := 1
 
 /-- `stamp_holds` at the named callee, whose precondition goals take its name. -/
 theorem stampMethod_holds : stampContract.Holds stampsProgram stampMethod := stamp_holds
+/-- info: 'Tests.LoopDiagnostics.stampMethod_holds' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms stampMethod_holds
 
 /-- The callee's precondition that no hypothesis states is left tagged with the callee, ahead of
     the continuing loop goal, which keeps its own tag. -/
@@ -675,8 +678,8 @@ example (memory current : Memory) (count index : W32) (buffer home : Reference)
 
 -- A loop tactic handed a tagged obligation instead of a loop path names that obligation.
 /-- error: cil_loop_advance: expected a `LoopReaches` or `LoopTerminates` goal
-The main goal is the `precondition.stampMethod` obligation; prove it first, or select the loop
-goal with `case`. -/
+The main goal is the `precondition.stampMethod` obligation; close it first, as
+`case precondition.stampMethod => ...`. -/
 #guard_msgs (whitespace := lax) in
 example (memory current : Memory) (count index : W32) (buffer home : Reference)
     (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)

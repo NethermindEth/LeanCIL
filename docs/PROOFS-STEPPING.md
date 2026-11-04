@@ -386,7 +386,7 @@ head hypothesis with one condition leaves `invariant`, and one with two leaves `
 `measure`, as the entry and iteration hypotheses of `invoke_loop_induction` do; any other
 hypothesis keeps Lean's tags. A mistyped tag is Lean's `Case tag ... not found` error, which lists
 the tags of the open goals. A loop tactic handed a tagged obligation instead of a loop path says
-which obligation the main goal is. The tags are the proof API:
+which obligation the main goal is and how to select it. The tags are the proof API:
 
 ```lean
 import CIL.Safety.Obligations

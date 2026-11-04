@@ -143,8 +143,8 @@ theorem root_holds (mixHolds : mixContract.Holds Extracted.program mix)
   have fb := access_reference_valid _ _ _ _ _ (read_access readB)
   cil_contract_steps [fr, fb]
   cil_formed_call addHolds ⟨r, b, r, x, y⟩ at addSite [fr, fb]
-  · exact ⟨readR, readB, writable⟩
-  · exact formed
+  case precondition => exact ⟨readR, readB, writable⟩
+  case wellFormed => exact formed
   -- The call supplies `m1.WellFormed`, which `mixContract.pre` needs; `addContract.post` does not state it.
   rintro m1 _ - formed1 - framed1 ⟨_, rfl, rfl, readR1⟩
   have readB1 : read m1 b 8 1 = .ok (numberBytes y.toNat 8) :=
@@ -156,7 +156,7 @@ theorem root_holds (mixHolds : mixContract.Holds Extracted.program mix)
   have lb1 := load_word64_of_read readB1
   cil_contract_steps [fr1, fb1, lr1, lb1]
   cil_contract_call mixHolds (x + y, y) at mixSite []
-  · exact formed1
+  case precondition => exact formed1
   rintro m2 _ - framed2 ⟨_, rfl, rfl⟩
   dsimp only [mixContract]
   have writable2 : access m2 r 8 1 true = .ok () :=
@@ -164,9 +164,11 @@ theorem root_holds (mixHolds : mixContract.Holds Extracted.program mix)
   obtain ⟨m3, wrote, store, readback⟩ := store_word64 ((x + y) * 3 + y) writable2
   have fr2 := access_reference_valid _ _ _ _ _ writable2
   cil_contract_steps [fr2, store]
-  simp only [leaveFrame, List.foldl_nil]
-  exact ⟨framed1.trans ((framed2.widen (by simp [mixContract])).trans (Confined.write wrote (by simp [addContract, numberBytes]))),
-    _, rfl, rfl, readback⟩
+  case postcondition =>
+    simp only [leaveFrame, List.foldl_nil]
+    exact ⟨framed1.trans ((framed2.widen (by simp [mixContract])).trans
+        (Confined.write wrote (by simp [addContract, numberBytes]))),
+      _, rfl, rfl, readback⟩
 
 theorem root_correct : rootContract.Holds Extracted.program root := root_holds mix_holds add_holds
 

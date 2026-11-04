@@ -48,7 +48,8 @@ def preconditionTag (holdsType : Expr) : Name :=
 def preconditionTagOf (holds : Term) : TacticM Name := withMainContext do
   let saved ← saveState
   try
-    let type ← whnfR (← instantiateMVars (← inferType (← Term.elabTerm holds none)))
+    let proof ← Term.withoutErrToSorry <| withoutRecover <| Term.elabTerm holds none
+    let type ← whnfR (← instantiateMVars (← inferType proof))
     saved.restore
     return preconditionTag type
   catch _ =>
@@ -103,7 +104,7 @@ def obligationNote : TacticM MessageData := do
   let some goal := goals.head? | return m!""
   let tag ← goal.getTag
   let some _ := obligationOf? tag | return m!""
-  return m!"\nThe main goal is the `{tag.eraseMacroScopes}` obligation; prove it first, or select \
-    the loop goal with `case`."
+  return m!"\nThe main goal is the `{tag.eraseMacroScopes}` obligation; close it first, as \
+    `case {tag.eraseMacroScopes} => ...`."
 
 end CIL.Safety
