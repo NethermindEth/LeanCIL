@@ -120,19 +120,19 @@ theorem correctness (memory : Memory) (view : SpanView) (values : List W32) (out
     simpa [whole] using filled.1
   | cons value rest =>
     obtain ⟨item, -, found, element⟩ := (span.within wellFormed frame).head (by decide)
-    by_cases zero : value = 0#32
+    by_cases zero : value = 0
     · subst zero
       have whole : copied values = done := by
         rw [split, copied_append nonzero]
         simp [copied]
-      have answer : result values = count ||| 2147483648#32 := by
+      have answer : result values = count ||| 0x80000000 := by
         unfold result
         rw [whole, ← counted, BitVec.ofNat_toNat, BitVec.setWidth_eq]
         simp [split]
       cil_loop_finish [answer]
       simpa [whole] using filled.1
     · have room : (copied (value :: rest)).length = (copied rest).length + 1 := by
-        simp [copied, zero]
+        rw [copied, List.takeWhile_cons_of_pos (by simpa using zero)]; rfl
       have short := contents.length ▸ SpanView.length_bounded view memory valid
       have lengths : done.length + 1 + rest.length = values.length := by simp [split]; omega
       have total : (copied values).length = done.length + (copied (value :: rest)).length := by
