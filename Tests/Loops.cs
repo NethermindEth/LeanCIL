@@ -150,6 +150,32 @@ foreach (var (name, mutate) in new (string, Action<TypeDefinition>)[]
     Console.WriteLine($"PASS unchanged struct-local loop proof rejects {name}");
 }
 
+// A loop over a struct with a bool field that writes caller memory through a helper and stops early.
+var copyOutput = Directory.CreateDirectory(Path.Combine(root, "CopyUntilZero")).FullName;
+Run(Extract("extract", assembly, "Examples", "Loops::CopyUntilZero(System.ReadOnlySpan`1<System.UInt32>,uint&)",
+    copyOutput));
+Console.WriteLine("PASS early-exit struct loop extracts with its ref-writing helper");
+
+var copyUntilZero = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Loops")!.GetMethod("CopyUntilZero")!
+    .CreateDelegate<CopyUntilZeroDelegate>();
+const uint StoppedBit = 0x80000000u;
+const uint Untouched = 0xDEADBEEFu;
+foreach (uint[] values in new uint[][] { [], [1, 2, 3], [5, 0, 7], [0], [9, uint.MaxValue, 0] })
+{
+    var zero = Array.IndexOf(values, 0u);
+    var stopped = zero >= 0;
+    var copied = stopped ? zero : values.Length;
+    var expected = stopped ? (uint)copied | StoppedBit : (uint)copied;
+    var output = new uint[values.Length + 1];
+    Array.Fill(output, Untouched);
+    var result = copyUntilZero(values, ref output[0]);
+    var wrongWords = !output[..copied].SequenceEqual(values[..copied]) || output[copied..].Any(word => word != Untouched);
+    if (result != expected || wrongWords)
+        throw new InvalidOperationException(
+            $"CopyUntilZero([{string.Join(", ", values)}]) returned {result:X} with [{string.Join(", ", output)}]");
+}
+Console.WriteLine("PASS early-exit struct loop runtime comparisons copy up to the first zero and flag the stop");
+
 string CountVariant(string name, Action<MethodDefinition, MethodDefinition> mutate)
 {
     var output = Path.Combine(root, name);
@@ -774,5 +800,6 @@ foreach (var mutation in new[] { "stack-height", "stack-type", "local-fact", "st
 }
 
 delegate void FillWordsDelegate(ref ulong destination, ulong value, int count);
+delegate uint CopyUntilZeroDelegate(ReadOnlySpan<uint> values, ref uint output);
 delegate bool AllZeroDelegate(ReadOnlySpan<uint> values);
 delegate ulong SumDelegate(ReadOnlySpan<ulong> values);

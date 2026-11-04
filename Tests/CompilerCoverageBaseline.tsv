@@ -676,6 +676,7 @@ Examples:System.UInt32 Examples.IntegerMath::MaxUInt32(System.UInt32,System.UInt
 Examples:System.UInt32 Examples.IntegerMath::MinUInt32(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Loops::AddTwo(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Loops::Bump(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt32 Examples.Loops::CopyUntilZero(System.ReadOnlySpan`1<System.UInt32>,System.UInt32&)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Loops::CountCalls(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Loops::CountUntil(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Loops::Countdown(System.UInt32)	A	A	A	A	A	A	A	A
@@ -1003,6 +1004,7 @@ Examples:System.Void Examples.InitializedHelper::.cctor()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.InitializedTypes::.cctor()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.InitializedValue::.cctor()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.Loops::FillWords(System.UInt64&,System.UInt64,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Loops::Stamp(System.UInt32&,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ManagedDispatch::Targets(method System.Int32 *(System.Int32)[])	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.MarshaledMemory::Write(System.Span`1<System.Byte>,System.UInt64&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.MarshaledMemory::WriteAggregate(System.Span`1<System.Byte>,Examples.FourLimbs&)	A	A	A	A	A	A	A	A
