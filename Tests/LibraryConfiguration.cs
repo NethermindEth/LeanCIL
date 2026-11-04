@@ -8,7 +8,8 @@ var checkout = File.ReadAllText(At("lakefile.toml")).ReplaceLineEndings("\n");
 var library = LibraryLakefile(checkout);
 const string cilLibrary = "[[lean_lib]]\nname = \"CIL\"\n";
 Require(library.Contains(cilLibrary, StringComparison.Ordinal) &&
-    library.Contains("[[lean_exe]]\nname = \"leancil-audit\"\nroot = \"CIL.OleanAudit\"\n", StringComparison.Ordinal) &&
+    library.Contains("[[lean_exe]]\nname = \"leancil-audit\"\nroot = \"CIL.OleanAudit\"\n",
+        StringComparison.Ordinal) &&
     library.StartsWith("name = \"leancil\"\n", StringComparison.Ordinal) &&
     library.Contains("defaultTargets = [\"CIL\"]\n", StringComparison.Ordinal),
     "Library lakefile lost the package, CIL or auditor configuration:\n" + library);
@@ -35,7 +36,8 @@ Console.WriteLine("PASS test library additions, removals, comments and line endi
 foreach (var (label, edited) in new[]
 {
     ("a package version", checkout.Replace("version = \"0.1.0\"", "version = \"0.2.0\"")),
-    ("a package Lean option", checkout.Replace("defaultTargets", "moreLeanArgs = [\"-Dlinter.all=true\"]\ndefaultTargets")),
+    ("a package Lean option",
+        checkout.Replace("defaultTargets", "moreLeanArgs = [\"-Dlinter.all=true\"]\ndefaultTargets")),
     ("a package option table", checkout + "\n[leanOptions]\nautoImplicit = false\n"),
     ("the CIL library", checkout.Replace(cilLibrary, cilLibrary + "precompileModules = true\n")),
     ("the auditor", checkout.Replace("root = \"CIL.OleanAudit\"", "root = \"CIL.Replay\"")),
