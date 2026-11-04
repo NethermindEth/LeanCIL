@@ -38,6 +38,12 @@
     </Content>
   </ItemGroup>
 
+  <!-- A development package gets a fresh prerelease version, so a tool install never reuses a cached
+       package of the same version; only a release pack, given its descriptors, is the plain version. -->
+  <PropertyGroup Condition="'$(CertifiedLibraryReleaseDirectory)' == '' and '$(PackageVersion)' == ''">
+    <PackageVersion>$(VersionPrefix)-dev.$([System.DateTime]::UtcNow.ToString('yyyyMMddHHmmss'))</PackageVersion>
+  </PropertyGroup>
+
   <!-- Release descriptors are generated from authenticated, replayed artifacts by the publisher. -->
   <ItemGroup Condition="'$(CertifiedLibraryReleaseDirectory)' != ''">
     <Content Include="$(CertifiedLibraryReleaseDirectory)/certified-library-release.*.json">

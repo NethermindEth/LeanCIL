@@ -7,8 +7,13 @@ Build and install the .NET tool from this checkout:
 
 ```sh
 dotnet pack Extractor -c Release -o artifacts/packages
-dotnet tool install --global Nethermind.LeanCIL --add-source artifacts/packages --version 0.1.0
+dotnet tool update --global Nethermind.LeanCIL --add-source artifacts/packages --prerelease
 ```
+
+Each development pack is a new prerelease version, `0.1.0-dev.` and its UTC build time, so
+rerunning both commands after a change replaces the installed tool instead of reusing a cached
+package of the same version. A release pack, given its certified library descriptors, keeps the
+plain version.
 
 Prove that compiled addition returns the right result for every 64-bit input, change `+` to `-`, and see the same proof fail. This walkthrough also demonstrates a theorem that rules out successful execution of an invalid memory access.
 

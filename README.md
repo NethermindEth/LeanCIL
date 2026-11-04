@@ -43,7 +43,7 @@ Install **Lean 4.35.0** through elan and **.NET SDK 10.0.403**, as pinned in
 ```sh
 lake build
 dotnet pack Extractor -c Release -o artifacts/packages
-dotnet tool install --global Nethermind.LeanCIL --add-source artifacts/packages --version 0.1.0
+dotnet tool update --global Nethermind.LeanCIL --add-source artifacts/packages --prerelease
 dotnet build Examples/Assembly -c Release
 ```
 
