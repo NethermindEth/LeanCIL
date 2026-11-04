@@ -1,5 +1,7 @@
 # Consumer harness compilation reuse
 
+<!-- audience: maintainers -->
+
 `Tests/ConsumerVerification.cs` includes six checks in one executable and dispatches them
 through `--check` in separate processes, sharing compilation of the verifier code.
 Environment changes, private caches and fingerprint worker processes remain isolated. No proof,
@@ -45,7 +47,7 @@ Joint replay shares imports across its exact target set, and eligible audits reu
 replayed environment. Requests retain independent import visibility and authenticated module
 bindings; matching module names alone do not authorize environment reuse.
 Core's hot consumer fixtures import `CIL.Semantics` or specific proof modules. Generated
-extraction uses `Translation`, `SymbolicExecution` and `Safety.Execution`.
+extraction uses `CIL.Extraction.Translation`, `CIL.SymbolicExecution` and `CIL.Safety.Execution`.
 
 ## Reusing certified fingerprints during preparation
 

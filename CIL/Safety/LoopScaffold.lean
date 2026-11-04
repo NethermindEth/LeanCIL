@@ -2,6 +2,9 @@ import CIL.Safety.LoopAutomation
 import CIL.Safety.FrameProgress
 import CIL.Safety.NumericLocals
 import CIL.Safety.LoopFrames
+import CIL.Safety.LoopFrameFields
+import CIL.Safety.LoopFrameSteps
+import CIL.MethodIdentity
 import Lean
 
 /-!
@@ -10,6 +13,9 @@ import Lean
 Proof-local generators derive entry frames and cutpoints from extracted methods. Generated
 equations are checked by the kernel; no frame layout or instruction position is assumed.
 Only proofs requesting the scaffold elaborate it, so extraction certificates stay unchanged.
+Importing the scaffold brings the rest of a loop proof: the frame lemmas of
+`CIL.Safety.LoopFrames` and `CIL.Safety.LoopFrameFields`, `invoke_loop_induction` with the
+call rules of `CIL.Safety.LoopContract`, and the tactics of `CIL.Safety.LoopFrameSteps`.
 -/
 
 namespace CIL.Safety
@@ -36,8 +42,8 @@ theorem enterFrame_isSome (body : CIL.Method) (args : List Value) (memory : Memo
     allocating entry also proves the `LoopFrame` of all its homes for every footprint.
     Entry must reduce to success or have an explicit proof; no failure receives a default.
     The frame, slot facts and a normalized entry's result and memory unfold in the loop
-    tactics in this scope. -/
-syntax "bind_entry " ident bracketedBinder* " := " term:max
+    tactics in this scope. A docstring before the command documents `name.checked`. -/
+syntax (docComment)? "bind_entry " ident bracketedBinder* " := " term:max
   " with " term:max " from " term:max (" using " term:max)? (" allocating " term:max)?
   (" simplifying " "[" term,* "]")? : command
 
@@ -263,7 +269,8 @@ private def mentionedBinders (variables : Array Expr) (value : Expr) :
     explicit in opaque home references, and the checked theorem yields them existentially. -/
 private def elabAllocatingEntry (name : Ident)
     (binders : TSyntaxArray ``Lean.Parser.Term.bracketedBinder)
-    (body args memory wellFormed : Term) (facts : Array Term) : CommandElabM Unit := do
+    (body args memory wellFormed : Term) (facts : Array Term)
+    (doc : Option (TSyntax ``Lean.Parser.Command.docComment)) : CommandElabM Unit := do
   let indexed (base : String) (index : Nat) := mkIdent (Name.mkSimple s!"{base}{index}")
   let definitions ← bodyDefinitions body
   let kept := mkIdent `kept
@@ -409,17 +416,17 @@ private def elabAllocatingEntry (name : Ident)
     LoopFrame.ofEntry footprint $progress $writableHomes $snapshots))
   steps := steps.push (← `(tactic| exact ⟨$witnesses,*⟩))
   let checked := mkIdent (name.getId ++ `checked)
-  elabCommand (← `(theorem $checked $binders* : $statement := by $steps*))
+  elabCommand (← `($[$doc]? theorem $checked $binders* : $statement := by $steps*))
   elabCommand (← `(#print axioms $checked))
   emitSlots name binders slots false
 
 elab_rules : command
-  | `(bind_entry $name $binders* := $body with $args from $memory $[using $witness]?
-      $[allocating $wellFormed]? $[simplifying [$facts,*]]?) => do
+  | `($[$doc:docComment]? bind_entry $name $binders* := $body with $args from $memory
+      $[using $witness]? $[allocating $wellFormed]? $[simplifying [$facts,*]]?) => do
     if let some wellFormed := wellFormed then
       if witness.isSome then throwError "Choose a success witness or allocation, not both"
       return ← elabAllocatingEntry name binders body args memory wellFormed
-        (facts.map (·.getElems) |>.getD #[])
+        (facts.map (·.getElems) |>.getD #[]) doc
     if witness.isSome && facts.isSome then
       throwError "Choose a success witness or simplifying facts, not both"
     let normalizer ← entrySimplifier (← bodyDefinitions body) (facts.map (·.getElems) |>.getD #[])
@@ -482,8 +489,9 @@ elab_rules : command
         let type ← Term.elabType statement
         Term.synthesizeSyntheticMVarsNoPostponing
         addClosedTheorem equationName variables type (proof.beta variables)
+      CIL.MethodIdentity.documentBinding doc equation
     else
-      elabCommand (← `(theorem $equation $binders* : $statement :=
+      elabCommand (← `($[$doc]? theorem $equation $binders* : $statement :=
         entry_result_checked _ $success))
     elabCommand (← `(#print axioms $equation))
     let slots ← liftTermElabM <| Term.elabBinders binders fun _ => do
@@ -492,20 +500,36 @@ elab_rules : command
 
 /-- Derive the unique matching cutpoint and a state constructor from the extracted body, over
     binders the frame may mention. Ambiguous or missing matches fail the kernel-checked
-    uniqueness obligation. The state unfolds in the loop tactics in this scope. -/
-syntax "bind_cutpoint " ident bracketedBinder* " := " term:max " matching " term:max
-  " with " term : command
+    uniqueness obligation. Given as `with frame, stack, memory`, the state fixes all three
+    instead of taking the stack and memory as arguments. The state unfolds in the loop tactics in
+    this scope, and a docstring before the command documents it. -/
+syntax (docComment)? "bind_cutpoint " ident bracketedBinder* " := " term:max " matching " term:max
+  " with " term ("," term "," term)? : command
+
+/-- Define the cutpoint state `name` at `pc`: fixed when the stack and memory are given, else a
+    function of them; it unfolds in the loop tactics in this scope. -/
+def elabCutpointState (name : Ident)
+    (binders : Array (TSyntax ``Lean.Parser.Term.bracketedBinder)) (pc : Ident) (frame : Term)
+    (stack memory : Option Term) (doc : Option (TSyntax ``Lean.Parser.Command.docComment)) :
+    CommandElabM Unit := do
+  match stack, memory with
+  | some stack, some memory =>
+    elabCommand (← `($[$doc]? def $name $binders* : LoopState := ⟨$pc, $frame, $stack, $memory⟩))
+  | _, _ =>
+    elabCommand (← `($[$doc]? def $name $binders* (stack : List Value) (memory : Memory) :
+      LoopState := ⟨$pc, $frame, stack, memory⟩))
+  elabCommand (← `(attribute [local cil_loop_unfold] $name))
 
 /-- Select an instruction explicitly, including a structural label in a multi-loop method.
     The requested instruction must exist and satisfy the supplied predicate. Given as
     `with frame, stack, memory`, the generated state fixes all three instead of taking the stack
     and memory as arguments. The generated state unfolds in the loop tactics in this scope. -/
-syntax "bind_cutpoint " ident bracketedBinder* " := " term:max " at " term:max
+syntax (docComment)? "bind_cutpoint " ident bracketedBinder* " := " term:max " at " term:max
   " matching " term:max " with " term ("," term "," term)? : command
 
 elab_rules : command
-  | `(bind_cutpoint $name $binders* := $body at $location matching $predicate with $frame
-      $[, $stack, $memory]?) => do
+  | `($[$doc:docComment]? bind_cutpoint $name $binders* := $body at $location matching
+      $predicate with $frame $[, $stack, $memory]?) => do
     liftTermElabM do
       let selected ← Term.elabTermEnsuringType
         (← `(if ($body).code[$location]?.map $predicate = some true then 1 else 0))
@@ -519,16 +543,11 @@ elab_rules : command
     elabCommand (← `(theorem $checked :
       ($body).code[$pc]?.map $predicate = some true := by decide +kernel))
     elabCommand (← `(#print axioms $checked))
-    match stack, memory with
-    | some stack, some memory =>
-      elabCommand (← `(def $name $binders* : LoopState := ⟨$pc, $frame, $stack, $memory⟩))
-    | _, _ =>
-      elabCommand (← `(def $name $binders* (stack : List Value) (memory : Memory) : LoopState :=
-        ⟨$pc, $frame, stack, memory⟩))
-    elabCommand (← `(attribute [local cil_loop_unfold] $name))
+    elabCutpointState name binders pc frame stack memory doc
 
 elab_rules : command
-  | `(bind_cutpoint $name $binders* := $body matching $predicate with $frame) => do
+  | `($[$doc:docComment]? bind_cutpoint $name $binders* := $body matching $predicate
+      with $frame $[, $stack, $memory]?) => do
     let pc := mkIdent (name.getId ++ `pc)
     let checked := mkIdent (name.getId ++ `checked)
     let location ← liftTermElabM do
@@ -548,8 +567,6 @@ elab_rules : command
       ($body).code[$pc]?.map $predicate = some true ∧
         (($body).code.filter $predicate).length = 1 := by decide +kernel))
     elabCommand (← `(#print axioms $checked))
-    elabCommand (← `(def $name $binders* (stack : List Value) (memory : Memory) : LoopState :=
-      ⟨$pc, $frame, stack, memory⟩))
-    elabCommand (← `(attribute [local cil_loop_unfold] $name))
+    elabCutpointState name binders pc frame stack memory doc
 
 end CIL.Safety

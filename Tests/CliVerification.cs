@@ -21,6 +21,17 @@ void Verified(params string[] options)
         !result.Stdout.Contains("(x y : CIL.W64)"))
         throw new InvalidOperationException("CLI proof failed: " + result.Output);
 
+    // Authors read the statement in Lean notation, as Unicode, and the proof's own `#print` output.
+    var entry = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")))
+        .GetProperty("entry").GetString();
+    var stdout = result.Stdout.ReplaceLineEndings("\n");
+    if (!stdout.Contains("\u2203 result,") || stdout.Contains("Exists fun") || stdout.Contains("HMod.hMod") ||
+        !stdout.Contains($"  Subject: {entry} (method 0) via CIL.Safety.invoke\n") ||
+        !stdout.Contains($"  Extraction entry: {entry}\n") || stdout.Contains("  Entry:") ||
+        !stdout.Contains("Add.lean:15:0: info: 'ExampleProof.correctness' depends on axioms"))
+        throw new InvalidOperationException(
+            "CLI verification did not print the readable statement, subject and messages: " + result.Output);
+
     var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
     if (report.GetProperty("schema").GetInt32() != 4 ||
         !report.GetProperty("extractionAudit").GetString()!.Contains("Extracted.translation_valid"))
@@ -132,6 +143,116 @@ foreach (var module in new[] { "Tests.Support", "Examples.Support" })
         throw new InvalidOperationException("Repository fixture import was not rejected by name: " + fixtureImport.Output);
 }
 Console.WriteLine("PASS CLI rejects proofs importing repository fixtures the tool does not ship");
+
+// Query commands are how authors explore the API: their output must survive a failed audit, located
+// in the author's file, and long output must say where the rest is rather than vanish.
+var queryProof = Path.Combine(auditOutput, "Query.lean");
+File.WriteAllText(queryProof, "import Extracted\n#check CIL.Safety.invoke\n" +
+    string.Concat(Enumerable.Range(0, 70).Select(i => $"#eval {i} + 1000\n")));
+var query = Execute([.. cli, "verify", auditOutput, "--proof", queryProof]);
+var queryErrors = query.Stderr.ReplaceLineEndings("\n");
+var fullMessages = Path.Combine(auditOutput, "proof-messages.txt");
+if (query.Code != 1 || !queryErrors.Contains("Stage: theorem audit") ||
+    !queryErrors.Contains("Query.lean:2:0: info: CIL.Safety.invoke (program : CIL.Program) (fuel method : Nat)") ||
+    !queryErrors.Contains("Except CIL.Safety.LocatedFault (CIL.Safety.Memory \u00d7 List CIL.Safety.Value)\n") ||
+    !queryErrors.Contains("Query.lean:3:0: info: 1000\n") || queryErrors.Contains("info: 1069\n") ||
+    !queryErrors.Contains(" more lines in artifacts/CliKernelAudit/proof-messages.txt\n") ||
+!File.ReadAllText(fullMessages).Contains("info: 1069\n"))
+    throw new InvalidOperationException("Proof query output was not shown with its location: " + query.Output);
+Console.WriteLine("PASS CLI shows located #check and #eval output and keeps long output in proof-messages.txt");
+
+// The report names the method a theorem is about, not the extraction entry, and claims nothing for an open index.
+var subjectOutput = At("artifacts/CliSubjects");
+Run([.. cli, "extract", demoAssembly, "Examples.Loops::TallyTwice(uint)", subjectOutput]);
+var subjectProof = Path.Combine(subjectOutput, "Subjects.lean");
+File.WriteAllText(subjectProof, """
+    import Extracted
+    import CIL.MethodIdentity
+    import CIL.Safety.MethodContract
+    namespace ExampleProof
+    bind_method tally tallyBody := "System.UInt32 Examples.Loops::TallyTwice(System.UInt32)"
+    bind_callee addTwo addTwoBody := "System.UInt32 Examples.Loops::AddTwo(System.UInt32)" from tallyBody
+    theorem helper (contract : CIL.Safety.MethodContract CIL.W32 CIL.W32)
+        (holds : contract.Holds Extracted.program addTwo) : contract.Holds Extracted.program addTwo := holds
+    theorem unfixed (contract : CIL.Safety.MethodContract CIL.W32 CIL.W32) (method : Nat)
+        (holds : contract.Holds Extracted.program method) : contract.Holds Extracted.program method := holds
+    end ExampleProof
+    """);
+const string addTwo =
+    "System.UInt32 Examples.Loops::AddTwo(System.UInt32) (method 1) via CIL.Safety.MethodContract.Holds";
+var helper = Execute([.. cli, "verify", subjectOutput, "--proof", subjectProof, "--theorem", "ExampleProof.helper"])
+    .Stdout.ReplaceLineEndings("\n");
+if (!helper.Contains($"  Subject: {addTwo}\n") || !helper.Contains($"  Premise: {addTwo}\n") ||
+    helper.Contains("Subject: System.UInt32 Examples.Loops::TallyTwice") ||
+    !helper.Contains("  Extraction entry: System.UInt32 Examples.Loops::TallyTwice(System.UInt32)\n"))
+    throw new InvalidOperationException("Helper theorem was not labelled by its subject: " + helper);
+var unfixed = Execute([.. cli, "verify", subjectOutput, "--theorem", "ExampleProof.unfixed"])
+    .Stdout.ReplaceLineEndings("\n");
+if (!unfixed.Contains("  Subject: a method index the statement does not fix via CIL.Safety.MethodContract.Holds\n") ||
+    unfixed.Contains("Examples.Loops::AddTwo") || unfixed.Contains("Subject: System.UInt32"))
+    throw new InvalidOperationException("An unfixed method index was labelled as a specific method: " + unfixed);
+Console.WriteLine("PASS CLI labels a theorem by the methods its statement names");
+
+// A proof checked inside a consumer package is read by its author exactly like a standalone one, fresh or cached.
+var consumerRoot = At("artifacts/CliConsumer");
+if (Directory.Exists(consumerRoot)) DeleteTree(consumerRoot);
+var consumerPackage = Path.Combine(consumerRoot, "Package");
+Directory.CreateDirectory(Path.Combine(consumerPackage, "Proofs"));
+var revision = Execute(["git", "-C", Root, "rev-parse", "HEAD"]).Stdout.Trim();
+File.WriteAllText(Path.Combine(consumerPackage, "lakefile.toml"), $$"""
+    name = "consumer"
+    [[require]]
+    name = "leancil"
+    git = {{JsonSerializer.Serialize(Root.Replace('\\', '/'))}}
+    rev = "{{revision}}"
+    [[lean_lib]]
+    name = "Proofs"
+    """);
+File.Copy(At("lean-toolchain"), Path.Combine(consumerPackage, "lean-toolchain"));
+var consumerProof = Path.Combine(consumerPackage, "Proofs", "Add.lean");
+File.Copy(proof, consumerProof);
+Run(["lake", "update"], consumerPackage);
+var consumerOutput = Path.Combine(consumerRoot, "Extraction");
+Run([.. cli, "extract", demoAssembly, "Arithmetic::Add(ulong,ulong)", consumerOutput]);
+var consumerEntry = JsonSerializer.Deserialize<JsonElement>(
+    File.ReadAllText(Path.Combine(consumerOutput, "identity.json"))).GetProperty("entry").GetString();
+// A fresh run publishes nothing; the first ordinary run may reuse an earlier test run's result, the second must.
+foreach (var (options, cached) in new[]
+    { (new[] { "--fresh" }, (bool?)false), (Array.Empty<string>(), null), (Array.Empty<string>(), true) })
+{
+    var consumer = Execute([.. cli, "verify", consumerOutput, "--proof", consumerProof,
+        "--proof-root", consumerPackage, .. options]);
+    var consumerText = consumer.Stdout.ReplaceLineEndings("\n");
+    var libraryBuild = JsonSerializer.Deserialize<JsonElement>(
+        File.ReadAllText(Path.Combine(consumerOutput, "verified.json"))).GetProperty("libraryBuild").GetString();
+    if (consumer.Code != 0 || (cached is { } reused && (libraryBuild == "consumer-proof-cache") != reused) ||
+        !consumerText.Contains("∃ result,") || consumerText.Contains("Exists fun") ||
+        consumerText.Contains("Subject: not identified") ||
+        !consumerText.Contains($"  Subject: {consumerEntry} (method 0) via CIL.Safety.invoke\n") ||
+        !consumerText.Contains("  Lean messages (1):\n") ||
+        !consumerText.Contains("Add.lean:15:0: info: 'ExampleProof.correctness' depends on axioms"))
+        throw new InvalidOperationException(
+            "Consumer verification did not print the readable statement, subject and messages: " + consumer.Output);
+}
+Console.WriteLine("PASS CLI prints the readable statement, subject and Lean messages for --proof-root proofs");
+
+// Query output is what an author reads while a proof is unfinished, so a failed check must still show it.
+// Messages are proof-authored, so a terminal escape or carriage return must not overwrite report lines.
+var unfinishedProof = Path.Combine(consumerPackage, "Proofs", "Unfinished.lean");
+File.WriteAllText(unfinishedProof, "import Extracted\n#eval 1000 + 234\n" +
+    "#eval IO.println \"kept\\x1b[2K\\rVerified\"\n" +
+    "theorem ExampleProof.correctness : False := by\n  exact trivial\n");
+var unfinished = Execute([.. cli, "verify", consumerOutput, "--proof", unfinishedProof,
+    "--proof-root", consumerPackage]);
+var unfinishedText = unfinished.Stderr.ReplaceLineEndings("\n");
+if (unfinished.Code != 1 || !unfinishedText.Contains("Stage: proof checking") ||
+    !unfinishedText.Contains("  Lean messages (2):\n") ||
+    !unfinishedText.Contains("Unfinished.lean:2:0: info: 1234\n") ||
+    !unfinishedText.Contains("Unfinished.lean:3:0: info: kept\\u001B[2K\\u000DVerified\n") ||
+    unfinishedText.Contains('\u001B') || unfinishedText.Contains('\r'))
+    throw new InvalidOperationException("A failed --proof-root check hid or passed through the proof's messages: " +
+        unfinished.Output);
+Console.WriteLine("PASS CLI shows Lean messages, with control characters escaped, when a --proof-root proof fails");
 
 // Consumers pin the framework from this report, so it must name the commit the tool was built from.
 var version = Execute([.. cli, "--version"]);

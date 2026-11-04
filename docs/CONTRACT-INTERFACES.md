@@ -84,8 +84,8 @@ arguments for `extract`. The attribute is a locator, not a pin.
 
 ## Sidecar schema 1
 
-`Tests/ContractImports/Lib.leancil.contracts` is a hand-written template. The
-`imports` test suite fills its build-specific hashes and MVID. Required fields:
+The repository's `imports` suite checks a hand-written sidecar of this schema, filling its
+build-specific hashes and MVID. Required fields:
 
 - `schema`, `semanticsVersion`, `formatVersion`: each is `1`.
 - `frameworkKey`: SHA-256 of the sorted framework source manifest described below.

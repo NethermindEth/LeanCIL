@@ -1,5 +1,7 @@
 # Native/int32 runtime evidence
 
+<!-- audience: maintainers -->
+
 Recorded on 2026-10-15. The probe executes the exact CIL recorded in each manifest on isolated .NET **10.0.0** runtimes:
 
 | Runtime | Admitted cases | Mismatches | Rejected mixed unsigned branches | Historical model divergences |

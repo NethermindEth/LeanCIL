@@ -23,6 +23,20 @@ internal static class Rejections
 
 internal static class CliDiagnostics
 {
+    /// <summary>Exception data key holding the failed proof's located Lean messages.</summary>
+    internal const string ProofMessagesKey = "LeanCIL.ProofMessages";
+
+    /// <summary>
+    /// Proof-authored text with control and bidirectional override characters shown as escapes, so it
+    /// cannot rewrite or reorder the report lines printed around it.
+    /// </summary>
+    internal static string Printable(string text) => string.Concat(text.Select(character =>
+        character != '\n' && character != '\t' && (char.IsControl(character) || IsBidiControl(character))
+            ? $"\\u{(int)character:X4}" : character.ToString()));
+
+    static bool IsBidiControl(char character) =>
+        character is >= '‪' and <= '‮' or >= '⁦' and <= '⁩' or '‎' or '‏' or '؜';
+
     internal static void Write(Exception error, string stage, bool invalid)
     {
         if (error is CliFailure failure)
@@ -60,7 +74,7 @@ internal static class CliDiagnostics
             _ => error.Message
         } : error.Message;
 
-        Console.Error.WriteLine($"{(invalid ? "Invalid" : "Error")}: {summary}");
+        Console.Error.WriteLine($"{(invalid ? "Invalid" : "Error")}: {Printable(summary)}");
         Console.Error.WriteLine($"  Stage: {stage}");
         Console.Error.WriteLine($"  Next: {next}");
         if (summary != error.Message)
@@ -69,8 +83,10 @@ internal static class CliDiagnostics
             var cause = error is CliFailure ? error.InnerException ?? error : error;
             var lean = LeanDiagnostics.Summarize(error.Message, cause.Data[LeanDiagnostics.HiddenModulesKey] as string[]);
             if (lean is not null)
-                Console.Error.Write(lean + "Full Lean output follows under Details.\n");
-            Console.Error.WriteLine("Details:\n" + error.Message);
+                Console.Error.Write(Printable(lean) + "Full Lean output follows under Details.\n");
+            Console.Error.WriteLine("Details:\n" + Printable(error.Message.ReplaceLineEndings("\n")));
         }
+        if (error.Data[ProofMessagesKey] is string messages)
+            Console.Error.Write(messages);
     }
 }

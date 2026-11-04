@@ -80,6 +80,27 @@ public static class Loops
         return count;
     }
 
+    struct Tally
+    {
+        public uint Count;
+        public uint Sum;
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    static uint AddTwo(uint value) => unchecked(value + 2);
+
+    // Counts to value in a struct local, adding two per iteration through a helper.
+    public static uint TallyTwice(uint value)
+    {
+        Tally tally = default;
+        while (tally.Count != value)
+        {
+            tally.Sum = AddTwo(tally.Sum);
+            tally.Count = unchecked(tally.Count + 1);
+        }
+        return tally.Sum;
+    }
+
     public static uint Bump(uint count, uint limit) =>
         count == limit ? throw new InvalidOperationException() : unchecked(count + 1);
 

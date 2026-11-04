@@ -1,5 +1,7 @@
 # Reusing checked span extraction in contract fixtures
 
+<!-- audience: maintainers -->
+
 `Tests/MemorySpans.cs` compiles the complete `SliceRead` and `SliceWrite` extraction sources
 for their contract imports, including each concrete execution theorem.
 The later positive batch contains only the remaining `Existing`

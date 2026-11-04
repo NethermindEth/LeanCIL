@@ -567,7 +567,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         finally { File.Delete(runner); File.Delete(targetsPath); }
     }
 
-    sealed record ConsumerDependency(string Name, string Directory, string Source, string Revision, string Url);
+    /// <summary>A Lake dependency of a consumer package; `Url` is null for the bundled framework copied into a
+    /// generated scratch package, which has no git checkout.</summary>
+    sealed record ConsumerDependency(string Name, string Directory, string Source, string Revision, string? Url);
     ConsumerDependency[]? fullBundleDependencies { get; init; }
 
     static string Within(string root, string relative)
@@ -596,7 +598,15 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         }
     }
 
-    static ConsumerDependency[] ConsumerDependencies(string root)
+    /// <summary>Relative directory of the framework copy that a generated scratch package requires by path.</summary>
+    const string BundledFrameworkDirectory = ".lake/packages/leancil";
+
+    /// <summary>
+    /// The package's dependencies from lake-manifest.json: git packages pinned by a full revision. Only editor
+    /// workspaces of a generated scratch package pass `bundledFramework`, which also admits its path-required
+    /// framework copy; verification never does.
+    /// </summary>
+    static ConsumerDependency[] ConsumerDependencies(string root, bool bundledFramework = false)
     {
         var manifest = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(root, "lake-manifest.json")));
         if (manifest.GetProperty("packagesDir").GetString() != ".lake/packages" ||
@@ -605,6 +615,13 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return manifest.GetProperty("packages").EnumerateArray().Select(package =>
         {
             var name = package.GetProperty("name").GetString()!;
+            if (bundledFramework && name == "leancil" && package.GetProperty("type").GetString() == "path" &&
+                package.GetProperty("dir").GetString() == BundledFrameworkDirectory)
+            {
+                // Its sources are hashed and compared with the bundled framework like any dependency's.
+                var copy = Within(root, BundledFrameworkDirectory);
+                return new ConsumerDependency(name, copy, copy, "bundled", null);
+            }
             var revision = package.TryGetProperty("rev", out var rev) ? rev.GetString() ?? "" : "";
             if (package.GetProperty("type").GetString() != "git" ||
                 !Regex.IsMatch(name, @"\A[A-Za-z_][A-Za-z0-9_-]*\z") || !Regex.IsMatch(revision, @"\A[0-9a-fA-F]{40}\z"))
@@ -1177,7 +1194,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         {
             var destination = Within(session, Path.GetRelativePath(root, dependency.Directory));
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            if (fullBundleDependencies is null)
+            if (fullBundleDependencies is null && dependency.Url is not null)
             {
                 Run(["git", "clone", "--no-hardlinks", "--no-checkout", dependency.Directory, destination]);
                 Run(["git", "remote", "set-url", "origin", dependency.Url], destination);
@@ -1329,16 +1346,30 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         public string? Detail;
         // Proof modules of other requests in the workspace, omitted from this request's diagnostics.
         public string[]? Hidden;
+        // Display only, never read by a check: the proof's Lean messages and its printed statement.
+        public ProofMessage[]? Messages;
+        public StatementView? Statement;
     }
 
     Report VerifyConsumer(string assembly, string proof, string output, string theorem, string root,
         string? settings, Action<string>? stage)
     {
+        ProofMessages = null;
+        VerifiedStatement = null;
         var outcome = VerifyConsumerRequests(root, [new(assembly, output, proof, theorem, settings)],
             (_, value) => stage?.Invoke(value), batch: false)[0];
+        ProofMessages = outcome.Messages;
+        VerifiedStatement = outcome.Statement;
         if (outcome.Error is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(outcome.Error);
         return outcome.Report!;
     }
+
+    /// <summary>
+    /// The non-error messages of `source` in Lake's printed build output, which logs each message of a
+    /// module that failed to check as `level: file:line:column: text`, with `file` relative to `package`.
+    /// </summary>
+    static ProofMessage[] LakeOutputMessages(string output, string package, string source) =>
+        SourceMessages(LeanDiagnostics.Entries(output), package, source);
 
     // Capture all artifact names, including unknown parts used by module discovery.
     static SortedDictionary<string, string> ConsumerArtifactSnapshot(string directory) =>
@@ -1524,8 +1555,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 extractions[i] = ExtractionIdentity.Read(outputs[i]);
                 identities[i] = extractions[i].Sha256;
                 // PDB names bind only proofs that import them; identity.json does not cover the PDB.
+                // A result cached without a statement view must not satisfy a run that prints one.
                 proofKeys[i] = ConsumerCacheKey("proof", before[i], SemanticExtractionIdentity(extractions[i]) + "\n" + requests[i].Theorem + "\n" + Sha(requests[i].Assembly) +
-                    (symbols[i] is null ? "" : "\n" + symbols[i]));
+                    (symbols[i] is null ? "" : "\n" + symbols[i]) + (viewsStatement ? "\nstatement-view" : ""));
                 if (requests[i].ExpectRejection || ReferenceOnlyImports(extractions[i])) continue;
                 var receipt = Path.Combine(Path.GetTempPath(), "leancil-consumer-receipt-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(receipt);
@@ -1534,6 +1566,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     if (!RestoreSuccess(proofKeys[i], receipt)) continue;
                     var report = JsonSerializer.Deserialize<Report>(File.ReadAllText(Path.Combine(receipt, "report.json")))!;
                     if (report.schema != 4) continue;
+                    var cachedMessages = Path.Combine(receipt, ProofMessagesFile);
+                    outcomes[i].Messages = File.Exists(cachedMessages)
+                        ? JsonSerializer.Deserialize<ProofMessage[]>(File.ReadAllText(cachedMessages)) : null;
+                    outcomes[i].Statement = ReadStatementView(Path.Combine(receipt, StatementViewFile));
                     outcomes[i].Detail = JsonSerializer.Serialize(report with { libraryBuild = "consumer-proof-cache" }, Json);
                     cached.Add(i);
                 }
@@ -1860,13 +1896,25 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     File.Exists(Path.Combine(directory, name + ".olean")) && File.Exists(Path.Combine(directory, name + ".trace")))).ToArray();
                 if (buildFailure is null && !built.All(value => value))
                     throw new InvalidDataException("Consumer proof or certificate is missing from the resolved import paths.");
+                // Display only: later audit failures still show the messages of a proof that checked.
+                for (var k = 0; k < members.Length; k++)
+                    if (built[k])
+                        outcomes[members[k]].Messages = LakeTraceMessages(ProofModule(members[k]) + ".trace", session,
+                            Path.Combine(session, names[k] + ".lean"));
             }
+            // The built proof module of a request, as a path without extension.
+            string ProofModule(int i) => importDirectories
+                .Select(directory => Path.Combine(directory, requestModules[i]))
+                .First(path => File.Exists(path + ".olean"));
             var rejecting = new List<int>();
             for (var k = 0; k < members.Length; k++)
             {
                 var i = members[k];
                 if (!built[k])
                 {
+                    // Display only: a module that failed to check has no trace, so its messages come from the log.
+                    outcomes[i].Messages = LakeOutputMessages(build.Output, session,
+                        Path.Combine(session, names[k] + ".lean"));
                     if (requests[i].ExpectRejection) rejecting.Add(i);
                     else if (members.Length == 1) Fail([i], buildFailure!);
                     else
@@ -2184,6 +2232,15 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 }
                 finally { if (collected is not null && Directory.Exists(collected)) Directory.Delete(collected, true); }
             }
+            // Read from the audited proof module after every check above; the receipt caches it with the result.
+            void ShowConsumerProof(int i, string receipt)
+            {
+                File.WriteAllText(Path.Combine(receipt, ProofMessagesFile),
+                    JsonSerializer.Serialize(outcomes[i].Messages));
+                if (viewsStatement)
+                    outcomes[i].Statement = ViewStatement(receipt, ProofModule(i) + ".olean", leanPath,
+                        File.ReadAllText(Path.Combine(session, requestModules[i] + ".lean")), requests[i].Theorem);
+            }
             foreach (var i in proceeding)
             {
                 var extraction = extractions[i].Root;
@@ -2205,6 +2262,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 var receipt = Path.Combine(session, "certified-result-" + i);
                 Directory.CreateDirectory(receipt);
                 File.WriteAllText(Path.Combine(receipt, "report.json"), JsonSerializer.Serialize(report, Json));
+                ShowConsumerProof(i, receipt);
                 PublishSuccess(proofKeys[i], receipt);
                 if (last[outputs[i]] == i) File.WriteAllText(Path.Combine(outputs[i], "verified.json"), JsonSerializer.Serialize(report, Json) + "\n");
                 outcomes[i].Report = report;

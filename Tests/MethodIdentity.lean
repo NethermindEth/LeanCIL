@@ -30,7 +30,9 @@ open CIL
 
 example : method_named "System.UInt64 Examples.Identity::Left(System.UInt64,System.UInt64)" = 1 := rfl
 
+/-- The root method. -/
 bind_method root rootBody := "System.UInt64 Examples.Identity::Root(System.UInt64)"
+/-- The left callee. -/
 bind_callee left leftBody := "System.UInt64 Examples.Identity::Left(System.UInt64,System.UInt64)" from rootBody
 bind_callee right rightBody := "System.UInt64 Examples.Identity::Right(System.UInt64,System.UInt64)" from rootBody
 
@@ -82,6 +84,7 @@ it calls:
 bind_callee pick pickBody := "System.UInt64 Examples.Overloads::Pick(System.UInt64)" from rootBody
 
 -- Call shape locates helpers whose names change; `[k]` orders calls of the same arity.
+/-- The second two-argument callee. -/
 bind_callee second secondBody := call 2 from rootBody [1]
 example : second = left ∧ secondBody = leftBody := ⟨rfl, rfl⟩
 example : rootBody.code[4]? = some (.call second 2) := second.call
@@ -130,6 +133,7 @@ run_meta discard <| CIL.MethodIdentity.resolveIn ``duplicated Extracted.method1S
 
 -- Import slot `j` is past every extracted method, at `Extracted.program.length + j`.
 bind_import addTo := "System.Void Library.Adder::AddTo(System.UInt64&,System.UInt64&,System.UInt64&)"
+/-- The imported doubling method. -/
 bind_import twice := "System.UInt32 Library.Adder::Twice(System.UInt32)"
 example : addTo = 5 ∧ twice = 7 := ⟨rfl, rfl⟩
 example : twice = Extracted.program.length + 2 := twice.slot
@@ -197,6 +201,16 @@ error: 2 imported methods have signature
 -/
 #guard_msgs in
 run_meta discard <| CIL.MethodIdentity.resolveIn ``duplicatedImports Extracted.method1Signature "imported method" "import"
+
+-- A docstring before a binding command documents the bound index.
+/-- info: [some "The root method. ", some "The left callee. ", some "The second two-argument callee. ",
+  some "The imported doubling method. "] -/
+#guard_msgs (whitespace := lax) in
+open Lean in
+#eval show MetaM _ from do
+  let env ← getEnv
+  [`Tests.MethodIdentity.root, `Tests.MethodIdentity.left,
+    `Tests.MethodIdentity.second, `Tests.MethodIdentity.twice].mapM fun name => liftM (findDocString? env name : IO _)
 
 end Tests.MethodIdentity
 

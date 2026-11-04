@@ -1,5 +1,7 @@
 # Generic constraint certificate normalization
 
+<!-- audience: maintainers -->
+
 Generic evidence repeatedly compares the exact scoped `System.ValueType` and unmanaged
 constraint strings. Normalizing their concatenated UTF-8 representations was a substantial
 part of the specialization proofs for packed values, vectors, swaps and buffer helpers.

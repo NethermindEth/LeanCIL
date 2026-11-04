@@ -62,6 +62,9 @@ name = "Tests.AggregateFields"
 name = "Tests.LoopFrames"
 
 [[lean_lib]]
+name = "Tests.LoopDiagnostics"
+
+[[lean_lib]]
 name = "Tests.ContractConsequence"
 
 [[lean_lib]]

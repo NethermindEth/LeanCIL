@@ -1,5 +1,7 @@
 # Verification CI
 
+<!-- audience: maintainers -->
+
 Certified libraries travel as authenticated tar/zstd payloads. The archive and manifest digests
 come from the same producer job; restoration verifies the archive before decompression and
 rejects unsafe entries. Legacy raw artifacts retain their manifest checks. See
@@ -41,8 +43,9 @@ installation while reducing the archive size and repeated decompression work.
 
 Pushes to `main` and manual runs execute every verification suite. Pull requests
 select suites from changed test entry points, referenced proofs, and their
-transitive source imports. Markdown and license-only changes skip the expensive
-suites. Shared framework, extractor, fixture projects, build configuration,
+transitive source imports. Markdown under `docs/` and `skills/` and the README select only the
+`docs` suite; other Markdown and license changes skip the suites. Shared framework, extractor,
+fixture projects, build configuration,
 workflow changes, and unrecognized paths conservatively run the full matrix.
 
 Suites measured at no more than 60 seconds share a job with at most two other short suites,
@@ -70,13 +73,77 @@ Keep this aggregate check required rather than individual matrix jobs, which may
 be absent on a PR. Run `dotnet run --file scripts/TestSelectVerification.cs` to test the
 selection rules and final gate locally.
 
-Selection first runs `dotnet run --file scripts/CheckDocReferences.cs`, so documentation-only PRs
-check it too. Every link under `docs/` and in the README whose text is one code span and whose
-target is a `.lean` or `.cs` file must name something that file still contains: a Lean
-declaration, a declared C# type or member, or a quoted string literal such as a test mutation
-name. A label may also be the file's own path. A rename or deletion fails selection. A link whose
-text names a `.lean` or `.cs` line, or whose target has a `#L` line anchor, also fails: cite code by
-name, not by line number.
+## Documentation checks
+
+A stale document misleads as much as a missing one, so the README, `docs/` and `skills/` are
+checked in two places. Selection first runs `dotnet run --file scripts/CheckDocReferences.cs`,
+which needs no Lean, so every PR runs it:
+
+- Every relative link, and every link to a file of this repository on GitHub, must resolve, an
+  anchor into a Markdown file must name one of its headings, and
+  every backticked path under `CIL/`, `Examples/`, `scripts/` or `docs/` must exist with exactly
+  that spelling, as a case-sensitive file system resolves it. Build outputs under `bin/` or `obj/`
+  are not paths.
+- A link whose text is one code span and whose target is a `.lean` or `.cs` file must name
+  something that file still contains: a Lean declaration, a declared C# type or member, or a quoted
+  string literal such as a test mutation name. A label may also be the file's own path. A link
+  whose text names a `.lean` or `.cs` line, or whose target has a `#L` line anchor, fails: cite
+  code by name, not by line number.
+- Every `bind_*` and `cil_*` command, tactic or attribute named in prose or in an unelaborated
+  block must still be declared under `CIL/`.
+- Every line of a Lean block, excerpts included, fits in 100 characters, the limit of the
+  library's own Lean. An excerpt begins each line of its source as written, so a wide excerpt is
+  fixed by wrapping its source.
+- A document's audience decides what it may cite. Documents are for users unless they declare
+  `<!-- audience: maintainers -->` below their title; maintainers documents describe how LeanCIL
+  itself is built, validated and audited (the `VALIDATION*`, `SOUNDNESS-*` detail pages, this page,
+  compiler coverage, performance and evidence records). The tool ships `CIL/`, and `Examples/` holds
+  complete proofs that the `core` suite verifies end to end; `Tests/` is the repository's own
+  regression fixtures, which users cannot import or run. A user document therefore cites no
+  `Tests/` path, `Tests.*` module or excerpt of one; it cites an example, states the API in a
+  checked snippet, or links the maintainers document that describes the evidence.
+
+Every fenced Lean block is elaborated unless its info string says why not:
+
+| Info string | Check |
+| --- | --- |
+| `lean` | Elaborated by the `docs` suite against the current library with exactly the block's own imports, as if it were a file of its own: nothing is imported or opened implicitly, so a block starts with `import CIL` or the modules it needs. Imports must name library modules; a block that needs `Extracted` fails until it is marked. |
+| `lean excerpt PATH` | Every non-blank line, in order, must begin a line of `PATH`, a file the suites verify, such as an example under `Examples/Proofs`. |
+| `lean extracted` | Code that needs a generated `Extracted` module. Its imports and commands are checked statically and its `CIL.` names by the `docs` suite. |
+| `lean illustrative` | A shape rather than code to run, checked like `extracted`. |
+
+Any other info string fails. Prefer an elaborated block, then an excerpt of a verified example;
+`extracted` and `illustrative` blocks can drift in ways only a reader notices. Never mark a block
+to hide an error.
+
+The `docs` suite (`Tests/DocSnippets.cs`) needs the certified library. It writes the elaborated
+blocks into one Lean file per distinct import set, so a block sees only the modules it imports, and
+the names cited outside elaborated code into a file that imports every library module; the files
+elaborate concurrently. Names are probed by these rules:
+
+- A `CIL.`-rooted name in prose or in an unelaborated block must be a declaration or namespace as
+  written, unless it is a module path.
+- A code span in prose that is wholly a `bind_*` or `cil_*` word must start a tactic, command or
+  other syntax, or be an attribute, of the library.
+- A code span in prose that is wholly a snake_case word (`invoke_loop_induction`), or a dotted name
+  whose first component is capitalised (`LoopFrame.store_field`), must be a declaration, namespace,
+  syntax or attribute of the environment, or the suffix of a declaration or namespace of a `CIL`
+  module. A dotted name whose part before the last component is no namespace, such as
+  `X86.Aes.Encrypt`, is .NET's and not probed; so are names rooted at `Extracted`,
+  `ExtractedSymbols`, `Examples`, `Tests` or `System`, file names, and .NET accessor names such as
+  `get_Item`, which capitalise after the underscore. A lowercase dotted span such as `entry.memory`
+  or `ldind.i` is a term or an opcode, not a name.
+- A name that a Lean block of the documentation declares, or binds with `have`, needs no probe; in
+  a maintainers document neither does a name declared under `Tests/`, which its own suite checks.
+
+Each diagnostic, warning or `sorryAx` is reported at the document line it came from. The suite then
+checks that a pre-`Except` `invoke` statement, a removed or renamed name, a removed tactic and a
+block using a module it does not import each fail at their own lines, while the current forms and
+names outside the library pass. Run it locally with
+`dotnet run --file scripts/Test.cs -- --suite docs`; `scripts/TestCheckDocReferences.cs` tests the
+static rules.
+
+## Other workflows
 
 The ARM64 AES workflow runs only `Tests/AesHardware.cs` and the runtime probe on a macOS Apple
 silicon runner, for changes to the AES model, its hardware check, the probe or the macOS evidence;

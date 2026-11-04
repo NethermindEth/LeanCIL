@@ -52,6 +52,21 @@ same pinned Git dependencies and framework/toolchain checks as consumer
 verification apply. `--assembly` and `--assume-initialized` have the extraction
 command's meaning.
 
+A proof with no `lakefile.toml` or `lakefile.lean` in its directory or above it
+needs no setup. The command generates a package at
+`.work/leancil/package-<key>` beside the proof, holding a copy of the proof and a
+copy of the tool's bundled framework sources in `.lake/packages/leancil`, which
+the package requires by `path`. It runs `lake update` there without network
+access and creates no Git repository or commit, so Git settings such as
+`commit.gpgsign` do not apply. It then opens that package as above. A tool with
+different framework sources regenerates the package. Verification accepts only
+dependencies pinned by a Git revision, so the generated package cannot be passed
+to `--proof-root`. The default output
+is `.work/leancil/<request-key>` beside the proof. Each run refreshes the copy, so
+an edited source proof makes an existing workspace stale like any consumer
+source change. Copy the edited workspace proof back to the original file and
+verify it with ordinary `leancil verify <extraction> --proof <file>`.
+
 The default output is `.work/leancil/<request-key>` under the source package.
 Use `--output directory` to choose an external directory, or one under the
 package's excluded `.work`, `artifacts`, `generated`, `bin` or `obj` tree. The
@@ -183,9 +198,8 @@ Generated components are not exported as portable consumer support.
 
 This first implementation shares components available in the initial checked workspace. It does
 not rename method indices to discover structurally equivalent methods, and unrelated groups can
-still repeat evidence that is absent from that workspace. `Tests/ConsumerComponents.cs` records
-build/replay counts, source size and wall time for four wrappers around one helper; `--measure`
-accepts a baseline extractor DLL without requiring component reuse.
+still repeat evidence that is absent from that workspace. The
+[coverage reference](VALIDATION-COVERAGE.md) records the build and replay counts this saves.
 
 `leancil verify-batch requests.json` verifies many requests against one consumer
 snapshot in one session:

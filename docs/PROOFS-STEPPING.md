@@ -108,13 +108,14 @@ theorem checked_arithmetic (memory : CIL.Safety.Memory) (left right : CIL.W32) :
       [.scalar (.i32 left), .scalar (.i32 right)] memory =
       .ok (memory, [.scalar (.i32 (if left + (right <<< 1) > 0 then 1 else 0))]) := by
   cil_checked_steps
+#print axioms checked_arithmetic
 
 end ProofGuide
 ```
 
-The [automation regression](../Tests/Automation.lean) checks this pattern and symbolic branch
-proofs. This handwritten body demonstrates the tactic; a proof about an assembly must bind its body
-to the generated program, as described in in [Bind bodies to the
+The [proof automation regressions](VALIDATION-PROOFS.md#proof-automation) check this pattern and
+symbolic branch proofs. This handwritten body demonstrates the tactic; a proof about an assembly
+must bind its body to the generated program, as described in [Bind bodies to the
 extraction](PROOFS-BINDING.md#bind-bodies-to-the-extraction), and pass verification.
 
 `cil_checked_steps` composes `invoke_of_run`, `run_next`, `run_return` and `run_call_of_invoke`. It
@@ -228,28 +229,19 @@ field or first run `simp only [CIL.Safety.reduceMethodProfile, cil_feature] at h
 
 ### Consumer stepping regressions
 
-The consumer failures reported in #252 are covered by the following proofs. These use the public
-tactics with symbolic values and memory; they do not replace the checked interpreter with
-consumer-specific execution rules.
+The public tactics, with symbolic values and memory and no consumer-specific execution rules, handle
+these cases that consumer proofs rely on:
 
-| Case | Regression |
-| --- | --- |
-| Supplied store/load facts take priority over generic equations | `Tests.Automation.step_facts_first`, `applied_step_facts_first` |
-| Zero, nonzero and literal branch conditions | `Tests.Automation.branch_from_zero`, `branch_from_nonzero`, `literal_branch` |
-| Memory operations use their own equations | `Tests.Automation.asRef_fact_stack`, `load128_fact_stack`, `add_fact_stack` |
-| Profile facts decide instruction lookup | `Tests.Automation.feature_op_checked`, `Tests.MethodContract.feature_op_contract_steps` |
-| Intrinsic evaluation facts normalize the next stack | `Tests.Automation.evaluated_then_stored`, `evaluated_by_applied_hypothesis` |
-| Signed, unsigned and loaded-limb comparisons | `Tests.MethodContract.loaded_signed_branch`, `loaded_unsigned_branch`, `loaded_limb_branch` |
-| Signed/unsigned widening and both argument orders | `Tests.MethodContract.ordered_widening` |
+- supplied store and load facts take priority over generic equations;
+- zero, nonzero and literal branch conditions decide the next program counter;
+- memory operations use their own equations;
+- profile facts decide instruction lookup;
+- intrinsic evaluation facts normalize the next stack;
+- signed, unsigned and loaded-limb comparisons, and signed or unsigned widening in both argument
+  orders, step within fixed heartbeat budgets.
 
-Each comparison proof has a 2,000-heartbeat budget. The widening proof handles all eight
-combinations of signed conversion, scalar position and reversed arguments in 12,000 heartbeats,
-using one `cil_contract_steps 3` invocation per case. Its arbitrary continuation preserves the
-actual widened stack and memory, rather than merely checking that some execution exists. These
-budgets detect elaboration regressions independently of machine speed; they are not wall-clock
-benchmarks. `ordered_widening_returns` composes that prefix with a concrete suffix which discards
-both operands and returns zero, proving that the continuation premise is satisfiable for every case.
-The widened value is checked by the prefix theorem.
+The [proof automation regressions](VALIDATION-PROOFS.md#consumer-stepping-regressions) name the
+proof that pins each case and its budget.
 
 Every stepping, call and loop tactic closes lookups with `cil_lookup [facts]`: by evaluation of an
 `@[cil_code]` extraction, by `rfl`, from a lookup hypothesis such as `found : program[index]? = some
@@ -265,9 +257,8 @@ A segment theorem over an abstract body states where its code sits with `CodeAt 
 + 2`. It also finds local placement hypotheses without listing them and accepts supplied placement
 expressions such as `region.append_left`. The fetched instruction must be inside the segment and
 agree with its code. `append`, `middle`, `take` and `drop` move a placement between a region and its
-segments, and `rfl` closes a concrete one. [Tests/CodeAt](../Tests/CodeAt.lean) steps a segment this
-way. `Segment program method start finish pre post` packages a checked prefix as a composable
-contract. Assertions take the unchanged arguments and a `SegmentState` containing the frame, stack
+segments, and `rfl` closes a concrete one. `Segment program method start finish pre post`
+packages a checked prefix as a composable contract. Assertions take the unchanged arguments and a `SegmentState` containing the frame, stack
 and memory. Each admitted input supplies an output state and a cost, with an exact `run (fuel +
 cost) = run fuel` equation for every continuation fuel. `Segment.trans` composes adjacent contracts
 and adds their costs; `Segment.run_exists` applies a successful continuation. `Segment.consequence`
@@ -284,8 +275,8 @@ one frame-rule application replaces separate disjoint-read proofs for all retain
 numeric slot identities must remain fixed, and the frame-rule placement must belong to the running
 method and end at the contract boundary. Indirect writes and calls need a proved memory effect;
 absence of a direct `setLocal` is not evidence that an aliased byte-backed local keeps its value.
-[Tests/Segment](../Tests/Segment.lean) composes a 256-bit Add Vector128 reference prefix and
-Multiply AVX2 vector-input stages with these rules.
+The [proof automation regressions](VALIDATION-PROOFS.md#proof-automation) step a placed segment and
+compose vector-input stages with these rules.
 
 For steps depending on hypotheses, use `cil_checked_steps [facts]` with the relevant proved facts.
 Branches always use equations before reflexivity, so a fact can decide the next program counter
@@ -298,8 +289,9 @@ For loops, import [LoopAutomation](../CIL/Safety/LoopAutomation.lean). `cil_loop
 composes an execution segment and `cil_loop_finish [facts]` proves an exit path and its
 postcondition. The list is optional: both tactics add the facts
 [`gatherLoopFacts`](../CIL/Safety/LoopFacts.lean) finds, described under [loop verification
-conditions](#loop-verification-conditions), so the list carries only case hypotheses, invariant
-equations and other facts of no recognized shape. A step equation in the context, quantified or not,
+conditions](#loop-verification-conditions), so the list carries only invariant equations, the
+positive side of a case split and other facts of no recognized shape.
+A case split's negative side, such as `¬count = value`, is gathered and decides the branch. A step equation in the context, quantified or not,
 is used whenever its instruction is reached, so a run that used to stop at an instruction such a
 hypothesis justifies now continues past it. The exit closes with the normalised facts, then again
 after unfolding `leaveFrame` and narrow extension, so a fact about the exited frame's memory is
@@ -307,15 +299,51 @@ tried before cleanup rewrites past it. Supply an invariant and decreasing measur
 termination theorem; these tactics do not infer termination. See the [countdown
 proof](../Examples/Proofs/Countdown.lean).
 
+The loop tactics step one fetched instruction at a time, simplifying the stack with the `drop`,
+`take`, `reverse` and append lemmas after each step. When one cannot go on it fails instead of
+leaving a goal, and the message names the pc:
+
+- `cannot step pc N (op) at memory M` shows the step and what is left of it after the step
+  equations and gathered facts; this is usually a store or load at a memory with no `LoopFrame`
+  or step equation in scope;
+- `pc N is a call (op); cross it with cil_loop_call` stops `cil_loop_steps` and `cil_loop_finish`
+  at a call;
+- `target state not matched at pc N` names the frame, stack or memory that differs when the path
+  reaches the target's pc in another state, in the reached form and the target's;
+- an undecided pc asks for a fact deciding the branch condition.
+
 A loop body that calls a helper composes through the helper's `MethodContract`
 ([LoopContract](../CIL/Safety/LoopContract.lean)). `LoopSegment` fixes one cost for every
 continuation budget, which a contract's existential fuel cannot supply, so
 `loop_terminates_induction` asks each iteration for `LoopTerminates` at its own state while assuming
-it at every invariant state of smaller measure. Step to the call with `cil_loop_advance [facts]`,
-apply the contract with `cil_loop_call holds input at site [facts]` (`loop_terminates_call`, or
-`loop_terminates_call_formed` for `WellFormed` and the static world), re-establish the invariant
-from `Returns` and `Confined` in the continuation, reach the next head with `cil_loop_steps`, and
-close with `loop_reaches_terminates` and the assumption. The [counted-loop
+it at every invariant state of smaller measure.
+[`invoke_loop_induction`](../CIL/Safety/LoopContract.lean) joins it with frame entry. From the
+lookup, checked arguments, `setup`, the configuration, invariant and measure, it leaves two
+goals: the entry state terminates given that every invariant head state does, and the iteration.
+Its result is the `∃ fuel final, invoke ... = .ok (final, values) ∧ kept final` of
+`invoke_loop_results`.
+
+The tactics of [LoopFrameSteps](../CIL/Safety/LoopFrameSteps.lean), which
+`CIL.Safety.LoopScaffold` imports, walk these goals while keeping the loop's `LoopFrame` current:
+
+- `cil_loop_advance [facts]` steps to a call or return and fails as `cil_loop_steps` does on
+  anything else.
+- `cil_loop_call holds input at site [facts]` applies the contract (`loop_terminates_call`) at
+  the `bind_call` site or, without `at site`, at the fetched call, and fails naming the pc and
+  instruction when the goal is not at a call. It leaves the precondition unless `trivial` proves
+  it, then continues: it names the returned memory, unfolds the contract, substitutes an output
+  its postcondition states as an equation, and, when the callee's footprint lies inside the
+  frame's, proves the frame at the returned memory with `LoopFrame.after_confined`.
+- `cil_loop_recurse hypothesis values` steps to the loop head of `hypothesis`, the entry goal's
+  or the iteration's statement that every (smaller) invariant head state terminates. It takes
+  each struct zeroing and field store on the way through `LoopFrame.zero_aggregate` and
+  `store_field`, naming the memory each produces, and applies `hypothesis` at the head state
+  with loop values `values`, the reached memory and its frame. The invariant and the decrease
+  are left as goals; a state that is not the head's at `values` fails, showing the reached state.
+
+All gather facts as the other loop tactics do, so the lists are optional.
+`loop_terminates_call_formed` gives the continuation `WellFormed` and the static world when a
+proof composes the call by hand. The [counted-loop
 proof](../Examples/Proofs/CountCalls.lean) never unfolds the helper or names its fuel; the loop
 suite reuses it unedited for a reimplemented helper and requires it to reject a discarded helper
 result and a broken count. On the correct build, a nondecreasing measure and an invariant that holds
@@ -342,9 +370,9 @@ expected exception from any settled run that does not throw it.
 The [outcome loop proof](../Examples/Proofs/CountUntil.lean) propagates its helper's exception after
 earlier successful calls. The loop suite reuses it unedited for a reimplemented helper and rejects a
 helper that raises another type; on the correct build, a nondecreasing measure, a non-inductive
-invariant and a wrong specified exception each fail at that obligation. `Tests/LoopOutcome.lean`
-derives the normal-only rules as the `none` instances and proves that unsupported execution, invalid
-state and fuel exhaustion never satisfy an expected loop exception.
+invariant and a wrong specified exception each fail at that obligation. The normal-only rules are
+the `none` instances of the outcome rules, and unsupported execution, invalid state and fuel
+exhaustion never satisfy an expected loop exception.
 
 ### Loop verification conditions
 
@@ -373,8 +401,13 @@ an unrelated context adds nothing to simp:
   with that memory's `WellFormed` in context, the facts of
   [`CheckedSpan.within`](../CIL/Safety/LoopFrames.lean) in the frame's memory;
 - `elementWidth` of a `SpanContents`;
-- for a [`LoopFrame`](../CIL/Safety/LoopFrames.lean) over `knownLocals` of a list, the load of each
-  remembered home through `LoopFrame.load`, with `localResult`;
+- for a [`LoopFrame`](../CIL/Safety/LoopFrames.lean) over `knownLocals` of a list, and for the
+  entry frame `bind_entry ... allocating` proves for every footprint, the `form` of each home
+  (`LoopFrame.form_home`), so `ldloca` steps, and the load of each remembered home through
+  `LoopFrame.load`, with `localResult`;
+- for a struct local remembered as `.aggregate (layout.encode fields)`, the read of each field by
+  value (`ldloc` then `ldfld`, [`step_fieldAt_encode`](../CIL/Safety/FieldValues.lean)) and by
+  address (`LoopFrame.load_field`), as that field's value;
 - [`LoopFrame.leave_kept`](../CIL/Safety/LoopFrames.lean) of each `LoopFrame []` with the entry's
   `setup` equation, when the goal is an exit;
 - `numericOfWidth` and `BitVec.ofNat_toNat` when a gathered fact loads at a literal width.
@@ -385,10 +418,16 @@ about. [`loopGoalScope`](../CIL/Safety/LoopFacts.lean) starts from the goal's st
 postcondition, and from the method arguments only when the program reads one with `.arg`; the
 right side of each kept equation then extends it. A derived fact must be about variables reached
 without an equation. A fact about a memory that no state of the goal holds and no kept equation
-produces, such as the caller's memory once the frame has stored, is dropped. Derived facts are added as hygienic
+produces, such as the caller's memory once the frame has stored, is dropped; a frame fact at a
+memory that a kept store or call produces is kept. Derived facts are added as hygienic
 hypotheses, so the stepper looks them up by name instead of elaborating a proof term at every
 step, and a statement already gathered is not added again. `SpanSum` names no fact but its
 invariant equation.
+
+The stepping tactics give each instruction only the facts it can read. Home forms reach only
+`ldloca`, field reads only `ldfld`, and the negative sides of case splits only instructions that
+test or compute on data, while `ret` reads them all; each group is added and normalised the first time such an
+instruction is reached. Stack lemmas join the rewrite only when the goal holds a stack operation.
 
 A loop over symbolic caller memory keeps the frame part of its state as the
 [`LoopFrame`](../CIL/Safety/LoopFrames.lean) that `bind_entry ... allocating` returns, in a
@@ -397,10 +436,9 @@ equation and the frame after the store, without composing `MemoryBelow` by hand.
 `LoopFrame.load` reads a home at a loop head, and `LoopFrame.leave_kept` `setup` is the exit's
 `MemoryBelow` fact for a frame confined to no caller storage, for any exited frame with the
 entry's owned identities, closing a postcondition such as `SpanSum`'s; the loop tactics derive
-both from the state's frame. `Tests/LoopScaffold.lean` proves a countdown and
-a span fold over symbolic memory this way, naming no frame or span fact, and shows for each that
-a constant measure fails at the decrease goal and an invariant that is not preserved at its
-preservation goal.
+both from the state's frame. [Countdown](../Examples/Proofs/Countdown.lean) and
+[SpanSum](../Examples/Proofs/SpanSum.lean) store through their frames this way; SpanSum's loop
+steps name no frame or span fact.
 
 ## Read control flow off one step
 

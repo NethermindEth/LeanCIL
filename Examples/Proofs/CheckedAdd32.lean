@@ -26,7 +26,8 @@ theorem correctness (x y : W32) (fits : x.toNat + y.toNat < 2^32) :
     rfl
   have first : CIL.Safety.step Extracted.method0 (.arg 0) 0 args frame [] Memory.empty =
       .ok (.next 1 [.scalar (.i32 x)] frame Memory.empty) := rfl
-  have second : CIL.Safety.step Extracted.method0 (.arg 1) 1 args frame [.scalar (.i32 x)] Memory.empty =
+  have second :
+      CIL.Safety.step Extracted.method0 (.arg 1) 1 args frame [.scalar (.i32 x)] Memory.empty =
       .ok (.next 2 [.scalar (.i32 y), .scalar (.i32 x)] frame Memory.empty) := rfl
   have ran : CIL.Safety.run Extracted.program 4 0 0 args frame [] Memory.empty =
       .ok (Memory.empty, [.scalar (.i32 result)]) := by

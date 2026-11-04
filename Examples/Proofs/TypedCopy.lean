@@ -6,7 +6,8 @@ namespace ExampleProof
 
 def sourceMemory (x : CIL.W64) : Memory := {
   allocations := fun id => if id < 2 then some ⟨.callerStack, ⟨8, 1, []⟩, true, [8]⟩ else none
-  cells := fun id offset => if id = 0 then ⟨(numberBytes x.toNat 8)[offset]?.getD 0, true⟩ else ⟨0, false⟩
+  cells := fun id offset =>
+    if id = 0 then ⟨(numberBytes x.toNat 8)[offset]?.getD 0, true⟩ else ⟨0, false⟩
   views := [⟨0, 0, 8, true, true⟩, ⟨1, 0, 8, true, true⟩]
   nextIdentity := 2
 }

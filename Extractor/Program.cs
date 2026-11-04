@@ -19,7 +19,12 @@ internal static partial class Program
         Run(args, report: TextWriter.Null, rethrow: true);
     }
 
-    static int Main(string[] args) => Run(args);
+    static int Main(string[] args)
+    {
+        // Lean statements and messages are Unicode; a legacy console code page would print `?`.
+        Console.OutputEncoding = new UTF8Encoding(false);
+        return Run(args);
+    }
 
     static int Run(string[] args, ExtractionBatch? batch = null,
         Action<TemplateEmitter.Variant>? checkedTemplate = null, TextWriter? report = null, bool rethrow = false)

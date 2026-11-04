@@ -10,8 +10,10 @@ open CIL.Safety
 open CIL (W32)
 namespace ExampleProof
 
-bind_method countUntil untilBody := "System.UInt32 Examples.Loops::CountUntil(System.UInt32,System.UInt32)"
-bind_callee bump bumpBody := "System.UInt32 Examples.Loops::Bump(System.UInt32,System.UInt32)" from untilBody
+bind_method countUntil untilBody :=
+  "System.UInt32 Examples.Loops::CountUntil(System.UInt32,System.UInt32)"
+bind_callee bump bumpBody :=
+  "System.UInt32 Examples.Loops::Bump(System.UInt32,System.UInt32)" from untilBody
 bind_call bumpSite := bump from untilBody
 
 def bumpContract : OutcomeContract (W32 × W32) W32 where
@@ -118,12 +120,14 @@ theorem outcome (holds : bumpContract.Holds Extracted.program bump) (value limit
     show (x - 1).toNat < x.toNat
     omega
 
-/-- The outcome `CountUntil` reaches from its arguments: `untilRaises` of them, or a normal return. -/
+/-- The outcome `CountUntil` reaches from its arguments: `untilRaises` of them, or a normal
+return. -/
 def untilOutcome : List Value → Memory → Option String
   | [.scalar (.i32 value), .scalar (.i32 limit)], _ => untilRaises value limit
   | _, _ => none
 
-/-- For every pair of `uint`s, `CountUntil` returns its input or raises the helper's exception, given only the helper's contract. -/
+/-- For every pair of `uint`s, `CountUntil` returns its input or raises the helper's exception,
+given only the helper's contract. -/
 theorem count_until (holds : bumpContract.Holds Extracted.program bump) :
     EnsuresOutcome Extracted.program countUntil
       (fun args initial => ∃ value limit : W32,

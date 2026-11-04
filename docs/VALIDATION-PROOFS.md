@@ -1,5 +1,7 @@
 # Proof automation regression coverage
 
+<!-- audience: maintainers -->
+
 ## Proof automation
 
 The checked proof APIs share execution traces, frame-setup effects and instruction contracts. Their
@@ -71,6 +73,35 @@ backward switch and malformed-input rejection.
 instances of the outcome rules, and proves that unsupported execution, invalid state, fuel
 exhaustion, normal return and a different exception never satisfy an expected loop exception.
 
+`Tests.LoopScaffold` proves a countdown and a span fold over symbolic memory through their
+`LoopFrame`s, naming no frame or span fact, and shows for each that a constant measure fails at the
+decrease goal and an invariant that is not preserved at its preservation goal.
+
+### Consumer stepping regressions
+
+The consumer failures reported in #252 are covered by the following proofs. These use the public
+tactics with symbolic values and memory; they do not replace the checked interpreter with
+consumer-specific execution rules.
+
+| Case | Regression |
+| --- | --- |
+| Supplied store/load facts take priority over generic equations | `Tests.Automation.step_facts_first`, `applied_step_facts_first` |
+| Zero, nonzero and literal branch conditions | `Tests.Automation.branch_from_zero`, `branch_from_nonzero`, `literal_branch` |
+| Memory operations use their own equations | `Tests.Automation.asRef_fact_stack`, `load128_fact_stack`, `add_fact_stack` |
+| Profile facts decide instruction lookup | `Tests.Automation.feature_op_checked`, `Tests.MethodContract.feature_op_contract_steps` |
+| Intrinsic evaluation facts normalize the next stack | `Tests.Automation.evaluated_then_stored`, `evaluated_by_applied_hypothesis` |
+| Signed, unsigned and loaded-limb comparisons | `Tests.MethodContract.loaded_signed_branch`, `loaded_unsigned_branch`, `loaded_limb_branch` |
+| Signed/unsigned widening and both argument orders | `Tests.MethodContract.ordered_widening` |
+
+Each comparison proof has a 2,000-heartbeat budget. The widening proof handles all eight
+combinations of signed conversion, scalar position and reversed arguments in 12,000 heartbeats,
+using one `cil_contract_steps 3` invocation per case. Its arbitrary continuation preserves the
+actual widened stack and memory, rather than merely checking that some execution exists. These
+budgets detect elaboration regressions independently of machine speed; they are not wall-clock
+benchmarks. `ordered_widening_returns` composes that prefix with a concrete suffix which discards
+both operands and returns zero, proving that the continuation premise is satisfiable for every case.
+The widened value is checked by the prefix theorem.
+
 `Tests.ContractConsequence` derives public method and outcome contracts from proved internal ones
 without re-executing the callee, composes callers through the derived contracts, and proves that an
 unjustified stronger postcondition, a weaker precondition, a smaller footprint and a changed
@@ -93,13 +124,34 @@ computed run. `Tests.ValidCallTransport` carries `ValidCall` through writes, fra
 kept below a watermark and a call confined apart from the inputs, and shows that a confined call
 over an input can revoke its read authority.
 
+`Tests.MethodContract` proves a caller from two contracts without unfolding either callee, and
+`Tests/MethodContract.cs` verifies that proof unedited against a build whose helpers are
+reimplemented and renumbered, then refutes each contract with a concrete run on builds with an
+arithmetic or an aliasing bug. `Tests.StoreFacts` also counts exactly 12 `trace.CIL.factNormalize`
+events for a 27-instruction run. `Tests.ConstructContract` constructs a 16-byte and a 32-byte struct
+and reads a field of each from the constructors' contracts alone, covers a constructor that assigns
+one of two fields, and rejects a contract without write authority over its storage, a constructor
+writing outside its footprint and an 8-byte readback at a 16-byte site; `Tests/ConstructContract.cs`
+verifies it against a build writing the fields in the opposite order and refutes the contract on a
+build storing a wrong field. `Tests.OutcomeContract` proves every outcome of a two-level chain from
+the callees' contracts, and `Tests/OutcomeContract.cs` verifies it against the compiled build and
+refutes the callee's contract on builds with an off-by-one threshold or a different exception type.
+`Tests.RuntimeExceptions` proves every mapped CLR exception, refutes wrong names and proves unsigned
+division and remainder by zero for every dividend and caller memory; `Tests/RuntimeExceptions.cs`
+checks each against its compiled C# method. `Tests.Imports` proves `Root` against an imported
+`AddTo`, discharges it for one appended implementation, shows the unlinked program faults at the
+import's call, and composes an imported raising `Percent`; `Tests.Linking` links an `AddTo` library
+whose entry calls its own relocated `Sum` helper and a `Percent` library whose raise reaches `Root`
+through two relocated calls.
+
 `Tests.ConfinedFootprints` checks footprint coverage and preservation through `Confined`.
 `Tests.LocalSnapshots` keeps vector, int32, byte and narrow locals known across stores, overwrites,
 writes elsewhere and confined calls, and steps a load from a snapshot fact. `Tests.BufferContents`
 checks typed buffer contents: fills and in-place transforms of any length, unchanged neighbouring
 bytes and sibling slices of one allocation, a producer that extends its prefix while its room stays
 unreadable, empty buffers at invalid and sentinel positions, and rejection of uninitialized,
-past-end, overlapping, unjoined and stale contents.
+past-end, overlapping, unjoined and stale contents. It also composes two calls' `MemoryBelow` facts
+and refutes that composition without the first call's watermark growth.
 
 `Tests.AggregateFields` checks the struct field laws on a 12-byte word-and-int layout, steps a field
 store and a later load through a remembered struct local, and keeps a remembered struct local exact beside a
@@ -117,6 +169,13 @@ lemma rejects a write through the second's home, which breaks its snapshot. A co
 signature through `bind_method` is entered over its body name, cut with the binder form of
 `bind_cutpoint ... matching`, and proved to return zero, so frame setup must unfold the bound name
 to the extracted method.
+
+`Tests.LoopDiagnostics` proves a loop over a struct local that calls a method, passing no facts to
+the loop tactics: the gathered frame facts read the struct's fields by value and by address, and
+the call is crossed by its contract. Each loop tactic failure names its pc and instruction: a
+contract applied before the call, a call reached by `cil_loop_steps`, a store with no frame fact at
+its memory and a path back to the cutpoint in another state. A field store outside the layout or of
+the wrong kind, and a by-value read of a field narrower than its value, do not elaborate.
 
 `Tests.ProfileContract` proves a contract for a method that tests AVX2 once, under x86-64-v3, and
 carries it to x86-64-v4, to v3 without 256-bit acceleration and to every profile with AVX2 on. A
@@ -159,7 +218,7 @@ reference.
 Run the focused Lean targets and extracted-loop suite with:
 
 ```sh
-lake build CIL Tests.Automation Tests.MethodEmbedding Tests.RetainedNumericLocals Tests.AllocationRenaming Tests.AllocationExecutionRenaming Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.AggregateFields Tests.LoopFrames Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations Tests.CodeAt Tests.Segment Tests.SimdLanes
+lake build CIL Tests.Automation Tests.MethodEmbedding Tests.RetainedNumericLocals Tests.AllocationRenaming Tests.AllocationExecutionRenaming Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.AggregateFields Tests.LoopFrames Tests.LoopDiagnostics Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations Tests.CodeAt Tests.Segment Tests.SimdLanes
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 
@@ -172,6 +231,35 @@ consumers, compiled artifact size, CPU time, peak process memory and kernel repl
 Compile identical consumer sources against both revisions and alternate serial runs with prebuilt
 dependencies on the same machine. A smaller compiled proof alone does not establish a speed or
 memory improvement. Preserve the kernel replay, axiom audits and negative regressions.
+
+## Binding and transport
+
+These checks back [binding and transport](PROOFS-BINDING.md). `Tests.MethodBinding` proves a body
+binding with `cil_body` and pins the diagnostic for a differing instruction, a differing local, an
+index past the program and a `Method = Method` goal. `Tests.MethodIdentity` covers the signature
+diagnostics, and `Tests/MethodIdentity.cs` verifies one unedited proof against two builds with
+different method numbering. `Tests.StructuralLabels` covers the label diagnostics, and
+`Tests/StructuralLabels.cs` verifies one unedited proof against a build with a statement inserted
+before both loops. `Tests.DebugNames` covers local-name scoping and both diagnostics;
+`Tests/DebugNames.cs` checks byte-identical extraction, an unedited proof across an inserted local,
+and each message with and without a PDB; `Tests/ConsumerSymbols.cs` covers consumer packages,
+batches and PDB-only changes.
+
+`Tests.RegionRun` moves a suffix after inline code to the same suffix after a helper call, one pc
+earlier, and combines `CIL.Embedding.BodyRefines.of_relocated_suffix` with `run_congr_region` for a
+100-instruction suffix with a symbolic feature profile and callee index, including conditional,
+switch and wrapped native branch targets, at the default heartbeat limit.
+
+`Tests.ProfileEmbedding` binds one template and one open theorem to three valid profiles, including
+shifted branch targets, without restating the template body for each profile. It also rejects
+unresolved flags, incorrect flag and callee values, and a changed branch target.
+
+`Tests/ProfileTemplates.cs` compiles a real AVX2/SSE4.2 dispatch helper and checks one shared proof
+from `Tests/ProfileTemplatesProof.lean` against three profiles. A fourth extraction changes the
+managed callee numbering through a wrapper entry point. The suite replays the generated equations,
+extraction certificates, bindings and consumer proofs in the kernel, and rejects changed flag
+values, callees, branch targets, instruction equations, stale extraction source and incompatible
+profile-dependent parameter homes.
 
 ## Store view reuse
 

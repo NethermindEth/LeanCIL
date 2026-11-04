@@ -88,11 +88,11 @@ its DLL as a [pinned reference](CLI.md#extract-from-referenced-assemblies). The 
 per assembly: a sidecar for a pinned assembly is not discovered, and an explicit `--import` of
 a pinned assembly is rejected. Without a pin, imports behave as before.
 
-`Tests/GenericLayoutImports.cs` builds real Lib/App SDK assemblies. It verifies
+The `exportstyped` suite builds real Lib/App SDK assemblies. It verifies
 the nested `in`/`out` forwarding contract, a chain through an imported local and
 `Identity<UInt64>`, then checks the linked claims with full verification. It also
 exercises a private layout before the public nested closure, metadata tampering
 seen only through a local, by-value, field and `initobj` uses of an imported local, an
 unpublished local type, wrong/open/unlisted instances, custom modifiers from two
-assemblies and the canonical format 2 sidecar digest. `Tests/ImportedLayouts.lean`
-directly checks malformed validator inputs independently of DLL hashes.
+assemblies and the canonical format 2 sidecar digest. The `evidence` suite directly checks
+malformed validator inputs independently of DLL hashes.

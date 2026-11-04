@@ -1,5 +1,7 @@
 # Extraction and contract evidence
 
+<!-- audience: maintainers -->
+
 ## Independently checked extraction evidence
 
 `TranslationValid rawLayouts computedLayouts methodEvidence imports program` checks one record

@@ -1,5 +1,7 @@
 # Validation
 
+<!-- audience: maintainers -->
+
 Run the smallest suite covering the changed behavior, then the checks required by `AGENTS.md`.
 Concurrent suites need separate checkouts because they build and mutate `artifacts/`.
 
@@ -24,6 +26,7 @@ Omit `--suite` to run everything. The accepted names and fixture mapping are def
 | Loops and shared stepping tactics | `loops`, examples, and `Tests.Automation`, `Tests.StoreFacts`, `Tests.MethodContract`, `Tests.CodeAt` |
 | CLI, artifact identity and theorem selection | `core`, `cli`, `failures`, `workspace`, `audit` |
 | Exported interfaces and implementation checks | The affected export partition from `ExportVerificationSuites.cs` |
+| Documentation, its Lean snippets and cited names | `docs`, plus `scripts/CheckDocReferences.cs`; see [documentation checks](CI.md#documentation-checks) |
 
 `lake build` builds only `CIL`. Changes under `CIL/` require building every library target in
 `lakefile.toml` before pushing. C# changes require analyzer validation, including changed

@@ -63,7 +63,12 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
         ["unknown", "contracts"]);
     Require(VerificationSelection.Groups([]).Length == 0, "Empty selection gained suites");
 });
-Test("docs only", () => Equal(VerificationSelection.Select(["README.md", "docs/design.md"]), []));
+Test("docs only", () =>
+{
+    Equal(VerificationSelection.Select(["README.md", "docs/design.md"]), ["docs"]);
+    Equal(VerificationSelection.Select(["skills/leancil/SKILL.md"]), ["docs"]);
+    Equal(VerificationSelection.Select(["AGENTS.md", "LICENSE"]), []);
+});
 Test("main and manual always full", () =>
 {
     foreach (var eventName in new[] { "push", "workflow_dispatch" })
@@ -124,7 +129,8 @@ Test("other workflows do not rerun suites", () =>
 });
 Test("multiple changes and deleted paths", () =>
 {
-    Equal(VerificationSelection.Select(["README.md", "Tests/Loops.cs", "Tests/Division.cs"]), ["division", "loops"]);
+    Equal(VerificationSelection.Select(["README.md", "Tests/Loops.cs", "Tests/Division.cs"]),
+        ["division", "docs", "loops"]);
     Equal(VerificationSelection.Select(["Tests/Deleted.cs"]), All());
 });
 Test("every registered suite has its entry point", () =>

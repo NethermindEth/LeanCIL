@@ -11,7 +11,8 @@ open CIL (W32)
 namespace ExampleProof
 
 bind_method countCalls countBody := "System.UInt32 Examples.Loops::CountCalls(System.UInt32)"
-bind_callee decrement decrementBody := "System.UInt32 Examples.Loops::Decrement(System.UInt32)" from countBody
+bind_callee decrement decrementBody :=
+  "System.UInt32 Examples.Loops::Decrement(System.UInt32)" from countBody
 bind_call decrementSite := decrement from countBody
 
 def decrementContract : MethodContract W32 W32 where
@@ -48,8 +49,8 @@ private def invariant {remaining counted : Reference} (value : W32)
 theorem terminates (holds : decrementContract.Holds Extracted.program decrement)
     (args : List CIL.Safety.Value) (value : W32) {remaining counted : Reference}
     (state : State remaining counted) (valid : invariant value state) :
-    LoopTerminates Extracted.program countCalls args (fun _ values => values = [.scalar (.i32 value)])
-      (header remaining counted state) := by
+    LoopTerminates Extracted.program countCalls args
+      (fun _ values => values = [.scalar (.i32 value)]) (header remaining counted state) := by
   apply loop_terminates_induction Extracted.program countCalls args (header remaining counted)
     (invariant value) (fun s => s.values.1.toNat) _ ?_ state valid
   rintro ⟨⟨x, count⟩, m, frame⟩ total recurse
@@ -63,14 +64,9 @@ theorem terminates (holds : decrementContract.Holds Extracted.program decrement)
     cil_loop_finish [entry.frame, header, loaded0, loaded1]
   · have nonzero : x ≠ 0#32 := zero
     cil_loop_advance [entry.frame, header, loaded0, nonzero]
+    -- The callee may change only its empty footprint, so both locals survive in `calledFrame`.
     cil_loop_call holds x at decrementSite [entry.frame, loaded0]
-    · trivial
-    rintro final _ ⟨_, invoked⟩ framed ⟨_, rfl, rfl⟩
-    dsimp only [decrementContract, List.nil_append, List.cons_append, Nat.reduceAdd] at framed ⊢
-    -- The callee may change only its empty footprint, so both locals survive the call.
-    have called := frame.after_confined framed
-      (invoke_preserves_wellFormed _ _ _ _ _ _ _ frame.wellFormed invoked) (by simp) (by simp)
-    obtain ⟨m1, stored0, frame1, -⟩ := called.store 0 (.i32 (x - 1)) rfl
+    obtain ⟨m1, stored0, frame1, -⟩ := calledFrame.store 0 (.i32 (x - 1)) rfl
     obtain ⟨m2, stored1, frame2, -⟩ := frame1.store 1 (.i32 (count + 1)) rfl
     -- The next head is chosen only now, from the memory the contract returned.
     refine loop_reaches_terminates (target := header remaining counted ⟨(x - 1, count + 1), m2,

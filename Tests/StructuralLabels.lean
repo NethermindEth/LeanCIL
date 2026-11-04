@@ -99,12 +99,22 @@ def longBody : Method :=
   { code := long_code% 800, locals := [], returnsValue := false }
 
 bind_callee late lateBody := call 1 from longBody
+/-- The call to the late helper. -/
 bind_call lateCall := late from longBody
+/-- The loop of the long body. -/
 bind_loop tail := longBody
 
 example : lateCall = 801 ∧ tail = 800 ∧ tail.latch = 802 ∧ lateBody = stepBody := ⟨rfl, rfl, rfl, rfl⟩
 example : longBody.code[lateCall]? = some (.call late 1) := lateCall.call
 example := late.call
 example := tail.backEdge
+
+-- A docstring before a binding command documents the bound label.
+/-- info: [some "The loop of the long body. ", some "The call to the late helper. "] -/
+#guard_msgs in
+open Lean in
+#eval show MetaM _ from do
+  let env ← getEnv
+  [``tail, ``lateCall].mapM fun name => liftM (findDocString? env name : IO _)
 
 end Tests.StructuralLabels
