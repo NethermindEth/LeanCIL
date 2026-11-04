@@ -17,6 +17,13 @@ produces the library. Every candidate still needs that successful producer job, 
 manifest digest and an artifact with sufficient remaining retention.
 Source/toolchain checks and kernel replay remain mandatory; changed sources use dependency-aware
 incremental preparation or fall back to a fresh build.
+A library's identity covers the toolchain, `CIL.lean`, `CIL/`, `lake-manifest.json` and the
+library view of `lakefile.toml`, which is the file the library is built from: the checkout
+lakefile without blank lines, comments and plain `[[lean_lib]]` tables naming a library outside
+CIL. Package settings, dependencies, the `CIL` library, the `leancil-audit` executable and any
+library with further keys stay in it. Adding or removing a test library therefore keeps both the
+identity and incremental donors; checkout inputs, such as session cache keys, still hash the
+complete lakefile. `Tests/LibraryConfiguration.cs` checks both directions.
 Transient HTTP failures (408, 429, 500, 502, 503 and 504) receive at most two retries, after
 one and two seconds. An unavailable listing, job, artifact or log skips that candidate rather
 than aborting the search. Failed responses never supply evidence, and a candidate still needs

@@ -12,7 +12,7 @@ foreach (var name in sources.Keys)
 {
     var destination = Path.Combine(library, name);
     Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-    File.Copy(At(name), destination);
+    CopyLibrarySource(name, destination);
 }
 var source = Path.Combine(root, "AUnaggregatedForgery.lean");
 Directory.CreateDirectory(Path.GetDirectoryName(source)!);

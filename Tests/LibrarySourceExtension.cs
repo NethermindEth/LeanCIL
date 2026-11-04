@@ -15,7 +15,7 @@ foreach (var source in LibrarySources(CommonInputs()).Keys.Where(name => name !=
 {
     var target = Path.Combine(certifiedBase, source);
     Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-    File.Copy(At(source), target);
+    CopyLibrarySource(source, target);
 }
 var compiled = Path.Combine(certifiedBase, ".lake/build/lib/lean/CIL.olean");
 Directory.CreateDirectory(Path.GetDirectoryName(compiled)!);

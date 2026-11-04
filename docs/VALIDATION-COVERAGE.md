@@ -442,7 +442,8 @@ directly. Publication follows the existing source binding and independent kernel
 
 When only Lean sources changed, `--incremental <donor-directory> <trusted-manifest-sha256>`
 authenticates every donor file before reusing its Lake build traces in a private copy. The runtime,
-compiler, kernel checker and build configuration must match. Changed and removed modules lose their
+compiler, kernel checker and build configuration must match; the configuration is the library view
+of `lakefile.toml`, so a change to test libraries alone keeps the donor. Changed and removed modules lose their
 compiled artifacts; Lake checks the current source hashes and rebuilds the dependent closure. The
 native auditor is relinked, every resulting module is kernel-replayed, and canonical fingerprints
 are regenerated before a new source-bound manifest is published. CI tries this after exact reuse,
