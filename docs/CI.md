@@ -92,7 +92,7 @@ which needs no Lean, so every PR runs it:
 - Every `bind_*` and `cil_*` command, tactic or attribute named in prose or in an unelaborated
   block must still be declared under `CIL/`.
 - Every line of a Lean block, excerpts included, fits in 100 characters, the limit of the
-  library's own Lean. An excerpt begins each line of its source as written, so a wide excerpt is
+  library's own Lean. An excerpt copies whole lines of its source, so a wide excerpt is
   fixed by wrapping its source.
 - A document's audience decides what it may cite. Documents are for users unless they declare
   `<!-- audience: maintainers -->` below their title; maintainers documents describe how LeanCIL
@@ -108,7 +108,7 @@ Every fenced Lean block is elaborated unless its info string says why not:
 | Info string | Check |
 | --- | --- |
 | `lean` | Elaborated by the `docs` suite against the current library with exactly the block's own imports, as if it were a file of its own: nothing is imported or opened implicitly, so a block starts with `import CIL` or the modules it needs. Imports must name library modules; a block that needs `Extracted` fails until it is marked. |
-| `lean excerpt PATH` | Every non-blank line, in order, must begin a line of `PATH`, a file the suites verify, such as an example under `Examples/Proofs`. |
+| `lean excerpt PATH` | The block must be a contiguous range of whole lines of `PATH`, which may be dedented as a block; `PATH` is a file the suites verify, such as an example under `Examples/Proofs`. |
 | `lean extracted` | Code that needs a generated `Extracted` module. Its imports and commands are checked statically and its `CIL.` names by the `docs` suite. |
 | `lean illustrative` | A shape rather than code to run, checked like `extracted`. |
 

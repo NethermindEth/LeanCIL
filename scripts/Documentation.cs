@@ -6,7 +6,7 @@ enum SnippetKind
 {
     /// <summary>No marker: elaborated with exactly its own imports, in a namespace of its own.</summary>
     Checked,
-    /// <summary>`excerpt PATH`: every line, in order, begins a line of that verified repository file.</summary>
+    /// <summary>`excerpt PATH`: the lines are a contiguous range of that verified repository file.</summary>
     Excerpt,
     /// <summary>`extracted`: needs a generated `Extracted` module; imports, commands and names are checked.</summary>
     Extracted,
@@ -334,7 +334,8 @@ static partial class Documentation
         return kind == SnippetKind.Excerpt ? null : $"`import {module}` is not a library module";
     }
 
-    // Each excerpt line, in order, must begin a line of the source; elided lines are allowed.
+    // An excerpt is a contiguous range of whole source lines, which may be dedented as a block: an elided
+    // or truncated line could hide a hypothesis or a `sorry` the reader never sees.
     static string? ExcerptProblem(string root, LeanBlock block, bool userFacing)
     {
         var source = block.Source!;
@@ -342,15 +343,36 @@ static partial class Documentation
         if (!path.StartsWith(root, StringComparison.Ordinal) || !File.Exists(path))
             return $"excerpt source `{source}` does not exist";
         if (userFacing && Unshipped(source)) return $"excerpt source `{source}`: {UnshippedReason}";
-        var lines = File.ReadAllLines(path).Select(line => line.Trim()).ToArray();
-        var next = 0;
-        foreach (var excerpt in block.Lines.Select(line => line.Trim()).Where(line => line.Length != 0))
-        {
-            while (next < lines.Length && !lines[next].StartsWith(excerpt, StringComparison.Ordinal)) next++;
-            if (next == lines.Length) return $"excerpt line `{excerpt}` is not in `{source}` after the previous ones";
-            next++;
-        }
-        return null;
+        var excerpt = Dedented(block.Lines.SkipWhile(IsBlank).Reverse().SkipWhile(IsBlank).Reverse().ToArray());
+        if (excerpt.Length == 0) return "the excerpt is empty";
+        var lines = File.ReadAllLines(path).Select(line => line.TrimEnd()).ToArray();
+        for (var start = 0; start + excerpt.Length <= lines.Length; start++)
+            if (lines[start].TrimStart() == excerpt[0].TrimStart() &&
+                Dedented(lines[start..(start + excerpt.Length)]).SequenceEqual(excerpt, StringComparer.Ordinal))
+                return null;
+        // Name the first line no range of the source continues, so the author sees where the excerpt drifted.
+        var matched = 1;
+        for (var start = 0; start < lines.Length; start++)
+            for (var length = matched + 1; length <= excerpt.Length && start + length <= lines.Length; length++)
+            {
+                if (!Dedented(lines[start..(start + length)]).SequenceEqual(excerpt[..length], StringComparer.Ordinal))
+                    break;
+                matched = length;
+            }
+        return lines.Any(line => line.TrimStart() == excerpt[0].TrimStart())
+            ? $"excerpt line `{excerpt[matched].Trim()}` does not follow the previous ones in `{source}`"
+            : $"excerpt line `{excerpt[0].Trim()}` is not in `{source}`";
+    }
+
+    static bool IsBlank(string line) => line.Trim().Length == 0;
+
+    /// <summary>The lines, right-trimmed, with the indentation they share removed; blank lines are empty.</summary>
+    static string[] Dedented(string[] lines)
+    {
+        var trimmed = lines.Select(line => line.TrimEnd()).ToArray();
+        var indent = trimmed.Where(line => line.Length != 0)
+            .Select(line => line.Length - line.TrimStart().Length).DefaultIfEmpty(0).Min();
+        return [.. trimmed.Select(line => line.Length == 0 ? "" : line[indent..])];
     }
 
     /// <summary>Every `bind_` and `cil_` command, tactic and attribute the library declares.</summary>

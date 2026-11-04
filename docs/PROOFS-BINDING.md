@@ -225,14 +225,13 @@ never proof evidence; it also works for `Method = Method` goals.
 
 Extraction numbers methods by the reachable call graph, so adding or reordering a callee renumbers
 unrelated methods and breaks every literal index. Name them by their exact emitted signature
-(`Extracted.signatures`) instead:
+(`Extracted.signatures`) instead, with `import CIL.MethodIdentity`:
 
 ```lean excerpt Examples/Proofs/CountCalls.lean
-import CIL.MethodIdentity
-
 bind_method countCalls countBody := "System.UInt32 Examples.Loops::CountCalls(System.UInt32)"
 bind_callee decrement decrementBody :=
   "System.UInt32 Examples.Loops::Decrement(System.UInt32)" from countBody
+bind_call decrementSite := decrement from countBody
 
 def decrementContract : MethodContract W32 W32 where
   args x := [.scalar (.i32 x)]

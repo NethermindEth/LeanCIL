@@ -21,7 +21,7 @@ is a loop state over such a view. `span.facts` is the view's validity, width and
 stepper; `span.head` gives the passing guard, a positive length and the first element's
 reference and load; `span.length_cons` is the passing guard alone and `span.length_nil` makes it
 fail; `span.tail` gives `Slice(1)` and the checked suffix; `span.below` moves a checked span into
-any memory that keeps the caller's, [`CheckedSpan.within`](../CIL/Safety/LoopFrames.lean) into
+any memory that keeps the caller's, [`CheckedSpan.within`](../CIL/Safety/LoopCallerFacts.lean) into
 the memory of a `LoopFrame` confined to no caller storage, and `span.tail_below` slices there while
 keeping the suffix checked in caller memory. The loop tactics take these facts from a `CheckedSpan`
 in context.
@@ -221,26 +221,59 @@ always carry; a span's contents carry when it lies apart from each footprint ent
 ```lean excerpt CIL/Safety/LoopCallerFacts.lean
 def SpanApart (view : SpanView) (entry : Reference × Nat) : Prop :=
   ∀ base, view.reference = .address base → Apart base (view.width * view.length) entry
+```
+
+```lean excerpt CIL/Safety/LoopCallerFacts.lean
 theorem LoopFrame.caller_form (frame : LoopFrame footprint caller current kinds slots known)
+    (wellFormed : caller.WellFormed) {base : Reference}
     (valid : CIL.Safety.form caller base = .ok base) :
     CIL.Safety.form current base = .ok base :=
+```
+
+```lean excerpt CIL/Safety/LoopCallerFacts.lean
 theorem LoopFrame.caller_add (frame : LoopFrame footprint caller current kinds slots known)
+    (wellFormed : caller.WellFormed) {base result : Reference} {width : Nat}
     {offset : BitVec 64} (added : add caller base width offset = .ok result) :
     add current base width offset = .ok result := by
+```
+
+```lean excerpt CIL/Safety/LoopCallerFacts.lean
 theorem LoopFrame.caller_valid (frame : LoopFrame footprint caller current kinds slots known)
+    (wellFormed : caller.WellFormed) {view : SpanView} (valid : view.validate caller = .ok ()) :
     view.validate current = .ok () :=
+```
+
+```lean excerpt CIL/Safety/LoopCallerFacts.lean
 theorem LoopFrame.caller_element (frame : LoopFrame footprint caller current kinds slots known)
+    (wellFormed : caller.WellFormed) {view : SpanView} {index : Nat} {item : Reference}
     (found : view.element caller index = .ok item) : view.element current index = .ok item := by
+```
+
+```lean excerpt CIL/Safety/LoopCallerFacts.lean
 theorem LoopFrame.caller_slice (frame : LoopFrame footprint caller current kinds slots known)
+    (wellFormed : caller.WellFormed) {view sliced : SpanView} {start length : Nat}
     (cut : view.slice caller start length = .ok sliced) :
     view.slice current start length = .ok sliced := by
+```
+
+```lean excerpt CIL/Safety/LoopCallerFacts.lean
 theorem CheckedSpan.within {view : SpanView} {width : Nat} {writable : Bool}
+    {values : List (BitVec (8 * width))} (span : CheckedSpan caller view width writable values)
     (wellFormed : caller.WellFormed) (frame : LoopFrame footprint caller current kinds slots known)
     (apart : ∀ entry ∈ footprint, SpanApart view entry := by cil_span_apart) :
     CheckedSpan current view width writable values := by
+```
+
+```lean excerpt CIL/Safety/LoopCallerFacts.lean
 theorem SpanApart.slice {view sliced : SpanView} {entry : Reference × Nat} {memory : Memory}
+    {start length : Nat} (apart : SpanApart view entry)
     (cut : view.slice memory start length = .ok sliced) : SpanApart sliced entry := by
+```
+
+```lean excerpt CIL/Safety/LoopCallerFacts.lean
 theorem Writable.add_int {memory : Memory} {base : Reference} {width start count : Nat}
+    (writable : Writable memory base width start count) (wellFormed : memory.WellFormed)
+    (valid : CIL.Safety.form memory base = .ok base) {index : CIL.W32}
     (small : index.toNat < 2 ^ 31) (low : start ≤ index.toNat)
     (high : index.toNat < start + count) :
     add memory base width (BitVec.ofInt 64 index.toInt) = .ok (base.element width index.toNat) :=
@@ -260,10 +293,16 @@ A caller buffer is written word by word through these lemmas of
 theorem Writable.sub {start count : Nat} (writable : Writable m base width start count)
     {index length : Nat} (low : start ≤ index) (high : index + length ≤ start + count) :
     Writable m (base.element width index) width 0 length := fun i bound => by
+```
+
+```lean excerpt CIL/Safety/BufferContents.lean
 theorem Writable.write_one (writable : Writable m base width 0 1) (x : BitVec (8 * width)) :
     ∃ after, write m base (numberBytes x.toNat width) 1 = .ok after ∧
       form m base = .ok base ∧ Confined [(base, width)] m after ∧
       Contents after base width [x] := by
+```
+
+```lean excerpt CIL/Safety/BufferContents.lean
 theorem Filled.extend {xs : List (BitVec (8 * width))} {room index : Nat}
     {x : BitVec (8 * width)} (filled : Filled m base width xs (room + 1))
     (slot : Contents m (base.element width index) width [x]) (next : index = xs.length) :

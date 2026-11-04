@@ -88,6 +88,8 @@ try
     Fails("an excerpt that no longer matches",
         "```lean excerpt Examples/Proofs/Sample.lean\ntheorem sample_holds : CIL.sample = 2 := by\n```",
         "is not in `Examples/Proofs/Sample.lean`");
+    // An excerpt is a contiguous range of whole lines: an elided or cut line could hide a hypothesis.
+    const string Drifted = "does not follow the previous ones in `Examples/Proofs/Sample.lean`";
     Fails("an excerpt out of order",
         """
         ```lean excerpt Examples/Proofs/Sample.lean
@@ -95,7 +97,22 @@ try
         import Extracted
         ```
         """,
+        Drifted);
+    Fails("an excerpt eliding a line",
+        "```lean excerpt Examples/Proofs/Sample.lean\nimport Extracted\n  rfl\n```", Drifted);
+    Fails("an excerpt cutting a line short",
+        "```lean excerpt Examples/Proofs/Sample.lean\ntheorem sample_holds : CIL.sample = 1\n```",
         "is not in `Examples/Proofs/Sample.lean`");
+    Fails("an excerpt changing a line's relative indentation",
+        "```lean excerpt Examples/Proofs/Sample.lean\ntheorem sample_holds : CIL.sample = 1 := by\nrfl\n```",
+        Drifted);
+    Fails("an excerpt inserting a blank line",
+        "```lean excerpt Examples/Proofs/Sample.lean\nimport Extracted\n\n" +
+        "theorem sample_holds : CIL.sample = 1 := by\n```",
+        Drifted);
+    Passes("a contiguous excerpt of indented lines, dedented as a block",
+        "```lean excerpt Examples/Proofs/Sample.lean\n    theorem sample_holds : CIL.sample = 1 := by\n      rfl\n```");
+    Passes("an excerpt of one indented line", "```lean excerpt Examples/Proofs/Sample.lean\nrfl\n```");
     Fails("an unclosed fence", "```lean\nexample : True := trivial\n", "never closed");
 
     // Lean style caps lines at 100 characters; an excerpt complies only once its source is wrapped.
