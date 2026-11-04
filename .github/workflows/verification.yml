@@ -166,18 +166,22 @@ jobs:
         run: >-
           dotnet run --file scripts/LibraryArchive.cs -c Release -- restore artifacts/library-download
           artifacts/certified-library "$MANIFEST_SHA256" "$ARCHIVE_SHA256"
-      # Reuse rechecks the source binding and every file against the producer's digest; the producer
-      # already kernel-replayed it. Any mismatch tries an incremental build, then a fresh one.
+      # Reuse rechecks the source binding and every file against the producer's digest. It skips kernel
+      # replay only when run metadata shows the producer ran this commit's producer code, which replayed
+      # it. Any mismatch tries an incremental build, then a fresh one.
       - name: Reuse a donated library or build it from source
         id: certify
         shell: bash
         env:
           DONATED_SHA256: ${{ steps.restored.outcome == 'success' && steps.donor.outputs.manifest-sha256 || '' }}
+          SAME_PRODUCER: ${{ steps.donor.outputs.same-producer }}
         run: |
           mkdir -p artifacts
           set -o pipefail
+          producer=()
+          if [ "$SAME_PRODUCER" = true ]; then producer=(--producer-replayed); fi
           if [ -n "$DONATED_SHA256" ] && dotnet run --file scripts/PrepareLibrary.cs -- artifacts/certified-library \
-              --reuse "$DONATED_SHA256" 2>&1 | tee artifacts/verification.log; then
+              --reuse "$DONATED_SHA256" "${producer[@]}" 2>&1 | tee artifacts/verification.log; then
             echo "reused=true" >> "$GITHUB_OUTPUT"
           else
             if [ -n "$DONATED_SHA256" ]; then

@@ -836,7 +836,7 @@ partial class Program : IDisposable
                 throw new InvalidDataException("Released library exceeds extraction limits");
         // ZipFile rejects entries escaping the destination; the entire extracted tree must match the manifest.
         System.IO.Compression.ZipFile.ExtractToDirectory(archive, staging);
-        if (ReplayReleasedLibrary(staging, asset.ManifestSha256) is null)
+        if (ReplayPreparedLibrary(staging, asset.ManifestSha256) is null)
             throw new InvalidDataException("Released library identity or integrity mismatch");
         var manifestBytes = File.ReadAllBytes(Path.Combine(staging, "cache-manifest.json"));
         File.WriteAllBytes(Path.Combine(staging, "cache-receipt.hmac"),
@@ -1424,10 +1424,15 @@ partial class Program : IDisposable
         return destination;
     }
 
-    string PrepareLibrary(string destination, string? trustedDigest = null)
+    /// <summary>
+    /// Publishes a freshly built library, or authenticates one restored under a trusted digest. A restored
+    /// library is also kernel-replayed unless its producer ran this commit's producer code.
+    /// </summary>
+    string PrepareLibrary(string destination, string? trustedDigest = null, bool producerReplayed = false)
     {
         if (trustedDigest is not null)
-            return ReusePreparedLibrary(destination, trustedDigest) ??
+            return (producerReplayed ? ReusePreparedLibrary(destination, trustedDigest)
+                    : ReplayPreparedLibrary(destination, trustedDigest)) ??
                 throw new InvalidOperationException("Certified library identity or integrity mismatch; destination left unchanged");
         destination = RequireEmptyLibraryDestination(destination);
         Library(Inputs(At("CIL.lean")));
@@ -1528,8 +1533,8 @@ partial class Program : IDisposable
 
     /// <summary>
     /// The trusted digest when every file of the library matches the manifest it names and the manifest
-    /// binds the current sources, or null. The library is not replayed: its producer, our own CI, already
-    /// kernel-replayed every module, and a compromised producer is outside what replay here defends against.
+    /// binds the current sources, or null. The library is not replayed, so a caller relies on a producer
+    /// that ran the same producer code and kernel-replayed every module.
     /// </summary>
     string? ReusePreparedLibrary(string directory, string? trustedDigest)
     {
@@ -1541,13 +1546,13 @@ partial class Program : IDisposable
     }
 
     /// <summary>
-    /// Like <see cref="ReusePreparedLibrary"/>, but also kernel-replays every module. Release assets are
-    /// produced outside a CI run that logged their digest, and consumers rely on the kernel, not on us.
+    /// Like <see cref="ReusePreparedLibrary"/>, but also kernel-replays every module, for a library whose
+    /// producer ran other code, such as a release asset or a donor with changed CI scripts.
     /// </summary>
-    string? ReplayReleasedLibrary(string directory, string trustedDigest)
+    string? ReplayPreparedLibrary(string directory, string trustedDigest)
     {
         if (ReusePreparedLibrary(directory, trustedDigest) is null) return null;
-        ReplayLibrary(directory, "released Lean verification library");
+        ReplayLibrary(directory, "reused Lean verification library");
         return ReusePreparedLibrary(directory, trustedDigest);
     }
 

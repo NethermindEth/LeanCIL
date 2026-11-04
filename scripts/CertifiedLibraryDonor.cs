@@ -59,6 +59,55 @@ static class CertifiedLibraryDonor
         return null;
     }
 
+    /// <summary>The paths whose code builds, replays, packs or restores a certified library in CI.</summary>
+    public static readonly string[] ProducerPaths = [".github/workflows/verification.yml", "scripts", "global.json",
+        "Directory.Build.props", "Directory.Packages.props", ".editorconfig"];
+
+    /// <summary>
+    /// Whether two commits hold identical git objects at every producer path, read from the repository's
+    /// trees rather than the donated bytes. Missing or malformed metadata answers false.
+    /// </summary>
+    public static bool SameProducer(string? donorCommit, string currentCommit, Func<string, JsonElement> git,
+        Action<string> warning)
+    {
+        if (donorCommit is null || !Regex.IsMatch(donorCommit, "^[0-9a-f]{40}$") ||
+            !Regex.IsMatch(currentCommit, "^[0-9a-f]{40}$")) return false;
+        if (donorCommit == currentCommit) return true;
+        var trees = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        string Entry(string commit, string path)
+        {
+            if (!trees.TryGetValue(commit, out var described))
+                trees[commit] = described = git("git/commits/" + commit);
+            string sha = described.GetProperty("tree").GetProperty("sha").GetString() ?? "", kind = "tree";
+            foreach (var component in path.Split('/'))
+            {
+                if (!Regex.IsMatch(sha, "^[0-9a-f]{40}$") || kind != "tree")
+                    throw new FormatException("Invalid producer tree " + sha);
+                if (!trees.TryGetValue(sha, out var listing)) trees[sha] = listing = git("git/trees/" + sha);
+                // A truncated listing could omit the entry, which would read as absent.
+                if (listing.TryGetProperty("truncated", out var truncated) && truncated.GetBoolean())
+                    throw new InvalidOperationException("Truncated tree " + sha);
+                var entry = listing.GetProperty("tree").EnumerateArray()
+                    .Where(item => item.GetProperty("path").GetString() == component).ToArray();
+                if (entry.Length == 0) return "absent";
+                sha = entry[0].GetProperty("sha").GetString() ?? "";
+                kind = entry[0].GetProperty("type").GetString() ?? "";
+            }
+            if (!Regex.IsMatch(sha, "^[0-9a-f]{40}$")) throw new FormatException("Invalid tree entry " + sha);
+            return kind + " " + sha;
+        }
+        try
+        {
+            return ProducerPaths.All(path => Entry(donorCommit, path) == Entry(currentCommit, path));
+        }
+        catch (Exception error) when (error is InvalidOperationException or JsonException or Win32Exception or
+                                      KeyNotFoundException or FormatException)
+        {
+            warning("Donor producer trees unavailable; the library will be replayed. " + error.Message);
+            return false;
+        }
+    }
+
     /// <summary>Retries transient HTTP failures at most twice; unsuccessful responses are never parsed.</summary>
     public static string Request(Func<(int ExitCode, string Output, string Error)> send, Action<TimeSpan> delay)
     {

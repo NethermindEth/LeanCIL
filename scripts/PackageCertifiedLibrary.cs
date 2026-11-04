@@ -18,7 +18,7 @@ var runtime = System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifie
 var archiveName = ReleaseAssetName(runtime, key);
 var asset = new CertifiedReleaseAsset(1, tag, runtime, key, archiveName, 1, new string('0', 64), digest);
 if (!ValidReleaseAsset(asset, key)) throw new ArgumentException("Invalid release tag or producer digest");
-if (verifier.ReplayReleasedLibrary(directory, digest) is null)
+if (verifier.ReplayPreparedLibrary(directory, digest) is null)
     throw new InvalidDataException("Release input does not match the authenticated producer or current sources");
 Directory.CreateDirectory(output);
 var archive = Path.Combine(output, archiveName);

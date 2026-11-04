@@ -29,7 +29,8 @@ through the kernel, and audits the theorem's dependencies. Unexpected axioms, mi
 failed builds and exhausted proof resources are failures. Hash equality establishes identity,
 not semantic correctness. Cached artifacts require independent authenticated provenance.
 A certified library that CI reuses is trusted because our own CI produced it and kernel-replayed
-every module, and its bytes match the manifest digest that run logged; it is not replayed again.
+every module, and its bytes match the manifest digest that run logged. It is replayed again unless
+run metadata shows the producing commit had this commit's workflow, scripts and build files.
 A library built in the current run, or downloaded with a release, is replayed.
 
 Checked execution tracks allocation identity, lifetime, bounds, permissions, initialization and

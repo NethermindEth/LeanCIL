@@ -329,4 +329,55 @@ Test("a same-PR ancestor is preferred over main, which is not queried once it do
     Require(CertifiedLibraryDonor.Candidates(() => [1], () => [2], () => [3], () => [4], () => [5])
         .SequenceEqual([1L, 2, 3, 4, 5]), "Donor sources out of order");
 });
+Test("only a donor commit with this commit's producer trees skips replay", () =>
+{
+    string donor = new('d', 40), current = new('c', 40);
+    // Each commit gets its own root and intermediate trees, so only the producer objects can agree.
+    Func<string, JsonElement> Repository(char donorWorkflow, char donorScripts, char currentWorkflow,
+        char currentScripts, bool truncated = false)
+    {
+        var objects = new Dictionary<string, string>(StringComparer.Ordinal);
+        string Tree(params (string Name, string Type, string Sha)[] entries) => JsonSerializer.Serialize(new
+        {
+            truncated, tree = entries.Select(entry => new { path = entry.Name, type = entry.Type, sha = entry.Sha })
+        });
+        void Commit(string commit, char side, char workflow, char scripts, char sources)
+        {
+            string Sha(char kind) => new string(kind, 39) + side;
+            objects["git/commits/" + commit] = JsonSerializer.Serialize(new { tree = new { sha = Sha('1') } });
+            objects["git/trees/" + Sha('1')] = Tree((".github", "tree", Sha('2')),
+                ("scripts", "tree", new string(scripts, 40)), ("CIL", "tree", new string(sources, 40)));
+            objects["git/trees/" + Sha('2')] = Tree(("workflows", "tree", Sha('3')));
+            objects["git/trees/" + Sha('3')] = Tree(("verification.yml", "blob", new string(workflow, 40)));
+        }
+        // Lean sources differ, which the library identity binds; only producer code decides replay.
+        Commit(donor, 'a', donorWorkflow, donorScripts, '7');
+        Commit(current, 'b', currentWorkflow, currentScripts, '8');
+        return path => objects.TryGetValue(path, out var json) ? Json(json)
+            : throw new InvalidOperationException("gh: Not Found (HTTP 404) " + path);
+    }
+    var warnings = new List<string>();
+    Require(CertifiedLibraryDonor.SameProducer(donor, current, Repository('e', 'f', 'e', 'f'), warnings.Add),
+        "Identical producer trees replayed");
+    Require(CertifiedLibraryDonor.SameProducer(donor, donor, _ => throw new InvalidOperationException(),
+        warnings.Add), "The same commit needs no tree lookup");
+    Require(warnings.Count == 0, "Successful comparisons warned: " + string.Join("; ", warnings));
+    Console.WriteLine("PASS same producer trees: reuse without replay");
+    Require(!CertifiedLibraryDonor.SameProducer(donor, current, Repository('e', 'f', '9', 'f'), warnings.Add),
+        "Changed workflow skipped replay");
+    Require(!CertifiedLibraryDonor.SameProducer(donor, current, Repository('e', 'f', 'e', '9'), warnings.Add),
+        "Changed scripts tree skipped replay");
+    Console.WriteLine("PASS different workflow or scripts tree: replay");
+    Require(!CertifiedLibraryDonor.SameProducer(donor, current, Repository('e', 'f', 'e', 'f', truncated: true),
+        warnings.Add), "A truncated tree listing skipped replay");
+    foreach (var missing in new[] { null, "", donor[..7], new string('z', 40) })
+        Require(!CertifiedLibraryDonor.SameProducer(missing, current, Repository('e', 'f', 'e', 'f'),
+            warnings.Add), "Missing producer commit skipped replay");
+    Require(!CertifiedLibraryDonor.SameProducer(donor, current,
+        _ => throw new InvalidOperationException("gh: Server Error (HTTP 502)"), warnings.Add),
+        "Unavailable tree metadata skipped replay");
+    Require(!CertifiedLibraryDonor.SameProducer(donor, current, _ => Json("{}"), warnings.Add),
+        "Malformed tree metadata skipped replay");
+    Console.WriteLine("PASS missing, unavailable or truncated metadata: replay");
+});
 Console.WriteLine($"All {checks} certified library donor checks passed.");
