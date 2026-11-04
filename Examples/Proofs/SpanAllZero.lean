@@ -41,8 +41,8 @@ theorem correctness (memory : Memory) (view : SpanView) (values : List CIL.W32)
     obtain ⟨sliced, slicedOK, next⟩ := span.tail
     by_cases zero : value = 0
     · cil_loop_continue ⟨sliced, remaining, next⟩ [zero]
-      · simpa [zero] using invariant
-      · simp
+      case invariant => simpa [zero] using invariant
+      case measure => simp
     · exact .inl (by cil_loop_finish [zero, invariant.symm])
 #print axioms correctness
 

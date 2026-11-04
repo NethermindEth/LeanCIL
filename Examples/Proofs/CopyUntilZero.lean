@@ -144,12 +144,13 @@ theorem correctness (memory : Memory) (view : SpanView) (values : List W32) (out
       cil_loop_advance
       cil_loop_call stamp_holds (output.element 4 count.toNat, value) at stampSite
       cil_loop_recurse recurse (⟨sliced, rest, next⟩, count + 1, value)
-      · refine ⟨done ++ [value], by simp [split], by simpa using ⟨nonzero, Ne.symm zero⟩, ?_,
+      case invariant =>
+        refine ⟨done ++ [value], by simp [split], by simpa using ⟨nonzero, Ne.symm zero⟩, ?_,
           (room ▸ filled).extend returned counted, spanApart.slice cut⟩
         simp only [List.length_append, List.length_singleton, ← counted, BitVec.toNat_add]
         simp
         omega
-      · simp
+      case measure => simp
 #print axioms correctness
 
 end ExampleProof

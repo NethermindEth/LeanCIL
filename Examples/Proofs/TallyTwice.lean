@@ -67,10 +67,12 @@ theorem correctness (memory : Memory) (value : W32) (wellFormed : memory.WellFor
   · cil_loop_advance
     cil_loop_call addTwo_holds sum at addTwoSite
     cil_loop_recurse recurse (count + 1, sum + 2)
-    · show sum + 2 = 2 * (count + 1)
+    case invariant =>
+      show sum + 2 = 2 * (count + 1)
       rw [doubled]
       bv_omega
-    · show (value - (count + 1)).toNat < (value - count).toNat
+    case measure =>
+      show (value - (count + 1)).toNat < (value - count).toNat
       bv_omega
 
 #print axioms correctness

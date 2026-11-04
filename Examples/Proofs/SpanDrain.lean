@@ -43,8 +43,8 @@ theorem drain (memory : Memory) (view : SpanView) (valid : view.validate memory 
     have formed := view.slice_valid sliced memory 1 (view.length - 1) slicedOK
     cil_loop_continue ⟨sliced, formed, sameWidth.trans width, sameMode.trans readOnly⟩
       [view.length_word_ne_zero memory valid empty, show 1 ≤ view.length by omega]
-    · trivial
-    · dsimp only; omega
+    case invariant => trivial
+    case measure => dsimp only; omega
 #print axioms drain
 
 /-- The compiled method returns zero for every valid span, with exact memory preservation. -/

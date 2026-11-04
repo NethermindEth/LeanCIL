@@ -56,8 +56,8 @@ theorem correctness (memory : Memory) (view : SpanView) (values : List W64)
     obtain ⟨sliced, slicedOK, next, -⟩ := span.tail_below wellFormed nextFrame.kept
     cil_loop_continue ⟨(⟨sliced, remaining, next⟩, total + value), updated,
       nextFrame.set_local 1 (.span 8 false (some sliced))⟩
-    · simpa [BitVec.add_assoc] using invariant
-    · simp
+    case invariant => simpa [BitVec.add_assoc] using invariant
+    case measure => simp
 #print axioms correctness
 
 end ExampleProof
