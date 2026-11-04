@@ -169,7 +169,8 @@ foreach (uint[] values in new uint[][] { [], [1, 2, 3], [5, 0, 7], [0], [9, uint
     var output = new uint[values.Length + 1];
     Array.Fill(output, Untouched);
     var result = copyUntilZero(values, ref output[0]);
-    var wrongWords = !output[..copied].SequenceEqual(values[..copied]) || output[copied..].Any(word => word != Untouched);
+    var wrongWords = !output[..copied].SequenceEqual(values[..copied])
+        || output[copied..].Any(word => word != Untouched);
     if (result != expected || wrongWords)
         throw new InvalidOperationException(
             $"CopyUntilZero([{string.Join(", ", values)}]) returned {result:X} with [{string.Join(", ", output)}]");
