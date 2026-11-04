@@ -182,7 +182,9 @@ use `cil_contract_steps`, whose fuel remains existential.
 Without matching evidence, the contract stepper stops at the call. `cil_contract_call holds input at
 site [facts]` explicitly applies the contract at a `bind_call` site (or the fetched call without
 `at`), leaving the precondition and then a continuation over the callee's final memory, values,
-invocation, frame and `Returns`. Destructure `Returns` as `⟨out, rfl, post⟩` and unfold the contract
+invocation, frame and `Returns`. The precondition is tagged `precondition.<callee>`, the other
+goals these tactics leave as their [obligation tags](PROOFS-STEPPING.md#obligation-tags) say, and
+the continuation keeps the call goal's tag, so `case precondition =>` selects the precondition. Destructure `Returns` as `⟨out, rfl, post⟩` and unfold the contract
 (`dsimp only [mixContract]`) so the stack holds the encoded output. Use `cil_contract_steps n
 [facts]` to take at most `n` instruction steps and leave the remaining goal for a continuation. With
 `n = 0`, no instruction is executed. `cil_contract_steps [facts] until continuation` tries the

@@ -19,6 +19,7 @@ interface that expresses the result:
 | Specify normal and exceptional outcomes | [Outcome contracts](PROOFS-CONTRACTS.md#name-exceptional-outcomes) | [CountUntil](../Examples/Proofs/CountUntil.lean) |
 | Publish a smaller public guarantee | [Contract consequence](PROOFS-CONTRACTS.md#derive-public-contracts) | The guide's checked `increment_refines` snippet |
 | Bind or transport a proof to extracted code | [Binding and transport](PROOFS-BINDING.md) | [CountCalls](../Examples/Proofs/CountCalls.lean) |
+| Select the goals a tactic leaves by purpose | [Obligation tags](PROOFS-STEPPING.md#obligation-tags) | [TallyTwice](../Examples/Proofs/TallyTwice.lean) |
 | Import a separately proved interface | [Imported contracts](PROOFS-CONTRACTS.md#compose-through-imported-contracts) | [Interface guide](CONTRACT-INTERFACES.md) |
 
 ## Keep proof work local
