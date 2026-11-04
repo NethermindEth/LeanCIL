@@ -18,20 +18,21 @@ open Lean Elab Tactic Meta
     the loop head's `invariant` and the `measure`'s decrease at a back edge, a callee's
     `precondition` (refined by the callee, as `precondition.stamp`), the caller memory's
     `wellFormed` and `staticWorld` a call or construction needs, the callee's `raises` equation,
-    and the `postcondition` at a return (`postcondition_2` for its second conjunct). -/
+    and the `postcondition` at a return (`postcondition.«2»` for its second conjunct). -/
 def obligationTags : List Name :=
   [`invariant, `measure, `precondition, `wellFormed, `staticWorld, `raises, `postcondition]
 
 /-- The obligation `tag` names, as its first component, when it is one of `obligationTags`;
-    a numbered conjunct such as `postcondition_2` is the `postcondition`. -/
+    a numbered part such as `postcondition.«2»` is the `postcondition`. -/
 def obligationOf? (tag : Name) : Option Name :=
-  let first := tag.eraseMacroScopes.components.head?.getD .anonymous
-  let base := match first with
-    | .str .anonymous text => match text.splitOn "_" with
-      | [stem, index] => if index.isNat then Name.mkSimple stem else first
-      | _ => first
-    | _ => first
+  let base := tag.eraseMacroScopes.components.head?.getD .anonymous
   if obligationTags.contains base then some base else none
+
+/-- The tags of `count` parts of the obligation `base`, in order: `base` for a single part, and
+    `base.«1»`, `base.«2»`, ... for several, so `case base` selects the first by prefix. -/
+def numberedTags (base : Name) (count : Nat) : Array Name :=
+  if count == 1 then #[base]
+  else (List.range count).toArray.map fun index => base.str (toString (index + 1))
 
 /-- The tag of the precondition of the callee a contract proof's type names: `precondition`
     refined by the callee's constant, such as `precondition.stamp`, or bare when the callee is
@@ -78,12 +79,17 @@ elab_rules : tactic
       | none => pure `precondition
     nameObligations precondition
 
-/-- Tag `goals`, the conjuncts of one obligation in order, `base` when there is one and
-    `base_1`, `base_2`, ... when there are several. -/
+/-- Tag `goals`, the conjuncts of one obligation in order, by `numberedTags base`. -/
 def tagNumbered (base : Name) (goals : Array MVarId) : MetaM Unit := do
-  if let #[goal] := goals then goal.setTag base; return
-  for (goal, index) in goals.zipIdx do
-    goal.setTag (base.appendIndexAfter (index + 1))
+  for (goal, tag) in goals.zip (numberedTags base goals.size) do
+    goal.setTag tag
+
+/-- The tags of the `count` conditions a loop head's hypothesis takes, in order: the invariant's
+    parts, numbered by `numberedTags` when there are several, then at a back edge the last, the
+    `measure`'s decrease. -/
+def recurseConditionTags (count : Nat) : Array Name :=
+  if count ≤ 1 then numberedTags `invariant count
+  else numberedTags `invariant (count - 1) |>.push `measure
 
 /-- Run `tactic` on the main goal, giving each goal it leaves that is not tagged as an obligation
     the main goal's tag: the goal a tactic continues keeps its name. -/

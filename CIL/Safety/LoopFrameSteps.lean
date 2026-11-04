@@ -280,7 +280,7 @@ partial def loopConjuncts (goal : MVarId) : MetaM (Array MVarId) := do
 
 /-- Split a postcondition goal into its conjuncts, closing each that `close` proves and leaving
     the rest in order, each tagged by its place among all the conjuncts: `postcondition` when
-    there is one, else `postcondition_2` for the second, whichever others close. -/
+    there is one, else `postcondition.«2»` for the second, whichever others close. -/
 def loopCloseConjuncts (close : TacticM Unit) : TacticM Unit := do
   let conjuncts ← loopConjuncts (← getMainGoal)
   tagNumbered `postcondition conjuncts
@@ -636,9 +636,9 @@ def loopCloseHeadFrame (goal : MVarId) : TacticM Bool := goal.withContext do
     state of the loop (meeting its conditions) terminates, with the optional facts and those
     `gatherLoopFacts` finds, taking each struct zeroing, field store and numeric local store on
     the way through the frame lemmas, and apply `hypothesis` at the state with loop values
-    `values`, the reached memory and its frame. Leaves the hypothesis's conditions, such as the
-    invariant and the measure's decrease. Fails naming the pc where it cannot step, and the
-    reached state when it is not the head's at `values`. -/
+    `values`, the reached memory and its frame. Leaves the hypothesis's conditions, tagged by
+    `recurseConditionTags`, such as `invariant` and `measure`. Fails naming the pc where it
+    cannot step, and the reached state when it is not the head's at `values`. -/
 syntax "cil_loop_recurse " term:max term:max (" [" term,* "]")? : tactic
 
 elab_rules : tactic
@@ -662,11 +662,10 @@ elab_rules : tactic
       return (target, layouts, footprint, premises.size - 1)
     loopWalk "cil_loop_recurse" (.resume target) (facts.map (·.getElems) |>.getD #[]) layouts
       footprint
-    -- A loop head's hypothesis takes its invariant, then at a back edge the measure's decrease.
-    let holes : Array Term ← match conditions with
-      | 1 => pure #[← `(?invariant)]
-      | 2 => pure #[← `(?invariant), ← `(?measure)]
-      | _ => (List.range conditions).toArray.mapM fun _ => `(?_)
+    let tags := recurseConditionTags conditions
+    let holeNames ← (List.range tags.size).toArray.mapM fun index =>
+      MonadQuotation.addMacroScope (Name.mkSimple s!"condition{index}")
+    let holes : Array Term ← holeNames.mapM fun name => `(?$(mkIdent name))
     let (reached, memory) ← withMainContext do
       let reached ← instantiateMVars (← getMainTarget)
       let some (source, _) ← loopGoalStates reached
@@ -693,6 +692,7 @@ elab_rules : tactic
       throwError "cil_loop_recurse: no frame fact at the reached memory is the head's frame:\
         {indentExpr (loopLiteralSums wanted)}"
     setGoals (goals.filter (· != frameGoal))
-    nameObligations
+    for goal in goals do
+      if let some index := holeNames.idxOf? (← goal.getTag) then goal.setTag tags[index]!
 
 end CIL.Safety

@@ -631,7 +631,7 @@ example (memory : Memory) (count : W32) (buffer home : Reference) (current : Mem
         Confined [(buffer, 4)] memory final) ∧ Contents final buffer 4 [count])
       ⟨15, stampsEntry.frame memory home, [], current⟩ := by
   cil_loop_finish
-  case postcondition_3 => exact stored _
+  case postcondition.«3» => exact stored _
 
 -- A call whose stacked argument is not the contract's names both.
 /-- error: cil_loop_call: the call at pc 7 (CIL.Op.call 1 2) does not take the contract's
@@ -694,13 +694,24 @@ example (memory current : Memory) (count index : W32) (buffer home : Reference)
   cil_loop_call stampMethod_holds (buffer.element 4 index.toNat, index)
   cil_loop_advance
 
--- A mistyped obligation is Lean's unknown case, which lists the tags the recursion left.
-/-- error: Case tag `invariants` not found.
+open Lean Elab Command in
+/-- Elaborate `command`, which must fail, and fail unless its errors list each of `tags` in
+    backticks: the tags Lean's unknown-case hint offers, whatever wording surrounds them. -/
+elab "#guard_offered_tags " tags:ident* " in " command:command : command => do
+  let before := (← get).messages
+  modify fun state => { state with messages := {} }
+  elabCommand (← `(command| set_option Elab.async false in $command))
+  let errors := (← get).messages.toList.filter (·.severity == .error)
+  modify fun state => { state with messages := before }
+  let texts ← errors.mapM fun error => error.data.toString
+  if texts.isEmpty then throwError "#guard_offered_tags: the command did not fail"
+  for tag in tags do
+    let shown := s!"`{tag.getId}`"
+    unless texts.any (·.contains shown) do
+      throwError "#guard_offered_tags: no error offers {shown}:\n{String.intercalate "\n" texts}"
 
-Hint: Available tags:
-  • `invariant`: invariants̵
-  • `measure`: i̵n̵v̵a̵r̵i̵a̵n̵t̵s̵m̲e̲a̲s̲u̲r̲e̲ -/
-#guard_msgs (whitespace := lax) in
+-- A mistyped obligation is Lean's unknown case, which offers the tags the recursion left.
+#guard_offered_tags invariant measure in
 example (memory current : Memory) (value total : W32) (home : Reference)
     (frame : LoopFrame [] memory current [.aggregate 16] [.bytes (.aggregate 16) home]
       (knownLocals [some (.aggregate (mixed.encode
@@ -713,5 +724,22 @@ example (memory current : Memory) (value total : W32) (home : Reference)
       ⟨3, markedEntry.frame memory home, [], current⟩ := by
   cil_loop_recurse recurse (total + 1)
   case invariants => trivial
+
+/-- A head hypothesis of three conditions leaves the invariant's two parts numbered and the
+    measure's decrease last, each selected by its tag, the first also by the bare prefix. -/
+example (memory current : Memory) (value total : W32) (home : Reference)
+    (frame : LoopFrame [] memory current [.aggregate 16] [.bytes (.aggregate 16) home]
+      (knownLocals [some (.aggregate (mixed.encode
+        [.i32 0, .i32 0, .i32 total, .aggregate (List.replicate 8 0)]))]))
+    (recurse : ∀ next : Marked memory home, next.values = total + 1 → True →
+      next.values ≠ total →
+      LoopTerminates markedProgram 0 [.scalar (.i32 value)] (fun _ _ => True)
+        (markedHeader memory value home next)) :
+    LoopTerminates markedProgram 0 [.scalar (.i32 value)] (fun _ _ => True)
+      ⟨3, markedEntry.frame memory home, [], current⟩ := by
+  cil_loop_recurse recurse (total + 1)
+  case measure => exact fun same => by bv_omega
+  case invariant.«2» => trivial
+  case invariant => rfl
 
 end Tests.LoopDiagnostics

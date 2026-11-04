@@ -188,9 +188,10 @@ argument names the argument check; and a contract input whose arguments differ f
 names both. At a return `cil_loop_finish` closes the results and confinement and hands back the
 rest of the postcondition. The proofs select what the tactics leave by its obligation tag, so a
 dropped or renamed tag fails the build: `invariant` and `measure` after `cil_loop_recurse`,
-`precondition.stampMethod` for a named callee's open precondition, and the third conjunct's
-`postcondition_<n>` when the exit facts close the first two. A loop tactic run on that precondition
-names it, and a mistyped `case` is Lean's error listing the open tags.
+`precondition.stampMethod` for a named callee's open precondition, the third conjunct's
+`postcondition.«3»` when the exit facts close the first two, and the numbered invariant parts and
+`measure` of a three-condition head hypothesis. A loop tactic run on that precondition names it,
+and a mistyped `case` is Lean's error, checked to offer the open tags whatever its wording.
 
 `Tests.ProfileContract` proves a contract for a method that tests AVX2 once, under x86-64-v3, and
 carries it to x86-64-v4, to v3 without 256-bit acceleration and to every profile with AVX2 on. A
