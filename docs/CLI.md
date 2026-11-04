@@ -9,7 +9,7 @@ A regular `dotnet build Extractor -c Release` produces `Extractor/bin/leancil.ex
 
 ## Version
 
-`leancil --version` prints the tool version, the LeanCIL commit and Lean toolchain its framework comes from, and the `[[require]]` block a [consumer package](CONSUMERS.md#consumer-proof-packages) uses to pin the matching framework. A tool built outside a git checkout reports the revision as unknown.
+`leancil --version` prints the tool version (the installed package version, such as `0.1.0-dev.<stamp>` for a development pack), the LeanCIL commit and Lean toolchain its framework comes from, and the `[[require]]` block a [consumer package](CONSUMERS.md#consumer-proof-packages) uses to pin the matching framework. A tool built outside a git checkout reports the revision as unknown.
 
 ## Discover and select methods
 

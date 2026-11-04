@@ -263,6 +263,26 @@ if (version.Code != 0 || !version.Stdout.Contains($"LeanCIL revision: {head}") |
     throw new InvalidOperationException("Version report does not name the built revision: " + version.Output);
 Console.WriteLine("PASS CLI version names the framework revision and toolchain");
 
+// A user checks `leancil --version` against the package they installed, so a development pack reports
+// its own prerelease version rather than the version prefix it was stamped from.
+if (args.Length == 0)
+{
+    var packages = Path.Combine(output, "packages");
+    if (Directory.Exists(packages)) Directory.Delete(packages, true);
+    Run(["dotnet", "pack", At("Extractor"), "-c", "Release", "-o", packages], progress: "CLI development pack");
+    var package = Directory.GetFiles(packages, "Nethermind.LeanCIL.*.nupkg").Single();
+    var packageVersion = Path.GetFileNameWithoutExtension(package)["Nethermind.LeanCIL.".Length..];
+    var unpacked = Path.Combine(packages, "unpacked");
+    System.IO.Compression.ZipFile.ExtractToDirectory(package, unpacked);
+    var packedVersion = Execute(["dotnet", Path.Combine(unpacked, "tools/net10.0/any/Nethermind.LeanCIL.dll"),
+        "--version"]);
+    var reported = packedVersion.Stdout.ReplaceLineEndings("\n").Split('\n')[0];
+    if (packedVersion.Code != 0 || !packageVersion.Contains("-dev.") || reported != "leancil " + packageVersion)
+        throw new InvalidOperationException(
+            $"A development pack of {packageVersion} reports another version: " + packedVersion.Output);
+    Console.WriteLine("PASS CLI version of a development pack is the package version");
+}
+
 if (args.Length == 0)
     Run(["dotnet", "run", "--file", At("Tests/CliImportedKernelAudit.cs")],
         streamOutput: true, progress: "CLI imported helper kernel audit");
