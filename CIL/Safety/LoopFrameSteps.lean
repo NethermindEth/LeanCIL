@@ -291,6 +291,19 @@ partial def loopCloseConjuncts (close : TacticM Unit) : TacticM Unit := do
     unless (← getGoals).isEmpty do throwError "open"
   catch _ => saved.restore
 
+/-- Close a `Contents` goal with the contents of a `Filled` hypothesis stating them. -/
+def loopFilledContents : TacticM Unit := withMainContext do
+  let goal ← getMainGoal
+  for decl in ← getLCtx do
+    if decl.isImplementationDetail then continue
+    unless (← instantiateMVars decl.type).isAppOfArity ``Filled 5 do continue
+    let contents ← mkAppM ``And.left #[decl.toExpr]
+    if ← isDefEq (← inferType contents) (← goal.getType) then
+      goal.assign contents
+      replaceMainGoal []
+      return
+  throwError "no `Filled` hypothesis states these contents"
+
 /-- Take the `ret` a finishing walk stopped at: with a frame fact at its memory and the entry's
     `setup`, name what leaving the frame keeps (`exitConfined`, `exitBelow`), carry the
     caller-buffer facts to the exit memory, and prove the step and its checks. Each conjunct of
@@ -329,13 +342,13 @@ def loopFinishReturn (facts : Array Term) : TacticM Unit := withMainContext do
     · cil_checked_step_normalized [$[$prepared:term],*]
     · rfl
     try dsimp only)))
-  -- A carried `Filled` fact proves the contents it starts with.
-  loopCloseConjuncts (evalTactic (← `(tactic| first
-    | with_reducible assumption
-    | with_reducible exact (by assumption : Filled _ _ _ _ _).1
+  let simplified ← `(tactic| first
     | (simp [$[$extra:term],*, $[$prepared:term],*]; done)
     | (simp [CIL.Safety.leaveFrame, CIL.NarrowKind.extend, $[$extra:term],*,
-        $[$prepared:term],*]; done))))
+        $[$prepared:term],*]; done))
+  -- A carried `Filled` fact proves the contents it starts with.
+  loopCloseConjuncts (evalTactic (← `(tactic| with_reducible assumption)) <|>
+    loopFilledContents <|> evalTactic simplified)
 
 /-- Walk a `LoopTerminates` goal as `mode` directs, with the `explicit` facts and those
     `gatherLoopFacts` finds, taking each struct zeroing, field store and numeric local store no
