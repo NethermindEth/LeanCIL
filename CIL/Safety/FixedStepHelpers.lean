@@ -203,12 +203,12 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
   rw [mapping.unspecifiedOperands, argumentUnspecified_map]
   by_cases guard : (unspecifiedOperands (observerCount operation) stack ||
     argumentUnspecified operation arguments) = true
-  · simp only [guard, ite_true] at observable
+  · simp -bitVecOfNat only [guard, ite_true] at observable
     cases observable
-  · simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
+  · simp -bitVecOfNat only [guard, Bool.false_eq_true, ite_false] at observable ⊢
     split at observable
     all_goals try solve | cases family
-    all_goals try simp only [List.map_cons, AllocationRenaming.value, metadata.profile,
+    all_goals try simp -bitVecOfNat only [List.map_cons, AllocationRenaming.value, metadata.profile,
       metadata.returnsValue]
     all_goals try exact (related.stepFallback frames formed operation pc sourceBody.profile
       stack bounds observable)
@@ -239,19 +239,19 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
          all_goals try exact False.elim (noCall _ _ rfl)
          all_goals try exact False.elim (noTailCall _ _ rfl)
          all_goals try exact False.elim (noThrow _ rfl)
-         all_goals simp only [pureArity, CIL.Safety.instruction] at observable
+         all_goals simp -bitVecOfNat only [pureArity, CIL.Safety.instruction] at observable
          all_goals repeat first | cases observable | split at observable)
       | (have numeric : fixedStepFamily operation = .numeric := family
          have noIntrinsic : ∀ intrinsic argc, operation = .intrinsic intrinsic argc → False :=
            by assumption
          cases operation <;> try cases numeric
          all_goals try exact False.elim (noIntrinsic _ _ rfl)
-         all_goals simp only [pureArity, CIL.Safety.instruction] at observable
+         all_goals simp -bitVecOfNat only [pureArity, CIL.Safety.instruction] at observable
          all_goals repeat first | cases observable | split at observable)
       | fixed_fallback
     all_goals try solve | repeat first | contradiction | cases observable | split at observable
     all_goals clear observable
-    all_goals try simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
+    all_goals try simp -bitVecOfNat only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
     all_goals repeat' rcases bounds with ⟨_, bounds⟩
     all_goals repeat first
       | exact .ok (.next related frames)

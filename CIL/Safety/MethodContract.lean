@@ -724,7 +724,7 @@ def cilContractApply (methodFound instructionFound : Term) (facts : Array Term) 
       let beforePrecondition ← saveState
       try
         evalTactic (← `(tactic| focus
-          first | assumption | trivial | (simp [$[$facts:term],*]; done)))
+          first | assumption | trivial | (simp -bitVecOfNat [$[$facts:term],*]; done)))
       catch _ => beforePrecondition.restore
       if (← instantiateMVars input).hasExprMVar then
         throwError "The contract input has fields not determined by the call or precondition"

@@ -32,7 +32,7 @@ private def solveSnapshotPremise (goal : MVarId) (facts : Array Term) : TacticM 
       | assumption
       | rfl
       | cil_lookup [$facts,*]
-      | (simp [localNumber, localResult, rememberLocal, $[$facts:term],*]; done))))
+      | (simp -bitVecOfNat [localNumber, localResult, rememberLocal, $[$facts:term],*]; done))))
   unless remaining.isEmpty do throwError "A local snapshot premise was not established"
 
 /-- Assert a proved fact in the current continuation and return its fresh local name. -/
@@ -133,7 +133,7 @@ private def snapshotLoad (snapshot methodFound instructionFound : Term)
   evalTactic (← `(tactic| cil_strict rw [run_next $methodFound $instructionFound
     (LocalSnapshots.load (body := $body) (pc := $pc) (args := $args) (frame := $frame)
       (stack := $stack) (index := $index) $snapshot _
-      (by first | rfl | simp [rememberLocal, localResult, $[$facts:term],*]))]))
+      (by first | rfl | simp -bitVecOfNat [rememberLocal, localResult, $[$facts:term],*]))]))
 
 /-- Step with explicit numeric snapshots, introducing each store's memory and new snapshots. -/
 syntax "cil_checked_steps" "(" &"snapshots" ":=" term ")" "[" term,* "]" : tactic
@@ -159,7 +159,7 @@ elab_rules : tactic
             evalTactic (← `(tactic| cil_strict
               (rw [run_return $methodFound $instructionFound
                 (by cil_checked_step_normalized [$[$prepared:term],*])
-                (by first | rfl | (simp [$[$prepared:term],*]; rfl))]
+                (by first | rfl | (simp -bitVecOfNat [$[$prepared:term],*]; rfl))]
                try exact ⟨_, rfl⟩)))
             pure snapshot
           else

@@ -15,7 +15,7 @@ namespace CIL.Safety
 /-- Proves that no constructor argument carries unspecified vector bits, the `known` side
     condition of the construct steps, when the arguments are concrete. -/
 macro "cil_known_arguments" : tactic =>
-  `(tactic| simp [CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified])
+  `(tactic| simp -bitVecOfNat [CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified])
 
 /-- The actual new-value step allocates initialized caller-owned storage and
     passes its checked address to the constructor. -/

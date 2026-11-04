@@ -225,7 +225,7 @@ elab_rules : tactic
   | `(tactic| cil_loop_outcome_advance [$facts:term,*]) =>
     cilWithNormalisedFacts facts.getElems fun facts prepared =>
     `(tactic| repeat first
-      | (simp only [$[$facts:term],*])
+      | (simp -bitVecOfNat only [$[$facts:term],*])
       | (apply CIL.Safety.loop_outcome_next
          · cil_lookup [$[$facts:term],*]
          · cil_lookup [$[$facts:term],*]

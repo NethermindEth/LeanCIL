@@ -457,7 +457,8 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
           -- the form stepping leaves on the stack.
           let entries ← listEntries values
           let literal ← mkListLit (mkConst ``CIL.Value) (entries.toList.map (·.2))
-          let (spelled, _) ← simp literal (← Simp.mkContext) #[← Simp.getSimprocs]
+          let (spelled, _) ←
+            simp literal (← Simp.mkContext { bitVecOfNat := false }) #[← Simp.getSimprocs]
           let valuesTerm ← Term.exprToSyntax spelled.expr
           let fields ← listEntries (mkApp (mkConst `CIL.AggregateLayout.fields) layout)
           for (field, fieldLayout) in fields do

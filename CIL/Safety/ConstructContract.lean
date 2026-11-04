@@ -202,11 +202,11 @@ macro_rules
     refine CIL.Safety.run_newAggregate_of_contract $holds $constructs $input
       (by cil_lookup [$[$facts:term],*])
       (by cil_lookup [$[$facts:term],*])
-      (by decide) ?_ (by simp)
-      (by first | rfl | (simp [CIL.Safety.checkedValue, CIL.Safety.numericValue,
+      (by decide) ?_ (by simp -bitVecOfNat)
+      (by first | rfl | (simp -bitVecOfNat [CIL.Safety.checkedValue, CIL.Safety.numericValue,
           $[$facts:term],*] <;>
         (repeat constructor) <;> rfl))
       (by intro _; rfl) (by intro _; rfl) ?_ ?_
-      (by simp [CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified, $[$facts:term],*])))
+      (by simp -bitVecOfNat [CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified, $[$facts:term],*])))
 
 end CIL.Safety

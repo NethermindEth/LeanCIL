@@ -24,7 +24,7 @@ def SpanApart (view : SpanView) (entry : Reference × Nat) : Prop :=
 /-- Proves `∀ entry ∈ footprint, SpanApart view entry` for a literal footprint from a
     `SpanApart view entry` hypothesis per entry; the empty footprint needs none. -/
 macro "cil_span_apart" : tactic =>
-  `(tactic| ((simp only [List.forall_mem_cons, List.not_mem_nil, false_implies, implies_true,
+  `(tactic| ((simp -bitVecOfNat only [List.forall_mem_cons, List.not_mem_nil, false_implies, implies_true,
     and_true]) <;> (try and_intros) <;> assumption))
 
 /-- A reference forms exactly when its allocation's descriptor says so, whatever else memory
@@ -246,7 +246,7 @@ theorem Writable.add_int {memory : Memory} {base : Reference} {width start count
     watermark, from a hypothesis or a `form` fact of the caller's well-formed memory. -/
 macro "cil_caller_allocation" : tactic => `(tactic| first
   | with_reducible assumption
-  | ((try simp only [Reference.element_allocation])
+  | ((try simp -bitVecOfNat only [Reference.element_allocation])
      first
        | with_reducible assumption
        | exact Memory.WellFormed.form_bound (by with_reducible assumption)

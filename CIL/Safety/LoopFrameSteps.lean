@@ -72,7 +72,7 @@ def loopZeroFields? (layout : Expr) : TermElabM (Option (Array Term)) := do
     let zero ← whnf (mkApp (mkConst ``CIL.FieldLayout.zero) field)
     unless zero.getAppFn.constName?.any (·.getPrefix == ``CIL.Value) do return none
     -- Projections of the literal field, such as its width in a nested zero, are reduced.
-    let zero := (← dsimp zero (← Simp.mkContext)).1
+    let zero := (← dsimp zero (← Simp.mkContext { bitVecOfNat := false })).1
     zeros := zeros.push (← Term.exprToSyntax zero)
   return some zeros
 
@@ -324,8 +324,8 @@ def loopFinishReturn (fetched : LoopFetched) (reading : Array Term) : TacticM Un
   -- Frame cleanup only after the facts fail, since unfolding `leaveFrame` first would hide it
   -- from a supplied fact about the exited frame's memory.
   let closed ← `(tactic| first
-    | (simp [$[$reading:term],*]; done)
-    | (simp [CIL.Safety.leaveFrame, CIL.NarrowKind.extend, $[$reading:term],*]; done))
+    | (simp -bitVecOfNat [$[$reading:term],*]; done)
+    | (simp -bitVecOfNat [CIL.Safety.leaveFrame, CIL.NarrowKind.extend, $[$reading:term],*]; done))
   let saved ← saveState
   try
     Term.withoutErrToSorry <| withoutRecover <| evalTactic closed
@@ -351,8 +351,8 @@ def loopFinishReturn (fetched : LoopFetched) (reading : Array Term) : TacticM Un
       catch _ => left.restore
   withMainContext do
   let simplified ← `(tactic| first
-    | (simp [$[$extra:term],*, $[$reading:term],*]; done)
-    | (simp [CIL.Safety.leaveFrame, CIL.NarrowKind.extend, $[$extra:term],*,
+    | (simp -bitVecOfNat [$[$extra:term],*, $[$reading:term],*]; done)
+    | (simp -bitVecOfNat [CIL.Safety.leaveFrame, CIL.NarrowKind.extend, $[$extra:term],*,
         $[$reading:term],*]; done))
   -- A carried `Filled` fact proves the contents it starts with.
   loopCloseConjuncts (evalTactic (← `(tactic| with_reducible assumption)) <|>
@@ -426,7 +426,7 @@ elab_rules : tactic
     definitions, `facts`, arithmetic and `form` facts of the caller's memory. -/
 def loopCallSide (unfold : Array Ident) (facts : Array Term) : TacticM Unit := do
   evalTactic (← `(tactic| (
-    simp only [$[$unfold:ident],*, List.forall_mem_cons, List.not_mem_nil, false_implies,
+    simp -bitVecOfNat only [$[$unfold:ident],*, List.forall_mem_cons, List.not_mem_nil, false_implies,
       implies_true, and_true, List.mem_cons, exists_eq_or_imp, exists_eq_left, forall_eq_or_imp,
       forall_eq, Within,
       Reference.element_allocation, Reference.element_offset, true_and, or_false, $[$facts:term],*]
@@ -488,7 +488,7 @@ def loopCallContinue (contract : Expr) (memory : Expr) (facts : Array Term) :
         it needs, or a `form` fact of the caller's memory for its reference, in the context or \
         the fact list."
   setGoals [continued]
-  evalTactic (← `(tactic| try simp only [List.set, CIL.Safety.localResult] at $framed:ident))
+  evalTactic (← `(tactic| try simp -bitVecOfNat only [List.set, CIL.Safety.localResult] at $framed:ident))
 
 /-- Apply `holds`, the callee's contract at `input`, at the fetched loop call or at a
     `bind_call` site, with the optional facts and those `gatherLoopFacts` finds. The
