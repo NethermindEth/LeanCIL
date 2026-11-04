@@ -210,6 +210,8 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
   catch _ =>
     saved.restore
     return false
+  -- The slots stay literal, as the next step's frame states them, so the next gathering finds it.
+  evalTactic (← `(tactic| try dsimp only at $framed:ident))
   loopCarryBelow memory below
   -- Facts still at the caller's memory, such as a buffer the entry was handed, follow the frame.
   let caller ← withMainContext do
