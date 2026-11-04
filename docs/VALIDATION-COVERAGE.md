@@ -425,12 +425,15 @@ trusted code built that library and printed its digest, so the digest is read fr
 log, never from the artifact. `PrepareLibrary.cs --reuse` then rechecks the library key, the source
 binding and every file against that manifest; any mismatch, or no donor, builds from source.
 It kernel-replays the library unless `--producer-replayed` is passed, which CI does only when the
-donor run was a push to main, or a same-repository pull request whose `head_sha` holds the same git
-objects as its merge base with main at every `CertifiedLibraryDonor.ProducerPaths` entry. A pull
-request run builds its merge with main, whose SHA no trusted metadata records, so the head's own
-changes decide whether that merge ran main's reviewed producer code. A PR that changes the workflow
+donor run was a push of a commit reachable from `refs/heads/main`, or the run of exactly one
+same-repository pull request into main whose `head_sha` holds the same git objects as its merge base
+with the PR's base commit at every `CertifiedLibraryDonor.ProducerPaths` entry. A pull request run
+builds its merge with its base, whose SHA no trusted metadata records, so the head's own changes
+decide whether that merge ran main's reviewed producer code; a stacked PR builds into an unreviewed
+branch and replays. A PR that changes the workflow
 or `scripts/` can log a digest for a forged library, so any later reuse of it replays.
 `scripts/TestFindCertifiedLibrary.cs` covers main pushes, unchanged and changed PR producer paths,
+non-main bases, forks, PR entry and head mismatches, unreachable pushes, ambiguous main refs,
 unknown merge bases and other runs, and `Tests/LibraryReplayCoverage.cs` checks that reviewed reuse
 runs no replay yet rejects a changed file or digest, while other reuse and release replay reject a
 forged module. It does not restore compiled libraries from the GitHub Actions cache: a cache's

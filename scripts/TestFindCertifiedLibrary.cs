@@ -331,23 +331,34 @@ Test("a same-PR ancestor is preferred over main, which is not queried once it do
 });
 Test("only a donor that ran reviewed producer code skips replay", () =>
 {
-    string head = new('d', 40), mergeBase = new('b', 40);
+    string head = new('d', 40), mergeBase = new('b', 40), baseCommit = new('c', 40), main = new('e', 40);
+    const string here = "https://api.github.com/repos/owner/repo";
+    object Side(string reference, string sha, string url = here) => new { @ref = reference, sha, repo = new { url } };
+    object Pull(string baseRef = "main", string baseUrl = here, string headUrl = here, string? headSha = null) =>
+        new
+        {
+            number = 42, @base = Side(baseRef, baseCommit, baseUrl), head = Side("feature", headSha ?? head, headUrl)
+        };
     JsonElement Run(string trigger = "pull_request", string branch = "feature", string repository = "owner/repo",
-        string? commit = null) => Json(JsonSerializer.Serialize(new
+        string? commit = null, object[]? pulls = null) => Json(JsonSerializer.Serialize(new
         {
             @event = trigger, head_branch = branch, head_sha = commit ?? head,
-            head_repository = new { full_name = repository }
+            head_repository = new { full_name = repository }, pull_requests = pulls ?? [Pull()]
         }));
     // Each commit gets its own root and intermediate trees, so only the producer objects can agree.
-    Func<string, JsonElement> Repository(char headWorkflow, char headScripts, bool truncated = false,
-        string? knownBase = null)
+    Func<string, JsonElement> Repository(char headWorkflow = 'e', char headScripts = 'f', bool truncated = false,
+        string? knownBase = null, string headOnMain = "behind", string baseOnMain = "behind",
+        string mainRef = "refs/heads/main")
     {
         var objects = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["compare/main..." + head] = JsonSerializer.Serialize(new
+            [$"compare/{baseCommit}...{head}"] = JsonSerializer.Serialize(new
             {
                 merge_base_commit = new { sha = knownBase ?? mergeBase }
-            })
+            }),
+            ["git/ref/heads/main"] = JsonSerializer.Serialize(new { @ref = mainRef, @object = new { sha = main } }),
+            [$"compare/{main}...{head}"] = JsonSerializer.Serialize(new { status = headOnMain }),
+            [$"compare/{main}...{mergeBase}"] = JsonSerializer.Serialize(new { status = baseOnMain })
         };
         string Tree(params (string Name, string Type, string Sha)[] entries) => JsonSerializer.Serialize(new
         {
@@ -370,25 +381,49 @@ Test("only a donor that ran reviewed producer code skips replay", () =>
     }
     bool Reviewed(JsonElement run, Func<string, JsonElement> api) =>
         CertifiedLibraryDonor.ReviewedProducer(run, "owner/repo", api, _ => { });
+    void Replayed(string label, JsonElement run, Func<string, JsonElement> api) =>
+        Require(!Reviewed(run, api), label + " skipped replay");
     Func<string, JsonElement> unavailable = _ => throw new InvalidOperationException("gh: Server Error (HTTP 502)");
-    Require(Reviewed(Run(trigger: "push", branch: "main"), unavailable), "A main push donor was replayed");
-    Console.WriteLine("PASS a main push donor is trusted");
-    Require(Reviewed(Run(), Repository('e', 'f')), "A PR leaving producer paths unchanged was replayed");
-    Console.WriteLine("PASS a PR donor whose head leaves the producer paths unchanged is trusted");
-    Require(!Reviewed(Run(), Repository('e', '9')), "A PR that changed scripts/ skipped replay");
-    Require(!Reviewed(Run(), Repository('9', 'f')), "A PR that changed the workflow skipped replay");
+
+    var push = Run(trigger: "push", branch: "main", pulls: []);
+    Require(Reviewed(push, Repository()) && Reviewed(push, Repository(headOnMain: "identical")),
+        "A main push donor was replayed");
+    Require(Reviewed(Run(), Repository()), "A PR into main leaving producer paths unchanged was replayed");
+    Console.WriteLine("PASS a main push donor and a PR into main that leaves producer paths unchanged are trusted");
+
+    Replayed("A PR that changed scripts/", Run(), Repository(headScripts: '9'));
+    Replayed("A PR that changed the workflow", Run(), Repository(headWorkflow: '9'));
     Console.WriteLine("PASS a PR donor whose head changed scripts/ or the workflow is replayed");
+
+    Replayed("A PR into another branch", Run(pulls: [Pull(baseRef: "feature/parent")]), Repository());
+    Replayed("A fork PR", Run(pulls: [Pull(headUrl: "https://api.github.com/repos/fork/repo")]), Repository());
+    Replayed("A PR into another repository", Run(pulls: [Pull(baseUrl: "https://api.github.com/repos/other/repo")]),
+        Repository());
+    Replayed("A fork run", Run(repository: "fork/repo"), Repository());
+    Replayed("An empty pull_requests array", Run(pulls: []), Repository());
+    Replayed("Multiple pull_requests entries", Run(pulls: [Pull(), Pull()]), Repository());
+    Replayed("A head.sha mismatch", Run(pulls: [Pull(headSha: new string('f', 40))]), Repository());
+    Console.WriteLine("PASS non-main bases, forks, empty or multiple PR entries and head mismatches are replayed");
+
+    foreach (var status in new[] { "ahead", "diverged", "" })
+        Replayed("A push not reachable from main (" + status + ")", push, Repository(headOnMain: status));
+    Replayed("A push to another branch", Run(trigger: "push", pulls: []), Repository());
+    Replayed("A merge base not on main", Run(), Repository(baseOnMain: "ahead"));
+    Replayed("An ambiguous main ref", push, Repository(mainRef: "refs/tags/main"));
+    Replayed("An unresolvable main ref", push, path => path == "git/ref/heads/main"
+        ? Json("""[{"ref":"refs/heads/main-old"}]""") : Repository()(path));
+    Console.WriteLine("PASS a push not reachable from main, or an ambiguous or unresolved main ref, is replayed");
+
     foreach (var unknown in new[] { "", mergeBase[..7], new string('z', 40) })
-        Require(!Reviewed(Run(), Repository('e', 'f', knownBase: unknown)), "An unknown merge base skipped replay");
-    Require(!Reviewed(Run(), unavailable), "Unavailable merge base skipped replay");
-    Require(!Reviewed(Run(), path => path.StartsWith("compare/", StringComparison.Ordinal) ? Json("{}")
-        : Repository('e', 'f')(path)), "A comparison without a merge base skipped replay");
-    Require(!Reviewed(Run(), Repository('e', 'f', truncated: true)), "A truncated tree listing skipped replay");
-    Console.WriteLine("PASS an unknown merge base or unavailable tree is replayed");
-    foreach (var untrusted in new[] { Run(trigger: "push", branch: "feature"), Run(repository: "fork/repo"),
-        Run(trigger: "workflow_dispatch", branch: "main"), Run(commit: "abc123"),
+        Replayed("An unknown merge base", Run(), Repository(knownBase: unknown));
+    Replayed("An unavailable merge base", Run(), unavailable);
+    Replayed("A push with unavailable metadata", push, unavailable);
+    Replayed("A comparison without a merge base", Run(), path => path.StartsWith("compare/" + baseCommit,
+        StringComparison.Ordinal) ? Json("{}") : Repository()(path));
+    Replayed("A truncated tree listing", Run(), Repository(truncated: true));
+    foreach (var untrusted in new[] { Run(trigger: "workflow_dispatch", branch: "main"), Run(commit: "abc123"),
         Json("""{"event":"push","head_branch":"main","head_repository":null}"""), Json("{}") })
-        Require(!Reviewed(untrusted, Repository('e', 'f')), "Untrusted run metadata skipped replay: " + untrusted);
-    Console.WriteLine("PASS other branches, forks, events and missing metadata are replayed");
+        Replayed("Untrusted run metadata " + untrusted, untrusted, Repository());
+    Console.WriteLine("PASS unknown merge bases, unavailable trees, other events and missing fields are replayed");
 });
 Console.WriteLine($"All {checks} certified library donor checks passed.");

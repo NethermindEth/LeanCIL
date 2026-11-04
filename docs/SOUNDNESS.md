@@ -30,8 +30,8 @@ failed builds and exhausted proof resources are failures. Hash equality establis
 not semantic correctness. Cached artifacts require independent authenticated provenance.
 A certified library that CI reuses is trusted because our own CI produced it and kernel-replayed
 every module, and its bytes match the manifest digest that run logged. It is replayed again unless
-GitHub metadata shows the producer ran reviewed code: a main push, or a PR that left the workflow,
-scripts and build files as main had them.
+GitHub metadata shows the producer ran reviewed code: a push on main, or a PR into main that left
+the workflow, scripts and build files as its base had them.
 A library built in the current run, or downloaded with a release, is replayed.
 
 Checked execution tracks allocation identity, lifetime, bounds, permissions, initialization and

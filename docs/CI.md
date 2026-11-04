@@ -18,11 +18,12 @@ manifest digest and an artifact with sufficient remaining retention.
 A donated library is trusted because our own CI produced it: that run kernel-replayed every
 module and logged the manifest digest, and reuse checks that every file matches that digest and
 that the manifest binds the current sources and toolchain. Reuse skips kernel replay only when
-GitHub metadata shows the donor ran reviewed producer code: a push to main, or a same-repository PR
-whose `head_sha` leaves `.github/workflows/verification.yml`, `scripts/` and the root .NET build
-files as its merge base with main has them, so the merge commit it built ran main's producer code.
-Otherwise, or when that metadata or merge base is unavailable, it replays the library as a fresh
-build would. Changed sources use
+GitHub metadata shows the donor ran reviewed producer code: a push of a commit reachable from
+`refs/heads/main`, or the run of exactly one same-repository PR into main whose `head_sha` leaves
+`.github/workflows/verification.yml`, `scripts/` and the root .NET build files as its merge base
+with the PR's base commit has them, so the merge it built ran main's producer code. A stacked PR,
+a fork, any other run, or unavailable metadata replays the library as a fresh build would; these
+checks do not rely on the branch filters of the donor queries. Changed sources use
 dependency-aware incremental preparation, which replays every module of the result, or fall back
 to a fresh build, which replays everything it built.
 A library's identity covers the toolchain, `CIL.lean`, `CIL/`, `lake-manifest.json` and the

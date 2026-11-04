@@ -65,35 +65,61 @@ static class CertifiedLibraryDonor
 
     /// <summary>
     /// Whether a donor run executed reviewed producer code, from GitHub run and repository metadata alone:
-    /// a push to main, or a same-repository PR whose head leaves every producer path as its merge base
-    /// with main has it, so the merge commit it built ran main's producer code. Anything else, including
-    /// missing metadata or an unknown merge base, answers false and the library is replayed.
+    /// a push of a commit on main, or the run of one same-repository PR into main whose head leaves every
+    /// producer path as its merge base with the PR's base commit has it, so the merge it built ran main's
+    /// producer code. Anything else, including missing metadata, answers false and the library is replayed.
     /// </summary>
     public static bool ReviewedProducer(JsonElement run, string repository, Func<string, JsonElement> api,
         Action<string> warning)
     {
         try
         {
-            if (run.GetProperty("head_repository").ValueKind != JsonValueKind.Object ||
-                !SameRepository(run.GetProperty("head_repository"), repository)) return false;
-            var trigger = run.GetProperty("event").GetString();
-            if (trigger == "push") return run.GetProperty("head_branch").GetString() == "main";
             var head = run.GetProperty("head_sha").GetString() ?? "";
-            if (trigger != "pull_request" || !Regex.IsMatch(head, "^[0-9a-f]{40}$")) return false;
-            // A pull_request run builds the merge with main; the head's own commits decide its producer code.
-            var mergeBase = api("compare/main..." + head).GetProperty("merge_base_commit").GetProperty("sha")
-                .GetString() ?? "";
-            if (!Regex.IsMatch(mergeBase, "^[0-9a-f]{40}$")) return false;
+            if (!IsCommit(head) || !SameRepository(run.GetProperty("head_repository"), repository)) return false;
+            var trigger = run.GetProperty("event").GetString();
+            if (trigger == "push")
+                return run.GetProperty("head_branch").GetString() == "main" && OnMain(head, api);
+            // A stacked PR builds merged into another branch, whose producer code may be unreviewed.
+            if (trigger != "pull_request") return false;
+            var pulls = run.GetProperty("pull_requests");
+            if (pulls.GetArrayLength() != 1) return false;
+            var pull = pulls[0];
+            var baseCommit = pull.GetProperty("base").GetProperty("sha").GetString() ?? "";
+            if (pull.GetProperty("base").GetProperty("ref").GetString() != "main" ||
+                !PullRepository(pull.GetProperty("base"), repository) ||
+                !PullRepository(pull.GetProperty("head"), repository) ||
+                pull.GetProperty("head").GetProperty("sha").GetString() != head || !IsCommit(baseCommit))
+                return false;
+            // The run built the head merged into its base; the head's own commits decide its producer code.
+            var mergeBase = api($"compare/{baseCommit}...{head}").GetProperty("merge_base_commit")
+                .GetProperty("sha").GetString() ?? "";
+            if (!IsCommit(mergeBase) || !OnMain(mergeBase, api)) return false;
             var trees = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
             return ProducerPaths.All(path => ProducerObject(mergeBase, path, api, trees) ==
                 ProducerObject(head, path, api, trees));
         }
         catch (Exception error) when (error is InvalidOperationException or JsonException or Win32Exception or
-                                      KeyNotFoundException or FormatException)
+                                      KeyNotFoundException or FormatException or IndexOutOfRangeException)
         {
             warning("Donor producer metadata unavailable; the library will be replayed. " + error.Message);
             return false;
         }
+    }
+
+    static bool IsCommit(string sha) => Regex.IsMatch(sha, "^[0-9a-f]{40}$");
+
+    /// <summary>A PR side's repository, which run metadata names only by its API URL.</summary>
+    static bool PullRepository(JsonElement side, string repository) =>
+        string.Equals(side.GetProperty("repo").GetProperty("url").GetString(),
+            "https://api.github.com/repos/" + repository, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Whether a commit is reachable from refs/heads/main, never a tag or another ref named main.</summary>
+    static bool OnMain(string commit, Func<string, JsonElement> api)
+    {
+        var reference = api("git/ref/heads/main");
+        var main = reference.GetProperty("object").GetProperty("sha").GetString() ?? "";
+        return reference.GetProperty("ref").GetString() == "refs/heads/main" && IsCommit(main) &&
+            api($"compare/{main}...{commit}").GetProperty("status").GetString() is "identical" or "behind";
     }
 
     /// <summary>The git object at a path of a commit, or "absent"; a truncated or malformed listing throws.</summary>
