@@ -14,14 +14,39 @@ head of their type, so a context of unrelated hypotheses adds nothing to simp.
 namespace CIL.Safety
 
 /-- Heads of the equations the loop tactics take from the context: checked steps, local and
-    memory loads and stores, span element, slice, validity, width and mode checks, and formed
-    references. -/
+    memory loads and stores, span element, slice, validity, width and mode checks, formed
+    references and `Unsafe.Add` results. -/
 def loopFactHeads : List Lean.Name :=
   [``CIL.Safety.step, ``CIL.Safety.instruction, ``CIL.Safety.memoryInstruction,
     ``CIL.Safety.staticInstruction, ``CIL.Safety.loadLocal, ``CIL.Safety.storeLocal,
     ``CIL.Safety.loadValue, ``CIL.Safety.storeValue, ``CIL.Safety.SpanView.element,
     ``CIL.Safety.SpanView.slice, ``CIL.Safety.SpanView.validate, ``CIL.Safety.SpanView.width,
-    ``CIL.Safety.SpanView.writable, ``CIL.Safety.form]
+    ``CIL.Safety.SpanView.writable, ``CIL.Safety.form, ``CIL.Safety.add]
+
+/-- The facts about caller storage that read only allocations, so a loop frame carries them from
+    its caller's memory to its own (`CIL.Safety.LoopCallerFacts`), with the lemma that does. -/
+def loopCallerFacts : List (Lean.Name × Lean.Name) :=
+  [(``CIL.Safety.form, `LoopFrame.caller_form), (``CIL.Safety.add, `LoopFrame.caller_add),
+    (``CIL.Safety.SpanView.validate, `LoopFrame.caller_valid),
+    (``CIL.Safety.SpanView.element, `LoopFrame.caller_element),
+    (``CIL.Safety.SpanView.slice, `LoopFrame.caller_slice)]
+
+open Lean Meta in
+/-- For an equation `f memory ... = .ok result` with `f` among `loopCallerFacts`, the carrying
+    lemma, the memory and the reference `form` of the result would state, when the result is a
+    reference that forms: an `add` or `element` result, or a formed reference. -/
+def loopCallerFact? (type : Expr) : MetaM (Option (Lean.Name × Expr × Option Expr)) := do
+  let some (_, lhs, rhs) := type.consumeMData.eq? | return none
+  let some head := lhs.getAppFn.constName? | return none
+  let some (_, carry) := loopCallerFacts.find? (·.1 == head) | return none
+  let memory? ← lhs.getAppArgs.findM? fun argument => do
+    return (← instantiateMVars (← inferType argument)).isConstOf ``Memory
+  let some memory := memory? | return none
+  let rhs := rhs.consumeMData
+  let result := if rhs.isAppOfArity ``Except.ok 3 then some rhs.appArg! else none
+  let formed := if [``CIL.Safety.form, ``CIL.Safety.add, ``CIL.Safety.SpanView.element].contains
+    head then result else none
+  return some (carry, memory, formed)
 
 open Lean Meta in
 /-- For an equation, possibly quantified, whose left side has a head in `loopFactHeads`, or a
@@ -249,8 +274,12 @@ open Lean Elab Tactic Meta in
       the goal and the facts;
     * hypotheses `loopFactSides?` recognizes;
     * for `span : CheckedSpan`, `span.facts`, `span.length_nil` or `span.length_cons` when its
-      values are `[]` or a cons, and `(span.within wellFormed frame).facts` for each
-      `frame : LoopFrame []` from its memory with that memory's `wellFormed` in context;
+      values are `[]` or a cons, and `span.valid_within wellFormed frame` for each
+      `frame : LoopFrame` from its memory with that memory's `wellFormed` in context;
+    * for a formed reference, `Unsafe.Add` result, or span validity, element or slice equation at
+      the caller memory of a `frame : LoopFrame` with that memory's `wellFormed` in context, the
+      equation at the frame's memory (`LoopFrame.caller_form` and its kind), and for an `add` or
+      `element` result or an `access` check, the `form` of the reference it gives;
     * for `contents : SpanContents`, `contents.elementWidth`;
     * for `frame : LoopFrame` over `knownLocals` of a list, the load of each remembered local, with
       `localResult`;
@@ -341,16 +370,50 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
         candidates := candidates.push
           (`spanLength, applied `CheckedSpan.length_cons #[fact], subject, #[], #[])
       for (frame, frameType) in typed do
-        unless confinedToNone frameType && frameType.getArg! 1 == arguments[0]! &&
-          isLive (frameType.getArg! 2) do continue
+        unless frameType.isAppOfArity `CIL.Safety.LoopFrame 6 &&
+          frameType.getArg! 1 == arguments[0]! && isLive (frameType.getArg! 2) do continue
         for (formed, formedType) in typed do
           unless formedType.isAppOfArity ``Memory.WellFormed 1 &&
             formedType.appArg! == arguments[0]! do continue
-          let within := applied `CheckedSpan.within #[fact, named formed, named frame]
           candidates := candidates.push (`spanFacts,
-            applied `CheckedSpan.facts #[← `(($within))],
+            applied `CheckedSpan.valid_within #[fact, named formed, named frame],
             variables #[frameType.getArg! 2, arguments[1]!], #[], #[])
-    else if type.isAppOfArity `CIL.Safety.SpanContents 4 then
+    -- A reference check or address, or a caller fact a frame carries to its own memory. The
+    -- caller's memory can be live too, since a frame's activation names its watermark.
+    let hole : Term ← `(_)
+    let carriers (memory : Expr) : Array (LocalDecl × LocalDecl) := Id.run do
+      let mut found := #[]
+      for (frame, frameType) in typed do
+        unless frameType.isAppOfArity `CIL.Safety.LoopFrame 6 && frameType.getArg! 1 == memory &&
+          frameType.getArg! 2 != memory && isLive (frameType.getArg! 2) do continue
+        for (formed, formedType) in typed do
+          if formedType.isAppOfArity ``Memory.WellFormed 1 && formedType.appArg! == memory then
+            found := found.push (frame, formed)
+      return found
+    let formTerms (memory : Expr) (proof : Term) : Array Term :=
+      (if isLive memory then #[proof] else #[]) ++ (carriers memory).map fun (frame, formed) =>
+        applied `LoopFrame.caller_form #[named frame, named formed, proof]
+    if let some (_, checked, _) := type.eq? then
+      if checked.isAppOfArity `CIL.Safety.access 5 then
+        for proof in formTerms (checked.getArg! 0) (applied `access_reference_valid
+            #[hole, hole, hole, hole, hole, fact]) do
+          candidates := candidates.push (`referenceForm, proof, #[], #[], #[])
+    if let some (carry, memory, formedResult) ← loopCallerFact? type then
+      if formedResult.isSome && !(type.consumeMData.eq?.any fun (_, lhs, _) =>
+          lhs.isAppOf ``CIL.Safety.form) then
+        let proof := if (type.consumeMData.eq?.any fun (_, lhs, _) =>
+            lhs.isAppOf ``CIL.Safety.add) then applied `add_formed #[fact]
+          else applied `SpanView.element_formed #[hole, hole, hole, hole, fact]
+        for proof in formTerms memory proof do
+          candidates := candidates.push (`referenceForm, proof, #[], #[], #[])
+      -- A span fact is carried only for a span the goal names; each produces its result.
+      if let some (_, lhs, rhs) := type.consumeMData.eq? then
+        let subject := if formedResult.isSome then #[]
+          else (variables lhs.getAppArgs).filter (· != memory.fvarId!)
+        for (frame, formed) in carriers memory do
+          candidates := candidates.push (`callerFact,
+            applied carry #[named frame, named formed, fact], subject, #[], variables #[rhs])
+    if type.isAppOfArity `CIL.Safety.SpanContents 4 then
       candidates := candidates.push (`elementWidth, applied `SpanContents.elementWidth #[fact],
         variables #[arguments[1]!], #[], #[])
     -- An entry frame for every footprint gives the frame facts at the empty one.
@@ -417,7 +480,9 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
     changed := false
     for index in [:candidates.size] do
       let (base, _, subject, memories, produced) := candidates[index]!
-      let visible := if base.isAnonymous || base == `caseSplit then reached else direct
+      -- A span's validity is read where a kept equation, such as a slice, produced the span.
+      let visible := if base.isAnonymous || base == `caseSplit || base == `spanFacts then reached
+        else direct
       if !kept[index]! && subject.all visible.contains &&
           memories.all fun memory => live.all (·.contains memory) then
         kept := kept.set! index true

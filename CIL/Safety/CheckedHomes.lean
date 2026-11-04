@@ -28,6 +28,25 @@ namespace CIL.Safety
     Pure.pure, Except.pure]
 #print axioms checkedValue_span
 
+/-- A formed address passes the argument check unchanged. -/
+@[cil_checked] theorem checkedValue_address (memory : Memory) (reference : Reference)
+    (formed : form memory reference = .ok reference) :
+    checkedValue memory (.reference (.address reference)) =
+      .ok (.reference (.address reference)) := by
+  simp [checkedValue, formValue, formed, checkedAt, Except.mapError, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
+#print axioms checkedValue_address
+
+/-- An int passes the argument check unchanged. -/
+@[cil_checked] theorem checkedValue_i32 (memory : Memory) (bits : CIL.W32) :
+    checkedValue memory (.scalar (.i32 bits)) = .ok (.scalar (.i32 bits)) := rfl
+#print axioms checkedValue_i32
+
+/-- A long passes the argument check unchanged. -/
+@[cil_checked] theorem checkedValue_i64 (memory : Memory) (bits : CIL.W64) :
+    checkedValue memory (.scalar (.i64 bits)) = .ok (.scalar (.i64 bits)) := rfl
+#print axioms checkedValue_i64
+
 /-- A span home reads the matching valid view without reading its backing bytes. -/
 @[cil_checked] theorem loadLocal_span (memory : Memory) (view : SpanView)
     (width : Nat) (writable : Bool) (valid : view.validate memory = .ok ())

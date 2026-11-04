@@ -1,8 +1,9 @@
 import CIL.Safety.LoopScaffold
 import CIL.Safety.Execution
 
-/-! Loop stepping over a struct local with the facts gathered by default, and the failures that
-name the pc, the instruction and what is missing when a loop tactic cannot go on. -/
+/-! Loop stepping over a struct local, and over an int local and a call through a contract with
+a footprint in a caller buffer, with the facts gathered by default, and the failures that name
+the pc, the instruction and what is missing when a loop tactic cannot go on. -/
 
 namespace Tests.LoopDiagnostics
 open CIL.Safety
@@ -418,5 +419,217 @@ open Lean in
 #eval show MetaM _ from do
   let env ← getEnv
   [``entry.checked, ``header].mapM fun name => liftM (findDocString? env name : IO _)
+
+/-- `for (i = 0; i != n; i++) stamp(Unsafe.Add(ref p, i), i); return i;`, with `i` an int local. -/
+@[cil_code] def stamps : CIL.Method := {
+  returnsValue := true, locals := [.i32 0], localKinds := [.word32]
+  code := [.const32 0, .setLocal 0, .branch 12, .arg 1, .local 0, .memory (.add 4 true),
+    .local 0, .call 1 2, .local 0, .const32 1, .add, .setLocal 0, .local 0, .arg 0, .bne 3,
+    .local 0, .ret] }
+
+/-- `*slot = value;` -/
+@[cil_code] def stamp : CIL.Method := {
+  returnsValue := false, locals := [], code := [.arg 0, .arg 1, .storeScalar 4, .ret] }
+
+/-- The program, with `stamps` calling `stamp` as method 1. -/
+@[cil_code] def stampsProgram : CIL.Program := [stamps, stamp]
+
+/-- `stamp` writes the word at `slot`, given write authority over it, and nothing else. -/
+def stampContract : MethodContract (Reference × W32) Unit where
+  args input := [.reference (.address input.1), .scalar (.i32 input.2)]
+  results _ := []
+  pre input memory := Writable memory input.1 4 0 1
+  footprint input := [(input.1, 4)]
+  post input _ final _ := Contents final input.1 4 [input.2]
+
+/-- `stamp` meets its contract, through the width-generic store and write lemmas. -/
+theorem stamp_holds : stampContract.Holds stampsProgram 1 := by
+  rintro ⟨slot, value⟩ memory writable
+  dsimp only [stampContract] at writable ⊢
+  obtain ⟨after, wrote, formed, confined, filled⟩ := writable.write_one value
+  refine ⟨8, after, [], ?_, confined, (), rfl, filled⟩
+  cil_checked_steps [step_storeScalar_of_write wrote, formed]
+/-- info: 'Tests.LoopDiagnostics.stamp_holds' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms stamp_holds
+
+/-- The entered frame of `stamps`. -/
+bind_entry stampsEntry (memory : Memory) (count : W32) (buffer : Reference)
+    (wellFormed : memory.WellFormed) :=
+  stamps with [.scalar (.i32 count), .reference (.address buffer)] from memory
+    allocating wellFormed
+
+/-- The index local, over the caller's buffer of `count` words. -/
+abbrev Stamping (memory : Memory) (buffer : Reference) (count : Nat) (home : Reference) :=
+  FrameState [(buffer, 4 * count)] memory [.word32] W32 (fun _ => [.bytes .word32 home])
+    fun index => [some (.i32 index)]
+
+/-- The loop test, with the count and the index on the stack. -/
+bind_cutpoint stampsHeader (memory : Memory) (count : W32) (buffer : Reference)
+    (home : Reference) (state : Stamping memory buffer count.toNat home) :=
+  stamps matching (fun op => op matches .bne _) with stampsEntry.frame memory home,
+    [.scalar (.i32 count), .scalar (.i32 state.values)], state.memory
+
+/-- The index stays within the count, and the rest of the buffer stays writable. -/
+def StampingInvariant (count : W32) (buffer : Reference) {memory : Memory} {home : Reference}
+    (state : Stamping memory buffer count.toNat home) : Prop :=
+  state.values.toNat ≤ count.toNat ∧
+    Writable state.memory buffer 4 state.values.toNat (count.toNat - state.values.toNat)
+
+/-- The loop tactics take the int local's stores through its frame, carry the `Unsafe.Add`
+    result and the formed buffer from the caller's memory to each frame memory, cross the call
+    with the frame after it from the index bound, and carry the buffer's write authority along:
+    the proof states only the invariant, the arithmetic and the caller's facts. -/
+theorem stamps_returns_count (memory : Memory) (count : W32) (buffer : Reference)
+    (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)
+    (small : count.toNat < 2 ^ 31) (writable : Writable memory buffer 4 0 count.toNat) :
+    ∃ fuel final, invoke stampsProgram fuel 0
+        [.scalar (.i32 count), .reference (.address buffer)] memory =
+      .ok (final, [.scalar (.i32 count)]) ∧
+      Confined [(buffer, 4 * count.toNat)] memory final := by
+  obtain ⟨home, entered, setup, -, -, entryFrame⟩ :=
+    stampsEntry.checked memory count buffer wellFormed
+  refine invoke_loop_induction (by rfl) ?_ setup (stampsHeader memory count buffer home)
+    (StampingInvariant count buffer) (fun state => count.toNat - state.values.toNat)
+    (fun start => ?_) ?_
+  · simp [cil_checked, formed]
+  · cil_loop_recurse start 0
+    exact ⟨by simp, by simpa using writable⟩
+  rintro ⟨index, current, frame⟩ ⟨bounded, rest⟩ recurse
+  dsimp only at bounded rest
+  by_cases done : index = count
+  · subst done
+    cil_loop_finish
+  · have lower : index.toNat < count.toNat := by
+      have := BitVec.toNat_ne.mp done
+      omega
+    have offset := writable.add_int wellFormed formed (index := index) (by omega) (by omega)
+      (by omega)
+    have slot := rest.sub (index := index.toNat) (length := 1) (by omega) (by omega)
+    cil_loop_advance
+    cil_loop_call stamp_holds (buffer.element 4 index.toNat, index)
+    have next : (index + 1).toNat = index.toNat + 1 := by bv_omega
+    cil_loop_recurse recurse (index + 1)
+    · refine ⟨show (index + 1).toNat ≤ count.toNat by omega, ?_⟩
+      have later := (Writable.append (left := 1)).mp
+        (show Writable _ buffer 4 index.toNat (1 + (count.toNat - (index.toNat + 1))) by
+          rwa [show 1 + (count.toNat - (index.toNat + 1)) = count.toNat - index.toNat by omega])
+      rw [next]
+      simpa [Nat.add_comm] using later.2
+    · dsimp only
+      omega
+/-- info: 'Tests.LoopDiagnostics.stamps_returns_count' depends on axioms: [propext,
+ Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms stamps_returns_count
+
+-- Without the `Unsafe.Add` result the advance stops at the add, naming that fact.
+/-- error: cil_loop_advance: cannot step pc 5 (CIL.Op.memory (CIL.MemoryOp.add 4 true)) -/
+#guard_msgs (whitespace := lax, substring := true) in
+example (memory current : Memory) (count index : W32) (buffer home : Reference)
+    (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)
+    (frame : LoopFrame [(buffer, 4 * count.toNat)] memory current [.word32]
+      [.bytes .word32 home] (knownLocals [some (.i32 index)])) :
+    LoopTerminates stampsProgram 0 [.scalar (.i32 count), .reference (.address buffer)]
+      (fun _ _ => True) ⟨3, stampsEntry.frame memory home, [], current⟩ := by
+  cil_loop_advance
+
+-- The hint for a stuck step names the fact its residual is missing.
+/-- info: the `Unsafe.Add` result: `add memory base width offset = .ok reference` at this memory or
+the caller's, such as `Writable.add_int` -/
+#guard_msgs (whitespace := lax) in
+open Lean Meta in
+#eval show MetaM Unit from do logInfo (← loopMissingHint #[mkConst ``CIL.Safety.add])
+
+-- A residual that mentions no checked fact gets the general hint.
+/-- info: a `LoopFrame` at this memory for a local, or the step equation of a store with this
+stack -/
+#guard_msgs (whitespace := lax) in
+open Lean Meta in
+#eval show MetaM Unit from do logInfo (← loopMissingHint #[mkConst ``True])
+
+/-- `i = (byte) 0x1FF; return i;`, storing the int local through a byte narrowing. -/
+@[cil_code] def narrowed : CIL.Method := {
+  returnsValue := true, locals := [.i32 0], localKinds := [.word32]
+  code := [.const32 0x1FF, .setLocal 0 (some .unsigned8), .local 0, .ret] }
+
+/-- The program of `narrowed` alone. -/
+@[cil_code] def narrowedProgram : CIL.Program := [narrowed]
+
+/-- The entered frame of `narrowed`. -/
+bind_entry narrowedEntry (memory : Memory) (wellFormed : memory.WellFormed) :=
+  narrowed with [] from memory allocating wellFormed
+
+-- A narrowing local store is not one `LoopFrame.store` models, so the walk stops at it.
+/-- error: cil_loop_finish: cannot step pc 1 (CIL.Op.setLocal 0 (some CIL.NarrowKind.unsigned8)) -/
+#guard_msgs (whitespace := lax, substring := true) in
+example (memory current : Memory) (home : Reference)
+    (frame : LoopFrame [] memory current [.word32] [.bytes .word32 home]
+      (knownLocals [some (.i32 0)])) :
+    LoopTerminates narrowedProgram 0 [] (fun _ _ => True)
+      ⟨0, narrowedEntry.frame memory home, [], current⟩ := by
+  cil_loop_finish
+
+-- Without the index bound the callee's slot is not shown inside the frame's footprint, and
+-- the call fails naming that side condition.
+/-- error: cil_loop_call: the frame after the call needs each callee footprint entry inside the
+frame's footprint, which the facts do not prove: -/
+#guard_msgs (whitespace := lax, substring := true) in
+example (memory current : Memory) (count index : W32) (buffer home slotted : Reference)
+    (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)
+    (frame : LoopFrame [(buffer, 4 * count.toNat)] memory current [.word32]
+      [.bytes .word32 home] (knownLocals [some (.i32 index)]))
+    (offset : add memory buffer 4 (BitVec.ofInt 64 index.toInt) =
+      .ok (buffer.element 4 index.toNat))
+    (slot : Writable current (buffer.element 4 index.toNat) 4 0 1) :
+    LoopTerminates stampsProgram 0 [.scalar (.i32 count), .reference (.address buffer)]
+      (fun _ _ => True) ⟨3, stampsEntry.frame memory home, [], current⟩ := by
+  cil_loop_advance
+  cil_loop_call stamp_holds (buffer.element 4 index.toNat, index)
+
+-- A call whose address argument has no `form` fact does not step, and the failure names the
+-- check and the fact it needs.
+/-- error: cil_loop_call: the call at pc 7 (CIL.Op.call 1 2) does not step: its argument checks
+reduce to -/
+#guard_msgs (whitespace := lax, substring := true) in
+example (memory current : Memory) (count index : W32) (home slotted : Reference)
+    (frame : LoopFrame [] memory current [.word32] [.bytes .word32 home]
+      (knownLocals [some (.i32 index)])) :
+    LoopTerminates stampsProgram 0 [.scalar (.i32 count), .reference (.address slotted)]
+      (fun _ _ => True)
+      ⟨7, stampsEntry.frame memory home, [.scalar (.i32 index), .reference (.address slotted)],
+        current⟩ := by
+  cil_loop_call stamp_holds (slotted, index)
+
+-- At the return, `cil_loop_finish` closes the conjuncts the exit facts prove, here the results
+-- and the caller's confinement, and hands back the rest.
+example (memory : Memory) (count : W32) (buffer home : Reference) (current : Memory)
+    (stored : ∀ final, Contents final buffer 4 [count])
+    (setup : enterFrame stamps [.scalar (.i32 count), .reference (.address buffer)] memory =
+      .ok (stampsEntry.frame memory home, current))
+    (frame : LoopFrame [(buffer, 4)] memory current [.word32] [.bytes .word32 home]
+      (knownLocals [some (.i32 count)])) :
+    LoopTerminates stampsProgram 0 [.scalar (.i32 count), .reference (.address buffer)]
+      (fun final results => (results = [.scalar (.i32 count)] ∧
+        Confined [(buffer, 4)] memory final) ∧ Contents final buffer 4 [count])
+      ⟨15, stampsEntry.frame memory home, [], current⟩ := by
+  cil_loop_finish
+  show Contents _ buffer 4 [count]
+  exact stored _
+
+-- A call whose stacked argument is not the contract's names both.
+/-- error: cil_loop_call: the call at pc 7 (CIL.Op.call 1 2) does not take the contract's
+arguments for this input, or is not the named site. -/
+#guard_msgs (whitespace := lax, substring := true) in
+example (memory current : Memory) (count index : W32) (buffer home : Reference)
+    (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)
+    (frame : LoopFrame [(buffer, 4 * count.toNat)] memory current [.word32]
+      [.bytes .word32 home] (knownLocals [some (.i32 index)]))
+    (offset : add memory buffer 4 (BitVec.ofInt 64 index.toInt) =
+      .ok (buffer.element 4 index.toNat)) :
+    LoopTerminates stampsProgram 0 [.scalar (.i32 count), .reference (.address buffer)]
+      (fun _ _ => True) ⟨3, stampsEntry.frame memory home, [], current⟩ := by
+  cil_loop_advance
+  cil_loop_call stamp_holds (buffer, index)
 
 end Tests.LoopDiagnostics
