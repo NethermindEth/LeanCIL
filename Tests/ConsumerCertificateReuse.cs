@@ -9,7 +9,9 @@ partial class Program
         var configurationReuse = args.Contains("--configuration-reuse", StringComparer.Ordinal);
         var cli = new[] { "dotnet", args.FirstOrDefault(value =>
             value is not ("--measure" or "--configuration-reuse")) ?? ExtractorPath };
-        var directory = At("artifacts/ConsumerCertificateReuse-" + Guid.NewGuid().ToString("N"));
+        // Lake on Windows fails past MAX_PATH, and the copied cache nests a 64-digit key and
+        // the compiled library beneath this directory, so keep its name short.
+        var directory = At("artifacts/CertificateReuse-" + Guid.NewGuid().ToString("N")[..8]);
         var previousCache = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR") ??
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LeanCIL", "libraries");
         var isolatedCache = Path.Combine(directory, "Cache");
