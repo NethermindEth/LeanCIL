@@ -7,12 +7,14 @@ come from the same producer job; restoration verifies the archive before decompr
 rejects unsafe entries. Legacy raw artifacts retain their manifest checks. See
 [library distribution](performance/LibraryDistribution.md) for the format and measurements.
 
-Library donation first checks this commit, then up to ten successful runs of the same PR whose
-heads are ancestors of its current head. Both the PR and donor must belong to this repository;
-forks and force-pushed nonancestors cannot donate. It then checks an identical merged PR tree,
-the exact base-main commit and at most ten recent successful main pushes. This covers a base
-run that skipped preparation or has no artifact. Every candidate still needs a successful
-producer job, its logged manifest digest and an artifact with sufficient remaining retention.
+Library donation first checks this commit, then the ten most recent runs of the same PR whose
+heads are ancestors of its current head, nearest first. Both the PR and donor must belong to this
+repository; forks and force-pushed nonancestors cannot donate. It then checks an identical merged
+PR tree, the exact base-main commit and at most ten recent successful main pushes. This covers a
+base run that skipped preparation or has no artifact. A PR or merged-tree run donates when its
+prepare job succeeded, even if its suites failed or are still running, since only that job
+produces the library. Every candidate still needs that successful producer job, its logged
+manifest digest and an artifact with sufficient remaining retention.
 Source/toolchain checks and kernel replay remain mandatory; changed sources use dependency-aware
 incremental preparation or fall back to a fresh build.
 Transient HTTP failures (408, 429, 500, 502, 503 and 504) receive at most two retries, after

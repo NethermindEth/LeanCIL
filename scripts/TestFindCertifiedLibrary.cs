@@ -20,7 +20,7 @@ const string Digest = "0123456789abcdef0123456789abcdef0123456789abcdef012345678
 const string Other = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
 DateTimeOffset now = DateTimeOffset.Parse("2026-10-27T00:00:00Z");
 
-Test("PR donors require the same PR, repository and successful ancestor", () =>
+Test("PR donors require the same PR, repository and an ancestor, whatever their suites concluded", () =>
 {
     var head = new string('a', 40);
     var ancestor = new string('b', 40);
@@ -34,9 +34,13 @@ Test("PR donors require the same PR, repository and successful ancestor", () =>
     long[] Select(string json, bool related = true) => CertifiedLibraryDonor.PullAncestors(Json(json),
         "owner/repo", 42, head, _ => related, 10).ToArray();
     Require(Select(Run()).SequenceEqual([9L]), "Successful ancestor was omitted");
-    foreach (var invalid in new[] { Run(pull: 43), Run(repository: "fork/repo"),
-        Run(status: "in_progress"), Run(conclusion: "failure"), Run(commit: head), Run(commit: "bad") })
-        Require(Select(invalid).Length == 0, "Unrelated or incomplete run accepted");
+    // The prepare job decides eligibility, so failed suites or a running workflow do not hide a library.
+    foreach (var pending in new[] { Run(status: "in_progress", conclusion: ""), Run(conclusion: "failure"),
+        Run(conclusion: "cancelled") })
+        Require(Select(pending).SequenceEqual([9L]), "Ancestor with a successful prepare job was omitted");
+    foreach (var invalid in new[] { Run(pull: 43), Run(repository: "fork/repo"), Run(commit: head),
+        Run(commit: "bad") })
+        Require(Select(invalid).Length == 0, "Unrelated run accepted");
     Require(Select(Run(), related: false).Length == 0, "Nonancestor accepted");
 });
 
@@ -274,5 +278,55 @@ Test("archive digest belongs to the same successful producer log as its manifest
             archive == Other ? result == new CertifiedLibraryDonor.Selection(7, 70, Digest, Other) : result is null,
             "Packed or legacy donor digest mismatch");
     }
+});
+JsonElement PreparedRun(long run, string conclusion) => Json($$"""
+    {"jobs":[
+      {"id":{{run * 100}},"name":"Prepare certified Lean library","run_attempt":1,"conclusion":"{{conclusion}}"},
+      {"id":{{run * 100 + 1}},"name":"Verify (evidence)","run_attempt":1,"conclusion":"failure"}]}
+    """);
+JsonElement LiveArtifact(long run) => Json($$$"""
+    {"artifacts":[{"id":{{{run * 10}}},"name":"certified-library-{{{run}}}-1","expired":false,
+      "expires_at":"2026-11-05T00:00:00Z","workflow_run":{"id":{{{run}}}}}]}
+    """);
+Test("a run whose suites failed donates through its successful prepare job", () =>
+{
+    // Run 7's evidence suite failed after its prepare job certified and logged the library.
+    var result = CertifiedLibraryDonor.Find([7, 8], (run, suffix) =>
+        suffix.StartsWith("/jobs", StringComparison.Ordinal) ? PreparedRun(run, "success") : LiveArtifact(run),
+        job => CertifiedLibraryDonor.DigestLine + (job == 700 ? Digest : Other), now, _ => { });
+    Require(result == new CertifiedLibraryDonor.Selection(7, 70, Digest), "Failed-suite run did not donate");
+});
+Test("a run whose prepare job failed or was cancelled never donates", () =>
+{
+    foreach (var conclusion in new[] { "failure", "cancelled", "skipped" })
+    {
+        var logs = new List<long>();
+        var result = CertifiedLibraryDonor.Find([7, 8], (run, suffix) =>
+            suffix.StartsWith("/jobs", StringComparison.Ordinal)
+                ? PreparedRun(run, run == 7 ? conclusion : "success") : LiveArtifact(run),
+            job => { logs.Add(job); return CertifiedLibraryDonor.DigestLine + Digest; }, now, _ => { });
+        Require(result == new CertifiedLibraryDonor.Selection(8, 80, Digest) && logs.SequenceEqual([800L]),
+            "A " + conclusion + " prepare job donated or had its log trusted");
+    }
+});
+Test("a same-PR ancestor is preferred over main, which is not queried once it donates", () =>
+{
+    const long ancestor = 5, main = 6;
+    var queried = new List<string>();
+    IEnumerable<long> Source(string name, params long[] runs)
+    {
+        queried.Add(name);
+        return runs;
+    }
+    var candidates = CertifiedLibraryDonor.Candidates(() => Source("commit"), () => Source("ancestors", ancestor),
+        () => Source("merged"), () => Source("base", main), () => Source("recent", main));
+    var result = CertifiedLibraryDonor.Find(candidates, (run, suffix) =>
+        suffix.StartsWith("/jobs", StringComparison.Ordinal) ? PreparedRun(run, "success") : LiveArtifact(run),
+        job => CertifiedLibraryDonor.DigestLine + Digest, now, _ => { });
+    Require(result == new CertifiedLibraryDonor.Selection(ancestor, 50, Digest), "Main preferred over ancestor");
+    Require(queried.SequenceEqual(["commit", "ancestors"]), "Main queried before the ancestor was tried: " +
+        string.Join(", ", queried));
+    Require(CertifiedLibraryDonor.Candidates(() => [1], () => [2], () => [3], () => [4], () => [5])
+        .SequenceEqual([1L, 2, 3, 4, 5]), "Donor sources out of order");
 });
 Console.WriteLine($"All {checks} certified library donor checks passed.");

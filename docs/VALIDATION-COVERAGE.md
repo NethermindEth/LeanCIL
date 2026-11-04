@@ -418,8 +418,8 @@ CI prepares the certified library once per workflow attempt and passes its immut
 the run that uploaded it and its manifest digest from the producer job to the suite jobs. The
 producer first looks for a library already certified by a run of the same commit. On push events it
 next checks at most ten associated merged PRs from the same repository, requiring their merge commit
-to be this push and their complete Git tree to match exactly. Successful runs of those heads precede
-the main push of the checkout's first parent. API failures or absent eligible artifacts retain the
+to be this push and their complete Git tree to match exactly. Runs of those heads whose prepare job
+succeeded, whatever their suites concluded, precede the main push of the checkout's first parent. API failures or absent eligible artifacts retain the
 older-main/source-build fallback. Their own trusted code built that library and printed its digest,
 so the digest is read from the donor job's log, never from the artifact. `PrepareLibrary.cs --reuse`
 then rechecks the library key and source binding and kernel-replays the library; any mismatch, or no

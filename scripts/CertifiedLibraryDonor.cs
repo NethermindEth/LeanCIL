@@ -23,6 +23,18 @@ static class CertifiedLibraryDonor
         }
     }
 
+    /// <summary>
+    /// Donor runs in order of preference: this commit, same-PR ancestors, identical merged PR trees, the
+    /// base main push, then recent main pushes. A source is queried only after earlier ones are exhausted.
+    /// </summary>
+    public static IEnumerable<long> Candidates(Func<IEnumerable<long>> commit, Func<IEnumerable<long>> pullAncestors,
+        Func<IEnumerable<long>> mergedPulls, Func<IEnumerable<long>> baseMain, Func<IEnumerable<long>> recentMain)
+    {
+        foreach (var source in new[] { commit, pullAncestors, mergedPulls, baseMain, recentMain })
+        foreach (var run in source())
+            yield return run;
+    }
+
     /// <summary>Finds a complete authenticated candidate; failures never supply partial evidence.</summary>
     public static Selection? Find(IEnumerable<long> runs, Func<long, string, JsonElement> api,
         Func<long, string> log, DateTimeOffset now, Action<string> warning)
@@ -87,7 +99,10 @@ static class CertifiedLibraryDonor
                 Regex.IsMatch(run.GetProperty("head_sha").GetString() ?? "", "^[0-9a-f]{40}$"))
             .Select(run => run.GetProperty("id").GetInt64()).Where(id => id > 0).Distinct();
 
-    /// <summary>Earlier successful runs of this same-repository PR, restricted to ancestors of its head.</summary>
+    /// <summary>
+    /// Earlier runs of this same-repository PR on ancestors of its head, nearest first. A run whose
+    /// suites failed still donates; <see cref="Find"/> admits only its successful prepare job.
+    /// </summary>
     public static IEnumerable<long> PullAncestors(JsonElement runs, string repository, int pull, string head,
         Func<string, bool> isAncestor, int limit)
     {
@@ -95,8 +110,6 @@ static class CertifiedLibraryDonor
         foreach (var run in runs.GetProperty("workflow_runs").EnumerateArray().Take(limit))
         {
             if (run.GetProperty("event").GetString() != "pull_request" ||
-                run.GetProperty("status").GetString() != "completed" ||
-                run.GetProperty("conclusion").GetString() != "success" ||
                 !SameRepository(run.GetProperty("head_repository"), repository) ||
                 !run.GetProperty("pull_requests").EnumerateArray().Any(request =>
                     request.GetProperty("number").GetInt32() == pull)) continue;
