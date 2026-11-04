@@ -1426,7 +1426,7 @@ partial class Program : IDisposable
 
     /// <summary>
     /// Publishes a freshly built library, or authenticates one restored under a trusted digest. A restored
-    /// library is also kernel-replayed unless its producer ran this commit's producer code.
+    /// library is also kernel-replayed unless its producer ran reviewed producer code.
     /// </summary>
     string PrepareLibrary(string destination, string? trustedDigest = null, bool producerReplayed = false)
     {
@@ -1534,7 +1534,7 @@ partial class Program : IDisposable
     /// <summary>
     /// The trusted digest when every file of the library matches the manifest it names and the manifest
     /// binds the current sources, or null. The library is not replayed, so a caller relies on a producer
-    /// that ran the same producer code and kernel-replayed every module.
+    /// that ran reviewed producer code and kernel-replayed every module.
     /// </summary>
     string? ReusePreparedLibrary(string directory, string? trustedDigest)
     {
@@ -1547,7 +1547,7 @@ partial class Program : IDisposable
 
     /// <summary>
     /// Like <see cref="ReusePreparedLibrary"/>, but also kernel-replays every module, for a library whose
-    /// producer ran other code, such as a release asset or a donor with changed CI scripts.
+    /// producer may have run other code, such as a release asset or a PR that changed CI scripts.
     /// </summary>
     string? ReplayPreparedLibrary(string directory, string trustedDigest)
     {

@@ -13,7 +13,7 @@ if (args is not ([_] or [_, "--reuse", _] or [_, "--reuse", _, "--producer-repla
 var directory = args[0];
 var reuse = args[1..] is ["--reuse", ..];
 var trustedDigest = reuse ? args[2] : null;
-// Only a producer whose commit had this commit's producer code, per run metadata, skips replay.
+// Only a producer that ran reviewed producer code, per run metadata, skips replay.
 var producerReplayed = args is [.., "--producer-replayed"];
 
 // Fresh production must not inherit a supplied library from a consumer's environment.
@@ -32,7 +32,7 @@ var digest = args is [_, "--extend", _, _] ? verifier.ExtendPreparedLibrary(dire
     : verifier.PrepareLibrary(directory, trustedDigest, producerReplayed);
 if (trustedDigest is not null)
     Console.WriteLine("Reusing certified library for identical sources and toolchain" +
-        (producerReplayed ? "; its producer ran this producer code and replayed it" : " after kernel replay"));
+        (producerReplayed ? "; its producer ran reviewed code and replayed it" : " after kernel replay"));
 Console.WriteLine("Certified library manifest SHA256: " + digest);
 if (Environment.GetEnvironmentVariable("GITHUB_OUTPUT") is { Length: > 0 } output)
     File.AppendAllText(output, "manifest-sha256=" + digest + Environment.NewLine);

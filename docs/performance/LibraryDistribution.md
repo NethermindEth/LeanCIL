@@ -13,7 +13,7 @@ outputs. Restoration checks the archive digest before decompression, rejects tra
 links, special entries and duplicate paths, then checks the manifest digest before publishing
 the restored directory. File executable permissions are preserved. Existing library source,
 toolchain and file-hash checks still run afterward, followed by kernel replay unless the producer
-ran this commit's producer code.
+ran reviewed producer code.
 
 Older raw-directory artifacts remain usable when their producer has no archive digest. An
 archive without its trusted digest cannot take this compatibility path. A failed donor restore

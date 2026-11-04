@@ -64,48 +64,60 @@ static class CertifiedLibraryDonor
         "Directory.Build.props", "Directory.Packages.props", ".editorconfig"];
 
     /// <summary>
-    /// Whether two commits hold identical git objects at every producer path, read from the repository's
-    /// trees rather than the donated bytes. Missing or malformed metadata answers false.
+    /// Whether a donor run executed reviewed producer code, from GitHub run and repository metadata alone:
+    /// a push to main, or a same-repository PR whose head leaves every producer path as its merge base
+    /// with main has it, so the merge commit it built ran main's producer code. Anything else, including
+    /// missing metadata or an unknown merge base, answers false and the library is replayed.
     /// </summary>
-    public static bool SameProducer(string? donorCommit, string currentCommit, Func<string, JsonElement> git,
+    public static bool ReviewedProducer(JsonElement run, string repository, Func<string, JsonElement> api,
         Action<string> warning)
     {
-        if (donorCommit is null || !Regex.IsMatch(donorCommit, "^[0-9a-f]{40}$") ||
-            !Regex.IsMatch(currentCommit, "^[0-9a-f]{40}$")) return false;
-        if (donorCommit == currentCommit) return true;
-        var trees = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
-        string Entry(string commit, string path)
-        {
-            if (!trees.TryGetValue(commit, out var described))
-                trees[commit] = described = git("git/commits/" + commit);
-            string sha = described.GetProperty("tree").GetProperty("sha").GetString() ?? "", kind = "tree";
-            foreach (var component in path.Split('/'))
-            {
-                if (!Regex.IsMatch(sha, "^[0-9a-f]{40}$") || kind != "tree")
-                    throw new FormatException("Invalid producer tree " + sha);
-                if (!trees.TryGetValue(sha, out var listing)) trees[sha] = listing = git("git/trees/" + sha);
-                // A truncated listing could omit the entry, which would read as absent.
-                if (listing.TryGetProperty("truncated", out var truncated) && truncated.GetBoolean())
-                    throw new InvalidOperationException("Truncated tree " + sha);
-                var entry = listing.GetProperty("tree").EnumerateArray()
-                    .Where(item => item.GetProperty("path").GetString() == component).ToArray();
-                if (entry.Length == 0) return "absent";
-                sha = entry[0].GetProperty("sha").GetString() ?? "";
-                kind = entry[0].GetProperty("type").GetString() ?? "";
-            }
-            if (!Regex.IsMatch(sha, "^[0-9a-f]{40}$")) throw new FormatException("Invalid tree entry " + sha);
-            return kind + " " + sha;
-        }
         try
         {
-            return ProducerPaths.All(path => Entry(donorCommit, path) == Entry(currentCommit, path));
+            if (run.GetProperty("head_repository").ValueKind != JsonValueKind.Object ||
+                !SameRepository(run.GetProperty("head_repository"), repository)) return false;
+            var trigger = run.GetProperty("event").GetString();
+            if (trigger == "push") return run.GetProperty("head_branch").GetString() == "main";
+            var head = run.GetProperty("head_sha").GetString() ?? "";
+            if (trigger != "pull_request" || !Regex.IsMatch(head, "^[0-9a-f]{40}$")) return false;
+            // A pull_request run builds the merge with main; the head's own commits decide its producer code.
+            var mergeBase = api("compare/main..." + head).GetProperty("merge_base_commit").GetProperty("sha")
+                .GetString() ?? "";
+            if (!Regex.IsMatch(mergeBase, "^[0-9a-f]{40}$")) return false;
+            var trees = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+            return ProducerPaths.All(path => ProducerObject(mergeBase, path, api, trees) ==
+                ProducerObject(head, path, api, trees));
         }
         catch (Exception error) when (error is InvalidOperationException or JsonException or Win32Exception or
                                       KeyNotFoundException or FormatException)
         {
-            warning("Donor producer trees unavailable; the library will be replayed. " + error.Message);
+            warning("Donor producer metadata unavailable; the library will be replayed. " + error.Message);
             return false;
         }
+    }
+
+    /// <summary>The git object at a path of a commit, or "absent"; a truncated or malformed listing throws.</summary>
+    static string ProducerObject(string commit, string path, Func<string, JsonElement> api,
+        Dictionary<string, JsonElement> trees)
+    {
+        if (!trees.TryGetValue(commit, out var described)) trees[commit] = described = api("git/commits/" + commit);
+        string sha = described.GetProperty("tree").GetProperty("sha").GetString() ?? "", kind = "tree";
+        foreach (var component in path.Split('/'))
+        {
+            if (!Regex.IsMatch(sha, "^[0-9a-f]{40}$") || kind != "tree")
+                throw new FormatException("Invalid producer tree " + sha);
+            if (!trees.TryGetValue(sha, out var listing)) trees[sha] = listing = api("git/trees/" + sha);
+            // A truncated listing could omit the entry, which would read as absent.
+            if (listing.TryGetProperty("truncated", out var truncated) && truncated.GetBoolean())
+                throw new InvalidOperationException("Truncated tree " + sha);
+            var entry = listing.GetProperty("tree").EnumerateArray()
+                .Where(item => item.GetProperty("path").GetString() == component).ToArray();
+            if (entry.Length == 0) return "absent";
+            sha = entry[0].GetProperty("sha").GetString() ?? "";
+            kind = entry[0].GetProperty("type").GetString() ?? "";
+        }
+        if (!Regex.IsMatch(sha, "^[0-9a-f]{40}$")) throw new FormatException("Invalid tree entry " + sha);
+        return kind + " " + sha;
     }
 
     /// <summary>Retries transient HTTP failures at most twice; unsuccessful responses are never parsed.</summary>

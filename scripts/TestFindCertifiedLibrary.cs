@@ -329,14 +329,26 @@ Test("a same-PR ancestor is preferred over main, which is not queried once it do
     Require(CertifiedLibraryDonor.Candidates(() => [1], () => [2], () => [3], () => [4], () => [5])
         .SequenceEqual([1L, 2, 3, 4, 5]), "Donor sources out of order");
 });
-Test("only a donor commit with this commit's producer trees skips replay", () =>
+Test("only a donor that ran reviewed producer code skips replay", () =>
 {
-    string donor = new('d', 40), current = new('c', 40);
+    string head = new('d', 40), mergeBase = new('b', 40);
+    JsonElement Run(string trigger = "pull_request", string branch = "feature", string repository = "owner/repo",
+        string? commit = null) => Json(JsonSerializer.Serialize(new
+        {
+            @event = trigger, head_branch = branch, head_sha = commit ?? head,
+            head_repository = new { full_name = repository }
+        }));
     // Each commit gets its own root and intermediate trees, so only the producer objects can agree.
-    Func<string, JsonElement> Repository(char donorWorkflow, char donorScripts, char currentWorkflow,
-        char currentScripts, bool truncated = false)
+    Func<string, JsonElement> Repository(char headWorkflow, char headScripts, bool truncated = false,
+        string? knownBase = null)
     {
-        var objects = new Dictionary<string, string>(StringComparer.Ordinal);
+        var objects = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["compare/main..." + head] = JsonSerializer.Serialize(new
+            {
+                merge_base_commit = new { sha = knownBase ?? mergeBase }
+            })
+        };
         string Tree(params (string Name, string Type, string Sha)[] entries) => JsonSerializer.Serialize(new
         {
             truncated, tree = entries.Select(entry => new { path = entry.Name, type = entry.Type, sha = entry.Sha })
@@ -351,33 +363,32 @@ Test("only a donor commit with this commit's producer trees skips replay", () =>
             objects["git/trees/" + Sha('3')] = Tree(("verification.yml", "blob", new string(workflow, 40)));
         }
         // Lean sources differ, which the library identity binds; only producer code decides replay.
-        Commit(donor, 'a', donorWorkflow, donorScripts, '7');
-        Commit(current, 'b', currentWorkflow, currentScripts, '8');
+        Commit(mergeBase, 'a', 'e', 'f', '7');
+        Commit(head, 'b', headWorkflow, headScripts, '8');
         return path => objects.TryGetValue(path, out var json) ? Json(json)
             : throw new InvalidOperationException("gh: Not Found (HTTP 404) " + path);
     }
-    var warnings = new List<string>();
-    Require(CertifiedLibraryDonor.SameProducer(donor, current, Repository('e', 'f', 'e', 'f'), warnings.Add),
-        "Identical producer trees replayed");
-    Require(CertifiedLibraryDonor.SameProducer(donor, donor, _ => throw new InvalidOperationException(),
-        warnings.Add), "The same commit needs no tree lookup");
-    Require(warnings.Count == 0, "Successful comparisons warned: " + string.Join("; ", warnings));
-    Console.WriteLine("PASS same producer trees: reuse without replay");
-    Require(!CertifiedLibraryDonor.SameProducer(donor, current, Repository('e', 'f', '9', 'f'), warnings.Add),
-        "Changed workflow skipped replay");
-    Require(!CertifiedLibraryDonor.SameProducer(donor, current, Repository('e', 'f', 'e', '9'), warnings.Add),
-        "Changed scripts tree skipped replay");
-    Console.WriteLine("PASS different workflow or scripts tree: replay");
-    Require(!CertifiedLibraryDonor.SameProducer(donor, current, Repository('e', 'f', 'e', 'f', truncated: true),
-        warnings.Add), "A truncated tree listing skipped replay");
-    foreach (var missing in new[] { null, "", donor[..7], new string('z', 40) })
-        Require(!CertifiedLibraryDonor.SameProducer(missing, current, Repository('e', 'f', 'e', 'f'),
-            warnings.Add), "Missing producer commit skipped replay");
-    Require(!CertifiedLibraryDonor.SameProducer(donor, current,
-        _ => throw new InvalidOperationException("gh: Server Error (HTTP 502)"), warnings.Add),
-        "Unavailable tree metadata skipped replay");
-    Require(!CertifiedLibraryDonor.SameProducer(donor, current, _ => Json("{}"), warnings.Add),
-        "Malformed tree metadata skipped replay");
-    Console.WriteLine("PASS missing, unavailable or truncated metadata: replay");
+    bool Reviewed(JsonElement run, Func<string, JsonElement> api) =>
+        CertifiedLibraryDonor.ReviewedProducer(run, "owner/repo", api, _ => { });
+    Func<string, JsonElement> unavailable = _ => throw new InvalidOperationException("gh: Server Error (HTTP 502)");
+    Require(Reviewed(Run(trigger: "push", branch: "main"), unavailable), "A main push donor was replayed");
+    Console.WriteLine("PASS a main push donor is trusted");
+    Require(Reviewed(Run(), Repository('e', 'f')), "A PR leaving producer paths unchanged was replayed");
+    Console.WriteLine("PASS a PR donor whose head leaves the producer paths unchanged is trusted");
+    Require(!Reviewed(Run(), Repository('e', '9')), "A PR that changed scripts/ skipped replay");
+    Require(!Reviewed(Run(), Repository('9', 'f')), "A PR that changed the workflow skipped replay");
+    Console.WriteLine("PASS a PR donor whose head changed scripts/ or the workflow is replayed");
+    foreach (var unknown in new[] { "", mergeBase[..7], new string('z', 40) })
+        Require(!Reviewed(Run(), Repository('e', 'f', knownBase: unknown)), "An unknown merge base skipped replay");
+    Require(!Reviewed(Run(), unavailable), "Unavailable merge base skipped replay");
+    Require(!Reviewed(Run(), path => path.StartsWith("compare/", StringComparison.Ordinal) ? Json("{}")
+        : Repository('e', 'f')(path)), "A comparison without a merge base skipped replay");
+    Require(!Reviewed(Run(), Repository('e', 'f', truncated: true)), "A truncated tree listing skipped replay");
+    Console.WriteLine("PASS an unknown merge base or unavailable tree is replayed");
+    foreach (var untrusted in new[] { Run(trigger: "push", branch: "feature"), Run(repository: "fork/repo"),
+        Run(trigger: "workflow_dispatch", branch: "main"), Run(commit: "abc123"),
+        Json("""{"event":"push","head_branch":"main","head_repository":null}"""), Json("{}") })
+        Require(!Reviewed(untrusted, Repository('e', 'f')), "Untrusted run metadata skipped replay: " + untrusted);
+    Console.WriteLine("PASS other branches, forks, events and missing metadata are replayed");
 });
 Console.WriteLine($"All {checks} certified library donor checks passed.");

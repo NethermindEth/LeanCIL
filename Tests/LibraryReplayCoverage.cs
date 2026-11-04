@@ -41,10 +41,10 @@ File.WriteAllText(Path.Combine(library, "library-key.txt"), key);
 File.WriteAllText(Path.Combine(library, "cache-manifest.json"), JsonSerializer.Serialize(CacheFiles(library)));
 var digest = Sha(Path.Combine(library, "cache-manifest.json"));
 
-// A donor that ran this commit's producer code is trusted; accepting a forgery shows no replay ran.
+// A donor that ran reviewed producer code is trusted; accepting a forgery shows no replay ran.
 if (verifier.PrepareLibrary(library, digest, producerReplayed: true) != digest)
-    throw new Exception("Same-producer reuse rejected a library its producer certified");
-Console.WriteLine("PASS reuse from a donor with the same producer code performs no kernel replay");
+    throw new Exception("Reviewed-producer reuse rejected a library its producer certified");
+Console.WriteLine("PASS reuse from a donor that ran reviewed producer code performs no kernel replay");
 if (verifier.ReusePreparedLibrary(library, new string('0', 64)) is not null)
     throw new Exception("Reuse accepted a manifest whose digest no producer logged");
 var forged = Path.Combine(library, ".lake/build/lib/lean/AUnaggregatedForgery.olean");
@@ -55,10 +55,10 @@ if (verifier.ReusePreparedLibrary(library, digest) is not null)
 File.WriteAllBytes(forged, forgedBytes);
 Console.WriteLine("PASS reuse without replay still rejects a digest mismatch and a tampered file");
 
-// Other producer code, a release asset or unknown provenance replays every module.
+// Unreviewed producer code, a release asset or unknown provenance replays every module.
 foreach (var (label, reuse) in new (string, Func<string?>)[]
 {
-    ("donor with other producer code", () => verifier.PrepareLibrary(library, digest)),
+    ("donor with unreviewed producer code", () => verifier.PrepareLibrary(library, digest)),
     ("release asset", () => verifier.ReplayPreparedLibrary(library, digest)),
 })
 {

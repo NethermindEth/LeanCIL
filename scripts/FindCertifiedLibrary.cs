@@ -31,19 +31,17 @@ if (selected is null)
     Console.WriteLine("No certified library to reuse; building from sources.");
 else
 {
-    // The producer commit comes from run metadata; the donated bytes cannot vouch for their own code.
-    var producer = CertifiedLibraryDonor.Available("Run " + selected.Run, () =>
-        new[] { Api(RunPath(selected.Run)).GetProperty("head_sha").GetString() }, Warning).FirstOrDefault();
-    var sameProducer = CertifiedLibraryDonor.SameProducer(producer, options["--head"],
-        path => Api($"repos/{repository}/{path}"), Warning);
+    // Run metadata, not the donated bytes, decides whether the producer ran reviewed code.
+    var reviewed = CertifiedLibraryDonor.Available("Run " + selected.Run, () =>
+        new[] { CertifiedLibraryDonor.ReviewedProducer(Api(RunPath(selected.Run)), repository,
+            path => Api($"repos/{repository}/{path}"), Warning) }, Warning).FirstOrDefault();
     File.AppendAllText(output,
         $"run-id={selected.Run}\nartifact-id={selected.Artifact}\nmanifest-sha256={selected.Digest}\n" +
-        $"archive-sha256={selected.ArchiveDigest}\nsame-producer={(sameProducer ? "true" : "false")}\n");
+        $"archive-sha256={selected.ArchiveDigest}\nreviewed-producer={(reviewed ? "true" : "false")}\n");
     Console.WriteLine($"Reusing artifact {selected.Artifact} from run {selected.Run} " +
         $"with manifest SHA256 {selected.Digest}");
-    Console.WriteLine(sameProducer
-        ? $"Producer commit {producer} has this commit's producer code; reuse skips kernel replay."
-        : $"Producer commit {producer ?? "unknown"} has other producer code; reuse kernel-replays the library.");
+    Console.WriteLine(reviewed ? "The donor ran reviewed producer code; reuse skips kernel replay."
+        : "The donor may have run unreviewed producer code; reuse kernel-replays the library.");
 }
 
 void Warning(string message) => Console.WriteLine("::warning::" + message);

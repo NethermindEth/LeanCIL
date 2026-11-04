@@ -462,8 +462,8 @@ Test("certified library binding, main republication and observability", () =>
         "if: steps.certify.outputs.reused != 'true' || " +
             "(github.event_name == 'push' && github.ref == 'refs/heads/main')",
         "--reuse \"" + dollar + "DONATED_SHA256\" \"" + dollar + "{producer[@]}\"",
-        "SAME_PRODUCER: " + dollar + "{{ steps.donor.outputs.same-producer }}",
-        "if [ \"" + dollar + "SAME_PRODUCER\" = true ]; then producer=(--producer-replayed); fi",
+        "REVIEWED_PRODUCER: " + dollar + "{{ steps.donor.outputs.reviewed-producer }}",
+        "if [ \"" + dollar + "REVIEWED_PRODUCER\" = true ]; then producer=(--producer-replayed); fi",
         "name: verification-results-" + dollar + "{{ matrix.suite }}-" + dollar + "{{ github.run_attempt }}",
         "archive-sha256: " + dollar + "{{ steps.pack-library.outputs.archive-sha256 || " +
             "steps.donor.outputs.archive-sha256 }}",
