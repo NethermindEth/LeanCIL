@@ -189,7 +189,7 @@ names both. At a return `cil_loop_finish` closes the results and confinement and
 rest of the postcondition. The proofs select what the tactics leave by its obligation tag, so a
 dropped or renamed tag fails the build: `invariant` and `measure` after `cil_loop_recurse`,
 `precondition.stampMethod` for a named callee's open precondition, the third conjunct's
-`postcondition.«3»` when the exit facts close the first two, and the numbered invariant parts and
+`postcondition.part3` when the exit facts close the first two, and the numbered invariant parts and
 `measure` of a three-condition head hypothesis. A loop tactic run on that precondition names it,
 and a mistyped `case` is Lean's error, checked to offer the open tags whatever its wording.
 

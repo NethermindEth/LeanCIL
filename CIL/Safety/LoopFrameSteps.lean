@@ -280,7 +280,7 @@ partial def loopConjuncts (goal : MVarId) : MetaM (Array MVarId) := do
 
 /-- Split a postcondition goal into its conjuncts, closing each that `close` proves and leaving
     the rest in order, each tagged by its place among all the conjuncts: `postcondition` when
-    there is one, else `postcondition.«2»` for the second, whichever others close. -/
+    there is one, else `postcondition.part2` for the second, whichever others close. -/
 def loopCloseConjuncts (close : TacticM Unit) : TacticM Unit := do
   let conjuncts ← loopConjuncts (← getMainGoal)
   tagNumbered `postcondition conjuncts

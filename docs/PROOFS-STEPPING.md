@@ -368,26 +368,26 @@ after `cil_loop_advance` or the continuation after `cil_loop_call`, keeps the ta
 
 | Tag | Obligation | Left by |
 | --- | --- | --- |
-| `invariant`, `invariant.«<n>»` | the loop head's invariant at the reached state, or its `n`th part | `cil_loop_recurse`, `cil_loop_continue` |
+| `invariant`, `invariant.part<n>` | the loop head's invariant at the reached state, or its `n`th part | `cil_loop_recurse`, `cil_loop_continue` |
 | `measure` | the measure's decrease at a back edge | `cil_loop_recurse`, `cil_loop_continue` |
 | `precondition.<callee>` | the callee contract's precondition | `cil_loop_call`, `cil_loop_outcome_call`, `cil_loop_outcome_raise`, `cil_contract_call`, `cil_formed_call`, `cil_certified_call`, `cil_contract_certified_call`, `cil_outcome_call`, `cil_formed_outcome_call`, `cil_outcome_raise`, `cil_contract_steps`, `cil_contract_construct` |
 | `wellFormed` | the caller memory's `WellFormed` | `cil_formed_call`, `cil_formed_outcome_call`, `cil_contract_certified_call`, `cil_contract_construct` |
 | `staticWorld` | the caller memory's static world | `cil_contract_certified_call` |
 | `raises` | the callee's `raises` equation | `cil_loop_outcome_call`, `cil_loop_outcome_raise`, `cil_outcome_call`, `cil_formed_outcome_call`, `cil_outcome_raise` |
-| `postcondition`, `postcondition.«<n>»` | the postcondition at a return, or its `n`th conjunct | `cil_loop_finish`, `cil_contract_steps` |
+| `postcondition`, `postcondition.part<n>` | the postcondition at a return, or its `n`th conjunct | `cil_loop_finish`, `cil_contract_steps` |
 
 The callee part of a precondition tag is the last component of the callee's constant, such as
 `precondition.stamp` for a `bind_callee stamp`; a callee given as a literal index leaves the bare
 `precondition`. `case precondition` selects either, since `case` also matches a tag's prefix.
 `cil_loop_finish` numbers the conjuncts it leaves by their place among all the postcondition's
-conjuncts, `postcondition.«2»` for the second, so a conjunct keeps its tag whichever others the
+conjuncts, `postcondition.part2` for the second, so a conjunct keeps its tag whichever others the
 exit facts close, and `case postcondition` selects the first left; a postcondition that is not a
-conjunction is left as `postcondition`. A number is a quoted component, since `case` reads a
-bare `.2` as a projection. A loop head hypothesis with one condition leaves `invariant`, as the
-entry hypothesis of `invoke_loop_induction` does; one with more leaves its last, the back edge's
-decrease, as `measure`, and the others as the invariant's parts, `invariant` for one, as in the
-iteration hypothesis, and `invariant.«1»`, `invariant.«2»`, ... for several. A mistyped tag is Lean's `Case tag ... not found` error, which lists
-the tags of the open goals. A loop tactic handed a tagged obligation instead of a loop path says
+conjunction is left as `postcondition`. A loop head hypothesis with one condition leaves
+`invariant`, as the entry hypothesis of `invoke_loop_induction` does; one with more leaves its
+last, the back edge's decrease, as `measure`, and the others as the invariant's parts,
+`invariant` for one, as in the iteration hypothesis, and `invariant.part1`, `invariant.part2`,
+... for several. A mistyped tag is Lean's `Case tag ... not found` error, which lists the tags
+of the open goals. A loop tactic handed a tagged obligation instead of a loop path says
 which obligation the main goal is and how to select it. The tags are the proof API:
 
 ```lean
@@ -398,9 +398,9 @@ open CIL.Safety
 example : obligationTags =
     [`invariant, `measure, `precondition, `wellFormed, `staticWorld, `raises, `postcondition] :=
   rfl
-#guard obligationOf? `postcondition.«2» == some `postcondition
-#guard numberedTags `postcondition 2 == #[`postcondition.«1», `postcondition.«2»]
-#guard recurseConditionTags 3 == #[`invariant.«1», `invariant.«2», `measure]
+#guard obligationOf? `postcondition.part2 == some `postcondition
+#guard numberedTags `postcondition 2 == #[`postcondition.part1, `postcondition.part2]
+#guard recurseConditionTags 3 == #[`invariant.part1, `invariant.part2, `measure]
 #guard obligationOf? `precondition.stamp == some `precondition
 #guard obligationOf? `refine_2 == none
 ```

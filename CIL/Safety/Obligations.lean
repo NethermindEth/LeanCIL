@@ -18,21 +18,21 @@ open Lean Elab Tactic Meta
     the loop head's `invariant` and the `measure`'s decrease at a back edge, a callee's
     `precondition` (refined by the callee, as `precondition.stamp`), the caller memory's
     `wellFormed` and `staticWorld` a call or construction needs, the callee's `raises` equation,
-    and the `postcondition` at a return (`postcondition.«2»` for its second conjunct). -/
+    and the `postcondition` at a return (`postcondition.part2` for its second conjunct). -/
 def obligationTags : List Name :=
   [`invariant, `measure, `precondition, `wellFormed, `staticWorld, `raises, `postcondition]
 
 /-- The obligation `tag` names, as its first component, when it is one of `obligationTags`;
-    a numbered part such as `postcondition.«2»` is the `postcondition`. -/
+    a numbered part such as `postcondition.part2` is the `postcondition`. -/
 def obligationOf? (tag : Name) : Option Name :=
   let base := tag.eraseMacroScopes.components.head?.getD .anonymous
   if obligationTags.contains base then some base else none
 
 /-- The tags of `count` parts of the obligation `base`, in order: `base` for a single part, and
-    `base.«1»`, `base.«2»`, ... for several, so `case base` selects the first by prefix. -/
+    `base.part1`, `base.part2`, ... for several, so `case base` selects the first by prefix. -/
 def numberedTags (base : Name) (count : Nat) : Array Name :=
   if count == 1 then #[base]
-  else (List.range count).toArray.map fun index => base.str (toString (index + 1))
+  else (List.range count).toArray.map fun index => base.str s!"part{index + 1}"
 
 /-- The tag of the precondition of the callee a contract proof's type names: `precondition`
     refined by the callee's constant, such as `precondition.stamp`, or bare when the callee is

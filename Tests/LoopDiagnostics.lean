@@ -631,7 +631,7 @@ example (memory : Memory) (count : W32) (buffer home : Reference) (current : Mem
         Confined [(buffer, 4)] memory final) ∧ Contents final buffer 4 [count])
       ⟨15, stampsEntry.frame memory home, [], current⟩ := by
   cil_loop_finish
-  case postcondition.«3» => exact stored _
+  case postcondition.part3 => exact stored _
 
 -- A call whose stacked argument is not the contract's names both.
 /-- error: cil_loop_call: the call at pc 7 (CIL.Op.call 1 2) does not take the contract's
@@ -739,7 +739,7 @@ example (memory current : Memory) (value total : W32) (home : Reference)
       ⟨3, markedEntry.frame memory home, [], current⟩ := by
   cil_loop_recurse recurse (total + 1)
   case measure => exact fun same => by bv_omega
-  case invariant.«2» => trivial
+  case invariant.part2 => trivial
   case invariant => rfl
 
 end Tests.LoopDiagnostics
