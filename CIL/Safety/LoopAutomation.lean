@@ -301,9 +301,9 @@ def loopStepResidual (step : MVarId) (prepared : Array Term) : TacticM (Option (
   try
     let remaining ← Tactic.run step <| Term.withoutErrToSorry <| withoutRecover <|
       evalTactic (← `(tactic| (
-        simp only [cil_instruction_step, cil_step, cil_guard, CIL.Safety.instructionStep,
+        simp -bitVecOfNat only [cil_instruction_step, cil_step, cil_guard, CIL.Safety.instructionStep,
           $[$prepared:term],*]
-        try simp [cil_guard, cil_checked, CIL.Safety.checkedValue, CIL.Safety.numericValue,
+        try simp -bitVecOfNat [cil_guard, cil_checked, CIL.Safety.checkedValue, CIL.Safety.numericValue,
           CIL.Safety.scalars, CIL.Safety.formValue, CIL.Safety.checkedAt, Except.mapError,
           Bind.bind, Except.bind, Pure.pure, Except.pure, $[$prepared:term],*])))
     let goals ← remaining.mapM fun goal => do instantiateMVars (← goal.getType)
@@ -392,8 +392,8 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepa
   let stackLemmas : Array Term := loopStackLemmas.map fun name => mkIdent (`_root_ ++ name)
   let core := facts.core
   let withStack := core ++ stackLemmas
-  let rewrite ← `(tactic| simp only [$[$core:term],*])
-  let rewriteStack ← `(tactic| simp only [$[$withStack:term],*])
+  let rewrite ← `(tactic| simp -bitVecOfNat only [$[$core:term],*])
+  let rewriteStack ← `(tactic| simp -bitVecOfNat only [$[$withStack:term],*])
   let close ← `(tactic| exact CIL.Safety.loop_reaches_refl)
   -- Each group of `LoopFacts.readBy`, once normalised.
   let mut normalised : Array (Option (Array Term)) := #[none, none, none, none]
@@ -476,10 +476,10 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepa
           · cil_checked_step_normalized [$[$reading:term],*]
           · rfl
           · first
-            | simp [$[$reading:term],*]; done
+            | simp -bitVecOfNat [$[$reading:term],*]; done
             -- Frame cleanup only after the facts fail, since unfolding `leaveFrame` first
             -- would hide it from a supplied fact about the exited frame's memory.
-            | simp [CIL.Safety.leaveFrame, CIL.NarrowKind.extend, $[$reading:term],*]))
+            | simp -bitVecOfNat [CIL.Safety.leaveFrame, CIL.NarrowKind.extend, $[$reading:term],*]))
       if ← attempt finish then continue
       -- A return whose results or postcondition the facts do not prove is left as the goal.
       return some op

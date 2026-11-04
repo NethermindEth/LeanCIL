@@ -294,10 +294,10 @@ theorem loadValue_signed_of_read {memory : Memory} {reference : Reference} {widt
     equations in `InstructionSteps` are closed. -/
 local macro "field_step_proof " generic:ident : tactic => `(tactic| (
   rw [$generic:ident]
-  simp only [instructionStep, instruction, cil_guard, unspecifiedOperands, List.take, List.any,
+  simp -bitVecOfNat only [instructionStep, instruction, cil_guard, unspecifiedOperands, List.take, List.any,
     Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false, bind_assoc, pure_bind,
     referenceAt, valueSnapshot, ite_true, writeSnapshot_initialized]
-  all_goals first | rfl | (split <;> (try simp only [bind_assoc, pure_bind]) <;> rfl)))
+  all_goals first | rfl | (split <;> (try simp -bitVecOfNat only [bind_assoc, pure_bind]) <;> rfl)))
 
 /-- A 16-byte vector field store writes the vector's bytes at the field address. -/
 theorem step_setFieldAt_v128_eq (body : CIL.Method) (pc : Nat) (args : List Value)

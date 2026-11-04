@@ -681,7 +681,7 @@ macro "cil_managed_calls" "[" facts:term,* "]" : tactic =>
        refine ⟨?_, ?_, ?_⟩
        · rfl
        · rfl
-       · simp [all3, validateManagedCall, validateManagedCallWith, managedCallTarget,
+       · simp -bitVecOfNat [all3, validateManagedCall, validateManagedCallWith, managedCallTarget,
            $[$facts:term],*] <;>
            decide +kernel)
     | decide +kernel)

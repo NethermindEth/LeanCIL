@@ -18,7 +18,7 @@ private theorem bind_ite {α β : Type} (c : Prop) [Decidable c] (a b : Executio
 /-- Closes one memory step equation through `step` and both memory dispatchers. Both
     dispatchers check the same operands, so a decided guard leaves one arm and no `if`. -/
 local macro "memory_step_proof" : tactic => `(tactic| (
-  simp only [step, staticInstruction, memoryInstruction, spanFillInstruction, spanCopyInstruction,
+  simp -bitVecOfNat only [step, staticInstruction, memoryInstruction, spanFillInstruction, spanCopyInstruction,
     otherMemoryInstruction, wideArithmeticInstruction, referenceAddInstruction,
     vector128UnsafeInstruction,
     displaceReference, observerCount,
@@ -26,7 +26,7 @@ local macro "memory_step_proof" : tactic => `(tactic| (
     Bool.or_false, Bool.false_eq_true, ite_false, ite_true, CIL.offsetValue, cil_guard, bind_ite,
     bind_assoc, pure_bind]
   all_goals (repeat' split) <;>
-    (try simp only [*, Bool.false_eq_true, ite_false, ite_true, bind_assoc, pure_bind]) <;> rfl))
+    (try simp -bitVecOfNat only [*, Bool.false_eq_true, ite_false, ite_true, bind_assoc, pure_bind]) <;> rfl))
 
 section MemoryEquations
 

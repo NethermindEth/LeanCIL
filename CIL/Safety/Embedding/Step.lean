@@ -188,10 +188,10 @@ macro "step_observers" : tactic => `(tactic| (
   first
   | (obtain ⟨observed, h⟩ := observer_ok h
      dsimp only [observerCount] at observed h ⊢
-     simp only [observed, Bool.false_eq_true, ite_false])
+     simp -bitVecOfNat only [observed, Bool.false_eq_true, ite_false])
   | (obtain ⟨observed, h⟩ := observer_thrown h
      dsimp only [observerCount] at observed h ⊢
-     simp only [observed, Bool.false_eq_true, ite_false])
+     simp -bitVecOfNat only [observed, Bool.false_eq_true, ite_false])
   | skip))
 
 set_option hygiene false in
@@ -218,11 +218,11 @@ theorem except_bind_ok {x : Except ε α} {f : α → Except ε β} {y : β}
 set_option hygiene false in
 /-- Replays the shared monadic prefix of both steps, then matches the final action. -/
 macro "lockstep" : tactic => `(tactic| (
-  repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+  repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp -bitVecOfNat only [found, ok_bind_eq])
   cases h
   first
   | rfl
-  | (simp only [FrameAction.relabel]; rw [context.next rfl]; rfl)))
+  | (simp -bitVecOfNat only [FrameAction.relabel]; rw [context.next rfl]; rfl)))
 
 set_option hygiene false in
 /-- Introduces a `StepRelabel` or `StepRaise` goal, unfolds both steps and clears the guard. -/
@@ -278,7 +278,7 @@ set_option hygiene false in
 macro "lookup_lockstep" : tactic => `(tactic| (
   split at h
   · rename_i found
-    (try simp only [found])
+    (try simp -bitVecOfNat only [found])
     lockstep
   · cases h))
 
@@ -870,7 +870,7 @@ macro "fallback_raise_vacuous" : tactic => `(tactic|
 set_option hygiene false in
 /-- Replays the shared monadic prefix of both steps up to the bind that throws. -/
 macro "raise_lockstep" : tactic => `(tactic| (
-  repeat (rcases except_bind_error h with found | ⟨_, found, h⟩ <;> simp only [found,
+  repeat (rcases except_bind_error h with found | ⟨_, found, h⟩ <;> simp -bitVecOfNat only [found,
     error_bind_eq, ok_bind_eq])
   first | exact h | cases h))
 
@@ -879,7 +879,7 @@ set_option hygiene false in
 macro "lookup_raise" : tactic => `(tactic| (
   split at h
   · rename_i found
-    (try simp only [found])
+    (try simp -bitVecOfNat only [found])
     raise_lockstep
   · cases h))
 

@@ -135,6 +135,6 @@ macro_rules
     `(tactic| (
       apply numeric_store_vc $kind $value _ (by rfl) $ready
       intro $updated $stored $loaded $writable
-      simp only [localResult, BitVec.ofNat_eq_ofNat] at $stored $loaded))
+      simp -bitVecOfNat only [localResult, BitVec.ofNat_eq_ofNat] at $stored $loaded))
 
 end CIL.Safety

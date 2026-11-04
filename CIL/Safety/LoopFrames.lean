@@ -38,7 +38,7 @@ syntax "cil_listed_locals" : tactic
 
 macro_rules
   | `(tactic| cil_listed_locals) =>
-    `(tactic| ((conv => lhs; try simp only [List.set, CIL.Safety.localResult]) <;> rfl))
+    `(tactic| ((conv => lhs; try simp -bitVecOfNat only [List.set, CIL.Safety.localResult]) <;> rfl))
 
 /-- Remembering a new value of a listed local lists that value in its place. -/
 theorem rememberLocal_knownLocals {values : List (Option CIL.Value)} {index : Nat}

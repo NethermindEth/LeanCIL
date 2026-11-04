@@ -69,6 +69,15 @@ def factInstances (proof : Expr) : TermElabM (Array Expr) := do
         instances := instances.push (mkApp proof (mkConst ctor))
   return instances
 
+open Lean in
+/-- `config` with `-bitVecOfNat` last, so the simp it configures keeps literals in the spec's
+    `OfNat` spelling, as every simp call of the tactics does. -/
+def literalConfig {m : Type → Type} [Monad m] [MonadQuotation m]
+    (config : TSyntax ``Lean.Parser.Tactic.optConfig) :
+    m (TSyntax ``Lean.Parser.Tactic.optConfig) := do
+  let literal ← `(Lean.Parser.Tactic.optConfig| -bitVecOfNat)
+  return ⟨config.raw.modifyArg 0 (·.modifyArgs (· ++ literal.raw[0].getArgs))⟩
+
 open Lean Elab Tactic Meta in
 /-- `facts`, followed by new hypotheses restating them in simp-normal form. The goal's subterms
     reach simp-normal form before a hypothesis can rewrite them, so a fact stated in another
@@ -77,6 +86,7 @@ open Lean Elab Tactic Meta in
     method's profile, with the other supplied facts. -/
 def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
     (facts : Array Term) : TacticM (Array Term) := withMainContext do
+    let config ← literalConfig config
     let isLocal (fact : Term) : TacticM Bool :=
       return fact.raw.isIdent && ((← getLCtx).findFromUserName? fact.raw.getId).isSome
     let locals ← facts.filterM isLocal
@@ -142,6 +152,7 @@ def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
 open Lean Elab Tactic Meta in
 elab_rules : tactic
   | `(tactic| cil_fact_simp $config:optConfig [$lemmas:term,*] [$facts:term,*]) => do
+    let config ← literalConfig config
     let prepared ← normaliseStepFacts config facts.getElems
     let all := lemmas.getElems ++ #[← `(term| cil_guard), ← `(term| CIL.fin_val_three),
       ← `(term| CIL.fin_mk_ofNat)] ++ prepared
@@ -210,7 +221,7 @@ elab_rules : tactic
     -- Built as a term: `refine` cannot assign the caller's op metavariable inside a term-mode
     -- `by`.
     try
-      let decide ← `(tactic| simp only [Bool.false_eq_true, Bool.true_eq_false, eq_self_iff_true,
+      let decide ← `(tactic| simp -bitVecOfNat only [Bool.false_eq_true, Bool.true_eq_false, eq_self_iff_true,
         ite_true, ite_false, dite_true, dite_false, Bool.cond_true, Bool.cond_false, ↓reduceIte,
         ↓reduceDIte, $[$facts:term],*])
       let { ctx, simprocs, .. } ← mkSimpContext decide (eraseLocal := false)
@@ -269,7 +280,7 @@ elab_rules : tactic
         let placedTerm ← Term.exprToSyntax placement
         let indexTerm : Term := ⟨Syntax.mkNumLit (toString index)⟩
         evalTactic (← `(tactic| cil_strict
-          (simpa only [Nat.add_assoc, Nat.add_zero, Nat.reduceAdd] using
+          (simpa -bitVecOfNat only [Nat.add_assoc, Nat.add_zero, Nat.reduceAdd] using
             (CodeAt.lookup $placedTerm $indexTerm rfl))))
         return
       catch _ => saved.restore
@@ -283,18 +294,18 @@ macro_rules
   | `(tactic| cil_lookup [$facts:term,*]) =>
   `(tactic| first
     | cil_lookup_assumption
-    | (simp only [cil_code, Nat.reduceAdd]; cil_lookup_rfl [$[$facts:term],*])
+    | (simp -bitVecOfNat only [cil_code, Nat.reduceAdd]; cil_lookup_rfl [$[$facts:term],*])
     | cil_lookup_rfl [$[$facts:term],*]
     | cil_lookup_placed [$[$facts:term],*]
-    | (simp only [cil_code, Nat.reduceAdd, bne_iff_ne, ne_eq, not_false_eq_true,
+    | (simp -bitVecOfNat only [cil_code, Nat.reduceAdd, bne_iff_ne, ne_eq, not_false_eq_true,
         Bool.false_eq_true, ite_true, ite_false, ↓reduceIte, $[$facts:term],*]; done)
-    | (simp only [cil_code, Nat.reduceAdd, bne_iff_ne, ne_eq, not_false_eq_true,
+    | (simp -bitVecOfNat only [cil_code, Nat.reduceAdd, bne_iff_ne, ne_eq, not_false_eq_true,
         Bool.false_eq_true, ite_true, ite_false, ↓reduceIte, $[$facts:term],*]; rfl))
 
 /-- Normalises the literal `take`, `drop`, `reverse` and `++` a step leaves on the stack;
     never fails. -/
 macro "cil_stack_cleanup" : tactic =>
-  `(tactic| try simp only [List.drop_succ_cons, List.drop_zero, List.drop_nil,
+  `(tactic| try simp -bitVecOfNat only [List.drop_succ_cons, List.drop_zero, List.drop_nil,
     List.take_succ_cons, List.take_zero, List.take_nil, List.reverse_cons, List.reverse_nil,
     List.nil_append, List.cons_append, List.append_nil])
 
@@ -303,8 +314,8 @@ macro "cil_stack_cleanup" : tactic =>
     definitions and `facts`, constructors and `rfl`. -/
 macro "cil_checked_step_by_equations " "[" facts:term,* "]" : tactic =>
   `(tactic| (
-       simp only [cil_instruction_step, cil_step, cil_guard, CIL.Safety.instructionStep]
-       try simp [cil_guard, cil_checked, CIL.fin_val_three, CIL.fin_mk_ofNat,
+       simp -bitVecOfNat only [cil_instruction_step, cil_step, cil_guard, CIL.Safety.instructionStep]
+       try simp -bitVecOfNat [cil_guard, cil_checked, CIL.fin_val_three, CIL.fin_mk_ofNat,
          CIL.Safety.checkedValue,
          CIL.Safety.numericValue, CIL.Safety.scalars, CIL.Safety.formValue, CIL.Safety.checkedAt,
          CIL.Safety.leaveFrame, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure,
@@ -331,8 +342,8 @@ elab "cil_instruction_step_goal" : tactic => withMainContext do
 macro "cil_checked_instruction_retry " "[" facts:term,* "]" : tactic =>
   `(tactic| (
        cil_instruction_step_goal
-       simp only [cil_step, cil_guard, CIL.Safety.instructionStep]
-       try simp [cil_guard, cil_checked, CIL.fin_val_three, CIL.fin_mk_ofNat,
+       simp -bitVecOfNat only [cil_step, cil_guard, CIL.Safety.instructionStep]
+       try simp -bitVecOfNat [cil_guard, cil_checked, CIL.fin_val_three, CIL.fin_mk_ofNat,
          CIL.Safety.checkedValue,
          CIL.Safety.numericValue, CIL.Safety.scalars, CIL.Safety.formValue, CIL.Safety.checkedAt,
          CIL.Safety.leaveFrame, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure,
@@ -344,8 +355,8 @@ macro "cil_checked_instruction_retry " "[" facts:term,* "]" : tactic =>
     generic list would slow every other step. -/
 macro "cil_checked_memory_by_equations " "[" facts:term,* "]" : tactic =>
   `(tactic| (
-       simp only [cil_step, cil_guard, CIL.Safety.instructionStep]
-       try simp [cil_guard, cil_checked, CIL.fin_val_three, CIL.fin_mk_ofNat,
+       simp -bitVecOfNat only [cil_step, cil_guard, CIL.Safety.instructionStep]
+       try simp -bitVecOfNat [cil_guard, cil_checked, CIL.fin_val_three, CIL.fin_mk_ofNat,
          CIL.Safety.checkedValue,
          CIL.Safety.numericValue, CIL.Safety.scalars,
          CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.referenceAt_null,
@@ -360,8 +371,8 @@ macro "cil_checked_memory_by_equations " "[" facts:term,* "]" : tactic =>
 macro "cil_checked_side " "[" facts:term,* "]" : tactic =>
   `(tactic| first
     | rfl
-    | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)
-    | (simp [cil_checked, CIL.Safety.checkedValue, CIL.Safety.numericValue,
+    | (simp -bitVecOfNat [$[$facts:term],*] <;> (repeat constructor) <;> rfl)
+    | (simp -bitVecOfNat [cil_checked, CIL.Safety.checkedValue, CIL.Safety.numericValue,
          CIL.Safety.formValue, CIL.Safety.checkedAt, Except.mapError, Bind.bind, Except.bind,
          Pure.pure, Except.pure, $[$facts:term],*] <;> (repeat constructor) <;> rfl))
 
@@ -369,15 +380,15 @@ macro "cil_checked_side " "[" facts:term,* "]" : tactic =>
     `CIL.Safety.step` and `CIL.step` with `facts`, unfolding the return checks only if needed. -/
 macro "cil_checked_step_by_unfolding " "[" facts:term,* "]" : tactic =>
   `(tactic| (
-       fail_if_success simp only [cil_step]
+       fail_if_success simp -bitVecOfNat only [cil_step]
        -- Keep established arithmetic proofs compact. Unfolding checkedAt/formValue in the
        -- first pass can expand return checks enough to exceed the kernel recursion limit.
        first
-       | (simp [cil_guard, cil_checked, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.step,
+       | (simp -bitVecOfNat [cil_guard, cil_checked, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.step,
            CIL.Safety.checkedValue, CIL.Safety.numericValue,
            CIL.Safety.pureArity, CIL.Safety.scalars, CIL.Safety.leaveFrame, CIL.step,
            $[$facts:term],*] <;> (repeat constructor) <;> rfl)
-       | (simp [cil_guard, cil_checked, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.step,
+       | (simp -bitVecOfNat [cil_guard, cil_checked, CIL.fin_val_three, CIL.fin_mk_ofNat, CIL.Safety.step,
            CIL.Safety.checkedValue, CIL.Safety.numericValue,
            CIL.Safety.pureArity, CIL.Safety.scalars, CIL.Safety.leaveFrame, CIL.step,
            CIL.Safety.formValue, CIL.Safety.checkedAt, Except.mapError,
@@ -415,8 +426,8 @@ macro "cil_checked_step_equations " "[" facts:term,* "]" : tactic =>
 macro "cil_checked_memory_retry " "[" facts:term,* "]" : tactic =>
   `(tactic| (
        rw [CIL.Safety.step_memory_eq]
-       try simp only [cil_guard]
-       try simp [cil_guard, cil_checked, CIL.fin_val_three, CIL.fin_mk_ofNat,
+       try simp -bitVecOfNat only [cil_guard]
+       try simp -bitVecOfNat [cil_guard, cil_checked, CIL.fin_val_three, CIL.fin_mk_ofNat,
          CIL.Safety.checkedValue,
          CIL.Safety.numericValue, CIL.Safety.scalars,
          CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.referenceAt_null,
@@ -482,7 +493,7 @@ elab_rules : tactic
     operands are respelled as numerals to match it. -/
 macro "cil_checked_intrinsic " "[" facts:term,* "]" : tactic =>
   `(tactic| (
-    simp only [cil_step, cil_guard, CIL.Intrinsic.available, List.length_cons, List.length_nil,
+    simp -bitVecOfNat only [cil_step, cil_guard, CIL.Intrinsic.available, List.length_cons, List.length_nil,
       Nat.reduceAdd, Nat.reduceLT, Bool.not_true, Bool.not_false, Bool.false_eq_true,
       ite_false, ite_true, List.take_succ_cons, List.take_zero, List.take_nil,
       List.reverse_cons, List.reverse_nil, List.nil_append, List.cons_append, List.append_nil,
@@ -490,7 +501,7 @@ macro "cil_checked_intrinsic " "[" facts:term,* "]" : tactic =>
       CIL.Safety.numericValue, Bind.bind, Except.bind, Pure.pure, Except.pure,
       BitVec.ofInt_ofNat, cil_eval, $[$facts:term],*]
     -- A fact that makes the intrinsic fault leaves no result for this pass to check.
-    all_goals try simp only [CIL.Safety.checkedIntrinsic, cil_guard, cil_eval,
+    all_goals try simp -bitVecOfNat only [CIL.Safety.checkedIntrinsic, cil_guard, cil_eval,
       List.any_cons, List.any_nil, Bool.false_or, Bool.true_or, Bool.or_false,
       Bool.false_eq_true, ite_false, CIL.Safety.checkedValue, CIL.Safety.numericValue, ite_true,
       Bind.bind, Except.bind, Pure.pure, Except.pure, $[$facts:term],*]
@@ -500,7 +511,7 @@ macro "cil_checked_intrinsic " "[" facts:term,* "]" : tactic =>
     all_goals (first
       | (cil_numeral_eval_fact [$[$facts:term],*]
          cil_intrinsic_pending
-         simp only [bitVecOfNatLiteral, CIL.Safety.checkedIntrinsic, cil_guard, cil_eval,
+         simp -bitVecOfNat only [bitVecOfNatLiteral, CIL.Safety.checkedIntrinsic, cil_guard, cil_eval,
            List.any_cons, List.any_nil, Bool.false_or, Bool.true_or, Bool.or_false,
            Bool.false_eq_true, ite_false, CIL.Safety.checkedValue, CIL.Safety.numericValue,
            ite_true, Bind.bind, Except.bind, Pure.pure, Except.pure, $[$facts:term],*]
@@ -590,14 +601,14 @@ elab_rules : tactic
       catch _ => saved.restore
     if !candidates.isEmpty then
       let { ctx, simprocs, .. } ←
-        mkSimpContext (← `(tactic| simp only [cil_code])) (eraseLocal := false)
+        mkSimpContext (← `(tactic| simp -bitVecOfNat only [cil_code])) (eraseLocal := false)
       for fact in candidates do
         let saved ← saveState
         try
           applyUnfoldedStepFact ctx simprocs fact
           return
         catch _ => saved.restore
-    evalTactic (← `(tactic| try simp only [cil_code, Nat.reduceAdd]))
+    evalTactic (← `(tactic| try simp -bitVecOfNat only [cil_code, Nat.reduceAdd]))
     if (← getGoals).isEmpty then return
     -- A tactic `have` leaves the target under `mdata`, which `Expr.eq?` does not see through.
     let mut target := (← instantiateMVars (← getMainTarget)).consumeMData
@@ -705,13 +716,13 @@ macro "cil_checked_return_at " methodFound:term:max instructionFound:term:max
     cil_strict refine Eq.trans (CIL.Safety.run_return $methodFound $instructionFound
       (by cil_checked_step_normalized [$[$facts:term],*])
       (by cil_checked_side [$[$facts:term],*])) ?_
-    try simp only [CIL.Safety.leaveFrame, List.foldl_nil, List.nil_append, List.append_nil,
+    try simp -bitVecOfNat only [CIL.Safety.leaveFrame, List.foldl_nil, List.nil_append, List.append_nil,
       CIL.NarrowKind.extend_ite_one_zero, CIL.NarrowKind.extend_ite_ofNat_one_zero,
       List.reverse_cons, List.reverse_nil, BitVec.reduceToNat, BitVec.reduceSignExtend,
       BitVec.reduceOfInt, BitVec.isValue,
       Nat.reduceMod, Bool.false_eq_true, ite_true, ite_false]
     try with_reducible rfl
-    try (with_reducible simp [$[$facts:term],*]; done)))
+    try (with_reducible simp -bitVecOfNat [$[$facts:term],*]; done)))
 
 /-- Takes a fetched step that continues in the same method through `run_next`, given the
     lookups, leaving the `run` goal at the next state. The step proof is elaborated before the
@@ -931,7 +942,7 @@ elab_rules : tactic
         cilRunStep prepared true
       -- Fold the stepped pc (`2 + 1`) so the residual matches a target stated with a numeral.
       unless (← getGoals).isEmpty do
-        evalTactic (← `(tactic| try (conv => lhs; arg 4; simp only [Nat.reduceAdd])))
+        evalTactic (← `(tactic| try (conv => lhs; arg 4; simp -bitVecOfNat only [Nat.reduceAdd])))
 
 /-- `cil_checked_steps n` with no facts. -/
 macro "cil_checked_steps " count:num : tactic => `(tactic| cil_checked_steps $count [])

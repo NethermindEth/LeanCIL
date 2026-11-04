@@ -99,9 +99,9 @@ macro "base_relabel_comparison " compare32:term ", " compare64:term : tactic => 
       cases rest with
       | nil => cases b <;> rfl
       | cons a rest =>
-        cases b <;> first | rfl | (cases a <;>
-          simp only [comparisonValues, bind, Option.bind, pure, decide_eq_true_eq] <;>
-          first | rfl | (simp only [ite_not]; rfl))
+        cases b <;> first | rfl | (cases a <;> simp -bitVecOfNat only [comparisonValues, bind,
+          Option.bind, pure, decide_eq_true_eq] <;>
+          first | rfl | (simp -bitVecOfNat only [ite_not]; rfl))
   · intro r t; rfl
   · intro t; rfl))
 

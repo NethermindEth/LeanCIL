@@ -386,9 +386,11 @@ theorem marked_advances_to_return (memory : Memory) (value : W32)
   by_cases done : total = value
   · subst done
     cil_loop_advance
+    -- The walk keeps the spec's `OfNat` spelling of literals, so no `n#w` is left to rewrite.
+    fail_if_success simp only [← BitVec.ofNat_eq_ofNat]
     -- The store is taken: the walk is at the return, with the stored flag on the stack.
     show LoopTerminates markedProgram 0 [.scalar (.i32 total)] _
-      ⟨18, _, [.scalar (.i32 1#32)], _⟩
+      ⟨18, _, [.scalar (.i32 1)], _⟩
     cil_loop_finish
   · cil_loop_recurse recurse (total + 1)
     · trivial

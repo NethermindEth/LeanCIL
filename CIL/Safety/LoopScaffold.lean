@@ -70,7 +70,7 @@ private def bodyDefinitions (body : Term) : CommandElabM (Array Term) := do
 private def entrySimplifier {m : Type → Type} [Monad m] [MonadQuotation m]
     (definitions facts : Array (TSyntax `term)) : m (TSyntax `tactic) := do
   let facts := definitions ++ facts
-  `(tactic| (simp [enterFrame, makeSelectedLocals, makeLocals,
+  `(tactic| (simp -bitVecOfNat [enterFrame, makeSelectedLocals, makeLocals,
     makeArgumentHomes, makeParameterHomes, makeLocal, storeLocal, Value.hasUnspecified,
     checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure,
     $[$facts:term],*]; try rfl))
@@ -81,7 +81,7 @@ private def allocationSimplifier {m : Type → Type} [Monad m] [MonadQuotation m
     (definitions facts made : Array (TSyntax `term)) : m (TSyntax `tactic) := do
   let unfolded := definitions ++ facts ++ made
   let normalizer ← entrySimplifier definitions (facts ++ made)
-  `(tactic| ((simp only [enterFrame, makeSelectedLocals, makeLocals, List.isEmpty, ite_true,
+  `(tactic| ((simp -bitVecOfNat only [enterFrame, makeSelectedLocals, makeLocals, List.isEmpty, ite_true,
     Bind.bind, Except.bind, Pure.pure, Except.pure, $[$unfolded:term],*]) <;> $normalizer:tactic))
 
 /-- A local slot's generated facts: its index and slot, typed load and store facts for span and
