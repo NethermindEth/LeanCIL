@@ -426,7 +426,7 @@ log, never from the artifact. `PrepareLibrary.cs --reuse` then rechecks the libr
 binding and every file against that manifest; any mismatch, or no donor, builds from source.
 It kernel-replays the library unless `--producer-replayed` is passed, which CI does only when the
 donor run was a push of a commit reachable from `refs/heads/main`, or the run of exactly one
-same-repository pull request into main whose `head_sha` holds the same git objects as its merge base
+same-repository pull request into main whose head commit holds the same git objects as its merge base
 with the PR's base commit at every `CertifiedLibraryDonor.ProducerPaths` entry. A pull request run
 builds its merge with its base, whose SHA no trusted metadata records, so the head's own changes
 decide whether that merge ran main's reviewed producer code; a stacked PR builds into an unreviewed

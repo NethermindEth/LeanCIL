@@ -19,7 +19,7 @@ A donated library is trusted because our own CI produced it: that run kernel-rep
 module and logged the manifest digest, and reuse checks that every file matches that digest and
 that the manifest binds the current sources and toolchain. Reuse skips kernel replay only when
 GitHub metadata shows the donor ran reviewed producer code: a push of a commit reachable from
-`refs/heads/main`, or the run of exactly one same-repository PR into main whose `head_sha` leaves
+`refs/heads/main`, or the run of exactly one same-repository PR into main whose head commit leaves
 `.github/workflows/verification.yml`, `scripts/` and the root .NET build files as its merge base
 with the PR's base commit has them, so the merge it built ran main's producer code. A stacked PR,
 a fork, any other run, or unavailable metadata replays the library as a fresh build would; these
