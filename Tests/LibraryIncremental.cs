@@ -14,7 +14,7 @@ foreach (var name in current.Keys)
 {
     var target = Path.Combine(donor, name);
     Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-    File.Copy(At(name), target);
+    CopyLibrarySource(name, target);
 }
 const string changed = "CIL/Replay.lean";
 File.AppendAllText(Path.Combine(donor, changed), "\n-- previous source\n");
@@ -49,9 +49,21 @@ if (!File.ReadAllText(Path.Combine(donor, retained[0])).StartsWith("authenticate
     throw new Exception("Incremental staging shares writable bytes with donor.");
 Console.WriteLine("PASS changed/deleted module invalidation, unaffected trace reuse, native/metadata reset and isolation");
 
-void Reject(string label, string expected)
+// A checkout that differs only in its test libraries keeps the donor's identity and configuration.
+SortedDictionary<string, string> WithLakefile(string lakefile) =>
+    new(current, StringComparer.Ordinal) { ["lakefile.toml"] = ContentKey(LibraryLakefile(lakefile)) };
+var checkoutLakefile = File.ReadAllText(At("lakefile.toml"));
+var testLibrary = WithLakefile(checkoutLakefile + "\n[[lean_lib]]\nname = \"Tests.Added\"\n");
+var packageOption = WithLakefile(checkoutLakefile + "\n[leanOptions]\nautoImplicit = false\n");
+if (verifier.LibraryIdentity(testLibrary).Key != verifier.LibraryIdentity(current).Key ||
+    verifier.LibraryIdentity(packageOption).Key == verifier.LibraryIdentity(current).Key)
+    throw new Exception("Library identity tracks test libraries or ignores package options.");
+verifier.StageIncrementalLibrary(Path.Combine(root, "test-library"), donor, digest, testLibrary);
+Console.WriteLine("PASS an added test library keeps the library identity and incremental configuration");
+
+void Reject(string label, string expected, SortedDictionary<string, string>? sources = null)
 {
-    try { verifier.StageIncrementalLibrary(Path.Combine(root, label), donor, digest, current); }
+    try { verifier.StageIncrementalLibrary(Path.Combine(root, label), donor, digest, sources ?? current); }
     catch (InvalidDataException error) when (error.Message.Contains(expected, StringComparison.Ordinal))
     {
         Console.WriteLine("PASS incremental donor rejects " + label);
@@ -67,10 +79,12 @@ File.AppendAllText(Path.Combine(donor, retained[0]), "tampered");
 Reject("tampered-artifact", "identity or integrity mismatch");
 _ = Publish();
 Reject("self-rehashed-manifest", "manifest digest mismatch");
-File.AppendAllText(Path.Combine(donor, "lakefile.toml"), "\n# different build\n");
+digest = Publish();
+Reject("changed-package-option", "build configuration changed", packageOption);
+File.AppendAllText(Path.Combine(donor, "lakefile.toml"), "\n[leanOptions]\nautoImplicit = false\n");
 digest = Publish();
 Reject("changed-configuration", "build configuration changed");
-File.Copy(At("lakefile.toml"), Path.Combine(donor, "lakefile.toml"), true);
+CopyLibrarySource("lakefile.toml", Path.Combine(donor, "lakefile.toml"));
 digest = Publish();
 File.WriteAllText(Path.Combine(donor, "library-key.txt"), "another-runtime-or-toolchain");
 File.WriteAllText(Path.Combine(donor, "cache-manifest.json"), JsonSerializer.Serialize(CacheFiles(donor)));

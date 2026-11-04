@@ -418,18 +418,32 @@ CI prepares the certified library once per workflow attempt and passes its immut
 the run that uploaded it and its manifest digest from the producer job to the suite jobs. The
 producer first looks for a library already certified by a run of the same commit. On push events it
 next checks at most ten associated merged PRs from the same repository, requiring their merge commit
-to be this push and their complete Git tree to match exactly. Successful runs of those heads precede
-the main push of the checkout's first parent. API failures or absent eligible artifacts retain the
-older-main/source-build fallback. Their own trusted code built that library and printed its digest,
-so the digest is read from the donor job's log, never from the artifact. `PrepareLibrary.cs --reuse`
-then rechecks the library key and source binding and kernel-replays the library; any mismatch, or no
-donor, builds from source. It does not restore compiled libraries from the GitHub Actions cache: a
-cache's source key and self-described file hashes cannot authenticate the native auditor or
-establish that compiled modules came from those sources.
+to be this push and their complete Git tree to match exactly. Runs of those heads whose prepare job
+succeeded, whatever their suites concluded, precede the main push of the checkout's first parent.
+API failures or absent eligible artifacts retain the older-main/source-build fallback. Their own
+trusted code built that library and printed its digest, so the digest is read from the donor job's
+log, never from the artifact. `PrepareLibrary.cs --reuse` then rechecks the library key, the source
+binding and every file against that manifest; any mismatch, or no donor, builds from source.
+It kernel-replays the library unless `--producer-replayed` is passed, which CI does only when the
+donor run was a push of a commit reachable from `refs/heads/main`, or the run of exactly one
+same-repository pull request into main whose head commit holds the same git objects as its merge base
+with the PR's base commit at every `CertifiedLibraryDonor.ProducerPaths` entry. A pull request run
+builds its merge with its base, whose SHA no trusted metadata records, so the head's own changes
+decide whether that merge ran main's reviewed producer code; a stacked PR builds into an unreviewed
+branch and replays. A PR that changes the workflow
+or `scripts/` can log a digest for a forged library, so any later reuse of it replays.
+`scripts/TestFindCertifiedLibrary.cs` covers main pushes, unchanged and changed PR producer paths,
+non-main bases, forks, PR entry and head mismatches, unreachable pushes, ambiguous main refs,
+unknown merge bases and other runs, and `Tests/LibraryReplayCoverage.cs` checks that reviewed reuse
+runs no replay yet rejects a changed file or digest, while other reuse and release replay reject a
+forged module. It does not restore compiled libraries from the GitHub Actions cache: a cache's
+source key and self-described file hashes cannot authenticate the native auditor or establish that
+compiled modules came from those sources.
 
 `dotnet run --file scripts/PrepareLibrary.cs -- <output-directory>` requires an empty or absent
 destination and publishes a freshly built library through a staging directory. Explicit reuse uses
-`--reuse <trusted-manifest-sha256>`; obtain this digest independently from a trusted producer, never
+`--reuse <trusted-manifest-sha256> [--producer-replayed]`; obtain this digest independently from a
+trusted producer, never
 by hashing the restored manifest itself. Missing or invalid reuse evidence fails without replacing
 the destination. Rebuilding an existing library requires a separate output directory.
 `Tests/LibraryCache.cs` covers substituted auditors and compiled modules with regenerated manifests,
@@ -438,13 +452,15 @@ missing producer digests, and preservation of unrelated destination files.
 Main push runs publish their validated library even after exact reuse. This keeps the main run
 eligible to donate to later PRs without following a chain of earlier runs. Suite jobs prefer the
 current run's artifact when it uploaded one; PR runs that reuse a donor still consume that donor
-directly. Publication follows the existing source binding and independent kernel replay.
+directly. Publication follows the existing source binding and the replay rule above.
 
 When only Lean sources changed, `--incremental <donor-directory> <trusted-manifest-sha256>`
 authenticates every donor file before reusing its Lake build traces in a private copy. The runtime,
-compiler, kernel checker and build configuration must match. Changed and removed modules lose their
-compiled artifacts; Lake checks the current source hashes and rebuilds the dependent closure. The
-native auditor is relinked, every resulting module is kernel-replayed, and canonical fingerprints
+compiler, kernel checker and build configuration must match; the configuration is the library view
+of `lakefile.toml`, so a change to test libraries alone keeps the donor. Changed and removed modules
+lose their compiled artifacts; Lake checks the current source hashes and rebuilds the dependent closure. The
+native auditor is relinked, every resulting module is kernel-replayed, including those kept from the
+donor, since a byte-identical module can import a rebuilt one, and canonical fingerprints
 are regenerated before a new source-bound manifest is published. CI tries this after exact reuse,
 then falls back to a cold build if incremental preparation fails. `Tests/LibraryIncremental.cs`
 covers artifact tampering, incompatible identities/configuration, source removal and copy isolation.

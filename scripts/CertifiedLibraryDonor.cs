@@ -23,6 +23,18 @@ static class CertifiedLibraryDonor
         }
     }
 
+    /// <summary>
+    /// Donor runs in order of preference: this commit, same-PR ancestors, identical merged PR trees, the
+    /// base main push, then recent main pushes. A source is queried only after earlier ones are exhausted.
+    /// </summary>
+    public static IEnumerable<long> Candidates(Func<IEnumerable<long>> commit, Func<IEnumerable<long>> pullAncestors,
+        Func<IEnumerable<long>> mergedPulls, Func<IEnumerable<long>> baseMain, Func<IEnumerable<long>> recentMain)
+    {
+        foreach (var source in new[] { commit, pullAncestors, mergedPulls, baseMain, recentMain })
+        foreach (var run in source())
+            yield return run;
+    }
+
     /// <summary>Finds a complete authenticated candidate; failures never supply partial evidence.</summary>
     public static Selection? Find(IEnumerable<long> runs, Func<long, string, JsonElement> api,
         Func<long, string> log, DateTimeOffset now, Action<string> warning)
@@ -45,6 +57,93 @@ static class CertifiedLibraryDonor
             if (selected.Length != 0) return selected[0];
         }
         return null;
+    }
+
+    /// <summary>The paths whose code builds, replays, packs or restores a certified library in CI.</summary>
+    public static readonly string[] ProducerPaths = [".github/workflows/verification.yml", "scripts", "global.json",
+        "Directory.Build.props", "Directory.Packages.props", ".editorconfig"];
+
+    /// <summary>
+    /// Whether a donor run executed reviewed producer code, from GitHub run and repository metadata alone:
+    /// a push of a commit on main, or the run of one same-repository PR into main whose head leaves every
+    /// producer path as its merge base with the PR's base commit has it, so the merge it built ran main's
+    /// producer code. Anything else, including missing metadata, answers false and the library is replayed.
+    /// </summary>
+    public static bool ReviewedProducer(JsonElement run, string repository, Func<string, JsonElement> api,
+        Action<string> warning)
+    {
+        try
+        {
+            var head = run.GetProperty("head_sha").GetString() ?? "";
+            if (!IsCommit(head) || !SameRepository(run.GetProperty("head_repository"), repository)) return false;
+            var trigger = run.GetProperty("event").GetString();
+            if (trigger == "push")
+                return run.GetProperty("head_branch").GetString() == "main" && OnMain(head, api);
+            // A stacked PR builds merged into another branch, whose producer code may be unreviewed.
+            if (trigger != "pull_request") return false;
+            var pulls = run.GetProperty("pull_requests");
+            if (pulls.GetArrayLength() != 1) return false;
+            var pull = pulls[0];
+            var baseCommit = pull.GetProperty("base").GetProperty("sha").GetString() ?? "";
+            if (pull.GetProperty("base").GetProperty("ref").GetString() != "main" ||
+                !PullRepository(pull.GetProperty("base"), repository) ||
+                !PullRepository(pull.GetProperty("head"), repository) ||
+                pull.GetProperty("head").GetProperty("sha").GetString() != head || !IsCommit(baseCommit))
+                return false;
+            // The run built the head merged into its base; the head's own commits decide its producer code.
+            var mergeBase = api($"compare/{baseCommit}...{head}").GetProperty("merge_base_commit")
+                .GetProperty("sha").GetString() ?? "";
+            if (!IsCommit(mergeBase) || !OnMain(mergeBase, api)) return false;
+            var trees = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+            return ProducerPaths.All(path => ProducerObject(mergeBase, path, api, trees) ==
+                ProducerObject(head, path, api, trees));
+        }
+        catch (Exception error) when (error is InvalidOperationException or JsonException or Win32Exception or
+                                      KeyNotFoundException or FormatException or IndexOutOfRangeException)
+        {
+            warning("Donor producer metadata unavailable; the library will be replayed. " + error.Message);
+            return false;
+        }
+    }
+
+    static bool IsCommit(string sha) => Regex.IsMatch(sha, "^[0-9a-f]{40}$");
+
+    /// <summary>A PR side's repository, which run metadata names only by its API URL.</summary>
+    static bool PullRepository(JsonElement side, string repository) =>
+        string.Equals(side.GetProperty("repo").GetProperty("url").GetString(),
+            "https://api.github.com/repos/" + repository, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Whether a commit is reachable from refs/heads/main, never a tag or another ref named main.</summary>
+    static bool OnMain(string commit, Func<string, JsonElement> api)
+    {
+        var reference = api("git/ref/heads/main");
+        var main = reference.GetProperty("object").GetProperty("sha").GetString() ?? "";
+        return reference.GetProperty("ref").GetString() == "refs/heads/main" && IsCommit(main) &&
+            api($"compare/{main}...{commit}").GetProperty("status").GetString() is "identical" or "behind";
+    }
+
+    /// <summary>The git object at a path of a commit, or "absent"; a truncated or malformed listing throws.</summary>
+    static string ProducerObject(string commit, string path, Func<string, JsonElement> api,
+        Dictionary<string, JsonElement> trees)
+    {
+        if (!trees.TryGetValue(commit, out var described)) trees[commit] = described = api("git/commits/" + commit);
+        string sha = described.GetProperty("tree").GetProperty("sha").GetString() ?? "", kind = "tree";
+        foreach (var component in path.Split('/'))
+        {
+            if (!Regex.IsMatch(sha, "^[0-9a-f]{40}$") || kind != "tree")
+                throw new FormatException("Invalid producer tree " + sha);
+            if (!trees.TryGetValue(sha, out var listing)) trees[sha] = listing = api("git/trees/" + sha);
+            // A truncated listing could omit the entry, which would read as absent.
+            if (listing.TryGetProperty("truncated", out var truncated) && truncated.GetBoolean())
+                throw new InvalidOperationException("Truncated tree " + sha);
+            var entry = listing.GetProperty("tree").EnumerateArray()
+                .Where(item => item.GetProperty("path").GetString() == component).ToArray();
+            if (entry.Length == 0) return "absent";
+            sha = entry[0].GetProperty("sha").GetString() ?? "";
+            kind = entry[0].GetProperty("type").GetString() ?? "";
+        }
+        if (!Regex.IsMatch(sha, "^[0-9a-f]{40}$")) throw new FormatException("Invalid tree entry " + sha);
+        return kind + " " + sha;
     }
 
     /// <summary>Retries transient HTTP failures at most twice; unsuccessful responses are never parsed.</summary>
@@ -87,7 +186,10 @@ static class CertifiedLibraryDonor
                 Regex.IsMatch(run.GetProperty("head_sha").GetString() ?? "", "^[0-9a-f]{40}$"))
             .Select(run => run.GetProperty("id").GetInt64()).Where(id => id > 0).Distinct();
 
-    /// <summary>Earlier successful runs of this same-repository PR, restricted to ancestors of its head.</summary>
+    /// <summary>
+    /// Earlier runs of this same-repository PR on ancestors of its head, nearest first. A run whose
+    /// suites failed still donates; <see cref="Find"/> admits only its successful prepare job.
+    /// </summary>
     public static IEnumerable<long> PullAncestors(JsonElement runs, string repository, int pull, string head,
         Func<string, bool> isAncestor, int limit)
     {
@@ -95,8 +197,6 @@ static class CertifiedLibraryDonor
         foreach (var run in runs.GetProperty("workflow_runs").EnumerateArray().Take(limit))
         {
             if (run.GetProperty("event").GetString() != "pull_request" ||
-                run.GetProperty("status").GetString() != "completed" ||
-                run.GetProperty("conclusion").GetString() != "success" ||
                 !SameRepository(run.GetProperty("head_repository"), repository) ||
                 !run.GetProperty("pull_requests").EnumerateArray().Any(request =>
                     request.GetProperty("number").GetInt32() == pull)) continue;
