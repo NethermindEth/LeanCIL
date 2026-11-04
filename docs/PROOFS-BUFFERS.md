@@ -197,10 +197,10 @@ as the span fold slices its span; it rejects a home and a remembered local.
 Each lemma proves the frame after one step. `load` and `store` read and write a remembered local;
 `write` and `write_element` keep the frame across a write inside the footprint; `after_confined`
 keeps it across a call whose footprint entries lie inside it; `form` and `leave` give the caller
-reference's `form` fact and the confined, `MemoryBelow` result on return. A frame confined to no
-caller storage, `LoopFrame []`, has `kept` all of it, `leave_kept` gives the exit's `MemoryBelow`
-fact from the entry's `setup`, and `CheckedSpan.within` reads a caller span in its memory, as
-[SpanSum](../Examples/Proofs/SpanSum.lean) does. A local whose address is
+reference's `form` fact and the confined, `MemoryBelow` result on return, from the entry's
+`setup` and, optionally, the frame the loop returns from. A frame confined to no
+caller storage, `LoopFrame []`, has `kept` all of it and `leave_kept` gives the exit's
+`MemoryBelow` fact from the entry's `setup`. A local whose address is
 taken can change through that reference, so `write` and `after_confined` require every written
 allocation to be older than the frame (`allocation < caller.nextIdentity`); a write or callee that
 reaches a home does not elaborate and the snapshot stays the author's obligation.
@@ -211,6 +211,68 @@ no invariant beyond the frame, and [CountCalls](../Examples/Proofs/CountCalls.le
 [CountUntil](../Examples/Proofs/CountUntil.lean) keep two locals across a helper call with
 `after_confined`. The [proof regressions](VALIDATION-PROOFS.md#proof-automation) list the
 rejected writes, including one through the second home of a generated two-local frame.
+
+### Caller facts in frame memory
+
+`CIL.Safety.LoopCallerFacts`, which `CIL.Safety.LoopScaffold` imports, carries facts about the
+caller's memory into every frame memory, whatever the footprint. Facts that read only allocations
+always carry; a span's contents carry when it lies apart from each footprint entry:
+
+```lean excerpt CIL/Safety/LoopCallerFacts.lean
+def SpanApart (view : SpanView) (entry : Reference × Nat) : Prop :=
+  ∀ base, view.reference = .address base → Apart base (view.width * view.length) entry
+theorem LoopFrame.caller_form (frame : LoopFrame footprint caller current kinds slots known)
+    (valid : CIL.Safety.form caller base = .ok base) :
+    CIL.Safety.form current base = .ok base :=
+theorem LoopFrame.caller_add (frame : LoopFrame footprint caller current kinds slots known)
+    {offset : BitVec 64} (added : add caller base width offset = .ok result) :
+    add current base width offset = .ok result := by
+theorem LoopFrame.caller_valid (frame : LoopFrame footprint caller current kinds slots known)
+    view.validate current = .ok () :=
+theorem LoopFrame.caller_element (frame : LoopFrame footprint caller current kinds slots known)
+    (found : view.element caller index = .ok item) : view.element current index = .ok item := by
+theorem LoopFrame.caller_slice (frame : LoopFrame footprint caller current kinds slots known)
+    (cut : view.slice caller start length = .ok sliced) :
+    view.slice current start length = .ok sliced := by
+theorem CheckedSpan.within {view : SpanView} {width : Nat} {writable : Bool}
+    (wellFormed : caller.WellFormed) (frame : LoopFrame footprint caller current kinds slots known)
+    (apart : ∀ entry ∈ footprint, SpanApart view entry := by cil_span_apart) :
+    CheckedSpan current view width writable values := by
+theorem SpanApart.slice {view sliced : SpanView} {entry : Reference × Nat} {memory : Memory}
+    (cut : view.slice memory start length = .ok sliced) : SpanApart sliced entry := by
+theorem Writable.add_int {memory : Memory} {base : Reference} {width start count : Nat}
+    (small : index.toNat < 2 ^ 31) (low : start ≤ index.toNat)
+    (high : index.toNat < start + count) :
+    add memory base width (BitVec.ofInt 64 index.toInt) = .ok (base.element width index.toNat) :=
+```
+
+Each `caller_*` lemma also takes the caller's `WellFormed`. The loop tactics apply them, and
+`CheckedSpan.valid_within`, at the frame memories they reach, so a proof states each fact once,
+at the caller's memory: `(span.within wellFormed frame).head` reads a caller span's first element
+in frame memory, with `cil_span_apart` finding each entry's `SpanApart` in context, and
+`writable.add_int wellFormed formed` gives an `int` index's `Unsafe.Add` address for every frame.
+[CopyUntilZero](../Examples/Proofs/CopyUntilZero.lean) states only these.
+
+A caller buffer is written word by word through these lemmas of
+[BufferContents](../CIL/Safety/BufferContents.lean):
+
+```lean excerpt CIL/Safety/BufferContents.lean
+theorem Writable.sub {start count : Nat} (writable : Writable m base width start count)
+    {index length : Nat} (low : start ≤ index) (high : index + length ≤ start + count) :
+    Writable m (base.element width index) width 0 length := fun i bound => by
+theorem Writable.write_one (writable : Writable m base width 0 1) (x : BitVec (8 * width)) :
+    ∃ after, write m base (numberBytes x.toNat width) 1 = .ok after ∧
+      form m base = .ok base ∧ Confined [(base, width)] m after ∧
+      Contents after base width [x] := by
+theorem Filled.extend {xs : List (BitVec (8 * width))} {room index : Nat}
+    {x : BitVec (8 * width)} (filled : Filled m base width xs (room + 1))
+    (slot : Contents m (base.element width index) width [x]) (next : index = xs.length) :
+    Filled m base width (xs ++ [x]) room := by
+```
+
+`Writable.write_one` with `step_storeScalar_of_write` (1-, 2- or 4-byte `int` stores) or
+`step_storeScalar_i64_of_write` ([LoopFrames](../CIL/Safety/LoopFrames.lean)) proves a one-word
+store helper's contract, as `Stamp`'s in CopyUntilZero.
 
 ## Track a struct local by its fields in a loop
 
@@ -234,8 +296,8 @@ and zero or sign extended, as `narrowLoad width signed bits`: `step_fieldAt_enco
 it by value and `load_narrow_field` through the address.
 
 The loop tactics gather the field reads and the home's `form` from each frame in scope, and
-`cil_loop_recurse`, `cil_loop_advance` and `cil_loop_finish` take the zeroing and the stores
-themselves, so a proof names neither. A zeroed struct's layout is one its loop head remembers.
+`cil_loop_recurse`, `cil_loop_advance` and `cil_loop_finish` take the zeroing, the stores and
+numeric local stores themselves, so a proof names neither. A zeroed struct's layout is one its loop head remembers.
 A field reads back as the value stored, such as `.i32 (count + 1)`, with no `toNat` round trip
 through bytes, and a narrow field as its `narrowLoad`, which the tactics compute for a literal.
 [TallyTwice](../Examples/Proofs/TallyTwice.lean) counts and sums in a

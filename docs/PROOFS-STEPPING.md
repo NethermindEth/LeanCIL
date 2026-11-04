@@ -305,8 +305,9 @@ The loop tactics step one fetched instruction at a time, simplifying the stack w
 leaving a goal, and the message names the pc:
 
 - `cannot step pc N (op) at memory M` shows the step and what is left of it after the step
-  equations and gathered facts; this is usually a store or load at a memory with no `LoopFrame`
-  or step equation in scope;
+  equations and gathered facts, and names the fact that residual lacks: a span's validity, a
+  slice, an element's address, an `Unsafe.Add` result, a `form` fact, a load's value, or a
+  `LoopFrame` or store equation;
 - `pc N is a call (op); cross it with cil_loop_call` stops `cil_loop_steps` and `cil_loop_finish`
   at a call;
 - `target state not matched at pc N` names the frame, stack or memory that differs when the path
@@ -328,22 +329,37 @@ The tactics of [LoopFrameSteps](../CIL/Safety/LoopFrameSteps.lean), which
 `CIL.Safety.LoopScaffold` imports, walk these goals while keeping the loop's `LoopFrame` current:
 
 - `cil_loop_advance [facts]` steps to a call or return and `cil_loop_finish [facts]` through a
-  return to its postcondition. Each takes a struct zeroing or field store on the way as
-  `cil_loop_recurse` does and fails as `cil_loop_steps` does on anything else.
+  return to its postcondition. Each takes a struct zeroing, field store or numeric local store on
+  the way as `cil_loop_recurse` does and fails as `cil_loop_steps` does on anything else. At the
+  return `cil_loop_finish` names what leaving the frame keeps, `exitConfined` and `exitBelow`
+  (`LoopFrame.leave`), carries the caller-buffer facts to the exit memory, and closes each
+  conjunct of the postcondition that a hypothesis, a carried `Filled` fact's contents or the
+  facts prove; the rest is left as the goal, with those facts in context.
 - `cil_loop_call holds input at site [facts]` applies the contract (`loop_terminates_call`) at
-  the `bind_call` site or, without `at site`, at the fetched call, and fails naming the pc and
-  instruction when the goal is not at a call. It leaves the precondition unless `trivial` proves
-  it, then continues: it names the returned memory, unfolds the contract, substitutes an output
-  its postcondition states as an equation, and, when the callee's footprint lies inside the
-  frame's, proves the frame at the returned memory with `LoopFrame.after_confined`.
-- `cil_loop_recurse hypothesis values` steps to the loop head of `hypothesis`, the entry goal's
-  or the iteration's statement that every (smaller) invariant head state terminates. It takes
-  each struct zeroing and field store on the way through `LoopFrame.zero_aggregate` and
-  `store_field`, naming the memory each produces, and applies `hypothesis` at the head state
-  with loop values `values`, the reached memory and its frame. The invariant and the decrease
-  are left as goals; a state that is not the head's at `values` fails, showing the reached state.
+  the `bind_call` site or, without `at site`, at the fetched call. It leaves the precondition
+  unless `trivial` or a hypothesis proves it, then continues: it names the returned memory,
+  unfolds the contract, substitutes an output its postcondition states as an equation, names the
+  callee's `WellFormed` (`calledFormed`) and proves the frame at the returned memory
+  (`calledFrame`, through `LoopFrame.after_confined`), and carries the caller-buffer facts across
+  the call: write authority always, contents when `omega` shows them apart from the callee's
+  footprint. It fails naming the pc and instruction when the goal is not at a call, the argument
+  check and the fact it needs when the call does not step, the contract's arguments beside the
+  stack when they differ, and the side condition when the callee's footprint is not shown inside
+  the frame's footprint or below the caller's watermark.
+- `cil_loop_recurse hypothesis values [facts]` steps to the loop head of `hypothesis`, the entry
+  goal's or the iteration's statement that every (smaller) invariant head state terminates. It
+  takes each struct zeroing, field store and numeric local store on the way through
+  `LoopFrame.zero_aggregate`, `store_field` and `store`, naming the memory each produces, and
+  applies `hypothesis` at the head state with loop values `values`, the reached memory and its
+  frame, through `LoopFrame.set_local` when a span or reference slot changed. The invariant and
+  the decrease are left as goals; a state that is not the head's at `values` fails, showing the
+  reached state.
 
-All gather facts as the other loop tactics do, so the lists are optional.
+Each store names its memory, step and frame (`stored`, `storing`, `storedFrame`,
+`storedBelow`), and the walk re-states each `Contents`, `Filled` and `Writable` hypothesis about
+the stored-over memory, or about the caller's, at the new one under the same name, so an
+invariant reads them at the memory it is stated at. All gather facts as the other loop tactics
+do, so the lists are optional.
 `loop_terminates_call_formed` gives the continuation `WellFormed` and the static world when a
 proof composes the call by hand. The [counted-loop
 proof](../Examples/Proofs/CountCalls.lean) never unfolds the helper or names its fuel; the loop
@@ -396,12 +412,16 @@ an unrelated context adds nothing to simp:
 - the declarations in scope with the `cil_loop_unfold` simp attribute, which `bind_cutpoint`
   gives its state and `bind_entry` its frame and normalized result and memory;
 - equations, possibly quantified or conjoined, about `step`, `instruction`, `memoryInstruction`,
-  `staticInstruction`, `loadLocal`, `storeLocal`, `loadValue`, `storeValue` and the span
-  `element`, `slice`, `validate`, `width` and `writable` checks;
+  `staticInstruction`, `loadLocal`, `storeLocal`, `loadValue`, `storeValue`, `form`, `add` and
+  the span `element`, `slice`, `validate`, `width` and `writable` checks;
 - for a [`CheckedSpan`](../CIL/Safety/SpanContents.lean), its `facts`, `length_nil` or
-  `length_cons` when its values are `[]` or a cons, and, for each `LoopFrame []` from its memory
-  with that memory's `WellFormed` in context, the facts of
-  [`CheckedSpan.within`](../CIL/Safety/LoopFrames.lean) in the frame's memory;
+  `length_cons` when its values are `[]` or a cons, and, for each `LoopFrame` from its memory
+  with that memory's `WellFormed` in context, its validity, width and mode in the frame's memory
+  ([`CheckedSpan.valid_within`](../CIL/Safety/LoopCallerFacts.lean));
+- for a `form`, `add` or span `validate`, `element` or `slice` equation at the caller's memory of
+  a `LoopFrame` with that memory's `WellFormed`, the equation at the frame's memory
+  (`LoopFrame.caller_form` and its kind), and for an `add` or `element` result or an `access`
+  check, the `form` fact of the reference it gives;
 - `elementWidth` of a `SpanContents`;
 - for a [`LoopFrame`](../CIL/Safety/LoopFrames.lean) over `knownLocals` of a list, and for the
   entry frame `bind_entry ... allocating` proves for every footprint, the `form` of each home
