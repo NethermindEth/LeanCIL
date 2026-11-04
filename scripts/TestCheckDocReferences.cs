@@ -59,6 +59,10 @@ try
     Fails("an excerpt of a test", "```lean excerpt Tests/Fixture.lean\ndef helper : Nat := 0\n```", Unshipped);
     Fails("a missing repository path", "`CIL/Missing.lean` defines it.", "does not exist");
     Fails("a missing link target", "See [missing](Missing.md).", "does not exist");
+    // Windows resolves these, but the case-sensitive CI file system does not.
+    Fails("a path in another case", "`CIL/sample.lean` defines it.", "does not exist");
+    Fails("a link in another case", "See [it](../cil/Sample.lean).", "does not exist");
+    Fails("a placeholder path", "Paths such as `CIL/...` must exist.", "does not exist");
     Fails("a renamed heading", "## Kept heading\n\nSee [it](#removed-heading).", "names no heading");
     Passes("anchors of headings with code and repeats", """
         ## The `Kept` heading, again

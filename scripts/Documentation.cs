@@ -63,6 +63,41 @@ static partial class Documentation
 
     internal static string Relative(string root, string path) => Path.GetRelativePath(root, path).Replace('\\', '/');
 
+    /// <summary>
+    /// Whether a path under the root names an entry with exactly this spelling, as a case-sensitive
+    /// file system on CI resolves it; Windows would also match other cases and trailing dots.
+    /// </summary>
+    internal static bool ExistsExactly(string root, string path)
+    {
+        if (!path.StartsWith(root, StringComparison.Ordinal) ||
+            path.Length > root.Length && path[root.Length] is not ('/' or '\\'))
+            return false;
+        var current = root;
+        foreach (var segment in path[root.Length..].Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!Directory.Exists(current) || !Directory.EnumerateFileSystemEntries(current).Any(entry =>
+                    string.Equals(Path.GetFileName(entry), segment, StringComparison.Ordinal)))
+                return false;
+            current = Path.Combine(current, segment);
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Joins a path onto a directory, resolving `.` and `..` by text alone; unlike Path.GetFullPath it
+    /// keeps trailing dots and spaces, which Windows would drop and CI would not.
+    /// </summary>
+    static string Join(string directory, string path)
+    {
+        var segments = new List<string>(directory.TrimEnd('/', '\\').Split(['/', '\\']));
+        foreach (var segment in path.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (segment == "..") { if (segments.Count > 1) segments.RemoveAt(segments.Count - 1); }
+            else if (segment != ".") segments.Add(segment);
+        }
+        return string.Join(Path.DirectorySeparatorChar, segments);
+    }
+
     /// <summary>Splits a document into prose and Lean blocks; fenced non-Lean code is neither.</summary>
     internal static DocumentPage Read(string root, string path)
     {
@@ -163,8 +198,7 @@ static partial class Documentation
                     var linked = hash == 0 ? page.Path : LinkedPath(root, page.Path, target);
                     if (linked is null) continue;
                     var relative = Relative(root, linked);
-                    if (!linked.StartsWith(root, StringComparison.Ordinal) ||
-                        !File.Exists(linked) && !Directory.Exists(linked))
+                    if (!linked.StartsWith(root, StringComparison.Ordinal) || !ExistsExactly(root, linked))
                     {
                         failures.Add($"{at}: link target `{target}` does not exist");
                         continue;
@@ -191,7 +225,7 @@ static partial class Documentation
                     {
                         references++;
                         var path = span.TrimEnd('/');
-                        if (!File.Exists(Path.Combine(root, path)) && !Directory.Exists(Path.Combine(root, path)))
+                        if (!ExistsExactly(root, Join(root, path)))
                             failures.Add($"{at}: `{span}` does not exist");
                     }
                     if (userFacing && (Unshipped(span) || Patterns.TestModule().IsMatch(span)))
@@ -252,9 +286,9 @@ static partial class Documentation
         if (path.Length == 0 || path.StartsWith("mailto:", StringComparison.Ordinal)) return null;
         foreach (var form in new[] { "blob/main/", "tree/main/" })
             if (path.StartsWith(Repository + form, StringComparison.Ordinal))
-                return Path.GetFullPath(Path.Combine(root, path[(Repository.Length + form.Length)..]));
+                return Join(root, path[(Repository.Length + form.Length)..]);
         if (path.Contains("://", StringComparison.Ordinal)) return null;
-        return Path.GetFullPath(Path.Combine(Path.GetDirectoryName(document)!, path));
+        return Join(Path.GetDirectoryName(document)!, path);
     }
 
     static IEnumerable<string> CheckBlock(string root, LeanBlock block, bool userFacing, HashSet<string> commands)

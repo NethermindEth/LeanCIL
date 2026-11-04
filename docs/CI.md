@@ -81,8 +81,9 @@ which needs no Lean, so every PR runs it:
 
 - Every relative link, and every link to a file of this repository on GitHub, must resolve, an
   anchor into a Markdown file must name one of its headings, and
-  every backticked repository path (`CIL/...`, `Examples/...`, `scripts/...`, `docs/...`) must
-  exist. Build outputs under `bin/` or `obj/` are not paths.
+  every backticked path under `CIL/`, `Examples/`, `scripts/` or `docs/` must exist with exactly
+  that spelling, as a case-sensitive file system resolves it. Build outputs under `bin/` or `obj/`
+  are not paths.
 - A link whose text is one code span and whose target is a `.lean` or `.cs` file must name
   something that file still contains: a Lean declaration, a declared C# type or member, or a quoted
   string literal such as a test mutation name. A label may also be the file's own path. A link
