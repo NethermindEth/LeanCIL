@@ -66,8 +66,12 @@ partial class Program
         if (Sha(path) != Environment.GetEnvironmentVariable(PreparedLeanFixturesDigest))
             throw new InvalidOperationException("Prepared Lean fixture manifest changed");
         var manifest = JsonSerializer.Deserialize<PreparedLeanManifest>(File.ReadAllText(path))!;
+        // Compare snapshot keys, not raw files: the lakefile's key covers only its library view.
+        var current = LibrarySources(CommonInputs());
+        if (manifest.LibrarySources.Count != current.Count)
+            throw new InvalidOperationException("Prepared Lean library sources changed");
         foreach (var (source, hash) in manifest.LibrarySources)
-            if (Sha(At(source)) != hash)
+            if (current.GetValueOrDefault(source) != hash)
                 throw new InvalidOperationException("Prepared Lean library source changed: " + source);
         foreach (var module in modules)
         {

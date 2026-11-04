@@ -460,6 +460,29 @@ theorem Writable.write_succeeds {start count : Nat}
     ∃ after, write m (base.element width start) (numberBytes x.toNat width) 1 = .ok after :=
   CIL.Safety.write_succeeds (by simpa using writable 0 (by omega))
 
+/-- Write authority over a run gives write authority over any run of elements inside it, as a
+    run of its own starting at its first element. -/
+theorem Writable.sub {start count : Nat} (writable : Writable m base width start count)
+    {index length : Nat} (low : start ≤ index) (high : index + length ≤ start + count) :
+    Writable m (base.element width index) width 0 length := fun i bound => by
+  have held := writable (index - start + i) (by omega)
+  rwa [Reference.element_element, Nat.zero_add,
+    show index + i = start + (index - start + i) by omega]
+
+/-- One writable element accepts one store: the write succeeds, the reference forms, the store
+    is confined to that element and leaves it holding `x`. A one-store callee's contract needs
+    nothing else. -/
+theorem Writable.write_one (writable : Writable m base width 0 1) (x : BitVec (8 * width)) :
+    ∃ after, write m base (numberBytes x.toNat width) 1 = .ok after ∧
+      form m base = .ok base ∧ Confined [(base, width)] m after ∧
+      Contents after base width [x] := by
+  have ready : access m base width 1 true = .ok () := by simpa using writable 0 (by omega)
+  obtain ⟨after, written⟩ := CIL.Safety.write_succeeds (bytes := numberBytes x.toNat width)
+    (by simpa [numberBytes_length] using ready)
+  refine ⟨after, written, access_reference_valid _ _ _ _ _ ready,
+    Confined.write written (by simp [numberBytes_length]), Contents.singleton.mpr ?_⟩
+  simpa [numberBytes_length] using write_readback _ _ _ _ _ written
+
 end Writable
 
 section Filled
@@ -507,6 +530,26 @@ theorem Filled.after_below {watermark : Nat} {after : Memory} {xs : List (BitVec
     {room : Nat} (filled : Filled m base width xs room) (preserved : MemoryBelow watermark m after)
     (old : base.allocation < watermark) : Filled after base width xs room :=
   ⟨filled.1.after_below preserved old, filled.2.after_below preserved old⟩
+
+/-- A confined change apart from the initialized prefix keeps the prefix and all the room, since
+    write authority survives every confined change. -/
+theorem Filled.after_confined {footprint : List (Reference × Nat)} {after : Memory}
+    {xs : List (BitVec (8 * width))} {room : Nat} (filled : Filled m base width xs room)
+    (framed : Confined footprint m after) (formed : m.WellFormed)
+    (apart : ∀ entry ∈ footprint, Apart base (width * xs.length) entry) :
+    Filled after base width xs room :=
+  ⟨filled.1.after_confined framed formed apart, filled.2.after_confined framed formed⟩
+
+/-- An element holding `x` just past the initialized prefix extends the prefix by `x` and
+    shrinks the room by one; this is how a callee's store reaches the caller's buffer. -/
+theorem Filled.extend {xs : List (BitVec (8 * width))} {room index : Nat}
+    {x : BitVec (8 * width)} (filled : Filled m base width xs (room + 1))
+    (slot : Contents m (base.element width index) width [x]) (next : index = xs.length) :
+    Filled m base width (xs ++ [x]) room := by
+  subst next
+  obtain ⟨contents, writable⟩ := filled
+  rw [Nat.add_comm room 1] at writable
+  exact ⟨Contents.append.mpr ⟨contents, slot⟩, by simpa using (Writable.append.mp writable).2⟩
 
 /-- A full producer has written every element. -/
 theorem Filled.complete {xs : List (BitVec (8 * width))} (filled : Filled m base width xs 0) :
@@ -648,8 +691,12 @@ theorem Contents.transform {m : Memory} {base : Reference} {width : Nat}
 #print axioms Writable.after_confined
 #print axioms Writable.after_below
 #print axioms Writable.write_succeeds
+#print axioms Writable.sub
+#print axioms Writable.write_one
 #print axioms Filled.push
 #print axioms Filled.after_below
+#print axioms Filled.after_confined
+#print axioms Filled.extend
 #print axioms Filled.write_next
 #print axioms Filled.fill
 #print axioms Contents.transform

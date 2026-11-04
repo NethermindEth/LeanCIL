@@ -12,7 +12,7 @@ foreach (var name in sources.Keys)
 {
     var destination = Path.Combine(library, name);
     Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-    File.Copy(At(name), destination);
+    CopyLibrarySource(name, destination);
 }
 var source = Path.Combine(root, "AUnaggregatedForgery.lean");
 Directory.CreateDirectory(Path.GetDirectoryName(source)!);
@@ -40,11 +40,34 @@ Run([verifier.LeanExecutable, "--run", source, Path.Combine(library, ".lake/buil
 File.WriteAllText(Path.Combine(library, "library-key.txt"), key);
 File.WriteAllText(Path.Combine(library, "cache-manifest.json"), JsonSerializer.Serialize(CacheFiles(library)));
 var digest = Sha(Path.Combine(library, "cache-manifest.json"));
-try { verifier.ReusePreparedLibrary(library, digest); }
-catch (InvalidOperationException error) when (
-    error.Message.Contains("UnaggregatedForgery.bad", StringComparison.Ordinal))
+
+// A donor that ran reviewed producer code is trusted; accepting a forgery shows no replay ran.
+if (verifier.PrepareLibrary(library, digest, producerReplayed: true) != digest)
+    throw new Exception("Reviewed-producer reuse rejected a library its producer certified");
+Console.WriteLine("PASS reuse from a donor that ran reviewed producer code performs no kernel replay");
+if (verifier.ReusePreparedLibrary(library, new string('0', 64)) is not null)
+    throw new Exception("Reuse accepted a manifest whose digest no producer logged");
+var forged = Path.Combine(library, ".lake/build/lib/lean/AUnaggregatedForgery.olean");
+var forgedBytes = File.ReadAllBytes(forged);
+File.AppendAllText(forged, "tampered");
+if (verifier.ReusePreparedLibrary(library, digest) is not null)
+    throw new Exception("Reuse accepted a file that differs from the authenticated manifest");
+File.WriteAllBytes(forged, forgedBytes);
+Console.WriteLine("PASS reuse without replay still rejects a digest mismatch and a tampered file");
+
+// Unreviewed producer code, a release asset or unknown provenance replays every module.
+foreach (var (label, reuse) in new (string, Func<string?>)[]
 {
-    Console.WriteLine("PASS fallback kernel replay rejects a forged module outside the CIL aggregate");
-    return;
+    ("donor with unreviewed producer code", () => verifier.PrepareLibrary(library, digest)),
+    ("release asset", () => verifier.ReplayPreparedLibrary(library, digest)),
+})
+{
+    try { reuse(); }
+    catch (InvalidOperationException error) when (
+        error.Message.Contains("UnaggregatedForgery.bad", StringComparison.Ordinal))
+    {
+        Console.WriteLine("PASS replay of a " + label + " rejects a forged module outside the CIL aggregate");
+        continue;
+    }
+    throw new Exception("Replay of a " + label + " ignored an invalid nonaggregate library module");
 }
-throw new Exception("Fallback kernel replay ignored an invalid nonaggregate library module");

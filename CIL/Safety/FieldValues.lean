@@ -9,9 +9,14 @@ proof that tracks a struct local this way names its field values, such as `[.i32
 .i32 sum]`, instead of its bytes, offsets and widths. On a valid, disjoint layout a field store
 replaces exactly that value (`AggregateLayout.setIn_encode`), and a field holding an int, word or
 vector of exactly its width reads back as that value, by value (`step_fieldAt_encode`) or through
-the struct's address (`fieldAt_encode_home`). A narrow field stores a truncated value, which
-reads back zero or sign extended, so it has no exact read here and stays at the byte level of
-`CIL.Safety.AggregateFields`.
+the struct's address (`fieldAt_encode_home`). A 1- or 2-byte field stores a truncated int, which
+reads back as `narrowLoad`, its low bytes zero or sign extended (`step_fieldAt_encode_narrow`,
+`fieldAt_encode_home_narrow`).
+
+`AggregateLayout.zeros` are the field values of a zeroed struct, each the value its kind loads
+from zero bytes (`FieldLayout.zero_loaded`, `FieldLayout.zero_nested`): an int for a 1-, 2- or
+4-byte field, a word, a vector, or a nested struct's zero bytes. On a valid layout they encode
+as the zeroed struct (`AggregateLayout.encode_zeros`), which is what `initobj` leaves.
 -/
 
 namespace CIL.Safety
@@ -341,5 +346,192 @@ theorem fieldAt_encode_home {memory : Memory} {home : Reference} {layout : Aggre
       loaded within scalar body pc args frame rest
 
 #print axioms fieldAt_encode_home
+
+end CIL.Safety
+
+namespace CIL
+open Safety
+
+/-- The value a field of this kind holds in zeroed bytes, as its load pushes it: an int for a
+    1-, 2- or 4-byte field, a word for 8 bytes, a vector of the field's width and the zero bytes
+    of a nested struct. -/
+def FieldLayout.zero (field : FieldLayout) : CIL.Value :=
+  if field.aggregate then .aggregate (List.replicate field.width 0) else
+    match field.width with
+    | 8 => .i64 0
+    | 16 => .v128 0
+    | 32 => .v256 0
+    | _ => .i32 0
+
+/-- The field values of a zeroed struct of the layout, in field order. -/
+def AggregateLayout.zeros (layout : AggregateLayout) : List CIL.Value :=
+  layout.fields.map FieldLayout.zero
+
+/-- A load of a zeroed scalar field pushes its zero, signed or not. -/
+theorem FieldLayout.zero_loaded {field : FieldLayout} (scalar : field.aggregate = false)
+    (width : field.width ∈ [1, 2, 4, 8, 16, 32]) (signed : Bool) :
+    (if signed then signedOfWidth field.width 0 else numericOfWidth field.width 0) =
+      field.zero := by
+  obtain ⟨offset, width, aggregate⟩ := field
+  simp only at scalar width
+  subst scalar
+  simp only [List.mem_cons, List.not_mem_nil, or_false] at width
+  rcases width with rfl | rfl | rfl | rfl | rfl | rfl <;> cases signed <;> rfl
+
+/-- A nested struct load of a zeroed field pushes its zero. -/
+theorem FieldLayout.zero_nested {field : FieldLayout} (nested : field.aggregate = true)
+    {size : Nat} (within : field.offset + field.width ≤ size) :
+    Value.aggregate (field.bytesIn (List.replicate size 0)) = field.zero := by
+  simp only [zero, nested, ite_true, bytesIn, List.drop_replicate, List.take_replicate]
+  congr 2
+  omega
+
+/-- A field's zero stores no nonzero byte. -/
+theorem FieldLayout.fieldNumber_zero (field : FieldLayout) :
+    fieldNumber field.width field.zero = 0 := by
+  obtain ⟨offset, width, aggregate⟩ := field
+  unfold zero fieldNumber
+  cases aggregate
+  · simp only [Bool.false_eq_true, ite_false]
+    split <;> unfold fieldStoreNumber <;> split <;> simp_all <;> (subst_vars; rfl)
+  · simp [fieldStoreNumber]
+
+/-- Storing zero into a field inside zeroed bytes keeps them zero. -/
+theorem FieldLayout.setIn_replicate_zero {field : FieldLayout} {size : Nat}
+    (within : field.offset + field.width ≤ size) :
+    field.setIn (List.replicate size 0) 0 = List.replicate size 0 := by
+  have zeros : numberBytes 0 field.width = List.replicate field.width 0 := by
+    simp [numberBytes, List.map_const']
+  rw [setIn, zeros, List.take_replicate, List.drop_replicate, List.replicate_append_replicate,
+    List.replicate_append_replicate]
+  congr 1
+  omega
+
+#print axioms FieldLayout.zero_loaded
+#print axioms FieldLayout.zero_nested
+#print axioms FieldLayout.fieldNumber_zero
+#print axioms FieldLayout.setIn_replicate_zero
+
+end CIL
+
+namespace CIL.Safety
+
+/-- Fields inside zeroed bytes storing their zeros leave the bytes zero. -/
+theorem encodeFields_zeros {fields : List FieldLayout} {size : Nat}
+    (within : ∀ field ∈ fields, field.offset + field.width ≤ size) :
+    encodeFields fields (fields.map FieldLayout.zero) (List.replicate size 0) =
+      List.replicate size 0 := by
+  induction fields with
+  | nil => rfl
+  | cons field fields ih =>
+    simp only [List.map_cons, encodeFields, FieldLayout.fieldNumber_zero,
+      FieldLayout.setIn_replicate_zero (within field (by simp))]
+    exact ih fun other member => within other (by simp [member])
+
+#print axioms encodeFields_zeros
+
+end CIL.Safety
+
+namespace CIL
+open Safety
+
+/-- A zeroed struct of a valid layout is the struct whose fields hold the layout's zeros. -/
+theorem AggregateLayout.encode_zeros {layout : AggregateLayout} (valid : layout.Valid) :
+    layout.encode layout.zeros = List.replicate layout.size 0 :=
+  encodeFields_zeros fun field member => field_within_layout layout valid field member
+
+#print axioms AggregateLayout.encode_zeros
+
+end CIL
+
+namespace CIL.Safety
+
+/-- What a load of a 1- or 2-byte field that stored the int `bits` pushes: its low `width`
+    bytes, sign extended when signed and zero extended otherwise; `bits` at any other width. -/
+def narrowLoad : Nat → Bool → BitVec 32 → BitVec 32
+  | 1, false, bits => (bits.setWidth 8).setWidth 32
+  | 1, true, bits => (bits.setWidth 8).signExtend 32
+  | 2, false, bits => (bits.setWidth 16).setWidth 32
+  | 2, true, bits => (bits.setWidth 16).signExtend 32
+  | _, _, bits => bits
+
+/-- A 1- or 2-byte field that stored the int `bits` decodes to `narrowLoad`, signed or not. -/
+theorem narrowLoad_decoded {width : Nat} (narrow : width = 1 ∨ width = 2) (signed : Bool)
+    (bits : BitVec 32) :
+    (if signed then signedOfWidth width (fieldNumber width (.i32 bits))
+      else numericOfWidth width (fieldNumber width (.i32 bits))) =
+      .i32 (narrowLoad width signed bits) := by
+  rcases narrow with rfl | rfl <;> cases signed <;>
+    simp only [fieldNumber, fieldStoreNumber, signedOfWidth, numericOfWidth, narrowLoad,
+      Option.getD_some, Bool.false_eq_true, ite_false, ite_true, CIL.Value.i32.injEq] <;>
+    first
+    | (congr 1; apply BitVec.eq_of_toNat_eq; simp; done)
+    | (apply BitVec.eq_of_toNat_eq; simp; done)
+
+/-- A by-value `ldfld` of a 1- or 2-byte field holding the number an int `bits` stores pushes
+    `narrowLoad` of it. The step holds in any method and frame. -/
+theorem step_fieldAt_narrow {bytes : List (BitVec 8)} {offset width : Nat} {bits : BitVec 32}
+    (within : offset + width ≤ bytes.length) (narrow : width = 1 ∨ width = 2)
+    (decoded : byteNumber ((bytes.drop offset).take width) = fieldNumber width (.i32 bits)) :
+    ∀ body pc args frame memory rest signed,
+      step body (.fieldAt offset width signed) pc args frame (.scalar (.aggregate bytes) :: rest)
+        memory =
+        .ok (.next (pc + 1) (.scalar (.i32 (narrowLoad width signed bits)) :: rest) frame
+          memory) := by
+  intro body pc args frame memory rest signed
+  have pushed := narrowLoad_decoded narrow signed bits
+  rw [step_fieldAt_eq]
+  rcases narrow with rfl | rfl <;> cases signed <;>
+    simp_all [instructionStep, instruction, cil_guard, unspecifiedOperands, List.take, List.any,
+      Value.hasUnspecified, signedOfWidth, numericOfWidth, Bind.bind, Except.bind, Pure.pure,
+      Except.pure, Nat.not_lt.2 within]
+
+/-- A by-value `ldfld` of 1- or 2-byte field `index` of a struct of a valid, disjoint layout whose
+    field values hold the int `bits` there pushes `narrowLoad` of it. -/
+theorem step_fieldAt_encode_narrow {layout : AggregateLayout} (valid : layout.Valid)
+    (index : Nat) (values : List CIL.Value) {offset width : Nat} {aggregate : Bool}
+    (found : layout.fields[index]? = some ⟨offset, width, aggregate⟩ := by rfl)
+    {bits : BitVec 32} (listed : values[index]? = some (.i32 bits) := by rfl)
+    (narrow : width = 1 ∨ width = 2 := by decide) (disjoint : layout.Disjoint := by decide) :
+    ∀ body pc args frame memory rest signed,
+      step body (.fieldAt offset width signed) pc args frame
+        (.scalar (.aggregate (layout.encode values)) :: rest) memory =
+        .ok (.next (pc + 1) (.scalar (.i32 (narrowLoad width signed bits)) :: rest) frame
+          memory) :=
+  step_fieldAt_narrow (layout.within_encode valid values _ (List.mem_of_getElem? found)) narrow
+    (layout.numberIn_encode valid disjoint found listed)
+
+/-- `ldfld` of 1- or 2-byte field `index` through the address of a struct home holding a struct
+    of a valid, disjoint layout whose field values hold the int `bits` there pushes `narrowLoad`
+    of it. The step holds in any method and frame. -/
+theorem fieldAt_encode_home_narrow {memory : Memory} {home : Reference}
+    {layout : AggregateLayout} (formed : memory.WellFormed) (valid : layout.Valid)
+    (disjoint : layout.Disjoint) {values : List CIL.Value}
+    (loaded : read memory home (layout.encode values).length 1 = .ok (layout.encode values))
+    {index offset width : Nat} {aggregate : Bool}
+    (found : layout.fields[index]? = some ⟨offset, width, aggregate⟩) {bits : BitVec 32}
+    (listed : values[index]? = some (.i32 bits)) (narrow : width = 1 ∨ width = 2) :
+    ∀ body pc args frame rest signed,
+      step body (.fieldAt offset width signed) pc args frame
+        (.reference (.address home) :: rest) memory =
+        .ok (.next (pc + 1) (.scalar (.i32 (narrowLoad width signed bits)) :: rest) frame
+          memory) := by
+  intro body pc args frame rest signed
+  have within := layout.within_encode valid values _ (List.mem_of_getElem? found)
+  have number := layout.numberIn_encode valid disjoint found listed
+  have scalar : ScalarWidth width := by rcases narrow with rfl | rfl <;> simp [ScalarWidth]
+  rw [← narrowLoad_decoded narrow signed bits]
+  cases signed with
+  | false =>
+    simpa [number] using step_fieldAt_home (field := ⟨offset, width, aggregate⟩) formed loaded
+      within scalar body pc args frame rest
+  | true =>
+    simpa [number] using step_fieldAt_signed_home (field := ⟨offset, width, aggregate⟩) formed
+      loaded within scalar body pc args frame rest
+
+#print axioms narrowLoad_decoded
+#print axioms step_fieldAt_narrow
+#print axioms step_fieldAt_encode_narrow
+#print axioms fieldAt_encode_home_narrow
 
 end CIL.Safety

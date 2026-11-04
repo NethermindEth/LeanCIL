@@ -14,6 +14,9 @@ name = "Tests.Support"
 name = "Tests.Semantics"
 
 [[lean_lib]]
+name = "Tests.LiteralDisplay"
+
+[[lean_lib]]
 name = "Tests.Automation"
 
 [[lean_lib]]

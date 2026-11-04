@@ -662,8 +662,12 @@ partial class Program : IDisposable
     {
         var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
 
-        foreach (var name in new[] { "lean-toolchain", "lakefile.toml", "lake-manifest.json", "CIL.lean" })
+        foreach (var name in new[] { "lean-toolchain", "lake-manifest.json", "CIL.lean" })
             result[name] = Sha(At(name));
+        // Checkout identities see every declaration; the certified library sees only what builds it.
+        var lakefile = File.ReadAllBytes(At("lakefile.toml"));
+        result[CheckoutLakefileInput] = Convert.ToHexStringLower(SHA256.HashData(lakefile));
+        result["lakefile.toml"] = ContentKey(LibraryLakefile(Encoding.UTF8.GetString(lakefile)));
 
         var folders = new List<(string, string[])> { ("CIL", [".lean"]) };
 #if !LEANCIL_TOOL
@@ -684,6 +688,49 @@ partial class Program : IDisposable
             }
 
         return result;
+    }
+
+    /// <summary>The snapshot key of the complete checkout lakefile, which no certified library contains.</summary>
+    const string CheckoutLakefileInput = "checkout:lakefile.toml";
+
+    /// <summary>
+    /// The lakefile the certified library is built from: the checkout's, without blank lines, comments
+    /// or any plain <c>[[lean_lib]]</c> table that declares only a library outside CIL.
+    /// </summary>
+    static string LibraryLakefile(string lakefile)
+    {
+        var lines = lakefile.ReplaceLineEndings("\n").Split('\n');
+        // A multi-line string can hold header-like lines, so such a file is kept whole.
+        if (lakefile.Contains("\"\"\"", StringComparison.Ordinal) ||
+            lakefile.Contains("'''", StringComparison.Ordinal))
+            return string.Join("\n", lines);
+        var tables = new List<List<string>> { new() };
+        foreach (var line in lines)
+        {
+            if (line.StartsWith('[')) tables.Add([]);
+            if (!string.IsNullOrWhiteSpace(line) && !line.TrimStart().StartsWith('#')) tables[^1].Add(line);
+        }
+        static string? OtherLibrary(List<string> table) =>
+            table is ["[[lean_lib]]", var declaration] &&
+            LibraryName().Match(declaration) is { Success: true } match && match.Groups[1].Value is var name &&
+            name != "CIL" && !name.StartsWith("CIL.", StringComparison.Ordinal) ? name : null;
+        var named = string.Join("\n", tables.Where(table => OtherLibrary(table) is null).SelectMany(table => table));
+        // A library that a kept table names, such as a default target, stays declared.
+        return string.Concat(tables.Where(table => OtherLibrary(table) is not { } name ||
+                named.Contains('"' + name + '"', StringComparison.Ordinal))
+            .SelectMany(table => table).Select(line => line + "\n"));
+    }
+
+    [GeneratedRegex(@"\Aname = ""([A-Za-z_][A-Za-z0-9_.]*)""\z")]
+    private static partial Regex LibraryName();
+
+    /// <summary>Copies one certified library source from the checkout; the lakefile is its library view.</summary>
+    static void CopyLibrarySource(string name, string destination)
+    {
+        if (name == "lakefile.toml")
+            File.WriteAllText(destination,
+                LibraryLakefile(Encoding.UTF8.GetString(File.ReadAllBytes(At(name)))));
+        else File.Copy(At(name), destination, true);
     }
 
     static SortedDictionary<string, string> Inputs(SortedDictionary<string, string> common, string proof,
@@ -789,7 +836,7 @@ partial class Program : IDisposable
                 throw new InvalidDataException("Released library exceeds extraction limits");
         // ZipFile rejects entries escaping the destination; the entire extracted tree must match the manifest.
         System.IO.Compression.ZipFile.ExtractToDirectory(archive, staging);
-        if (ReusePreparedLibrary(staging, asset.ManifestSha256) is null)
+        if (ReplayPreparedLibrary(staging, asset.ManifestSha256) is null)
             throw new InvalidDataException("Released library identity or integrity mismatch");
         var manifestBytes = File.ReadAllBytes(Path.Combine(staging, "cache-manifest.json"));
         File.WriteAllBytes(Path.Combine(staging, "cache-receipt.hmac"),
@@ -1015,10 +1062,9 @@ partial class Program : IDisposable
         // Include the resolved toolchain, platform and cache format, not the selected proof.
         var toolchain = Toolchain;
         var compiler = Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "lean.exe" : "lean");
-        return (Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
-            "leancil-library-v4-all-modules-kernel-replayed\n" + System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier + "\n" +
-            Sha(Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker")) + "\n" + Sha(compiler) + "\n" + JsonSerializer.Serialize(sources)))),
-            sources);
+        var checker = Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
+        return (ContentKey("leancil-library-v5-all-modules-kernel-replayed\n" + RuntimeInformation.RuntimeIdentifier +
+            "\n" + Sha(checker) + "\n" + Sha(compiler) + "\n" + JsonSerializer.Serialize(sources)), sources);
     }
 
     /// <summary>
@@ -1037,7 +1083,6 @@ partial class Program : IDisposable
         }
 
         (libraryKey, var sources) = LibraryIdentity(common);
-        var toolchain = Toolchain;
         var fresh = freshLibrary ||
             string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"), "true", StringComparison.OrdinalIgnoreCase);
@@ -1098,7 +1143,7 @@ partial class Program : IDisposable
                 {
                     var destination = Path.Combine(library, name);
                     Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                    File.Copy(At(name), destination, true);
+                    CopyLibrarySource(name, destination);
                     if (Sha(destination) != hash)
                         throw new InvalidOperationException("Library source changed while copying: " + name);
                 }
@@ -1107,14 +1152,9 @@ partial class Program : IDisposable
                     name.EndsWith(".lean", StringComparison.Ordinal)).Select(name => "+" + name[..^".lean".Length].Replace('/', '.'));
                 Run(["lake", "build", "CIL", "leancil-audit", .. frameworkModules], library, streamOutput: true,
                     progress: "Building fresh Lean verification library");
-                var checker = Path.Combine(toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker");
-                var compiledLibrary = Path.Combine(library, ".lake/build/lib/lean");
-                string[] modules = [.. ModuleArtifacts(library).Keys.Select(ModuleName)
-                    .Distinct().Order(StringComparer.Ordinal)];
-                if (!ReplayModulesJointly(library, modules,
-                    compiledLibrary, "Joint kernel replay of fresh Lean verification library"))
-                    Run([checker, .. modules], library, compiledLibrary, streamOutput: true,
-                        progress: "Kernel replay of fresh Lean verification library");
+                // An incremental build replays donor modules too: an unchanged olean may import changed ones.
+                ReplayLibrary(library, (incrementalLibrary is null ? "fresh" : "incremental") +
+                    " Lean verification library");
                 if (!Same(sources, LibrarySources(CommonInputs())))
                     throw new InvalidDataException("Library sources changed during preparation");
                 libraryBuild = incrementalLibrary is null ? "fresh" : "incremental";
@@ -1200,15 +1240,16 @@ partial class Program : IDisposable
     }
 
     /// <summary>
-    /// A fresh package holding the given checkout sources and every non-CIL library of the base,
-    /// with the base itself as a read-only path dependency. Lake writes only below this package.
+    /// A fresh package holding the given checkout sources and every non-CIL library of the checkout
+    /// lakefile, with the base as a read-only path dependency. Lake writes only below this package.
     /// </summary>
     static string CreateSession(string certified, IEnumerable<string> extraSources)
     {
         var directory = Path.Combine(Path.GetTempPath(), "leancil-session-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
+        // The certified lakefile omits test libraries, so only the checkout's can declare them.
         File.WriteAllText(Path.Combine(directory, "lakefile.toml"), "name = \"leancil-session\"\n" +
-            FrameworkRequirement(directory, certified) + LibraryDeclarations(Path.Combine(certified, "lakefile.toml")));
+            FrameworkRequirement(directory, certified) + LibraryDeclarations(At("lakefile.toml")));
         File.Copy(Path.Combine(certified, "lean-toolchain"), Path.Combine(directory, "lean-toolchain"));
         foreach (var name in extraSources)
         {
@@ -1249,9 +1290,8 @@ partial class Program : IDisposable
         Path.Combine(directory, ".lake/build/lib/lean") + Path.PathSeparator + Path.Combine(library!, ".lake/build/lib/lean");
 
     /// <summary>
-    /// A package named leancil whose only library is CIL, read in place from the certified library.
-    /// The certified lakefile also declares the test libraries; only this view keeps them from
-    /// claiming a requiring package's own modules.
+    /// A package named leancil whose only library is CIL, read in place from the certified library,
+    /// so no other target of the certified lakefile can claim a requiring package's own modules.
     /// </summary>
     static string FrameworkPackage(string owner, string certified)
     {
@@ -1384,10 +1424,15 @@ partial class Program : IDisposable
         return destination;
     }
 
-    string PrepareLibrary(string destination, string? trustedDigest = null)
+    /// <summary>
+    /// Publishes a freshly built library, or authenticates one restored under a trusted digest. A restored
+    /// library is also kernel-replayed unless its producer ran reviewed producer code.
+    /// </summary>
+    string PrepareLibrary(string destination, string? trustedDigest = null, bool producerReplayed = false)
     {
         if (trustedDigest is not null)
-            return ReusePreparedLibrary(destination, trustedDigest) ??
+            return (producerReplayed ? ReusePreparedLibrary(destination, trustedDigest)
+                    : ReplayPreparedLibrary(destination, trustedDigest)) ??
                 throw new InvalidOperationException("Certified library identity or integrity mismatch; destination left unchanged");
         destination = RequireEmptyLibraryDestination(destination);
         Library(Inputs(At("CIL.lean")));
@@ -1486,27 +1531,45 @@ partial class Program : IDisposable
         finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
     }
 
-    // A manifest authenticates contents only when its digest comes independently from a trusted producer.
-    // Kernel replay cannot authenticate the native auditor or establish compiled-to-source correspondence.
+    /// <summary>
+    /// The trusted digest when every file of the library matches the manifest it names and the manifest
+    /// binds the current sources, or null. The library is not replayed, so a caller relies on a producer
+    /// that ran reviewed producer code and kernel-replayed every module.
+    /// </summary>
     string? ReusePreparedLibrary(string directory, string? trustedDigest)
+    {
+        var manifest = Path.Combine(directory, "cache-manifest.json");
+        if (string.IsNullOrWhiteSpace(trustedDigest) || !File.Exists(manifest) || Sha(manifest) != trustedDigest)
+            return null;
+        var (key, sources) = LibraryIdentity(CommonInputs());
+        return ValidCertifiedLibrary(directory, trustedDigest, key, sources) ? trustedDigest : null;
+    }
+
+    /// <summary>
+    /// Like <see cref="ReusePreparedLibrary"/>, but also kernel-replays every module, for a library whose
+    /// producer may have run other code, such as a release asset or a PR that changed CI scripts.
+    /// </summary>
+    string? ReplayPreparedLibrary(string directory, string trustedDigest)
+    {
+        if (ReusePreparedLibrary(directory, trustedDigest) is null) return null;
+        ReplayLibrary(directory, "reused Lean verification library");
+        return ReusePreparedLibrary(directory, trustedDigest);
+    }
+
+    /// <summary>
+    /// Kernel-replays every compiled module of a library, including modules outside the CIL aggregate,
+    /// and fails unless all of them replay.
+    /// </summary>
+    void ReplayLibrary(string directory, string description)
     {
         // Replay runs inside the library, so a relative Lean path would resolve below it.
         directory = Path.GetFullPath(directory);
-        var manifest = Path.Combine(directory, "cache-manifest.json");
-        if (string.IsNullOrWhiteSpace(trustedDigest) || !File.Exists(manifest) || Sha(manifest) != trustedDigest) return null;
-        var snapshot = Inputs(At("CIL.lean"));
-        var (key, sources) = LibraryIdentity(new(snapshot.Where(p => !p.Key.StartsWith("proof:", StringComparison.Ordinal) &&
-            !p.Key.StartsWith("settings:", StringComparison.Ordinal)).ToDictionary(), StringComparer.Ordinal));
-        if (!ValidCertifiedLibrary(directory, trustedDigest, key, sources)) return null;
         var compiled = Path.Combine(directory, ".lake/build/lib/lean");
         string[] modules = [.. ModuleArtifacts(directory).Keys.Select(ModuleName)
             .Distinct().Order(StringComparer.Ordinal)];
-        if (!ReplayModulesJointly(directory, modules,
-            compiled, "Joint kernel replay of reused Lean verification library"))
+        if (!ReplayModulesJointly(directory, modules, compiled, "Joint kernel replay of " + description))
             Run([Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker"),
-                .. modules], directory, compiled,
-                streamOutput: true, progress: "Kernel replay of reused Lean verification library");
-        return ValidCertifiedLibrary(directory, trustedDigest, key, sources) ? trustedDigest : null;
+                .. modules], directory, compiled, streamOutput: true, progress: "Kernel replay of " + description);
     }
 
     SortedDictionary<string, string> SupportInputs(string session, string[] roots, SortedDictionary<string, string> snapshot)

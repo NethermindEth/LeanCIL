@@ -60,12 +60,8 @@ theorem fill_words (initial : Memory) (base : Reference) (v : W64) (n : W32)
   by_cases exit : k.toNat = n.toNat
   · left
     obtain rfl : k = n := BitVec.eq_of_toNat_eq exit
-    obtain ⟨framed, below⟩ := frame.leave setup
     have stays : ¬ k.toInt < k.toInt := Int.lt_irrefl _
     cil_loop_finish [entry.frame, header, guard, loaded, stays]
-    exact loop_terminates_return (op := .ret none) (by first | (simp only [cil_code]; rfl) | rfl)
-      (by first | (simp only [cil_code]; rfl) | rfl)
-      (by cil_checked_step [CIL.truth]) rfl ⟨⟨filled.1.after_below below old, framed⟩, rfl⟩
   · have lower : k.toNat < n.toNat := by omega
     obtain ⟨m1, target, stored, pushed⟩ := filled.write_next (by omega) (v : BitVec (8 * 8))
     simp only [List.length_replicate] at target stored

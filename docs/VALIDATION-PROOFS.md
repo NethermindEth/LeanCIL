@@ -168,14 +168,25 @@ does change the local, so its remembered value is refuted. A two-local frame gen
 lemma rejects a write through the second's home, which breaks its snapshot. A countdown bound by
 signature through `bind_method` is entered over its body name, cut with the binder form of
 `bind_cutpoint ... matching`, and proved to return zero, so frame setup must unfold the bound name
-to the extracted method.
+to the extracted method. The caller-fact lemmas carry a formed reference, an `Unsafe.Add` result and a
+span's validity and slice from the caller's memory to a frame's, and reject a fact about another
+memory; a slice of a span apart from an entry stays apart, and a stored word extends a filled run
+only right after it, so a word past the next one is refused.
 
 `Tests.LoopDiagnostics` proves a loop over a struct local that calls a method, passing no facts to
 the loop tactics: the gathered frame facts read the struct's fields by value and by address, and
 the call is crossed by its contract. Each loop tactic failure names its pc and instruction: a
 contract applied before the call, a call reached by `cil_loop_steps`, a store with no frame fact at
 its memory and a path back to the cutpoint in another state. A field store outside the layout or of
-the wrong kind, and a by-value read of a field narrower than its value, do not elaborate.
+the wrong kind, and a by-value read of a field narrower than its value, do not elaborate. A second
+loop over an int local stamps a caller buffer through a helper whose contract writes one word,
+with no frame lemma, memory or store named: the walk takes the local's stores, carries the
+`Unsafe.Add` result and write authority, and crosses the call with the frame after it. Without
+the `Unsafe.Add` fact the walk stops at the add, naming that fact; a narrowing local store stops
+the walk; without the index bound the call names the footprint side condition; an unformed
+argument names the argument check; and a contract input whose arguments differ from the stack
+names both. At a return `cil_loop_finish` closes the results and confinement and hands back the
+rest of the postcondition.
 
 `Tests.ProfileContract` proves a contract for a method that tests AVX2 once, under x86-64-v3, and
 carries it to x86-64-v4, to v3 without 256-bit acceleration and to every profile with AVX2 on. A

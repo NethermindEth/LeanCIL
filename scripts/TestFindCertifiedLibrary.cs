@@ -20,7 +20,7 @@ const string Digest = "0123456789abcdef0123456789abcdef0123456789abcdef012345678
 const string Other = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
 DateTimeOffset now = DateTimeOffset.Parse("2026-10-27T00:00:00Z");
 
-Test("PR donors require the same PR, repository and successful ancestor", () =>
+Test("PR donors require the same PR, repository and an ancestor, whatever their suites concluded", () =>
 {
     var head = new string('a', 40);
     var ancestor = new string('b', 40);
@@ -34,9 +34,13 @@ Test("PR donors require the same PR, repository and successful ancestor", () =>
     long[] Select(string json, bool related = true) => CertifiedLibraryDonor.PullAncestors(Json(json),
         "owner/repo", 42, head, _ => related, 10).ToArray();
     Require(Select(Run()).SequenceEqual([9L]), "Successful ancestor was omitted");
-    foreach (var invalid in new[] { Run(pull: 43), Run(repository: "fork/repo"),
-        Run(status: "in_progress"), Run(conclusion: "failure"), Run(commit: head), Run(commit: "bad") })
-        Require(Select(invalid).Length == 0, "Unrelated or incomplete run accepted");
+    // The prepare job decides eligibility, so failed suites or a running workflow do not hide a library.
+    foreach (var pending in new[] { Run(status: "in_progress", conclusion: ""), Run(conclusion: "failure"),
+        Run(conclusion: "cancelled") })
+        Require(Select(pending).SequenceEqual([9L]), "Ancestor with a successful prepare job was omitted");
+    foreach (var invalid in new[] { Run(pull: 43), Run(repository: "fork/repo"), Run(commit: head),
+        Run(commit: "bad") })
+        Require(Select(invalid).Length == 0, "Unrelated run accepted");
     Require(Select(Run(), related: false).Length == 0, "Nonancestor accepted");
 });
 
@@ -274,5 +278,152 @@ Test("archive digest belongs to the same successful producer log as its manifest
             archive == Other ? result == new CertifiedLibraryDonor.Selection(7, 70, Digest, Other) : result is null,
             "Packed or legacy donor digest mismatch");
     }
+});
+JsonElement PreparedRun(long run, string conclusion) => Json($$"""
+    {"jobs":[
+      {"id":{{run * 100}},"name":"Prepare certified Lean library","run_attempt":1,"conclusion":"{{conclusion}}"},
+      {"id":{{run * 100 + 1}},"name":"Verify (evidence)","run_attempt":1,"conclusion":"failure"}]}
+    """);
+JsonElement LiveArtifact(long run) => Json($$$"""
+    {"artifacts":[{"id":{{{run * 10}}},"name":"certified-library-{{{run}}}-1","expired":false,
+      "expires_at":"2026-11-05T00:00:00Z","workflow_run":{"id":{{{run}}}}}]}
+    """);
+Test("a run whose suites failed donates through its successful prepare job", () =>
+{
+    // Run 7's evidence suite failed after its prepare job certified and logged the library.
+    var result = CertifiedLibraryDonor.Find([7, 8], (run, suffix) =>
+        suffix.StartsWith("/jobs", StringComparison.Ordinal) ? PreparedRun(run, "success") : LiveArtifact(run),
+        job => CertifiedLibraryDonor.DigestLine + (job == 700 ? Digest : Other), now, _ => { });
+    Require(result == new CertifiedLibraryDonor.Selection(7, 70, Digest), "Failed-suite run did not donate");
+});
+Test("a run whose prepare job failed or was cancelled never donates", () =>
+{
+    foreach (var conclusion in new[] { "failure", "cancelled", "skipped" })
+    {
+        var logs = new List<long>();
+        var result = CertifiedLibraryDonor.Find([7, 8], (run, suffix) =>
+            suffix.StartsWith("/jobs", StringComparison.Ordinal)
+                ? PreparedRun(run, run == 7 ? conclusion : "success") : LiveArtifact(run),
+            job => { logs.Add(job); return CertifiedLibraryDonor.DigestLine + Digest; }, now, _ => { });
+        Require(result == new CertifiedLibraryDonor.Selection(8, 80, Digest) && logs.SequenceEqual([800L]),
+            "A " + conclusion + " prepare job donated or had its log trusted");
+    }
+});
+Test("a same-PR ancestor is preferred over main, which is not queried once it donates", () =>
+{
+    const long ancestor = 5, main = 6;
+    var queried = new List<string>();
+    IEnumerable<long> Source(string name, params long[] runs)
+    {
+        queried.Add(name);
+        return runs;
+    }
+    var candidates = CertifiedLibraryDonor.Candidates(() => Source("commit"), () => Source("ancestors", ancestor),
+        () => Source("merged"), () => Source("base", main), () => Source("recent", main));
+    var result = CertifiedLibraryDonor.Find(candidates, (run, suffix) =>
+        suffix.StartsWith("/jobs", StringComparison.Ordinal) ? PreparedRun(run, "success") : LiveArtifact(run),
+        job => CertifiedLibraryDonor.DigestLine + Digest, now, _ => { });
+    Require(result == new CertifiedLibraryDonor.Selection(ancestor, 50, Digest), "Main preferred over ancestor");
+    Require(queried.SequenceEqual(["commit", "ancestors"]), "Main queried before the ancestor was tried: " +
+        string.Join(", ", queried));
+    Require(CertifiedLibraryDonor.Candidates(() => [1], () => [2], () => [3], () => [4], () => [5])
+        .SequenceEqual([1L, 2, 3, 4, 5]), "Donor sources out of order");
+});
+Test("only a donor that ran reviewed producer code skips replay", () =>
+{
+    string head = new('d', 40), mergeBase = new('b', 40), baseCommit = new('c', 40), main = new('e', 40);
+    const string here = "https://api.github.com/repos/owner/repo";
+    object Side(string reference, string sha, string url = here) => new { @ref = reference, sha, repo = new { url } };
+    object Pull(string baseRef = "main", string baseUrl = here, string headUrl = here, string? headSha = null) =>
+        new
+        {
+            number = 42, @base = Side(baseRef, baseCommit, baseUrl), head = Side("feature", headSha ?? head, headUrl)
+        };
+    JsonElement Run(string trigger = "pull_request", string branch = "feature", string repository = "owner/repo",
+        string? commit = null, object[]? pulls = null) => Json(JsonSerializer.Serialize(new
+        {
+            @event = trigger, head_branch = branch, head_sha = commit ?? head,
+            head_repository = new { full_name = repository }, pull_requests = pulls ?? [Pull()]
+        }));
+    // Each commit gets its own root and intermediate trees, so only the producer objects can agree.
+    Func<string, JsonElement> Repository(char headWorkflow = 'e', char headScripts = 'f', bool truncated = false,
+        string? knownBase = null, string headOnMain = "behind", string baseOnMain = "behind",
+        string mainRef = "refs/heads/main")
+    {
+        var objects = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [$"compare/{baseCommit}...{head}"] = JsonSerializer.Serialize(new
+            {
+                merge_base_commit = new { sha = knownBase ?? mergeBase }
+            }),
+            ["git/ref/heads/main"] = JsonSerializer.Serialize(new { @ref = mainRef, @object = new { sha = main } }),
+            [$"compare/{main}...{head}"] = JsonSerializer.Serialize(new { status = headOnMain }),
+            [$"compare/{main}...{mergeBase}"] = JsonSerializer.Serialize(new { status = baseOnMain })
+        };
+        string Tree(params (string Name, string Type, string Sha)[] entries) => JsonSerializer.Serialize(new
+        {
+            truncated, tree = entries.Select(entry => new { path = entry.Name, type = entry.Type, sha = entry.Sha })
+        });
+        void Commit(string commit, char side, char workflow, char scripts, char sources)
+        {
+            string Sha(char kind) => new string(kind, 39) + side;
+            objects["git/commits/" + commit] = JsonSerializer.Serialize(new { tree = new { sha = Sha('1') } });
+            objects["git/trees/" + Sha('1')] = Tree((".github", "tree", Sha('2')),
+                ("scripts", "tree", new string(scripts, 40)), ("CIL", "tree", new string(sources, 40)));
+            objects["git/trees/" + Sha('2')] = Tree(("workflows", "tree", Sha('3')));
+            objects["git/trees/" + Sha('3')] = Tree(("verification.yml", "blob", new string(workflow, 40)));
+        }
+        // Lean sources differ, which the library identity binds; only producer code decides replay.
+        Commit(mergeBase, 'a', 'e', 'f', '7');
+        Commit(head, 'b', headWorkflow, headScripts, '8');
+        return path => objects.TryGetValue(path, out var json) ? Json(json)
+            : throw new InvalidOperationException("gh: Not Found (HTTP 404) " + path);
+    }
+    bool Reviewed(JsonElement run, Func<string, JsonElement> api) =>
+        CertifiedLibraryDonor.ReviewedProducer(run, "owner/repo", api, _ => { });
+    void Replayed(string label, JsonElement run, Func<string, JsonElement> api) =>
+        Require(!Reviewed(run, api), label + " skipped replay");
+    Func<string, JsonElement> unavailable = _ => throw new InvalidOperationException("gh: Server Error (HTTP 502)");
+
+    var push = Run(trigger: "push", branch: "main", pulls: []);
+    Require(Reviewed(push, Repository()) && Reviewed(push, Repository(headOnMain: "identical")),
+        "A main push donor was replayed");
+    Require(Reviewed(Run(), Repository()), "A PR into main leaving producer paths unchanged was replayed");
+    Console.WriteLine("PASS a main push donor and a PR into main that leaves producer paths unchanged are trusted");
+
+    Replayed("A PR that changed scripts/", Run(), Repository(headScripts: '9'));
+    Replayed("A PR that changed the workflow", Run(), Repository(headWorkflow: '9'));
+    Console.WriteLine("PASS a PR donor whose head changed scripts/ or the workflow is replayed");
+
+    Replayed("A PR into another branch", Run(pulls: [Pull(baseRef: "feature/parent")]), Repository());
+    Replayed("A fork PR", Run(pulls: [Pull(headUrl: "https://api.github.com/repos/fork/repo")]), Repository());
+    Replayed("A PR into another repository", Run(pulls: [Pull(baseUrl: "https://api.github.com/repos/other/repo")]),
+        Repository());
+    Replayed("A fork run", Run(repository: "fork/repo"), Repository());
+    Replayed("An empty pull_requests array", Run(pulls: []), Repository());
+    Replayed("Multiple pull_requests entries", Run(pulls: [Pull(), Pull()]), Repository());
+    Replayed("A head.sha mismatch", Run(pulls: [Pull(headSha: new string('f', 40))]), Repository());
+    Console.WriteLine("PASS non-main bases, forks, empty or multiple PR entries and head mismatches are replayed");
+
+    foreach (var status in new[] { "ahead", "diverged", "" })
+        Replayed("A push not reachable from main (" + status + ")", push, Repository(headOnMain: status));
+    Replayed("A push to another branch", Run(trigger: "push", pulls: []), Repository());
+    Replayed("A merge base not on main", Run(), Repository(baseOnMain: "ahead"));
+    Replayed("An ambiguous main ref", push, Repository(mainRef: "refs/tags/main"));
+    Replayed("An unresolvable main ref", push, path => path == "git/ref/heads/main"
+        ? Json("""[{"ref":"refs/heads/main-old"}]""") : Repository()(path));
+    Console.WriteLine("PASS a push not reachable from main, or an ambiguous or unresolved main ref, is replayed");
+
+    foreach (var unknown in new[] { "", mergeBase[..7], new string('z', 40) })
+        Replayed("An unknown merge base", Run(), Repository(knownBase: unknown));
+    Replayed("An unavailable merge base", Run(), unavailable);
+    Replayed("A push with unavailable metadata", push, unavailable);
+    Replayed("A comparison without a merge base", Run(), path => path.StartsWith("compare/" + baseCommit,
+        StringComparison.Ordinal) ? Json("{}") : Repository()(path));
+    Replayed("A truncated tree listing", Run(), Repository(truncated: true));
+    foreach (var untrusted in new[] { Run(trigger: "workflow_dispatch", branch: "main"), Run(commit: "abc123"),
+        Json("""{"event":"push","head_branch":"main","head_repository":null}"""), Json("{}") })
+        Replayed("Untrusted run metadata " + untrusted, untrusted, Repository());
+    Console.WriteLine("PASS unknown merge bases, unavailable trees, other events and missing fields are replayed");
 });
 Console.WriteLine($"All {checks} certified library donor checks passed.");

@@ -31,6 +31,15 @@ namespace CIL.Safety
 def knownLocals (values : List (Option CIL.Value)) : Nat → Option CIL.Value :=
   fun index => values[index]?.join
 
+/-- Close `listed = ?result` by choosing `?result` as `listed` with each `List.set` of a literal
+    list and every `localResult` computed, so a frame stored by hand lists its remembered locals
+    as literally as one the loop tactics store. -/
+syntax "cil_listed_locals" : tactic
+
+macro_rules
+  | `(tactic| cil_listed_locals) =>
+    `(tactic| ((conv => lhs; try simp only [List.set, CIL.Safety.localResult]) <;> rfl))
+
 /-- Remembering a new value of a listed local lists that value in its place. -/
 theorem rememberLocal_knownLocals {values : List (Option CIL.Value)} {index : Nat}
     (present : index < values.length) (value : CIL.Value) :
@@ -236,12 +245,13 @@ theorem LoopFrame.store {values : List (Option CIL.Value)}
     (value : CIL.Value) {kind : CIL.LocalKind} {home : Reference} {number : Nat}
     (fits : localNumber kind value = .ok number)
     (slot : slots[index]? = some (.bytes kind home) := by rfl)
-    (present : index < values.length := by simp) :
+    (present : index < values.length := by simp) {stored : List (Option CIL.Value)}
+    (listed : values.set index (some (localResult kind value)) = stored := by cil_listed_locals) :
     ∃ updated, storeLocal current (.bytes kind home) (.scalar value) =
         .ok (.bytes kind home, updated) ∧
-      LoopFrame footprint caller updated kinds slots
-        (knownLocals (values.set index (some (localResult kind value)))) ∧
+      LoopFrame footprint caller updated kinds slots (knownLocals stored) ∧
       MemoryBelow caller.nextIdentity current updated := by
+  subst listed
   have fresh := frame.homes.home_bound index kind home slot
   obtain ⟨updated, written, stored, _⟩ :=
     store_numeric_local kind value number fits (frame.homes.writable_at slot)
@@ -323,18 +333,20 @@ theorem LoopFrame.form {known : Nat → Option CIL.Value}
     form current base = .ok base := by
   simpa only [CIL.Safety.form, liveAllocation, frame.confined.allocations _ old] using valid
 
-/-- Leaving the entered frame keeps the caller's storage outside `footprint`, and changes
+/-- Leaving the entered frame, through any frame that owns what the entry allocated, such as
+    the frame a loop returns from, keeps the caller's storage outside `footprint`, and changes
     nothing the caller allocated. -/
 theorem LoopFrame.leave {known : Nat → Option CIL.Value} {body : CIL.Method} {args : List Value}
     {entered : Memory} {entering : Frame}
     (frame : LoopFrame footprint caller current kinds slots known)
-    (setup : enterFrame body args caller = .ok (entering, entered)) :
-    Confined footprint caller (leaveFrame entering current) ∧
-      MemoryBelow caller.nextIdentity current (leaveFrame entering current) :=
-  have owned : ∀ id ∈ entering.owned, caller.nextIdentity ≤ id := fun id member =>
-    ((enterFrame_fresh _ _ _ _ _ setup).2 id member).1
-  ⟨frame.confined.after_leaveFrame owned,
-    leaveFrame_preserves_memory_below entering current _ owned⟩
+    (setup : enterFrame body args caller = .ok (entering, entered)) (exited : Frame := entering)
+    (owned : exited.owned = entering.owned := by rfl) :
+    Confined footprint caller (leaveFrame exited current) ∧
+      MemoryBelow caller.nextIdentity current (leaveFrame exited current) :=
+  have fresh : ∀ id ∈ exited.owned, caller.nextIdentity ≤ id := fun id member =>
+    ((enterFrame_fresh _ _ _ _ _ setup).2 id (owned ▸ member)).1
+  ⟨frame.confined.after_leaveFrame fresh,
+    leaveFrame_preserves_memory_below exited current _ fresh⟩
 
 /-- A frame confined to no caller storage has kept all of it. -/
 theorem LoopFrame.kept {known : Nat → Option CIL.Value}
@@ -353,20 +365,9 @@ theorem LoopFrame.leave_kept {known : Nat → Option CIL.Value} {body : CIL.Meth
   frame.kept.trans (leaveFrame_preserves_memory_below exited current _ fun id member =>
     ((enterFrame_fresh _ _ _ _ _ setup).2 id (owned ▸ member)).1)
 
-/-- A checked span of well-formed caller memory stays checked in the memory of a frame confined
-    to no caller storage, so a loop state keeps its span in caller memory and reads it in frame
-    memory. -/
-theorem CheckedSpan.within {known : Nat → Option CIL.Value} {view : SpanView} {width : Nat}
-    {writable : Bool} {values : List (BitVec (8 * width))}
-    (span : CheckedSpan caller view width writable values) (wellFormed : caller.WellFormed)
-    (frame : LoopFrame [] caller current kinds slots known) :
-    CheckedSpan current view width writable values :=
-  span.below wellFormed frame.kept
-
 #print axioms LoopFrame.ofEntry
 #print axioms LoopFrame.kept
 #print axioms LoopFrame.leave_kept
-#print axioms CheckedSpan.within
 #print axioms LoopFrame.form_home
 #print axioms LoopFrame.load
 #print axioms LoopFrame.store
@@ -429,7 +430,36 @@ theorem step_store64_of_write {memory after : Memory} {target : Reference} {word
   simp [storeValue, referenceAt, ordinaryAccessAlignment, written, checkedAt,
     CIL.Value.hasUnspecified, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
+/-- A 1-, 2- or 4-byte scalar store of an int through an address whose write succeeds steps to
+    that write. The step holds in any method and frame. -/
+theorem step_storeScalar_of_write {memory after : Memory} {target : Reference} {width : Nat}
+    {bits : CIL.W32} (written : write memory target (numberBytes bits.toNat width) 1 = .ok after)
+    (narrow : width = 1 ∨ width = 2 ∨ width = 4 := by decide) :
+    ∀ body pc args frame rest,
+      step body (.storeScalar width) pc args frame
+        (.scalar (.i32 bits) :: .reference (.address target) :: rest) memory =
+        .ok (.next (pc + 1) rest frame after) := by
+  intro body pc args frame rest
+  rw [step_storeScalar_i32_eq body pc args frame memory width narrow]
+  simp [referenceAt, checkedAt, ordinaryAccessAlignment, written, Except.mapError, Bind.bind,
+    Except.bind, Pure.pure, Except.pure]
+
+/-- An eight-byte scalar store of a long through an address whose write succeeds steps to that
+    write. The step holds in any method and frame. -/
+theorem step_storeScalar_i64_of_write {memory after : Memory} {target : Reference}
+    {bits : CIL.W64} (written : write memory target (numberBytes bits.toNat 8) 1 = .ok after) :
+    ∀ body pc args frame rest,
+      step body (.storeScalar 8) pc args frame
+        (.scalar (.i64 bits) :: .reference (.address target) :: rest) memory =
+        .ok (.next (pc + 1) rest frame after) := by
+  intro body pc args frame rest
+  rw [step_storeScalar_i64_eq]
+  simp [referenceAt, checkedAt, ordinaryAccessAlignment, written, Except.mapError, Bind.bind,
+    Except.bind, Pure.pure, Except.pure]
+
 #print axioms step_store64_of_write
+#print axioms step_storeScalar_of_write
+#print axioms step_storeScalar_i64_of_write
 #print axioms int_offset
 #print axioms int_lt
 #print axioms toNat_succ

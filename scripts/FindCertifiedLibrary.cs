@@ -6,8 +6,8 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-// Prefer this commit and same-PR ancestors before merged PR trees and main pushes.
-// Their own code built the library and printed its digest; PrepareLibrary --reuse rechecks both.
+// A PR run donates once its prepare job succeeded, even if its suites failed. That job's own code
+// built the library and printed its digest; PrepareLibrary --reuse rechecks both.
 const int RunsPerCommit = 10;
 var options = new Dictionary<string, string>(StringComparer.Ordinal);
 for (var i = 0; i < args.Length; i++)
@@ -22,18 +22,26 @@ for (var i = 0; i < args.Length; i++)
 string repository = options["--repository"], workflow = options["--workflow"], output = options["--output"];
 string runs = $"repos/{repository}/actions/workflows/{workflow}/runs?per_page={RunsPerCommit}&head_sha=";
 string RunPath(long run) => $"repos/{repository}/actions/runs/{run}";
-var selected = CertifiedLibraryDonor.Find(Candidates(), (run, suffix) => Api(RunPath(run) + suffix),
+var selected = CertifiedLibraryDonor.Find(CertifiedLibraryDonor.Candidates(() => Runs(options["--head"], ""),
+        PullAncestorRuns, MergedPullRuns, () => Runs(options["--base"], "&event=push&branch=main"), RecentMainRuns),
+    (run, suffix) => Api(RunPath(run) + suffix),
     job => Gh($"repos/{repository}/actions/jobs/{job}/logs", "--allow-escape-sequences"),
     DateTimeOffset.UtcNow, Warning);
 if (selected is null)
     Console.WriteLine("No certified library to reuse; building from sources.");
 else
 {
+    // Run metadata, not the donated bytes, decides whether the producer ran reviewed code.
+    var reviewed = CertifiedLibraryDonor.Available("Run " + selected.Run, () =>
+        new[] { CertifiedLibraryDonor.ReviewedProducer(Api(RunPath(selected.Run)), repository,
+            path => Api($"repos/{repository}/{path}"), Warning) }, Warning).FirstOrDefault();
     File.AppendAllText(output,
         $"run-id={selected.Run}\nartifact-id={selected.Artifact}\nmanifest-sha256={selected.Digest}\n" +
-        $"archive-sha256={selected.ArchiveDigest}\n");
+        $"archive-sha256={selected.ArchiveDigest}\nreviewed-producer={(reviewed ? "true" : "false")}\n");
     Console.WriteLine($"Reusing artifact {selected.Artifact} from run {selected.Run} " +
         $"with manifest SHA256 {selected.Digest}");
+    Console.WriteLine(reviewed ? "The donor ran reviewed producer code; reuse skips kernel replay."
+        : "The donor may have run unreviewed producer code; reuse kernel-replays the library.");
 }
 
 void Warning(string message) => Console.WriteLine("::warning::" + message);
@@ -47,19 +55,11 @@ IEnumerable<long> Runs(string commit, string filter) => Regex.IsMatch(commit, "^
 
 JsonElement Api(string path) => JsonSerializer.Deserialize<JsonElement>(Gh(path));
 
-IEnumerable<long> Candidates()
-{
-    foreach (var run in Runs(options["--head"], "")) yield return run;
-    foreach (var run in PullAncestorRuns()) yield return run;
-    foreach (var run in MergedPullRuns()) yield return run;
-    foreach (var run in Runs(options["--base"], "&event=push&branch=main")) yield return run;
-    // The exact base may have skipped preparation or reused a library without republishing it.
-    var recent = CertifiedLibraryDonor.Available("Recent main runs", () =>
-        CertifiedLibraryDonor.RecentMainRuns(Api(
-            $"repos/{repository}/actions/workflows/{workflow}/runs?per_page={RunsPerCommit}" +
-            "&event=push&branch=main&status=success"), repository, RunsPerCommit), Warning);
-    foreach (var run in recent) yield return run;
-}
+// The exact base may have skipped preparation or reused a library without republishing it.
+IEnumerable<long> RecentMainRuns() => CertifiedLibraryDonor.Available("Recent main runs", () =>
+    CertifiedLibraryDonor.RecentMainRuns(Api(
+        $"repos/{repository}/actions/workflows/{workflow}/runs?per_page={RunsPerCommit}" +
+        "&event=push&branch=main&status=success"), repository, RunsPerCommit), Warning);
 
 IEnumerable<long> PullAncestorRuns()
 {
@@ -73,7 +73,7 @@ IEnumerable<long> PullAncestorRuns()
             head.GetProperty("sha").GetString() != options["--head"]) return Array.Empty<long>();
         var branch = Uri.EscapeDataString(head.GetProperty("ref").GetString()!);
         var previous = Api($"repos/{repository}/actions/workflows/{workflow}/runs?per_page={RunsPerCommit}" +
-            "&event=pull_request&status=success&branch=" + branch);
+            "&event=pull_request&branch=" + branch);
         return CertifiedLibraryDonor.PullAncestors(previous, repository, pull, options["--head"],
             commit => Api($"repos/{repository}/compare/{commit}...{options["--head"]}")
                 .GetProperty("status").GetString() == "ahead", RunsPerCommit);
@@ -85,7 +85,7 @@ IEnumerable<long> MergedPullRuns()
     if (options.GetValueOrDefault("--event") != "push") return [];
     return CertifiedLibraryDonor.Available("Merged PR libraries", () =>
         CertifiedLibraryDonor.MergedHeads(repository, options["--head"], Api)
-            .SelectMany(head => Runs(head, "&event=pull_request&status=success")), Warning);
+            .SelectMany(head => Runs(head, "&event=pull_request")), Warning);
 }
 
 string Gh(string path, params string[] flags) =>

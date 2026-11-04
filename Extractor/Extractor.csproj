@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <!-- Read before this file sets the framework, so only a per-framework inner build sees one. -->
+    <PerFrameworkBuild Condition="'$(TargetFramework)' != ''">true</PerFrameworkBuild>
     <OutputType>Exe</OutputType>
     <AssemblyName>Nethermind.LeanCIL</AssemblyName>
     <RootNamespace>Nethermind.LeanCIL</RootNamespace>
@@ -37,6 +39,34 @@
       <Pack>false</Pack>
     </Content>
   </ItemGroup>
+
+  <!-- A development package gets a fresh prerelease version, so a tool install never reuses a cached
+       package of the same version; only a release pack, given its descriptors, is the plain version.
+       The pack's per-framework inner build, which builds the shipped assembly, reuses its version. -->
+  <PropertyGroup Condition="'$(CertifiedLibraryReleaseDirectory)' == '' and '$(PackageVersion)' == ''">
+    <DevPackageVersionFile
+      >$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(BaseIntermediateOutputPath)', 'dev-package-version.txt'))</DevPackageVersionFile>
+    <PackageVersion Condition="'$(PerFrameworkBuild)' == 'true' and Exists('$(DevPackageVersionFile)')"
+      >$([System.IO.File]::ReadAllText('$(DevPackageVersionFile)').Trim())</PackageVersion>
+    <DevPackageVersionStamped Condition="'$(PackageVersion)' == ''">true</DevPackageVersionStamped>
+    <PackageVersion Condition="'$(PackageVersion)' == ''"
+      >$(VersionPrefix)-dev.$([System.DateTime]::UtcNow.ToString('yyyyMMddHHmmss'))</PackageVersion>
+  </PropertyGroup>
+
+  <!-- A packed tool reports the version it is installed as; other builds keep their assembly info stable. -->
+  <PropertyGroup Condition="'$(_IsPacking)' == 'true' and '$(InformationalVersion)' == ''">
+    <InformationalVersion>$(PackageVersion)</InformationalVersion>
+  </PropertyGroup>
+
+  <Target Name="ShareDevPackageVersion" BeforeTargets="_WalkEachTargetPerFramework"
+          Condition="'$(DevPackageVersionStamped)' == 'true'">
+    <WriteLinesToFile File="$(DevPackageVersionFile)" Lines="$(PackageVersion)" Overwrite="true" />
+  </Target>
+
+  <!-- A version left from an earlier pack must never name a later one. -->
+  <Target Name="ForgetDevPackageVersion" AfterTargets="Pack" Condition="'$(DevPackageVersionStamped)' == 'true'">
+    <Delete Files="$(DevPackageVersionFile)" />
+  </Target>
 
   <!-- Release descriptors are generated from authenticated, replayed artifacts by the publisher. -->
   <ItemGroup Condition="'$(CertifiedLibraryReleaseDirectory)' != ''">

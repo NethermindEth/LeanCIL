@@ -7,14 +7,32 @@ come from the same producer job; restoration verifies the archive before decompr
 rejects unsafe entries. Legacy raw artifacts retain their manifest checks. See
 [library distribution](performance/LibraryDistribution.md) for the format and measurements.
 
-Library donation first checks this commit, then up to ten successful runs of the same PR whose
-heads are ancestors of its current head. Both the PR and donor must belong to this repository;
-forks and force-pushed nonancestors cannot donate. It then checks an identical merged PR tree,
-the exact base-main commit and at most ten recent successful main pushes. This covers a base
-run that skipped preparation or has no artifact. Every candidate still needs a successful
-producer job, its logged manifest digest and an artifact with sufficient remaining retention.
-Source/toolchain checks and kernel replay remain mandatory; changed sources use dependency-aware
-incremental preparation or fall back to a fresh build.
+Library donation first checks this commit, then the ten most recent runs of the same PR whose
+heads are ancestors of its current head, nearest first. Both the PR and donor must belong to this
+repository; forks and force-pushed nonancestors cannot donate. It then checks an identical merged
+PR tree, the exact base-main commit and at most ten recent successful main pushes. This covers a
+base run that skipped preparation or has no artifact. A PR or merged-tree run donates when its
+prepare job succeeded, even if its suites failed or are still running, since only that job
+produces the library. Every candidate still needs that successful producer job, its logged
+manifest digest and an artifact with sufficient remaining retention.
+A donated library is trusted because our own CI produced it: that run kernel-replayed every
+module and logged the manifest digest, and reuse checks that every file matches that digest and
+that the manifest binds the current sources and toolchain. Reuse skips kernel replay only when
+GitHub metadata shows the donor ran reviewed producer code: a push of a commit reachable from
+`refs/heads/main`, or the run of exactly one same-repository PR into main whose head commit leaves
+`.github/workflows/verification.yml`, `scripts/` and the root .NET build files as its merge base
+with the PR's base commit has them, so the merge it built ran main's producer code. A stacked PR,
+a fork, any other run, or unavailable metadata replays the library as a fresh build would; these
+checks do not rely on the branch filters of the donor queries. Changed sources use
+dependency-aware incremental preparation, which replays every module of the result, or fall back
+to a fresh build, which replays everything it built.
+A library's identity covers the toolchain, `CIL.lean`, `CIL/`, `lake-manifest.json` and the
+library view of `lakefile.toml`, which is the file the library is built from: the checkout
+lakefile without blank lines, comments and plain `[[lean_lib]]` tables naming a library outside
+CIL. Package settings, dependencies, the `CIL` library, the `leancil-audit` executable and any
+library with further keys stay in it. Adding or removing a test library therefore keeps both the
+identity and incremental donors; checkout inputs, such as session cache keys, still hash the
+complete lakefile. `Tests/LibraryConfiguration.cs` checks both directions.
 Transient HTTP failures (408, 429, 500, 502, 503 and 504) receive at most two retries, after
 one and two seconds. An unavailable listing, job, artifact or log skips that candidate rather
 than aborting the search. Failed responses never supply evidence, and a candidate still needs
@@ -92,7 +110,7 @@ which needs no Lean, so every PR runs it:
 - Every `bind_*` and `cil_*` command, tactic or attribute named in prose or in an unelaborated
   block must still be declared under `CIL/`.
 - Every line of a Lean block, excerpts included, fits in 100 characters, the limit of the
-  library's own Lean. An excerpt begins each line of its source as written, so a wide excerpt is
+  library's own Lean. An excerpt copies whole lines of its source, so a wide excerpt is
   fixed by wrapping its source.
 - A document's audience decides what it may cite. Documents are for users unless they declare
   `<!-- audience: maintainers -->` below their title; maintainers documents describe how LeanCIL
@@ -108,7 +126,7 @@ Every fenced Lean block is elaborated unless its info string says why not:
 | Info string | Check |
 | --- | --- |
 | `lean` | Elaborated by the `docs` suite against the current library with exactly the block's own imports, as if it were a file of its own: nothing is imported or opened implicitly, so a block starts with `import CIL` or the modules it needs. Imports must name library modules; a block that needs `Extracted` fails until it is marked. |
-| `lean excerpt PATH` | Every non-blank line, in order, must begin a line of `PATH`, a file the suites verify, such as an example under `Examples/Proofs`. |
+| `lean excerpt PATH` | The block must be a contiguous range of whole lines of `PATH`, which may be dedented as a block; `PATH` is a file the suites verify, such as an example under `Examples/Proofs`. |
 | `lean extracted` | Code that needs a generated `Extracted` module. Its imports and commands are checked statically and its `CIL.` names by the `docs` suite. |
 | `lean illustrative` | A shape rather than code to run, checked like `extracted`. |
 

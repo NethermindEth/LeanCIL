@@ -1,8 +1,9 @@
 import CIL.Safety.LoopScaffold
 import CIL.Safety.Execution
 
-/-! Loop stepping over a struct local with the facts gathered by default, and the failures that
-name the pc, the instruction and what is missing when a loop tactic cannot go on. -/
+/-! Loop stepping over a struct local, and over an int local and a call through a contract with
+a footprint in a caller buffer, with the facts gathered by default, and the failures that name
+the pc, the instruction and what is missing when a loop tactic cannot go on. -/
 
 namespace Tests.LoopDiagnostics
 open CIL.Safety
@@ -223,6 +224,192 @@ example (memory current : Memory) (home : Reference)
 #guard_msgs (substring := true) in
 example := step_fieldAt_encode layout_valid 0 [.i64 0, .i32 0]
 
+/-- A struct of a flag byte at 0, a signed 16-bit count at 2, a 32-bit total at 4 and a nested
+    8-byte struct at 8. -/
+def mixed : CIL.AggregateLayout :=
+  ⟨16, [⟨0, 1, false⟩, ⟨2, 2, false⟩, ⟨4, 4, false⟩, ⟨8, 8, true⟩]⟩
+
+/-- The layout's fields are in bounds and apart. -/
+theorem mixed_valid : mixed.Valid := by decide +kernel
+
+-- Each field's zero is the value its kind loads from zeroed bytes: an int for the narrow and
+-- 4-byte fields and zero bytes for the nested struct.
+example : mixed.zeros = [.i32 0, .i32 0, .i32 0, .aggregate (List.replicate 8 0)] := rfl
+
+/-- `s = default; while (s.flag == 0) s.flag = 1; return s.count;`, reading `flag` by value and
+    the signed `count` through the struct's address. -/
+@[cil_code] def flagged : CIL.Method := {
+  returnsValue := true, locals := [.aggregate (List.replicate 16 0)], localKinds := [.aggregate 16]
+  code := [.localAddr 0, .initAggregate 16, .branch 6, .localAddr 0, .const32 1, .setFieldAt 0 1,
+    .local 0, .fieldAt 0 1, .brzero 3, .localAddr 0, .fieldAt 2 2 true, .ret] }
+
+/-- The program of `flagged` alone. -/
+@[cil_code] def flaggedProgram : CIL.Program := [flagged]
+
+/-- The entered frame of `flagged`. -/
+bind_entry flaggedEntry (memory : Memory) (wellFormed : memory.WellFormed) :=
+  flagged with [] from memory allocating wellFormed
+
+/-- The struct local, remembered by its `flag` field; the other fields stay zero. -/
+abbrev Flagged (memory : Memory) (home : Reference) :=
+  FrameState [] memory [.aggregate 16] W32 (fun _ => [.bytes (.aggregate 16) home])
+    fun flag => [some (.aggregate (mixed.encode
+      [.i32 flag, .i32 0, .i32 0, .aggregate (List.replicate 8 0)]))]
+
+/-- The loop test, with nothing on the stack. -/
+bind_cutpoint flaggedHeader (memory : Memory) (home : Reference) (state : Flagged memory home) :=
+  flagged matching (fun op => op matches .local _) with flaggedEntry.frame memory home, [],
+    state.memory
+
+/-- `cil_loop_recurse` zeroes a struct with 1-, 2- and 4-byte and nested fields through its
+    frame, stores the flag byte, and the loop tactics read the flag by value and the signed
+    count through the address as narrow loads. -/
+theorem flagged_returns_zero (memory : Memory) (wellFormed : memory.WellFormed) :
+    ∃ fuel final, invoke flaggedProgram fuel 0 [] memory = .ok (final, [.scalar (.i32 0)]) ∧
+      MemoryBelow memory.nextIdentity memory final := by
+  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := flaggedEntry.checked memory wellFormed
+  refine invoke_loop_induction (by rfl) rfl setup (flaggedHeader memory home)
+    (fun state => state.values = 0 ∨ state.values = 1)
+    (fun state => if state.values = 0 then 1 else 0) (fun start => ?_) ?_
+  · cil_loop_recurse start 0
+    exact Or.inl rfl
+  rintro ⟨flag, current, frame⟩ (rfl | rfl) recurse
+  · cil_loop_recurse recurse 1
+    · exact Or.inr rfl
+    · simp
+  · cil_loop_finish
+/-- info: 'Tests.LoopDiagnostics.flagged_returns_zero' depends on axioms: [propext,
+ Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms flagged_returns_zero
+
+-- A zero claim that is not the layout's zeros is rejected: the nested struct's zero is its zero
+-- bytes, not an int.
+/-- error: could not synthesize default value for parameter 'zeroed' using tactics -/
+#guard_msgs (substring := true) in
+example (memory current : Memory) (home : Reference)
+    (frame : LoopFrame [] memory current [.aggregate 16] [.bytes (.aggregate 16) home]
+      (knownLocals [none])) : True := by
+  obtain ⟨-, -, -, -⟩ := frame.zero_aggregate 0 mixed [.i32 0, .i32 0, .i32 0, .i32 0]
+  trivial
+
+-- A zeroed flag byte holds zero, not one.
+/-- error: could not synthesize default value for parameter 'zeroed' using tactics -/
+#guard_msgs (substring := true) in
+example (memory current : Memory) (home : Reference)
+    (frame : LoopFrame [] memory current [.aggregate 16] [.bytes (.aggregate 16) home]
+      (knownLocals [none])) : True := by
+  obtain ⟨-, -, -, -⟩ :=
+    frame.zero_aggregate 0 mixed [.i32 1, .i32 0, .i32 0, .aggregate (List.replicate 8 0)]
+  trivial
+
+-- A narrow read of a 4-byte field is refused; that field reads back exactly.
+/-- error: could not synthesize default value for parameter 'narrow' using tactics -/
+#guard_msgs (substring := true) in
+example := step_fieldAt_encode_narrow mixed_valid 2
+  [.i32 0, .i32 0, .i32 7, .aggregate (List.replicate 8 0)]
+
+-- A stored byte reads back truncated to its field: 0x1FF in the flag byte loads as 0xFF, and
+-- as -1 signed.
+example (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (memory : Memory)
+    (rest : List Value) :
+    step body (.fieldAt 0 1 false) pc args frame (.scalar (.aggregate (mixed.encode
+      [.i32 0x1FF, .i32 0, .i32 0, .aggregate (List.replicate 8 0)])) :: rest) memory =
+      .ok (.next (pc + 1) (.scalar (.i32 0xFF) :: rest) frame memory) ∧
+    step body (.fieldAt 0 1 true) pc args frame (.scalar (.aggregate (mixed.encode
+      [.i32 0x1FF, .i32 0, .i32 0, .aggregate (List.replicate 8 0)])) :: rest) memory =
+      .ok (.next (pc + 1) (.scalar (.i32 (-1)) :: rest) frame memory) := by
+  constructor <;> rw [step_fieldAt_encode_narrow mixed_valid 0 _] <;> rfl
+
+/-- `s = default; while (s.total != value) s.total++; s.flag = 1; return s.flag;`, storing the
+    flag byte on the exit path. -/
+@[cil_code] def marked : CIL.Method := {
+  returnsValue := true, locals := [.aggregate (List.replicate 16 0)], localKinds := [.aggregate 16]
+  code := [.localAddr 0, .initAggregate 16, .branch 9, .localAddr 0, .local 0, .fieldAt 4 4,
+    .const32 1, .add, .setFieldAt 4 4, .local 0, .fieldAt 4 4, .arg 0, .bne 3, .localAddr 0,
+    .const32 1, .setFieldAt 0 1, .local 0, .fieldAt 0 1, .ret] }
+
+/-- The program of `marked` alone. -/
+@[cil_code] def markedProgram : CIL.Program := [marked]
+
+/-- The entered frame of `marked`. -/
+bind_entry markedEntry (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) :=
+  marked with [.scalar (.i32 value)] from memory allocating wellFormed
+
+/-- The struct local, remembered by its `total` field; the other fields stay zero. -/
+abbrev Marked (memory : Memory) (home : Reference) :=
+  FrameState [] memory [.aggregate 16] W32 (fun _ => [.bytes (.aggregate 16) home])
+    fun total => [some (.aggregate (mixed.encode
+      [.i32 0, .i32 0, .i32 total, .aggregate (List.replicate 8 0)]))]
+
+/-- The loop test, with the input and `total` on the stack. -/
+bind_cutpoint markedHeader (memory : Memory) (value : W32) (home : Reference)
+    (state : Marked memory home) :=
+  marked matching (fun op => op matches .bne _) with markedEntry.frame memory home,
+    [.scalar (.i32 value), .scalar (.i32 state.values)], state.memory
+
+/-- `cil_loop_finish` takes a store on the exit path through the frame and returns the stored
+    flag, leaving the frame of the stored memory. -/
+theorem marked_returns_one (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) :
+    ∃ fuel final, invoke markedProgram fuel 0 [.scalar (.i32 value)] memory =
+      .ok (final, [.scalar (.i32 1)]) ∧ MemoryBelow memory.nextIdentity memory final := by
+  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := markedEntry.checked memory value wellFormed
+  refine invoke_loop_induction (by rfl) rfl setup (markedHeader memory value home)
+    (fun _ => True) (fun state => (value - state.values).toNat) (fun start => ?_) ?_
+  · cil_loop_recurse start 0
+    trivial
+  rintro ⟨total, current, frame⟩ - recurse
+  by_cases done : total = value
+  · subst done
+    cil_loop_finish
+  · cil_loop_recurse recurse (total + 1)
+    · trivial
+    · show (value - (total + 1)).toNat < (value - total).toNat
+      bv_omega
+/-- info: 'Tests.LoopDiagnostics.marked_returns_one' depends on axioms: [propext,
+ Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms marked_returns_one
+
+/-- `cil_loop_advance` takes the same exit-path store and stops at the return, which
+    `cil_loop_finish` then proves. -/
+theorem marked_advances_to_return (memory : Memory) (value : W32)
+    (wellFormed : memory.WellFormed) :
+    ∃ fuel final, invoke markedProgram fuel 0 [.scalar (.i32 value)] memory =
+      .ok (final, [.scalar (.i32 1)]) ∧ MemoryBelow memory.nextIdentity memory final := by
+  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := markedEntry.checked memory value wellFormed
+  refine invoke_loop_induction (by rfl) rfl setup (markedHeader memory value home)
+    (fun _ => True) (fun state => (value - state.values).toNat) (fun start => ?_) ?_
+  · cil_loop_recurse start 0
+    trivial
+  rintro ⟨total, current, frame⟩ - recurse
+  by_cases done : total = value
+  · subst done
+    cil_loop_advance
+    -- The store is taken: the walk is at the return, with the stored flag on the stack.
+    show LoopTerminates markedProgram 0 [.scalar (.i32 total)] _
+      ⟨18, _, [.scalar (.i32 1#32)], _⟩
+    cil_loop_finish
+  · cil_loop_recurse recurse (total + 1)
+    · trivial
+    · show (value - (total + 1)).toNat < (value - total).toNat
+      bv_omega
+/-- info: 'Tests.LoopDiagnostics.marked_advances_to_return' depends on axioms: [propext,
+ Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms marked_advances_to_return
+
+-- A remembered nested struct, spelled as `List.replicate`, still lets a 4-byte field read
+-- by value step.
+example (memory current : Memory) (value total : W32) (home : Reference)
+    (frame : LoopFrame [] memory current [.aggregate 16] [.bytes (.aggregate 16) home]
+      (knownLocals [some (.aggregate (mixed.encode
+        [.i32 0, .i32 0, .i32 total, .aggregate (List.replicate 8 0)]))])) :
+    LoopReaches markedProgram 0 [.scalar (.i32 value)]
+      ⟨9, markedEntry.frame memory home, [], current⟩
+      ⟨11, markedEntry.frame memory home, [.scalar (.i32 total)], current⟩ := by
+  cil_loop_steps
+
 -- A docstring before `bind_entry` documents its checked entry, and before `bind_cutpoint` its
 -- state.
 /-- info: [some "The entered frame of `tally`. ",
@@ -232,5 +419,228 @@ open Lean in
 #eval show MetaM _ from do
   let env ← getEnv
   [``entry.checked, ``header].mapM fun name => liftM (findDocString? env name : IO _)
+
+/-- `for (i = 0; i != n; i++) stamp(Unsafe.Add(ref p, i), i); return i;`, with `i` an int local. -/
+@[cil_code] def stamps : CIL.Method := {
+  returnsValue := true, locals := [.i32 0], localKinds := [.word32]
+  code := [.const32 0, .setLocal 0, .branch 12, .arg 1, .local 0, .memory (.add 4 true),
+    .local 0, .call 1 2, .local 0, .const32 1, .add, .setLocal 0, .local 0, .arg 0, .bne 3,
+    .local 0, .ret] }
+
+/-- `*slot = value;` -/
+@[cil_code] def stamp : CIL.Method := {
+  returnsValue := false, locals := [], code := [.arg 0, .arg 1, .storeScalar 4, .ret] }
+
+/-- The program, with `stamps` calling `stamp` as method 1. -/
+@[cil_code] def stampsProgram : CIL.Program := [stamps, stamp]
+
+/-- `stamp` writes the word at `slot`, given write authority over it, and nothing else. -/
+def stampContract : MethodContract (Reference × W32) Unit where
+  args input := [.reference (.address input.1), .scalar (.i32 input.2)]
+  results _ := []
+  pre input memory := Writable memory input.1 4 0 1
+  footprint input := [(input.1, 4)]
+  post input _ final _ := Contents final input.1 4 [input.2]
+
+/-- `stamp` meets its contract, through the width-generic store and write lemmas. -/
+theorem stamp_holds : stampContract.Holds stampsProgram 1 := by
+  rintro ⟨slot, value⟩ memory writable
+  dsimp only [stampContract] at writable ⊢
+  obtain ⟨after, wrote, formed, confined, filled⟩ := writable.write_one value
+  refine ⟨8, after, [], ?_, confined, (), rfl, filled⟩
+  cil_checked_steps [step_storeScalar_of_write wrote, formed]
+/-- info: 'Tests.LoopDiagnostics.stamp_holds' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms stamp_holds
+
+/-- The entered frame of `stamps`. -/
+bind_entry stampsEntry (memory : Memory) (count : W32) (buffer : Reference)
+    (wellFormed : memory.WellFormed) :=
+  stamps with [.scalar (.i32 count), .reference (.address buffer)] from memory
+    allocating wellFormed
+
+/-- The index local, over the caller's buffer of `count` words. -/
+abbrev Stamping (memory : Memory) (buffer : Reference) (count : Nat) (home : Reference) :=
+  FrameState [(buffer, 4 * count)] memory [.word32] W32 (fun _ => [.bytes .word32 home])
+    fun index => [some (.i32 index)]
+
+/-- The loop test, with the count and the index on the stack. -/
+bind_cutpoint stampsHeader (memory : Memory) (count : W32) (buffer : Reference)
+    (home : Reference) (state : Stamping memory buffer count.toNat home) :=
+  stamps matching (fun op => op matches .bne _) with stampsEntry.frame memory home,
+    [.scalar (.i32 count), .scalar (.i32 state.values)], state.memory
+
+/-- The index stays within the count, and the rest of the buffer stays writable. -/
+def StampingInvariant (count : W32) (buffer : Reference) {memory : Memory} {home : Reference}
+    (state : Stamping memory buffer count.toNat home) : Prop :=
+  state.values.toNat ≤ count.toNat ∧
+    Writable state.memory buffer 4 state.values.toNat (count.toNat - state.values.toNat)
+
+/-- The loop tactics take the int local's stores through its frame, carry the `Unsafe.Add`
+    result and the formed buffer from the caller's memory to each frame memory, cross the call
+    with the frame after it from the index bound, and carry the buffer's write authority along:
+    the proof states only the invariant, the arithmetic and the caller's facts. -/
+theorem stamps_returns_count (memory : Memory) (count : W32) (buffer : Reference)
+    (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)
+    (small : count.toNat < 2 ^ 31) (writable : Writable memory buffer 4 0 count.toNat) :
+    ∃ fuel final, invoke stampsProgram fuel 0
+        [.scalar (.i32 count), .reference (.address buffer)] memory =
+      .ok (final, [.scalar (.i32 count)]) ∧
+      Confined [(buffer, 4 * count.toNat)] memory final := by
+  obtain ⟨home, entered, setup, -, -, entryFrame⟩ :=
+    stampsEntry.checked memory count buffer wellFormed
+  refine invoke_loop_induction (by rfl) ?_ setup (stampsHeader memory count buffer home)
+    (StampingInvariant count buffer) (fun state => count.toNat - state.values.toNat)
+    (fun start => ?_) ?_
+  · simp [cil_checked, formed]
+  · cil_loop_recurse start 0
+    exact ⟨by simp, by simpa using writable⟩
+  rintro ⟨index, current, frame⟩ ⟨bounded, rest⟩ recurse
+  dsimp only at bounded rest
+  by_cases done : index = count
+  · subst done
+    cil_loop_finish
+  · have lower : index.toNat < count.toNat := by
+      have := BitVec.toNat_ne.mp done
+      omega
+    have offset := writable.add_int wellFormed formed (index := index) (by omega) (by omega)
+      (by omega)
+    have slot := rest.sub (index := index.toNat) (length := 1) (by omega) (by omega)
+    cil_loop_advance
+    cil_loop_call stamp_holds (buffer.element 4 index.toNat, index)
+    have next : (index + 1).toNat = index.toNat + 1 := by bv_omega
+    cil_loop_recurse recurse (index + 1)
+    · refine ⟨show (index + 1).toNat ≤ count.toNat by omega, ?_⟩
+      have later := (Writable.append (left := 1)).mp
+        (show Writable _ buffer 4 index.toNat (1 + (count.toNat - (index.toNat + 1))) by
+          rwa [show 1 + (count.toNat - (index.toNat + 1)) = count.toNat - index.toNat by omega])
+      rw [next]
+      simpa [Nat.add_comm] using later.2
+    · dsimp only
+      omega
+/-- info: 'Tests.LoopDiagnostics.stamps_returns_count' depends on axioms: [propext,
+ Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms stamps_returns_count
+
+-- Without the `Unsafe.Add` result the advance stops at the add, naming that fact.
+/-- error: cil_loop_advance: cannot step pc 5 (CIL.Op.memory (CIL.MemoryOp.add 4 true)) -/
+#guard_msgs (whitespace := lax, substring := true) in
+example (memory current : Memory) (count index : W32) (buffer home : Reference)
+    (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)
+    (frame : LoopFrame [(buffer, 4 * count.toNat)] memory current [.word32]
+      [.bytes .word32 home] (knownLocals [some (.i32 index)])) :
+    LoopTerminates stampsProgram 0 [.scalar (.i32 count), .reference (.address buffer)]
+      (fun _ _ => True) ⟨3, stampsEntry.frame memory home, [], current⟩ := by
+  cil_loop_advance
+
+-- The stuck step shows its pc as a literal, as the message's first line does.
+/-- (CIL.Op.memory (CIL.MemoryOp.add 4 true)) 5 -/
+#guard_msgs (whitespace := lax, substring := true) in
+example (memory current : Memory) (count index : W32) (buffer home : Reference)
+    (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)
+    (frame : LoopFrame [(buffer, 4 * count.toNat)] memory current [.word32]
+      [.bytes .word32 home] (knownLocals [some (.i32 index)])) :
+    LoopTerminates stampsProgram 0 [.scalar (.i32 count), .reference (.address buffer)]
+      (fun _ _ => True) ⟨3, stampsEntry.frame memory home, [], current⟩ := by
+  cil_loop_advance
+
+-- The hint for a stuck step names the fact its residual is missing.
+/-- info: the `Unsafe.Add` result: `add memory base width offset = .ok reference` at this memory or
+the caller's, such as `Writable.add_int` -/
+#guard_msgs (whitespace := lax) in
+open Lean Meta in
+#eval show MetaM Unit from do logInfo (← loopMissingHint #[mkConst ``CIL.Safety.add])
+
+-- A residual that mentions no checked fact gets the general hint.
+/-- info: a `LoopFrame` at this memory for a local, or the step equation of a store with this
+stack -/
+#guard_msgs (whitespace := lax) in
+open Lean Meta in
+#eval show MetaM Unit from do logInfo (← loopMissingHint #[mkConst ``True])
+
+/-- `i = (byte) 0x1FF; return i;`, storing the int local through a byte narrowing. -/
+@[cil_code] def narrowed : CIL.Method := {
+  returnsValue := true, locals := [.i32 0], localKinds := [.word32]
+  code := [.const32 0x1FF, .setLocal 0 (some .unsigned8), .local 0, .ret] }
+
+/-- The program of `narrowed` alone. -/
+@[cil_code] def narrowedProgram : CIL.Program := [narrowed]
+
+/-- The entered frame of `narrowed`. -/
+bind_entry narrowedEntry (memory : Memory) (wellFormed : memory.WellFormed) :=
+  narrowed with [] from memory allocating wellFormed
+
+-- A narrowing local store is not one `LoopFrame.store` models, so the walk stops at it.
+/-- error: cil_loop_finish: cannot step pc 1 (CIL.Op.setLocal 0 (some CIL.NarrowKind.unsigned8)) -/
+#guard_msgs (whitespace := lax, substring := true) in
+example (memory current : Memory) (home : Reference)
+    (frame : LoopFrame [] memory current [.word32] [.bytes .word32 home]
+      (knownLocals [some (.i32 0)])) :
+    LoopTerminates narrowedProgram 0 [] (fun _ _ => True)
+      ⟨0, narrowedEntry.frame memory home, [], current⟩ := by
+  cil_loop_finish
+
+-- Without the index bound the callee's slot is not shown inside the frame's footprint, and
+-- the call fails naming that side condition.
+/-- error: cil_loop_call: the frame after the call needs each callee footprint entry inside the
+frame's footprint, which the facts do not prove: -/
+#guard_msgs (whitespace := lax, substring := true) in
+example (memory current : Memory) (count index : W32) (buffer home slotted : Reference)
+    (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)
+    (frame : LoopFrame [(buffer, 4 * count.toNat)] memory current [.word32]
+      [.bytes .word32 home] (knownLocals [some (.i32 index)]))
+    (offset : add memory buffer 4 (BitVec.ofInt 64 index.toInt) =
+      .ok (buffer.element 4 index.toNat))
+    (slot : Writable current (buffer.element 4 index.toNat) 4 0 1) :
+    LoopTerminates stampsProgram 0 [.scalar (.i32 count), .reference (.address buffer)]
+      (fun _ _ => True) ⟨3, stampsEntry.frame memory home, [], current⟩ := by
+  cil_loop_advance
+  cil_loop_call stamp_holds (buffer.element 4 index.toNat, index)
+
+-- A call whose address argument has no `form` fact does not step, and the failure names the
+-- check and the fact it needs.
+/-- error: cil_loop_call: the call at pc 7 (CIL.Op.call 1 2) does not step: its argument checks
+reduce to -/
+#guard_msgs (whitespace := lax, substring := true) in
+example (memory current : Memory) (count index : W32) (home slotted : Reference)
+    (frame : LoopFrame [] memory current [.word32] [.bytes .word32 home]
+      (knownLocals [some (.i32 index)])) :
+    LoopTerminates stampsProgram 0 [.scalar (.i32 count), .reference (.address slotted)]
+      (fun _ _ => True)
+      ⟨7, stampsEntry.frame memory home, [.scalar (.i32 index), .reference (.address slotted)],
+        current⟩ := by
+  cil_loop_call stamp_holds (slotted, index)
+
+-- At the return, `cil_loop_finish` closes the conjuncts the exit facts prove, here the results
+-- and the caller's confinement, and hands back the rest.
+example (memory : Memory) (count : W32) (buffer home : Reference) (current : Memory)
+    (stored : ∀ final, Contents final buffer 4 [count])
+    (setup : enterFrame stamps [.scalar (.i32 count), .reference (.address buffer)] memory =
+      .ok (stampsEntry.frame memory home, current))
+    (frame : LoopFrame [(buffer, 4)] memory current [.word32] [.bytes .word32 home]
+      (knownLocals [some (.i32 count)])) :
+    LoopTerminates stampsProgram 0 [.scalar (.i32 count), .reference (.address buffer)]
+      (fun final results => (results = [.scalar (.i32 count)] ∧
+        Confined [(buffer, 4)] memory final) ∧ Contents final buffer 4 [count])
+      ⟨15, stampsEntry.frame memory home, [], current⟩ := by
+  cil_loop_finish
+  show Contents _ buffer 4 [count]
+  exact stored _
+
+-- A call whose stacked argument is not the contract's names both.
+/-- error: cil_loop_call: the call at pc 7 (CIL.Op.call 1 2) does not take the contract's
+arguments for this input, or is not the named site. -/
+#guard_msgs (whitespace := lax, substring := true) in
+example (memory current : Memory) (count index : W32) (buffer home : Reference)
+    (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)
+    (frame : LoopFrame [(buffer, 4 * count.toNat)] memory current [.word32]
+      [.bytes .word32 home] (knownLocals [some (.i32 index)]))
+    (offset : add memory buffer 4 (BitVec.ofInt 64 index.toInt) =
+      .ok (buffer.element 4 index.toNat)) :
+    LoopTerminates stampsProgram 0 [.scalar (.i32 count), .reference (.address buffer)]
+      (fun _ _ => True) ⟨3, stampsEntry.frame memory home, [], current⟩ := by
+  cil_loop_advance
+  cil_loop_call stamp_holds (buffer, index)
 
 end Tests.LoopDiagnostics

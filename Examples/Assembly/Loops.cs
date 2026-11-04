@@ -101,6 +101,34 @@ public static class Loops
         return tally.Sum;
     }
 
+    struct Scan
+    {
+        public uint Count;
+        public bool Stopped;
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    static void Stamp(ref uint slot, uint value) => slot = value;
+
+    // Copies the words before the first zero to output; returns the count, with bit 31 set if a zero ended the copy.
+    public static uint CopyUntilZero(ReadOnlySpan<uint> values, ref uint output)
+    {
+        Scan scan = default;
+        while (values.Length != 0)
+        {
+            uint value = values[0];
+            if (value == 0)
+            {
+                scan.Stopped = true;
+                break;
+            }
+            Stamp(ref System.Runtime.CompilerServices.Unsafe.Add(ref output, (int)scan.Count), value);
+            scan.Count = unchecked(scan.Count + 1);
+            values = values.Slice(1);
+        }
+        return scan.Stopped ? scan.Count | 0x80000000u : scan.Count;
+    }
+
     public static uint Bump(uint count, uint limit) =>
         count == limit ? throw new InvalidOperationException() : unchecked(count + 1);
 

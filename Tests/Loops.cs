@@ -150,6 +150,69 @@ foreach (var (name, mutate) in new (string, Action<TypeDefinition>)[]
     Console.WriteLine($"PASS unchanged struct-local loop proof rejects {name}");
 }
 
+// A loop over a struct with a bool field that writes caller memory through a helper and stops early.
+const string CopyUntilZero = "Loops::CopyUntilZero(System.ReadOnlySpan`1<System.UInt32>,uint&)";
+var copyProof = At("Examples/Proofs/CopyUntilZero.lean");
+verification.Verify(assembly, "Examples", CopyUntilZero, copyProof, Path.Combine(root, "CopyUntilZero"));
+Console.WriteLine("PASS early-exit struct loop copies up to the first zero through the ref-writing helper's contract");
+
+var copyUntilZero = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Loops")!.GetMethod("CopyUntilZero")!
+    .CreateDelegate<CopyUntilZeroDelegate>();
+const uint StoppedBit = 0x80000000u;
+const uint Untouched = 0xDEADBEEFu;
+foreach (uint[] values in new uint[][] { [], [1, 2, 3], [5, 0, 7], [0], [9, uint.MaxValue, 0] })
+{
+    var zero = Array.IndexOf(values, 0u);
+    var stopped = zero >= 0;
+    var copied = stopped ? zero : values.Length;
+    var expected = stopped ? (uint)copied | StoppedBit : (uint)copied;
+    var output = new uint[values.Length + 1];
+    Array.Fill(output, Untouched);
+    var result = copyUntilZero(values, ref output[0]);
+    var wrongWords = !output[..copied].SequenceEqual(values[..copied])
+        || output[copied..].Any(word => word != Untouched);
+    if (result != expected || wrongWords)
+        throw new InvalidOperationException(
+            $"CopyUntilZero([{string.Join(", ", values)}]) returned {result:X} with [{string.Join(", ", output)}]");
+}
+Console.WriteLine("PASS early-exit struct loop runtime comparisons copy up to the first zero and flag the stop");
+
+// A helper that stamps zero and a loop that copies past a zero each break the copy claim.
+foreach (var (name, mutate) in new (string, Action<TypeDefinition>)[]
+{
+    ("CopyUntilZeroStampsZero", type => type.Methods.Single(m => m.Name == "Stamp").Body.Instructions
+        .Single(i => i.OpCode == OpCodes.Ldarg_1).OpCode = OpCodes.Ldc_I4_0),
+    ("CopyUntilZeroIgnoresZero", type =>
+    {
+        var test = type.Methods.Single(m => m.Name == "CopyUntilZero").Body.Instructions
+            .First(i => i.OpCode == OpCodes.Brtrue || i.OpCode == OpCodes.Brtrue_S);
+        test.OpCode = test.OpCode == OpCodes.Brtrue ? OpCodes.Br : OpCodes.Br_S;
+        // The tested word is still loaded; an unconditional branch must not leave it on the stack.
+        test.Previous.OpCode = OpCodes.Nop;
+    })
+})
+{
+    var output = Path.Combine(root, name);
+    Directory.CreateDirectory(output);
+    var dll = Path.Combine(output, "Examples.dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        mutate(module.GetType("Examples.Loops"));
+        module.Write(dll);
+    }
+    Run(Extract("extract", dll, "Examples", CopyUntilZero, output));
+    var refused = false;
+    try { verification.Verify(dll, "Examples", CopyUntilZero, copyProof, output, existingArtifacts: true); }
+    catch (InvalidOperationException error)
+        when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
+    {
+        refused = true;
+    }
+    if (!refused || File.Exists(Path.Combine(output, "verified.json")))
+        throw new InvalidOperationException($"{name} satisfied the early-exit copy proof");
+    Console.WriteLine($"PASS unchanged early-exit copy proof rejects {name}");
+}
+
 string CountVariant(string name, Action<MethodDefinition, MethodDefinition> mutate)
 {
     var output = Path.Combine(root, name);
@@ -774,5 +837,6 @@ foreach (var mutation in new[] { "stack-height", "stack-type", "local-fact", "st
 }
 
 delegate void FillWordsDelegate(ref ulong destination, ulong value, int count);
+delegate uint CopyUntilZeroDelegate(ReadOnlySpan<uint> values, ref uint output);
 delegate bool AllZeroDelegate(ReadOnlySpan<uint> values);
 delegate ulong SumDelegate(ReadOnlySpan<ulong> values);
