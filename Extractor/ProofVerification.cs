@@ -409,7 +409,8 @@ partial class Program
     {
         if (messages is not { Length: > 0 }) return "";
         var full = string.Concat(messages.Select(message =>
-            $"{CliPaths.Display(proof)}:{message.line}:{message.column}: {message.severity}: {message.text}\n"));
+            $"{CliPaths.Display(proof)}:{message.line}:{message.column}: {message.severity}: " +
+            $"{CliDiagnostics.Printable(message.text)}\n"));
         var path = Path.Combine(output, ProofMessagesText);
         File.WriteAllText(path, full);
         var lines = full.TrimEnd('\n').Split('\n');

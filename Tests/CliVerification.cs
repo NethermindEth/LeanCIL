@@ -195,7 +195,7 @@ Console.WriteLine("PASS CLI labels a theorem by the methods its statement names"
 
 // A proof checked inside a consumer package is read by its author exactly like a standalone one, fresh or cached.
 var consumerRoot = At("artifacts/CliConsumer");
-if (Directory.Exists(consumerRoot)) Directory.Delete(consumerRoot, true);
+if (Directory.Exists(consumerRoot)) DeleteTree(consumerRoot);
 var consumerPackage = Path.Combine(consumerRoot, "Package");
 Directory.CreateDirectory(Path.Combine(consumerPackage, "Proofs"));
 var revision = Execute(["git", "-C", Root, "rev-parse", "HEAD"]).Stdout.Trim();
@@ -237,17 +237,22 @@ foreach (var (options, cached) in new[]
 Console.WriteLine("PASS CLI prints the readable statement, subject and Lean messages for --proof-root proofs");
 
 // Query output is what an author reads while a proof is unfinished, so a failed check must still show it.
+// Messages are proof-authored, so a terminal escape or carriage return must not overwrite report lines.
 var unfinishedProof = Path.Combine(consumerPackage, "Proofs", "Unfinished.lean");
 File.WriteAllText(unfinishedProof, "import Extracted\n#eval 1000 + 234\n" +
+    "#eval IO.println \"kept\\x1b[2K\\rVerified\"\n" +
     "theorem ExampleProof.correctness : False := by\n  exact trivial\n");
 var unfinished = Execute([.. cli, "verify", consumerOutput, "--proof", unfinishedProof,
     "--proof-root", consumerPackage]);
 var unfinishedText = unfinished.Stderr.ReplaceLineEndings("\n");
 if (unfinished.Code != 1 || !unfinishedText.Contains("Stage: proof checking") ||
-    !unfinishedText.Contains("  Lean messages (1):\n") ||
-    !unfinishedText.Contains("Unfinished.lean:2:0: info: 1234\n"))
-    throw new InvalidOperationException("A failed --proof-root check hid the proof's messages: " + unfinished.Output);
-Console.WriteLine("PASS CLI shows Lean messages when a --proof-root proof fails to check");
+    !unfinishedText.Contains("  Lean messages (2):\n") ||
+    !unfinishedText.Contains("Unfinished.lean:2:0: info: 1234\n") ||
+    !unfinishedText.Contains("Unfinished.lean:3:0: info: kept\\u001B[2K\\u000DVerified\n") ||
+    unfinishedText.Contains('\u001B') || unfinishedText.Contains('\r'))
+    throw new InvalidOperationException("A failed --proof-root check hid or passed through the proof's messages: " +
+        unfinished.Output);
+Console.WriteLine("PASS CLI shows Lean messages, with control characters escaped, when a --proof-root proof fails");
 
 // Consumers pin the framework from this report, so it must name the commit the tool was built from.
 var version = Execute([.. cli, "--version"]);

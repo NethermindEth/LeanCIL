@@ -428,6 +428,15 @@ partial class Program : IDisposable
 
     static string At(string path) => Path.Combine(Root, path);
 
+    /// <summary>Deletes a tree that may hold git objects, which git marks read-only and Windows refuses to delete.</summary>
+    static void DeleteTree(string directory)
+    {
+        EnumerationOptions ownFiles = new() { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint };
+        foreach (var file in Directory.EnumerateFiles(directory, "*", ownFiles))
+            File.SetAttributes(file, FileAttributes.Normal);
+        Directory.Delete(directory, recursive: true);
+    }
+
     static string Sha(string path)
     {
         const int bufferSize = 64 * 1024;
