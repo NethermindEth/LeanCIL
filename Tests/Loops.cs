@@ -103,6 +103,53 @@ verification.Verify(assembly, "Examples", "Loops::TallyTwice(uint)", At("Example
     Path.Combine(root, "TallyTwice"));
 Console.WriteLine("PASS struct-local loop doubles every uint through the helper contract");
 
+var tally = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Loops")!.GetMethod("TallyTwice")!
+    .CreateDelegate<Func<uint, uint>>();
+foreach (var value in new uint[] { 0, 1, 7, 1000 })
+    if (tally(value) != unchecked(2 * value))
+        throw new InvalidOperationException($"TallyTwice({value}) returned {tally(value)}, not {unchecked(2 * value)}");
+Console.WriteLine("PASS struct-local loop runtime comparisons return twice the input");
+
+// A helper that adds three and a return of the count field each break the doubling claim.
+foreach (var (name, mutate) in new (string, Action<TypeDefinition>)[]
+{
+    ("TallyTwiceAddsThree", type => type.Methods.Single(m => m.Name == "AddTwo").Body.Instructions
+        .Single(i => i.OpCode == OpCodes.Ldc_I4_2).OpCode = OpCodes.Ldc_I4_3),
+    ("TallyTwiceReturnsCount", type =>
+    {
+        var body = type.Methods.Single(m => m.Name == "TallyTwice").Body.Instructions;
+        var load = body.Last(i => i.OpCode == OpCodes.Ldfld);
+        if (((FieldReference)load.Operand).Name != "Sum")
+            throw new InvalidDataException("TallyTwice no longer returns its Sum field last");
+        load.Operand = ((FieldReference)load.Operand).DeclaringType.Resolve().Fields.Single(f => f.Name == "Count");
+    })
+})
+{
+    var output = Path.Combine(root, name);
+    Directory.CreateDirectory(output);
+    var dll = Path.Combine(output, "Examples.dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        mutate(module.GetType("Examples.Loops"));
+        module.Write(dll);
+    }
+    Run(Extract("extract", dll, "Examples", "Loops::TallyTwice(uint)", output));
+    var refused = false;
+    try
+    {
+        verification.Verify(dll, "Examples", "Loops::TallyTwice(uint)", At("Examples/Proofs/TallyTwice.lean"), output,
+            existingArtifacts: true);
+    }
+    catch (InvalidOperationException error)
+        when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
+    {
+        refused = true;
+    }
+    if (!refused || File.Exists(Path.Combine(output, "verified.json")))
+        throw new InvalidOperationException($"{name} satisfied the struct-local loop proof");
+    Console.WriteLine($"PASS unchanged struct-local loop proof rejects {name}");
+}
+
 string CountVariant(string name, Action<MethodDefinition, MethodDefinition> mutate)
 {
     var output = Path.Combine(root, name);

@@ -35,10 +35,11 @@ private def invariant (initial : Memory) (base home : Reference) (v : W64) (n : 
     (n.toNat - state.values.toNat) ∧ state.values.toNat ≤ n.toNat
 
 /-- `FillWords` fills `count` words from write authority alone and changes no other caller byte. -/
-theorem fill_words (initial : Memory) (base : Reference) (v : W64) (n : W32) (formed : initial.WellFormed)
-    (valid : form initial base = .ok base) (small : n.toNat < 2^31) (writable : Writable initial base 8 0 n.toNat) :
-    ∃ fuel final, invoke Extracted.program fuel 0 [.reference (.address base), .scalar (.i64 v), .scalar (.i32 n)]
-        initial = .ok (final, []) ∧
+theorem fill_words (initial : Memory) (base : Reference) (v : W64) (n : W32)
+    (formed : initial.WellFormed) (valid : form initial base = .ok base) (small : n.toNat < 2^31)
+    (writable : Writable initial base 8 0 n.toNat) :
+    ∃ fuel final, invoke Extracted.program fuel 0
+        [.reference (.address base), .scalar (.i64 v), .scalar (.i32 n)] initial = .ok (final, []) ∧
       Contents final base 8 (List.replicate n.toNat (v : BitVec (8 * 8))) ∧
       Confined [(base, 8 * n.toNat)] initial final := by
   obtain ⟨home, entered, setup, -, entryMemory, entryFrame⟩ :=
@@ -82,18 +83,21 @@ theorem fill_words (initial : Memory) (base : Reference) (v : W64) (n : W32) (fo
 
 /-- Every nonnegative count fills exactly that many words, whatever the buffer held before. -/
 theorem correctness : Ensures Extracted.program 0
-    (fun args initial => ∃ base v n, args = [.reference (.address base), .scalar (.i64 v), .scalar (.i32 n)] ∧
-      initial.WellFormed ∧ form initial base = .ok base ∧ n.toNat < 2^31 ∧ Writable initial base 8 0 n.toNat)
+    (fun args initial => ∃ base v n,
+      args = [.reference (.address base), .scalar (.i64 v), .scalar (.i32 n)] ∧
+      initial.WellFormed ∧ form initial base = .ok base ∧ n.toNat < 2^31 ∧
+      Writable initial base 8 0 n.toNat)
     (fun args initial final values => values = [] ∧ ∀ base v n,
       args = [.reference (.address base), .scalar (.i64 v), .scalar (.i32 n)] →
       Contents final base 8 (List.replicate n.toNat (v : BitVec (8 * 8))) ∧
         Confined [(base, 8 * n.toNat)] initial final) := by
   rintro args initial ⟨base, v, n, rfl, formed, valid, small, writable⟩
-  obtain ⟨fuel, final, executed, contents, framed⟩ := fill_words initial base v n formed valid small writable
+  obtain ⟨fuel, final, executed, contents, framed⟩ :=
+    fill_words initial base v n formed valid small writable
   refine ⟨fuel, final, [], executed, rfl, ?_⟩
   intro other value count same
-  simp only [List.cons.injEq, Value.reference.injEq, ManagedReference.address.injEq, Value.scalar.injEq,
-    CIL.Value.i64.injEq, CIL.Value.i32.injEq, and_true] at same
+  simp only [List.cons.injEq, Value.reference.injEq, ManagedReference.address.injEq,
+    Value.scalar.injEq, CIL.Value.i64.injEq, CIL.Value.i32.injEq, and_true] at same
   obtain ⟨rfl, rfl, rfl⟩ := same
   exact ⟨contents, framed⟩
 
