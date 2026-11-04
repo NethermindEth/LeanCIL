@@ -12,6 +12,19 @@ var baseline = "import Tests.Support\n" + File.ReadAllText(At("Examples/Proofs/A
 File.WriteAllText(proof, baseline);
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 const string entry = "Arithmetic::Add(ulong,ulong)";
+// Verify against a supplied certified library, as CI does, under a cache of this run's own: the
+// reuse checks must count only certifications this run made, never ones a previous run left.
+var isolatedCache = At("artifacts/VerificationReuseCache");
+if (Directory.Exists(isolatedCache)) DeleteTree(isolatedCache);
+if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY")))
+{
+    var certifiedBase = At("artifacts/VerificationReuseLibrary");
+    if (Directory.Exists(certifiedBase)) DeleteTree(certifiedBase);
+    using var producer = new Program();
+    Environment.SetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY_SHA256", producer.PrepareLibrary(certifiedBase));
+    Environment.SetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY", certifiedBase);
+}
+Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", isolatedCache);
 using var verifier = new Program();
 var timer = Stopwatch.StartNew();
 verifier.Verify(assembly, "Examples", entry, proof, output);
