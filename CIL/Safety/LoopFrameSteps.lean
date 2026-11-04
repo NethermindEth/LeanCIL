@@ -530,7 +530,8 @@ def loopCallFailure (holds input : Term) (facts : Array Term) (position : Nat)
         term.isConstOf).isSome
     if checking then
       throwError "cil_loop_call: the call at pc {position} ({op}) does not step: its argument \
-        checks reduce to{indentD (MessageData.joinSep (goals.toList.map (m!"{·}")) "\n")}\n\
+        checks reduce to\
+        {indentD (MessageData.joinSep (goals.toList.map (m!"{loopLiteralSums ·}")) "\n")}\n\
         Supply {← loopMissingHint goals}."
   let contract ← loopHeldContract holds
   let wanted ← withMainContext do
@@ -539,8 +540,9 @@ def loopCallFailure (holds input : Term) (facts : Array Term) (position : Nat)
     withTransparency .default <| reduce (skipTypes := true)
       (← instantiateMVars (← mkAppM ``MethodContract.args #[contract, inputExpr]))
   throwError "cil_loop_call: the call at pc {position} ({op}) does not take the contract's \
-    arguments for this input, or is not the named site. The contract passes{indentExpr wanted}\n\
-    and the stack holds{indentExpr stack}"
+    arguments for this input, or is not the named site. The contract passes\
+    {indentExpr (loopLiteralSums wanted)}\n\
+    and the stack holds{indentExpr (loopLiteralSums stack)}"
 
 elab_rules : tactic
   | `(tactic| cil_loop_call $holds $input $[at $site:ident]? $[[$facts:term,*]]?) => do
@@ -662,7 +664,7 @@ elab_rules : tactic
       return (reached, parts[3]!)
     let mismatch (error : Exception) : TacticM Unit :=
       throwError "cil_loop_recurse: the reached state is not the head of {hypothesis} at \
-        {values}:{indentExpr reached}\n{error.toMessageData}"
+        {values}:{indentExpr (loopLiteralSums reached)}\n{error.toMessageData}"
     let saved ← saveState
     let memoryTerm ← withMainContext do Term.exprToSyntax memory
     let framed ← `(?headFrame)
@@ -677,7 +679,7 @@ elab_rules : tactic
     unless ← loopCloseHeadFrame frameGoal do
       let wanted ← frameGoal.withContext do instantiateMVars (← frameGoal.getType)
       throwError "cil_loop_recurse: no frame fact at the reached memory is the head's frame:\
-        {indentExpr wanted}"
+        {indentExpr (loopLiteralSums wanted)}"
     setGoals (goals.filter (· != frameGoal))
 
 end CIL.Safety

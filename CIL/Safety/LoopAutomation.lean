@@ -268,7 +268,8 @@ def loopMissingHint (residual : Array Expr) : MetaM MessageData := do
   let mentions (name : Name) : Bool :=
     residual.any fun goal => (goal.find? fun term => term.isConstOf name).isSome
   let spanLocal := residual.any fun goal => (goal.find? fun term =>
-    term.isAppOf ``loadLocal && (term.getArg! 1).isAppOf ``LocalSlot.span).isSome
+    term.isAppOf ``loadLocal && term.getAppNumArgs >= 2 &&
+      (term.getArg! 1).isAppOf ``LocalSlot.span).isSome
   if spanLocal || mentions ``SpanView.validate then
     return m!"the span's validity at this memory: a `CheckedSpan` of the caller's memory, which \
       the loop tactics read in every frame memory, or `view.validate memory = .ok ()`"
@@ -323,7 +324,7 @@ def loopStuck (tactic : String) (facts prepared : Array Term)
     | throwError "{tactic}: expected a `LoopReaches` or `LoopTerminates` goal"
   let some parts ← loopStateParts? source
     | throwError "{tactic}: the source state does not reduce to a literal state:\
-        {indentExpr source}"
+        {indentExpr (loopLiteralSums source)}"
   let some position ← literalNat? parts[0]!
     | throwError "{tactic}: the pc is not a literal, so a branch was not decided; supply a fact \
         deciding its condition. The pc is{indentExpr parts[0]!}"

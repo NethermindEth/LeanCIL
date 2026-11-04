@@ -534,6 +534,17 @@ example (memory current : Memory) (count index : W32) (buffer home : Reference)
       (fun _ _ => True) ⟨3, stampsEntry.frame memory home, [], current⟩ := by
   cil_loop_advance
 
+-- The stuck step shows its pc as a literal, as the message's first line does.
+/-- (CIL.Op.memory (CIL.MemoryOp.add 4 true)) 5 -/
+#guard_msgs (whitespace := lax, substring := true) in
+example (memory current : Memory) (count index : W32) (buffer home : Reference)
+    (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)
+    (frame : LoopFrame [(buffer, 4 * count.toNat)] memory current [.word32]
+      [.bytes .word32 home] (knownLocals [some (.i32 index)])) :
+    LoopTerminates stampsProgram 0 [.scalar (.i32 count), .reference (.address buffer)]
+      (fun _ _ => True) ⟨3, stampsEntry.frame memory home, [], current⟩ := by
+  cil_loop_advance
+
 -- The hint for a stuck step names the fact its residual is missing.
 /-- info: the `Unsafe.Add` result: `add memory base width offset = .ok reference` at this memory or
 the caller's, such as `Writable.add_int` -/

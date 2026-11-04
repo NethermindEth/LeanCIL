@@ -302,7 +302,9 @@ proof](../Examples/Proofs/Countdown.lean).
 
 The loop tactics step one fetched instruction at a time, simplifying the stack with the `drop`,
 `take`, `reverse` and append lemmas after each step. When one cannot go on it fails instead of
-leaving a goal, and the message names the pc:
+leaving a goal, and the message names the pc. Every state, step and residual a message shows
+writes its pc as a literal, such as `18` rather than `17 + 1`, as does a loop goal a walk hands
+back:
 
 - `cannot step pc N (op) at memory M` shows the step and what is left of it after the step
   equations and gathered facts, and names the fact that residual lacks: a span's validity, a
