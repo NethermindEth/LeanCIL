@@ -12,6 +12,7 @@ import CIL.Imports
 import CIL.InstructionEquations
 import CIL.Instructions
 import CIL.Layout
+import CIL.LiteralDisplay
 import CIL.Memory
 import CIL.MemoryLemmas
 import CIL.MethodBinding

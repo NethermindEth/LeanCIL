@@ -304,7 +304,8 @@ The loop tactics step one fetched instruction at a time, simplifying the stack w
 `take`, `reverse` and append lemmas after each step. When one cannot go on it fails instead of
 leaving a goal, and the message names the pc. Every state, step and residual a message shows
 writes its pc as a literal, such as `18` rather than `17 + 1`, as does a loop goal a walk hands
-back:
+back. Goals print a bit-vector literal of `2 ^ 16` or more in hexadecimal, such as `0x80000000`
+or `0x80000000#32` ([LiteralDisplay](../CIL/LiteralDisplay.lean)), and smaller ones in decimal:
 
 - `cannot step pc N (op) at memory M` shows the step and what is left of it after the step
   equations and gathered facts, and names the fact that residual lacks: a span's validity, a
