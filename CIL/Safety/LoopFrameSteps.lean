@@ -271,25 +271,29 @@ def loopEntrySetup? (caller : Expr) : TacticM (Option Expr) := withMainContext d
       return some declaration.toExpr
   return none
 
-/-- Split a goal of conjunctions into its conjuncts, closing each that `close` proves and leaving
-    the rest in order. -/
-partial def loopCloseConjuncts (close : TacticM Unit) : TacticM Unit := do
-  let goal ← getMainGoal
+/-- The conjuncts of `goal`, a conjunction split as its `And`s nest, in order. -/
+partial def loopConjuncts (goal : MVarId) : MetaM (Array MVarId) := do
   let target ← whnfR (← instantiateMVars (← goal.getType))
-  if target.isAppOfArity ``And 2 then
-    let [left, right] ← goal.apply (mkConst ``And.intro) | return
-    let mut open_ := #[]
-    for side in [left, right] do
-      setGoals [side]
-      loopCloseConjuncts close
-      open_ := open_ ++ (← getGoals)
-    setGoals open_.toList
-    return
-  let saved ← saveState
-  try
-    Term.withoutErrToSorry <| withoutRecover close
-    unless (← getGoals).isEmpty do throwError "open"
-  catch _ => saved.restore
+  unless target.isAppOfArity ``And 2 do return #[goal]
+  let [left, right] ← goal.apply (mkConst ``And.intro) | return #[goal]
+  return (← loopConjuncts left) ++ (← loopConjuncts right)
+
+/-- Split a postcondition goal into its conjuncts, closing each that `close` proves and leaving
+    the rest in order, each tagged by its place among all the conjuncts: `postcondition` when
+    there is one, else `postcondition_2` for the second, whichever others close. -/
+def loopCloseConjuncts (close : TacticM Unit) : TacticM Unit := do
+  let conjuncts ← loopConjuncts (← getMainGoal)
+  tagNumbered `postcondition conjuncts
+  let mut open_ := #[]
+  for conjunct in conjuncts do
+    setGoals [conjunct]
+    let saved ← saveState
+    try
+      Term.withoutErrToSorry <| withoutRecover close
+      unless (← getGoals).isEmpty do throwError "open"
+    catch _ => saved.restore
+    open_ := open_ ++ (← getGoals)
+  setGoals open_.toList
 
 /-- Close a `Contents` goal with the contents of a `Filled` hypothesis stating them. -/
 def loopFilledContents : TacticM Unit := withMainContext do
@@ -403,7 +407,7 @@ def noFootprint : MetaM Expr := do
 syntax "cil_loop_advance" (" [" term,* "]")? : tactic
 
 elab_rules : tactic
-  | `(tactic| cil_loop_advance $[[$facts:term,*]]?) => do
+  | `(tactic| cil_loop_advance $[[$facts:term,*]]?) => keepingTag do
     loopWalk "cil_loop_advance" .advance (facts.map (·.getElems) |>.getD #[])
       (← contextLayouts) (← noFootprint)
 
@@ -417,7 +421,7 @@ elab_rules : tactic
 syntax "cil_loop_finish" (" [" term,* "]")? : tactic
 
 elab_rules : tactic
-  | `(tactic| cil_loop_finish $[[$facts:term,*]]?) => do
+  | `(tactic| cil_loop_finish $[[$facts:term,*]]?) => keepingTag do
     loopWalk "cil_loop_finish" .finish (facts.map (·.getElems) |>.getD #[])
       (← contextLayouts) (← noFootprint)
 
@@ -499,10 +503,12 @@ def loopCallContinue (contract : Expr) (memory : Expr) (facts : Array Term) :
     differ, and the side condition when the frame after the call cannot be proved. -/
 syntax "cil_loop_call" term:max term:max (" at " ident)? (" [" term,* "]")? : tactic
 
-/-- The contract a `MethodContract.Holds` proof's type names. -/
-def loopHeldContract (holds : Term) : TacticM Expr := withMainContext do
+/-- The contract a `MethodContract.Holds` proof's type names, and the tag of its callee's
+    precondition (`preconditionTag`). -/
+def loopHeldContract (holds : Term) : TacticM (Expr × Name) := withMainContext do
   let type ← whnfR (← inferType (← Term.elabTerm holds none))
-  return if type.isAppOf ``MethodContract.Holds then type.getAppArgs[2]! else type
+  let contract := if type.isAppOf ``MethodContract.Holds then type.getAppArgs[2]! else type
+  return (contract, preconditionTag type)
 
 /-- Fail for a call `cil_loop_call` could not cross at `position`: naming the missing fact when
     the step's argument checks do not reduce, and otherwise the contract's arguments for `input`
@@ -533,7 +539,7 @@ def loopCallFailure (holds input : Term) (facts : Array Term) (position : Nat)
         checks reduce to\
         {indentD (MessageData.joinSep (goals.toList.map (m!"{loopLiteralSums ·}")) "\n")}\n\
         Supply {← loopMissingHint goals}."
-  let contract ← loopHeldContract holds
+  let (contract, _) ← loopHeldContract holds
   let wanted ← withMainContext do
     let inputExpr ← Term.elabTerm input none
     -- The contract's argument list, reduced as far as its definition goes.
@@ -545,7 +551,8 @@ def loopCallFailure (holds input : Term) (facts : Array Term) (position : Nat)
     and the stack holds{indentExpr (loopLiteralSums stack)}"
 
 elab_rules : tactic
-  | `(tactic| cil_loop_call $holds $input $[at $site:ident]? $[[$facts:term,*]]?) => do
+  | `(tactic| cil_loop_call $holds $input $[at $site:ident]? $[[$facts:term,*]]?) =>
+    keepingTag do
     let explicit := facts.map (·.getElems) |>.getD #[]
     let groups ← gatherLoopFactGroups explicit
     -- The call checks its arguments, so it reads the reference facts besides the core.
@@ -557,7 +564,7 @@ elab_rules : tactic
       | some site => pure ⟨(mkIdent (site.getId ++ `call)).raw⟩
       | none => `(by cil_lookup [$[$facts:term],*])
     let some (source, _) ← withMainContext do loopGoalStates (← getMainTarget)
-      | throwError "cil_loop_call: expected a `LoopTerminates` goal"
+      | throwError "cil_loop_call: expected a `LoopTerminates` goal{← obligationNote}"
     let some parts ← withMainContext do loopStateParts? source
       | throwError "cil_loop_call: the source state does not reduce to a literal state"
     let saved ← saveState
@@ -570,7 +577,7 @@ elab_rules : tactic
       saved.restore
       let some position ← withMainContext do literalNat? parts[0]! | throw error
       loopCallFailure holds input groups.all position parts[2]!
-    let contract ← loopHeldContract holds
+    let (contract, precondition) ← loopHeldContract holds
     let [permitted, continuation] ← getGoals
       | throwError "cil_loop_call: expected the precondition and the continuation"
     setGoals [continuation]
@@ -582,6 +589,7 @@ elab_rules : tactic
     let open_ ← Tactic.run permitted (evalTactic (← `(tactic| (
       try dsimp only [$[$unfold:ident],*]
       try first | trivial | assumption))))
+    for goal in open_ do goal.setTag precondition
     setGoals (open_ ++ remaining)
 
 /-- Close `goal`, a head state's frame, with a frame fact at the reached memory: one of its type,
@@ -654,11 +662,15 @@ elab_rules : tactic
       return (target, layouts, footprint, premises.size - 1)
     loopWalk "cil_loop_recurse" (.resume target) (facts.map (·.getElems) |>.getD #[]) layouts
       footprint
-    let holes : Array Term ← (List.range conditions).toArray.mapM fun _ => `(?_)
+    -- A loop head's hypothesis takes its invariant, then at a back edge the measure's decrease.
+    let holes : Array Term ← match conditions with
+      | 1 => pure #[← `(?invariant)]
+      | 2 => pure #[← `(?invariant), ← `(?measure)]
+      | _ => (List.range conditions).toArray.mapM fun _ => `(?_)
     let (reached, memory) ← withMainContext do
       let reached ← instantiateMVars (← getMainTarget)
       let some (source, _) ← loopGoalStates reached
-        | throwError "cil_loop_recurse: expected a `LoopTerminates` goal"
+        | throwError "cil_loop_recurse: expected a `LoopTerminates` goal{← obligationNote}"
       let some parts ← loopStateParts? source
         | throwError "cil_loop_recurse: the reached state is not a literal state"
       return (reached, parts[3]!)
@@ -681,5 +693,6 @@ elab_rules : tactic
       throwError "cil_loop_recurse: no frame fact at the reached memory is the head's frame:\
         {indentExpr (loopLiteralSums wanted)}"
     setGoals (goals.filter (· != frameGoal))
+    nameObligations
 
 end CIL.Safety

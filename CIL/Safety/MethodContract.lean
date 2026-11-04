@@ -1,5 +1,6 @@
 import CIL.Verification
 import CIL.Safety.SymbolicExecution
+import CIL.Safety.Obligations
 import CIL.Safety.MemoryBelow
 import CIL.Safety.ReturnMemory
 import CIL.Safety.ViewReuse
@@ -707,6 +708,7 @@ def cilContractApply (methodFound instructionFound : Term) (facts : Array Term) 
       let inputSyntax ← Term.exprToSyntax input
       let proofSyntax ← Term.exprToSyntax (mkAppN proof parameters)
       let siblings := (← getGoals).tail!
+      let tag ← (← getMainGoal).getTag
       evalTactic (← `(tactic| (
         cil_strict refine CIL.Safety.run_call_of_contract $proofSyntax $inputSyntax
           $methodFound $instructionFound
@@ -721,6 +723,8 @@ def cilContractApply (methodFound instructionFound : Term) (facts : Array Term) 
         throwError "The contract input could not be inferred from the call arguments"
       let permitted := pending[0]!
       let continuation := pending[1]!
+      permitted.setTag (preconditionTag type)
+      continuation.setTag tag
       let beforePrecondition ← saveState
       try
         evalTactic (← `(tactic| focus
@@ -752,12 +756,15 @@ elab_rules : tactic
         saved.restore
         cilContractChild methodFound instructionFound facts.getElems
       return
-    evalTactic (← if operation == ``CIL.Op.ret then
-      `(tactic| cil_strict refine CIL.Safety.run_return_exists
+    if operation == ``CIL.Op.ret then
+      evalTactic (← `(tactic| cil_strict refine CIL.Safety.run_return_exists
         $methodFound $instructionFound
         (by cil_checked_step_normalized [$[$facts:term],*])
-        (by cil_checked_side [$[$facts:term],*]) ?_)
-      else
+        (by cil_checked_side [$[$facts:term],*]) ?_))
+      -- What is left at a return is the method's postcondition.
+      (← getMainGoal).setTag `postcondition
+      return
+    evalTactic (←
       `(tactic| (
         cil_strict refine CIL.Safety.run_next_exists (post := _)
           $methodFound $instructionFound
@@ -766,7 +773,8 @@ elab_rules : tactic
 
 /-- Step a goal `∃ fuel result returned, run ... ∧ post` through checked instructions,
     composing calls with registered contracts or child evidence. Unmatched calls and
-    the postcondition at each return remain explicit goals. -/
+    the postcondition at each return remain explicit goals, a callee's precondition tagged
+    `precondition` and the postcondition `postcondition`. -/
 syntax "cil_contract_steps" "[" term,* "]" : tactic
 /-- As `cil_contract_steps`, but stop silently after at most `count` steps. -/
 syntax "cil_contract_steps" num "[" term,* "]" : tactic
@@ -807,7 +815,7 @@ elab_rules : tactic
         | cil_contract_step [$[$prepared:term],*]))))
 
 /-- Apply a proved contract at the fetched call, optionally checked against a `bind_call`
-    site: leaves the precondition, then the continuation over the callee's final memory,
+    site: leaves the `precondition`, then the continuation over the callee's final memory,
     values, invocation, footprint and postcondition. -/
 syntax "cil_contract_call" term:max term:max (" at " ident)? "[" term,* "]" : tactic
 
@@ -817,16 +825,18 @@ macro_rules
     refine CIL.Safety.run_call_of_contract $holds $input
       (by cil_lookup [$[$facts:term],*])
       (by cil_lookup [$[$facts:term],*])
-      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_))
+      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?precondition ?_
+    cil_name_obligations $holds))
   | `(tactic| cil_contract_call $holds $input at $site:ident [$facts:term,*]) =>
   `(tactic| (
     -- The site fixes the body, so the lookup may close during simplification.
     refine CIL.Safety.run_call_of_contract $holds $input
       (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
-      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_))
+      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?precondition ?_
+    cil_name_obligations $holds))
 
-/-- `cil_contract_call` through `run_call_of_contract_formed`: leaves the precondition,
-    the caller memory's `WellFormed`, then the continuation with both invariants. -/
+/-- `cil_contract_call` through `run_call_of_contract_formed`: leaves the `precondition`,
+    the caller memory's `wellFormed`, then the continuation with both invariants. -/
 syntax "cil_formed_call" term:max term:max (" at " ident)? "[" term,* "]" : tactic
 
 macro_rules
@@ -835,11 +845,13 @@ macro_rules
     refine CIL.Safety.run_call_of_contract_formed $holds $input
       (by cil_lookup [$[$facts:term],*])
       (by cil_lookup [$[$facts:term],*])
-      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_))
+      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?precondition ?wellFormed ?_
+    cil_name_obligations $holds))
   | `(tactic| cil_formed_call $holds $input at $site:ident [$facts:term,*]) =>
   `(tactic| (
     refine CIL.Safety.run_call_of_contract_formed $holds $input
       (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
-      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_))
+      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?precondition ?wellFormed ?_
+    cil_name_obligations $holds))
 
 end CIL.Safety

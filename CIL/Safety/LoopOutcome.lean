@@ -218,11 +218,11 @@ theorem ensures_outcome_of_loop (program : CIL.Program) (method : Nat)
 #print axioms ensures_outcome_of_loop
 
 /-- Step a `LoopOutcome` goal through non-call, non-return instructions until one does not
-    apply. -/
+    apply; the goal keeps its tag. -/
 syntax "cil_loop_outcome_advance" "[" term,* "]" : tactic
 
 elab_rules : tactic
-  | `(tactic| cil_loop_outcome_advance [$facts:term,*]) =>
+  | `(tactic| cil_loop_outcome_advance [$facts:term,*]) => keepingTag <|
     cilWithNormalisedFacts facts.getElems fun facts prepared =>
     `(tactic| repeat first
       | (simp only [$[$facts:term],*])
@@ -231,8 +231,8 @@ elab_rules : tactic
          · cil_lookup [$[$facts:term],*]
          · cil_checked_step_normalized [$[$prepared:term],*]))
 
-/-- Continue past a returning callee at a `bind_call` site; leaves `pre`, the `raises`
-    equation, then the continuation. -/
+/-- Continue past a returning callee at a `bind_call` site; leaves the `precondition`, the
+    `raises` equation, then the continuation. -/
 syntax "cil_loop_outcome_call" term:max term:max " at " ident "[" term,* "]" : tactic
 
 macro_rules
@@ -240,10 +240,11 @@ macro_rules
   `(tactic| (
     refine CIL.Safety.loop_outcome_call $holds $input
       (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
-      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_))
+      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?precondition ?raises ?_
+    cil_name_obligations $holds))
 
-/-- Exit with the exception the callee's contract names at a `bind_call` site; leaves `pre`
-    and the `raises` equation. -/
+/-- Exit with the exception the callee's contract names at a `bind_call` site; leaves the
+    `precondition` and the `raises` equation. -/
 syntax "cil_loop_outcome_raise" term:max term:max " at " ident "[" term,* "]" : tactic
 
 macro_rules
@@ -252,6 +253,7 @@ macro_rules
     refine CIL.Safety.loop_outcome_call_raises $holds $input
       (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
       (by cil_checked_step [$[$facts:term],*]) (by rfl)
-      (by cil_checked_side [$[$facts:term],*]) ?_ ?_))
+      (by cil_checked_side [$[$facts:term],*]) ?precondition ?raises
+    cil_name_obligations $holds))
 
 end CIL.Safety

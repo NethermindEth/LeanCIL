@@ -114,17 +114,18 @@ theorem invoke_loop_results {α : Type} {program : CIL.Program} {method : Nat}
   exact ⟨fuel, final, executed, satisfied⟩
 #print axioms invoke_loop_results
 
-/-- Generate invariant-preservation and measure-decrease goals after checking the path with
-    `cil_loop_steps` and the optional facts. A path that cannot be justified leaves its checked
-    execution obligation unsolved. -/
+/-- Generate the invariant-preservation and measure-decrease goals, tagged `invariant` and
+    `measure`, after checking the path with `cil_loop_steps` and the optional facts. A path that
+    cannot be justified leaves its checked execution obligation unsolved. -/
 syntax "cil_loop_continue " term:max (" [" term,* "]")? : tactic
 
 macro_rules
   | `(tactic| cil_loop_continue $next $[[$facts,*]]?) => do
     let facts := facts.map (·.getElems) |>.getD #[]
     `(tactic| (
-      apply loop_continue_vc (next := $next)
-      · cil_loop_steps [$facts,*]))
+      refine loop_continue_vc (next := $next) ?_ ?invariant ?measure
+      · cil_loop_steps [$facts,*]
+      cil_name_obligations))
 
 /-- Generate the post-store obligation and name its memory, checked store, load and authority.
     The numeric encoding is checked by reduction; unsupported stores do not apply. -/

@@ -192,8 +192,8 @@ theorem run_newAggregate_of_contract {Input Output : Type} {c : MethodContract I
 #print axioms run_construct_of_contract_formed
 #print axioms run_newAggregate_of_contract
 
-/-- Apply a constructor contract at the fetched `newobj`, leaving `WellFormed`, the precondition
-    and the continuation. -/
+/-- Apply a constructor contract at the fetched `newobj`, leaving `wellFormed`, the
+    `precondition` and the continuation. -/
 syntax "cil_contract_construct" term:max term:max term:max "[" term,* "]" : tactic
 
 macro_rules
@@ -202,11 +202,12 @@ macro_rules
     refine CIL.Safety.run_newAggregate_of_contract $holds $constructs $input
       (by cil_lookup [$[$facts:term],*])
       (by cil_lookup [$[$facts:term],*])
-      (by decide) ?_ (by simp)
+      (by decide) ?wellFormed (by simp)
       (by first | rfl | (simp [CIL.Safety.checkedValue, CIL.Safety.numericValue,
           $[$facts:term],*] <;>
         (repeat constructor) <;> rfl))
-      (by intro _; rfl) (by intro _; rfl) ?_ ?_
-      (by simp [CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified, $[$facts:term],*])))
+      (by intro _; rfl) (by intro _; rfl) ?precondition ?_
+      (by simp [CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified, $[$facts:term],*])
+    cil_name_obligations $holds))
 
 end CIL.Safety

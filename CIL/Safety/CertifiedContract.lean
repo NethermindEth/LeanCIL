@@ -133,7 +133,7 @@ theorem run_call_of_contract_certified {Input Output : Type} {c : MethodContract
 #print axioms run_call_of_certified
 #print axioms run_call_of_contract_certified
 
-/-- `cil_contract_call` through `run_call_of_certified`: leaves the precondition, then the
+/-- `cil_contract_call` through `run_call_of_certified`: leaves the `precondition`, then the
     continuation over the callee's certificate, footprint and output. -/
 syntax "cil_certified_call" term:max term:max (" at " ident)? "[" term,* "]" : tactic
 
@@ -143,15 +143,17 @@ macro_rules
     refine CIL.Safety.run_call_of_certified $certified $input
       (by cil_lookup [$[$facts:term],*])
       (by cil_lookup [$[$facts:term],*])
-      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_))
+      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?precondition ?_
+    cil_name_obligations $certified))
   | `(tactic| cil_certified_call $certified $input at $site:ident [$facts:term,*]) =>
   `(tactic| (
     refine CIL.Safety.run_call_of_certified $certified $input
       (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
-      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_))
+      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?precondition ?_
+    cil_name_obligations $certified))
 
-/-- `cil_contract_call` through `run_call_of_contract_certified`: leaves the precondition,
-    the caller memory's `WellFormed` and static world, then the continuation over the
+/-- `cil_contract_call` through `run_call_of_contract_certified`: leaves the `precondition`,
+    the caller memory's `wellFormed` and `staticWorld`, then the continuation over the
     callee's certificate, footprint and output. -/
 syntax "cil_contract_certified_call" term:max term:max (" at " ident)? "[" term,* "]" : tactic
 
@@ -161,11 +163,13 @@ macro_rules
     refine CIL.Safety.run_call_of_contract_certified $holds $input
       (by cil_lookup [$[$facts:term],*])
       (by cil_lookup [$[$facts:term],*])
-      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_ ?_))
+      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?precondition ?wellFormed ?staticWorld ?_
+    cil_name_obligations $holds))
   | `(tactic| cil_contract_certified_call $holds $input at $site:ident [$facts:term,*]) =>
   `(tactic| (
     refine CIL.Safety.run_call_of_contract_certified $holds $input
       (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
-      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?_ ?_ ?_ ?_))
+      (by cil_checked_step [$[$facts:term],*]) (by rfl) ?precondition ?wellFormed ?staticWorld ?_
+    cil_name_obligations $holds))
 
 end CIL.Safety
