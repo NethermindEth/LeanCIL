@@ -674,12 +674,14 @@ Examples:System.UInt32 Examples.GenericOwners::TableFirst(method System.UInt32 *
 Examples:System.UInt32 Examples.IntegerMath::ClampUInt32(System.UInt32,System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.IntegerMath::MaxUInt32(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.IntegerMath::MinUInt32(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt32 Examples.Loops::AddTwo(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Loops::Bump(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Loops::CountCalls(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Loops::CountUntil(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Loops::Countdown(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Loops::Decrement(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Loops::FeatureCountdown(System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt32 Examples.Loops::TallyTwice(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Loops::WrongCountdown(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.NativeIntegers::NarrowUnsigned(System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Nested::Packed(System.UInt32)	A	A	A	A	A	A	A	A

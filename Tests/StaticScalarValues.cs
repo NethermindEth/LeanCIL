@@ -126,7 +126,7 @@ Run(ExtractSeeded(assembly, "Hash(ulong)", mix));
 var verified = Run(["dotnet", ExtractorPath, "verify", mix, "--proof", At("Examples/Proofs/OpaqueSeeds.lean")]);
 if (seedFields.Any(field =>
         !verified.Contains($"Unknown static value: {field} is not computed", StringComparison.Ordinal)) ||
-    !verified.Contains(" (seed0 seed1 value : CIL.W64),", StringComparison.Ordinal))
+    !verified.Contains("ExampleProof.correctness (seed0 seed1 value : CIL.W64) :", StringComparison.Ordinal))
     throw new Exception("Verification omitted the unknown seeds or their quantifier:\n" + verified);
 var seededReport = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(mix, "verified.json")))
     .RootElement.GetProperty("opaqueStaticValues").EnumerateArray().Select(item => item.GetString());
