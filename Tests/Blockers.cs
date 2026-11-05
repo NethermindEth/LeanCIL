@@ -153,7 +153,7 @@ Require(blockers.Select(b => b.GetProperty("construct").GetString()).Order(Strin
         "Rejected external call: System.Int32 System.Environment::get_TickCount()",
         "Rejected external call: System.Int32 System.GC::GetGeneration(System.Object)",
         "Unsupported aggregate layout: Counter",
-        "Unsupported class instance method: System.Int32 Counter::Add(System.Int32)",
+        "Unsupported class instance method",
         "Unsupported instruction: newarr System.Decimal",
         "Unsupported instruction: newarr System.Double",
         "Unsupported instruction: newarr System.Single",
@@ -232,7 +232,7 @@ Require(Constructs(12).Order(StringComparer.Ordinal).SequenceEqual(
     "Rejected signature hid the body's blockers: " + string.Join("; ", Constructs(12)));
 Require(Constructs(11).Order(StringComparer.Ordinal).SequenceEqual([
         "Unsupported aggregate layout: Counter",
-        "Unsupported class instance method: System.Int32 Counter::Add(System.Int32)",
+        "Unsupported class instance method",
         "Unsupported instruction: newarr System.Decimal"]),
     "Reference-type receiver hid the body's blockers: " + string.Join("; ", Constructs(11)));
 // A resolved entry of rejected shape is blocked, not unchecked, and its definition is still analysed.
@@ -267,6 +267,28 @@ for (var index = 0; index < entries.Length; index++)
         $"Entry {index} is {entries[index].GetProperty("status")} but extract exited {extracted.Code}:\n" +
         extracted.Output);
 }
+// The report groups the condition across methods; extract still names the method it stopped at.
+var classInstance = Execute(["dotnet", ExtractorPath, "extract", assembly, "Counter::Add(int)",
+    Path.Combine(directory, "extract", "class-instance"), "scalar"]);
+Require(classInstance.Code != 0 && classInstance.Output.Contains("Unsupported class instance method") &&
+    classInstance.Output.Contains("Method: System.Int32 Counter::Add(System.Int32)"),
+    "extract no longer names the class instance method it rejects:\n" + classInstance.Output);
+
+// MSBuild configuration names are case-insensitive, so a `-c release` build is a Release build.
+string BuildAs(string configuration)
+{
+    var output = Path.Combine(directory, "configuration", configuration);
+    Run(["dotnet", "build", Path.Combine(source, "Fixture.csproj"), "-c", configuration, "-o", output]);
+    return Path.Combine(output, "Fixture.dll");
+}
+(int Code, string Output, string Stdout, string Stderr) ExtractAdmitted(string dll, string configuration) =>
+    Execute(["dotnet", ExtractorPath, "extract", dll, "Fixture::Admitted(ulong,ulong)",
+        Path.Combine(directory, "extract", configuration), "scalar"]);
+var lowercase = ExtractAdmitted(BuildAs("release"), "release");
+Require(lowercase.Code == 0, "A `-c release` build is rejected:\n" + lowercase.Output);
+var debug = ExtractAdmitted(BuildAs("Debug"), "Debug");
+Require(debug.Code != 0 && debug.Output.Contains("build configuration"),
+    "A Debug build is accepted:\n" + debug.Output);
 
 // Distinct arrays and sites are compared by content, while output keeps first discovery order.
 var blockersType = Assembly.LoadFrom(ExtractorPath).GetType("Nethermind.LeanCIL.Blockers", true)!;

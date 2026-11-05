@@ -439,7 +439,9 @@ internal static class MetadataValidation
             .SingleOrDefault(a => a.AttributeType.FullName == name)?.ConstructorArguments.Single().Value as string;
         if ((module.Assembly.Name.FullName != assemblyIdentity && module.Assembly.Name.Name != assemblyIdentity) ||
             Attribute("System.Runtime.Versioning.TargetFrameworkAttribute") != ".NETCoreApp,Version=v10.0" ||
-            Attribute("System.Reflection.AssemblyConfigurationAttribute") != "Release" ||
+            // MSBuild configuration names are case-insensitive: `-c release` stamps "release".
+            !string.Equals(Attribute("System.Reflection.AssemblyConfigurationAttribute"), "Release",
+                StringComparison.OrdinalIgnoreCase) ||
             (module.Attributes & ModuleAttributes.ILOnly) == 0 ||
             (module.Attributes & ModuleAttributes.Required32Bit) != 0)
             throw new InvalidDataException("Unsupported assembly identity, target framework or build configuration");
@@ -546,7 +548,7 @@ internal static class MetadataValidation
                 "Unsupported method metadata: calling convention or this parameter");
             Reject(() => method.HasThis && !method.IsStatic &&
                     !IsAggregate(MethodSpecialization.DeclaringType(method), module),
-                $"Unsupported class instance method: {method.FullName}\n" +
+                "Unsupported class instance method\n" +
                 "  Instance methods are admitted on value types only; class instances are not modelled.");
             Reject(() => (method.ImplAttributes & MethodImplAttributes.Synchronized) != 0,
                 "Unsupported method metadata: synchronized method");
