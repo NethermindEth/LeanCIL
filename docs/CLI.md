@@ -431,9 +431,20 @@ validation as the failing stage and links to the supported subset.
 
 When proof checking fails, the report leads with `Lean errors (N):`: each
 `error:` diagnostic with its `file:line:col`, the module Lake was building and
-its full message block, omitting axiom reports, traces and warnings. Long
-messages are truncated in this summary only; the unmodified Lake output follows
-under `Details:` (and in the `LEANCIL_TRACE_DIRECTORY` transcripts when set).
+its full message block, omitting axiom reports, traces and warnings. Each error
+is printed once. A message longer than 40 lines or 400 columns, and every error
+after the first 20, is shortened or left out of this summary and printed in full
+under `Details:`; nothing else follows. When the output holds no Lean error,
+such as a crashed tool, `Details:` holds the whole output instead. The
+unmodified output is the `message` of [`failed.json`](#failure-reports) and,
+when `LEANCIL_TRACE_DIRECTORY` is set, its transcripts.
+
+Verification checks a copy of the proof, `Extracted.lean`, the PDB names and,
+under `--proof-root`, the package's sources and its proof module. A location
+in a copy cites the file it was copied from, at the same line and column, and
+Lake's module names the proof's own module, so editors and terminals open the
+file the developer edits. Only a copy byte-identical to its original when it
+was made is mapped; a generated module keeps the path Lean printed.
 Direct verification checks the proof with `lean --json` and renders each message
 in Lean's `file:line:col: severity:` form; informational messages, which plain
 Lean output prints without a position, appear there as `info:` entries, and the
@@ -486,8 +497,8 @@ output (for the last request of an output, as with `verified.json`) and as the
 The request's `kind`, `file`, `line` and `column` are those of the first Lean
 error; `diagnostics` lists every error of the request's own modules with its
 message block. Lines are 1-based and columns 0-based, as Lean prints them.
-Locations in workspace or temporary copies are mapped back to the selected
-proof, the artifact's `Extracted.lean` or the consumer package. `message` is the
+Locations in the session's copies cite their originals, as in the text
+report. `message` is the
 original output, unmodified; `rerun` reruns just that request. Classification
 uses only the stage, LeanCIL's own messages and Lean's error prefixes above.
 An unsolved goal is never a refutation: only a verified theorem whose

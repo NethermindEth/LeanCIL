@@ -162,7 +162,7 @@ partial class Program
                         : $"PASS verified {CliPaths.Display(outputs[i])} {request.theorem}");
                 else
                 {
-                    var error = outcome.Error ?? new InvalidOperationException("Verification produced no result.");
+                    var error = outcome.Located() ?? new InvalidOperationException("Verification produced no result.");
                     Console.WriteLine($"FAIL {CliPaths.Display(outputs[i])} {request.theorem} (stage: {outcome.Stage})");
                     CliDiagnostics.Write(new CliFailure(outcome.Stage, error), outcome.Stage, true);
                 }
@@ -192,10 +192,11 @@ partial class Program
             var status = passed ? expect : "failed";
             if (!passed) failed++;
             // A verified refutation is a certificate and a failed contract; any other pass leaves no failure.
-            var failure = outcome.Error is { } error ? FailureReports.Failed(outcome.Stage, error, request.theorem, proofs[i], outputs[i], proofRoot)
+            var failure = outcome.Located() is { } error
+                ? FailureReports.Failed(outcome.Stage, error, request.theorem, proofs[i], outputs[i], proofRoot)
                 : outcome.Report is { } report ? FailureReports.Refuted(report.theoremAudit, request.theorem, proofs[i], outputs[i], proofRoot)
                 : FailureReports.Classify(outcome.Stage, outcome.Detail ?? "Verification produced no result.", outcome.Hidden,
-                    request.theorem, proofs[i], outputs[i], proofRoot);
+                    request.theorem, proofs[i], outputs[i], proofRoot, outcome.Sources);
             if (lastForOutput.Contains(i))
             {
                 if (failure is null) FailureReports.Delete(outputs[i]);

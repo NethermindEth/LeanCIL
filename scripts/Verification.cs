@@ -2474,6 +2474,8 @@ partial class Program : IDisposable
         FullImportResult? fullResult = null;
         string stagedProof = Path.Combine(fresh, "Proof.lean");
         string stagedSymbols = Path.Combine(fresh, "ExtractedSymbols.lean");
+        // Diagnostics in these copies cite the files they were copied from.
+        var copies = new SourceCopies(fresh);
         void RequireStagedProofSources()
         {
             if (!File.Exists(stagedProof) || Sha(stagedProof) != proofSourceHash)
@@ -2487,6 +2489,7 @@ partial class Program : IDisposable
             File.Copy(Path.Combine(output, "Extracted.lean"), Path.Combine(fresh, "Extracted.lean"));
             if (Sha(Path.Combine(fresh, "Extracted.lean")) != extraction.Root.GetProperty("generatedSha256").GetString())
                 throw new InvalidOperationException("Inputs changed during verification");
+            copies.Add(Path.Combine(fresh, "Extracted.lean"), Path.Combine(output, "Extracted.lean"));
             string[] importModules = StageImportSources(extraction, fresh);
             var leanPath = fresh + Path.PathSeparator + SessionLeanPath(session);
 
@@ -2568,6 +2571,8 @@ partial class Program : IDisposable
             File.WriteAllBytes(stagedProof, proofSourceBytes);
             if (symbols) File.WriteAllBytes(stagedSymbols, symbolsSourceBytes!);
             RequireStagedProofSources();
+            copies.Add(stagedProof, proof);
+            if (symbols) copies.Add(stagedSymbols, symbolsSource!);
             if (symbols)
             {
                 Run([LeanExecutable, "--root=" + fresh, "-o", Path.Combine(fresh, "ExtractedSymbols.olean"), stagedSymbols],
@@ -2707,6 +2712,11 @@ partial class Program : IDisposable
 
             return report;
         }
+        catch (Exception error)
+        {
+            error.Data[SourceCopies.Key] = copies;
+            throw;
+        }
         finally
         {
             Directory.Delete(fresh, true);
@@ -2719,5 +2729,61 @@ partial class Program : IDisposable
             Directory.Delete(session, true);
         if (ownsLibrary && library is not null && Directory.Exists(library))
             Directory.Delete(library, true);
+    }
+}
+
+/// <summary>
+/// The developer's files a verification session copied, by the path of each copy, so diagnostics cite the file
+/// the developer edits. Only byte-identical copies are recorded, so a copy's lines and columns are the original's.
+/// </summary>
+internal sealed partial class SourceCopies(string directory)
+{
+    /// <summary>Exception.Data key holding the session's copies when verification fails.</summary>
+    internal const string Key = "LeanCIL.SourceCopies";
+
+    static readonly StringComparer PathComparer =
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+    readonly Dictionary<string, string> originals = new(PathComparer);
+    readonly Dictionary<string, string> modules = new(StringComparer.Ordinal);
+
+    [GeneratedRegex(@"\A(?<file>.+?\.lean):(?<line>\d+):(?<column>\d+)\z")]
+    private static partial Regex Location();
+
+    /// <summary>
+    /// Records `copy` as a copy of `original` when their bytes are equal; a copy that differs keeps its own path,
+    /// since its locations would point elsewhere in the original.
+    /// </summary>
+    internal bool Add(string copy, string original)
+    {
+        if (!File.Exists(copy) || !File.Exists(original) ||
+            !File.ReadAllBytes(copy).AsSpan().SequenceEqual(File.ReadAllBytes(original)))
+            return false;
+        originals[Path.GetFullPath(copy, directory)] = Path.GetFullPath(original);
+        return true;
+    }
+
+    /// <summary>
+    /// <see cref="Add(string, string)"/> for a copy built as module `copyModule`, which Lake's progress lines name,
+    /// of the original's module `originalModule`.
+    /// </summary>
+    internal bool Add(string copy, string original, string copyModule, string originalModule)
+    {
+        if (!Add(copy, original)) return false;
+        modules[copyModule] = originalModule;
+        return true;
+    }
+
+    /// <summary>The original module of `module`, a copy's module as Lake named it, or `module` itself.</summary>
+    internal string ModuleOf(string module) => modules.GetValueOrDefault(module, module);
+
+    /// <summary>The original of `file`, a path as Lean or Lake printed it, or null when it is no copy.</summary>
+    internal string? OriginalOf(string file) => originals.GetValueOrDefault(Path.GetFullPath(file, directory));
+
+    /// <summary>`location`, a `file:line:column`, citing through `display` the original of a copied file.</summary>
+    internal string Locate(string location, Func<string, string>? display = null)
+    {
+        var match = Location().Match(location);
+        if (!match.Success || OriginalOf(match.Groups["file"].Value) is not { } original) return location;
+        return $"{display?.Invoke(original) ?? original}:{match.Groups["line"].Value}:{match.Groups["column"].Value}";
     }
 }

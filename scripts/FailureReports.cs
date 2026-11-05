@@ -54,16 +54,17 @@ internal static partial class FailureReports
     private static partial Regex ProofModule();
 
     internal static Report Failed(string stage, Exception error, string theorem, string proof, string output, string? proofRoot) =>
-        Classify(stage, error.Message, error.Data[LeanDiagnostics.HiddenModulesKey] as string[], theorem, proof, output, proofRoot);
+        Classify(stage, error.Message, error.Data[LeanDiagnostics.HiddenModulesKey] as string[], theorem, proof, output,
+            proofRoot, error.Data[SourceCopies.Key] as SourceCopies);
 
     internal static Report Classify(string stage, string message, IReadOnlyCollection<string>? hidden, string theorem,
-        string proof, string output, string? proofRoot)
+        string proof, string output, string? proofRoot, SourceCopies? copies = null)
     {
         var module = ModuleOf(proof, proofRoot);
         var diagnostics = LeanDiagnostics.Errors(message, hidden).Select(error =>
         {
             var (kind, resource) = KindOf(stage, error.Lines[0]);
-            var (file, line, column) = Place(error, proof, output, proofRoot);
+            var (file, line, column) = Place(error, copies);
             var origin = error.Module is { } name && ProofModule().IsMatch(name) ? module : error.Module;
             return new Diagnostic(kind, resource, origin ?? (file == proof ? module : null), file, line, column, string.Join("\n", error.Lines));
         }).ToArray();
@@ -111,25 +112,21 @@ internal static partial class FailureReports
         };
     }
 
-    // Maps workspace and temporary copies back to the files the user edits.
-    static (string? File, int? Line, int? Column) Place(LeanDiagnostics.Diagnostic error, string proof, string output, string? proofRoot)
+    // A location in a file the session copied cites the original the user edits; any other keeps its printed path.
+    static (string? File, int? Line, int? Column) Place(LeanDiagnostics.Diagnostic error, SourceCopies? copies)
     {
         if (error.Location is null) return (null, null, null);
         var match = Location().Match(error.Location);
         if (!match.Success) return (error.Location, null, null);
         var file = match.Groups["file"].Value;
-        var name = file.Replace('\\', '/').Split('/')[^1][..^".lean".Length];
-        var mapped = (error.Module is { } module && ProofModule().IsMatch(module)) || ProofModule().IsMatch(name) ||
-            (proofRoot is null && name == "Proof") ? proof
-            : name == "Extracted" ? Path.Combine(output, "Extracted.lean")
-            : proofRoot is not null && !Path.IsPathRooted(file) ? Path.GetFullPath(file, proofRoot) : file;
-        return (mapped, int.Parse(match.Groups["line"].Value), int.Parse(match.Groups["column"].Value));
+        return (copies?.OriginalOf(file) ?? file, int.Parse(match.Groups["line"].Value),
+            int.Parse(match.Groups["column"].Value));
     }
 
     static string ModuleOf(string proof, string? proofRoot) => proofRoot is null ? "Proof"
         : Path.GetRelativePath(proofRoot, proof).Replace('\\', '/')[..^".lean".Length].Replace('/', '.');
 
-    static Method? MethodOf(string output)
+    internal static Method? MethodOf(string output)
     {
         try
         {
@@ -143,7 +140,7 @@ internal static partial class FailureReports
         }
     }
 
-    static string[] Rerun(string theorem, string proof, string output, string? proofRoot) =>
+    internal static string[] Rerun(string theorem, string proof, string output, string? proofRoot) =>
         ["leancil", "verify", output, "--proof", proof, "--theorem", theorem, .. proofRoot is null ? Array.Empty<string>() : ["--proof-root", proofRoot]];
 
     internal static void Write(string output, Report report)

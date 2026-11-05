@@ -107,10 +107,11 @@ Run([.. cli, "extract", demoAssembly, "Arithmetic::Add(ulong,ulong)", output]);
 var rejected = Execute([.. cli, "verify", output]);
 
 if (rejected.Code != 1 || rejected.Stdout.Length != 0 || !rejected.Stderr.StartsWith("Invalid:") ||
-    !rejected.Stderr.Contains("error:") || !rejected.Stderr.Contains("Stage: proof checking") ||
+    !rejected.Stderr.Contains("Lean errors (") || !rejected.Stderr.Contains("Stage: proof checking") ||
     !rejected.Stderr.Contains("Next:") || File.Exists(Path.Combine(output, "verified.json")) ||
     File.ReadAllText(settingsPath) != settings)
     throw new InvalidOperationException("Incorrect implementation was not rejected by the proof: " + rejected.Output);
+RequireSourceLocations(rejected.Stderr, "Examples/Proofs/Add.lean:");
 
 Console.WriteLine("PASS CLI incorrect implementation rejected without a successful report");
 
@@ -252,6 +253,8 @@ if (unfinished.Code != 1 || !unfinishedText.Contains("Stage: proof checking") ||
     unfinishedText.Contains('\u001B') || unfinishedText.Contains('\r'))
     throw new InvalidOperationException("A failed --proof-root check hid or passed through the proof's messages: " +
         unfinished.Output);
+RequireSourceLocations(unfinishedText,
+    "artifacts/CliConsumer/Package/Proofs/Unfinished.lean:5:2 (building Proofs.Unfinished)");
 Console.WriteLine("PASS CLI shows Lean messages, with control characters escaped, when a --proof-root proof fails");
 
 // A starting proof must elaborate yet be refused until its holes are filled, must never replace a
@@ -322,3 +325,23 @@ if (args.Length == 0)
 if (args.Length == 0)
     Run(["dotnet", "run", "--file", At("Tests/CliImportedKernelAudit.cs")],
         streamOutput: true, progress: "CLI imported helper kernel audit");
+
+// Editors, terminals and problem matchers follow a diagnostic's path, so a failed proof must cite the file the
+// developer edits, never the deleted workspace copy, and print each Lean error once.
+static void RequireSourceLocations(string stderr, string location)
+{
+    var text = stderr.ReplaceLineEndings("\n");
+    var headers = text.Split('\n').Where(line => line.StartsWith("  ", StringComparison.Ordinal) &&
+        !line.StartsWith("   ", StringComparison.Ordinal) && line.Contains(".lean:", StringComparison.Ordinal) &&
+        !line.Contains(": info:", StringComparison.Ordinal)).ToArray();
+    if (!text.Contains("Lean errors (", StringComparison.Ordinal) || headers.Length == 0 ||
+        !headers.Any(header => header.TrimStart().StartsWith(location, StringComparison.Ordinal)) ||
+        headers.Distinct().Count() != headers.Length ||
+        System.Text.RegularExpressions.Regex.IsMatch(text, @"proof-[0-9a-f]{32}") ||
+        text.Contains("LeanCILProof", StringComparison.Ordinal) ||
+        text.Contains("leancil-consumer-", StringComparison.Ordinal) ||
+        text.Contains(Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase) ||
+        text.Contains("Command failed", StringComparison.Ordinal))
+        throw new InvalidOperationException(
+            $"A failed proof did not cite {location} once, or named a temporary copy:\n{stderr}");
+}

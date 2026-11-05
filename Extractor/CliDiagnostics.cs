@@ -80,12 +80,21 @@ internal static class CliDiagnostics
         Console.Error.WriteLine($"  Next: {next}");
         if (summary != error.Message)
         {
-            // The bounded Lean summary leads; the full transcript follows unchanged.
+            // Each Lean error is printed once, located in the file the developer edits rather than a session copy.
             var cause = error is CliFailure ? error.InnerException ?? error : error;
-            var lean = LeanDiagnostics.Summarize(error.Message, cause.Data[LeanDiagnostics.HiddenModulesKey] as string[]);
-            if (lean is not null)
-                Console.Error.Write(Printable(lean) + "Full Lean output follows under Details.\n");
-            Console.Error.WriteLine("Details:\n" + Printable(error.Message.ReplaceLineEndings("\n")));
+            var hidden = cause.Data[LeanDiagnostics.HiddenModulesKey] as string[];
+            var copies = cause.Data[SourceCopies.Key] as SourceCopies;
+            var lean = LeanDiagnostics.Summarize(error.Message, hidden,
+                location => copies?.Locate(location, CliPaths.Display) ?? location,
+                module => copies?.ModuleOf(module) ?? module);
+            if (lean is null)
+                Console.Error.WriteLine("Details:\n" + Printable(error.Message.ReplaceLineEndings("\n")));
+            else
+            {
+                Console.Error.Write(Printable(lean.Text));
+                if (lean.Shortened.Length > 0)
+                    Console.Error.Write("Details:\n" + Printable(lean.Shortened));
+            }
         }
         if (error.Data[ProofMessagesKey] is string messages)
             Console.Error.Write(messages);
