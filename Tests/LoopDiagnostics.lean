@@ -200,7 +200,8 @@ set_option hygiene false in
 /-- The walk from the entry to the loop head, traced or not by `trace.CIL.loop`. -/
 macro "walk_to_head" : tactic => `(tactic| (
   obtain ⟨home, entered, setup, -, -, entryFrame⟩ := entry.checked memory value wellFormed
-  obtain ⟨zeroed, zeroing, frame, -⟩ := (entryFrame []).zero_aggregate 0 layout [.i32 0, .i32 0]
+  obtain ⟨zeroed, zeroing, frame, -⟩ :=
+    (entryFrame []).zero_aggregate 0 layout [.i32 0, .i32 0]
   have : LoopReaches program 0 [.scalar (.i32 value)] ⟨0, entry.frame memory home, [], entered⟩
       (header memory value home ⟨(0, 0), zeroed, frame⟩) := by
     cil_loop_steps
@@ -264,7 +265,8 @@ example (memory : Memory) (value sum : W32) (home : Reference) (final : Memory) 
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True := by
   obtain ⟨home, entered, setup, -, -, entryFrame⟩ := entry.checked memory value wellFormed
-  obtain ⟨zeroed, zeroing, frame, -⟩ := (entryFrame []).zero_aggregate 0 layout [.i32 0, .i32 0]
+  obtain ⟨zeroed, zeroing, frame, -⟩ :=
+    (entryFrame []).zero_aggregate 0 layout [.i32 0, .i32 0]
   have : LoopReaches program 0 [.scalar (.i32 value)] ⟨0, entry.frame memory home, [], entered⟩
       (header memory (value + 1) home ⟨(0, 0), zeroed, frame⟩) := by
     cil_loop_steps
