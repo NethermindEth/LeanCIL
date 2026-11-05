@@ -780,12 +780,15 @@ internal static class MetadataValidation
         }
         Visit(entry);
         // One condition is one blocker: keep the more specific of a shape and a walk rejection.
-        if (shape?.Error.Data[ContractMethodMetadata.InstantiationKey] is string && blocked!.Any(failure =>
-                failure.Method == definition && failure.Error.Message is OpenGenericMethod or OpenGenericMember))
-            blocked.Remove(shape);
-        if (shape?.Error.Data[ContractMethodMetadata.ModifiedTypeKey] is string modified)
-            blocked!.RemoveAll(failure => failure.Method == definition && failure.At is null &&
-                failure.Error.Message == "Unsupported type: " + modified);
+        if (blocked is not null && shape is not null)
+        {
+            if (shape.Error.Data[ContractMethodMetadata.InstantiationKey] is string && blocked.Any(failure =>
+                    failure.Method == definition && failure.Error.Message is OpenGenericMethod or OpenGenericMember))
+                blocked.Remove(shape);
+            if (shape.Error.Data[ContractMethodMetadata.ModifiedTypeKey] is string modified)
+                blocked.RemoveAll(failure => failure.Method == definition && failure.At is null &&
+                    failure.Error.Message == "Unsupported type: " + modified);
+        }
         ordered.Reverse();
         // Validate translation before producing any artifact.
         var methods = ordered.ToArray();

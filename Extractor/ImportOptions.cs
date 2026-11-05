@@ -21,7 +21,7 @@ internal sealed class ImportOptions
     internal static bool Names(string option) =>
         option is "--import" or "--import-implementation" or "--import-sha256" or "--import-interface-sha256";
 
-    /// <summary>Records one import option and its value; relative paths resolve against <paramref name="directory"/>.</summary>
+    /// <summary>Records one import option; relative paths resolve against <paramref name="directory"/>.</summary>
     internal void Add(string option, string value, string? directory = null)
     {
         if (string.IsNullOrWhiteSpace(value) || value.StartsWith("--", StringComparison.Ordinal))
@@ -80,9 +80,12 @@ internal sealed class ImportOptions
     }
 
     /// <summary>The options as `extract` arguments, so a confirming extraction sees the same imports.</summary>
-    internal IEnumerable<string> Arguments() =>
-        Paths.SelectMany(path => new[] { "--import", path })
-            .Concat(Implementations.SelectMany(pair => new[] { "--import-implementation", pair.Key + "=" + pair.Value }))
-            .Concat(Sha256.SelectMany(pair => new[] { "--import-sha256", pair.Key + "=" + pair.Value }))
-            .Concat(InterfaceSha256.SelectMany(pair => new[] { "--import-interface-sha256", pair.Key + "=" + pair.Value }));
+    internal IEnumerable<string> Arguments()
+    {
+        static IEnumerable<string> Named(string option, Dictionary<string, string> values) =>
+            values.SelectMany(pair => new[] { option, pair.Key + "=" + pair.Value });
+        return Paths.SelectMany(path => new[] { "--import", path })
+            .Concat(Named("--import-implementation", Implementations)).Concat(Named("--import-sha256", Sha256))
+            .Concat(Named("--import-interface-sha256", InterfaceSha256));
+    }
 }

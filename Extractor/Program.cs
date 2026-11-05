@@ -241,7 +241,8 @@ internal static partial class Program
                     string sidecar = global::Program.ExtractionIdentity.Resolve(output, node.GetProperty("sidecarPath").GetString()!);
                     string implementation = importOptions.Implementations.GetValueOrDefault(name) ??
                         global::Program.ExtractionIdentity.Resolve(output, node.GetProperty("implementationPath").GetString()!);
-                    string expected = importOptions.Sha256.GetValueOrDefault(name) ?? node.GetProperty("implementationSha256").GetString()!;
+                    string expected = importOptions.Sha256.GetValueOrDefault(name) ??
+                        node.GetProperty("implementationSha256").GetString()!;
                     string expectedInterface = importOptions.InterfaceSha256.GetValueOrDefault(name) ??
                         (node.TryGetProperty("expectedInterfaceDigest", out JsonElement pinnedInterface) ? pinnedInterface.GetString()! :
                             throw new InvalidDataException("Import graph has no independent interface digest; extract again with --import-interface-sha256."));
@@ -255,7 +256,8 @@ internal static partial class Program
                     string name = AssemblyNameReference.Parse(binding.GetProperty("identity").GetString()!.Split("::", 2)[0]).Name;
                     string implementation = importOptions.Implementations.GetValueOrDefault(name) ??
                         global::Program.ExtractionIdentity.Resolve(output, binding.GetProperty("implementationPath").GetString()!);
-                    string expected = importOptions.Sha256.GetValueOrDefault(name) ?? binding.GetProperty("implementationSha256").GetString()!;
+                    string expected = importOptions.Sha256.GetValueOrDefault(name) ??
+                        binding.GetProperty("implementationSha256").GetString()!;
                     string expectedInterface = importOptions.InterfaceSha256.GetValueOrDefault(name) ??
                         (binding.TryGetProperty("interfaceDigest", out JsonElement pinnedInterface) ? pinnedInterface.GetString()! :
                             throw new InvalidDataException("Import extraction has no independent interface digest; extract again with --import-interface-sha256."));

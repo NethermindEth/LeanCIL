@@ -129,7 +129,8 @@ internal static class Blockers
         foreach (var (key, option) in ImportKeys)
             if (root.TryGetProperty(key, out var values))
                 foreach (var value in key == "imports" ? (values.Deserialize<string[]>() ?? []) :
-                        (values.Deserialize<Dictionary<string, string>>() ?? []).Select(pair => pair.Key + "=" + pair.Value))
+                        (values.Deserialize<Dictionary<string, string>>() ?? [])
+                            .Select(pair => pair.Key + "=" + pair.Value))
                     imports.Add(option, value, manifestDirectory);
         if (root.TryGetProperty("references", out var listed))
             referencePaths.AddRange((listed.Deserialize<string[]>() ?? [])
