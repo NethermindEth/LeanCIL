@@ -262,7 +262,8 @@ var outlined = Path.Combine(outlines, "Add");
 Run([.. cli, "extract", demoAssembly, "Arithmetic::Add(ulong,ulong)", outlined]);
 var addOutline = Path.Combine(outlines, "AddProof.lean");
 var written = Execute([.. cli, "new-proof", outlined, addOutline]);
-if (written.Code != 0 || !written.Stdout.StartsWith("Wrote ") || !written.Stdout.Contains("Holes: 3"))
+if (written.Code != 0 || !written.Stdout.StartsWith("Wrote ") ||
+    !written.Stdout.Contains("Holes: 3 obligations, 0 paths not outlined"))
     throw new InvalidOperationException("new-proof did not write the Add outline: " + written.Output);
 var outlineText = File.ReadAllText(addOutline);
 var refusedOutline = Execute([.. cli, "verify", outlined, "--proof", addOutline]);
@@ -274,13 +275,13 @@ var overwrite = Execute([.. cli, "new-proof", outlined, addOutline]);
 if (overwrite.Code == 0 || !overwrite.Stderr.Contains("already exists; new-proof never overwrites a proof") ||
     File.ReadAllText(addOutline) != outlineText)
     throw new InvalidOperationException("new-proof replaced an existing file: " + overwrite.Output);
-var choose = Path.Combine(outlines, "Choose");
-Run([.. cli, "extract", demoAssembly, "Arithmetic::Choose(bool,ulong,ulong)", choose]);
-var chooseOutline = Path.Combine(outlines, "ChooseProof.lean");
-var unsupported = Execute([.. cli, "new-proof", choose, chooseOutline]);
-if (unsupported.Code == 0 || File.Exists(chooseOutline) || !unsupported.Stderr.Contains("Stage: proof outline") ||
-    !unsupported.Stderr.Contains("cannot outline this method: parameter `flag` of Choose has type System.Boolean"))
-    throw new InvalidOperationException("new-proof did not refuse a boolean parameter: " + unsupported.Output);
+var packet = Path.Combine(outlines, "Packet");
+Run([.. cli, "extract", demoAssembly, "Arguments::Struct(Examples.Packet)", packet]);
+var packetOutline = Path.Combine(outlines, "PacketProof.lean");
+var unsupported = Execute([.. cli, "new-proof", packet, packetOutline]);
+if (unsupported.Code == 0 || File.Exists(packetOutline) || !unsupported.Stderr.Contains("Stage: proof outline") ||
+    !unsupported.Stderr.Contains("parameter `value` of Struct has type Examples.Packet; new-proof types"))
+    throw new InvalidOperationException("new-proof did not refuse a struct parameter: " + unsupported.Output);
 File.AppendAllText(Path.Combine(outlined, "Extracted.lean"), "\n-- edited\n");
 var staleOutline = Path.Combine(outlines, "StaleProof.lean");
 var staleOutlined = Execute([.. cli, "new-proof", outlined, staleOutline]);

@@ -839,38 +839,59 @@ foreach (var mutation in new[] { "stack-height", "stack-type", "local-fact", "st
 
 // A generated starting proof must elaborate with only its holes open, and verification must refuse it
 // until every hole is filled; otherwise an author could mistake the outline for a proof.
-var outlines = new (string Name, string Selector)[]
+// Loops reuse the checked extraction an earlier section left under their name; the straight-line
+// methods cover `bool` and narrow parameters and a `bool` result.
+var outlined = new (string Name, string? Selector)[]
 {
-    ("Countdown", "Loops::Countdown(uint)"), ("FillWords", "Loops::FillWords(ulong&,ulong,int)"),
-    ("CountUntil", CountUntil), ("CountCalls", CountCalls), ("SpanDrain", Drain), ("SpanAllZero", AllZero),
-    ("SpanSum", Sum), ("TallyTwice", "Loops::TallyTwice(uint)"), ("CopyUntilZero", CopyUntilZero)
+    ("Countdown", null), ("FillWords", null), ("CountUntil", null), ("CountCalls", null), ("SpanDrain", null),
+    ("SpanAllZero", null), ("SpanSum", null), ("TallyTwice", null), ("CopyUntilZero", null),
+    ("Choose", "Arithmetic::Choose(bool,ulong,ulong)"), ("Narrow", "Arguments::Narrow(byte)"),
+    ("ReverseI16", "Bits::ReverseI16(short)"), ("PowerU32", "Bits::PowerU32(uint)")
 };
+var outlineTimer = System.Diagnostics.Stopwatch.StartNew();
+var outlineRoot = Path.Combine(root, "Outlines");
+if (Directory.Exists(outlineRoot)) DeleteTree(outlineRoot);
+Directory.CreateDirectory(outlineRoot);
 string[] Cli(params string[] arguments) => ["dotnet", At("Extractor/bin/Nethermind.LeanCIL.dll"), .. arguments];
-foreach (var (name, selector) in outlines)
+var libraryPath = verification.CheckoutLeanPath();
+var elaborated = outlined.AsParallel().WithDegreeOfParallelism(Environment.ProcessorCount).Select(entry =>
 {
-    var output = Path.Combine(root, "Outline" + name);
-    if (Directory.Exists(output)) DeleteTree(output);
-    Run(Extract("extract", assembly, "Examples", selector, output));
-    var outline = Path.Combine(output, "Proof.lean");
-    var again = Path.Combine(output, "Again.lean");
-    Run(Cli("new-proof", output, outline));
-    Run(Cli("new-proof", output, again));
-    if (File.ReadAllText(outline) != File.ReadAllText(again))
-        throw new InvalidOperationException($"new-proof wrote different outlines of {name}");
-    var verified = Execute(Cli("verify", output, "--proof", outline));
-    var messages = Regex.Matches(verified.Output, @"Proof\.lean:\d+:\d+: (error|warning): (.*)")
+    var (name, selector) = entry;
+    var scratch = Path.Combine(outlineRoot, name);
+    Directory.CreateDirectory(scratch);
+    var extraction = selector is null ? Path.Combine(root, name) : Path.Combine(scratch, "Extraction");
+    if (selector is not null) Run(Extract("extract", assembly, "Examples", selector, extraction));
+    var outline = Path.Combine(scratch, "Proof.lean");
+    Run(Cli("new-proof", extraction, outline));
+    Run(Cli("new-proof", extraction, Path.Combine(scratch, "Again.lean")));
+    var source = File.ReadAllText(outline);
+    if (source != File.ReadAllText(Path.Combine(scratch, "Again.lean")))
+        return $"new-proof wrote different outlines of {name}";
+    Run([verification.LeanExecutable, "--root=" + extraction, "-o", Path.Combine(scratch, "Extracted.olean"),
+        Path.Combine(extraction, "Extracted.lean")], leanPath: libraryPath);
+    var result = Execute([verification.LeanExecutable, outline],
+        leanPath: scratch + Path.PathSeparator + libraryPath);
+    var messages = Regex.Matches(result.Output, @"Proof\.lean:\d+:\d+: (error|warning): (.*)")
         .Select(match => (Kind: match.Groups[1].Value, Text: match.Groups[2].Value.Trim())).ToArray();
-    if (verified.Code == 0 || !verified.Output.Contains("Unapproved proof axioms: sorryAx") ||
-        messages.Any(message => message.Kind == "error" || message.Text != "declaration uses `sorry`") ||
-        !messages.Any() || File.Exists(Path.Combine(output, "verified.json")))
-        throw new InvalidOperationException($"The {name} outline did not elaborate with only its holes open:\n" +
-            verified.Output);
-}
-Console.WriteLine($"PASS new-proof outlines {outlines.Length} loops that elaborate and verification refuses");
+    var holes = Regex.Match(result.Output, @"'ExampleProof\.correctness' depends on axioms: \[[^\]]*sorryAx");
+    return result.Code != 0 || messages.Length == 0 || !holes.Success ||
+        messages.Any(message => message.Kind == "error" || message.Text != "declaration uses `sorry`")
+        ? $"The {name} outline did not elaborate with only its holes open:\n{result.Output}" : null;
+}).Where(failure => failure is not null).ToArray();
+if (elaborated.Length > 0) throw new InvalidOperationException(string.Join("\n", elaborated));
+Console.WriteLine($"PASS new-proof outlines {outlined.Length} methods that elaborate with only their holes open");
+
+// The audit refuses an outline for its holes, whatever the method; one loop shows it end to end.
+var countdownOutline = Path.Combine(root, "Countdown");
+var countdownSource = Path.Combine(outlineRoot, "Countdown", "Proof.lean");
+var outlineRefused = Execute(Cli("verify", countdownOutline, "--proof", countdownSource));
+if (outlineRefused.Code == 0 || !outlineRefused.Output.Contains("Unapproved proof axioms: sorryAx") ||
+    outlineRefused.Output.Contains(": error") || File.Exists(Path.Combine(countdownOutline, "verified.json")))
+    throw new InvalidOperationException("verify did not refuse the Countdown outline for its holes:\n" +
+        outlineRefused.Output);
 
 // Filling only the holes, with nothing else edited, must give a proof that verifies.
-var countdownOutline = Path.Combine(root, "OutlineCountdown");
-var filled = Path.Combine(countdownOutline, "Filled.lean");
+var filled = Path.Combine(outlineRoot, "Countdown", "Filled.lean");
 var countdownHoles = new (string Hole, string Filled)[]
 {
     ("def Precondition (value : W32) : Prop := sorry", "def Precondition (value : W32) : Prop := True"),
@@ -879,7 +900,7 @@ var countdownHoles = new (string Hole, string Filled)[]
     ("(state : State home0) : Prop := sorry", "(state : State home0) : Prop := True"),
     ("(state : State home0) : Nat := sorry", "(state : State home0) : Nat := state.values.toNat"),
     ("case invariant => sorry -- invariant at the first loop head", "case invariant => trivial"),
-    ("sorry -- Postcondition at the return at Loops.cs:40", "simp_all [Postcondition]"),
+    (@"sorry -- Postcondition at the return at Loops\.cs:\d+", "simp_all [Postcondition]"),
     ("case invariant => sorry -- invariant again at the loop head", "case invariant => trivial"),
     ("case measure => sorry -- measure decreases over this iteration", """
     case measure =>
@@ -893,7 +914,7 @@ var countdownHoles = new (string Hole, string Filled)[]
             omega
     """.Trim())
 };
-var filledSource = File.ReadAllText(Path.Combine(countdownOutline, "Proof.lean"));
+var filledSource = File.ReadAllText(countdownSource);
 // The CLI reference shows this outline, so the page must change when the generator does.
 var documented = Regex.Match(File.ReadAllText(At("docs/CLI.md")).ReplaceLineEndings("\n"),
     "```lean extracted\n(import Extracted\n.*?)```", RegexOptions.Singleline);
@@ -901,9 +922,10 @@ if (!documented.Success || documented.Groups[1].Value != filledSource)
     throw new InvalidOperationException("docs/CLI.md does not show the current Countdown outline");
 foreach (var (hole, replacement) in countdownHoles)
 {
-    if (!filledSource.Contains(hole))
+    var pattern = hole.Contains(@"\d") ? hole : Regex.Escape(hole);
+    if (Regex.Matches(filledSource, pattern).Count != 1)
         throw new InvalidOperationException("The Countdown outline lacks the hole " + hole);
-    filledSource = filledSource.Replace(hole, replacement);
+    filledSource = Regex.Replace(filledSource, pattern, replacement.Replace("$", "$$"));
 }
 if (Regex.IsMatch(filledSource, @"(?<![`\w])sorry(?![`\w])"))
     throw new InvalidOperationException("The Countdown outline has a hole the test does not fill");
@@ -911,7 +933,8 @@ File.WriteAllText(filled, filledSource);
 var proved = Execute(Cli("verify", countdownOutline, "--proof", filled));
 if (proved.Code != 0 || !proved.Stdout.StartsWith("Verified: ExampleProof.correctness"))
     throw new InvalidOperationException("The filled Countdown outline did not verify:\n" + proved.Output);
-Console.WriteLine("PASS filling the Countdown outline's holes gives a verified proof");
+Console.WriteLine("PASS verify refuses the Countdown outline until its holes are filled, then verifies it " +
+    $"({outlineTimer.Elapsed.TotalSeconds:F0}s for every outline check)");
 
 delegate void FillWordsDelegate(ref ulong destination, ulong value, int count);
 delegate uint CopyUntilZeroDelegate(ReadOnlySpan<uint> values, ref uint output);
