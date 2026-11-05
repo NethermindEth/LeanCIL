@@ -226,7 +226,8 @@ is:
 
 Where the outline cannot follow a path, such as a write through a reference, an `Unsafe.Add`, or a
 span read after a local store, it leaves a hole there saying what it met, and the proof continues
-by hand from the named source line. The unedited file elaborates with only warnings that a declaration
+by hand from the named source line. The loop's `State` keeps no caller footprint, so a loop that
+writes caller memory through a reference needs its footprint widened to the written range first. The unedited file elaborates with only warnings that a declaration
 uses `sorry`, and `leancil verify` rejects it at the theorem audit for `sorryAx`; it can never
 verify until every hole is filled.
 
