@@ -564,9 +564,10 @@ hypotheses its proof used, what changed and the goals left (see
 [PROOFS-STEPPING](PROOFS-STEPPING.md#see-what-the-loop-tactics-did)). The text
 report prints them in full under `Trace (N steps):`, after and apart from the
 proof's `Lean messages`; the JSON report lists them in `trace`, each with its
-location and text. Without `--trace`, `trace` is `null` and the report's
-top-level `unknown` says why, as it does when the run stopped before the proof
-was checked. A traced result is cached apart from an untraced one.
+location and text. Steps of other tactics, such as `cil_checked_steps`, are not
+traced, and both reports say so: the text on an `Untraced:` line, the JSON in the
+top-level `unknown`. Without `--trace`, `trace` is `null` and `unknown` says why,
+as it does when the run stopped before the proof was checked. A traced result is cached apart from an untraced one.
 
 ## Export contracts
 

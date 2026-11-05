@@ -157,13 +157,16 @@ var traced = Execute([.. cli, "verify", loopOutput, "--proof", countdownProof, "
 var tracedText = traced.Stdout.ReplaceLineEndings("\n");
 var tracedMessages = tracedText[..Math.Max(0, tracedText.IndexOf("  Trace (", StringComparison.Ordinal))];
 if (traced.Code != 0 || !tracedText.Contains("  Trace (") ||
+    !tracedText.Contains("    Untraced: only cil_loop_steps, cil_loop_advance, cil_loop_finish, cil_loop_recurse") ||
     !tracedText.Contains("Countdown.lean:31:8: [CIL.loop] pc 0: CIL.Op.arg 0\n") ||
     tracedMessages.Contains("[CIL.loop]"))
     throw new InvalidOperationException("verify --trace did not report the loop steps apart: " + traced.Output);
 var tracedReport = JsonNode.Parse(Execute([.. cli, "verify", loopOutput, "--proof", countdownProof, "--trace",
     "--format", "json"]).Stdout) as JsonObject;
 var steps = tracedReport?["trace"]?.AsArray().Select(step => step!["text"]!.GetValue<string>()).ToArray() ?? [];
+var scope = tracedReport?["unknown"]?["trace"]?.GetValue<string>() ?? "";
 if (steps.Length == 0 || !steps.All(step => step.StartsWith("[CIL.loop] pc ", StringComparison.Ordinal)) ||
+    !scope.StartsWith("only cil_loop_steps", StringComparison.Ordinal) ||
     tracedReport!["messages"]!.AsArray().Any(message => message!["text"]!.GetValue<string>().Contains("[CIL.loop]")))
     throw new InvalidOperationException("verify --trace --format json did not report the steps in `trace`: " +
         tracedReport?.ToJsonString());

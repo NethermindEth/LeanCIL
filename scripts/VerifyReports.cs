@@ -13,6 +13,10 @@ internal static partial class VerifyReports
     /// <summary>`CIL.Safety.failureMarker`, starting the line a tactic appends under `cil.diagnostics`.</summary>
     internal const string FailureMarker = "[LeanCIL failure v1] ";
 
+    /// <summary>The tactics the trace covers; a step any other tactic takes is in no trace.</summary>
+    internal const string TraceScope = "only cil_loop_steps, cil_loop_advance, cil_loop_finish, cil_loop_recurse " +
+        "and cil_loop_call trace their steps; steps of other tactics, such as cil_checked_steps, are not traced";
+
     /// <summary>`CIL.Safety.obligationTags`, the first component of every tag a LeanCIL tactic gives a goal.</summary>
     internal static readonly string[] ObligationTags =
         ["invariant", "measure", "precondition", "wellFormed", "staticWorld", "raises", "postcondition"];
@@ -211,9 +215,10 @@ internal static partial class VerifyReports
             {
                 ["file"] = proof, ["line"] = step.Line, ["column"] = step.Column, ["text"] = step.Text
             })]),
-            ["unknown"] = trace is not null ? new JsonObject() : new JsonObject
+            ["unknown"] = new JsonObject
             {
-                ["trace"] = traceRequested ? "the proof was not checked, so no step was traced"
+                ["trace"] = trace is not null ? TraceScope
+                    : traceRequested ? "the proof was not checked, so no step was traced"
                     : "not requested; --trace traces each step the loop tactics take"
             },
             ["rerun"] = new JsonArray([.. FailureReports.Rerun(theorem, proof, output, proofRoot)

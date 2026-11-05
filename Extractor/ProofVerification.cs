@@ -478,7 +478,8 @@ partial class Program
     static string TraceReport(ProofMessage[]? steps, string proof)
     {
         if (steps is null) return "";
-        var report = new System.Text.StringBuilder($"  Trace ({steps.Length} steps):\n");
+        var report = new System.Text.StringBuilder($"  Trace ({steps.Length} steps):\n")
+            .Append($"    Untraced: {VerifyReports.TraceScope}.\n");
         foreach (var step in steps)
         {
             var located = $"{CliPaths.Display(proof)}:{step.line}:{step.column}: {CliDiagnostics.Printable(step.text)}";
