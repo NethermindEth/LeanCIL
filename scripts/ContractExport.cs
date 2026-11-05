@@ -313,6 +313,10 @@ partial class Program
             !identity.GetProperty("entryTypeArguments").Deserialize<string[]>()!
                 .SequenceEqual(selection.ArgumentNames, StringComparer.Ordinal))
             throw new InvalidDataException("Export closed method selection differs from its artifact.");
+        // Only a static method has a typed import signature, so its shape is checked first.
+        if (!IsExportableMethod(method))
+            throw new InvalidDataException(
+                "Contract exports require a public or protected static, non-virtual, closed method.");
         ContractLayout[] layouts = ImportedLayoutMetadata.Signature(selection.Reference, module, profile.Architecture);
         string computedLayouts = ImportedLayoutMetadata.ComputedLean(layouts, module, profile.Architecture);
         string[] layoutIdentities = identity.GetProperty("layoutIdentities").Deserialize<string[]>()!;
@@ -329,9 +333,6 @@ partial class Program
                 "Contract export method/entry or implementation differs from its selected artifact.");
         if (identity.TryGetProperty("staticValues", out var staticValues) && staticValues.GetArrayLength() != 0)
             throw new InvalidDataException("Contract export rejects static-value assumptions: staticValues");
-        if (!IsExportableMethod(method))
-            throw new InvalidDataException(
-                "Contract exports require a public or protected static, non-virtual, closed method.");
         string proof = ExportProof(manifest, request);
         StaticIdentityRecord[] statics = identity.GetProperty("staticIdentities")
             .Deserialize<StaticIdentityRecord[]>(ContractInterface.Json)

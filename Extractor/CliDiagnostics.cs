@@ -58,6 +58,7 @@ internal static class CliDiagnostics
             "Lean library build" => "Ensure Lean and Lake are installed with the bundled lean-toolchain version, then address the build diagnostic below.",
             "proof checking" => "Read the Lean diagnostic below and check the implementation against the stated contract, including its preconditions.",
             "theorem audit" => "Select a proved theorem with --theorem and remove unproved or unsupported axioms from its dependencies.",
+            "proof outline" => "Write this proof by hand from a similar example, or report the shape as an issue.",
             "library audit" => "Address the kernel replay or axiom diagnostic for the listed theorems, or correct the namespace prefixes.",
             _ => "Check the diagnostic and the input paths, then retry."
         };

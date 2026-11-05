@@ -52,6 +52,12 @@ public struct Counter
     static void Increment(ref byte value) => value++;
 }
 
+/// <summary>An <c>init</c> accessor returns <c>void modreq(IsExternalInit)</c>.</summary>
+public readonly struct InitCounter
+{
+    public ulong Value { get; init; }
+}
+
 public static class StructMethods
 {
     public static ulong Mutate(ulong value)
@@ -100,4 +106,6 @@ public static class StructMethods
         var counter = new Counter(value);
         return counter.Read();
     }
+
+    public static ulong Initialized(ulong value) => new InitCounter { Value = value + 1 }.Value;
 }

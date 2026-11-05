@@ -102,6 +102,10 @@ internal static class VerificationSelection
         inputs["imports"].UnionWith(["Tests/ContractClosure.lean", "Tests/ContractImports/Lib.leancil.contracts", "Tests/ContractImports/ImportFixture.lean", "Tests/ContractImports/Caller.lean",
             "Tests/ContractImports/Lib/Lib.csproj", "Tests/ContractImports/Lib/Library.cs", "Tests/ContractImports/App/App.csproj", "Tests/ContractImports/App/Application.cs"]);
         inputs["unsafe"].UnionWith(["Tests/SkipInitialization.cs", "Tests/NullReferences.cs"]);
+        // Self-admission scans the extractor itself, so every source compiled into it can change the result.
+        inputs["blockers"].Add("Tests/SelfAdmissionBaseline.txt");
+        inputs["blockers"].UnionWith(Matches(File.ReadAllText(Path.Combine(root, "Extractor/Extractor.csproj")),
+            @"<Compile Include=""\.\./([^""]+\.cs)""").Select(path => path.Replace('\\', '/')));
 
         // Follow literal source paths, file-based includes and Lean imports.
         // Dynamic/new paths absent from this graph still fall back to the full matrix.

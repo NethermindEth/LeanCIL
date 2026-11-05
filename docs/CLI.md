@@ -124,7 +124,7 @@ Instance methods of generic classes remain rejected as entries and as callees.
 
 `leancil blockers` runs admission, the validation `extract` performs, over an explicit list of
 method and profile pairs, and reports everything that blocks each one instead of stopping at the
-first failure. It writes no extraction artifacts and checks no proofs:
+first failure. It checks no proofs and keeps no extraction artifacts:
 
 ```sh
 leancil blockers assembly.dll --manifest blockers-manifest.json [--output blockers.json]
@@ -134,6 +134,9 @@ leancil blockers assembly.dll --manifest blockers-manifest.json [--output blocke
 {
   "initializedTypes": ["Namespace.Type"],
   "references": ["Lib.dll"],
+  "imports": ["Other.leancil.contracts"],
+  "importSha256": { "Other": "implementation sha256" },
+  "importInterfaceSha256": { "Other": "interface digest" },
   "entries": [
     { "signature": "Type::Method(ulong)", "profile": "scalar" },
     { "signature": "Type::Method(ulong)", "profile": "@profiles/x64-v3.json" },
@@ -145,18 +148,29 @@ leancil blockers assembly.dll --manifest blockers-manifest.json [--output blocke
 `profile` is a profile name or `@file`, resolved against the manifest's directory;
 `initializedTypes` applies `--assume-initialized` to every entry, `references` (paths relative to
 the manifest) or `--reference` pins referenced assemblies for every entry, and an entry's optional
-`typeArguments` applies `--type-argument` to it. The report goes to
+`typeArguments` applies `--type-argument` to it. Contract imports are those of `extract`: the
+`--import`, `--import-implementation`, `--import-sha256` and `--import-interface-sha256` options,
+or the manifest's `imports`, `importImplementations`, `importSha256` and `importInterfaceSha256`
+(paths relative to the manifest), apply to every entry, and a sidecar beside the assembly is
+discovered as `extract` discovers it. An entry with no blockers is then extracted into a scratch
+directory, so `admitted` means exactly that `extract` succeeds. The report goes to
 `--output`, by default `blockers.json` next to the manifest, and a short summary goes to standard
 output. Each entry is `admitted` (extraction would succeed), `blocked`, or `notChecked` with the
-reason: a selector that matches no method or several, an unknown profile, or an assembly or
-assumption that fails before any method is checked. Each blocker is one unsupported construct
-(instruction, call, type or layout). It lists every site, with method, IL offset, instruction and
-the PDB source location when one is present, and every affected entry with the call chains from
-it to those sites. Only code reachable under the entry's profile is checked, so a branch excluded
-by a constant `IsSupported` is never reported. A method whose metadata or control flow cannot be
-analysed is reported once, without the callees behind it. Admission is not verification: an admitted entry
-still needs a proof. The command exits with `0` whenever the report is written, whatever the
-entries' status.
+reason: a selector that matches no method or several, a malformed type argument, an unknown
+profile, or an assembly, import or assumption that fails before any method is checked. An entry
+the selector resolves but `extract` rejects by its shape, such as an `init` setter or a member of
+an open generic type, is `blocked`, and its definition is analysed as an entry. Each blocker is
+one unsupported construct (instruction, call, type, layout, method metadata or static
+constructor). It lists every site, with method, IL offset, instruction and the PDB source location
+when one is present, and every affected entry with the call chains from it to those sites. A
+condition found by two checks, such as an entry's modifier and the type that carries it, is
+reported once, by the more specific check. A rejected signature, receiver, static constructor or
+entry shape does not stop the analysis: the body and callees behind it are still checked and
+their blockers reported. Only a method without IL to analyse, or a body whose control flow cannot
+be analysed, ends its branch, and that blocker's message names what was not analysed behind it.
+Only code reachable under the entry's profile is checked, so a branch excluded by a constant
+`IsSupported` is never reported. Admission is not verification: an admitted entry still needs a
+proof. The command exits with `0` whenever the report is written, whatever the entries' status.
 
 ## Check
 
@@ -183,6 +197,135 @@ Valid: extraction artifacts match the assembly and recorded settings.
 Paths under the current directory are displayed relative to it; paths outside it remain absolute.
 
 The check reads the assembly path, method and hardware profile from the manifest, regenerates the extraction in memory, and compares it with the saved files without overwriting them. Assembly paths are stored relative to the artifact directory. If the DLL moves, use `leancil check artifacts/Add --assembly-path path/to/Examples.dll`; its identity and content must still match. Older manifests must be regenerated with `extract`.
+
+## Start a proof
+
+Write a starting proof of an extraction's entry method:
+
+```sh
+leancil extract Examples/Assembly/bin/Examples.dll "Loops::Countdown(uint)" artifacts/Countdown
+leancil new-proof artifacts/Countdown Proofs/Countdown.lean
+```
+
+Expected output on standard output:
+
+```text
+Wrote Proofs/Countdown.lean: a starting proof of System.UInt32 Examples.Loops::Countdown(System.UInt32)
+  Holes: 8 obligations, 0 paths not outlined (each `sorry`; verify rejects the file until none remain)
+  Next: fill the holes, then run leancil verify artifacts/Countdown --proof Proofs/Countdown.lean
+```
+
+`new-proof` reads only the extraction directory and first runs the same comparison as
+`leancil check`, so a stale or edited extraction is refused at the `extraction integrity` stage. It
+never replaces a file: when the proof path exists, it exits with `1` and writes nothing. The same
+extraction always gives the same file, byte for byte.
+
+The file states `ExampleProof.correctness` as a `CIL.Safety.Ensures` theorem over the method's
+parameters, named as in the PDB, and checks it with `#print axioms correctness`. A `bool` parameter
+is a `Bool`, a narrow integer a `BitVec` of its width, and a `bool` result the `Bool` its returned
+word encodes. Every place the author must decide something is a `sorry`, each with a one-line
+comment saying which obligation it is:
+
+- `Precondition` and `Postcondition` are definitions to replace with the specification. The
+  theorem assumes the precondition and promises the postcondition of the returned value, and for
+  a method that takes references or spans also of the caller's memory before and after.
+- A method without a loop is stepped by `cil_checked_steps` when its body is arithmetic on 32- and
+  64-bit arguments, leaving only the postcondition.
+- A method with one loop gets its loop state, the cutpoint at the loop's back-edge test (found by
+  instruction, never by pc), and `invariant` and `measure` definitions to replace. A method that
+  takes a reference also gets a `footprint` to replace: the caller memory the loop may write, which
+  the loop state carries. The proof applies `invoke_loop_satisfies`, steps the entry to the first
+  loop head, splits the iteration where the body branches, and leaves the obligations the loop
+  tactics tag: `invariant` and `measure` where an iteration continues, `postcondition` where it
+  returns, and `precondition` at a call.
+- A call in the loop gets a `MethodContract` for the callee, with `pre` and `post` to replace, and a
+  `Holds` theorem that steps the callee when it is arithmetic on its arguments.
+
+Where the outline cannot step a path, it leaves a hole whose comment starts with `not outlined:`,
+names what it met and what that step needs, and gives the source line to continue from. The
+`Holes` line counts these apart from the obligations. The unedited file elaborates with only
+warnings that a declaration uses `sorry`, and `leancil verify` rejects it at the theorem audit for
+`sorryAx`; it can never verify until every hole is filled.
+
+The countdown's outline:
+
+```lean extracted
+import Extracted
+import CIL.Verification
+import CIL.StructuralLabels
+import CIL.Safety.LoopScaffold
+
+/-! A starting proof of `Countdown`, generated by `leancil new-proof` from its extraction. Each
+    `sorry` is a hole, and `leancil verify` rejects the file until none remains. A hole commented
+    `not outlined:` marks a path the outline could not step. The tactics leave obligations tagged
+    `invariant`, `measure`, `postcondition` and `precondition` (at a call), which the holes select
+    with `case`. -/
+
+open CIL.Safety
+open CIL (W32 W64)
+namespace ExampleProof
+
+/-- Replace with what callers must guarantee about the arguments, or `True`. -/
+def Precondition (value : W32) : Prop := sorry
+
+/-- Replace with what `Countdown` guarantees about its result. -/
+def Postcondition (value result : W32) : Prop := sorry
+
+bind_entry entry (value : W32) := Extracted.method0
+  with [.scalar (.i32 value)] from Memory.empty
+  allocating Memory.empty_wellFormed
+bind_loop loop := Extracted.method0
+
+/-- The loop's locals at its head: `remaining`. -/
+abbrev State (home0 : Reference) :=
+  FrameState [] Memory.empty [.word32] W32
+    (fun _ => [.bytes .word32 home0]) fun values => [some (.i32 values)]
+
+-- The cutpoint is the loop's back-edge test at Loops.cs:38.
+bind_cutpoint header (home0 : Reference) (state : State home0) :=
+  Extracted.method0 at loop.latch matching (· matches .brnonzero _)
+  with entry.frame home0, [.scalar (.i32 state.values)], state.memory
+
+/-- Replace with what holds at every loop head. -/
+def invariant (value : W32) {home0 : Reference} (state : State home0) : Prop := sorry
+
+/-- Replace with a quantity each iteration decreases. -/
+def measure (value : W32) {home0 : Reference} (state : State home0) : Nat := sorry
+
+theorem correctness (value : W32) : Ensures Extracted.program 0
+    (fun args initial => args = [.scalar (.i32 value)] ∧ initial = Memory.empty ∧
+      Precondition value)
+    (fun _ _ _ results => ∃ result : W32, results = [.scalar (.i32 result)] ∧
+      Postcondition value result) := by
+  rintro args initial ⟨rfl, rfl, assumed⟩
+  obtain ⟨home0, entered, setup, -, -, entryFrame⟩ := entry.checked value
+  refine invoke_loop_satisfies Extracted.lookup0 rfl setup (header home0) (invariant value)
+      (measure value) (fun start => ?_) ?_
+  · have entryFrame := entryFrame []
+    cil_loop_recurse start value
+    case invariant => sorry -- invariant at the first loop head
+  rintro ⟨remaining, current, frame⟩ holds recurse
+  by_cases guard : remaining = 0
+  · -- leaves the loop at Loops.cs:40
+    cil_loop_finish [guard]
+    case postcondition =>
+      refine ⟨_, rfl, ?_⟩
+      sorry -- Postcondition at the return at Loops.cs:40
+  · -- another iteration
+    cil_loop_recurse recurse (remaining - 1) [guard]
+    case invariant => sorry -- invariant again at the loop head
+    case measure => sorry -- measure decreases over this iteration
+
+#print axioms correctness
+end ExampleProof
+```
+
+It verifies once the precondition is `True`, the postcondition `result = 0`, the invariant `True`,
+the measure `state.values.toNat`, and each tagged case is proved, the measure case by showing that
+`remaining - 1` is smaller than a nonzero `remaining`.
+
+A shape the outline cannot state is refused at the `proof outline` stage, exiting with `1` and
+writing nothing; the message names the parameter, local, loop or test and what it lacks.
 
 ## Verify
 

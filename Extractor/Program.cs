@@ -7,7 +7,7 @@ namespace Nethermind.LeanCIL;
 
 internal static partial class Program
 {
-    const string Usage = "Usage: leancil list assembly.dll\n       leancil templates output-directory extraction-directory...\n       leancil lint-exceptions output-directory --documentation assembly.xml\n       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory [profile|@profile.json] [--assembly 'assembly name or full identity'] [--type-argument System.UInt64]... [--assume-initialized Namespace.Type]... [--reference Lib.dll]... [--import Lib.leancil.contracts] [--import-implementation Lib=path] [--import-sha256 Lib=hex] [--import-interface-sha256 Lib=hex]\n       leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]\n       leancil workspace assembly.dll method --profile profile --proof proof.lean [--proof-root package-directory] [--output workspace-directory]\n       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] [--assembly 'assembly name or full identity'] [--reference Lib.dll]...\n       leancil check output-directory [--assembly-path assembly.dll] [--assembly 'assembly name or full identity']\n       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--rebuild-library] [--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory]...\n       leancil verify-batch requests.json [--fresh] [--rebuild-library] [--parallel count] [--results results.json]\n       leancil audit-library --project package-directory --module M... --prefix P... [--axioms a,b,c] [--results results.json]\n       leancil --version";
+    const string Usage = "Usage: leancil list assembly.dll\n       leancil templates output-directory extraction-directory...\n       leancil lint-exceptions output-directory --documentation assembly.xml\n       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory [profile|@profile.json] [--assembly 'assembly name or full identity'] [--type-argument System.UInt64]... [--assume-initialized Namespace.Type]... [--reference Lib.dll]... [--import Lib.leancil.contracts] [--import-implementation Lib=path] [--import-sha256 Lib=hex] [--import-interface-sha256 Lib=hex]\n       leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]\n       leancil workspace assembly.dll method --profile profile --proof proof.lean [--proof-root package-directory] [--output workspace-directory]\n       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] [--assembly 'assembly name or full identity'] [--reference Lib.dll]...\n       leancil check output-directory [--assembly-path assembly.dll] [--assembly 'assembly name or full identity']\n       leancil new-proof extraction-directory proof.lean\n       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--rebuild-library] [--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory]...\n       leancil verify-batch requests.json [--fresh] [--rebuild-library] [--parallel count] [--results results.json]\n       leancil audit-library --project package-directory --module M... --prefix P... [--axioms a,b,c] [--results results.json]\n       leancil --version";
 
     internal static int CheckExtraction(string output) => Main(["check", output]);
 
@@ -27,7 +27,8 @@ internal static partial class Program
     }
 
     static int Run(string[] args, ExtractionBatch? batch = null,
-        Action<TemplateEmitter.Variant>? checkedTemplate = null, TextWriter? report = null, bool rethrow = false)
+        Action<TemplateEmitter.Variant>? checkedTemplate = null, TextWriter? report = null, bool rethrow = false,
+        Action<ProofOutline.Extraction>? inspect = null)
     {
         report ??= Console.Out;
         if (args.Length == 0 || args is ["--help"] or ["-h"])
@@ -59,6 +60,12 @@ internal static partial class Program
             {
                 stage = "editor workspace";
                 global::Program.CreateProofWorkspace(args[1..]);
+                return 0;
+            }
+            if (args[0] == "new-proof")
+            {
+                stage = "proof outline";
+                ProofOutline.Run(args[1..], ReadChecked);
                 return 0;
             }
             if (args[0] == "templates")
@@ -117,32 +124,17 @@ internal static partial class Program
             var positional = new List<string>();
             string? expectedAssembly = null;
             string? assemblyOverride = null;
-            List<string> importPaths = [];
+            ImportOptions importOptions = new();
             List<string> entryTypeArguments = [];
             List<string> referencePaths = [];
-            Dictionary<string, string> implementationPaths = new(StringComparer.Ordinal);
-            Dictionary<string, string> importHashes = new(StringComparer.Ordinal);
-            Dictionary<string, string> interfaceHashes = new(StringComparer.Ordinal);
             var initializedTypes = new SortedSet<string>(StringComparer.Ordinal);
             for (var index = 1; index < args.Length; index++)
             {
-                if (args[index] is "--import" or "--import-implementation" or "--import-sha256" or "--import-interface-sha256")
+                if (ImportOptions.Names(args[index]))
                 {
                     string option = args[index];
-                    if (++index == args.Length || string.IsNullOrWhiteSpace(args[index]) || args[index].StartsWith("--", StringComparison.Ordinal))
-                        throw new ArgumentException(option + " requires a value.");
-                    if (option == "--import") importPaths.Add(Path.GetFullPath(args[index]));
-                    else
-                    {
-                        int separator = args[index].IndexOf('=');
-                        if (separator < 1 || separator == args[index].Length - 1)
-                            throw new ArgumentException(option + " requires Lib=<value>.");
-                        Dictionary<string, string> selected = option == "--import-sha256" ? importHashes :
-                            option == "--import-interface-sha256" ? interfaceHashes : implementationPaths;
-                        string value = args[index][(separator + 1)..];
-                        if (!selected.TryAdd(args[index][..separator], selected == implementationPaths ? value : value.ToLowerInvariant()))
-                            throw new ArgumentException("Duplicate " + option + " assembly.");
-                    }
+                    if (++index == args.Length) throw new ArgumentException(option + " requires a value.");
+                    importOptions.Add(option, args[index]);
                 }
                 else if (args[index] == "--type-argument")
                 {
@@ -254,10 +246,11 @@ internal static partial class Program
                 {
                     string name = AssemblyNameReference.Parse(node.GetProperty("assemblyIdentity").GetString()!).Name;
                     string sidecar = global::Program.ExtractionIdentity.Resolve(output, node.GetProperty("sidecarPath").GetString()!);
-                    string implementation = implementationPaths.GetValueOrDefault(name) ??
+                    string implementation = importOptions.Implementations.GetValueOrDefault(name) ??
                         global::Program.ExtractionIdentity.Resolve(output, node.GetProperty("implementationPath").GetString()!);
-                    string expected = importHashes.GetValueOrDefault(name) ?? node.GetProperty("implementationSha256").GetString()!;
-                    string expectedInterface = interfaceHashes.GetValueOrDefault(name) ??
+                    string expected = importOptions.Sha256.GetValueOrDefault(name) ??
+                        node.GetProperty("implementationSha256").GetString()!;
+                    string expectedInterface = importOptions.InterfaceSha256.GetValueOrDefault(name) ??
                         (node.TryGetProperty("expectedInterfaceDigest", out JsonElement pinnedInterface) ? pinnedInterface.GetString()! :
                             throw new InvalidDataException("Import graph has no independent interface digest; extract again with --import-interface-sha256."));
                     importSources.Add(new(sidecar, Path.GetFullPath(implementation), expected, expectedInterface));
@@ -268,40 +261,17 @@ internal static partial class Program
                     string sidecar = global::Program.ExtractionIdentity.Resolve(output, binding.GetProperty("sidecarPath").GetString()!);
                     if (importSources.Any(source => source.SidecarPath == sidecar)) continue;
                     string name = AssemblyNameReference.Parse(binding.GetProperty("identity").GetString()!.Split("::", 2)[0]).Name;
-                    string implementation = implementationPaths.GetValueOrDefault(name) ??
+                    string implementation = importOptions.Implementations.GetValueOrDefault(name) ??
                         global::Program.ExtractionIdentity.Resolve(output, binding.GetProperty("implementationPath").GetString()!);
-                    string expected = importHashes.GetValueOrDefault(name) ?? binding.GetProperty("implementationSha256").GetString()!;
-                    string expectedInterface = interfaceHashes.GetValueOrDefault(name) ??
+                    string expected = importOptions.Sha256.GetValueOrDefault(name) ??
+                        binding.GetProperty("implementationSha256").GetString()!;
+                    string expectedInterface = importOptions.InterfaceSha256.GetValueOrDefault(name) ??
                         (binding.TryGetProperty("interfaceDigest", out JsonElement pinnedInterface) ? pinnedInterface.GetString()! :
                             throw new InvalidDataException("Import extraction has no independent interface digest; extract again with --import-interface-sha256."));
                     importSources.Add(new(sidecar, Path.GetFullPath(implementation), expected, expectedInterface));
                 }
-            foreach (string sidecar in importPaths.Distinct(StringComparer.Ordinal))
-            {
-                if (importSources.Any(source => source.SidecarPath == sidecar)) continue;
-                ContractInterface contract = ContractInterface.Read(File.ReadAllBytes(sidecar));
-                // Rejected before import validation, so a pinned reference never silently loses its contract.
-                // The selected assembly is not a reference; importing its own sidecar keeps its usual checks.
-                if (pinned.References.Any(reference => reference.Pin.Identity == contract.AssemblyIdentity))
-                    throw new InvalidDataException(
-                        "An assembly cannot be both a typed import and an extracted reference: " +
-                        contract.AssemblyIdentity);
-                string name = AssemblyNameReference.Parse(contract.AssemblyIdentity).Name;
-                string adjacent = Path.Combine(Path.GetDirectoryName(sidecar)!, name + ".dll");
-                string implementation = implementationPaths.GetValueOrDefault(name) ?? (File.Exists(adjacent) ? adjacent :
-                    Path.Combine(Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!, name + ".dll"));
-                importSources.Add(new(sidecar, Path.GetFullPath(implementation), importHashes.GetValueOrDefault(name) ?? "", interfaceHashes.GetValueOrDefault(name) ?? ""));
-            }
             // check replays only the recorded import graph; sidecars appearing after extraction are outside it.
-            foreach (AssemblyNameReference reference in recorded is null ? module.AssemblyReferences : [])
-            {
-                if (pinned.References.Any(pin => pin.Module.Assembly.Name.Name == reference.Name)) continue;
-                string discovered = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!, reference.Name + ".leancil.contracts");
-                if (File.Exists(discovered) && !importSources.Any(source => source.SidecarPath == discovered))
-                    importSources.Add(new(discovered, Path.GetFullPath(implementationPaths.GetValueOrDefault(reference.Name) ??
-                        Path.Combine(Path.GetDirectoryName(discovered)!, reference.Name + ".dll")),
-                        importHashes.GetValueOrDefault(reference.Name) ?? "", interfaceHashes.GetValueOrDefault(reference.Name) ?? "", Discovered: true));
-            }
+            importOptions.AddSources(importSources, pinned, assemblyPath, module, discover: recorded is null);
             using ImportResolution imports = new(importSources);
             using var enumMetadata = EnumTypes.BeginScope();
             stage = "metadata and CIL validation";
@@ -325,7 +295,7 @@ internal static partial class Program
             }
             stage = "metadata and CIL validation";
             LeanEmitter.Emission emitted = LeanEmitter.Emit(methods, profile, pinned, imports,
-                staticIdentities, collectTemplates: checkedTemplate is not null);
+                staticIdentities, collectTemplates: checkedTemplate is not null || inspect is not null);
             string source = emitted.Source;
             var loadedValues = methods.SelectMany(m => Reachability.Analyze(m, profile)).Where(StaticValues.IsLoad)
                 .Select(i => StaticValues.Resolve((FieldReference)i.Operand, module, profile.Architecture)).ToArray();
@@ -448,6 +418,8 @@ internal static partial class Program
                 report.WriteLine($"  Unknown static value: {name} is not computed; " +
                     "loads read the caller's static binding.");
             checkedTemplate?.Invoke(new(output, assemblyHash, profile, emitted.Templates));
+            if (args[0] == "check")
+                inspect?.Invoke(new(methods, emitted.Templates, emitted.LayoutIdentities, source));
         }
         catch (Exception exception)
         {
@@ -456,6 +428,12 @@ internal static partial class Program
             return 1;
         }
         return 0;
+    }
+
+    // Outline only an extraction the ordinary check has matched, while its methods are still loaded.
+    static void ReadChecked(string directory, Action<ProofOutline.Extraction> outline)
+    {
+        Run(["check", directory], report: TextWriter.Null, rethrow: true, inspect: outline);
     }
 
     // Capture only after the ordinary check has matched every extraction artifact.

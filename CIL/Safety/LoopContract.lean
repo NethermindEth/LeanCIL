@@ -6,9 +6,10 @@ import CIL.Safety.MethodContract
 # Loop termination and calls in loops
 
 The induction principle for loop termination (an invariant with a decreasing measure), its
-composition with frame entry into one theorem about `invoke` (`invoke_loop_induction`), and the
-rules that cross a call inside a loop through the callee's `MethodContract`. The tactics that
-apply them are in `CIL.Safety.LoopFrameSteps`.
+composition with frame entry into one theorem about `invoke` (`invoke_loop_induction`, and
+`invoke_loop_satisfies` for any postcondition), and the rules that cross a call inside a loop
+through the callee's `MethodContract`. The tactics that apply them are in
+`CIL.Safety.LoopFrameSteps`.
 -/
 
 namespace CIL.Safety
@@ -101,6 +102,31 @@ theorem invoke_loop_induction {α : Type} {program : CIL.Program} {method : Nat}
     (fun _ => True) (fun _ => 0) () loop_reaches_refl trivial fun _ _ => .inl (entry
       (loop_terminates_induction program method args configuration invariant measure _ progress))
 #print axioms invoke_loop_induction
+
+/-- `invoke_loop_induction` for any postcondition on the final memory and results, so an
+    `Ensures` goal takes it directly after its premises are introduced. The entry path steps to a
+    loop head and applies its hypothesis there; every continuing iteration must reach an invariant
+    state of smaller measure. -/
+theorem invoke_loop_satisfies {α : Type} {program : CIL.Program} {method : Nat}
+    {body : CIL.Method} {args : List Value} {memory entered : Memory} {frame : Frame}
+    {post : Memory → List Value → Prop}
+    (found : program[method]? = some body) (checked : args.mapM (checkedValue memory) = .ok args)
+    (setup : enterFrame body args memory = .ok (frame, entered))
+    (configuration : α → LoopState) (invariant : α → Prop) (measure : α → Nat)
+    (entry : (∀ start, invariant start →
+        LoopTerminates program method args post (configuration start)) →
+      LoopTerminates program method args post ⟨0, frame, [], entered⟩)
+    (progress : ∀ state, invariant state →
+      (∀ next, invariant next → measure next < measure state →
+        LoopTerminates program method args post (configuration next)) →
+      LoopTerminates program method args post (configuration state)) :
+    ∃ fuel final values, invoke program fuel method args memory = .ok (final, values) ∧
+      post final values := by
+  obtain ⟨fuel, final, values, executed, satisfied⟩ :=
+    entry (loop_terminates_induction program method args configuration invariant measure post
+      progress)
+  exact ⟨fuel, final, values, invoke_of_run found checked setup executed, satisfied⟩
+#print axioms invoke_loop_satisfies
 #print axioms loop_terminates_call
 #print axioms loop_terminates_call_formed
 

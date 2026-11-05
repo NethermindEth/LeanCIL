@@ -44,6 +44,17 @@ internal sealed record ContractMethodSignature(ContractType Owner, string Name, 
 
 internal static class ContractMethodMetadata
 {
+    // Exception data naming the shape a rejection found, so a report can drop its restatements.
+    internal const string ModifiedTypeKey = "Nethermind.LeanCIL.ModifiedType";
+    internal const string InstantiationKey = "Nethermind.LeanCIL.Instantiation";
+
+    static InvalidDataException Shape(string message, string key, string value)
+    {
+        InvalidDataException error = new(message);
+        error.Data[key] = value;
+        return error;
+    }
+
     internal static void ValidatePublished(ContractMethodSignature signature, string[] arguments, int count, bool returned)
     {
         if (signature.Owner is null || signature.Owner.Kind != "atom" || string.IsNullOrWhiteSpace(signature.Name) ||
@@ -82,27 +93,33 @@ internal static class ContractMethodMetadata
     internal static void RejectModifiers(TypeReference type)
     {
         if (type is RequiredModifierType or OptionalModifierType)
-            throw new InvalidDataException("Custom modifiers are unsupported in typed contract signatures: " + type.FullName);
+            throw Shape("Custom modifiers are unsupported in typed contract signatures: " + type.FullName,
+                ModifiedTypeKey, type.FullName);
         if (type is GenericInstanceType generic)
             foreach (TypeReference argument in generic.GenericArguments) RejectModifiers(argument);
         if (type is TypeSpecification specification) RejectModifiers(specification.ElementType);
     }
 
     // Imported and exported signatures admit no modifier: their methods are static and non-virtual.
-    internal static void RejectModifiers(MethodReference method) => RejectModifiers(method, inParameters: false);
+    internal static void RejectModifiers(MethodReference method) => RejectModifiers(method, selected: false);
 
-    // A selected method may carry `modreq(InAttribute)` on a by-reference parameter and nowhere else.
-    static void RejectModifiers(MethodReference method, bool inParameters)
+    // A selected method may carry `modreq(InAttribute)` on a by-reference parameter and
+    // `modreq(IsExternalInit)` on a void return, and nowhere else.
+    static void RejectModifiers(MethodReference method, bool selected)
     {
         RejectModifiers(method.DeclaringType);
-        RejectModifiers(method.ReturnType);
+        if (selected && !InitAccessors.Is(method.ReturnType) && InReferences.Modified(method.ReturnType))
+            throw Shape("Custom modifiers are unsupported in method returns, except " +
+                "modreq(System.Runtime.CompilerServices.IsExternalInit) directly on System.Void: " +
+                method.ReturnType.FullName, ModifiedTypeKey, method.ReturnType.FullName);
+        if (!selected) RejectModifiers(method.ReturnType);
         foreach (ParameterDefinition parameter in method.Parameters)
         {
-            if (inParameters && InReferences.Is(parameter.ParameterType)) continue;
-            if (inParameters && InReferences.Modified(parameter.ParameterType))
-                throw new InvalidDataException("Custom modifiers are unsupported in method signatures, except " +
+            if (selected && InReferences.Is(parameter.ParameterType)) continue;
+            if (selected && InReferences.Modified(parameter.ParameterType))
+                throw Shape("Custom modifiers are unsupported in method signatures, except " +
                     "System.Runtime's modreq(InAttribute) directly on a by-reference parameter: " +
-                    parameter.ParameterType.FullName);
+                    parameter.ParameterType.FullName, ModifiedTypeKey, parameter.ParameterType.FullName);
             RejectModifiers(parameter.ParameterType);
         }
         if (method is GenericInstanceMethod generic)
@@ -157,24 +174,32 @@ internal static class ContractMethodMetadata
 
     internal static Selection Select(ModuleDefinition module, string selector, string[] arguments, string architecture)
     {
-        MethodDefinition definition = MethodSelector.Resolve(module, selector);
-        TypeReference[] types = arguments.Select(name => EntryArgument(module, name)).ToArray();
-        return Instantiate(definition, types, architecture, entry: true);
+        (MethodDefinition definition, TypeReference[] types) = Resolve(module, selector, arguments);
+        return Entry(definition, types, architecture);
     }
+
+    /// <summary>The method a selector names and its closed type arguments, before its shape is checked.</summary>
+    internal static (MethodDefinition Definition, TypeReference[] Arguments) Resolve(ModuleDefinition module,
+        string selector, string[] arguments) =>
+        (MethodSelector.Resolve(module, selector), arguments.Select(name => EntryArgument(module, name)).ToArray());
+
+    /// <summary>The resolved method closed as an entry; rejects shapes no entry may have.</summary>
+    internal static Selection Entry(MethodDefinition definition, TypeReference[] arguments, string architecture) =>
+        Instantiate(definition, arguments, architecture, entry: true);
 
     static Selection Instantiate(MethodDefinition definition, TypeReference[] arguments, string architecture,
         bool entry = false)
     {
-        RejectModifiers(definition, inParameters: true);
-        InReferences.RejectTwins(definition);
+        RejectModifiers(definition, selected: true);
+        ModifierTwins.Reject(definition);
         // An entry may be a static method of a generic class: method arguments come first, then the owner's.
         int ownerArity = definition.DeclaringType.GenericParameters.Count;
         if ((ownerArity != 0 && (!entry || !definition.IsStatic)) ||
             definition.GenericParameters.Count + ownerArity != arguments.Length)
-            throw new InvalidDataException("Contract method requires an exact closed generic instantiation." +
+            throw Shape("Contract method requires an exact closed generic instantiation." +
                 (ownerArity == 0 ? "" : $"\n  Pass {definition.GenericParameters.Count} method type argument(s) " +
                     $"followed by {ownerArity} for {definition.DeclaringType.FullName}; only static methods " +
-                    "of a generic type can be an entry."));
+                    "of a generic type can be an entry."), InstantiationKey, definition.FullName);
         // Imported calls bind across assemblies, so only an entry may close over its own module's value types.
         if (arguments.Any(type => !Primitive(type) && !(entry && type.IsValueType &&
                 (type.Module == definition.Module || PinnedAssemblies.Active?.ModuleOf(type) is not null))))

@@ -35,9 +35,9 @@ losses even when gains elsewhere leave the accepted count unchanged. Reports inc
 and detailed blocker diagnostics. Admission is extraction coverage, not a correctness proof.
 Each compiler/language directory also contains `not-checked.tsv`, listing the method and
 selection failure for every `N` entry; console output groups these entries by reason.
-Open generic definitions need explicit closed instantiations before they can be checked as
-entries. Their `N` status neither establishes support nor proves that they are unsupported;
-closed callers can exercise their specializations. Profile-dependent SIMD coverage is tested
+An open generic definition is not an entry `extract` accepts, so it is `B`, with that shape as
+one of its blockers and its open body analysed behind it; closed callers can still exercise its
+specializations. Profile-dependent SIMD coverage is tested
 separately and is not measured by this scalar whole-corpus baseline.
 This scan does not compile F# or the C# strings and mutated assemblies constructed by test scripts.
 
@@ -67,3 +67,21 @@ and its targeted proof tests, even when the catalog is unchanged.
 The pinned compiler check and inventory run inside the `dispatch` suite. Compiler checks
 share reference downloads and batch their Lean evidence checks rather than duplicating runtime
 proofs for every compiler.
+
+## Self-admission
+
+The `blockers` suite also runs `leancil blockers` under the scalar profile over every method of
+the extractor's own `Nethermind.LeanCIL.dll`, a realistic program that changes with every PR.
+[SelfAdmission.cs](../Tests/SelfAdmission.cs) generates the manifest from the built assembly's
+metadata and compares the report with the checked-in
+[baseline](../Tests/SelfAdmissionBaseline.txt), the list of admitted methods. It needs no Lean.
+
+The gate is admission, not blocker totals. The scan fails only when a method that the baseline
+admits still exists and is no longer admitted. Admitted methods removed since the baseline,
+admissions gained, counts and the most widely reached blockers are reported in
+`artifacts/SelfAdmission/summary.md` and the CI job summary, but never fail it. An unrelated PR
+therefore needs no baseline change; a PR that gains an admission records it with
+`dotnet run --file Tests/SelfAdmission.cs -- --update`. A compiler-generated name, such as a
+lambda's, can be renumbered by an unrelated edit, which reports an admitted method as removed and
+gained rather than as lost. Any change to a source compiled into the extractor, or to the
+baseline, selects the suite.

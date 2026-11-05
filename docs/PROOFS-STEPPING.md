@@ -327,6 +327,9 @@ lookup, checked arguments, `setup`, the configuration, invariant and measure, it
 goals: the entry state terminates given that every invariant head state does, and the iteration.
 Its result is the `∃ fuel final, invoke ... = .ok (final, values) ∧ kept final` of
 `invoke_loop_results`.
+[`invoke_loop_satisfies`](../CIL/Safety/LoopContract.lean) takes the same arguments for any
+postcondition on the final memory and results, so it closes a `CIL.Safety.Ensures` goal once its
+premises are introduced; the outlines `leancil new-proof` writes start from it.
 
 The tactics of [LoopFrameSteps](../CIL/Safety/LoopFrameSteps.lean), which
 `CIL.Safety.LoopScaffold` imports, walk these goals while keeping the loop's `LoopFrame` current:

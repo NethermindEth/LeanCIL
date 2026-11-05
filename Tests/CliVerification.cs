@@ -254,6 +254,42 @@ if (unfinished.Code != 1 || !unfinishedText.Contains("Stage: proof checking") ||
         unfinished.Output);
 Console.WriteLine("PASS CLI shows Lean messages, with control characters escaped, when a --proof-root proof fails");
 
+// A starting proof must elaborate yet be refused until its holes are filled, must never replace a
+// file, and must refuse a stale extraction or a shape it cannot state rather than write a guess.
+var outlines = At("artifacts/CliOutline");
+if (Directory.Exists(outlines)) Directory.Delete(outlines, true);
+var outlined = Path.Combine(outlines, "Add");
+Run([.. cli, "extract", demoAssembly, "Arithmetic::Add(ulong,ulong)", outlined]);
+var addOutline = Path.Combine(outlines, "AddProof.lean");
+var written = Execute([.. cli, "new-proof", outlined, addOutline]);
+if (written.Code != 0 || !written.Stdout.StartsWith("Wrote ") ||
+    !written.Stdout.Contains("Holes: 3 obligations, 0 paths not outlined"))
+    throw new InvalidOperationException("new-proof did not write the Add outline: " + written.Output);
+var outlineText = File.ReadAllText(addOutline);
+var refusedOutline = Execute([.. cli, "verify", outlined, "--proof", addOutline]);
+if (refusedOutline.Code == 0 || !refusedOutline.Output.Contains("Unapproved proof axioms: sorryAx") ||
+    refusedOutline.Output.Contains(": error"))
+    throw new InvalidOperationException("The unedited Add outline was not refused for its holes alone: " +
+        refusedOutline.Output);
+var overwrite = Execute([.. cli, "new-proof", outlined, addOutline]);
+if (overwrite.Code == 0 || !overwrite.Stderr.Contains("already exists; new-proof never overwrites a proof") ||
+    File.ReadAllText(addOutline) != outlineText)
+    throw new InvalidOperationException("new-proof replaced an existing file: " + overwrite.Output);
+var packet = Path.Combine(outlines, "Packet");
+Run([.. cli, "extract", demoAssembly, "Arguments::Struct(Examples.Packet)", packet]);
+var packetOutline = Path.Combine(outlines, "PacketProof.lean");
+var unsupported = Execute([.. cli, "new-proof", packet, packetOutline]);
+if (unsupported.Code == 0 || File.Exists(packetOutline) || !unsupported.Stderr.Contains("Stage: proof outline") ||
+    !unsupported.Stderr.Contains("parameter `value` of Struct has type Examples.Packet; new-proof types"))
+    throw new InvalidOperationException("new-proof did not refuse a struct parameter: " + unsupported.Output);
+File.AppendAllText(Path.Combine(outlined, "Extracted.lean"), "\n-- edited\n");
+var staleOutline = Path.Combine(outlines, "StaleProof.lean");
+var staleOutlined = Execute([.. cli, "new-proof", outlined, staleOutline]);
+if (staleOutlined.Code == 0 || File.Exists(staleOutline) ||
+    !staleOutlined.Stderr.Contains("Stage: extraction integrity"))
+    throw new InvalidOperationException("new-proof outlined a stale extraction: " + staleOutlined.Output);
+Console.WriteLine("PASS CLI new-proof outline is refused until filled and never overwrites or guesses");
+
 // Consumers pin the framework from this report, so it must name the commit the tool was built from.
 var version = Execute([.. cli, "--version"]);
 var head = Execute(["git", "-C", Root, "rev-parse", "HEAD"]).Stdout.Trim();

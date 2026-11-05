@@ -30,12 +30,14 @@ internal static class TailCalls
         if (prefix.Next is { OpCode.Code: Code.Calli, Operand: Mono.Cecil.CallSite indirect })
         {
             ManagedPointers.Validate(indirect, method.Module, architecture);
-            if (ManagedPointers.TypeEvidence(indirect.ReturnType) != ManagedPointers.TypeEvidence(method.ReturnType))
+            if (ManagedPointers.TypeEvidence(indirect.ReturnType) !=
+                ManagedPointers.TypeEvidence(InitAccessors.Return(method.ReturnType)))
                 throw new InvalidDataException("Unsupported tail prefix: mismatched indirect return type");
             return;
         }
         if (prefix.Next is not { OpCode.Code: Code.Call, Operand: MethodReference target } ||
-            target.ReturnType.FullName != method.ReturnType.FullName ||
+            InitAccessors.Return(target.ReturnType).FullName !=
+                InitAccessors.Return(method.ReturnType).FullName ||
             target.DeclaringType.Scope != method.Module ||
             InstructionTranslation.RuntimeModel(target) is not null)
             throw new InvalidDataException(
