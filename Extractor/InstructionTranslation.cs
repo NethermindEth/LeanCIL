@@ -132,6 +132,8 @@ internal static class InstructionTranslation
         {
             var f = (FieldReference)i.Operand;
             FieldDefinition resolved = f.Resolve() ?? throw new InvalidDataException("Unresolved field");
+            if (ObjectTypes.Candidate(f.DeclaringType))
+                throw new InvalidDataException("Unsupported class instance field access: " + f.FullName);
             Layout(f.DeclaringType);
             var actual = MetadataValidation.InstanceFieldOf(f);
             var fieldType = actual.Type;
@@ -213,7 +215,7 @@ internal static class InstructionTranslation
             Code.Stind_I1 => ".storeScalar 1", Code.Stind_I2 => ".storeScalar 2", Code.Stind_I4 => ".storeScalar 4",
             Code.Conv_I1 => ".convI1", Code.Conv_I2 => ".convI2", Code.Conv_U2 => ".convU2",
             Code.Neg => ".neg",
-            Code.Ldnull => ".memory .nullRef",
+            Code.Ldnull => ".memory .nullObject",
             Code.Cgt => ".gt",
             Code.Bgt or Code.Bgt_S => $".bgt {Target()}",
             Code.Ble or Code.Ble_S => $".ble {Target()}",

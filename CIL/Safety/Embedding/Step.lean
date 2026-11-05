@@ -445,7 +445,8 @@ theorem step_relabel_ret (narrow : Option NarrowKind) : StepRelabel (.ret narrow
         cases rest <;> fallback_vacuous
       | span reference length =>
         cases rest <;> fallback_vacuous
-      | bufferSpan _ | readOnlyReference _ | array _ | methodPointer _ | methodTable _ =>
+      | bufferSpan _ | readOnlyReference _ | array _ | methodPointer _ | methodTable _
+      | object _ =>
         cases rest <;> fallback_vacuous
 
 theorem step_relabel_unsupported (description : String) :
@@ -615,6 +616,7 @@ theorem step_relabel_bleu (target : Nat) : StepRelabel (.bleu target) := by
 
 #print axioms step_relabel_bleu
 
+set_option maxHeartbeats 300000 in
 /-- Every instruction steps in lockstep with its relabeled form. Pure operations
     share the base-step contract; ordinary memory operations share an unchanged
     instruction result. Dedicated dispatcher cases retain their own proofs. -/
@@ -983,7 +985,8 @@ theorem step_raise_ret (narrow : Option NarrowKind) : StepRaise (.ret narrow) :=
         cases rest <;> fallback_raise_vacuous
       | span reference length =>
         cases rest <;> fallback_raise_vacuous
-      | bufferSpan _ | readOnlyReference _ | array _ | methodPointer _ | methodTable _ =>
+      | bufferSpan _ | readOnlyReference _ | array _ | methodPointer _ | methodTable _
+      | object _ =>
         cases rest <;> fallback_raise_vacuous
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/

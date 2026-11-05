@@ -112,7 +112,7 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
     allocation_fixed_step (
       first
       | exact False.elim (isManaged ⟨_, rfl⟩)
-      | (case h_54 =>
+      | (case h_60 =>
           rename_i _ _ position
           rw [List.getElem?_map]
           cases found : arguments[position]? with
@@ -123,7 +123,7 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
             intro first second same
             subst second
             exact .ok (.next related frames))
-      | (case h_55 =>
+      | (case h_61 =>
           rename_i _ _ position kind
           rw [List.getElem?_map]
           cases found : arguments[position]? with

@@ -33,6 +33,7 @@ internal static class LeanEmitter
             return $".{(type is ArrayType ? "methodTable" : "methodPointer")} " +
                 ManagedPointers.SignatureEvidence(pointer);
         if (type is ByReferenceType or PointerType) return ".reference";
+        if (ObjectTypes.Is(type)) return ".object";
         if (Arrays.Of(type, architecture) is { } element) return $".array {element.Expression}";
         if (Spans.Width(type, architecture) is { } width)
             return $".span {width} {(Spans.Writable(type) ? "true" : "false")}";
@@ -76,7 +77,7 @@ internal static class LeanEmitter
     internal static string Initial(TypeReference type, ModuleDefinition module, string architecture = "scalar",
         MetadataValidation.LayoutContext? layouts = null) => Kind(type, module, architecture, layouts) switch
     {
-        ".reference" => ".nullRef", ".word32" => ".i32 0", ".word64" => ".i64 0",
+        ".reference" or ".object" => ".nullRef", ".word32" => ".i32 0", ".word64" => ".i64 0",
         string kind when kind.StartsWith(".narrow ", StringComparison.Ordinal) => ".i32 0",
         string kind when kind.StartsWith(".span ", StringComparison.Ordinal) ||
             kind.StartsWith(".array ", StringComparison.Ordinal) ||

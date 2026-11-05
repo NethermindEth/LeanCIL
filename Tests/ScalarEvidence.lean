@@ -566,7 +566,11 @@ private def pushHoleRaw (opcode : Nat) := raw [i opcode, i 38, i 2, i 42] [word]
 private def pushHoleFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 0, unknown 1]
 private def pushHoleStates : ScalarCertificate := [some [], some [.other], some [], some [.word64]]
 private def pushHoleCode (emitted : Op) : List Op := [emitted, .pop, .arg 0, .ret]
-example : ScalarFlowValid #[] (pushHoleRaw 20) pushHoleFeatures (pushHoleStates.set 1 (some [.nullObject])) (pushHoleCode (.memory .nullRef)) := by decide
+example : ScalarFlowValid #[] (pushHoleRaw 20) pushHoleFeatures
+    (pushHoleStates.set 1 (some [.nullObject])) (pushHoleCode (.memory .nullObject)) := by decide
+-- `ldnull` has one canonical null; the byref null of `Unsafe.NullRef` is a different value.
+example : ¬ ScalarFlowValid #[] (pushHoleRaw 20) pushHoleFeatures
+    (pushHoleStates.set 1 (some [.nullObject])) (pushHoleCode (.memory .nullRef)) := by decide
 example : ¬ ScalarFlowValid #[] (pushHoleRaw 20) pushHoleFeatures (pushHoleStates.set 1 (some [.nullObject])) (pushHoleCode (.const64 0)) := by decide
 example : ¬ ScalarFlowValid #[] (pushHoleRaw 35) pushHoleFeatures pushHoleStates (pushHoleCode (.const64 0)) := by decide
 example : ¬ ScalarFlowValid #[] (pushHoleRaw 35) pushHoleFeatures pushHoleStates (pushHoleCode (.const32 0)) := by decide

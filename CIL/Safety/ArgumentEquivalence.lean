@@ -46,9 +46,12 @@ theorem step_arguments_eq (body : CIL.Method) (op : CIL.Op) (pc : Nat)
       first
       | rfl
       | cases rest with
-        | nil => first | rfl | (cases value <;> rfl)
+        | nil =>
+          first | rfl | (cases value <;> first | rfl |
+            (rename_i reference; cases reference <;> rfl))
         | cons next rest =>
-          first | rfl | (cases value <;> first | rfl | (cases next <;> rfl))
+          first | rfl | (cases value <;> first | rfl | (cases next <;> rfl) |
+            (rename_i reference; cases reference <;> first | rfl | (cases next <;> rfl)))
 
 /-- Changing unobserved arguments preserves every checked execution step.
     Child calls receive the same evaluated stack arguments on both sides. -/

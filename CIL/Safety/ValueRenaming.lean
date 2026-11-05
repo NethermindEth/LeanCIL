@@ -19,7 +19,7 @@ def ManagedReference.Below (limit : Nat) : ManagedReference → Prop
 /-- Every reference carried by a checked value belongs to the allocated identity prefix. -/
 def Value.Below (limit : Nat) : Value → Prop
   | .scalar _ | .methodPointer _ | .methodTable _ => True
-  | .reference address | .readOnlyReference address | .span address _ =>
+  | .reference address | .readOnlyReference address | .span address _ | .object address =>
     address.Below limit
   | .bufferSpan view => view.reference.Below limit
   | .array view => view.reference.Below limit
@@ -45,6 +45,7 @@ def value (mapping : AllocationRenaming) : Value → Value
   | .methodTable table => .methodTable table
   | .scalar scalar => .scalar scalar
   | .reference reference => .reference (mapping.managedReference reference)
+  | .object reference => .object (mapping.managedReference reference)
   | .readOnlyReference reference => .readOnlyReference (mapping.managedReference reference)
   | .span reference length => .span (mapping.managedReference reference) length
   | .bufferSpan view => .bufferSpan (mapping.spanView view)
@@ -86,7 +87,7 @@ theorem value_below (mapping : AllocationRenaming) (value : Value)
     (mapping.value value).Below mapping.targetLimit := by
   cases value with
   | scalar _ | methodPointer _ | methodTable _ => trivial
-  | reference reference | readOnlyReference reference | span reference _ =>
+  | reference reference | readOnlyReference reference | span reference _ | object reference =>
     exact mapping.managedReference_below reference bound
   | bufferSpan view => exact mapping.managedReference_below view.reference bound
   | array view => exact mapping.managedReference_below view.reference bound

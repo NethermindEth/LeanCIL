@@ -212,7 +212,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
       metadata.returnsValue]
     all_goals try exact (related.stepFallback frames formed operation pc sourceBody.profile
       stack bounds observable)
-    case h_74 =>
+    case h_80 =>
       first
       | (have boundary : fixedStepFamily operation = .boundary := family
          have noManaged : ∀ op, operation = .managed op → False := by assumption
@@ -273,6 +273,18 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
          subst second
          exact .ok (.next related frames))
       | (apply (related.referenceNonNull _ (by assumption)).bind
+         intro first second same
+         subst second
+         exact .ok (.next related frames))
+      | (apply (related.objectEqual _ _ (by assumption) (by assumption)).bind
+         intro first second same
+         subst second
+         exact .ok (.next related frames))
+      | (apply (related.objectNonNull _ (by assumption)).bind
+         intro first second same
+         subst second
+         exact .ok (.next related frames))
+      | (apply (related.objectAboveNull _ _ (by assumption)).bind
          intro first second same
          subst second
          exact .ok (.next related frames))

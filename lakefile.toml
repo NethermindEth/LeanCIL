@@ -226,6 +226,9 @@ root = "CIL.OleanAudit"
 name = "Tests.PointerOperations"
 
 [[lean_lib]]
+name = "Tests.Objects"
+
+[[lean_lib]]
 name = "Tests.PrimitiveArrays"
 
 [[lean_lib]]

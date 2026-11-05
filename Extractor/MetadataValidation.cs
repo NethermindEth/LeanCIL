@@ -387,7 +387,15 @@ internal static class MetadataValidation
                     "locals, returns, fields or external signatures.");
             if (byRef.ElementType is ByReferenceType)
                 throw new InvalidDataException("Unsupported nested managed reference");
+            if (ObjectTypes.Candidate(byRef.ElementType))
+                throw new InvalidDataException("Unsupported by-reference class instance: " + type.FullName +
+                    "\n  Object references live in roots without byte storage, so they have no address.");
             Type(byRef.ElementType, module, architecture: architecture);
+            return;
+        }
+        if (ObjectTypes.Candidate(type))
+        {
+            ObjectTypes.Validate(type);
             return;
         }
         type = EnumTypes.Storage(type);

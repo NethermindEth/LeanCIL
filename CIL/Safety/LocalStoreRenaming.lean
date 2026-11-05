@@ -41,6 +41,9 @@ theorem Memory.Renamed.storeLocal {mapping : AllocationRenaming}
     case reference reference => cases reference <;> first
       | exact .error _
       | exact .ok ⟨rfl, related⟩
+    case object reference => cases reference <;> first
+      | exact .error _
+      | exact .ok ⟨rfl, related⟩
     all_goals simp only [CIL.Safety.storeLocal, AllocationRenaming.localSlot,
       AllocationRenaming.value, Value.hasUnspecified, Bool.false_and, Bool.false_eq_true,
       ↓reduceIte]
@@ -54,7 +57,7 @@ theorem Memory.Renamed.storeLocal {mapping : AllocationRenaming}
     | scalar scalar =>
       cases scalar <;> first | exact .error _ | exact .ok ⟨rfl, related⟩
     | reference _ | span _ _ | bufferSpan _ | readOnlyReference _ | array _
-    | methodPointer _ | methodTable _ => exact .error _
+    | methodPointer _ | methodTable _ | object _ => exact .error _
   | root stored | readOnlyRoot stored =>
     cases value with
     | reference reference | readOnlyReference reference =>
@@ -64,7 +67,19 @@ theorem Memory.Renamed.storeLocal {mapping : AllocationRenaming}
       intro left right values
       exact .ok ⟨rfl, related⟩
     | scalar scalar => cases scalar <;> exact .error _
-    | span _ _ | bufferSpan _ | array _ | methodPointer _ | methodTable _ => exact .error _
+    | span _ _ | bufferSpan _ | array _ | methodPointer _ | methodTable _ | object _ =>
+      exact .error _
+  | object stored =>
+    cases value with
+    | object reference =>
+      dsimp only [CIL.Safety.storeLocal, AllocationRenaming.localSlot,
+        AllocationRenaming.value, Value.hasUnspecified, Bool.and]
+      apply (related.formObject reference valueBound).bind
+      intro left right values
+      exact .ok ⟨rfl, related⟩
+    | scalar scalar => cases scalar <;> exact .error _
+    | reference _ | readOnlyReference _ | span _ _ | bufferSpan _ | array _
+    | methodPointer _ | methodTable _ => exact .error _
   | bytes kind reference =>
     cases value with
     | scalar scalar =>
@@ -87,12 +102,12 @@ theorem Memory.Renamed.storeLocal {mapping : AllocationRenaming}
            intro left right stored
            exact .ok ⟨rfl, stored⟩)
     | reference _ | span _ _ | bufferSpan _ | readOnlyReference _ | array _
-    | methodPointer _ | methodTable _ => exact .error _
+    | methodPointer _ | methodTable _ | object _ => exact .error _
   | span width writable stored =>
     cases value with
     | scalar scalar => cases scalar <;> exact .error _
     | reference _ | readOnlyReference _ | array _
-    | methodPointer _ | methodTable _ => exact .error _
+    | methodPointer _ | methodTable _ | object _ => exact .error _
     | span reference length =>
       cases writable with
       | true => exact .error .invalidState
@@ -121,7 +136,7 @@ theorem Memory.Renamed.storeLocal {mapping : AllocationRenaming}
   | array element stored =>
     cases value with
     | scalar scalar => cases scalar <;> exact .error _
-    | reference reference =>
+    | object reference =>
       cases reference with
       | address _ => exact .error .invalidState
       | null =>
@@ -134,7 +149,7 @@ theorem Memory.Renamed.storeLocal {mapping : AllocationRenaming}
         · exact .ok ⟨rfl, related⟩
         · exact .error _
     | span _ _ | readOnlyReference _ | bufferSpan _
-    | methodPointer _ | methodTable _ => exact .error _
+    | methodPointer _ | methodTable _ | reference _ => exact .error _
     | array view =>
       dsimp only [CIL.Safety.storeLocal, AllocationRenaming.localSlot,
         AllocationRenaming.value, AllocationRenaming.arrayView, Value.hasUnspecified, Bool.and]

@@ -59,7 +59,8 @@ theorem successful_instruction_prefix (first second : List CIL.Op) (stack : List
 /-- Reference validity is independent of readable initialization and access
     width. A span's accessible bytes are checked by the memory operation. -/
 def Value.Valid (m : Memory) : Value → Prop
-  | .methodPointer _ | .methodTable _ => True
+  | .methodPointer _ | .methodTable _ | .object .null => True
+  | .object (.address r) => formObject m (.address r) = .ok (.object (.address r))
   | .scalar value => numericValue value = true
   | .bufferSpan view => view.validate m = .ok ()
   | .array view => view.validate m = .ok ()
@@ -118,6 +119,51 @@ theorem formValue_returns_input (m : Memory) (r : ManagedReference) (value : Val
       cases h
       rw [same]
 
+/-- A formed object reference is returned unchanged. -/
+theorem formObject_returns_input {m : Memory} {reference : ManagedReference} {value : Value}
+    (formed : formObject m reference = .ok value) : value = .object reference := by
+  cases reference with
+  | null => cases formed; rfl
+  | address r =>
+    simp only [formObject, checkedAt, Except.mapError, Bind.bind, Except.bind] at formed
+    split at formed
+    · cases formed
+    · split at formed
+      · split at formed
+        · cases formed; rfl
+        · cases formed
+      · cases formed
+
+/-- A formed object reference is a valid stack value. -/
+theorem formObject_result_valid {m : Memory} {reference : ManagedReference} {value : Value}
+    (formed : formObject m reference = .ok value) : value.Valid m := by
+  have same := formObject_returns_input formed
+  subst value
+  cases reference with
+  | null => exact True.intro
+  | address r => exact formed
+
+/-- Object formation needs only the allocation table entry, which extension keeps. -/
+theorem formObject_preserved {m result : Memory} {reference : ManagedReference}
+    (formed : formObject m reference = .ok (.object reference)) (wellFormed : m.WellFormed)
+    (ext : AllocationExtension m result) :
+    formObject result reference = .ok (.object reference) := by
+  cases reference with
+  | null => rfl
+  | address r =>
+    cases found : m.allocations r.allocation with
+    | none =>
+      simp [formObject, liveAllocation, found, checkedAt, Except.mapError, Bind.bind,
+        Except.bind] at formed
+    | some allocation =>
+      have kept := ext.lookup r.allocation (wellFormed.1 _ _ found).1
+      rw [found] at kept
+      simpa only [formObject, liveAllocation, kept, found] using formed
+
+#print axioms formObject_returns_input
+#print axioms formObject_result_valid
+#print axioms formObject_preserved
+
 theorem formValue_result_valid (m : Memory) (r : ManagedReference) (value : Value)
     (h : formValue m r = .ok value) : value.Valid m := by
   have same := formValue_returns_input _ _ _ h
@@ -149,6 +195,8 @@ theorem checkedValue_valid (m : Memory) (value result : Value)
     (h : checkedValue m value = .ok result) : result = value ∧ result.Valid m := by
   cases value with
   | methodPointer _ | methodTable _ => cases h; exact ⟨rfl, trivial⟩
+  | object r =>
+    exact ⟨formObject_returns_input h, formObject_result_valid h⟩
   | scalar value =>
     simp only [checkedValue] at h
     split at h
@@ -190,6 +238,10 @@ theorem checkedValue_of_valid (m : Memory) (value : Value) (valid : value.Valid 
     checkedValue m value = .ok value := by
   cases value with
   | methodPointer _ | methodTable _ => rfl
+  | object r =>
+    cases r with
+    | null => rfl
+    | address r => exact valid
   | scalar value => simp only [Value.Valid] at valid; simp [checkedValue, valid]
   | bufferSpan view | array view =>
     simp only [Value.Valid] at valid
@@ -213,6 +265,10 @@ theorem ValuesValid.preserve {m result : Memory} {values : List Value}
   have hv := valid value member
   cases value with
   | scalar value | methodPointer _ | methodTable _ => exact hv
+  | object r =>
+    cases r with
+    | null => exact True.intro
+    | address r => exact formObject_preserved hv hm ext
   | bufferSpan view => exact view.validate_preserved hv hm ext
   | array view => exact view.validate_preserved hv hm ext
   | readOnlyReference r =>

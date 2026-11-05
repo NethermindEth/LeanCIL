@@ -143,6 +143,7 @@ def callableLayoutsValid (layouts : List RawLayout) : TypeExpr → Bool
 /-- Decode storage independently from the exact metadata type identity. -/
 def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
   | .atom scope name => if scope = runtimeScope then .field <$> primitiveField name else none
+  | .object _ _ => some .object
   | .aggregate identity index => do
     let metadata ← layouts[index]?
     if metadata.identity = identity then return .field (.aggregate index) else none

@@ -28,6 +28,26 @@ theorem Memory.Equivalent.referenceEqual {m n : Memory} (same : m.Equivalent n)
 
 #print axioms Memory.Equivalent.referenceEqual
 
+/-- Object null tests depend only on the allocation table. -/
+theorem Memory.Equivalent.objectNonNull {m n : Memory} (same : m.Equivalent n)
+    (value : ManagedReference) : objectNonNull m value = objectNonNull n value := by
+  simp only [CIL.Safety.objectNonNull, same.formObject]
+
+/-- Object identity depends only on the allocation table. -/
+theorem Memory.Equivalent.objectEqual {m n : Memory} (same : m.Equivalent n)
+    (left right : ManagedReference) : objectEqual m left right = objectEqual n left right := by
+  simp only [CIL.Safety.objectEqual, same.formObject]
+
+/-- Object presence against null depends only on the allocation table. -/
+theorem Memory.Equivalent.objectAboveNull {m n : Memory} (same : m.Equivalent n)
+    (left right : ManagedReference) :
+    objectAboveNull m left right = objectAboveNull n left right := by
+  cases right <;> simp only [CIL.Safety.objectAboveNull, same.objectNonNull]
+
+#print axioms Memory.Equivalent.objectAboveNull
+#print axioms Memory.Equivalent.objectNonNull
+#print axioms Memory.Equivalent.objectEqual
+
 /-- Equivalent memories give the same unsigned pointer ordering. -/
 theorem Memory.Equivalent.referenceLess {m n : Memory} (same : m.Equivalent n)
     (left right : ManagedReference) : referenceLess m left right = referenceLess n left right := by
@@ -43,7 +63,7 @@ theorem Memory.Equivalent.referenceSubtract {m n : Memory} (same : m.Equivalent 
 theorem Memory.Equivalent.checkedValue {m n : Memory} (same : m.Equivalent n)
     (value : Value) : checkedValue m value = checkedValue n value := by
   cases value <;> simp only [CIL.Safety.checkedValue, same.formValue, same.spanValidate,
-    same.arrayValidate]
+    same.arrayValidate, same.formObject]
 
 theorem Memory.Equivalent.checkedValues {m n : Memory} (same : m.Equivalent n)
     (values : List Value) :
@@ -132,7 +152,8 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
   dsimp only
   split <;> try simp only [same.checkedValue, same.checkedValues, same.loadLocal, same.localAddress,
     same.referenceNonNull, same.referenceEqual, same.referenceDifference,
-    same.referenceLess, same.referenceSubtract]
+    same.referenceLess, same.referenceSubtract, same.objectNonNull, same.objectEqual,
+    same.objectAboveNull]
   all_goals repeat' first
     | exact same.managedStep _ _ _ _
     | (apply ResultEquivalent.bind (same.newArray _ _)

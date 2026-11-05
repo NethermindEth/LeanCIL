@@ -26,6 +26,8 @@ inductive StorageType where
   | aggregateArray (identity : String) (index : Nat)
   | methodPointer (signature : ManagedSignature)
   | methodTable (signature : ManagedSignature)
+  /-- A reference to an admitted class instance, held in a root without bytes. -/
+  | object
   deriving DecidableEq, Repr
 
 /-- One entry per original instruction, including instructions pruned by the profile. -/
@@ -55,6 +57,7 @@ def storageKind (layouts : Array ComputedLayout) : StorageType → Option LocalK
       some (.array (.aggregate identity layout.layout.size)) else none
   | .methodPointer signature => some (.methodPointer signature)
   | .methodTable signature => some (.methodTable signature)
+  | .object => some .object
   | .aggregateSpan index writable => do
     let layout ← layouts[index]?
     if 0 < layout.layout.size ∧ layout.layout.size < 2^64 then
@@ -192,7 +195,8 @@ def validateArgumentOpAt (localCount : Nat) (argumentAt : Nat → Option Storage
       | _ => return false).getD false
   | .address index => (do
       let type ← argumentAt index
-      if type == StorageType.reference || (match type with | .array _ => true | _ => false) then return false
+      let rootOnly := match type with | .array _ | .object => true | _ => false
+      if type == StorageType.reference || rootOnly then return false
       let slot ← homeAt index
       match emitted with
       | .localAddr actual => return actual == slot

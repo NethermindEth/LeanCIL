@@ -1,4 +1,4 @@
-import Std
+import CIL.TypeExpr
 
 /-!
 # Allocation-aware memory
@@ -18,9 +18,16 @@ namespace CIL.Safety
 /-- The identity of an allocation; identities are never reused. -/
 abbrev AllocationId := Nat
 
-/-- Where an allocation lives; only an immutable static may never be written. -/
+/-- The runtime type an object allocation records: its exact class identity. -/
+structure RuntimeType where
+  identity : CIL.Extraction.TypeExpr
+  deriving DecidableEq, Repr
+
+/-- Where an allocation lives; only an immutable static may never be written. An object
+    allocation is a class instance of its recorded runtime type. -/
 inductive StorageKind where
   | managedHeap | callerStack | frame (activation : Nat) | immutableStatic
+  | object (type : RuntimeType)
   deriving DecidableEq, Repr
 
 /-- The byte size, alignment and GC reference slots of an allocation. -/

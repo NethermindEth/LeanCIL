@@ -34,6 +34,9 @@ inductive Value where
   | methodPointer (pointer : CIL.MethodPointer)
   /-- An immutable supplied table retains the provenance of every entry. -/
   | methodTable (table : CIL.MethodTable)
+  /-- A class instance reference: null or offset 0 of an object allocation. It has no byte
+      position, so arithmetic, byte loads and byref operations never accept it. -/
+  | object (reference : ManagedReference)
   deriving DecidableEq, Repr
 
 /-- Why the checked interpreter stopped. -/
@@ -280,6 +283,17 @@ def formValue (memory : Memory) (reference : ManagedReference) : ExecutionResult
     let result ← checkedAt reference 0 (form memory r)
     return .reference (.address result)
 
+/-- Checks that an object reference may be held: null, or offset 0 of a live allocation of
+    object kind. Any other reference is an ill-typed state, not a runtime exception. -/
+def formObject (memory : Memory) (reference : ManagedReference) : ExecutionResult Value :=
+  match reference with
+  | .null => .ok (.object .null)
+  | .address address => do
+    let allocation ← checkedAt reference 0 (liveAllocation memory address.allocation)
+    match allocation.kind with
+    | .object _ => if address.offset = 0 then .ok (.object reference) else .error .invalidState
+    | _ => .error .invalidState
+
 /-- Two non-null, live references to one allocation, checked without byte access authority. -/
 def referencePositions (memory : Memory) (left right : ManagedReference) :
     ExecutionResult (Nat × Nat) := do
@@ -393,7 +407,7 @@ def arrayFillInstruction (element : CIL.ArrayElement) (counted : Bool)
             checkedAt view.reference 0 (view.storage.slice memory start count)
         spanFillInstruction element.width false
           (.scalar value :: .bufferSpan storage :: rest) memory
-  | .reference .null => .error (.thrown "System.ArgumentNullException")
+  | .object .null => .error (.thrown "System.ArgumentNullException")
   | _ => .error .invalidState
 
 /-- A fixed-width integer in the requested byte order, with the required narrow extension. -/
@@ -458,7 +472,7 @@ def viewObservationInstruction (observation : CIL.ViewObservation) (stack : List
     let _ ← checkedAt view.reference 0 (view.validate memory)
     if view.reference == .null then .error (.thrown "System.NullReferenceException") else
     return (memory, (← formValue memory view.reference) :: rest)
-  | .arrayData, .reference .null :: _ =>
+  | .arrayData, .object .null :: _ =>
     .error (.thrown "System.NullReferenceException")
   | _, _ => .error .invalidState
 
@@ -473,7 +487,7 @@ def arrayTransferInstruction (element : CIL.ArrayElement) (store : Bool)
   let some index := arrayIndex index | .error .invalidState
   let view ← match array with
     | .array view => pure view
-    | .reference .null => .error (.thrown "System.NullReferenceException")
+    | .object .null => .error (.thrown "System.NullReferenceException")
     | _ => .error .invalidState
   if view.elementType != element then .error .invalidState else pure ()
   let shape ← match element with
@@ -704,17 +718,17 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
       else .error (.thrown "System.ArgumentOutOfRangeException")
     let sliced ← checkedAt view.reference 0 (view.slice memory start.toNat length.toNat)
     return (memory, .bufferSpan sliced :: rest)
-  | .arraySpan element writable .whole, .reference .null :: rest =>
+  | .arraySpan element writable .whole, .object .null :: rest =>
     let view : SpanView := ⟨.null, 0, element.width, writable⟩
     let _ ← checkedAt view.reference 0 (view.validate memory)
     return (memory, .bufferSpan view :: rest)
-  | .arraySpan element writable .fromStart, .scalar (.i32 start) :: .reference .null :: rest =>
+  | .arraySpan element writable .fromStart, .scalar (.i32 start) :: .object .null :: rest =>
     if start == 0 then pure () else .error (.thrown "System.ArgumentOutOfRangeException")
     let view : SpanView := ⟨.null, 0, element.width, writable⟩
     let _ ← checkedAt view.reference 0 (view.validate memory)
     return (memory, .bufferSpan view :: rest)
   | .arraySpan element writable .counted,
-      .scalar (.i32 length) :: .scalar (.i32 start) :: .reference .null :: rest =>
+      .scalar (.i32 length) :: .scalar (.i32 start) :: .object .null :: rest =>
     if start == 0 && length == 0 then pure ()
       else .error (.thrown "System.ArgumentOutOfRangeException")
     let view : SpanView := ⟨.null, 0, element.width, writable⟩
@@ -745,12 +759,12 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     let updated ← checkedAt (.address reference) width
       (write memory reference (numberBytes number width) 1)
     return (updated, rest)
-  | .arrayLength, .reference .null :: _ => .error (.thrown "System.NullReferenceException")
-  | .arrayLoad .., .scalar index :: .reference .null :: _
-  | .arrayAddress .., .scalar index :: .reference .null :: _ =>
+  | .arrayLength, .object .null :: _ => .error (.thrown "System.NullReferenceException")
+  | .arrayLoad .., .scalar index :: .object .null :: _
+  | .arrayAddress .., .scalar index :: .object .null :: _ =>
     let some _ := arrayIndex index | .error .invalidState
     .error (.thrown "System.NullReferenceException")
-  | .arrayStore _, .scalar _ :: .scalar index :: .reference .null :: _ =>
+  | .arrayStore _, .scalar _ :: .scalar index :: .object .null :: _ =>
     let some _ := arrayIndex index | .error .invalidState
     .error (.thrown "System.NullReferenceException")
   -- Spans
@@ -821,6 +835,7 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     return (memory, .scalar (.i32 (BitVec.ofNat 32 length)) :: rest)
   -- Null references
   | .nullRef, _ => return (memory, .reference .null :: stack)
+  | .nullObject, _ => return (memory, .object .null :: stack)
   -- A pure comparison: no access, so a live, expired or end reference all answer false.
   | .isNullRef, .reference r :: rest | .isNullRef, .readOnlyReference r :: rest =>
     return (memory, .scalar (.i32 (match r with | .null => 1 | .address _ => 0)) :: rest)
@@ -1067,6 +1082,7 @@ def block (returns : Bool) (args : List Value) (ops : List CIL.Op)
       | .span reference length => .ok (.span reference length)
       | .methodPointer pointer => .ok (.methodPointer pointer)
       | .methodTable table => .ok (.methodTable table)
+      | .object reference => formObject m reference
       | .array view => do
         let _ ← checkedAt view.reference 0 (view.validate m)
         pure (.array view)

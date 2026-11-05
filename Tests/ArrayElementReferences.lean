@@ -33,7 +33,7 @@ theorem end_address_rejected :
 
 /-- A null array has no element address. -/
 theorem null_address_rejected :
-    memoryInstruction (.arrayAddress .signed32) [.scalar (.i32 0), .reference .null] memory =
+    memoryInstruction (.arrayAddress .signed32) [.scalar (.i32 0), .object .null] memory =
       .error (.thrown "System.NullReferenceException") := rfl
 #print axioms null_address_rejected
 

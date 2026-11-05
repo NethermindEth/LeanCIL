@@ -67,6 +67,8 @@ inductive LocalKind where
   /-- Callable roots retain exact signatures and never expose a numeric byte home. -/
   | methodPointer (signature : ManagedSignature)
   | methodTable (signature : ManagedSignature)
+  /-- An object reference root holds a heap identity, never bytes. -/
+  | object
   | byte | word32 | word64 | vector128 | vector256 | vector512 | reference
   deriving DecidableEq, Repr
 

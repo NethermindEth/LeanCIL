@@ -17,7 +17,7 @@ namespace CIL.Safety
     physical home, and a managed root may start null. -/
 def InitializerFits (kind : CIL.LocalKind) (initial : CIL.Value) : Prop :=
   match kind with
-  | .methodPointer _ | .methodTable _ => initial = .unmodeled ∨ initial = .nullRef
+  | .methodPointer _ | .methodTable _ | .object => initial = .unmodeled ∨ initial = .nullRef
   | .array element => initial = .unmodeled ∨
       (0 < element.width ∧ element.width < 2^64) ∧ initial = .nullRef
   | .span width _ => (0 < width ∧ width < 2^64) ∧ (initial = .unmodeled ∨ initial = .nullRef)
@@ -35,7 +35,7 @@ theorem initializer_numeric_number {kind : CIL.LocalKind} {initial : CIL.Value}
     (notSpan : ∀ width writable, kind ≠ .span width writable)
     (notArray : ∀ element, kind ≠ .array element)
     (notPointer : ∀ signature, kind ≠ .methodPointer signature)
-    (notTable : ∀ signature, kind ≠ .methodTable signature)
+    (notTable : ∀ signature, kind ≠ .methodTable signature) (notObject : kind ≠ .object)
     (known : initial ≠ .unmodeled) : ∃ number, localNumber kind initial = .ok number := by
   cases kind <;> cases initial <;>
     simp_all [InitializerFits, localNumber, CIL.Value.hasUnspecified]
@@ -66,6 +66,9 @@ theorem makeLocal_succeeds (m : Memory) (activation : Nat) (kind : CIL.LocalKind
   by_cases root : kind = .reference
   · subst kind
     cases initial <;> simp_all [InitializerFits, makeLocal]
+  by_cases object : kind = .object
+  · subst kind
+    cases initial <;> simp_all [InitializerFits, makeLocal]
   · obtain ⟨reference, memory, home⟩ :=
       allocateHome_succeeds m activation (localWidth kind) wellFormed (localWidth_bounded kind)
         (localAlignment_pos kind)
@@ -73,7 +76,7 @@ theorem makeLocal_succeeds (m : Memory) (activation : Nat) (kind : CIL.LocalKind
     · refine ⟨.bytes kind reference, [reference.allocation], memory, ?_⟩
       cases kind <;> simp_all [makeLocal, Bind.bind, Except.bind, Pure.pure, Except.pure]
     · obtain ⟨number, value⟩ :=
-        initializer_numeric_number fits root notSpan notArray notPointer notTable unknown
+        initializer_numeric_number fits root notSpan notArray notPointer notTable object unknown
       obtain ⟨slot, result, stored⟩ := fresh_home_storeLocal_succeeds _ _ _ _ _ _ _ home value
       refine ⟨slot, [reference.allocation], result, ?_⟩
       cases kind <;> simp_all [makeLocal, Bind.bind, Except.bind, Pure.pure, Except.pure]
@@ -138,6 +141,7 @@ def ParameterFits (kind : CIL.LocalKind) : Value → Prop
   | .methodTable table => kind = .methodTable table.signature
   | .scalar value => kind ≠ .reference ∧ ∃ number, localNumber kind value = .ok number
   | .reference _ => kind = .reference
+  | .object _ => kind = .object
   | .span _ _ => False
   | .readOnlyReference _ => kind = .reference
   | .bufferSpan view => kind = .span view.width view.writable ∧ (0 < view.width ∧ view.width < 2^64)
@@ -201,6 +205,14 @@ theorem initializeParameter_succeeds (m : Memory) (activation : Nat) (kind : CIL
       simp only [checkedValue] at formed
       simp [storeLocal, formed, Value.hasUnspecified,
         Bind.bind, Except.bind, Pure.pure, Except.pure]⟩
+  | object reference =>
+    change kind = .object at fits
+    subst kind
+    have formed := checkedValue_of_valid m (.object reference) valid
+    exact ⟨.object none, [], m, .object (some reference), m, rfl, by
+      simp only [checkedValue] at formed
+      simp [storeLocal, formed, Value.hasUnspecified,
+        Bind.bind, Except.bind, Pure.pure, Except.pure]⟩
   | scalar value =>
     obtain ⟨numeric, number, numbered⟩ := fits
     have notSpan : ∀ width writable, kind ≠ .span width writable := by
@@ -210,6 +222,8 @@ theorem initializeParameter_succeeds (m : Memory) (activation : Nat) (kind : CIL
     have notPointer : ∀ signature, kind ≠ .methodPointer signature := by
       cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
     have notTable : ∀ signature, kind ≠ .methodTable signature := by
+      cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
+    have notObject : kind ≠ .object := by
       cases kind <;> cases value <;> simp_all [localNumber, CIL.Value.hasUnspecified]
     obtain ⟨r, home, allocated⟩ := allocateHome_succeeds m activation (localWidth kind) hm
       (localWidth_bounded kind) (localAlignment_pos kind)

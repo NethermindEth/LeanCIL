@@ -215,7 +215,20 @@ successful successor. Unknown values and mismatched homes cannot use that rule.
 Null managed references are distinct from numeric zero. Access faults on null are not automatically
 named throws; only explicit outcome mappings establish a named exception.
 
-## Sequential struct layout
+## Class instances
+
+An admitted class is non-generic and non-abstract, derives directly from
+`System.Object` in `System.Runtime`, has sequential or auto layout and no finalizer. A reference to
+it is `Value.object`: null, or offset 0 of a live allocation whose kind is `.object` with the
+class's runtime type (`formObject`). Object references carry no byte position, so code cannot
+form one from an integer, a byref or an interior offset, and `ldnull` pushes the one null
+object reference; `Unsafe.NullRef` keeps the distinct null byref. `ceq`, `beq` and `bne.un`
+compare identities; `cgt.un` and `brtrue`/`brfalse` test presence against null only. Object
+locals and parameters are roots without bytes and have no address.
+
+Interface, generic, abstract, derived, explicit-layout and finalizable classes, byrefs to class
+instances and class field access are each rejected by name during extraction.
+
 
 Admitted layouts are reference-free and bounded by 65,536 bytes. Sequential fields include supported
 integers/enums, nested aggregates and admitted vectors. Closed same-assembly generic owners bind

@@ -4,6 +4,7 @@ import CIL.Safety.Equations
 import CIL.Safety.StepComposition
 import CIL.Safety.ValueSteps
 import CIL.Safety.MemorySteps
+import CIL.Safety.ObjectSteps
 import CIL.Safety.InstructionSteps
 import CIL.Safety.CallComposition
 import CIL.Safety.CodeAt

@@ -1,0 +1,32 @@
+namespace Examples;
+
+/// <summary>A class instance; its identity is the heap allocation that holds it.</summary>
+public sealed class Account
+{
+    /// <summary>The current balance.</summary>
+    public ulong Balance;
+
+    /// <summary>The largest single withdrawal.</summary>
+    public uint Limit;
+}
+
+/// <summary>Reference identity and null tests on class instances.</summary>
+public static class Objects
+{
+    /// <summary>Reference equality: the same instance, or both null.</summary>
+    public static bool Same(Account left, Account right) => left == right;
+
+    /// <summary>A null test, compiled as a comparison against <c>ldnull</c>.</summary>
+    public static bool IsNull(Account? account) => account is null;
+
+    /// <summary>A presence test, compiled as an unsigned greater-than against <c>ldnull</c>.</summary>
+    public static bool IsPresent(Account? account) => account is not null;
+
+    /// <summary>Selects one of two references through a branch on the first one's presence.</summary>
+    public static Account? FirstPresent(Account? first, Account? second)
+    {
+        Account? selected = second;
+        if (first != null) selected = first;
+        return selected;
+    }
+}

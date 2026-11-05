@@ -37,7 +37,7 @@ private def memoryFeatureEffect : MemoryOp → Nat × Nat
   | .copyBlock _ | .initBlock _ => (3, 0)
   | .store128 | .store256 | .store512 => (2, 0)
   | .init256 | .skipInit => (1, 0)
-  | .staticAddress _ | .staticValue _ | .nullRef => (0, 1)
+  | .staticAddress _ | .staticValue _ | .nullRef | .nullObject => (0, 1)
   | .add .. | .spanCreate | .spanItem _ => (2, 1)
   | .load128 | .load256 | .load512 | .asRef | .bitcast256 | .bitcastByteBool | .bitcastValue ..
   | .createSpan _ | .spanReference | .spanLength | .isNullRef => (1, 1)

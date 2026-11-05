@@ -46,7 +46,7 @@ theorem make_unknown_local (memory : Memory) (activation : Nat) (kind : CIL.Loca
     (notSpan : ∀ width writable, kind ≠ .span width writable)
     (notArray : ∀ element, kind ≠ .array element)
     (notPointer : ∀ signature, kind ≠ .methodPointer signature)
-    (notTable : ∀ signature, kind ≠ .methodTable signature) :
+    (notTable : ∀ signature, kind ≠ .methodTable signature) (notObject : kind ≠ .object) :
     ∃ reference result,
       makeLocal activation kind .unmodeled memory =
         .ok (.bytes kind reference, [reference.allocation], result) ∧
@@ -62,7 +62,8 @@ theorem make_unknown_locals (memory : Memory) (activation : Nat) (kinds : List C
     (notSpan : ∀ kind ∈ kinds, ∀ width writable, kind ≠ .span width writable)
     (notArray : ∀ kind ∈ kinds, ∀ element, kind ≠ .array element)
     (notPointer : ∀ kind ∈ kinds, ∀ signature, kind ≠ .methodPointer signature)
-    (notTable : ∀ kind ∈ kinds, ∀ signature, kind ≠ .methodTable signature) :
+    (notTable : ∀ kind ∈ kinds, ∀ signature, kind ≠ .methodTable signature)
+    (notObject : ∀ kind ∈ kinds, kind ≠ .object) :
     ∃ slots owned result,
       makeLocals activation kinds (kinds.map fun _ => .unmodeled) memory =
         .ok (slots, owned, result) ∧ WritableHomes result memory.nextIdentity kinds slots := by
@@ -72,7 +73,7 @@ theorem make_unknown_locals (memory : Memory) (activation : Nat) (kinds : List C
     obtain ⟨reference, middle, made, writable⟩ :=
       make_unknown_local memory activation kind wellFormed (numeric kind (by simp))
         (notSpan kind (by simp)) (notArray kind (by simp))
-        (notPointer kind (by simp)) (notTable kind (by simp))
+        (notPointer kind (by simp)) (notTable kind (by simp)) (notObject kind (by simp))
     have middleWF := makeLocal_preserves_wellFormed _ _ _ _ _ _ _ wellFormed made
     obtain ⟨slots, owned, result, rest, homes⟩ :=
       ih middle middleWF (fun k member => numeric k (by simp [member]))
@@ -80,6 +81,7 @@ theorem make_unknown_locals (memory : Memory) (activation : Nat) (kinds : List C
         (fun k member => notArray k (by simp [member]))
         (fun k member => notPointer k (by simp [member]))
         (fun k member => notTable k (by simp [member]))
+        (fun k member => notObject k (by simp [member]))
     have fresh := (makeLocal_fresh _ _ _ _ _ _ _ made).2 reference.allocation (by simp)
     have retained := makeLocals_preserves_caller_memory _ _ _ _ _ _ _ rest
     refine ⟨.bytes kind reference :: slots, reference.allocation :: owned, result, ?_, ?_⟩
@@ -127,6 +129,7 @@ theorem unknown_frame_setup (body : CIL.Method)
     (notArray : ∀ kind ∈ body.localKinds, ∀ element, kind ≠ .array element)
     (notPointer : ∀ kind ∈ body.localKinds, ∀ signature, kind ≠ .methodPointer signature)
     (notTable : ∀ kind ∈ body.localKinds, ∀ signature, kind ≠ .methodTable signature)
+    (notObject : ∀ kind ∈ body.localKinds, kind ≠ .object)
     (arguments : body.vectorArgs = []) (parameters : body.parameterHomes = [])
     (opaqueLocals : body.opaqueVectorLocals = []) (memory : Memory) (args : List Value)
     (wellFormed : memory.WellFormed) :
@@ -136,7 +139,7 @@ theorem unknown_frame_setup (body : CIL.Method)
       MemoryBelow memory.nextIdentity memory result ∧ result.WellFormed := by
   obtain ⟨slots, owned, result, made, homes⟩ :=
     make_unknown_locals memory memory.nextIdentity body.localKinds wellFormed numeric notSpan notArray
-      notPointer notTable
+      notPointer notTable notObject
   let frame : Frame := ⟨memory.nextIdentity, slots, owned, [], 0⟩
   have setup : enterFrame body args memory = .ok (frame, result) := by
     simp only [enterFrame, opaqueLocals, makeSelectedLocals, List.isEmpty_nil, ite_true,

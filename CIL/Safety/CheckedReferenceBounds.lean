@@ -64,6 +64,16 @@ theorem Value.Valid.below {memory : Memory} (formed : memory.WellFormed)
     cases reference with
     | null => trivial
     | address address => exact formed.form_below valid
+  | object reference =>
+    cases reference with
+    | null => trivial
+    | address address =>
+      change address.allocation < memory.nextIdentity
+      cases found : memory.allocations address.allocation with
+      | none =>
+        simp [Value.Valid, formObject, liveAllocation, found, checkedAt, Except.mapError,
+          Bind.bind, Except.bind] at valid
+      | some allocation => exact (formed.1 _ _ found).1
 #print axioms Value.Valid.below
 
 /-- A valid evaluation stack supplies all bounds required by allocation renaming. -/

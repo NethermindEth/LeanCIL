@@ -195,6 +195,8 @@ inductive MemoryOp where
   | arrayTransfer (element : ArrayElement) (store : Bool)
   /-- `Unsafe.NullRef<T>` pushes the null reference; `Unsafe.IsNullRef<T>` tests for it. -/
   | nullRef | isNullRef
+  /-- `ldnull` pushes the null object reference, distinct from a null byref. -/
+  | nullObject
   deriving Repr
 
 /-- Every popped operand; no default, so each new operation states what it reads. -/
@@ -219,7 +221,7 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .arrayTransfer _ store => if store then 3 else 2
   | .arrayStore _ => 3
   | .store128 | .store256 | .store512 | .add .. | .spanCreate | .spanItem _ => 2
-  | .staticAddress _ | .staticValue _ | .nullRef | .spanEmpty .. => 0
+  | .staticAddress _ | .staticValue _ | .nullRef | .nullObject | .spanEmpty .. => 0
   | .load128 | .load256 | .load512 | .init256 | .asRef | .bitcast256 | .bitcastByteBool
   | .skipInit | .bitcastValue .. | .createSpan _ | .spanReference | .spanLength | .isNullRef => 1
 

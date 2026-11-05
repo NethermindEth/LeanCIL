@@ -23,6 +23,8 @@ namespace CIL.Extraction
 /-- The evaluation-stack kind of a value, as far as scalar encodings care. -/
 inductive ScalarKind where
   | word32 | word64 | native | reference | nullObject | other
+  /-- A class instance reference of an admitted object type. -/
+  | object
   | array (element : ArrayElement)
   | enumSpan (element : ArrayElement) (writable : Bool) (reference : Bool)
   | methodPointer (signature : ManagedSignature)
@@ -46,6 +48,7 @@ def scalarType : TypeExpr → ScalarKind
     | some signature => .methodTable signature
     | none => (arrayElementType element).map ScalarKind.array |>.getD .other
   | type@(.functionPointer ..) => (managedSignature type).map ScalarKind.methodPointer |>.getD .other
+  | .object .. => .object
   | type@(.apply _ element@(.enum ..)) =>
     match spanStorage type, arrayElementType element with
     | some (.span _ writable), some identity => .enumSpan identity writable false
@@ -64,7 +67,7 @@ private def numeric (kind : ScalarKind) : Bool := kind ∈ [.word32, .word64, .n
     share one representation on the admitted 64-bit targets. -/
 private def storageCompatible (value home : ScalarKind) : Bool :=
   value == home || (value == .nullObject &&
-    (match home with | .array _ | .methodTable _ => true | _ => false)) ||
+    (match home with | .array _ | .methodTable _ | .object => true | _ => false)) ||
     value ∈ [.word64, .native] && home ∈ [.word64, .native]
 
 /-- Two-operand arithmetic: `add` through `xor`, the overflow-checked forms, and `ceq`
@@ -236,11 +239,15 @@ private def mixedNative (left right : ScalarKind) : Bool :=
 private def compatibleBinary (left right : ScalarKind) : Bool :=
   numeric left && numeric right && (left == right || mixedNative left right)
 
-/-- Object null supports equality; only managed references support unsigned ordering. -/
+/-- Object references and null support equality, and `cgt.un` against null tests presence;
+    only managed references support unsigned ordering. -/
 private def referenceComparison (opcode : Nat) (left right : ScalarKind) : Bool :=
-  left == right &&
+  (left == right &&
     ((opcode ∈ [46, 51, 59, 64, 65025] && left ∈ [.reference, .nullObject]) ||
-      (opcode ∈ [52, 53, 54, 55, 65, 66, 67, 68, 65027, 65029] && left == .reference))
+      (opcode ∈ [52, 53, 54, 55, 65, 66, 67, 68, 65027, 65029] && left == .reference))) ||
+    (opcode ∈ [46, 51, 59, 64, 65025] && left ∈ [.object, .nullObject] &&
+      right ∈ [.object, .nullObject]) ||
+    (opcode == 65027 && left == .object && right == .nullObject)
 
 /-- Mixed native/int32 operands require exactly one `nativeBinary` wrapper; any other pair
     forbids it. -/
@@ -275,15 +282,15 @@ def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind) (em
   else if instruction.opcode == 65054 then
     instruction.operand == .none && match emitted with | .nop => true | _ => false
   else if instruction.opcode == 20 then
-    instruction.operand == .none && match emitted with | .memory .nullRef => true | _ => false
+    instruction.operand == .none && match emitted with | .memory .nullObject => true | _ => false
   else if instruction.opcode ∈ [44, 45, 57, 58] then
     match instruction.operand, stack, emitted with
     | .target target, value :: _, .brzero actual =>
       instruction.opcode ∈ [44, 57] && target == actual &&
-        (numeric value || value ∈ [.reference, .nullObject])
+        (numeric value || value ∈ [.reference, .nullObject, .object])
     | .target target, value :: _, .brnonzero actual =>
       instruction.opcode ∈ [45, 58] && target == actual &&
-        (numeric value || value ∈ [.reference, .nullObject])
+        (numeric value || value ∈ [.reference, .nullObject, .object])
     | _, _, _ => false
   else if 21 <= instruction.opcode && instruction.opcode <= 33 then
     match literal instruction, emitted with
@@ -458,7 +465,7 @@ private def joinBytes (separator : List UInt8) : List (List UInt8) → List UInt
     method type parameter, `&` and `*` suffixes, and `<...>` for generic arguments. -/
 private def scalarTypeBytes : TypeExpr → Option (List UInt8)
   | .void => some (signatureBytes "System.Void")
-  | .atom _ name | .constructor _ name => some (signatureBytes name)
+  | .atom _ name | .constructor _ name | .object _ name => some (signatureBytes name)
   | type@(.aggregate ..) => signatureBytes <$> spanElementName type
   -- Enum names cannot contain generic owner arguments.
   | .enum identity _ => (splitBytes (signatureBytes identity) [58, 58])[1]?
@@ -727,7 +734,7 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     if instruction.operand == .none then return .nullObject :: stack else none
   if opcode ∈ [44, 45, 57, 58] then
     let value :: tail := stack | none
-    if numeric value || value ∈ [.reference, .nullObject] then return tail else none
+    if numeric value || value ∈ [.reference, .nullObject, .object] then return tail else none
   if compareBranch opcode then
     let right :: left :: tail := stack | none
     if compatibleBinary left right || referenceComparison opcode left right then return tail else none
@@ -791,7 +798,7 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     let pops := expected.length
     if !callParametersMatch site || pops > stack.length || !((inputs.take pops).zip expected).all (fun (value, home) =>
         value == home || (value == .nullObject &&
-          (match home with | .array _ | .methodTable _ => true | _ => false))) ||
+          (match home with | .array _ | .methodTable _ | .object => true | _ => false))) ||
         site.returnsValue != (site.returnType != .void) then none else
       return (if opcode == 115 then [scalarType site.declaringType]
         else if site.returnsValue then [callResult site] else []) ++ stack.drop pops
