@@ -544,12 +544,10 @@ internal static class MetadataValidation
             Reject(() => method.IsStatic == method.HasThis || method.ExplicitThis ||
                     method.CallingConvention != MethodCallingConvention.Default,
                 "Unsupported method metadata: calling convention or this parameter");
-            Reject(() => !method.IsStatic && !method.IsConstructor &&
+            Reject(() => method.HasThis && !method.IsStatic &&
                     !IsAggregate(MethodSpecialization.DeclaringType(method), module),
-                "Unsupported method metadata: instance method of a reference type");
-            Reject(() => method.IsConstructor && !method.IsStatic &&
-                    !IsAggregate(MethodSpecialization.DeclaringType(method), module),
-                "Unsupported method metadata: constructor of a reference type");
+                $"Unsupported class instance method: {method.FullName}\n" +
+                "  Instance methods are admitted on value types only; class instances are not modelled.");
             Reject(() => (method.ImplAttributes & MethodImplAttributes.Synchronized) != 0,
                 "Unsupported method metadata: synchronized method");
             Reject(() => method.HasGenericParameters,
@@ -572,7 +570,7 @@ internal static class MetadataValidation
                 $"Unsupported static initialisation: {owner} has a static constructor\n" +
                 "  It is never extracted. If every caller runs it first, pass " +
                 $"--assume-initialized {owner}; this records a caller precondition and does not prove it.");
-            Check(method, null, () => InReferences.RejectTwins(method), named: true);
+            Check(method, null, () => ModifierTwins.Reject(method), named: true);
             Check(method, null, () =>
             {
                 // Reference-type and open generic receivers are reported above; only a closed struct has a layout.
@@ -584,7 +582,8 @@ internal static class MetadataValidation
                 if (method.IsConstructor && !method.IsStatic &&
                     (method.Name != ".ctor" || !method.HasThis || method.ReturnType.MetadataType != MetadataType.Void))
                     throw new InvalidDataException($"Unsupported constructor signature: {method.FullName}");
-                Type(method.ReturnType, module, returns: true, architecture: profile.Architecture);
+                Type(InitAccessors.Return(method.ReturnType), module, returns: true,
+                    architecture: profile.Architecture);
             }, named: true);
             foreach (ParameterDefinition parameter in method.Parameters)
                 Check(method, null, () =>

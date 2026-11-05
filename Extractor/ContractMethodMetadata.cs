@@ -101,17 +101,22 @@ internal static class ContractMethodMetadata
     }
 
     // Imported and exported signatures admit no modifier: their methods are static and non-virtual.
-    internal static void RejectModifiers(MethodReference method) => RejectModifiers(method, inParameters: false);
+    internal static void RejectModifiers(MethodReference method) => RejectModifiers(method, selected: false);
 
-    // A selected method may carry `modreq(InAttribute)` on a by-reference parameter and nowhere else.
-    static void RejectModifiers(MethodReference method, bool inParameters)
+    // A selected method may carry `modreq(InAttribute)` on a by-reference parameter and
+    // `modreq(IsExternalInit)` on a void return, and nowhere else.
+    static void RejectModifiers(MethodReference method, bool selected)
     {
         RejectModifiers(method.DeclaringType);
-        RejectModifiers(method.ReturnType);
+        if (selected && !InitAccessors.Is(method.ReturnType) && InReferences.Modified(method.ReturnType))
+            throw Shape("Custom modifiers are unsupported in method returns, except " +
+                "modreq(System.Runtime.CompilerServices.IsExternalInit) directly on System.Void: " +
+                method.ReturnType.FullName, ModifiedTypeKey, method.ReturnType.FullName);
+        if (!selected) RejectModifiers(method.ReturnType);
         foreach (ParameterDefinition parameter in method.Parameters)
         {
-            if (inParameters && InReferences.Is(parameter.ParameterType)) continue;
-            if (inParameters && InReferences.Modified(parameter.ParameterType))
+            if (selected && InReferences.Is(parameter.ParameterType)) continue;
+            if (selected && InReferences.Modified(parameter.ParameterType))
                 throw Shape("Custom modifiers are unsupported in method signatures, except " +
                     "System.Runtime's modreq(InAttribute) directly on a by-reference parameter: " +
                     parameter.ParameterType.FullName, ModifiedTypeKey, parameter.ParameterType.FullName);
@@ -185,8 +190,8 @@ internal static class ContractMethodMetadata
     static Selection Instantiate(MethodDefinition definition, TypeReference[] arguments, string architecture,
         bool entry = false)
     {
-        RejectModifiers(definition, inParameters: true);
-        InReferences.RejectTwins(definition);
+        RejectModifiers(definition, selected: true);
+        ModifierTwins.Reject(definition);
         // An entry may be a static method of a generic class: method arguments come first, then the owner's.
         int ownerArity = definition.DeclaringType.GenericParameters.Count;
         if ((ownerArity != 0 && (!entry || !definition.IsStatic)) ||

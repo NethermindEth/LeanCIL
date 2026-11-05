@@ -65,6 +65,17 @@ public struct Point
     public int X { get; init; }
 }
 
+public static class Views
+{
+    static int value;
+
+    public static ref readonly int Peek(int x)
+    {
+        value = new decimal[x].Length;
+        return ref value;
+    }
+}
+
 public struct Cell<T>
 {
     public int Twice(int x) => new decimal[x].Length + x;
@@ -100,7 +111,8 @@ File.WriteAllText(manifest, JsonSerializer.Serialize(new
         new { signature = "Signatures::Measure(string,int)", profile = "scalar" },
         new { signature = "Point::set_X(int)", profile = "scalar" },
         new { signature = "Cell`1::Twice(int)", profile = "scalar" },
-        new { signature = "Seeded::.cctor()", profile = "scalar" }
+        new { signature = "Seeded::.cctor()", profile = "scalar" },
+        new { signature = "Views::Peek(int)", profile = "scalar" }
     }
 }));
 var report = Path.Combine(directory, "blockers.json");
@@ -118,7 +130,7 @@ void Require(bool condition, string message)
 string[] Ids(int index) => entries[index].GetProperty("blockers").EnumerateArray().Select(e => e.GetString()!).ToArray();
 
 string[] expected = ["admitted", "blocked", "blocked", "admitted", "blocked", "notChecked", "notChecked", "blocked",
-    "admitted", "notChecked", "notChecked", "blocked", "blocked", "blocked", "blocked", "blocked"];
+    "admitted", "notChecked", "notChecked", "blocked", "blocked", "admitted", "blocked", "blocked", "blocked"];
 Require(entries.Select(e => e.GetProperty("status").GetString()).SequenceEqual(expected), "Wrong entry classification");
 Require(entries[0].GetProperty("method").GetString() == "System.UInt64 Fixture::Admitted(System.UInt64,System.UInt64)" &&
     entries[0].GetProperty("reachableMethods").GetInt32() == 1, "Admitted entry lost its resolved method");
@@ -134,18 +146,21 @@ string[] Reached(JsonElement blocker) => blocker.GetProperty("entries").Enumerat
 string Id(JsonElement blocker) => blocker.GetProperty("id").GetString()!;
 Require(blockers.Select(b => b.GetProperty("construct").GetString()).Order(StringComparer.Ordinal)
     .SequenceEqual([
-        "Custom modifiers are unsupported in typed contract signatures: System.Void " +
-            "modreq(System.Runtime.CompilerServices.IsExternalInit)",
+        "Custom modifiers are unsupported in method returns, except " +
+            "modreq(System.Runtime.CompilerServices.IsExternalInit) directly on System.Void: " +
+            "System.Int32& modreq(System.Runtime.InteropServices.InAttribute)",
         "Rejected external call: System.Int32 System.Environment::get_ProcessorCount()",
         "Rejected external call: System.Int32 System.Environment::get_TickCount()",
         "Rejected external call: System.Int32 System.GC::GetGeneration(System.Object)",
         "Unsupported aggregate layout: Counter",
+        "Unsupported class instance method: System.Int32 Counter::Add(System.Int32)",
         "Unsupported instruction: newarr System.Decimal",
         "Unsupported instruction: newarr System.Double",
         "Unsupported instruction: newarr System.Single",
-        "Unsupported method metadata: instance method of a reference type",
         "Unsupported method metadata: member of an open generic type",
+        "Unsupported static field load: System.Int32 Views::value",
         "Unsupported static field store: stsfld System.Int32 Seeded::Seed",
+        "Unsupported static field store: stsfld System.Int32 Views::value",
         "Unsupported static initialisation: static constructors are never extracted",
         "Unsupported type: System.String"]),
     "Expected one blocker per unsupported construct");
@@ -204,7 +219,7 @@ Require(entries[9].GetProperty("reason").GetString()!.Contains("Closed entry typ
     "Reference type argument not rejected at selection");
 Require(entries[10].GetProperty("reason").GetString()!.Contains("`typeArguments` must be an array"),
     "Malformed type arguments accepted");
-Require(summary.Contains("3 admitted, 9 blocked, 4 not checked") && summary.Contains("nothing here is proved") &&
+Require(summary.Contains("4 admitted, 9 blocked, 4 not checked") && summary.Contains("nothing here is proved") &&
     !summary.Contains("verified", StringComparison.OrdinalIgnoreCase), "Summary overstates or misses counts");
 // A rejected signature or receiver does not hide the body: its unsupported instruction is reported too.
 string[] Constructs(int index) => Ids(index).Select(id => blockers.Single(b => Id(b) == id)
@@ -216,15 +231,17 @@ Require(Constructs(12).Order(StringComparer.Ordinal).SequenceEqual(
         s.GetProperty("method").GetString() == "System.Int32 Signatures::Measure(System.String,System.Int32)"),
     "Rejected signature hid the body's blockers: " + string.Join("; ", Constructs(12)));
 Require(Constructs(11).Order(StringComparer.Ordinal).SequenceEqual([
-        "Unsupported aggregate layout: Counter", "Unsupported instruction: newarr System.Decimal",
-        "Unsupported method metadata: instance method of a reference type"]),
+        "Unsupported aggregate layout: Counter",
+        "Unsupported class instance method: System.Int32 Counter::Add(System.Int32)",
+        "Unsupported instruction: newarr System.Decimal"]),
     "Reference-type receiver hid the body's blockers: " + string.Join("; ", Constructs(11)));
 // A resolved entry of rejected shape is blocked, not unchecked, and its definition is still analysed.
 // One condition is one blocker: the shape names the modifier, and the walk names the open generic owner.
-Require(Constructs(13).Single(c => c.Contains("IsExternalInit")).StartsWith("Custom modifiers are unsupported",
+Require(Constructs(16).Single(c => c.Contains("InAttribute")).StartsWith("Custom modifiers are unsupported",
         StringComparison.Ordinal) &&
-    entries[13].GetProperty("method").GetString()!.EndsWith("Point::set_X(System.Int32)", StringComparison.Ordinal),
-    "Init-only setter not analysed past its modifier: " + string.Join("; ", Constructs(13)));
+    Constructs(16).Contains("Unsupported instruction: newarr System.Decimal") &&
+    entries[16].GetProperty("method").GetString()!.EndsWith("Views::Peek(System.Int32)", StringComparison.Ordinal),
+    "Modified return not analysed past its modifier: " + string.Join("; ", Constructs(16)));
 Require(Constructs(14).Contains("Unsupported method metadata: member of an open generic type") &&
     !Constructs(14).Contains("Contract method requires an exact closed generic instantiation.") &&
     Constructs(14).Contains("Unsupported instruction: newarr System.Decimal"),

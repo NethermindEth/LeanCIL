@@ -4,13 +4,6 @@ namespace Nethermind.LeanCIL;
 
 internal static class CallReturnType
 {
-    /// <summary>Whether a return pushes no value; a modifier such as `modreq(IsExternalInit)` keeps `void`.</summary>
-    internal static bool IsVoid(TypeReference type)
-    {
-        while (type is IModifierType modified) type = modified.ElementType;
-        return type.MetadataType == MetadataType.Void;
-    }
-
     internal static TypeReference Resolve(MethodReference method) => Substitute(method.ReturnType, method);
 
     internal static IEnumerable<TypeReference> Parameters(MethodReference method) =>

@@ -140,7 +140,7 @@ internal sealed class FeatureConstants
             case Code.Calli:
                 var indirect = (Mono.Cecil.CallSite)instruction.Operand;
                 for (var index = 0; index < indirect.Parameters.Count + 1; index++) Pop();
-                if (!CallReturnType.IsVoid(indirect.ReturnType)) _stack.Add(null);
+                if (indirect.ReturnType.MetadataType != MetadataType.Void) _stack.Add(null);
                 return;
             case Code.Call: case Code.Callvirt: case Code.Newobj:
                 MethodReference callee = (MethodReference)instruction.Operand;
@@ -152,11 +152,12 @@ internal sealed class FeatureConstants
                     _stack.Add(constant);
                 else if (FeatureProfile.Getter(callee) is Feature feature)
                     _stack.Add(profile.Get(feature) ? 1 : 0);
-                else if (code == Code.Newobj || !CallReturnType.IsVoid(callee.ReturnType))
+                else if (code == Code.Newobj ||
+                    InitAccessors.Return(callee.ReturnType).MetadataType != MetadataType.Void)
                     _stack.Add(null);
                 return;
             case Code.Ret:
-                if (!CallReturnType.IsVoid(method.ReturnType)) Pop();
+                if (InitAccessors.Return(method.ReturnType).MetadataType != MetadataType.Void) Pop();
                 return;
         }
 

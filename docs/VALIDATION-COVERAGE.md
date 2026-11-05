@@ -620,9 +620,15 @@ Nested struct validation: 123 runtime/layout comparisons passed, including sixte
 combinations. A universal nested snapshot proof passed and rejected an incorrect implementation.
 Seven malformed layouts and seven semantic memory-fault cases were rejected.
 
-Struct instance-call validation: 96 runtime comparisons passed, including short and full argument
-encodings, by-value copy isolation and direct constructor calls. A universal instance store/load
-proof passed and rejected an incorrect implementation. Four malformed metadata cases were rejected.
+Struct instance-call validation: 132 runtime comparisons passed, including short and full argument
+encodings, by-value copy isolation, direct constructor calls and a call to an `init` accessor,
+which is also proved as an entry, and with the marker declared locally or by another
+System.Runtime version. A universal instance store/load proof passed and rejected an incorrect
+implementation. Four malformed metadata cases were rejected. For the `init` modifier, `modopt`,
+another `modreq` type, a same-named marker in another namespace and a value-returning or
+parameter placement are rejected by name, both as an entry and behind its caller; selectors and
+recorded entries tell the accessor from a plain void setter, and both members of a
+modifier-only pair are rejected. An `init` accessor export is rejected as non-static.
 
 Struct construction validation: 56 runtime comparisons passed, covering packed and nested structs,
 chained and parameterless constructors, zero-initialized storage and checked arithmetic faults. A

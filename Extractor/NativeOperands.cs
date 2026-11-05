@@ -201,7 +201,7 @@ internal static class NativeOperands
                 for (var index = 0; index < signature.Parameters.Count; index++) Pop();
                 if (instruction.Previous?.OpCode.Code == Code.Tail && stack.Count != 0)
                     throw new InvalidDataException("Tail call requires exactly its arguments on the evaluation stack");
-                if (!CallReturnType.IsVoid(signature.ReturnType)) stack.Add(Type(signature.ReturnType));
+                if (signature.ReturnType.MetadataType != MetadataType.Void) stack.Add(Type(signature.ReturnType));
             }
             else if (code == Code.Ldelem_I && stack.Count >= 2 && stack[^2].Kind == Kind.MethodTable)
             {
@@ -215,15 +215,15 @@ internal static class NativeOperands
             {
                 var callee = (MethodReference)instruction.Operand;
                 for (var index = 0; index < callee.Parameters.Count + (code != Code.Newobj && callee.HasThis ? 1 : 0); index++) Pop();
-                if (code == Code.Newobj || !CallReturnType.IsVoid(callee.ReturnType))
+                if (code == Code.Newobj || InitAccessors.Return(callee.ReturnType).MetadataType != MetadataType.Void)
                     stack.Add(code == Code.Newobj ? Type(callee.DeclaringType) : CallType(callee, profile));
             }
             else if (code == Code.Ret)
             {
-                var actual = !CallReturnType.IsVoid(method.ReturnType) ? Pop() : Kind.Other;
+                var returned = InitAccessors.Return(method.ReturnType);
+                var actual = returned.MetadataType != MetadataType.Void ? Pop() : Kind.Other;
                 if (MethodSpecialization.Source(method) is not null &&
-                    (stack.Count != 0 ||
-                        (!CallReturnType.IsVoid(method.ReturnType) && actual != Type(method.ReturnType))))
+                    (stack.Count != 0 || (returned.MetadataType != MetadataType.Void && actual != Type(returned))))
                     throw new InvalidDataException($"Unsupported generic return stack type: {method.FullName}");
             }
             else
