@@ -7,7 +7,7 @@ namespace Nethermind.LeanCIL;
 
 internal static partial class Program
 {
-    const string Usage = "Usage: leancil list assembly.dll\n       leancil templates output-directory extraction-directory...\n       leancil lint-exceptions output-directory --documentation assembly.xml\n       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory [profile|@profile.json] [--assembly 'assembly name or full identity'] [--type-argument System.UInt64]... [--assume-initialized Namespace.Type]... [--reference Lib.dll]... [--import Lib.leancil.contracts] [--import-implementation Lib=path] [--import-sha256 Lib=hex] [--import-interface-sha256 Lib=hex]\n       leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]\n       leancil workspace assembly.dll method --profile profile --proof proof.lean [--proof-root package-directory] [--output workspace-directory]\n       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] [--assembly 'assembly name or full identity'] [--reference Lib.dll]...\n       leancil check output-directory [--assembly-path assembly.dll] [--assembly 'assembly name or full identity']\n       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--rebuild-library] [--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory]...\n       leancil verify-batch requests.json [--fresh] [--rebuild-library] [--parallel count] [--results results.json]\n       leancil audit-library --project package-directory --module M... --prefix P... [--axioms a,b,c] [--results results.json]\n       leancil --version";
+    const string Usage = "Usage: leancil list assembly.dll\n       leancil templates output-directory extraction-directory...\n       leancil lint-exceptions output-directory --documentation assembly.xml\n       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory [profile|@profile.json] [--assembly 'assembly name or full identity'] [--type-argument System.UInt64]... [--assume-initialized Namespace.Type]... [--reference Lib.dll]... [--import Lib.leancil.contracts] [--import-implementation Lib=path] [--import-sha256 Lib=hex] [--import-interface-sha256 Lib=hex]\n       leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]\n       leancil workspace assembly.dll method --profile profile --proof proof.lean [--proof-root package-directory] [--output workspace-directory]\n       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] [--assembly 'assembly name or full identity'] [--reference Lib.dll]...\n       leancil check output-directory [--assembly-path assembly.dll] [--assembly 'assembly name or full identity']\n       leancil new-proof extraction-directory proof.lean\n       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--rebuild-library] [--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory]...\n       leancil verify-batch requests.json [--fresh] [--rebuild-library] [--parallel count] [--results results.json]\n       leancil audit-library --project package-directory --module M... --prefix P... [--axioms a,b,c] [--results results.json]\n       leancil --version";
 
     internal static int CheckExtraction(string output) => Main(["check", output]);
 
@@ -27,7 +27,8 @@ internal static partial class Program
     }
 
     static int Run(string[] args, ExtractionBatch? batch = null,
-        Action<TemplateEmitter.Variant>? checkedTemplate = null, TextWriter? report = null, bool rethrow = false)
+        Action<TemplateEmitter.Variant>? checkedTemplate = null, TextWriter? report = null, bool rethrow = false,
+        Action<ProofOutline.Extraction>? inspect = null)
     {
         report ??= Console.Out;
         if (args.Length == 0 || args is ["--help"] or ["-h"])
@@ -59,6 +60,12 @@ internal static partial class Program
             {
                 stage = "editor workspace";
                 global::Program.CreateProofWorkspace(args[1..]);
+                return 0;
+            }
+            if (args[0] == "new-proof")
+            {
+                stage = "proof outline";
+                ProofOutline.Run(args[1..], ReadChecked);
                 return 0;
             }
             if (args[0] == "templates")
@@ -325,7 +332,7 @@ internal static partial class Program
             }
             stage = "metadata and CIL validation";
             LeanEmitter.Emission emitted = LeanEmitter.Emit(methods, profile, pinned, imports,
-                staticIdentities, collectTemplates: checkedTemplate is not null);
+                staticIdentities, collectTemplates: checkedTemplate is not null || inspect is not null);
             string source = emitted.Source;
             var loadedValues = methods.SelectMany(m => Reachability.Analyze(m, profile)).Where(StaticValues.IsLoad)
                 .Select(i => StaticValues.Resolve((FieldReference)i.Operand, module, profile.Architecture)).ToArray();
@@ -448,6 +455,8 @@ internal static partial class Program
                 report.WriteLine($"  Unknown static value: {name} is not computed; " +
                     "loads read the caller's static binding.");
             checkedTemplate?.Invoke(new(output, assemblyHash, profile, emitted.Templates));
+            if (args[0] == "check")
+                inspect?.Invoke(new(methods, emitted.Templates, emitted.LayoutIdentities, source));
         }
         catch (Exception exception)
         {
@@ -456,6 +465,12 @@ internal static partial class Program
             return 1;
         }
         return 0;
+    }
+
+    // Outline only an extraction the ordinary check has matched, while its methods are still loaded.
+    static void ReadChecked(string directory, Action<ProofOutline.Extraction> outline)
+    {
+        Run(["check", directory], report: TextWriter.Null, rethrow: true, inspect: outline);
     }
 
     // Capture only after the ordinary check has matched every extraction artifact.
