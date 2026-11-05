@@ -150,6 +150,28 @@ if (wrongHeadText.Code != 1 || !wrongHeadText.Stderr.Contains("cil_loop_steps: t
     throw new InvalidOperationException("The default report changed for a loop failure: " + wrongHeadText.Output);
 Console.WriteLine("PASS CLI --format json reports each failure with its obligation, pc and state, and success");
 
+// `--trace` passes each step the loop tactics take through, apart from the proof's messages, in text and in
+// JSON; without it the report has no trace.
+var countdownProof = At("Examples/Proofs/Countdown.lean");
+var traced = Execute([.. cli, "verify", loopOutput, "--proof", countdownProof, "--trace"]);
+var tracedText = traced.Stdout.ReplaceLineEndings("\n");
+var tracedMessages = tracedText[..Math.Max(0, tracedText.IndexOf("  Trace (", StringComparison.Ordinal))];
+if (traced.Code != 0 || !tracedText.Contains("  Trace (") ||
+    !tracedText.Contains("Countdown.lean:31:8: [CIL.loop] pc 0: CIL.Op.arg 0\n") ||
+    tracedMessages.Contains("[CIL.loop]"))
+    throw new InvalidOperationException("verify --trace did not report the loop steps apart: " + traced.Output);
+var tracedReport = JsonNode.Parse(Execute([.. cli, "verify", loopOutput, "--proof", countdownProof, "--trace",
+    "--format", "json"]).Stdout) as JsonObject;
+var steps = tracedReport?["trace"]?.AsArray().Select(step => step!["text"]!.GetValue<string>()).ToArray() ?? [];
+if (steps.Length == 0 || !steps.All(step => step.StartsWith("[CIL.loop] pc ", StringComparison.Ordinal)) ||
+    tracedReport!["messages"]!.AsArray().Any(message => message!["text"]!.GetValue<string>().Contains("[CIL.loop]")))
+    throw new InvalidOperationException("verify --trace --format json did not report the steps in `trace`: " +
+        tracedReport?.ToJsonString());
+var untraced = Execute([.. cli, "verify", loopOutput, "--proof", countdownProof]);
+if (untraced.Code != 0 || untraced.Stdout.Contains("[CIL.loop]") || untraced.Stdout.Contains("Trace ("))
+    throw new InvalidOperationException("verify without --trace printed a trace: " + untraced.Output);
+Console.WriteLine("PASS CLI --trace reports each loop step apart from the proof's messages, and only when asked");
+
 // This theorem proves invalid memory access cannot produce a successful execution.
 var memoryOutput = At("artifacts/CliMemory");
 Run([.. cli, "extract", assembly, "Arithmetic::PastEnd(ulong&)", memoryOutput]);
@@ -283,6 +305,15 @@ if (unfinished.Code != 1 || !unfinishedText.Contains("Stage: proof checking") ||
         unfinished.Output);
 RequireSourceLocations(unfinishedText,
     "artifacts/CliConsumer/Package/Proofs/Unfinished.lean:5:2 (building Proofs.Unfinished)");
+// A --proof-root report cites the package's own file and module, as the text report does.
+var unfinishedJson = Execute([.. cli, "verify", consumerOutput, "--proof", unfinishedProof,
+    "--proof-root", consumerPackage, "--format", "json"]);
+var unfinishedFailure = (JsonNode.Parse(unfinishedJson.Stdout) as JsonObject)?["failures"]?[0];
+if (unfinishedJson.Code != 1 || unfinishedJson.Stderr.Length != 0 ||
+    unfinishedFailure?["module"]?.GetValue<string>() != "Proofs.Unfinished" ||
+    unfinishedFailure["source"]?["file"]?.GetValue<string>() != Path.GetFullPath(unfinishedProof))
+    throw new InvalidOperationException("A --proof-root JSON report did not cite the package's file: " +
+        unfinishedJson.Output);
 Console.WriteLine("PASS CLI shows Lean messages, with control characters escaped, when a --proof-root proof fails");
 
 // A starting proof must elaborate yet be refused until its holes are filled, must never replace a

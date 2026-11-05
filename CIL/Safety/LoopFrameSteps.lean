@@ -144,6 +144,8 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
   let saved ← saveState
   let some (source, _) ← loopGoalStates (← getMainTarget) | return false
   let some parts ← loopStateParts? source | return false
+  -- The goal before the store, kept only for its trace.
+  let before ← if ← isTracingEnabledFor `CIL.loop then some <$> getMainGoal else pure none
   let fetched ← observing? (loopFetch facts)
   saved.restore
   let some { op, found, instruction, .. } := fetched | return false
@@ -219,7 +221,12 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
   if let some caller := caller then
     unless caller == memory do
       loopCarryConfined caller (← `(($framed).confined)) (← `((by assumption))) #[]
-  unless takesStep do return true
+  let lemma := if op.isAppOf ``CIL.Op.setFieldAt then ``CIL.Safety.LoopFrame.store_field
+    else if op.isAppOf ``CIL.Op.initAggregate then ``CIL.Safety.LoopFrame.zero_aggregate
+    else ``CIL.Safety.LoopFrame.store
+  unless takesStep do
+    if let some goal := before then loopTraceStep goal (.ofConstName lemma) (some op)
+    return true
   -- Taking the store's step puts its memory in the goal, so the regathered facts are about it.
   let taken ← saveState
   try
@@ -228,6 +235,9 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
     Term.withoutErrToSorry <| withoutRecover <| evalTactic (← `(tactic|
       refine CIL.Safety.loop_terminates_next $found $instruction ($stepped _ _ _ _ _) ?_))
   catch _ => taken.restore
+  if let some goal := before then
+    loopTraceStep goal m!"{MessageData.ofConstName lemma} and \
+      {MessageData.ofConstName ``CIL.Safety.loop_terminates_next}" (some op)
   return true
 
 /-- The layouts each `AggregateLayout.encode` in `expression` names. -/
@@ -592,6 +602,13 @@ elab_rules : tactic
     let some parts ← withMainContext do loopStateParts? source
       | throwError "cil_loop_call: the source state does not reduce to a literal state"
     let saved ← saveState
+    -- The goal at the call and its instruction, kept only for its trace.
+    let before ← if ← isTracingEnabledFor `CIL.loop then do
+        let goal ← getMainGoal
+        let fetched ← observing? (loopFetch facts)
+        saved.restore
+        pure (some (goal, fetched.map (·.op)))
+      else pure none
     try
       Term.withoutErrToSorry <| withoutRecover <|
         evalTactic (← `(tactic| refine CIL.Safety.loop_terminates_call $holds $input
@@ -615,6 +632,9 @@ elab_rules : tactic
       try first | trivial | assumption))))
     for goal in open_ do goal.setTag precondition
     setGoals (open_ ++ remaining)
+    if let some (goal, op) := before then
+      loopTraceStep goal m!"{MessageData.ofConstName ``CIL.Safety.loop_terminates_call} with \
+        {holds}" op
 
 /-- Close `goal`, a head state's frame, with a frame fact at the reached memory: one of its type,
     or one whose span and reference slots differ from it, through `LoopFrame.set_local`. -/
@@ -714,6 +734,8 @@ elab_rules : tactic
           unknown := #[("expected", "the head is not instantiated at these values; the \
             message says how it differs")] }
     let saved ← saveState
+    -- The goal at the loop head, kept only for its trace.
+    let before ← if ← isTracingEnabledFor `CIL.loop then some <$> getMainGoal else pure none
     let memoryTerm ← withMainContext do Term.exprToSyntax memory
     let framed ← `(?headFrame)
     let applied ← `(tactic| refine $hypothesis ⟨$values, $memoryTerm, $framed⟩ $holes*)
@@ -735,5 +757,7 @@ elab_rules : tactic
     setGoals (goals.filter (· != frameGoal))
     for goal in goals do
       if let some index := holeNames.idxOf? (← goal.getTag) then goal.setTag tags[index]!
+    if let some goal := before then
+      loopTraceStep goal m!"{hypothesis} at {values}" none
 
 end CIL.Safety

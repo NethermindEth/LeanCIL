@@ -533,6 +533,24 @@ both from the state's frame. [Countdown](../Examples/Proofs/Countdown.lean) and
 [SpanSum](../Examples/Proofs/SpanSum.lean) store through their frames this way; SpanSum's loop
 steps name no frame or span fact.
 
+### See what the loop tactics did
+
+With `set_option trace.CIL.loop true`, each instruction `cil_loop_steps`, `cil_loop_advance`,
+`cil_loop_finish`, `cil_loop_recurse` and `cil_loop_call` take, including a frame store or
+return, logs a `[CIL.loop]` trace: the pc and instruction, the source line from
+`ExtractedSymbols` when the proof imports it, the lemma applied, each hypothesis the step's proof
+term mentions, the parts of the state that changed and the tags of the goals left. A hypothesis
+whose statement is a `SpanApart`, `Writable`, `Filled` or `CheckedSpan` fact also says what it
+establishes, such as that the footprints are disjoint, and appears only when the step used it.
+With the option unset nothing is built or printed. `leancil verify --trace` checks the proof with
+it set and reports the steps apart from the proof's messages.
+
+When one of these tactics fails with `set_option cil.diagnostics true`, its error ends with a
+line starting `[LeanCIL failure v1] `, a JSON record of the method, pc and instruction it reached,
+the reached and expected state, the kind of fact it lacks and the obligation its goal is, each
+unknown field with its reason. `leancil verify --format json` sets the option and reports these
+records; the error text before the line is unchanged.
+
 ## Read control flow off one step
 
 `CIL.Safety.StepFlow` says where a successful `step` can go without unfolding it.

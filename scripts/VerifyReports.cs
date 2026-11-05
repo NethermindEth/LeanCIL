@@ -172,7 +172,8 @@ internal static partial class VerifyReports
     /// <summary>The report of a run: `verified`, or `failed` with one record per failure, never both.</summary>
     internal static JsonObject Result(string result, FailureReports.Report? failure, string theorem, string proof,
         string output, string? proofRoot, string? stage, string[]? axioms, string? statement,
-        IEnumerable<(string Severity, int Line, int Column, string Text)> messages)
+        IEnumerable<(string Severity, int Line, int Column, string Text)> messages,
+        IEnumerable<(string Severity, int Line, int Column, string Text)>? trace = null, bool traceRequested = false)
     {
         var methods = Methods(output);
         var failures = new JsonArray();
@@ -205,8 +206,19 @@ internal static partial class VerifyReports
                 ["file"] = proof, ["line"] = message.Line, ["column"] = message.Column,
                 ["severity"] = message.Severity, ["text"] = message.Text
             })]),
+            // Each step a loop tactic took, as Lean traced it under `--trace`.
+            ["trace"] = trace is null ? null : new JsonArray([.. trace.Select(step => (JsonNode?)new JsonObject
+            {
+                ["file"] = proof, ["line"] = step.Line, ["column"] = step.Column, ["text"] = step.Text
+            })]),
+            ["unknown"] = trace is not null ? new JsonObject() : new JsonObject
+            {
+                ["trace"] = traceRequested ? "the proof was not checked, so no step was traced"
+                    : "not requested; --trace traces each step the loop tactics take"
+            },
             ["rerun"] = new JsonArray([.. FailureReports.Rerun(theorem, proof, output, proofRoot)
-                .Concat(["--format", "json"]).Select(argument => (JsonNode?)argument)]),
+                .Concat(traceRequested ? ["--format", "json", "--trace"] : ["--format", "json"])
+                .Select(argument => (JsonNode?)argument)]),
         };
     }
 

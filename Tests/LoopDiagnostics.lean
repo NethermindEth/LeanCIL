@@ -196,6 +196,48 @@ example (memory : Memory) (value count sum : W32) (home : Reference) (current : 
   refine ?invariant
   cil_loop_call addTwo_holds sum
 
+set_option hygiene false in
+/-- The walk from the entry to the loop head, traced or not by `trace.CIL.loop`. -/
+macro "walk_to_head" : tactic => `(tactic| (
+  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := entry.checked memory value wellFormed
+  obtain ⟨zeroed, zeroing, frame, -⟩ := (entryFrame []).zero_aggregate 0 layout [.i32 0, .i32 0]
+  have : LoopReaches program 0 [.scalar (.i32 value)] ⟨0, entry.frame memory home, [], entered⟩
+      (header memory value home ⟨(0, 0), zeroed, frame⟩) := by
+    cil_loop_steps
+  trivial))
+
+-- Untraced, the walk prints nothing.
+#guard_msgs in
+example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True := by
+  walk_to_head
+
+-- A step names each hypothesis its proof used: the zeroing fact steps `initAggregate`.
+/-- [CIL.loop] pc 1: CIL.Op.initAggregate 8
+  source: unknown, since the proof does not import ExtractedSymbols
+  by loop_reaches_next
+  used zeroing : -/
+#guard_msgs (whitespace := lax, substring := true) in
+set_option trace.CIL.loop true in
+example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True := by
+  walk_to_head
+
+-- A branch uses no hypothesis, so no fact is named although `setup` and `wellFormed` are in
+-- context.
+/-- [CIL.loop] pc 2: CIL.Op.branch 14
+  source: unknown, since the proof does not import ExtractedSymbols
+  by loop_reaches_next
+  changes pc: 1 + 1 ⟶ 14 -/
+#guard_msgs (whitespace := lax, substring := true) in
+set_option trace.CIL.loop true in
+example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True := by
+  walk_to_head
+
+-- Each fact the trace explains by its statement's head is a declaration of the framework.
+#guard_msgs in
+run_meta do
+  for (name, _) in loopFactMeanings do
+    unless (← Lean.getEnv).contains name do throwError "{name} is not declared"
+
 -- A call stops `cil_loop_steps`, which names the pc and the tactic that crosses it.
 /-- error: cil_loop_steps: pc 6 is a call (CIL.Op.call 1 1); cross it with `cil_loop_call` -/
 #guard_msgs (whitespace := lax, substring := true) in

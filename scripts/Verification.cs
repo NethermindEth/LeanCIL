@@ -2127,8 +2127,19 @@ partial class Program : IDisposable
     /// <summary>The Lean option `cil.diagnostics`, set only when the proof imports the module declaring it.</summary>
     internal const string DiagnosticsOption = "-Dweak.cil.diagnostics=true";
 
-    /// <summary>The options the proof module is checked with: none unless a caller asked for records.</summary>
-    string[] ProofOptions => structuredFailures ? [DiagnosticsOption] : [];
+    /// <summary>Set by callers that print the loop tactics' steps, checking the proof with <see cref="TraceOption"/>.
+    /// </summary>
+    bool tracesLoops { get; init; }
+
+    /// <summary>The Lean option tracing each step the loop tactics take, as `[CIL.loop]` messages.</summary>
+    internal const string TraceOption = "-Dweak.trace.CIL.loop=true";
+
+    /// <summary>The start of a message of the `CIL.loop` trace class.</summary>
+    internal const string TraceHeader = "[CIL.loop]";
+
+    /// <summary>The options the proof module is checked with: none unless asked for records or a trace.</summary>
+    string[] ProofOptions => [.. structuredFailures ? [DiagnosticsOption] : Array.Empty<string>(),
+        .. tracesLoops ? [TraceOption] : Array.Empty<string>()];
 
     /// <summary>Binds a cached proof result to its options; empty for a default run, keeping its keys.</summary>
     string ProofOptionsKey => ProofOptions.Length == 0 ? "" : "\noptions " + string.Join(' ', ProofOptions);

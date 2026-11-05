@@ -555,6 +555,19 @@ for lack of data, and an empty `obligations`, has its reason under `unknown`,
 keyed by the field's name; an error without a failure record, such as Lean's
 own, says so there.
 
+### Trace the loop tactics
+
+`leancil verify ... --trace` checks the proof with `trace.CIL.loop` set, which
+the loop tactics use to log each step they take: its pc and instruction, the
+source line when the proof imports `ExtractedSymbols`, the lemma applied, the
+hypotheses its proof used, what changed and the goals left (see
+[PROOFS-STEPPING](PROOFS-STEPPING.md#see-what-the-loop-tactics-did)). The text
+report prints them in full under `Trace (N steps):`, after and apart from the
+proof's `Lean messages`; the JSON report lists them in `trace`, each with its
+location and text. Without `--trace`, `trace` is `null` and the report's
+top-level `unknown` says why, as it does when the run stopped before the proof
+was checked. A traced result is cached apart from an untraced one.
+
 ## Export contracts
 
 `leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]`

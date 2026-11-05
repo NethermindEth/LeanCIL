@@ -3,6 +3,7 @@ import CIL.Safety.SymbolicExecution
 import CIL.Safety.LoopFacts
 import CIL.Safety.Obligations
 import CIL.Safety.FailureRecords
+import CIL.Safety.LoopTrace
 
 /-!
 # Loop path automation
@@ -347,6 +348,38 @@ def loopGoalMethod? (target : Expr) : MetaM (Option Nat) := do
 def loopStatePartNames : Array String := #["pc", "frame", "stack", "memory"]
 
 open Lean Elab Tactic Meta in
+/-- Trace under `CIL.loop` the step that `lemma` took at instruction `op` from the loop goal
+    `goal`: the source of its pc, the hypotheses its proof used, the state parts it changed
+    and the goals left. Callers run it only when `CIL.loop` is traced. -/
+def loopTraceStep (goal : MVarId) (lemma : MessageData) (op : Option Expr) : TacticM Unit := do
+  let target ← goal.withContext do instantiateMVars (← goal.getType)
+  let some (source, _) ← loopGoalStates target | return
+  let some before ← loopStateParts? source | return
+  let pc ← literalNat? before[0]!
+  let location ← loopSourceOf (← loopGoalMethod? target) pc
+  let used ← goal.withContext do
+    (← loopUsedFacts goal).mapM fun decl => do
+      let statement ← instantiateMVars decl.type
+      let meaning := (loopFactMeaning? statement).map (s!" ({·})") |>.getD ""
+      addMessageContext m!"\n  used {mkFVar decl.fvarId} : {statement}{meaning}"
+  let changes ← match (← getGoals).head? with
+    | some next => next.withContext do
+      let some (state, _) ← loopGoalStates (← instantiateMVars (← next.getType))
+        | return #[m!"the goal is no longer a loop path"]
+      let some after ← loopStateParts? state | return #[m!"the state is not literal"]
+      (← loopChanges loopStatePartNames before after).mapM addMessageContext
+    | none => pure #[m!"the path is closed"]
+  let changed := if changes.isEmpty then m!"\n  changes nothing"
+    else MessageData.joinSep (changes.toList.map (m!"\n  changes {·}")) ""
+  let position := pc.map toString |>.getD "?"
+  let instruction ← goal.withContext do
+    match op with
+    | some op => addMessageContext m!" {← instantiateMVars op}"
+    | none => pure m!""
+  trace[CIL.loop] m!"pc {position}:{instruction}\n  source: {location}\n  by {lemma}\
+    {MessageData.joinSep used.toList ""}{changed}\n  goals left: {← loopGoalsLeft}"
+
+open Lean Elab Tactic Meta in
 /-- The step goal `step` rewritten as far as the step equations and `prepared` go: the goals left,
     or `none` when nothing rewrites it. -/
 def loopStepResidual (step : MVarId) (prepared : Array Term) : TacticM (Option (Array Expr)) := do
@@ -517,6 +550,7 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepa
   let yields : Lean.Name → Bool := fun op => stops op || (mode != .reach &&
     (op == ``CIL.Op.setFieldAt || op == ``CIL.Op.initAggregate || op == ``CIL.Op.setLocal))
   let mut taken := 0
+  let tracing ← isTracingEnabledFor `CIL.loop
   repeat
     if (← getGoals).isEmpty then return none
     let rewriting := if ← loopMentionsStackOperations then rewriteStack else rewrite
@@ -563,8 +597,14 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepa
       reading := reading ++ ready
     let found ← Term.exprToSyntax fetched.found
     let instruction ← Term.exprToSyntax fetched.instruction
+    -- The goal before the step, kept only for its trace.
+    let before ← if tracing then some <$> getMainGoal else pure none
     if finishing then
-      if let some take := finishReturn then take fetched reading; return none
+      if let some take := finishReturn then
+        take fetched reading
+        if let some goal := before then
+          loopTraceStep goal (.ofConstName ``CIL.Safety.loop_terminates_return) (some fetched.op)
+        return none
       let finish ← `(tactic| (
           apply CIL.Safety.loop_terminates_return $found $instruction
           · cil_checked_step_normalized [$[$reading:term],*]
@@ -574,7 +614,10 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepa
             -- Frame cleanup only after the facts fail, since unfolding `leaveFrame` first
             -- would hide it from a supplied fact about the exited frame's memory.
             | simp [CIL.Safety.leaveFrame, CIL.NarrowKind.extend, $[$reading:term],*]))
-      if ← attempt finish then continue
+      if ← attempt finish then
+        if let some goal := before then
+          loopTraceStep goal (.ofConstName ``CIL.Safety.loop_terminates_return) (some fetched.op)
+        continue
       -- A return whose results or postcondition the facts do not prove is left as the goal.
       return some op
     let next ← match mode with
@@ -586,6 +629,9 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepa
           · cil_checked_step_normalized [$[$reading:term],*]))
     if ← attempt next then
       taken := taken + 1
+      if let some goal := before then
+        loopTraceStep goal (.ofConstName (if mode == .reach then ``CIL.Safety.loop_reaches_next
+          else ``CIL.Safety.loop_terminates_next)) (some fetched.op)
       continue
     if yields op then return some op
     loopStuck tactic facts.all reading yields

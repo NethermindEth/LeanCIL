@@ -218,11 +218,12 @@ partial class Program
     internal static void VerifyArtifacts(string[] args)
     {
         if (args.Length == 0 || args[0].StartsWith("--", StringComparison.Ordinal))
-            throw new ArgumentException("Usage: leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--rebuild-library] [--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory] [--format text|json]");
+            throw new ArgumentException("Usage: leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--rebuild-library] [--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory] [--format text|json] [--trace]");
 
         var output = Path.GetFullPath(args[0]);
         // A request for JSON gets JSON for every outcome, including a rejected option after it.
         var json = args.Zip(args.Skip(1)).Any(pair => pair is ("--format", "json"));
+        var trace = false;
         string? format = null;
         string? proof = null;
         string? theorem = null;
@@ -248,6 +249,11 @@ partial class Program
             if (option == "--fresh" && !fresh)
             {
                 fresh = true;
+                continue;
+            }
+            if (option == "--trace" && !trace)
+            {
+                trace = true;
                 continue;
             }
             if (++index == args.Length || args[index].StartsWith("--", StringComparison.Ordinal))
@@ -286,7 +292,8 @@ partial class Program
             var failure = FailureReports.Classify("arguments", error.Message, null,
                 theorem ?? "ExampleProof.correctness", proof ?? Path.Combine(output, "Proof.lean"), output, proofRoot);
             Console.Write(VerifyReports.Serialize(VerifyReports.Result("failed", failure, failure.theorem,
-                failure.proof, output, proofRoot, "arguments", null, null, [])));
+                failure.proof, output, proofRoot, "arguments", null, null, [],
+                traceRequested: args.Contains("--trace"))));
             return new CliFailure("arguments", error, reported: true);
         }
 
@@ -346,7 +353,8 @@ partial class Program
                 freshLibrary = rebuildLibrary,
                 forceFullVerification = forceFull,
                 viewsStatement = true,
-                structuredFailures = json
+                structuredFailures = json,
+                tracesLoops = trace
             };
             if (forceFull) verification.fullImportAudit = (artifact, session, module, leanPath) =>
                 verification.VerifyFullImports(artifact, session, module, theorem, leanPath, fullArtifacts);
@@ -361,11 +369,12 @@ partial class Program
             {
                 var refutation = FailureReports.Refuted(report.theoremAudit, theorem, proof, output, proofRoot);
                 if (refutation is not null) FailureReports.Write(output, refutation);
-                ProofMessagesReport(verification.ProofMessages, proof, output);
+                var (shown, traced) = Traced(verification.ProofMessages, trace);
+                ProofMessagesReport(shown, proof, output);
                 Console.Write(VerifyReports.Serialize(VerifyReports.Result("verified", refutation, report.theorem,
                     proof, output, proofRoot, null, report.axioms,
                     view?.statement ?? report.theoremAudit.Split("'" + report.theorem + "'", 2)[0].Trim(),
-                    JsonMessages(verification.ProofMessages))));
+                    JsonMessages(shown), traced is null ? null : JsonMessages(traced), trace)));
                 return;
             }
             Console.WriteLine($"Verified: {report.theorem}");
@@ -411,7 +420,9 @@ partial class Program
             var statement = view?.statement ?? report.theoremAudit.Split("'" + report.theorem + "'", 2)[0].Trim();
             foreach (var line in statement.Split('\n'))
                 Console.WriteLine("    " + line.TrimEnd());
-            Console.Write(ProofMessagesReport(verification.ProofMessages, proof, output));
+            var (proofMessages, steps) = Traced(verification.ProofMessages, trace);
+            Console.Write(ProofMessagesReport(proofMessages, proof, output));
+            Console.Write(TraceReport(steps, proof));
         }
         catch (Exception error)
         {
@@ -419,11 +430,14 @@ partial class Program
             var failed = FailureReports.Failed(stage, error, theorem ?? "ExampleProof.correctness",
                 proof ?? Path.Combine(output, "Proof.lean"), output, proofRoot);
             FailureReports.Write(output, failed);
-            var messages = proof is null ? "" : ProofMessagesReport(verification?.ProofMessages, proof, output);
+            var (proofMessages, steps) = Traced(verification?.ProofMessages, trace);
+            var messages = proof is null ? ""
+                : ProofMessagesReport(proofMessages, proof, output) + TraceReport(steps, proof);
             if (json)
             {
                 Console.Write(VerifyReports.Serialize(VerifyReports.Result("failed", failed, failed.theorem,
-                    failed.proof, output, proofRoot, stage, null, null, JsonMessages(verification?.ProofMessages))));
+                    failed.proof, output, proofRoot, stage, null, null, JsonMessages(proofMessages),
+                    steps is null ? null : JsonMessages(steps), trace)));
                 throw new CliFailure(stage, error, reported: true);
             }
             var failure = new CliFailure(stage, error);
@@ -438,6 +452,41 @@ partial class Program
 
     static IEnumerable<(string, int, int, string)> JsonMessages(ProofMessage[]? messages) =>
         (messages ?? []).Select(message => (message.severity, message.line, message.column, message.text));
+
+    /// <summary>
+    /// The proof's messages without the loop trace, and the trace when the run asked for it; a trace message
+    /// in a run that did not ask for one is the proof's own, and stays with its messages.
+    /// </summary>
+    static (ProofMessage[]? Messages, ProofMessage[]? Trace) Traced(ProofMessage[]? messages, bool trace)
+    {
+        if (!trace || messages is null) return (messages, null);
+        var all = messages ?? [];
+        bool IsStep(ProofMessage message) => message.text.StartsWith(TraceHeader, StringComparison.Ordinal);
+        // Lean joins the steps one tactic traced into one message; each step starts a line with the header.
+        var steps = all.Where(IsStep).SelectMany(message => message.text.Split('\n')
+            .Aggregate(new List<List<string>>(), (split, line) =>
+            {
+                if (line.StartsWith(TraceHeader, StringComparison.Ordinal) || split.Count == 0) split.Add([]);
+                split[^1].Add(line);
+                return split;
+            })
+            .Select(lines => message with { text = string.Join('\n', lines) }));
+        return ([.. all.Where(message => !IsStep(message))], [.. steps]);
+    }
+
+    /// <summary>The loop trace in full, each step at its location in the proof, or nothing without `--trace`.</summary>
+    static string TraceReport(ProofMessage[]? steps, string proof)
+    {
+        if (steps is null) return "";
+        var report = new System.Text.StringBuilder($"  Trace ({steps.Length} steps):\n");
+        foreach (var step in steps)
+        {
+            var located = $"{CliPaths.Display(proof)}:{step.line}:{step.column}: {CliDiagnostics.Printable(step.text)}";
+            foreach (var line in located.Split('\n'))
+                report.Append(("    " + line).TrimEnd()).Append('\n');
+        }
+        return report.ToString();
+    }
 
     const string ProofMessagesText = "proof-messages.txt";
     const int ProofMessageLines = 60;

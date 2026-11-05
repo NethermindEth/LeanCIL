@@ -25,6 +25,10 @@
       "text": "'ExampleProof.correctness' depends on axioms: [propext, Quot.sound]"
     }
   ],
+  "trace": null,
+  "unknown": {
+    "trace": "not requested; --trace traces each step the loop tactics take"
+  },
   "rerun": [
     "leancil",
     "verify",
