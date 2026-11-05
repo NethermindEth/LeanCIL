@@ -505,6 +505,10 @@ internal static class MetadataValidation
             state[method] = 3;
             if (!Check(method, null, () =>
             {
+                if (Pinned(method.Module) && method.HasThis && !method.IsStatic &&
+                    !IsAggregate(MethodSpecialization.DeclaringType(method), module))
+                    throw new InvalidDataException($"Unsupported class instance method: {method.FullName}\n" +
+                        "  Instance methods are admitted on value types only; class instances are not modelled.");
                 if (!Pinned(method.Module) || method.IsStatic == method.HasThis || method.ExplicitThis ||
                     (!method.IsStatic && !IsAggregate(MethodSpecialization.DeclaringType(method), module)) ||
                     method.CallingConvention != MethodCallingConvention.Default || !method.HasBody ||
