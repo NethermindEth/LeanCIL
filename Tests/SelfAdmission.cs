@@ -33,10 +33,11 @@ using (var module = ModuleDefinition.ReadModule(ExtractorPath))
     signatures = module.GetTypes().SelectMany(type => type.Methods).Select(method => method.FullName)
         .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
 var manifest = Path.Combine(directory, "manifest.json");
-File.WriteAllText(manifest, JsonSerializer.Serialize(new
-{
-    entries = signatures.Select(signature => new { signature, profile = Profile })
-}));
+if (!reuse)
+    File.WriteAllText(manifest, JsonSerializer.Serialize(new
+    {
+        entries = signatures.Select(signature => new { signature, profile = Profile })
+    }));
 var report = Path.Combine(directory, "blockers.json");
 var timer = Stopwatch.StartNew();
 if (!reuse) Run(["dotnet", ExtractorPath, "blockers", ExtractorPath, "--manifest", manifest, "--output", report]);
@@ -101,7 +102,8 @@ summary.Add("| --- | ---: | ---: |");
 summary.AddRange(blockers.Take(ListedBlockers).Select(blocker =>
     $"| {blocker.GetProperty("construct").GetString()!.Replace("|", "\\|")} | " +
     $"{blocker.GetProperty("entries").GetArrayLength()} | {blocker.GetProperty("sites").GetArrayLength()} |"));
-File.WriteAllLines(Path.Combine(directory, "summary.md"), summary);
+// A reused report checks an altered baseline, so it must not replace the real scan's summary.
+File.WriteAllLines(Path.Combine(directory, reuse ? "summary-check.md" : "summary.md"), summary);
 if (Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY") is { Length: > 0 } stepSummary && !reuse)
     File.AppendAllLines(stepSummary, summary);
 Console.WriteLine(string.Join('\n', summary));
