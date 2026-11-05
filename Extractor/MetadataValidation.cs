@@ -527,14 +527,15 @@ internal static class MetadataValidation
                         $"  {owner} has a static constructor, which is never extracted. If every caller runs it " +
                         $"first, pass --assume-initialized {owner}; this records a caller precondition and " +
                         "does not prove it.");
-                InReferences.RejectTwins(method);
+                ModifierTwins.Reject(method);
             })) return;
             Check(method, null, () =>
             {
                 if (method.HasThis) Layout(MethodSpecialization.DeclaringType(method), module, profile.Architecture);
                 if (method.IsConstructor && (method.Name != ".ctor" || !method.HasThis || method.ReturnType.MetadataType != MetadataType.Void))
                     throw new InvalidDataException($"Unsupported constructor signature: {method.FullName}");
-                Type(method.ReturnType, module, returns: true, architecture: profile.Architecture);
+                Type(InitAccessors.Return(method.ReturnType), module, returns: true,
+                    architecture: profile.Architecture);
             }, named: true);
             foreach (ParameterDefinition parameter in method.Parameters)
                 Check(method, null, () =>

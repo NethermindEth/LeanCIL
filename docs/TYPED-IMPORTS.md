@@ -68,9 +68,10 @@ The new signature boundary rejects open types, generic declaring types (an extra
 be a static method of a generic class, but such a method cannot be exported or imported),
 unsupported constraints, reference type arguments and recursively nested
 `modreq`/`modopt` nodes, including the `modreq(InAttribute)` that entry selection admits on
-`in` parameters of virtual members. Contract methods are static and non-virtual, and C# emits
-that modifier only on virtual members and private explicit implementations, so no exported or
-imported identity can differ from another only in a modifier. Ordinary in/out definition flags
+`in` parameters of virtual members and the `modreq(IsExternalInit)` it admits on `init`
+accessor returns. Contract methods are static and non-virtual, and C# emits those modifiers only
+on virtual members, private explicit implementations and instance `init` accessors, so no
+exported or imported identity can differ from another only in a modifier. Ordinary in/out definition flags
 are retained. A call-site
 MemberRef does not encode all definition parameter flags; the checker compares
 the actual call-site type encoding and the published flags with the selected

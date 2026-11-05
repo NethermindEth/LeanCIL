@@ -33,6 +33,10 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     // The kernel sees an `in` reference as the reference it is; the extractor compares the modifier exactly.
     string Parameter(TypeReference type) => Type(InReferences.Parameter(type));
 
+    // The kernel sees an `init` accessor as the void method it is; its signature string keeps the modifier.
+    static TypeReference Returned(MethodReference reference) =>
+        InitAccessors.Return(CallReturnType.Resolve(reference));
+
     string Type(TypeReference type, bool preserveGeneric)
     {
         if (type is FunctionPointerType callable)
@@ -105,7 +109,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var name = extracted
             ? ((MethodDefinition)Original(definition.Resolve().Module)
                 .LookupToken(definition.Resolve().MetadataToken)).Name : definition.Name;
-        return $"{{ declaringType := {Type(declaringType, true)}, name := {Quote(name)}, target := {target}, typeArguments := {List(arguments.Select(Type))}, ownerArgumentCount := {owners.Length}, parameterCount := {reference.Parameters.Count}, hasThis := {Bool(reference.HasThis)}, returnsValue := {Bool(reference.ReturnType.FullName != "System.Void")}, returnType := {Type(CallReturnType.Resolve(reference))}, parameterTypes := {List(CallReturnType.Parameters(reference).Select(Parameter))} }}";
+        return $"{{ declaringType := {Type(declaringType, true)}, name := {Quote(name)}, target := {target}, typeArguments := {List(arguments.Select(Type))}, ownerArgumentCount := {owners.Length}, parameterCount := {reference.Parameters.Count}, hasThis := {Bool(reference.HasThis)}, returnsValue := {Bool(Returned(reference).FullName != "System.Void")}, returnType := {Type(Returned(reference))}, parameterTypes := {List(CallReturnType.Parameters(reference).Select(Parameter))} }}";
     }
 
     // An open owner spells caller parameters by position, so the certificate can instantiate it;
@@ -226,7 +230,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             return $"{{ offset := {instruction.Offset}, opcode := {(ushort)instruction.OpCode.Value}, " +
                 $"operand := {operand} }}";
         });
-        return $"{{ token := {method.MetadataToken.ToUInt32()}, owner := {Quote(LayoutEvidence.Identity(method.DeclaringType))}, ownerParameters := {List(ownerConstraints)}, ownerArgumentCount := {MethodSpecialization.OwnerArguments(method).Count}, hasThis := {Bool(method.HasThis)}, explicitThis := {Bool(method.ExplicitThis)}, callingConvention := {(byte)method.CallingConvention}, attributes := {(uint)method.Attributes}, implementation := {(uint)method.ImplAttributes}, returnType := {Type(method.ReturnType)}, parameters := {List(method.Parameters.Select(parameter => Parameter(parameter.ParameterType)))}, locals := {List(method.Body.Variables.Select(local => LocalType(local.VariableType)))}, initLocals := {Bool(method.Body.InitLocals)}, maxStack := {method.Body.MaxStackSize}, genericParameters := {List(constraints)}, code := {List(code)} }}";
+        return $"{{ token := {method.MetadataToken.ToUInt32()}, owner := {Quote(LayoutEvidence.Identity(method.DeclaringType))}, ownerParameters := {List(ownerConstraints)}, ownerArgumentCount := {MethodSpecialization.OwnerArguments(method).Count}, hasThis := {Bool(method.HasThis)}, explicitThis := {Bool(method.ExplicitThis)}, callingConvention := {(byte)method.CallingConvention}, attributes := {(uint)method.Attributes}, implementation := {(uint)method.ImplAttributes}, returnType := {Type(InitAccessors.Return(method.ReturnType))}, parameters := {List(method.Parameters.Select(parameter => Parameter(parameter.ParameterType)))}, locals := {List(method.Body.Variables.Select(local => LocalType(local.VariableType)))}, initLocals := {Bool(method.Body.InitLocals)}, maxStack := {method.Body.MaxStackSize}, genericParameters := {List(constraints)}, code := {List(code)} }}";
     }
 
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number,
@@ -303,7 +307,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         $"hasBody := {Bool(method.HasBody)}, genericArity := {method.GenericParameters.Count}, " +
         $"explicitThis := {Bool(method.ExplicitThis)}, callingConvention := {(byte)method.CallingConvention}, " +
         $"attributes := {(uint)method.Attributes}, implementation := {(uint)method.ImplAttributes}, " +
-        $"returnType := {Type(Closed(method.ReturnType))}, " +
+        $"returnType := {Type(InitAccessors.Return(Closed(method.ReturnType)))}, " +
         $"parameters := {List(method.Parameters.Select(parameter => Parameter(Closed(parameter.ParameterType))))}, " +
         // A slot of any extracted assembly is recorded: dropping one would let a weaker candidate win in Lean.
         $"overrides := {List(method.Overrides

@@ -152,11 +152,12 @@ internal sealed class FeatureConstants
                     _stack.Add(constant);
                 else if (FeatureProfile.Getter(callee) is Feature feature)
                     _stack.Add(profile.Get(feature) ? 1 : 0);
-                else if (code == Code.Newobj || callee.ReturnType.MetadataType != MetadataType.Void)
+                else if (code == Code.Newobj ||
+                    InitAccessors.Return(callee.ReturnType).MetadataType != MetadataType.Void)
                     _stack.Add(null);
                 return;
             case Code.Ret:
-                if (method.ReturnType.MetadataType != MetadataType.Void) Pop();
+                if (InitAccessors.Return(method.ReturnType).MetadataType != MetadataType.Void) Pop();
                 return;
         }
 

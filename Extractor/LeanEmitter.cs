@@ -19,6 +19,10 @@ internal static class LeanEmitter
         _ => null
     };
 
+    // An `init` accessor returns nothing, like a plain void method.
+    static bool ReturnsValue(MethodDefinition method) =>
+        InitAccessors.Return(method.ReturnType).FullName != "System.Void";
+
     // The kernel rechecks every decide; elaborator whnf costs grow superlinearly with body size.
     internal const string Decide = "by decide +kernel";
     internal static string Kind(TypeReference type, ModuleDefinition module, string architecture = "scalar",
@@ -87,7 +91,7 @@ internal static class LeanEmitter
         TypeReference[] types = methods
             .SelectMany(m => m.Parameters.Select(p => InReferences.Parameter(p.ParameterType))
             .Concat(m.HasThis ? [MethodSpecialization.DeclaringType(m)] : [])
-            .Concat(m.Body.Variables.Select(v => v.VariableType)).Append(m.ReturnType)
+            .Concat(m.Body.Variables.Select(v => v.VariableType)).Append(InitAccessors.Return(m.ReturnType))
             .Concat(MethodSpecialization.Arguments(m))
             .Concat(m.Body.Instructions.Where(i => i.Operand is TypeReference).Select(i => (TypeReference)i.Operand))
             .Concat(m.Body.Instructions.Where(i => i.Operand is GenericInstanceMethod).SelectMany(i => ((GenericInstanceMethod)i.Operand).GenericArguments))
@@ -231,7 +235,7 @@ internal static class LeanEmitter
                 lean.AppendLine($"def method{n}GenericDefinition : String := {JsonSerializer.Serialize(origin.Definition)}");
                 lean.AppendLine($"def method{n}TypeArguments : List String := [{string.Join(", ", origin.TypeArguments.Select(t => JsonSerializer.Serialize(t)))}]");
             }
-            var metadata = $"returnsValue := {(m.ReturnType.FullName == "System.Void" ? "false" : "true")}, " +
+            var metadata = $"returnsValue := {(ReturnsValue(m) ? "true" : "false")}, " +
                 $"locals := [{locals}], localKinds := [{kinds}], opaqueVectorLocals := [{opaqueLocals}], " +
                 $"parameterHomes := [{parameters}], staticSites := [{sites}]";
             callDefinitions[n] = CallDefinitions(n, ops, methods.Length);
@@ -249,7 +253,7 @@ internal static class LeanEmitter
             for (int pc = 0; pc < ops.Count; pc++)
                 lean.AppendLine($"@[cil_code ↓] theorem method{n}_instruction{pc} : method{n}.code[{pc}]? = some ({ops[pc]} : Op) := rfl");
             foreach (string field in new[] { "profile", "locals", "localKinds", "returnsValue", "staticSites", "vectorLocals", "vectorArgs" })
-                lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({(field == "profile" ? "profile" : field == "locals" ? $"[{locals}]" : field == "localKinds" ? $"[{kinds}]" : field == "returnsValue" ? (m.ReturnType.FullName == "System.Void" ? "false" : "true") : field == "staticSites" ? $"[{sites}]" : "[]")}) := rfl");
+                lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({(field == "profile" ? "profile" : field == "locals" ? $"[{locals}]" : field == "localKinds" ? $"[{kinds}]" : field == "returnsValue" ? (ReturnsValue(m) ? "true" : "false") : field == "staticSites" ? $"[{sites}]" : "[]")}) := rfl");
         }
         // Identities only: hashes and MVIDs change with every rebuild, so they stay in identity.json for `check`.
         PinnedAssemblies.Pin[] pins = pinned.Pins.ToArray();

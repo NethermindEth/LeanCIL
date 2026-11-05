@@ -817,6 +817,7 @@ Examples:System.UInt64 Examples.InParameters::Constrained(Examples.InWord&,Examp
 Examples:System.UInt64 Examples.InParameters::ConstrainedSum(Examples.InWord&,System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.InParameters::Sum(T&,System.ReadOnlySpan`1<System.UInt64>&)	N	N	N	N	N	N	N	N
 Examples:System.UInt64 Examples.InWord::Examples.IInWord<Examples.InWord>.Sum(System.ReadOnlySpan`1<System.UInt64>& modreq(System.Runtime.InteropServices.InAttribute))	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.InitCounter::get_Value()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.InitializedHelper::Identity(System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.InitializedTypes::Add(System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.InitializedTypes::CallHelper(System.UInt64)	B	B	B	B	B	B	B	B
@@ -887,6 +888,7 @@ Examples:System.UInt64 Examples.StaticVirtualDefaults::SpendRefunding(Examples.R
 Examples:System.UInt64 Examples.StructMethods::Arguments(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.StructMethods::ByValue(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.StructMethods::ConstructLocal(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.StructMethods::Initialized(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.StructMethods::Mutate(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.StructMethods::Replace(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.TriplePrice::get_Price()	A	A	A	A	A	A	A	A
@@ -1077,6 +1079,7 @@ Examples:System.Void Examples.UnalignedMemory::WriteSigned(System.Byte&,System.S
 Examples:System.Void Examples.UnalignedMemory::WriteWord(System.Byte&,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Word256::.cctor()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.Word256::.ctor(System.UInt64,System.UInt64,System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
+Examples:System.Void modreq(System.Runtime.CompilerServices.IsExternalInit) Examples.InitCounter::set_Value(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:T Examples.GenericCounterValue`1::Echo(T)	N	N	N	N	N	N	N	N
 Examples:T Examples.GenericEnvelope`1::Read()	N	N	N	N	N	N	N	N
 Examples:T Examples.GenericMethods::Choose(System.Boolean,T,T)	N	N	N	N	N	N	N	N

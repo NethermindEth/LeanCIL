@@ -744,7 +744,7 @@ foreach (var (selector, index) in new[] { (inSelector, 0), (plainSelector, 1) })
 {
     var result = Execute(["dotnet", ExtractorPath, "extract", twin, selector,
         Path.Combine(root, "in-twin-" + index)]);
-    if (result.Code == 0 || !result.Output.Contains("Ambiguous in-parameter twin", StringComparison.Ordinal) ||
+    if (result.Code == 0 || !result.Output.Contains("Ambiguous modifier-only twin", StringComparison.Ordinal) ||
         !result.Output.Contains("cannot distinguish modifier-only overloads", StringComparison.Ordinal))
         throw new Exception("Incorrect in-modifier twin rejection: " + selector + "\n" + result.Output);
 }
@@ -764,7 +764,8 @@ using (var module = ModuleDefinition.ReadModule(assembly))
 }
 var returnResult = Execute(["dotnet", ExtractorPath, "extract", readOnlyReturn, returnSelector,
     Path.Combine(root, "Reject-in-return")]);
-const string returnRejection = "Custom modifiers are unsupported in typed contract signatures: System.UInt64& modreq(";
+const string returnRejection = "Custom modifiers are unsupported in method returns, except " +
+    "System.Runtime's modreq(IsExternalInit) directly on System.Void: System.UInt64& modreq(";
 if (returnResult.Code == 0 || !returnResult.Output.Contains(returnRejection, StringComparison.Ordinal))
     throw new Exception("Incorrect in-modifier return rejection\n" + returnResult.Output);
 Console.WriteLine("PASS in-modifier rejection: ref readonly return");

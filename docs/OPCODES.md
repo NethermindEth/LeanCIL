@@ -427,6 +427,20 @@ modifier-only twin is rejected. `modopt`, other `modreq` types, the modifier on 
 parameter, inside the reference or on a return, and an `InAttribute` from any other scope
 are rejected. Imported and exported contract signatures admit no modifier.
 
+### `init` accessors
+
+C# marks an `init` accessor by returning
+`System.Void modreq(System.Runtime.CompilerServices.IsExternalInit)`. The modifier only
+restricts which C# callers may bind the accessor, so the accessor runs as the void method it is,
+as an entry or behind a call. It is admitted only directly on `System.Void` and only with the
+exact `System.Runtime` scope. Selectors, recorded entries and the Lean signature string keep the
+modifier; the Lean method and call metadata record a plain void return, so a method whose
+declaring type also has a modifier-only twin is rejected. `modopt`, other `modreq` types, the
+modifier on a value-returning method or a parameter, and an `IsExternalInit` from any other
+assembly, including one declared in the extracted assembly, are rejected with the modified type
+in the message. An `init` accessor of a reference type also needs a class `this`, which instance
+methods do not admit.
+
 ### Static readonly values
 
 Primitive integer fields (including Boolean, Char and 64-bit native integers) and same-assembly

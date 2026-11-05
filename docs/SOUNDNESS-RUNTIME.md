@@ -140,6 +140,12 @@ declaring type has another method with the same name and signature once the modi
 No admitted certificate therefore contains two methods that differ only in that modifier. C#
 never emits such overloads.
 
+An `init` accessor returns `System.Void modreq(IsExternalInit)`. The modifier has no run-time
+effect either, so the Lean method and call metadata record a plain void return, while the
+signature string keeps it. The extractor admits only the exact `System.Runtime` modifier
+directly on `System.Void`, and the same twin rejection covers a method equal to the accessor
+once the modifier is erased.
+
 Equal-size aggregate/vector `Unsafe.BitCast` uses the same snapshot representation for validated
 `byte`, `int`, `uint`, `long` and `ulong` vector elements. Element signedness does not initialize
 unknown bytes or change their bits. Aggregate/vector loads and stores preserve initialization masks.
