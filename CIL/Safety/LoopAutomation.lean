@@ -2,6 +2,7 @@ import CIL.Safety.Loops
 import CIL.Safety.SymbolicExecution
 import CIL.Safety.LoopFacts
 import CIL.Safety.Obligations
+import CIL.Safety.FailureRecords
 
 /-!
 # Loop path automation
@@ -263,36 +264,87 @@ def LoopFacts.readBy (facts : LoopFacts) (op : Lean.Name) (references : Bool) :
     if loopMovesOnly.contains op then #[] else facts.cases,
     if references then facts.references else #[]]
 
+/-- The kind of fact a stuck step lacks, read from the terms its residual mentions. -/
+inductive MissingFact where
+  /-- A span's validity at the step's memory. -/
+  | spanValidity
+  /-- A span slice. -/
+  | spanSlice
+  /-- A span element's address. -/
+  | spanElement
+  /-- An `Unsafe.Add` result. -/
+  | unsafeAdd
+  /-- That a reference forms. -/
+  | referenceForm
+  /-- What a load reads. -/
+  | load
+  /-- The step equation of a store. -/
+  | storeStep
+  /-- A local's frame fact, or a store's step equation, when the residual names neither. -/
+  | frameOrStore
+
+/-- The stable name of a missing fact's kind, as failure records report it. -/
+def MissingFact.name : MissingFact → String
+  | .spanValidity => "spanValidity"
+  | .spanSlice => "spanSlice"
+  | .spanElement => "spanElement"
+  | .unsafeAdd => "unsafeAdd"
+  | .referenceForm => "referenceForm"
+  | .load => "load"
+  | .storeStep => "storeStep"
+  | .frameOrStore => "frameOrStore"
+
+/-- What to supply for a missing fact of this kind. -/
+def MissingFact.hint : MissingFact → Lean.MessageData
+  | .spanValidity => m!"the span's validity at this memory: a `CheckedSpan` of the caller's \
+      memory, which the loop tactics read in every frame memory, or \
+      `view.validate memory = .ok ()`"
+  | .spanSlice => m!"the slice: `view.slice memory start length = .ok sliced`, such as from \
+      `CheckedSpan.tail` at the caller's memory"
+  | .spanElement => m!"the element's address: `view.element memory index = .ok item`, such as \
+      from `CheckedSpan.head`"
+  | .unsafeAdd => m!"the `Unsafe.Add` result: `add memory base width offset = .ok reference` at \
+      this memory or the caller's, such as `Writable.add_int`"
+  | .referenceForm => m!"that the reference forms: `form memory reference = .ok reference`, or \
+      an `access` or `add` fact it follows from, at this memory or the caller's"
+  | .load => m!"what the load reads: a `loadValue` fact at this memory, such as from \
+      `(span.within wellFormed frame).head`"
+  | .storeStep => m!"the step equation of a store with this stack"
+  | .frameOrStore => m!"a `LoopFrame` at this memory for a local, or the step equation of a \
+      store with this stack"
+
 open Lean Meta in
-/-- A hint naming the fact a stuck step needs, from the residual of that step. -/
-def loopMissingHint (residual : Array Expr) : MetaM MessageData := do
+/-- The kind of fact a stuck step needs, from the residual of that step. -/
+def loopMissingFact (residual : Array Expr) : MissingFact :=
   let mentions (name : Name) : Bool :=
     residual.any fun goal => (goal.find? fun term => term.isConstOf name).isSome
   let spanLocal := residual.any fun goal => (goal.find? fun term =>
     term.isAppOf ``loadLocal && term.getAppNumArgs >= 2 &&
       (term.getArg! 1).isAppOf ``LocalSlot.span).isSome
-  if spanLocal || mentions ``SpanView.validate then
-    return m!"the span's validity at this memory: a `CheckedSpan` of the caller's memory, which \
-      the loop tactics read in every frame memory, or `view.validate memory = .ok ()`"
-  if mentions ``SpanView.slice then
-    return m!"the slice: `view.slice memory start length = .ok sliced`, such as from \
-      `CheckedSpan.tail` at the caller's memory"
-  if mentions ``SpanView.element then
-    return m!"the element's address: `view.element memory index = .ok item`, such as from \
-      `CheckedSpan.head`"
-  if mentions ``add then
-    return m!"the `Unsafe.Add` result: `add memory base width offset = .ok reference` at this \
-      memory or the caller's, such as `Writable.add_int`"
-  if mentions ``form || mentions ``formValue then
-    return m!"that the reference forms: `form memory reference = .ok reference`, or an `access` \
-      or `add` fact it follows from, at this memory or the caller's"
-  if mentions ``loadValue || mentions ``read then
-    return m!"what the load reads: a `loadValue` fact at this memory, such as from \
-      `(span.within wellFormed frame).head`"
-  if mentions ``storeLocal || mentions ``storeValue || mentions ``write then
-    return m!"the step equation of a store with this stack"
-  return m!"a `LoopFrame` at this memory for a local, or the step equation of a store with this \
-    stack"
+  if spanLocal || mentions ``SpanView.validate then .spanValidity
+  else if mentions ``SpanView.slice then .spanSlice
+  else if mentions ``SpanView.element then .spanElement
+  else if mentions ``add then .unsafeAdd
+  else if mentions ``form || mentions ``formValue then .referenceForm
+  else if mentions ``loadValue || mentions ``read then .load
+  else if mentions ``storeLocal || mentions ``storeValue || mentions ``write then .storeStep
+  else .frameOrStore
+
+open Lean Meta in
+/-- A hint naming the fact a stuck step needs, from the residual of that step. -/
+def loopMissingHint (residual : Array Expr) : MetaM MessageData :=
+  return (loopMissingFact residual).hint
+
+open Lean Meta in
+/-- The method index of a loop goal, when a literal. -/
+def loopGoalMethod? (target : Expr) : MetaM (Option Nat) := do
+  let target := (← instantiateMVars target).consumeMData
+  unless target.isAppOfArity ``LoopReaches 5 || target.isAppOfArity ``LoopTerminates 5 do
+    return none
+  literalNat? (target.getArg! 1)
+
+/-- The names of a loop state's parts, in `LoopState.mk` order. -/
+def loopStatePartNames : Array String := #["pc", "frame", "stack", "memory"]
 
 open Lean Elab Tactic Meta in
 /-- The step goal `step` rewritten as far as the step equations and `prepared` go: the goals left,
@@ -321,25 +373,50 @@ open Lean Elab Tactic Meta in
 def loopStuck (tactic : String) (facts prepared : Array Term)
     (stops : Lean.Name → Bool) : TacticM Unit := withMainContext do
   let saved ← saveState
-  let some (source, _) ← loopGoalStates (← getMainTarget)
-    | throwError "{tactic}: expected a `LoopReaches` or `LoopTerminates` goal{← obligationNote}"
+  let goal ← getMainTarget
+  -- Built only for a failure record, so a stuck walk costs nothing more without one.
+  let method (_ : Unit) := loopGoalMethod? goal
+  let some (source, _) ← loopGoalStates goal
+    | throwFailure m!"{tactic}: expected a `LoopReaches` or `LoopTerminates` goal\
+        {← obligationNote}" do
+      return {
+        tactic, unknown := #[("method", "the goal is not a loop path"),
+          ("pc", "the goal is not a loop path")] }
   let some parts ← loopStateParts? source
-    | throwError "{tactic}: the source state does not reduce to a literal state:\
-        {indentExpr (loopLiteralSums source)}"
+    | throwFailure m!"{tactic}: the source state does not reduce to a literal state:\
+        {indentExpr (loopLiteralSums source)}" do
+      return {
+        tactic, method := ← method (),
+        unknown := #[("pc", "the source state is not a literal state")] }
+  let reached (_ : Unit) := loopStatePartNames.zip (parts.map loopLiteralSums)
   let some position ← literalNat? parts[0]!
-    | throwError "{tactic}: the pc is not a literal, so a branch was not decided; supply a fact \
-        deciding its condition. The pc is{indentExpr parts[0]!}"
+    | throwFailure m!"{tactic}: the pc is not a literal, so a branch was not decided; supply a \
+        fact deciding its condition. The pc is{indentExpr parts[0]!}" do
+      return {
+        tactic, method := ← method (), reached := reached (),
+        missing := some "branchCondition",
+        suggestions := #[m!"supply a fact deciding the branch condition"],
+        unknown := #[("pc", "the pc is not a literal: a branch was not decided")] }
   let fetched ← try loopFetch facts catch error =>
     saved.restore
-    throwError "{tactic}: cannot fetch the instruction at pc {position}: {error.toMessageData}"
+    throwFailure m!"{tactic}: cannot fetch the instruction at pc {position}: \
+      {error.toMessageData}" do
+      return {
+        tactic, method := ← method (), pc := position, reached := reached (),
+        missing := some "instructionLookup",
+        unknown := #[("instruction", "the method or instruction lookup did not close")] }
   let op := fetched.op
   let stepGoal := fetched.step
   let opName := ((← whnfR op).getAppFn.constName?).getD Name.anonymous
   if stops opName then saved.restore; return
   if opName == ``CIL.Op.call then
     saved.restore
-    throwError "{tactic}: pc {position} is a call ({op}); cross it with `cil_loop_call` and the \
-      callee's contract"
+    throwFailure m!"{tactic}: pc {position} is a call ({op}); cross it with `cil_loop_call` and \
+      the callee's contract" do
+      return {
+        tactic, method := ← method (), pc := position, instruction := op,
+        reached := reached (), missing := some "calleeContract",
+        suggestions := #[m!"cross the call with `cil_loop_call` and the callee's contract"] }
   let obligation := loopLiteralSums (← instantiateMVars (← stepGoal.getType))
   -- The step rewritten as far as its equations and the facts go shows the term left unproved.
   let residual ← loopStepResidual stepGoal prepared
@@ -347,11 +424,18 @@ def loopStuck (tactic : String) (facts prepared : Array Term)
   let shown := match residual with
     | some goals => MessageData.joinSep (goals.toList.map (m!"{loopLiteralSums ·}")) "\n"
     | none => m!"no step equation or fact rewrites it"
-  let hint ← loopMissingHint (residual.getD #[obligation])
-  throwError "{tactic}: cannot step pc {position} ({op}) at memory{indentExpr parts[3]!}\n\
+  let missing := loopMissingFact (residual.getD #[obligation])
+  let hint := missing.hint
+  throwFailure m!"{tactic}: cannot step pc {position} ({op}) at memory{indentExpr parts[3]!}\n\
     The step is{indentExpr obligation}\n\
     With the step equations and facts it reduces to{indentD shown}\n\
-    Supply {hint}."
+    Supply {hint}." do
+    return {
+      tactic, method := ← method (), pc := position, instruction := op,
+      reached := reached (),
+      missing := some missing.name,
+      residual := (residual.getD #[obligation]).map loopLiteralSums,
+      suggestions := #[m!"supply {hint}"] }
 
 open Lean Elab Tactic Meta in
 /-- Fail, as `tactic`, for a `LoopReaches` goal that has stepped back to its target's pc in
@@ -360,15 +444,24 @@ def loopTargetMismatch (tactic : String) (position : Nat) (source target : Expr)
     TacticM Unit := withMainContext do
   let some reached ← loopStateParts? source | return
   let some expected ← loopStateParts? target | return
-  let names := #["pc", "frame", "stack", "memory"]
+  let names := loopStatePartNames
   let mut differing : MessageData := m!""
+  let mut differs : Array Nat := #[]
   for index in [:4] do
     unless ← withNewMCtxDepth (isDefEq reached[index]! expected[index]!) do
+      differs := differs.push index
       differing := differing ++ m!"\n{names[index]!}: reached\
         {indentExpr (loopLiteralSums reached[index]!)}\n\
         but the target has{indentExpr (loopLiteralSums expected[index]!)}"
-  throwError "{tactic}: target state not matched at pc {position}:{differing}\nState a fact in \
-    the reached form, or state the target in it."
+  throwFailure m!"{tactic}: target state not matched at pc {position}:{differing}\nState a fact \
+    in the reached form, or state the target in it." do
+    return {
+      tactic, method := ← loopGoalMethod? (← getMainTarget), pc := position,
+      reached := differs.map fun index => (names[index]!, loopLiteralSums reached[index]!),
+      expected := differs.map fun index => (names[index]!, loopLiteralSums expected[index]!),
+      missing := some "targetState",
+      suggestions := #[m!"state a fact in the reached form, or state the target in it"],
+      unknown := #[("instruction", "the walk is at the target's pc, so it steps no instruction")] }
 
 open Lean Elab Tactic Meta in
 /-- Whether a loop goal mentions a list operation that `loopStackLemmas` puts in literal form. -/

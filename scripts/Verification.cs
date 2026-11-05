@@ -2118,6 +2118,21 @@ partial class Program : IDisposable
     /// <summary>Set by callers that print <see cref="VerifiedStatement"/>; printing costs one Lean run.</summary>
     bool viewsStatement { get; init; }
 
+    /// <summary>
+    /// Set by callers that read failure records: the proof is checked with <see cref="DiagnosticsOption"/>, so a
+    /// failing LeanCIL tactic appends what it established to its error. It changes no proof term.
+    /// </summary>
+    bool structuredFailures { get; init; }
+
+    /// <summary>The Lean option `cil.diagnostics`, set only when the proof imports the module declaring it.</summary>
+    internal const string DiagnosticsOption = "-Dweak.cil.diagnostics=true";
+
+    /// <summary>The options the proof module is checked with: none unless a caller asked for records.</summary>
+    string[] ProofOptions => structuredFailures ? [DiagnosticsOption] : [];
+
+    /// <summary>Binds a cached proof result to its options; empty for a default run, keeping its keys.</summary>
+    string ProofOptionsKey => ProofOptions.Length == 0 ? "" : "\noptions " + string.Join(' ', ProofOptions);
+
     /// <summary>Messages from the last proof check, kept for display; no check reads them.</summary>
     internal ProofMessage[]? ProofMessages { get; private set; }
 
@@ -2587,7 +2602,7 @@ partial class Program : IDisposable
             var proofKey = ContentKey("theorem-audit-v3\n" + extractedKey + "\n" + proofSourceHash + "\n" +
                 (symbols ? symbolsSourceHash + "\n" : "") +
                 SemanticExtractionIdentity(extraction) + "\n" + JsonSerializer.Serialize(extraction.Sources) + "\n" +
-                JsonSerializer.Serialize(acceptedInterfaceArtifacts) + "\n" + theorem);
+                JsonSerializer.Serialize(acceptedInterfaceArtifacts) + "\n" + theorem + ProofOptionsKey);
             var proofRestored = RestoreSuccess(proofKey, fresh);
             if (proofRestored)
             {
@@ -2601,7 +2616,7 @@ partial class Program : IDisposable
             {
                 stage?.Invoke("proof checking");
                 RequireStagedProofSources();
-                string[] command = [LeanExecutable, "--json", "--root=" + fresh, "-o",
+                string[] command = [LeanExecutable, "--json", .. ProofOptions, "--root=" + fresh, "-o",
                     Path.Combine(fresh, "Proof.olean"), stagedProof];
                 var checkedProof = Execute(command, leanPath: leanPath, progress: "Checking Proof: " + entry);
                 var (transcript, messages) = LeanJsonMessages(checkedProof.Output, stagedProof);

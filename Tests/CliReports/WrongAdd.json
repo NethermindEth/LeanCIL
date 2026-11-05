@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "result": "failed",
+  "stage": "proof checking",
+  "theorem": "ExampleProof.correctness",
+  "method": {
+    "entry": "System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64)",
+    "assembly": "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+    "assemblySha256": "<sha256>"
+  },
+  "proof": "<proof>",
+  "output": "<output>",
+  "axioms": null,
+  "statement": null,
+  "failures": [
+    {
+      "kind": "elaboration-error",
+      "resource": null,
+      "module": "Proof",
+      "source": {
+        "file": "<proof>",
+        "line": 13,
+        "column": 2
+      },
+      "message": "Tactic `rfl` failed: The left-hand side\n  Except.map Prod.snd\n    (Safety.invoke Extracted.program 4 0 [Safety.Value.scalar (Value.i64 x), Safety.Value.scalar (Value.i64 y)]\n      Safety.Memory.empty)\nis not definitionally equal to the right-hand side\n  Except.ok [Safety.Value.scalar (Value.i64 (x + y))]\n\nx y : W64\n⊢ Except.map Prod.snd\n      (Safety.invoke Extracted.program 4 0 [Safety.Value.scalar (Value.i64 x), Safety.Value.scalar (Value.i64 y)]\n        Safety.Memory.empty) =\n    Except.ok [Safety.Value.scalar (Value.i64 (x + y))]",
+      "tactic": null,
+      "method": null,
+      "cil": null,
+      "state": null,
+      "missing": null,
+      "suggestions": [],
+      "obligations": [],
+      "unknown": {
+        "tactic": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one",
+        "method": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one",
+        "cil": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one",
+        "state": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one",
+        "missing": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one",
+        "obligations": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one"
+      }
+    }
+  ],
+  "messages": [
+    {
+      "file": "<proof>",
+      "line": 15,
+      "column": 0,
+      "severity": "info",
+      "text": "'ExampleProof.correctness' depends on axioms: [propext, sorryAx, Quot.sound]"
+    }
+  ],
+  "rerun": [
+    "leancil",
+    "verify",
+    "<output>",
+    "--proof",
+    "<proof>",
+    "--theorem",
+    "ExampleProof.correctness",
+    "--format",
+    "json"
+  ]
+}

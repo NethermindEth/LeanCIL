@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "result": "verified",
+  "stage": null,
+  "theorem": "ExampleProof.correctness",
+  "method": {
+    "entry": "System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64)",
+    "assembly": "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+    "assemblySha256": "<sha256>"
+  },
+  "proof": "<proof>",
+  "output": "<output>",
+  "axioms": [
+    "propext",
+    "Quot.sound"
+  ],
+  "statement": "ExampleProof.correctness (x y : CIL.W64) :\n  ∃ result,\n    Except.map Prod.snd\n          (CIL.Safety.invoke Extracted.program 4 0\n            [CIL.Safety.Value.scalar (CIL.Value.i64 x), CIL.Safety.Value.scalar (CIL.Value.i64 y)]\n            CIL.Safety.Memory.empty) =\n        Except.ok [CIL.Safety.Value.scalar (CIL.Value.i64 result)] ∧\n      BitVec.toNat result = (BitVec.toNat x + BitVec.toNat y) % 2 ^ 64",
+  "failures": [],
+  "messages": [
+    {
+      "file": "<proof>",
+      "line": 15,
+      "column": 0,
+      "severity": "info",
+      "text": "'ExampleProof.correctness' depends on axioms: [propext, Quot.sound]"
+    }
+  ],
+  "rerun": [
+    "leancil",
+    "verify",
+    "<output>",
+    "--proof",
+    "<proof>",
+    "--theorem",
+    "ExampleProof.correctness",
+    "--format",
+    "json"
+  ]
+}

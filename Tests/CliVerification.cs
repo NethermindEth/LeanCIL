@@ -2,7 +2,9 @@
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
 
+using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 var cli = args.Length == 0
     ? new[] { "dotnet", At("Extractor/bin/Nethermind.LeanCIL.dll") }
@@ -112,6 +114,9 @@ if (rejected.Code != 1 || rejected.Stdout.Length != 0 || !rejected.Stderr.Starts
     File.ReadAllText(settingsPath) != settings)
     throw new InvalidOperationException("Incorrect implementation was not rejected by the proof: " + rejected.Output);
 RequireSourceLocations(rejected.Stderr, "Examples/Proofs/Add.lean:");
+// Tools read `--format json` instead: one record per Lean error, the same exit code, nothing on stderr.
+RequireReport(Execute([.. cli, "verify", output, "--format", "json"]), 1, "WrongAdd.json", (output, "<output>"),
+    (proof, "<proof>"));
 
 Console.WriteLine("PASS CLI incorrect implementation rejected without a successful report");
 
@@ -121,6 +126,29 @@ Run(["dotnet", "build", fixture, "-c", "Release"]);
 Run([.. cli, "extract", demoAssembly, "Arithmetic::Add(ulong,ulong)", output]);
 Verified();
 Console.WriteLine("PASS CLI verification settings survive failure and support recovery");
+RequireReport(Execute([.. cli, "verify", output, "--format", "json"]), 0, "Verified.json", (output, "<output>"),
+    (proof, "<proof>"));
+
+// A loop proof missing its invariant reports the open obligation by its tag, and a loop tactic that stops
+// reports the method, pc and instruction it reached and what differs, read from its failure record.
+var loopOutput = At("artifacts/CliLoopReports");
+Run([.. cli, "extract", demoAssembly, "Examples.Loops::Countdown(uint)", loopOutput]);
+var countdown = File.ReadAllText(At("Examples/Proofs/Countdown.lean")).ReplaceLineEndings("\n");
+var noInvariant = Path.Combine(loopOutput, "NoInvariant.lean");
+File.WriteAllText(noInvariant, Edited(countdown, "    case invariant => trivial\n", ""));
+RequireReport(Execute([.. cli, "verify", loopOutput, "--proof", noInvariant, "--format", "json"]), 1,
+    "MissingInvariant.json", (loopOutput, "<output>"), (noInvariant, "<proof>"));
+var wrongHead = Path.Combine(loopOutput, "WrongHead.lean");
+File.WriteAllText(wrongHead, Edited(countdown, "cil_loop_continue \u27e8x - 1, updated, next\u27e9",
+    "cil_loop_continue \u27e8x - 2, updated, next\u27e9"));
+RequireReport(Execute([.. cli, "verify", loopOutput, "--proof", wrongHead, "--format", "json"]), 1,
+    "LoopHeadMismatch.json", (loopOutput, "<output>"), (wrongHead, "<proof>"));
+// The record is requested only by `--format json`; the default report is the error alone.
+var wrongHeadText = Execute([.. cli, "verify", loopOutput, "--proof", wrongHead]);
+if (wrongHeadText.Code != 1 || !wrongHeadText.Stderr.Contains("cil_loop_steps: target state not matched at pc 8") ||
+    wrongHeadText.Stderr.Contains("[LeanCIL failure"))
+    throw new InvalidOperationException("The default report changed for a loop failure: " + wrongHeadText.Output);
+Console.WriteLine("PASS CLI --format json reports each failure with its obligation, pc and state, and success");
 
 // This theorem proves invalid memory access cannot produce a successful execution.
 var memoryOutput = At("artifacts/CliMemory");
@@ -325,6 +353,46 @@ if (args.Length == 0)
 if (args.Length == 0)
     Run(["dotnet", "run", "--file", At("Tests/CliImportedKernelAudit.cs")],
         streamOutput: true, progress: "CLI imported helper kernel audit");
+
+// A golden report pins every field a tool reads; paths and hashes vary by machine and are named instead.
+static void RequireReport((int Code, string Output, string Stdout, string Stderr) run, int code, string golden,
+    params (string Path, string Name)[] paths)
+{
+    var report = JsonNode.Parse(run.Stdout) as JsonObject;
+    if (run.Code != code || run.Stderr.Length != 0 || report?["schema"]?.GetValue<int>() != 1)
+        throw new InvalidOperationException($"verify --format json did not exit {code} with one report: " + run.Output);
+    var actual = Normalized(report, paths)!.ToJsonString(new JsonSerializerOptions
+    {
+        WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    }).ReplaceLineEndings("\n") + "\n";
+    var expected = At("Tests/CliReports/" + golden);
+    if (File.Exists(expected) && File.ReadAllText(expected).ReplaceLineEndings("\n") == actual) return;
+    var written = At("artifacts/CliReports/" + golden);
+    Directory.CreateDirectory(Path.GetDirectoryName(written)!);
+    File.WriteAllText(written, actual);
+    throw new InvalidOperationException($"verify --format json differs from Tests/CliReports/{golden}; see {written}");
+}
+
+static JsonNode? Normalized(JsonNode? node, (string Path, string Name)[] paths) => node switch
+{
+    JsonObject entries => new JsonObject(entries.Select(entry =>
+        KeyValuePair.Create(entry.Key, Normalized(entry.Value, paths)))),
+    JsonArray items => new JsonArray([.. items.Select(item => Normalized(item, paths))]),
+    JsonValue value when value.TryGetValue<string>(out var text) => JsonValue.Create(Named(text, paths)),
+    _ => node?.DeepClone()
+};
+
+static string Named(string text, (string Path, string Name)[] paths) =>
+    // A longer path first, since a proof inside the output directory starts with the output's path.
+    System.Text.RegularExpressions.Regex.Replace(paths.Select(path => (Full: Path.GetFullPath(path.Path), path.Name))
+        .OrderByDescending(path => path.Full.Length).Aggregate(text, (current, path) =>
+            current.Replace(path.Full, path.Name).Replace(path.Full.Replace('\\', '/'), path.Name)),
+        @"\b[0-9a-f]{64}\b", "<sha256>");
+
+// A test edit that no longer applies would test the unedited proof.
+static string Edited(string text, string original, string replacement) =>
+    text.Contains(original, StringComparison.Ordinal) ? text.Replace(original, replacement)
+        : throw new InvalidOperationException("The proof no longer contains: " + original);
 
 // Editors, terminals and problem matchers follow a diagnostic's path, so a failed proof must cite the file the
 // developer edits, never the deleted workspace copy, and print each Lean error once.

@@ -736,13 +736,17 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return generated;
     }
 
-    static void AddConsumerLibrary(string directory, string name)
+    static void AddConsumerLibrary(string directory, string name, string[]? leanArguments = null)
     {
         var toml = Path.Combine(directory, "lakefile.toml");
+        // TOML and Lean string literals both accept a JSON-quoted string.
+        var quoted = string.Join(", ", (leanArguments ?? []).Select(argument => JsonSerializer.Serialize(argument)));
         if (File.Exists(toml))
-            File.AppendAllText(toml, $"\n[[lean_lib]]\nname = \"{name}\"\n");
+            File.AppendAllText(toml, $"\n[[lean_lib]]\nname = \"{name}\"\n" +
+                (quoted.Length == 0 ? "" : $"moreLeanArgs = [{quoted}]\n"));
         else
-            File.AppendAllText(Path.Combine(directory, "lakefile.lean"), $"\nlean_lib {name}\n");
+            File.AppendAllText(Path.Combine(directory, "lakefile.lean"), $"\nlean_lib {name}\n" +
+                (quoted.Length == 0 ? "" : $"  where moreLeanArgs := #[{quoted}]\n"));
     }
 
     /// <summary>The compiled module directory of a certified library.</summary>
@@ -1329,7 +1333,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 string authorPath = Path.Combine(session, author + ".lean");
                 if (File.Exists(authorPath)) throw new InvalidDataException(author + " is reserved for the export author proof.");
                 File.Copy(Path.Combine(session, Path.GetRelativePath(root, proof)), authorPath);
-                AddConsumerLibrary(session, author);
+                AddConsumerLibrary(session, author, ProofOptions);
                 copied.Add(authorPath);
                 File.WriteAllText(target, "import " + author + "\n" + audit);
             }
@@ -1339,7 +1343,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 sources.Add(target, proof, module,
                     Path.ChangeExtension(Path.GetRelativePath(root, proof), null).Replace('\\', '/').Replace('/', '.'));
             }
-            AddConsumerLibrary(session, module);
+            AddConsumerLibrary(session, module, ProofOptions);
             copied.Add(target);
         }
         sources.Add(extractedCopy.Item1, extractedCopy.Item2);
@@ -1582,7 +1586,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 // PDB names bind only proofs that import them; identity.json does not cover the PDB.
                 // A result cached without a statement view must not satisfy a run that prints one.
                 proofKeys[i] = ConsumerCacheKey("proof", before[i], SemanticExtractionIdentity(extractions[i]) + "\n" + requests[i].Theorem + "\n" + Sha(requests[i].Assembly) +
-                    (symbols[i] is null ? "" : "\n" + symbols[i]) + (viewsStatement ? "\nstatement-view" : ""));
+                    (symbols[i] is null ? "" : "\n" + symbols[i]) + (viewsStatement ? "\nstatement-view" : "") +
+                    ProofOptionsKey);
                 if (requests[i].ExpectRejection || ReferenceOnlyImports(extractions[i])) continue;
                 var receipt = Path.Combine(Path.GetTempPath(), "leancil-consumer-receipt-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(receipt);

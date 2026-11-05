@@ -160,7 +160,8 @@ example (memory : Memory) (value sum : W32) (home : Reference) (final : Memory)
         final⟩ := by
   cil_loop_recurse recurse (0, sum + 2)
 
--- A contract applied before the loop reaches its call names the instruction it is at.
+-- A contract applied before the loop reaches its call names the instruction it is at. The
+-- whole message is pinned: without `cil.diagnostics` no failure record follows it.
 /-- error: cil_loop_call: pc 3 is CIL.Op.localAddr 0, not a call; step to the call first with
 `cil_loop_advance` -/
 #guard_msgs (whitespace := lax) in
@@ -169,6 +170,30 @@ example (memory : Memory) (value count sum : W32) (home : Reference) (current : 
       (knownLocals [some (.aggregate (layout.encode [.i32 count, .i32 sum]))])) :
     LoopTerminates program 0 [.scalar (.i32 value)] (fun _ _ => True)
       ⟨3, entry.frame memory home, [], current⟩ := by
+  cil_loop_call addTwo_holds sum
+
+-- With `cil.diagnostics` the same failure appends its record: the method, pc and instruction
+-- it stopped at, and no obligation, since the goal carries no tag.
+/-- "instruction":"CIL.Op.localAddr 0","method":0,"missing":null,"obligation":null,"pc":3 -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (memory : Memory) (value count sum : W32) (home : Reference) (current : Memory)
+    (frame : LoopFrame [] memory current [.aggregate 8] [.bytes (.aggregate 8) home]
+      (knownLocals [some (.aggregate (layout.encode [.i32 count, .i32 sum]))])) :
+    LoopTerminates program 0 [.scalar (.i32 value)] (fun _ _ => True)
+      ⟨3, entry.frame memory home, [], current⟩ := by
+  cil_loop_call addTwo_holds sum
+
+-- The record names the obligation the failing goal is, read from its tag.
+/-- "obligation":"invariant","pc":3 -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (memory : Memory) (value count sum : W32) (home : Reference) (current : Memory)
+    (frame : LoopFrame [] memory current [.aggregate 8] [.bytes (.aggregate 8) home]
+      (knownLocals [some (.aggregate (layout.encode [.i32 count, .i32 sum]))])) :
+    LoopTerminates program 0 [.scalar (.i32 value)] (fun _ _ => True)
+      ⟨3, entry.frame memory home, [], current⟩ := by
+  refine ?invariant
   cil_loop_call addTwo_holds sum
 
 -- A call stops `cil_loop_steps`, which names the pc and the tactic that crosses it.

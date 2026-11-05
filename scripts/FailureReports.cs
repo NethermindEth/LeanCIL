@@ -81,7 +81,7 @@ internal static partial class FailureReports
             requestKind = stage switch
             {
                 "kernel replay" or "theorem audit" => ReplayOrAuditRejected,
-                "proof selection" => InvalidRequest,
+                "proof selection" or "arguments" => InvalidRequest,
                 _ => Unclassified
             };
         var first = diagnostics.FirstOrDefault();

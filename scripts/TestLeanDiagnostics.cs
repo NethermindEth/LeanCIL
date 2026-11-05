@@ -3,6 +3,7 @@
 #:include Verification.cs
 #:include LeanDiagnostics.cs
 #:include FailureReports.cs
+#:include VerifyReports.cs
 
 static void Require(bool condition, string message, string? text = null)
 {
@@ -206,3 +207,36 @@ Require(FailureReports.Refuted(Audit, "ExampleProof.correctness", proof, output,
     unsolved.kind != FailureReports.Refutation, "an unsolved goal or a negated statement alone is never a refutation");
 Directory.Delete(work, true);
 Console.WriteLine("PASS failure reports classify stages and Lean diagnostics and map locations to the user's files");
+
+// The JSON report reads Lean's records by these names; a renamed tag or marker would drop every record.
+var obligationSource = File.ReadAllText(At("CIL/Safety/Obligations.lean"));
+var recordSource = File.ReadAllText(At("CIL/Safety/FailureRecords.lean"));
+var leanTags = "[" + string.Join(", ", VerifyReports.ObligationTags.Select(tag => "`" + tag)) + "]";
+Require(obligationSource.Contains(leanTags) &&
+    recordSource.Contains($"def failureMarker : String := \"{VerifyReports.FailureMarker}\""),
+    "the report's obligation tags and record marker are Lean's");
+var recordLine = new System.Text.Json.Nodes.JsonObject
+{
+    ["tactic"] = "cil_loop_steps", ["method"] = 0, ["pc"] = 1, ["instruction"] = "CIL.Op.add",
+    ["obligation"] = "invariant", ["reached"] = new System.Text.Json.Nodes.JsonObject { ["stack"] = "[]" },
+    ["expected"] = new System.Text.Json.Nodes.JsonObject(), ["missing"] = "load",
+    ["residual"] = new System.Text.Json.Nodes.JsonArray("r"),
+    ["suggestions"] = new System.Text.Json.Nodes.JsonArray("s"),
+    ["unknown"] = new System.Text.Json.Nodes.JsonObject()
+}.ToJsonString();
+VerifyReports.ManifestMethod[] manifest = [new("M", ["IL_0000: ldarg.0", "IL_0001: add"])];
+var stopped = VerifyReports.Failure(new(FailureReports.ElaborationError, null, "Proof", proof, 3, 2,
+    "cil_loop_steps: stuck\n" + VerifyReports.FailureMarker + recordLine), manifest);
+Require(stopped["message"]!.GetValue<string>() == "cil_loop_steps: stuck" &&
+    stopped["method"]!["signature"]!.GetValue<string>() == "M" &&
+    stopped["cil"]!["ilOffset"]!.GetValue<int>() == 1 && stopped["cil"]!["instruction"]!.GetValue<string>() == "add" &&
+    stopped["obligations"]![0]!.GetValue<string>() == "invariant" &&
+    stopped["missing"]!["shape"]!.GetValue<string>() == "load" &&
+    stopped["suggestions"]![0]!.GetValue<string>() == "s" &&
+    stopped["unknown"]!.AsObject().Count == 0, "a failure record fills the report's fields", stopped.ToJsonString());
+var open = VerifyReports.Failure(new(FailureReports.UnsolvedGoal, null, "Proof", proof, 3, 2,
+    "unsolved goals\ncase invariant\nx : Nat\n\u22a2 True\n\ncase helper\n\u22a2 True"), manifest);
+Require(open["obligations"]!.AsArray().Select(tag => tag!.GetValue<string>()).SequenceEqual(["invariant"]) &&
+    open["cil"] is null && open["unknown"]!["cil"]!.GetValue<string>().Contains("left these goals open"),
+    "unsolved goals report only LeanCIL obligation tags, and say why nothing else is known", open.ToJsonString());
+Console.WriteLine("PASS verify --format json reads failure records and obligation tags, and explains each null");

@@ -1,8 +1,11 @@
 namespace Nethermind.LeanCIL;
 
-internal sealed class CliFailure(string stage, Exception cause) : Exception(cause.Message, cause)
+internal sealed class CliFailure(string stage, Exception cause, bool reported = false) : Exception(cause.Message, cause)
 {
     internal string Stage { get; } = stage;
+
+    /// <summary>Whether the command already reported this failure itself, so no text diagnostic follows.</summary>
+    internal bool Reported { get; } = reported;
 }
 
 internal enum Rejection { Selector, Call }

@@ -1,0 +1,78 @@
+{
+  "schema": 1,
+  "result": "failed",
+  "stage": "proof checking",
+  "theorem": "ExampleProof.correctness",
+  "method": {
+    "entry": "System.UInt32 Examples.Loops::Countdown(System.UInt32)",
+    "assembly": "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+    "assemblySha256": "<sha256>"
+  },
+  "proof": "<proof>",
+  "output": "<output>",
+  "axioms": null,
+  "statement": null,
+  "failures": [
+    {
+      "kind": "unsolved-goal",
+      "resource": null,
+      "module": "Proof",
+      "source": {
+        "file": "<proof>",
+        "line": 38,
+        "column": 2
+      },
+      "message": "unsolved goals\ncase invariant\nx✝ : W32\nhome : Reference\nentered : Memory\nsetup :\n  enterFrame Extracted.method0 [Value.scalar (CIL.Value.i32 x✝)] Memory.empty = Except.ok (entry.frame home, entered)\nentryFrame :\n  ∀ (footprint : List (Reference × Nat)),\n    LoopFrame footprint Memory.empty entered [CIL.LocalKind.word32] [LocalSlot.bytes CIL.LocalKind.word32 home]\n      (knownLocals [some (CIL.Value.i32 0)])\nstarted : Memory\nstored✝ :\n  storeLocal entered (LocalSlot.bytes CIL.LocalKind.word32 home) (Value.scalar (CIL.Value.i32 x✝)) =\n    Except.ok (LocalSlot.bytes CIL.LocalKind.word32 home, started)\nframe✝ :\n  LoopFrame [] Memory.empty started [CIL.LocalKind.word32] [LocalSlot.bytes CIL.LocalKind.word32 home]\n    (knownLocals [some (CIL.Value.i32 x✝)])\nx : W32\nm : Memory\nframe :\n  LoopFrame [] Memory.empty m [CIL.LocalKind.word32] [LocalSlot.bytes CIL.LocalKind.word32 home]\n    (knownLocals [some (CIL.Value.i32 x)])\nloaded : loadLocal m (LocalSlot.bytes CIL.LocalKind.word32 home) = Except.ok (Value.scalar (CIL.Value.i32 x))\nzero : ¬x = 0\nnonzero : x ≠ 0#32\nupdated : Memory\nstored :\n  storeLocal m (LocalSlot.bytes CIL.LocalKind.word32 home) (Value.scalar (CIL.Value.i32 (x - 1))) =\n    Except.ok (LocalSlot.bytes CIL.LocalKind.word32 home, updated)\nnext :\n  LoopFrame [] Memory.empty updated [CIL.LocalKind.word32] [LocalSlot.bytes CIL.LocalKind.word32 home]\n    (knownLocals [some (CIL.Value.i32 (x - 1))])\n⊢ True",
+      "tactic": null,
+      "method": null,
+      "cil": null,
+      "state": null,
+      "missing": null,
+      "suggestions": [],
+      "obligations": [
+        "invariant"
+      ],
+      "unknown": {
+        "tactic": "the proof left these goals open; no LeanCIL tactic stopped on them",
+        "method": "the proof left these goals open; no LeanCIL tactic stopped on them",
+        "cil": "the proof left these goals open; no LeanCIL tactic stopped on them",
+        "state": "the proof left these goals open; no LeanCIL tactic stopped on them",
+        "missing": "the proof left these goals open; no LeanCIL tactic stopped on them"
+      }
+    }
+  ],
+  "messages": [
+    {
+      "file": "<proof>",
+      "line": 10,
+      "column": 0,
+      "severity": "info",
+      "text": "'ExampleProof.entry.checked' depends on axioms: [propext, Classical.choice, Quot.sound]"
+    },
+    {
+      "file": "<proof>",
+      "line": 12,
+      "column": 0,
+      "severity": "info",
+      "text": "'ExampleProof.cutpoint.checked' depends on axioms: [propext]"
+    },
+    {
+      "file": "<proof>",
+      "line": 51,
+      "column": 0,
+      "severity": "info",
+      "text": "'ExampleProof.correctness' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]"
+    }
+  ],
+  "rerun": [
+    "leancil",
+    "verify",
+    "<output>",
+    "--proof",
+    "<proof>",
+    "--theorem",
+    "ExampleProof.correctness",
+    "--format",
+    "json"
+  ]
+}

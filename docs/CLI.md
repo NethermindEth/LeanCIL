@@ -507,6 +507,54 @@ the theorem audit. A verified refutation keeps its `verified.json`, the
 certificate of the refutation, and also writes `failed.json` with kind
 `refutation`, located at the theorem's name.
 
+### Machine-readable verify output
+
+`leancil verify ... --format json` prints one JSON report on stdout instead of
+the text report, and nothing on stderr; the exit code is the same as without
+it. `--format text` is the default. The report has `schema` 1, `result`
+(`verified` or `failed`), the `stage` that failed, the `theorem`, `method`,
+`proof` and `output`, and on success the `axioms` and `statement`. The proof's
+own Lean messages are in `messages`, and `rerun` repeats the run. `failures`
+holds one record per Lean error, located in the developer's file as in the
+text report:
+
+```json
+{
+  "kind": "elaboration-error",
+  "source": { "file": "/work/Proofs/Countdown.lean", "line": 40, "column": 4 },
+  "message": "cil_loop_steps: target state not matched at pc 8: ...",
+  "tactic": "cil_loop_steps",
+  "method": { "index": 0, "signature": "System.UInt32 Examples.Loops::Countdown(System.UInt32)" },
+  "cil": { "pc": 8, "ilOffset": 9, "instruction": "brtrue.s IL_0004", "leanInstruction": null },
+  "state": {
+    "reached": { "stack": "[CIL.Safety.Value.scalar (CIL.Value.i32 (x - 1#32))]" },
+    "expected": { "stack": "[CIL.Safety.Value.scalar (CIL.Value.i32 (x - 2))]" }
+  },
+  "missing": { "shape": "targetState", "residual": [] },
+  "suggestions": ["state a fact in the reached form, or state the target in it"],
+  "obligations": [],
+  "unknown": {
+    "cil.leanInstruction": "the walk is at the target's pc, so it steps no instruction",
+    "obligations": "the goal carries no obligation tag"
+  }
+}
+```
+
+`kind`, `resource` and `module` are as in `failed.json`. `tactic`, `method`,
+`cil`, `state` and `missing` come from the failure record the stopped tactic
+wrote, never from the error's prose: `cil_loop_steps`, `cil_loop_advance`,
+`cil_loop_finish`, `cil_loop_recurse`, `cil_loop_call` and the tactics built on
+them write one when the proof is checked with the Lean option `cil.diagnostics`,
+which `--format json` sets. `ilOffset` and `instruction` are read from the
+manifest at that method and pc. `missing.shape` names the kind of fact the step
+lacks, such as `unsafeAdd`, `spanValidity` or `targetState`, and `residual` the
+terms it must prove. `obligations` lists the obligation tags of the goal that
+failed, or of the goals an `unsolved goals` error lists, such as `invariant`.
+`suggestions` is advice, kept apart from these facts. Every field left `null`
+for lack of data, and an empty `obligations`, has its reason under `unknown`,
+keyed by the field's name; an error without a failure record, such as Lean's
+own, says so there.
+
 ## Export contracts
 
 `leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]`
