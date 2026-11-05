@@ -39,8 +39,9 @@ theorem correctness : CIL.Safety.Ensures Extracted.program 0
     obtain ⟨updated, stored, next, -⟩ := frame.store 0 (.i32 (x - 1)) rfl
     cil_loop_continue ⟨x - 1, updated, next⟩
       [entry.frame, header, cutpoint, loaded, stored, next.load 0, nonzero]
-    · trivial
-    · have positive : 0 < x.toNat := by
+    case invariant => trivial
+    case measure =>
+      have positive : 0 < x.toNat := by
         have : x.toNat ≠ 0 := by intro h; exact zero (BitVec.eq_of_toNat_eq h)
         omega
       rw [BitVec.toNat_sub_of_le]

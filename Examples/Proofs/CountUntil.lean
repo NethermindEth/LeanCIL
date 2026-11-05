@@ -89,11 +89,11 @@ theorem outcome (holds : bumpContract.Holds Extracted.program bump) (value limit
       -- The call raises with iterations left; no invariant or measure obligation remains.
       rw [show untilRaises value count = some _ from ite_eq_left (by omega)]
       cil_loop_outcome_raise holds (count, count) at bumpSite [entry.frame]
-      · trivial
-      · simp only [bumpContract, ite_true]
+      case precondition => trivial
+      case raises => simp only [bumpContract, ite_true]
     cil_loop_outcome_call holds (count, limit) at bumpSite [entry.frame]
-    · trivial
-    · simp only [bumpContract, hit, ite_false]
+    case precondition => trivial
+    case raises => simp only [bumpContract, hit, ite_false]
     rintro final _ ⟨_, invoked⟩ framed ⟨_, rfl, rfl⟩
     dsimp only [bumpContract, List.nil_append, List.cons_append, Nat.reduceAdd] at framed ⊢
     -- The callee may change only its empty footprint, so both locals survive the call.

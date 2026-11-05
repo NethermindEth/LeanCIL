@@ -106,7 +106,8 @@ theorem doubles (memory : Memory) (value : W32) (wellFormed : memory.WellFormed)
 
 /-- By default the loop tactics take the struct's zeroing and stores through its frame, decide
     the branch from `count ≠ value`, and continue the call with the frame after it: the proof
-    names no frame lemma, memory or step and supplies only the invariant and the arithmetic. -/
+    names no frame lemma, memory or step and supplies only the invariant and the arithmetic,
+    each selected by the tag `cil_loop_recurse` gives it. -/
 theorem doubles_by_default (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) :
     ∃ fuel final, invoke program fuel 0 [.scalar (.i32 value)] memory =
       .ok (final, [.scalar (.i32 (2 * value))]) ∧
@@ -126,10 +127,12 @@ theorem doubles_by_default (memory : Memory) (value : W32) (wellFormed : memory.
   · cil_loop_advance
     cil_loop_call addTwo_holds sum
     cil_loop_recurse recurse (count + 1, sum + 2)
-    · show sum + 2 = 2 * (count + 1)
-      rw [doubled]
+    case measure =>
+      show (value - (count + 1)).toNat < (value - count).toNat
       bv_omega
-    · show (value - (count + 1)).toNat < (value - count).toNat
+    case invariant =>
+      show sum + 2 = 2 * (count + 1)
+      rw [doubled]
       bv_omega
 #print axioms doubles_by_default
 
@@ -510,13 +513,15 @@ theorem stamps_returns_count (memory : Memory) (count : W32) (buffer : Reference
     cil_loop_call stamp_holds (buffer.element 4 index.toNat, index)
     have next : (index + 1).toNat = index.toNat + 1 := by bv_omega
     cil_loop_recurse recurse (index + 1)
-    · refine ⟨show (index + 1).toNat ≤ count.toNat by omega, ?_⟩
+    case invariant =>
+      refine ⟨show (index + 1).toNat ≤ count.toNat by omega, ?_⟩
       have later := (Writable.append (left := 1)).mp
         (show Writable _ buffer 4 index.toNat (1 + (count.toNat - (index.toNat + 1))) by
           rwa [show 1 + (count.toNat - (index.toNat + 1)) = count.toNat - index.toNat by omega])
       rw [next]
       simpa [Nat.add_comm] using later.2
-    · dsimp only
+    case measure =>
+      dsimp only
       omega
 /-- info: 'Tests.LoopDiagnostics.stamps_returns_count' depends on axioms: [propext,
  Classical.choice, Quot.sound] -/
@@ -613,7 +618,8 @@ example (memory current : Memory) (count index : W32) (home slotted : Reference)
   cil_loop_call stamp_holds (slotted, index)
 
 -- At the return, `cil_loop_finish` closes the conjuncts the exit facts prove, here the results
--- and the caller's confinement, and hands back the rest.
+-- and the caller's confinement, and hands back the rest, each tagged by its place among all the
+-- conjuncts, which stays put whichever others close.
 example (memory : Memory) (count : W32) (buffer home : Reference) (current : Memory)
     (stored : ∀ final, Contents final buffer 4 [count])
     (setup : enterFrame stamps [.scalar (.i32 count), .reference (.address buffer)] memory =
@@ -625,8 +631,7 @@ example (memory : Memory) (count : W32) (buffer home : Reference) (current : Mem
         Confined [(buffer, 4)] memory final) ∧ Contents final buffer 4 [count])
       ⟨15, stampsEntry.frame memory home, [], current⟩ := by
   cil_loop_finish
-  show Contents _ buffer 4 [count]
-  exact stored _
+  case postcondition.part3 => exact stored _
 
 -- A call whose stacked argument is not the contract's names both.
 /-- error: cil_loop_call: the call at pc 7 (CIL.Op.call 1 2) does not take the contract's
@@ -642,5 +647,99 @@ example (memory current : Memory) (count index : W32) (buffer home : Reference)
       (fun _ _ => True) ⟨3, stampsEntry.frame memory home, [], current⟩ := by
   cil_loop_advance
   cil_loop_call stamp_holds (buffer, index)
+
+/-- `stamp`'s method index, named as `bind_callee` names a callee. -/
+def stampMethod : Nat := 1
+
+/-- `stamp_holds` at the named callee, whose precondition goals take its name. -/
+theorem stampMethod_holds : stampContract.Holds stampsProgram stampMethod := stamp_holds
+/-- info: 'Tests.LoopDiagnostics.stampMethod_holds' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms stampMethod_holds
+
+/-- The callee's precondition that no hypothesis states is left tagged with the callee, ahead of
+    the continuing loop goal, which keeps its own tag. -/
+example (memory current : Memory) (count index : W32) (buffer home : Reference)
+    (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)
+    (bound : index.toNat < count.toNat)
+    (frame : LoopFrame [(buffer, 4 * count.toNat)] memory current [.word32]
+      [.bytes .word32 home] (knownLocals [some (.i32 index)]))
+    (offset : add memory buffer 4 (BitVec.ofInt 64 index.toInt) =
+      .ok (buffer.element 4 index.toNat))
+    (slot : 0 < 1 → Writable current (buffer.element 4 index.toNat) 4 0 1)
+    (later : ∀ state, LoopTerminates stampsProgram 0
+      [.scalar (.i32 count), .reference (.address buffer)] (fun _ _ => True) state) :
+    LoopTerminates stampsProgram 0 [.scalar (.i32 count), .reference (.address buffer)]
+      (fun _ _ => True) ⟨3, stampsEntry.frame memory home, [], current⟩ := by
+  cil_loop_advance
+  cil_loop_call stampMethod_holds (buffer.element 4 index.toNat, index)
+  case precondition.stampMethod => exact slot Nat.one_pos
+  exact later _
+
+-- A loop tactic handed a tagged obligation instead of a loop path names that obligation.
+/-- error: cil_loop_advance: expected a `LoopReaches` or `LoopTerminates` goal
+The main goal is the `precondition.stampMethod` obligation; close it first, as
+`case precondition.stampMethod => ...`. -/
+#guard_msgs (whitespace := lax) in
+example (memory current : Memory) (count index : W32) (buffer home : Reference)
+    (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)
+    (bound : index.toNat < count.toNat)
+    (frame : LoopFrame [(buffer, 4 * count.toNat)] memory current [.word32]
+      [.bytes .word32 home] (knownLocals [some (.i32 index)]))
+    (offset : add memory buffer 4 (BitVec.ofInt 64 index.toInt) =
+      .ok (buffer.element 4 index.toNat)) :
+    LoopTerminates stampsProgram 0 [.scalar (.i32 count), .reference (.address buffer)]
+      (fun _ _ => True) ⟨3, stampsEntry.frame memory home, [], current⟩ := by
+  cil_loop_advance
+  cil_loop_call stampMethod_holds (buffer.element 4 index.toNat, index)
+  cil_loop_advance
+
+open Lean Elab Command in
+/-- Elaborate `command`, which must fail, and fail unless its errors list each of `tags` in
+    backticks: the tags Lean's unknown-case hint offers, whatever wording surrounds them. -/
+elab "#guard_offered_tags " tags:ident* " in " command:command : command => do
+  let before := (← get).messages
+  modify fun state => { state with messages := {} }
+  elabCommand (← `(command| set_option Elab.async false in $command))
+  let errors := (← get).messages.toList.filter (·.severity == .error)
+  modify fun state => { state with messages := before }
+  let texts ← errors.mapM fun error => error.data.toString
+  if texts.isEmpty then throwError "#guard_offered_tags: the command did not fail"
+  for tag in tags do
+    let shown := s!"`{tag.getId}`"
+    unless texts.any (·.contains shown) do
+      throwError "#guard_offered_tags: no error offers {shown}:\n{String.intercalate "\n" texts}"
+
+-- A mistyped obligation is Lean's unknown case, which offers the tags the recursion left.
+#guard_offered_tags invariant measure in
+example (memory current : Memory) (value total : W32) (home : Reference)
+    (frame : LoopFrame [] memory current [.aggregate 16] [.bytes (.aggregate 16) home]
+      (knownLocals [some (.aggregate (mixed.encode
+        [.i32 0, .i32 0, .i32 total, .aggregate (List.replicate 8 0)]))]))
+    (recurse : ∀ next : Marked memory home, True →
+      (value - next.values).toNat < (value - total).toNat →
+      LoopTerminates markedProgram 0 [.scalar (.i32 value)] (fun _ _ => True)
+        (markedHeader memory value home next)) :
+    LoopTerminates markedProgram 0 [.scalar (.i32 value)] (fun _ _ => True)
+      ⟨3, markedEntry.frame memory home, [], current⟩ := by
+  cil_loop_recurse recurse (total + 1)
+  case invariants => trivial
+
+/-- A head hypothesis of three conditions leaves the invariant's two parts numbered and the
+    measure's decrease last, each selected by its tag, the first also by the bare prefix. -/
+example (memory current : Memory) (value total : W32) (home : Reference)
+    (frame : LoopFrame [] memory current [.aggregate 16] [.bytes (.aggregate 16) home]
+      (knownLocals [some (.aggregate (mixed.encode
+        [.i32 0, .i32 0, .i32 total, .aggregate (List.replicate 8 0)]))]))
+    (recurse : ∀ next : Marked memory home, next.values = total + 1 → True →
+      next.values ≠ total →
+      LoopTerminates markedProgram 0 [.scalar (.i32 value)] (fun _ _ => True)
+        (markedHeader memory value home next)) :
+    LoopTerminates markedProgram 0 [.scalar (.i32 value)] (fun _ _ => True)
+      ⟨3, markedEntry.frame memory home, [], current⟩ := by
+  cil_loop_recurse recurse (total + 1)
+  case measure => exact fun same => by bv_omega
+  case invariant.part2 => trivial
+  case invariant => rfl
 
 end Tests.LoopDiagnostics

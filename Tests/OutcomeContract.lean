@@ -84,8 +84,8 @@ theorem strict_holds (percentHolds : percentContract.Holds Extracted.program per
       simp only [strictContract, strictRaises, within, ↓reduceIte]
       cil_raise_steps []
       cil_outcome_call percentHolds 0 at percentSite []
-      · trivial
-      · simp only [percentContract, within, ite_true]
+      case precondition => trivial
+      case raises => simp only [percentContract, within, ite_true]
       rintro m1 _ - - ⟨_, rfl, rfl⟩
       dsimp only [percentContract]
       cil_raise_steps [CIL.truth]
@@ -103,8 +103,8 @@ theorem strict_holds (percentHolds : percentContract.Holds Extracted.program per
   · simp only [strictContract, strictRaises, within, ite_false]
     cil_raise_steps []
     cil_outcome_raise percentHolds v at percentSite []
-    · trivial
-    · simp only [percentContract, within, ite_false]
+    case precondition => trivial
+    case raises => simp only [percentContract, within, ite_false]
 
 /-- `Root` reads `Strict`'s outcome off its contract without restating when it raises. -/
 theorem root_holds (strictHolds : strictContract.Holds Extracted.program strict) :
@@ -154,9 +154,9 @@ theorem root_formed (strictHolds : strictContract.Holds Extracted.program strict
   | none =>
     cil_contract_steps []
     cil_formed_outcome_call strictHolds v at strictSite []
-    · trivial
-    · exact formed
-    · exact raised
+    case precondition => trivial
+    case wellFormed => exact formed
+    case raises => exact raised
     rintro m1 _ - formed1 - confined ⟨out, rfl, same⟩
     subst out
     dsimp only [strictContract]
@@ -168,9 +168,9 @@ example (percentHolds : percentContract.Holds Extracted.program percent) (m : Me
     Raises Extracted.program strict [.scalar (.i64 0)] m "System.ArgumentException" := by
   cil_raise_steps []
   cil_formed_outcome_call percentHolds 0 at percentSite []
-  · trivial
-  · exact formed
-  · simp only [percentContract]; decide
+  case precondition => trivial
+  case wellFormed => exact formed
+  case raises => simp only [percentContract]; decide
   rintro m1 _ - - - - ⟨_, rfl, rfl⟩
   dsimp only [percentContract]
   cil_raise_steps [CIL.truth]

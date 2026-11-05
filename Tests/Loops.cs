@@ -385,7 +385,7 @@ Console.WriteLine("PASS unchanged outcome loop proof after reimplementing the th
 int UntilLine(string text) => untilProof.IndexOf(text, StringComparison.Ordinal) is var at and >= 0 && untilProof.Split(text).Length == 2
     ? untilProof[..at].Count(c => c == '\n') + 1
     : throw new InvalidDataException("Examples/Proofs/CountUntil.lean has no unique line containing: " + text);
-var exceptionalExit = UntilLine("· simp only [bumpContract, ite_true]");
+var exceptionalExit = UntilLine("case raises => simp only [bumpContract, ite_true]");
 
 // A helper that throws another type, with its contract re-proved to say so, no longer
 // establishes the loop's specified exception: the unchanged loop proof fails at that exit.
@@ -420,7 +420,8 @@ foreach (var (name, original, mutated, obligation) in new[]
         "state.values.2.toNat ≤ limit.toNat - state.values.1.toNat\n",
         "show (count + 1).toNat ≤ limit.toNat"),
     ("CountUntilWrongException", "then some \"System.InvalidOperationException\" else none\n\nbind_entry entry",
-        "then some \"System.ArgumentException\" else none\n\nbind_entry entry", "· simp only [bumpContract, ite_true]")
+        "then some \"System.ArgumentException\" else none\n\nbind_entry entry",
+        "case raises => simp only [bumpContract, ite_true]")
 })
 {
     if (untilProof.Split(original).Length != 2) throw new InvalidDataException("Ambiguous proof mutation: " + original);

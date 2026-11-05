@@ -1,6 +1,7 @@
 import CIL.Safety.Loops
 import CIL.Safety.SymbolicExecution
 import CIL.Safety.LoopFacts
+import CIL.Safety.Obligations
 
 /-!
 # Loop path automation
@@ -321,7 +322,7 @@ def loopStuck (tactic : String) (facts prepared : Array Term)
     (stops : Lean.Name → Bool) : TacticM Unit := withMainContext do
   let saved ← saveState
   let some (source, _) ← loopGoalStates (← getMainTarget)
-    | throwError "{tactic}: expected a `LoopReaches` or `LoopTerminates` goal"
+    | throwError "{tactic}: expected a `LoopReaches` or `LoopTerminates` goal{← obligationNote}"
   let some parts ← loopStateParts? source
     | throwError "{tactic}: the source state does not reduce to a literal state:\
         {indentExpr (loopLiteralSums source)}"

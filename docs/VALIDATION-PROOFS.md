@@ -186,7 +186,12 @@ the `Unsafe.Add` fact the walk stops at the add, naming that fact; a narrowing l
 the walk; without the index bound the call names the footprint side condition; an unformed
 argument names the argument check; and a contract input whose arguments differ from the stack
 names both. At a return `cil_loop_finish` closes the results and confinement and hands back the
-rest of the postcondition.
+rest of the postcondition. The proofs select what the tactics leave by its obligation tag, so a
+dropped or renamed tag fails the build: `invariant` and `measure` after `cil_loop_recurse`,
+`precondition.stampMethod` for a named callee's open precondition, the third conjunct's
+`postcondition.part3` when the exit facts close the first two, and the numbered invariant parts and
+`measure` of a three-condition head hypothesis. A loop tactic run on that precondition names it,
+and a mistyped `case` is Lean's error, checked to offer the open tags whatever its wording.
 
 `Tests.ProfileContract` proves a contract for a method that tests AVX2 once, under x86-64-v3, and
 carries it to x86-64-v4, to v3 without 256-bit acceleration and to every profile with AVX2 on. A

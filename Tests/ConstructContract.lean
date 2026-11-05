@@ -171,8 +171,8 @@ theorem root_holds (pairHolds : pairContract.Holds Extracted.program pair)
   dsimp only [rootContract, MethodContract.Returns] at *
   cil_contract_steps []
   cil_contract_construct pairHolds pair_constructs (fun this => ⟨this, x, y⟩) []
-  · exact formed
-  · exact fun _ _ storage => ⟨storage.formed, storage.writable⟩
+  case wellFormed => exact formed
+  case precondition => exact fun _ _ storage => ⟨storage.formed, storage.writable⟩
   intro t1 m1 final1 _ storage1 _ formed1 _ framed1 _
   have length : ∀ n, (numberBytes n 8).length = 8 := by simp [numberBytes]
   have size1 : (pairBytes ⟨t1, x, y⟩).length = 16 := by simp [pairBytes, length]

@@ -45,6 +45,10 @@ Details: [editor workspace](https://github.com/NethermindEth/LeanCIL/blob/main/d
   helper; caller proofs then survive helper rewrites.
 - Loop invariants describe the state at a checked cutpoint; continuing iterations must decrease
   an explicit measure. A finite sample does not prove termination.
+- Close the goals a loop or call tactic leaves by their tag, `case invariant =>`,
+  `case measure =>`, `case precondition =>` and so on, rather than by position; a tactic that
+  fails on a tagged goal names it. The tags are listed under
+  [obligation tags](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-STEPPING.md#obligation-tags).
 - End each theorem with `#print axioms` and confirm it lists no `sorryAx`.
 - If a step does not reduce, check that the method and profile are the ones extracted, then read
   [stepping and reduction](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-STEPPING.md)

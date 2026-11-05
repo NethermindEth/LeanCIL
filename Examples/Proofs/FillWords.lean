@@ -73,9 +73,10 @@ theorem fill_words (initial : Memory) (base : Reference) (v : W64) (n : W32)
       loaded, frame1.load 0, stored2, frame2.load 0, List.reverse_cons, List.reverse_nil,
       List.nil_append, List.cons_append]
     all_goals simp only [invariant, toNat_succ lower]
-    · rw [List.replicate_succ', show n.toNat - (k.toNat + 1) = n.toNat - k.toNat - 1 by omega]
+    case invariant =>
+      rw [List.replicate_succ', show n.toNat - (k.toNat + 1) = n.toNat - k.toNat - 1 by omega]
       exact ⟨pushed.after_below below2 old, by omega⟩
-    · omega
+    case measure => omega
 
 /-- Every nonnegative count fills exactly that many words, whatever the buffer held before. -/
 theorem correctness : Ensures Extracted.program 0

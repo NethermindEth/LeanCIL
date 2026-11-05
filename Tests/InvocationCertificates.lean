@@ -188,9 +188,9 @@ theorem relay_holds : relayContract.Holds program relayMethod := by
   -- callee runs from `memory`.
   cil_contract_steps []
   cil_contract_certified_call echo_anywhere v []
-  · trivial
-  · exact formed
-  · exact world
+  case precondition => trivial
+  case wellFormed => exact formed
+  case staticWorld => exact world
   relay_finish
 
 /-- Through a certified callee, the precondition of `Echo` supplies the entry premises. -/
@@ -199,7 +199,7 @@ theorem relay_holds_of_certified : relayContract.Holds program relayMethod := by
   dsimp only [relayContract, echoContract]
   cil_contract_steps []
   cil_certified_call echo_certified v []
-  · exact ⟨formed, world⟩
+  case precondition => exact ⟨formed, world⟩
   relay_finish
 
 /-- The `at site` form of `cil_contract_certified_call` checks the call instruction. -/

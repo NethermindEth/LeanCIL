@@ -337,15 +337,16 @@ The tactics of [LoopFrameSteps](../CIL/Safety/LoopFrameSteps.lean), which
   return `cil_loop_finish` names what leaving the frame keeps, `exitConfined` and `exitBelow`
   (`LoopFrame.leave`), carries the caller-buffer facts to the exit memory, and closes each
   conjunct of the postcondition that a hypothesis, a carried `Filled` fact's contents or the
-  facts prove; the rest is left as the goal, with those facts in context.
+  facts prove; the rest are left as goals, tagged by their place among the conjuncts (see
+  [obligation tags](#obligation-tags)), with those facts in context.
 - `cil_loop_call holds input at site [facts]` applies the contract (`loop_terminates_call`) at
-  the `bind_call` site or, without `at site`, at the fetched call. It leaves the precondition
-  unless `trivial` or a hypothesis proves it, then continues: it names the returned memory,
-  unfolds the contract, substitutes an output its postcondition states as an equation, names the
-  callee's `WellFormed` (`calledFormed`) and proves the frame at the returned memory
-  (`calledFrame`, through `LoopFrame.after_confined`), and carries the caller-buffer facts across
-  the call: write authority always, contents when `omega` shows them apart from the callee's
-  footprint. It fails naming the pc and instruction when the goal is not at a call, the argument
+  the `bind_call` site or, without `at site`, at the fetched call. It leaves the precondition,
+  tagged `precondition.<callee>`, unless `trivial` or a hypothesis proves it, then continues: it
+  names the returned memory, unfolds the contract, substitutes an output its postcondition states
+  as an equation, names the callee's `WellFormed` (`calledFormed`) and proves the frame at the
+  returned memory (`calledFrame`, through `LoopFrame.after_confined`), and carries the
+  caller-buffer facts across the call: write authority always, contents when `omega` shows them
+  apart from the callee's footprint. It fails naming the pc and instruction when the goal is not at a call, the argument
   check and the fact it needs when the call does not step, the contract's arguments beside the
   stack when they differ, and the side condition when the callee's footprint is not shown inside
   the frame's footprint or below the caller's watermark.
@@ -355,8 +356,69 @@ The tactics of [LoopFrameSteps](../CIL/Safety/LoopFrameSteps.lean), which
   `LoopFrame.zero_aggregate`, `store_field` and `store`, naming the memory each produces, and
   applies `hypothesis` at the head state with loop values `values`, the reached memory and its
   frame, through `LoopFrame.set_local` when a span or reference slot changed. The invariant and
-  the decrease are left as goals; a state that is not the head's at `values` fails, showing the
-  reached state.
+  the decrease are left as goals tagged `invariant` and `measure`; a state that is not the
+  head's at `values` fails, showing the reached state.
+
+#### Obligation tags
+
+Every goal a loop or contract tactic leaves for the author carries a tag naming its purpose
+([Obligations](../CIL/Safety/Obligations.lean)), so a proof selects it with `case <tag> =>` and
+the infoview shows it. Tagging is goal metadata: it prints nothing and does no proof work. The goal a tactic only continues, such as the loop path
+after `cil_loop_advance` or the continuation after `cil_loop_call`, keeps the tag it had.
+
+| Tag | Obligation | Left by |
+| --- | --- | --- |
+| `invariant`, `invariant.part<n>` | the loop head's invariant at the reached state, or its `n`th part | `cil_loop_recurse`, `cil_loop_continue` |
+| `measure` | the measure's decrease at a back edge | `cil_loop_recurse`, `cil_loop_continue` |
+| `precondition.<callee>` | the callee contract's precondition | `cil_loop_call`, `cil_loop_outcome_call`, `cil_loop_outcome_raise`, `cil_contract_call`, `cil_formed_call`, `cil_certified_call`, `cil_contract_certified_call`, `cil_outcome_call`, `cil_formed_outcome_call`, `cil_outcome_raise`, `cil_contract_steps`, `cil_contract_construct` |
+| `wellFormed` | the caller memory's `WellFormed` | `cil_formed_call`, `cil_formed_outcome_call`, `cil_contract_certified_call`, `cil_contract_construct` |
+| `staticWorld` | the caller memory's static world | `cil_contract_certified_call` |
+| `raises` | the callee's `raises` equation | `cil_loop_outcome_call`, `cil_loop_outcome_raise`, `cil_outcome_call`, `cil_formed_outcome_call`, `cil_outcome_raise` |
+| `postcondition`, `postcondition.part<n>` | the postcondition at a return, or its `n`th conjunct | `cil_loop_finish`, `cil_contract_steps` |
+
+The callee part of a precondition tag is the last component of the callee's constant, such as
+`precondition.stamp` for a `bind_callee stamp`; a callee given as a literal index leaves the bare
+`precondition`. `case precondition` selects either, since `case` also matches a tag's prefix.
+`cil_loop_finish` numbers the conjuncts it leaves by their place among all the postcondition's
+conjuncts, `postcondition.part2` for the second, so a conjunct keeps its tag whichever others the
+exit facts close, and `case postcondition` selects the first left; a postcondition that is not a
+conjunction is left as `postcondition`. A loop head hypothesis with one condition leaves
+`invariant`, as the entry hypothesis of `invoke_loop_induction` does; one with more leaves its
+last, the back edge's decrease, as `measure`, and the others as the invariant's parts,
+`invariant` for one, as in the iteration hypothesis, and `invariant.part1`, `invariant.part2`,
+... for several. A mistyped tag is Lean's `Case tag ... not found` error, which lists the tags
+of the open goals. A loop tactic handed a tagged obligation instead of a loop path says
+which obligation the main goal is and how to select it. The tags are the proof API:
+
+```lean
+import CIL.Safety.Obligations
+
+open CIL.Safety
+
+example : obligationTags =
+    [`invariant, `measure, `precondition, `wellFormed, `staticWorld, `raises, `postcondition] :=
+  rfl
+#guard obligationOf? `postcondition.part2 == some `postcondition
+#guard numberedTags `postcondition 2 == #[`postcondition.part1, `postcondition.part2]
+#guard recurseConditionTags 3 == #[`invariant.part1, `invariant.part2, `measure]
+#guard obligationOf? `precondition.stamp == some `precondition
+#guard obligationOf? `refine_2 == none
+```
+
+The iteration of the [struct-local loop proof](../Examples/Proofs/TallyTwice.lean) crosses the
+call and closes both recursion obligations by name:
+
+```lean excerpt Examples/Proofs/TallyTwice.lean
+cil_loop_call addTwo_holds sum at addTwoSite
+cil_loop_recurse recurse (count + 1, sum + 2)
+case invariant =>
+  show sum + 2 = 2 * (count + 1)
+  rw [doubled]
+  bv_omega
+case measure =>
+  show (value - (count + 1)).toNat < (value - count).toNat
+  bv_omega
+```
 
 Each store names its memory, step and frame (`stored`, `storing`, `storedFrame`,
 `storedBelow`), and the walk re-states each `Contents`, `Filled` and `Writable` hypothesis about
