@@ -43,7 +43,8 @@ File.WriteAllText(Path.Combine(appRoot, "App.csproj"), """
 string librarySource = Path.Combine(libraryRoot, "Library.cs");
 File.WriteAllText(librarySource, "namespace ImportFixture; public static class Library { public static ulong AddOne(ulong value) => value + 1; public static ulong AddSame(ulong value) => value + 1; " +
     "public static ulong Generic<T>(ulong value) => value + 1; internal static ulong Hidden(ulong value) => value + 1; } " +
-    "public struct Value { public ulong Field; public ulong Add(ulong value) => value + Field; } " +
+    "public struct Value { public ulong Field; public ulong Add(ulong value) => value + Field; " +
+    "public ulong Init { readonly get => Field; init => Field = value; } } " +
     "public static class Seeded { public static readonly ulong Seed = (ulong)System.Environment.ProcessorCount; } " +
     "public struct ConstantWord { public ulong Value; public ConstantWord(ulong value) { Value = value; } " +
     "public static implicit operator ConstantWord(ulong value) => new(value); public static readonly ConstantWord One = 1ul; } " +
@@ -310,13 +311,17 @@ JsonObject RestrictedManifest(string assembly, string method, string folder)
 }
 const string shape = "Contract exports require a public or protected static, non-virtual, closed method.";
 const string assumptions = "Contract export rejects static-value assumptions: ";
-foreach ((string Name, string Method, string Marker) restriction in new[]
+// An `init` accessor returns `void modreq(IsExternalInit)`; it is rejected as an instance method,
+// before its signature reaches the typed-layout boundary.
+foreach ((string Name, string[] Methods) restriction in new[]
 {
-    ("internal", "ImportFixture.Library::Hidden(ulong)", shape),
-    ("instance", "ImportFixture.Value::Add(ulong)", shape)
+    ("internal", new[] { "ImportFixture.Library::Hidden(ulong)" }),
+    ("instance", new[] { "ImportFixture.Value::Add(ulong)", "ImportFixture.Value::set_Init(ulong)" })
 })
 {
-    RejectExport(RestrictedManifest(library, restriction.Method, Restriction(restriction.Name, library, restriction.Method)), restriction.Marker, restricted);
+    foreach ((string method, int index) in restriction.Methods.Select((method, index) => (method, index)))
+        RejectExport(RestrictedManifest(library, method, Restriction(restriction.Name + (index == 0 ? "" : "-" + index),
+            library, method)), shape, restricted);
     completed.CompleteCase("core." + restriction.Name);
 }
 string genericOutput = Path.Combine(root, "Restriction-generic");
