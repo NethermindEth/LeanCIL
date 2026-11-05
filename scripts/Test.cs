@@ -101,7 +101,8 @@ var independentSuites = new Dictionary<string, (string Script, string Descriptio
     ["assemblies"] = ("Tests/MultiAssembly.cs",
         "bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and " +
         "substitution rejection"),
-    ["blockers"] = ("Tests/Blockers.cs", "admission reports with deduplicated blockers, call chains and profile-excluded branches"),
+    ["blockers"] = ("Tests/Blockers.cs", "admission reports with deduplicated blockers, call chains, " +
+        "profile-excluded branches and self-admission"),
     ["audit"] = ("Tests/OleanAudit.cs", "theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts cannot forge"),
     ["docs"] = ("Tests/DocSnippets.cs", "documentation Lean snippets and cited library names against the current library")
 };
@@ -178,6 +179,7 @@ if (suite is "all" or "evidence")
         "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TypeTests.cs",
         "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/StaticScalarValues.cs",
         "Tests/TranslationAudit.cs"]);
+if (suite is "all" or "blockers") projects.Add("Tests/SelfAdmission.cs");
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
 if (suite is "all" or "generics") projects.AddRange(["Tests/GenericOwners.cs", "Tests/GenericLayouts.cs"]);
 if (suite is "all" or "unsafe")

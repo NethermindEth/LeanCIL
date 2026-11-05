@@ -25,6 +25,7 @@ Omit `--suite` to run everything. The accepted names and fixture mapping are def
 | Referenced assemblies and pins | `assemblies`, `evidence`, `dispatch`, `exportstyped` |
 | Loops and shared stepping tactics | `loops`, examples, and `Tests.Automation`, `Tests.StoreFacts`, `Tests.MethodContract`, `Tests.CodeAt` |
 | CLI, artifact identity and theorem selection | `core`, `cli`, `failures`, `workspace`, `audit` |
+| Admission reports and self-admission of the extractor | `blockers`; see [self-admission](COMPILER-COVERAGE.md#self-admission) |
 | Exported interfaces and implementation checks | The affected export partition from `ExportVerificationSuites.cs` |
 | Documentation, its Lean snippets and cited names | `docs`, plus `scripts/CheckDocReferences.cs`; see [documentation checks](CI.md#documentation-checks) |
 
@@ -45,7 +46,8 @@ instruction must not satisfy a named-exception obligation.
 - [Export and consumer checks](VALIDATION-EXPORTS.md): interface pins, audit and consumer packages.
 - [CI operation](CI.md): job selection, prepared libraries and artifacts.
 - [Pinned compiler corpus and runtime inventory](COMPILER-COVERAGE.md): compiler-sensitive
-  recognizers and visible changes to admitted runtime-call definitions.
+  recognizers, visible changes to admitted runtime-call definitions, and admission of
+  LeanCIL's own assembly.
 
 Use existing fixture batches for related cases. Measure producer work, proof compilation and
 kernel replay separately; moving work between jobs or caches does not itself demonstrate a

@@ -100,6 +100,10 @@ Test("test entry points", () =>
         Equal(VerificationSelection.Select([$"Tests/{name}.cs"]), ["unsafe"]);
     Equal(VerificationSelection.Select(["Tests/VectorStorage.cs"]), ["unsafe"]);
     Equal(VerificationSelection.Select(["Tests/VectorStorage.lean"]), ["unsafe"]);
+    // Sources compiled into the extractor change the self-admission scan, as does its baseline.
+    Equal(VerificationSelection.Select(["Tests/SelfAdmissionBaseline.tsv"]), ["blockers"]);
+    Require(VerificationSelection.Select(["scripts/ContractExport.cs"]).Contains("blockers"),
+        "A source compiled into the extractor does not select the self-admission scan");
 });
 Test("proof and transitive imports", () =>
 {

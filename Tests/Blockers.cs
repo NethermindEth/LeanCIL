@@ -262,4 +262,33 @@ Require(sites.Count == 2 && reaches.Count == 2 && chains.Count == 2 &&
     chains[0].SequenceEqual(new[] { "Entry", "ab", "c" }) &&
     chains[1].SequenceEqual(new[] { "Entry", "a", "bc" }),
     "Blocker indexes lost content equality, profile case or chain order");
+
+// LeanCIL's own assembly against its checked-in baseline, then the gate's decisions on altered baselines.
+const string selfAdmission = "Tests/SelfAdmission.cs";
+Run(["dotnet", "run", "--file", selfAdmission], streamOutput: true, progress: "Self-admission");
+var selfReport = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(At("artifacts/SelfAdmission/blockers.json")))
+    .GetProperty("entries").EnumerateArray().ToArray();
+string? Existing(string status) => selfReport.FirstOrDefault(e => e.GetProperty("status").GetString() == status)
+    is { ValueKind: JsonValueKind.Object } entry ? entry.GetProperty("signature").GetString() : null;
+(int Code, string Output) Gate(params string[] lines)
+{
+    var path = Path.Combine(directory, "self-baseline.tsv");
+    File.WriteAllLines(path, ["status\tmethod", .. lines]);
+    var result = Execute(["dotnet", "run", "--file", selfAdmission, "--", "--baseline", path, "--reuse-report"]);
+    return (result.Code, result.Output);
+}
+// Losing an admission that still exists is the only failure.
+var blockedMethod = Existing("blocked")!;
+var lostAdmission = Gate("A\t" + blockedMethod);
+Require(lostAdmission.Code != 0 && lostAdmission.Output.Contains("no longer admitted") &&
+    lostAdmission.Output.Contains(blockedMethod), "Lost admission passed the gate:\n" + lostAdmission.Output);
+// Removed methods and gained admissions are reported, since the tool's own method set changes every PR.
+const string gone = "System.Int32 Gone::Removed()";
+var admittedMethod = Existing("admitted");
+var reported = admittedMethod is null ? Gate("A\t" + gone) : Gate("A\t" + gone, "B\t" + admittedMethod);
+Require(reported.Code == 0 && !reported.Output.Contains("Lost admissions") &&
+    reported.Output.Contains("Removed admitted methods:") && reported.Output.Contains(gone) &&
+    (admittedMethod is null || reported.Output.Contains("Gained admissions") &&
+        reported.Output.Contains(admittedMethod)),
+    "Removed or gained methods misreported:\n" + reported.Output);
 Console.WriteLine($"PASS {checks} admission report checks");
