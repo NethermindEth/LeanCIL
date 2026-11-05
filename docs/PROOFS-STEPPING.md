@@ -537,7 +537,7 @@ steps name no frame or span fact.
 
 With `set_option trace.CIL.loop true`, each instruction `cil_loop_steps`, `cil_loop_advance`,
 `cil_loop_finish`, `cil_loop_recurse` and `cil_loop_call` take, including a frame store or
-return, logs a `[CIL.loop]` trace: the pc and instruction, the source line from
+return, logs a trace message: the pc and instruction, the source line from
 `ExtractedSymbols` when the proof imports it, the lemma applied, each hypothesis the step's proof
 term mentions, the parts of the state that changed and the tags of the goals left. A hypothesis
 whose statement is a `SpanApart`, `Writable`, `Filled` or `CheckedSpan` fact also says what it
