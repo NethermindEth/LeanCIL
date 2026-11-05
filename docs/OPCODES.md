@@ -438,8 +438,7 @@ modifier; the Lean method and call metadata record a plain void return, so a met
 declaring type also has a modifier-only twin is rejected. `modopt`, other `modreq` types, the
 modifier on a value-returning method or a parameter, and an `IsExternalInit` from any other
 assembly, including one declared in the extracted assembly, are rejected with the modified type
-in the message. An `init` accessor of a reference type also needs a class `this`, which instance
-methods do not admit.
+in the message.
 
 ### Static readonly values
 
