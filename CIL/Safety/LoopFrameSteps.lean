@@ -144,8 +144,6 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
   let saved ← saveState
   let some (source, _) ← loopGoalStates (← getMainTarget) | return false
   let some parts ← loopStateParts? source | return false
-  -- The goal before the store, kept only for its trace.
-  let before ← if ← isTracingEnabledFor `CIL.loop then some <$> getMainGoal else pure none
   let fetched ← observing? (loopFetch facts)
   saved.restore
   let some { op, found, instruction, .. } := fetched | return false
@@ -221,12 +219,7 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
   if let some caller := caller then
     unless caller == memory do
       loopCarryConfined caller (← `(($framed).confined)) (← `((by assumption))) #[]
-  let lemma := if op.isAppOf ``CIL.Op.setFieldAt then ``CIL.Safety.LoopFrame.store_field
-    else if op.isAppOf ``CIL.Op.initAggregate then ``CIL.Safety.LoopFrame.zero_aggregate
-    else ``CIL.Safety.LoopFrame.store
-  unless takesStep do
-    if let some goal := before then loopTraceStep goal (.ofConstName lemma) (some op)
-    return true
+  unless takesStep do return true
   -- Taking the store's step puts its memory in the goal, so the regathered facts are about it.
   let taken ← saveState
   try
@@ -235,9 +228,6 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
     Term.withoutErrToSorry <| withoutRecover <| evalTactic (← `(tactic|
       refine CIL.Safety.loop_terminates_next $found $instruction ($stepped _ _ _ _ _) ?_))
   catch _ => taken.restore
-  if let some goal := before then
-    loopTraceStep goal m!"{MessageData.ofConstName lemma} and \
-      {MessageData.ofConstName ``CIL.Safety.loop_terminates_next}" (some op)
   return true
 
 /-- The layouts each `AggregateLayout.encode` in `expression` names. -/
@@ -497,16 +487,10 @@ def loopCallContinue (contract : Expr) (memory : Expr) (facts : Array Term) :
       catch _ => pure [side]
     unless open_.isEmpty do
       let goal ← instantiateMVars (← side.getType)
-      throwFailure m!"cil_loop_call: the frame after the call needs each callee footprint \
-        entry {names[index]!}, which the facts do not prove:{indentExpr goal}\nState the \
-        arithmetic it needs, or a `form` fact of the caller's memory for its reference, in the \
-        context or the fact list." do
-        return {
-          tactic := "cil_loop_call", missing := some "calleeFootprint", residual := #[goal],
-          suggestions := #[m!"state the arithmetic it needs, or a `form` fact of the caller's \
-            memory for its reference, in the context or the fact list"],
-          unknown := #[("method", "the frame side condition is not a loop path"),
-            ("pc", "the frame side condition is not a loop path")] }
+      throwError "cil_loop_call: the frame after the call needs each callee footprint entry \
+        {names[index]!}, which the facts do not prove:{indentExpr goal}\nState the arithmetic \
+        it needs, or a `form` fact of the caller's memory for its reference, in the context or \
+        the fact list."
   setGoals [continued]
   evalTactic (← `(tactic| try simp only [List.set, CIL.Safety.localResult] at $framed:ident))
 
@@ -532,26 +516,17 @@ def loopHeldContract (holds : Term) : TacticM (Expr × Name) := withMainContext 
 def loopCallFailure (holds input : Term) (facts : Array Term) (position : Nat)
     (stack : Expr) : TacticM Unit := withMainContext do
   let saved ← saveState
-  let tactic := "cil_loop_call"
-  let method (_ : Unit) := do loopGoalMethod? (← getMainTarget)
   -- The facts are normalised first, so the fetched step's context has them.
   let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
     (#[← `(CIL.truth)] ++ facts)
   let fetched ← observing? (loopFetch facts)
   let some { op, step, .. } := fetched
     | saved.restore
-      throwFailure m!"cil_loop_call: cannot fetch the instruction at pc {position}" do
-        return {
-          tactic, method := ← method (), pc := position,
-          missing := some "instructionLookup",
-          unknown := #[("instruction", "the method or instruction lookup did not close")] }
+      throwError "cil_loop_call: cannot fetch the instruction at pc {position}"
   unless (← whnfR op).isAppOf ``CIL.Op.call do
     saved.restore
-    throwFailure m!"cil_loop_call: pc {position} is {op}, not a call; step to the call first \
-      with `cil_loop_advance`" do
-      return {
-        tactic, method := ← method (), pc := position, instruction := op,
-        suggestions := #[m!"step to the call first with `cil_loop_advance`"] }
+    throwError "cil_loop_call: pc {position} is {op}, not a call; step to the call first with \
+      `cil_loop_advance`"
   let residual ← loopStepResidual step prepared
   saved.restore
   -- A call whose step still mentions a check is stuck on a fact, not on the contract.
@@ -560,29 +535,20 @@ def loopCallFailure (holds input : Term) (facts : Array Term) (position : Nat)
       [``form, ``formValue, ``checkedValue, ``SpanView.validate, ``add, ``loadLocal].any
         term.isConstOf).isSome
     if checking then
-      let missing := loopMissingFact goals
-      throwFailure m!"cil_loop_call: the call at pc {position} ({op}) does not step: its \
-        argument checks reduce to\
+      throwError "cil_loop_call: the call at pc {position} ({op}) does not step: its argument \
+        checks reduce to\
         {indentD (MessageData.joinSep (goals.toList.map (m!"{loopLiteralSums ·}")) "\n")}\n\
-        Supply {missing.hint}." do
-        return {
-          tactic, method := ← method (), pc := position, instruction := op,
-          missing := some missing.name, residual := goals.map loopLiteralSums,
-          suggestions := #[m!"supply {missing.hint}"] }
+        Supply {← loopMissingHint goals}."
   let (contract, _) ← loopHeldContract holds
   let wanted ← withMainContext do
     let inputExpr ← Term.elabTerm input none
     -- The contract's argument list, reduced as far as its definition goes.
     withTransparency .default <| reduce (skipTypes := true)
       (← instantiateMVars (← mkAppM ``MethodContract.args #[contract, inputExpr]))
-  throwFailure m!"cil_loop_call: the call at pc {position} ({op}) does not take the \
-    contract's arguments for this input, or is not the named site. The contract passes\
+  throwError "cil_loop_call: the call at pc {position} ({op}) does not take the contract's \
+    arguments for this input, or is not the named site. The contract passes\
     {indentExpr (loopLiteralSums wanted)}\n\
-    and the stack holds{indentExpr (loopLiteralSums stack)}" do
-    return {
-      tactic, method := ← method (), pc := position, instruction := op,
-      reached := #[("stack", loopLiteralSums stack)],
-      expected := #[("stack", loopLiteralSums wanted)], missing := some "contractArguments" }
+    and the stack holds{indentExpr (loopLiteralSums stack)}"
 
 elab_rules : tactic
   | `(tactic| cil_loop_call $holds $input $[at $site:ident]? $[[$facts:term,*]]?) =>
@@ -602,13 +568,6 @@ elab_rules : tactic
     let some parts ← withMainContext do loopStateParts? source
       | throwError "cil_loop_call: the source state does not reduce to a literal state"
     let saved ← saveState
-    -- The goal at the call and its instruction, kept only for its trace.
-    let before ← if ← isTracingEnabledFor `CIL.loop then do
-        let goal ← getMainGoal
-        let fetched ← observing? (loopFetch facts)
-        saved.restore
-        pure (some (goal, fetched.map (·.op)))
-      else pure none
     try
       Term.withoutErrToSorry <| withoutRecover <|
         evalTactic (← `(tactic| refine CIL.Safety.loop_terminates_call $holds $input
@@ -632,9 +591,6 @@ elab_rules : tactic
       try first | trivial | assumption))))
     for goal in open_ do goal.setTag precondition
     setGoals (open_ ++ remaining)
-    if let some (goal, op) := before then
-      loopTraceStep goal m!"{MessageData.ofConstName ``CIL.Safety.loop_terminates_call} with \
-        {holds}" op
 
 /-- Close `goal`, a head state's frame, with a frame fact at the reached memory: one of its type,
     or one whose span and reference slots differ from it, through `LoopFrame.set_local`. -/
@@ -718,24 +674,9 @@ elab_rules : tactic
         | throwError "cil_loop_recurse: the reached state is not a literal state"
       return (reached, parts[3]!)
     let mismatch (error : Exception) : TacticM Unit :=
-      throwFailure m!"cil_loop_recurse: the reached state is not the head of {hypothesis} at \
-        {values}:{indentExpr (loopLiteralSums reached)}\n{error.toMessageData}" do
-        let some (source, _) ← loopGoalStates reached
-          | return {
-              tactic := "cil_loop_recurse",
-              unknown := #[("method", "the goal is not a loop path"),
-                ("pc", "the goal is not a loop path")] }
-        let parts := (← loopStateParts? source).getD #[]
-        return {
-          tactic := "cil_loop_recurse", method := ← loopGoalMethod? reached,
-          pc := ← (parts[0]?).bindM fun pc => literalNat? pc,
-          reached := loopStatePartNames.zip (parts.map loopLiteralSums),
-          missing := some "loopHead",
-          unknown := #[("expected", "the head is not instantiated at these values; the \
-            message says how it differs")] }
+      throwError "cil_loop_recurse: the reached state is not the head of {hypothesis} at \
+        {values}:{indentExpr (loopLiteralSums reached)}\n{error.toMessageData}"
     let saved ← saveState
-    -- The goal at the loop head, kept only for its trace.
-    let before ← if ← isTracingEnabledFor `CIL.loop then some <$> getMainGoal else pure none
     let memoryTerm ← withMainContext do Term.exprToSyntax memory
     let framed ← `(?headFrame)
     let applied ← `(tactic| refine $hypothesis ⟨$values, $memoryTerm, $framed⟩ $holes*)
@@ -748,16 +689,10 @@ elab_rules : tactic
       | throwError "cil_loop_recurse: the head state of {hypothesis} carries no frame"
     unless ← loopCloseHeadFrame frameGoal do
       let wanted ← frameGoal.withContext do instantiateMVars (← frameGoal.getType)
-      throwFailure m!"cil_loop_recurse: no frame fact at the reached memory is the head's \
-        frame:{indentExpr (loopLiteralSums wanted)}" do
-        return {
-          tactic := "cil_loop_recurse", method := ← loopGoalMethod? reached,
-          expected := #[("frame", loopLiteralSums wanted)], missing := some "headFrame",
-          unknown := #[("pc", "the frame goal is not a loop path")] }
+      throwError "cil_loop_recurse: no frame fact at the reached memory is the head's frame:\
+        {indentExpr (loopLiteralSums wanted)}"
     setGoals (goals.filter (· != frameGoal))
     for goal in goals do
       if let some index := holeNames.idxOf? (← goal.getTag) then goal.setTag tags[index]!
-    if let some goal := before then
-      loopTraceStep goal m!"{hypothesis} at {values}" none
 
 end CIL.Safety

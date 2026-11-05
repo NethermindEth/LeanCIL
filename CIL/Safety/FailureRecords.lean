@@ -4,31 +4,38 @@ import CIL.Safety.Obligations
 /-!
 # Failure records
 
-What a LeanCIL tactic established when it stops: the method and pc it reached, the instruction
-there, the obligation its goal is, the reached and expected states, and the shape of the fact it
-lacks. With the option `cil.diagnostics` set, a failing tactic appends these as one line to its
-error, after `failureMarker`, as a JSON object, which `leancil verify --format json` reads instead
-of the error's prose. With the option unset the error is unchanged and no record is built.
+What a LeanCIL tactic had established where it stopped: the method and pc it reached, the
+instruction there, the obligation it was handed, the reached and expected states, and the shape of
+the fact it lacked. `CIL.Observe` builds a record for each error a LeanCIL tactic raises, and for
+each goal one leaves unsolved, and logs it as one line of JSON after `failureMarker`, which
+`leancil verify --format json` reads instead of the error's prose. Only an importer of
+`CIL.Observe` with `cil.diagnostics` set builds records; the tactics themselves build none.
 -/
 
 namespace CIL.Safety
 
-open Lean Elab Tactic Meta
+open Lean Meta
 
-/-- Whether a failing LeanCIL tactic appends its `FailureRecord` to its error. -/
+/-- Whether `CIL.Observe` logs a `FailureRecord` for each failure of a LeanCIL tactic. -/
 register_option cil.diagnostics : Bool := {
   defValue := false
-  descr := "append a machine-readable record of what a failing LeanCIL tactic established"
+  descr := "log a machine-readable record of where each LeanCIL tactic failed or stopped"
 }
 
-/-- The text that starts the line of a failure record in an error message, version 1. -/
+/-- The text that starts the line of a failure record, version 1. -/
 def failureMarker : String := "[LeanCIL failure v1] "
 
-/-- What a stopped LeanCIL tactic established. A field it could not determine is `none`, with the
+/-- Where a LeanCIL tactic failed or stopped. A field it could not determine is `none`, with the
     reason in `unknown` under the field's name; suggestions are kept apart from these facts. -/
 structure FailureRecord where
-  /-- The tactic that stopped. -/
+  /-- The tactic that failed or stopped. -/
   tactic : String
+  /-- The line and column of the error the record explains. -/
+  error : Option Position := none
+  /-- Whether the tactic succeeded and left the goal open rather than raising the error. -/
+  stopped : Bool := false
+  /-- The obligation the tactic was handed, by its tag. -/
+  obligation : Option Name := none
   /-- The index of the method the goal steps, when a literal. -/
   method : Option Nat := none
   /-- The pc the goal reached, when a literal. -/
@@ -48,51 +55,39 @@ structure FailureRecord where
   /-- The fields left `none`, each with the reason it could not be determined. -/
   unknown : Array (String × String) := #[]
 
-/-- The tag of the main goal when it names an obligation of `obligationTags`. -/
-def mainObligation? : TacticM (Option Name) := do
-  let some goal := (← getGoals).head? | return none
-  let tag := (← goal.getTag).eraseMacroScopes
-  return (obligationOf? tag).map fun _ => tag
-
-/-- `record` as one line of JSON, with its expressions printed in the main goal's context. -/
-def FailureRecord.render (record : FailureRecord) : TacticM String := withMainContext do
-  let text (data : MessageData) : TacticM Json :=
+/-- `record` as one line of JSON, with its expressions printed in the current context. -/
+def FailureRecord.render (record : FailureRecord) : MetaM String := do
+  let text (data : MessageData) : MetaM Json :=
     return Json.str (← (← addMessageContext data).toString)
-  let parts (entries : Array (String × Expr)) : TacticM Json := do
+  let parts (entries : Array (String × Expr)) : MetaM Json := do
     return Json.mkObj (← entries.toList.mapM fun (name, value) => do
       return (name, ← text m!"{value}"))
-  let obligation ← mainObligation?
-  -- Every field left null says why, even when the tactic gave no reason of its own.
+  -- Every field left null says why, even when the analysis gave no reason of its own.
   let unreported := [("method", record.method.isNone), ("pc", record.pc.isNone),
-      ("instruction", record.instruction.isNone), ("missing", record.missing.isNone)].filterMap
+      ("instruction", record.instruction.isNone), ("missing", record.missing.isNone),
+      ("obligation", record.obligation.isNone)].filterMap
     fun (field, absent) => if absent && !record.unknown.any (·.1 == field) then
-      some (field, s!"{record.tactic} does not determine it at this failure") else none
-  let unknown := record.unknown ++ unreported.toArray ++
-    (if obligation.isNone then #[("obligation", "the goal carries no obligation tag")] else #[])
+      some (field, s!"the goal {record.tactic} left does not determine it") else none
+  let error := match record.error with
+    | some position => Json.mkObj [("line", position.line), ("column", position.column)]
+    | none => Json.null
   let fields : List (String × Json) := [
     ("tactic", Json.str record.tactic),
+    ("error", error),
+    ("stopped", Json.bool record.stopped),
     ("method", toJson record.method),
     ("pc", toJson record.pc),
     ("instruction", ← match record.instruction with
       | some op => text m!"{op}"
       | none => pure Json.null),
-    ("obligation", toJson (obligation.map (·.toString))),
+    ("obligation", toJson (record.obligation.map (·.toString))),
     ("reached", ← parts record.reached),
     ("expected", ← parts record.expected),
     ("missing", toJson record.missing),
     ("residual", Json.arr (← record.residual.mapM fun term => text m!"{term}")),
     ("suggestions", Json.arr (← record.suggestions.mapM text)),
-    ("unknown", Json.mkObj (unknown.toList.map fun (field, reason) => (field, Json.str reason)))]
+    ("unknown", Json.mkObj ((record.unknown ++ unreported.toArray).toList.map
+      fun (field, reason) => (field, Json.str reason)))]
   return (Json.mkObj fields).compress
-
-/-- Throw `message`, followed when `cil.diagnostics` is set by the line of the record `record`
-    builds; `record` runs only then, so an unset option costs nothing. -/
-def throwFailure {α : Type} (message : MessageData) (record : TacticM FailureRecord) :
-    TacticM α := do
-  unless cil.diagnostics.get (← getOptions) do throwError message
-  let line ← try (← record).render catch error =>
-    pure (Json.mkObj [("tactic", Json.null), ("unknown", Json.mkObj
-      [("record", Json.str (← error.toMessageData.toString))])]).compress
-  throwError m!"{message}\n{failureMarker}{line}"
 
 end CIL.Safety

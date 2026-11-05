@@ -6,6 +6,8 @@ defaultTargets = ["CIL"]
 
 [[lean_lib]]
 name = "CIL"
+# The observer is opt-in, so no CIL module imports it; the library still builds and ships it.
+globs = ["CIL", "CIL.Observe"]
 
 [[lean_lib]]
 name = "Tests.Support"

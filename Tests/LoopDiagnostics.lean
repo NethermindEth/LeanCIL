@@ -1,9 +1,11 @@
 import CIL.Safety.LoopScaffold
 import CIL.Safety.Execution
+import CIL.Observe
 
 /-! Loop stepping over a struct local, and over an int local and a call through a contract with
 a footprint in a caller buffer, with the facts gathered by default, and the failures that name
-the pc, the instruction and what is missing when a loop tactic cannot go on. -/
+the pc, the instruction and what is missing when a loop tactic cannot go on, and what the
+observer of `CIL.Observe` reports of them. -/
 
 namespace Tests.LoopDiagnostics
 open CIL.Safety
@@ -160,8 +162,7 @@ example (memory : Memory) (value sum : W32) (home : Reference) (final : Memory)
         final⟩ := by
   cil_loop_recurse recurse (0, sum + 2)
 
--- A contract applied before the loop reaches its call names the instruction it is at. The
--- whole message is pinned: without `cil.diagnostics` no failure record follows it.
+-- A contract applied before the loop reaches its call names the instruction it is at.
 /-- error: cil_loop_call: pc 3 is CIL.Op.localAddr 0, not a call; step to the call first with
 `cil_loop_advance` -/
 #guard_msgs (whitespace := lax) in
@@ -171,73 +172,6 @@ example (memory : Memory) (value count sum : W32) (home : Reference) (current : 
     LoopTerminates program 0 [.scalar (.i32 value)] (fun _ _ => True)
       ⟨3, entry.frame memory home, [], current⟩ := by
   cil_loop_call addTwo_holds sum
-
--- With `cil.diagnostics` the same failure appends its record: the method, pc and instruction
--- it stopped at, and no obligation, since the goal carries no tag.
-/-- "instruction":"CIL.Op.localAddr 0","method":0,"missing":null,"obligation":null,"pc":3 -/
-#guard_msgs (substring := true) in
-set_option cil.diagnostics true in
-example (memory : Memory) (value count sum : W32) (home : Reference) (current : Memory)
-    (frame : LoopFrame [] memory current [.aggregate 8] [.bytes (.aggregate 8) home]
-      (knownLocals [some (.aggregate (layout.encode [.i32 count, .i32 sum]))])) :
-    LoopTerminates program 0 [.scalar (.i32 value)] (fun _ _ => True)
-      ⟨3, entry.frame memory home, [], current⟩ := by
-  cil_loop_call addTwo_holds sum
-
--- The record names the obligation the failing goal is, read from its tag.
-/-- "obligation":"invariant","pc":3 -/
-#guard_msgs (substring := true) in
-set_option cil.diagnostics true in
-example (memory : Memory) (value count sum : W32) (home : Reference) (current : Memory)
-    (frame : LoopFrame [] memory current [.aggregate 8] [.bytes (.aggregate 8) home]
-      (knownLocals [some (.aggregate (layout.encode [.i32 count, .i32 sum]))])) :
-    LoopTerminates program 0 [.scalar (.i32 value)] (fun _ _ => True)
-      ⟨3, entry.frame memory home, [], current⟩ := by
-  refine ?invariant
-  cil_loop_call addTwo_holds sum
-
-set_option hygiene false in
-/-- The walk from the entry to the loop head, traced or not by `trace.CIL.loop`. -/
-macro "walk_to_head" : tactic => `(tactic| (
-  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := entry.checked memory value wellFormed
-  obtain ⟨zeroed, zeroing, frame, -⟩ :=
-    (entryFrame []).zero_aggregate 0 layout [.i32 0, .i32 0]
-  have : LoopReaches program 0 [.scalar (.i32 value)] ⟨0, entry.frame memory home, [], entered⟩
-      (header memory value home ⟨(0, 0), zeroed, frame⟩) := by
-    cil_loop_steps
-  trivial))
-
--- Untraced, the walk prints nothing.
-#guard_msgs in
-example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True := by
-  walk_to_head
-
--- A step names each hypothesis its proof used: the zeroing fact steps `initAggregate`.
-/-- [CIL.loop] pc 1: CIL.Op.initAggregate 8
-  source: unknown, since the proof does not import ExtractedSymbols
-  by loop_reaches_next
-  used zeroing : -/
-#guard_msgs (whitespace := lax, substring := true) in
-set_option trace.CIL.loop true in
-example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True := by
-  walk_to_head
-
--- A branch uses no hypothesis, so no fact is named although `setup` and `wellFormed` are in
--- context.
-/-- [CIL.loop] pc 2: CIL.Op.branch 14
-  source: unknown, since the proof does not import ExtractedSymbols
-  by loop_reaches_next
-  changes pc: 1 + 1 ⟶ 14 -/
-#guard_msgs (whitespace := lax, substring := true) in
-set_option trace.CIL.loop true in
-example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True := by
-  walk_to_head
-
--- Each fact the trace explains by its statement's head is a declaration of the framework.
-#guard_msgs in
-run_meta do
-  for (name, _) in loopFactMeanings do
-    unless (← Lean.getEnv).contains name do throwError "{name} is not declared"
 
 -- A call stops `cil_loop_steps`, which names the pc and the tactic that crosses it.
 /-- error: cil_loop_steps: pc 6 is a call (CIL.Op.call 1 1); cross it with `cil_loop_call` -/
@@ -265,8 +199,7 @@ example (memory : Memory) (value sum : W32) (home : Reference) (final : Memory) 
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True := by
   obtain ⟨home, entered, setup, -, -, entryFrame⟩ := entry.checked memory value wellFormed
-  obtain ⟨zeroed, zeroing, frame, -⟩ :=
-    (entryFrame []).zero_aggregate 0 layout [.i32 0, .i32 0]
+  obtain ⟨zeroed, zeroing, frame, -⟩ := (entryFrame []).zero_aggregate 0 layout [.i32 0, .i32 0]
   have : LoopReaches program 0 [.scalar (.i32 value)] ⟨0, entry.frame memory home, [], entered⟩
       (header memory (value + 1) home ⟨(0, 0), zeroed, frame⟩) := by
     cil_loop_steps
@@ -810,5 +743,110 @@ example (memory current : Memory) (value total : W32) (home : Reference)
   case measure => exact fun same => by bv_omega
   case invariant.part2 => trivial
   case invariant => rfl
+
+/-! ## Observing the loop tactics
+
+The observer of `CIL.Observe`, silent without its options, traces each step under
+`trace.CIL.step` from the proof term and records each failure under `cil.diagnostics`. -/
+
+set_option hygiene false in
+/-- The walk from the entry to the loop head, through the struct's zeroing and the branch. -/
+macro "walk_to_head" : tactic => `(tactic| (
+  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := entry.checked memory value wellFormed
+  obtain ⟨zeroed, zeroing, frame, -⟩ :=
+    (entryFrame []).zero_aggregate 0 layout [.i32 0, .i32 0]
+  have : LoopReaches program 0 [.scalar (.i32 value)] ⟨0, entry.frame memory home, [], entered⟩
+      (header memory value home ⟨(0, 0), zeroed, frame⟩) := by
+    cil_loop_steps
+  trivial))
+
+-- Imported but with neither option set, the observer prints nothing.
+#guard_msgs in
+example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True := by
+  walk_to_head
+
+-- A step names each hypothesis its step proof used: the zeroing fact steps `initAggregate`.
+/-- [CIL.step] pc 1: CIL.Op.initAggregate (8 % 2 ^ 64)
+  source: unknown, since the proof does not import ExtractedSymbols
+  by loop_reaches_next
+  used zeroing : -/
+#guard_msgs (whitespace := lax, substring := true) in
+set_option trace.CIL.step true in
+example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True := by
+  walk_to_head
+
+-- A branch uses no hypothesis, so no fact is named although `setup` and `wellFormed` are in
+-- context; the tactic's summary names the goals it left by obligation tag.
+/-- [CIL.step] pc 2: CIL.Op.branch 14
+  source: unknown, since the proof does not import ExtractedSymbols
+  by loop_reaches_next
+  changes pc: 1 + 1 ⟶ 14 -/
+#guard_msgs (whitespace := lax, substring := true) in
+set_option trace.CIL.step true in
+example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True := by
+  walk_to_head
+
+-- `cil_checked_steps` is traced the same way, through `run_next` and `run_return`.
+/-- [CIL.step] cil_checked_steps took 4 steps; goals left: none -/
+#guard_msgs (whitespace := lax, substring := true) in
+set_option trace.CIL.step true in
+example : addTwoContract.Holds program 1 := by
+  rintro x memory -
+  dsimp only [addTwoContract]
+  refine ⟨8, memory, _, ?_, Confined.refl _ memory, _, rfl, rfl⟩
+  cil_checked_steps
+
+-- A step taken by hand, outside any LeanCIL tactic, is traced at its tactic block.
+/-- taken outside a LeanCIL tactic -/
+#guard_msgs (whitespace := lax, substring := true) in
+set_option trace.CIL.step true in
+example (memory : Memory) (value : W32) (frame : Frame) :
+    run program 100 1 0 [.scalar (.i32 value)] frame [] memory =
+      run program 99 1 1 [.scalar (.i32 value)] frame [.scalar (.i32 value)] memory := by
+  exact run_next (by cil_lookup []) (by cil_lookup []) (by cil_checked_step [])
+
+-- A call tactic applied before the walk reaches a call records the instruction it is at and
+-- that the call site is missing.
+/-- "instruction":"CIL.Op.localAddr 0","method":0,"missing":"callSite","obligation":null,"pc":3 -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (memory : Memory) (value count sum : W32) (home : Reference) (current : Memory)
+    (frame : LoopFrame [] memory current [.aggregate 8] [.bytes (.aggregate 8) home]
+      (knownLocals [some (.aggregate (layout.encode [.i32 count, .i32 sum]))])) :
+    LoopTerminates program 0 [.scalar (.i32 value)] (fun _ _ => True)
+      ⟨3, entry.frame memory home, [], current⟩ := by
+  cil_loop_call addTwo_holds sum
+
+-- The record names the obligation the tactic was handed, read from its goal's tag.
+/-- "obligation":"invariant","pc":3 -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (memory : Memory) (value count sum : W32) (home : Reference) (current : Memory)
+    (frame : LoopFrame [] memory current [.aggregate 8] [.bytes (.aggregate 8) home]
+      (knownLocals [some (.aggregate (layout.encode [.i32 count, .i32 sum]))])) :
+    LoopTerminates program 0 [.scalar (.i32 value)] (fun _ _ => True)
+      ⟨3, entry.frame memory home, [], current⟩ := by
+  refine ?invariant
+  cil_loop_call addTwo_holds sum
+
+-- A tactic that stops without an error, leaving a step for the proof, is recorded as stopped
+-- there, with the instruction it did not take.
+/-- "instruction":"CIL.Op.const32 2","method":1,"missing" -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (memory : Memory) (value : W32) (frame : Frame)
+    (result : Except LocatedFault (Memory × List Value)) :
+    run program 100 1 0 [.scalar (.i32 value)] frame [] memory = result := by
+  cil_checked_steps 1
+
+-- Each name the observer reads a fact or a missing fact by is a declaration of the framework.
+#guard_msgs in
+run_meta do
+  for (name, _) in factMeanings do
+    unless (← Lean.getEnv).contains name do throwError "{name} is not declared"
+  for (_, names) in missingFactMentions do
+    for name in names do
+      unless (← Lean.getEnv).contains name do throwError "{name} is not declared"
+
 
 end Tests.LoopDiagnostics
