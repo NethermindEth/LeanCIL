@@ -654,6 +654,102 @@ foreach ((string name, string theorem, string before, string after, string valid
 }
 rejectedEndian.Check();
 
+// PMULUDQ runs on the host CPU and its x64-sse2 extraction must return the same products.
+// Lanes with set high halves and both 32-bit extremes come first, then seeded random words.
+const int MultiplyCases = 12;
+var multiplyRandom = new Random(0x4d55);
+ulong MultiplyWord()
+{
+    var bytes = new byte[sizeof(ulong)];
+    multiplyRandom.NextBytes(bytes);
+    return BitConverter.ToUInt64(bytes);
+}
+var multiplyInputs = new List<ulong[]>
+{
+    new[] { 0xFFFFFFFF_FFFFFFFFUL, 0x00000003_00000002UL, 0x00000005_FFFFFFFFUL, 0x00000007_00000004UL },
+    new[] { 0x80000000_7FFFFFFFUL, 0xFFFFFFFF_80000000UL, 0x00000001_80000000UL, 0x12345678_FFFFFFFFUL }
+};
+while (multiplyInputs.Count < MultiplyCases)
+{
+    multiplyInputs.Add(Enumerable.Range(0, 4).Select(_ => MultiplyWord()).ToArray());
+}
+var multiplyEven = runtime.GetMethod("MultiplyEven128")!;
+var multiplyObserved = multiplyInputs.Select(input =>
+{
+    var bytes = new byte[16];
+    ((Vector128<ulong>)multiplyEven.Invoke(null, input.Cast<object>().ToArray())!).AsByte().CopyTo(bytes);
+    return bytes;
+}).ToArray();
+// The cases must separate the model from odd 32-bit lanes, a signed product and a full 64-bit product.
+foreach ((string mutant, Func<ulong, ulong, ulong> product) in new (string, Func<ulong, ulong, ulong>)[]
+{
+    ("odd lanes", (left, right) => (left >> 32) * (right >> 32)),
+    ("signed product", (left, right) => (ulong)((long)(int)left * (int)right)),
+    ("full product", (left, right) => left * right)
+})
+{
+    var agrees = multiplyInputs.Select((input, index) =>
+        new[] { product(input[0], input[2]), product(input[1], input[3]) }
+            .SelectMany(BitConverter.GetBytes).SequenceEqual(multiplyObserved[index]));
+    if (agrees.All(same => same))
+    {
+        throw new InvalidOperationException($"Multiply inputs do not reject the {mutant} mutant");
+    }
+}
+var multiplyClaims = multiplyInputs.Select((input, index) => Invocation(
+    input.Select(word => $".scalar (.i64 {word})"), $".v128 {VectorBits(multiplyObserved[index])}")).ToArray();
+var multiplyOutput = Path.Combine(root, "MultiplyEven128");
+Directory.CreateDirectory(multiplyOutput);
+var multiplyProof = Path.Combine(multiplyOutput, "Proof.lean");
+File.WriteAllText(multiplyProof, $$"""
+    import Extracted
+    import CIL.Safety.Execution
+    namespace ExampleProof
+    /-- Successful observations identify the successful checked execution result. -/
+    private theorem result_of_toOption {error value : Type} {result : Except error value}
+        {expected : value} (observed : result.toOption = some expected) : result = .ok expected := by
+      cases result <;> simp_all [Except.toOption]
+    #print axioms result_of_toOption
+    /-- The host CPU's even-lane products on the same arguments. -/
+    theorem correctness :
+        {{string.Join(" ∧\n    ", multiplyClaims)}} := by
+      exact {{Conjunction(multiplyClaims.Select(_ => "by apply result_of_toOption; decide +kernel"))}}
+    #print axioms correctness
+    end ExampleProof
+    """);
+pending.Add((new(selectors["MultiplyEven128"], multiplyProof, multiplyOutput), "x64-sse2",
+    () => Console.WriteLine($"PASS MultiplyEven128 matches the host CPU on {multiplyClaims.Length} inputs")));
+Flush();
+// Without SSE2 the reachable call is rejected before any evidence is written.
+var multiplyRejectedOutput = Path.Combine(root, "MultiplyEven128-scalar");
+Directory.CreateDirectory(multiplyRejectedOutput);
+File.Delete(Path.Combine(multiplyRejectedOutput, "Extracted.lean"));
+var rejectedMultiply = Execute(
+    Extract("extract", assembly, "Examples", selectors["MultiplyEven128"], multiplyRejectedOutput, "scalar"));
+if (rejectedMultiply.Code == 0 || File.Exists(Path.Combine(multiplyRejectedOutput, "Extracted.lean")) ||
+    !rejectedMultiply.Output.Contains("Reachable intrinsic lacks Sse2", StringComparison.Ordinal))
+{
+    throw new InvalidOperationException($"MultiplyEven128 admitted without Sse2: {rejectedMultiply.Output}");
+}
+Console.WriteLine("PASS MultiplyEven128 rejected under scalar");
+// Forged evidence must not substitute the 256-bit multiply or another exact SSE call for PMULUDQ.
+var rejectedMultiplies = new RejectedEvidence(Path.Combine(root, "RejectedMultiply"));
+var multiplySource = NarrowEvidence(File.ReadAllText(Path.Combine(multiplyOutput, "Extracted.lean")),
+    "method0_intrinsics_validated");
+if (!multiplySource.Contains(".sse .multiplyEven32", StringComparison.Ordinal))
+{
+    throw new InvalidOperationException("Missing multiply mutation: .sse .multiplyEven32");
+}
+foreach ((string after, int index) in new[] { (".avx2 .multiplyEven32", 0), (".sse .shuffleBytes", 1) })
+{
+    var path = Path.Combine(root, "RejectedMultiply", $"MultiplyEven128-{index}.lean");
+    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+    File.WriteAllText(path, multiplySource.Replace(".sse .multiplyEven32", after, StringComparison.Ordinal));
+    rejectedMultiplies.Add(path, "PASS forged MultiplyEven128 evidence rejected by ExactIntrinsicsValid",
+        "ExactIntrinsicsValid");
+}
+rejectedMultiplies.Check();
+
 // Runs the compiled example on the host CPU and returns the vector's bytes, lane zero first.
 static byte[] RuntimeShuffle(MethodInfo method, byte[] source, byte[] control)
 {

@@ -26,6 +26,7 @@ internal static class RuntimeModels
     private const string Avx512DQ = $"{X86}.Avx512DQ";
     private const string V128Byte = $"{Intrinsics}.Vector128`1<System.Byte>";
     private const string V128UInt64 = $"{Intrinsics}.Vector128`1<System.UInt64>";
+    private const string V128UInt32 = $"{Intrinsics}.Vector128`1<System.UInt32>";
     private const string V256Byte = $"{Intrinsics}.Vector256`1<System.Byte>";
     private const string V256UInt64 = $"{Intrinsics}.Vector256`1<System.UInt64>";
     private const string V256UInt32 = $"{Intrinsics}.Vector256`1<System.UInt32>";
@@ -576,6 +577,8 @@ internal static class RuntimeModels
                 Finish(".advSimd .reverseElement8", 1, Feature.AdvSimd),
             $"{V128UInt64} {X86}.Sse2::ShiftLeftLogical128BitLane({V128UInt64},System.Byte)" =>
                 Finish(".sse .shiftLeftBytes", 2, Feature.Sse2),
+            $"{V128UInt64} {X86}.Sse2::Multiply({V128UInt32},{V128UInt32})" =>
+                Finish(".sse .multiplyEven32", 2, Feature.Sse2),
             $"{V128Byte} {X86}.Ssse3::AlignRight({V128Byte},{V128Byte},System.Byte)" =>
                 Finish(".sse .alignBytes", 3, Feature.Ssse3),
             $"{V128Byte} {X86}.Ssse3::Shuffle({V128Byte},{V128Byte})" =>

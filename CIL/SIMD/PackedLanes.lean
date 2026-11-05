@@ -8,6 +8,7 @@ Lane forms of the integer intrinsics: lane projections of `pack512`, of bitwise 
 lanewise maps and zips and of count shifts; lanewise maps and zips of `pack128` and `pack256`;
 the numeric value of a packed vector; `moveMask64` as sign bits, the exact products
 of `multiplyEven32`, `permute4x64`, shifts by immediate, `sum64` and the AVX-512DQ `mul64`.
+`sseMultiplyEven32`, the 128-bit `multiplyEven32`, gets the same lane and packed forms.
 On top of `LaneCarry` they give the carry and borrow repair of a wide addition or subtraction
 done lane by lane, in the shapes that stepping `evalIntrinsic` produces.
 
@@ -671,6 +672,29 @@ theorem multiplyEven32_pack256 (a0 a1 a2 a3 b0 b1 b2 b3 : W64) :
   | 3, _ => simp only [lane256_3]
 #print axioms multiplyEven32_pack256
 
+/-- `sseMultiplyEven32` lane product: the low halves of two lanes, widened and multiplied. -/
+theorem lane64_sseMultiplyEven32 (x y : V128) {i : Nat} (lane : i < 2) :
+    lane64 (sseMultiplyEven32 x y) i =
+      ((lane64 x i).setWidth 32).zeroExtend 64 * ((lane64 y i).setWidth 32).zeroExtend 64 := by
+  rw [← lane32_even, ← lane32_even]
+  match i, lane with
+  | 0, _ => exact lane128_0 _ _
+  | 1, _ => exact lane128_1 _ _
+#print axioms lane64_sseMultiplyEven32
+
+/-- `sseMultiplyEven32` on packed lanes multiplies their widened low halves. -/
+theorem sseMultiplyEven32_pack128 (a0 a1 b0 b1 : W64) :
+    sseMultiplyEven32 (pack128 a0 a1) (pack128 b0 b1) =
+      pack128 ((a0.setWidth 32).zeroExtend 64 * (b0.setWidth 32).zeroExtend 64)
+        ((a1.setWidth 32).zeroExtend 64 * (b1.setWidth 32).zeroExtend 64) := by
+  apply eq_of_lane64_eq128
+  intro i lane
+  rw [lane64_sseMultiplyEven32 _ _ lane]
+  match i, lane with
+  | 0, _ => simp only [lane128_0]
+  | 1, _ => simp only [lane128_1]
+#print axioms sseMultiplyEven32_pack128
+
 /-- The product of two widened 32-bit halves never wraps: it is the exact natural product. -/
 theorem toNat_even_product (a b : W64) :
     ((a.setWidth 32).zeroExtend 64 * (b.setWidth 32).zeroExtend 64).toNat =
@@ -800,6 +824,12 @@ theorem intrinsic_multiplyEven32 (x y : V256) :
     evalIntrinsic (.avx2 .multiplyEven32) [.v256 x, .v256 y] =
       some (.v256 (multiplyEven32 x y)) := rfl
 #print axioms intrinsic_multiplyEven32
+
+/-- `Sse2.Multiply` on unsigned lanes multiplies the even 32-bit lanes into 64-bit products. -/
+theorem intrinsic_sseMultiplyEven32 (x y : V128) :
+    evalIntrinsic (.sse .multiplyEven32) [.v128 x, .v128 y] =
+      some (.v128 (sseMultiplyEven32 x y)) := rfl
+#print axioms intrinsic_sseMultiplyEven32
 
 /-- AVX-512DQ `MultiplyLow` keeps the low 64 bits of each lane product. -/
 theorem intrinsic_avx512dq_mul256 (x y : V256) :

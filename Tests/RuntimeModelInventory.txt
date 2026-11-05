@@ -107,6 +107,7 @@ System.Runtime.Intrinsics::System.Runtime.Intrinsics.Vector128`1<System.UInt64> 
 System.Runtime.Intrinsics::System.Runtime.Intrinsics.Vector128`1<System.UInt64> System.Runtime.Intrinsics.Vector128::Create(System.UInt64,System.UInt64)
 System.Runtime.Intrinsics::System.Runtime.Intrinsics.Vector128`1<System.UInt64> System.Runtime.Intrinsics.Vector128::CreateScalar(System.UInt64)
 System.Runtime.Intrinsics::System.Runtime.Intrinsics.Vector128`1<System.UInt64> System.Runtime.Intrinsics.Vector128::CreateScalarUnsafe(System.UInt64)
+System.Runtime.Intrinsics::System.Runtime.Intrinsics.Vector128`1<System.UInt64> System.Runtime.Intrinsics.X86.Sse2::Multiply(System.Runtime.Intrinsics.Vector128`1<System.UInt32>,System.Runtime.Intrinsics.Vector128`1<System.UInt32>)
 System.Runtime.Intrinsics::System.Runtime.Intrinsics.Vector128`1<System.UInt64> System.Runtime.Intrinsics.X86.Sse2::ShiftLeftLogical128BitLane(System.Runtime.Intrinsics.Vector128`1<System.UInt64>,System.Byte)
 System.Runtime.Intrinsics::System.Runtime.Intrinsics.Vector128`1<T> System.Runtime.Intrinsics.Vector128::Create(System.ReadOnlySpan`1<T>)
 System.Runtime.Intrinsics::System.Runtime.Intrinsics.Vector128`1<T> System.Runtime.Intrinsics.Vector128::Equals(System.Runtime.Intrinsics.Vector128`1<T>,System.Runtime.Intrinsics.Vector128`1<T>)

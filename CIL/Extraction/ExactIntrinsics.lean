@@ -112,6 +112,12 @@ private def exactSignatures : List (String × String × String × Intrinsic × N
       System.Runtime.Intrinsics.Vector128`1<System.Byte>,\
       System.Runtime.Intrinsics.Vector128`1<System.Byte>)",
     .sse .shuffleBytes, 2),
+  ("System.Runtime.Intrinsics.X86.Sse2", "Multiply",
+    "System.Runtime.Intrinsics.Vector128`1<System.UInt64> \
+      System.Runtime.Intrinsics.X86.Sse2::Multiply(\
+      System.Runtime.Intrinsics.Vector128`1<System.UInt32>,\
+      System.Runtime.Intrinsics.Vector128`1<System.UInt32>)",
+    .sse .multiplyEven32, 2),
   ("System.Runtime.Intrinsics.X86.Aes", "Encrypt",
     "System.Runtime.Intrinsics.Vector128`1<System.Byte> \
       System.Runtime.Intrinsics.X86.Aes::Encrypt(\
@@ -147,6 +153,11 @@ private def ulongVector (width : String) : TypeExpr :=
   .apply (.constructor intrinsicsScope ("System.Runtime.Intrinsics.Vector" ++ width ++ "`1"))
     (.atom runtimeScope "System.UInt64")
 
+/-- `Vector{width}<uint>` with exact scopes. -/
+private def uintVector (width : String) : TypeExpr :=
+  .apply (.constructor intrinsicsScope ("System.Runtime.Intrinsics.Vector" ++ width ++ "`1"))
+    (.atom runtimeScope "System.UInt32")
+
 /-- `Vector{width}<byte>` with exact scopes. -/
 private def byteVector (width : String) : TypeExpr :=
   .apply (.constructor intrinsicsScope ("System.Runtime.Intrinsics.Vector" ++ width ++ "`1"))
@@ -171,6 +182,7 @@ private def exactCallTypes : Intrinsic → Option (TypeExpr × List TypeExpr)
   | .sse .shuffleBytes | .aes .encrypt | .armAes .encrypt =>
     some (byteVector "128", [byteVector "128", byteVector "128"])
   | .armAes .mixColumns => some (byteVector "128", [byteVector "128"])
+  | .sse .multiplyEven32 => some (ulongVector "128", [uintVector "128", uintVector "128"])
   | .advSimd .reverseElement8 => some (ulongVector "128", [ulongVector "128"])
   | .avx512 .permuteVar4x64x2 =>
     some (ulongVector "256", [ulongVector "256", ulongVector "256", ulongVector "256"])
@@ -384,7 +396,7 @@ def emittedExactIntrinsic : Op → Option (Intrinsic × Nat)
     | .avx512 .ltu512 | .avx512 .gtu512
     | .avx512DQ .moveMask512 | .avx512DQ .moveMask64 | .vector .combine256
     | .vector .createScalarUnsafe64 | .avx2 .shuffleBytes | .sse .shuffleBytes
-    | .aes .encrypt | .armAes .encrypt | .armAes .mixColumns
+    | .sse .multiplyEven32 | .aes .encrypt | .armAes .encrypt | .armAes .mixColumns
     | .advSimd .reverseElement8 | .avx512 .permuteVar4x64x2
     | .vector (.band _) | .vector (.bor _) | .vector (.bxor _) | .vector (.bnot _)
     | .vector (.equalsAll _) | .vector (.zero _) | .vector (.ones _) => some (intrinsic, arity)

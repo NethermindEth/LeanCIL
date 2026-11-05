@@ -11,7 +11,7 @@ Values are modelled as bit patterns with lane zero in the least-significant bits
 | Family | Extractable operations |
 | --- | --- |
 | [Portable vectors](#portable-vector-operations) | Selected integer arithmetic, bitwise/equality operators, lane comparisons, construction (including from a byte span), unaligned `Vector128<byte>` loads and stores through a reference, extraction, reductions, arithmetic shifts and bit reinterpretation |
-| [SSE](#sse) | `Sse2.ShiftLeftLogical128BitLane`, `Ssse3.AlignRight`, `Ssse3.Shuffle`; SSE4.1/4.2 getters only |
+| [SSE](#sse) | `Sse2.ShiftLeftLogical128BitLane`, widening even-lane `Sse2.Multiply`, `Ssse3.AlignRight`, `Ssse3.Shuffle`; SSE4.1/4.2 getters only |
 | [AVX](#avx) | Selected `MoveMask`, `Blend`, `TestZ` overloads |
 | [AVX2](#avx2) | `Permute4x64`, byte `Shuffle`, `Blend`, `Add`, `CompareEqual`, `CompareGreaterThan`, widening even-lane `Multiply`, bitwise operations, logical shifts |
 | [AVX512](#avx512) | F.VL alignment, ternary logic, two-table quadword permutation and unsigned comparisons; DQ mask extraction and DQ.VL low multiplication on 256-bit vectors; F unsigned comparisons and DQ mask extraction on 512-bit vectors |
@@ -57,10 +57,11 @@ No other element types or operators are implied. In particular, portable vector 
 | Exact API | Arguments → result | Required feature | Model |
 | --- | --- | --- | --- |
 | `Sse2.ShiftLeftLogical128BitLane` | `V128<ulong>, byte` → `V128<ulong>` | `Sse2` | Shift the whole vector left by a byte count, zero-filling; counts ≥16 yield zero |
+| `Sse2.Multiply` | `V128<uint>, V128<uint>` → `V128<ulong>` | `Sse2` | `pmuludq`: multiply unsigned 32-bit lanes 0 and 2 into two 64-bit products |
 | `Ssse3.AlignRight` | `V128<byte>, V128<byte>, byte` → `V128<byte>` | `Ssse3` | Extract a 16-byte window from the concatenation, with the second operand as the low half; out-of-range bits are zero |
 | `Ssse3.Shuffle` | `V128<byte> value, V128<byte> mask` -> `V128<byte>` | `Ssse3` | `pshufb`: byte `i` is zero when bit 7 of mask byte `i` is set, else the value byte selected by its low four bits |
 
-SSE4.1 and SSE4.2 capability getters are recognised, but their instruction APIs have no mappings. There is no blanket SSE/SSE2 arithmetic, comparison or load/store support.
+SSE4.1 and SSE4.2 capability getters are recognised, but their instruction APIs have no mappings. There is no blanket SSE/SSE2 arithmetic, comparison or load/store support. Of the `Sse2.Multiply` overloads only the unsigned `Vector128<uint>` one is mapped; the `double` overload and the signed `Sse41.Multiply` (`pmuldq`) are not.
 
 ## AVX
 

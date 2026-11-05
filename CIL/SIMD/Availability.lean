@@ -17,7 +17,7 @@ def Intrinsic.available (profile : FeatureProfile) : Intrinsic → Bool
   | .scalar _ => true
   | .vector _ => true
   | .advSimd _ => profile.advSimd
-  | .sse .shiftLeftBytes => profile.sse2
+  | .sse .shiftLeftBytes | .sse .multiplyEven32 => profile.sse2
   | .sse .alignBytes | .sse .shuffleBytes => profile.ssse3
   | .avx _ => profile.avx
   | .avx2 _ => profile.avx2

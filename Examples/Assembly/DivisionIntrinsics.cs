@@ -94,4 +94,7 @@ public static class DivisionIntrinsics
         upper.StoreUnsafe(ref to);
         lower.StoreUnsafe(ref to, 16);
     }
+    // PMULUDQ: the low 32 bits of each 64-bit lane, multiplied into a full 64-bit product.
+    public static Vector128<ulong> MultiplyEven128(ulong left0, ulong left1, ulong right0, ulong right1) =>
+        Sse2.Multiply(Vector128.Create(left0, left1).AsUInt32(), Vector128.Create(right0, right1).AsUInt32());
 }

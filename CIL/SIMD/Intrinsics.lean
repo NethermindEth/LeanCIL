@@ -46,7 +46,7 @@ inductive AdvSimdIntrinsic where
 
 /-- SSE2 and SSSE3 intrinsics. -/
 inductive SSEIntrinsic where
-  | shiftLeftBytes | alignBytes | shuffleBytes
+  | shiftLeftBytes | alignBytes | shuffleBytes | multiplyEven32
   deriving DecidableEq, Repr
 
 /-- AVX2 intrinsics on 256-bit vectors. -/
@@ -227,6 +227,7 @@ def evalIntrinsic (op : Intrinsic) (args : List Value) : Option Value := do
     some (.v128 (Vector.ssseAlignBytes a b c.toNat))
   | .sse .shuffleBytes, [.v128 source, .v128 control] =>
     some (.v128 (Vector.shuffleBytes128 source control))
+  | .sse .multiplyEven32, [.v128 a, .v128 b] => some (.v128 (Vector.sseMultiplyEven32 a b))
   -- AVX and AVX2.
   | .avx .moveMask64, [.v256 a] => some (.i32 (Vector.moveMask64 a))
   | .avx .moveMask32, [.v256 a] => some (.i32 (Vector.moveMask32 a))
