@@ -106,7 +106,7 @@ internal static partial class ProofOutline
             imports.Add("CIL.Safety.LoopScaffold");
             if (spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.ReadOnlySpan))
                 imports.Add("CIL.Safety.SpanContents");
-            Header(lean, spec, imports, loop: true);
+            Header(lean, spec, imports, "`invariant`, `measure`, `postcondition` and `precondition` (at a call)");
             foreach (var index in callees.Keys.Order()) Contract(lean, index);
             spec.Placeholders(lean);
             Entry(lean);
@@ -121,12 +121,7 @@ internal static partial class ProofOutline
         string[] Homes => slots.Where(slot => slot.Home is not null).Select(slot => slot.Home!).ToArray();
         IEnumerable<Parameter> SpanParameters => spec.Parameters.Where(p => p.Shape == ParameterShape.ReadOnlySpan);
 
-        string Location(int pc)
-        {
-            var offset = method.Body.Instructions[pc].Offset;
-            return Symbols.Location(method, offset, Path.GetFileName) is { } at
-                ? at[..at.LastIndexOf(':')] : $"IL_{offset:x4}";
-        }
+        string Location(int pc) => ProofOutline.Location(method, pc);
 
         void Frame()
         {
@@ -299,7 +294,14 @@ internal static partial class ProofOutline
                 lean.Noted("  ", "case postcondition => sorry", $"{name}Contract.post of the returned value");
             }
             else
-                lean.Noted("  ", "sorry", $"{callee.Name}'s body against the contract, as in a straight-line proof");
+            {
+                var reason = inputs.Any(input => input.Reference) ? "it writes through a reference"
+                    : output is null ? "it returns nothing to state"
+                    : !extraction.Emitted[index].Metadata.Contains("locals := [],") ? "it has locals"
+                    : Unstepped(callee, extraction.Emitted[index].Ops, []);
+                lean.Noted("  ", "sorry", $"{NotOutlined}{callee.Name}'s body against the contract, since " +
+                    reason);
+            }
             lean.Line();
         }
 
@@ -342,11 +344,16 @@ internal static partial class ProofOutline
             lean.Line();
         }
 
+        // A method handed a reference may write caller memory, so its frame keeps a named footprint.
+        bool Writes => spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference);
+        const string Footprint = "List (Reference × Nat)";
+
         string StateBinders => string.Join(" ", (spec.Symbolic ? new[] { "(memory : Memory)" } : [])
+            .Concat(Writes ? [$"(written : {Footprint})"] : [])
             .Concat(Homes.Length > 0 ? [$"({string.Join(" ", Homes)} : Reference)"] : []));
 
         string StateArguments(string memory) =>
-            string.Join(" ", (spec.Symbolic ? new[] { memory } : []).Concat(Homes));
+            string.Join(" ", (spec.Symbolic ? new[] { memory } : []).Concat(Writes ? ["written"] : []).Concat(Homes));
 
         string StateType(string memory) => StateArguments(memory) is { Length: > 0 } arguments
             ? $"State {arguments}" : "State";
@@ -359,6 +366,14 @@ internal static partial class ProofOutline
 
         void StateAndHeader(Writer lean)
         {
+            if (Writes)
+            {
+                lean.Doc("Replace with the caller memory the loop may write, as references with their " +
+                    "widths in bytes.");
+                lean.Wrapped("def footprint", Grouped(spec.Binders), $": {Footprint} :=");
+                lean.Line("  sorry -- caller memory the loop may write");
+                lean.Line();
+            }
             var described = string.Join(", ", components.Select(component => component.Part == Part.Span
                 ? $"the unread suffix of `{component.Name}`" : $"`{component.Name}`"));
             lean.Doc($"The loop's locals at its head: {described}.");
@@ -376,7 +391,7 @@ internal static partial class ProofOutline
                 _ => "none"
             }).ToArray();
             var kinds = string.Join(", ", slots.Select(slot => slot.Kind));
-            lean.Wrapped($"  FrameState [] {Memory}", [$"[{kinds}]", ValuesType], "");
+            lean.Wrapped($"  FrameState {(Writes ? "written" : "[]")} {Memory}", [$"[{kinds}]", ValuesType], "");
             var slotsUse = slotTerms.Any(term => term.Contains("values")) ? "values" : "_";
             var knownUse = remembered.Any(term => term.Contains("values")) ? "values" : "_";
             var slotsLine = $"    (fun {slotsUse} => [{string.Join(", ", slotTerms)}])";
@@ -404,6 +419,7 @@ internal static partial class ProofOutline
             var binders = (spec.Symbolic ? new[] { "(memory : Memory)" } : [])
                 .Concat(Grouped(spec.Parameters.Where(parameter => headerParameters.Contains(parameter.Name))
                     .Select(parameter => (parameter.Name, parameter.Lean))))
+                .Concat(Writes ? [$"(written : {Footprint})"] : [])
                 .Concat(Homes.Length > 0 ? [$"({string.Join(" ", Homes)} : Reference)"] : [])
                 .Append($"(state : {StateType("memory")})");
             lean.Line($"-- The cutpoint is the loop's back-edge test at {Location(loop.Latch)}.");
@@ -415,6 +431,7 @@ internal static partial class ProofOutline
                 [$"[{string.Join(", ", stack)}],", "state.memory"], "");
             lean.Line();
             var implicitBinders = string.Join(" ", (spec.Symbolic ? new[] { "{memory : Memory}" } : [])
+                .Concat(Writes ? [$"{{written : {Footprint}}}"] : [])
                 .Concat(Homes.Length > 0 ? [$"{{{string.Join(" ", Homes)} : Reference}}"] : []));
             var explicitBinders = Grouped(spec.Binders).ToList();
             if (implicitBinders.Length > 0) explicitBinders.Add(implicitBinders);
@@ -426,6 +443,19 @@ internal static partial class ProofOutline
             lean.Wrapped("def measure", explicitBinders, ": Nat := sorry");
             lean.Line();
         }
+
+        /// <summary>A value the outline cannot write as a term, named for the hole that meets it.</summary>
+        static string Unnamed(Value value) => value switch
+        {
+            Number { Narrow: true } field => $"the narrow field `{field.Term}`, which a load sign- or " +
+                "zero-extends and the outline does not split on",
+            Unknown unknown => unknown.What,
+            Element => "a span element before it is loaded",
+            SpanLength => "a span length outside the loop test",
+            LocalAddress or LocalValue => "a struct local as a whole",
+            ReferenceArgument reference => $"the reference `{reference.Name}`",
+            _ => "a value the outline cannot name"
+        };
 
         string StackValue(Value operand, PathState state) => operand switch
         {
@@ -476,11 +506,12 @@ internal static partial class ProofOutline
                     .Select(fact => ", " + fact.Name)) + "])"
                 : "rfl";
             var header = "(header " + string.Join(" ", (spec.Symbolic ? new[] { "initial" } : [])
-                .Concat(headerParameters).Concat(Homes)) + ")";
+                .Concat(headerParameters).Concat(Writes ? [$"(footprint {spec.Arguments})"] : []).Concat(Homes)) + ")";
             var header0 = header == "(header )" ? "header" : header;
             lean.Wrapped("  refine invoke_loop_satisfies", ["Extracted.lookup0", checkedArguments, "setup", header0,
                 $"(invariant {spec.Arguments})", $"(measure {spec.Arguments})", "(fun start => ?_)", "?_"], "");
-            lean.Line("  · have entryFrame := entryFrame []");
+            lean.Line(Writes ? $"  · have entryFrame := entryFrame (footprint {spec.Arguments})"
+                : "  · have entryFrame := entryFrame []");
             var entry = new PathState
             {
                 Pc = 0, GoalPc = 0, State = components.Select(component => component.Part == Part.Span
@@ -515,13 +546,13 @@ internal static partial class ProofOutline
                 if (happened == Event.Continue) continue;
                 var what = happened == Event.Stop ? stopReason : "a branch or call";
                 lean.Noted("    ", "sorry",
-                    $"the entry path meets {what} at {Location(pc)}; step it to the loop by hand");
+                    $"{NotOutlined}the entry path meets {what} at {Location(pc)}; step it to the loop by hand");
                 return;
             }
             if (Values(state) is not { } values)
             {
                 lean.Noted("    ", "sorry",
-                    $"the first loop state holds {stopReason}; step the entry to the loop by hand");
+                    $"{NotOutlined}the first loop state holds {stopReason}; step the entry to the loop by hand");
                 return;
             }
             lean.Line($"    cil_loop_recurse start {values}");
@@ -554,7 +585,7 @@ internal static partial class ProofOutline
         string Facts(PathState state) => state.Facts.Count == 0 ? "" : $" [{string.Join(", ", state.Facts)}]";
 
         void Hole(Writer lean, string indent, PathState state, string what) =>
-            lean.Noted(indent, "sorry", $"{what}; step on by hand from {Location(state.GoalPc)}");
+            lean.Noted(indent, "sorry", $"{NotOutlined}{what}; step on by hand from {Location(state.GoalPc)}");
 
         void Walk(Writer lean, PathState state, string indent)
         {
@@ -586,15 +617,7 @@ internal static partial class ProofOutline
                         return;
                     case Event.Return:
                         lean.Line($"{indent}cil_loop_finish{Facts(state)}");
-                        if (spec.Result is null)
-                            lean.Noted(indent, "case postcondition => sorry",
-                                $"Postcondition at the return at {Location(pc)}");
-                        else
-                        {
-                            lean.Line($"{indent}case postcondition =>");
-                            lean.Line($"{indent}  {spec.ResultShape}");
-                            lean.Noted(indent + "  ", "sorry", $"Postcondition at the return at {Location(pc)}");
-                        }
+                        spec.Postcondition(lean, indent, $"Postcondition at the return at {Location(pc)}");
                         return;
                     case Event.Call:
                         if (!Call(lean, state, indent, pc)) return;
@@ -621,8 +644,11 @@ internal static partial class ProofOutline
             }).ToArray();
             if (state.Called || terms.Any(term => term is null))
             {
-                Hole(lean, indent, state, state.Called ? $"a second call at {Location(pc)}"
-                    : $"the call at {Location(pc)} passes a value the outline cannot name");
+                Hole(lean, indent, state, state.Called
+                    ? $"a second call at {Location(pc)}, whose input depends on the first call's state"
+                    : $"the call at {Location(pc)} passes " +
+                        Unnamed(arguments.First(argument => argument is not (Number { Narrow: false } or
+                            ReferenceArgument))));
                 return false;
             }
             var input = terms.Length switch { 0 => "()", 1 => terms[0]!, _ => "(" + string.Join(", ", terms) + ")" };
@@ -683,9 +709,9 @@ internal static partial class ProofOutline
                 Walk(lean, state, indent);
                 return;
             }
-            if (operands.Any(operand => operand is not Number { Narrow: false }))
+            if (operands.FirstOrDefault(operand => operand is not Number { Narrow: false }) is { } unnamed)
             {
-                Hole(lean, indent, state, $"the test at {Location(pc)} reads a value the outline cannot name");
+                Hole(lean, indent, state, $"the test at {Location(pc)} reads {Unnamed(unnamed)}");
                 return;
             }
             var terms = operands.Select(operand => ((Number)operand).Term).ToArray();
@@ -739,7 +765,8 @@ internal static partial class ProofOutline
                 var slot = slots[int.Parse(match.Groups[1].Value)];
                 var first = components.IndexOf(slot.Components[0]);
                 if (slot.Components[0].Part == Part.Span && state.Stored)
-                    return Stop("a span read after a local store, whose memory no frame fact names");
+                    return Stop("a span read after a local store, whose memory the loop tactics hold no span " +
+                        "validity in (name it with `LoopFrame.store` and `CheckedSpan.tail_below`)");
                 stack.Add(slot.Components[0].Part == Part.Word ? (Value)state.State[first]
                     : new LocalValue(slot.Index));
             }
@@ -767,6 +794,8 @@ internal static partial class ProofOutline
                 stack.Add(parameter.Shape switch
                 {
                     ParameterShape.Scalar => new Number(parameter.Name, parameter.Width),
+                    ParameterShape.Boolean => new Unknown($"the `bool` argument `{parameter.Name}`"),
+                    ParameterShape.Narrow => new Unknown($"the narrow argument `{parameter.Name}`"),
                     ParameterShape.Reference => new ReferenceArgument(parameter.Name),
                     _ => new Unknown($"the span `{parameter.Name}`")
                 });
@@ -868,6 +897,9 @@ internal static partial class ProofOutline
             else if (Body.Conditional(op)) return Event.Branch;
             else if (op.StartsWith(".call ", StringComparison.Ordinal)) return Event.Call;
             else if (op == ".ret" || op.StartsWith(".ret (some ", StringComparison.Ordinal)) return Event.Return;
+            else if (Regex.IsMatch(op, @"\A\.memory \(\.add \d+ (true|false)\)\z"))
+                return Stop("an `Unsafe.Add`, which needs `add memory base width offset = .ok reference` " +
+                    "(such as from `Writable.add_int`) and write authority for the store in `footprint`");
             else return Stop($"`{op}`, which the outline does not step");
             state.Pc++;
             return Event.Continue;
@@ -880,8 +912,17 @@ internal static partial class ProofOutline
         void PendingHead(PathState state, int component, SpanTerm span)
         {
             var name = components[component].Name;
+            var apart = "";
+            if (Writes && current is not null && state.Obtained.Add(name + "Apart"))
+            {
+                current.Wrapped($"{currentIndent}have {name}Apart :",
+                    [$"∀ entry ∈ footprint {spec.Arguments},", $"SpanApart {span.View} entry :="], "");
+                current.Noted(currentIndent + "    ", "sorry", $"`{name}` lies apart from the memory the loop writes");
+                apart = $" {name}Apart";
+            }
+            else if (Writes) apart = $" {name}Apart";
             Pending(state, $"obtain ⟨{name}Item, -, {name}Found, {name}Element⟩ :=",
-                $"({span.Checked}.within wellFormed frame).head (by decide)");
+                $"({span.Checked}.within wellFormed frame{apart}).head (by decide)");
         }
 
         void PendingTail(PathState state, int component, SpanTerm span)

@@ -44,10 +44,14 @@ internal static partial class ProofOutline
             stream.Write(bytes);
         }
         Console.WriteLine($"Wrote {CliPaths.Display(proof)}: a starting proof of {outline.Signature}");
-        Console.WriteLine($"  Holes: {outline.Holes} (each `sorry`; verify rejects the file until none remain)");
+        var paths = outline.Paths == 1 ? "path" : "paths";
+        Console.WriteLine($"  Holes: {outline.Obligations} obligations, {outline.Paths} {paths} not outlined " +
+            "(each `sorry`; verify rejects the file until none remain)");
         Console.WriteLine($"  Next: fill the holes, then run leancil verify {CliPaths.Display(directory)} " +
             $"--proof {CliPaths.Display(proof)}");
     }
 
-    sealed record Outline(string Signature, string Source, int Holes);
+    /// <summary>A generated proof: its obligations are holes for the author's argument, its paths
+    /// holes where the outline could not step the method.</summary>
+    sealed record Outline(string Signature, string Source, int Obligations, int Paths);
 }

@@ -7,16 +7,21 @@ namespace Nethermind.LeanCIL;
 // The statement, specification placeholders, entry binding and loop scaffolding of an outline.
 internal static partial class ProofOutline
 {
-    /// <summary>A Lean binder of the theorem and how its argument value is written.</summary>
-    sealed record Parameter(string Name, ParameterShape Shape, string Lean, int Width)
+    /// <summary>A Lean binder of the theorem and how its argument value is written; a narrow integer
+    /// reaches the method sign- or zero-extended to 32 bits.</summary>
+    sealed record Parameter(string Name, ParameterShape Shape, string Lean, int Width, bool Signed = false)
     {
         internal string ElementsName => Name + "Elements";
     }
 
-    enum ParameterShape { Scalar, Reference, ReadOnlySpan }
+    enum ParameterShape { Scalar, Boolean, Narrow, Reference, ReadOnlySpan }
 
-    /// <summary>The method's return as a Lean type and value constructor, or none for `void`.</summary>
-    sealed record Result(string Lean, string Constructor);
+    /// <summary>The method's return as a Lean type and value constructor, or none for `void`; a `bool`
+    /// is a `Bool` the returned word encodes as 1 or 0.</summary>
+    sealed record Result(string Lean, string Constructor, bool Boolean = false);
+
+    /// <summary>The comment that starts every hole the outline could not step, so it can be found.</summary>
+    const string NotOutlined = "not outlined: ";
 
     static readonly HashSet<string> Reserved = new(StringComparer.Ordinal)
     {
@@ -25,7 +30,7 @@ internal static partial class ProofOutline
         "entry", "loop", "State", "header", "invariant", "measure", "Precondition", "Postcondition",
         "correctness", "args", "initial", "final", "memory", "results", "result", "assumed", "wellFormed",
         "current", "frame", "holds", "recurse", "start", "entered", "setup", "entryFrame", "guard",
-        "output", "permitted", "input", "calledFrame", "calledFormed", "returned"
+        "output", "permitted", "input", "calledFrame", "calledFormed", "returned", "footprint", "written"
     };
 
     static Outline Generate(Extraction extraction)
@@ -37,7 +42,8 @@ internal static partial class ProofOutline
         if (method.HasThis)
             throw Unsupported($"{method.FullName} is an instance method; new-proof outlines static methods");
         var result = DescribeResult(method);
-        bool symbolic = parameters.Any(parameter => parameter.Shape != ParameterShape.Scalar);
+        bool symbolic = parameters.Any(parameter => parameter.Shape is ParameterShape.Reference or
+            ParameterShape.ReadOnlySpan);
         var body = new Body(emitted.Ops);
         var lean = new Writer();
         var loops = body.Loops();
@@ -48,10 +54,12 @@ internal static partial class ProofOutline
         else if (loops.Count == 1)
             source = LoopProof(extraction, spec, body, loops[0], names, lean);
         else
-            throw Unsupported($"{method.FullName} has {loops.Count} loops; new-proof outlines a method with " +
-                "at most one");
+            throw Unsupported($"{method.FullName} has {loops.Count} loops, with back edges at " +
+                string.Join(", ", loops.Select(loop => Location(method, loop.Latch))) + "; new-proof binds one " +
+                "cutpoint and does not chain the state from one loop's exit into the next");
         var holes = Regex.Matches(source, @"(?<![`\w])sorry(?![`\w])").Count;
-        return new(method.FullName, source, holes);
+        var paths = Regex.Matches(source, "-- " + NotOutlined).Count;
+        return new(method.FullName, source, holes - paths, paths);
     }
 
     static NotSupportedException Unsupported(string message) =>
@@ -71,8 +79,14 @@ internal static partial class ProofOutline
         {
             "System.UInt32" or "System.Int32" => new(name, ParameterShape.Scalar, "W32", 4),
             "System.UInt64" or "System.Int64" => new(name, ParameterShape.Scalar, "W64", 8),
+            "System.Boolean" => new(name, ParameterShape.Boolean, "Bool", 4),
+            "System.Byte" => new(name, ParameterShape.Narrow, "BitVec 8", 1),
+            "System.SByte" => new(name, ParameterShape.Narrow, "BitVec 8", 1, Signed: true),
+            "System.UInt16" or "System.Char" => new(name, ParameterShape.Narrow, "BitVec 16", 2),
+            "System.Int16" => new(name, ParameterShape.Narrow, "BitVec 16", 2, Signed: true),
             _ => throw Unsupported($"parameter `{parameter.Name}` of {method.Name} has type {type.FullName}; " +
-                "new-proof types 32- and 64-bit integers, references to them and read-only spans of them")
+                "new-proof types `bool`, integers of up to 64 bits, and references to and read-only spans of " +
+                "32- and 64-bit integers")
         };
     }
 
@@ -86,7 +100,8 @@ internal static partial class ProofOutline
     static Result? DescribeResult(MethodDefinition method) => method.ReturnType.FullName switch
     {
         "System.Void" => null,
-        "System.UInt32" or "System.Int32" or "System.Boolean" or "System.Byte" or "System.SByte" or "System.UInt16"
+        "System.Boolean" => new("Bool", ".i32", Boolean: true),
+        "System.UInt32" or "System.Int32" or "System.Byte" or "System.SByte" or "System.UInt16"
             or "System.Int16" or "System.Char" => new("W32", ".i32"),
         "System.UInt64" or "System.Int64" => new("W64", ".i64"),
         var other => throw Unsupported($"{method.Name} returns {other}; new-proof states integer and void results")
@@ -113,6 +128,9 @@ internal static partial class ProofOutline
         internal string ArgumentValues => "[" + string.Join(", ", Parameters.Select(parameter => parameter.Shape switch
         {
             ParameterShape.Scalar => $".scalar ({ScalarConstructor(parameter.Width)} {parameter.Name})",
+            ParameterShape.Boolean => $".scalar (.i32 (if {parameter.Name} then 1 else 0))",
+            ParameterShape.Narrow =>
+                $".scalar (.i32 ({parameter.Name}.{(parameter.Signed ? "signExtend" : "zeroExtend")} 32))",
             ParameterShape.Reference => $".reference (.address {parameter.Name})",
             _ => $".bufferSpan {parameter.Name}"
         })) + "]";
@@ -162,14 +180,28 @@ internal static partial class ProofOutline
                 lean.Conjunction($"    ({binder} ", ["results = []", post], ") := by");
             else
                 lean.Conjunction($"    ({binder} ∃ result : {Result.Lean}, ",
-                    [$"results = [.scalar ({Result.Constructor} result)]", post + " result"], ") := by");
+                    [$"results = [.scalar ({Result.Constructor} {ResultWord})]", post + " result"], ") := by");
             var pattern = new[] { "rfl", Symbolic ? "wellFormed" : "rfl" }
                 .Concat(MemoryFacts.Select(fact => fact.Name)).Append("assumed");
             lean.Line($"  rintro args initial ⟨{string.Join(", ", pattern)}⟩");
         }
 
-        /// <summary>The tactic text that proves the returned value meets the postcondition shape.</summary>
-        internal string ResultShape => Result is null ? "refine ⟨rfl, ?_⟩" : "refine ⟨_, rfl, ?_⟩";
+        string ResultWord => Result is { Boolean: true } ? "(if result then 1 else 0)" : "result";
+
+        /// <summary>The postcondition goal at a return: the returned value is matched when it is a word,
+        /// and left with the hole when a `Bool` must be chosen for it.</summary>
+        internal void Postcondition(Writer lean, string indent, string note)
+        {
+            if (Result is null or { Boolean: true })
+            {
+                var choose = Result is null ? "" : ", for the Bool the returned word encodes";
+                lean.Noted(indent, "case postcondition => sorry", note + choose);
+                return;
+            }
+            lean.Line(indent + "case postcondition =>");
+            lean.Line(indent + "  refine ⟨_, rfl, ?_⟩");
+            lean.Noted(indent + "  ", "sorry", note);
+        }
     }
 
     static IEnumerable<string> Grouped(IEnumerable<(string Name, string Type)> binders)
@@ -183,40 +215,65 @@ internal static partial class ProofOutline
 
     static string StraightLine(Extraction extraction, Specification spec, Body body, Writer lean)
     {
-        var steppable = !spec.Symbolic && body.Ops.All(Body.Pure);
-        Header(lean, spec, ["CIL.Verification", "CIL.Safety.SymbolicExecution"], loop: false);
+        var steppable = spec.Parameters.All(parameter => parameter.Shape == ParameterShape.Scalar) &&
+            body.Ops.All(Body.Pure);
+        Header(lean, spec, ["CIL.Verification", "CIL.Safety.SymbolicExecution"],
+            steppable ? "`postcondition`" : null);
         spec.Placeholders(lean);
         spec.Statement(lean);
         if (steppable)
         {
             lean.Line("  refine ⟨CIL.executionBound Extracted.program 0, ?final, ?results, ?run, ?postcondition⟩");
             lean.Line("  case run => cil_checked_steps");
-            lean.Line("  case postcondition =>");
-            lean.Line("    " + spec.ResultShape);
-            lean.Noted("    ", "sorry", "Postcondition of the returned value");
+            spec.Postcondition(lean, "  ", "Postcondition of the returned value");
         }
         else
         {
-            var reason = spec.Symbolic ? "reads caller memory" : "branches, calls or can fault";
-            lean.Line($"  -- The body {reason}: choose a fuel bound and step it with");
-            lean.Line("  -- `cil_checked_steps [facts]`, splitting cases where it branches.");
-            lean.Line("  sorry -- the run and Postcondition of its result");
+            lean.Line("  -- Choose a fuel bound and step the body with `cil_checked_steps [facts]`,");
+            lean.Line("  -- splitting cases where it branches.");
+            lean.Noted("  ", "sorry", $"{NotOutlined}{Unstepped(spec.Method, body.Ops, spec.Parameters)}; " +
+                "prove its run and Postcondition");
         }
         Footer(lean);
         return lean.ToString();
     }
 
-    static void Header(Writer lean, Specification spec, IEnumerable<string> imports, bool loop)
+    /// <summary>Why the outline leaves a body to the author: the first argument or operation that
+    /// `cil_checked_steps` cannot take without facts or a case split.</summary>
+    static string Unstepped(MethodDefinition method, string[] ops, IEnumerable<Parameter> parameters)
+    {
+        if (parameters.FirstOrDefault(parameter => parameter.Shape != ParameterShape.Scalar) is { } argument)
+            return $"the body reads `{argument.Name}`, " + argument.Shape switch
+            {
+                ParameterShape.Boolean => "a `bool` that needs a case split",
+                ParameterShape.Narrow => "a narrow integer whose extension needs facts",
+                ParameterShape.Reference => "a reference into caller memory",
+                _ => "a span of caller memory"
+            };
+        var pc = Array.FindIndex(ops, op => !Body.Pure(op));
+        return pc < 0 ? "the body has locals" : $"`{ops[pc]}` at {Location(method, pc)} needs facts or a case split";
+    }
+
+    /// <summary>The source line of the instruction at `pc`, or its IL offset without a PDB.</summary>
+    static string Location(MethodDefinition method, int pc)
+    {
+        var offset = method.Body.Instructions[pc].Offset;
+        return Symbols.Location(method, offset, Path.GetFileName) is { } at
+            ? at[..at.LastIndexOf(':')] : $"IL_{offset:x4}";
+    }
+
+    // `tags` names the goals the generated tactics leave, or is null when the proof is one hole.
+    static void Header(Writer lean, Specification spec, IEnumerable<string> imports, string? tags)
     {
         lean.Line("import Extracted");
         foreach (var module in imports) lean.Line("import " + module);
         lean.Line();
-        var tags = loop ? "`invariant`, `measure`, `postcondition` and `precondition` (at a call)"
-            : "`run` and `postcondition`";
+        var selected = tags is null ? ""
+            : $" The tactics leave obligations tagged {tags}, which the holes select with `case`.";
         lean.Comment("/-! ", "    ", $"A starting proof of `{spec.Method.Name}`, generated by " +
-            "`leancil new-proof` from " +
-            "its extraction. Each `sorry` is a hole, and `leancil verify` rejects the file until none remains. " +
-            $"The tactics leave obligations tagged {tags}, which the holes select with `case`. -/");
+            "`leancil new-proof` from its extraction. Each `sorry` is a hole, and `leancil verify` rejects " +
+            $"the file until none remains. A hole commented `{NotOutlined.TrimEnd()}` marks a path the " +
+            $"outline could not step.{selected} -/");
         lean.Line();
         lean.Line("open CIL.Safety");
         lean.Line("open CIL (W32 W64)");
