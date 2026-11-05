@@ -765,7 +765,7 @@ using (var module = ModuleDefinition.ReadModule(assembly))
 var returnResult = Execute(["dotnet", ExtractorPath, "extract", readOnlyReturn, returnSelector,
     Path.Combine(root, "Reject-in-return")]);
 const string returnRejection = "Custom modifiers are unsupported in method returns, except " +
-    "System.Runtime's modreq(IsExternalInit) directly on System.Void: System.UInt64& modreq(";
+    "modreq(System.Runtime.CompilerServices.IsExternalInit) directly on System.Void: System.UInt64& modreq(";
 if (returnResult.Code == 0 || !returnResult.Output.Contains(returnRejection, StringComparison.Ordinal))
     throw new Exception("Incorrect in-modifier return rejection\n" + returnResult.Output);
 Console.WriteLine("PASS in-modifier rejection: ref readonly return");

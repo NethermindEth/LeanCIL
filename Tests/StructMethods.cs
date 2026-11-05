@@ -96,6 +96,36 @@ foreach (var shortForm in new[] { false, true })
     Compare(dll, "Arguments", "-" + shortForm);
 }
 
+// Libraries for older frameworks declare their own IsExternalInit; C# binds the marker by full name
+// from any assembly, so an accessor marked by one runs exactly as with System.Runtime's.
+foreach (var scope in new[] { "local-marker", "versioned-marker" })
+{
+    var output = Path.Combine(root, "Init-" + scope);
+    Directory.CreateDirectory(output);
+    var dll = Path.Combine(output, "Examples.dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        var setter = module.GetType("Examples.InitCounter").Methods.Single(method => method.Name == "set_Value");
+        var marker = (RequiredModifierType)setter.ReturnType;
+        var runtime = (AssemblyNameReference)marker.ModifierType.Scope;
+        TypeReference replacement;
+        if (scope == "local-marker")
+        {
+            var local = new TypeDefinition(marker.ModifierType.Namespace, marker.ModifierType.Name,
+                Mono.Cecil.TypeAttributes.Abstract | Mono.Cecil.TypeAttributes.Sealed, module.TypeSystem.Object);
+            module.Types.Add(local);
+            replacement = local;
+        }
+        else
+            replacement = new TypeReference(marker.ModifierType.Namespace, marker.ModifierType.Name, module,
+                new AssemblyNameReference(runtime.Name, new Version(9, 0, 0, 0))
+                    { PublicKeyToken = runtime.PublicKeyToken });
+        setter.ReturnType = new RequiredModifierType(replacement, marker.ElementType);
+        module.Write(dll);
+    }
+    Compare(dll, "Initialized", "-" + scope);
+}
+
 queue.Flush();
 
 var contract = At("Examples/Proofs/InstanceWriteRead.lean");
@@ -141,13 +171,14 @@ foreach (var mutation in new[] { "static-call", "explicit-this", "class", "const
         throw new InvalidOperationException($"Invalid instance metadata accepted: {mutation}\n{result.Output}");
 }
 
-// Only System.Runtime's modreq(IsExternalInit) directly on System.Void is admitted; every other
-// modifier is rejected by name, both as an entry and behind the call that reaches it.
-const string returnRejection = "except System.Runtime's modreq(IsExternalInit) directly on System.Void";
+// Only modreq(System.Runtime.CompilerServices.IsExternalInit) directly on System.Void is admitted;
+// every other modifier, including a same-named marker in another namespace, is rejected by name,
+// both as an entry and behind the call that reaches it.
+const string returnRejection = "except modreq(System.Runtime.CompilerServices.IsExternalInit) directly on System.Void";
 const string parameterRejection = "except System.Runtime's modreq(InAttribute) directly on a by-reference parameter";
 static MethodDefinition Accessor(ModuleDefinition module, string name) =>
     module.GetType("Examples.InitCounter").Methods.Single(method => method.Name == name);
-foreach (var mutation in new[] { "other-modreq", "modopt", "non-void", "parameter", "versioned-scope", "local-scope" })
+foreach (var mutation in new[] { "other-modreq", "modopt", "non-void", "parameter", "other-namespace" })
 {
     var output = Path.Combine(root, "Reject-init-" + mutation);
     Directory.CreateDirectory(output);
@@ -160,9 +191,9 @@ foreach (var mutation in new[] { "other-modreq", "modopt", "non-void", "paramete
         var runtime = (AssemblyNameReference)marker.ModifierType.Scope;
         TypeReference Modifier(string name, IMetadataScope scope) =>
             new("System.Runtime.CompilerServices", name, module, scope);
-        TypeReference LocalMarker()
+        TypeReference ForeignMarker()
         {
-            var local = new TypeDefinition("System.Runtime.CompilerServices", "IsExternalInit",
+            var local = new TypeDefinition("Examples", "IsExternalInit",
                 Mono.Cecil.TypeAttributes.Abstract | Mono.Cecil.TypeAttributes.Sealed, module.TypeSystem.Object);
             module.Types.Add(local);
             return local;
@@ -182,12 +213,7 @@ foreach (var mutation in new[] { "other-modreq", "modopt", "non-void", "paramete
                 setter.Parameters[0].ParameterType =
                     new RequiredModifierType(marker.ModifierType, setter.Parameters[0].ParameterType);
                 break;
-            case "versioned-scope":
-                setter.ReturnType = new RequiredModifierType(Modifier("IsExternalInit", new AssemblyNameReference(
-                    runtime.Name, new Version(9, 0, 0, 0)) { PublicKeyToken = runtime.PublicKeyToken }),
-                    marker.ElementType);
-                break;
-            default: setter.ReturnType = new RequiredModifierType(LocalMarker(), marker.ElementType); break;
+            default: setter.ReturnType = new RequiredModifierType(ForeignMarker(), marker.ElementType); break;
         }
         modified = mutation == "parameter" ? setter.Parameters[0].ParameterType.FullName : target.ReturnType.FullName;
         selector = target.FullName;

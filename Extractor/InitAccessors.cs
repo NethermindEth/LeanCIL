@@ -8,11 +8,11 @@ internal static class InitAccessors
 {
     const string Modifier = "System.Runtime.CompilerServices.IsExternalInit";
 
-    // Exactly System.Runtime's IsExternalInit, required directly on a modifier-free System.Void.
+    // Roslyn binds the marker by full name from any assembly, since libraries for older frameworks
+    // declare their own; it carries no IL semantics wherever it is declared.
     internal static TypeReference? Unwrap(TypeReference type) =>
         type is RequiredModifierType { ModifierType: var modifier, ElementType: var element } &&
-        modifier is not TypeSpecification && modifier.FullName == Modifier &&
-        RuntimeModels.ExactScope(modifier.Scope, "System.Runtime") &&
+        modifier is not TypeSpecification && modifier.DeclaringType is null && modifier.FullName == Modifier &&
         element is not TypeSpecification && element.MetadataType == MetadataType.Void ? element : null;
 
     internal static bool Is(TypeReference type) => Unwrap(type) is not null;

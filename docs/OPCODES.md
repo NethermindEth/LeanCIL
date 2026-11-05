@@ -432,13 +432,14 @@ are rejected. Imported and exported contract signatures admit no modifier.
 C# marks an `init` accessor by returning
 `System.Void modreq(System.Runtime.CompilerServices.IsExternalInit)`. The modifier only
 restricts which C# callers may bind the accessor, so the accessor runs as the void method it is,
-as an entry or behind a call. It is admitted only directly on `System.Void` and only with the
-exact `System.Runtime` scope. Selectors, recorded entries and the Lean signature string keep the
-modifier; the Lean method and call metadata record a plain void return, so a method whose
-declaring type also has a modifier-only twin is rejected. `modopt`, other `modreq` types, the
-modifier on a value-returning method or a parameter, and an `IsExternalInit` from any other
-assembly, including one declared in the extracted assembly, are rejected with the modified type
-in the message.
+as an entry or behind a call. It is admitted only directly on `System.Void`. Like C#, the
+extractor recognizes the marker by its full name from any assembly, so a library that declares
+its own `IsExternalInit` for an older framework is admitted too. Selectors, recorded entries and
+the Lean signature string keep the modifier; the Lean method and call metadata record a plain
+void return, so a method whose declaring type also has a modifier-only twin is rejected.
+`modopt`, other `modreq` types, an `IsExternalInit` in another namespace and the modifier on a
+value-returning method or a parameter are rejected with the modified type in the message. An
+`init` accessor cannot be exported: contract exports are static methods.
 
 ### Static readonly values
 

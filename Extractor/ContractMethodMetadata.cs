@@ -98,7 +98,8 @@ internal static class ContractMethodMetadata
         RejectModifiers(method.DeclaringType);
         if (selected && !InitAccessors.Is(method.ReturnType) && InReferences.Modified(method.ReturnType))
             throw new InvalidDataException("Custom modifiers are unsupported in method returns, except " +
-                "System.Runtime's modreq(IsExternalInit) directly on System.Void: " + method.ReturnType.FullName);
+                "modreq(System.Runtime.CompilerServices.IsExternalInit) directly on System.Void: " +
+                method.ReturnType.FullName);
         if (!selected) RejectModifiers(method.ReturnType);
         foreach (ParameterDefinition parameter in method.Parameters)
         {
