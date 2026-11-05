@@ -201,7 +201,7 @@ internal static class NativeOperands
                 for (var index = 0; index < signature.Parameters.Count; index++) Pop();
                 if (instruction.Previous?.OpCode.Code == Code.Tail && stack.Count != 0)
                     throw new InvalidDataException("Tail call requires exactly its arguments on the evaluation stack");
-                if (signature.ReturnType.MetadataType != MetadataType.Void) stack.Add(Type(signature.ReturnType));
+                if (!CallReturnType.IsVoid(signature.ReturnType)) stack.Add(Type(signature.ReturnType));
             }
             else if (code == Code.Ldelem_I && stack.Count >= 2 && stack[^2].Kind == Kind.MethodTable)
             {
@@ -215,14 +215,15 @@ internal static class NativeOperands
             {
                 var callee = (MethodReference)instruction.Operand;
                 for (var index = 0; index < callee.Parameters.Count + (code != Code.Newobj && callee.HasThis ? 1 : 0); index++) Pop();
-                if (code == Code.Newobj || callee.ReturnType.MetadataType != MetadataType.Void)
+                if (code == Code.Newobj || !CallReturnType.IsVoid(callee.ReturnType))
                     stack.Add(code == Code.Newobj ? Type(callee.DeclaringType) : CallType(callee, profile));
             }
             else if (code == Code.Ret)
             {
-                var actual = method.ReturnType.MetadataType != MetadataType.Void ? Pop() : Kind.Other;
+                var actual = !CallReturnType.IsVoid(method.ReturnType) ? Pop() : Kind.Other;
                 if (MethodSpecialization.Source(method) is not null &&
-                    (stack.Count != 0 || (method.ReturnType.MetadataType != MetadataType.Void && actual != Type(method.ReturnType))))
+                    (stack.Count != 0 ||
+                        (!CallReturnType.IsVoid(method.ReturnType) && actual != Type(method.ReturnType))))
                     throw new InvalidDataException($"Unsupported generic return stack type: {method.FullName}");
             }
             else

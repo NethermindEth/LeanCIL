@@ -157,10 +157,18 @@ internal static class ContractMethodMetadata
 
     internal static Selection Select(ModuleDefinition module, string selector, string[] arguments, string architecture)
     {
-        MethodDefinition definition = MethodSelector.Resolve(module, selector);
-        TypeReference[] types = arguments.Select(name => EntryArgument(module, name)).ToArray();
-        return Instantiate(definition, types, architecture, entry: true);
+        (MethodDefinition definition, TypeReference[] types) = Resolve(module, selector, arguments);
+        return Entry(definition, types, architecture);
     }
+
+    /// <summary>The method a selector names and its closed type arguments, before its shape is checked.</summary>
+    internal static (MethodDefinition Definition, TypeReference[] Arguments) Resolve(ModuleDefinition module,
+        string selector, string[] arguments) =>
+        (MethodSelector.Resolve(module, selector), arguments.Select(name => EntryArgument(module, name)).ToArray());
+
+    /// <summary>The resolved method closed as an entry; rejects shapes no entry may have.</summary>
+    internal static Selection Entry(MethodDefinition definition, TypeReference[] arguments, string architecture) =>
+        Instantiate(definition, arguments, architecture, entry: true);
 
     static Selection Instantiate(MethodDefinition definition, TypeReference[] arguments, string architecture,
         bool entry = false)

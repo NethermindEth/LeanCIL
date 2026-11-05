@@ -419,8 +419,9 @@ internal static class MetadataValidation
 
     internal sealed record Blocked(MethodDefinition Method, Instruction? At, Exception Error, MethodDefinition[] Chain);
 
-    // With `blocked`, failures after entry selection are recorded and the walk continues past them;
-    // without it, the first failure throws. Either way only profile-reachable code is checked.
+    // With `blocked`, failures after the selector resolves, the entry's shape included, are recorded
+    // and the walk continues past them; without it, the first failure throws. Only profile-reachable
+    // code is checked.
     internal static MethodDefinition[] Validate(ModuleDefinition module, string assemblyIdentity, string entrySignature, FeatureProfile profile,
         IReadOnlyCollection<string>? initializedTypes = null, List<Blocked>? blocked = null, ImportResolution? imports = null,
         string[]? typeArguments = null, Func<TypeReference, bool>? importedByref = null)
@@ -438,7 +439,15 @@ internal static class MetadataValidation
             (module.Attributes & ModuleAttributes.ILOnly) == 0 ||
             (module.Attributes & ModuleAttributes.Required32Bit) != 0)
             throw new InvalidDataException("Unsupported assembly identity, target framework or build configuration");
-        MethodDefinition entry = ContractMethodMetadata.Select(module, entrySignature, typeArguments ?? [], profile.Architecture).Closed;
+        var (definition, entryArguments) = ContractMethodMetadata.Resolve(module, entrySignature, typeArguments ?? []);
+        MethodDefinition entry;
+        try { entry = ContractMethodMetadata.Entry(definition, entryArguments, profile.Architecture).Closed; }
+        catch (Exception error) when (blocked is not null)
+        {
+            // A resolved entry of rejected shape is still analysed from its definition.
+            blocked.Add(new(definition, null, error, [definition]));
+            entry = definition;
+        }
         MethodSpecialization specializations = new(module, profile.Architecture);
         var staticValues = new StaticValues.Context(module);
         // 1 while visiting, 2 once admitted to the walk, 3 when its body could not be analysed.
@@ -465,6 +474,15 @@ internal static class MetadataValidation
                 return false;
             }
         }
+        // A report names what a failed body analysis leaves unchecked behind it.
+        Action Hiding(string hidden, Action analysis) => blocked is null ? analysis : () =>
+        {
+            try { analysis(); }
+            catch (Exception error)
+            {
+                throw new InvalidDataException($"{error.Message}\n  Not analysed behind it: {hidden}.", error);
+            }
+        };
         void Visit(MethodDefinition method)
         {
             var pending = new Stack<(MethodDefinition Method, bool Finish, bool Deferred,
@@ -503,35 +521,59 @@ internal static class MetadataValidation
             // A referenced body is validated against its own pinned module's metadata.
             var module = method.Module;
             state[method] = 3;
+            // Only a method without a pinned IL body stops the walk; nothing behind it can be analysed.
             if (!Check(method, null, () =>
             {
-                if (!Pinned(method.Module) || method.IsStatic == method.HasThis || method.ExplicitThis ||
-                    (!method.IsStatic && !IsAggregate(MethodSpecialization.DeclaringType(method), module)) ||
-                    method.CallingConvention != MethodCallingConvention.Default || !method.HasBody ||
-                    method.IsPInvokeImpl ||
+                if (!Pinned(method.Module))
+                    throw new InvalidDataException("Unsupported method metadata: body outside the pinned assemblies");
+                if (!method.HasBody || method.IsPInvokeImpl || method.Body.Instructions.Count == 0 ||
                     (method.ImplAttributes & (MethodImplAttributes.CodeTypeMask | MethodImplAttributes.ManagedMask |
-                        MethodImplAttributes.Synchronized | MethodImplAttributes.InternalCall | MethodImplAttributes.ForwardRef)) != 0 ||
-                    method.HasGenericParameters || (method.DeclaringType.HasGenericParameters &&
-                        MethodSpecialization.OwnerArguments(method).Count == 0) ||
-                    method.Body.Instructions.Count == 0 || method.Body.ExceptionHandlers.Count != 0 ||
-                    (method.IsConstructor && method.IsStatic))
-                    throw new InvalidDataException($"Unsupported method metadata or static initialisation: {method.FullName}");
-                var owner = method.DeclaringType.FullName;
-                if (method.Module != selected && method.DeclaringType.Methods.Any(m => m.IsConstructor && m.IsStatic))
-                    throw new InvalidDataException(
-                        $"Unsupported static initialisation in a referenced assembly: {method.FullName}\n" +
-                        "  Initialization assumptions name types of the selected assembly only.");
-                if (method.DeclaringType.Methods.Any(m => m.IsConstructor && m.IsStatic) &&
-                    !initializedTypes.Contains(owner, StringComparer.Ordinal))
-                    throw new InvalidDataException($"Unsupported static initialisation: {method.FullName}\n" +
-                        $"  {owner} has a static constructor, which is never extracted. If every caller runs it " +
-                        $"first, pass --assume-initialized {owner}; this records a caller precondition and " +
-                        "does not prove it.");
-                InReferences.RejectTwins(method);
-            })) return;
+                        MethodImplAttributes.InternalCall | MethodImplAttributes.ForwardRef)) != 0)
+                    throw new InvalidDataException("Unsupported method metadata: no managed IL body");
+            }, named: true)) return;
+            // Every other rejection is its own blocker; the body and callees are still analysed.
+            void Reject(Func<bool> rejected, string reason) => Check(method, null, () =>
+            {
+                if (rejected()) throw new InvalidDataException(reason);
+            }, named: true);
+            Reject(() => method.IsStatic == method.HasThis || method.ExplicitThis ||
+                    method.CallingConvention != MethodCallingConvention.Default,
+                "Unsupported method metadata: calling convention or this parameter");
+            Reject(() => !method.IsStatic && !method.IsConstructor &&
+                    !IsAggregate(MethodSpecialization.DeclaringType(method), module),
+                "Unsupported method metadata: instance method of a reference type");
+            Reject(() => method.IsConstructor && !method.IsStatic &&
+                    !IsAggregate(MethodSpecialization.DeclaringType(method), module),
+                "Unsupported method metadata: constructor of a reference type");
+            Reject(() => (method.ImplAttributes & MethodImplAttributes.Synchronized) != 0,
+                "Unsupported method metadata: synchronized method");
+            Reject(() => method.HasGenericParameters,
+                "Unsupported method metadata: open generic method");
+            Reject(() => method.DeclaringType.HasGenericParameters &&
+                    MethodSpecialization.OwnerArguments(method).Count == 0,
+                "Unsupported method metadata: member of an open generic type");
+            Reject(() => method.Body.ExceptionHandlers.Count != 0,
+                "Unsupported method metadata: exception handlers");
+            Reject(() => method.IsConstructor && method.IsStatic,
+                "Unsupported static initialisation: static constructors are never extracted");
+            var owner = method.DeclaringType.FullName;
+            bool initialised = !method.DeclaringType.Methods.Any(m => m.IsConstructor && m.IsStatic);
+            Reject(() => !initialised && method.Module != selected,
+                $"Unsupported static initialisation in a referenced assembly: {owner}\n" +
+                "  Initialization assumptions name types of the selected assembly only.");
+            Reject(() => !initialised && method.Module == selected &&
+                    !initializedTypes.Contains(owner, StringComparer.Ordinal),
+                $"Unsupported static initialisation: {owner} has a static constructor\n" +
+                "  It is never extracted. If every caller runs it first, pass " +
+                $"--assume-initialized {owner}; this records a caller precondition and does not prove it.");
+            Check(method, null, () => InReferences.RejectTwins(method), named: true);
             Check(method, null, () =>
             {
-                if (method.HasThis) Layout(MethodSpecialization.DeclaringType(method), module, profile.Architecture);
+                // Reference-type and open generic receivers are reported above; only a closed struct has a layout.
+                if (method.HasThis && IsAggregate(MethodSpecialization.DeclaringType(method), module) &&
+                    !(method.DeclaringType.HasGenericParameters &&
+                        MethodSpecialization.OwnerArguments(method).Count == 0))
+                    Layout(MethodSpecialization.DeclaringType(method), module, profile.Architecture);
                 if (method.IsConstructor && (method.Name != ".ctor" || !method.HasThis || method.ReturnType.MetadataType != MetadataType.Void))
                     throw new InvalidDataException($"Unsupported constructor signature: {method.FullName}");
                 Type(method.ReturnType, module, returns: true, architecture: profile.Architecture);
@@ -555,8 +597,11 @@ internal static class MetadataValidation
             HashSet<Instruction> reachable = [];
             TypeTests.Analysis? typeTests = null;
             Throws.Analysis? throws = null;
-            if (!Check(method, null, () => reachable = Reachability.Analyze(method, profile), named: true) ||
-                !Check(method, null, () => (typeTests, throws) = (TypeTests.Analyze(method), Throws.Analyze(method))))
+            const string callees = "this method's calls, callees and instructions";
+            if (!Check(method, null, Hiding(callees, () => reachable = Reachability.Analyze(method, profile)),
+                    named: true) ||
+                !Check(method, null, Hiding(callees,
+                    () => (typeTests, throws) = (TypeTests.Analyze(method), Throws.Analyze(method)))))
                 return;
             var instructions = new InstructionIndex(method);
             state[method] = 1;
@@ -731,8 +776,9 @@ internal static class MetadataValidation
         // Proofs bind methods by unscoped signature, so one signature must name one assembly's body.
         foreach (var group in methods.GroupBy(method => method.FullName, StringComparer.Ordinal))
             if (group.Select(method => method.Module).Distinct().Skip(1).Any())
-                throw new InvalidDataException($"Ambiguous method signature across pinned assemblies: {group.Key}\n  " +
-                    string.Join(", ", group.Select(method => method.Module.Assembly.Name.FullName).Distinct()));
+                Check(group.First(), null, () => throw new InvalidDataException(
+                    $"Ambiguous method signature across pinned assemblies: {group.Key}\n  " +
+                    string.Join(", ", group.Select(method => method.Module.Assembly.Name.FullName).Distinct())));
         var methodIndices = methods.Select((method, index) => (method, index))
             .ToDictionary(pair => pair.method, pair => pair.index);
         var constrainedTargets = new ConstrainedCalls.TargetIndex(methods);
@@ -745,12 +791,12 @@ internal static class MetadataValidation
             NativeOperands.Certificate? nativeOperands = null;
             Dictionary<int, int>? parameterHomes = null;
             HashSet<Instruction>? reachable = null;
-            if (!Check(method, null, () =>
+            if (!Check(method, null, Hiding("this method's instruction translations", () =>
                 {
                     reachable = Reachability.Analyze(method, profile);
                     nativeOperands = NativeOperands.Certify(method, reachable, profile);
                     parameterHomes = ParameterStorage.IndexHomes(ParameterStorage.Analyze(method, reachable));
-                }, named: true))
+                }), named: true))
                 continue;
             foreach (Instruction instruction in reachable!)
                 if (!skipped.Contains(instruction))

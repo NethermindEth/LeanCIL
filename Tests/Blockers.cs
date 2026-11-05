@@ -43,6 +43,32 @@ public struct Pair
     public int First;
     public long Second;
 }
+
+public sealed class Counter
+{
+    int total;
+
+    public int Add(int x)
+    {
+        total += x;
+        return new decimal[x].Length;
+    }
+}
+
+public static class Signatures
+{
+    public static int Measure(string text, int x) => new decimal[x].Length;
+}
+
+public struct Point
+{
+    public int X { get; init; }
+}
+
+public struct Cell<T>
+{
+    public int Twice(int x) => new decimal[x].Length + x;
+}
 """;
 File.WriteAllText(Path.Combine(source, "Fixture.cs"), fixture);
 Run(["dotnet", "build", Path.Combine(source, "Fixture.csproj"), "-c", "Release"]);
@@ -64,7 +90,11 @@ File.WriteAllText(manifest, JsonSerializer.Serialize(new
         new { signature = "Fixture::External(int)", profile = "scalar" },
         new { signature = "Fixture::Size()", profile = "scalar", typeArguments = new[] { "Pair" } },
         new { signature = "Fixture::Size()", profile = "scalar", typeArguments = new[] { "System.String" } },
-        new { signature = "Fixture::Size()", profile = "scalar", typeArguments = "Pair" }
+        new { signature = "Fixture::Size()", profile = "scalar", typeArguments = "Pair" },
+        new { signature = "Counter::Add(int)", profile = "scalar" },
+        new { signature = "Signatures::Measure(string,int)", profile = "scalar" },
+        new { signature = "Point::set_X(int)", profile = "scalar" },
+        new { signature = "Cell`1::Twice(int)", profile = "scalar" }
     }
 }));
 var report = Path.Combine(directory, "blockers.json");
@@ -82,7 +112,7 @@ void Require(bool condition, string message)
 string[] Ids(int index) => entries[index].GetProperty("blockers").EnumerateArray().Select(e => e.GetString()!).ToArray();
 
 string[] expected = ["admitted", "blocked", "blocked", "admitted", "blocked", "notChecked", "notChecked", "blocked",
-    "admitted", "notChecked", "notChecked"];
+    "admitted", "notChecked", "notChecked", "blocked", "blocked", "blocked", "blocked"];
 Require(entries.Select(e => e.GetProperty("status").GetString()).SequenceEqual(expected), "Wrong entry classification");
 Require(entries[0].GetProperty("method").GetString() == "System.UInt64 Fixture::Admitted(System.UInt64,System.UInt64)" &&
     entries[0].GetProperty("reachableMethods").GetInt32() == 1, "Admitted entry lost its resolved method");
@@ -98,10 +128,19 @@ string[] Reached(JsonElement blocker) => blocker.GetProperty("entries").Enumerat
 string Id(JsonElement blocker) => blocker.GetProperty("id").GetString()!;
 Require(blockers.Select(b => b.GetProperty("construct").GetString()).Order(StringComparer.Ordinal)
     .SequenceEqual([
+        "Contract method requires an exact closed generic instantiation.",
+        "Custom modifiers are unsupported in typed contract signatures: System.Void " +
+            "modreq(System.Runtime.CompilerServices.IsExternalInit)",
         "External managed dependency: System.Int32 System.Environment::get_ProcessorCount()",
         "External managed dependency: System.Int32 System.GC::GetGeneration(System.Object)",
+        "Unsupported aggregate layout: Counter",
+        "Unsupported instruction: newarr System.Decimal",
         "Unsupported instruction: newarr System.Double",
-        "Unsupported instruction: newarr System.Single"]),
+        "Unsupported instruction: newarr System.Single",
+        "Unsupported method metadata: instance method of a reference type",
+        "Unsupported method metadata: member of an open generic type",
+        "Unsupported type: System.String",
+        "Unsupported type: System.Void modreq(System.Runtime.CompilerServices.IsExternalInit)"]),
     "Expected one blocker per unsupported construct");
 var allocation = Blocker("Unsupported instruction: newarr System.Single");
 var generation = Blocker("External managed dependency: System.Int32 System.GC::GetGeneration(System.Object)");
@@ -158,8 +197,47 @@ Require(entries[9].GetProperty("reason").GetString()!.Contains("Closed entry typ
     "Reference type argument not rejected at selection");
 Require(entries[10].GetProperty("reason").GetString()!.Contains("`typeArguments` must be an array"),
     "Malformed type arguments accepted");
-Require(summary.Contains("3 admitted, 4 blocked, 4 not checked") && summary.Contains("nothing here is proved") &&
+Require(summary.Contains("3 admitted, 8 blocked, 4 not checked") && summary.Contains("nothing here is proved") &&
     !summary.Contains("verified", StringComparison.OrdinalIgnoreCase), "Summary overstates or misses counts");
+// A rejected signature or receiver does not hide the body: its unsupported instruction is reported too.
+string[] Constructs(int index) => Ids(index).Select(id => blockers.Single(b => Id(b) == id)
+    .GetProperty("construct").GetString()!).ToArray();
+var decimals = Blocker("Unsupported instruction: newarr System.Decimal");
+Require(Constructs(12).Order(StringComparer.Ordinal).SequenceEqual(
+    ["Unsupported instruction: newarr System.Decimal", "Unsupported type: System.String"]) &&
+    decimals.GetProperty("sites").EnumerateArray().Any(s =>
+        s.GetProperty("method").GetString() == "System.Int32 Signatures::Measure(System.String,System.Int32)"),
+    "Rejected signature hid the body's blockers: " + string.Join("; ", Constructs(12)));
+Require(Constructs(11).Order(StringComparer.Ordinal).SequenceEqual([
+        "Unsupported aggregate layout: Counter", "Unsupported instruction: newarr System.Decimal",
+        "Unsupported method metadata: instance method of a reference type"]),
+    "Reference-type receiver hid the body's blockers: " + string.Join("; ", Constructs(11)));
+// A resolved entry of rejected shape is blocked, not unchecked, and its definition is still analysed.
+Require(Constructs(13).Any(c => c.StartsWith("Custom modifiers are unsupported", StringComparison.Ordinal)) &&
+    entries[13].GetProperty("method").GetString()!.EndsWith("Point::set_X(System.Int32)", StringComparison.Ordinal),
+    "Init-only setter not analysed past its modifier: " + string.Join("; ", Constructs(13)));
+Require(Constructs(14).Contains("Contract method requires an exact closed generic instantiation.") &&
+    Constructs(14).Contains("Unsupported instruction: newarr System.Decimal"),
+    "Open generic member not analysed past its shape: " + string.Join("; ", Constructs(14)));
+
+// `admitted` means exactly that `extract` succeeds, so every well-formed entry is also extracted.
+var manifestEntries = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(manifest)).GetProperty("entries")
+    .EnumerateArray().ToArray();
+for (var index = 0; index < entries.Length; index++)
+{
+    var entry = manifestEntries[index];
+    string[]? typeArguments = !entry.TryGetProperty("typeArguments", out var listed) ? [] :
+        listed.ValueKind == JsonValueKind.Array ? [.. listed.EnumerateArray().Select(a => a.GetString()!)] : null;
+    if (typeArguments is null) continue;
+    var output = Path.Combine(directory, "extract", index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    var extracted = Execute(["dotnet", ExtractorPath, "extract", assembly, entry.GetProperty("signature").GetString()!,
+        output, entry.GetProperty("profile").GetString()!,
+        .. typeArguments.SelectMany(argument => new[] { "--type-argument", argument })]);
+    Require((extracted.Code == 0) == (entries[index].GetProperty("status").GetString() == "admitted"),
+        $"Entry {index} is {entries[index].GetProperty("status")} but extract exited {extracted.Code}:\n" +
+        extracted.Output);
+}
+
 // Distinct arrays and sites are compared by content, while output keeps first discovery order.
 var blockersType = Assembly.LoadFrom(ExtractorPath).GetType("Nethermind.LeanCIL.Blockers", true)!;
 var findingType = blockersType.GetNestedType("Finding", BindingFlags.NonPublic)!;

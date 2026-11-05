@@ -35,9 +35,9 @@ losses even when gains elsewhere leave the accepted count unchanged. Reports inc
 and detailed blocker diagnostics. Admission is extraction coverage, not a correctness proof.
 Each compiler/language directory also contains `not-checked.tsv`, listing the method and
 selection failure for every `N` entry; console output groups these entries by reason.
-Open generic definitions need explicit closed instantiations before they can be checked as
-entries. Their `N` status neither establishes support nor proves that they are unsupported;
-closed callers can exercise their specializations. Profile-dependent SIMD coverage is tested
+An open generic definition is not an entry `extract` accepts, so it is `B`, with that shape as
+one of its blockers and its open body analysed behind it; closed callers can still exercise its
+specializations. Profile-dependent SIMD coverage is tested
 separately and is not measured by this scalar whole-corpus baseline.
 This scan does not compile F# or the C# strings and mutated assemblies constructed by test scripts.
 

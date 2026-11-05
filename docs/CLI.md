@@ -148,14 +148,19 @@ the manifest) or `--reference` pins referenced assemblies for every entry, and a
 `typeArguments` applies `--type-argument` to it. The report goes to
 `--output`, by default `blockers.json` next to the manifest, and a short summary goes to standard
 output. Each entry is `admitted` (extraction would succeed), `blocked`, or `notChecked` with the
-reason: a selector that matches no method or several, an unknown profile, or an assembly or
-assumption that fails before any method is checked. Each blocker is one unsupported construct
-(instruction, call, type or layout). It lists every site, with method, IL offset, instruction and
-the PDB source location when one is present, and every affected entry with the call chains from
-it to those sites. Only code reachable under the entry's profile is checked, so a branch excluded
-by a constant `IsSupported` is never reported. A method whose metadata or control flow cannot be
-analysed is reported once, without the callees behind it. Admission is not verification: an admitted entry
-still needs a proof. The command exits with `0` whenever the report is written, whatever the
+reason: a selector that matches no method or several, a malformed type argument, an unknown
+profile, or an assembly or assumption that fails before any method is checked. An entry the
+selector resolves but `extract` rejects by its shape, such as an `init` setter or a member of an
+open generic type, is `blocked`, and its definition is analysed as an entry. Each blocker is one
+unsupported construct (instruction, call, type, layout, method metadata or static constructor).
+It lists every site, with method, IL offset, instruction and the PDB source location when one is
+present, and every affected entry with the call chains from it to those sites. A rejected
+signature, receiver, static constructor or entry shape does not stop the analysis: the body and
+callees behind it are still checked and their blockers reported. Only a method without IL to
+analyse, or a body whose control flow cannot be analysed, ends its branch, and that blocker's
+message names what was not analysed behind it. Only code reachable under the entry's profile is
+checked, so a branch excluded by a constant `IsSupported` is never reported. Admission is not
+verification: an admitted entry still needs a proof. The command exits with `0` whenever the report is written, whatever the
 entries' status.
 
 ## Check
