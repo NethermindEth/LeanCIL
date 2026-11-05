@@ -44,6 +44,17 @@ internal sealed record ContractMethodSignature(ContractType Owner, string Name, 
 
 internal static class ContractMethodMetadata
 {
+    // Exception data naming the shape a rejection found, so a report can drop its restatements.
+    internal const string ModifiedTypeKey = "Nethermind.LeanCIL.ModifiedType";
+    internal const string InstantiationKey = "Nethermind.LeanCIL.Instantiation";
+
+    static InvalidDataException Shape(string message, string key, string value)
+    {
+        InvalidDataException error = new(message);
+        error.Data[key] = value;
+        return error;
+    }
+
     internal static void ValidatePublished(ContractMethodSignature signature, string[] arguments, int count, bool returned)
     {
         if (signature.Owner is null || signature.Owner.Kind != "atom" || string.IsNullOrWhiteSpace(signature.Name) ||
@@ -82,7 +93,8 @@ internal static class ContractMethodMetadata
     internal static void RejectModifiers(TypeReference type)
     {
         if (type is RequiredModifierType or OptionalModifierType)
-            throw new InvalidDataException("Custom modifiers are unsupported in typed contract signatures: " + type.FullName);
+            throw Shape("Custom modifiers are unsupported in typed contract signatures: " + type.FullName,
+                ModifiedTypeKey, type.FullName);
         if (type is GenericInstanceType generic)
             foreach (TypeReference argument in generic.GenericArguments) RejectModifiers(argument);
         if (type is TypeSpecification specification) RejectModifiers(specification.ElementType);
@@ -100,9 +112,9 @@ internal static class ContractMethodMetadata
         {
             if (inParameters && InReferences.Is(parameter.ParameterType)) continue;
             if (inParameters && InReferences.Modified(parameter.ParameterType))
-                throw new InvalidDataException("Custom modifiers are unsupported in method signatures, except " +
+                throw Shape("Custom modifiers are unsupported in method signatures, except " +
                     "System.Runtime's modreq(InAttribute) directly on a by-reference parameter: " +
-                    parameter.ParameterType.FullName);
+                    parameter.ParameterType.FullName, ModifiedTypeKey, parameter.ParameterType.FullName);
             RejectModifiers(parameter.ParameterType);
         }
         if (method is GenericInstanceMethod generic)
@@ -179,10 +191,10 @@ internal static class ContractMethodMetadata
         int ownerArity = definition.DeclaringType.GenericParameters.Count;
         if ((ownerArity != 0 && (!entry || !definition.IsStatic)) ||
             definition.GenericParameters.Count + ownerArity != arguments.Length)
-            throw new InvalidDataException("Contract method requires an exact closed generic instantiation." +
+            throw Shape("Contract method requires an exact closed generic instantiation." +
                 (ownerArity == 0 ? "" : $"\n  Pass {definition.GenericParameters.Count} method type argument(s) " +
                     $"followed by {ownerArity} for {definition.DeclaringType.FullName}; only static methods " +
-                    "of a generic type can be an entry."));
+                    "of a generic type can be an entry."), InstantiationKey, definition.FullName);
         // Imported calls bind across assemblies, so only an entry may close over its own module's value types.
         if (arguments.Any(type => !Primitive(type) && !(entry && type.IsValueType &&
                 (type.Module == definition.Module || PinnedAssemblies.Active?.ModuleOf(type) is not null))))

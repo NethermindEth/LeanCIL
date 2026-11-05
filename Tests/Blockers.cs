@@ -69,6 +69,11 @@ public struct Cell<T>
 {
     public int Twice(int x) => new decimal[x].Length + x;
 }
+
+public static class Seeded
+{
+    public static readonly int Seed = System.Environment.TickCount;
+}
 """;
 File.WriteAllText(Path.Combine(source, "Fixture.cs"), fixture);
 Run(["dotnet", "build", Path.Combine(source, "Fixture.csproj"), "-c", "Release"]);
@@ -94,7 +99,8 @@ File.WriteAllText(manifest, JsonSerializer.Serialize(new
         new { signature = "Counter::Add(int)", profile = "scalar" },
         new { signature = "Signatures::Measure(string,int)", profile = "scalar" },
         new { signature = "Point::set_X(int)", profile = "scalar" },
-        new { signature = "Cell`1::Twice(int)", profile = "scalar" }
+        new { signature = "Cell`1::Twice(int)", profile = "scalar" },
+        new { signature = "Seeded::.cctor()", profile = "scalar" }
     }
 }));
 var report = Path.Combine(directory, "blockers.json");
@@ -112,7 +118,7 @@ void Require(bool condition, string message)
 string[] Ids(int index) => entries[index].GetProperty("blockers").EnumerateArray().Select(e => e.GetString()!).ToArray();
 
 string[] expected = ["admitted", "blocked", "blocked", "admitted", "blocked", "notChecked", "notChecked", "blocked",
-    "admitted", "notChecked", "notChecked", "blocked", "blocked", "blocked", "blocked"];
+    "admitted", "notChecked", "notChecked", "blocked", "blocked", "blocked", "blocked", "blocked"];
 Require(entries.Select(e => e.GetProperty("status").GetString()).SequenceEqual(expected), "Wrong entry classification");
 Require(entries[0].GetProperty("method").GetString() == "System.UInt64 Fixture::Admitted(System.UInt64,System.UInt64)" &&
     entries[0].GetProperty("reachableMethods").GetInt32() == 1, "Admitted entry lost its resolved method");
@@ -128,22 +134,23 @@ string[] Reached(JsonElement blocker) => blocker.GetProperty("entries").Enumerat
 string Id(JsonElement blocker) => blocker.GetProperty("id").GetString()!;
 Require(blockers.Select(b => b.GetProperty("construct").GetString()).Order(StringComparer.Ordinal)
     .SequenceEqual([
-        "Contract method requires an exact closed generic instantiation.",
         "Custom modifiers are unsupported in typed contract signatures: System.Void " +
             "modreq(System.Runtime.CompilerServices.IsExternalInit)",
-        "External managed dependency: System.Int32 System.Environment::get_ProcessorCount()",
-        "External managed dependency: System.Int32 System.GC::GetGeneration(System.Object)",
+        "Rejected external call: System.Int32 System.Environment::get_ProcessorCount()",
+        "Rejected external call: System.Int32 System.Environment::get_TickCount()",
+        "Rejected external call: System.Int32 System.GC::GetGeneration(System.Object)",
         "Unsupported aggregate layout: Counter",
         "Unsupported instruction: newarr System.Decimal",
         "Unsupported instruction: newarr System.Double",
         "Unsupported instruction: newarr System.Single",
         "Unsupported method metadata: instance method of a reference type",
         "Unsupported method metadata: member of an open generic type",
-        "Unsupported type: System.String",
-        "Unsupported type: System.Void modreq(System.Runtime.CompilerServices.IsExternalInit)"]),
+        "Unsupported static field store: stsfld System.Int32 Seeded::Seed",
+        "Unsupported static initialisation: static constructors are never extracted",
+        "Unsupported type: System.String"]),
     "Expected one blocker per unsupported construct");
 var allocation = Blocker("Unsupported instruction: newarr System.Single");
-var generation = Blocker("External managed dependency: System.Int32 System.GC::GetGeneration(System.Object)");
+var generation = Blocker("Rejected external call: System.Int32 System.GC::GetGeneration(System.Object)");
 Require(Reached(allocation).SequenceEqual([
     $"scalar System.Int32 Fixture::First(System.Int32) -> {helper}",
     $"scalar System.Int32 Fixture::Second(System.Int32) -> {helper}"]), "Wrong call chains: " + string.Join("; ", Reached(allocation)));
@@ -180,7 +187,7 @@ Require(Ids(4).Order(StringComparer.Ordinal)
     "Live AVX2 branch not reported");
 
 // An unmodelled overload is named once at its call; the call is not reported again as untranslatable.
-var external = Blocker("External managed dependency: System.Int32 System.Environment::get_ProcessorCount()");
+var external = Blocker("Rejected external call: System.Int32 System.Environment::get_ProcessorCount()");
 var call = external.GetProperty("sites").EnumerateArray().Single();
 Require(Ids(7).SequenceEqual([Id(external)]) && Reached(external).SequenceEqual(["scalar System.Int32 Fixture::External(System.Int32)"]) &&
     call.GetProperty("instruction").GetString() == $"IL_{call.GetProperty("ilOffset").GetInt32():x4}: call System.Int32 System.Environment::get_ProcessorCount()" &&
@@ -197,7 +204,7 @@ Require(entries[9].GetProperty("reason").GetString()!.Contains("Closed entry typ
     "Reference type argument not rejected at selection");
 Require(entries[10].GetProperty("reason").GetString()!.Contains("`typeArguments` must be an array"),
     "Malformed type arguments accepted");
-Require(summary.Contains("3 admitted, 8 blocked, 4 not checked") && summary.Contains("nothing here is proved") &&
+Require(summary.Contains("3 admitted, 9 blocked, 4 not checked") && summary.Contains("nothing here is proved") &&
     !summary.Contains("verified", StringComparison.OrdinalIgnoreCase), "Summary overstates or misses counts");
 // A rejected signature or receiver does not hide the body: its unsupported instruction is reported too.
 string[] Constructs(int index) => Ids(index).Select(id => blockers.Single(b => Id(b) == id)
@@ -213,12 +220,18 @@ Require(Constructs(11).Order(StringComparer.Ordinal).SequenceEqual([
         "Unsupported method metadata: instance method of a reference type"]),
     "Reference-type receiver hid the body's blockers: " + string.Join("; ", Constructs(11)));
 // A resolved entry of rejected shape is blocked, not unchecked, and its definition is still analysed.
-Require(Constructs(13).Any(c => c.StartsWith("Custom modifiers are unsupported", StringComparison.Ordinal)) &&
+// One condition is one blocker: the shape names the modifier, and the walk names the open generic owner.
+Require(Constructs(13).Single(c => c.Contains("IsExternalInit")).StartsWith("Custom modifiers are unsupported",
+        StringComparison.Ordinal) &&
     entries[13].GetProperty("method").GetString()!.EndsWith("Point::set_X(System.Int32)", StringComparison.Ordinal),
     "Init-only setter not analysed past its modifier: " + string.Join("; ", Constructs(13)));
-Require(Constructs(14).Contains("Contract method requires an exact closed generic instantiation.") &&
+Require(Constructs(14).Contains("Unsupported method metadata: member of an open generic type") &&
+    !Constructs(14).Contains("Contract method requires an exact closed generic instantiation.") &&
     Constructs(14).Contains("Unsupported instruction: newarr System.Decimal"),
     "Open generic member not analysed past its shape: " + string.Join("; ", Constructs(14)));
+// A static constructor is reported as itself, not again as its owner's static initialisation.
+Require(Constructs(15).Count(c => c.StartsWith("Unsupported static initialisation", StringComparison.Ordinal)) == 1,
+    "Static constructor reported twice: " + string.Join("; ", Constructs(15)));
 
 // `admitted` means exactly that `extract` succeeds, so every well-formed entry is also extracted.
 var manifestEntries = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(manifest)).GetProperty("entries")
@@ -272,20 +285,20 @@ string? Existing(string status) => selfReport.FirstOrDefault(e => e.GetProperty(
     is { ValueKind: JsonValueKind.Object } entry ? entry.GetProperty("signature").GetString() : null;
 (int Code, string Output) Gate(params string[] lines)
 {
-    var path = Path.Combine(directory, "self-baseline.tsv");
-    File.WriteAllLines(path, ["status\tmethod", .. lines]);
+    var path = Path.Combine(directory, "self-baseline.txt");
+    File.WriteAllLines(path, lines);
     var result = Execute(["dotnet", "run", "--file", selfAdmission, "--", "--baseline", path, "--reuse-report"]);
     return (result.Code, result.Output);
 }
 // Losing an admission that still exists is the only failure.
 var blockedMethod = Existing("blocked")!;
-var lostAdmission = Gate("A\t" + blockedMethod);
+var lostAdmission = Gate(blockedMethod);
 Require(lostAdmission.Code != 0 && lostAdmission.Output.Contains("no longer admitted") &&
     lostAdmission.Output.Contains(blockedMethod), "Lost admission passed the gate:\n" + lostAdmission.Output);
 // Removed methods and gained admissions are reported, since the tool's own method set changes every PR.
 const string gone = "System.Int32 Gone::Removed()";
 var admittedMethod = Existing("admitted");
-var reported = admittedMethod is null ? Gate("A\t" + gone) : Gate("A\t" + gone, "B\t" + admittedMethod);
+var reported = Gate(gone);
 Require(reported.Code == 0 && !reported.Output.Contains("Lost admissions") &&
     reported.Output.Contains("Removed admitted methods:") && reported.Output.Contains(gone) &&
     (admittedMethod is null || reported.Output.Contains("Gained admissions") &&

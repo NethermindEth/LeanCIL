@@ -117,32 +117,17 @@ internal static partial class Program
             var positional = new List<string>();
             string? expectedAssembly = null;
             string? assemblyOverride = null;
-            List<string> importPaths = [];
+            ImportOptions importOptions = new();
             List<string> entryTypeArguments = [];
             List<string> referencePaths = [];
-            Dictionary<string, string> implementationPaths = new(StringComparer.Ordinal);
-            Dictionary<string, string> importHashes = new(StringComparer.Ordinal);
-            Dictionary<string, string> interfaceHashes = new(StringComparer.Ordinal);
             var initializedTypes = new SortedSet<string>(StringComparer.Ordinal);
             for (var index = 1; index < args.Length; index++)
             {
-                if (args[index] is "--import" or "--import-implementation" or "--import-sha256" or "--import-interface-sha256")
+                if (ImportOptions.Names(args[index]))
                 {
                     string option = args[index];
-                    if (++index == args.Length || string.IsNullOrWhiteSpace(args[index]) || args[index].StartsWith("--", StringComparison.Ordinal))
-                        throw new ArgumentException(option + " requires a value.");
-                    if (option == "--import") importPaths.Add(Path.GetFullPath(args[index]));
-                    else
-                    {
-                        int separator = args[index].IndexOf('=');
-                        if (separator < 1 || separator == args[index].Length - 1)
-                            throw new ArgumentException(option + " requires Lib=<value>.");
-                        Dictionary<string, string> selected = option == "--import-sha256" ? importHashes :
-                            option == "--import-interface-sha256" ? interfaceHashes : implementationPaths;
-                        string value = args[index][(separator + 1)..];
-                        if (!selected.TryAdd(args[index][..separator], selected == implementationPaths ? value : value.ToLowerInvariant()))
-                            throw new ArgumentException("Duplicate " + option + " assembly.");
-                    }
+                    if (++index == args.Length) throw new ArgumentException(option + " requires a value.");
+                    importOptions.Add(option, args[index]);
                 }
                 else if (args[index] == "--type-argument")
                 {
@@ -254,10 +239,10 @@ internal static partial class Program
                 {
                     string name = AssemblyNameReference.Parse(node.GetProperty("assemblyIdentity").GetString()!).Name;
                     string sidecar = global::Program.ExtractionIdentity.Resolve(output, node.GetProperty("sidecarPath").GetString()!);
-                    string implementation = implementationPaths.GetValueOrDefault(name) ??
+                    string implementation = importOptions.Implementations.GetValueOrDefault(name) ??
                         global::Program.ExtractionIdentity.Resolve(output, node.GetProperty("implementationPath").GetString()!);
-                    string expected = importHashes.GetValueOrDefault(name) ?? node.GetProperty("implementationSha256").GetString()!;
-                    string expectedInterface = interfaceHashes.GetValueOrDefault(name) ??
+                    string expected = importOptions.Sha256.GetValueOrDefault(name) ?? node.GetProperty("implementationSha256").GetString()!;
+                    string expectedInterface = importOptions.InterfaceSha256.GetValueOrDefault(name) ??
                         (node.TryGetProperty("expectedInterfaceDigest", out JsonElement pinnedInterface) ? pinnedInterface.GetString()! :
                             throw new InvalidDataException("Import graph has no independent interface digest; extract again with --import-interface-sha256."));
                     importSources.Add(new(sidecar, Path.GetFullPath(implementation), expected, expectedInterface));
@@ -268,40 +253,16 @@ internal static partial class Program
                     string sidecar = global::Program.ExtractionIdentity.Resolve(output, binding.GetProperty("sidecarPath").GetString()!);
                     if (importSources.Any(source => source.SidecarPath == sidecar)) continue;
                     string name = AssemblyNameReference.Parse(binding.GetProperty("identity").GetString()!.Split("::", 2)[0]).Name;
-                    string implementation = implementationPaths.GetValueOrDefault(name) ??
+                    string implementation = importOptions.Implementations.GetValueOrDefault(name) ??
                         global::Program.ExtractionIdentity.Resolve(output, binding.GetProperty("implementationPath").GetString()!);
-                    string expected = importHashes.GetValueOrDefault(name) ?? binding.GetProperty("implementationSha256").GetString()!;
-                    string expectedInterface = interfaceHashes.GetValueOrDefault(name) ??
+                    string expected = importOptions.Sha256.GetValueOrDefault(name) ?? binding.GetProperty("implementationSha256").GetString()!;
+                    string expectedInterface = importOptions.InterfaceSha256.GetValueOrDefault(name) ??
                         (binding.TryGetProperty("interfaceDigest", out JsonElement pinnedInterface) ? pinnedInterface.GetString()! :
                             throw new InvalidDataException("Import extraction has no independent interface digest; extract again with --import-interface-sha256."));
                     importSources.Add(new(sidecar, Path.GetFullPath(implementation), expected, expectedInterface));
                 }
-            foreach (string sidecar in importPaths.Distinct(StringComparer.Ordinal))
-            {
-                if (importSources.Any(source => source.SidecarPath == sidecar)) continue;
-                ContractInterface contract = ContractInterface.Read(File.ReadAllBytes(sidecar));
-                // Rejected before import validation, so a pinned reference never silently loses its contract.
-                // The selected assembly is not a reference; importing its own sidecar keeps its usual checks.
-                if (pinned.References.Any(reference => reference.Pin.Identity == contract.AssemblyIdentity))
-                    throw new InvalidDataException(
-                        "An assembly cannot be both a typed import and an extracted reference: " +
-                        contract.AssemblyIdentity);
-                string name = AssemblyNameReference.Parse(contract.AssemblyIdentity).Name;
-                string adjacent = Path.Combine(Path.GetDirectoryName(sidecar)!, name + ".dll");
-                string implementation = implementationPaths.GetValueOrDefault(name) ?? (File.Exists(adjacent) ? adjacent :
-                    Path.Combine(Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!, name + ".dll"));
-                importSources.Add(new(sidecar, Path.GetFullPath(implementation), importHashes.GetValueOrDefault(name) ?? "", interfaceHashes.GetValueOrDefault(name) ?? ""));
-            }
             // check replays only the recorded import graph; sidecars appearing after extraction are outside it.
-            foreach (AssemblyNameReference reference in recorded is null ? module.AssemblyReferences : [])
-            {
-                if (pinned.References.Any(pin => pin.Module.Assembly.Name.Name == reference.Name)) continue;
-                string discovered = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!, reference.Name + ".leancil.contracts");
-                if (File.Exists(discovered) && !importSources.Any(source => source.SidecarPath == discovered))
-                    importSources.Add(new(discovered, Path.GetFullPath(implementationPaths.GetValueOrDefault(reference.Name) ??
-                        Path.Combine(Path.GetDirectoryName(discovered)!, reference.Name + ".dll")),
-                        importHashes.GetValueOrDefault(reference.Name) ?? "", interfaceHashes.GetValueOrDefault(reference.Name) ?? "", Discovered: true));
-            }
+            importOptions.AddSources(importSources, pinned, assemblyPath, module, discover: recorded is null);
             using ImportResolution imports = new(importSources);
             using var enumMetadata = EnumTypes.BeginScope();
             stage = "metadata and CIL validation";

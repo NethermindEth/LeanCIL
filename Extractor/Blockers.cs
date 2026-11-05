@@ -10,7 +10,15 @@ namespace Nethermind.LeanCIL;
 // Runs extraction and its validators over explicit method/profile pairs; it never checks a proof.
 internal static class Blockers
 {
-    const string Usage = "Usage: leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] [--assembly 'assembly name or full identity'] [--reference Lib.dll]...";
+    const string Usage = "Usage: leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] " +
+        "[--assembly 'assembly name or full identity'] [--reference Lib.dll]... [--import Lib.leancil.contracts]... " +
+        "[--import-implementation Lib=path]... [--import-sha256 Lib=hex]... [--import-interface-sha256 Lib=hex]...";
+    // Manifest keys that carry the import options, in the order `extract` names them.
+    static readonly (string Key, string Option)[] ImportKeys =
+    [
+        ("imports", "--import"), ("importImplementations", "--import-implementation"),
+        ("importSha256", "--import-sha256"), ("importInterfaceSha256", "--import-interface-sha256")
+    ];
     const string Disclaimer = "Admission only: admitted entries are extractable under their profile; nothing here is proved.";
 
     sealed record Site(string Method, int? IlOffset, string? Instruction, string? Source, string Message);
@@ -86,10 +94,12 @@ internal static class Blockers
     {
         string? assemblyPath = null, manifestPath = null, outputPath = null, expectedAssembly = null;
         List<string> referencePaths = [];
+        ImportOptions imports = new();
         for (var index = 0; index < args.Length; index++)
         {
             switch (args[index])
             {
+                case var option when ImportOptions.Names(option): imports.Add(option, Option(args, ref index)); break;
                 case "--manifest" when manifestPath is null: manifestPath = Option(args, ref index); break;
                 case "--output" when outputPath is null: outputPath = Option(args, ref index); break;
                 case "--assembly" when expectedAssembly is null: expectedAssembly = Option(args, ref index); break;
@@ -110,9 +120,17 @@ internal static class Blockers
         using var manifest = JsonDocument.Parse(File.ReadAllText(manifestPath));
         var root = manifest.RootElement;
         if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("entries", out var entries) || entries.ValueKind != JsonValueKind.Array ||
-            root.EnumerateObject().Any(p => p.Name is not ("entries" or "initializedTypes" or "references")))
+            root.EnumerateObject().Any(p => p.Name is not ("entries" or "initializedTypes" or "references") &&
+                !ImportKeys.Any(key => key.Key == p.Name)))
             throw new InvalidDataException("Blocker manifest must be an object with an `entries` array, " +
-                "optional `initializedTypes` and optional `references`.");
+                "optional `initializedTypes`, `references`, `imports`, `importImplementations`, `importSha256` " +
+                "and `importInterfaceSha256`.");
+        // Paths in the manifest are relative to it; hashes and the names they key are taken as written.
+        foreach (var (key, option) in ImportKeys)
+            if (root.TryGetProperty(key, out var values))
+                foreach (var value in key == "imports" ? (values.Deserialize<string[]>() ?? []) :
+                        (values.Deserialize<Dictionary<string, string>>() ?? []).Select(pair => pair.Key + "=" + pair.Value))
+                    imports.Add(option, value, manifestDirectory);
         if (root.TryGetProperty("references", out var listed))
             referencePaths.AddRange((listed.Deserialize<string[]>() ?? [])
                 .Select(path => Path.GetFullPath(path, manifestDirectory)));
@@ -132,6 +150,13 @@ internal static class Blockers
 
         var findings = new Dictionary<string, Finding>(StringComparer.Ordinal);
         var outcomes = new List<Outcome>();
+        // One module serves every entry, so per-method analyses are computed once; each entry's
+        // operand rewrites are undone before the next entry is validated.
+        var references = referencePaths.Distinct(StringComparer.Ordinal).ToArray();
+        using var pinned = new PinnedAssemblies(assembly, Hash(assembly),
+            references.Select(path => new PinnedAssemblies.Source(path)));
+        var module = pinned.Selected;
+        Symbols.Read(module, assemblyPath, out _);
         foreach (var entry in entries.EnumerateArray())
         {
             var signature = entry.ValueKind == JsonValueKind.Object ? Text(entry, "signature") : null;
@@ -173,32 +198,34 @@ internal static class Blockers
                 continue;
             }
 
-            // Validation rewrites generic call operands, so every entry gets its own module.
-            using var pinned = new PinnedAssemblies(assembly, Hash(assembly),
-                referencePaths.Distinct(StringComparer.Ordinal).Select(path => new PinnedAssemblies.Source(path)));
-            var module = pinned.Selected;
-            Symbols.Read(module, assemblyPath, out _);
             var blocked = new List<MetadataValidation.Blocked>();
+            var rewrites = new List<(Mono.Cecil.Cil.Instruction Instruction, object Operand)>();
             MethodDefinition[] methods;
             try
             {
+                List<ImportResolution.Source> sources = [];
+                imports.AddSources(sources, pinned, assemblyPath, module, discover: true);
+                using var resolution = new ImportResolution(sources);
+                using var enumMetadata = EnumTypes.BeginScope();
                 methods = MetadataValidation.Validate(module, expectedAssembly ?? identity, signature, profile,
-                    initializedTypes, blocked, typeArguments: typeArguments);
+                    initializedTypes, blocked, resolution, typeArguments,
+                    type => resolution.ValidateByref(type, profile), rewrites);
             }
             catch (Exception error)
             {
-                // Only selection, profile, assumption and assembly checks throw once blockers are collected.
+                // Only selection, profile, assumption, import and assembly checks throw once blockers are collected.
                 outcomes.Add(NotChecked(error.Message));
                 continue;
             }
-            if (blocked.Count == 0)
+            finally
             {
-                try
-                {
-                    LeanEmitter.Emit(methods, profile, pinned);
-                }
-                catch (Exception error) { blocked.Add(new(methods[0], null, error, [methods[0]])); }
+                for (var index = rewrites.Count - 1; index >= 0; index--)
+                    rewrites[index].Instruction.Operand = rewrites[index].Operand;
             }
+            // `admitted` means exactly that `extract` succeeds, so an entry without blockers is extracted.
+            if (blocked.Count == 0 && Extract(assemblyPath, signature, profileName, manifestDirectory, expectedAssembly,
+                    typeArguments, initializedTypes, references, imports) is { } rejected)
+                blocked.Add(new(methods[0], null, rejected, [methods[0]]));
             if (blocked.Count == 0)
             {
                 outcomes.Add(new(signature, profileName, "admitted", methods[0].FullName, null, methods.Length, [])
@@ -267,6 +294,30 @@ internal static class Blockers
         File.WriteAllText(outputPath, report + "\n", new UTF8Encoding(false));
         Console.Write(Summary(identity, outcomes, ordered, outputPath));
         return 0;
+    }
+
+    // Runs `extract` with the entry's settings into a scratch directory; returns its failure, if any.
+    static Exception? Extract(string assemblyPath, string signature, string profileName, string manifestDirectory,
+        string? expectedAssembly, string[] typeArguments, IEnumerable<string> initializedTypes,
+        IEnumerable<string> references, ImportOptions imports)
+    {
+        var output = Path.Combine(Path.GetTempPath(), "leancil-blockers-" + Guid.NewGuid().ToString("N"));
+        string profile = profileName.StartsWith('@') ? "@" + Path.GetFullPath(profileName[1..], manifestDirectory) :
+            profileName;
+        try
+        {
+            Program.RunQuietly(["extract", Path.GetFullPath(assemblyPath), signature, output, profile,
+                .. expectedAssembly is null ? Array.Empty<string>() : ["--assembly", expectedAssembly],
+                .. typeArguments.SelectMany(argument => new[] { "--type-argument", argument }),
+                .. initializedTypes.SelectMany(type => new[] { "--assume-initialized", type }),
+                .. references.SelectMany(path => new[] { "--reference", path }), .. imports.Arguments()]);
+            return null;
+        }
+        catch (Exception error) { return error; }
+        finally
+        {
+            if (Directory.Exists(output)) Directory.Delete(output, recursive: true);
+        }
     }
 
     static string Summary(string identity, List<Outcome> outcomes, Finding[] findings, string outputPath)

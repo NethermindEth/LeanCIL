@@ -124,7 +124,7 @@ Instance methods of generic classes remain rejected as entries and as callees.
 
 `leancil blockers` runs admission, the validation `extract` performs, over an explicit list of
 method and profile pairs, and reports everything that blocks each one instead of stopping at the
-first failure. It writes no extraction artifacts and checks no proofs:
+first failure. It checks no proofs and keeps no extraction artifacts:
 
 ```sh
 leancil blockers assembly.dll --manifest blockers-manifest.json [--output blockers.json]
@@ -134,6 +134,9 @@ leancil blockers assembly.dll --manifest blockers-manifest.json [--output blocke
 {
   "initializedTypes": ["Namespace.Type"],
   "references": ["Lib.dll"],
+  "imports": ["Other.leancil.contracts"],
+  "importSha256": { "Other": "implementation sha256" },
+  "importInterfaceSha256": { "Other": "interface digest" },
   "entries": [
     { "signature": "Type::Method(ulong)", "profile": "scalar" },
     { "signature": "Type::Method(ulong)", "profile": "@profiles/x64-v3.json" },
@@ -145,23 +148,29 @@ leancil blockers assembly.dll --manifest blockers-manifest.json [--output blocke
 `profile` is a profile name or `@file`, resolved against the manifest's directory;
 `initializedTypes` applies `--assume-initialized` to every entry, `references` (paths relative to
 the manifest) or `--reference` pins referenced assemblies for every entry, and an entry's optional
-`typeArguments` applies `--type-argument` to it. The report goes to
+`typeArguments` applies `--type-argument` to it. Contract imports are those of `extract`: the
+`--import`, `--import-implementation`, `--import-sha256` and `--import-interface-sha256` options,
+or the manifest's `imports`, `importImplementations`, `importSha256` and `importInterfaceSha256`
+(paths relative to the manifest), apply to every entry, and a sidecar beside the assembly is
+discovered as `extract` discovers it. An entry with no blockers is then extracted into a scratch
+directory, so `admitted` means exactly that `extract` succeeds. The report goes to
 `--output`, by default `blockers.json` next to the manifest, and a short summary goes to standard
 output. Each entry is `admitted` (extraction would succeed), `blocked`, or `notChecked` with the
 reason: a selector that matches no method or several, a malformed type argument, an unknown
-profile, or an assembly or assumption that fails before any method is checked. An entry the
-selector resolves but `extract` rejects by its shape, such as an `init` setter or a member of an
-open generic type, is `blocked`, and its definition is analysed as an entry. Each blocker is one
-unsupported construct (instruction, call, type, layout, method metadata or static constructor).
-It lists every site, with method, IL offset, instruction and the PDB source location when one is
-present, and every affected entry with the call chains from it to those sites. A rejected
-signature, receiver, static constructor or entry shape does not stop the analysis: the body and
-callees behind it are still checked and their blockers reported. Only a method without IL to
-analyse, or a body whose control flow cannot be analysed, ends its branch, and that blocker's
-message names what was not analysed behind it. Only code reachable under the entry's profile is
-checked, so a branch excluded by a constant `IsSupported` is never reported. Admission is not
-verification: an admitted entry still needs a proof. The command exits with `0` whenever the report is written, whatever the
-entries' status.
+profile, or an assembly, import or assumption that fails before any method is checked. An entry
+the selector resolves but `extract` rejects by its shape, such as an `init` setter or a member of
+an open generic type, is `blocked`, and its definition is analysed as an entry. Each blocker is
+one unsupported construct (instruction, call, type, layout, method metadata or static
+constructor). It lists every site, with method, IL offset, instruction and the PDB source location
+when one is present, and every affected entry with the call chains from it to those sites. A
+condition found by two checks, such as an entry's modifier and the type that carries it, is
+reported once, by the more specific check. A rejected signature, receiver, static constructor or
+entry shape does not stop the analysis: the body and callees behind it are still checked and
+their blockers reported. Only a method without IL to analyse, or a body whose control flow cannot
+be analysed, ends its branch, and that blocker's message names what was not analysed behind it.
+Only code reachable under the entry's profile is checked, so a branch excluded by a constant
+`IsSupported` is never reported. Admission is not verification: an admitted entry still needs a
+proof. The command exits with `0` whenever the report is written, whatever the entries' status.
 
 ## Check
 

@@ -217,6 +217,7 @@ string alternate = Path.Combine(directory, "alternate-implementation.dll");
 File.Copy(library, alternate, true);
 Run(Command(extra: ["--import-implementation", "ImportFixture.Lib=" + alternate]));
 Run([.. cli, "check", output]);
+CheckBlockersAdmission();
 Run(Command());
 Run([.. cli, "check", output]);
 JsonElement identity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
@@ -918,3 +919,49 @@ try
 finally { Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", savedReferenceCache); }
 Console.WriteLine("PASS reference-only authoring disables success receipts only for its own request");
 CheckInterfaceReuse();
+
+// `blockers` admits exactly what `extract` accepts with a contract import named, discovered or listed in its manifest.
+void CheckBlockersAdmission()
+{
+    string[] methods = ["Entry", "Generic", "Unrelated"];
+    string[] hashes = ["--import-sha256", "ImportFixture.Lib=" + expectedHash,
+        "--import-interface-sha256", "ImportFixture.Lib=" + expectedInterfaceHash];
+    string manifest = Path.Combine(directory, "blockers-manifest.json");
+    string report = Path.Combine(directory, "blockers.json");
+    string extracted = Path.Combine(directory, "blockers-extraction");
+    object entries = methods.Select(method => new { signature = $"ImportFixture.Application::{method}(ulong)",
+        profile = "scalar" }).ToArray();
+    var cases = new (string Name, object Manifest, string[] Blockers, string[] Extract)[]
+    {
+        ("named", new { entries }, ["--import", sidecar, .. hashes], ["--import", sidecar, .. hashes]),
+        ("discovered", new { entries }, hashes, hashes),
+        ("unpinned", new { entries }, [], []),
+        ("manifest", new
+        {
+            entries, imports = new[] { Path.GetFileName(sidecar) },
+            importSha256 = new Dictionary<string, string> { ["ImportFixture.Lib"] = expectedHash },
+            importInterfaceSha256 = new Dictionary<string, string> { ["ImportFixture.Lib"] = expectedInterfaceHash }
+        }, [], ["--import", sidecar, .. hashes])
+    };
+    foreach (var (name, content, blockersOptions, extractOptions) in cases)
+    {
+        File.WriteAllText(manifest, JsonSerializer.Serialize(content));
+        Run([.. cli, "blockers", app, "--manifest", manifest, "--output", report, .. blockersOptions]);
+        JsonElement[] statuses = [.. JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(report))
+            .GetProperty("entries").EnumerateArray()];
+        for (int index = 0; index < methods.Length; index++)
+        {
+            var result = Execute([.. cli, "extract", app, $"ImportFixture.Application::{methods[index]}(ulong)",
+                extracted, .. extractOptions]);
+            string status = statuses[index].GetProperty("status").GetString()!;
+            if ((result.Code == 0) != (status == "admitted"))
+                throw new InvalidOperationException($"blockers ({name}) reports {methods[index]} {status}, " +
+                    $"but extract exited {result.Code}:\n{result.Output}");
+        }
+        // The imported call is admitted only through its contract, so the pinned cases must admit it.
+        if (name != "unpinned" && statuses[0].GetProperty("status").GetString() != "admitted")
+            throw new InvalidOperationException($"blockers ({name}) did not admit the imported call:\n" +
+                File.ReadAllText(report));
+    }
+    Console.WriteLine("PASS blockers admits exactly what extract accepts with contract imports");
+}

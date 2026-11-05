@@ -9,11 +9,11 @@ using Mono.Cecil;
 
 // Admission of LeanCIL's own assembly under the scalar profile, gated on admitted methods only.
 // Fails only when a method admitted in the baseline still exists and is no longer admitted.
-const string Usage = "Usage: SelfAdmission.cs [--update] [--baseline baseline.tsv] [--reuse-report]";
+const string Usage = "Usage: SelfAdmission.cs [--update] [--baseline baseline.txt] [--reuse-report]";
 const string Profile = "scalar";
 const int ListedBlockers = 10;
 const int ListedMethods = 20;
-var baselinePath = At("Tests/SelfAdmissionBaseline.tsv");
+var baselinePath = At("Tests/SelfAdmissionBaseline.txt");
 bool update = false, reuse = false;
 for (var index = 0; index < args.Length; index++)
     switch (args[index])
@@ -53,22 +53,15 @@ foreach (var entry in document.RootElement.GetProperty("entries").EnumerateArray
     };
 if (current.Count != signatures.Length)
     throw new InvalidDataException($"Report has {current.Count} entries for {signatures.Length} methods.");
-string[] Lines(IDictionary<string, char> statuses) =>
-    ["status\tmethod", .. statuses.Select(pair => $"{pair.Value}\t{pair.Key}")];
-if (update) File.WriteAllText(baselinePath, string.Join('\n', Lines(current)) + "\n");
-
-var baseline = File.ReadAllLines(baselinePath).Skip(1).Select(line => line.Split('\t', 2))
-    .ToDictionary(fields => fields[1], fields => fields[0][0], StringComparer.Ordinal);
-bool Admitted(IDictionary<string, char> statuses, string method) =>
-    statuses.TryGetValue(method, out var status) && status == 'A';
-var lost = baseline.Keys.Where(method => Admitted(baseline, method) && current.ContainsKey(method) &&
-    !Admitted(current, method)).ToArray();
-var gained = current.Keys.Where(method => baseline.ContainsKey(method) && !Admitted(baseline, method) &&
-    Admitted(current, method)).ToArray();
-var added = current.Keys.Where(method => !baseline.ContainsKey(method)).ToArray();
-var removed = baseline.Keys.Where(method => !current.ContainsKey(method)).Order(StringComparer.Ordinal).ToArray();
-var reclassified = current.Keys.Count(method => baseline.TryGetValue(method, out var status) &&
-    status != current[method] && !Admitted(baseline, method) && !Admitted(current, method));
+// The baseline lists admitted methods only; whether a non-admitted method is new does not matter.
+var admitted = current.Where(pair => pair.Value == 'A').Select(pair => pair.Key).ToArray();
+if (update) File.WriteAllText(baselinePath, string.Concat(admitted.Select(method => method + "\n")));
+var baseline = File.ReadAllLines(baselinePath).Where(line => line.Length != 0)
+    .ToHashSet(StringComparer.Ordinal);
+var lost = baseline.Where(method => current.TryGetValue(method, out var status) && status != 'A')
+    .Order(StringComparer.Ordinal).ToArray();
+var removed = baseline.Where(method => !current.ContainsKey(method)).Order(StringComparer.Ordinal).ToArray();
+var gained = admitted.Where(method => !baseline.Contains(method)).ToArray();
 
 int Count(char status) => current.Values.Count(value => value == status);
 var blockers = document.RootElement.GetProperty("blockers").EnumerateArray().ToArray();
@@ -79,10 +72,8 @@ var summary = new List<string>
     "| Methods | Admitted | Blocked | Not checked | Distinct blockers | Seconds |",
     "| ---: | ---: | ---: | ---: | ---: | ---: |",
     $"| {current.Count} | {Count('A')} | {Count('B')} | {Count('N')} | {blockers.Length} | {elapsed:F1} |", "",
-    $"Since the baseline: {lost.Length} lost, {gained.Length} gained, {added.Length} added " +
-        $"({added.Count(method => Admitted(current, method))} admitted), {removed.Length} removed " +
-        $"({removed.Count(method => Admitted(baseline, method))} admitted), " +
-        $"{reclassified} moved between blocked and not checked.", ""
+    $"Since the baseline: {lost.Length} lost, {gained.Length} gained, " +
+        $"{removed.Length} admitted methods removed.", ""
 };
 void List(string heading, IEnumerable<string> methods)
 {
@@ -95,8 +86,7 @@ void List(string heading, IEnumerable<string> methods)
 }
 List("Lost admissions (fail):", lost);
 List("Gained admissions (record with `--update`):", gained);
-List("Added and admitted:", added.Where(method => Admitted(current, method)));
-List("Removed admitted methods:", removed.Where(method => Admitted(baseline, method)));
+List("Removed admitted methods:", removed);
 summary.Add("| Blocker | Entries | Sites |");
 summary.Add("| --- | ---: | ---: |");
 summary.AddRange(blockers.Take(ListedBlockers).Select(blocker =>

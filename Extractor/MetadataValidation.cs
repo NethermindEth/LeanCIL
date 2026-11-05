@@ -419,12 +419,16 @@ internal static class MetadataValidation
 
     internal sealed record Blocked(MethodDefinition Method, Instruction? At, Exception Error, MethodDefinition[] Chain);
 
+    const string OpenGenericMethod = "Unsupported method metadata: open generic method";
+    const string OpenGenericMember = "Unsupported method metadata: member of an open generic type";
+
     // With `blocked`, failures after the selector resolves, the entry's shape included, are recorded
     // and the walk continues past them; without it, the first failure throws. Only profile-reachable
     // code is checked.
     internal static MethodDefinition[] Validate(ModuleDefinition module, string assemblyIdentity, string entrySignature, FeatureProfile profile,
         IReadOnlyCollection<string>? initializedTypes = null, List<Blocked>? blocked = null, ImportResolution? imports = null,
-        string[]? typeArguments = null, Func<TypeReference, bool>? importedByref = null)
+        string[]? typeArguments = null, Func<TypeReference, bool>? importedByref = null,
+        List<(Instruction Instruction, object Operand)>? rewrites = null)
     {
         profile.Validate();
         initializedTypes ??= [];
@@ -441,11 +445,12 @@ internal static class MetadataValidation
             throw new InvalidDataException("Unsupported assembly identity, target framework or build configuration");
         var (definition, entryArguments) = ContractMethodMetadata.Resolve(module, entrySignature, typeArguments ?? []);
         MethodDefinition entry;
+        Blocked? shape = null;
         try { entry = ContractMethodMetadata.Entry(definition, entryArguments, profile.Architecture).Closed; }
         catch (Exception error) when (blocked is not null)
         {
             // A resolved entry of rejected shape is still analysed from its definition.
-            blocked.Add(new(definition, null, error, [definition]));
+            blocked.Add(shape = new(definition, null, error, [definition]));
             entry = definition;
         }
         MethodSpecialization specializations = new(module, profile.Architecture);
@@ -548,10 +553,10 @@ internal static class MetadataValidation
             Reject(() => (method.ImplAttributes & MethodImplAttributes.Synchronized) != 0,
                 "Unsupported method metadata: synchronized method");
             Reject(() => method.HasGenericParameters,
-                "Unsupported method metadata: open generic method");
+                OpenGenericMethod);
             Reject(() => method.DeclaringType.HasGenericParameters &&
                     MethodSpecialization.OwnerArguments(method).Count == 0,
-                "Unsupported method metadata: member of an open generic type");
+                OpenGenericMember);
             Reject(() => method.Body.ExceptionHandlers.Count != 0,
                 "Unsupported method metadata: exception handlers");
             Reject(() => method.IsConstructor && method.IsStatic,
@@ -561,7 +566,8 @@ internal static class MetadataValidation
             Reject(() => !initialised && method.Module != selected,
                 $"Unsupported static initialisation in a referenced assembly: {owner}\n" +
                 "  Initialization assumptions name types of the selected assembly only.");
-            Reject(() => !initialised && method.Module == selected &&
+            // A static constructor is already reported as itself, not again through its owner.
+            Reject(() => !initialised && method.Module == selected && !(method.IsConstructor && method.IsStatic) &&
                     !initializedTypes.Contains(owner, StringComparer.Ordinal),
                 $"Unsupported static initialisation: {owner} has a static constructor\n" +
                 "  It is never extracted. If every caller runs it first, pass " +
@@ -574,7 +580,9 @@ internal static class MetadataValidation
                     !(method.DeclaringType.HasGenericParameters &&
                         MethodSpecialization.OwnerArguments(method).Count == 0))
                     Layout(MethodSpecialization.DeclaringType(method), module, profile.Architecture);
-                if (method.IsConstructor && (method.Name != ".ctor" || !method.HasThis || method.ReturnType.MetadataType != MetadataType.Void))
+                // A static constructor is already reported as itself.
+                if (method.IsConstructor && !method.IsStatic &&
+                    (method.Name != ".ctor" || !method.HasThis || method.ReturnType.MetadataType != MetadataType.Void))
                     throw new InvalidDataException($"Unsupported constructor signature: {method.FullName}");
                 Type(method.ReturnType, module, returns: true, architecture: profile.Architecture);
             }, named: true);
@@ -653,6 +661,7 @@ internal static class MetadataValidation
                         (!specialized.IsConstructor || !specialized.HasThis ||
                          !IsAggregate(MethodSpecialization.DeclaringType(specialized), module)))
                         throw Call("Unsupported generic newobj constructor", reference, method, instruction);
+                    rewrites?.Add((instruction, instruction.Operand));
                     instruction.Operand = specialized;
                     Enter(specialized, reference, instruction);
                     return;
@@ -770,6 +779,13 @@ internal static class MetadataValidation
             }
         }
         Visit(entry);
+        // One condition is one blocker: keep the more specific of a shape and a walk rejection.
+        if (shape?.Error.Data[ContractMethodMetadata.InstantiationKey] is string && blocked!.Any(failure =>
+                failure.Method == definition && failure.Error.Message is OpenGenericMethod or OpenGenericMember))
+            blocked.Remove(shape);
+        if (shape?.Error.Data[ContractMethodMetadata.ModifiedTypeKey] is string modified)
+            blocked!.RemoveAll(failure => failure.Method == definition && failure.At is null &&
+                failure.Error.Message == "Unsupported type: " + modified);
         ordered.Reverse();
         // Validate translation before producing any artifact.
         var methods = ordered.ToArray();
