@@ -235,7 +235,7 @@ var throwProof = Path.Combine(root, "NullMessageThrow.lean");
 File.WriteAllText(throwProof, throwSource + """
 
     theorem null_message_raises :
-        CIL.Safety.invoke Extracted.program 16 0 [] ⟨fun _ => none, fun _ _ => ⟨0, false⟩, [], 0, [], 0, 0⟩ =
+        CIL.Safety.invoke Extracted.program 16 0 [] CIL.Safety.Memory.empty =
           .error ⟨0, 2, .thrown "System.DivideByZeroException"⟩ := rfl
     #print axioms null_message_raises
     """);
