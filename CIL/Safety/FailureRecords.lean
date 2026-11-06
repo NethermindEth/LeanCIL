@@ -1,5 +1,6 @@
 import Lean
 import CIL.Safety.Obligations
+import CIL.Safety.ObserveOptions
 
 /-!
 # Failure records
@@ -15,12 +16,6 @@ each goal one leaves unsolved, and logs it as one line of JSON after `failureMar
 namespace CIL.Safety
 
 open Lean Meta
-
-/-- Whether `CIL.Observe` logs a `FailureRecord` for each failure of a LeanCIL tactic. -/
-register_option cil.diagnostics : Bool := {
-  defValue := false
-  descr := "log a machine-readable record of where each LeanCIL tactic failed or stopped"
-}
 
 /-- The text that starts the line of a failure record, version 1. -/
 def failureMarker : String := "[LeanCIL failure v1] "

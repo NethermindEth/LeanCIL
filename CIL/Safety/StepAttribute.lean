@@ -1,10 +1,13 @@
 import Lean
+import CIL.Safety.ObserveOptions
 
 /-!
 # Step simp sets
 
 Simp attributes used by the stepping tactics. They are registered in their own file
-because a simp attribute cannot be used in the module that declares it.
+because a simp attribute cannot be used in the module that declares it. Importing them also
+registers the options of `CIL.Observe`, so a proof that sets one without the observer is told to
+import it.
 -/
 
 -- `CIL.Safety.step` equations, one per dispatcher arm, so a step rewrites without

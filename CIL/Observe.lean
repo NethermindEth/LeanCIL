@@ -25,8 +25,6 @@ namespace CIL.Safety
 
 open Lean Elab Command Meta
 
-initialize registerTraceClass `CIL.step
-
 /-- The text that starts each line of the step trace. -/
 def stepTraceHeader : String := "[CIL.step] "
 
