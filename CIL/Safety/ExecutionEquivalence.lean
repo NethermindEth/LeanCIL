@@ -125,7 +125,8 @@ theorem Memory.Equivalent.allocateArray {m n : Memory} (same : m.Equivalent n)
            { target with cells := fun other offset =>
                if other == identity then ⟨0, true⟩ else target.cells other offset } :=
          ⟨equivalent.allocations, by simp only [equivalent.cells], equivalent.permissions,
-           equivalent.nextIdentity, equivalent.staticBindings, equivalent.stackLimit⟩
+           equivalent.nextIdentity, equivalent.staticBindings,
+               equivalent.stackLimit, equivalent.heapBudget⟩
        exact initialized.prependView _)
     | unfold checkedAt
     | split

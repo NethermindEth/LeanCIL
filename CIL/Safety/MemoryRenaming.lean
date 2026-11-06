@@ -25,11 +25,12 @@ structure Memory.Renamed (mapping : AllocationRenaming) (scopes : Nat → Nat �
   staticBindings : target.staticBindings = source.staticBindings.map
     (fun binding => (binding.1, mapping.reference binding.2))
   stackLimit : target.stackLimit = source.stackLimit
+  heapBudget : target.heapBudget = source.heapBudget
 
 /-- Identical caller memory is related by the initial identity map. -/
 theorem Memory.Renamed.refl (memory : Memory) (scopes : Nat → Nat → Prop) :
     Memory.Renamed (.identity memory.nextIdentity) scopes memory memory := by
-  refine ⟨rfl, rfl, ?_, fun _ _ _ => rfl, fun _ _ _ => rfl, ?_, rfl⟩
+  refine ⟨rfl, rfl, ?_, fun _ _ _ => rfl, fun _ _ _ => rfl, ?_, rfl, rfl⟩
   · intro identity _
     change Option.Rel (Allocation.Related scopes) (memory.allocations identity)
       (memory.allocations identity)
@@ -120,7 +121,7 @@ theorem Memory.Renamed.extendScopes {mapping : AllocationRenaming}
     (extension : ∀ left right, before left right → after left right) :
     Memory.Renamed mapping after source target := by
   refine ⟨related.sourceLimit, related.targetLimit, ?_, related.cells, related.permissions,
-    related.staticBindings, related.stackLimit⟩
+    related.staticBindings, related.stackLimit, related.heapBudget⟩
   intro identity bound
   have lift : ∀ left right, Option.Rel (Allocation.Related before) left right →
       Option.Rel (Allocation.Related after) left right := by

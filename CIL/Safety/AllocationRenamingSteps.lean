@@ -62,7 +62,7 @@ theorem Memory.Renamed.allocate {mapping : AllocationRenaming} {scopes : Nat →
   refine ⟨sourceAfter, targetAfter, ?_, ?_, ?_⟩
   · simp [CIL.Safety.allocate, valid, sourceFormed.fresh, sourceAfter]
   · simp [CIL.Safety.allocate, ← descriptors.valid, valid, targetFormed.fresh, targetAfter]
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, related.stackLimit⟩
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, related.stackLimit, related.heapBudget⟩
   · simp only [AllocationRenaming.allocate, sourceAfter, related.sourceLimit]
   · simp only [AllocationRenaming.allocate, targetAfter, related.targetLimit]
   · intro identity bound
@@ -131,7 +131,7 @@ theorem Memory.Renamed.skipTarget {mapping : AllocationRenaming} {scopes : Nat �
       else target.cells identity offset
     nextIdentity := target.nextIdentity + 1 }
   refine ⟨targetAfter, ?_, related.sourceLimit, ?_, ?_, ?_, related.permissions,
-    related.staticBindings, related.stackLimit⟩
+    related.staticBindings, related.stackLimit, related.heapBudget⟩
   · simp [CIL.Safety.allocate, valid, formed.fresh, targetAfter]
   · simp only [AllocationRenaming.skipTarget, targetAfter, related.targetLimit]
   · intro identity bound

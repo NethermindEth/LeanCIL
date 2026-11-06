@@ -87,7 +87,7 @@ private theorem initializedStatic_related {mapping : AllocationRenaming}
       (initializedStatic descriptor (mapping.image identity) target) := by
   have views := related.prependView ⟨identity, 0, descriptor.bytes.length, true, false⟩ bound
   refine ⟨related.sourceLimit, related.targetLimit, related.allocations, ?_, views.permissions,
-    ?_, related.stackLimit⟩
+    ?_, related.stackLimit, related.heapBudget⟩
   · intro queried queryBound offset
     have identities : mapping.image queried = mapping.image identity ↔ queried = identity :=
       ⟨mapping.injective _ _ queryBound bound, congrArg mapping.image⟩

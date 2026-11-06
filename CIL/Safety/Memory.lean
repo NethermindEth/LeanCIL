@@ -88,6 +88,9 @@ structure Memory where
   /-- Admitted dynamic-stack bytes per activation; deployment must justify this quota.
       Zero is the default, so existing memory grants no dynamic stack storage. -/
   stackLimit : Nat := 0
+  /-- Bytes still available for object allocations; deployment must justify it, and each
+      allocation consumes its size. Zero is the default, so existing memory grants none. -/
+  heapBudget : Nat := 0
 
 /-- Caller memory with no allocations, views or static bindings. It describes a caller that
     passes only scalars, so it grants no storage a method could read or write. -/
