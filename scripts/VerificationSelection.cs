@@ -89,8 +89,7 @@ internal static class VerificationSelection
             "Tests/BufferContents.lean", "Tests/Linking.lean", "Tests/StepFlow.lean", "Tests/RegionRun.lean",
             "Tests/StoreFacts.lean", "Tests/BatchVerification.cs", "Tests/VerificationCache.cs",
             "Tests/VerificationReuse.cs", "Tests/RuntimeExceptions.lean", "Tests/ProfileContract.lean",
-            "Tests/InstructionEquations.lean", "Tests/CodeAt.lean", "Tests/SimdLanes.lean",
-            "Tests/ObserveOptions.lean"
+            "Tests/InstructionEquations.lean", "Tests/CodeAt.lean", "Tests/SimdLanes.lean"
         };
         inputs["core"].UnionWith(new[] { "Add", "AddModel", "Choose", "Calls", "Alias", "Struct", "StructCopy",
             "LargeStruct", "PastEnd", "WrongAdd", "Escape", "Hardware", "StaticData" }.Select(name => $"Examples/Proofs/{name}.lean"));

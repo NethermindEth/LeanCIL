@@ -269,7 +269,7 @@ Run(["lake", "build", "Tests.Semantics", "Tests.Automation", "Tests.MethodBindin
     "Tests.DebugNames", "Tests.MethodContract", "Tests.ContractCalls", "Tests.ConstructContract", "Tests.OutcomeContract",
     "Tests.RuntimeExceptions", "Tests.Imports", "Tests.LoopOutcome", "Tests.ConfinedFootprints",
     "Tests.LocalSnapshots", "Tests.LocalSnapshotSteps", "Tests.AggregateFields", "Tests.LoopFrames",
-    "Tests.LoopDiagnostics", "Tests.ObserveOptions", "Tests.ContractConsequence", "Tests.InvocationCertificates",
+    "Tests.LoopDiagnostics", "Tests.ContractConsequence", "Tests.InvocationCertificates",
     "Tests.ValidCallTransport", "Tests.BufferContents", "Tests.Linking",
     "Tests.ModularStatics", "Tests.StepFlow", "Tests.RegionRun", "Tests.StoreFacts",
     "Tests.ProfileContract", "Tests.InstructionEquations", "Tests.CodeAt", "Tests.Segment", "Tests.SimdLanes",

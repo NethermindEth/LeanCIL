@@ -537,9 +537,8 @@ steps name no frame or span fact.
 
 The [`observer`](../CIL/Observe.lean) linter of `CIL.Observe` reads each declaration's
 elaborated proof after it is checked and reports on it; no tactic runs any of its code, so a
-proof that does not import it elaborates exactly as before. Both options below are registered with
-the stepping tactics, so a file that sets one without importing `CIL.Observe` gets a warning at
-the option that says to add the import. Import it and set `trace.CIL.step` to log each step the proof
+proof that does not import it
+elaborates exactly as before. Import it and set `trace.CIL.step` to log each step the proof
 takes, whichever tactic or hand-written term took it: any application of a lemma to a
 `step ... = ...` premise counts, so `cil_loop_steps`, `cil_checked_steps`, `cil_contract_steps`,
 the outcome and return tactics and `run_next` by hand are all traced. Each step message gives

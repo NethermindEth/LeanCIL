@@ -37,9 +37,6 @@ name = "Tests.LoopScaffold"
 name = "Tests.DebugNames"
 
 [[lean_lib]]
-name = "Tests.ObserveOptions"
-
-[[lean_lib]]
 name = "Tests.MethodContract"
 
 [[lean_lib]]
