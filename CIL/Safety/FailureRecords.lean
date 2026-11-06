@@ -62,12 +62,14 @@ def FailureRecord.render (record : FailureRecord) : MetaM String := do
   let parts (entries : Array (String × Expr)) : MetaM Json := do
     return Json.mkObj (← entries.toList.mapM fun (name, value) => do
       return (name, ← text m!"{value}"))
+  let untagged := "the goal the tactic was handed carries no obligation tag"
   -- Every field left null says why, even when the analysis gave no reason of its own.
   let unreported := [("method", record.method.isNone), ("pc", record.pc.isNone),
       ("instruction", record.instruction.isNone), ("missing", record.missing.isNone),
       ("obligation", record.obligation.isNone)].filterMap
     fun (field, absent) => if absent && !record.unknown.any (·.1 == field) then
-      some (field, s!"the goal {record.tactic} left does not determine it") else none
+      some (field, if field == "obligation" then untagged
+        else s!"the goal {record.tactic} left does not determine it") else none
   let error := match record.error with
     | some position => Json.mkObj [("line", position.line), ("column", position.column)]
     | none => Json.null
