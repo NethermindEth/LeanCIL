@@ -90,13 +90,15 @@ internal static class CliDiagnostics
             var lean = LeanDiagnostics.Summarize(error.Message, hidden,
                 location => copies?.Locate(location, CliPaths.Display) ?? location,
                 module => copies?.ModuleOf(module) ?? module);
+            // The session's copies are deleted when it ends, so details cite the originals instead.
+            string Shown(string text) => copies?.Displayed(text, CliPaths.Display) ?? text;
             if (lean is null)
-                Console.Error.WriteLine("Details:\n" + Printable(error.Message.ReplaceLineEndings("\n")));
+                Console.Error.WriteLine("Details:\n" + Printable(Shown(error.Message.ReplaceLineEndings("\n"))));
             else
             {
                 Console.Error.Write(Printable(lean.Text));
                 if (lean.Shortened.Length > 0)
-                    Console.Error.Write("Details:\n" + Printable(lean.Shortened));
+                    Console.Error.Write("Details:\n" + Printable(Shown(lean.Shortened)));
             }
         }
         if (error.Data[ProofMessagesKey] is string messages)

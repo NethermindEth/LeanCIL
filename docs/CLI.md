@@ -515,8 +515,8 @@ it. `--format text` is the default. The report has `schema` 1, `result`
 (`verified` or `failed`), the `stage` that failed, the `theorem`, `method`,
 `proof` and `output`, and on success the `axioms` and `statement`. The proof's
 own Lean messages are in `messages`, and `rerun` repeats the run. `failures`
-holds one record per Lean error, located in the developer's file as in the
-text report:
+holds one record per Lean error, or per goal a tactic stopped on, located in
+the developer's file as in the text report:
 
 ```json
 {
@@ -540,13 +540,20 @@ text report:
 }
 ```
 
-`kind`, `resource` and `module` are as in `failed.json`. `tactic`, `method`,
-`cil`, `state` and `missing` come from the failure record the stopped tactic
-wrote, never from the error's prose: `cil_loop_steps`, `cil_loop_advance`,
-`cil_loop_finish`, `cil_loop_recurse`, `cil_loop_call` and the tactics built on
-them write one when the proof is checked with the Lean option `cil.diagnostics`,
-which `--format json` sets. `ilOffset` and `instruction` are read from the
-manifest at that method and pc. `missing.shape` names the kind of fact the step
+`kind`, `resource` and `module` are as in `failed.json`. `tactic`, `stopped`,
+`method`, `cil`, `state` and `missing` come from the failure record `CIL.Observe`
+logged for the error, never from the error's prose. `--format json` checks the
+proof with `import CIL.Observe` added at the start of its first import line,
+which moves no other line or column, and with the Lean option `cil.diagnostics`
+set; the observer then records each error a `cil_` tactic raised, and each goal
+one left that Lean reports as unsolved, with `stopped` true (see
+[PROOFS-STEPPING](PROOFS-STEPPING.md#see-what-the-tactics-did)). An `unsolved
+goals` error with several such goals gives one failure per goal. `ilOffset` and
+`instruction` are read from the manifest at that method and pc. `cil.source` is
+the C# file, line and column of the last visible PDB sequence point at or before
+the pc, read from the extraction's `Symbols.lean` whether or not the proof
+imports `ExtractedSymbols`; an extraction without a matching PDB has no
+`Symbols.lean`, and `unknown` says so. `missing.shape` names the kind of fact the step
 lacks, such as `unsafeAdd`, `spanValidity` or `targetState`, and `residual` the
 terms it must prove. `obligations` lists the obligation tags of the goal that
 failed, or of the goals an `unsolved goals` error lists, such as `invariant`.
@@ -555,19 +562,29 @@ for lack of data, and an empty `obligations`, has its reason under `unknown`,
 keyed by the field's name; an error without a failure record, such as Lean's
 own, says so there.
 
-### Trace the loop tactics
+### Trace the proof's steps
 
-`leancil verify ... --trace` checks the proof with `trace.CIL.loop` set, which
-the loop tactics use to log each step they take: its pc and instruction, the
-source line when the proof imports `ExtractedSymbols`, the lemma applied, the
-hypotheses its proof used, what changed and the goals left (see
-[PROOFS-STEPPING](PROOFS-STEPPING.md#see-what-the-loop-tactics-did)). The text
-report prints them in full under `Trace (N steps):`, after and apart from the
-proof's `Lean messages`; the JSON report lists them in `trace`, each with its
-location and text. Steps of other tactics, such as `cil_checked_steps`, are not
-traced, and both reports say so: the text on an `Untraced:` line, the JSON in the
-top-level `unknown`. Without `--trace`, `trace` is `null` and `unknown` says why,
-as it does when the run stopped before the proof was checked. A traced result is cached apart from an untraced one.
+`leancil verify ... --trace` checks the proof with `import CIL.Observe` added as
+for `--format json` and `trace.CIL.step` set, so the observer logs each step the
+proof takes, whichever tactic or term took it: its pc and instruction, the
+source line when the proof imports `ExtractedSymbols`, the lemmas applied, the
+hypotheses its proof used and what changed, then for each `cil_` tactic the
+number of steps it took and the obligation tags of the goals it left (see
+[PROOFS-STEPPING](PROOFS-STEPPING.md#see-what-the-tactics-did)). The text report
+prints them in full under `Trace (N entries):`, after and apart from the proof's
+`Lean messages`; the JSON report lists them in `trace`, each with its location
+and text. Without `--trace`, `trace` is `null` and `unknown.trace` says why, as
+it does when the run stopped before the proof was checked. A traced result is
+cached apart from an untraced one.
+
+### Batches
+
+`leancil verify-batch requests.json --format json` prints one JSON document on
+stdout instead of the per-request lines: `schema` 1, the `passed` and `failed`
+counts, and `requests`, each with its `expect`, its `status` (`verified`,
+`rejected` or `failed`) and the `report` that `verify --format json` prints for
+it. `--trace` traces every request's proof, after its line in the text report
+and in each `report` in JSON.
 
 ## Export contracts
 

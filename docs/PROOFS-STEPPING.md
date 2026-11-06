@@ -533,23 +533,31 @@ both from the state's frame. [Countdown](../Examples/Proofs/Countdown.lean) and
 [SpanSum](../Examples/Proofs/SpanSum.lean) store through their frames this way; SpanSum's loop
 steps name no frame or span fact.
 
-### See what the loop tactics did
+### See what the tactics did
 
-With `set_option trace.CIL.loop true`, each instruction `cil_loop_steps`, `cil_loop_advance`,
-`cil_loop_finish`, `cil_loop_recurse` and `cil_loop_call` take, including a frame store or
-return, logs a trace message: the pc and instruction, the source line from
-`ExtractedSymbols` when the proof imports it, the lemma applied, each hypothesis the step's proof
-term mentions, the parts of the state that changed and the tags of the goals left. A hypothesis
-whose statement is a `SpanApart`, `Writable`, `Filled` or `CheckedSpan` fact also says what it
-establishes, such as that the footprints are disjoint, and appears only when the step used it.
-With the option unset nothing is built or printed. `leancil verify --trace` checks the proof with
-it set and reports the steps apart from the proof's messages.
+The [`observer`](../CIL/Observe.lean) linter of `CIL.Observe` reads each declaration's
+elaborated proof after it is checked and reports on it; no tactic runs any of its code, so a
+proof that does not import it
+elaborates exactly as before. Import it and set `trace.CIL.step` to log each step the proof
+takes, whichever tactic or hand-written term took it: any application of a lemma to a
+`step ... = ...` premise counts, so `cil_loop_steps`, `cil_checked_steps`, `cil_contract_steps`,
+the outcome and return tactics and `run_next` by hand are all traced. Each step message gives
+the pc and instruction, the source line from `ExtractedSymbols` when the proof imports it, the
+lemma applied and the one that proved its step, each hypothesis the step's proof used, and the
+parts of the state that changed. A hypothesis whose statement is a `SpanApart`, `Writable`,
+`Filled` or `CheckedSpan` fact also says what it establishes, such as that the footprints are
+disjoint. Each `cil_` tactic the proof names then logs how many steps it took and the obligation
+tags of the goals it left; a step no such tactic took is logged at its tactic block as taken
+outside one.
 
-When one of these tactics fails with `set_option cil.diagnostics true`, its error ends with a
-line starting `[LeanCIL failure v1] `, a JSON record of the method, pc and instruction it reached,
-the reached and expected state, the kind of fact it lacks and the obligation its goal is, each
-unknown field with its reason. `leancil verify --format json` sets the option and reports these
-records; the error text before the line is unchanged.
+With `set_option cil.diagnostics true`, the observer logs a failure record for each error a `cil_`
+tactic raised, and for each goal one left that Lean reports as unsolved, as a message starting
+`[LeanCIL failure v1] `: a JSON object of the method, pc and instruction reached, the reached and
+expected state, the kind of fact the step lacks, the obligation the tactic was handed and the
+position of the error it explains, each unknown field with its reason. The error itself is
+unchanged. `leancil verify --trace` and `--format json` add the import to the start of the
+proof's first import line, which moves no other line or column, set these options and report the
+steps and records apart from the proof's messages.
 
 ## Read control flow off one step
 

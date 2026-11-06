@@ -150,30 +150,30 @@ if (wrongHeadText.Code != 1 || !wrongHeadText.Stderr.Contains("cil_loop_steps: t
     throw new InvalidOperationException("The default report changed for a loop failure: " + wrongHeadText.Output);
 Console.WriteLine("PASS CLI --format json reports each failure with its obligation, pc and state, and success");
 
-// `--trace` passes each step the loop tactics take through, apart from the proof's messages, in text and in
-// JSON; without it the report has no trace.
+// `--trace` passes each step the proof takes through, apart from the proof's messages, in text and in JSON,
+// with each tactic's step count and the obligations it left; without it the report has no trace.
 var countdownProof = At("Examples/Proofs/Countdown.lean");
 var traced = Execute([.. cli, "verify", loopOutput, "--proof", countdownProof, "--trace"]);
 var tracedText = traced.Stdout.ReplaceLineEndings("\n");
 var tracedMessages = tracedText[..Math.Max(0, tracedText.IndexOf("  Trace (", StringComparison.Ordinal))];
-if (traced.Code != 0 || !tracedText.Contains("  Trace (") ||
-    !tracedText.Contains("    Untraced: only cil_loop_steps, cil_loop_advance, cil_loop_finish, cil_loop_recurse") ||
-    !tracedText.Contains("Countdown.lean:31:8: [CIL.loop] pc 0: CIL.Op.arg 0\n") ||
-    tracedMessages.Contains("[CIL.loop]"))
-    throw new InvalidOperationException("verify --trace did not report the loop steps apart: " + traced.Output);
+if (traced.Code != 0 || !tracedText.Contains("  Trace (") || tracedText.Contains("Untraced") ||
+    !tracedText.Contains("Countdown.lean:31:8: [CIL.step] pc 0: CIL.Op.arg 0\n") ||
+    !tracedText.Contains("[CIL.step] cil_loop_steps took ") || tracedMessages.Contains("[CIL.step]") ||
+    // The tactic sits in a `refine` term Lean elaborates more than once; only the attempt it kept is traced.
+    tracedText.Split("Countdown.lean:31:8: [CIL.step] cil_loop_steps took ").Length != 2)
+    throw new InvalidOperationException("verify --trace did not report the steps apart: " + traced.Output);
 var tracedReport = JsonNode.Parse(Execute([.. cli, "verify", loopOutput, "--proof", countdownProof, "--trace",
     "--format", "json"]).Stdout) as JsonObject;
 var steps = tracedReport?["trace"]?.AsArray().Select(step => step!["text"]!.GetValue<string>()).ToArray() ?? [];
-var scope = tracedReport?["unknown"]?["trace"]?.GetValue<string>() ?? "";
-if (steps.Length == 0 || !steps.All(step => step.StartsWith("[CIL.loop] pc ", StringComparison.Ordinal)) ||
-    !scope.StartsWith("only cil_loop_steps", StringComparison.Ordinal) ||
-    tracedReport!["messages"]!.AsArray().Any(message => message!["text"]!.GetValue<string>().Contains("[CIL.loop]")))
+if (steps.Length == 0 || !steps.All(step => step.StartsWith("[CIL.step] ", StringComparison.Ordinal)) ||
+    tracedReport!["unknown"]!.AsObject().Count != 0 ||
+    tracedReport["messages"]!.AsArray().Any(message => message!["text"]!.GetValue<string>().Contains("[CIL.step]")))
     throw new InvalidOperationException("verify --trace --format json did not report the steps in `trace`: " +
         tracedReport?.ToJsonString());
 var untraced = Execute([.. cli, "verify", loopOutput, "--proof", countdownProof]);
-if (untraced.Code != 0 || untraced.Stdout.Contains("[CIL.loop]") || untraced.Stdout.Contains("Trace ("))
+if (untraced.Code != 0 || untraced.Stdout.Contains("[CIL.step]") || untraced.Stdout.Contains("Trace ("))
     throw new InvalidOperationException("verify without --trace printed a trace: " + untraced.Output);
-Console.WriteLine("PASS CLI --trace reports each loop step apart from the proof's messages, and only when asked");
+Console.WriteLine("PASS CLI --trace reports each step apart from the proof's messages, and only when asked");
 
 // This theorem proves invalid memory access cannot produce a successful execution.
 var memoryOutput = At("artifacts/CliMemory");
@@ -317,6 +317,39 @@ if (unfinishedJson.Code != 1 || unfinishedJson.Stderr.Length != 0 ||
     unfinishedFailure["source"]?["file"]?.GetValue<string>() != Path.GetFullPath(unfinishedProof))
     throw new InvalidOperationException("A --proof-root JSON report did not cite the package's file: " +
         unfinishedJson.Output);
+
+// `verify-batch --format json` prints one document with each request's `verify --format json` report, and
+// `--trace` adds each request's steps; the rejected request is last, so the output keeps its settings.
+var batchManifest = Path.Combine(consumerRoot, "requests.json");
+File.WriteAllText(batchManifest, JsonSerializer.Serialize(new
+{
+    schema = 1, proofRoot = consumerPackage, requests = new object[]
+    {
+        new { output = consumerOutput, proof = consumerProof, theorem = "ExampleProof.correctness" },
+        new { output = consumerOutput, proof = unfinishedProof, theorem = "ExampleProof.correctness",
+            expect = "rejected" }
+    }
+}));
+var batch = Execute([.. cli, "verify-batch", batchManifest, "--format", "json", "--trace"]);
+var batchReport = JsonNode.Parse(batch.Stdout) as JsonObject;
+var batchRequests = batchReport?["requests"]?.AsArray();
+if (batch.Code != 0 || batch.Stderr.Length != 0 || batchReport?["schema"]?.GetValue<int>() != 1 ||
+    batchReport["passed"]?.GetValue<int>() != 2 || batchRequests is not { Count: 2 } ||
+    batchRequests[0]!["status"]!.GetValue<string>() != "verified" ||
+    batchRequests[0]!["report"]!["result"]!.GetValue<string>() != "verified" ||
+    batchRequests[0]!["report"]!["trace"] is not JsonArray { Count: > 0 } verifiedSteps ||
+    !verifiedSteps.All(step => step!["text"]!.GetValue<string>().StartsWith("[CIL.step] ", StringComparison.Ordinal)) ||
+    batchRequests[1]!["status"]!.GetValue<string>() != "rejected" ||
+    batchRequests[1]!["report"]!["result"]!.GetValue<string>() != "failed" ||
+    batchRequests[1]!["report"]!["failures"]?[0]?["source"]?["file"]?.GetValue<string>() !=
+        Path.GetFullPath(unfinishedProof))
+    throw new InvalidOperationException("verify-batch --format json --trace did not print one report per request: " +
+        batch.Output);
+var batchText = Execute([.. cli, "verify-batch", batchManifest, "--trace"]);
+if (batchText.Code != 0 || !batchText.Stdout.Contains("PASS verified") || !batchText.Stdout.Contains("  Trace (") ||
+    !batchText.Stdout.Contains("Batch: 2 passed, 0 failed of 2 requests."))
+    throw new InvalidOperationException("verify-batch --trace did not print each request's trace: " + batchText.Output);
+Console.WriteLine("PASS CLI verify-batch reports each request as JSON and traces each request's steps");
 Console.WriteLine("PASS CLI shows Lean messages, with control characters escaped, when a --proof-root proof fails");
 
 // A starting proof must elaborate yet be refused until its holes are filled, must never replace a

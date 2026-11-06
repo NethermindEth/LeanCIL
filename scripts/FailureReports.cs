@@ -118,9 +118,9 @@ internal static partial class FailureReports
         if (error.Location is null) return (null, null, null);
         var match = Location().Match(error.Location);
         if (!match.Success) return (error.Location, null, null);
-        var file = match.Groups["file"].Value;
-        return (copies?.OriginalOf(file) ?? file, int.Parse(match.Groups["line"].Value),
+        var (file, line, column) = (match.Groups["file"].Value, int.Parse(match.Groups["line"].Value),
             int.Parse(match.Groups["column"].Value));
+        return copies?.Position(file, line, column) ?? (file, line, column);
     }
 
     static string ModuleOf(string proof, string? proofRoot) => proofRoot is null ? "Proof"

@@ -113,6 +113,38 @@ try
     var changed = new SourceCopies(Path.GetDirectoryName(copy)!);
     Require(!changed.Add(copy, original) && changed.Locate("Proof.lean:1:8") == "Proof.lean:1:8",
         "a copy whose bytes differ is never mapped, since its lines would not be the original's");
+
+    // The observed copy differs only by an import at the start of the first import line; every position maps back.
+    File.WriteAllText(original, "/-! Proof. -/\nimport CIL\nimport Extracted\n\ntheorem t : True := trivial\n");
+    var observed = ObservedProof.Insert(File.ReadAllBytes(original));
+    Require(observed.Line == 2 && System.Text.Encoding.UTF8.GetString(observed.Bytes) ==
+        "/-! Proof. -/\nimport CIL.Observe import CIL\nimport Extracted\n\ntheorem t : True := trivial\n",
+        "the observer import starts the first import line and adds no line");
+    File.WriteAllBytes(copy, observed.Bytes);
+    var observedSession = new SourceCopies(Path.GetDirectoryName(copy)!);
+    Require(!observedSession.Add(copy, original) && observedSession.AddObserved(copy, original) &&
+        observedSession.Locate("Proof.lean:2:26") == original + ":2:7" &&
+        observedSession.Locate("Proof.lean:2:3") == original + ":2:0" &&
+        observedSession.Locate("Proof.lean:5:8") == original + ":5:8",
+        "positions on the import line move back past the inserted import, and other lines keep theirs");
+    var located = observedSession.Relocate(original, [
+        new("info", 2, 26, "plain"),
+        new("info", 5, 0, Program.FailureMarker + "{\"error\":{\"line\":2,\"column\":19},\"tactic\":\"t\"}")])!;
+    Require(located[0] == new Program.ProofMessage("info", 2, 7, "plain") && located[1].column == 0 &&
+        VerifyReports.Record(located[1].text)!["error"]!["column"]!.GetValue<int>() == 0,
+        "messages and the errors their records cite are read in the original", string.Join("\n", located));
+    File.AppendAllText(copy, "-- edited\n");
+    Require(!new SourceCopies(Path.GetDirectoryName(copy)!).AddObserved(copy, original),
+        "an observed copy with any other change is never mapped");
+
+    // A failure with no Lean error prints its command; the deleted workspace never appears in it.
+    var workspace = Path.GetDirectoryName(copy)!;
+    var command = $"Command failed (1): lean --json --root={workspace} -o {Path.Combine(workspace, "Proof.olean")} " +
+        $"{copy}\nPANIC at lean";
+    var shown = observedSession.Displayed(command);
+    Require(!shown.Contains(workspace, StringComparison.OrdinalIgnoreCase) && !shown.Contains("--root") &&
+        shown.Contains(SourceCopies.Workspace) && shown.Contains("PANIC at lean"),
+        "details show no path of the deleted workspace", shown);
 }
 finally { Directory.Delete(copies, true); }
 
@@ -213,29 +245,43 @@ var obligationSource = File.ReadAllText(At("CIL/Safety/Obligations.lean"));
 var recordSource = File.ReadAllText(At("CIL/Safety/FailureRecords.lean"));
 var leanTags = "[" + string.Join(", ", VerifyReports.ObligationTags.Select(tag => "`" + tag)) + "]";
 Require(obligationSource.Contains(leanTags) &&
-    recordSource.Contains($"def failureMarker : String := \"{VerifyReports.FailureMarker}\""),
+    recordSource.Contains($"def failureMarker : String := \"{Program.FailureMarker}\""),
     "the report's obligation tags and record marker are Lean's");
 var recordLine = new System.Text.Json.Nodes.JsonObject
 {
-    ["tactic"] = "cil_loop_steps", ["method"] = 0, ["pc"] = 1, ["instruction"] = "CIL.Op.add",
+    ["tactic"] = "cil_loop_steps", ["method"] = 0, ["pc"] = 1, ["instruction"] = "CIL.Op.add", ["stopped"] = false,
+    ["error"] = new System.Text.Json.Nodes.JsonObject { ["line"] = 3, ["column"] = 2 },
     ["obligation"] = "invariant", ["reached"] = new System.Text.Json.Nodes.JsonObject { ["stack"] = "[]" },
     ["expected"] = new System.Text.Json.Nodes.JsonObject(), ["missing"] = "load",
     ["residual"] = new System.Text.Json.Nodes.JsonArray("r"),
     ["suggestions"] = new System.Text.Json.Nodes.JsonArray("s"),
     ["unknown"] = new System.Text.Json.Nodes.JsonObject()
 }.ToJsonString();
-VerifyReports.ManifestMethod[] manifest = [new("M", ["IL_0000: ldarg.0", "IL_0001: add"])];
-var stopped = VerifyReports.Failure(new(FailureReports.ElaborationError, null, "Proof", proof, 3, 2,
-    "cil_loop_steps: stuck\n" + VerifyReports.FailureMarker + recordLine), manifest);
+// The C# statement of pc 1 starts at the sequence point of pc 0, the last at or before it.
+VerifyReports.ManifestMethod[] manifest =
+    [new("M", ["IL_0000: ldarg.0", "IL_0001: add"], [new(0, "Mix.cs", 12, 9), new(2, "Mix.cs", 13, 9)])];
+var diagnostic = new FailureReports.Diagnostic(FailureReports.ElaborationError, null, "Proof", proof, 3, 2,
+    "cil_loop_steps: stuck");
+var records = VerifyReports.Records([("info", 3, 0, Program.FailureMarker + recordLine)]);
+var stopped = VerifyReports.Failures(diagnostic, proof, manifest, records).Single();
 Require(stopped["message"]!.GetValue<string>() == "cil_loop_steps: stuck" &&
     stopped["method"]!["signature"]!.GetValue<string>() == "M" &&
     stopped["cil"]!["ilOffset"]!.GetValue<int>() == 1 && stopped["cil"]!["instruction"]!.GetValue<string>() == "add" &&
+    stopped["cil"]!["source"]!.ToJsonString() == """{"file":"Mix.cs","line":12,"column":9}""" &&
     stopped["obligations"]![0]!.GetValue<string>() == "invariant" &&
     stopped["missing"]!["shape"]!.GetValue<string>() == "load" &&
     stopped["suggestions"]![0]!.GetValue<string>() == "s" &&
     stopped["unknown"]!.AsObject().Count == 0, "a failure record fills the report's fields", stopped.ToJsonString());
+// A record explains only the error at the position it cites; another error of the proof stays Lean's own.
+var other = VerifyReports.Failures(diagnostic with { line = 4 }, proof, manifest, records).Single();
+Require(other["tactic"] is null && other["unknown"]!["tactic"] is not null,
+    "a record is paired with its own error only", other.ToJsonString());
+var symbolFree = VerifyReports.Failures(diagnostic, proof, [manifest[0] with { Points = null }], records).Single();
+Require(symbolFree["cil"]!["source"] is null &&
+    symbolFree["unknown"]!["cil.source"]!.GetValue<string>() == VerifyReports.NoSymbols,
+    "without symbols the C# location is null and says why", symbolFree.ToJsonString());
 var open = VerifyReports.Failure(new(FailureReports.UnsolvedGoal, null, "Proof", proof, 3, 2,
-    "unsolved goals\ncase invariant\nx : Nat\n\u22a2 True\n\ncase helper\n\u22a2 True"), manifest);
+    "unsolved goals\ncase invariant\nx : Nat\n\u22a2 True\n\ncase helper\n\u22a2 True"), manifest, null);
 Require(open["obligations"]!.AsArray().Select(tag => tag!.GetValue<string>()).SequenceEqual(["invariant"]) &&
     open["cil"] is null && open["unknown"]!["cil"]!.GetValue<string>().Contains("left these goals open"),
     "unsolved goals report only LeanCIL obligation tags, and say why nothing else is known", open.ToJsonString());

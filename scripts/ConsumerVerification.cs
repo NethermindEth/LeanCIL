@@ -1332,16 +1332,20 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 string author = module + "Author";
                 string authorPath = Path.Combine(session, author + ".lean");
                 if (File.Exists(authorPath)) throw new InvalidDataException(author + " is reserved for the export author proof.");
-                File.Copy(Path.Combine(session, Path.GetRelativePath(root, proof)), authorPath);
+                File.WriteAllBytes(authorPath,
+                    CheckedProofBytes(File.ReadAllBytes(Path.Combine(session, Path.GetRelativePath(root, proof)))));
                 AddConsumerLibrary(session, author, ProofOptions);
                 copied.Add(authorPath);
                 File.WriteAllText(target, "import " + author + "\n" + audit);
             }
             else
             {
-                File.Copy(Path.Combine(session, Path.GetRelativePath(root, proof)), target);
-                sources.Add(target, proof, module,
-                    Path.ChangeExtension(Path.GetRelativePath(root, proof), null).Replace('\\', '/').Replace('/', '.'));
+                File.WriteAllBytes(target,
+                    CheckedProofBytes(File.ReadAllBytes(Path.Combine(session, Path.GetRelativePath(root, proof)))));
+                var original = Path.ChangeExtension(Path.GetRelativePath(root, proof), null).Replace('\\', '/')
+                    .Replace('/', '.');
+                if (ObservesProof) sources.AddObserved(target, proof, module, original);
+                else sources.Add(target, proof, module, original);
             }
             AddConsumerLibrary(session, module, ProofOptions);
             copied.Add(target);
@@ -1372,6 +1376,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         // The developer's files the request's workspace copied, which its diagnostics cite.
         public SourceCopies? Sources;
 
+        /// <summary>The proof's messages, each at its position in `proof` rather than in the workspace's copy.
+        /// </summary>
+        public ProofMessage[]? ProofMessages(string proof) => Sources?.Relocate(proof, Messages) ?? Messages;
+
         /// <summary>The failure, carrying the workspace's copies so its diagnostics cite the originals.</summary>
         public Exception? Located()
         {
@@ -1387,7 +1395,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         VerifiedStatement = null;
         var outcome = VerifyConsumerRequests(root, [new(assembly, output, proof, theorem, settings)],
             (_, value) => stage?.Invoke(value), batch: false)[0];
-        ProofMessages = outcome.Messages;
+        ProofMessages = outcome.ProofMessages(proof);
         VerifiedStatement = outcome.Statement;
         if (outcome.Located() is { } error) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(error);
         return outcome.Report!;

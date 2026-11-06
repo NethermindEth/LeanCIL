@@ -2119,27 +2119,39 @@ partial class Program : IDisposable
     bool viewsStatement { get; init; }
 
     /// <summary>
-    /// Set by callers that read failure records: the proof is checked with <see cref="DiagnosticsOption"/>, so a
-    /// failing LeanCIL tactic appends what it established to its error. It changes no proof term.
+    /// Set by callers that read failure records: the proof is checked as <see cref="ObservedProof"/> with
+    /// <see cref="DiagnosticsOption"/>, so each failure of a LeanCIL tactic is logged as a record after
+    /// <see cref="FailureMarker"/>. The observer reads the elaborated proof and changes no proof term.
     /// </summary>
     bool structuredFailures { get; init; }
 
-    /// <summary>The Lean option `cil.diagnostics`, set only when the proof imports the module declaring it.</summary>
+    /// <summary>The Lean option `cil.diagnostics`, which `CIL.Observe` reads.</summary>
     internal const string DiagnosticsOption = "-Dweak.cil.diagnostics=true";
 
-    /// <summary>Set by callers that print the loop tactics' steps, checking the proof with <see cref="TraceOption"/>.
+    /// <summary>`CIL.Safety.failureMarker`, which starts each failure record the observer logs.</summary>
+    internal const string FailureMarker = "[LeanCIL failure v1] ";
+
+    /// <summary>
+    /// Set by callers that print each step the proof takes: the proof is checked as <see cref="ObservedProof"/>
+    /// with <see cref="TraceOption"/>.
     /// </summary>
-    bool tracesLoops { get; init; }
+    bool tracesSteps { get; init; }
 
-    /// <summary>The Lean option tracing each step the loop tactics take, as `[CIL.loop]` messages.</summary>
-    internal const string TraceOption = "-Dweak.trace.CIL.loop=true";
+    /// <summary>The Lean option tracing each step of the proof, as `[CIL.step]` messages of `CIL.Observe`.</summary>
+    internal const string TraceOption = "-Dweak.trace.CIL.step=true";
 
-    /// <summary>The start of a message of the `CIL.loop` trace class.</summary>
-    internal const string TraceHeader = "[CIL.loop]";
+    /// <summary>The start of a message of the `CIL.step` trace class.</summary>
+    internal const string TraceHeader = "[CIL.step]";
+
+    /// <summary>Whether the proof is checked as <see cref="ObservedProof"/>, as records and a trace need.</summary>
+    bool ObservesProof => structuredFailures || tracesSteps;
 
     /// <summary>The options the proof module is checked with: none unless asked for records or a trace.</summary>
     string[] ProofOptions => [.. structuredFailures ? [DiagnosticsOption] : Array.Empty<string>(),
-        .. tracesLoops ? [TraceOption] : Array.Empty<string>()];
+        .. tracesSteps ? [TraceOption] : Array.Empty<string>()];
+
+    /// <summary>The bytes the proof module is checked from: the developer's, or <see cref="ObservedProof"/>.</summary>
+    byte[] CheckedProofBytes(byte[] source) => ObservesProof ? ObservedProof.Insert(source).Bytes : source;
 
     /// <summary>Binds a cached proof result to its options; empty for a default run, keeping its keys.</summary>
     string ProofOptionsKey => ProofOptions.Length == 0 ? "" : "\noptions " + string.Join(' ', ProofOptions);
@@ -2502,9 +2514,11 @@ partial class Program : IDisposable
         string stagedSymbols = Path.Combine(fresh, "ExtractedSymbols.lean");
         // Diagnostics in these copies cite the files they were copied from.
         var copies = new SourceCopies(fresh);
+        byte[] stagedProofBytes = CheckedProofBytes(proofSourceBytes);
+        string stagedProofHash = Convert.ToHexStringLower(SHA256.HashData(stagedProofBytes));
         void RequireStagedProofSources()
         {
-            if (!File.Exists(stagedProof) || Sha(stagedProof) != proofSourceHash)
+            if (!File.Exists(stagedProof) || Sha(stagedProof) != stagedProofHash)
                 throw new InvalidOperationException("Proof sources changed during verification: Proof.lean");
             if (symbols && (!File.Exists(stagedSymbols) || Sha(stagedSymbols) != symbolsSourceHash))
                 throw new InvalidOperationException("Proof sources changed during verification: ExtractedSymbols.lean");
@@ -2594,10 +2608,11 @@ partial class Program : IDisposable
             if (File.Exists(stagedSymbols))
                 throw new InvalidOperationException("Proof sources changed during verification: ExtractedSymbols.lean");
             RequireOriginalProofSources();
-            File.WriteAllBytes(stagedProof, proofSourceBytes);
+            File.WriteAllBytes(stagedProof, stagedProofBytes);
             if (symbols) File.WriteAllBytes(stagedSymbols, symbolsSourceBytes!);
             RequireStagedProofSources();
-            copies.Add(stagedProof, proof);
+            if (ObservesProof) copies.AddObserved(stagedProof, proof);
+            else copies.Add(stagedProof, proof);
             if (symbols) copies.Add(stagedSymbols, symbolsSource!);
             if (symbols)
             {
@@ -2620,8 +2635,8 @@ partial class Program : IDisposable
                 proofCacheHits++;
                 CacheProgress("certified proof: " + entry);
                 var cachedMessages = Path.Combine(fresh, ProofMessagesFile);
-                ProofMessages = File.Exists(cachedMessages)
-                    ? JsonSerializer.Deserialize<ProofMessage[]>(File.ReadAllText(cachedMessages)) : null;
+                ProofMessages = copies.Relocate(proof, File.Exists(cachedMessages)
+                    ? JsonSerializer.Deserialize<ProofMessage[]>(File.ReadAllText(cachedMessages)) : null);
             }
             else
             {
@@ -2631,7 +2646,7 @@ partial class Program : IDisposable
                     Path.Combine(fresh, "Proof.olean"), stagedProof];
                 var checkedProof = Execute(command, leanPath: leanPath, progress: "Checking Proof: " + entry);
                 var (transcript, messages) = LeanJsonMessages(checkedProof.Output, stagedProof);
-                ProofMessages = messages;
+                ProofMessages = copies.Relocate(proof, messages);
                 if (checkedProof.Code != 0)
                     throw new InvalidOperationException(
                         $"Command failed ({checkedProof.Code}): {string.Join(' ', command)}\n{transcript}");
@@ -2771,6 +2786,8 @@ internal sealed partial class SourceCopies(string directory)
         OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
     readonly Dictionary<string, string> originals = new(PathComparer);
     readonly Dictionary<string, string> modules = new(StringComparer.Ordinal);
+    // An observed copy's line holding the inserted import, by the copy's path.
+    readonly Dictionary<string, int> observedLines = new(PathComparer);
 
     [GeneratedRegex(@"\A(?<file>.+?\.lean):(?<line>\d+):(?<column>\d+)\z")]
     private static partial Regex Location();
@@ -2799,6 +2816,88 @@ internal sealed partial class SourceCopies(string directory)
         return true;
     }
 
+    /// <summary>
+    /// Records `copy` as <see cref="ObservedProof"/> of `original` when its bytes are exactly that; positions on the
+    /// line of the inserted import are read back past it, and every other position is the original's.
+    /// </summary>
+    internal bool AddObserved(string copy, string original)
+    {
+        if (!File.Exists(copy) || !File.Exists(original)) return false;
+        var (observed, line) = ObservedProof.Insert(File.ReadAllBytes(original));
+        if (!File.ReadAllBytes(copy).AsSpan().SequenceEqual(observed)) return false;
+        var key = Path.GetFullPath(copy, directory);
+        originals[key] = Path.GetFullPath(original);
+        observedLines[key] = line;
+        return true;
+    }
+
+    /// <summary><see cref="AddObserved(string, string)"/> for a copy Lake builds as module `copyModule`.</summary>
+    internal bool AddObserved(string copy, string original, string copyModule, string originalModule)
+    {
+        if (!AddObserved(copy, original)) return false;
+        modules[copyModule] = originalModule;
+        return true;
+    }
+
+    /// <summary>
+    /// The file, line and column in the original of a position Lean printed in `file`, or the position as printed
+    /// when `file` is no copy. A column inside an inserted import reads as the start of its line.
+    /// </summary>
+    internal (string File, int Line, int Column) Position(string file, int line, int column)
+    {
+        var key = Path.GetFullPath(file, directory);
+        if (!originals.TryGetValue(key, out var original)) return (file, line, column);
+        var shifted = observedLines.TryGetValue(key, out var observed) && observed == line;
+        return (original, line, shifted ? Math.Max(0, column - ObservedProof.Import.Length) : column);
+    }
+
+    /// <summary>
+    /// `messages` Lean reported for the copy of `original`, each at its position in the original, with the error a
+    /// failure record cites read the same way; unchanged when `original` has no observed copy.
+    /// </summary>
+    internal Program.ProofMessage[]? Relocate(string original, Program.ProofMessage[]? messages)
+    {
+        var full = Path.GetFullPath(original);
+        var copy = observedLines.Keys.FirstOrDefault(key => PathComparer.Equals(originals[key], full));
+        if (messages is null || copy is null) return messages;
+        int Column(int line, int column) => Position(copy, line, column).Column;
+        return [.. messages.Select(message => message with
+        {
+            column = Column(message.line, message.column),
+            text = message.text.StartsWith(Program.FailureMarker, StringComparison.Ordinal) &&
+                System.Text.Json.Nodes.JsonNode.Parse(message.text[Program.FailureMarker.Length..]) is
+                    System.Text.Json.Nodes.JsonObject { } record &&
+                record["error"] is System.Text.Json.Nodes.JsonObject { } error &&
+                error["line"]?.GetValue<int>() is { } line && error["column"]?.GetValue<int>() is { } column
+                    ? Program.FailureMarker + Relocated(record, line, Column(line, column)) : message.text
+        })];
+    }
+
+    // The record with the error it cites moved to `column`.
+    static string Relocated(System.Text.Json.Nodes.JsonObject record, int line, int column)
+    {
+        record["error"] = new System.Text.Json.Nodes.JsonObject { ["line"] = line, ["column"] = column };
+        return record.ToJsonString();
+    }
+
+    /// <summary>
+    /// `text` with each copy's path read as its original and the workspace's other paths shown as
+    /// <see cref="Workspace"/>, its `--root` argument left out: the workspace is deleted when verification ends.
+    /// </summary>
+    internal string Displayed(string text, Func<string, string>? display = null)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        // Longer paths first, so a copy inside another copy's directory keeps its own original.
+        foreach (var (copy, original) in originals.OrderByDescending(pair => pair.Key.Length))
+            text = text.Replace(copy, display?.Invoke(original) ?? original, comparison);
+        var workspace = Path.GetFullPath(directory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return text.Replace(" --root=" + workspace, "", comparison).Replace(workspace, Workspace, comparison);
+    }
+
+    /// <summary>How <see cref="Displayed"/> shows the deleted verification workspace.</summary>
+    internal const string Workspace = "<verification workspace>";
+
     /// <summary>The original module of `module`, a copy's module as Lake named it, or `module` itself.</summary>
     internal string ModuleOf(string module) => modules.GetValueOrDefault(module, module);
 
@@ -2810,6 +2909,36 @@ internal sealed partial class SourceCopies(string directory)
     {
         var match = Location().Match(location);
         if (!match.Success || OriginalOf(match.Groups["file"].Value) is not { } original) return location;
-        return $"{display?.Invoke(original) ?? original}:{match.Groups["line"].Value}:{match.Groups["column"].Value}";
+        var (_, line, column) = Position(match.Groups["file"].Value, int.Parse(match.Groups["line"].Value),
+            int.Parse(match.Groups["column"].Value));
+        return $"{display?.Invoke(original) ?? original}:{line}:{column}";
+    }
+}
+
+/// <summary>
+/// The proof `verify` checks when asked for failure records or a trace: the developer's proof with
+/// <see cref="Import"/> inserted at the start of its first import line, so the observer runs on it and every
+/// other line and column is the original's.
+/// </summary>
+internal static partial class ObservedProof
+{
+    /// <summary>The text inserted, which imports `CIL.Observe` ahead of the proof's own imports.</summary>
+    internal const string Import = "import CIL.Observe ";
+
+    // An import command, plain or with module-system modifiers, at the start of a line.
+    [GeneratedRegex(@"^[ \t]*(?:(?:public|private|meta)[ \t]+)*import\b", RegexOptions.Multiline)]
+    private static partial Regex ImportLine();
+
+    /// <summary>`source` with <see cref="Import"/> inserted, and the 1-based line it was inserted on.</summary>
+    internal static (byte[] Bytes, int Line) Insert(byte[] source)
+    {
+        var preamble = source.AsSpan().StartsWith(Encoding.UTF8.Preamble) ? Encoding.UTF8.Preamble.Length : 0;
+        var text = Encoding.UTF8.GetString(source, preamble, source.Length - preamble);
+        var match = ImportLine().Match(text);
+        // A multiline `^` matches at a line start, so the match starts the import's line.
+        var start = match.Success ? match.Index : 0;
+        var at = preamble + Encoding.UTF8.GetByteCount(text.AsSpan(0, start));
+        var line = 1 + text.AsSpan(0, start).Count('\n');
+        return ([.. source.AsSpan(0, at), .. Encoding.UTF8.GetBytes(Import), .. source.AsSpan(at)], line);
     }
 }
