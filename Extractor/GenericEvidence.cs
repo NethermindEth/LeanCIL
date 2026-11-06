@@ -234,7 +234,23 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             return $"{{ offset := {instruction.Offset}, opcode := {(ushort)instruction.OpCode.Value}, " +
                 $"operand := {operand} }}";
         });
-        return $"{{ token := {method.MetadataToken.ToUInt32()}, owner := {Quote(LayoutEvidence.Identity(method.DeclaringType))}, ownerParameters := {List(ownerConstraints)}, ownerArgumentCount := {MethodSpecialization.OwnerArguments(method).Count}, objectReceiver := {Bool(method.HasThis && ObjectTypes.Is(method.DeclaringType))}, hasThis := {Bool(method.HasThis)}, explicitThis := {Bool(method.ExplicitThis)}, callingConvention := {(byte)method.CallingConvention}, attributes := {(uint)method.Attributes}, implementation := {(uint)method.ImplAttributes}, returnType := {Type(InitAccessors.Return(method.ReturnType))}, parameters := {List(method.Parameters.Select(parameter => Parameter(parameter.ParameterType)))}, locals := {List(method.Body.Variables.Select(local => LocalType(local.VariableType)))}, initLocals := {Bool(method.Body.InitLocals)}, maxStack := {method.Body.MaxStackSize}, genericParameters := {List(constraints)}, code := {List(code)} }}";
+        var owner = Quote(LayoutEvidence.Identity(method.DeclaringType));
+        var objectReceiver = Bool(method.HasThis && ObjectTypes.Is(method.DeclaringType));
+        var parameters = List(method.Parameters.Select(parameter => Parameter(parameter.ParameterType)));
+        var locals = List(method.Body.Variables.Select(local => LocalType(local.VariableType)));
+        // Lines break only after a comma, so the emitted definition stays on one line.
+        return $$"""
+            { token := {{method.MetadataToken.ToUInt32()}}, owner := {{owner}},
+            ownerParameters := {{List(ownerConstraints)}},
+            ownerArgumentCount := {{MethodSpecialization.OwnerArguments(method).Count}},
+            objectReceiver := {{objectReceiver}}, hasThis := {{Bool(method.HasThis)}},
+            explicitThis := {{Bool(method.ExplicitThis)}}, callingConvention := {{(byte)method.CallingConvention}},
+            attributes := {{(uint)method.Attributes}}, implementation := {{(uint)method.ImplAttributes}},
+            returnType := {{Type(InitAccessors.Return(method.ReturnType))}}, parameters := {{parameters}},
+            locals := {{locals}}, initLocals := {{Bool(method.Body.InitLocals)}},
+            maxStack := {{method.Body.MaxStackSize}}, genericParameters := {{List(constraints)}},
+            code := {{List(code)}} }
+            """.ReplaceLineEndings(" ");
     }
 
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number,
