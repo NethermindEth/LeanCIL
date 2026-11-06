@@ -34,6 +34,9 @@ inductive Value where
   | methodPointer (pointer : CIL.MethodPointer)
   /-- An immutable supplied table retains the provenance of every entry. -/
   | methodTable (table : CIL.MethodTable)
+  /-- A class instance reference: null or offset 0 of an object allocation. It has no byte
+      position, so arithmetic, byte loads and byref operations never accept it. -/
+  | object (reference : ManagedReference)
   deriving DecidableEq, Repr
 
 /-- Why the checked interpreter stopped. -/
@@ -54,6 +57,9 @@ inductive ExecutionFault where
   /-- Dynamic stack demand exceeded the caller-supplied per-activation quota.
       This model resource failure is not an automatically established CLR exception. -/
   | stackAllocationFailure (requested available : Nat)
+  /-- An object of `requested` bytes exceeded the `available` caller-supplied heap budget.
+      Like stack exhaustion, this model resource failure is not a CLR exception. -/
+  | allocationFailure (requested available : Nat)
   deriving DecidableEq, Repr
 
 /-- A checked result: a value, or the fault that stopped execution. -/
@@ -86,7 +92,8 @@ def observerCount : CIL.Op → Nat
   | .setLane _ | .store64 | .copyObject _ => 2
   -- Method boundaries
   | .ret _ => 1
-  | .call _ argc | .tailCall _ argc | .newVector256 _ argc | .newAggregate _ argc _ => argc
+  | .call _ argc | .callInstance _ argc | .tailCall _ argc | .newVector256 _ argc
+  | .newAggregate _ argc _ | .newObject _ argc .. => argc
   | .managed (.call signature _ _) => signature.parameters.length + 1
   | .managed (.tableElement _) | .managed (.tableAddress _) | .managed .tableOffset => 2
   | .managed .tableLength | .managed (.tableLoad _) => 1
@@ -280,6 +287,33 @@ def formValue (memory : Memory) (reference : ManagedReference) : ExecutionResult
     let result ← checkedAt reference 0 (form memory r)
     return .reference (.address result)
 
+/-- Checks that an object reference may be held: null, or offset 0 of a live allocation of
+    object kind. Any other reference is an ill-typed state, not a runtime exception. -/
+def formObject (memory : Memory) (reference : ManagedReference) : ExecutionResult Value :=
+  match reference with
+  | .null => .ok (.object .null)
+  | .address address => do
+    let allocation ← checkedAt reference 0 (liveAllocation memory address.allocation)
+    match allocation.kind with
+    | .object _ => if address.offset = 0 then .ok (.object reference) else .error .invalidState
+    | _ => .error .invalidState
+
+/-- The field at `offset` of the object `reference` names, which must be a live object of type
+    `owner`. A null receiver throws `NullReferenceException`, as `ldfld` and `stfld` do. -/
+def objectFieldAddress (memory : Memory) (reference : ManagedReference)
+    (owner : CIL.Extraction.TypeExpr) (offset : Nat) : ExecutionResult Reference :=
+  match reference with
+  | .null => .error (.thrown "System.NullReferenceException")
+  | .address address => do
+    let allocation ← checkedAt reference 0 (liveAllocation memory address.allocation)
+    match allocation.kind with
+    | .object type =>
+      if address.offset ≠ 0 then .error .invalidState
+      else if type.identity ≠ owner then
+        .error (.unsupported "Field owner is not the object's type")
+      else checkedAt reference 0 (add memory address 1 (BitVec.ofNat 64 offset))
+    | _ => .error .invalidState
+
 /-- Two non-null, live references to one allocation, checked without byte access authority. -/
 def referencePositions (memory : Memory) (left right : ManagedReference) :
     ExecutionResult (Nat × Nat) := do
@@ -393,7 +427,7 @@ def arrayFillInstruction (element : CIL.ArrayElement) (counted : Bool)
             checkedAt view.reference 0 (view.storage.slice memory start count)
         spanFillInstruction element.width false
           (.scalar value :: .bufferSpan storage :: rest) memory
-  | .reference .null => .error (.thrown "System.ArgumentNullException")
+  | .object .null => .error (.thrown "System.ArgumentNullException")
   | _ => .error .invalidState
 
 /-- A fixed-width integer in the requested byte order, with the required narrow extension. -/
@@ -458,7 +492,7 @@ def viewObservationInstruction (observation : CIL.ViewObservation) (stack : List
     let _ ← checkedAt view.reference 0 (view.validate memory)
     if view.reference == .null then .error (.thrown "System.NullReferenceException") else
     return (memory, (← formValue memory view.reference) :: rest)
-  | .arrayData, .reference .null :: _ =>
+  | .arrayData, .object .null :: _ =>
     .error (.thrown "System.NullReferenceException")
   | _, _ => .error .invalidState
 
@@ -473,7 +507,7 @@ def arrayTransferInstruction (element : CIL.ArrayElement) (store : Bool)
   let some index := arrayIndex index | .error .invalidState
   let view ← match array with
     | .array view => pure view
-    | .reference .null => .error (.thrown "System.NullReferenceException")
+    | .object .null => .error (.thrown "System.NullReferenceException")
     | _ => .error .invalidState
   if view.elementType != element then .error .invalidState else pure ()
   let shape ← match element with
@@ -704,17 +738,17 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
       else .error (.thrown "System.ArgumentOutOfRangeException")
     let sliced ← checkedAt view.reference 0 (view.slice memory start.toNat length.toNat)
     return (memory, .bufferSpan sliced :: rest)
-  | .arraySpan element writable .whole, .reference .null :: rest =>
+  | .arraySpan element writable .whole, .object .null :: rest =>
     let view : SpanView := ⟨.null, 0, element.width, writable⟩
     let _ ← checkedAt view.reference 0 (view.validate memory)
     return (memory, .bufferSpan view :: rest)
-  | .arraySpan element writable .fromStart, .scalar (.i32 start) :: .reference .null :: rest =>
+  | .arraySpan element writable .fromStart, .scalar (.i32 start) :: .object .null :: rest =>
     if start == 0 then pure () else .error (.thrown "System.ArgumentOutOfRangeException")
     let view : SpanView := ⟨.null, 0, element.width, writable⟩
     let _ ← checkedAt view.reference 0 (view.validate memory)
     return (memory, .bufferSpan view :: rest)
   | .arraySpan element writable .counted,
-      .scalar (.i32 length) :: .scalar (.i32 start) :: .reference .null :: rest =>
+      .scalar (.i32 length) :: .scalar (.i32 start) :: .object .null :: rest =>
     if start == 0 && length == 0 then pure ()
       else .error (.thrown "System.ArgumentOutOfRangeException")
     let view : SpanView := ⟨.null, 0, element.width, writable⟩
@@ -745,12 +779,12 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     let updated ← checkedAt (.address reference) width
       (write memory reference (numberBytes number width) 1)
     return (updated, rest)
-  | .arrayLength, .reference .null :: _ => .error (.thrown "System.NullReferenceException")
-  | .arrayLoad .., .scalar index :: .reference .null :: _
-  | .arrayAddress .., .scalar index :: .reference .null :: _ =>
+  | .arrayLength, .object .null :: _ => .error (.thrown "System.NullReferenceException")
+  | .arrayLoad .., .scalar index :: .object .null :: _
+  | .arrayAddress .., .scalar index :: .object .null :: _ =>
     let some _ := arrayIndex index | .error .invalidState
     .error (.thrown "System.NullReferenceException")
-  | .arrayStore _, .scalar _ :: .scalar index :: .reference .null :: _ =>
+  | .arrayStore _, .scalar _ :: .scalar index :: .object .null :: _ =>
     let some _ := arrayIndex index | .error .invalidState
     .error (.thrown "System.NullReferenceException")
   -- Spans
@@ -821,6 +855,7 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     return (memory, .scalar (.i32 (BitVec.ofNat 32 length)) :: rest)
   -- Null references
   | .nullRef, _ => return (memory, .reference .null :: stack)
+  | .nullObject, _ => return (memory, .object .null :: stack)
   -- A pure comparison: no access, so a live, expired or end reference all answer false.
   | .isNullRef, .reference r :: rest | .isNullRef, .readOnlyReference r :: rest =>
     return (memory, .scalar (.i32 (match r with | .null => 1 | .address _ => 0)) :: rest)
@@ -840,6 +875,47 @@ def singleSpanInstruction (width : Nat) (writable : Bool) (stack : List Value)
     let view : SpanView := ⟨reference, 1, width, false⟩
     let _ ← checkedAt reference width (view.validate memory)
     return (memory, .bufferSpan view :: rest)
+  | _, _ => .error .invalidState
+
+/-- The object reference the reference field at `field` holds. The field's slot must be
+    readable, and the reference must still form, so a load never pushes a dangling one. -/
+def loadSlot (memory : Memory) (field : Reference) : ExecutionResult Value := do
+  let _ ← checkedAt (.address field) objectFieldSlot
+    (access memory field objectFieldSlot ordinaryAccessAlignment false)
+  formObject memory (memory.slots field.allocation field.offset)
+
+/-- Stores `value` into the reference field at `field`. The field's slot must be writable and
+    `value` must form, so a field only ever holds null or a live object. -/
+def storeSlot (memory : Memory) (field : Reference) (value : ManagedReference) :
+    ExecutionResult Memory := do
+  let _ ← checkedAt (.address field) objectFieldSlot
+    (access memory field objectFieldSlot ordinaryAccessAlignment true)
+  let _ ← formObject memory value
+  return setSlot memory field value
+
+/-- `ldfld` and `stfld` of a field of a class instance, at the field's model offset: a scalar
+    field moves bytes, a class-typed field moves the object reference its slot holds. -/
+def objectFieldInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  match operation, stack with
+  | .objectField owner offset width signed, .object reference :: rest =>
+    if width ∉ [1, 2, 4, 8] then .error (.unsupported "Object field width") else
+    let address ← objectFieldAddress memory reference owner offset
+    return (memory, .scalar (← loadValue memory (.address address) width signed) :: rest)
+  | .setObjectField owner offset width, .scalar value :: .object reference :: rest =>
+    let address ← objectFieldAddress memory reference owner offset
+    let number ← match width, value with
+      | 1, .i32 bits | 2, .i32 bits | 4, .i32 bits => .ok bits.toNat
+      | 8, .i64 bits => .ok bits.toNat
+      | _, _ => .error .invalidState
+    return (← checkedAt (.address address) width
+      (write memory address (numberBytes number width) ordinaryAccessAlignment), rest)
+  | .objectReferenceField owner offset, .object reference :: rest =>
+    let address ← objectFieldAddress memory reference owner offset
+    return (memory, (← loadSlot memory address) :: rest)
+  | .setObjectReferenceField owner offset, .object value :: .object reference :: rest =>
+    let address ← objectFieldAddress memory reference owner offset
+    return (← storeSlot memory address value, rest)
   | _, _ => .error .invalidState
 
 /-- Runs a `.memory` operation on the stack (top first), giving the new memory and stack.
@@ -867,6 +943,9 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .spanFill width clear => spanFillInstruction width clear stack memory
   | .arrayFill element counted => arrayFillInstruction element counted stack memory
   | .bigMul64 _ | .divRemOut _ => wideArithmeticInstruction operation stack memory
+  | .objectField .. | .setObjectField ..
+  | .objectReferenceField .. | .setObjectReferenceField .. =>
+    objectFieldInstruction operation stack memory
   | _ => otherMemoryInstruction operation stack memory
 
 /-- Runs an op on the stack (top first) and memory: loads, stores, typed copies, aggregate
@@ -1067,6 +1146,7 @@ def block (returns : Bool) (args : List Value) (ops : List CIL.Op)
       | .span reference length => .ok (.span reference length)
       | .methodPointer pointer => .ok (.methodPointer pointer)
       | .methodTable table => .ok (.methodTable table)
+      | .object reference => formObject m reference
       | .array view => do
         let _ ← checkedAt view.reference 0 (view.validate m)
         pure (.array view)

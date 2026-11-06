@@ -11,7 +11,8 @@ fixtures.PrepareLeanFixtures(
     "Tests.LayoutCoverage", "Tests.TypeTestEvidence", "Tests.ThrowEvidence", "Tests.SpanEvidence",
     "Tests.ImportEvidence", "Tests.ImportedLayouts", "Tests.AssemblyPins", "Tests.StaticValueEvidence", "Tests.SpanViews",
     "Tests.MemorySpanExecution", "Tests.ManagedPointerValues", "Tests.PrimitiveArrays", "Tests.ArrayElementReferences",
-    "Tests.ReadOnlyArrayReferences", "Tests.ExtractionGenerics", "Tests.ReferenceTests", "Tests.PointerOperations");
+    "Tests.ReadOnlyArrayReferences", "Tests.ExtractionGenerics", "Tests.ReferenceTests", "Tests.PointerOperations",
+    "Tests.Objects");
 if (args is ["--prepare-only"]) return;
 Run(["dotnet", "run", "--file", "Tests/PreparedLeanFixturesTests.cs"]);
 Run(["dotnet", "run", "--file", "Tests/RejectedEvidenceTests.cs"]);
@@ -23,6 +24,11 @@ Run(["dotnet", "run", "--file", "Tests/ReadOnlyArrayReferences.cs"], streamOutpu
     progress: "Readonly array references");
 Run(["dotnet", "run", "--file", "Tests/ExternalIdentityEncoding.cs"], streamOutput: true,
     progress: "UTF-8 metadata identity certificates");
-foreach (var name in new[] { "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests", "Throws", "SpanTables", "MemorySpans", "ReferenceInstructions", "PointerOperations", "StaticValues", "StaticScalarValues", "TranslationAudit" })
+foreach (var name in new[]
+{
+    "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests", "Throws", "SpanTables",
+    "MemorySpans", "ReferenceInstructions", "PointerOperations", "Objects", "StaticValues", "StaticScalarValues",
+    "TranslationAudit"
+})
     Run(["dotnet", "run", "--file", $"Tests/{name}.cs"], streamOutput: true, progress: name);
 Console.WriteLine("PASS complete extraction evidence, compiled fixtures, mutations and mandatory certificate audit");

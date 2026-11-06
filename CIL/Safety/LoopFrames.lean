@@ -324,7 +324,7 @@ theorem Memory.WellFormed.form_bound {memory : Memory} {base : Reference}
     (formed : memory.WellFormed) (valid : form memory base = .ok base) :
     base.allocation < memory.nextIdentity := by
   obtain ⟨_, present, _, _⟩ := formed_reference_live _ _ _ valid
-  exact (formed.1 _ _ present).1
+  exact (formed.allocations _ _ present).1
 
 /-- A caller reference formed before entry stays formed. -/
 theorem LoopFrame.form {known : Nat → Option CIL.Value}

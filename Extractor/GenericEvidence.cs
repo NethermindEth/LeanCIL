@@ -30,6 +30,9 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
 
     internal string Type(TypeReference type) => Type(type, false);
 
+    /// <summary>The type expression naming a class instance type, as field operations carry it.</summary>
+    internal static string ObjectType(TypeReference type) => $".object {Scope(type)} {Quote(type.FullName)}";
+
     // The kernel sees an `in` reference as the reference it is; the extractor compares the modifier exactly.
     string Parameter(TypeReference type) => Type(InReferences.Parameter(type));
 
@@ -70,6 +73,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             var underlying = type.Resolve().Fields.Single(field => !field.IsStatic).FieldType;
             return $".enum {Quote(LayoutEvidence.Identity(type))} ({Type(underlying)})";
         }
+        if (ObjectTypes.Is(type)) return ObjectType(type);
         var index = layouts.Index(type);
         if (index >= 0 && !layouts.Metadata.IsImported(type))
             return $".aggregate {Quote(LayoutEvidence.Identity(type))} {index}";
@@ -230,7 +234,26 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             return $"{{ offset := {instruction.Offset}, opcode := {(ushort)instruction.OpCode.Value}, " +
                 $"operand := {operand} }}";
         });
-        return $"{{ token := {method.MetadataToken.ToUInt32()}, owner := {Quote(LayoutEvidence.Identity(method.DeclaringType))}, ownerParameters := {List(ownerConstraints)}, ownerArgumentCount := {MethodSpecialization.OwnerArguments(method).Count}, hasThis := {Bool(method.HasThis)}, explicitThis := {Bool(method.ExplicitThis)}, callingConvention := {(byte)method.CallingConvention}, attributes := {(uint)method.Attributes}, implementation := {(uint)method.ImplAttributes}, returnType := {Type(InitAccessors.Return(method.ReturnType))}, parameters := {List(method.Parameters.Select(parameter => Parameter(parameter.ParameterType)))}, locals := {List(method.Body.Variables.Select(local => LocalType(local.VariableType)))}, initLocals := {Bool(method.Body.InitLocals)}, maxStack := {method.Body.MaxStackSize}, genericParameters := {List(constraints)}, code := {List(code)} }}";
+        var owner = Quote(LayoutEvidence.Identity(method.DeclaringType));
+        var classOwner = method.HasThis && ObjectTypes.Is(method.DeclaringType);
+        var objectReceiver = Bool(classOwner);
+        var objectFields = classOwner ? MetadataValidation.Fields(method.DeclaringType).Length : 0;
+        var parameters = List(method.Parameters.Select(parameter => Parameter(parameter.ParameterType)));
+        var locals = List(method.Body.Variables.Select(local => LocalType(local.VariableType)));
+        // Lines break only after a comma, so the emitted definition stays on one line.
+        return $$"""
+            { token := {{method.MetadataToken.ToUInt32()}}, owner := {{owner}},
+            ownerParameters := {{List(ownerConstraints)}},
+            ownerArgumentCount := {{MethodSpecialization.OwnerArguments(method).Count}},
+            objectReceiver := {{objectReceiver}}, objectFieldCount := {{objectFields}},
+            hasThis := {{Bool(method.HasThis)}},
+            explicitThis := {{Bool(method.ExplicitThis)}}, callingConvention := {{(byte)method.CallingConvention}},
+            attributes := {{(uint)method.Attributes}}, implementation := {{(uint)method.ImplAttributes}},
+            returnType := {{Type(InitAccessors.Return(method.ReturnType))}}, parameters := {{parameters}},
+            locals := {{locals}}, initLocals := {{Bool(method.Body.InitLocals)}},
+            maxStack := {{method.Body.MaxStackSize}}, genericParameters := {{List(constraints)}},
+            code := {{List(code)}} }
+            """.ReplaceLineEndings(" ");
     }
 
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number,

@@ -56,6 +56,10 @@ theorem Memory.Renamed.makeLocalUnmodeled {mapping : AllocationRenaming}
     refine ⟨mapping, .root none, [], source, target, .refl mapping, rfl, rfl, related, ?_, ?_⟩
     · intro address member; cases member
     · intro identity member; cases member
+  | object =>
+    refine ⟨mapping, .object none, [], source, target, .refl mapping, rfl, rfl, related, ?_, ?_⟩
+    · intro address member; cases member
+    · intro identity member; cases member
   | array element =>
     refine ⟨mapping, .array element none, [], source, target, .refl mapping,
       rfl, rfl, related, ?_, ?_⟩
@@ -120,7 +124,7 @@ theorem Memory.Renamed.makeLocalInitialized {mapping : AllocationRenaming}
     rw [← related.sourceLimit, mapping.allocate_fresh, related.targetLimit]
   let retainedKind := kind
   cases kind with
-  | reference | methodPointer _ | methodTable _ =>
+  | reference | methodPointer _ | methodTable _ | object =>
     cases initial <;> simp only [CIL.Safety.makeLocal] at made
     all_goals first | contradiction | cases made
     all_goals refine ⟨mapping, target, .refl mapping, ?_, related, ?_, ?_⟩
@@ -206,6 +210,9 @@ theorem Memory.Renamed.skipLocalUnmodeled {mapping : AllocationRenaming}
       by simp⟩
   | reference =>
     refine ⟨mapping, .root none, [], target, .refl mapping, rfl, related, ?_⟩
+    intro identity member; cases member
+  | object =>
+    refine ⟨mapping, .object none, [], target, .refl mapping, rfl, related, ?_⟩
     intro identity member; cases member
   | array element =>
     refine ⟨mapping, .array element none, [], target, .refl mapping, rfl, related, ?_⟩
@@ -294,6 +301,10 @@ theorem Memory.Renamed.skipLocalInitialized {mapping : AllocationRenaming}
     cases initial <;> simp [InitializerFits] at fits unknown
     refine ⟨mapping, .root (some .null), [], target, .refl mapping, rfl, related, ?_⟩
     intro identity member; cases member
+  | object =>
+    cases initial <;> simp [InitializerFits] at fits unknown
+    refine ⟨mapping, .object (some .null), [], target, .refl mapping, rfl, related, ?_⟩
+    intro identity member; cases member
   | array element =>
     cases initial <;> simp [InitializerFits] at fits unknown
     refine ⟨mapping, .array element (some ⟨.null, 0, element⟩), [], target,
@@ -308,7 +319,7 @@ theorem Memory.Renamed.skipLocalInitialized {mapping : AllocationRenaming}
     obtain ⟨home, allocated, homes⟩ := related.skipHome targetFormed activation
       (localWidth retainedKind) (localAlignment retainedKind) bounded (localAlignment_pos _)
     obtain ⟨number, encoded⟩ := initializer_numeric_number fits (by simp)
-      (by intros; simp) (by intros; simp) (by intros; simp) (by intros; simp) unknown
+      (by intros; simp) (by intros; simp) (by intros; simp) (by intros; simp) (by simp) unknown
     obtain ⟨slot, after, stored⟩ := fresh_home_storeLocal_succeeds _ _ _ _ _ _ _ allocated encoded
     have remains := homes.storePrivateLocal _ privateHome _ _ _ encoded stored
     refine ⟨mapping.skipTarget, slot, [target.nextIdentity], after,

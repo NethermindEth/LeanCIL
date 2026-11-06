@@ -75,7 +75,7 @@ theorem frame_entry_exit_preserves_reference (body : CIL.Method) (args : List Va
     (enter : enterFrame body args m = .ok (frame, result)) (valid : form m r = .ok formed) :
     form (leaveFrame frame result) r = .ok formed := by
   obtain ⟨a, present, _, _⟩ := formed_reference_live _ _ _ valid
-  have old := (hm.1 _ _ present).1
+  have old := (hm.allocations _ _ present).1
   rw [form_allocation_congr _ _ _ (frame_entry_exit_preserves_caller _ _ _ _ _ _ enter old)]
   exact valid
 
@@ -88,5 +88,14 @@ theorem expireAll_retained_fields (ids : List AllocationId) (m : Memory) :
   induction ids generalizing m with
   | nil => exact ⟨rfl, rfl, rfl, rfl⟩
   | cons id ids ih => exact ih (expire m id)
+
+/-- Expiring identities leaves every reference slot as it was. -/
+theorem expireAll_slots (ids : List AllocationId) (m : Memory) :
+    (ids.foldl expire m).slots = m.slots := by
+  induction ids generalizing m with
+  | nil => rfl
+  | cons id ids ih => exact ih (expire m id)
+
+#print axioms expireAll_slots
 
 end CIL.Safety

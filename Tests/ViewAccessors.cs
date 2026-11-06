@@ -26,7 +26,7 @@ foreach (var method in metadata.GetType("Examples.ViewAccessors").Methods.Where(
             claims.Add("(CIL.Safety.invoke Extracted.program 32 0 " +
                 $"[.array ⟨.address ⟨0, 0⟩, {length}, .signed32⟩] memory).map Prod.snd = " +
                 ".ok [.reference (.address ⟨0, 0⟩)]");
-        claims.Add("(match CIL.Safety.invoke Extracted.program 32 0 [.reference .null] memory with " +
+        claims.Add("(match CIL.Safety.invoke Extracted.program 32 0 [.object .null] memory with " +
             "| .error ⟨_, _, .thrown \"System.NullReferenceException\"⟩ => true | _ => false) = true");
     }
     else

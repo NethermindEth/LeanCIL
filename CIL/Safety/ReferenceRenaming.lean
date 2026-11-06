@@ -1,5 +1,6 @@
 import CIL.Safety.ValueMemoryRenaming
 import CIL.Safety.ReferenceObservations
+import CIL.Safety.HeapObjects
 
 /-!
 # Reference observations under allocation renaming
@@ -44,6 +45,60 @@ theorem Memory.Renamed.referenceNonNull {mapping : AllocationRenaming}
   intro left right values
   cases reference <;> exact .ok rfl
 #print axioms Memory.Renamed.referenceNonNull
+
+/-- Object null tests preserve their Boolean result and object formation checks. -/
+theorem Memory.Renamed.objectNonNull {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (reference : ManagedReference)
+    (bound : reference.Below mapping.sourceLimit) :
+    ResultRenamed mapping Eq (objectNonNull source reference)
+      (objectNonNull target (mapping.managedReference reference)) := by
+  unfold CIL.Safety.objectNonNull
+  apply (related.formObject reference bound).bind
+  intro left right values
+  cases reference <;> exact .ok rfl
+#print axioms Memory.Renamed.objectNonNull
+
+/-- Object identity is preserved: the allocation map is injective on allocated identities. -/
+theorem Memory.Renamed.objectEqual {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (left right : ManagedReference)
+    (leftBound : left.Below mapping.sourceLimit) (rightBound : right.Below mapping.sourceLimit) :
+    ResultRenamed mapping Eq (objectEqual source left right)
+      (objectEqual target (mapping.managedReference left) (mapping.managedReference right)) := by
+  unfold CIL.Safety.objectEqual
+  apply (related.formObject left leftBound).bind
+  intro first otherFirst firstRelated
+  apply (related.formObject right rightBound).bind
+  intro second otherSecond secondRelated
+  cases left with
+  | null => cases right <;> exact .ok rfl
+  | address left =>
+    cases right with
+    | null => exact .ok rfl
+    | address right =>
+      have identities : mapping.image left.allocation = mapping.image right.allocation ↔
+          left.allocation = right.allocation :=
+        ⟨mapping.injective _ _ leftBound rightBound, congrArg mapping.image⟩
+      refine .ok ?_
+      simp only [AllocationRenaming.managedReference, AllocationRenaming.reference]
+      rw [Bool.eq_iff_iff]
+      simp only [beq_iff_eq, ManagedReference.address.injEq, Reference.mk.injEq, identities]
+      cases left; cases right; simp
+#print axioms Memory.Renamed.objectEqual
+
+/-- `cgt.un` on objects keeps its presence result and its rejection of non-null operands. -/
+theorem Memory.Renamed.objectAboveNull {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (left right : ManagedReference)
+    (leftBound : left.Below mapping.sourceLimit) :
+    ResultRenamed mapping Eq (objectAboveNull source left right)
+      (objectAboveNull target (mapping.managedReference left)
+        (mapping.managedReference right)) := by
+  cases right with
+  | null => exact related.objectNonNull left leftBound
+  | address _ => exact .error .invalidState
+#print axioms Memory.Renamed.objectAboveNull
 
 /-- Pointer subtraction and ordering inspect corresponding offsets in the same allocation. -/
 theorem Memory.Renamed.referencePositions {mapping : AllocationRenaming}

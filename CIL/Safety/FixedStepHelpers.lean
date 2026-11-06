@@ -93,14 +93,15 @@ inductive FixedStepFamily where
 def fixedStepFamily : CIL.Op → FixedStepFamily
   | .local .. | .localAddr _ | .setLocal .. | .vectorLocal _ | .vectorLocalAddr _
   | .setVectorLocal _ | .initializeSpanLocal .. | .stackAlloc _ | .newArray _ | .newVector256 ..
-  | .newAggregate .. | .memory _ => .excluded
+  | .newAggregate .. | .newObject .. | .memory _ => .excluded
   | .sub => .reference
   | .ltu | .gtu | .eq => .reference
   | .bltu _ | .bgeu _ | .bgtu _ | .bleu _ => .reference
   | .brzero _ | .brnonzero _ | .beq _ | .bne _ => .reference
   | .intrinsic .. | .nativeBinary _ | .checkedConvert .. | .checkedArithmetic ..
   | .divide .. => .numeric
-  | .managed _ | .arg .. | .vectorArg _ | .vectorArgAddr _ | .call .. | .tailCall ..
+  | .managed _ | .arg .. | .vectorArg _ | .vectorArgAddr _ | .call .. | .callInstance ..
+  | .tailCall ..
   | .throw _ | .ret _ => .boundary
   | _ => .other
 
@@ -212,7 +213,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
       metadata.returnsValue]
     all_goals try exact (related.stepFallback frames formed operation pc sourceBody.profile
       stack bounds observable)
-    case h_74 =>
+    case h_82 =>
       first
       | (have boundary : fixedStepFamily operation = .boundary := family
          have noManaged : ∀ op, operation = .managed op → False := by assumption
@@ -273,6 +274,18 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
          subst second
          exact .ok (.next related frames))
       | (apply (related.referenceNonNull _ (by assumption)).bind
+         intro first second same
+         subst second
+         exact .ok (.next related frames))
+      | (apply (related.objectEqual _ _ (by assumption) (by assumption)).bind
+         intro first second same
+         subst second
+         exact .ok (.next related frames))
+      | (apply (related.objectNonNull _ (by assumption)).bind
+         intro first second same
+         subst second
+         exact .ok (.next related frames))
+      | (apply (related.objectAboveNull _ _ (by assumption)).bind
          intro first second same
          subst second
          exact .ok (.next related frames))

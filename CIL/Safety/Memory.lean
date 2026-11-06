@@ -1,4 +1,4 @@
-import Std
+import CIL.TypeExpr
 
 /-!
 # Allocation-aware memory
@@ -18,9 +18,16 @@ namespace CIL.Safety
 /-- The identity of an allocation; identities are never reused. -/
 abbrev AllocationId := Nat
 
-/-- Where an allocation lives; only an immutable static may never be written. -/
+/-- The runtime type an object allocation records: its exact class identity. -/
+structure RuntimeType where
+  identity : CIL.Extraction.TypeExpr
+  deriving DecidableEq, Repr
+
+/-- Where an allocation lives; only an immutable static may never be written. An object
+    allocation is a class instance of its recorded runtime type. -/
 inductive StorageKind where
   | managedHeap | callerStack | frame (activation : Nat) | immutableStatic
+  | object (type : RuntimeType)
   deriving DecidableEq, Repr
 
 /-- The byte size, alignment and GC reference slots of an allocation. -/
@@ -81,6 +88,12 @@ structure Memory where
   /-- Admitted dynamic-stack bytes per activation; deployment must justify this quota.
       Zero is the default, so existing memory grants no dynamic stack storage. -/
   stackLimit : Nat := 0
+  /-- Bytes still available for object allocations; deployment must justify it, and each
+      allocation consumes its size. Zero is the default, so existing memory grants none. -/
+  heapBudget : Nat := 0
+  /-- The object reference each reference-typed field of a class instance holds, by allocation
+      and field byte offset. No field's bytes encode a reference; zeroed storage holds null. -/
+  slots : AllocationId → Nat → ManagedReference := fun _ _ => .null
 
 /-- Caller memory with no allocations, views or static bindings. It describes a caller that
     passes only scalars, so it grants no storage a method could read or write. -/
@@ -117,16 +130,24 @@ def Allocation.valid (a : Allocation) : Bool :=
     a.sentinels.all (fun offset => decide (offset ≤ a.layout.size)) &&
     a.layout.referenceSlots.all (fun slot => decide (slot.1 + slot.2 ≤ a.layout.size))
 
-/-- Every allocation has an identity below `nextIdentity` and is well formed, and every
-    view lies inside an existing allocation. -/
-def Memory.WellFormed (m : Memory) : Prop :=
-  (∀ id a, m.allocations id = some a → id < m.nextIdentity ∧ a.WellFormed) ∧
-  ∀ view ∈ m.views, ∃ a, m.allocations view.allocation = some a ∧
+/-- The invariants every reachable memory keeps: allocations, views and field references name
+    existing, well-formed storage. -/
+structure Memory.WellFormed (m : Memory) : Prop where
+  /-- Every allocation has an identity below `nextIdentity` and is well formed. -/
+  allocations : ∀ id a, m.allocations id = some a → id < m.nextIdentity ∧ a.WellFormed
+  /-- Every reference a field holds names an identity already issued, so no later allocation
+      can make a dangling reference live. -/
+  slots : ∀ id offset reference, m.slots id offset = .address reference →
+    reference.allocation < m.nextIdentity
+  /-- Every view lies inside an existing allocation. -/
+  views : ∀ view ∈ m.views, ∃ a, m.allocations view.allocation = some a ∧
     view.start + view.length ≤ a.layout.size
 
 /-- Memory with no allocations or views is well formed. -/
-theorem Memory.empty_wellFormed : Memory.empty.WellFormed :=
-  ⟨fun _ _ absent => (nomatch absent), fun _ member => nomatch member⟩
+theorem Memory.empty_wellFormed : Memory.empty.WellFormed where
+  allocations _ _ absent := nomatch absent
+  views _ member := nomatch member
+  slots _ _ _ held := nomatch held
 #print axioms Memory.empty_wellFormed
 
 /-- The allocation `id`, failing if it is missing or has expired. -/
@@ -243,6 +264,13 @@ def write (m : Memory) (r : Reference) (bytes : List (BitVec 8)) (alignment : Na
       | none => m.cells id offset)
     else m.cells id offset) }
 
+/-- `m` with the reference field at `field` holding `value`; bytes, authority and allocations
+    are unchanged. `storeSlot` checks the field and the value before calling it. -/
+def setSlot (m : Memory) (field : Reference) (value : ManagedReference) : Memory :=
+  { m with slots := fun id offset =>
+      if id = field.allocation then if offset = field.offset then value else m.slots id offset
+      else m.slots id offset }
+
 /-- A checked byte write with constant-time lookup in its retained snapshot. -/
 def writeIndexed (memory : Memory) (reference : Reference) (bytes : List (BitVec 8))
     (alignment : Nat) : Checked Memory := do
@@ -289,6 +317,7 @@ def allocate (m : Memory) (a : Allocation) : Checked (AllocationId × Memory) :=
       allocations := fun id => if id = m.nextIdentity then some a else m.allocations id
       cells := fun id offset => if id = m.nextIdentity then { bits := 0, initialized := false }
         else m.cells id offset
+      slots := fun id offset => if id = m.nextIdentity then .null else m.slots id offset
       nextIdentity := m.nextIdentity + 1 })
 
 end CIL.Safety

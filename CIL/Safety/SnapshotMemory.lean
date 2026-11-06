@@ -53,7 +53,10 @@ theorem writeSnapshot_preserves_wellFormed (m result : Memory) (r : Reference)
   · cases h
   · cases h
     have preserved := write_preserves_wellFormed _ _ _ _ _ hm hw
-    exact ⟨preserved.1, preserved.2⟩
+    exact {
+      allocations := preserved.allocations
+      views := preserved.views
+      slots := preserved.slots }
 
 theorem writeSnapshot_extends_allocations (m result : Memory) (r : Reference)
     (bytes : List (BitVec 8 × Bool)) (alignment : Nat)
@@ -78,7 +81,7 @@ theorem writeSnapshot_preserves_memory_below (m result : Memory) (r : Reference)
   · cases h
   · cases h
     have preserved := write_preserves_memory_below _ _ _ _ _ _ fresh hw
-    refine ⟨preserved.allocations, ?_, preserved.permissions⟩
+    refine ⟨preserved.allocations, ?_, preserved.permissions, preserved.slots⟩
     intro id old offset
     have different : id ≠ r.allocation := by omega
     simp [different]
@@ -97,6 +100,6 @@ theorem Memory.Equivalent.writeSnapshot {m n : Memory} (same : m.Equivalent n)
   intro left right related
   apply ResultEquivalent.ok
   exact ⟨related.allocations, by simp only [same.cells], related.permissions,
-    related.nextIdentity, related.staticBindings, related.stackLimit⟩
+    related.nextIdentity, related.staticBindings, related.stackLimit, related.heapBudget, related.slots⟩
 
 end CIL.Safety

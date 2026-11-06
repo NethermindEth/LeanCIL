@@ -544,6 +544,8 @@ partial class Program : IDisposable
     }
 
     static readonly object TraceGate = new();
+    // A reused process id must not append to an earlier process's trace, which a reader treats as old.
+    static readonly string TraceFile = $"{Environment.ProcessId}-{Guid.NewGuid():N}.jsonl";
 
     static (int Code, string Output, string Stdout, string Stderr) Execute(IEnumerable<string> command, string? cwd = null, string? leanPath = null,
         bool streamOutput = false, string? progress = null, IReadOnlyDictionary<string, string>? environment = null)
@@ -637,7 +639,7 @@ partial class Program : IDisposable
         Directory.CreateDirectory(traceDirectory);
         // Concurrent commands in one process append to the same trace file.
         lock (TraceGate)
-            File.AppendAllText(Path.Combine(traceDirectory, $"{Environment.ProcessId}.jsonl"), JsonSerializer.Serialize(new {
+            File.AppendAllText(Path.Combine(traceDirectory, TraceFile), JsonSerializer.Serialize(new {
             stage, startedAtUtc, processId = Environment.ProcessId, cwd, durationSeconds = elapsed.TotalSeconds,
             exitCode, transcript, command, suite = Environment.GetEnvironmentVariable("LEANCIL_SUITE")
         }) + "\n");

@@ -895,7 +895,8 @@ internal static partial class ProofOutline
                 return Event.Continue;
             }
             else if (Body.Conditional(op)) return Event.Branch;
-            else if (op.StartsWith(".call ", StringComparison.Ordinal)) return Event.Call;
+            else if (op.StartsWith(".call ", StringComparison.Ordinal) ||
+                op.StartsWith(".callInstance ", StringComparison.Ordinal)) return Event.Call;
             else if (op == ".ret" || op.StartsWith(".ret (some ", StringComparison.Ordinal)) return Event.Return;
             else if (Regex.IsMatch(op, @"\A\.memory \(\.add \d+ (true|false)\)\z"))
                 return Stop("an `Unsafe.Add`, which needs `add memory base width offset = .ok reference` " +

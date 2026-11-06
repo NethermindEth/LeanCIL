@@ -18,7 +18,7 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
   obtain ⟨middle, entered, made, middleWritable, -⟩ :=
     make_fitting_local memory memory.nextIdentity (.aggregate 8) (.aggregate (List.replicate 8 0))
       formed nofun (fun _ _ => nofun) (fun _ => nofun) (fun _ => nofun) (fun _ => nofun)
-      (Or.inr rfl)
+      nofun (Or.inr rfl)
   let frame : Frame := ⟨memory.nextIdentity, [.bytes (.aggregate 8) middle], [middle.allocation],
     [], 0⟩
   have setup : enterFrame Extracted.method0

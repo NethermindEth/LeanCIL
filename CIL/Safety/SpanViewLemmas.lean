@@ -41,7 +41,7 @@ theorem SpanView.validate_preserved (view : SpanView) {before after : Memory}
         | split at formed
         | simp_all [Bind.bind, Except.bind, Pure.pure, Except.pure]
     | some allocation =>
-      have same := extension.lookup address.allocation (wellFormed.1 _ _ present).1
+      have same := extension.lookup address.allocation (wellFormed.allocations _ _ present).1
       simpa only [SpanView.validate, reference, liveAllocation, same] using formed
 
 #print axioms SpanView.validate_congr

@@ -336,7 +336,7 @@ def loopStuck (tactic : String) (facts prepared : Array Term)
   let stepGoal := fetched.step
   let opName := ((← whnfR op).getAppFn.constName?).getD Name.anonymous
   if stops opName then saved.restore; return
-  if opName == ``CIL.Op.call then
+  if callsCallee opName then
     saved.restore
     throwError "{tactic}: pc {position} is a call ({op}); cross it with `cil_loop_call` and the \
       callee's contract"
@@ -418,7 +418,7 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepa
   let stops : Lean.Name → Bool := match mode with
     | .reach => fun _ => false
     | .finish => (· == ``CIL.Op.ret)
-    | .advance => fun op => op == ``CIL.Op.call || op == ``CIL.Op.ret
+    | .advance => fun op => callsCallee op || op == ``CIL.Op.ret
     | .resume _ => fun op => op == ``CIL.Op.setFieldAt || op == ``CIL.Op.initAggregate
   -- A struct store no fact steps ends any walk but `.reach`, for the frame lemmas to take.
   let yields : Lean.Name → Bool := fun op => stops op || (mode != .reach &&

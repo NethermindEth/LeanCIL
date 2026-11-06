@@ -82,6 +82,56 @@ theorem Memory.Renamed.managedStep {indices : LocalIndexMap} {mapping : Allocati
         (exfalso; solve_by_elim)
 #print axioms Memory.Renamed.managedStep
 
+/-- A receiver-checked call transports as a call: renaming keeps a receiver null exactly when it
+    was, so both runs throw at the `callvirt` or both enter the callee. -/
+private theorem Memory.Renamed.stepCallInstance {indices : LocalIndexMap}
+    {mapping : AllocationRenaming} {scopes : Nat → Nat → Prop} {source target : Memory}
+    {sourceFrame targetFrame : Frame} (related : Memory.Renamed mapping scopes source target)
+    (formed : source.WellFormed) (sourceBody targetBody : CIL.Method) (callee argc pc : Nat)
+    (arguments stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit) :
+    ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
+      (step sourceBody (.callInstance callee argc) pc arguments sourceFrame stack source)
+      (step targetBody (.callInstance callee argc) pc (arguments.map mapping.value)
+        targetFrame (stack.map mapping.value) target) := by
+  simp only [step, mapping.unspecifiedOperands, Bool.or_false, List.length_map,
+    ← List.map_take, ← List.map_drop, ← List.map_reverse]
+  by_cases guard : unspecifiedOperands (observerCount (.callInstance callee argc)) stack = true
+  · simp only [guard, ite_true]
+    exact .error _
+  · simp only [guard, Bool.false_eq_true, ite_false]
+    by_cases short : stack.length < argc
+    · simp only [short, ite_true]
+      exact .error _
+    · simp only [short, ite_false]
+      have checks := related.checkedValues (stack.take argc).reverse (by
+        intro value member
+        exact bounds value (List.mem_of_mem_take (List.mem_reverse.mp member)))
+      cases checked : (stack.take argc).reverse.mapM (CIL.Safety.checkedValue source) with
+      | error fault =>
+        rw [checked] at checks
+        generalize ((stack.take argc).reverse.map mapping.value).mapM
+          (CIL.Safety.checkedValue target) = targetChecked at checks ⊢
+        cases checks
+        exact .error fault
+      | ok operands =>
+        rw [checked] at checks
+        obtain ⟨targetOperands, targetChecked, rfl⟩ := checks.success
+        simp only [targetChecked, Bind.bind, Except.bind]
+        have called : ∀ receiver tail, ResultRenamed mapping
+            (FrameAction.Renamed indices mapping scopes)
+            (.ok (.call callee (.object (.address receiver) :: tail) (stack.drop argc) source))
+            (.ok (.call callee ((Value.object (.address receiver) :: tail).map mapping.value)
+              ((stack.drop argc).map mapping.value) target)) := fun receiver tail =>
+          .ok (FrameAction.Renamed.call related)
+        match operands with
+        | [] => exact .error _
+        | .object (.address receiver) :: tail => exact called receiver tail
+        | .object .null :: _ => exact .error _
+        | .scalar _ :: _ | .methodPointer _ :: _ | .methodTable _ :: _ | .reference _ :: _
+        | .readOnlyReference _ :: _ | .span .. :: _ | .bufferSpan _ :: _ | .array _ :: _ =>
+          exact .error _
+#print axioms Memory.Renamed.stepCallInstance
+
 /-- Argument loads, calls and returns preserve their checked values and control flow. -/
 theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
@@ -108,11 +158,16 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
       exact .error (.unsupported "Instruction observes unspecified vector bits")
     · simp only [guarded, Bool.false_eq_true, ite_false] at observable ⊢
       exact related.managedStep frames formed native pc stack bounds observable
+  by_cases receiverChecked : ∃ callee argc, operation = .callInstance callee argc
+  · rcases receiverChecked with ⟨callee, argc, rfl⟩
+    exact related.stepCallInstance formed sourceBody targetBody callee argc pc arguments stack
+      bounds
   ·
     allocation_fixed_step (
       first
       | exact False.elim (isManaged ⟨_, rfl⟩)
-      | (case h_54 =>
+      | exact False.elim (receiverChecked ⟨_, _, rfl⟩)
+      | (case h_60 =>
           rename_i _ _ position
           rw [List.getElem?_map]
           cases found : arguments[position]? with
@@ -123,7 +178,7 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
             intro first second same
             subst second
             exact .ok (.next related frames))
-      | (case h_55 =>
+      | (case h_61 =>
           rename_i _ _ position kind
           rw [List.getElem?_map]
           cases found : arguments[position]? with

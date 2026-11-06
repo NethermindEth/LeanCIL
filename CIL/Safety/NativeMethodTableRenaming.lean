@@ -84,7 +84,7 @@ theorem NativeMethodTable.check_bounded (table : NativeMethodTable) (memory : Me
     table.origin.allocation < memory.nextIdentity := by
   cases found : memory.allocations table.origin.allocation with
   | none => simp [NativeMethodTable.check, liveAllocation, found, Bind.bind, Except.bind] at checked
-  | some allocation => exact (formed.1 _ _ found).1
+  | some allocation => exact (formed.allocations _ _ found).1
 #print axioms NativeMethodTable.check_bounded
 
 /-- A successfully resolved native binding remains resolved after allocation renaming. -/

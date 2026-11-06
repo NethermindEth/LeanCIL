@@ -15,7 +15,7 @@ theorem Memory.WellFormed.fresh {memory : Memory} (formed : memory.WellFormed) :
     memory.allocations memory.nextIdentity = none := by
   cases found : memory.allocations memory.nextIdentity with
   | none => rfl
-  | some allocation => exact False.elim (Nat.lt_irrefl _ (formed.1 _ _ found).1)
+  | some allocation => exact False.elim (Nat.lt_irrefl _ (formed.allocations _ _ found).1)
 #print axioms Memory.WellFormed.fresh
 
 /-- Existing well-formed views grant no authority to future allocation identities. -/
@@ -24,9 +24,9 @@ theorem Memory.WellFormed.future_permission {memory : Memory} (formed : memory.W
     permitted memory writing reference = false := by
   simp only [permitted, List.any_eq_false]
   intro view member
-  obtain ⟨allocation, present, _⟩ := formed.2 view member
+  obtain ⟨allocation, present, _⟩ := formed.views view member
   have bound : view.allocation < memory.nextIdentity :=
-    (formed.1 view.allocation allocation present).1
+    (formed.allocations view.allocation allocation present).1
   have different : view.allocation ≠ reference.allocation :=
     Nat.ne_of_lt (Nat.lt_of_lt_of_le bound future)
   simp [viewContains, different]
@@ -50,19 +50,23 @@ theorem Memory.Renamed.allocate {mapping : AllocationRenaming} {scopes : Nat →
       else source.allocations identity
     cells := fun identity offset => if identity = source.nextIdentity then ⟨0, false⟩
       else source.cells identity offset
+    slots := fun identity offset => if identity = source.nextIdentity then .null
+      else source.slots identity offset
     nextIdentity := source.nextIdentity + 1 }
   let targetAfter : Memory := { target with
     allocations := fun identity => if identity = target.nextIdentity then some targetDescriptor
       else target.allocations identity
     cells := fun identity offset => if identity = target.nextIdentity then ⟨0, false⟩
       else target.cells identity offset
+    slots := fun identity offset => if identity = target.nextIdentity then .null
+      else target.slots identity offset
     nextIdentity := target.nextIdentity + 1 }
   have freshImage : mapping.allocate.image source.nextIdentity = target.nextIdentity := by
     rw [← related.sourceLimit, mapping.allocate_fresh, related.targetLimit]
   refine ⟨sourceAfter, targetAfter, ?_, ?_, ?_⟩
   · simp [CIL.Safety.allocate, valid, sourceFormed.fresh, sourceAfter]
   · simp [CIL.Safety.allocate, ← descriptors.valid, valid, targetFormed.fresh, targetAfter]
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, related.stackLimit⟩
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, related.stackLimit, related.heapBudget, ?_⟩
   · simp only [AllocationRenaming.allocate, sourceAfter, related.sourceLimit]
   · simp only [AllocationRenaming.allocate, targetAfter, related.targetLimit]
   · intro identity bound
@@ -117,6 +121,29 @@ theorem Memory.Renamed.allocate {mapping : AllocationRenaming} {scopes : Nat →
     intro binding member
     exact congrArg (fun reference => (binding.1, reference))
       (mapping.allocate_extends.reference binding.2 (staticBounds binding member)).symm
+  · intro identity bound offset
+    change identity < mapping.sourceLimit + 1 at bound
+    by_cases old : identity < mapping.sourceLimit
+    · have sourceDifferent : identity ≠ source.nextIdentity := by
+        rw [← related.sourceLimit]
+        exact Nat.ne_of_lt old
+      have targetDifferent : mapping.image identity ≠ target.nextIdentity := by
+        rw [← related.targetLimit]
+        exact Nat.ne_of_lt (mapping.bounded identity old)
+      simp only [sourceAfter, targetAfter, AllocationRenaming.allocate, old, ite_true,
+        sourceDifferent, targetDifferent, ite_false, related.slots identity old offset]
+      cases held : source.slots identity offset with
+      | null => rfl
+      | address reference =>
+        have referenceOld : reference.allocation < mapping.sourceLimit := by
+          rw [related.sourceLimit]
+          exact sourceFormed.slots _ _ _ held
+        exact congrArg ManagedReference.address
+          (mapping.allocate_extends.reference reference referenceOld).symm
+    · have fresh : identity = mapping.sourceLimit := by omega
+      subst identity
+      simp [sourceAfter, targetAfter, related.sourceLimit, freshImage,
+        AllocationRenaming.managedReference]
 #print axioms Memory.Renamed.allocate
 /-- A private target-only allocation leaves every source observation unchanged. -/
 theorem Memory.Renamed.skipTarget {mapping : AllocationRenaming} {scopes : Nat → Nat → Prop}
@@ -129,9 +156,11 @@ theorem Memory.Renamed.skipTarget {mapping : AllocationRenaming} {scopes : Nat �
       else target.allocations identity
     cells := fun identity offset => if identity = target.nextIdentity then ⟨0, false⟩
       else target.cells identity offset
+    slots := fun identity offset => if identity = target.nextIdentity then .null
+      else target.slots identity offset
     nextIdentity := target.nextIdentity + 1 }
   refine ⟨targetAfter, ?_, related.sourceLimit, ?_, ?_, ?_, related.permissions,
-    related.staticBindings, related.stackLimit⟩
+    related.staticBindings, related.stackLimit, related.heapBudget, ?_⟩
   · simp [CIL.Safety.allocate, valid, formed.fresh, targetAfter]
   · simp only [AllocationRenaming.skipTarget, targetAfter, related.targetLimit]
   · intro identity bound
@@ -146,5 +175,12 @@ theorem Memory.Renamed.skipTarget {mapping : AllocationRenaming} {scopes : Nat �
       exact Nat.ne_of_lt (mapping.bounded identity bound)
     simpa only [targetAfter, AllocationRenaming.skipTarget, different, ite_false]
       using related.cells identity bound offset
+  · intro identity bound offset
+    have different : mapping.image identity ≠ target.nextIdentity := by
+      rw [← related.targetLimit]
+      exact Nat.ne_of_lt (mapping.bounded identity bound)
+    simp only [targetAfter, AllocationRenaming.skipTarget, different, ite_false]
+    rw [related.slots identity bound offset]
+    rfl
 #print axioms Memory.Renamed.skipTarget
 end CIL.Safety

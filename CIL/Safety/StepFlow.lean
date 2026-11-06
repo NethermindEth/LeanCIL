@@ -13,8 +13,8 @@ namespace CIL
 /-- Every method index an instruction calls or constructs with. -/
 def Op.callees : Op → List Nat
   | .managed (.call _ catalog _) => catalog.map ManagedTarget.method
-  | .call method _ | .tailCall method _ | .newVector256 method _
-  | .newAggregate method _ _ => [method]
+  | .call method _ | .callInstance method _ | .tailCall method _ | .newVector256 method _
+  | .newAggregate method _ _ | .newObject method .. => [method]
   | _ => []
 
 end CIL

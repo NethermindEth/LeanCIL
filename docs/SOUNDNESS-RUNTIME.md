@@ -215,6 +215,94 @@ successful successor. Unknown values and mismatched homes cannot use that rule.
 Null managed references are distinct from numeric zero. Access faults on null are not automatically
 named throws; only explicit outcome mappings establish a named exception.
 
+## Class instances
+
+An admitted class is non-generic and non-abstract, derives directly from
+`System.Object` in `System.Runtime`, has sequential or auto layout and no finalizer. A reference to
+it is `Value.object`: null, or offset 0 of a live allocation whose kind is `.object` with the
+class's runtime type (`formObject`). Object references carry no byte position, so code cannot
+form one from an integer, a byref or an interior offset, and `ldnull` pushes the one null
+object reference; `Unsafe.NullRef` keeps the distinct null byref. `ceq`, `beq` and `bne.un`
+compare identities; `cgt.un` and `brtrue`/`brfalse` test presence against null only. Object
+locals and parameters are roots without bytes and have no address.
+
+`ldfld` and `stfld` of an integer, Boolean, Char or enum field of a class reach the field's
+bytes in the object's allocation (`objectFieldAddress`). The model, not CoreCLR, chooses the
+layout: one 8-byte slot per instance field in declaration order (`objectFieldOffset`), which
+Lean rechecks against each instruction's raw field index and type. This needs no
+correspondence with CoreCLR's layout because code cannot observe it: `ldflda` on a class is
+rejected, and object references have no integer form. Each access checks that the allocation's
+runtime type is the field's declaring class, and a null receiver throws
+`NullReferenceException`, as `ldfld` and `stfld` do; a null byref keeps its distinct
+`nullDereference` fault.
+
+`newobj` of an admitted class (`.newObject`) checks the constructor's arguments, then allocates
+a fresh live instance (`allocateObject`): an allocation of kind `.object` with the class's runtime
+type, one zeroed 8-byte slot per instance field and authority over all of it. It charges the
+instance's size to `Memory.heapBudget`, the bytes the caller grants for objects, and fails with
+`allocationFailure` when the budget is short; that is a model resource fault, not a CLR
+exception, so no proof of an expected exception can rest on it. The budget never grows back:
+it is a conservative bound that ignores collection. The constructor then runs with the
+instance as its receiver, and the instance is pushed once it returns. Lean rechecks that the
+call site's declaring class is the instance's runtime type, that the constructor takes an
+object receiver, and that the size is one slot per instance field of the constructor's class.
+Inside an admitted constructor, `call System.Object::.ctor()` with the exact `System.Runtime`
+scope only pops the receiver: the runtime's constructor has no effect on an instance, and Lean
+rechecks that exact target wherever `.pop` stands for a call. No frame owns
+an instance, so leaving the method that created it never expires it: an instance lives as long
+as a reference can observe it, which is the reachability the collector maintains.
+
+References held by fields are kept apart from bytes: `Memory.slots` records, by allocation and
+field offset, the object reference a field holds, and fresh storage holds null. No byte encodes
+a reference, so no byte access can forge or observe one. `Memory.WellFormed` requires every
+held reference to name an identity already issued, so a later allocation can never make a
+dangling reference live; `Confined`, `MemoryBelow`, `Memory.Equivalent` and `Memory.Renamed`
+each relate field references alongside bytes, the last through the allocation map.
+
+`ldfld` and `stfld` of a field whose type is an admitted class (`.objectReferenceField`,
+`.setObjectReferenceField`) locate the field like a scalar one, so a null receiver throws
+`NullReferenceException` and the owner is checked against the runtime type, then check the
+field's 8-byte slot for read or write authority inside the object. A load pushes the reference
+the slot holds once it forms again (`loadSlot`); a store requires the value to form, that is to
+be null or a live object, and changes only that slot (`storeSlot`), so no byte and no authority
+changes and every held reference stays issued. The model checks that a stored value is an
+object, not that its class is the field's type: that is the verifier's typing, as for arguments,
+and an object of another class read back through the field fails its next field access with
+the owner check rather than reading another class's fields.
+
+A non-virtual instance method of an admitted class is an entry whose receiver `this` is an
+object reference, not a byref: the raw method records the class receiver (`objectReceiver`),
+from which Lean derives the receiver's storage and scalar kind. Lean rejects the address of
+the receiver and of any class-typed local or argument, so no byref can stand in for an object
+receiver.
+
+`callvirt` without a `constrained.` prefix, which C# emits for every instance call on a class,
+is admitted when its target is a non-virtual method of an admitted class. It has exactly one
+target, so it is a call (`callInstance`) that first checks its receiver: a null receiver throws
+`System.NullReferenceException` at the `callvirt`, in the caller, before the callee is entered
+(ECMA-335 III.3.19), and a receiver that is no object reference is ill-typed. Lean admits a
+`callInstance` only at `callvirt`, only into a method whose receiver is an object, counting the
+receiver among its arguments, and rejects a plain `call` emitted for `callvirt`, which would skip
+the check. That the target is not virtual is metadata the extractor decodes and checks, as it
+decodes `hasThis`.
+
+Interface, generic, abstract, derived, explicit-layout and finalizable classes, byrefs to class
+instances, field addresses on class instances, class fields holding anything but integers or
+admitted class instances (strings, arrays, interfaces, other classes),
+virtual class methods, `callvirt` of a virtual method and the address of a class receiver, local
+or argument are each
+rejected by name during extraction.
+
+An instance of a class with no fields is an allocation of size zero: it costs no heap budget,
+has no byte any access could reach, and is still distinct from every other instance, since
+identity is the allocation and not an address
+([TwoMarkers](../Examples/Proofs/TwoMarkers.lean)).
+
+Object identity, runtime type and field positions are allocation metadata, which byte writes
+never change, so distinct object references are distinct allocations and their fields never
+share a byte; [object framing](PROOFS-CONTRACTS.md#frame-class-instances) states this for
+proofs.
+
 ## Sequential struct layout
 
 Admitted layouts are reference-free and bounded by 65,536 bytes. Sequential fields include supported

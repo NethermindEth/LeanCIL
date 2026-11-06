@@ -66,7 +66,7 @@ theorem wellFormed_next_unused (m : Memory) (hm : m.WellFormed) :
   cases h : m.allocations m.nextIdentity with
   | none => rfl
   | some allocation =>
-    have bad := (hm.1 m.nextIdentity allocation h).1
+    have bad := (hm.allocations m.nextIdentity allocation h).1
     exact False.elim (Nat.lt_irrefl _ bad)
 
 /-- In a valid static world, loading any of its descriptors succeeds: from the cache if bound,

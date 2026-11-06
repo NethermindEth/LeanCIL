@@ -3,6 +3,7 @@ import CIL.Safety.FrameSetupLemmas
 import CIL.Safety.StaticMemoryLemmas
 import CIL.Safety.StackAllocationLemmas
 import CIL.Safety.ArrayAllocationLemmas
+import CIL.Safety.ObjectAllocationLemmas
 import CIL.Safety.SpanConstructionLemmas
 
 /-!
@@ -35,6 +36,8 @@ inductive StepEffect (body : CIL.Method) (frame : Frame) (m : Memory) :
     Frame → Memory → Prop where
   | arrayAllocation {view result} (effect : ArrayAllocationEffect m view result) :
       StepEffect body frame m frame result
+  | objectAllocation {object result} (effect : ObjectAllocationEffect m object result) :
+      StepEffect body frame m frame result
   | stackAllocation {reference final result}
       (effect : StackAllocationEffect m frame reference final result) :
       StepEffect body frame m final result
@@ -57,6 +60,7 @@ theorem StepEffect.wellFormed {body : CIL.Method} {frame final : Frame} {m resul
     (effect : StepEffect body frame m final result) (hm : m.WellFormed) : result.WellFormed := by
   cases effect with
   | arrayAllocation effect => exact effect.wellFormed hm
+  | objectAllocation effect => exact effect.wellFormed hm
   | stackAllocation effect => exact effect.wellFormed hm
   | memory effect => exact effect.wellFormed hm
   | store _ stored => exact storeLocal_preserves_wellFormed _ _ _ _ _ hm stored
@@ -71,6 +75,7 @@ theorem StepEffect.allocations {body : CIL.Method} {frame final : Frame} {m resu
     (effect : StepEffect body frame m final result) : AllocationExtension m result := by
   cases effect with
   | arrayAllocation effect => exact effect.allocations
+  | objectAllocation effect => exact effect.allocations
   | stackAllocation effect => exact effect.allocations
   | memory effect => exact effect.allocations
   | store _ stored => exact storeLocal_extends_allocations _ _ _ _ _ stored
@@ -94,6 +99,7 @@ theorem loadLocal_result_valid (m : Memory) (slot : LocalSlot) (value : Value)
       | solve | exact loadSnapshot_numeric (by assumption)
       | solve | apply formValue_result_valid; assumption
       | solve | apply formValue_readOnly_valid; assumption
+      | solve | exact formObject_result_valid (by assumption)
       | solve | exact checkedAt_ok (by assumption)
       | cases h
       | split at h
@@ -106,7 +112,7 @@ theorem localAddress_result_valid (m : Memory) (slot : LocalSlot) (value : Value
   | opaque128 _ => cases h
   | span _ _ _ => cases h
   | array _ _ => cases h
-  | methodPointer _ _ | methodTable _ _ => cases h
+  | methodPointer _ _ | methodTable _ _ | object _ => cases h
   | bytes kind r => exact formValue_result_valid m (.address r) value h
 
 theorem ValuesValid.drop {m : Memory} {values : List Value}
@@ -196,6 +202,25 @@ theorem StepContract.arrayAllocation {body : CIL.Method} {frame : Frame}
 
 #print axioms StepContract.arrayAllocation
 
+/-- `newobj` hands the constructor a fresh instance ahead of arguments checked before the
+    allocation, and leaves the same instance under the caller's remaining stack. -/
+theorem StepContract.objectAllocation {body : CIL.Method} {frame : Frame}
+    {stack arguments : List Value} {memory result : Memory} {object : Reference}
+    {type : RuntimeType} {size callee argc : Nat}
+    (checked : (stack.take argc).reverse.mapM (checkedValue memory) = .ok arguments)
+    (success : allocateObject memory type size = .ok (object, result)) :
+    StepContract body frame stack memory
+      (.call callee (.object (.address object) :: arguments)
+        (.object (.address object) :: stack.drop argc) result) := by
+  have effect := allocateObject_effect success
+  apply StepContract.of_effect (.objectAllocation effect)
+  intro hm extension retained
+  exact ⟨ValuesValid.cons effect.object_valid
+      (checkedValues_preserved _ _ _ _ hm extension checked),
+    ValuesValid.cons effect.object_valid (retained.drop _)⟩
+
+#print axioms StepContract.objectAllocation
+
 /-- A successful pointer subtraction forms a valid result without changing its capability. -/
 theorem referenceSubtract_valid (memory : Memory) (reference result : ManagedReference)
     (offset : CIL.Value) (success : referenceSubtract memory reference offset = .ok result) :
@@ -269,6 +294,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
         all_goals assumption
     | solve | exact .stackAllocation (by assumption)
     | solve | exact .arrayAllocation (by assumption)
+    | solve | exact .objectAllocation (by assumption) (by assumption)
     | solve |
         apply StepContract.staticInstruction
         apply staticInstruction_contract

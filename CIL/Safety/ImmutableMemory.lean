@@ -122,7 +122,7 @@ theorem allocate_preserves_immutable (m result : Memory) (a : Allocation) (id : 
     · cases h
     · cases h
       intro other old present kind
-      have different := Nat.ne_of_lt (hm.1 other old present).1
+      have different := Nat.ne_of_lt (hm.allocations other old present).1
       exact ⟨by simp [different, present], by simp [different], fun _ => rfl⟩
 
 #print axioms write_preserves_immutable

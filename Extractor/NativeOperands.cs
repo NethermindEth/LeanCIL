@@ -9,7 +9,7 @@ internal static class NativeOperands
 {
     internal enum Kind
     {
-        Other, Word32, Word64, Native, Reference, NullObject, MethodPointer, MethodTable, NativeMethodTable,
+        Other, Word32, Word64, Native, Reference, NullObject, Object, MethodPointer, MethodTable, NativeMethodTable,
         ArraySigned8, ArrayUnsigned8, ArraySigned16, ArrayUnsigned16, ArraySigned32, ArrayUnsigned32,
         ArraySigned64, ArrayUnsigned64, ArrayNativeInt, ArrayNativeUInt, ArrayBoolean, ArrayCharacter, ArrayComposite
     }
@@ -68,7 +68,8 @@ internal static class NativeOperands
     }
 
     static StackType PrimitiveType(TypeReference type) => type is ByReferenceType or PointerType
-        ? Kind.Reference : Arrays.Of(type)?.Kind ?? EnumTypes.Storage(type).MetadataType switch
+        ? Kind.Reference : ObjectTypes.Is(type) ? Kind.Object : Arrays.Of(type)?.Kind ??
+        EnumTypes.Storage(type).MetadataType switch
     {
         MetadataType.IntPtr or MetadataType.UIntPtr => Kind.Native,
         MetadataType.Int64 or MetadataType.UInt64 => Kind.Word64,

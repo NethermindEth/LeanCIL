@@ -3,6 +3,7 @@ import CIL.Extraction.UnsafeReferences
 import CIL.Extraction.UnsafeTransfers
 import CIL.Extraction.SpanCalls
 import CIL.Extraction.ViewObservations
+import CIL.Extraction.ObjectConstruction
 
 /-!
 # Scalar flow
@@ -23,6 +24,8 @@ namespace CIL.Extraction
 /-- The evaluation-stack kind of a value, as far as scalar encodings care. -/
 inductive ScalarKind where
   | word32 | word64 | native | reference | nullObject | other
+  /-- A class instance reference of an admitted object type. -/
+  | object
   | array (element : ArrayElement)
   | enumSpan (element : ArrayElement) (writable : Bool) (reference : Bool)
   | methodPointer (signature : ManagedSignature)
@@ -46,6 +49,7 @@ def scalarType : TypeExpr → ScalarKind
     | some signature => .methodTable signature
     | none => (arrayElementType element).map ScalarKind.array |>.getD .other
   | type@(.functionPointer ..) => (managedSignature type).map ScalarKind.methodPointer |>.getD .other
+  | .object .. => .object
   | type@(.apply _ element@(.enum ..)) =>
     match spanStorage type, arrayElementType element with
     | some (.span _ writable), some identity => .enumSpan identity writable false
@@ -58,13 +62,20 @@ def scalarType : TypeExpr → ScalarKind
       "System.UInt16", "System.Int32", "System.UInt32"] then .word32 else .other
   | _ => .other
 
+/-- The stack kind of the receiver of an instance method declared by `owner`: an object
+    reference for a class, a byref for a value type. -/
+def receiverKind (owner : TypeExpr) : ScalarKind :=
+  match owner with
+  | .object .. => .object
+  | _ => scalarType (.byref owner)
+
 private def numeric (kind : ScalarKind) : Bool := kind ∈ [.word32, .word64, .native]
 
 /-- A value of kind `value` may be stored in a slot of kind `home`; `word64` and `native`
     share one representation on the admitted 64-bit targets. -/
 private def storageCompatible (value home : ScalarKind) : Bool :=
   value == home || (value == .nullObject &&
-    (match home with | .array _ | .methodTable _ => true | _ => false)) ||
+    (match home with | .array _ | .methodTable _ | .object => true | _ => false)) ||
     value ∈ [.word64, .native] && home ∈ [.word64, .native]
 
 /-- Two-operand arithmetic: `add` through `xor`, the overflow-checked forms, and `ceq`
@@ -236,11 +247,15 @@ private def mixedNative (left right : ScalarKind) : Bool :=
 private def compatibleBinary (left right : ScalarKind) : Bool :=
   numeric left && numeric right && (left == right || mixedNative left right)
 
-/-- Object null supports equality; only managed references support unsigned ordering. -/
+/-- Object references and null support equality, and `cgt.un` against null tests presence;
+    only managed references support unsigned ordering. -/
 private def referenceComparison (opcode : Nat) (left right : ScalarKind) : Bool :=
-  left == right &&
+  (left == right &&
     ((opcode ∈ [46, 51, 59, 64, 65025] && left ∈ [.reference, .nullObject]) ||
-      (opcode ∈ [52, 53, 54, 55, 65, 66, 67, 68, 65027, 65029] && left == .reference))
+      (opcode ∈ [52, 53, 54, 55, 65, 66, 67, 68, 65027, 65029] && left == .reference))) ||
+    (opcode ∈ [46, 51, 59, 64, 65025] && left ∈ [.object, .nullObject] &&
+      right ∈ [.object, .nullObject]) ||
+    (opcode == 65027 && left == .object && right == .nullObject)
 
 /-- Mixed native/int32 operands require exactly one `nativeBinary` wrapper; any other pair
     forbids it. -/
@@ -275,15 +290,15 @@ def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind) (em
   else if instruction.opcode == 65054 then
     instruction.operand == .none && match emitted with | .nop => true | _ => false
   else if instruction.opcode == 20 then
-    instruction.operand == .none && match emitted with | .memory .nullRef => true | _ => false
+    instruction.operand == .none && match emitted with | .memory .nullObject => true | _ => false
   else if instruction.opcode ∈ [44, 45, 57, 58] then
     match instruction.operand, stack, emitted with
     | .target target, value :: _, .brzero actual =>
       instruction.opcode ∈ [44, 57] && target == actual &&
-        (numeric value || value ∈ [.reference, .nullObject])
+        (numeric value || value ∈ [.reference, .nullObject, .object])
     | .target target, value :: _, .brnonzero actual =>
       instruction.opcode ∈ [45, 58] && target == actual &&
-        (numeric value || value ∈ [.reference, .nullObject])
+        (numeric value || value ∈ [.reference, .nullObject, .object])
     | _, _, _ => false
   else if 21 <= instruction.opcode && instruction.opcode <= 33 then
     match literal instruction, emitted with
@@ -361,6 +376,49 @@ private def sizeConstant (instruction : RawInstruction) (bits : W32) : Bool :=
     | _ => false
   | _, _ => false
 
+/-- The width and sign extension of a class instance field of `type`: integer, Boolean, Char
+    and enum fields only, each fitting one `objectFieldSlot`. -/
+private def objectFieldShape (type : TypeExpr) : Option (Nat × Bool) :=
+  match typeStorage [] type with
+  | some (.field kind) => (primitiveFieldWidth kind).map fun width =>
+    (width, kind == .signed8 || kind == .signed16)
+  | _ => none
+
+/-- An instance field instruction on a class, or an emitted class field operation. -/
+private def objectFieldSite (instruction : RawInstruction) (emitted : Op) : Bool :=
+  (instruction.opcode ∈ [123, 124, 125] && match instruction.operand with
+    | .field (.object _ _) _ _ false => true
+    | _ => false) ||
+  match emitted with
+  | .memory (.objectField ..) | .memory (.setObjectField ..)
+  | .memory (.objectReferenceField ..) | .memory (.setObjectReferenceField ..) => true
+  | _ => false
+
+/-- `ldfld` and `stfld` of a class instance field emit the checked field operation for that
+    owner, at the field's model offset: with its width and extension for a scalar field, as a
+    reference slot for a class-typed one, whose stored value must be an object or null. `ldflda`
+    never does. -/
+private def objectFieldMatches (instruction : RawInstruction) (stack : List ScalarKind)
+    (emitted : Op) : Bool :=
+  match instruction.opcode, instruction.operand, stack, emitted with
+  | 123, .field (.object scope name) index type false, receiver :: _,
+      .memory (.objectField owner offset width signed) =>
+    receiver ∈ [.object, .nullObject] && owner == .object scope name &&
+      offset == objectFieldOffset index && objectFieldShape type == some (width, signed)
+  | 125, .field (.object scope name) index type false, _ :: receiver :: _,
+      .memory (.setObjectField owner offset width) =>
+    receiver ∈ [.object, .nullObject] && owner == .object scope name &&
+      offset == objectFieldOffset index && (objectFieldShape type).map (·.1) == some width
+  | 123, .field (.object scope name) index (.object _ _) false, receiver :: _,
+      .memory (.objectReferenceField owner offset) =>
+    receiver ∈ [.object, .nullObject] && owner == .object scope name &&
+      offset == objectFieldOffset index
+  | 125, .field (.object scope name) index (.object _ _) false, value :: receiver :: _,
+      .memory (.setObjectReferenceField owner offset) =>
+    value ∈ [.object, .nullObject] && receiver ∈ [.object, .nullObject] &&
+      owner == .object scope name && offset == objectFieldOffset index
+  | _, _, _, _ => false
+
 /-- Covered opcodes emit exactly their encoding. Elsewhere only a decided type test's word,
     a size constant or an exact runtime query may emit a scalar operation. -/
 def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
@@ -406,6 +464,7 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
   else if arrayEmission emitted then arrayMatches instruction stack emitted
   else if instruction.opcode == 20 && role ∈ [some .head, some .interior] then
     instruction.operand == .none && match emitted with | .nop => true | _ => false
+  else if objectFieldSite instruction emitted then objectFieldMatches instruction stack emitted
   else if scalarCovered instruction.opcode then scalarOpMatches instruction stack emitted
   else !scalarEmission emitted || match role, emitted with
     | _, .const32 bits => sizeConstant instruction bits ||
@@ -458,7 +517,7 @@ private def joinBytes (separator : List UInt8) : List (List UInt8) → List UInt
     method type parameter, `&` and `*` suffixes, and `<...>` for generic arguments. -/
 private def scalarTypeBytes : TypeExpr → Option (List UInt8)
   | .void => some (signatureBytes "System.Void")
-  | .atom _ name | .constructor _ name => some (signatureBytes name)
+  | .atom _ name | .constructor _ name | .object _ name => some (signatureBytes name)
   | type@(.aggregate ..) => signatureBytes <$> spanElementName type
   -- Enum names cannot contain generic owner arguments.
   | .enum identity _ => (splitBytes (signatureBytes identity) [58, 58])[1]?
@@ -632,7 +691,7 @@ private def dispatchScalar (context : NativeDispatchContext) (type : TypeExpr)
 /-- The kind of argument `index`, counting `this` as argument 0. -/
 private def argumentKind (raw : RawMethod)
     (context : NativeDispatchContext) (index : Nat) : Option ScalarKind :=
-  if raw.hasThis && index == 0 then some .reference
+  if raw.hasThis && index == 0 then some (if raw.objectReceiver then .object else .reference)
   else dispatchScalar context <$> raw.parameters[index - (if raw.hasThis then 1 else 0)]?
 
 /-- The kind an opcode with a fixed one-value push leaves on the stack. -/
@@ -650,13 +709,18 @@ private def pushedKind (raw : RawMethod)
     else if instruction.opcode ∈ [18, 65037] then
       let index ← localIndex instruction
       let type ← raw.locals[index]?
+      -- A class instance's slot is never addressed, so no byref stands in for a receiver.
+      if type matches .object .. then none else
       if (nativeDispatchStorage context type (some index)).isSome then none else
         return scalarType (.byref type)
     else if instruction.opcode ∈ [15, 65034] then
       match argumentOperation instruction with
       | some (.address index) =>
-        if raw.hasThis && index == 0 then return .reference
+        -- An object receiver has no home, so its address is never taken.
+        if raw.hasThis && index == 0 then
+          if raw.objectReceiver then none else return .reference
         let type ← raw.parameters[index - (if raw.hasThis then 1 else 0)]?
+        if type matches .object .. then none else
         if (nativeDispatchStorage context type).isSome then none else
           return scalarType (.byref type)
       | _ => none
@@ -727,7 +791,7 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     if instruction.operand == .none then return .nullObject :: stack else none
   if opcode ∈ [44, 45, 57, 58] then
     let value :: tail := stack | none
-    if numeric value || value ∈ [.reference, .nullObject] then return tail else none
+    if numeric value || value ∈ [.reference, .nullObject, .object] then return tail else none
   if compareBranch opcode then
     let right :: left :: tail := stack | none
     if compatibleBinary left right || referenceComparison opcode left right then return tail else none
@@ -779,19 +843,20 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
         if let some (type, read, _) := unsafeValueCall instruction then
         (if read then [] else [scalarType type]) ++ [.reference] else
       if unsafeReferenceHelper instruction == some .asRef then [.reference] else
+      if objectConstructorCall instruction then [.object] else
       if unsafePointerOffset instruction then [.word32, .reference] else
       if (opcode == 115 || opcode == 40) && (spanConstructor 115 site).isSome
       then [.word32, .reference] ++
         (if opcode == 40 then [scalarType (.byref site.declaringType)] else []) else
       site.parameterTypes.reverse.map scalarType ++
-        (if opcode != 115 && site.hasThis then [scalarType (.byref site.declaringType)] else [])
+        (if opcode != 115 && site.hasThis then [receiverKind site.declaringType] else [])
     let inputs := if opcode == 115 && role == some .interior then
         stack.map (fun kind => if kind == .nullObject then .other else kind)
       else stack
     let pops := expected.length
     if !callParametersMatch site || pops > stack.length || !((inputs.take pops).zip expected).all (fun (value, home) =>
         value == home || (value == .nullObject &&
-          (match home with | .array _ | .methodTable _ => true | _ => false))) ||
+          (match home with | .array _ | .methodTable _ | .object => true | _ => false))) ||
         site.returnsValue != (site.returnType != .void) then none else
       return (if opcode == 115 then [scalarType site.declaringType]
         else if site.returnsValue then [callResult site] else []) ++ stack.drop pops

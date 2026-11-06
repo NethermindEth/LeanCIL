@@ -52,12 +52,14 @@ def constrainedSiteWindow (resolve : TypeExpr → CallSite → Option Constraine
         | some ⟨_, opcode, .call site⟩ => opcode == constrainedCallOpcode site
         | _ => false) && nextLive == some true
   | some ⟨_, 111, .call site⟩ =>
-    if pc == 0 || targeted pc || !site.hasThis then false else
     match previous, emitted with
     | some ⟨_, 65046, .type receiver⟩, some emitted =>
+      if pc == 0 || targeted pc || !site.hasThis then false else
       match resolve receiver site with
       | some resolved => selectedImplementation methods receiver site resolved emitted
       | none => false
+    -- Unprefixed, only a receiver-checked call, whose target the managed-call rule binds.
+    | _, some (.callInstance ..) => site.hasThis
     | _, _ => false
   | some ⟨_, 40, .call site⟩ =>
     match previous with

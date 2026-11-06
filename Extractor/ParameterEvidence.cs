@@ -14,6 +14,7 @@ internal static class ParameterEvidence
             return $".{(type is ArrayType ? "methodTable" : "methodPointer")} " +
                 ManagedPointers.SignatureEvidence(signature);
         if (type is ByReferenceType or PointerType) return ".reference";
+        if (ObjectTypes.Is(type)) return ".object";
         if (type is ArrayType array && MetadataValidation.IsAggregate(array.ElementType, module))
             return $".aggregateArray {System.Text.Json.JsonSerializer.Serialize(LayoutEvidence.Identity(array.ElementType))} " +
                 layouts.Index(array.ElementType);
@@ -46,7 +47,7 @@ internal static class ParameterEvidence
     {
         var dispatch = NativeDispatch.For(method);
         var arguments = new List<string>();
-        if (method.HasThis) arguments.Add(".reference");
+        if (method.HasThis) arguments.Add(ObjectTypes.Is(method.DeclaringType) ? ".object" : ".reference");
         arguments.AddRange(method.Parameters.Select(parameter => InReferences.Parameter(parameter.ParameterType))
             .Select(type => dispatch.Kind(type) ?? Type(type, method.Module, layouts)));
         var locals = method.Body.Variables.Select(local => dispatch.Kind(local.VariableType, local.Index) ??

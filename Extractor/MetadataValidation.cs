@@ -387,7 +387,15 @@ internal static class MetadataValidation
                     "locals, returns, fields or external signatures.");
             if (byRef.ElementType is ByReferenceType)
                 throw new InvalidDataException("Unsupported nested managed reference");
+            if (ObjectTypes.Candidate(byRef.ElementType))
+                throw new InvalidDataException("Unsupported by-reference class instance: " + type.FullName +
+                    "\n  Object references live in roots without byte storage, so they have no address.");
             Type(byRef.ElementType, module, architecture: architecture);
+            return;
+        }
+        if (ObjectTypes.Candidate(type))
+        {
+            ObjectTypes.Validate(type);
             return;
         }
         type = EnumTypes.Storage(type);
@@ -546,10 +554,18 @@ internal static class MetadataValidation
             Reject(() => method.IsStatic == method.HasThis || method.ExplicitThis ||
                     method.CallingConvention != MethodCallingConvention.Default,
                 "Unsupported method metadata: calling convention or this parameter");
-            Reject(() => method.HasThis && !method.IsStatic &&
-                    !IsAggregate(MethodSpecialization.DeclaringType(method), module),
+            var receiver = MethodSpecialization.DeclaringType(method);
+            var classReceiver = method.HasThis && !method.IsStatic && !IsAggregate(receiver, module);
+            Reject(() => classReceiver && !ObjectTypes.Candidate(receiver),
                 "Unsupported class instance method\n" +
-                "  Instance methods are admitted on value types only; class instances are not modelled.");
+                "  Instance methods are admitted on value types and on classes of pinned assemblies only.");
+            Check(method, null, () =>
+            {
+                if (classReceiver && ObjectTypes.Candidate(receiver)) ObjectTypes.Validate(receiver);
+            }, named: true);
+            Reject(() => classReceiver && method.IsVirtual,
+                "Unsupported virtual instance method\n" +
+                "  Dispatch on class instances is not modelled (#477).");
             Reject(() => (method.ImplAttributes & MethodImplAttributes.Synchronized) != 0,
                 "Unsupported method metadata: synchronized method");
             Reject(() => method.HasGenericParameters,
@@ -624,7 +640,13 @@ internal static class MetadataValidation
             }
             void CallSite(Instruction instruction, MethodReference reference)
             {
-                if (instruction.OpCode.Code == Code.Callvirt ||
+                if (ObjectTypes.ReceiverCall(instruction))
+                {
+                    if (reference.Resolve() is { IsVirtual: true })
+                        throw Call("Unsupported virtual call", reference, method, instruction,
+                            "Dispatch on class instances is not modelled (#477).");
+                }
+                else if (instruction.OpCode.Code == Code.Callvirt ||
                     instruction is { OpCode.Code: Code.Call, Previous.OpCode.Code: Code.Constrained })
                 {
                     var resolved = ConstrainedCalls.Resolve(method, instruction, instructions, profile.Architecture);
@@ -685,10 +707,10 @@ internal static class MetadataValidation
                 if (reference.HasThis != callee.HasThis)
                     throw Call("Mismatched managed dependency", reference, method, instruction,
                         $"HasThis differs (reference {reference.HasThis}, definition {callee.HasThis})");
-                if (instruction.OpCode.Code == Code.Newobj &&
-                    (!callee.IsConstructor || !callee.HasThis || !IsAggregate(callee.DeclaringType, module)))
+                if (instruction.OpCode.Code == Code.Newobj && (!callee.IsConstructor || !callee.HasThis ||
+                        !IsAggregate(callee.DeclaringType, module) && !ObjectTypes.Candidate(callee.DeclaringType)))
                     throw Call("Unsupported newobj constructor", reference, method, instruction,
-                        "newobj must construct a reference-free struct declared in this assembly");
+                        "newobj must construct a reference-free struct or a class of a pinned assembly");
                 Enter(callee, reference, instruction);
             }
             void StaticLoad(Instruction instruction, FieldReference loaded)
@@ -774,6 +796,7 @@ internal static class MetadataValidation
                             !Spans.Analyze(method, profile).Constructors.ContainsKey(instruction))
                             throw Call("Unsupported in-place span constructor", reference, method, instruction,
                                 "The receiver must be a local address followed by at most three simple argument pushes.");
+                        if (instruction.OpCode.Code == Code.Call && RuntimeModels.ObjectConstructor(reference)) return;
                         if (InstructionTranslation.RuntimeModel(reference, profile) is null) CallSite(instruction, reference);
                     }))
                     skipped.Add(instruction);

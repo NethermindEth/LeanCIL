@@ -28,6 +28,48 @@ theorem Memory.Renamed.formValue {mapping : AllocationRenaming}
     | ok address => exact .ok rfl
 #print axioms Memory.Renamed.formValue
 
+/-- Object formation yields the mapped reference: related allocations keep their kind. -/
+theorem Memory.Renamed.formObject {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (reference : ManagedReference)
+    (bound : reference.Below mapping.sourceLimit) :
+    ResultRenamed mapping (fun source target => target = mapping.value source)
+      (formObject source reference) (formObject target (mapping.managedReference reference)) := by
+  cases reference with
+  | null => exact .ok rfl
+  | address reference =>
+    have allocations := related.allocations reference.allocation bound
+    simp only [CIL.Safety.formObject, AllocationRenaming.managedReference,
+      AllocationRenaming.reference, CIL.Safety.liveAllocation, checkedAt, Except.mapError,
+      Bind.bind, Except.bind]
+    generalize source.allocations reference.allocation = sourceAllocation at allocations ⊢
+    generalize target.allocations (mapping.image reference.allocation) = targetAllocation
+      at allocations ⊢
+    cases allocations with
+    | none => exact .error (.memory .missingAllocation (.address reference) 0)
+    | @some sourceDescriptor targetDescriptor descriptors =>
+      obtain ⟨kinds, -, live, -⟩ := descriptors
+      dsimp only
+      rw [← live]
+      cases sourceDescriptor.live with
+      | false => exact .error (.memory .expiredLifetime (.address reference) 0)
+      | true =>
+        simp only [ite_true, Pure.pure, Except.pure]
+        revert kinds
+        generalize sourceDescriptor.kind = sourceKind
+        generalize targetDescriptor.kind = targetKind
+        intro kinds
+        cases kinds with
+        | frame => exact .error .invalidState
+        | same =>
+          cases sourceKind
+          all_goals first
+            | exact .error .invalidState
+            | (by_cases origin : reference.offset = 0
+               · rw [if_pos origin, if_pos origin]; exact .ok rfl
+               · rw [if_neg origin, if_neg origin]; exact .error .invalidState)
+#print axioms Memory.Renamed.formObject
+
 /-- Snapshot reads preserve their scalar bits and initialization flags exactly. -/
 theorem Memory.Renamed.loadSnapshot {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -56,7 +98,7 @@ theorem Memory.Renamed.localAddress {mapping : AllocationRenaming}
   cases slot with
   | bytes kind reference => exact related.formValue (.address reference) bound
   | root _ | readOnlyRoot _ | opaque128 _ | span _ _ _ | array _ _
-  | methodPointer _ _ | methodTable _ _ => exact .error _
+  | methodPointer _ _ | methodTable _ _ | object _ => exact .error _
 #print axioms Memory.Renamed.localAddress
 
 /-- Reading a retained local preserves its value, including restricted references and snapshots. -/
@@ -77,6 +119,10 @@ theorem Memory.Renamed.loadLocal {mapping : AllocationRenaming}
     cases reference with
     | none => exact .error .invalidState
     | some reference => exact related.formValue reference (bound reference rfl)
+  | object reference =>
+    cases reference with
+    | none => exact .error .invalidState
+    | some reference => exact related.formObject reference (bound reference rfl)
   | readOnlyRoot reference =>
     exact (related.formValue reference bound).bind _ _ (fun _ _ _ => .ok rfl)
   | opaque128 contents =>

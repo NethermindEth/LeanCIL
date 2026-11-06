@@ -1,4 +1,5 @@
 import CIL.Extraction.Generics
+import CIL.Extraction.Scalars
 import CIL.Safety.SymbolicExecution
 
 namespace Tests.ExtractionGenerics
@@ -102,5 +103,59 @@ theorem argument_count_rejected :
       cil_managed_calls [caller, closed, raw, word, callCode]))
   decide +kernel
 #print axioms argument_count_rejected
+
+/-- A class whose instances have two fields, and its one-argument constructor. -/
+def tally : TypeExpr := .object "Test" "Tally"
+def tallyConstructor : RawMethod := { closed with
+  hasThis := true, objectReceiver := true, objectFieldCount := 2 }
+def construction : CallSite := {
+  declaringType := tally, name := ".ctor", target := .managed 0,
+  typeArguments := [], parameterCount := 1, hasThis := true, returnsValue := false }
+
+-- A construction allocates the call site's class at one slot per field of its constructor's class.
+theorem construction_owner_and_size :
+    constructedOwnerMatches construction tallyConstructor (.newObject 0 1 tally 16) ∧
+    ¬ constructedOwnerMatches construction tallyConstructor (.newObject 0 1 tally 8) ∧
+    ¬ constructedOwnerMatches construction tallyConstructor (.newObject 0 1 tally 24) ∧
+    ¬ constructedOwnerMatches construction tallyConstructor
+      (.newObject 0 1 (.object "Test" "Other") 16) ∧
+    ¬ constructedOwnerMatches { construction with declaringType := word }
+      { tallyConstructor with objectReceiver := false } (.newObject 0 1 word 16) ∧
+    ¬ constructedOwnerMatches construction { tallyConstructor with objectReceiver := false }
+      (.newObject 0 1 tally 16) := by decide +kernel
+#print axioms construction_owner_and_size
+
+/-- A non-virtual instance method of `Tally` taking one word, and a call site of it. -/
+def deposit : RawMethod := { closed with
+  owner := "Test::Tally", hasThis := true, objectReceiver := true, parameters := [word] }
+def depositSite : CallSite := {
+  declaringType := tally, name := "Deposit", target := .managed closed.token,
+  typeArguments := [], parameterCount := 1, hasThis := true, returnsValue := true,
+  returnType := word, parameterTypes := [word] }
+
+-- Only `callvirt` emits a receiver-checked call, counting the receiver, and only into a method
+-- whose receiver is an object; a `callvirt` that skips the null check as a plain call is rejected.
+theorem receiver_checked_calls :
+    validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true (.callInstance 0 2) ∧
+    ¬ validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true (.call 0 2) ∧
+    ¬ validateManagedCall [⟨[], deposit⟩] [] ⟨0, 40, .call depositSite⟩ true
+      (.callInstance 0 2) ∧
+    ¬ validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true
+      (.callInstance 0 1) ∧
+    ¬ validateManagedCall [⟨[], { deposit with objectReceiver := false }⟩] []
+      ⟨0, 111, .call depositSite⟩ true (.callInstance 0 2) := by decide +kernel
+#print axioms receiver_checked_calls
+
+/-- A method with a class instance local and parameter beside a scalar of each. -/
+def holder : RawMethod := { closed with
+  parameters := [tally, word], locals := [tally, word], code := [] }
+
+-- No byref to a class instance's slot exists, so none can stand in for an object receiver.
+theorem class_instance_slots_unaddressed :
+    scalarTransfer holder ⟨0, 18, .local 0⟩ [] = none ∧
+    scalarTransfer holder ⟨0, 18, .local 1⟩ [] ≠ none ∧
+    scalarTransfer holder ⟨0, 15, .argument 0⟩ [] = none ∧
+    scalarTransfer holder ⟨0, 15, .argument 1⟩ [] ≠ none := by decide +kernel
+#print axioms class_instance_slots_unaddressed
 
 end Tests.ExtractionGenerics

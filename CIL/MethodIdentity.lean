@@ -75,18 +75,32 @@ syntax (name := methodNamed) "method_named " str : term
   let some signature := stx[1].isStrLit? | throwUnsupportedSyntax
   return mkNatLit (← resolve signature)
 
-/-- Every `(pc, callee, argc)` call in a method body, reduced one cell at a time so the
-cost is linear in the body and the body is never normalized. -/
-def calls (method : Expr) : MetaM (Array (Nat × Nat × Nat)) := do
+/-- A call instruction found in a method body: `CIL.Op.call` or the receiver-checked
+    `CIL.Op.callInstance`, with its pc, callee index and argument count. -/
+structure CallAt where
+  pc : Nat
+  callee : Nat
+  argc : Nat
+  opcode : Name
+  deriving Inhabited
+
+/-- The instruction a call site holds, as syntax with `index` for its callee. -/
+def CallAt.instruction (site : CallAt) (index : Term) : MacroM Term :=
+  `($(mkCIdent site.opcode) $index $(quote site.argc))
+
+/-- Every call in a method body, reduced one cell at a time so the cost is linear in the body
+and the body is never normalized. -/
+def calls (method : Expr) : MetaM (Array CallAt) := do
   let mut cell := mkApp (mkConst ``CIL.Method.code) method
   let mut pc := 0
   let mut found := #[]
   repeat
     match (← whnf cell).getAppFnArgs with
     | (``List.cons, #[_, op, tail]) =>
-      if let (``CIL.Op.call, #[callee, argc]) := (← whnf op).getAppFnArgs then
-        if let (some callee, some argc) := (← (evalNat callee).run, ← (evalNat argc).run) then
-          found := found.push (pc, callee, argc)
+      if let (opcode, #[callee, argc]) := (← whnf op).getAppFnArgs then
+        if opcode == ``CIL.Op.call || opcode == ``CIL.Op.callInstance then
+          if let (some callee, some argc) := (← (evalNat callee).run, ← (evalNat argc).run) then
+            found := found.push { pc, callee, argc, opcode }
       cell := tail
       pc := pc + 1
     | _ => break
@@ -134,26 +148,25 @@ elab_rules : command
     emit index body signature (← liftTermElabM (resolve signature.getString))
     documentBinding doc index
 
-/-- The `(pc, argc)` of each call to `method` in `parent`, failing with what it does call. -/
+/-- Each call to `method` in `parent`, failing with what it does call. -/
 def callSites (parent : Term) (method : Nat) (callee : String) :
-    TermElabM (Array (Nat × Nat)) := do
+    TermElabM (Array CallAt) := do
   let sites ←
     calls (← instantiateMVars (← elabTermEnsuringType parent (some (mkConst ``CIL.Method))))
-  let found := sites.filterMap fun (pc, target, argc) =>
-    if target == method then some (pc, argc) else none
+  let found := sites.filter (·.callee == method)
   if found.isEmpty then
     let table ← strings (mkConst (← visible `Extracted.signatures))
-    let called := sites.toList.map (·.2.1) |>.eraseDups
+    let called := sites.toList.map (·.callee) |>.eraseDups
     throwError "{parent} does not call\n  {callee}\nit calls:\n\
       {"\n".intercalate (called.map fun i => s!"  [{i}] {table[i]?.getD "?"}")}"
   return found
 
 /-- The call site chosen by `[occurrence]`, or the only one. -/
 def callSite (parent : Term) (method : Nat) (callee : String) (occurrence : Option Nat) :
-    TermElabM (Nat × Nat) := do
+    TermElabM CallAt := do
   let sites ← callSites parent method callee
   let chosen ← choose m!"{parent} calls\n  {callee}\nat {sites.size} sites"
-    (sites.map fun (pc, _) => s!"pc {pc}") occurrence
+    (sites.map fun site => s!"pc {site.pc}") occurrence
   return sites[chosen]!
 
 /-- `bind_callee index body := "signature" from parent` binds as `bind_method` does and
@@ -172,9 +185,9 @@ elab_rules : command
       return (method, ← callSite parent method signature.getString (occurrence.map (·.getNat)))
     emit index body signature method
     documentBinding doc index
-    let (pc, argc) := site
-    elabAtPc pc (← `(@[cil_code] theorem $(mkIdent (index.getId ++ `call)) :
-      ($parent).code[$(quote pc)]? = some (CIL.Op.call $index $(quote argc)) := rfl))
+    let instruction ← liftMacroM (site.instruction index)
+    elabAtPc site.pc (← `(@[cil_code] theorem $(mkIdent (index.getId ++ `call)) :
+      ($parent).code[$(quote site.pc)]? = some $instruction := rfl))
 
 /-- `bind_callee index body := call argc from parent` binds the method `parent` calls with
 `argc` arguments, for helpers whose names are not stable; `[k]` selects one of several such
@@ -186,26 +199,27 @@ syntax (name := bindCalleeShape)
 elab_rules : command
   | `($[$doc:docComment]? bind_callee $index $body := call $argc from $parent
       $[[$occurrence]]?) => do
-    let (method, pc, signature) ← liftTermElabM do
+    let (site, signature) ← liftTermElabM do
       let sites ←
         calls (← instantiateMVars (← elabTermEnsuringType parent (some (mkConst ``CIL.Method))))
       let table ← strings (mkConst (← visible `Extracted.signatures))
-      let describe := fun ((pc, callee, count) : Nat × Nat × Nat) =>
-        s!"pc {pc}: {table[callee]?.getD "?"} with {count}"
-      let shaped := sites.filter (·.2.2 == argc.getNat)
+      let describe := fun (site : CallAt) =>
+        s!"pc {site.pc}: {table[site.callee]?.getD "?"} with {site.argc}"
+      let shaped := sites.filter (·.argc == argc.getNat)
       if shaped.isEmpty then
         throwError "{parent} makes no call with {argc.getNat} arguments; it calls:
 {"
 ".intercalate (sites.toList.map fun s => "  " ++ describe s)}"
       let chosen ← choose m!"{parent} makes {shaped.size} calls with {argc.getNat} arguments"
-        (shaped.map fun (pc, callee, _) => s!"pc {pc}: {table[callee]?.getD "?"}")
+        (shaped.map fun site => s!"pc {site.pc}: {table[site.callee]?.getD "?"}")
         (occurrence.map (·.getNat))
-      let (pc, callee, _) := shaped[chosen]!
-      return (callee, pc, table[callee]?.getD "")
-    emit index body (Syntax.mkStrLit signature) method
+      let site := shaped[chosen]!
+      return (site, table[site.callee]?.getD "")
+    emit index body (Syntax.mkStrLit signature) site.callee
     documentBinding doc index
-    elabAtPc pc (← `(@[cil_code] theorem $(mkIdent (index.getId ++ `call)) :
-      ($parent).code[$(quote pc)]? = some (CIL.Op.call $index $(quote argc.getNat)) := rfl))
+    let instruction ← liftMacroM (site.instruction index)
+    elabAtPc site.pc (← `(@[cil_code] theorem $(mkIdent (index.getId ++ `call)) :
+      ($parent).code[$(quote site.pc)]? = some $instruction := rfl))
 
 /-- The number of cells in a closed list, reduced one cell at a time without normalizing its
     elements. -/

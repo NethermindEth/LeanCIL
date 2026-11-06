@@ -1,0 +1,192 @@
+import Extracted
+import CIL.MethodIdentity
+import CIL.Safety.ObjectFraming
+import CIL.Safety.OutcomeContract
+
+open CIL.Safety
+open CIL (W64)
+namespace ExampleProof
+
+/-- The runtime type of `Examples.Account` instances. -/
+def accountType : CIL.Extraction.TypeExpr :=
+  .object "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" "Examples.Account"
+
+bind_method bumpBoth bumpBothBody :=
+  "System.Void Examples.Objects::BumpBoth(Examples.Account,Examples.Account,System.UInt64)"
+bind_callee bump bumpBody :=
+  "System.Void Examples.Objects::Bump(Examples.Account,System.UInt64)" from bumpBothBody [0]
+
+/-- `Balance` of the live account at `account` is a writable word holding some value, and is
+    located at the account's own reference, being its first field. -/
+def BalanceWord (memory : Memory) (account : Reference) : Prop :=
+  objectFieldAddress memory (.address account) accountType 0 = .ok account ∧
+    (∃ balance : W64, read memory account 8 1 = .ok (numberBytes balance.toNat 8)) ∧
+    access memory account 8 1 true = .ok ()
+
+/-- `Bump(account, amount)` adds `amount` to `Balance` and writes no other byte. -/
+def bumpContract : MethodContract (Reference × W64) where
+  args input := [.object (.address input.1), .scalar (.i64 input.2)]
+  pre input memory := BalanceWord memory input.1
+  footprint input := [(input.1, 8)]
+  post input initial final values := values = [] ∧
+    ∀ balance : W64, read initial input.1 8 1 = .ok (numberBytes balance.toNat 8) →
+      read final input.1 8 1 = .ok (numberBytes (balance + input.2).toNat 8)
+
+/-- Two reads of one word give the same value. -/
+theorem word_unique {memory : Memory} {reference : Reference} {left right : W64}
+    (leftRead : read memory reference 8 1 = .ok (numberBytes left.toNat 8))
+    (rightRead : read memory reference 8 1 = .ok (numberBytes right.toNat 8)) : left = right := by
+  have leftLoaded := load_word64_of_read leftRead
+  rw [load_word64_of_read rightRead] at leftLoaded
+  cases leftLoaded
+  rfl
+
+#print axioms word_unique
+
+/-- `Bump` meets its contract for every live account and amount. -/
+theorem bump_holds : bumpContract.Holds Extracted.program bump := by
+  rintro ⟨account, amount⟩ memory ⟨located, ⟨balance, loaded⟩, writable⟩
+  dsimp only [bumpContract] at *
+  obtain ⟨after, written, -, readback⟩ := store_word64 (balance + amount) writable
+  have formed := formObject_of_objectFieldAddress located
+  have value := load_word64_of_read loaded
+  refine ⟨CIL.executionBound Extracted.program bump, after, [], ?_,
+    Confined.write written (by simp [numberBytes]), [], rfl, rfl, ?_⟩
+  · cil_checked_steps [formed, located, value, written, accountType]
+  · intro old oldLoaded
+    rw [← word_unique loaded oldLoaded]
+    exact readback
+
+#print axioms bump_holds
+
+/-- `BumpBoth(first, second, amount)` adds `amount` to each account's `Balance`, twice to one
+    account passed as both, and writes no other byte. -/
+def bumpBothContract : MethodContract (Reference × Reference × W64) where
+  args input := [.object (.address input.1), .object (.address input.2.1),
+    .scalar (.i64 input.2.2)]
+  pre input memory := memory.WellFormed ∧ BalanceWord memory input.1 ∧
+    BalanceWord memory input.2.1
+  footprint input := [(input.1, 8), (input.2.1, 8)]
+  post input initial final values := values = [] ∧
+    ∀ first second : W64, read initial input.1 8 1 = .ok (numberBytes first.toNat 8) →
+      read initial input.2.1 8 1 = .ok (numberBytes second.toNat 8) →
+      if input.1 = input.2.1 then
+        read final input.1 8 1 = .ok (numberBytes (first + input.2.2 + input.2.2).toNat 8)
+      else
+        read final input.1 8 1 = .ok (numberBytes (first + input.2.2).toNat 8) ∧
+          read final input.2.1 8 1 = .ok (numberBytes (second + input.2.2).toNat 8)
+
+/-- After `Bump` on `first`, the balance of `second` is still a writable word: unchanged when
+    the accounts differ, the bumped value when they are the same. -/
+theorem balance_after_bump {memory middle : Memory} {first second : Reference} {amount : W64}
+    (formedMemory : memory.WellFormed) (firstWord : BalanceWord memory first)
+    (secondWord : BalanceWord memory second)
+    (framed : Confined [(first, 8)] memory middle)
+    (bumped : ∀ balance : W64, read memory first 8 1 = .ok (numberBytes balance.toNat 8) →
+      read middle first 8 1 = .ok (numberBytes (balance + amount).toNat 8)) :
+    BalanceWord middle second := by
+  obtain ⟨firstLocated, -, -⟩ := firstWord
+  obtain ⟨secondLocated, ⟨secondBalance, secondLoaded⟩, secondWritable⟩ := secondWord
+  have old :=
+    (formedMemory.allocations _ _ (objectFieldAddress_allocated secondLocated).choose_spec).1
+  refine ⟨objectFieldAddress_of_confined framed formedMemory secondLocated, ?_,
+    (framed.access_write second old 8 1).trans secondWritable⟩
+  by_cases same : first = second
+  · subst same
+    exact ⟨_, bumped _ secondLoaded⟩
+  · exact ⟨_, framed.objectField_read_of_ne old firstLocated secondLocated
+      (fun equal => same (ManagedReference.address.inj equal)) secondLoaded⟩
+
+#print axioms balance_after_bump
+
+/-- `BumpBoth` meets its contract given only the contract of `Bump`: each call is composed
+    through `bumpContract`, and the second balance is framed across the first call. -/
+theorem bumpBoth_holds (holds : bumpContract.Holds Extracted.program bump) :
+    bumpBothContract.Holds Extracted.program bumpBoth := by
+  rintro ⟨first, second, amount⟩ memory ⟨formedMemory, firstWord, secondWord⟩
+  dsimp only [bumpBothContract]
+  have firstFormed := formObject_of_objectFieldAddress firstWord.1
+  have secondFormed := formObject_of_objectFieldAddress secondWord.1
+  cil_contract_steps [holds, bumpContract, firstWord, firstFormed, secondFormed]
+  rename_i middle firstFramed values firstPost _
+  obtain ⟨rfl, firstBumped⟩ := firstPost
+  have secondMiddle := balance_after_bump formedMemory firstWord secondWord firstFramed
+    firstBumped
+  have secondFormedMiddle := formObject_of_objectFieldAddress secondMiddle.1
+  dsimp only [bumpContract]
+  cil_contract_steps [holds, bumpContract, secondMiddle, secondFormedMiddle]
+  rename_i final secondFramed values secondPost _
+  obtain ⟨rfl, secondBumped⟩ := secondPost
+  dsimp only [bumpContract] at firstFramed firstBumped secondFramed secondBumped ⊢
+  cil_contract_steps []
+  change Confined _ memory final ∧ bumpBothContract.Returns _ memory final []
+  obtain ⟨firstLocated, -, -⟩ := firstWord
+  obtain ⟨secondLocated, -, -⟩ := secondWord
+  have firstOld :=
+    (formedMemory.allocations _ _ (objectFieldAddress_allocated firstLocated).choose_spec).1
+  have secondOld :=
+    (formedMemory.allocations _ _ (objectFieldAddress_allocated secondLocated).choose_spec).1
+  refine ⟨(firstFramed.widen (by simp)).trans (secondFramed.widen (by simp)), [], rfl, rfl, ?_⟩
+  intro firstBalance secondBalance firstLoaded secondLoaded
+  dsimp only
+  split
+  · rename_i same
+    subst same
+    exact secondBumped _ (firstBumped _ firstLoaded)
+  · rename_i distinct
+    have apart : ManagedReference.address first ≠ .address second :=
+      fun equal => distinct (ManagedReference.address.inj equal)
+    refine ⟨secondFramed.objectField_read_of_ne (Nat.lt_of_lt_of_le firstOld firstFramed.grows)
+      (objectFieldAddress_of_confined firstFramed formedMemory secondLocated)
+      (objectFieldAddress_of_confined firstFramed formedMemory firstLocated) (Ne.symm apart)
+      (firstBumped _ firstLoaded), secondBumped _ ?_⟩
+    exact firstFramed.objectField_read_of_ne secondOld firstLocated secondLocated apart
+      secondLoaded
+
+#print axioms bumpBoth_holds
+
+/-- `BumpBoth` meets its contract, with `Bump` discharged by its own proof. -/
+theorem correctness : bumpBothContract.Holds Extracted.program bumpBoth :=
+  bumpBoth_holds bump_holds
+
+#print axioms correctness
+
+/-- `Bump` on a null account throws `NullReferenceException` at its field load. -/
+theorem bump_null_throws (memory : Memory) (amount : W64) :
+    ∃ fuel, invoke Extracted.program fuel bump [.object .null, .scalar (.i64 amount)] memory =
+      .error ⟨bump, 2, .thrown "System.NullReferenceException"⟩ := by
+  refine ⟨CIL.executionBound Extracted.program bump, ?_⟩
+  cil_checked_steps [objectFieldAddress]
+
+#print axioms bump_null_throws
+
+/-- `Bump` with a possibly null account: a null account throws `NullReferenceException`, and a
+    live one meets `bumpContract`. -/
+def bumpOutcome : OutcomeContract (ManagedReference × W64) where
+  args input := [.object input.1, .scalar (.i64 input.2)]
+  pre input memory := match input.1 with
+    | .null => True
+    | .address account => BalanceWord memory account
+  footprint input := match input.1 with
+    | .null => []
+    | .address account => [(account, 8)]
+  post input initial final values := values = [] ∧ match input.1 with
+    | .null => True
+    | .address account =>
+      ∀ balance : W64, read initial account 8 1 = .ok (numberBytes balance.toNat 8) →
+        read final account 8 1 = .ok (numberBytes (balance + input.2).toNat 8)
+  raises input _ := match input.1 with
+    | .null => some "System.NullReferenceException"
+    | .address _ => none
+
+/-- `Bump` meets its outcome contract: the runtime exception for null, the update otherwise. -/
+theorem bump_outcome : bumpOutcome.Holds Extracted.program bump := by
+  rintro ⟨account, amount⟩ memory permitted
+  cases account with
+  | null =>
+    obtain ⟨fuel, thrown⟩ := bump_null_throws memory amount
+    exact ⟨fuel, _, thrown, rfl⟩
+  | address account => exact bump_holds (account, amount) memory permitted
+
+#print axioms bump_outcome
+end ExampleProof

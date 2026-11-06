@@ -23,7 +23,7 @@ def localWidth : CIL.LocalKind → Nat
   | .vector128 => 16
   | .vector256 => 32
   | .vector512 => 64
-  | .reference | .span .. | .array _ | .methodPointer _ | .methodTable _ => 0
+  | .reference | .span .. | .array _ | .methodPointer _ | .methodTable _ | .object => 0
 
 /-- The contents of an opaque 128-bit vector local: fully known bits, or only the low 64
     bits known. -/
@@ -49,6 +49,8 @@ inductive LocalSlot where
   | array (element : CIL.ArrayElement) (value : Option ArrayView)
   | methodPointer (signature : CIL.ManagedSignature) (value : Option CIL.MethodPointer)
   | methodTable (signature : CIL.ManagedSignature) (value : Option CIL.MethodTable)
+  /-- An object reference root; `none` until an unmodeled local is first stored. -/
+  | object (value : Option ManagedReference)
   deriving DecidableEq, Repr
 
 /-- A method activation: its identity, local slots, the allocations it owns (expired by
@@ -130,13 +132,16 @@ def storeLocal (m : Memory) (slot : LocalSlot) (value : Value) :
   | .methodTable signature _, .methodTable table =>
     if table.signature != signature then .error .invalidState else
       return (.methodTable signature (some table), m)
-  | .methodTable signature _, .reference .null =>
+  | .methodTable signature _, .object .null =>
     return (.methodTable signature (some ⟨signature, none, none⟩), m)
+  | .object _, .object reference =>
+    let _ ← formObject m reference
+    return (.object (some reference), m)
   | .array element _, .array view =>
     if view.elementType != element then .error .invalidState else pure ()
     let _ ← checkedAt view.reference 0 (view.validate m)
     return (.array element (some view), m)
-  | .array element _, .reference .null =>
+  | .array element _, .object .null =>
     let _ ← checkedAt .null 0 ((ArrayView.mk .null 0 element).validate m)
     return (.array element (some ⟨.null, 0, element⟩), m)
   | .span width writable _, .bufferSpan view =>
@@ -172,7 +177,8 @@ def storeLocal (m : Memory) (slot : LocalSlot) (value : Value) :
     vector home with uninitialized bytes loads as a snapshot instead. -/
 def loadLocal (m : Memory) (slot : LocalSlot) : ExecutionResult Value := do
   match slot with
-  | .methodPointer _ none | .methodTable _ none => .error .invalidState
+  | .methodPointer _ none | .methodTable _ none | .object none => .error .invalidState
+  | .object (some reference) => formObject m reference
   | .methodPointer signature (some pointer) =>
     if pointer.signature != signature then .error .invalidState else return .methodPointer pointer
   | .methodTable signature (some table) =>
@@ -209,7 +215,8 @@ def loadLocal (m : Memory) (slot : LocalSlot) : ExecutionResult Value := do
     | .vector128 => return .scalar (.v128 (BitVec.ofNat 128 number))
     | .vector256 => return .scalar (.v256 (BitVec.ofNat 256 number))
     | .vector512 => return .scalar (.v512 (BitVec.ofNat 512 number))
-    | .reference | .span .. | .array _ | .methodPointer _ | .methodTable _ => .error .invalidState
+    | .reference | .span .. | .array _ | .methodPointer _ | .methodTable _ | .object =>
+      .error .invalidState
 
 /-- The address of a local's byte home. Root and opaque vector slots have no bytes and
     cannot be addressed. -/
@@ -222,6 +229,7 @@ def localAddress (m : Memory) (slot : LocalSlot) : ExecutionResult Value :=
   | .span .. => .error (.unsupported "Address of span local outside a validated receiver")
   | .methodPointer .. | .methodTable .. =>
     .error (.unsupported "Address of callable provenance root")
+  | .object _ => .error (.unsupported "Address of object reference local")
 
 /-- Initialized reads retain the original typed decoding, independently of the
     fallback used for partial aggregate/vector copies. -/
@@ -236,7 +244,7 @@ theorem loadLocal_of_read {m : Memory} {reference : Reference} {kind : CIL.Local
       | .vector128 => .ok (.scalar (.v128 (BitVec.ofNat 128 (byteNumber bytes))))
       | .vector256 => .ok (.scalar (.v256 (BitVec.ofNat 256 (byteNumber bytes))))
       | .vector512 => .ok (.scalar (.v512 (BitVec.ofNat 512 (byteNumber bytes))))
-      | .reference | .span .. | .array _ | .methodPointer _ | .methodTable _ =>
+      | .reference | .span .. | .array _ | .methodPointer _ | .methodTable _ | .object =>
         .error .invalidState) := by
   simp only [loadLocal, loaded, checkedAt, Except.mapError, Bind.bind, Except.bind,
     Pure.pure, Except.pure]
@@ -269,6 +277,10 @@ def makeLocal (activation : Nat) (kind : CIL.LocalKind) (initial : CIL.Value) (m
   | .reference => match initial with
     | .nullRef => .ok (.root (some .null), [], m)
     | .unmodeled => .ok (.root none, [], m)
+    | _ => .error .invalidState
+  | .object => match initial with
+    | .nullRef => .ok (.object (some .null), [], m)
+    | .unmodeled => .ok (.object none, [], m)
     | _ => .error .invalidState
   | _ => do
     let (reference, memory) ← allocateHome m activation (localWidth kind) (localAlignment kind)

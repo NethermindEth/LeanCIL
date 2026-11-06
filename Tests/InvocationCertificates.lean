@@ -43,8 +43,10 @@ def empty : Memory :=
   { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩, views := [], nextIdentity := 0 }
 
 /-- Memory with no allocation is well formed. -/
-theorem empty_formed : empty.WellFormed :=
-  ⟨fun _ _ absent => (nomatch absent), fun _ member => (nomatch member)⟩
+theorem empty_formed : empty.WellFormed where
+  allocations _ _ absent := nomatch absent
+  views _ member := nomatch member
+  slots _ _ _ held := nomatch held
 
 /-- With no static descriptor and no binding, the static world is valid. -/
 theorem empty_world : StaticWorldValid (programStaticDescriptors program) empty :=

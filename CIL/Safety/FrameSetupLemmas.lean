@@ -2,6 +2,7 @@ import CIL.Safety.FrameLemmas
 import CIL.Safety.MemoryBelow
 import CIL.Safety.SpanViewLemmas
 import CIL.Safety.ArrayViewLemmas
+import CIL.Safety.InstructionMemoryLemmas
 
 /-!
 # Frame setup effects
@@ -121,6 +122,8 @@ theorem allocateHome_preserves_caller_memory {alignment : Nat} (m result : Memor
 def LocalSlot.ReferencesValid (m : Memory) : LocalSlot → Prop
   | .methodPointer .. | .methodTable .. => True
   | .root none | .root (some .null) | .readOnlyRoot .null | .opaque128 _ => True
+  | .object none | .object (some .null) => True
+  | .object (some (.address r)) => formObject m (.address r) = .ok (.object (.address r))
   | .root (some (.address r)) | .readOnlyRoot (.address r) | .bytes _ r => form m r = .ok r
   | .span _ _ none => True
   | .span _ _ (some view) => view.validate m = .ok ()
@@ -156,6 +159,13 @@ theorem LocalSlot.ReferencesValid.preserve {m result : Memory} {slot : LocalSlot
       cases r with
       | null => exact True.intro
       | address r => exact ext.preserves_reference hm r r valid
+  | object value =>
+    cases value with
+    | none => exact True.intro
+    | some r =>
+      cases r with
+      | null => exact True.intro
+      | address r => exact formObject_preserved valid hm ext
 
 theorem allocateHome_reference_valid {alignment : Nat} (m result : Memory)
     (activation width : Nat) (r : Reference)
@@ -177,7 +187,7 @@ theorem allocateHome_reference_valid {alignment : Nat} (m result : Memory)
 /-- Byte homes are allocated after the entry watermark; roots do not own bytes. -/
 def LocalSlot.Above (watermark : Nat) : LocalSlot → Prop
   | .root _ | .readOnlyRoot _ | .opaque128 _ | .span .. | .array ..
-  | .methodPointer .. | .methodTable .. => True
+  | .methodPointer .. | .methodTable .. | .object _ => True
   | .bytes _ r => watermark ≤ r.allocation
 
 theorem write_staticBindings {m result : Memory} {r : Reference} {bytes : List (BitVec 8)}
@@ -259,6 +269,18 @@ theorem formValue_readOnlyRoot_valid {m : Memory} {r : ManagedReference} {value 
 
 #print axioms formValue_readOnlyRoot_valid
 
+/-- An object slot retains the reference whose object allocation was checked at storage. -/
+theorem formObject_slot_valid {m : Memory} {reference : ManagedReference} {value : Value}
+    (formed : formObject m reference = .ok value) :
+    (LocalSlot.object (some reference)).ReferencesValid m := by
+  have same := formObject_returns_input formed
+  subst value
+  cases reference with
+  | null => trivial
+  | address r => exact formed
+
+#print axioms formObject_slot_valid
+
 theorem storeLocal_preserves_reference_validity (m result : Memory) (slot final : LocalSlot)
     (value : Value) (hm : m.WellFormed) (valid : slot.ReferencesValid m)
     (h : storeLocal m slot value = .ok (final, result)) : final.ReferencesValid result := by
@@ -268,6 +290,7 @@ theorem storeLocal_preserves_reference_validity (m result : Memory) (slot final 
     | exact retained
     | solve | exact formValue_root_valid (by assumption)
     | solve | exact formValue_readOnlyRoot_valid (by assumption)
+    | solve | exact formObject_slot_valid (by assumption)
     | solve | exact checkedAt_ok (by assumption)
     | cases h
     | split at h
@@ -314,6 +337,7 @@ theorem FrameSetup.append {activation : Nat} {first middle last : Memory}
       | opaque128 _ | methodPointer _ _ | methodTable _ _ => trivial
       | span _ _ _ => trivial
       | array _ _ => trivial
+      | object _ => trivial
       | bytes _ _ => exact Nat.le_trans a.fresh.1.next bound
 
 theorem allocateHome_setup {alignment : Nat} (m result : Memory) (activation width : Nat)
@@ -365,6 +389,14 @@ theorem FrameSetup.store {activation : Nat} {before home result : Memory}
 
 theorem FrameSetup.root (activation : Nat) (m : Memory) (r : Option ManagedReference)
     (valid : (LocalSlot.root r).ReferencesValid m) : FrameSetup activation m m [.root r] [] :=
+  ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id,
+    fun _ slot member => by obtain rfl := List.mem_singleton.mp member; exact valid,
+    fun slot member => by obtain rfl := List.mem_singleton.mp member; trivial⟩
+
+/-- An object local owns no bytes and holds a reference checked against `m`. -/
+theorem FrameSetup.object (activation : Nat) (m : Memory) (r : Option ManagedReference)
+    (valid : (LocalSlot.object r).ReferencesValid m) :
+    FrameSetup activation m m [.object r] [] :=
   ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id,
     fun _ slot member => by obtain rfl := List.mem_singleton.mp member; exact valid,
     fun slot member => by obtain rfl := List.mem_singleton.mp member; trivial⟩
@@ -425,6 +457,10 @@ theorem makeLocal_setup (m result : Memory) (activation : Nat) (kind : CIL.Local
   · split at h
     · cases h; exact .root _ _ _ True.intro
     · cases h; exact .root _ _ _ True.intro
+    · cases h
+  · split at h
+    · cases h; exact .object _ _ _ True.intro
+    · cases h; exact .object _ _ _ True.intro
     · cases h
   all_goals
     cases ha : allocateHome m activation (localWidth kind) (localAlignment kind) <;>

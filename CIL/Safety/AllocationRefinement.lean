@@ -21,7 +21,8 @@ theorem ProgramRenaming.invoke_scalars
       .ok (final, values.map Value.scalar)) :
     ∃ targetFinal, invoke targetProgram fuel method arguments initial =
       .ok (targetFinal, values.map Value.scalar) ∧
-      MemoryBelow initial.nextIdentity final targetFinal :=
+      BytesBelow initial.nextIdentity final targetFinal ∧
+      SlotsAgreeBelow initial.nextIdentity final targetFinal :=
   invoke_rename_scalars StepRenaming.stepTransport programs formed statics success
 #print axioms ProgramRenaming.invoke_scalars
 
@@ -39,8 +40,9 @@ theorem ProgramRenaming.invoke_confined
     ∃ targetFinal, invoke targetProgram fuel method arguments initial =
       .ok (targetFinal, values.map Value.scalar) ∧
       MemoryBelow initial.nextIdentity initial targetFinal := by
-  obtain ⟨targetFinal, finished, related⟩ := programs.invoke_scalars formed statics success
-  exact ⟨targetFinal, finished, preserved.trans related⟩
+  obtain ⟨targetFinal, finished, bytes, agree⟩ :=
+    programs.invoke_scalars formed statics success
+  exact ⟨targetFinal, finished, agree.confined bytes formed (Nat.le_refl _) preserved⟩
 #print axioms ProgramRenaming.invoke_confined
 
 /-- Named exceptions survive actual paired execution, including nested calls and later allocation.
@@ -66,7 +68,8 @@ theorem MethodContract.Holds.of_allocationRenaming {Input Output : Type}
     (scalarResults : ∀ output, ∃ values : List CIL.Value,
       contract.results output = values.map Value.scalar)
     (stablePost : ∀ input initial sourceFinal targetFinal output,
-      contract.pre input initial → MemoryBelow initial.nextIdentity sourceFinal targetFinal →
+      contract.pre input initial → BytesBelow initial.nextIdentity sourceFinal targetFinal →
+      SlotsAgreeBelow initial.nextIdentity sourceFinal targetFinal →
       contract.post input initial sourceFinal output →
       contract.post input initial targetFinal output) :
     contract.Holds targetProgram method := by
@@ -76,11 +79,12 @@ theorem MethodContract.Holds.of_allocationRenaming {Input Output : Type}
   obtain ⟨scalars, scalarEncoding⟩ := scalarResults output
   rw [encoded, scalarEncoding] at success
   obtain ⟨formed, statics⟩ := ready input initial permitted
-  obtain ⟨targetFinal, targetSuccess, related⟩ := programs.invoke_scalars formed statics success
+  obtain ⟨targetFinal, targetSuccess, related, agree⟩ :=
+    programs.invoke_scalars formed statics success
   have targetGrowth :=
     (invoke_preserves_caller_allocations _ _ _ _ _ _ _ targetSuccess).next
   refine ⟨fuel, targetFinal, scalars.map Value.scalar, targetSuccess, ?_,
-    output, scalarEncoding.symm, stablePost _ _ _ _ _ permitted related post⟩
+    output, scalarEncoding.symm, stablePost _ _ _ _ _ permitted related agree post⟩
   exact ⟨targetGrowth,
     fun identity bound => (related.allocations identity bound).trans
       (confined.allocations identity bound),
@@ -89,7 +93,12 @@ theorem MethodContract.Holds.of_allocationRenaming {Input Output : Type}
     fun identity bound offset => (related.permissions identity bound offset true).trans
       (confined.writable identity bound offset),
     fun identity bound offset outside => (related.permissions identity bound offset false).trans
-      (confined.readable identity bound offset outside)⟩
+      (confined.readable identity bound offset outside),
+    fun identity bound offset outside => by
+      have kept := confined.slots identity bound offset outside
+      refine (agree identity bound offset fun reference held => ?_).trans kept
+      rw [kept] at held
+      exact formed.slots _ _ _ held⟩
 #print axioms MethodContract.Holds.of_allocationRenaming
 
 end CIL.Safety

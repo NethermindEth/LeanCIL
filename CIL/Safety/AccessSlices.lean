@@ -55,7 +55,7 @@ theorem Memory.WellFormed.access_bound {m : Memory} {r : Reference} {width align
     {writing : Bool} (formed : m.WellFormed) (h : access m r width alignment writing = .ok ()) :
     r.allocation < m.nextIdentity := by
   obtain ⟨_, ready⟩ := access_requirements h
-  exact (formed.1 _ _ ready.present).1
+  exact (formed.allocations _ _ ready.present).1
 
 /-- A nonempty subinterval of an admitted access is itself accessible with
     byte alignment. Formation, GC layout and API authority are retained. -/
@@ -65,7 +65,7 @@ theorem AccessRequirements.slice {m : Memory} {r : Reference} {width alignment :
     (start count : Nat) (nonempty : 0 < count) (within : start + count ≤ width) :
     AccessRequirements m { r with offset := r.offset + start } count 1 writing allocation := by
   have interior : r.offset + start < allocation.layout.size := by have := ready.extent; omega
-  have native := (wellFormed.1 _ _ ready.present).2.1
+  have native := (wellFormed.allocations _ _ ready.present).2.1
   refine ⟨ready.present, ready.live, ?_, ?_, ?_, ?_, ready.mutable, ?_⟩
   · simp [validPosition, interior, show r.offset + start < nativeLimit by omega]
   · intro slot member overlap
@@ -105,7 +105,7 @@ theorem AccessRequirements.add_slice {m : Memory} {r : Reference} {width alignme
     (ready.slice wellFormed (size * index) count nonempty within).access
   have bound : r.offset + size * index < 2^64 := by
     have extent := ready.extent
-    have native := (wellFormed.1 _ _ ready.present).2.1
+    have native := (wellFormed.allocations _ _ ready.present).2.1
     change allocation.layout.size < 2^64 at native
     omega
   simp only [add, source, Bind.bind, Except.bind, BitVec.ofNat_mul_ofNat,

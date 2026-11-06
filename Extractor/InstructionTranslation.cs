@@ -97,7 +97,9 @@ internal static class InstructionTranslation
             ConstrainedCalls.Resolve(m, i.Next, instructions, profile.Architecture);
             return ".nop";
         }
-        if (i.OpCode.Code == Code.Callvirt || i is { OpCode.Code: Code.Call, Previous.OpCode.Code: Code.Constrained })
+        var receiverCall = ObjectTypes.ReceiverCall(i);
+        if (!receiverCall &&
+            (i.OpCode.Code == Code.Callvirt || i is { OpCode.Code: Code.Call, Previous.OpCode.Code: Code.Constrained }))
         {
             var resolved = (constrainedTargets ?? new ConstrainedCalls.TargetIndex(methods.Keys))
                 .Find(ConstrainedCalls.Resolve(m, i, instructions, profile.Architecture));
@@ -132,6 +134,8 @@ internal static class InstructionTranslation
         {
             var f = (FieldReference)i.Operand;
             FieldDefinition resolved = f.Resolve() ?? throw new InvalidDataException("Unresolved field");
+            if (ObjectTypes.Candidate(f.DeclaringType))
+                return ObjectTypes.FieldOperation(f, resolved, store: op == "setField", address: op == "fieldAddr");
             Layout(f.DeclaringType);
             var actual = MetadataValidation.InstanceFieldOf(f);
             var fieldType = actual.Type;
@@ -159,17 +163,20 @@ internal static class InstructionTranslation
             SpanReferences.ValidateCopy(m, i, instructions);
             return ".nop";
         }
-        if (i.OpCode.Code is Code.Call or Code.Newobj)
+        if (i.OpCode.Code is Code.Call or Code.Newobj || receiverCall)
         {
             var r = (MethodReference)i.Operand;
+            if (i.OpCode.Code == Code.Call && RuntimeModels.ObjectConstructor(r)) return ".pop";
             if (RuntimeModel(r, profile) is string modeled) return modeled;
             MethodDefinition resolved = r.Resolve() ?? throw new InvalidDataException($"Unresolved method: {r.FullName}");
             int index = methods.GetValueOrDefault(resolved, -1);
             if (index > methodIndex || index >= 0 && TailCalls.IsCall(i))
             {
+                if (i.OpCode.Code == Code.Newobj && ObjectTypes.Candidate(resolved.DeclaringType))
+                    return ObjectTypes.Construction(resolved, index);
                 if (i.OpCode.Code == Code.Newobj)
                     return $".newAggregate {index} {resolved.Parameters.Count} {Layout(MethodSpecialization.DeclaringType(resolved))}";
-                var operation = TailCalls.IsCall(i) ? "tailCall" : "call";
+                var operation = TailCalls.IsCall(i) ? "tailCall" : receiverCall ? "callInstance" : "call";
                 return $".{operation} {index} {resolved.Parameters.Count + (resolved.HasThis ? 1 : 0)}";
             }
             throw new InvalidDataException($"Unsupported or unresolved call: {r.FullName} [{r.DeclaringType.Scope.Name}]");
@@ -184,6 +191,11 @@ internal static class InstructionTranslation
             Code.Cpblk => $".memory (.copyBlock {MemoryPrefixes.BlockAlignment(i)})",
             Code.Initblk => $".memory (.initBlock {MemoryPrefixes.BlockAlignment(i)})",
             Code.Starg or Code.Starg_S => Parameter("setLocal"),
+            Code.Ldarga or Code.Ldarga_S when m.HasThis && i.Operand == m.Body.ThisParameter &&
+                ObjectTypes.Candidate(m.DeclaringType) =>
+                throw new InvalidDataException("Unsupported address of a class instance receiver: " + m.FullName),
+            Code.Ldarga or Code.Ldarga_S when ObjectTypes.Candidate(((ParameterDefinition)i.Operand).ParameterType) =>
+                throw new InvalidDataException("Unsupported address of a class instance argument: " + m.FullName),
             Code.Ldarga or Code.Ldarga_S => Parameter(
                 !Spans.Is(((ParameterDefinition)i.Operand).ParameterType) ? "localAddr" : "local"),
             Code.Conv_I => ".convI8",
@@ -213,7 +225,7 @@ internal static class InstructionTranslation
             Code.Stind_I1 => ".storeScalar 1", Code.Stind_I2 => ".storeScalar 2", Code.Stind_I4 => ".storeScalar 4",
             Code.Conv_I1 => ".convI1", Code.Conv_I2 => ".convI2", Code.Conv_U2 => ".convU2",
             Code.Neg => ".neg",
-            Code.Ldnull => ".memory .nullRef",
+            Code.Ldnull => ".memory .nullObject",
             Code.Cgt => ".gt",
             Code.Bgt or Code.Bgt_S => $".bgt {Target()}",
             Code.Ble or Code.Ble_S => $".ble {Target()}",
@@ -245,6 +257,8 @@ internal static class InstructionTranslation
             Code.Ldarg or Code.Ldarg_S => Arg(MethodArguments.Index(m, (ParameterDefinition)i.Operand)),
             Code.Ldloc_0 => LocalOp("local", 0), Code.Ldloc_1 => LocalOp("local", 1), Code.Ldloc_2 => LocalOp("local", 2), Code.Ldloc_3 => LocalOp("local", 3),
             Code.Ldloc or Code.Ldloc_S => LocalOp("local", Local()),
+            Code.Ldloca or Code.Ldloca_S when ObjectTypes.Candidate(((VariableDefinition)i.Operand).VariableType) =>
+                throw new InvalidDataException("Unsupported address of a class instance local: " + m.FullName),
             Code.Ldloca or Code.Ldloca_S => LocalOp(
                 !Spans.Is(((VariableDefinition)i.Operand).VariableType) ? "localAddr" : "local", Local()),
             Code.Stloc_0 => LocalOp("setLocal", 0), Code.Stloc_1 => LocalOp("setLocal", 1), Code.Stloc_2 => LocalOp("setLocal", 2), Code.Stloc_3 => LocalOp("setLocal", 3),

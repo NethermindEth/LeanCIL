@@ -27,6 +27,16 @@ theorem write_allocations (m result : Memory) (r : Reference) (bytes : List (Bit
   · cases h
   · cases h; rfl
 
+/-- A checked write changes bytes only, never the references fields hold. -/
+theorem write_slots {m result : Memory} {r : Reference} {bytes : List (BitVec 8)}
+    {alignment : Nat} (h : write m r bytes alignment = .ok result) : result.slots = m.slots := by
+  unfold write at h
+  cases ha : access m r bytes.length alignment true <;>
+    simp only [ha, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  · cases h
+  · cases h; rfl
+#print axioms write_slots
+
 /-- A checked write records exactly its write view and allocates nothing. -/
 theorem write_views_nextIdentity {memory result : Memory} {reference : Reference}
     {bytes : List (BitVec 8)} {alignment : Nat}
