@@ -11,7 +11,8 @@ account. C# compiles both calls as `callvirt`, which checks the receiver for nul
 call; `Deposit` is not virtual, so the call has one target. The proof composes both calls through
 `depositContract` and frames the second account across the first call, as `BumpBoth` does for a
 static method. A null receiver throws `NullReferenceException` at the `callvirt` in the caller,
-before `Deposit` runs.
+before `Deposit` runs; a null second account throws at the second `callvirt` after the first
+deposit has returned.
 -/
 
 open CIL.Safety
@@ -173,4 +174,31 @@ theorem first_null_throws (memory : Memory) (second : Reference) (amount : W64)
   cil_checked_steps [secondFormed]
 
 #print axioms first_null_throws
+/-- A null `second` throws `NullReferenceException` at the second `callvirt`, pc 5, only after
+    `Deposit` has run on a live `first`: the invocation of `Deposit` that `DepositBoth` makes at
+    pc 2 returns with `amount` added to the first balance and no other byte written, and the run
+    then faults at pc 5. Memory after a throw is not observable, so the deposit is stated on
+    that call rather than on the faulting result. -/
+theorem second_null_throws (memory : Memory) (first : Reference) (amount : W64)
+    (firstWord : BalanceWord memory first) :
+    ∃ fuel middle,
+      invoke Extracted.program fuel deposit [.object (.address first), .scalar (.i64 amount)]
+          memory = .ok (middle, []) ∧
+        Confined [(first, 8)] memory middle ∧
+        (∀ balance : W64, read memory first 8 1 = .ok (numberBytes balance.toNat 8) →
+          read middle first 8 1 = .ok (numberBytes (balance + amount).toNat 8)) ∧
+        invoke Extracted.program (fuel + 6) depositBoth
+            [.object (.address first), .object .null, .scalar (.i64 amount)] memory =
+          .error ⟨depositBoth, 5, .thrown "System.NullReferenceException"⟩ := by
+  obtain ⟨childFuel, middle, values, invoked, framed, output, rfl, rfl, deposited⟩ :=
+    deposit_holds (first, amount) memory firstWord
+  dsimp only [depositContract] at invoked framed deposited
+  refine ⟨childFuel, middle, invoked, framed, deposited, ?_⟩
+  -- The caller reaches the call with three of its six units of fuel spent.
+  have called := invoke_mono _ childFuel 3 _ _ _ (.ok (middle, [])) trivial invoked
+  have firstFormed := formObject_of_objectFieldAddress firstWord.1
+  cil_checked_steps [firstFormed, called]
+
+#print axioms second_null_throws
+
 end ExampleProof
