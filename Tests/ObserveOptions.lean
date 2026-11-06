@@ -8,16 +8,18 @@ place it sets the option, instead of getting no output or Lean's unknown-option 
 -/
 
 /--
-warning: `trace.CIL.step` traces each step a LeanCIL tactic takes only in a file that imports `CIL.Observe`; add `import CIL.Observe` to this file
+warning: `trace.CIL.step` traces each step a LeanCIL tactic takes only in a file that imports
+`CIL.Observe`; add `import CIL.Observe` to this file
 -/
-#guard_msgs in
+#guard_msgs (whitespace := lax) in
 set_option trace.CIL.step true in
 example : True := trivial
 
 /--
-warning: `cil.diagnostics` records where each LeanCIL tactic failed or stopped only in a file that imports `CIL.Observe`; add `import CIL.Observe` to this file
+warning: `cil.diagnostics` records where each LeanCIL tactic failed or stopped only in a file
+that imports `CIL.Observe`; add `import CIL.Observe` to this file
 -/
-#guard_msgs in
+#guard_msgs (whitespace := lax) in
 example : True := by
   set_option cil.diagnostics true in
   trivial
