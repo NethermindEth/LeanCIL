@@ -254,13 +254,15 @@ as a reference can observe it, which is the reachability the collector maintains
 
 A non-virtual instance method of an admitted class is an entry whose receiver `this` is an
 object reference, not a byref: the raw method records the class receiver (`objectReceiver`),
-from which Lean derives the receiver's storage and scalar kind, and taking the receiver's
-address is rejected. Calls to such methods are not yet admitted, since C# emits `callvirt`
+from which Lean derives the receiver's storage and scalar kind. Lean rejects the address of
+the receiver and of any class-typed local or argument, so no byref can stand in for an object
+receiver. Calls to such methods are not yet admitted, since C# emits `callvirt`
 for them and its receiver null check is not modelled.
 
 Interface, generic, abstract, derived, explicit-layout and finalizable classes, byrefs to class
 instances, field addresses on class instances, reference-typed or non-integer class fields,
-virtual class methods, `callvirt` on a class and the address of a class receiver are each
+virtual class methods, `callvirt` on a class and the address of a class receiver, local or
+argument are each
 rejected by name during extraction.
 
 Object identity, runtime type and field positions are allocation metadata, which byte writes

@@ -1,4 +1,5 @@
 import CIL.Extraction.Generics
+import CIL.Extraction.Scalars
 import CIL.Safety.SymbolicExecution
 
 namespace Tests.ExtractionGenerics
@@ -123,5 +124,17 @@ theorem construction_owner_and_size :
     ¬ constructedOwnerMatches construction { tallyConstructor with objectReceiver := false }
       (.newObject 0 1 tally 16) := by decide +kernel
 #print axioms construction_owner_and_size
+
+/-- A method with a class instance local and parameter beside a scalar of each. -/
+def holder : RawMethod := { closed with
+  parameters := [tally, word], locals := [tally, word], code := [] }
+
+-- No byref to a class instance's slot exists, so none can stand in for an object receiver.
+theorem class_instance_slots_unaddressed :
+    scalarTransfer holder ⟨0, 18, .local 0⟩ [] = none ∧
+    scalarTransfer holder ⟨0, 18, .local 1⟩ [] ≠ none ∧
+    scalarTransfer holder ⟨0, 15, .argument 0⟩ [] = none ∧
+    scalarTransfer holder ⟨0, 15, .argument 1⟩ [] ≠ none := by decide +kernel
+#print axioms class_instance_slots_unaddressed
 
 end Tests.ExtractionGenerics

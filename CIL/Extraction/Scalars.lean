@@ -691,6 +691,8 @@ private def pushedKind (raw : RawMethod)
     else if instruction.opcode ∈ [18, 65037] then
       let index ← localIndex instruction
       let type ← raw.locals[index]?
+      -- A class instance's slot is never addressed, so no byref stands in for a receiver.
+      if type matches .object .. then none else
       if (nativeDispatchStorage context type (some index)).isSome then none else
         return scalarType (.byref type)
     else if instruction.opcode ∈ [15, 65034] then
@@ -700,6 +702,7 @@ private def pushedKind (raw : RawMethod)
         if raw.hasThis && index == 0 then
           if raw.objectReceiver then none else return .reference
         let type ← raw.parameters[index - (if raw.hasThis then 1 else 0)]?
+        if type matches .object .. then none else
         if (nativeDispatchStorage context type).isSome then none else
           return scalarType (.byref type)
       | _ => none
