@@ -48,12 +48,26 @@ void Verified(params string[] options)
 
 // Build a disposable copy so the demonstration tests an actual source edit and rebuild.
 var fixture = At("artifacts/CliDemoSource");
-Directory.CreateDirectory(fixture);
-foreach (var path in Directory.EnumerateFiles(At("Examples/Assembly")))
-    if (Path.GetExtension(path) is ".cs" or ".csproj")
-        File.Copy(path, Path.Combine(fixture, Path.GetFileName(path)), true);
-Run(["dotnet", "build", fixture, "-c", "Release"]);
 var demoAssembly = Path.Combine(fixture, "bin", "Examples.dll");
+var addition = "Add(ulong x, ulong y) => unchecked(x + y)";
+var subtraction = "Add(ulong x, ulong y) => unchecked(x - y)";
+// Copies keep their sources' old timestamps, so an output an aborted run built from an edit would
+// look current to MSBuild; staging starts from an empty directory instead.
+void StageFixture()
+{
+    if (Directory.Exists(fixture)) Directory.Delete(fixture, true);
+    Directory.CreateDirectory(fixture);
+    foreach (var path in Directory.EnumerateFiles(At("Examples/Assembly")))
+        if (Path.GetExtension(path) is ".cs" or ".csproj")
+            File.Copy(path, Path.Combine(fixture, Path.GetFileName(path)), true);
+    Run(["dotnet", "build", fixture, "-c", "Release"]);
+}
+// Leave what an aborted run leaves behind, so the proof below fails if restaging keeps its output.
+StageFixture();
+var editedMethods = Path.Combine(fixture, "Methods.cs");
+File.WriteAllText(editedMethods, File.ReadAllText(editedMethods).Replace(addition, subtraction));
+Run(["dotnet", "build", fixture, "-c", "Release"]);
+StageFixture();
 
 // Explicit proof selection becomes portable settings, separate from the generated report.
 Run([.. cli, "extract", demoAssembly, "Arithmetic::Add(ulong,ulong)", output]);
@@ -99,7 +113,7 @@ Console.WriteLine("PASS CLI kernel replay rejects unchecked theorems and transit
 // The unchanged addition contract must fail after changing + to - and rebuilding.
 var methodsPath = Path.Combine(fixture, "Methods.cs");
 var methods = File.ReadAllText(methodsPath);
-File.WriteAllText(methodsPath, methods.Replace("Add(ulong x, ulong y) => unchecked(x + y)", "Add(ulong x, ulong y) => unchecked(x - y)"));
+File.WriteAllText(methodsPath, methods.Replace(addition, subtraction));
 Run(["dotnet", "build", fixture, "-c", "Release"]);
 var stale = Execute([.. cli, "check", output]);
 if (stale.Code != 1 || !stale.Stderr.Contains("assembly has changed") || !stale.Stderr.Contains("Next: Rerun leancil extract"))
