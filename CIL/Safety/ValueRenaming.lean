@@ -26,11 +26,6 @@ def Value.Below (limit : Nat) : Value → Prop
 
 namespace AllocationRenaming
 
-/-- Rename a managed reference, preserving null exactly. -/
-def managedReference (mapping : AllocationRenaming) : ManagedReference → ManagedReference
-  | .null => .null
-  | .address reference => .address (mapping.reference reference)
-
 /-- Rename the backing allocation of a span without changing its extent or mutability. -/
 def spanView (mapping : AllocationRenaming) (view : SpanView) : SpanView :=
   { view with reference := mapping.managedReference view.reference }

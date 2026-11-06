@@ -66,7 +66,7 @@ theorem staticReference_preserves_wellFormed (descriptor : CIL.StaticDescriptor)
       obtain ⟨id, memory⟩ := allocated
       cases h
       have hw := allocate_preserves_wellFormed _ _ _ _ hm ha
-      refine { allocations := hw.allocations, views := ?_ }
+      refine { allocations := hw.allocations, views := ?_, slots := hw.slots }
       intro view hv
       simp only [List.mem_cons] at hv
       rcases hv with rfl | hv

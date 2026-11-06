@@ -16,11 +16,13 @@ theorem leaveFrame_preserves_memory_below (frame : Frame) (memory : Memory) (wat
     (owned : ∀ id ∈ frame.owned, watermark ≤ id) :
     MemoryBelow watermark memory (leaveFrame frame memory) := by
   have retained := expireAll_retained_fields frame.owned memory
-  refine ⟨leaveFrame_preserves_older_allocations frame memory watermark owned, ?_, ?_⟩
+  refine ⟨leaveFrame_preserves_older_allocations frame memory watermark owned, ?_, ?_, ?_⟩
   · intro id _ offset
     exact congrFun (congrFun retained.1 id) offset
   · intro id _ offset writing
     simp only [permitted, leaveFrame, retained.2.1]
+  · intro id _ offset
+    exact congrFun (congrFun (expireAll_slots frame.owned memory) id) offset
 
 #print axioms leaveFrame_preserves_memory_below
 

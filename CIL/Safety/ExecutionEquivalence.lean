@@ -126,7 +126,7 @@ theorem Memory.Equivalent.allocateArray {m n : Memory} (same : m.Equivalent n)
                if other == identity then ⟨0, true⟩ else target.cells other offset } :=
          ⟨equivalent.allocations, by simp only [equivalent.cells], equivalent.permissions,
            equivalent.nextIdentity, equivalent.staticBindings,
-               equivalent.stackLimit, equivalent.heapBudget⟩
+               equivalent.stackLimit, equivalent.heapBudget, equivalent.slots⟩
        exact initialized.prependView _)
     | unfold checkedAt
     | split
@@ -137,7 +137,7 @@ theorem Memory.Equivalent.withHeapBudget {m n : Memory} (same : m.Equivalent n)
     (budget : Nat) :
     Memory.Equivalent { m with heapBudget := budget } { n with heapBudget := budget } :=
   ⟨same.allocations, same.cells, same.permissions, same.nextIdentity, same.staticBindings,
-    same.stackLimit, rfl⟩
+    same.stackLimit, rfl, same.slots⟩
 #print axioms Memory.Equivalent.withHeapBudget
 
 /-- Object allocation charges equal budgets and grants the same fresh zeroed storage. -/
@@ -165,7 +165,7 @@ theorem Memory.Equivalent.allocateObject {m n : Memory} (same : m.Equivalent n)
                if other == identity then ⟨0, true⟩ else target.cells other offset } :=
          ⟨equivalent.allocations, by simp only [equivalent.cells], equivalent.permissions,
            equivalent.nextIdentity, equivalent.staticBindings,
-               equivalent.stackLimit, equivalent.heapBudget⟩
+               equivalent.stackLimit, equivalent.heapBudget, equivalent.slots⟩
        exact (initialized.prependView _).withHeapBudget _)
     | unfold checkedAt
     | split

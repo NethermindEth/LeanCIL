@@ -89,4 +89,13 @@ theorem expireAll_retained_fields (ids : List AllocationId) (m : Memory) :
   | nil => exact ⟨rfl, rfl, rfl, rfl⟩
   | cons id ids ih => exact ih (expire m id)
 
+/-- Expiring identities leaves every reference slot as it was. -/
+theorem expireAll_slots (ids : List AllocationId) (m : Memory) :
+    (ids.foldl expire m).slots = m.slots := by
+  induction ids generalizing m with
+  | nil => rfl
+  | cons id ids ih => exact ih (expire m id)
+
+#print axioms expireAll_slots
+
 end CIL.Safety

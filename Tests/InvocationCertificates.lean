@@ -46,6 +46,7 @@ def empty : Memory :=
 theorem empty_formed : empty.WellFormed where
   allocations _ _ absent := nomatch absent
   views _ member := nomatch member
+  slots _ _ _ held := nomatch held
 
 /-- With no static descriptor and no binding, the static world is valid. -/
 theorem empty_world : StaticWorldValid (programStaticDescriptors program) empty :=

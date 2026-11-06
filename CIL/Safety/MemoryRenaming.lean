@@ -26,11 +26,14 @@ structure Memory.Renamed (mapping : AllocationRenaming) (scopes : Nat → Nat �
     (fun binding => (binding.1, mapping.reference binding.2))
   stackLimit : target.stackLimit = source.stackLimit
   heapBudget : target.heapBudget = source.heapBudget
+  slots : ∀ identity, identity < mapping.sourceLimit → ∀ offset,
+    target.slots (mapping.image identity) offset =
+      mapping.managedReference (source.slots identity offset)
 
 /-- Identical caller memory is related by the initial identity map. -/
 theorem Memory.Renamed.refl (memory : Memory) (scopes : Nat → Nat → Prop) :
     Memory.Renamed (.identity memory.nextIdentity) scopes memory memory := by
-  refine ⟨rfl, rfl, ?_, fun _ _ _ => rfl, fun _ _ _ => rfl, ?_, rfl, rfl⟩
+  refine ⟨rfl, rfl, ?_, fun _ _ _ => rfl, fun _ _ _ => rfl, ?_, rfl, rfl, ?_⟩
   · intro identity _
     change Option.Rel (Allocation.Related scopes) (memory.allocations identity)
       (memory.allocations identity)
@@ -38,6 +41,10 @@ theorem Memory.Renamed.refl (memory : Memory) (scopes : Nat → Nat → Prop) :
     | none => exact .none
     | some allocation => exact .some (Allocation.Related.refl scopes allocation)
   · simp [AllocationRenaming.reference, AllocationRenaming.identity]
+  · intro identity _ offset
+    cases held : memory.slots identity offset <;>
+      simp [held, AllocationRenaming.managedReference, AllocationRenaming.reference,
+        AllocationRenaming.identity]
 #print axioms Memory.Renamed.refl
 
 /-- Reference formation preserves its result after mapping an allocated identity. -/
@@ -121,7 +128,7 @@ theorem Memory.Renamed.extendScopes {mapping : AllocationRenaming}
     (extension : ∀ left right, before left right → after left right) :
     Memory.Renamed mapping after source target := by
   refine ⟨related.sourceLimit, related.targetLimit, ?_, related.cells, related.permissions,
-    related.staticBindings, related.stackLimit, related.heapBudget⟩
+    related.staticBindings, related.stackLimit, related.heapBudget, related.slots⟩
   intro identity bound
   have lift : ∀ left right, Option.Rel (Allocation.Related before) left right →
       Option.Rel (Allocation.Related after) left right := by

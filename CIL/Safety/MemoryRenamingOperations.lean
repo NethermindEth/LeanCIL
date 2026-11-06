@@ -17,7 +17,7 @@ theorem Memory.Renamed.prependView {mapping : AllocationRenaming} {scopes : Nat 
     Memory.Renamed mapping scopes { source with views := view :: source.views }
       { target with views := mapping.view view :: target.views } := by
   refine ⟨related.sourceLimit, related.targetLimit, related.allocations, related.cells, ?_,
-    related.staticBindings, related.stackLimit, related.heapBudget⟩
+    related.staticBindings, related.stackLimit, related.heapBudget, related.slots⟩
   intro reference referenceBound writing
   change (viewContains (mapping.view view) (mapping.reference reference) &&
       (if writing then view.writable else view.readable) ||
@@ -36,7 +36,7 @@ theorem Memory.Renamed.prependPrivateView {mapping : AllocationRenaming}
       view.allocation ≠ mapping.image identity) :
     Memory.Renamed mapping scopes source { target with views := view :: target.views } := by
   refine ⟨related.sourceLimit, related.targetLimit, related.allocations, related.cells, ?_,
-    related.staticBindings, related.stackLimit, related.heapBudget⟩
+    related.staticBindings, related.stackLimit, related.heapBudget, related.slots⟩
   intro reference bound writing
   have excluded : viewContains view (mapping.reference reference) = false := by
     simp [viewContains, AllocationRenaming.reference, privateView reference.allocation bound]
@@ -53,7 +53,7 @@ theorem Memory.Renamed.expire {mapping : AllocationRenaming} {scopes : Nat → N
     Memory.Renamed mapping scopes (expire source identity)
       (expire target (mapping.image identity)) := by
   refine ⟨related.sourceLimit, related.targetLimit, ?_, related.cells, related.permissions,
-    related.staticBindings, related.stackLimit, related.heapBudget⟩
+    related.staticBindings, related.stackLimit, related.heapBudget, related.slots⟩
   intro other otherBound
   have allocations := related.allocations other otherBound
   have identities : mapping.image other = mapping.image identity ↔ other = identity :=
@@ -78,7 +78,7 @@ theorem Memory.Renamed.expirePrivate {mapping : AllocationRenaming} {scopes : Na
       mapping.image other ≠ identity) :
     Memory.Renamed mapping scopes source (CIL.Safety.expire target identity) := by
   refine ⟨related.sourceLimit, related.targetLimit, ?_, related.cells, related.permissions,
-    related.staticBindings, related.stackLimit, related.heapBudget⟩
+    related.staticBindings, related.stackLimit, related.heapBudget, related.slots⟩
   intro other bound
   simpa only [CIL.Safety.expire, privateHome other bound, ite_false]
     using related.allocations other bound
@@ -100,7 +100,7 @@ theorem Memory.Renamed.write {mapping : AllocationRenaming} {scopes : Nat → Na
     cases value
     apply ResultEquivalent.ok
     refine ⟨related.sourceLimit, related.targetLimit, related.allocations, ?_, ?_,
-      related.staticBindings, related.stackLimit, related.heapBudget⟩
+      related.staticBindings, related.stackLimit, related.heapBudget, related.slots⟩
     · intro identity identityBound offset
       have identities : mapping.image identity = mapping.image reference.allocation ↔
           identity = reference.allocation :=
@@ -132,7 +132,7 @@ theorem Memory.Renamed.writePrivate {mapping : AllocationRenaming} {scopes : Nat
     simp only [checked, Bind.bind, Except.bind, Pure.pure, Except.pure, Except.ok.injEq] at written
     subst after
     refine ⟨related.sourceLimit, related.targetLimit, related.allocations, ?_, ?_,
-      related.staticBindings, related.stackLimit, related.heapBudget⟩
+      related.staticBindings, related.stackLimit, related.heapBudget, related.slots⟩
     · intro identity bound offset
       simp only [privateHome identity bound, false_and, ite_false]
       exact related.cells identity bound offset

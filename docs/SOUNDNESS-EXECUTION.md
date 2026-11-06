@@ -71,7 +71,7 @@ fuel exhaustion, unsupported-operation, invalid-state, memory or arithmetic faul
 | Relation | Preconditions | Guarantee and limit |
 | --- | --- | --- |
 | `MethodEmbedsDeadLocals` | Trailing null/unmodeled reference or bounded span slots; matching retained local/kind lengths; no parameter homes; opaque slots stay retained | Same memory, results and named throws. No invocation-certificate transfer or general `ProgramRefines` composition. |
-| `AllocationRefinement` | Checked local renaming/initializers; ordinary frames without opaque/vector/parameter argument homes; well-formed memory and bounded statics | Scalar results and caller-prefix preservation; named throws require valid arguments. Fresh identities/counters and arbitrary reference-valued postconditions need not match. |
+| `AllocationRefinement` | Checked local renaming/initializers; ordinary frames without opaque/vector/parameter argument homes; well-formed memory and bounded statics | Scalar results and caller-prefix preservation of allocations, bytes and authority (`BytesBelow`); caller fields agree wherever the source holds null or a caller reference (`SlotsAgreeBelow`); named throws require valid arguments. Fresh identities/counters, caller fields holding fresh objects and arbitrary reference-valued postconditions need not match. |
 
 Allocation refinement proves the complete dispatcher simulation with injective retained-allocation
 and activation mappings. Extra private homes lie outside the mapped image. Contract transport also

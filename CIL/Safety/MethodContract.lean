@@ -32,8 +32,8 @@ def Outside (footprint : List (Reference × Nat)) (id offset : Nat) : Prop :=
   ∀ entry ∈ footprint,
     id ≠ entry.1.allocation ∨ offset < entry.1.offset ∨ entry.1.offset + entry.2 ≤ offset
 
-/-- What a call may change in memory that existed before it: bytes and read authority
-    inside `footprint`. Allocations and write authority are kept everywhere. -/
+/-- What a call may change in memory that existed before it: bytes, field references and read
+    authority inside `footprint`. Allocations and write authority are kept everywhere. -/
 structure Confined (footprint : List (Reference × Nat)) (before after : Memory) : Prop where
   grows : before.nextIdentity ≤ after.nextIdentity
   allocations : ∀ id, id < before.nextIdentity → after.allocations id = before.allocations id
@@ -43,10 +43,13 @@ structure Confined (footprint : List (Reference × Nat)) (before after : Memory)
     permitted after true ⟨id, offset⟩ = permitted before true ⟨id, offset⟩
   readable : ∀ id, id < before.nextIdentity → ∀ offset, Outside footprint id offset →
     permitted after false ⟨id, offset⟩ = permitted before false ⟨id, offset⟩
+  slots : ∀ id, id < before.nextIdentity → ∀ offset, Outside footprint id offset →
+    after.slots id offset = before.slots id offset
 
 theorem Confined.refl (footprint : List (Reference × Nat)) (m : Memory) :
     Confined footprint m m :=
-  ⟨Nat.le_refl _, fun _ _ => rfl, fun _ _ _ _ => rfl, fun _ _ _ => rfl, fun _ _ _ _ => rfl⟩
+  ⟨Nat.le_refl _, fun _ _ => rfl, fun _ _ _ _ => rfl, fun _ _ _ => rfl, fun _ _ _ _ => rfl,
+    fun _ _ _ _ => rfl⟩
 
 theorem Confined.trans {footprint : List (Reference × Nat)} {first middle last : Memory}
     (left : Confined footprint first middle) (right : Confined footprint middle last) :
@@ -60,7 +63,9 @@ theorem Confined.trans {footprint : List (Reference × Nat)} {first middle last 
     fun id bound offset =>
       (right.writable id (old bound) offset).trans (left.writable id bound offset),
     fun id bound offset outside => (right.readable id (old bound) offset outside).trans
-      (left.readable id bound offset outside)⟩
+      (left.readable id bound offset outside),
+    fun id bound offset outside => (right.slots id (old bound) offset outside).trans
+      (left.slots id bound offset outside)⟩
 
 /-- A contract with a smaller footprint also holds for any larger one. -/
 theorem Confined.widen {small large : List (Reference × Nat)} {before after : Memory}
@@ -71,7 +76,8 @@ theorem Confined.widen {small large : List (Reference × Nat)} {before after : M
   ⟨framed.grows, framed.allocations,
     fun id bound offset outside => framed.cells id bound offset (narrow outside),
     framed.writable,
-    fun id bound offset outside => framed.readable id bound offset (narrow outside)⟩
+    fun id bound offset outside => framed.readable id bound offset (narrow outside),
+    fun id bound offset outside => framed.slots id bound offset (narrow outside)⟩
 
 /-- Memory left untouched below a watermark covering every old allocation is confined to
     any footprint. -/
@@ -84,7 +90,8 @@ theorem Confined.ofMemoryBelow {footprint : List (Reference × Nat)} {before aft
   ⟨grows, fun id bound => preserved.allocations id (old bound),
     fun id bound offset _ => preserved.cells id (old bound) offset,
     fun id bound offset => preserved.permissions id (old bound) offset true,
-    fun id bound offset _ => preserved.permissions id (old bound) offset false⟩
+    fun id bound offset _ => preserved.permissions id (old bound) offset false,
+    fun id bound offset _ => preserved.slots id (old bound) offset⟩
 
 /-- A change confined to no storage keeps all memory that existed before it. -/
 theorem Confined.nil_memoryBelow {before after : Memory} (framed : Confined [] before after) :
@@ -94,7 +101,8 @@ theorem Confined.nil_memoryBelow {before after : Memory} (framed : Confined [] b
     fun id bound offset writing => by
       cases writing
       · exact framed.readable id bound offset fun _ member => nomatch member
-      · exact framed.writable id bound offset⟩
+      · exact framed.writable id bound offset,
+    fun id bound offset => framed.slots id bound offset (fun _ member => nomatch member)⟩
 #print axioms Confined.nil_memoryBelow
 
 /-- Interval `inner` lies wholly inside interval `outer` of the same allocation. -/
@@ -120,7 +128,8 @@ theorem Confined.widen_within {small large : List (Reference × Nat)} {before af
   ⟨framed.grows, framed.allocations,
     fun id bound offset outside => framed.cells id bound offset (narrow outside),
     framed.writable,
-    fun id bound offset outside => framed.readable id bound offset (narrow outside)⟩
+    fun id bound offset outside => framed.readable id bound offset (narrow outside),
+    fun id bound offset outside => framed.slots id bound offset (narrow outside)⟩
 
 /-- Footprint entries in identities allocated after `before`, such as a callee's locals,
     can be dropped. -/
@@ -135,7 +144,8 @@ theorem Confined.forget_fresh {fresh footprint : List (Reference × Nat)} {befor
   ⟨framed.grows, framed.allocations,
     fun id bound offset o => framed.cells id bound offset (outside bound o),
     framed.writable,
-    fun id bound offset o => framed.readable id bound offset (outside bound o)⟩
+    fun id bound offset o => framed.readable id bound offset (outside bound o),
+    fun id bound offset o => framed.slots id bound offset (outside bound o)⟩
 
 /-- A step that keeps all memory older than `first`, such as frame entry or teardown,
     keeps `Confined`. -/
@@ -150,7 +160,9 @@ theorem Confined.then_below {footprint : List (Reference × Nat)} {first middle 
     fun id bound offset =>
       (preserved.permissions id bound offset true).trans (framed.writable id bound offset),
     fun id bound offset outside => (preserved.permissions id bound offset false).trans
-      (framed.readable id bound offset outside)⟩
+      (framed.readable id bound offset outside),
+    fun id bound offset outside =>
+      (preserved.slots id bound offset).trans (framed.slots id bound offset outside)⟩
 
 /-- Leaving a frame that owns only identities allocated after `before`, such as the callee's
     own locals, keeps `Confined`. -/
@@ -176,7 +188,7 @@ theorem Confined.write {footprint : List (Reference × Nat)} {m result : Memory}
     rw [← writeViews_permitted m r bytes.length writing q]
     simp only [permitted, shape.1]
   refine ⟨Nat.le_of_eq shape.2.symm, fun id _ => by rw [write_allocations _ _ _ _ _ h],
-    ?_, ?_, ?_⟩
+    ?_, ?_, ?_, fun id _ offset _ => by rw [write_slots h]⟩
   · intro id _ offset outside
     exact write_outside _ _ _ _ _ _ _ h (outside _ member)
   · intro id _ offset
@@ -531,7 +543,10 @@ theorem Confined.across_frame {footprint inner : List (Reference × Nat)}
         (entryBelow.permissions id bound offset true)),
     fun id bound offset outside => (exitBelow.permissions id bound offset false).trans
       ((framed.readable id (old bound) offset (narrow bound outside)).trans
-        (entryBelow.permissions id bound offset false))⟩
+        (entryBelow.permissions id bound offset false)),
+    fun id bound offset outside => (exitBelow.slots id bound offset).trans
+      ((framed.slots id (old bound) offset (narrow bound outside)).trans
+        (entryBelow.slots id bound offset))⟩
 
 #print axioms Confined.across_frame
 

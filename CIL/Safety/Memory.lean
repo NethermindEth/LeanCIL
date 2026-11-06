@@ -91,6 +91,9 @@ structure Memory where
   /-- Bytes still available for object allocations; deployment must justify it, and each
       allocation consumes its size. Zero is the default, so existing memory grants none. -/
   heapBudget : Nat := 0
+  /-- The object reference each reference-typed field of a class instance holds, by allocation
+      and field byte offset. No field's bytes encode a reference; zeroed storage holds null. -/
+  slots : AllocationId → Nat → ManagedReference := fun _ _ => .null
 
 /-- Caller memory with no allocations, views or static bindings. It describes a caller that
     passes only scalars, so it grants no storage a method could read or write. -/
@@ -127,11 +130,15 @@ def Allocation.valid (a : Allocation) : Bool :=
     a.sentinels.all (fun offset => decide (offset ≤ a.layout.size)) &&
     a.layout.referenceSlots.all (fun slot => decide (slot.1 + slot.2 ≤ a.layout.size))
 
-/-- The invariants every reachable memory keeps: allocations and views name existing,
-    well-formed storage. -/
+/-- The invariants every reachable memory keeps: allocations, views and field references name
+    existing, well-formed storage. -/
 structure Memory.WellFormed (m : Memory) : Prop where
   /-- Every allocation has an identity below `nextIdentity` and is well formed. -/
   allocations : ∀ id a, m.allocations id = some a → id < m.nextIdentity ∧ a.WellFormed
+  /-- Every reference a field holds names an identity already issued, so no later allocation
+      can make a dangling reference live. -/
+  slots : ∀ id offset reference, m.slots id offset = .address reference →
+    reference.allocation < m.nextIdentity
   /-- Every view lies inside an existing allocation. -/
   views : ∀ view ∈ m.views, ∃ a, m.allocations view.allocation = some a ∧
     view.start + view.length ≤ a.layout.size
@@ -140,6 +147,7 @@ structure Memory.WellFormed (m : Memory) : Prop where
 theorem Memory.empty_wellFormed : Memory.empty.WellFormed where
   allocations _ _ absent := nomatch absent
   views _ member := nomatch member
+  slots _ _ _ held := nomatch held
 #print axioms Memory.empty_wellFormed
 
 /-- The allocation `id`, failing if it is missing or has expired. -/
@@ -302,6 +310,7 @@ def allocate (m : Memory) (a : Allocation) : Checked (AllocationId × Memory) :=
       allocations := fun id => if id = m.nextIdentity then some a else m.allocations id
       cells := fun id offset => if id = m.nextIdentity then { bits := 0, initialized := false }
         else m.cells id offset
+      slots := fun id offset => if id = m.nextIdentity then .null else m.slots id offset
       nextIdentity := m.nextIdentity + 1 })
 
 end CIL.Safety

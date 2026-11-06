@@ -320,10 +320,11 @@ theorem consecutive_calls_need_growth :
       views := []
       nextIdentity := 1 }
   have unchanged : MemoryBelow 1 first { first with nextIdentity := 0 } :=
-    ⟨fun _ _ => rfl, fun _ _ _ => rfl, fun _ _ _ _ => rfl⟩
+    ⟨fun _ _ => rfl, fun _ _ _ => rfl, fun _ _ _ _ => rfl, fun _ _ _ => rfl⟩
   have vacuous : MemoryBelow 0 { first with nextIdentity := 0 }
       { first with cells := fun _ _ => ⟨1, true⟩ } :=
     ⟨fun id bound => absurd bound (Nat.not_lt_zero id),
+      fun id bound => absurd bound (Nat.not_lt_zero id),
       fun id bound => absurd bound (Nat.not_lt_zero id),
       fun id bound => absurd bound (Nat.not_lt_zero id)⟩
   have rewritten := (compose first _ _ unchanged vacuous).cells 0 Nat.zero_lt_one 0

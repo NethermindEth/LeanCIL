@@ -286,7 +286,8 @@ def readOnly : Memory := {
   nextIdentity := 1 }
 
 theorem readOnly_formed : readOnly.WellFormed := by
-  refine { allocations := fun id allocation found => ?_, views := fun view member => ?_ }
+  refine { allocations := fun id allocation found => ?_, views := fun view member => ?_,
+            slots := fun _ _ _ held => nomatch held }
   · by_cases zero : id = 0
     · subst zero
       simp only [readOnly, ite_true, Option.some.injEq] at found
@@ -335,6 +336,7 @@ def shared : Memory := { readOnly with views := [⟨0, 0, 16, true, true⟩] }
 
 theorem shared_formed : shared.WellFormed where
   allocations := readOnly_formed.allocations
+  slots := readOnly_formed.slots
   views view member := by
     simp only [shared, List.mem_singleton] at member
     subst member

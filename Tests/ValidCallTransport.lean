@@ -40,7 +40,8 @@ abbrev payload : List (BitVec 8) := numberBytes 5 width
 /-- Well-formed whenever the only view lies inside the only allocation. -/
 theorem formed_of_view {views : List View} (inside : views = [⟨0, 0, size, true, true⟩] ∨
     views = [⟨0, 0, size, false, true⟩]) : ({ sample with views } : Memory).WellFormed := by
-  refine { allocations := fun id allocation found => ?_, views := fun view member => ?_ }
+  refine { allocations := fun id allocation found => ?_, views := fun view member => ?_,
+            slots := fun _ _ _ held => nomatch held }
   · by_cases zero : id = 0
     · subst zero
       simp only [sample, ite_true, Option.some.injEq] at found
@@ -127,7 +128,7 @@ theorem valid_after_confined {result : Memory}
 
 /-- Revoking read authority over the whole allocation is confined to it. -/
 theorem revoke_confined : Confined [(source.reference, size)] sample revoked := by
-  refine ⟨Nat.le_refl _, fun _ _ => rfl, fun _ _ _ _ => rfl, ?_, ?_⟩
+  refine ⟨Nat.le_refl _, fun _ _ => rfl, fun _ _ _ _ => rfl, ?_, ?_, fun _ _ _ _ => rfl⟩
   · intro id _ offset
     simp [permitted, viewContains, revoked, sample]
   · intro id old offset outside

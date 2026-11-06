@@ -197,7 +197,7 @@ theorem write_preserves_wellFormed (m result : Memory) (r : Reference)
     simp only [ha, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   · cases h
   · cases h
-    refine { allocations := hm.allocations, views := ?_ }
+    refine { allocations := hm.allocations, views := ?_, slots := hm.slots }
     intro view hv
     have included :
         view ∈ ⟨r.allocation, r.offset, bytes.length, true, false⟩ :: m.views := by
@@ -237,6 +237,7 @@ theorem expire_preserves_wellFormed (m : Memory) (id : AllocationId)
       change (if view.allocation = id then _ else _) = _
       simp only [ite_eq_left he, ha, Option.map_some]
     · exact ⟨a, by simp [expire, he, ha], bounds⟩
+  case slots => exact hm.slots
 
 theorem allocate_preserves_wellFormed (m result : Memory) (a : Allocation)
     (id : AllocationId) (hm : m.WellFormed) (h : allocate m a = .ok (id, result)) :
@@ -266,6 +267,27 @@ theorem allocate_preserves_wellFormed (m result : Memory) (a : Allocation)
           have bound := (hm.allocations view.allocation allocation ha).1
           exact Nat.ne_of_lt bound
         exact ⟨allocation, by simpa only [ne, ite_false] using ha, bounds⟩
+      case slots =>
+        intro other offset reference held
+        by_cases he : other = m.nextIdentity
+        · simp only [he, ite_true] at held
+          cases held
+        · simp only [he, ite_false] at held
+          exact Nat.lt_succ_of_lt (hm.slots other offset reference held)
+
+/-- Allocation leaves the references held by existing allocations unchanged. -/
+theorem allocate_preserves_slots (m result : Memory) (a : Allocation) (id : AllocationId)
+    (h : allocate m a = .ok (id, result)) (identity : AllocationId)
+    (old : identity < m.nextIdentity) (offset : Nat) :
+    result.slots identity offset = m.slots identity offset := by
+  simp only [allocate] at h
+  split at h
+  · cases h
+  · split at h
+    · cases h
+    · cases h
+      simp [Nat.ne_of_lt old]
+#print axioms allocate_preserves_slots
 
 theorem read_requires_initialization (m : Memory) (r : Reference) (width alignment : Nat)
     (bytes : List (BitVec 8)) (h : read m r width alignment = .ok bytes) :

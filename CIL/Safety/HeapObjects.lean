@@ -43,6 +43,8 @@ def objectMemory (memory : Memory) (type : RuntimeType) (size : Nat) : Memory :=
       else memory.allocations identity
     cells := fun identity offset =>
       if identity = memory.nextIdentity then ⟨0, true⟩ else memory.cells identity offset
+    slots := fun identity offset =>
+      if identity = memory.nextIdentity then .null else memory.slots identity offset
     views := ⟨memory.nextIdentity, 0, size, true, true⟩ :: memory.views
     nextIdentity := memory.nextIdentity + 1
     heapBudget := memory.heapBudget - size }

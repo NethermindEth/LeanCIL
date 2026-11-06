@@ -252,6 +252,13 @@ rechecks that exact target wherever `.pop` stands for a call. No frame owns
 an instance, so leaving the method that created it never expires it: an instance lives as long
 as a reference can observe it, which is the reachability the collector maintains.
 
+References held by fields are kept apart from bytes: `Memory.slots` records, by allocation and
+field offset, the object reference a field holds, and fresh storage holds null. No byte encodes
+a reference, so no byte access can forge or observe one. `Memory.WellFormed` requires every
+held reference to name an identity already issued, so a later allocation can never make a
+dangling reference live; `Confined`, `MemoryBelow`, `Memory.Equivalent` and `Memory.Renamed`
+each relate field references alongside bytes, the last through the allocation map.
+
 A non-virtual instance method of an admitted class is an entry whose receiver `this` is an
 object reference, not a byref: the raw method records the class receiver (`objectReceiver`),
 from which Lean derives the receiver's storage and scalar kind. Lean rejects the address of
