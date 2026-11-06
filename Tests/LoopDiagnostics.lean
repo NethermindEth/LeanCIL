@@ -829,6 +829,22 @@ example (memory : Memory) (value count sum : W32) (home : Reference) (current : 
   refine ?invariant
   cil_loop_call addTwo_holds sum
 
+/-- A user tactic whose expansion runs `cil_loop_call`, as `cil_loop_continue` runs
+    `cil_loop_steps`. -/
+macro "cil_call_add_two" : tactic => `(tactic| cil_loop_call addTwo_holds sum)
+
+-- An error a tactic's expansion raises is recorded for that tactic, although a failed expansion's
+-- state is rolled back.
+/-- "tactic":"cil_loop_call","unknown" -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (memory : Memory) (value count sum : W32) (home : Reference) (current : Memory)
+    (frame : LoopFrame [] memory current [.aggregate 8] [.bytes (.aggregate 8) home]
+      (knownLocals [some (.aggregate (layout.encode [.i32 count, .i32 sum]))])) :
+    LoopTerminates program 0 [.scalar (.i32 value)] (fun _ _ => True)
+      ⟨3, entry.frame memory home, [], current⟩ := by
+  cil_call_add_two
+
 -- A tactic that stops without an error, leaving a step for the proof, is recorded as stopped
 -- there, with the instruction it did not take.
 /-- "instruction":"CIL.Op.const32 2","method":1,"missing" -/

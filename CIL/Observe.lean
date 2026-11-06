@@ -474,22 +474,21 @@ structure TacticNode where
   /-- The tactic's info. -/
   info : TacticInfo
 
+/-- The LeanCIL tactic `stx` runs, by its own first atom, whether written in the source or built by
+    another tactic's expansion. -/
+def cilTactic? (stx : Syntax) : Option String :=
+  -- A tactic sequence starts with its first tactic's atom, but is not that tactic.
+  match stx[0] with
+  | .atom _ value =>
+    let value := String.ofList (value.toList.filter (· != ' '))
+    if value.startsWith "cil_" then some value else none
+  | _ => none
+
 /-- The LeanCIL tactic `stx` written in the source runs, by its first atom: none for
     syntax a tactic built. -/
 def userTactic? (stx : Syntax) : Option String :=
-  match stx.getHeadInfo, stx.getHead? with
-  | .original .., some (.atom _ value) =>
-    let value := String.ofList (value.toList.filter (· != ' '))
-    if value.startsWith "cil_" then some value else none
-  | _, _ => none
-
-/-- The LeanCIL tactic `stx` runs, by its first atom, whether written in the source or built by
-    another tactic's expansion. -/
-def cilTactic? (stx : Syntax) : Option String :=
-  match stx.getHead? with
-  | some (.atom _ value) =>
-    let value := String.ofList (value.toList.filter (· != ' '))
-    if value.startsWith "cil_" then some value else none
+  match stx.getHeadInfo with
+  | .original .. => cilTactic? stx
   | _ => none
 
 /-- The tactic nodes of an info tree, in elaboration order. -/
@@ -562,6 +561,23 @@ def logSteps (blocks tactics : Array TacticNode) : CommandElabM Unit := do
       logInfoAt block.info.stx m!"{stepTraceHeader}this proof states a run of a method but \
         applies no step lemma, so the trace shows no step of it"
 
+/-- The LeanCIL tactic nodes of a rerun of `node`, a macro, from the state before it ran, with
+    its expansion evaluated directly: Lean drops the nodes of a failed expansion, including the
+    goals the tactic inside it failed on, but keeps those of a tactic that fails on its own. -/
+def rerunExpansion (node : TacticNode) : IO (Array TacticNode) := do
+  let some goal := node.info.goalsBefore.head? | return #[]
+  let trees ← { node.context with mctx := node.info.mctxBefore }.runMetaM {} do
+    Term.TermElabM.run' do
+      modifyInfoState fun state => { state with enabled := true, trees := {} }
+      try
+        discard <| Tactic.run goal do
+          let some expanded ← liftMacroM (expandMacro? node.info.stx) | return
+          Tactic.evalTactic expanded
+      catch _ => pure ()
+      return (← getInfoState).trees
+  return trees.foldl (init := #[]) fun found tree =>
+    found ++ (tacticNodes tree (some node.context) true).raisers
+
 /-- The text of `message`. -/
 def messageText (message : Message) : IO String := message.data.toString
 
@@ -580,7 +596,16 @@ def logRecords (blocks tactics raisers : Array TacticNode) : CommandElabM Unit :
       (node.info.stx.getPos?.map (fileMap.toPosition · == error.pos)).getD false
     let named := raised.filter fun node =>
       (cilTactic? node.info.stx).any fun name => text.startsWith s!"{name}:"
-    let some node := named.back? <|> raised.back? | continue
+    let some outer := named.back? <|> raised.back? | continue
+    -- The LeanCIL tactic the error names, which may run inside the expansion of `outer`.
+    let name? := (text.splitOn ":")[0]?.filter fun name =>
+      name.startsWith "cil_" && !name.contains ' '
+    let inner ← match name?, named.isEmpty with
+      | some name, true => do
+        let rerun ← rerunExpansion outer
+        pure (rerun.filter (cilTactic? ·.info.stx == some name)).back?
+      | _, _ => pure none
+    let node := inner.getD outer
     let some goal := node.info.goalsAfter.head? | continue
     let tactic := (cilTactic? node.info.stx).getD "?"
     let line ← node.run <| goal.withContext do
@@ -628,20 +653,24 @@ def observer : Linter where
       | some point, some start, some stop => start ≤ point && point ≤ stop
       | _, _, _ => false
     let ownBlocks := blocks.filter inCommand
-    -- The nodes of the elaboration Lean kept, each once: the info trees may hold a node twice.
-    let ran (nodes : Array TacticNode) : Array TacticNode := Id.run do
-      let mut seen : Std.HashSet (Array MVarId × Option Nat) := {}
-      let mut live := #[]
+    -- Each node once, as the info trees may hold a node twice; with `live`, only the nodes of the
+    -- elaboration Lean kept. A failed tactic's state is rolled back but its error is not, so the
+    -- tactics an error may come from are not filtered by liveness.
+    let ran (nodes : Array TacticNode) (live : Bool := true) : Array TacticNode := Id.run do
+      let mut seen : Std.HashSet (Array MVarId × Option Nat × Name) := {}
+      let mut found := #[]
       for node in nodes.filter inCommand do
-        unless node.info.goalsBefore.all (kept ownBlocks) do continue
-        let key := (node.info.goalsBefore.toArray, node.info.stx.getPos?.map (·.byteIdx))
+        if live && !node.info.goalsBefore.all (kept ownBlocks) then continue
+        -- A macro and the tactic it expands to share goals and position, but not their kind.
+        let key := (node.info.goalsBefore.toArray, node.info.stx.getPos?.map (·.byteIdx),
+          node.info.stx.getKind)
         if seen.contains key then continue
         seen := seen.insert key
-        live := live.push node
-      return live
+        found := found.push node
+      return found
     let ownTactics := ran tactics
     if tracing then logSteps ownBlocks ownTactics
-    if recording then logRecords ownBlocks ownTactics (ran raisers)
+    if recording then logRecords ownBlocks ownTactics (ran raisers (live := false))
 
 initialize addLinter observer
 
