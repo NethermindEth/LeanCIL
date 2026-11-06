@@ -764,8 +764,11 @@ elab_rules : tactic
               let requestedFuel ← getNatValue? requested.getAppArgs[1]!
               -- An abstract program cannot reduce to reconcile different concrete budgets.
               let program := requested.getAppArgs[0]!
-              if program.isFVar && (← program.fvarId!.getDecl).value?.isNone &&
-                  provided.getAppArgs[0]! == program then
+              -- Only a local program has a declaration; a nested `←` would also run on a constant.
+              let abstract ← if program.isFVar then
+                  pure (← program.fvarId!.getDecl).value?.isNone
+                else pure false
+              if abstract && provided.getAppArgs[0]! == program then
                 if let some supplied := providedFuel then
                   if let some needed := requestedFuel then
                     if supplied != needed then

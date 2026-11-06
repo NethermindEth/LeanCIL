@@ -118,6 +118,15 @@ theorem registered_caller (memory : Safety.Memory) :
   simp_all [seven]
 #print axioms registered_caller
 
+/-- A child fact about a concrete program closes the call; the helper body, which returns 7,
+    is never stepped, so only the fact can give `value`. -/
+theorem checked_child_concrete (memory final : Safety.Memory) (value : W32)
+    (child : Safety.invoke boundProgram 2 1 [] memory = .ok (final, [.scalar (.i32 value)])) :
+    Safety.run boundProgram 3 0 0 [] ⟨0, [], [], [], 0⟩ [] memory =
+      .ok (final, [.scalar (.i32 value)]) := by
+  cil_checked_steps [child]
+#print axioms checked_child_concrete
+
 /-- A caller forwards two scalar arguments to a separately contracted helper. -/
 @[cil_code] def pairCaller : Method := {
   returnsValue := true, locals := [], code := [.arg 0, .arg 1, .call 1 2, .ret] }
