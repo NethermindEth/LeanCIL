@@ -335,7 +335,9 @@ def stateChanges (before after : Array (String × Expr)) : MetaM (Array MessageD
 def resultChanges (before : Array (String × Expr)) (result : Expr) :
     MetaM (Array MessageData) := do
   let result ← whnfR (← instantiateMVars result)
-  unless result.isAppOfArity ``Except.ok 3 do return #[m!"faults: {result}"]
+  if result.isAppOfArity ``Except.error 3 then return #[m!"faults: {result.appArg!}"]
+  -- A step stated with an unknown result, as an existential step does, changes nothing it names.
+  unless result.isAppOfArity ``Except.ok 3 do return #[]
   let action ← whnfR result.appArg!
   let args := action.getAppArgs
   if action.isAppOfArity `CIL.Safety.FrameAction.next 4 then
@@ -511,6 +513,12 @@ def spans (fileMap : FileMap) (stx : Syntax) (position : Position) : Bool :=
     start ≤ point && point ≤ stop
   | _, _ => false
 
+/-- Whether `goal` is declared in the final metavariable context of one of `blocks`. Lean may
+    elaborate a term more than once and keep the tactic nodes of each attempt, but it rolls back the
+    metavariables of each attempt it discards. -/
+def kept (blocks : Array TacticNode) (goal : MVarId) : Bool :=
+  blocks.any fun block => (block.info.mctxAfter.findDecl? goal).isSome
+
 /-- Log the steps of each LeanCIL tactic node, and then those of each tactic block that no LeanCIL
     tactic took. -/
 def logSteps (blocks tactics : Array TacticNode) : CommandElabM Unit := do
@@ -594,7 +602,15 @@ def observer : Linter where
       | some point, some start, some stop => start ≤ point && point ≤ stop
       | _, _, _ => false
     let ownBlocks := blocks.filter inCommand
-    let ownTactics := tactics.filter inCommand
+    let mut ran : Std.HashSet (Array MVarId × Option Nat) := {}
+    let mut ownTactics := #[]
+    for node in tactics.filter inCommand do
+      unless node.info.goalsBefore.all (kept ownBlocks) do continue
+      -- A node the info trees hold twice ran once.
+      let key := (node.info.goalsBefore.toArray, node.info.stx.getPos?.map (·.byteIdx))
+      if ran.contains key then continue
+      ran := ran.insert key
+      ownTactics := ownTactics.push node
     if tracing then logSteps ownBlocks ownTactics
     if recording then logRecords ownBlocks ownTactics
 
