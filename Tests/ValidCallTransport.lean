@@ -40,7 +40,7 @@ abbrev payload : List (BitVec 8) := numberBytes 5 width
 /-- Well-formed whenever the only view lies inside the only allocation. -/
 theorem formed_of_view {views : List View} (inside : views = [⟨0, 0, size, true, true⟩] ∨
     views = [⟨0, 0, size, false, true⟩]) : ({ sample with views } : Memory).WellFormed := by
-  refine ⟨fun id allocation found => ?_, fun view member => ?_⟩
+  refine { allocations := fun id allocation found => ?_, views := fun view member => ?_ }
   · by_cases zero : id = 0
     · subst zero
       simp only [sample, ite_true, Option.some.injEq] at found

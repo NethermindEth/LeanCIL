@@ -67,7 +67,7 @@ theorem AllocationExtension.preserves_reference {m result : Memory}
     (h : form m r = .ok formed) :
     form result r = .ok formed := by
   obtain ⟨a, present, _, _⟩ := formed_reference_live _ _ _ h
-  rw [form_allocation_congr _ _ _ (ext.lookup r.allocation (hm.1 _ _ present).1)]
+  rw [form_allocation_congr _ _ _ (ext.lookup r.allocation (hm.allocations _ _ present).1)]
   exact h
 
 theorem read_allocation_congr (m result : Memory) (r : Reference) (width alignment : Nat)

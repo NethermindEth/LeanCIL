@@ -197,7 +197,7 @@ theorem write_preserves_wellFormed (m result : Memory) (r : Reference)
     simp only [ha, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   · cases h
   · cases h
-    refine ⟨hm.1, ?_⟩
+    refine { allocations := hm.allocations, views := ?_ }
     intro view hv
     have included :
         view ∈ ⟨r.allocation, r.offset, bytes.length, true, false⟩ :: m.views := by
@@ -210,26 +210,28 @@ theorem write_preserves_wellFormed (m result : Memory) (r : Reference)
     rcases included with rfl | hv
     · obtain ⟨a, allocation, _, bounds⟩ := access_within_allocation _ _ _ _ _ ha
       exact ⟨a, allocation, bounds⟩
-    · exact hm.2 view hv
+    · exact hm.views view hv
 
 theorem expire_preserves_wellFormed (m : Memory) (id : AllocationId)
     (hm : m.WellFormed) : (expire m id).WellFormed := by
   constructor
-  · intro other a ha
+  case allocations =>
+    intro other a ha
     by_cases he : other = id
     · have mapped : (m.allocations other).map (fun a => { a with live := false }) = some a := by
         simpa only [expire, ite_eq_left he] using ha
       cases ho : m.allocations other
       · simp [ho] at mapped
       · rename_i old
-        have original := hm.1 other old ho
+        have original := hm.allocations other old ho
         simp only [ho, Option.map_some, Option.some.injEq] at mapped
         cases mapped
         exact original
     · simp only [expire, he, ite_false] at ha
-      exact hm.1 _ _ ha
-  · intro view hv
-    obtain ⟨a, ha, bounds⟩ := hm.2 view hv
+      exact hm.allocations _ _ ha
+  case views =>
+    intro view hv
+    obtain ⟨a, ha, bounds⟩ := hm.views view hv
     by_cases he : view.allocation = id
     · refine ⟨{ a with live := false }, ?_, bounds⟩
       change (if view.allocation = id then _ else _) = _
@@ -248,18 +250,20 @@ theorem allocate_preserves_wellFormed (m result : Memory) (a : Allocation)
     · cases h
     · cases h
       constructor
-      · intro other allocation ha
+      case allocations =>
+        intro other allocation ha
         by_cases he : other = m.nextIdentity
         · simp only [he, ite_true, Option.some.injEq] at ha
           cases ha
           exact ⟨he ▸ Nat.lt_succ_self _, hav⟩
         · simp only [he, ite_false] at ha
-          obtain ⟨bound, wf⟩ := hm.1 other allocation ha
+          obtain ⟨bound, wf⟩ := hm.allocations other allocation ha
           exact ⟨Nat.lt_trans bound (Nat.lt_succ_self _), wf⟩
-      · intro view hv
-        obtain ⟨allocation, ha, bounds⟩ := hm.2 view hv
+      case views =>
+        intro view hv
+        obtain ⟨allocation, ha, bounds⟩ := hm.views view hv
         have ne : view.allocation ≠ m.nextIdentity := by
-          have bound := (hm.1 view.allocation allocation ha).1
+          have bound := (hm.allocations view.allocation allocation ha).1
           exact Nat.ne_of_lt bound
         exact ⟨allocation, by simpa only [ne, ite_false] using ha, bounds⟩
 

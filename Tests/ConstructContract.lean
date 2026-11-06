@@ -286,7 +286,7 @@ def readOnly : Memory := {
   nextIdentity := 1 }
 
 theorem readOnly_formed : readOnly.WellFormed := by
-  refine ⟨fun id allocation found => ?_, fun view member => ?_⟩
+  refine { allocations := fun id allocation found => ?_, views := fun view member => ?_ }
   · by_cases zero : id = 0
     · subst zero
       simp only [readOnly, ite_true, Option.some.injEq] at found
@@ -333,11 +333,12 @@ def loggedContract : MethodContract LoggedInput Unit where
 /-- One writable allocation holding the struct at offset 0 and `log` at offset 8. -/
 def shared : Memory := { readOnly with views := [⟨0, 0, 16, true, true⟩] }
 
-theorem shared_formed : shared.WellFormed :=
-  ⟨readOnly_formed.1, fun view member => by
+theorem shared_formed : shared.WellFormed where
+  allocations := readOnly_formed.allocations
+  views view member := by
     simp only [shared, List.mem_singleton] at member
     subst member
-    exact ⟨_, rfl, by decide⟩⟩
+    exact ⟨_, rfl, by decide⟩
 
 /-- The write through `log` lands outside the footprint, so the contract is refuted by a concrete run. -/
 theorem stray_write_rejected : ¬ loggedContract.Holds loggedProgram 0 := by

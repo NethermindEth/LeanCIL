@@ -87,7 +87,8 @@ theorem balance_after_bump {memory middle : Memory} {first second : Reference} {
     BalanceWord middle second := by
   obtain ⟨firstLocated, -, -⟩ := firstWord
   obtain ⟨secondLocated, ⟨secondBalance, secondLoaded⟩, secondWritable⟩ := secondWord
-  have old := (formedMemory.1 _ _ (objectFieldAddress_allocated secondLocated).choose_spec).1
+  have old :=
+    (formedMemory.allocations _ _ (objectFieldAddress_allocated secondLocated).choose_spec).1
   refine ⟨objectFieldAddress_of_confined framed formedMemory secondLocated, ?_,
     (framed.access_write second old 8 1).trans secondWritable⟩
   by_cases same : first = second
@@ -121,9 +122,10 @@ theorem bumpBoth_holds (holds : bumpContract.Holds Extracted.program bump) :
   change Confined _ memory final ∧ bumpBothContract.Returns _ memory final []
   obtain ⟨firstLocated, -, -⟩ := firstWord
   obtain ⟨secondLocated, -, -⟩ := secondWord
-  have firstOld := (formedMemory.1 _ _ (objectFieldAddress_allocated firstLocated).choose_spec).1
+  have firstOld :=
+    (formedMemory.allocations _ _ (objectFieldAddress_allocated firstLocated).choose_spec).1
   have secondOld :=
-    (formedMemory.1 _ _ (objectFieldAddress_allocated secondLocated).choose_spec).1
+    (formedMemory.allocations _ _ (objectFieldAddress_allocated secondLocated).choose_spec).1
   refine ⟨(firstFramed.widen (by simp)).trans (secondFramed.widen (by simp)), [], rfl, rfl, ?_⟩
   intro firstBalance secondBalance firstLoaded secondLoaded
   dsimp only

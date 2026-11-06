@@ -156,7 +156,7 @@ theorem formObject_preserved {m result : Memory} {reference : ManagedReference}
       simp [formObject, liveAllocation, found, checkedAt, Except.mapError, Bind.bind,
         Except.bind] at formed
     | some allocation =>
-      have kept := ext.lookup r.allocation (wellFormed.1 _ _ found).1
+      have kept := ext.lookup r.allocation (wellFormed.allocations _ _ found).1
       rw [found] at kept
       simpa only [formObject, liveAllocation, kept, found] using formed
 

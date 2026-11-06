@@ -127,16 +127,19 @@ def Allocation.valid (a : Allocation) : Bool :=
     a.sentinels.all (fun offset => decide (offset ≤ a.layout.size)) &&
     a.layout.referenceSlots.all (fun slot => decide (slot.1 + slot.2 ≤ a.layout.size))
 
-/-- Every allocation has an identity below `nextIdentity` and is well formed, and every
-    view lies inside an existing allocation. -/
-def Memory.WellFormed (m : Memory) : Prop :=
-  (∀ id a, m.allocations id = some a → id < m.nextIdentity ∧ a.WellFormed) ∧
-  ∀ view ∈ m.views, ∃ a, m.allocations view.allocation = some a ∧
+/-- The invariants every reachable memory keeps: allocations and views name existing,
+    well-formed storage. -/
+structure Memory.WellFormed (m : Memory) : Prop where
+  /-- Every allocation has an identity below `nextIdentity` and is well formed. -/
+  allocations : ∀ id a, m.allocations id = some a → id < m.nextIdentity ∧ a.WellFormed
+  /-- Every view lies inside an existing allocation. -/
+  views : ∀ view ∈ m.views, ∃ a, m.allocations view.allocation = some a ∧
     view.start + view.length ≤ a.layout.size
 
 /-- Memory with no allocations or views is well formed. -/
-theorem Memory.empty_wellFormed : Memory.empty.WellFormed :=
-  ⟨fun _ _ absent => (nomatch absent), fun _ member => nomatch member⟩
+theorem Memory.empty_wellFormed : Memory.empty.WellFormed where
+  allocations _ _ absent := nomatch absent
+  views _ member := nomatch member
 #print axioms Memory.empty_wellFormed
 
 /-- The allocation `id`, failing if it is missing or has expired. -/

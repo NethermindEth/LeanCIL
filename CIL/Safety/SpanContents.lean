@@ -34,7 +34,7 @@ theorem SpanView.allocation_below {view : SpanView} {memory : Memory} {base : Re
       | contradiction
       | split at valid
       | simp_all [Bind.bind, Except.bind, Pure.pure, Except.pure]
-  | some allocation => exact (wellFormed.1 _ _ present).1
+  | some allocation => exact (wellFormed.allocations _ _ present).1
 #print axioms SpanView.allocation_below
 
 /-- Validity of a view of caller memory `anchor` is unchanged by anything that keeps the memory
@@ -169,7 +169,7 @@ theorem after_below {before after : Memory} {values : List (BitVec (8 * width))}
     | cons value rest =>
       have formed := access_reference_valid _ _ _ _ _ (read_access (shape 0 value rfl))
       obtain ⟨allocation, present, _, _⟩ := formed_reference_live _ _ _ formed
-      exact shape.after_below kept (by simpa using (wellFormed.1 _ _ present).1)
+      exact shape.after_below kept (by simpa using (wellFormed.allocations _ _ present).1)
 
 /-- Contents of a view valid in caller memory `anchor` survive anything that keeps the memory
     below `anchor`'s watermark, so contents a callee leaves in caller storage reach the caller's

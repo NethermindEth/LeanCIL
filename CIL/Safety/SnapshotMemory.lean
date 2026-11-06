@@ -53,7 +53,7 @@ theorem writeSnapshot_preserves_wellFormed (m result : Memory) (r : Reference)
   · cases h
   · cases h
     have preserved := write_preserves_wellFormed _ _ _ _ _ hm hw
-    exact ⟨preserved.1, preserved.2⟩
+    exact { allocations := preserved.allocations, views := preserved.views }
 
 theorem writeSnapshot_extends_allocations (m result : Memory) (r : Reference)
     (bytes : List (BitVec 8 × Bool)) (alignment : Nat)

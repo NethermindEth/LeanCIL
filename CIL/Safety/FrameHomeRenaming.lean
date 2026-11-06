@@ -19,7 +19,7 @@ theorem StaticRegistryValid.bounded {memory : Memory} (registry : StaticRegistry
     ∀ binding ∈ memory.staticBindings, binding.2.allocation < memory.nextIdentity := by
   intro binding member
   obtain ⟨allocation, present, _⟩ := registry.2 binding member
-  exact (formed.1 _ _ present).1
+  exact (formed.allocations _ _ present).1
 #print axioms StaticRegistryValid.bounded
 
 /-- Related activation homes allocate corresponding fresh storage and writable views. -/

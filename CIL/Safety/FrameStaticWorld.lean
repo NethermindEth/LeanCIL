@@ -21,7 +21,7 @@ theorem FrameSetup.staticWorld {activation : Nat} {before after : Memory}
   apply PreservesImmutable.world (m := before) (result := after) ?_ descriptors world
     setup.registry
   intro id a present _
-  have old := (hm.1 id a present).1
+  have old := (hm.allocations id a present).1
   exact ⟨(setup.below.allocations id old).trans present, setup.below.cells id old,
     fun offset => setup.below.permissions id old offset false⟩
 

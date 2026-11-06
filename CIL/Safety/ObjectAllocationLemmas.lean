@@ -53,12 +53,12 @@ theorem ObjectAllocationEffect.wellFormed {memory result : Memory} {object : Ref
   cases effect with
   | fresh _ allocation =>
     have ready := allocate_preserves_wellFormed _ _ _ _ valid allocation
-    refine ⟨ready.1, ?_⟩
+    refine { allocations := ready.allocations, views := ?_ }
     intro permission member
     rcases List.mem_cons.mp member with rfl | member
     · have found := allocation_lookup _ _ _ _ allocation
       exact ⟨_, found, by simp⟩
-    · exact ready.2 permission member
+    · exact ready.views permission member
 
 #print axioms ObjectAllocationEffect.wellFormed
 
@@ -112,7 +112,7 @@ theorem allocateObject_ok {memory : Memory} (formed : memory.WellFormed) (type :
   have unused : memory.allocations memory.nextIdentity = none := by
     cases found : memory.allocations memory.nextIdentity with
     | none => rfl
-    | some allocation => exact absurd (formed.1 _ _ found).1 (Nat.lt_irrefl _)
+    | some allocation => exact absurd (formed.allocations _ _ found).1 (Nat.lt_irrefl _)
   have aligned : 0 < objectAlignment := by decide
   simp only [allocateObject, allocate, Allocation.valid, objectMemory, arrayMemory, unused,
     bounded, aligned, Nat.not_lt.mpr affordable, checkedAt, Except.mapError, Bind.bind,

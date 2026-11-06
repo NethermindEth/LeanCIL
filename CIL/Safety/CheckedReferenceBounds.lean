@@ -18,7 +18,7 @@ theorem Memory.WellFormed.form_below {memory : Memory} (formed : memory.WellForm
   cases found : liveAllocation memory reference.allocation with
   | error fault => simp only [found, Bind.bind, Except.bind] at success; cases success
   | ok allocation =>
-    exact (formed.1 _ _ (liveAllocation_ok _ _ _ found).1).1
+    exact (formed.allocations _ _ (liveAllocation_ok _ _ _ found).1).1
 #print axioms Memory.WellFormed.form_below
 
 /-- Extracting a non-null address preserves its prefix bound. -/
@@ -64,13 +64,13 @@ theorem Memory.WellFormed.span_below {memory : Memory} (formed : memory.WellForm
       | contradiction
       | solve |
           have found : liveAllocation memory address.allocation = .ok _ := by assumption
-          exact (formed.1 _ _ (liveAllocation_ok _ _ _ found).1).1
+          exact (formed.allocations _ _ (liveAllocation_ok _ _ _ found).1).1
       | cases valid
       | split at valid
       | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at valid
     all_goals try simp_all only [ManagedReference.address.injEq]
     all_goals subst_vars
-    all_goals exact (formed.1 _ _ (liveAllocation_ok _ _ _ (by assumption)).1).1
+    all_goals exact (formed.allocations _ _ (liveAllocation_ok _ _ _ (by assumption)).1).1
 #print axioms Memory.WellFormed.span_below
 
 /-- Every valid checked value has bounded allocation identities in well-formed memory. -/
@@ -93,7 +93,7 @@ theorem Value.Valid.below {memory : Memory} (formed : memory.WellFormed)
       | none =>
         simp [Value.Valid, formObject, liveAllocation, found, checkedAt, Except.mapError,
           Bind.bind, Except.bind] at valid
-      | some allocation => exact (formed.1 _ _ found).1
+      | some allocation => exact (formed.allocations _ _ found).1
 #print axioms Value.Valid.below
 
 /-- A valid evaluation stack supplies all bounds required by allocation renaming. -/

@@ -15,7 +15,7 @@ theorem Memory.WellFormed.fresh {memory : Memory} (formed : memory.WellFormed) :
     memory.allocations memory.nextIdentity = none := by
   cases found : memory.allocations memory.nextIdentity with
   | none => rfl
-  | some allocation => exact False.elim (Nat.lt_irrefl _ (formed.1 _ _ found).1)
+  | some allocation => exact False.elim (Nat.lt_irrefl _ (formed.allocations _ _ found).1)
 #print axioms Memory.WellFormed.fresh
 
 /-- Existing well-formed views grant no authority to future allocation identities. -/
@@ -24,9 +24,9 @@ theorem Memory.WellFormed.future_permission {memory : Memory} (formed : memory.W
     permitted memory writing reference = false := by
   simp only [permitted, List.any_eq_false]
   intro view member
-  obtain ⟨allocation, present, _⟩ := formed.2 view member
+  obtain ⟨allocation, present, _⟩ := formed.views view member
   have bound : view.allocation < memory.nextIdentity :=
-    (formed.1 view.allocation allocation present).1
+    (formed.allocations view.allocation allocation present).1
   have different : view.allocation ≠ reference.allocation :=
     Nat.ne_of_lt (Nat.lt_of_lt_of_le bound future)
   simp [viewContains, different]

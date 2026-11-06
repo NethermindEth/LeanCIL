@@ -17,7 +17,9 @@ open CIL.Safety
 def initial : Memory := { AllocationRenaming.caller with stackLimit := 64 }
 
 /-- Granting the resource quota leaves the existing caller storage well formed. -/
-theorem initial_formed : initial.WellFormed := AllocationRenaming.caller_formed
+theorem initial_formed : initial.WellFormed where
+  allocations := AllocationRenaming.caller_formed.allocations
+  views := AllocationRenaming.caller_formed.views
 #print axioms initial_formed
 
 /-- Two retained declarations are interleaved with three private numeric homes. -/

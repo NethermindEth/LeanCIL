@@ -24,7 +24,7 @@ theorem step_preserves_frame_allocations (body : CIL.Method) (operation : CIL.Op
   have bounds : ∀ id ∈ frame.owned, id < m.nextIdentity := by
     intro id member
     obtain ⟨a, present, _, _⟩ := owns id member
-    exact (hm.1 _ _ present).1
+    exact (hm.allocations _ _ present).1
   have retained := owns.preserve effect.allocations bounds
   generalize action.frameAfter frame = final, action.memory = result at effect retained ⊢
   cases effect with
@@ -72,7 +72,7 @@ theorem child_run_preserves_parent_frame (program : CIL.Program) (fuel method : 
   apply owns.preserve (entered_run_preserves_caller_allocations _ _ _ _ _ _ _ _ _ _ setup finish)
   intro id member
   obtain ⟨a, present, _, _⟩ := owns id member
-  exact (hm.1 _ _ present).1
+  exact (hm.allocations _ _ present).1
 
 #print axioms step_preserves_frame_allocations
 #print axioms child_run_preserves_parent_frame

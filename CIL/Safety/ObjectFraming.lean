@@ -40,7 +40,7 @@ theorem Memory.WellFormed.object_below {memory : Memory} (formed : memory.WellFo
   simp only [formObject, checkedAt, Except.mapError, Bind.bind, Except.bind] at success
   cases found : liveAllocation memory reference.allocation with
   | error fault => simp only [found] at success; cases success
-  | ok allocation => exact (formed.1 _ _ (liveAllocation_ok _ _ _ found).1).1
+  | ok allocation => exact (formed.allocations _ _ (liveAllocation_ok _ _ _ found).1).1
 #print axioms Memory.WellFormed.object_below
 
 /-- An object reference that formed before a confined call still forms after it. -/
@@ -98,7 +98,7 @@ theorem objectFieldAddress_of_confined {footprint : List (Reference × Nat)}
     (located : objectFieldAddress before reference owner offset = .ok field) :
     objectFieldAddress after reference owner offset = .ok field := by
   obtain ⟨allocation, found⟩ := objectFieldAddress_allocated located
-  have old := (formedMemory.1 _ _ found).1
+  have old := (formedMemory.allocations _ _ found).1
   obtain ⟨origin, -⟩ := objectFieldAddress_position located
   subst origin
   rw [objectFieldAddress_of_allocation (reference := ⟨field.allocation, 0⟩)
