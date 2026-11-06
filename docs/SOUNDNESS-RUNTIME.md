@@ -236,9 +236,16 @@ runtime type is the field's declaring class, and a null receiver throws
 `NullReferenceException`, as `ldfld` and `stfld` do; a null byref keeps its distinct
 `nullDereference` fault.
 
+A non-virtual instance method of an admitted class is an entry whose receiver `this` is an
+object reference, not a byref: the raw method records the class receiver (`objectReceiver`),
+from which Lean derives the receiver's storage and scalar kind, and taking the receiver's
+address is rejected. Calls to such methods are not yet admitted, since C# emits `callvirt`
+for them and its receiver null check is not modelled.
+
 Interface, generic, abstract, derived, explicit-layout and finalizable classes, byrefs to class
-instances, field addresses on class instances, and reference-typed or non-integer class fields
-are each rejected by name during extraction.
+instances, field addresses on class instances, reference-typed or non-integer class fields,
+virtual class methods, `callvirt` on a class and the address of a class receiver are each
+rejected by name during extraction.
 
 
 Admitted layouts are reference-free and bounded by 65,536 bytes. Sequential fields include supported

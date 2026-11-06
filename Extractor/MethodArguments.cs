@@ -6,7 +6,11 @@ internal static class MethodArguments
 {
     internal static TypeReference Type(MethodDefinition method, int index)
     {
-        if (method.HasThis && index == 0) return new ByReferenceType(MethodSpecialization.DeclaringType(method));
+        if (method.HasThis && index == 0)
+        {
+            var receiver = MethodSpecialization.DeclaringType(method);
+            return ObjectTypes.Is(receiver) ? receiver : new ByReferenceType(receiver);
+        }
         var parameter = index - (method.HasThis ? 1 : 0);
         if (parameter < 0 || parameter >= method.Parameters.Count)
             throw new InvalidDataException($"Invalid argument index {index}: {method.FullName}");

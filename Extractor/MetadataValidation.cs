@@ -554,10 +554,18 @@ internal static class MetadataValidation
             Reject(() => method.IsStatic == method.HasThis || method.ExplicitThis ||
                     method.CallingConvention != MethodCallingConvention.Default,
                 "Unsupported method metadata: calling convention or this parameter");
-            Reject(() => method.HasThis && !method.IsStatic &&
-                    !IsAggregate(MethodSpecialization.DeclaringType(method), module),
+            var receiver = MethodSpecialization.DeclaringType(method);
+            var classReceiver = method.HasThis && !method.IsStatic && !IsAggregate(receiver, module);
+            Reject(() => classReceiver && !ObjectTypes.Candidate(receiver),
                 "Unsupported class instance method\n" +
-                "  Instance methods are admitted on value types only; class instances are not modelled.");
+                "  Instance methods are admitted on value types and on classes of pinned assemblies only.");
+            Check(method, null, () =>
+            {
+                if (classReceiver && ObjectTypes.Candidate(receiver)) ObjectTypes.Validate(receiver);
+            }, named: true);
+            Reject(() => classReceiver && method.IsVirtual,
+                "Unsupported virtual instance method\n" +
+                "  Dispatch on class instances is not modelled (#477).");
             Reject(() => (method.ImplAttributes & MethodImplAttributes.Synchronized) != 0,
                 "Unsupported method metadata: synchronized method");
             Reject(() => method.HasGenericParameters,

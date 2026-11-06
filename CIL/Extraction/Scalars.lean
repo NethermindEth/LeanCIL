@@ -672,7 +672,7 @@ private def dispatchScalar (context : NativeDispatchContext) (type : TypeExpr)
 /-- The kind of argument `index`, counting `this` as argument 0. -/
 private def argumentKind (raw : RawMethod)
     (context : NativeDispatchContext) (index : Nat) : Option ScalarKind :=
-  if raw.hasThis && index == 0 then some .reference
+  if raw.hasThis && index == 0 then some (if raw.objectReceiver then .object else .reference)
   else dispatchScalar context <$> raw.parameters[index - (if raw.hasThis then 1 else 0)]?
 
 /-- The kind an opcode with a fixed one-value push leaves on the stack. -/
@@ -695,7 +695,9 @@ private def pushedKind (raw : RawMethod)
     else if instruction.opcode ∈ [15, 65034] then
       match argumentOperation instruction with
       | some (.address index) =>
-        if raw.hasThis && index == 0 then return .reference
+        -- An object receiver has no home, so its address is never taken.
+        if raw.hasThis && index == 0 then
+          if raw.objectReceiver then none else return .reference
         let type ← raw.parameters[index - (if raw.hasThis then 1 else 0)]?
         if (nativeDispatchStorage context type).isSome then none else
           return scalarType (.byref type)

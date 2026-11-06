@@ -707,6 +707,7 @@ Examples:System.UInt32 SelectorExamples.One.Collision::Add(System.UInt32,System.
 Examples:System.UInt32& Examples.UnsafeLayouts::Add7int(System.UInt32&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32& Examples.UnsafeLayouts::Add7nint(System.UInt32&,System.IntPtr)	A	A	A	A	A	A	A	A
 Examples:System.UInt32& Examples.UnsafeLayouts::Add7nuint(System.UInt32&,System.UIntPtr)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Account::get_Headroom()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.AddStep::Apply(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Arguments::Struct(Examples.Packet)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A

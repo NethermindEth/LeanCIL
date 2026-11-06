@@ -186,6 +186,9 @@ internal static class InstructionTranslation
             Code.Cpblk => $".memory (.copyBlock {MemoryPrefixes.BlockAlignment(i)})",
             Code.Initblk => $".memory (.initBlock {MemoryPrefixes.BlockAlignment(i)})",
             Code.Starg or Code.Starg_S => Parameter("setLocal"),
+            Code.Ldarga or Code.Ldarga_S when m.HasThis && i.Operand == m.Body.ThisParameter &&
+                ObjectTypes.Candidate(m.DeclaringType) =>
+                throw new InvalidDataException("Unsupported address of a class instance receiver: " + m.FullName),
             Code.Ldarga or Code.Ldarga_S => Parameter(
                 !Spans.Is(((ParameterDefinition)i.Operand).ParameterType) ? "localAddr" : "local"),
             Code.Conv_I => ".convI8",

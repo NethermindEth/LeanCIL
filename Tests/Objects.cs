@@ -6,8 +6,8 @@
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
-// Class instances on the checked heap: proofs about identity, presence and scalar fields, and the
-// named rejection of every class shape or access the model does not represent.
+// Class instances on the checked heap: proofs about identity, presence, scalar fields and instance
+// receivers, and the named rejection of every class shape or access the model does not represent.
 using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Objects");
@@ -21,7 +21,8 @@ foreach (var (proof, entry) in new[]
     ("FirstPresentObject", "Objects::FirstPresent(Examples.Account,Examples.Account)"),
     ("BalanceField", "Objects::BalanceOf(Examples.Account)"),
     ("ReplaceField", "Objects::Replace(Examples.Account,System.UInt64)"),
-    ("LimitField", "Objects::SetLimit(Examples.Account,System.UInt32)")
+    ("LimitField", "Objects::SetLimit(Examples.Account,System.UInt32)"),
+    ("HeadroomReceiver", "Account::get_Headroom()")
 })
 {
     verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));
@@ -30,7 +31,8 @@ foreach (var (proof, entry) in new[]
 
 foreach (var mutation in new[]
 {
-    "abstract", "base", "explicit", "finalizer", "interface", "byref", "address", "reference", "fieldType"
+    "abstract", "base", "explicit", "finalizer", "interface", "byref", "address", "reference", "fieldType",
+    "virtual", "callvirt", "receiverAddress"
 })
 {
     var output = Path.Combine(root, "Reject-" + mutation);
@@ -41,6 +43,7 @@ foreach (var mutation in new[]
     {
         var account = module.GetType("Examples.Account");
         var method = module.GetType("Examples.Objects").Methods.Single(candidate => candidate.Name == "IsNull");
+        var getter = account.Methods.Single(candidate => candidate.Name == "get_Headroom");
         var runtime = module.TypeSystem.Object.Scope;
         switch (mutation)
         {
@@ -86,6 +89,23 @@ foreach (var mutation in new[]
                 editor.InsertAfter(first, editor.Create(OpCodes.Pop));
                 editor.InsertAfter(first, editor.Create(OpCodes.Ldfld, rate));
                 break;
+            case "virtual":
+                getter.IsVirtual = true;
+                getter.IsNewSlot = true;
+                break;
+            case "callvirt":
+                var start = method.Body.Instructions[0];
+                var calls = method.Body.GetILProcessor();
+                calls.InsertAfter(start, calls.Create(OpCodes.Ldarg_0));
+                calls.InsertAfter(start, calls.Create(OpCodes.Pop));
+                calls.InsertAfter(start, calls.Create(OpCodes.Callvirt, getter));
+                break;
+            case "receiverAddress":
+                var body = getter.Body.GetILProcessor();
+                body.InsertBefore(getter.Body.Instructions[0], body.Create(OpCodes.Pop));
+                body.InsertBefore(getter.Body.Instructions[0],
+                    body.Create(OpCodes.Ldarga_S, getter.Body.ThisParameter));
+                break;
         }
         expected = mutation switch
         {
@@ -98,19 +118,26 @@ foreach (var mutation in new[]
             "address" => "Unsupported field address on a class instance: System.UInt32 Examples.Account::Limit",
             "reference" => "Unsupported reference-typed field: Examples.Account Examples.Account::Owner",
             "fieldType" => "Unsupported class instance field type: System.Double Examples.Account::Rate",
+            "virtual" => "Unsupported virtual instance method\n  Dispatch on class instances",
+            "callvirt" => "Unsupported callvirt on a class instance: System.UInt64 Examples.Account::get_Headroom()",
+            "receiverAddress" =>
+                "Unsupported address of a class instance receiver: System.UInt64 Examples.Account::get_Headroom()",
             _ => throw new InvalidOperationException("Unknown class rejection fixture: " + mutation)
         };
         module.Write(dll);
     }
-    var parameter = mutation switch
+    var selector = mutation switch
     {
-        "interface" => "Examples.ICounterValue", "byref" => "Examples.Account&", _ => "Examples.Account"
+        "interface" => "Objects::IsNull(Examples.ICounterValue)",
+        "byref" => "Objects::IsNull(Examples.Account&)",
+        "virtual" or "receiverAddress" => "Account::get_Headroom()",
+        _ => "Objects::IsNull(Examples.Account)"
     };
-    var result = Execute(["dotnet", ExtractorPath, "extract", dll, $"Objects::IsNull({parameter})", output]);
+    var result = Execute(["dotnet", ExtractorPath, "extract", dll, selector, output]);
     if (result.Code != 1 || File.Exists(Path.Combine(output, "Extracted.lean")) ||
         !result.Output.Replace("\r\n", "\n").Contains(expected, StringComparison.Ordinal))
         throw new InvalidOperationException($"Incorrect class rejection: {mutation}\n{result.Output}");
     Console.WriteLine($"PASS class rejection: {mutation}");
 }
-Console.WriteLine("PASS objects: identity, presence and scalar field proofs, and named rejection of unmodelled " +
-    "class shapes and field accesses");
+Console.WriteLine("PASS objects: identity, presence, scalar field and receiver proofs, and named rejection of " +
+    "unmodelled class shapes, field accesses and calls");

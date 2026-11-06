@@ -265,6 +265,8 @@ structure RawMethod where
   ownerParameters : List GenericConstraint := []
   /-- Closed bodies retain the owner arity after their parameter constraints are discharged. -/
   ownerArgumentCount : Nat := 0
+  /-- The declaring type is a class, so `this` is an object reference rather than a byref. -/
+  objectReceiver : Bool := false
   deriving DecidableEq, Repr
 
 /-- Close metadata storage after substitution without changing callable owner expressions. -/
@@ -471,7 +473,8 @@ def closedArguments (layouts : List RawLayout) (closed : RawMethod) : Option Raw
   let locals ← closed.locals.zipIdx.mapM fun (type, index) =>
     nativeDispatchStorage context type (some index) <|> typeStorage layouts type
   let code ← closed.code.mapM argumentOperation
-  return ⟨(if closed.hasThis then [.reference] else []) ++ parameters, locals, code⟩
+  let receiver := if closed.objectReceiver then StorageType.object else .reference
+  return ⟨(if closed.hasThis then [receiver] else []) ++ parameters, locals, code⟩
 
 /-- `closed` is `original` instantiated at `arguments`, and `parameterInput` is the
     argument metadata derived from it. -/

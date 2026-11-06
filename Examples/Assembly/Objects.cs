@@ -8,6 +8,9 @@ public sealed class Account
 
     /// <summary>The largest single withdrawal.</summary>
     public uint Limit;
+
+    /// <summary>The balance plus the limit, read through the instance as its receiver.</summary>
+    public ulong Headroom => Balance + Limit;
 }
 
 /// <summary>Reference identity and null tests on class instances.</summary>

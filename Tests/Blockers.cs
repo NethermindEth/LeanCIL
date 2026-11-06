@@ -152,7 +152,6 @@ Require(blockers.Select(b => b.GetProperty("construct").GetString()).Order(Strin
         "Rejected external call: System.Int32 System.Environment::get_ProcessorCount()",
         "Rejected external call: System.Int32 System.Environment::get_TickCount()",
         "Rejected external call: System.Int32 System.GC::GetGeneration(System.Object)",
-        "Unsupported class instance method",
         "Unsupported instruction: newarr System.Decimal",
         "Unsupported instruction: newarr System.Double",
         "Unsupported instruction: newarr System.Single",
@@ -229,10 +228,9 @@ Require(Constructs(12).Order(StringComparer.Ordinal).SequenceEqual(
     decimals.GetProperty("sites").EnumerateArray().Any(s =>
         s.GetProperty("method").GetString() == "System.Int32 Signatures::Measure(System.String,System.Int32)"),
     "Rejected signature hid the body's blockers: " + string.Join("; ", Constructs(12)));
-Require(Constructs(11).Order(StringComparer.Ordinal).SequenceEqual([
-        "Unsupported class instance method",
-        "Unsupported instruction: newarr System.Decimal"]),
-    "Reference-type receiver hid the body's blockers: " + string.Join("; ", Constructs(11)));
+// A non-virtual method of an admitted class is blocked only by its body.
+Require(Constructs(11).SequenceEqual(["Unsupported instruction: newarr System.Decimal"]),
+    "Class receiver was blocked or hid the body's blockers: " + string.Join("; ", Constructs(11)));
 // A resolved entry of rejected shape is blocked, not unchecked, and its definition is still analysed.
 // One condition is one blocker: the shape names the modifier, and the walk names the open generic owner.
 Require(Constructs(16).Single(c => c.Contains("InAttribute")).StartsWith("Custom modifiers are unsupported",
@@ -268,7 +266,7 @@ for (var index = 0; index < entries.Length; index++)
 // The report groups the condition across methods; extract still names the method it stopped at.
 var classInstance = Execute(["dotnet", ExtractorPath, "extract", assembly, "Counter::Add(int)",
     Path.Combine(directory, "extract", "class-instance"), "scalar"]);
-Require(classInstance.Code != 0 && classInstance.Output.Contains("Unsupported class instance method") &&
+Require(classInstance.Code != 0 && classInstance.Output.Contains("newarr System.Decimal") &&
     classInstance.Output.Contains("Method: System.Int32 Counter::Add(System.Int32)"),
     "extract no longer names the class instance method it rejects:\n" + classInstance.Output);
 
