@@ -287,7 +287,8 @@ the check. That the target is not virtual is metadata the extractor decodes and 
 decodes `hasThis`.
 
 Interface, generic, abstract, derived, explicit-layout and finalizable classes, byrefs to class
-instances, field addresses on class instances, reference-typed or non-integer class fields,
+instances, field addresses on class instances, class fields holding anything but integers or
+admitted class instances (strings, arrays, interfaces, other classes),
 virtual class methods, `callvirt` of a virtual method and the address of a class receiver, local
 or argument are each
 rejected by name during extraction.

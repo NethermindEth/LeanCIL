@@ -6,8 +6,8 @@
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
-// Class instances on the checked heap: proofs about identity, presence, scalar fields, instance
-// receivers, calls framed across objects and construction against the heap budget, and the named
+// Class instances on the checked heap: proofs about identity, presence, scalar and class-typed fields,
+// instance receivers, calls framed across objects and construction against the heap budget, and the named
 // rejection of every class shape or access the model does not represent.
 using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
@@ -28,7 +28,8 @@ foreach (var (proof, entry) in new[]
     ("FreshObject", "Objects::Fresh(System.UInt32)"),
     ("DepositBoth", "Objects::DepositBoth(Examples.Account,Examples.Account,System.UInt64)"),
     ("DepositTimes", "Objects::DepositTimes(Examples.Account,System.UInt64,System.UInt32)"),
-    ("TwoMarkers", "Objects::TwoMarkers()")
+    ("TwoMarkers", "Objects::TwoMarkers()"),
+    ("LinkedNodes", "Objects::LinkedValue(Examples.Node,Examples.Node)")
 })
 {
     verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));
@@ -93,7 +94,7 @@ foreach (var mutation in new[]
                 processor.Replace(method.Body.Instructions[3], processor.Create(OpCodes.Ldc_I4_0));
                 break;
             case "reference":
-                var owner = new FieldDefinition("Owner", FieldAttributes.Public, account);
+                var owner = new FieldDefinition("Owner", FieldAttributes.Public, module.TypeSystem.String);
                 account.Fields.Add(owner);
                 method.Body.GetILProcessor().InsertAfter(method.Body.Instructions[0],
                     Instruction.Create(OpCodes.Ldfld, owner));
@@ -136,7 +137,8 @@ foreach (var mutation in new[]
             "interface" => "Unsupported class instance type: Examples.ICounterValue\n  Interface-typed values",
             "byref" => "Unsupported by-reference class instance: Examples.Account&",
             "address" => "Unsupported field address on a class instance: System.UInt32 Examples.Account::Limit",
-            "reference" => "Unsupported reference-typed field: Examples.Account Examples.Account::Owner",
+            "reference" => "Unsupported reference-typed field: System.String Examples.Account::Owner\n" +
+                "  Only fields holding instances of admitted classes are modelled; System.String is not one.",
             "fieldType" => "Unsupported class instance field type: System.Double Examples.Account::Rate",
             "virtual" => "Unsupported virtual instance method\n  Dispatch on class instances",
             "virtualCall" => "Unsupported virtual call: System.UInt64 Examples.Account::get_Headroom()",
@@ -159,5 +161,6 @@ foreach (var mutation in new[]
         throw new InvalidOperationException($"Incorrect class rejection: {mutation}\n{result.Output}");
     Console.WriteLine($"PASS class rejection: {mutation}");
 }
-Console.WriteLine("PASS objects: identity, presence, scalar field, receiver, framed call and construction proofs, " +
+Console.WriteLine("PASS objects: identity, presence, scalar and reference field, receiver, framed call " +
+    "and construction proofs, " +
     "and named rejection of unmodelled class shapes, field accesses and calls");

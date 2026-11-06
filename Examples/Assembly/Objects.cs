@@ -29,6 +29,16 @@ public sealed class Tally
     public Tally(uint step) => Step = step;
 }
 
+/// <summary>A singly linked node: a value and the node after it, or null at the end.</summary>
+public sealed class Node
+{
+    /// <summary>The node's value.</summary>
+    public ulong Value;
+
+    /// <summary>The following node, or null.</summary>
+    public Node? Next;
+}
+
 /// <summary>A class with no fields: its instances have identity and nothing else.</summary>
 public sealed class Marker
 {
@@ -101,6 +111,19 @@ public static class Objects
         var first = new Marker();
         var second = new Marker();
         return first != second;
+    }
+
+    /// <summary>Makes <paramref name="next"/> follow <paramref name="node"/>; both may be the same node.</summary>
+    public static void Link(Node node, Node next) => node.Next = next;
+
+    /// <summary>The value of the node after <paramref name="node"/>.</summary>
+    public static ulong SecondValue(Node node) => node.Next!.Value;
+
+    /// <summary>Links two nodes through <see cref="Link"/> and reads the second value back.</summary>
+    public static ulong LinkedValue(Node node, Node next)
+    {
+        Link(node, next);
+        return SecondValue(node);
     }
 
     /// <summary>Bumps two accounts through <see cref="Bump"/>; both may be the same instance.</summary>

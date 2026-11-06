@@ -60,8 +60,9 @@ internal static class ObjectTypes
     }
 
     /// <summary>
-    /// The checked operation for <c>ldfld</c> or <c>stfld</c> of an integer field of a class instance, at
-    /// the model offset of one 8-byte slot per instance field in declaration order.
+    /// The checked operation for <c>ldfld</c> or <c>stfld</c> of an integer or admitted-class field of a
+    /// class instance, at the model offset of one 8-byte slot per instance field in declaration order. A
+    /// class-typed field holds an object reference in its slot, never in bytes.
     /// </summary>
     internal static string FieldOperation(FieldReference field, FieldDefinition resolved, bool store, bool address)
     {
@@ -71,9 +72,17 @@ internal static class ObjectTypes
             throw new InvalidDataException("Unsupported field address on a class instance: " + field.FullName +
                 "\n  Class field offsets are chosen by the model, so no address may observe them.");
         var type = resolved.FieldType;
-        if (!type.IsValueType && type is not PointerType and not FunctionPointerType)
+        var holdsReference = !type.IsValueType && type is not PointerType and not FunctionPointerType;
+        if (holdsReference && !Is(type))
             throw new InvalidDataException("Unsupported reference-typed field: " + field.FullName +
-                "\n  Fields holding references are not modelled on class instances.");
+                "\n  Only fields holding instances of admitted classes are modelled; " + type.FullName +
+                " is not one.");
+        if (holdsReference)
+        {
+            var slot = FieldSlot * FieldIndex(field, resolved);
+            return store ? $".memory (.setObjectReferenceField ({GenericEvidence.ObjectType(owner)}) {slot})"
+                : $".memory (.objectReferenceField ({GenericEvidence.ObjectType(owner)}) {slot})";
+        }
         int width;
         try { width = MetadataValidation.PrimitiveWidth(type); }
         catch (InvalidDataException)
@@ -81,13 +90,20 @@ internal static class ObjectTypes
             throw new InvalidDataException("Unsupported class instance field type: " + field.FullName +
                 "\n  Only integer, Boolean, Char and enum fields of class instances are modelled.");
         }
-        var index = Array.FindIndex(MetadataValidation.Fields(owner), candidate => candidate.Definition == resolved);
-        if (index < 0) throw new InvalidDataException("Unresolved class instance field: " + field.FullName);
-        var offset = FieldSlot * index;
+        var offset = FieldSlot * FieldIndex(field, resolved);
         var signed = EnumTypes.Storage(type).FullName is "System.SByte" or "System.Int16";
         return store ? $".memory (.setObjectField ({GenericEvidence.ObjectType(owner)}) {offset} {width})"
             : $".memory (.objectField ({GenericEvidence.ObjectType(owner)}) {offset} {width} " +
                 $"{signed.ToString().ToLowerInvariant()})";
+    }
+
+    /// <summary>The declaration-order index of an instance field among its class's instance fields.</summary>
+    static int FieldIndex(FieldReference field, FieldDefinition resolved)
+    {
+        var index = Array.FindIndex(MetadataValidation.Fields(field.DeclaringType),
+            candidate => candidate.Definition == resolved);
+        return index >= 0 ? index
+            : throw new InvalidDataException("Unresolved class instance field: " + field.FullName);
     }
 
     /// <summary>

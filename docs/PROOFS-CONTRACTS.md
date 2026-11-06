@@ -272,7 +272,12 @@ store to it, so a contract's footprint names the fields whose bytes or reference
 `loadSlot_of_access` and `storeSlot_of_access` reduce them, given the slot's access check, to
 the held reference and to `setSlot`, which `setSlot_slots_same` and `setSlot_slots_of_ne` read
 back and which leaves bytes, authority and field locations unchanged (`read_setSlot`,
-`access_setSlot`, `objectFieldAddress_setSlot`).
+`access_setSlot`, `objectFieldAddress_setSlot`). [LinkedNodes](../Examples/Proofs/LinkedNodes.lean)
+composes `Link` and `SecondValue` through their contracts, keeps the linked node's `Value` across
+the one slot `Link` writes, proves both null faults of `SecondValue` at their pcs, and shows
+`Link`'s postcondition is stable under `BytesBelow` and `SlotsAgreeBelow`, the premise
+`MethodContract.Holds.of_allocationRenaming` needs: it names only caller references, which
+`SlotsAgreeBelow.held` keeps.
 [BumpBoth](../Examples/Proofs/BumpBoth.lean) composes two calls of `Bump` through one
 `MethodContract`, proves the distinct and the aliased case, and states the null receiver's
 `NullReferenceException` as an `OutcomeContract`.
