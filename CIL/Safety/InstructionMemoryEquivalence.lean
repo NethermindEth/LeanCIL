@@ -142,6 +142,15 @@ theorem Memory.Equivalent.referenceAddInstruction {m n : Memory} (same : m.Equiv
     | split
 #print axioms Memory.Equivalent.referenceAddInstruction
 
+/-- Locating an object field reads only allocation metadata, which equivalent memories share. -/
+theorem Memory.Equivalent.objectFieldAddress {m n : Memory} (same : m.Equivalent n)
+    (reference : ManagedReference) (owner : CIL.Extraction.TypeExpr) (offset : Nat) :
+    CIL.Safety.objectFieldAddress m reference owner offset =
+      CIL.Safety.objectFieldAddress n reference owner offset := by
+  cases reference <;>
+    simp only [CIL.Safety.objectFieldAddress, liveAllocation, same.allocations, same.add]
+#print axioms Memory.Equivalent.objectFieldAddress
+
 /-- Non-fill memory operations preserve equivalent memories and identical values. -/
 private theorem Memory.Equivalent.otherMemoryInstruction {m n : Memory} (same : m.Equivalent n)
     (operation : CIL.MemoryOp) (stack : List Value) :
@@ -193,6 +202,23 @@ private theorem Memory.Equivalent.wideArithmeticInstruction {m n : Memory} (same
        exact .ok ⟨related, rfl⟩)
     | split
 #print axioms Memory.Equivalent.wideArithmeticInstruction
+
+/-- Object field accesses locate the same field and perform equivalent checked accesses. -/
+private theorem Memory.Equivalent.objectFieldInstruction {m n : Memory} (same : m.Equivalent n)
+    (operation : CIL.MemoryOp) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (objectFieldInstruction operation stack m)
+      (objectFieldInstruction operation stack n) := by
+  unfold CIL.Safety.objectFieldInstruction
+  split <;> try simp only [same.objectFieldAddress, same.loadValue]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.objectFieldInstruction
 
 /-- Observations depend only on allocation metadata and preserve equivalent memories. -/
 theorem Memory.Equivalent.viewObservationInstruction {m n : Memory} (same : m.Equivalent n)
@@ -316,6 +342,8 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     · exact same.arrayFillInstruction _ _ _
     · exact same.wideArithmeticInstruction _ _
     · exact same.wideArithmeticInstruction _ _
+    · exact same.objectFieldInstruction _ _
+    · exact same.objectFieldInstruction _ _
     · exact same.otherMemoryInstruction _ _
 
 theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)

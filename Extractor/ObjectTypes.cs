@@ -48,4 +48,38 @@ internal static class ObjectTypes
                 "\n  A finalizer runs outside the extracted call graph.");
         return definition;
     }
+
+    /// <summary>
+    /// The checked operation for <c>ldfld</c> or <c>stfld</c> of an integer field of a class instance, at
+    /// the model offset of one 8-byte slot per instance field in declaration order.
+    /// </summary>
+    internal static string FieldOperation(FieldReference field, FieldDefinition resolved, bool store, bool address)
+    {
+        var owner = field.DeclaringType;
+        Validate(owner);
+        if (address)
+            throw new InvalidDataException("Unsupported field address on a class instance: " + field.FullName +
+                "\n  Class field offsets are chosen by the model, so no address may observe them.");
+        var type = resolved.FieldType;
+        if (!type.IsValueType && type is not PointerType and not FunctionPointerType)
+            throw new InvalidDataException("Unsupported reference-typed field: " + field.FullName +
+                "\n  Fields holding references are not modelled on class instances.");
+        int width;
+        try { width = MetadataValidation.PrimitiveWidth(type); }
+        catch (InvalidDataException)
+        {
+            throw new InvalidDataException("Unsupported class instance field type: " + field.FullName +
+                "\n  Only integer, Boolean, Char and enum fields of class instances are modelled.");
+        }
+        var index = Array.FindIndex(MetadataValidation.Fields(owner), candidate => candidate.Definition == resolved);
+        if (index < 0) throw new InvalidDataException("Unresolved class instance field: " + field.FullName);
+        var offset = FieldSlot * index;
+        var signed = EnumTypes.Storage(type).FullName is "System.SByte" or "System.Int16";
+        return store ? $".memory (.setObjectField ({GenericEvidence.ObjectType(owner)}) {offset} {width})"
+            : $".memory (.objectField ({GenericEvidence.ObjectType(owner)}) {offset} {width} " +
+                $"{signed.ToString().ToLowerInvariant()})";
+    }
+
+    // Matches `CIL.objectFieldSlot`, which Lean uses to recheck every emitted offset.
+    const int FieldSlot = 8;
 }

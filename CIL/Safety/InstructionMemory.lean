@@ -294,6 +294,22 @@ def formObject (memory : Memory) (reference : ManagedReference) : ExecutionResul
     | .object _ => if address.offset = 0 then .ok (.object reference) else .error .invalidState
     | _ => .error .invalidState
 
+/-- The field at `offset` of the object `reference` names, which must be a live object of type
+    `owner`. A null receiver throws `NullReferenceException`, as `ldfld` and `stfld` do. -/
+def objectFieldAddress (memory : Memory) (reference : ManagedReference)
+    (owner : CIL.Extraction.TypeExpr) (offset : Nat) : ExecutionResult Reference :=
+  match reference with
+  | .null => .error (.thrown "System.NullReferenceException")
+  | .address address => do
+    let allocation ← checkedAt reference 0 (liveAllocation memory address.allocation)
+    match allocation.kind with
+    | .object type =>
+      if address.offset ≠ 0 then .error .invalidState
+      else if type.identity ≠ owner then
+        .error (.unsupported "Field owner is not the object's type")
+      else checkedAt reference 0 (add memory address 1 (BitVec.ofNat 64 offset))
+    | _ => .error .invalidState
+
 /-- Two non-null, live references to one allocation, checked without byte access authority. -/
 def referencePositions (memory : Memory) (left right : ManagedReference) :
     ExecutionResult (Nat × Nat) := do
@@ -857,6 +873,24 @@ def singleSpanInstruction (width : Nat) (writable : Bool) (stack : List Value)
     return (memory, .bufferSpan view :: rest)
   | _, _ => .error .invalidState
 
+/-- `ldfld` and `stfld` of a scalar field of a class instance, at the field's model offset. -/
+def objectFieldInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  match operation, stack with
+  | .objectField owner offset width signed, .object reference :: rest =>
+    if width ∉ [1, 2, 4, 8] then .error (.unsupported "Object field width") else
+    let address ← objectFieldAddress memory reference owner offset
+    return (memory, .scalar (← loadValue memory (.address address) width signed) :: rest)
+  | .setObjectField owner offset width, .scalar value :: .object reference :: rest =>
+    let address ← objectFieldAddress memory reference owner offset
+    let number ← match width, value with
+      | 1, .i32 bits | 2, .i32 bits | 4, .i32 bits => .ok bits.toNat
+      | 8, .i64 bits => .ok bits.toNat
+      | _, _ => .error .invalidState
+    return (← checkedAt (.address address) width
+      (write memory address (numberBytes number width) ordinaryAccessAlignment), rest)
+  | _, _ => .error .invalidState
+
 /-- Runs a `.memory` operation on the stack (top first), giving the new memory and stack.
     Operands with unspecified bits are rejected first. The static-field and span-construction
     operations need extracted metadata, so `staticInstruction` runs them and they are
@@ -882,6 +916,7 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .spanFill width clear => spanFillInstruction width clear stack memory
   | .arrayFill element counted => arrayFillInstruction element counted stack memory
   | .bigMul64 _ | .divRemOut _ => wideArithmeticInstruction operation stack memory
+  | .objectField .. | .setObjectField .. => objectFieldInstruction operation stack memory
   | _ => otherMemoryInstruction operation stack memory
 
 /-- Runs an op on the stack (top first) and memory: loads, stores, typed copies, aggregate

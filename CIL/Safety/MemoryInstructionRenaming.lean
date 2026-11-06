@@ -330,6 +330,91 @@ private theorem Memory.Renamed.wideArithmeticInstructionResult {mapping : Alloca
     | (split <;> try simp only [*, AllocationRenaming.managedReference, Bind.bind, Except.bind])
 #print axioms Memory.Renamed.wideArithmeticInstructionResult
 
+/-- Locating an object field maps the object's allocation and keeps every check and fault. -/
+theorem Memory.Renamed.objectFieldAddress {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (reference : ManagedReference)
+    (bound : reference.Below mapping.sourceLimit) (owner : CIL.Extraction.TypeExpr)
+    (offset : Nat) :
+    ResultRenamed mapping (fun left right => right = mapping.reference left)
+      (CIL.Safety.objectFieldAddress source reference owner offset)
+      (CIL.Safety.objectFieldAddress target (mapping.managedReference reference) owner
+        offset) := by
+  cases reference with
+  | null => exact .error _
+  | address reference =>
+    have allocations := related.allocations reference.allocation bound
+    have moved := related.checkedAdd reference bound 1 (BitVec.ofNat 64 offset)
+      (.address reference) 0
+    simp only [CIL.Safety.objectFieldAddress, AllocationRenaming.managedReference,
+      AllocationRenaming.reference, CIL.Safety.liveAllocation, checkedAt, Except.mapError,
+      Bind.bind, Except.bind] at moved ⊢
+    generalize source.allocations reference.allocation = sourceAllocation at allocations ⊢
+    generalize target.allocations (mapping.image reference.allocation) = targetAllocation
+      at allocations ⊢
+    cases allocations with
+    | none => exact .error (.memory .missingAllocation (.address reference) 0)
+    | @some sourceDescriptor targetDescriptor descriptors =>
+      obtain ⟨kinds, -, live, -⟩ := descriptors
+      dsimp only
+      rw [← live]
+      cases sourceDescriptor.live with
+      | false => exact .error (.memory .expiredLifetime (.address reference) 0)
+      | true =>
+        simp only [ite_true, Pure.pure, Except.pure]
+        revert kinds
+        generalize sourceDescriptor.kind = sourceKind
+        generalize targetDescriptor.kind = targetKind
+        intro kinds
+        cases kinds with
+        | frame => exact .error .invalidState
+        | same =>
+          cases sourceKind
+          all_goals first
+            | exact .error .invalidState
+            | (rename_i type
+               by_cases origin : reference.offset = 0 <;>
+                 by_cases typed : type.identity = owner <;>
+                 simp only [origin, typed, ne_eq, not_true_eq_false, not_false_eq_true,
+                   ite_true, ite_false]
+               all_goals first | exact .error _ | (simp only [origin] at moved; exact moved))
+#print axioms Memory.Renamed.objectFieldAddress
+
+/-- Object field loads and stores touch the mapped field and relate their memories. -/
+private theorem Memory.Renamed.objectFieldInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (operation : CIL.MemoryOp)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (objectFieldInstruction operation stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (objectFieldInstruction operation stack source)
+      (objectFieldInstruction operation (stack.map mapping.value) target) := by
+  unfold objectFieldInstruction at observable ⊢
+  split at observable
+  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try solve | repeat first | contradiction | cases observable | split at observable
+  all_goals clear observable
+  all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
+  all_goals repeat' rcases bounds with ⟨_, bounds⟩
+  all_goals repeat first
+    | exact .ok ⟨related, rfl⟩
+    | exact .error _
+    | (apply (related.objectFieldAddress _ (by assumption) _ _).bindWithSuccess
+       intro first second sourceStep same
+       have addressBound := objectFieldAddress_below (by assumption) sourceStep
+       subst second)
+    | (apply (related.loadValue (.address _) (by assumption) _ _).bindWithSuccess
+       intro first second sourceStep same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply (related.checkedWrite _ (by assumption) _ _ _ _).bindWithSuccess
+       intro first second sourceStep memoryRelated
+       exact .ok ⟨memoryRelated, rfl⟩)
+    | (split <;> try simp only [*, AllocationRenaming.managedReference, Bind.bind, Except.bind])
+#print axioms Memory.Renamed.objectFieldInstructionResult
+
 /-- Ordinary memory effects transport independently of the whole-span dispatch families. -/
 private theorem Memory.Renamed.otherMemoryInstructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -675,6 +760,8 @@ theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
     · exact related.arrayFillInstructionResult formed _ _ _ bounds observable
     · exact related.wideArithmeticInstructionResult _ _ bounds observable
     · exact related.wideArithmeticInstructionResult _ _ bounds observable
+    · exact related.objectFieldInstructionResult _ _ bounds observable
+    · exact related.objectFieldInstructionResult _ _ bounds observable
     · exact related.otherMemoryInstructionResult _ formed _ bounds observable
 
 #print axioms Memory.Renamed.memoryInstructionResult

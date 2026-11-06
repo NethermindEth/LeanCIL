@@ -6,8 +6,8 @@
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
-// Class instances on the checked heap: proofs about identity and presence, and the named
-// rejection of every class shape or access the model does not represent.
+// Class instances on the checked heap: proofs about identity, presence and scalar fields, and the
+// named rejection of every class shape or access the model does not represent.
 using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Objects");
@@ -18,14 +18,20 @@ foreach (var (proof, entry) in new[]
     ("SameObject", "Objects::Same(Examples.Account,Examples.Account)"),
     ("NullObject", "Objects::IsNull(Examples.Account)"),
     ("PresentObject", "Objects::IsPresent(Examples.Account)"),
-    ("FirstPresentObject", "Objects::FirstPresent(Examples.Account,Examples.Account)")
+    ("FirstPresentObject", "Objects::FirstPresent(Examples.Account,Examples.Account)"),
+    ("BalanceField", "Objects::BalanceOf(Examples.Account)"),
+    ("ReplaceField", "Objects::Replace(Examples.Account,System.UInt64)"),
+    ("LimitField", "Objects::SetLimit(Examples.Account,System.UInt32)")
 })
 {
     verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));
     Console.WriteLine($"PASS {proof}: {entry}");
 }
 
-foreach (var mutation in new[] { "abstract", "base", "explicit", "finalizer", "interface", "byref", "field" })
+foreach (var mutation in new[]
+{
+    "abstract", "base", "explicit", "finalizer", "interface", "byref", "address", "reference", "fieldType"
+})
 {
     var output = Path.Combine(root, "Reject-" + mutation);
     Directory.CreateDirectory(output);
@@ -57,12 +63,28 @@ foreach (var mutation in new[] { "abstract", "base", "explicit", "finalizer", "i
             case "byref":
                 method.Parameters[0].ParameterType = new ByReferenceType(account);
                 break;
-            case "field":
-                var load = method.Body.Instructions[1];
+            case "address":
+                var receiver = method.Body.Instructions[0];
                 var processor = method.Body.GetILProcessor();
-                processor.InsertBefore(load, processor.Create(OpCodes.Ldfld,
+                processor.InsertAfter(receiver, processor.Create(OpCodes.Ldind_U4));
+                processor.InsertAfter(receiver, processor.Create(OpCodes.Ldflda,
                     account.Fields.Single(field => field.Name == "Limit")));
-                processor.Replace(load, processor.Create(OpCodes.Ldc_I4_0));
+                processor.Replace(method.Body.Instructions[3], processor.Create(OpCodes.Ldc_I4_0));
+                break;
+            case "reference":
+                var owner = new FieldDefinition("Owner", FieldAttributes.Public, account);
+                account.Fields.Add(owner);
+                method.Body.GetILProcessor().InsertAfter(method.Body.Instructions[0],
+                    Instruction.Create(OpCodes.Ldfld, owner));
+                break;
+            case "fieldType":
+                var rate = new FieldDefinition("Rate", FieldAttributes.Public, module.TypeSystem.Double);
+                account.Fields.Add(rate);
+                var first = method.Body.Instructions[0];
+                var editor = method.Body.GetILProcessor();
+                editor.InsertAfter(first, editor.Create(OpCodes.Ldarg_0));
+                editor.InsertAfter(first, editor.Create(OpCodes.Pop));
+                editor.InsertAfter(first, editor.Create(OpCodes.Ldfld, rate));
                 break;
         }
         expected = mutation switch
@@ -73,7 +95,9 @@ foreach (var mutation in new[] { "abstract", "base", "explicit", "finalizer", "i
             "finalizer" => "Unsupported class instance type: Examples.Account\n  A finalizer",
             "interface" => "Unsupported class instance type: Examples.ICounterValue\n  Interface-typed values",
             "byref" => "Unsupported by-reference class instance: Examples.Account&",
-            "field" => "Unsupported class instance field access: System.UInt32 Examples.Account::Limit",
+            "address" => "Unsupported field address on a class instance: System.UInt32 Examples.Account::Limit",
+            "reference" => "Unsupported reference-typed field: Examples.Account Examples.Account::Owner",
+            "fieldType" => "Unsupported class instance field type: System.Double Examples.Account::Rate",
             _ => throw new InvalidOperationException("Unknown class rejection fixture: " + mutation)
         };
         module.Write(dll);
@@ -88,4 +112,5 @@ foreach (var mutation in new[] { "abstract", "base", "explicit", "finalizer", "i
         throw new InvalidOperationException($"Incorrect class rejection: {mutation}\n{result.Output}");
     Console.WriteLine($"PASS class rejection: {mutation}");
 }
-Console.WriteLine("PASS objects: identity and presence proofs, and named rejection of unmodelled class shapes");
+Console.WriteLine("PASS objects: identity, presence and scalar field proofs, and named rejection of unmodelled " +
+    "class shapes and field accesses");

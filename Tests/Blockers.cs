@@ -152,7 +152,6 @@ Require(blockers.Select(b => b.GetProperty("construct").GetString()).Order(Strin
         "Rejected external call: System.Int32 System.Environment::get_ProcessorCount()",
         "Rejected external call: System.Int32 System.Environment::get_TickCount()",
         "Rejected external call: System.Int32 System.GC::GetGeneration(System.Object)",
-        "Unsupported class instance field access: System.Int32 Counter::total",
         "Unsupported class instance method",
         "Unsupported instruction: newarr System.Decimal",
         "Unsupported instruction: newarr System.Double",
@@ -231,7 +230,6 @@ Require(Constructs(12).Order(StringComparer.Ordinal).SequenceEqual(
         s.GetProperty("method").GetString() == "System.Int32 Signatures::Measure(System.String,System.Int32)"),
     "Rejected signature hid the body's blockers: " + string.Join("; ", Constructs(12)));
 Require(Constructs(11).Order(StringComparer.Ordinal).SequenceEqual([
-        "Unsupported class instance field access: System.Int32 Counter::total",
         "Unsupported class instance method",
         "Unsupported instruction: newarr System.Decimal"]),
     "Reference-type receiver hid the body's blockers: " + string.Join("; ", Constructs(11)));

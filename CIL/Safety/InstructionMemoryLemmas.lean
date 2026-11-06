@@ -667,6 +667,19 @@ theorem wideArithmeticInstruction_contract (operation : CIL.MemoryOp)
     | split at executed
 #print axioms wideArithmeticInstruction_contract
 
+/-- Object field loads and stores preserve checked effects and stack validity. -/
+theorem objectFieldInstruction_contract (operation : CIL.MemoryOp)
+    (stack values : List Value) (memory result : Memory)
+    (executed : objectFieldInstruction operation stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold objectFieldInstruction at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms objectFieldInstruction_contract
+
 set_option maxHeartbeats 800000 in
 /-- The remaining memory operations preserve their checked effects and stack validity. -/
 private theorem otherMemoryInstruction_contract (operation : CIL.MemoryOp)
@@ -845,6 +858,8 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
     · exact arrayFillInstruction_contract _ _ _ _ _ _ h
     · exact wideArithmeticInstruction_contract _ _ _ _ _ h
     · exact wideArithmeticInstruction_contract _ _ _ _ _ h
+    · exact objectFieldInstruction_contract _ _ _ _ _ h
+    · exact objectFieldInstruction_contract _ _ _ _ _ h
     · exact otherMemoryInstruction_contract _ _ _ _ _ h
 
 set_option maxHeartbeats 800000 in

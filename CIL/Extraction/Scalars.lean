@@ -368,6 +368,38 @@ private def sizeConstant (instruction : RawInstruction) (bits : W32) : Bool :=
     | _ => false
   | _, _ => false
 
+/-- The width and sign extension of a class instance field of `type`: integer, Boolean, Char
+    and enum fields only, each fitting one `objectFieldSlot`. -/
+private def objectFieldShape (type : TypeExpr) : Option (Nat × Bool) :=
+  match typeStorage [] type with
+  | some (.field kind) => (primitiveFieldWidth kind).map fun width =>
+    (width, kind == .signed8 || kind == .signed16)
+  | _ => none
+
+/-- An instance field instruction on a class, or an emitted class field operation. -/
+private def objectFieldSite (instruction : RawInstruction) (emitted : Op) : Bool :=
+  (instruction.opcode ∈ [123, 124, 125] && match instruction.operand with
+    | .field (.object _ _) _ _ false => true
+    | _ => false) ||
+  match emitted with
+  | .memory (.objectField ..) | .memory (.setObjectField ..) => true
+  | _ => false
+
+/-- `ldfld` and `stfld` of a class instance field emit the checked field operation for that
+    owner, at the field's model offset and with its width and extension; `ldflda` never does. -/
+private def objectFieldMatches (instruction : RawInstruction) (stack : List ScalarKind)
+    (emitted : Op) : Bool :=
+  match instruction.opcode, instruction.operand, stack, emitted with
+  | 123, .field (.object scope name) index type false, receiver :: _,
+      .memory (.objectField owner offset width signed) =>
+    receiver ∈ [.object, .nullObject] && owner == .object scope name &&
+      offset == objectFieldOffset index && objectFieldShape type == some (width, signed)
+  | 125, .field (.object scope name) index type false, _ :: receiver :: _,
+      .memory (.setObjectField owner offset width) =>
+    receiver ∈ [.object, .nullObject] && owner == .object scope name &&
+      offset == objectFieldOffset index && (objectFieldShape type).map (·.1) == some width
+  | _, _, _, _ => false
+
 /-- Covered opcodes emit exactly their encoding. Elsewhere only a decided type test's word,
     a size constant or an exact runtime query may emit a scalar operation. -/
 def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
@@ -413,6 +445,7 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
   else if arrayEmission emitted then arrayMatches instruction stack emitted
   else if instruction.opcode == 20 && role ∈ [some .head, some .interior] then
     instruction.operand == .none && match emitted with | .nop => true | _ => false
+  else if objectFieldSite instruction emitted then objectFieldMatches instruction stack emitted
   else if scalarCovered instruction.opcode then scalarOpMatches instruction stack emitted
   else !scalarEmission emitted || match role, emitted with
     | _, .const32 bits => sizeConstant instruction bits ||

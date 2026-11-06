@@ -1,7 +1,8 @@
 import CIL.Safety.ObjectSteps
 
 /-! Object references form only at offset 0 of a live object allocation, compare by identity
-    and test presence only against null; every other shape is rejected. -/
+    and test presence only against null, and reach fields only of their own runtime type; every
+    other shape is rejected. -/
 
 namespace Tests.Objects
 
@@ -67,5 +68,22 @@ theorem object_local_has_no_address :
     localAddress memory (.object (some live)) =
       .error (.unsupported "Address of object reference local") := rfl
 #print axioms object_local_has_no_address
+
+/-- A field access checks the object's runtime type against the field's declaring class. -/
+theorem field_owner_checked :
+    objectFieldAddress memory live (.object "Examples" "Examples.Other") 0 =
+      .error (.unsupported "Field owner is not the object's type") := rfl
+#print axioms field_owner_checked
+
+/-- A field access through null throws, as `ldfld` and `stfld` do at run time. -/
+theorem null_field_throws :
+    objectFieldAddress memory .null account.identity 0 =
+      .error (.thrown "System.NullReferenceException") := rfl
+#print axioms null_field_throws
+
+/-- Byte storage that is not an object has no fields, whatever offset is asked for. -/
+theorem buffer_has_no_fields :
+    objectFieldAddress memory (.address ⟨2, 0⟩) account.identity 0 = .error .invalidState := rfl
+#print axioms buffer_has_no_fields
 
 end Tests.Objects

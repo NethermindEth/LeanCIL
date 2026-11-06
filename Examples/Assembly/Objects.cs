@@ -29,4 +29,17 @@ public static class Objects
         if (first != null) selected = first;
         return selected;
     }
+
+    /// <summary>Reads a 64-bit field of a class instance.</summary>
+    public static ulong BalanceOf(Account account) => account.Balance;
+
+    /// <summary>Stores a field and reads it back through the same reference.</summary>
+    public static ulong Replace(Account account, ulong amount)
+    {
+        account.Balance = amount;
+        return account.Balance;
+    }
+
+    /// <summary>Stores a 32-bit field, leaving the other field of the instance unchanged.</summary>
+    public static void SetLimit(Account account, uint limit) => account.Limit = limit;
 }

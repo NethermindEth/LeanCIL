@@ -226,8 +226,19 @@ object reference; `Unsafe.NullRef` keeps the distinct null byref. `ceq`, `beq` a
 compare identities; `cgt.un` and `brtrue`/`brfalse` test presence against null only. Object
 locals and parameters are roots without bytes and have no address.
 
+`ldfld` and `stfld` of an integer, Boolean, Char or enum field of a class reach the field's
+bytes in the object's allocation (`objectFieldAddress`). The model, not CoreCLR, chooses the
+layout: one 8-byte slot per instance field in declaration order (`objectFieldOffset`), which
+Lean rechecks against each instruction's raw field index and type. This needs no
+correspondence with CoreCLR's layout because code cannot observe it: `ldflda` on a class is
+rejected, and object references have no integer form. Each access checks that the allocation's
+runtime type is the field's declaring class, and a null receiver throws
+`NullReferenceException`, as `ldfld` and `stfld` do; a null byref keeps its distinct
+`nullDereference` fault.
+
 Interface, generic, abstract, derived, explicit-layout and finalizable classes, byrefs to class
-instances and class field access are each rejected by name during extraction.
+instances, field addresses on class instances, and reference-typed or non-integer class fields
+are each rejected by name during extraction.
 
 
 Admitted layouts are reference-free and bounded by 65,536 bytes. Sequential fields include supported

@@ -93,6 +93,7 @@ import CIL.Safety.HomeProgress
 import CIL.Safety.ImmutableMemory
 import CIL.Safety.InstructionMemory
 import CIL.Safety.HeapObjects
+import CIL.Safety.HeapObjectFacts
 import CIL.Safety.InstructionMemoryLemmas
 import CIL.Safety.InstructionReferences
 import CIL.Safety.LiveState

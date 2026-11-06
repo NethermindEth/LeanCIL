@@ -30,6 +30,26 @@ theorem referenceAt_below {limit : Nat} {reference : ManagedReference} {address 
   | address source => cases success; exact bound
 #print axioms referenceAt_below
 
+/-- A located object field lies in the object's own allocation. -/
+theorem objectFieldAddress_below {limit : Nat} {memory : Memory} {reference : ManagedReference}
+    {owner : CIL.Extraction.TypeExpr} {offset : Nat} {address : Reference}
+    (bound : reference.Below limit)
+    (located : objectFieldAddress memory reference owner offset = .ok address) :
+    address.allocation < limit := by
+  cases reference with
+  | null => cases located
+  | address source =>
+    unfold objectFieldAddress at located
+    simp only [Bind.bind, Except.bind, checkedAt, Except.mapError] at located
+    repeat' first
+      | contradiction
+      | (cases moved : add memory source 1 (BitVec.ofNat 64 offset) <;>
+           simp only [moved] at located <;> cases located
+         rw [add_preserves_provenance _ _ _ _ _ moved]
+         exact bound)
+      | split at located
+#print axioms objectFieldAddress_below
+
 /-- Valid spans carry null or an address in the allocated prefix. -/
 theorem Memory.WellFormed.span_below {memory : Memory} (formed : memory.WellFormed)
     (view : SpanView) (valid : view.validate memory = .ok ()) :
