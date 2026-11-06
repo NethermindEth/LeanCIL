@@ -871,12 +871,20 @@ def cilRunStep (facts : Array Term) (openCall : Bool) : TacticM Unit := withMain
     | none => pure false
   let (methodSyntax, instructionSyntax, operation) ←
     cilFetchedOp ``CIL.Safety.run_next (fun e => e.eq?.map (·.2.1)) 3 facts
+  -- An object construction runs its constructor as a call before continuing in the caller.
+  let constructs := operation == ``CIL.Op.newObject
   evalTactic (← if operation == ``CIL.Op.ret then
       `(tactic| cil_checked_return_at $methodSyntax $instructionSyntax [$facts,*])
-    else if operation == ``CIL.Op.call then
-      if openCall then
-        `(tactic| cil_checked_call_open_at $methodSyntax $instructionSyntax [$facts,*])
-      else `(tactic| cil_checked_call_at $methodSyntax $instructionSyntax [$facts,*])
+    else if operation == ``CIL.Op.call || constructs then
+      let call ← if openCall then
+          `(tactic| cil_checked_call_open_at $methodSyntax $instructionSyntax [$facts,*])
+        else `(tactic| cil_checked_call_at $methodSyntax $instructionSyntax [$facts,*])
+      -- A construction can fault before its constructor runs, as when allocation fails.
+      if faulting && constructs then
+        `(tactic| first
+          | cil_checked_fault_at $methodSyntax $instructionSyntax [$facts,*]
+          | $call:tactic)
+      else pure call
     else if faulting then
       `(tactic| first
         | cil_checked_fault_at $methodSyntax $instructionSyntax [$facts,*]

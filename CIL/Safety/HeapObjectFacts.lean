@@ -8,7 +8,9 @@ Facts about class instance fields that proofs about extracted methods compose. A
 identity, runtime type and field positions live in allocation metadata, which byte writes
 never change, so a reference formed or a field located before a write stays so after it
 (`formObject_of_allocations`, `objectFieldAddress_of_allocations`). A field written with a value
-reads back as that value (`objectField_readback_i64`).
+reads back as that value (`objectField_readback_i64`). A fresh instance (`objectMemory`) forms,
+locates each field inside its size and grants access to its bytes (`objectMemory_formObject`,
+`objectMemory_field`, `objectMemory_access`).
 -/
 
 namespace CIL.Safety
@@ -92,5 +94,49 @@ theorem objectField_write_preserves_earlier {memory after : Memory}
   have := Nat.mod_le earlier (2 ^ 64)
   omega
 #print axioms objectField_write_preserves_earlier
+
+/-- A fresh instance forms as an object reference. -/
+theorem objectMemory_formObject (memory : Memory) (type : RuntimeType) (size : Nat) :
+    formObject (objectMemory memory type size) (.address ⟨memory.nextIdentity, 0⟩) =
+      .ok (.object (.address ⟨memory.nextIdentity, 0⟩)) := by
+  simp [formObject, liveAllocation, objectMemory, checkedAt, Except.mapError, Bind.bind,
+    Except.bind, Pure.pure, Except.pure]
+#print axioms objectMemory_formObject
+
+/-- A field of a fresh instance inside its size is located at its offset in the instance. -/
+theorem objectMemory_field (memory : Memory) (type : RuntimeType) {size offset : Nat}
+    (bounded : size < nativeLimit) (inside : offset < size) :
+    objectFieldAddress (objectMemory memory type size) (.address ⟨memory.nextIdentity, 0⟩)
+      type.identity offset = .ok ⟨memory.nextIdentity, offset⟩ := by
+  have small : offset < 2 ^ 64 := by simp only [nativeLimit] at bounded; omega
+  have positive : 0 < size := by omega
+  simp [objectFieldAddress, add, form, liveAllocation, validPosition, objectMemory,
+    checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure,
+    Nat.mod_eq_of_lt small, inside, positive, Nat.lt_trans inside bounded,
+    Nat.lt_trans positive bounded]
+#print axioms objectMemory_field
+
+/-- The bytes of a fresh instance are readable and writable with byte alignment. -/
+theorem objectMemory_access (memory : Memory) (type : RuntimeType) {size offset width : Nat}
+    (bounded : size < nativeLimit) (fits : offset + width ≤ size) (nonempty : 0 < width)
+    (writing : Bool) :
+    access (objectMemory memory type size) ⟨memory.nextIdentity, offset⟩ width 1 writing =
+      .ok () := by
+  have inside : offset < size := by omega
+  have covered : ∀ index ∈ List.range width,
+      permitted (objectMemory memory type size) writing
+        ⟨memory.nextIdentity, offset + index⟩ = true := by
+    intro index member
+    have below := List.mem_range.mp member
+    cases writing <;>
+      simp [permitted, viewContains, objectMemory, show offset + index < size by omega]
+  have all : (List.range width).all (fun index => permitted (objectMemory memory type size)
+      writing { (⟨memory.nextIdentity, offset⟩ : Reference) with offset := offset + index }) =
+      true := List.all_eq_true.mpr covered
+  simp only [access, all]
+  simp [form, liveAllocation, validPosition, objectMemory, inside,
+    Nat.lt_trans inside bounded, objectAlignment, fits, Nat.mod_one, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
+#print axioms objectMemory_access
 
 end CIL.Safety

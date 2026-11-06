@@ -267,6 +267,14 @@ formation fact the stepping tactics need for an argument whose field is located.
 `MethodContract`, proves the distinct and the aliased case, and states the null receiver's
 `NullReferenceException` as an `OutcomeContract`.
 
+A method that constructs an instance steps its `newobj` with `allocateObject_ok`, given
+well-formed memory and a `Memory.heapBudget` covering the instance, or `allocateObject_insufficient`
+for the `allocationFailure` fault when it does not. `objectMemory_formObject`, `objectMemory_field`
+and `objectMemory_access` give the fresh instance's formation, field addresses and access, and
+`allocateObject_effect` its `MemoryBelow` frame for the caller.
+[FreshObject](../Examples/Proofs/FreshObject.lean) proves both outcomes, stepping the
+constructor's call in place.
+
 ## Construct structs through contracts
 
 A `newobj` of a reference-free struct allocates caller-owned storage, writes zero to every byte,

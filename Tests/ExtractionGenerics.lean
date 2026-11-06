@@ -103,4 +103,25 @@ theorem argument_count_rejected :
   decide +kernel
 #print axioms argument_count_rejected
 
+/-- A class whose instances have two fields, and its one-argument constructor. -/
+def tally : TypeExpr := .object "Test" "Tally"
+def tallyConstructor : RawMethod := { closed with
+  hasThis := true, objectReceiver := true, objectFieldCount := 2 }
+def construction : CallSite := {
+  declaringType := tally, name := ".ctor", target := .managed 0,
+  typeArguments := [], parameterCount := 1, hasThis := true, returnsValue := false }
+
+-- A construction allocates the call site's class at one slot per field of its constructor's class.
+theorem construction_owner_and_size :
+    constructedOwnerMatches construction tallyConstructor (.newObject 0 1 tally 16) ∧
+    ¬ constructedOwnerMatches construction tallyConstructor (.newObject 0 1 tally 8) ∧
+    ¬ constructedOwnerMatches construction tallyConstructor (.newObject 0 1 tally 24) ∧
+    ¬ constructedOwnerMatches construction tallyConstructor
+      (.newObject 0 1 (.object "Test" "Other") 16) ∧
+    ¬ constructedOwnerMatches { construction with declaringType := word }
+      { tallyConstructor with objectReceiver := false } (.newObject 0 1 word 16) ∧
+    ¬ constructedOwnerMatches construction { tallyConstructor with objectReceiver := false }
+      (.newObject 0 1 tally 16) := by decide +kernel
+#print axioms construction_owner_and_size
+
 end Tests.ExtractionGenerics

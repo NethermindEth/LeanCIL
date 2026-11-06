@@ -701,10 +701,10 @@ internal static class MetadataValidation
                 if (reference.HasThis != callee.HasThis)
                     throw Call("Mismatched managed dependency", reference, method, instruction,
                         $"HasThis differs (reference {reference.HasThis}, definition {callee.HasThis})");
-                if (instruction.OpCode.Code == Code.Newobj &&
-                    (!callee.IsConstructor || !callee.HasThis || !IsAggregate(callee.DeclaringType, module)))
+                if (instruction.OpCode.Code == Code.Newobj && (!callee.IsConstructor || !callee.HasThis ||
+                        !IsAggregate(callee.DeclaringType, module) && !ObjectTypes.Candidate(callee.DeclaringType)))
                     throw Call("Unsupported newobj constructor", reference, method, instruction,
-                        "newobj must construct a reference-free struct declared in this assembly");
+                        "newobj must construct a reference-free struct or a class of a pinned assembly");
                 Enter(callee, reference, instruction);
             }
             void StaticLoad(Instruction instruction, FieldReference loaded)
@@ -790,6 +790,7 @@ internal static class MetadataValidation
                             !Spans.Analyze(method, profile).Constructors.ContainsKey(instruction))
                             throw Call("Unsupported in-place span constructor", reference, method, instruction,
                                 "The receiver must be a local address followed by at most three simple argument pushes.");
+                        if (instruction.OpCode.Code == Code.Call && RuntimeModels.ObjectConstructor(reference)) return;
                         if (InstructionTranslation.RuntimeModel(reference, profile) is null) CallSite(instruction, reference);
                     }))
                     skipped.Add(instruction);

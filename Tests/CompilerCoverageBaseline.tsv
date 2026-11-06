@@ -855,6 +855,7 @@ Examples:System.UInt64 Examples.NullReferences::Read()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.NullReferences::ReadField()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.NullReferences::Unchecked(Examples.FourLimbs&,System.Boolean)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Objects::BalanceOf(Examples.Account)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Objects::Fresh(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Objects::Replace(Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.PackedConstructor::Sum()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.PointerOperations::WriteEnum(Examples.Unsigned64*,System.UInt64)	A	A	A	A	A	A	A	A
@@ -958,7 +959,7 @@ Examples:System.ValueTuple`2<System.UInt32,System.UInt32> Examples.TupleDivision
 Examples:System.ValueTuple`2<System.UInt64,System.UInt64> Examples.TupleDivision::MathUInt64(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.ValueTuple`2<System.UInt64,System.UInt64> Examples.TupleDivision::Pair(System.UInt64,System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.ValueTuple`2<System.UIntPtr,System.UIntPtr> Examples.TupleDivision::MathUIntPtr(System.UIntPtr,System.UIntPtr)	A	A	A	A	A	A	A	A
-Examples:System.Void Examples.Account::.ctor()	B	B	B	B	B	B	B	B
+Examples:System.Void Examples.Account::.ctor()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.AggregateArrays::Write(Examples.AggregateArrays/Pair[],System.Int32,Examples.AggregateArrays/Pair)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.AggregateArrays::WriteVector(System.Runtime.Intrinsics.Vector128`1<System.UInt64>[],System.Int32,System.Runtime.Intrinsics.Vector128`1<System.UInt64>)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.AggregateSpanFill::Aliased(System.Span`1<Examples.AggregateSpans/Words>)	A	A	A	A	A	A	A	A
@@ -1071,6 +1072,7 @@ Examples:System.Void Examples.StaticValues::Select(System.Boolean,Examples.Word2
 Examples:System.Void Examples.StructMethods::ChangeCopy(Examples.Counter)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.TailCalls::ForwardVoid(System.Int32&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.TailCalls::Store(System.Int32&)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Tally::.ctor(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Throws::ThrowDivideByZero()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Throws::ThrowNull()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.TypedCopy::Packet(Examples.Packet&,Examples.Packet&)	A	A	A	A	A	A	A	A
@@ -1124,7 +1126,7 @@ ImportFixture.App:System.UInt64 ImportFixture.Application::Entry(System.UInt64)	
 ImportFixture.App:System.UInt64 ImportFixture.Application::Generic(System.UInt64)	B	B	B	B	B	B	B	B
 ImportFixture.App:System.UInt64 ImportFixture.Application::Unrelated(System.UInt64)	A	A	A	A	A	A	A	A
 ImportFixture.Lib:System.UInt64 ImportFixture.Library::AddOne(System.UInt64)	A	A	A	A	A	A	A	A
-ImportFixture.Lib:System.Void ImportFixture.Library::.ctor()	B	B	B	B	B	B	B	B
+ImportFixture.Lib:System.Void ImportFixture.Library::.ctor()	A	A	A	A	A	A	A	A
 ImportFixture.Lib:T ImportFixture.Library::Identity(T)	B	B	B	B	B	B	B	B
 NativeProbe:<>f__AnonymousType1`3<System.String,System.String,System.String[]> Program/<>c::<<Main>$>b__0_3(Mono.Cecil.MethodDefinition)	B	B	B	B	B	B	B	B
 NativeProbe:<architecture>j__TPar <>f__AnonymousType0`15::get_architecture()	B	B	B	B	B	B	B	B
@@ -1163,4 +1165,4 @@ NativeProbe:System.Void <>f__AnonymousType0`15::.ctor(<framework>j__TPar,<archit
 NativeProbe:System.Void <>f__AnonymousType1`3::.ctor(<name>j__TPar,<signature>j__TPar,<instructions>j__TPar)	B	B	B	B	B	B	B	B
 NativeProbe:System.Void Program/<>c::.cctor()	B	B	B	B	B	B	B	B
 NativeProbe:System.Void Program/<>c::.ctor()	B	B	B	B	B	B	B	B
-NativeProbe:System.Void Program::.ctor()	B	B	B	B	B	B	B	B
+NativeProbe:System.Void Program::.ctor()	A	A	A	A	A	A	A	A

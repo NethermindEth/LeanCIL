@@ -80,6 +80,17 @@ internal static class ObjectTypes
                 $"{signed.ToString().ToLowerInvariant()})";
     }
 
+    /// <summary>
+    /// The checked operation for <c>newobj</c> of an admitted class: a fresh instance of one 8-byte slot per
+    /// instance field, passed to <paramref name="constructor"/> at method index <paramref name="index"/>.
+    /// </summary>
+    internal static string Construction(MethodDefinition constructor, int index)
+    {
+        var owner = Validate(constructor.DeclaringType);
+        var size = FieldSlot * MetadataValidation.Fields(owner).Length;
+        return $".newObject {index} {constructor.Parameters.Count} ({GenericEvidence.ObjectType(owner)}) {size}";
+    }
+
     // Matches `CIL.objectFieldSlot`, which Lean uses to recheck every emitted offset.
     const int FieldSlot = 8;
 }

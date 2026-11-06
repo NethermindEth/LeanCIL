@@ -158,6 +158,9 @@ inductive Op where
   | call (method : Nat) (argc : Nat)
   | newVector256 (constructor : Nat) (argc : Nat)
   | newAggregate (constructor : Nat) (argc : Nat) (size : Fin (2^64))
+  /-- A fresh zeroed instance of class `owner` with `size` bytes of fields, passed to
+      `constructor` as its receiver ahead of `argc` arguments and pushed once it returns. -/
+  | newObject (constructor : Nat) (argc : Nat) (owner : Extraction.TypeExpr) (size : Nat)
   | skipInit | asRef
   /-- Pushes `1` when the method's feature profile has the feature, else `0`. -/
   | feature (id : Feature)

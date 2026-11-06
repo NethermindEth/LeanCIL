@@ -37,6 +37,7 @@ def Op.relocate (f : Nat → Nat) : Op → Op
   | .tailCall method argc => .tailCall (f method) argc
   | .newVector256 method argc => .newVector256 (f method) argc
   | .newAggregate method argc size => .newAggregate (f method) argc size
+  | .newObject method argc owner size => .newObject (f method) argc owner size
   | .managed (.call signature catalog tail) =>
     .managed (.call signature (catalog.map (ManagedTarget.relocate f)) tail)
   | op => op

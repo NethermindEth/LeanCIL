@@ -41,6 +41,12 @@ theorem step_preserves_static_world (descriptors : List CIL.StaticDescriptor)
     have old := (hm.1 identity allocation present).1
     exact ⟨(effect.below.allocations identity old).trans present, effect.below.cells identity old,
       fun offset => effect.below.permissions identity old offset false⟩
+  | objectAllocation effect =>
+    apply PreservesImmutable.world (m := m) (result := result) ?_ descriptors world effect.registry
+    intro identity allocation present _
+    have old := (hm.1 identity allocation present).1
+    exact ⟨(effect.below.allocations identity old).trans present, effect.below.cells identity old,
+      fun offset => effect.below.permissions identity old offset false⟩
   | stackAllocation effect =>
     cases effect with
     | empty => exact world

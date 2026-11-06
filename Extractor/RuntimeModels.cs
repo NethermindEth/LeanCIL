@@ -124,6 +124,16 @@ internal static class RuntimeModels
                 ValidateTypeIdentity(argument, reference.Module, architecture);
     }
 
+    /// <summary>
+    /// <c>call System.Object::.ctor()</c> on the receiver of an admitted class constructor. The runtime's
+    /// constructor has no effect on an instance, so the model only pops the receiver.
+    /// </summary>
+    internal static bool ObjectConstructor(MethodReference reference) =>
+        reference is { Name: ".ctor", HasThis: true, ExplicitThis: false, Parameters.Count: 0 } &&
+        reference is not GenericInstanceMethod && reference.CallingConvention == MethodCallingConvention.Default &&
+        reference.ReturnType.MetadataType == MetadataType.Void &&
+        reference.DeclaringType is { FullName: "System.Object" } owner && ExactScope(owner.Scope, "System.Runtime");
+
     internal static string? Translate(MethodReference reference, FeatureProfile profile)
     {
         if (ReferenceQueries.Constant(reference, profile.Architecture) is int constant)

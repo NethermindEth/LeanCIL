@@ -164,11 +164,14 @@ internal static class InstructionTranslation
         if (i.OpCode.Code is Code.Call or Code.Newobj)
         {
             var r = (MethodReference)i.Operand;
+            if (i.OpCode.Code == Code.Call && RuntimeModels.ObjectConstructor(r)) return ".pop";
             if (RuntimeModel(r, profile) is string modeled) return modeled;
             MethodDefinition resolved = r.Resolve() ?? throw new InvalidDataException($"Unresolved method: {r.FullName}");
             int index = methods.GetValueOrDefault(resolved, -1);
             if (index > methodIndex || index >= 0 && TailCalls.IsCall(i))
             {
+                if (i.OpCode.Code == Code.Newobj && ObjectTypes.Candidate(resolved.DeclaringType))
+                    return ObjectTypes.Construction(resolved, index);
                 if (i.OpCode.Code == Code.Newobj)
                     return $".newAggregate {index} {resolved.Parameters.Count} {Layout(MethodSpecialization.DeclaringType(resolved))}";
                 var operation = TailCalls.IsCall(i) ? "tailCall" : "call";

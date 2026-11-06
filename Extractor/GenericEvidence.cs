@@ -235,7 +235,9 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 $"operand := {operand} }}";
         });
         var owner = Quote(LayoutEvidence.Identity(method.DeclaringType));
-        var objectReceiver = Bool(method.HasThis && ObjectTypes.Is(method.DeclaringType));
+        var classOwner = method.HasThis && ObjectTypes.Is(method.DeclaringType);
+        var objectReceiver = Bool(classOwner);
+        var objectFields = classOwner ? MetadataValidation.Fields(method.DeclaringType).Length : 0;
         var parameters = List(method.Parameters.Select(parameter => Parameter(parameter.ParameterType)));
         var locals = List(method.Body.Variables.Select(local => LocalType(local.VariableType)));
         // Lines break only after a comma, so the emitted definition stays on one line.
@@ -243,7 +245,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             { token := {{method.MetadataToken.ToUInt32()}}, owner := {{owner}},
             ownerParameters := {{List(ownerConstraints)}},
             ownerArgumentCount := {{MethodSpecialization.OwnerArguments(method).Count}},
-            objectReceiver := {{objectReceiver}}, hasThis := {{Bool(method.HasThis)}},
+            objectReceiver := {{objectReceiver}}, objectFieldCount := {{objectFields}},
+            hasThis := {{Bool(method.HasThis)}},
             explicitThis := {{Bool(method.ExplicitThis)}}, callingConvention := {{(byte)method.CallingConvention}},
             attributes := {{(uint)method.Attributes}}, implementation := {{(uint)method.ImplAttributes}},
             returnType := {{Type(InitAccessors.Return(method.ReturnType))}}, parameters := {{parameters}},

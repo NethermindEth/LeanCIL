@@ -376,6 +376,12 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
       let frame := { frame with owned := temporary.allocation :: frame.owned }
       return .construct callee (.reference (.address temporary) :: arguments)
         (stack.drop argc) frame temporary (.aggregate size) memory
+  | .newObject constructor argc owner size, _ =>
+    if stack.length < argc then .error .invalidState else
+      let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
+      let (object, memory) ← allocateObject m ⟨owner⟩ size
+      let created := Value.object (.address object)
+      return .call constructor (created :: arguments) (created :: stack.drop argc) memory
   | .memory operation, _ =>
     let (memory, values) ← staticInstruction body pc operation stack m
     return .next (pc + 1) values frame memory

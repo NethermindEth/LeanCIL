@@ -13,6 +13,19 @@ public sealed class Account
     public ulong Headroom => Balance + Limit;
 }
 
+/// <summary>A class instance whose constructor sets one field and leaves the other zero.</summary>
+public sealed class Tally
+{
+    /// <summary>The running count.</summary>
+    public ulong Count;
+
+    /// <summary>The amount each count adds, fixed at construction.</summary>
+    public uint Step;
+
+    /// <summary>Creates a tally at zero with the given step.</summary>
+    public Tally(uint step) => Step = step;
+}
+
 /// <summary>Reference identity and null tests on class instances.</summary>
 public static class Objects
 {
@@ -48,6 +61,14 @@ public static class Objects
 
     /// <summary>Adds to the balance of one account, wrapping at 64 bits.</summary>
     public static void Bump(Account account, ulong amount) => account.Balance += amount;
+
+    /// <summary>Allocates a tally, stores into it and reads both fields back.</summary>
+    public static ulong Fresh(uint step)
+    {
+        var tally = new Tally(step);
+        tally.Count = 5;
+        return tally.Count + tally.Step;
+    }
 
     /// <summary>Bumps two accounts through <see cref="Bump"/>; both may be the same instance.</summary>
     public static void BumpBoth(Account first, Account second, ulong amount)

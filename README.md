@@ -111,7 +111,8 @@ The checked memory model tracks allocation identity, lifetime, bounds, permissio
 initialization and alignment. `CIL.Safety.invoke` is the execution model for both functional
 correctness and memory-safety claims.
 
-General class allocation and virtual dispatch, ordinary recursive calls, exception handlers,
+Classes beyond those deriving directly from `System.Object` with scalar fields, virtual
+dispatch, ordinary recursive calls, exception handlers,
 floating-point arithmetic and arbitrary external calls are outside the supported subset.
 Concurrency, GC implementation correctness and equivalence to arbitrary .NET runtimes are
 outside the model's guarantees. See [soundness and limitations](docs/SOUNDNESS.md).

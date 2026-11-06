@@ -86,4 +86,36 @@ theorem buffer_has_no_fields :
     objectFieldAddress memory (.address ⟨2, 0⟩) account.identity 0 = .error .invalidState := rfl
 #print axioms buffer_has_no_fields
 
+/-- Caller memory granting 16 bytes of object budget and no other storage. -/
+private def budgeted : CIL.Safety.Memory := { memory with heapBudget := 16 }
+
+/-- An allocation within budget takes the next identity and consumes its size. -/
+theorem allocation_charges_budget :
+    (allocateObject budgeted account 8).map (fun result => (result.1, result.2.heapBudget,
+      result.2.nextIdentity)) = .ok (⟨3, 0⟩, 8, 4) := rfl
+#print axioms allocation_charges_budget
+
+/-- An allocation over budget fails with the model resource fault, not a CLR exception. -/
+theorem allocation_over_budget :
+    allocateObject budgeted account 24 = .error (.allocationFailure 24 16) := rfl
+#print axioms allocation_over_budget
+
+/-- `newobj` with no arguments calls constructor 1 with the fresh instance as its receiver,
+    which then also waits on the caller's stack. -/
+private def creator : CIL.Method :=
+  { returnsValue := true, locals := [], code := [.newObject 1 0 account.identity 8, .ret none] }
+private def constructor : CIL.Method :=
+  { returnsValue := false, locals := [], code := [.ret none] }
+
+/-- The constructed instance is returned to the caller and outlives the constructor's frame. -/
+theorem construction_returns_instance :
+    (invoke [creator, constructor] 8 0 [] budgeted).map Prod.snd =
+      .ok [.object (.address ⟨3, 0⟩)] := rfl
+#print axioms construction_returns_instance
+
+/-- Without budget the construction stops at `newobj`, before the constructor runs. -/
+theorem construction_over_budget :
+    invoke [creator, constructor] 8 0 [] memory = .error ⟨0, 0, .allocationFailure 8 0⟩ := rfl
+#print axioms construction_over_budget
+
 end Tests.Objects

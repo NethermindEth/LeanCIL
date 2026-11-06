@@ -48,6 +48,9 @@ theorem stepTransport : StepTransport := by
     case newArray.refl element =>
       exact memories.stepNewArray frames sourceFormed targetFormed staticBounds
         sourceBody targetBody element pc arguments stack bounds observable
+    case newObject.refl callee argc owner size =>
+      exact memories.stepNewObject sourceFormed targetFormed staticBounds sourceBody targetBody
+        callee argc owner size pc arguments stack bounds observable
     all_goals dsimp only [LocalIndexMap.operation]
     all_goals first
     | exact ⟨mapping, .refl mapping,

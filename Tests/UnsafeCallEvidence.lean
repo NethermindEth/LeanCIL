@@ -79,4 +79,25 @@ theorem local_reference_helper_name :
   decide +kernel
 #print axioms local_reference_helper_name
 
+/-- The `System.Object` constructor a class constructor calls on its receiver. -/
+private def objectConstructor : CallSite := {
+  declaringType := .atom scope "System.Object", name := ".ctor"
+  target := .external (scope ++ "::System.Void System.Object::.ctor()")
+  typeArguments := [], parameterCount := 0, hasThis := true, returnsValue := false }
+
+-- Only the exact `System.Object` constructor may emit `pop`, and it must.
+theorem object_constructor_pop :
+    UnsafeCallsValid [] (raw objectConstructor) [true] [.pop] := by decide +kernel
+#print axioms object_constructor_pop
+theorem object_constructor_elsewhere_rejected :
+    ¬ UnsafeCallsValid [] (raw { objectConstructor with
+      declaringType := .atom "forged" "System.Object" }) [true] [.pop] ∧
+    ¬ UnsafeCallsValid [] (raw { objectConstructor with
+      target := .external "forged" }) [true] [.pop] ∧
+    ¬ UnsafeCallsValid [] (raw { objectConstructor with parameterCount := 1 }) [true] [.pop] ∧
+    ¬ UnsafeCallsValid [] (raw { objectConstructor with hasThis := false }) [true] [.pop] ∧
+    ¬ UnsafeCallsValid [] (raw objectConstructor) [true] [.nop] ∧
+    ¬ UnsafeCallsValid [] (raw call) [true] [.pop] := by decide +kernel
+#print axioms object_constructor_elsewhere_rejected
+
 end Tests.UnsafeCallEvidence

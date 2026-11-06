@@ -267,6 +267,8 @@ structure RawMethod where
   ownerArgumentCount : Nat := 0
   /-- The declaring type is a class, so `this` is an object reference rather than a byref. -/
   objectReceiver : Bool := false
+  /-- The instance field count of a class declaring type; each field takes one model slot. -/
+  objectFieldCount : Nat := 0
   deriving DecidableEq, Repr
 
 /-- Close metadata storage after substitution without changing callable owner expressions. -/
@@ -511,9 +513,17 @@ structure SpecializedMethod where
 private def managedCallTarget (opcode : Nat) : Op → Option (Nat × Nat)
   | .call target count | .tailCall target count =>
     if opcode = 40 then some (target, count) else none
-  | .newAggregate target count _ | .newVector256 target count =>
+  | .newAggregate target count _ | .newVector256 target count | .newObject target count .. =>
     if opcode = 115 then some (target, count) else none
   | _ => none
+
+/-- A class construction allocates an instance of the call site's declaring class, one slot per
+    instance field, whose constructor takes that instance as its object receiver. -/
+def constructedOwnerMatches (site : CallSite) (callee : RawMethod) : Op → Bool
+  | .newObject _ _ owner size => owner == site.declaringType && callee.objectReceiver &&
+    size == objectFieldOffset callee.objectFieldCount &&
+    match owner with | .object .. => true | _ => false
+  | _ => true
 
 /-- Legacy slots accept only primitive signatures; new families require exact typed metadata. -/
 def importSignatureMatches (slot : ImportSlot) (site : CallSite) : Bool :=
@@ -555,7 +565,8 @@ def managedTargetMatches (methods : Nat → Option SpecializedMethod)
 
 /-- Split a scoped declaring type from its ordered generic arguments. -/
 def managedOwner : TypeExpr → Option (String × List TypeExpr)
-  | .atom scope name | .constructor scope name => some (scope ++ "::" ++ name, [])
+  | .atom scope name | .constructor scope name | .object scope name =>
+    some (scope ++ "::" ++ name, [])
   | .aggregate identity _ => some (identity, [])
   | .apply owner argument => do
     let (identity, arguments) ← managedOwner owner
@@ -626,15 +637,16 @@ def validateManagedCallWith (methodCount : Nat)
           (callee.closed.returnType != .void) == site.returnsValue &&
           callee.closed.returnType == site.returnType &&
           callee.closed.parameters == site.parameterTypes &&
-          count == site.parameterCount + (if raw.opcode == 40 && site.hasThis then 1 else 0)
+          count == site.parameterCount + (if raw.opcode == 40 && site.hasThis then 1 else 0) &&
+          constructedOwnerMatches site callee.closed emitted
     | .external identity => match emitted with
       | .call target count =>
         validateImportCallWith methodCount imports raw.opcode site identity target count
-      | .tailCall .. | .newAggregate .. | .newVector256 .. => false
+      | .tailCall .. | .newAggregate .. | .newVector256 .. | .newObject .. => false
       | _ => true
   | .indirectCall .. => false
   | _ => match emitted with
-    | .call .. | .tailCall .. | .newAggregate .. | .newVector256 .. => false
+    | .call .. | .tailCall .. | .newAggregate .. | .newVector256 .. | .newObject .. => false
     | _ => true
 
 /-- The external-call rule stated against the original lists, including bounds and offset. -/
@@ -686,6 +698,7 @@ macro "cil_managed_calls" "[" facts:term,* "]" : tactic =>
        · rfl
        · rfl
        · simp [all3, validateManagedCall, validateManagedCallWith, managedCallTarget,
+           constructedOwnerMatches,
            $[$facts:term],*] <;>
            decide +kernel)
     | decide +kernel)

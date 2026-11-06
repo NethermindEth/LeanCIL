@@ -138,6 +138,7 @@ theorem StepEffect.staticBindingsBounded {body : CIL.Method} {source target : Me
     (bounded : source.StaticBindingsBounded) : target.StaticBindingsBounded := by
   cases effect with
   | arrayAllocation effect => exact bounded.preserve effect.registry effect.allocations.next
+  | objectAllocation effect => exact bounded.preserve effect.registry effect.allocations.next
   | stackAllocation effect => exact effect.staticBindingsBounded bounded
   | memory effect => exact effect.staticBindingsBounded bounded
   | store _ stored =>

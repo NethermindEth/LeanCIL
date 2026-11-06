@@ -7,8 +7,8 @@ using Mono.Cecil;
 using Mono.Cecil.Cil;
 
 // Class instances on the checked heap: proofs about identity, presence, scalar fields, instance
-// receivers and calls framed across objects, and the named rejection of every class shape or access
-// the model does not represent.
+// receivers, calls framed across objects and construction against the heap budget, and the named
+// rejection of every class shape or access the model does not represent.
 using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Objects");
@@ -24,7 +24,8 @@ foreach (var (proof, entry) in new[]
     ("ReplaceField", "Objects::Replace(Examples.Account,System.UInt64)"),
     ("LimitField", "Objects::SetLimit(Examples.Account,System.UInt32)"),
     ("HeadroomReceiver", "Account::get_Headroom()"),
-    ("BumpBoth", "Objects::BumpBoth(Examples.Account,Examples.Account,System.UInt64)")
+    ("BumpBoth", "Objects::BumpBoth(Examples.Account,Examples.Account,System.UInt64)"),
+    ("FreshObject", "Objects::Fresh(System.UInt32)")
 })
 {
     verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));
@@ -141,5 +142,5 @@ foreach (var mutation in new[]
         throw new InvalidOperationException($"Incorrect class rejection: {mutation}\n{result.Output}");
     Console.WriteLine($"PASS class rejection: {mutation}");
 }
-Console.WriteLine("PASS objects: identity, presence, scalar field, receiver and framed call proofs, and named " +
-    "rejection of unmodelled class shapes, field accesses and calls");
+Console.WriteLine("PASS objects: identity, presence, scalar field, receiver, framed call and construction proofs, " +
+    "and named rejection of unmodelled class shapes, field accesses and calls");

@@ -1,11 +1,14 @@
 import CIL.Safety.StepComposition
+import CIL.Safety.ObjectAllocationLemmas
 
 /-!
 # Object step equations
 
 `cil_step` equations for the instructions that observe class instance references: identity
 comparison (`ceq`, `beq`, `bne.un`), presence (`cgt.un` against null, `brtrue`, `brfalse`) and
-`ldnull`, and `ldfld`/`stfld` of scalar class fields. Each states the dispatcher arm of
+`ldnull`, `ldfld`/`stfld` of scalar class fields, and `newobj` of a class, which calls the
+constructor with a fresh instance that `allocateObject_ok` or `allocateObject_insufficient`
+decides. Each states the dispatcher arm of
 `CIL/Safety/Execution.lean` for object operands, so stepping never unfolds the dispatcher. The
 observations themselves unfold through `cil_checked` down to `formObject`, which a caller's
 facts or `formObject_null` decide; field accesses leave `objectFieldAddress` and the byte
@@ -49,6 +52,23 @@ attribute [cil_checked] objectNonNull objectEqual objectAboveNull
 section ObjectEquations
 
 variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (memory : Memory)
+
+/-- `newobj` of a class checks its `argc` arguments, allocates the instance and calls the
+    constructor with it as the receiver; the instance waits under the rest of the stack. -/
+@[cil_step] theorem step_newObject_eq (callee argc : Nat) (owner : CIL.Extraction.TypeExpr)
+    (size : Nat) (stack : List Value) :
+    step body (.newObject callee argc owner size) pc args frame stack memory =
+      if unspecifiedOperands argc stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else if stack.length < argc then .error .invalidState
+      else do
+        let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
+        let (object, allocated) ← allocateObject memory ⟨owner⟩ size
+        return FrameAction.call callee (.object (.address object) :: arguments)
+          (.object (.address object) :: stack.drop argc) allocated := by
+  simp only [step, observerCount, Bool.or_false]
+
+#print axioms step_newObject_eq
 
 /-- `ceq` on two object references pushes their identity comparison. -/
 @[cil_step high] theorem step_eq_object_eq (left right : ManagedReference) (rest : List Value) :

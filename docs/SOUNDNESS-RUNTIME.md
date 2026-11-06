@@ -236,6 +236,22 @@ runtime type is the field's declaring class, and a null receiver throws
 `NullReferenceException`, as `ldfld` and `stfld` do; a null byref keeps its distinct
 `nullDereference` fault.
 
+`newobj` of an admitted class (`.newObject`) checks the constructor's arguments, then allocates
+a fresh live instance (`allocateObject`): an allocation of kind `.object` with the class's runtime
+type, one zeroed 8-byte slot per instance field and authority over all of it. It charges the
+instance's size to `Memory.heapBudget`, the bytes the caller grants for objects, and fails with
+`allocationFailure` when the budget is short; that is a model resource fault, not a CLR
+exception, so no proof of an expected exception can rest on it. The budget never grows back:
+it is a conservative bound that ignores collection. The constructor then runs with the
+instance as its receiver, and the instance is pushed once it returns. Lean rechecks that the
+call site's declaring class is the instance's runtime type, that the constructor takes an
+object receiver, and that the size is one slot per instance field of the constructor's class.
+Inside an admitted constructor, `call System.Object::.ctor()` with the exact `System.Runtime`
+scope only pops the receiver: the runtime's constructor has no effect on an instance, and Lean
+rechecks that exact target wherever `.pop` stands for a call. No frame owns
+an instance, so leaving the method that created it never expires it: an instance lives as long
+as a reference can observe it, which is the reachability the collector maintains.
+
 A non-virtual instance method of an admitted class is an entry whose receiver `this` is an
 object reference, not a byref: the raw method records the class receiver (`objectReceiver`),
 from which Lean derives the receiver's storage and scalar kind, and taking the receiver's

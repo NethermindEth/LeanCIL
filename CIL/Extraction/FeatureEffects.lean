@@ -76,7 +76,7 @@ def emittedFeatureEffect (op : Op) (returnsValue : Bool) : Option (Nat × Nat) :
   | .dup => some (1, 2)
   -- Calls, construction, intrinsics and memory operations.
   | .call _ count | .tailCall _ count => some (count, if returnsValue then 1 else 0)
-  | .newAggregate _ count _ | .newVector256 _ count => some (count, 1)
+  | .newAggregate _ count _ | .newVector256 _ count | .newObject _ count .. => some (count, 1)
   | .intrinsic _ count => some (count, 1)
   | .memory operation => some (memoryFeatureEffect operation)
   -- Local writes, local addresses and control flow must match their raw instruction exactly.
