@@ -34,6 +34,18 @@ foreach (var (proof, entry) in new[]
     Console.WriteLine($"PASS {proof}: {entry}");
 }
 
+// The entry's call proof simplifies with the constructor's closed body; without it the proof
+// falls back to a whole-method kernel decision.
+var constructed = File.ReadAllLines(Path.Combine(root, "FreshObject", "Extracted.lean"));
+var construction = constructed.Single(line => line.StartsWith("  .newObject ", StringComparison.Ordinal));
+var constructor = construction.Split(' ', StringSplitOptions.RemoveEmptyEntries)[1];
+var entryCalls = constructed.Single(line =>
+    line.StartsWith("theorem method0_calls_validated ", StringComparison.Ordinal));
+if (!entryCalls.Contains("by cil_managed_calls [", StringComparison.Ordinal) ||
+    !entryCalls.Contains($"method{constructor}Closed", StringComparison.Ordinal))
+    throw new InvalidOperationException("The constructing method's call proof omits the constructor:\n" + entryCalls);
+Console.WriteLine("PASS construction call proof names the constructor");
+
 foreach (var mutation in new[]
 {
     "abstract", "base", "explicit", "finalizer", "interface", "byref", "address", "reference", "fieldType",

@@ -124,6 +124,7 @@ internal static class LeanEmitter
             if (!operation.StartsWith(".call ", StringComparison.Ordinal) &&
                 !operation.StartsWith(".callInstance ", StringComparison.Ordinal) &&
                 !operation.StartsWith(".newAggregate ", StringComparison.Ordinal) &&
+                !operation.StartsWith(".newObject ", StringComparison.Ordinal) &&
                 !operation.StartsWith(".newVector256 ", StringComparison.Ordinal)) continue;
             hasCall = true;
             var fields = operation.Split(' ', 3);
