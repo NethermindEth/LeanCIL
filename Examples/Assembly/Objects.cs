@@ -29,6 +29,11 @@ public sealed class Tally
     public Tally(uint step) => Step = step;
 }
 
+/// <summary>A class with no fields: its instances have identity and nothing else.</summary>
+public sealed class Marker
+{
+}
+
 /// <summary>Reference identity and null tests on class instances.</summary>
 public static class Objects
 {
@@ -81,6 +86,14 @@ public static class Objects
     {
         first.Deposit(amount);
         second.Deposit(amount);
+    }
+
+    /// <summary>Two instances of a class with no fields are still two distinct instances.</summary>
+    public static bool TwoMarkers()
+    {
+        var first = new Marker();
+        var second = new Marker();
+        return first != second;
     }
 
     /// <summary>Bumps two accounts through <see cref="Bump"/>; both may be the same instance.</summary>

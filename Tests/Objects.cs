@@ -26,7 +26,8 @@ foreach (var (proof, entry) in new[]
     ("HeadroomReceiver", "Account::get_Headroom()"),
     ("BumpBoth", "Objects::BumpBoth(Examples.Account,Examples.Account,System.UInt64)"),
     ("FreshObject", "Objects::Fresh(System.UInt32)"),
-    ("DepositBoth", "Objects::DepositBoth(Examples.Account,Examples.Account,System.UInt64)")
+    ("DepositBoth", "Objects::DepositBoth(Examples.Account,Examples.Account,System.UInt64)"),
+    ("TwoMarkers", "Objects::TwoMarkers()")
 })
 {
     verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));

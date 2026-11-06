@@ -147,6 +147,7 @@ Examples:System.Boolean Examples.NullReferences::IsNull()	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.Objects::IsNull(Examples.Account)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.Objects::IsPresent(Examples.Account)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.Objects::Same(Examples.Account,Examples.Account)	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.Objects::TwoMarkers()	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.PointerOperations::Greater(System.Byte*,System.Byte*)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.PointerOperations::GreaterEqual(System.Byte*,System.Byte*)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.PointerOperations::Less(System.Byte*,System.Byte*)	A	A	A	A	A	A	A	A
@@ -1019,6 +1020,7 @@ Examples:System.Void Examples.InitializedValue::.cctor()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.Loops::FillWords(System.UInt64&,System.UInt64,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Loops::Stamp(System.UInt32&,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ManagedDispatch::Targets(method System.Int32 *(System.Int32)[])	B	B	B	B	B	B	B	B
+Examples:System.Void Examples.Marker::.ctor()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.MarshaledMemory::Write(System.Span`1<System.Byte>,System.UInt64&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.MarshaledMemory::WriteAggregate(System.Span`1<System.Byte>,Examples.FourLimbs&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.MemorySpans::ClearBytes(System.Span`1<System.Byte>)	A	A	A	A	A	A	A	A

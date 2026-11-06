@@ -274,6 +274,11 @@ virtual class methods, `callvirt` of a virtual method and the address of a class
 or argument are each
 rejected by name during extraction.
 
+An instance of a class with no fields is an allocation of size zero: it costs no heap budget,
+has no byte any access could reach, and is still distinct from every other instance, since
+identity is the allocation and not an address
+([TwoMarkers](../Examples/Proofs/TwoMarkers.lean)).
+
 Object identity, runtime type and field positions are allocation metadata, which byte writes
 never change, so distinct object references are distinct allocations and their fields never
 share a byte; [object framing](PROOFS-CONTRACTS.md#frame-class-instances) states this for
