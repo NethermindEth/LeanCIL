@@ -247,6 +247,12 @@ instances, field addresses on class instances, reference-typed or non-integer cl
 virtual class methods, `callvirt` on a class and the address of a class receiver are each
 rejected by name during extraction.
 
+Object identity, runtime type and field positions are allocation metadata, which byte writes
+never change, so distinct object references are distinct allocations and their fields never
+share a byte; [object framing](PROOFS-CONTRACTS.md#frame-class-instances) states this for
+proofs.
+
+## Sequential struct layout
 
 Admitted layouts are reference-free and bounded by 65,536 bytes. Sequential fields include supported
 integers/enums, nested aggregates and admitted vectors. Closed same-assembly generic owners bind

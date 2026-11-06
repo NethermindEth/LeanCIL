@@ -1027,6 +1027,8 @@ Examples:System.Void Examples.MemorySpans::Write(System.Span`1<System.Int32>,Sys
 Examples:System.Void Examples.NestedConstructor::.ctor(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.NullReferences::Write(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.NullReferences::WriteField(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Objects::Bump(Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Objects::BumpBoth(Examples.Account,Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::SetLimit(Examples.Account,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PackedConstructor::.ctor(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PackedConstructor::.ctor(System.UInt64,System.Byte)	A	A	A	A	A	A	A	A

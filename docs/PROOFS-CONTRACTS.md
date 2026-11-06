@@ -251,6 +251,22 @@ caller can pass the same buffers again: `ValidCall.after_write` after any checke
 the inputs lie `Apart` from. `mono` drops buffers, and `input_bound` / `output_bound` give the
 identity bound those relations take.
 
+## Frame class instances
+
+A contract for a method taking [class instances](SOUNDNESS-RUNTIME.md#class-instances) names a
+field by the reference `objectFieldAddress` locates; the first field of an object is the object's
+own reference. `CIL.Safety.ObjectFraming` carries object facts across a call confined to a
+footprint: `formObject_of_confined` and `objectFieldAddress_of_confined` keep a formed reference
+and a located field, given well-formed memory before the call. `objectField_apart_of_ne` makes
+fields of two different objects `Apart`, so `Confined.objectField_read_of_ne` keeps a field of
+one object across a call confined to a field of another, given that the read field's allocation
+is older than the call. Equal references locate the same field (`objectFieldAddress_same`), so
+the aliased case of a proof follows by substitution. `formObject_of_objectFieldAddress` gives the
+formation fact the stepping tactics need for an argument whose field is located.
+[BumpBoth](../Examples/Proofs/BumpBoth.lean) composes two calls of `Bump` through one
+`MethodContract`, proves the distinct and the aliased case, and states the null receiver's
+`NullReferenceException` as an `OutcomeContract`.
+
 ## Construct structs through contracts
 
 A `newobj` of a reference-free struct allocates caller-owned storage, writes zero to every byte,

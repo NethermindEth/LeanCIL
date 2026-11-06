@@ -45,4 +45,14 @@ public static class Objects
 
     /// <summary>Stores a 32-bit field, leaving the other field of the instance unchanged.</summary>
     public static void SetLimit(Account account, uint limit) => account.Limit = limit;
+
+    /// <summary>Adds to the balance of one account, wrapping at 64 bits.</summary>
+    public static void Bump(Account account, ulong amount) => account.Balance += amount;
+
+    /// <summary>Bumps two accounts through <see cref="Bump"/>; both may be the same instance.</summary>
+    public static void BumpBoth(Account first, Account second, ulong amount)
+    {
+        Bump(first, amount);
+        Bump(second, amount);
+    }
 }
