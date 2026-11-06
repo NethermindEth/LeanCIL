@@ -122,6 +122,7 @@ internal static class LeanEmitter
         foreach (var operation in operations)
         {
             if (!operation.StartsWith(".call ", StringComparison.Ordinal) &&
+                !operation.StartsWith(".callInstance ", StringComparison.Ordinal) &&
                 !operation.StartsWith(".newAggregate ", StringComparison.Ordinal) &&
                 !operation.StartsWith(".newVector256 ", StringComparison.Ordinal)) continue;
             hasCall = true;

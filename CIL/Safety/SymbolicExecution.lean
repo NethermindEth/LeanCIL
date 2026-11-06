@@ -851,6 +851,10 @@ elab_rules : tactic
        · cil_checked_side [$facts,*]
        · cil_checked_side [$facts,*])))
 
+/-- Whether an opcode steps to a call action: `call`, or `callvirt` with a non-null receiver. -/
+def callsCallee (operation : Lean.Name) : Bool :=
+  operation == ``CIL.Op.call || operation == ``CIL.Op.callInstance
+
 open Lean Elab Tactic Meta in
 /-- One `run` step: prove the method and instruction lookups once, then apply only the
     composition lemma for the fetched opcode. With `openCall`, a call leaves the caller's
@@ -873,14 +877,15 @@ def cilRunStep (facts : Array Term) (openCall : Bool) : TacticM Unit := withMain
     cilFetchedOp ``CIL.Safety.run_next (fun e => e.eq?.map (·.2.1)) 3 facts
   -- An object construction runs its constructor as a call before continuing in the caller.
   let constructs := operation == ``CIL.Op.newObject
+  -- These fault before their callee runs: a short heap budget, or a null receiver.
+  let faultsFirst := constructs || operation == ``CIL.Op.callInstance
   evalTactic (← if operation == ``CIL.Op.ret then
       `(tactic| cil_checked_return_at $methodSyntax $instructionSyntax [$facts,*])
-    else if operation == ``CIL.Op.call || constructs then
+    else if callsCallee operation || constructs then
       let call ← if openCall then
           `(tactic| cil_checked_call_open_at $methodSyntax $instructionSyntax [$facts,*])
         else `(tactic| cil_checked_call_at $methodSyntax $instructionSyntax [$facts,*])
-      -- A construction can fault before its constructor runs, as when allocation fails.
-      if faulting && constructs then
+      if faulting && faultsFirst then
         `(tactic| first
           | cil_checked_fault_at $methodSyntax $instructionSyntax [$facts,*]
           | $call:tactic)

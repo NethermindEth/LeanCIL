@@ -640,7 +640,13 @@ internal static class MetadataValidation
             }
             void CallSite(Instruction instruction, MethodReference reference)
             {
-                if (instruction.OpCode.Code == Code.Callvirt ||
+                if (ObjectTypes.ReceiverCall(instruction))
+                {
+                    if (reference.Resolve() is { IsVirtual: true })
+                        throw Call("Unsupported virtual call", reference, method, instruction,
+                            "Dispatch on class instances is not modelled (#477).");
+                }
+                else if (instruction.OpCode.Code == Code.Callvirt ||
                     instruction is { OpCode.Code: Code.Call, Previous.OpCode.Code: Code.Constrained })
                 {
                     var resolved = ConstrainedCalls.Resolve(method, instruction, instructions, profile.Architecture);

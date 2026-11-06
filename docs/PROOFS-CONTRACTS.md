@@ -267,6 +267,13 @@ formation fact the stepping tactics need for an argument whose field is located.
 `MethodContract`, proves the distinct and the aliased case, and states the null receiver's
 `NullReferenceException` as an `OutcomeContract`.
 
+An instance call compiled as `callvirt` steps like a call once its receiver forms as a live
+object (`step_callInstance_eq`, `receiverCall_address`), so `cil_contract_steps` composes it
+through the callee's contract; a null receiver steps to `NullReferenceException` at the
+`callvirt` itself (`receiverCall_null`). [DepositBoth](../Examples/Proofs/DepositBoth.lean)
+composes two `callvirt` calls of `Account.Deposit` and proves the null receiver's fault at the
+caller's pc.
+
 A method that constructs an instance steps its `newobj` with `allocateObject_ok`, given
 well-formed memory and a `Memory.heapBudget` covering the instance, or `allocateObject_insufficient`
 for the `allocationFailure` fault when it does not. `objectMemory_formObject`, `objectMemory_field`

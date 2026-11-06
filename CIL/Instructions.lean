@@ -156,6 +156,9 @@ inductive Op where
   | bne (target : Nat)
   -- Calls and constructors; `argc` values are popped as arguments.
   | call (method : Nat) (argc : Nat)
+  /-- `callvirt` of a non-virtual instance method of a class: a null receiver, the first of the
+      `argc` arguments, throws `System.NullReferenceException` before the call. -/
+  | callInstance (method : Nat) (argc : Nat)
   | newVector256 (constructor : Nat) (argc : Nat)
   | newAggregate (constructor : Nat) (argc : Nat) (size : Fin (2^64))
   /-- A fresh zeroed instance of class `owner` with `size` bytes of fields, passed to

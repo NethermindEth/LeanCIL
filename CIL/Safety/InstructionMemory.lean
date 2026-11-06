@@ -92,8 +92,8 @@ def observerCount : CIL.Op → Nat
   | .setLane _ | .store64 | .copyObject _ => 2
   -- Method boundaries
   | .ret _ => 1
-  | .call _ argc | .tailCall _ argc | .newVector256 _ argc | .newAggregate _ argc _
-  | .newObject _ argc .. => argc
+  | .call _ argc | .callInstance _ argc | .tailCall _ argc | .newVector256 _ argc
+  | .newAggregate _ argc _ | .newObject _ argc .. => argc
   | .managed (.call signature _ _) => signature.parameters.length + 1
   | .managed (.tableElement _) | .managed (.tableAddress _) | .managed .tableOffset => 2
   | .managed .tableLength | .managed (.tableLoad _) => 1

@@ -25,7 +25,8 @@ foreach (var (proof, entry) in new[]
     ("LimitField", "Objects::SetLimit(Examples.Account,System.UInt32)"),
     ("HeadroomReceiver", "Account::get_Headroom()"),
     ("BumpBoth", "Objects::BumpBoth(Examples.Account,Examples.Account,System.UInt64)"),
-    ("FreshObject", "Objects::Fresh(System.UInt32)")
+    ("FreshObject", "Objects::Fresh(System.UInt32)"),
+    ("DepositBoth", "Objects::DepositBoth(Examples.Account,Examples.Account,System.UInt64)")
 })
 {
     verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));
@@ -35,7 +36,7 @@ foreach (var (proof, entry) in new[]
 foreach (var mutation in new[]
 {
     "abstract", "base", "explicit", "finalizer", "interface", "byref", "address", "reference", "fieldType",
-    "virtual", "callvirt", "receiverAddress"
+    "virtual", "virtualCall", "receiverAddress"
 })
 {
     var output = Path.Combine(root, "Reject-" + mutation);
@@ -96,7 +97,9 @@ foreach (var mutation in new[]
                 getter.IsVirtual = true;
                 getter.IsNewSlot = true;
                 break;
-            case "callvirt":
+            case "virtualCall":
+                getter.IsVirtual = true;
+                getter.IsNewSlot = true;
                 var start = method.Body.Instructions[0];
                 var calls = method.Body.GetILProcessor();
                 calls.InsertAfter(start, calls.Create(OpCodes.Ldarg_0));
@@ -122,7 +125,7 @@ foreach (var mutation in new[]
             "reference" => "Unsupported reference-typed field: Examples.Account Examples.Account::Owner",
             "fieldType" => "Unsupported class instance field type: System.Double Examples.Account::Rate",
             "virtual" => "Unsupported virtual instance method\n  Dispatch on class instances",
-            "callvirt" => "Unsupported callvirt on a class instance: System.UInt64 Examples.Account::get_Headroom()",
+            "virtualCall" => "Unsupported virtual call: System.UInt64 Examples.Account::get_Headroom()",
             "receiverAddress" =>
                 "Unsupported address of a class instance receiver: System.UInt64 Examples.Account::get_Headroom()",
             _ => throw new InvalidOperationException("Unknown class rejection fixture: " + mutation)

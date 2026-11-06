@@ -749,7 +749,7 @@ elab_rules : tactic
   | `(tactic| cil_contract_step [$facts:term,*]) => withMainContext do
     let (methodFound, instructionFound, operation) ←
       cilFetchedOp ``CIL.Safety.run_next_exists some 4 facts.getElems
-    if operation == ``CIL.Op.call then
+    if callsCallee operation then
       let saved ← saveState
       try cilContractApply methodFound instructionFound facts.getElems
       catch _ =>

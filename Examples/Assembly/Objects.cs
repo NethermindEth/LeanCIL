@@ -11,6 +11,9 @@ public sealed class Account
 
     /// <summary>The balance plus the limit, read through the instance as its receiver.</summary>
     public ulong Headroom => Balance + Limit;
+
+    /// <summary>Adds to the balance, wrapping at 64 bits; callers reach it through <c>callvirt</c>.</summary>
+    public void Deposit(ulong amount) => Balance += amount;
 }
 
 /// <summary>A class instance whose constructor sets one field and leaves the other zero.</summary>
@@ -68,6 +71,16 @@ public static class Objects
         var tally = new Tally(step);
         tally.Count = 5;
         return tally.Count + tally.Step;
+    }
+
+    /// <summary>
+    /// Deposits into two accounts through the instance method, each call checking its receiver for null;
+    /// both may be the same instance.
+    /// </summary>
+    public static void DepositBoth(Account first, Account second, ulong amount)
+    {
+        first.Deposit(amount);
+        second.Deposit(amount);
     }
 
     /// <summary>Bumps two accounts through <see cref="Bump"/>; both may be the same instance.</summary>

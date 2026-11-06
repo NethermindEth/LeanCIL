@@ -256,13 +256,22 @@ A non-virtual instance method of an admitted class is an entry whose receiver `t
 object reference, not a byref: the raw method records the class receiver (`objectReceiver`),
 from which Lean derives the receiver's storage and scalar kind. Lean rejects the address of
 the receiver and of any class-typed local or argument, so no byref can stand in for an object
-receiver. Calls to such methods are not yet admitted, since C# emits `callvirt`
-for them and its receiver null check is not modelled.
+receiver.
+
+`callvirt` without a `constrained.` prefix, which C# emits for every instance call on a class,
+is admitted when its target is a non-virtual method of an admitted class. It has exactly one
+target, so it is a call (`callInstance`) that first checks its receiver: a null receiver throws
+`System.NullReferenceException` at the `callvirt`, in the caller, before the callee is entered
+(ECMA-335 III.3.19), and a receiver that is no object reference is ill-typed. Lean admits a
+`callInstance` only at `callvirt`, only into a method whose receiver is an object, counting the
+receiver among its arguments, and rejects a plain `call` emitted for `callvirt`, which would skip
+the check. That the target is not virtual is metadata the extractor decodes and checks, as it
+decodes `hasThis`.
 
 Interface, generic, abstract, derived, explicit-layout and finalizable classes, byrefs to class
 instances, field addresses on class instances, reference-typed or non-integer class fields,
-virtual class methods, `callvirt` on a class and the address of a class receiver, local or
-argument are each
+virtual class methods, `callvirt` of a virtual method and the address of a class receiver, local
+or argument are each
 rejected by name during extraction.
 
 Object identity, runtime type and field positions are allocation metadata, which byte writes

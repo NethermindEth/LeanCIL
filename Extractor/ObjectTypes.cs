@@ -1,4 +1,5 @@
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
@@ -12,6 +13,15 @@ internal static class ObjectTypes
     internal static bool Candidate(TypeReference type) =>
         type is not TypeSpecification and not GenericParameter && !type.IsValueType &&
         (type.Scope is ModuleDefinition || PinnedAssemblies.Active?.ModuleOf(type) is not null);
+
+    /// <summary>
+    /// A callvirt with no constrained prefix on a method of a candidate class: a call that checks its
+    /// receiver for null before entering the callee.
+    /// </summary>
+    internal static bool ReceiverCall(Instruction call) =>
+        call is { OpCode.Code: Code.Callvirt, Operand: MethodReference callee } &&
+        call.Previous?.OpCode.Code != Code.Constrained && Candidate(callee.DeclaringType) &&
+        callee.DeclaringType.Resolve() is { IsInterface: false };
 
     /// <summary>The type is an admitted class instance type.</summary>
     internal static bool Is(TypeReference type)

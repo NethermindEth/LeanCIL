@@ -62,6 +62,13 @@ def scalarType : TypeExpr → ScalarKind
       "System.UInt16", "System.Int32", "System.UInt32"] then .word32 else .other
   | _ => .other
 
+/-- The stack kind of the receiver of an instance method declared by `owner`: an object
+    reference for a class, a byref for a value type. -/
+def receiverKind (owner : TypeExpr) : ScalarKind :=
+  match owner with
+  | .object .. => .object
+  | _ => scalarType (.byref owner)
+
 private def numeric (kind : ScalarKind) : Bool := kind ∈ [.word32, .word64, .native]
 
 /-- A value of kind `value` may be stored in a slot of kind `home`; `word64` and `native`
@@ -831,7 +838,7 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
       then [.word32, .reference] ++
         (if opcode == 40 then [scalarType (.byref site.declaringType)] else []) else
       site.parameterTypes.reverse.map scalarType ++
-        (if opcode != 115 && site.hasThis then [scalarType (.byref site.declaringType)] else [])
+        (if opcode != 115 && site.hasThis then [receiverKind site.declaringType] else [])
     let inputs := if opcode == 115 && role == some .interior then
         stack.map (fun kind => if kind == .nullObject then .other else kind)
       else stack

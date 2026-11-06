@@ -960,6 +960,7 @@ Examples:System.ValueTuple`2<System.UInt64,System.UInt64> Examples.TupleDivision
 Examples:System.ValueTuple`2<System.UInt64,System.UInt64> Examples.TupleDivision::Pair(System.UInt64,System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.ValueTuple`2<System.UIntPtr,System.UIntPtr> Examples.TupleDivision::MathUIntPtr(System.UIntPtr,System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Account::.ctor()	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Account::Deposit(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.AggregateArrays::Write(Examples.AggregateArrays/Pair[],System.Int32,Examples.AggregateArrays/Pair)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.AggregateArrays::WriteVector(System.Runtime.Intrinsics.Vector128`1<System.UInt64>[],System.Int32,System.Runtime.Intrinsics.Vector128`1<System.UInt64>)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.AggregateSpanFill::Aliased(System.Span`1<Examples.AggregateSpans/Words>)	A	A	A	A	A	A	A	A
@@ -1030,6 +1031,7 @@ Examples:System.Void Examples.NullReferences::Write(System.UInt64)	A	A	A	A	A	A	A
 Examples:System.Void Examples.NullReferences::WriteField(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::Bump(Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::BumpBoth(Examples.Account,Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Objects::DepositBoth(Examples.Account,Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::SetLimit(Examples.Account,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PackedConstructor::.ctor(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PackedConstructor::.ctor(System.UInt64,System.Byte)	A	A	A	A	A	A	A	A

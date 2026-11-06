@@ -125,6 +125,27 @@ theorem construction_owner_and_size :
       (.newObject 0 1 tally 16) := by decide +kernel
 #print axioms construction_owner_and_size
 
+/-- A non-virtual instance method of `Tally` taking one word, and a call site of it. -/
+def deposit : RawMethod := { closed with
+  owner := "Test::Tally", hasThis := true, objectReceiver := true, parameters := [word] }
+def depositSite : CallSite := {
+  declaringType := tally, name := "Deposit", target := .managed closed.token,
+  typeArguments := [], parameterCount := 1, hasThis := true, returnsValue := true,
+  returnType := word, parameterTypes := [word] }
+
+-- Only `callvirt` emits a receiver-checked call, counting the receiver, and only into a method
+-- whose receiver is an object; a `callvirt` that skips the null check as a plain call is rejected.
+theorem receiver_checked_calls :
+    validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true (.callInstance 0 2) ∧
+    ¬ validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true (.call 0 2) ∧
+    ¬ validateManagedCall [⟨[], deposit⟩] [] ⟨0, 40, .call depositSite⟩ true
+      (.callInstance 0 2) ∧
+    ¬ validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true
+      (.callInstance 0 1) ∧
+    ¬ validateManagedCall [⟨[], { deposit with objectReceiver := false }⟩] []
+      ⟨0, 111, .call depositSite⟩ true (.callInstance 0 2) := by decide +kernel
+#print axioms receiver_checked_calls
+
 /-- A method with a class instance local and parameter beside a scalar of each. -/
 def holder : RawMethod := { closed with
   parameters := [tally, word], locals := [tally, word], code := [] }

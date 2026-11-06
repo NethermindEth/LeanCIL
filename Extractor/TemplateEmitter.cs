@@ -67,8 +67,8 @@ internal static class TemplateEmitter
     {
         if (op.StartsWith(".newVector256 ", StringComparison.Ordinal))
             throw new InvalidDataException("Templates do not yet support vector constructor calls: " + op);
-        var prefix = op.StartsWith(".call ", StringComparison.Ordinal) ? ".call " :
-            op.StartsWith(".newAggregate ", StringComparison.Ordinal) ? ".newAggregate " : null;
+        var prefix = new[] { ".call ", ".callInstance ", ".newAggregate ", ".newObject " }
+            .FirstOrDefault(prefix => op.StartsWith(prefix, StringComparison.Ordinal));
         if (prefix is null) return null;
         var end = op.IndexOf(' ', prefix.Length);
         if (end < 0 || !int.TryParse(op[prefix.Length..end], out var index) ||

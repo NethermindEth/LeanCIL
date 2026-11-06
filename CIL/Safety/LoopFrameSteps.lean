@@ -385,14 +385,14 @@ partial def loopWalk (tactic : String) (mode : LoopStepping) (explicit : Array T
   if let .resume target := mode then
     if position == some target then return
   -- A call or return an advance stops at is left for the next tactic.
-  if mode == .advance && stopped.any fun op => op == ``CIL.Op.call || op == ``CIL.Op.ret then
+  if mode == .advance && stopped.any fun op => callsCallee op || op == ``CIL.Op.ret then
     return
   if ← loopFrameStore facts.core layouts footprint then
     return ← loopWalk tactic mode explicit layouts footprint true
   -- Where the walk stopped is the mode's stop, or a store no frame lemma takes.
   let stops : Lean.Name → Bool := match mode with
     | .finish => (· == ``CIL.Op.ret)
-    | .advance => fun op => op == ``CIL.Op.call || op == ``CIL.Op.ret
+    | .advance => fun op => callsCallee op || op == ``CIL.Op.ret
     | _ => fun _ => false
   loopStuck tactic facts.all prepared stops
 
@@ -523,7 +523,7 @@ def loopCallFailure (holds input : Term) (facts : Array Term) (position : Nat)
   let some { op, step, .. } := fetched
     | saved.restore
       throwError "cil_loop_call: cannot fetch the instruction at pc {position}"
-  unless (← whnfR op).isAppOf ``CIL.Op.call do
+  unless ((← whnfR op).getAppFn.constName?.map callsCallee).getD false do
     saved.restore
     throwError "cil_loop_call: pc {position} is {op}, not a call; step to the call first with \
       `cil_loop_advance`"

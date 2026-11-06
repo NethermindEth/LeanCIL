@@ -97,7 +97,9 @@ internal static class InstructionTranslation
             ConstrainedCalls.Resolve(m, i.Next, instructions, profile.Architecture);
             return ".nop";
         }
-        if (i.OpCode.Code == Code.Callvirt || i is { OpCode.Code: Code.Call, Previous.OpCode.Code: Code.Constrained })
+        var receiverCall = ObjectTypes.ReceiverCall(i);
+        if (!receiverCall &&
+            (i.OpCode.Code == Code.Callvirt || i is { OpCode.Code: Code.Call, Previous.OpCode.Code: Code.Constrained }))
         {
             var resolved = (constrainedTargets ?? new ConstrainedCalls.TargetIndex(methods.Keys))
                 .Find(ConstrainedCalls.Resolve(m, i, instructions, profile.Architecture));
@@ -161,7 +163,7 @@ internal static class InstructionTranslation
             SpanReferences.ValidateCopy(m, i, instructions);
             return ".nop";
         }
-        if (i.OpCode.Code is Code.Call or Code.Newobj)
+        if (i.OpCode.Code is Code.Call or Code.Newobj || receiverCall)
         {
             var r = (MethodReference)i.Operand;
             if (i.OpCode.Code == Code.Call && RuntimeModels.ObjectConstructor(r)) return ".pop";
@@ -174,7 +176,7 @@ internal static class InstructionTranslation
                     return ObjectTypes.Construction(resolved, index);
                 if (i.OpCode.Code == Code.Newobj)
                     return $".newAggregate {index} {resolved.Parameters.Count} {Layout(MethodSpecialization.DeclaringType(resolved))}";
-                var operation = TailCalls.IsCall(i) ? "tailCall" : "call";
+                var operation = TailCalls.IsCall(i) ? "tailCall" : receiverCall ? "callInstance" : "call";
                 return $".{operation} {index} {resolved.Parameters.Count + (resolved.HasThis ? 1 : 0)}";
             }
             throw new InvalidDataException($"Unsupported or unresolved call: {r.FullName} [{r.DeclaringType.Scope.Name}]");

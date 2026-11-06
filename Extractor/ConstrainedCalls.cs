@@ -57,11 +57,6 @@ internal static class ConstrainedCalls
     internal static Resolution Resolve(MethodDefinition caller, Instruction call,
         InstructionIndex instructions, string architecture)
     {
-        if (call is { OpCode.Code: Code.Callvirt, Operand: MethodReference virtualCall } &&
-            call.Previous?.OpCode.Code != Code.Constrained && ObjectTypes.Candidate(virtualCall.DeclaringType) &&
-            virtualCall.DeclaringType.Resolve() is { IsInterface: false })
-            throw new InvalidDataException("Unsupported callvirt on a class instance: " + virtualCall.FullName +
-                "\n  The receiver null check of callvirt is not modelled.");
         if (call.OpCode.Code is not (Code.Callvirt or Code.Call) || call.Operand is not MethodReference reference ||
             call.Previous is not { OpCode.Code: Code.Constrained, Operand: TypeReference receiver })
             throw new InvalidDataException("callvirt requires an adjacent concrete constrained receiver");

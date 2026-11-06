@@ -509,10 +509,12 @@ structure SpecializedMethod where
   deriving DecidableEq, Repr
 
 /-- The callee index and argument count of an emitted call, if its kind matches the raw
-    opcode: `call` (40) for `.call`, `newobj` (115) for a construction. -/
+    opcode: `call` (40) for `.call`, `callvirt` (111) for a receiver-checked call, `newobj`
+    (115) for a construction. -/
 private def managedCallTarget (opcode : Nat) : Op → Option (Nat × Nat)
   | .call target count | .tailCall target count =>
     if opcode = 40 then some (target, count) else none
+  | .callInstance target count => if opcode = 111 then some (target, count) else none
   | .newAggregate target count _ | .newVector256 target count | .newObject target count .. =>
     if opcode = 115 then some (target, count) else none
   | _ => none
@@ -523,6 +525,12 @@ def constructedOwnerMatches (site : CallSite) (callee : RawMethod) : Op → Bool
   | .newObject _ _ owner size => owner == site.declaringType && callee.objectReceiver &&
     size == objectFieldOffset callee.objectFieldCount &&
     match owner with | .object .. => true | _ => false
+  | _ => true
+
+/-- A receiver-checked call enters a non-virtual method of an admitted class, whose receiver is an
+    object reference; no other managed call checks its receiver. -/
+def checkedReceiverMatches (callee : RawMethod) : Op → Bool
+  | .callInstance .. => callee.objectReceiver
   | _ => true
 
 /-- Legacy slots accept only primitive signatures; new families require exact typed metadata. -/
@@ -637,16 +645,19 @@ def validateManagedCallWith (methodCount : Nat)
           (callee.closed.returnType != .void) == site.returnsValue &&
           callee.closed.returnType == site.returnType &&
           callee.closed.parameters == site.parameterTypes &&
-          count == site.parameterCount + (if raw.opcode == 40 && site.hasThis then 1 else 0) &&
-          constructedOwnerMatches site callee.closed emitted
+          count == site.parameterCount + (if raw.opcode != 115 && site.hasThis then 1 else 0) &&
+          constructedOwnerMatches site callee.closed emitted &&
+          checkedReceiverMatches callee.closed emitted
     | .external identity => match emitted with
       | .call target count =>
         validateImportCallWith methodCount imports raw.opcode site identity target count
-      | .tailCall .. | .newAggregate .. | .newVector256 .. | .newObject .. => false
+      | .callInstance .. | .tailCall .. | .newAggregate .. | .newVector256 .. | .newObject .. =>
+        false
       | _ => true
   | .indirectCall .. => false
   | _ => match emitted with
-    | .call .. | .tailCall .. | .newAggregate .. | .newVector256 .. | .newObject .. => false
+    | .call .. | .callInstance .. | .tailCall .. | .newAggregate .. | .newVector256 ..
+    | .newObject .. => false
     | _ => true
 
 /-- The external-call rule stated against the original lists, including bounds and offset. -/

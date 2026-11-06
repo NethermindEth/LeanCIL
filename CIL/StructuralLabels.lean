@@ -73,16 +73,17 @@ syntax (name := bindCall)
   (docComment)? "bind_call " ident " := " term:max " from " term:max (" [" num "]")? : command
 
 elab_rules : command
-  | `($[$doc:docComment]? bind_call $site := $callee from $parent $[[$occurrence]]?) => do
-    let (pc, argc) ← liftTermElabM do
+  | `($[$doc:docComment]? bind_call $label := $callee from $parent $[[$occurrence]]?) => do
+    let site ← liftTermElabM do
       let some method ←
           (evalNat (← whnf (← elabTermEnsuringType callee (some (mkConst ``Nat))))).run
         | throwError "{callee} is not a closed method index"
       let table ← strings (mkConst (← visible `Extracted.signatures))
       callSite parent method (table[method]?.getD s!"method {method}") (occurrence.map (·.getNat))
-    elabCommand (← `(@[cil_code] def $site : Nat := $(quote pc)))
-    CIL.MethodIdentity.documentBinding doc site
-    elabAtPc pc (← `(@[cil_code] theorem $(mkIdent (site.getId ++ `call)) :
-      ($parent).code[$site]? = some (CIL.Op.call $callee $(quote argc)) := rfl))
+    elabCommand (← `(@[cil_code] def $label : Nat := $(quote site.pc)))
+    CIL.MethodIdentity.documentBinding doc label
+    let instruction ← liftMacroM (site.instruction callee)
+    elabAtPc site.pc (← `(@[cil_code] theorem $(mkIdent (label.getId ++ `call)) :
+      ($parent).code[$label]? = some $instruction := rfl))
 
 end CIL.StructuralLabels

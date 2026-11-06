@@ -8,7 +8,8 @@ import CIL.Safety.ObjectAllocationLemmas
 comparison (`ceq`, `beq`, `bne.un`), presence (`cgt.un` against null, `brtrue`, `brfalse`) and
 `ldnull`, `ldfld`/`stfld` of scalar class fields, and `newobj` of a class, which calls the
 constructor with a fresh instance that `allocateObject_ok` or `allocateObject_insufficient`
-decides. Each states the dispatcher arm of
+decides, and `callvirt` of a non-virtual method, which calls with a live receiver and throws
+`NullReferenceException` on a null one (`receiverCall`). Each states the dispatcher arm of
 `CIL/Safety/Execution.lean` for object operands, so stepping never unfolds the dispatcher. The
 observations themselves unfold through `cil_checked` down to `formObject`, which a caller's
 facts or `formObject_null` decide; field accesses leave `objectFieldAddress` and the byte
@@ -69,6 +70,46 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
   simp only [step, observerCount, Bool.or_false]
 
 #print axioms step_newObject_eq
+
+/-- The call a receiver-checked `callvirt` makes with checked `arguments`, receiver first: a null
+    receiver throws `NullReferenceException`, and a receiver that is no object reference is
+    ill-typed. This is the `callInstance` arm of `step` after its argument checks. -/
+def receiverCall (callee : Nat) (arguments rest : List Value) (memory : Memory) :
+    ExecutionResult FrameAction :=
+  match arguments with
+  | .object (.address _) :: _ => .ok (.call callee arguments rest memory)
+  | .object .null :: _ => .error (.thrown "System.NullReferenceException")
+  | _ => .error .invalidState
+
+/-- `callvirt` of a non-virtual method checks its `argc` arguments and calls with a live receiver;
+    a null receiver throws `NullReferenceException` before the call. -/
+@[cil_step] theorem step_callInstance_eq (callee argc : Nat) (stack : List Value) :
+    step body (.callInstance callee argc) pc args frame stack memory =
+      if unspecifiedOperands argc stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else if stack.length < argc then .error .invalidState
+      else (do
+        let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
+        receiverCall callee arguments (stack.drop argc) memory) := by
+  simp only [step, observerCount, Bool.or_false]
+  rfl
+
+#print axioms step_callInstance_eq
+
+/-- A live receiver makes the call with the checked arguments as they stand. -/
+@[cil_checked] theorem receiverCall_address (callee : Nat) (receiver : Reference)
+    (arguments rest : List Value) :
+    receiverCall callee (.object (.address receiver) :: arguments) rest memory =
+      .ok (.call callee (.object (.address receiver) :: arguments) rest memory) := rfl
+
+#print axioms receiverCall_address
+
+/-- A null receiver throws before the call. -/
+@[cil_checked] theorem receiverCall_null (callee : Nat) (arguments rest : List Value) :
+    receiverCall callee (.object .null :: arguments) rest memory =
+      .error (.thrown "System.NullReferenceException") := rfl
+
+#print axioms receiverCall_null
 
 /-- `ceq` on two object references pushes their identity comparison. -/
 @[cil_step high] theorem step_eq_object_eq (left right : ManagedReference) (rest : List Value) :
