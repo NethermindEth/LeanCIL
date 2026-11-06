@@ -27,6 +27,7 @@ foreach (var (proof, entry) in new[]
     ("BumpBoth", "Objects::BumpBoth(Examples.Account,Examples.Account,System.UInt64)"),
     ("FreshObject", "Objects::Fresh(System.UInt32)"),
     ("DepositBoth", "Objects::DepositBoth(Examples.Account,Examples.Account,System.UInt64)"),
+    ("DepositTimes", "Objects::DepositTimes(Examples.Account,System.UInt64,System.UInt32)"),
     ("TwoMarkers", "Objects::TwoMarkers()")
 })
 {

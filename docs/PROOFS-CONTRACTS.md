@@ -272,7 +272,10 @@ object (`step_callInstance_eq`, `receiverCall_address`), so `cil_contract_steps`
 through the callee's contract; a null receiver steps to `NullReferenceException` at the
 `callvirt` itself (`receiverCall_null`). [DepositBoth](../Examples/Proofs/DepositBoth.lean)
 composes two `callvirt` calls of `Account.Deposit` and proves the null receiver's fault at the
-caller's pc.
+caller's pc. [DepositTimes](../Examples/Proofs/DepositTimes.lean) crosses the same call inside a
+loop with `cil_loop_call`, holding the balance as `Contents` and `Writable` facts; the loop
+tactics carry a `Contents` fact across a call only when it is apart from the callee's footprint,
+so a fact the call may change is restated from the contract's postcondition.
 
 A method that constructs an instance steps its `newobj` with `allocateObject_ok`, given
 well-formed memory and a `Memory.heapBudget` covering the instance, or `allocateObject_insufficient`

@@ -88,6 +88,13 @@ public static class Objects
         second.Deposit(amount);
     }
 
+    /// <summary>Deposits <paramref name="amount"/> <paramref name="times"/> times, one instance call per iteration.</summary>
+    public static void DepositTimes(Account account, ulong amount, uint times)
+    {
+        for (uint i = 0; i < times; i++)
+            account.Deposit(amount);
+    }
+
     /// <summary>Two instances of a class with no fields are still two distinct instances.</summary>
     public static bool TwoMarkers()
     {
