@@ -112,9 +112,8 @@ def loopCarryFacts (memory : Expr) (carry : Name → Ident → TacticM (Option T
   for (head, name) in carried do
     let some term ← carry head (mkIdent name) | continue
     let saved ← saveState
-    try
-      Term.withoutErrToSorry <| withoutRecover <| evalTactic
-        (← `(tactic| have $(mkIdent name):ident := $term))
+    -- A failed side proof inside `term` is logged, not thrown; `cil_strict` makes it fail here.
+    try evalTactic (← `(tactic| cil_strict have $(mkIdent name):ident := $term))
     catch _ => saved.restore
 
 /-- Carry the caller-buffer facts at `memory` across `below`, a store that keeps everything below
