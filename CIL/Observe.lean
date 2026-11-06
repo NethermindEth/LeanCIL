@@ -483,35 +483,47 @@ def userTactic? (stx : Syntax) : Option String :=
     if value.startsWith "cil_" then some value else none
   | _, _ => none
 
-/-- The outermost tactic nodes of `tree`, each a tactic block, and its LeanCIL tactic nodes
-    written in the source, in elaboration order. -/
+/-- The LeanCIL tactic `stx` runs, by its first atom, whether written in the source or built by
+    another tactic's expansion. -/
+def cilTactic? (stx : Syntax) : Option String :=
+  match stx.getHead? with
+  | some (.atom _ value) =>
+    let value := String.ofList (value.toList.filter (· != ' '))
+    if value.startsWith "cil_" then some value else none
+  | _ => none
+
+/-- The tactic nodes of an info tree, in elaboration order. -/
+structure TacticNodes where
+  /-- The outermost tactic nodes, each a tactic block. -/
+  blocks : Array TacticNode := #[]
+  /-- The LeanCIL tactic nodes written in the source. -/
+  tactics : Array TacticNode := #[]
+  /-- Every LeanCIL tactic node, including those another tactic's expansion built. -/
+  raisers : Array TacticNode := #[]
+  deriving Inhabited
+
+/-- The tactic nodes of `tree`. -/
 partial def tacticNodes (tree : InfoTree) (context : Option ContextInfo := none)
-    (inBlock : Bool := false) : Array TacticNode × Array TacticNode :=
+    (inBlock : Bool := false) : TacticNodes :=
   match tree with
   | .context part inner => tacticNodes inner (part.mergeIntoOuter? context) inBlock
-  | .hole _ => (#[], #[])
+  | .hole _ => {}
   | .node info children =>
-    let (blocks, tactics, inBlock) := match info, context with
+    let (found, inBlock) : TacticNodes × Bool := match info, context with
       | .ofTacticInfo tactic, some context =>
         let node := { context, info := tactic }
-        ((if inBlock then #[] else #[node]),
-          (if (userTactic? tactic.stx).isSome then #[node] else #[]), true)
-      | _, _ => (#[], #[], inBlock)
-    children.foldl (init := (blocks, tactics)) fun (blocks, tactics) child =>
-      let (more, found) := tacticNodes child context inBlock
-      (blocks ++ more, tactics ++ found)
+        ({ blocks := if inBlock then #[] else #[node]
+           tactics := if (userTactic? tactic.stx).isSome then #[node] else #[]
+           raisers := if (cilTactic? tactic.stx).isSome then #[node] else #[] }, true)
+      | _, _ => ({}, inBlock)
+    children.foldl (init := found) fun found child =>
+      let more := tacticNodes child context inBlock
+      { blocks := found.blocks ++ more.blocks, tactics := found.tactics ++ more.tactics
+        raisers := found.raisers ++ more.raisers }
 
 /-- Run `action` in `node`'s context after the tactic ran. -/
 def TacticNode.run (node : TacticNode) (action : MetaM α) : IO α :=
   { node.context with mctx := node.info.mctxAfter }.runMetaM {} action
-
-/-- Whether `position` lies in the source range of `stx`. -/
-def spans (fileMap : FileMap) (stx : Syntax) (position : Position) : Bool :=
-  match stx.getPos?, stx.getTailPos? with
-  | some start, some stop =>
-    let point := fileMap.ofPosition position
-    start ≤ point && point ≤ stop
-  | _, _ => false
 
 /-- Whether `goal` is declared in the final metavariable context of one of `blocks`. Lean may
     elaborate a term more than once and keep the tactic nodes of each attempt, but it rolls back the
@@ -536,29 +548,41 @@ def logSteps (blocks tactics : Array TacticNode) : CommandElabM Unit := do
     logInfoAt node.info.stx m!"{stepTraceHeader}{tactic} took {steps.size} steps; goals left: \
       {if left.isEmpty then "none" else ", ".intercalate left}"
   for block in blocks do
-    let steps ← block.run do
+    let (steps, statesRun) ← block.run do
       let ((), walk) ← (block.info.goalsBefore.forM walkGoal).run {}
-      return walk.steps
+      let some goal := block.info.goalsBefore.head? | return (walk.steps, false)
+      let type ← instantiateMVars (← goal.getType)
+      return (walk.steps, (type.find? fun part =>
+        part.isConstOf `CIL.Safety.invoke || part.isConstOf `CIL.Safety.run).isSome)
     for step in steps do
       unless seen.contains step.key do
         logInfoAt block.info.stx m!"{step.text}\n  taken outside a LeanCIL tactic"
+    -- A proof by evaluation, such as `rfl` or `decide` on a run, takes no step the trace can show.
+    if steps.isEmpty && statesRun then
+      logInfoAt block.info.stx m!"{stepTraceHeader}this proof states a run of a method but \
+        applies no step lemma, so the trace shows no step of it"
 
 /-- The text of `message`. -/
 def messageText (message : Message) : IO String := message.data.toString
 
 /-- Log a failure record for each error a LeanCIL tactic raised, and for each goal a tactic block
     leaves unsolved after a LeanCIL tactic left it. -/
-def logRecords (blocks tactics : Array TacticNode) : CommandElabM Unit := do
+def logRecords (blocks tactics raisers : Array TacticNode) : CommandElabM Unit := do
   let fileMap ← getFileMap
   let log := (← get).messages
   let errors := (log.reported.toArray ++ log.unreported.toArray).filter
     (·.severity == .error)
   for error in errors do
-    -- The innermost LeanCIL tactic whose source holds the error raised it.
-    let containing := tactics.filter fun node => spans fileMap node.info.stx error.pos
-    let some node := containing.back? | continue
+    -- A tactic's own error is reported where its syntax starts, so an error inside a term it
+    -- elaborates is Lean's; a LeanCIL error names the tactic that raised it.
+    let text ← messageText error
+    let raised := raisers.filter fun node =>
+      (node.info.stx.getPos?.map (fileMap.toPosition · == error.pos)).getD false
+    let named := raised.filter fun node =>
+      (cilTactic? node.info.stx).any fun name => text.startsWith s!"{name}:"
+    let some node := named.back? <|> raised.back? | continue
     let some goal := node.info.goalsAfter.head? | continue
-    let tactic := (userTactic? node.info.stx).getD "?"
+    let tactic := (cilTactic? node.info.stx).getD "?"
     let line ← node.run <| goal.withContext do
       (← analyze tactic goal node.info.goalsBefore.head? error.pos false).render
     logInfoAt node.info.stx m!"{failureMarker}{line}"
@@ -592,27 +616,32 @@ def observer : Linter where
     unless tracing || recording do return
     let mut blocks := #[]
     let mut tactics := #[]
+    let mut raisers := #[]
     for tree in (← get).infoState.trees do
-      let (more, found) := tacticNodes tree
-      blocks := blocks ++ more
-      tactics := tactics ++ found
+      let found := tacticNodes tree
+      blocks := blocks ++ found.blocks
+      tactics := tactics ++ found.tactics
+      raisers := raisers ++ found.raisers
     -- Only the nodes of this command: a tree may hold earlier commands' nodes.
     let inCommand (node : TacticNode) : Bool :=
       match node.info.stx.getPos?, command.getPos?, command.getTailPos? with
       | some point, some start, some stop => start ≤ point && point ≤ stop
       | _, _, _ => false
     let ownBlocks := blocks.filter inCommand
-    let mut ran : Std.HashSet (Array MVarId × Option Nat) := {}
-    let mut ownTactics := #[]
-    for node in tactics.filter inCommand do
-      unless node.info.goalsBefore.all (kept ownBlocks) do continue
-      -- A node the info trees hold twice ran once.
-      let key := (node.info.goalsBefore.toArray, node.info.stx.getPos?.map (·.byteIdx))
-      if ran.contains key then continue
-      ran := ran.insert key
-      ownTactics := ownTactics.push node
+    -- The nodes of the elaboration Lean kept, each once: the info trees may hold a node twice.
+    let ran (nodes : Array TacticNode) : Array TacticNode := Id.run do
+      let mut seen : Std.HashSet (Array MVarId × Option Nat) := {}
+      let mut live := #[]
+      for node in nodes.filter inCommand do
+        unless node.info.goalsBefore.all (kept ownBlocks) do continue
+        let key := (node.info.goalsBefore.toArray, node.info.stx.getPos?.map (·.byteIdx))
+        if seen.contains key then continue
+        seen := seen.insert key
+        live := live.push node
+      return live
+    let ownTactics := ran tactics
     if tracing then logSteps ownBlocks ownTactics
-    if recording then logRecords ownBlocks ownTactics
+    if recording then logRecords ownBlocks ownTactics (ran raisers)
 
 initialize addLinter observer
 
