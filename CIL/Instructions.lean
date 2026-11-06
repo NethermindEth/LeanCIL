@@ -45,8 +45,18 @@ theorem NarrowKind.extend_ite_ofNat_one_zero (kind : NarrowKind) (p : Prop) [Dec
     kind.extend (if p then 1#32 else 0#32) = if p then 1#32 else 0#32 := by
   cases kind <;> split <;> rfl
 
+/-- A decided comparison returns the literal `1#32`, which every narrow kind keeps. -/
+@[simp] theorem NarrowKind.extend_one (kind : NarrowKind) : kind.extend 1#32 = 1#32 := by
+  cases kind <;> rfl
+
+/-- A decided comparison returns the literal `0#32`, which every narrow kind keeps. -/
+@[simp] theorem NarrowKind.extend_zero (kind : NarrowKind) : kind.extend 0#32 = 0#32 := by
+  cases kind <;> rfl
+
 #print axioms NarrowKind.extend_ite_one_zero
 #print axioms NarrowKind.extend_ite_ofNat_one_zero
+#print axioms NarrowKind.extend_one
+#print axioms NarrowKind.extend_zero
 
 /-- Applies an optional narrowing to an `i32`; narrowing anything else is stuck. -/
 def narrowValue (kind : Option NarrowKind) (value : Value) : Option Value :=

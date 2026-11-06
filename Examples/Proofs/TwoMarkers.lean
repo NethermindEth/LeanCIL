@@ -46,12 +46,7 @@ theorem correctness (memory : Memory) (formed : memory.WellFormed) :
   refine ⟨CIL.executionBound Extracted.program twoMarkers,
     objectMemory (objectMemory memory ⟨markerType⟩ 0) ⟨markerType⟩ 0, ?_⟩
   simp only [markerType]
-  cil_checked_entry [first, second, firstCreated, secondCreated, firstKept, distinct]
-  cil_checked_steps 7 [first, second, firstCreated, secondCreated, firstKept, distinct]
-  -- `ceq` of the two instances pushed 0, and `ceq` of that with 0 pushes 1.
-  simp only [ite_true]
-  cil_checked_steps
-  rfl
+  cil_checked_steps [first, second, firstCreated, secondCreated, firstKept, distinct]
 
 #print axioms correctness
 

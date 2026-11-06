@@ -85,6 +85,19 @@ theorem checked_narrow_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.F
 
 #print axioms checked_narrow_return
 
+@[cil_code] def decidedNarrowMethod : CIL.Method := {
+  code := [.const32 0, .const32 0, .eq, .ret (some .unsigned8)]
+  locals := [], returnsValue := true }
+
+/-- A comparison of literals decides to `1#32` before the narrowed return, which keeps it, so
+    stepping alone closes the goal without unfolding `NarrowKind.extend`. -/
+theorem checked_decided_narrow_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame) :
+    CIL.Safety.run [decidedNarrowMethod] 4 0 0 [] frame [] memory =
+      .ok (CIL.Safety.leaveFrame frame memory, [.scalar (.i32 1)]) := by
+  cil_checked_steps
+
+#print axioms checked_decided_narrow_return
+
 theorem checked_plain_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame)
     (value : CIL.W32) :
     CIL.Safety.run [branchMethod] 1 0 3

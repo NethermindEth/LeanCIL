@@ -147,8 +147,9 @@ scaffolding](PROOFS-BINDING.md#generate-loop-entry-and-cutpoint-scaffolding)).
 At a return, the tactic leaves the equation between the computed checked result and the stated
 result as a proof goal. It closes that equation automatically only when `with_reducible rfl`
 succeeds after frame cleanup, list normalization and literal shift-count reduction. Cleanup also
-drops the narrowing of an `if p then 1 else 0` result, so a narrow Boolean return needs no unfolding
-of `NarrowKind.extend`. A follow-up `simp [leaveFrame, NarrowKind.extend]; split <;> rfl` after such
+drops the narrowing of an `if p then 1 else 0` result, and the closing `simp` drops it from a
+comparison already decided to `1` or `0`, so a narrow Boolean return needs no unfolding of
+`NarrowKind.extend`. A follow-up `simp [leaveFrame, NarrowKind.extend]; split <;> rfl` after such
 a return fails with "no goals" and must be deleted. Other mathematical results can need a separate
 `simp` or case split. The remaining goal contains the returned values, rather than an unexecuted
 `run`. `cil_contract_steps` likewise leaves the return postcondition as a goal.
