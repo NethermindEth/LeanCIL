@@ -548,7 +548,8 @@ parts of the state that changed. A hypothesis whose statement is a `SpanApart`, 
 `Filled` or `CheckedSpan` fact also says what it establishes, such as that the footprints are
 disjoint. Each `cil_` tactic the proof names then logs how many steps it took and the obligation
 tags of the goals it left; a step no such tactic took is logged at its tactic block as taken
-outside one.
+outside one. A block whose goal states a run of a method but whose proof applies no step lemma,
+such as one that evaluates the method with `rfl` or `decide`, logs that it took no step to trace.
 
 With `set_option cil.diagnostics true`, the observer logs a failure record for each error a `cil_`
 tactic raised, and for each goal one left that Lean reports as unsolved, as a message starting

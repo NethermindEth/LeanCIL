@@ -24,6 +24,7 @@
       },
       "message": "Tactic `rfl` failed: The left-hand side\n  Except.map Prod.snd\n    (Safety.invoke Extracted.program 4 0 [Safety.Value.scalar (Value.i64 x), Safety.Value.scalar (Value.i64 y)]\n      Safety.Memory.empty)\nis not definitionally equal to the right-hand side\n  Except.ok [Safety.Value.scalar (Value.i64 (x + y))]\n\nx y : W64\n⊢ Except.map Prod.snd\n      (Safety.invoke Extracted.program 4 0 [Safety.Value.scalar (Value.i64 x), Safety.Value.scalar (Value.i64 y)]\n        Safety.Memory.empty) =\n    Except.ok [Safety.Value.scalar (Value.i64 (x + y))]",
       "tactic": null,
+      "stopped": null,
       "method": null,
       "cil": null,
       "state": null,
@@ -31,12 +32,13 @@
       "suggestions": [],
       "obligations": [],
       "unknown": {
-        "tactic": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one",
-        "method": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one",
-        "cil": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one",
-        "state": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one",
-        "missing": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one",
-        "obligations": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one"
+        "tactic": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "stopped": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "method": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "cil": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "state": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "missing": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "obligations": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework"
       }
     }
   ],
@@ -51,7 +53,7 @@
   ],
   "trace": null,
   "unknown": {
-    "trace": "not requested; --trace traces each step the loop tactics take"
+    "trace": "not requested; --trace traces each step the proof takes"
   },
   "rerun": [
     "leancil",

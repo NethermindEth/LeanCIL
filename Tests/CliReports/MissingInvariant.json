@@ -24,6 +24,7 @@
       },
       "message": "unsolved goals\ncase invariant\nx✝ : W32\nhome : Reference\nentered : Memory\nsetup :\n  enterFrame Extracted.method0 [Value.scalar (CIL.Value.i32 x✝)] Memory.empty = Except.ok (entry.frame home, entered)\nentryFrame :\n  ∀ (footprint : List (Reference × Nat)),\n    LoopFrame footprint Memory.empty entered [CIL.LocalKind.word32] [LocalSlot.bytes CIL.LocalKind.word32 home]\n      (knownLocals [some (CIL.Value.i32 0)])\nstarted : Memory\nstored✝ :\n  storeLocal entered (LocalSlot.bytes CIL.LocalKind.word32 home) (Value.scalar (CIL.Value.i32 x✝)) =\n    Except.ok (LocalSlot.bytes CIL.LocalKind.word32 home, started)\nframe✝ :\n  LoopFrame [] Memory.empty started [CIL.LocalKind.word32] [LocalSlot.bytes CIL.LocalKind.word32 home]\n    (knownLocals [some (CIL.Value.i32 x✝)])\nx : W32\nm : Memory\nframe :\n  LoopFrame [] Memory.empty m [CIL.LocalKind.word32] [LocalSlot.bytes CIL.LocalKind.word32 home]\n    (knownLocals [some (CIL.Value.i32 x)])\nloaded : loadLocal m (LocalSlot.bytes CIL.LocalKind.word32 home) = Except.ok (Value.scalar (CIL.Value.i32 x))\nzero : ¬x = 0\nnonzero : x ≠ 0#32\nupdated : Memory\nstored :\n  storeLocal m (LocalSlot.bytes CIL.LocalKind.word32 home) (Value.scalar (CIL.Value.i32 (x - 1))) =\n    Except.ok (LocalSlot.bytes CIL.LocalKind.word32 home, updated)\nnext :\n  LoopFrame [] Memory.empty updated [CIL.LocalKind.word32] [LocalSlot.bytes CIL.LocalKind.word32 home]\n    (knownLocals [some (CIL.Value.i32 (x - 1))])\n⊢ True",
       "tactic": null,
+      "stopped": null,
       "method": null,
       "cil": null,
       "state": null,
@@ -34,6 +35,7 @@
       ],
       "unknown": {
         "tactic": "the proof left these goals open; no LeanCIL tactic stopped on them",
+        "stopped": "the proof left these goals open; no LeanCIL tactic stopped on them",
         "method": "the proof left these goals open; no LeanCIL tactic stopped on them",
         "cil": "the proof left these goals open; no LeanCIL tactic stopped on them",
         "state": "the proof left these goals open; no LeanCIL tactic stopped on them",
@@ -66,7 +68,7 @@
   ],
   "trace": null,
   "unknown": {
-    "trace": "not requested; --trace traces each step the loop tactics take"
+    "trace": "not requested; --trace traces each step the proof takes"
   },
   "rerun": [
     "leancil",

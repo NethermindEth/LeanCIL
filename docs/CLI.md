@@ -524,8 +524,12 @@ the developer's file as in the text report:
   "source": { "file": "/work/Proofs/Countdown.lean", "line": 40, "column": 4 },
   "message": "cil_loop_steps: target state not matched at pc 8: ...",
   "tactic": "cil_loop_steps",
+  "stopped": false,
   "method": { "index": 0, "signature": "System.UInt32 Examples.Loops::Countdown(System.UInt32)" },
-  "cil": { "pc": 8, "ilOffset": 9, "instruction": "brtrue.s IL_0004", "leanInstruction": null },
+  "cil": {
+    "pc": 8, "ilOffset": 9, "instruction": "brtrue.s IL_0004", "leanInstruction": null,
+    "source": { "file": "Loops.cs", "line": 38, "column": 9 }
+  },
   "state": {
     "reached": { "stack": "[CIL.Safety.Value.scalar (CIL.Value.i32 (x - 1#32))]" },
     "expected": { "stack": "[CIL.Safety.Value.scalar (CIL.Value.i32 (x - 2))]" }
@@ -535,7 +539,7 @@ the developer's file as in the text report:
   "obligations": [],
   "unknown": {
     "cil.leanInstruction": "the walk is at the target's pc, so it steps no instruction",
-    "obligations": "the goal carries no obligation tag"
+    "obligations": "the goal the tactic was handed carries no obligation tag"
   }
 }
 ```
@@ -560,7 +564,9 @@ failed, or of the goals an `unsolved goals` error lists, such as `invariant`.
 `suggestions` is advice, kept apart from these facts. Every field left `null`
 for lack of data, and an empty `obligations`, has its reason under `unknown`,
 keyed by the field's name; an error without a failure record, such as Lean's
-own, says so there.
+own, says so there. The message is Lean's error as printed; the tactic is the
+one the error names, also when it ran inside another tactic's expansion, such
+as the `cil_loop_steps` that `cil_loop_continue` runs.
 
 ### Trace the proof's steps
 

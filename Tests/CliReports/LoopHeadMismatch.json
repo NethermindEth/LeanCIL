@@ -24,6 +24,7 @@
       },
       "message": "Application type mismatch: The argument\n  next\nhas type\n  LoopFrame [] Memory.empty updated [CIL.LocalKind.word32] [LocalSlot.bytes CIL.LocalKind.word32 home]\n    (knownLocals [some (CIL.Value.i32 (x - 1))])\nbut is expected to have type\n  LoopFrame [] Memory.empty updated [CIL.LocalKind.word32] [LocalSlot.bytes CIL.LocalKind.word32 home]\n    (knownLocals [some (CIL.Value.i32 (x - 2))])\nin the application\n  { values := x - 2, memory := updated, frame := next }",
       "tactic": null,
+      "stopped": null,
       "method": null,
       "cil": null,
       "state": null,
@@ -31,12 +32,13 @@
       "suggestions": [],
       "obligations": [],
       "unknown": {
-        "tactic": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one",
-        "method": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one",
-        "cil": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one",
-        "state": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one",
-        "missing": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one",
-        "obligations": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one"
+        "tactic": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "stopped": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "method": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "cil": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "state": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "missing": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "obligations": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework"
       }
     },
     {
@@ -50,6 +52,7 @@
       },
       "message": "cil_loop_steps: target state not matched at pc 8:\nstack: reached\n  [Value.scalar (CIL.Value.i32 (x - 1#32))]\nbut the target has\n  [Value.scalar (CIL.Value.i32 (x - 2))]\nState a fact in the reached form, or state the target in it.",
       "tactic": "cil_loop_steps",
+      "stopped": false,
       "method": {
         "index": 0,
         "signature": "System.UInt32 Examples.Loops::Countdown(System.UInt32)"
@@ -58,7 +61,12 @@
         "pc": 8,
         "ilOffset": 9,
         "instruction": "brtrue.s IL_0004",
-        "leanInstruction": null
+        "leanInstruction": null,
+        "source": {
+          "file": "Loops.cs",
+          "line": 38,
+          "column": 9
+        }
       },
       "state": {
         "reached": {
@@ -78,7 +86,7 @@
       "obligations": [],
       "unknown": {
         "cil.leanInstruction": "the walk is at the target's pc, so it steps no instruction",
-        "obligations": "the goal carries no obligation tag"
+        "obligations": "the goal the tactic was handed carries no obligation tag"
       }
     },
     {
@@ -92,6 +100,7 @@
       },
       "message": "'change' tactic failed, pattern\n  (1 : Nat) ≤ BitVec.toNat x\nis not definitionally equal to target\n  (2 : W32) ≤ x",
       "tactic": null,
+      "stopped": null,
       "method": null,
       "cil": null,
       "state": null,
@@ -99,12 +108,13 @@
       "suggestions": [],
       "obligations": [],
       "unknown": {
-        "tactic": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one",
-        "method": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one",
-        "cil": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one",
-        "state": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one",
-        "missing": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one",
-        "obligations": "the error carries no LeanCIL failure record: it is Lean's own error, or comes from a tactic that does not report one"
+        "tactic": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "stopped": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "method": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "cil": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "state": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "missing": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
+        "obligations": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework"
       }
     }
   ],
@@ -133,7 +143,7 @@
   ],
   "trace": null,
   "unknown": {
-    "trace": "not requested; --trace traces each step the loop tactics take"
+    "trace": "not requested; --trace traces each step the proof takes"
   },
   "rerun": [
     "leancil",

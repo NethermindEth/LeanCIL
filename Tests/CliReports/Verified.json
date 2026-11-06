@@ -27,7 +27,7 @@
   ],
   "trace": null,
   "unknown": {
-    "trace": "not requested; --trace traces each step the loop tactics take"
+    "trace": "not requested; --trace traces each step the proof takes"
   },
   "rerun": [
     "leancil",
