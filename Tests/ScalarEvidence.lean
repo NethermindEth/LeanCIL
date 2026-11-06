@@ -575,6 +575,23 @@ example : ¬ ScalarFlowValid #[] (pushHoleRaw 20) pushHoleFeatures (pushHoleStat
 example : ¬ ScalarFlowValid #[] (pushHoleRaw 35) pushHoleFeatures pushHoleStates (pushHoleCode (.const64 0)) := by decide
 example : ¬ ScalarFlowValid #[] (pushHoleRaw 35) pushHoleFeatures pushHoleStates (pushHoleCode (.const32 0)) := by decide
 
+/-- A class with a field at raw index 1, read by `ldarg.0; ldfld; ret`. -/
+private def account : TypeExpr := .object "Scope" "Scope.Account"
+private def fieldRaw : RawMethod := { raw [i 2, i 123 (.field account 1 word false), i 42] [account] with
+  maxStack := 1 }
+private def fieldFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 1]
+private def fieldStates : ScalarCertificate := [some [], some [.object], some [.word64]]
+private def fieldCode (operation : MemoryOp) : List Op := [.arg 0, .memory operation, .ret]
+-- A class field load names the field's declaring class, model offset, width and extension.
+example : ScalarFlowValid #[] fieldRaw fieldFeatures fieldStates
+    (fieldCode (.objectField account 8 8 false)) := by decide
+example : ¬ ScalarFlowValid #[] fieldRaw fieldFeatures fieldStates
+    (fieldCode (.objectField account 0 8 false)) := by decide
+example : ¬ ScalarFlowValid #[] fieldRaw fieldFeatures fieldStates
+    (fieldCode (.objectField (.object "Scope" "Scope.Other") 8 8 false)) := by decide
+example : ¬ ScalarFlowValid #[] fieldRaw fieldFeatures fieldStates
+    (fieldCode (.objectField account 8 4 false)) := by decide
+
 -- Size constants are the only uncovered literal producers; primitive widths are bound here.
 private def sizeRaw (instruction : RawInstruction) := raw [instruction, i 38, i 2, i 42] [word]
 private def sizeStates : ScalarCertificate := [some [], some [.word32], some [], some [.word64]]
