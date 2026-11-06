@@ -877,7 +877,24 @@ def singleSpanInstruction (width : Nat) (writable : Bool) (stack : List Value)
     return (memory, .bufferSpan view :: rest)
   | _, _ => .error .invalidState
 
-/-- `ldfld` and `stfld` of a scalar field of a class instance, at the field's model offset. -/
+/-- The object reference the reference field at `field` holds. The field's slot must be
+    readable, and the reference must still form, so a load never pushes a dangling one. -/
+def loadSlot (memory : Memory) (field : Reference) : ExecutionResult Value := do
+  let _ ← checkedAt (.address field) objectFieldSlot
+    (access memory field objectFieldSlot ordinaryAccessAlignment false)
+  formObject memory (memory.slots field.allocation field.offset)
+
+/-- Stores `value` into the reference field at `field`. The field's slot must be writable and
+    `value` must form, so a field only ever holds null or a live object. -/
+def storeSlot (memory : Memory) (field : Reference) (value : ManagedReference) :
+    ExecutionResult Memory := do
+  let _ ← checkedAt (.address field) objectFieldSlot
+    (access memory field objectFieldSlot ordinaryAccessAlignment true)
+  let _ ← formObject memory value
+  return setSlot memory field value
+
+/-- `ldfld` and `stfld` of a field of a class instance, at the field's model offset: a scalar
+    field moves bytes, a class-typed field moves the object reference its slot holds. -/
 def objectFieldInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) := do
   match operation, stack with
@@ -893,6 +910,12 @@ def objectFieldInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
       | _, _ => .error .invalidState
     return (← checkedAt (.address address) width
       (write memory address (numberBytes number width) ordinaryAccessAlignment), rest)
+  | .objectReferenceField owner offset, .object reference :: rest =>
+    let address ← objectFieldAddress memory reference owner offset
+    return (memory, (← loadSlot memory address) :: rest)
+  | .setObjectReferenceField owner offset, .object value :: .object reference :: rest =>
+    let address ← objectFieldAddress memory reference owner offset
+    return (← storeSlot memory address value, rest)
   | _, _ => .error .invalidState
 
 /-- Runs a `.memory` operation on the stack (top first), giving the new memory and stack.
@@ -920,7 +943,9 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .spanFill width clear => spanFillInstruction width clear stack memory
   | .arrayFill element counted => arrayFillInstruction element counted stack memory
   | .bigMul64 _ | .divRemOut _ => wideArithmeticInstruction operation stack memory
-  | .objectField .. | .setObjectField .. => objectFieldInstruction operation stack memory
+  | .objectField .. | .setObjectField ..
+  | .objectReferenceField .. | .setObjectReferenceField .. =>
+    objectFieldInstruction operation stack memory
   | _ => otherMemoryInstruction operation stack memory
 
 /-- Runs an op on the stack (top first) and memory: loads, stores, typed copies, aggregate

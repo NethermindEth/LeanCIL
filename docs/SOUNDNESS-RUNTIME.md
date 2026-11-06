@@ -259,6 +259,17 @@ held reference to name an identity already issued, so a later allocation can nev
 dangling reference live; `Confined`, `MemoryBelow`, `Memory.Equivalent` and `Memory.Renamed`
 each relate field references alongside bytes, the last through the allocation map.
 
+`ldfld` and `stfld` of a field whose type is an admitted class (`.objectReferenceField`,
+`.setObjectReferenceField`) locate the field like a scalar one, so a null receiver throws
+`NullReferenceException` and the owner is checked against the runtime type, then check the
+field's 8-byte slot for read or write authority inside the object. A load pushes the reference
+the slot holds once it forms again (`loadSlot`); a store requires the value to form, that is to
+be null or a live object, and changes only that slot (`storeSlot`), so no byte and no authority
+changes and every held reference stays issued. The model checks that a stored value is an
+object, not that its class is the field's type: that is the verifier's typing, as for arguments,
+and an object of another class read back through the field fails its next field access with
+the owner check rather than reading another class's fields.
+
 A non-virtual instance method of an admitted class is an entry whose receiver `this` is an
 object reference, not a byref: the raw method records the class receiver (`objectReceiver`),
 from which Lean derives the receiver's storage and scalar kind. Lean rejects the address of

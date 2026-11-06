@@ -49,6 +49,9 @@ theorem InstructionEffect.staticWorld {m result : Memory} (effect : InstructionE
   | unchanged => exact world
   | write h => exact write_preserves_static_world _ _ _ _ _ _ world h
   | snapshot h => exact writeSnapshot_preserves_static_world _ _ _ _ _ _ world h
+  | slot h =>
+    obtain ⟨-, -, rfl⟩ := storeSlot_ok h
+    exact world
 
 theorem storeValue_preserves_static_world (descriptors : List CIL.StaticDescriptor)
     (m result : Memory) (reference : ManagedReference) (value : CIL.Value)

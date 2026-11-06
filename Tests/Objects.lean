@@ -118,4 +118,59 @@ theorem construction_over_budget :
     invoke [creator, constructor] 8 0 [] memory = .error ⟨0, 0, .allocationFailure 8 0⟩ := rfl
 #print axioms construction_over_budget
 
+private def node : RuntimeType := ⟨.object "Examples" "Examples.Node"⟩
+
+/-- Allocations 0 and 1 are 16-byte nodes, 1 read-only; 2 is a caller stack buffer. -/
+private def nodes : CIL.Safety.Memory :=
+  { allocations := fun identity => match identity with
+      | 0 | 1 => some ⟨.object node, ⟨16, 8, []⟩, true, [16]⟩
+      | 2 => some ⟨.callerStack, ⟨8, 1, []⟩, true, []⟩
+      | _ => none
+    cells := fun _ _ => ⟨0, true⟩
+    views := [⟨0, 0, 16, true, true⟩, ⟨1, 0, 16, true, false⟩]
+    nextIdentity := 3 }
+private def first : ManagedReference := .address ⟨0, 0⟩
+private def second : ManagedReference := .address ⟨1, 0⟩
+
+/-- A class-typed field holds the stored reference itself; no byte of the object changes. -/
+theorem reference_field_reads_back :
+    ((objectFieldInstruction (.setObjectReferenceField node.identity 8)
+        [.object second, .object first] nodes).bind fun stored =>
+      objectFieldInstruction (.objectReferenceField node.identity 8) [.object first]
+        stored.1).map Prod.snd = .ok [.object second] ∧
+    (objectFieldInstruction (.setObjectReferenceField node.identity 8)
+        [.object second, .object first] nodes).map (fun stored => stored.1.cells 0 8) =
+      .ok ⟨0, true⟩ := ⟨rfl, rfl⟩
+#print axioms reference_field_reads_back
+
+/-- A fresh field holds null. -/
+theorem reference_field_starts_null :
+    (objectFieldInstruction (.objectReferenceField node.identity 8) [.object first] nodes).map
+      Prod.snd = .ok [.object .null] := rfl
+#print axioms reference_field_starts_null
+
+/-- A null receiver throws on both the load and the store, before the value is checked. -/
+theorem reference_field_null_receiver_throws :
+    objectFieldInstruction (.objectReferenceField node.identity 8) [.object .null] nodes =
+      .error (.thrown "System.NullReferenceException") ∧
+    objectFieldInstruction (.setObjectReferenceField node.identity 8)
+        [.object (.address ⟨2, 0⟩), .object .null] nodes =
+      .error (.thrown "System.NullReferenceException") := ⟨rfl, rfl⟩
+#print axioms reference_field_null_receiver_throws
+
+/-- Only an object or null may be stored: a byte buffer is not one. -/
+theorem reference_field_rejects_buffer :
+    objectFieldInstruction (.setObjectReferenceField node.identity 8)
+        [.object (.address ⟨2, 0⟩), .object first] nodes = .error .invalidState := rfl
+#print axioms reference_field_rejects_buffer
+
+/-- A store needs write authority over the field's slot, and the slot must lie in the object. -/
+theorem reference_field_checks_slot :
+    objectFieldInstruction (.setObjectReferenceField node.identity 8)
+        [.object first, .object second] nodes =
+      .error (.memory .unwritable (.address ⟨1, 8⟩) 8) ∧
+    objectFieldInstruction (.objectReferenceField node.identity 16) [.object first] nodes =
+      .error (.memory .outsideAllocation (.address ⟨0, 16⟩) 8) := ⟨rfl, rfl⟩
+#print axioms reference_field_checks_slot
+
 end Tests.Objects

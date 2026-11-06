@@ -212,6 +212,23 @@ theorem write_preserves_wellFormed (m result : Memory) (r : Reference)
       exact ⟨a, allocation, bounds⟩
     · exact hm.views view hv
 
+/-- Storing null or a reference to an issued identity into a field keeps memory well formed. -/
+theorem setSlot_preserves_wellFormed {m : Memory} {field : Reference} {value : ManagedReference}
+    (hm : m.WellFormed)
+    (issued : ∀ reference, value = .address reference →
+      reference.allocation < m.nextIdentity) :
+    (setSlot m field value).WellFormed where
+  allocations := hm.allocations
+  views := hm.views
+  slots id offset reference held := by
+    simp only [setSlot] at held
+    split at held
+    · split at held
+      · exact issued _ held
+      · exact hm.slots _ _ _ held
+    · exact hm.slots _ _ _ held
+#print axioms setSlot_preserves_wellFormed
+
 theorem expire_preserves_wellFormed (m : Memory) (id : AllocationId)
     (hm : m.WellFormed) : (expire m id).WellFormed := by
   constructor

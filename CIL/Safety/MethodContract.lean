@@ -175,6 +175,27 @@ theorem Confined.after_leaveFrame {footprint : List (Reference × Nat)} {before 
 
 #print axioms Confined.after_leaveFrame
 
+/-- Changing the reference a field holds is confined to any footprint with an entry starting at
+    that field. -/
+theorem Confined.setSlot {footprint : List (Reference × Nat)} {m : Memory} {field : Reference}
+    {width : Nat} (value : ManagedReference) (member : (field, width) ∈ footprint)
+    (positive : 0 < width) : Confined footprint m (setSlot m field value) := by
+  refine ⟨Nat.le_refl _, fun _ _ => rfl, fun _ _ _ _ => rfl, fun _ _ _ => rfl,
+    fun _ _ _ _ => rfl, ?_⟩
+  intro id _ offset outside
+  simp only [CIL.Safety.setSlot]
+  by_cases sameId : id = field.allocation
+  · by_cases sameOffset : offset = field.offset
+    · subst sameId sameOffset
+      rcases outside _ member with different | below | above
+      · exact absurd rfl different
+      · exact absurd below (Nat.lt_irrefl _)
+      · simp only at above
+        omega
+    · simp only [sameId, sameOffset, ite_true, ite_false]
+  · simp only [sameId, ite_false]
+#print axioms Confined.setSlot
+
 /-- A checked write inside the footprint keeps every other byte and all write authority. -/
 theorem Confined.write {footprint : List (Reference × Nat)} {m result : Memory} {r : Reference}
     {bytes : List (BitVec 8)} {alignment : Nat}

@@ -264,6 +264,13 @@ def write (m : Memory) (r : Reference) (bytes : List (BitVec 8)) (alignment : Na
       | none => m.cells id offset)
     else m.cells id offset) }
 
+/-- `m` with the reference field at `field` holding `value`; bytes, authority and allocations
+    are unchanged. `storeSlot` checks the field and the value before calling it. -/
+def setSlot (m : Memory) (field : Reference) (value : ManagedReference) : Memory :=
+  { m with slots := fun id offset =>
+      if id = field.allocation then if offset = field.offset then value else m.slots id offset
+      else m.slots id offset }
+
 /-- A checked byte write with constant-time lookup in its retained snapshot. -/
 def writeIndexed (memory : Memory) (reference : Reference) (bytes : List (BitVec 8))
     (alignment : Nat) : Checked Memory := do

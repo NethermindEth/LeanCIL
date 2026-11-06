@@ -592,6 +592,36 @@ example : ¬ ScalarFlowValid #[] fieldRaw fieldFeatures fieldStates
 example : ¬ ScalarFlowValid #[] fieldRaw fieldFeatures fieldStates
     (fieldCode (.objectField account 8 4 false)) := by decide
 
+/-- A class-typed field at raw index 1 of `Scope.Node`, holding another node. -/
+private def node : TypeExpr := .object "Scope" "Scope.Node"
+private def nextField : RawOperand := .field node 1 node false
+private def nextRaw : RawMethod :=
+  { raw [i 2, i 123 nextField, i 42] [node] with returnType := node, maxStack := 1 }
+private def nextStates : ScalarCertificate := [some [], some [.object], some [.object]]
+-- A class-typed field moves the reference its slot holds, at the field's model offset; it is
+-- never read as bytes, and a scalar field is never read as a slot.
+example : ScalarFlowValid #[] nextRaw fieldFeatures nextStates
+    (fieldCode (.objectReferenceField node 8)) := by decide
+example : ¬ ScalarFlowValid #[] nextRaw fieldFeatures nextStates
+    (fieldCode (.objectReferenceField node 0)) := by decide
+example : ¬ ScalarFlowValid #[] nextRaw fieldFeatures nextStates
+    (fieldCode (.objectReferenceField account 8)) := by decide
+example : scalarEmissionMatches #[] none (i 123 nextField) [.object]
+    (.memory (.objectField node 8 8 false)) = false := by decide
+example : scalarEmissionMatches #[] none (i 123 (.field node 0 word false)) [.object]
+    (.memory (.objectReferenceField node 0)) = false := by decide
+-- A store takes an object or null as its value, and only as a slot store.
+example : scalarEmissionMatches #[] none (i 125 nextField) [.object, .object]
+    (.memory (.setObjectReferenceField node 8)) = true := by decide
+example : scalarEmissionMatches #[] none (i 125 nextField) [.nullObject, .object]
+    (.memory (.setObjectReferenceField node 8)) = true := by decide
+example : scalarEmissionMatches #[] none (i 125 nextField) [.word64, .object]
+    (.memory (.setObjectReferenceField node 8)) = false := by decide
+example : scalarEmissionMatches #[] none (i 125 nextField) [.object, .object]
+    (.memory (.setObjectField node 8 8)) = false := by decide
+example : scalarEmissionMatches #[] none (i 125 (.field node 0 word false)) [.word64, .object]
+    (.memory (.setObjectReferenceField node 0)) = false := by decide
+
 -- Size constants are the only uncovered literal producers; primitive widths are bound here.
 private def sizeRaw (instruction : RawInstruction) := raw [instruction, i 38, i 2, i 42] [word]
 private def sizeStates : ScalarCertificate := [some [], some [.word32], some [], some [.word64]]

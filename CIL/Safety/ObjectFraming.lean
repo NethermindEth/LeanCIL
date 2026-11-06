@@ -156,4 +156,99 @@ theorem Confined.objectField_read_of_ne {before after : Memory} {written read : 
     loaded
 #print axioms Confined.objectField_read_of_ne
 
+/-- A successful field reference store is confined to an entry starting at the field. -/
+theorem Confined.storeSlot {footprint : List (Reference × Nat)} {before after : Memory}
+    {field : Reference} {value : ManagedReference} {width : Nat}
+    (stored : CIL.Safety.storeSlot before field value = .ok after)
+    (member : (field, width) ∈ footprint) (positive : 0 < width) :
+    Confined footprint before after := by
+  obtain ⟨-, -, rfl⟩ := storeSlot_ok stored
+  exact Confined.setSlot value member positive
+#print axioms Confined.storeSlot
+
+/-- A call confined to a field of one object keeps the reference a field of a different, older
+    object holds. -/
+theorem Confined.objectSlot_of_ne {before after : Memory} {written read : ManagedReference}
+    {writtenOwner readOwner : CIL.Extraction.TypeExpr} {writtenOffset readOffset : Nat}
+    {writtenField readField : Reference} {writtenWidth : Nat}
+    (framed : Confined [(writtenField, writtenWidth)] before after)
+    (old : readField.allocation < before.nextIdentity)
+    (writtenLocated :
+      objectFieldAddress before written writtenOwner writtenOffset = .ok writtenField)
+    (readLocated : objectFieldAddress before read readOwner readOffset = .ok readField)
+    (distinct : written ≠ read) :
+    after.slots readField.allocation readField.offset =
+      before.slots readField.allocation readField.offset := by
+  refine framed.slots _ old _ fun entry member => ?_
+  simp only [List.mem_singleton] at member
+  subst member
+  obtain ⟨writtenOrigin, -⟩ := objectFieldAddress_position writtenLocated
+  obtain ⟨readOrigin, -⟩ := objectFieldAddress_position readLocated
+  left
+  intro same
+  apply distinct
+  rw [writtenOrigin, readOrigin, same]
+#print axioms Confined.objectSlot_of_ne
+
+/-- A field reference store leaves every allocation, byte and authority as it was. -/
+@[simp] theorem setSlot_allocations (memory : Memory) (field : Reference)
+    (value : ManagedReference) : (setSlot memory field value).allocations = memory.allocations :=
+  rfl
+
+/-- The stored field holds the stored reference. -/
+@[simp] theorem setSlot_slots_same (memory : Memory) (field : Reference)
+    (value : ManagedReference) :
+    (setSlot memory field value).slots field.allocation field.offset = value := by
+  simp only [CIL.Safety.setSlot, ite_true]
+
+/-- Every other field holds what it held. -/
+theorem setSlot_slots_of_ne (memory : Memory) {field other : Reference}
+    (value : ManagedReference) (distinct : other ≠ field) :
+    (setSlot memory field value).slots other.allocation other.offset =
+      memory.slots other.allocation other.offset := by
+  simp only [CIL.Safety.setSlot]
+  by_cases sameId : other.allocation = field.allocation
+  · have : other.offset ≠ field.offset := fun sameOffset =>
+      distinct (by cases other; cases field; simp_all)
+    simp only [sameId, this, ite_true, ite_false]
+  · simp only [sameId, ite_false]
+
+/-- Reading bytes is unaffected by a field reference store. -/
+@[simp] theorem read_setSlot (memory : Memory) (field : Reference) (value : ManagedReference)
+    (reference : Reference) (width alignment : Nat) :
+    read (setSlot memory field value) reference width alignment =
+      read memory reference width alignment := rfl
+
+/-- Access checks are unaffected by a field reference store. -/
+@[simp] theorem access_setSlot (memory : Memory) (field : Reference) (value : ManagedReference)
+    (reference : Reference) (width alignment : Nat) (writing : Bool) :
+    access (setSlot memory field value) reference width alignment writing =
+      access memory reference width alignment writing := rfl
+
+/-- Object formation is unaffected by a field reference store. -/
+@[simp] theorem formObject_setSlot (memory : Memory) (field : Reference)
+    (value reference : ManagedReference) :
+    formObject (setSlot memory field value) reference = formObject memory reference := rfl
+
+/-- Field location is unaffected by a field reference store. -/
+@[simp] theorem objectFieldAddress_setSlot (memory : Memory) (field : Reference)
+    (value reference : ManagedReference) (owner : CIL.Extraction.TypeExpr) (offset : Nat) :
+    objectFieldAddress (setSlot memory field value) reference owner offset =
+      objectFieldAddress memory reference owner offset := rfl
+
+/-- Scalar loads are unaffected by a field reference store. -/
+@[simp] theorem loadValue_setSlot (memory : Memory) (field : Reference)
+    (value reference : ManagedReference) (width : Nat) (signed : Bool) :
+    loadValue (setSlot memory field value) reference width signed =
+      loadValue memory reference width signed := rfl
+
+#print axioms setSlot_allocations
+#print axioms setSlot_slots_same
+#print axioms setSlot_slots_of_ne
+#print axioms read_setSlot
+#print axioms access_setSlot
+#print axioms formObject_setSlot
+#print axioms objectFieldAddress_setSlot
+#print axioms loadValue_setSlot
+
 end CIL.Safety

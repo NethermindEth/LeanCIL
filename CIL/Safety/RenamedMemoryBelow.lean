@@ -52,6 +52,17 @@ def SlotsAgreeBelow (watermark : Nat) (source target : Memory) : Prop :=
       reference.allocation < watermark) →
     target.slots id offset = source.slots id offset
 
+/-- A caller field holding a caller reference holds the same reference in an agreeing memory. -/
+theorem SlotsAgreeBelow.held {watermark : Nat} {source target : Memory}
+    (agree : SlotsAgreeBelow watermark source target) {id offset : Nat} {reference : Reference}
+    (old : id < watermark) (stored : source.slots id offset = .address reference)
+    (caller : reference.allocation < watermark) : target.slots id offset = .address reference :=
+  (agree id old offset fun other same => by
+    rw [stored] at same
+    cases same
+    exact caller).trans stored
+#print axioms SlotsAgreeBelow.held
+
 /-- The renaming fixes caller identities, so it fixes caller fields holding caller references. -/
 theorem Memory.RenamedBelow.slotsAgree {watermark : Nat} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}

@@ -160,9 +160,59 @@ theorem formObject_preserved {m result : Memory} {reference : ManagedReference}
       rw [found] at kept
       simpa only [formObject, liveAllocation, kept, found] using formed
 
+/-- A formed non-null object reference names an identity already issued. -/
+theorem formObject_issued {m : Memory} {reference : Reference} {value : Value}
+    (formed : formObject m (.address reference) = .ok value) (wellFormed : m.WellFormed) :
+    reference.allocation < m.nextIdentity := by
+  cases found : m.allocations reference.allocation with
+  | none =>
+    simp [formObject, liveAllocation, found, checkedAt, Except.mapError, Bind.bind,
+      Except.bind] at formed
+  | some allocation => exact (wellFormed.allocations _ _ found).1
+
+/-- A successful slot store checked the slot's write authority and the stored reference, and
+    changed only that slot. -/
+theorem storeSlot_ok {m result : Memory} {field : Reference} {value : ManagedReference}
+    (stored : storeSlot m field value = .ok result) :
+    access m field objectFieldSlot ordinaryAccessAlignment true = .ok () ∧
+      formObject m value = .ok (.object value) ∧ result = setSlot m field value := by
+  unfold storeSlot at stored
+  cases accessed : access m field objectFieldSlot ordinaryAccessAlignment true <;>
+    simp only [accessed, checkedAt, Except.mapError, Bind.bind, Except.bind] at stored
+  · cases stored
+  · cases formed : formObject m value with
+    | error => simp only [formed] at stored; cases stored
+    | ok formedValue =>
+      simp only [formed, Pure.pure, Except.pure, Except.ok.injEq] at stored
+      have same := formObject_returns_input formed
+      subst same
+      exact ⟨rfl, rfl, stored.symm⟩
+
+/-- A slot store keeps memory well formed: the stored reference formed, so it was issued. -/
+theorem storeSlot_preserves_wellFormed {m result : Memory} {field : Reference}
+    {value : ManagedReference} (hm : m.WellFormed)
+    (stored : storeSlot m field value = .ok result) : result.WellFormed := by
+  obtain ⟨-, formed, rfl⟩ := storeSlot_ok stored
+  exact setSlot_preserves_wellFormed hm fun reference held => by
+    subst held
+    exact formObject_issued formed hm
+
 #print axioms formObject_returns_input
 #print axioms formObject_result_valid
 #print axioms formObject_preserved
+/-- A loaded field reference formed, so it is a valid stack value. -/
+theorem loadSlot_valid {m : Memory} {field : Reference} {value : Value}
+    (loaded : loadSlot m field = .ok value) : value.Valid m := by
+  unfold loadSlot at loaded
+  cases accessed : access m field objectFieldSlot ordinaryAccessAlignment false <;>
+    simp only [accessed, checkedAt, Except.mapError, Bind.bind, Except.bind] at loaded
+  · cases loaded
+  · exact formObject_result_valid loaded
+
+#print axioms formObject_issued
+#print axioms loadSlot_valid
+#print axioms storeSlot_ok
+#print axioms storeSlot_preserves_wellFormed
 
 theorem formValue_result_valid (m : Memory) (r : ManagedReference) (value : Value)
     (h : formValue m r = .ok value) : value.Valid m := by
@@ -373,6 +423,8 @@ inductive InstructionEffect : Memory → Memory → Prop where
       InstructionEffect m result
   | snapshot {m result r bytes alignment} (h : writeSnapshot m r bytes alignment = .ok result) :
       InstructionEffect m result
+  | slot {m result field value} (h : storeSlot m field value = .ok result) :
+      InstructionEffect m result
 
 theorem InstructionEffect.wellFormed {m result : Memory} (effect : InstructionEffect m result)
     (hm : m.WellFormed) : result.WellFormed := by
@@ -380,6 +432,7 @@ theorem InstructionEffect.wellFormed {m result : Memory} (effect : InstructionEf
   | unchanged => exact hm
   | write h => exact write_preserves_wellFormed _ _ _ _ _ hm h
   | snapshot h => exact writeSnapshot_preserves_wellFormed _ _ _ _ _ hm h
+  | slot h => exact storeSlot_preserves_wellFormed hm h
 
 theorem InstructionEffect.allocations {m result : Memory} (effect : InstructionEffect m result) :
     AllocationExtension m result := by
@@ -387,6 +440,9 @@ theorem InstructionEffect.allocations {m result : Memory} (effect : InstructionE
   | unchanged => exact .refl _
   | write h => exact write_extends_allocations _ _ _ _ _ h
   | snapshot h => exact writeSnapshot_extends_allocations _ _ _ _ _ h
+  | slot h =>
+    obtain ⟨-, -, rfl⟩ := storeSlot_ok h
+    exact ⟨Nat.le_refl _, fun _ _ => rfl⟩
 
 theorem storeValue_effect (m result : Memory) (reference : ManagedReference) (value : CIL.Value)
     (h : storeValue m reference value = .ok result) : InstructionEffect m result := by
@@ -531,6 +587,7 @@ macro "instruction_contract_close" : tactic => `(tactic| (
     | exact .unchanged _
     | exact .write (checkedAt_ok (by assumption))
     | exact .snapshot (checkedAt_ok (by assumption))
+    | exact .slot (by assumption)
     | apply storeValue_effect; assumption
     | exact spanFill_effect _ _ _ _ (checkedAt_ok (by assumption))
     | exact spanFillSnapshot_effect _ _ _ _ (checkedAt_ok (by assumption))
@@ -555,6 +612,7 @@ macro "instruction_contract_close" : tactic => `(tactic| (
             | apply loadValue_scalar_valid; assumption
             | apply formValue_result_valid; assumption
             | apply formValue_readOnly_valid; assumption
+            | apply loadSlot_valid; assumption
             | split <;> first
                 | apply formValue_result_valid; assumption
                 | apply formValue_readOnly_valid; assumption
@@ -858,6 +916,8 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
     · exact arrayFillInstruction_contract _ _ _ _ _ _ h
     · exact wideArithmeticInstruction_contract _ _ _ _ _ h
     · exact wideArithmeticInstruction_contract _ _ _ _ _ h
+    · exact objectFieldInstruction_contract _ _ _ _ _ h
+    · exact objectFieldInstruction_contract _ _ _ _ _ h
     · exact objectFieldInstruction_contract _ _ _ _ _ h
     · exact objectFieldInstruction_contract _ _ _ _ _ h
     · exact otherMemoryInstruction_contract _ _ _ _ _ h

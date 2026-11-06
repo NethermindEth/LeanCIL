@@ -390,11 +390,14 @@ private def objectFieldSite (instruction : RawInstruction) (emitted : Op) : Bool
     | .field (.object _ _) _ _ false => true
     | _ => false) ||
   match emitted with
-  | .memory (.objectField ..) | .memory (.setObjectField ..) => true
+  | .memory (.objectField ..) | .memory (.setObjectField ..)
+  | .memory (.objectReferenceField ..) | .memory (.setObjectReferenceField ..) => true
   | _ => false
 
 /-- `ldfld` and `stfld` of a class instance field emit the checked field operation for that
-    owner, at the field's model offset and with its width and extension; `ldflda` never does. -/
+    owner, at the field's model offset: with its width and extension for a scalar field, as a
+    reference slot for a class-typed one, whose stored value must be an object or null. `ldflda`
+    never does. -/
 private def objectFieldMatches (instruction : RawInstruction) (stack : List ScalarKind)
     (emitted : Op) : Bool :=
   match instruction.opcode, instruction.operand, stack, emitted with
@@ -406,6 +409,14 @@ private def objectFieldMatches (instruction : RawInstruction) (stack : List Scal
       .memory (.setObjectField owner offset width) =>
     receiver ∈ [.object, .nullObject] && owner == .object scope name &&
       offset == objectFieldOffset index && (objectFieldShape type).map (·.1) == some width
+  | 123, .field (.object scope name) index (.object _ _) false, receiver :: _,
+      .memory (.objectReferenceField owner offset) =>
+    receiver ∈ [.object, .nullObject] && owner == .object scope name &&
+      offset == objectFieldOffset index
+  | 125, .field (.object scope name) index (.object _ _) false, value :: receiver :: _,
+      .memory (.setObjectReferenceField owner offset) =>
+    value ∈ [.object, .nullObject] && receiver ∈ [.object, .nullObject] &&
+      owner == .object scope name && offset == objectFieldOffset index
   | _, _, _, _ => false
 
 /-- Covered opcodes emit exactly their encoding. Elsewhere only a decided type test's word,

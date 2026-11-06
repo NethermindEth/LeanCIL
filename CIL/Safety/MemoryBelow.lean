@@ -80,6 +80,15 @@ theorem MemoryBelow.access {watermark : Nat} {m result : Memory}
   simp only [CIL.Safety.access, form, liveAllocation, preserved.allocations _ old]
   simp only [preserved.permissions _ old]
 
+/-- Access checks below the watermark agree where metadata and authority agree. -/
+theorem BytesBelow.access {watermark : Nat} {m result : Memory}
+    (preserved : BytesBelow watermark m result) (r : Reference) (old : r.allocation < watermark)
+    (width alignment : Nat) (writing : Bool) :
+    access result r width alignment writing = access m r width alignment writing := by
+  simp only [CIL.Safety.access, form, liveAllocation, preserved.allocations _ old]
+  simp only [preserved.permissions _ old]
+#print axioms BytesBelow.access
+
 theorem MemoryBelow.read {watermark : Nat} {m result : Memory}
     (preserved : MemoryBelow watermark m result) (r : Reference) (old : r.allocation < watermark)
     (width alignment : Nat) : read result r width alignment = read m r width alignment := by

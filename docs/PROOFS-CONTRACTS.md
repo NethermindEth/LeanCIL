@@ -263,6 +263,16 @@ one object across a call confined to a field of another, given that the read fie
 is older than the call. Equal references locate the same field (`objectFieldAddress_same`), so
 the aliased case of a proof follows by substitution. `formObject_of_objectFieldAddress` gives the
 formation fact the stepping tactics need for an argument whose field is located.
+
+A class-typed field keeps its reference in the field's slot, not in bytes, and one footprint
+entry starting at the field covers both: `Confined.setSlot` and `Confined.storeSlot` confine a
+store to it, so a contract's footprint names the fields whose bytes or references it may change.
+`Confined.objectSlot_of_ne` keeps the reference a field of a different, older object holds.
+`step_objectReferenceField_eq` and `step_setObjectReferenceField_eq` step the field accesses;
+`loadSlot_of_access` and `storeSlot_of_access` reduce them, given the slot's access check, to
+the held reference and to `setSlot`, which `setSlot_slots_same` and `setSlot_slots_of_ne` read
+back and which leaves bytes, authority and field locations unchanged (`read_setSlot`,
+`access_setSlot`, `objectFieldAddress_setSlot`).
 [BumpBoth](../Examples/Proofs/BumpBoth.lean) composes two calls of `Bump` through one
 `MethodContract`, proves the distinct and the aliased case, and states the null receiver's
 `NullReferenceException` as an `OutcomeContract`.

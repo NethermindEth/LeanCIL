@@ -226,6 +226,54 @@ theorem step_setObjectField_i32_eq (owner : CIL.Extraction.TypeExpr)
       (write memory address (numberBytes bits.toNat _) ordinaryAccessAlignment) <;> rfl
 
 
+/-- `ldfld` of a class-typed object field pushes the reference its located slot holds. -/
+@[cil_step high] theorem step_objectReferenceField_eq (owner : CIL.Extraction.TypeExpr)
+    (offset : Nat) (reference : ManagedReference) (rest : List Value) :
+    step body (.memory (.objectReferenceField owner offset)) pc args frame
+        (.object reference :: rest) memory = do
+      let address ← objectFieldAddress memory reference owner offset
+      let value ← loadSlot memory address
+      return .next (pc + 1) (value :: rest) frame memory := by
+  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    List.any, Value.hasUnspecified, Bool.false_eq_true, ite_false, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
+  cases objectFieldAddress memory reference owner offset <;> try rfl
+  rename_i address
+  dsimp only
+  cases loadSlot memory address <;> rfl
+
+/-- `stfld` of a class-typed object field stores the reference into its located slot. -/
+@[cil_step high] theorem step_setObjectReferenceField_eq (owner : CIL.Extraction.TypeExpr)
+    (offset : Nat) (value reference : ManagedReference) (rest : List Value) :
+    step body (.memory (.setObjectReferenceField owner offset)) pc args frame
+        (.object value :: .object reference :: rest) memory = do
+      let address ← objectFieldAddress memory reference owner offset
+      let after ← storeSlot memory address value
+      return .next (pc + 1) rest frame after := by
+  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    List.any, Value.hasUnspecified, Bool.false_eq_true, ite_false, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
+  cases objectFieldAddress memory reference owner offset <;> try rfl
+  rename_i address
+  dsimp only
+  cases storeSlot memory address value <;> rfl
+
+/-- A readable slot loads the reference it holds, which must still form. -/
+theorem loadSlot_of_access {memory : Memory} {field : Reference}
+    (readable : access memory field objectFieldSlot ordinaryAccessAlignment false = .ok ()) :
+    loadSlot memory field = formObject memory (memory.slots field.allocation field.offset) := by
+  simp only [loadSlot, readable, checkedAt, Except.mapError, Bind.bind, Except.bind]
+
+/-- A writable slot stores a formed reference, changing nothing else. -/
+theorem storeSlot_of_access {memory : Memory} {field : Reference} {value : ManagedReference}
+    (writable : access memory field objectFieldSlot ordinaryAccessAlignment true = .ok ())
+    (formed : formObject memory value = .ok (.object value)) :
+    storeSlot memory field value = .ok (setSlot memory field value) := by
+  simp only [storeSlot, writable, formed, checkedAt, Except.mapError, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
+
 /-- `ldfld` of a 1-byte object field, as `step_objectField_eq` states it. -/
 @[cil_step high] theorem step_objectField_1_eq (owner : CIL.Extraction.TypeExpr)
     (offset : Nat) (signed : Bool) (reference : ManagedReference) (rest : List Value) :
@@ -318,5 +366,9 @@ end ObjectEquations
 #print axioms step_setObjectField_i32_1_eq
 #print axioms step_setObjectField_i32_2_eq
 #print axioms step_setObjectField_i32_4_eq
+#print axioms step_objectReferenceField_eq
+#print axioms step_setObjectReferenceField_eq
+#print axioms loadSlot_of_access
+#print axioms storeSlot_of_access
 
 end CIL.Safety

@@ -60,6 +60,9 @@ theorem InstructionEffect.staticBindingsBounded {source target : Memory}
   | unchanged => rfl
   | write success => exact write_staticBindings success
   | snapshot success => exact writeSnapshot_staticBindings success
+  | slot success =>
+    obtain ⟨-, -, rfl⟩ := storeSlot_ok success
+    rfl
 #print axioms InstructionEffect.staticBindingsBounded
 
 /-- Frame-local storage preserves existing registry bounds. -/
