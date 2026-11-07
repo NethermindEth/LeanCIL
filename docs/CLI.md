@@ -558,8 +558,14 @@ the C# file, line and column of the last visible PDB sequence point at or before
 the pc, read from the extraction's `Symbols.lean` whether or not the proof
 imports `ExtractedSymbols`; an extraction without a matching PDB has no
 `Symbols.lean`, and `unknown` says so. `missing.shape` names the kind of fact the step
-lacks, such as `unsafeAdd`, `spanValidity` or `targetState`, and `residual` the
-terms it must prove. `obligations` lists the obligation tags of the goal that
+lacks, such as `unsafeAdd`, `spanValidity` or `targetState`, `calleeContract` at a
+`call` or `callvirt`, or on a class instance `objectForm`, `objectSlot` or
+`objectAllocation`, and `residual` the terms it must prove: the step rewritten by
+the proof's step equations and the `_ = .ok _` and `_ = .error _` facts in scope.
+A side condition, such as an unfolded step a tactic could not close, has a shape
+when it names one of these operations. A run stopped before its first instruction
+because the entry could not check an object argument lacks `objectForm`, with the
+`formObject` of each object argument as its residual. `obligations` lists the obligation tags of the goal that
 failed, or of the goals an `unsolved goals` error lists, such as `invariant`.
 `suggestions` is advice, kept apart from these facts. Every field left `null`
 for lack of data, and an empty `obligations`, has its reason under `unknown`,

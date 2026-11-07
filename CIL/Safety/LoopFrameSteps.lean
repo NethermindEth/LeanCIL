@@ -526,7 +526,7 @@ def loopCallFailure (holds input : Term) (facts : Array Term) (position : Nat)
     saved.restore
     throwError "cil_loop_call: pc {position} is {op}, not a call; step to the call first with \
       `cil_loop_advance`"
-  let residual ← loopStepResidual step prepared
+  let residual ← stepResidual step prepared
   saved.restore
   -- A call whose step still mentions a check is stuck on a fact, not on the contract.
   if let some goals := residual then

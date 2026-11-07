@@ -556,7 +556,12 @@ With `set_option cil.diagnostics true`, the observer logs a failure record for e
 tactic raised, and for each goal one left that Lean reports as unsolved, as a message starting
 `[LeanCIL failure v1] `: a JSON object of the method, pc and instruction reached, the reached and
 expected state, the kind of fact the step lacks, the obligation the tactic was handed and the
-position of the error it explains, each unknown field with its reason. The error itself is
+position of the error it explains, each unknown field with its reason. The kind is the one the
+loop tactics name in their errors, read by [`missingFactOf`](../CIL/Safety/MissingFacts.lean) from
+the step rewritten as far as the step equations and the result facts in scope go; a stuck step on
+a class instance lacks `objectForm`, `objectSlot` or `objectAllocation`. A stepping goal under the
+existentials of a contract's run, as `cil_contract_steps` leaves one at a call, is read as the run
+it states. The error itself is
 unchanged. `leancil verify --trace` and `--format json` add the import to the start of the
 proof's first import line, which moves no other line or column, set these options and report the
 steps and records apart from the proof's messages.

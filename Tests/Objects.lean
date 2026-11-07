@@ -1,8 +1,11 @@
 import CIL.Safety.ObjectSteps
+import CIL.Safety.SymbolicExecution
+import CIL.Observe
 
 /-! Object references form only at offset 0 of a live object allocation, compare by identity
     and test presence only against null, and reach fields only of their own runtime type; every
-    other shape is rejected. -/
+    other shape is rejected. A proof stuck on an object step names the object fact it lacks in its
+    failure record. -/
 
 namespace Tests.Objects
 
@@ -172,5 +175,77 @@ theorem reference_field_checks_slot :
     objectFieldInstruction (.objectReferenceField node.identity 16) [.object first] nodes =
       .error (.memory .outsideAllocation (.address ⟨0, 16⟩) 8) := ⟨rfl, rfl⟩
 #print axioms reference_field_checks_slot
+
+/-! ## Failure records of object steps -/
+
+/-- `callvirt` of method 4 on argument 0. -/
+@[cil_code] def depositing : CIL.Method :=
+  { returnsValue := false, locals := [], code := [.arg 0, .callInstance 4 1, .ret] }
+/-- `ldfld` of a scalar field of argument 0. -/
+@[cil_code] def fieldReading : CIL.Method :=
+  { returnsValue := true, locals := [],
+    code := [.arg 0, .memory (.objectField account.identity 0 8 false), .ret] }
+/-- `ldfld` of a class-typed field of argument 0. -/
+@[cil_code] def slotReading : CIL.Method :=
+  { returnsValue := true, locals := [],
+    code := [.arg 0, .memory (.objectReferenceField account.identity 8), .ret] }
+/-- `newobj` of an 8-byte instance whose constructor is method 4. -/
+@[cil_code] def creating : CIL.Method :=
+  { returnsValue := true, locals := [], code := [.newObject 4 0 account.identity 8, .ret] }
+/-- A constructor or instance method that does nothing. -/
+@[cil_code] def doingNothing : CIL.Method :=
+  { returnsValue := false, locals := [], code := [.ret] }
+/-- The methods above, by index. -/
+@[cil_code] def observed : CIL.Program :=
+  [depositing, fieldReading, slotReading, creating, doingNothing]
+
+-- A walk stopped at a receiver-checked call lacks the callee's contract, as at a direct call.
+/-- "instruction":"CIL.Op.callInstance 4 1","method":0,"missing":"calleeContract" -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (memory : CIL.Safety.Memory) (object : Reference) (frame : Frame)
+    (formed : formObject memory (.address object) = .ok (.object (.address object)))
+    (result : Except LocatedFault (CIL.Safety.Memory × List CIL.Safety.Value)) :
+    run observed 100 0 0 [.object (.address object)] frame [] memory = result := by
+  cil_checked_steps 1 [formed]
+
+-- A field load stopped on an unknown object lacks the field's address.
+/-- "method":1,"missing":"objectForm" -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (memory : CIL.Safety.Memory) (object : Reference) (frame : Frame)
+    (formed : formObject memory (.address object) = .ok (.object (.address object)))
+    (result : Except LocatedFault (CIL.Safety.Memory × List CIL.Safety.Value)) :
+    run observed 100 1 0 [.object (.address object)] frame [] memory = result := by
+  cil_checked_steps [formed]
+
+-- Given the field's address, a reference field load lacks what its slot holds.
+/-- "method":2,"missing":"objectSlot" -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (memory : CIL.Safety.Memory) (object field : Reference) (frame : Frame)
+    (formed : formObject memory (.address object) = .ok (.object (.address object)))
+    (located : objectFieldAddress memory (.address object) account.identity 8 = .ok field)
+    (result : Except LocatedFault (CIL.Safety.Memory × List CIL.Safety.Value)) :
+    run observed 100 2 0 [.object (.address object)] frame [] memory = result := by
+  cil_checked_steps [formed, located]
+
+-- A construction lacks the allocation against the heap budget.
+/-- "missing":"objectAllocation" -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (memory : CIL.Safety.Memory) (frame : Frame)
+    (result : Except LocatedFault (CIL.Safety.Memory × List CIL.Safety.Value)) :
+    run observed 100 3 0 [] frame [] memory = result := by
+  cil_checked_steps
+
+-- An invocation lacks the formation of each object argument, which the entry checks.
+/-- "instruction":null,"method":0,"missing":"objectForm" -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (memory : CIL.Safety.Memory) (object : Reference) :
+    invoke observed 100 0 [.object (.address object)] memory =
+      .error ⟨0, 1, .thrown "System.NullReferenceException"⟩ := by
+  cil_checked_steps
 
 end Tests.Objects

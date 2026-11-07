@@ -169,6 +169,7 @@ import CIL.Semantics
 import CIL.StepEquations
 import CIL.SymbolicExecution
 import CIL.Safety.SymbolicExecution
+import CIL.Safety.MissingFacts
 import CIL.Safety.LoopAutomation
 import CIL.Safety.LoopContract
 import CIL.Safety.LoopOutcome

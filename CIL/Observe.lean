@@ -2,6 +2,7 @@ import Lean
 import Lean.Linter.Basic
 import CIL.DebugNames
 import CIL.Safety.FailureRecords
+import CIL.Safety.MissingFacts
 
 /-!
 # Observing LeanCIL tactics
@@ -57,9 +58,15 @@ def loopStateParts (state : Expr) : MetaM (Option (Array (String × Expr))) := d
   return some (statePartNames.zip state.getAppArgs)
 
 /-- `goal`'s type read as a stepping goal: a loop path, a `run` or `invoke` equation, or a
-    `RunRaises` continuation. -/
-def steppingGoal? (type : Expr) : MetaM (Option SteppingGoal) := do
+    `RunRaises` continuation, also as the first conjunct under the existentials of a contract's
+    run, as `cil_contract_steps` leaves it. -/
+partial def steppingGoal? (type : Expr) : MetaM (Option SteppingGoal) := do
   let type := (← instantiateMVars type).consumeMData
+  -- The reached state never mentions the witnesses, so a placeholder stands for each.
+  if type.isAppOfArity ``Exists 2 then
+    let .lam _ binder body _ := type.appArg!.consumeMData | return none
+    return ← steppingGoal? (body.instantiate1 (← mkFreshExprMVar binder))
+  if type.isAppOfArity ``And 2 then return ← steppingGoal? (type.getArg! 0)
   if type.isAppOfArity `CIL.Safety.LoopTerminates 5 then
     let some parts ← loopStateParts (type.getArg! 4) | return none
     return some {
@@ -122,98 +129,36 @@ def goalName (goal : MVarId) : MetaM String := do
   if (← steppingGoal? (← goal.getType)).isSome then return "path"
   return "side condition"
 
-/-! ## The facts a missing step needs -/
+/-- The hypotheses in scope that state a checked operation's result, `_ = .ok _` or
+    `_ = .error _`: the facts a step tactic is passed, read back from the goal it stopped on. -/
+def resultFacts : MetaM (Array Expr) := do
+  let mut facts := #[]
+  for decl in ← getLCtx do
+    if decl.isImplementationDetail then continue
+    let some (_, _, result) := (← instantiateMVars decl.type).consumeMData.eq? | continue
+    if result.isAppOf ``Except.ok || result.isAppOf ``Except.error then
+      facts := facts.push decl.toExpr
+  return facts
 
-/-- The kind of fact a stuck step lacks, read from the terms its residual mentions. -/
-inductive MissingFact where
-  /-- A span's validity at the step's memory. -/
-  | spanValidity
-  /-- A span slice. -/
-  | spanSlice
-  /-- A span element's address. -/
-  | spanElement
-  /-- An `Unsafe.Add` result. -/
-  | unsafeAdd
-  /-- That a reference forms. -/
-  | referenceForm
-  /-- What a load reads. -/
-  | load
-  /-- The step equation of a store. -/
-  | storeStep
-  /-- A local's frame fact, or a store's step equation, when the residual names neither. -/
-  | frameOrStore
-
-/-- The stable name of a missing fact's kind, as failure records report it. -/
-def MissingFact.name : MissingFact → String
-  | .spanValidity => "spanValidity"
-  | .spanSlice => "spanSlice"
-  | .spanElement => "spanElement"
-  | .unsafeAdd => "unsafeAdd"
-  | .referenceForm => "referenceForm"
-  | .load => "load"
-  | .storeStep => "storeStep"
-  | .frameOrStore => "frameOrStore"
-
-/-- What to supply for a missing fact of this kind, as `loopMissingHint` words it. -/
-def MissingFact.hint : MissingFact → MessageData
-  | .spanValidity => m!"the span's validity at this memory: a `CheckedSpan` of the caller's \
-      memory, which the loop tactics read in every frame memory, or \
-      `view.validate memory = .ok ()`"
-  | .spanSlice => m!"the slice: `view.slice memory start length = .ok sliced`, such as from \
-      `CheckedSpan.tail` at the caller's memory"
-  | .spanElement => m!"the element's address: `view.element memory index = .ok item`, such as \
-      from `CheckedSpan.head`"
-  | .unsafeAdd => m!"the `Unsafe.Add` result: `add memory base width offset = .ok reference` at \
-      this memory or the caller's, such as `Writable.add_int`"
-  | .referenceForm => m!"that the reference forms: `form memory reference = .ok reference`, or \
-      an `access` or `add` fact it follows from, at this memory or the caller's"
-  | .load => m!"what the load reads: a `loadValue` fact at this memory, such as from \
-      `(span.within wellFormed frame).head`"
-  | .storeStep => m!"the step equation of a store with this stack"
-  | .frameOrStore => m!"a `LoopFrame` at this memory for a local, or the step equation of a \
-      store with this stack"
-
-/-- The constants whose mention in a step's residual decides its `MissingFact`, in the order
-    `loopMissingHint` tests them. A name here is checked against the environment by
-    `Tests.Observe`. -/
-def missingFactMentions : List (MissingFact × List Name) := [
-  (.spanValidity, [`CIL.Safety.SpanView.validate]),
-  (.spanSlice, [`CIL.Safety.SpanView.slice]),
-  (.spanElement, [`CIL.Safety.SpanView.element]),
-  (.unsafeAdd, [`CIL.Safety.add]),
-  (.referenceForm, [`CIL.Safety.form, `CIL.Safety.formValue]),
-  (.load, [`CIL.Safety.loadValue, `CIL.Safety.read]),
-  (.storeStep, [`CIL.Safety.storeLocal, `CIL.Safety.storeValue, `CIL.Safety.write])]
-
-/-- The kind of fact a stuck step needs, from the residual of that step: the same reading as
-    `loopMissingHint`, which words the error the loop tactics raise. -/
-def missingFactOf (residual : Array Expr) : MissingFact :=
-  let mentions (name : Name) : Bool :=
-    residual.any fun goal => (goal.find? fun term => term.isConstOf name).isSome
-  let spanLocal := residual.any fun goal => (goal.find? fun term =>
-    term.isAppOf `CIL.Safety.loadLocal && term.getAppNumArgs >= 2 &&
-      (term.getArg! 1).isAppOf `CIL.Safety.LocalSlot.span).isSome
-  if spanLocal then .spanValidity
-  else match missingFactMentions.find? (·.2.any mentions) with
-    | some (fact, _) => fact
-    | none => .frameOrStore
-
-/-- `CIL.Safety.loopStepResidual`, when the proof's environment has it: the step goal rewritten
-    as far as the step equations go. -/
-unsafe def stepResidualImpl (step : MVarId) : MetaM (Option (Array Expr)) := do
-  let name := `CIL.Safety.loopStepResidual
-  unless (← getEnv).contains name do return none
-  let residual ←
-    evalConst (MVarId → Array Syntax.Term → Tactic.TacticM (Option (Array Expr))) name
+/-- The step goal `step` rewritten as far as the step equations in the proof's environment and
+    the result facts in scope go. -/
+def residualOf (step : MVarId) : MetaM (Option (Array Expr)) := step.withContext do
+  let facts ← resultFacts
   let result ← IO.mkRef none
   discard <| Term.TermElabM.run' <| Tactic.run step do
-    result.set (← residual step #[])
+    result.set (← stepResidual step (← facts.mapM fun fact => Term.exprToSyntax fact))
   result.get
 
-@[implemented_by stepResidualImpl]
-opaque stepResidual (step : MVarId) : MetaM (Option (Array Expr))
-
 /-! ## Failure records -/
+
+/-- The non-null object references among the literal arguments `args`. -/
+def objectArguments (args : Expr) : MetaM (Array Expr) := do
+  let some (_, values) := (← instantiateMVars args).listLit? | return #[]
+  return values.toArray.filterMap fun value =>
+    let value := value.consumeMData
+    if value.isAppOfArity `CIL.Safety.Value.object 1 &&
+        value.appArg!.consumeMData.isAppOf `CIL.Safety.ManagedReference.address then
+      some value.appArg! else none
 
 /-- The record of a failure or stop of `tactic` on `goal`, handed `handed`: the reached state,
     the instruction there and what its step lacks. -/
@@ -226,20 +171,35 @@ def analyze (tactic : String) (goal : MVarId) (handed : Option MVarId) (error : 
     | none => pure none
   let base : FailureRecord := { tactic, error, stopped, obligation }
   let type ← instantiateMVars (← goal.getType)
+  let sideCondition := "the goal is a side condition, not a step of a method"
   let some stepping ← steppingGoal? type
-    | return { base with
-        residual := #[type],
-        unknown := #[("method", "the goal is a side condition, not a step of a method"),
-          ("pc", "the goal is a side condition, not a step of a method"),
-          ("instruction", "the goal is a side condition, not a step of a method"),
-          ("missing", "the goal is a side condition: the residual is the goal itself")] }
+    | -- A side condition that names a checked operation, as an unfolded step does, lacks its fact.
+      let record := { base with
+        residual := #[type]
+        unknown := #[("method", sideCondition), ("pc", sideCondition),
+          ("instruction", sideCondition)] }
+      match missingFactOf #[type] with
+      | .frameOrStore =>
+        let unknown := record.unknown.push
+          ("missing", "the goal is a side condition: the residual is the goal itself")
+        return { record with unknown }
+      | fact => return { record with
+          missing := fact.name, suggestions := #[m!"supply {fact.hint}"] }
   let method ← natLiteral? stepping.method
   let record := { base with method, reached := stepping.parts }
+  let entered := "the goal invokes the method; no instruction of it has run"
   let some pcTerm := stepping.pc
-    | return { record with
-        unknown := #[("pc", "the goal invokes the method; no instruction of it has run"),
-          ("instruction", "the goal invokes the method; no instruction of it has run"),
-          ("missing", "the goal invokes the method; no instruction of it has run")] }
+    | -- The entry checks each argument, and an object argument forms only from a fact about it.
+      let objects ← objectArguments stepping.args
+      let some memory := stepping.parts.find? (·.1 == "memory") | return record
+      if objects.isEmpty then
+        return { record with
+          unknown := #[("pc", entered), ("instruction", entered), ("missing", entered)] }
+      return { record with
+        missing := MissingFact.objectForm.name,
+        residual := ← objects.mapM (mkAppM `CIL.Safety.formObject #[memory.2, ·])
+        suggestions := #[m!"supply, for each object argument, {MissingFact.objectForm.hint}"],
+        unknown := #[("pc", entered), ("instruction", entered)] }
   let some pc ← natLiteral? pcTerm
     | return { record with
         missing := some "branchCondition",
@@ -269,7 +229,8 @@ def analyze (tactic : String) (goal : MVarId) (handed : Option MVarId) (error : 
         unknown := #[("instruction", "the instruction lookup does not reduce")] }
   let record := { record with instruction := op }
   let calling := tactic.endsWith "_call"
-  let isCall := (← whnfR op).isAppOf `CIL.Op.call
+  -- A receiver-checked call crosses into its callee as a direct call does.
+  let isCall := (← whnfR op).isAppOf `CIL.Op.call || (← whnfR op).isAppOf `CIL.Op.callInstance
   if isCall && !calling then
     return { record with
       missing := some "calleeContract",
@@ -286,7 +247,7 @@ def analyze (tactic : String) (goal : MVarId) (handed : Option MVarId) (error : 
     memory.2]
   let resultType ← inferType stepTerm
   let step ← mkFreshExprMVar (← mkEq stepTerm (← mkFreshExprMVar resultType))
-  let residual := (← stepResidual step.mvarId!).getD #[← instantiateMVars (← inferType step)]
+  let residual := (← residualOf step.mvarId!).getD #[← instantiateMVars (← inferType step)]
   let missing := missingFactOf residual
   return { record with
     missing := missing.name, residual,

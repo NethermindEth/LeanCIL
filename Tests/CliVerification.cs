@@ -189,6 +189,26 @@ if (untraced.Code != 0 || untraced.Stdout.Contains("[CIL.step]") || untraced.Std
     throw new InvalidOperationException("verify without --trace printed a trace: " + untraced.Output);
 Console.WriteLine("PASS CLI --trace reports each step apart from the proof's messages, and only when asked");
 
+// A proof stuck on a class instance names the object fact it lacks: the entry of `DepositBoth` checks each
+// account argument before its `callvirt` can throw, so an account with no formation fact stops it.
+var objectOutput = At("artifacts/CliObjectReports");
+Run([.. cli, "extract", demoAssembly, "Examples.Objects::DepositBoth(Examples.Account,Examples.Account,ulong)",
+    objectOutput]);
+var depositBothProof = At("Examples/Proofs/DepositBoth.lean");
+var unformed = Path.Combine(objectOutput, "UnformedAccount.lean");
+File.WriteAllText(unformed, Edited(File.ReadAllText(depositBothProof).ReplaceLineEndings("\n"),
+    "  cil_checked_steps [secondFormed]\n", "  cil_checked_steps []\n"));
+RequireReport(Execute([.. cli, "verify", objectOutput, "--proof", unformed, "--theorem",
+    "ExampleProof.first_null_throws", "--format", "json"]), 1, "UnformedAccount.json", (objectOutput, "<output>"),
+    (unformed, "<proof>"));
+// The trace shows the receiver-checked call and the exception it throws on a null receiver.
+var objectTrace = Execute([.. cli, "verify", objectOutput, "--proof", depositBothProof, "--theorem",
+    "ExampleProof.first_null_throws", "--trace"]).Stdout.ReplaceLineEndings("\n");
+if (!objectTrace.Contains("[CIL.step] pc 2: CIL.Op.callInstance 1 2\n") ||
+    !objectTrace.Contains("changes faults: ExecutionFault.thrown \"System.NullReferenceException\"\n"))
+    throw new InvalidOperationException("verify --trace did not show the null receiver's call: " + objectTrace);
+Console.WriteLine("PASS CLI reports a proof stuck on a class instance and traces its receiver-checked call");
+
 // This theorem proves invalid memory access cannot produce a successful execution.
 var memoryOutput = At("artifacts/CliMemory");
 Run([.. cli, "extract", assembly, "Arithmetic::PastEnd(ulong&)", memoryOutput]);
