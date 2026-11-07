@@ -161,7 +161,9 @@ partial class Program
         var selectionPath = Path.Combine(editor, EditorSelectionFile);
         var previous = File.Exists(selectionPath)
             ? JsonSerializer.Deserialize<EditorSelection>(File.ReadAllText(selectionPath)) : null;
-        File.WriteAllText(selectionPath, JsonSerializer.Serialize(selection, Json) + "\n");
+        var recorded = JsonSerializer.Serialize(selection, Json) + "\n";
+        if (!File.Exists(selectionPath) || File.ReadAllText(selectionPath) != recorded)
+            File.WriteAllText(selectionPath, recorded);
         Run(["lake", "build", .. modules.Select(module => "+" + module)], root,
             progress: "Building " + string.Join(" and ", modules) + " (the first build also builds the framework)");
         PrintEditorExtraction(settings, editor, modules, previous);

@@ -137,9 +137,16 @@ end Client
 WriteBody(codeLength);
 File.WriteAllText(proof, File.ReadAllText(proof).Replace("import Client.Support\n",
     "import Client.Support\nimport Client.Body\n", StringComparison.Ordinal));
+var compiled = Path.Combine(framework, ".lake", "build", "lib", "lean", "Extracted.olean");
+var compiledAt = File.GetLastWriteTimeUtc(compiled);
+var editorAt = Directory.EnumerateFiles(editor).ToDictionary(path => path, File.GetLastWriteTimeUtc);
 Run(command);
+// An unchanged method must leave the extraction and its build untouched, or every re-run rebuilds helpers.
+if (File.GetLastWriteTimeUtc(compiled) != compiledAt ||
+    editorAt.Any(entry => File.GetLastWriteTimeUtc(entry.Key) != entry.Value))
+    throw new InvalidOperationException("Re-running for an unchanged method rewrote or rebuilt the extraction.");
 CheckedProof();
-Console.WriteLine("PASS a helper module added to the package is accepted and checked");
+Console.WriteLine("PASS a helper module added to the package is accepted; an unchanged re-run rebuilds nothing");
 
 Console.WriteLine("Rebuilding the assembly with a different method body and refreshing in place");
 var clock = Stopwatch.StartNew();
