@@ -646,17 +646,23 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             throw new InvalidDataException("Extracted.lean is reserved for the selected extraction artifact; remove stale generated sources from the consumer package.");
         var framework = dependencies.SingleOrDefault(d => d.Name == "leancil")
             ?? throw new InvalidDataException("Consumer package must depend on leancil. Run lake update first.");
+        RequireBundledFramework(framework.Source, root);
+        return inputs;
+    }
+
+    /// <summary>Rejects a framework at `source` or a toolchain pin at `root` that differs from the tool's.</summary>
+    static void RequireBundledFramework(string source, string root)
+    {
         foreach (var path in Directory.EnumerateFiles(At("CIL"), "*.lean", SearchOption.AllDirectories)
             .Append(At("CIL.lean")).Append(At("lean-toolchain")))
         {
-            var consumer = Path.Combine(framework.Source, Path.GetRelativePath(Root, path));
+            var consumer = Path.Combine(source, Path.GetRelativePath(Root, path));
             if (!File.Exists(consumer) || File.ReadAllText(consumer).ReplaceLineEndings("\n") != File.ReadAllText(path).ReplaceLineEndings("\n"))
                 throw new InvalidDataException("Consumer leancil sources differ from the verifier's bundled framework: " + consumer +
                     (SourceRevision is { } revision ? $"\n  Pin leancil to rev \"{revision}\" (see leancil --version)." : ""));
         }
         if (File.ReadAllText(Path.Combine(root, "lean-toolchain")).Trim() != File.ReadAllText(At("lean-toolchain")).Trim())
             throw new InvalidDataException("Consumer and verifier Lean toolchains differ.");
-        return inputs;
     }
 
     static SortedDictionary<string, string> ConsumerInputs(string root, string proof, string? settings, string output)
@@ -1188,13 +1194,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return imports.Keys.Where(module => !dependent.Contains(module)).Order(StringComparer.Ordinal).ToArray();
     }
 
-    enum ConsumerSessionPurpose { Verification, Editor }
-
     ConsumerSession PrepareConsumerSession(string session, string root, ConsumerDependency[] dependencies,
-        SortedDictionary<string, string> snapshot, string? certifiedLibrary, ExtractionIdentity extraction,
+        SortedDictionary<string, string> snapshot, string certifiedLibrary, ExtractionIdentity extraction,
         IReadOnlyList<(string Module, string Proof, string Output)> proofs, string? symbols,
         IReadOnlyDictionary<string, string>? exportAudits = null,
-        ConsumerSessionPurpose purpose = ConsumerSessionPurpose.Verification,
         IReadOnlyDictionary<string, string>? generatedSources = null,
         ExtractionComponents? components = null, bool checkRejectedProofs = false)
     {
@@ -1221,24 +1224,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         }
         var framework = dependencies.Single(d => d.Name == "leancil");
         var frameworkCopy = Within(session, Path.GetRelativePath(root, framework.Source));
-        if (purpose == ConsumerSessionPurpose.Verification && certifiedLibrary is null)
-            throw new InvalidDataException("Verification requires a certified framework library.");
-        if (purpose == ConsumerSessionPurpose.Editor && certifiedLibrary is not null)
-            throw new InvalidDataException("Editor workspaces cannot receive certified framework artifacts.");
-        string generatedPackage;
-        if (purpose == ConsumerSessionPurpose.Verification)
-        {
-            // Lake reads the certified library in place and writes only below this session.
-            generatedPackage = UseCertifiedFramework(session, certifiedLibrary!);
-        }
-        else
-        {
-            // The snapshot already checked normalized source equality. Use the
-            // certified bytes (including line endings) so Lake can reuse its traces.
-            foreach (var path in Directory.EnumerateFiles(At("CIL"), "*.lean", SearchOption.AllDirectories).Append(At("CIL.lean")))
-                File.Copy(path, Path.Combine(frameworkCopy, Path.GetRelativePath(Root, path)), true);
-            generatedPackage = frameworkCopy;
-        }
+        // Lake reads the certified library in place and writes only below this session.
+        string generatedPackage = UseCertifiedFramework(session, certifiedLibrary);
         // Give Lake a real generated-module target before building consumer imports.
         if (File.Exists(Path.Combine(frameworkCopy, "Extracted.lean")) || File.Exists(Path.Combine(session, "Extracted.lean")))
             throw new InvalidDataException("Extracted is reserved for the selected extraction artifact.");

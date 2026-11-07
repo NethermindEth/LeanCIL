@@ -9,6 +9,14 @@ name = "CIL"
 # The observer is opt-in, so no CIL module imports it; the library still builds and ships it.
 globs = ["CIL", "CIL.Observe"]
 
+# Editor-only modules that `leancil workspace` writes below .lake; certified libraries and
+# verification sessions never declare it, and building the library itself builds nothing.
+[[lean_lib]]
+name = "LeanCILEditor"
+srcDir = ".lake/leancil"
+roots = ["Extracted", "ExtractedSymbols"]
+defaultFacets = []
+
 [[lean_lib]]
 name = "Tests.Support"
 
