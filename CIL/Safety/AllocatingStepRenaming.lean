@@ -219,21 +219,22 @@ theorem Memory.Renamed.stepNewObject {indices : LocalIndexMap} {mapping : Alloca
     (staticBounds : ∀ binding ∈ source.staticBindings,
       binding.2.allocation < mapping.sourceLimit)
     (sourceBody targetBody : CIL.Method) (callee argc : Nat) (owner : CIL.Extraction.TypeExpr)
+    (bases : List CIL.Extraction.TypeExpr)
     (size pc : Nat) (arguments stack : List Value)
     (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
     (observable : SuccessOrThrow
-      (step sourceBody (.newObject callee argc owner size) pc arguments sourceFrame stack
+      (step sourceBody (.newObject callee argc owner bases size) pc arguments sourceFrame stack
         source)) :
     ∃ later, mapping.Extends later ∧
       ResultRenamed later (FrameAction.Renamed indices later scopes)
-        (step sourceBody (.newObject callee argc owner size) pc arguments sourceFrame stack
+        (step sourceBody (.newObject callee argc owner bases size) pc arguments sourceFrame stack
           source)
-        (step targetBody (.newObject callee argc owner size) pc (arguments.map mapping.value)
+        (step targetBody (.newObject callee argc owner bases size) pc (arguments.map mapping.value)
           targetFrame (stack.map mapping.value) target) := by
   simp only [step, mapping.unspecifiedOperands, Bool.or_false, List.length_map,
     ← List.map_take, ← List.map_drop, ← List.map_reverse] at observable ⊢
   by_cases guard :
-      unspecifiedOperands (observerCount (.newObject callee argc owner size)) stack = true
+      unspecifiedOperands (observerCount (.newObject callee argc owner bases size)) stack = true
   · simp only [guard, ite_true, SuccessOrThrow] at observable
   · simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
     by_cases short : stack.length < argc
@@ -258,7 +259,7 @@ theorem Memory.Renamed.stepNewObject {indices : LocalIndexMap} {mapping : Alloca
         rw [checked] at checks
         obtain ⟨targetOperands, targetChecked, rfl⟩ := checks.success
         simp only [checked, Bind.bind, Except.bind] at observable
-        cases allocated : CIL.Safety.allocateObject source ⟨owner⟩ size with
+        cases allocated : CIL.Safety.allocateObject source ⟨owner, bases⟩ size with
         | error fault =>
           rw [allocated] at observable
           cases fault <;> simp only [SuccessOrThrow] at observable

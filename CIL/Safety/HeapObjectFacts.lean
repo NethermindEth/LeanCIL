@@ -59,7 +59,7 @@ theorem objectFieldAddress_position {memory : Memory} {reference : ManagedRefere
       cases kind : allocation.kind <;> simp only [kind] at located <;> try cases located
       rename_i type
       by_cases origin0 : origin.offset = 0 <;>
-        by_cases typed : type.identity = owner <;>
+        by_cases typed : owner ∈ type.lineage <;>
         simp only [origin0, typed, ne_eq, not_true_eq_false, not_false_eq_true, ite_true,
           ite_false] at located <;> try cases located
       cases moved : add memory origin 1 (BitVec.ofNat 64 offset) <;>
@@ -103,17 +103,19 @@ theorem objectMemory_formObject (memory : Memory) (type : RuntimeType) (size : N
     Except.bind, Pure.pure, Except.pure]
 #print axioms objectMemory_formObject
 
-/-- A field of a fresh instance inside its size is located at its offset in the instance. -/
+/-- A field of a fresh instance inside its size, declared by its class or one of its bases, is
+    located at its offset in the instance. -/
 theorem objectMemory_field (memory : Memory) (type : RuntimeType) {size offset : Nat}
+    {owner : CIL.Extraction.TypeExpr} (owned : owner ∈ type.lineage)
     (bounded : size < nativeLimit) (inside : offset < size) :
     objectFieldAddress (objectMemory memory type size) (.address ⟨memory.nextIdentity, 0⟩)
-      type.identity offset = .ok ⟨memory.nextIdentity, offset⟩ := by
+      owner offset = .ok ⟨memory.nextIdentity, offset⟩ := by
   have small : offset < 2 ^ 64 := by simp only [nativeLimit] at bounded; omega
   have positive : 0 < size := by omega
   simp [objectFieldAddress, add, form, liveAllocation, validPosition, objectMemory,
     checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure,
     Nat.mod_eq_of_lt small, inside, positive, Nat.lt_trans inside bounded,
-    Nat.lt_trans positive bounded]
+    Nat.lt_trans positive bounded, owned]
 #print axioms objectMemory_field
 
 /-- The bytes of a fresh instance are readable and writable with byte alignment. -/

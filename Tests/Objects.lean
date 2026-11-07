@@ -11,7 +11,7 @@ namespace Tests.Objects
 
 open CIL CIL.Safety
 
-private def account : RuntimeType := ⟨.object "Examples" "Examples.Account"⟩
+private def account : RuntimeType := ⟨.object "Examples" "Examples.Account", []⟩
 
 /-- Allocation 0 holds an object, 1 is an expired object and 2 is a caller stack buffer. -/
 private def memory : CIL.Safety.Memory :=
@@ -75,8 +75,29 @@ theorem object_local_has_no_address :
 /-- A field access checks the object's runtime type against the field's declaring class. -/
 theorem field_owner_checked :
     objectFieldAddress memory live (.object "Examples" "Examples.Other") 0 =
-      .error (.unsupported "Field owner is not the object's type") := rfl
+      .error (.unsupported "Field owner is not the object's class or a base of it") := rfl
 #print axioms field_owner_checked
+
+private def shape : CIL.Extraction.TypeExpr := .object "Examples" "Examples.Shape"
+private def circle : RuntimeType := ⟨.object "Examples" "Examples.Circle", [shape]⟩
+
+/-- Allocation 0 is a 16-byte `Circle` deriving from `Shape`; allocation 1 a bare `Shape`. -/
+private def shapes : CIL.Safety.Memory :=
+  { allocations := fun identity => match identity with
+      | 0 => some ⟨.object circle, ⟨16, 8, []⟩, true, [16]⟩
+      | 1 => some ⟨.object ⟨shape, []⟩, ⟨8, 8, []⟩, true, [8]⟩
+      | _ => none
+    cells := fun _ _ => ⟨0, true⟩, views := [], nextIdentity := 2 }
+
+/-- A derived instance reaches the fields its base declares and its own; an instance of the base
+    reaches no field the derived class declares. -/
+theorem base_fields_reached :
+    objectFieldAddress shapes (.address ⟨0, 0⟩) shape 0 = .ok ⟨0, 0⟩ ∧
+    objectFieldAddress shapes (.address ⟨0, 0⟩) circle.identity 8 = .ok ⟨0, 8⟩ ∧
+    objectFieldAddress shapes (.address ⟨1, 0⟩) circle.identity 8 =
+      .error (.unsupported "Field owner is not the object's class or a base of it") :=
+  ⟨rfl, rfl, rfl⟩
+#print axioms base_fields_reached
 
 /-- A field access through null throws, as `ldfld` and `stfld` do at run time. -/
 theorem null_field_throws :
@@ -106,7 +127,8 @@ theorem allocation_over_budget :
 /-- `newobj` with no arguments calls constructor 1 with the fresh instance as its receiver,
     which then also waits on the caller's stack. -/
 private def creator : CIL.Method :=
-  { returnsValue := true, locals := [], code := [.newObject 1 0 account.identity 8, .ret none] }
+  { returnsValue := true, locals := [],
+    code := [.newObject 1 0 account.identity [] 8, .ret none] }
 private def constructor : CIL.Method :=
   { returnsValue := false, locals := [], code := [.ret none] }
 
@@ -121,7 +143,7 @@ theorem construction_over_budget :
     invoke [creator, constructor] 8 0 [] memory = .error ⟨0, 0, .allocationFailure 8 0⟩ := rfl
 #print axioms construction_over_budget
 
-private def node : RuntimeType := ⟨.object "Examples" "Examples.Node"⟩
+private def node : RuntimeType := ⟨.object "Examples" "Examples.Node", []⟩
 
 /-- Allocations 0 and 1 are 16-byte nodes, 1 read-only; 2 is a caller stack buffer. -/
 private def nodes : CIL.Safety.Memory :=
@@ -191,7 +213,7 @@ theorem reference_field_checks_slot :
     code := [.arg 0, .memory (.objectReferenceField account.identity 8), .ret] }
 /-- `newobj` of an 8-byte instance whose constructor is method 4. -/
 @[cil_code] def creating : CIL.Method :=
-  { returnsValue := true, locals := [], code := [.newObject 4 0 account.identity 8, .ret] }
+  { returnsValue := true, locals := [], code := [.newObject 4 0 account.identity [] 8, .ret] }
 /-- A constructor or instance method that does nothing. -/
 @[cil_code] def doingNothing : CIL.Method :=
   { returnsValue := false, locals := [], code := [.ret] }

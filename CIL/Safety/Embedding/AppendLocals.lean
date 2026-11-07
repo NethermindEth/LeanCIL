@@ -1172,7 +1172,8 @@ theorem step_appendLocals_newAggregate (constructor : Nat) (argc : Nat) (size : 
 
 /-- `newObject` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_newObject (constructor argc : Nat) (owner : Extraction.TypeExpr)
-    (size : Nat) : StepAppendLocals (.newObject constructor argc owner size) := by
+    (bases : List Extraction.TypeExpr) (size : Nat) :
+    StepAppendLocals (.newObject constructor argc owner bases size) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
@@ -1462,8 +1463,8 @@ theorem step_appendLocals (body : Method) (op : Op) (pc : Nat) (args : List Valu
       exact step_appendLocals_newVector256 constructor argc
     case newAggregate constructor argc size =>
       exact step_appendLocals_newAggregate constructor argc size
-    case newObject constructor argc owner size =>
-      exact step_appendLocals_newObject constructor argc owner size
+    case newObject constructor argc owner bases size =>
+      exact step_appendLocals_newObject constructor argc owner bases size
     case skipInit =>
       exact step_appendLocals_skipInit
     case asRef =>

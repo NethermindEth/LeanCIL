@@ -4,7 +4,7 @@ using Mono.Cecil.Cil;
 namespace Nethermind.LeanCIL;
 
 // Class instances the checked heap admits: a reference is an allocation identity, and the
-// allocation records the runtime type that every field access is checked against.
+// allocation records the runtime type, with its admitted base classes, that every field access is checked against.
 internal static class ObjectTypes
 {
     const string Unsupported = "Unsupported class instance type: ";
@@ -31,7 +31,10 @@ internal static class ObjectTypes
         catch (InvalidDataException) { return false; }
     }
 
-    /// <summary>Rejects a candidate class whose instances the heap model cannot represent, naming why.</summary>
+    /// <summary>
+    /// Rejects a candidate class whose instances the heap model cannot represent, naming why. A class derives from
+    /// System.Object directly or through admitted classes; an abstract class is admitted as a type, never constructed.
+    /// </summary>
     internal static TypeDefinition Validate(TypeReference type)
     {
         if (!Candidate(type)) throw new InvalidDataException(Unsupported + type.FullName);
@@ -42,13 +45,6 @@ internal static class ObjectTypes
         if (definition.HasGenericParameters)
             throw new InvalidDataException(Unsupported + type.FullName +
                 "\n  Generic classes are not modelled.");
-        if (definition.IsAbstract)
-            throw new InvalidDataException(Unsupported + type.FullName +
-                "\n  An abstract class has no instances without inheritance, which is not modelled.");
-        if (definition.BaseType is not { FullName: "System.Object" } parent ||
-            !RuntimeModels.ExactScope(parent.Scope, "System.Runtime"))
-            throw new InvalidDataException(Unsupported + type.FullName +
-                "\n  Only classes deriving directly from System.Object are modelled; inheritance is not.");
         if (definition.IsExplicitLayout)
             throw new InvalidDataException(Unsupported + type.FullName +
                 "\n  Explicit class layout is not modelled.");
@@ -56,13 +52,55 @@ internal static class ObjectTypes
                 !method.HasParameters && method.ReturnType.MetadataType == MetadataType.Void))
             throw new InvalidDataException(Unsupported + type.FullName +
                 "\n  A finalizer runs outside the extracted call graph.");
+        var parent = definition.BaseType ?? throw new InvalidDataException(Unsupported + type.FullName);
+        if (parent.FullName == "System.Object" && RuntimeModels.ExactScope(parent.Scope, "System.Runtime"))
+            return definition;
+        if (!Candidate(parent))
+            throw new InvalidDataException(Unsupported + type.FullName +
+                "\n  Only classes deriving from System.Object through admitted classes are modelled; " +
+                parent.FullName + " is not one.");
+        try { Validate(parent); }
+        catch (InvalidDataException error)
+        {
+            throw new InvalidDataException(Unsupported + type.FullName + "\n  Its base class is not admitted: " +
+                error.Message.Replace("\n", "\n  ", StringComparison.Ordinal), error);
+        }
         return definition;
+    }
+
+    /// <summary>The admitted base classes of an admitted class, nearest first, excluding System.Object.</summary>
+    internal static TypeReference[] Bases(TypeReference type)
+    {
+        var bases = new List<TypeReference>();
+        for (var parent = Validate(type).BaseType; parent is not null && parent.FullName != "System.Object";
+            parent = Validate(parent).BaseType)
+            bases.Add(parent);
+        return [.. bases];
+    }
+
+    /// <summary>
+    /// The instance fields of an admitted class in model order: its bases' fields first, farthest base first, then
+    /// its own in declaration order. Each takes one 8-byte slot, so a derived instance extends its base's layout.
+    /// </summary>
+    internal static FieldDefinition[] Fields(TypeReference type) =>
+        [.. Bases(type).Reverse().Append(type).SelectMany(owner =>
+            MetadataValidation.Fields(owner).Select(field => field.Definition))];
+
+    /// <summary>
+    /// The model slot index of an instance field of an admitted class, counting its bases' fields first.
+    /// </summary>
+    internal static int FieldIndex(TypeReference owner, FieldDefinition resolved)
+    {
+        var index = Array.IndexOf(Fields(owner), resolved);
+        return index >= 0 ? index
+            : throw new InvalidDataException(
+                "Unresolved class instance field: " + owner.FullName + "::" + resolved.Name);
     }
 
     /// <summary>
     /// The checked operation for <c>ldfld</c> or <c>stfld</c> of an integer or admitted-class field of a
-    /// class instance, at the model offset of one 8-byte slot per instance field in declaration order. A
-    /// class-typed field holds an object reference in its slot, never in bytes.
+    /// class instance, at the model offset of its slot. A class-typed field holds an object reference in its
+    /// slot, never in bytes.
     /// </summary>
     internal static string FieldOperation(FieldReference field, FieldDefinition resolved, bool store, bool address)
     {
@@ -77,12 +115,10 @@ internal static class ObjectTypes
             throw new InvalidDataException("Unsupported reference-typed field: " + field.FullName +
                 "\n  Only fields holding instances of admitted classes are modelled; " + type.FullName +
                 " is not one.");
+        var offset = FieldSlot * FieldIndex(owner, resolved);
         if (holdsReference)
-        {
-            var slot = FieldSlot * FieldIndex(field, resolved);
-            return store ? $".memory (.setObjectReferenceField ({GenericEvidence.ObjectType(owner)}) {slot})"
-                : $".memory (.objectReferenceField ({GenericEvidence.ObjectType(owner)}) {slot})";
-        }
+            return store ? $".memory (.setObjectReferenceField ({GenericEvidence.ObjectType(owner)}) {offset})"
+                : $".memory (.objectReferenceField ({GenericEvidence.ObjectType(owner)}) {offset})";
         int width;
         try { width = MetadataValidation.PrimitiveWidth(type); }
         catch (InvalidDataException)
@@ -90,31 +126,30 @@ internal static class ObjectTypes
             throw new InvalidDataException("Unsupported class instance field type: " + field.FullName +
                 "\n  Only integer, Boolean, Char and enum fields of class instances are modelled.");
         }
-        var offset = FieldSlot * FieldIndex(field, resolved);
         var signed = EnumTypes.Storage(type).FullName is "System.SByte" or "System.Int16";
         return store ? $".memory (.setObjectField ({GenericEvidence.ObjectType(owner)}) {offset} {width})"
             : $".memory (.objectField ({GenericEvidence.ObjectType(owner)}) {offset} {width} " +
                 $"{signed.ToString().ToLowerInvariant()})";
     }
 
-    /// <summary>The declaration-order index of an instance field among its class's instance fields.</summary>
-    static int FieldIndex(FieldReference field, FieldDefinition resolved)
-    {
-        var index = Array.FindIndex(MetadataValidation.Fields(field.DeclaringType),
-            candidate => candidate.Definition == resolved);
-        return index >= 0 ? index
-            : throw new InvalidDataException("Unresolved class instance field: " + field.FullName);
-    }
+    /// <summary>The emitted list of an admitted class's base classes, nearest first.</summary>
+    internal static string BaseList(TypeReference type) =>
+        "[" + string.Join(", ", Bases(type).Select(parent => $"({GenericEvidence.ObjectType(parent)})")) + "]";
 
     /// <summary>
-    /// The checked operation for <c>newobj</c> of an admitted class: a fresh instance of one 8-byte slot per
-    /// instance field, passed to <paramref name="constructor"/> at method index <paramref name="index"/>.
+    /// The checked operation for <c>newobj</c> of an admitted class: a fresh instance of its runtime type, with
+    /// one 8-byte slot per instance field including its bases', passed to <paramref name="constructor"/> at
+    /// method index <paramref name="index"/>. An abstract class has no instances of its own.
     /// </summary>
     internal static string Construction(MethodDefinition constructor, int index)
     {
         var owner = Validate(constructor.DeclaringType);
-        var size = FieldSlot * MetadataValidation.Fields(owner).Length;
-        return $".newObject {index} {constructor.Parameters.Count} ({GenericEvidence.ObjectType(owner)}) {size}";
+        if (owner.IsAbstract)
+            throw new InvalidDataException("Unsupported construction of an abstract class: " + owner.FullName +
+                "\n  newobj of an abstract class fails at run time; only its derived classes have instances.");
+        var size = FieldSlot * Fields(owner).Length;
+        return $".newObject {index} {constructor.Parameters.Count} ({GenericEvidence.ObjectType(owner)}) " +
+            $"{BaseList(owner)} {size}";
     }
 
     // Matches `CIL.objectFieldSlot`, which Lean uses to recheck every emitted offset.

@@ -410,8 +410,9 @@ theorem step_relabel_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
   · simp only [short, ↓reduceIte, Bool.false_eq_true] at h ⊢
     lockstep
 
-theorem step_relabel_newObject (callee argc : Nat) (owner : Extraction.TypeExpr) (size : Nat) :
-    StepRelabel (.newObject callee argc owner size) := by
+theorem step_relabel_newObject (callee argc : Nat) (owner : Extraction.TypeExpr)
+    (bases : List Extraction.TypeExpr) (size : Nat) :
+    StepRelabel (.newObject callee argc owner bases size) := by
   plain_cases
   by_cases short : stack.length < argc
   · simp [short] at h
@@ -687,8 +688,8 @@ theorem step_relabel (op : CIL.Op) : StepRelabel op := by
   case tailCall method argc => exact step_relabel_tailCall method argc
   case newVector256 constructor argc => exact step_relabel_newVector256 constructor argc
   case newAggregate constructor argc size => exact step_relabel_newAggregate constructor argc size
-  case newObject constructor argc owner size =>
-    exact step_relabel_newObject constructor argc owner size
+  case newObject constructor argc owner bases size =>
+    exact step_relabel_newObject constructor argc owner bases size
   case intrinsic operation argc => exact step_relabel_intrinsic operation argc
   case memory operation => exact step_relabel_memory operation
   case ret narrow => exact step_relabel_ret narrow
@@ -976,8 +977,9 @@ theorem step_raise_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
   · simp only [short, ↓reduceIte, Bool.false_eq_true] at h ⊢
     raise_lockstep
 
-theorem step_raise_newObject (callee argc : Nat) (owner : Extraction.TypeExpr) (size : Nat) :
-    StepRaise (.newObject callee argc owner size) := by
+theorem step_raise_newObject (callee argc : Nat) (owner : Extraction.TypeExpr)
+    (bases : List Extraction.TypeExpr) (size : Nat) :
+    StepRaise (.newObject callee argc owner bases size) := by
   plain_cases
   by_cases short : stack.length < argc
   · simp [short] at h
@@ -1230,7 +1232,8 @@ theorem step_raise (op : CIL.Op) : StepRaise op := by
   case tailCall callee argc => exact step_raise_tailCall callee argc
   case newVector256 callee argc => exact step_raise_newVector256 callee argc
   case newAggregate callee argc size => exact step_raise_newAggregate callee argc size
-  case newObject callee argc owner size => exact step_raise_newObject callee argc owner size
+  case newObject callee argc owner bases size =>
+    exact step_raise_newObject callee argc owner bases size
   case intrinsic operation argc => exact step_raise_intrinsic operation argc
   case memory operation =>
     plain_cases

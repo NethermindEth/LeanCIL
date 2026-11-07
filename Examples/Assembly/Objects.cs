@@ -44,6 +44,26 @@ public sealed class Marker
 {
 }
 
+/// <summary>An abstract base class: it declares a field and a constructor but has no instances of its own.</summary>
+public abstract class Shape
+{
+    /// <summary>The shape's identifier, the first field of every derived instance.</summary>
+    public ulong Id;
+
+    /// <summary>Sets the identifier; only the constructors of derived classes call it.</summary>
+    protected Shape(ulong id) => Id = id;
+}
+
+/// <summary>A class derived from <see cref="Shape"/>: its own field follows the fields of its base.</summary>
+public class Circle : Shape
+{
+    /// <summary>The circle's radius.</summary>
+    public ulong Radius;
+
+    /// <summary>Creates a circle, chaining to the base constructor for the identifier.</summary>
+    public Circle(ulong id, ulong radius) : base(id) => Radius = radius;
+}
+
 /// <summary>Reference identity and null tests on class instances.</summary>
 public static class Objects
 {
@@ -79,6 +99,16 @@ public static class Objects
 
     /// <summary>Adds to the balance of one account, wrapping at 64 bits.</summary>
     public static void Bump(Account account, ulong amount) => account.Balance += amount;
+
+    /// <summary>Reads the field a base class declares, through a reference of the base type.</summary>
+    public static ulong IdOf(Shape shape) => shape.Id;
+
+    /// <summary>Constructs a derived instance, whose constructor chains to its base's, and reads both fields.</summary>
+    public static ulong Describe(ulong id, ulong radius)
+    {
+        var circle = new Circle(id, radius);
+        return circle.Id + circle.Radius;
+    }
 
     /// <summary>Allocates a tally, stores into it and reads both fields back.</summary>
     public static ulong Fresh(uint step)

@@ -21,6 +21,9 @@ namespace ExampleProof
 def tallyType : CIL.Extraction.TypeExpr :=
   .object "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" "Examples.Tally"
 
+/-- The runtime type of a `Tally` instance; `Tally` derives from `System.Object` directly. -/
+def tally : RuntimeType := ⟨tallyType, []⟩
+
 /-- The model size of a `Tally`: one 8-byte slot for each of its two fields. -/
 def tallySize : Nat := 16
 
@@ -34,22 +37,23 @@ theorem correctness (memory : Memory) (formed : memory.WellFormed)
         .ok (final, [.scalar (.i64 (5 + step.zeroExtend 64))]) ∧
       MemoryBelow memory.nextIdentity memory final := by
   have bounded : tallySize < nativeLimit := by decide
-  have allocated := allocateObject_ok formed ⟨tallyType⟩ budget bounded
-  have created := objectMemory_formObject memory ⟨tallyType⟩ tallySize
-  have stepField := objectMemory_field memory ⟨tallyType⟩ bounded (offset := 8) (by decide)
-  have countField := objectMemory_field memory ⟨tallyType⟩ bounded (offset := 0) (by decide)
+  have allocated := allocateObject_ok formed tally budget bounded
+  have created := objectMemory_formObject memory tally tallySize
+  have owned := tally.identity_mem_lineage
+  have stepField := objectMemory_field memory tally owned bounded (offset := 8) (by decide)
+  have countField := objectMemory_field memory tally owned bounded (offset := 0) (by decide)
   -- The constructor writes `Step`, then `Fresh` writes `Count`; both in the fresh instance.
-  have stepReady := objectMemory_access memory ⟨tallyType⟩ bounded (offset := 8) (width := 4)
+  have stepReady := objectMemory_access memory tally bounded (offset := 8) (width := 4)
     (by decide) (by decide) true
   obtain ⟨afterStep, stepWritten⟩ := write_succeeds (bytes := numberBytes step.toNat 4)
     (alignment := 1) (by simpa only [numberBytes_length] using stepReady)
   have stepFramed : Confined [(⟨memory.nextIdentity, 8⟩, 4)] _ afterStep :=
     Confined.write stepWritten (by simp [numberBytes_length])
-  have unborn : memory.nextIdentity < (objectMemory memory ⟨tallyType⟩ tallySize).nextIdentity :=
+  have unborn : memory.nextIdentity < (objectMemory memory tally tallySize).nextIdentity :=
     by simp [objectMemory]
   have countReady : access afterStep ⟨memory.nextIdentity, 0⟩ 8 1 true = .ok () := by
     rw [stepFramed.access_write _ unborn]
-    exact objectMemory_access memory ⟨tallyType⟩ bounded (by decide) (by decide) true
+    exact objectMemory_access memory tally bounded (by decide) (by decide) true
   obtain ⟨afterCount, countWritten, -, countRead⟩ := store_word64 5 countReady
   have stepAllocations := write_allocations _ _ _ _ _ stepWritten
   have countAllocations := write_allocations _ _ _ _ _ countWritten
@@ -77,7 +81,7 @@ theorem correctness (memory : Memory) (formed : memory.WellFormed)
   refine ⟨CIL.executionBound Extracted.program fresh, afterCount, ?_, ?_⟩
   · cil_checked_steps [allocated, created, stepField, stepWritten, stepFormed,
       countFieldAfterStep, countStored, countFormed, countFieldAfter, stepFieldAfter,
-      countLoaded, stepLoaded, tallyType, tallySize]
+      countLoaded, stepLoaded, tally, tallyType, tallySize]
   · exact (allocateObject_effect allocated).below.trans
       ((write_preserves_memory_below _ _ _ _ _ _ (by simp) stepWritten).trans
         (write_preserves_memory_below _ _ _ _ _ _ (by simp) countWritten))
@@ -90,9 +94,9 @@ theorem insufficient_budget (memory : Memory) (short : memory.heapBudget < tally
     (step : W32) :
     ∃ fuel, invoke Extracted.program fuel fresh [.scalar (.i32 step)] memory =
       .error ⟨fresh, 1, .allocationFailure tallySize memory.heapBudget⟩ := by
-  have failed := allocateObject_insufficient ⟨tallyType⟩ short
+  have failed := allocateObject_insufficient tally short
   refine ⟨CIL.executionBound Extracted.program fresh, ?_⟩
-  cil_checked_steps [failed, tallyType, tallySize]
+  cil_checked_steps [failed, tally, tallyType, tallySize]
 
 #print axioms insufficient_budget
 

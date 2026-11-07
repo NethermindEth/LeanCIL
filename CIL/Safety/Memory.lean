@@ -18,10 +18,20 @@ namespace CIL.Safety
 /-- The identity of an allocation; identities are never reused. -/
 abbrev AllocationId := Nat
 
-/-- The runtime type an object allocation records: its exact class identity. -/
+/-- The runtime type an object allocation records: its exact class identity and the admitted
+    classes it derives from, nearest first, up to but excluding `System.Object`. -/
 structure RuntimeType where
   identity : CIL.Extraction.TypeExpr
+  bases : List CIL.Extraction.TypeExpr
   deriving DecidableEq, Repr
+
+/-- The classes an instance of `type` is an instance of: its own class, then its bases. -/
+def RuntimeType.lineage (type : RuntimeType) : List CIL.Extraction.TypeExpr :=
+  type.identity :: type.bases
+
+/-- An instance is an instance of its own class. -/
+@[simp] theorem RuntimeType.identity_mem_lineage (type : RuntimeType) :
+    type.identity ∈ type.lineage := List.mem_cons_self
 
 /-- Where an allocation lives; only an immutable static may never be written. An object
     allocation is a class instance of its recorded runtime type. -/

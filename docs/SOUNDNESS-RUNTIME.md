@@ -217,10 +217,12 @@ named throws; only explicit outcome mappings establish a named exception.
 
 ## Class instances
 
-An admitted class is non-generic and non-abstract, derives directly from
-`System.Object` in `System.Runtime`, has sequential or auto layout and no finalizer. A reference to
-it is `Value.object`: null, or offset 0 of a live allocation whose kind is `.object` with the
-class's runtime type (`formObject`). Object references carry no byte position, so code cannot
+An admitted class is non-generic, derives from `System.Object` in `System.Runtime` directly or
+through admitted classes, has sequential or auto layout and no finalizer; an abstract class is
+admitted as a type but never constructed. A reference to it is `Value.object`: null, or offset 0
+of a live allocation whose kind is `.object` with a runtime type (`formObject`). The runtime type
+records the instance's class and its bases, nearest first, up to but excluding `System.Object`
+(`RuntimeType.bases`); the class and its bases form its lineage (`RuntimeType.lineage`). Object references carry no byte position, so code cannot
 form one from an integer, a byref or an interior offset, and `ldnull` pushes the one null
 object reference; `Unsafe.NullRef` keeps the distinct null byref. `ceq`, `beq` and `bne.un`
 compare identities; `cgt.un` and `brtrue`/`brfalse` test presence against null only. Object
@@ -228,24 +230,33 @@ locals and parameters are roots without bytes and have no address.
 
 `ldfld` and `stfld` of an integer, Boolean, Char or enum field of a class reach the field's
 bytes in the object's allocation (`objectFieldAddress`). The model, not CoreCLR, chooses the
-layout: one 8-byte slot per instance field in declaration order (`objectFieldOffset`), which
-Lean rechecks against each instruction's raw field index and type. This needs no
+layout: one 8-byte slot per instance field, the fields of the furthest base first and each
+class's own in declaration order after its base's (`objectFieldOffset`), so a field keeps its
+offset in every derived instance. Lean rechecks the offset against each instruction's raw field
+index and type; that the raw index counts the fields of the declaring class's bases first is
+metadata the extractor decodes. This needs no
 correspondence with CoreCLR's layout because code cannot observe it: `ldflda` on a class is
-rejected, and object references have no integer form. Each access checks that the allocation's
-runtime type is the field's declaring class, and a null receiver throws
+rejected, and object references have no integer form. Each access checks that the field's
+declaring class is in the allocation's lineage, so a field of a base class is reached on every
+derived instance and a field of an unrelated class on none, and a null receiver throws
 `NullReferenceException`, as `ldfld` and `stfld` do; a null byref keeps its distinct
 `nullDereference` fault.
 
 `newobj` of an admitted class (`.newObject`) checks the constructor's arguments, then allocates
-a fresh live instance (`allocateObject`): an allocation of kind `.object` with the class's runtime
-type, one zeroed 8-byte slot per instance field and authority over all of it. It charges the
+a fresh live instance (`allocateObject`): an allocation of kind `.object` with the class and its
+bases as its runtime type, one zeroed 8-byte slot per instance field, inherited fields included,
+and authority over all of it. It charges the
 instance's size to `Memory.heapBudget`, the bytes the caller grants for objects, and fails with
 `allocationFailure` when the budget is short; that is a model resource fault, not a CLR
 exception, so no proof of an expected exception can rest on it. The budget never grows back:
 it is a conservative bound that ignores collection. The constructor then runs with the
 instance as its receiver, and the instance is pushed once it returns. Lean rechecks that the
-call site's declaring class is the instance's runtime type, that the constructor takes an
-object receiver, and that the size is one slot per instance field of the constructor's class.
+call site's declaring class is the instance's class, that its bases are those the constructor's
+raw method records (`RawMethod.objectBases`), that the constructor takes an object receiver, and
+that the size is one slot per instance field of the constructor's class, inherited fields
+included. `newobj` of an abstract class is rejected by name, as the runtime rejects it. A derived
+constructor's chained call to its base's constructor is an ordinary instance `call` with the new
+instance as receiver ([DerivedObject](../Examples/Proofs/DerivedObject.lean)).
 Inside an admitted constructor, `call System.Object::.ctor()` with the exact `System.Runtime`
 scope only pops the receiver: the runtime's constructor has no effect on an instance, and Lean
 rechecks that exact target wherever `.pop` stands for a call. No frame owns
@@ -286,7 +297,8 @@ receiver among its arguments, and rejects a plain `call` emitted for `callvirt`,
 the check. That the target is not virtual is metadata the extractor decodes and checks, as it
 decodes `hasThis`.
 
-Interface, generic, abstract, derived, explicit-layout and finalizable classes, byrefs to class
+Interface, generic, explicit-layout and finalizable classes, classes deriving from a class that is
+not admitted, `newobj` of an abstract class, byrefs to class
 instances, field addresses on class instances, class fields holding anything but integers or
 admitted class instances (strings, arrays, interfaces, other classes),
 virtual class methods, `callvirt` of a virtual method and the address of a class receiver, local

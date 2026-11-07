@@ -374,7 +374,7 @@ theorem Memory.Renamed.objectFieldAddress {mapping : AllocationRenaming}
             | exact .error .invalidState
             | (rename_i type
                by_cases origin : reference.offset = 0 <;>
-                 by_cases typed : type.identity = owner <;>
+                 by_cases typed : owner ∈ type.lineage <;>
                  simp only [origin, typed, ne_eq, not_true_eq_false, not_false_eq_true,
                    ite_true, ite_false]
                all_goals first | exact .error _ | (simp only [origin] at moved; exact moved))

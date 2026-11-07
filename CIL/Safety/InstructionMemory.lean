@@ -298,8 +298,9 @@ def formObject (memory : Memory) (reference : ManagedReference) : ExecutionResul
     | .object _ => if address.offset = 0 then .ok (.object reference) else .error .invalidState
     | _ => .error .invalidState
 
-/-- The field at `offset` of the object `reference` names, which must be a live object of type
-    `owner`. A null receiver throws `NullReferenceException`, as `ldfld` and `stfld` do. -/
+/-- The field at `offset` of the object `reference` names, which must be a live object of class
+    `owner` or of a class derived from it. A null receiver throws `NullReferenceException`, as
+    `ldfld` and `stfld` do. -/
 def objectFieldAddress (memory : Memory) (reference : ManagedReference)
     (owner : CIL.Extraction.TypeExpr) (offset : Nat) : ExecutionResult Reference :=
   match reference with
@@ -309,8 +310,8 @@ def objectFieldAddress (memory : Memory) (reference : ManagedReference)
     match allocation.kind with
     | .object type =>
       if address.offset ≠ 0 then .error .invalidState
-      else if type.identity ≠ owner then
-        .error (.unsupported "Field owner is not the object's type")
+      else if owner ∉ type.lineage then
+        .error (.unsupported "Field owner is not the object's class or a base of it")
       else checkedAt reference 0 (add memory address 1 (BitVec.ofNat 64 offset))
     | _ => .error .invalidState
 

@@ -20,6 +20,9 @@ namespace ExampleProof
 def markerType : CIL.Extraction.TypeExpr :=
   .object "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" "Examples.Marker"
 
+/-- The runtime type of a `Marker` instance; `Marker` derives from `System.Object` directly. -/
+def marker : RuntimeType := ⟨markerType, []⟩
+
 bind_method twoMarkers twoMarkersBody := "System.Boolean Examples.Objects::TwoMarkers()"
 
 /-- `TwoMarkers()` returns `true` from every well-formed memory, whatever its heap budget: two
@@ -28,24 +31,25 @@ theorem correctness (memory : Memory) (formed : memory.WellFormed) :
     ∃ fuel final, invoke Extracted.program fuel twoMarkers [] memory =
       .ok (final, [.scalar (.i32 1)]) := by
   have bounded : (0 : Nat) < nativeLimit := by decide
-  have first := allocateObject_ok formed ⟨markerType⟩ (Nat.zero_le _) bounded
+  have first := allocateObject_ok formed marker (Nat.zero_le _) bounded
   have firstFormed := (allocateObject_effect first).wellFormed formed
-  have second := allocateObject_ok firstFormed ⟨markerType⟩ (Nat.zero_le _) bounded
-  have firstCreated := objectMemory_formObject memory ⟨markerType⟩ 0
+  have second := allocateObject_ok firstFormed marker (Nat.zero_le _) bounded
+  have firstCreated := objectMemory_formObject memory marker 0
   have secondCreated :=
-    objectMemory_formObject (objectMemory memory ⟨markerType⟩ 0) ⟨markerType⟩ 0
+    objectMemory_formObject (objectMemory memory marker 0) marker 0
   -- The second construction leaves the first instance live.
-  have firstKept : formObject (objectMemory (objectMemory memory ⟨markerType⟩ 0) ⟨markerType⟩ 0)
-      (.address ⟨memory.nextIdentity, 0⟩) = .ok (.object (.address ⟨memory.nextIdentity, 0⟩)) := by
+  have firstKept : formObject (objectMemory (objectMemory memory marker 0) marker 0)
+      (.address ⟨memory.nextIdentity, 0⟩) =
+        .ok (.object (.address ⟨memory.nextIdentity, 0⟩)) := by
     simp [formObject, liveAllocation, objectMemory, checkedAt, Except.mapError, Bind.bind,
       Except.bind, Pure.pure, Except.pure]
   -- The second instance is a later allocation than the first.
-  have distinct : memory.nextIdentity ≠ (objectMemory memory ⟨markerType⟩ 0).nextIdentity := by
+  have distinct : memory.nextIdentity ≠ (objectMemory memory marker 0).nextIdentity := by
     simp [objectMemory]
-  simp only [markerType] at first second firstCreated secondCreated firstKept distinct
+  simp only [marker, markerType] at first second firstCreated secondCreated firstKept distinct
   refine ⟨CIL.executionBound Extracted.program twoMarkers,
-    objectMemory (objectMemory memory ⟨markerType⟩ 0) ⟨markerType⟩ 0, ?_⟩
-  simp only [markerType]
+    objectMemory (objectMemory memory marker 0) marker 0, ?_⟩
+  simp only [marker, markerType]
   cil_checked_steps [first, second, firstCreated, secondCreated, firstKept, distinct]
 
 #print axioms correctness
@@ -55,7 +59,7 @@ theorem correctness (memory : Memory) (formed : memory.WellFormed) :
     on it. -/
 theorem no_field_bytes (memory : Memory) (offset width alignment : Nat) (nonempty : 0 < width)
     (writing : Bool) :
-    access (objectMemory memory ⟨markerType⟩ 0) ⟨memory.nextIdentity, offset⟩ width alignment
+    access (objectMemory memory marker 0) ⟨memory.nextIdentity, offset⟩ width alignment
       writing ≠ .ok () := by
   intro granted
   obtain ⟨allocation, found, -, fits⟩ :=

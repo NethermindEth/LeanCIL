@@ -104,25 +104,31 @@ theorem argument_count_rejected :
   decide +kernel
 #print axioms argument_count_rejected
 
-/-- A class whose instances have two fields, and its one-argument constructor. -/
+/-- A class deriving from `Test.Counter` whose instances have two fields, its base's included,
+    and its one-argument constructor. -/
 def tally : TypeExpr := .object "Test" "Tally"
+def counter : TypeExpr := .object "Test" "Counter"
 def tallyConstructor : RawMethod := { closed with
-  hasThis := true, objectReceiver := true, objectFieldCount := 2 }
+  hasThis := true, objectReceiver := true, objectFieldCount := 2, objectBases := [counter] }
 def construction : CallSite := {
   declaringType := tally, name := ".ctor", target := .managed 0,
   typeArguments := [], parameterCount := 1, hasThis := true, returnsValue := false }
 
--- A construction allocates the call site's class at one slot per field of its constructor's class.
+-- A construction allocates the call site's class, with its constructor's class's bases, at one
+-- slot per field of that class.
 theorem construction_owner_and_size :
-    constructedOwnerMatches construction tallyConstructor (.newObject 0 1 tally 16) ∧
-    ¬ constructedOwnerMatches construction tallyConstructor (.newObject 0 1 tally 8) ∧
-    ¬ constructedOwnerMatches construction tallyConstructor (.newObject 0 1 tally 24) ∧
+    constructedOwnerMatches construction tallyConstructor (.newObject 0 1 tally [counter] 16) ∧
+    ¬ constructedOwnerMatches construction tallyConstructor (.newObject 0 1 tally [counter] 8) ∧
+    ¬ constructedOwnerMatches construction tallyConstructor (.newObject 0 1 tally [counter] 24) ∧
+    ¬ constructedOwnerMatches construction tallyConstructor (.newObject 0 1 tally [] 16) ∧
     ¬ constructedOwnerMatches construction tallyConstructor
-      (.newObject 0 1 (.object "Test" "Other") 16) ∧
+      (.newObject 0 1 tally [counter, tally] 16) ∧
+    ¬ constructedOwnerMatches construction tallyConstructor
+      (.newObject 0 1 (.object "Test" "Other") [counter] 16) ∧
     ¬ constructedOwnerMatches { construction with declaringType := word }
-      { tallyConstructor with objectReceiver := false } (.newObject 0 1 word 16) ∧
+      { tallyConstructor with objectReceiver := false } (.newObject 0 1 word [counter] 16) ∧
     ¬ constructedOwnerMatches construction { tallyConstructor with objectReceiver := false }
-      (.newObject 0 1 tally 16) := by decide +kernel
+      (.newObject 0 1 tally [counter] 16) := by decide +kernel
 #print axioms construction_owner_and_size
 
 /-- A non-virtual instance method of `Tally` taking one word, and a call site of it. -/

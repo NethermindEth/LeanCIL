@@ -296,9 +296,12 @@ A method that constructs an instance steps its `newobj` with `allocateObject_ok`
 well-formed memory and a `Memory.heapBudget` covering the instance, or `allocateObject_insufficient`
 for the `allocationFailure` fault when it does not. `objectMemory_formObject`, `objectMemory_field`
 and `objectMemory_access` give the fresh instance's formation, field addresses and access, and
-`allocateObject_effect` its `MemoryBelow` frame for the caller.
+`allocateObject_effect` its `MemoryBelow` frame for the caller; `objectMemory_field` takes the
+field's declaring class as a member of the instance's `RuntimeType.lineage`, so it covers fields
+of a base class too.
 [FreshObject](../Examples/Proofs/FreshObject.lean) proves both outcomes, stepping the
-constructor's call in place.
+constructor's call in place, and [DerivedObject](../Examples/Proofs/DerivedObject.lean) steps a
+derived class's constructor through its base's.
 
 ## Construct structs through contracts
 

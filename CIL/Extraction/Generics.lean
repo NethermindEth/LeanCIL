@@ -267,8 +267,11 @@ structure RawMethod where
   ownerArgumentCount : Nat := 0
   /-- The declaring type is a class, so `this` is an object reference rather than a byref. -/
   objectReceiver : Bool := false
-  /-- The instance field count of a class declaring type; each field takes one model slot. -/
+  /-- The instance field count of a class declaring type, its bases' fields included; each field
+      takes one model slot. -/
   objectFieldCount : Nat := 0
+  /-- The admitted base classes of a class declaring type, nearest first. -/
+  objectBases : List TypeExpr := []
   deriving DecidableEq, Repr
 
 /-- Close metadata storage after substitution without changing callable owner expressions. -/
@@ -519,11 +522,12 @@ private def managedCallTarget (opcode : Nat) : Op → Option (Nat × Nat)
     if opcode = 115 then some (target, count) else none
   | _ => none
 
-/-- A class construction allocates an instance of the call site's declaring class, one slot per
-    instance field, whose constructor takes that instance as its object receiver. -/
+/-- A class construction allocates an instance of the call site's declaring class, with that
+    class's bases and one slot per instance field, whose constructor takes that instance as its
+    object receiver. -/
 def constructedOwnerMatches (site : CallSite) (callee : RawMethod) : Op → Bool
-  | .newObject _ _ owner size => owner == site.declaringType && callee.objectReceiver &&
-    size == objectFieldOffset callee.objectFieldCount &&
+  | .newObject _ _ owner bases size => owner == site.declaringType && callee.objectReceiver &&
+    bases == callee.objectBases && size == objectFieldOffset callee.objectFieldCount &&
     match owner with | .object .. => true | _ => false
   | _ => true
 

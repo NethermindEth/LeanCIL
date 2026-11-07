@@ -7,8 +7,8 @@ using Mono.Cecil;
 using Mono.Cecil.Cil;
 
 // Class instances on the checked heap: proofs about identity, presence, scalar and class-typed fields,
-// instance receivers, calls framed across objects and construction against the heap budget, and the named
-// rejection of every class shape or access the model does not represent.
+// instance receivers, calls framed across objects, construction against the heap budget and fields of base
+// classes, and the named rejection of every class shape or access the model does not represent.
 using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Objects");
@@ -29,7 +29,9 @@ foreach (var (proof, entry) in new[]
     ("DepositBoth", "Objects::DepositBoth(Examples.Account,Examples.Account,System.UInt64)"),
     ("DepositTimes", "Objects::DepositTimes(Examples.Account,System.UInt64,System.UInt32)"),
     ("TwoMarkers", "Objects::TwoMarkers()"),
-    ("LinkedNodes", "Objects::LinkedValue(Examples.Node,Examples.Node)")
+    ("LinkedNodes", "Objects::LinkedValue(Examples.Node,Examples.Node)"),
+    ("BaseField", "Objects::IdOf(Examples.Shape)"),
+    ("DerivedObject", "Objects::Describe(System.UInt64,System.UInt64)")
 })
 {
     verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));
@@ -50,8 +52,8 @@ Console.WriteLine("PASS construction call proof names the constructor");
 
 foreach (var mutation in new[]
 {
-    "abstract", "base", "explicit", "finalizer", "interface", "byref", "address", "reference", "fieldType",
-    "virtual", "virtualCall", "receiverAddress"
+    "abstract", "base", "baseRejected", "explicit", "finalizer", "interface", "byref", "address", "reference",
+    "fieldType", "virtual", "virtualCall", "receiverAddress"
 })
 {
     var output = Path.Combine(root, "Reject-" + mutation);
@@ -66,8 +68,14 @@ foreach (var mutation in new[]
         var runtime = module.TypeSystem.Object.Scope;
         switch (mutation)
         {
-            case "abstract": account.IsAbstract = true; break;
+            case "abstract": module.GetType("Examples.Tally").IsAbstract = true; break;
             case "base": account.BaseType = new TypeReference("System", "Exception", module, runtime); break;
+            case "baseRejected":
+                var shape = module.GetType("Examples.Shape");
+                shape.IsAutoLayout = false;
+                shape.IsExplicitLayout = true;
+                account.BaseType = shape;
+                break;
             case "explicit":
                 account.IsAutoLayout = false;
                 account.IsExplicitLayout = true;
@@ -130,8 +138,12 @@ foreach (var mutation in new[]
         }
         expected = mutation switch
         {
-            "abstract" => "Unsupported class instance type: Examples.Account\n  An abstract class",
-            "base" => "Unsupported class instance type: Examples.Account\n  Only classes deriving directly",
+            "abstract" => "Unsupported construction of an abstract class: Examples.Tally\n" +
+                "  newobj of an abstract class fails at run time",
+            "base" => "Unsupported class instance type: Examples.Account\n  Only classes deriving from System.Object " +
+                "through admitted classes are modelled; System.Exception is not one.",
+            "baseRejected" => "Unsupported class instance type: Examples.Account\n  Its base class is not admitted: " +
+                "Unsupported class instance type: Examples.Shape\n    Explicit class layout",
             "explicit" => "Unsupported class instance type: Examples.Account\n  Explicit class layout",
             "finalizer" => "Unsupported class instance type: Examples.Account\n  A finalizer",
             "interface" => "Unsupported class instance type: Examples.ICounterValue\n  Interface-typed values",
@@ -150,6 +162,7 @@ foreach (var mutation in new[]
     }
     var selector = mutation switch
     {
+        "abstract" => "Objects::Fresh(System.UInt32)",
         "interface" => "Objects::IsNull(Examples.ICounterValue)",
         "byref" => "Objects::IsNull(Examples.Account&)",
         "virtual" or "receiverAddress" => "Account::get_Headroom()",
@@ -162,5 +175,5 @@ foreach (var mutation in new[]
     Console.WriteLine($"PASS class rejection: {mutation}");
 }
 Console.WriteLine("PASS objects: identity, presence, scalar and reference field, receiver, framed call " +
-    "and construction proofs, " +
+    "construction and base class field proofs, " +
     "and named rejection of unmodelled class shapes, field accesses and calls");

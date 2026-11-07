@@ -170,6 +170,9 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                     var resolved = field.Resolve();
                     index = layouts.Metadata.FieldIndex(field.DeclaringType, resolved, isStatic);
                     if (!isStatic) fieldType = layouts.Metadata.Fields(field.DeclaringType)[index].Type;
+                    // A class field's index counts its bases' fields first, as its model slot does.
+                    if (!isStatic && ObjectTypes.Is(field.DeclaringType))
+                        index = ObjectTypes.FieldIndex(field.DeclaringType, resolved);
                 }
                 else if (!isStatic && ValueTuples.Is(field.DeclaringType))
                 {
@@ -237,7 +240,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var owner = Quote(LayoutEvidence.Identity(method.DeclaringType));
         var classOwner = method.HasThis && ObjectTypes.Is(method.DeclaringType);
         var objectReceiver = Bool(classOwner);
-        var objectFields = classOwner ? MetadataValidation.Fields(method.DeclaringType).Length : 0;
+        var objectFields = classOwner ? ObjectTypes.Fields(method.DeclaringType).Length : 0;
+        var objectBases = classOwner ? ObjectTypes.BaseList(method.DeclaringType) : "[]";
         var parameters = List(method.Parameters.Select(parameter => Parameter(parameter.ParameterType)));
         var locals = List(method.Body.Variables.Select(local => LocalType(local.VariableType)));
         // Lines break only after a comma, so the emitted definition stays on one line.
@@ -246,6 +250,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             ownerParameters := {{List(ownerConstraints)}},
             ownerArgumentCount := {{MethodSpecialization.OwnerArguments(method).Count}},
             objectReceiver := {{objectReceiver}}, objectFieldCount := {{objectFields}},
+            objectBases := {{objectBases}},
             hasThis := {{Bool(method.HasThis)}},
             explicitThis := {{Bool(method.ExplicitThis)}}, callingConvention := {{(byte)method.CallingConvention}},
             attributes := {{(uint)method.Attributes}}, implementation := {{(uint)method.ImplAttributes}},
