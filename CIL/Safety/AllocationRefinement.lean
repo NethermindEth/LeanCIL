@@ -70,6 +70,7 @@ theorem MethodContract.Holds.of_allocationRenaming {Input Output : Type}
     (stablePost : ∀ input initial sourceFinal targetFinal output,
       contract.pre input initial → BytesBelow initial.nextIdentity sourceFinal targetFinal →
       SlotsAgreeBelow initial.nextIdentity sourceFinal targetFinal →
+      initial.nextIdentity ≤ targetFinal.nextIdentity →
       contract.post input initial sourceFinal output →
       contract.post input initial targetFinal output) :
     contract.Holds targetProgram method := by
@@ -84,7 +85,7 @@ theorem MethodContract.Holds.of_allocationRenaming {Input Output : Type}
   have targetGrowth :=
     (invoke_preserves_caller_allocations _ _ _ _ _ _ _ targetSuccess).next
   refine ⟨fuel, targetFinal, scalars.map Value.scalar, targetSuccess, ?_,
-    output, scalarEncoding.symm, stablePost _ _ _ _ _ permitted related agree post⟩
+    output, scalarEncoding.symm, stablePost _ _ _ _ _ permitted related agree targetGrowth post⟩
   exact ⟨targetGrowth,
     fun identity bound => (related.allocations identity bound).trans
       (confined.allocations identity bound),

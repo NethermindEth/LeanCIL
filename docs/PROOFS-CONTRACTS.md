@@ -253,10 +253,54 @@ identity bound those relations take.
 
 ## Frame class instances
 
-A contract for a method taking [class instances](SOUNDNESS-RUNTIME.md#class-instances) names a
-field by the reference `objectFieldAddress` locates; the first field of an object is the object's
-own reference. `CIL.Safety.ObjectFraming` carries object facts across a call confined to a
-footprint: `formObject_of_confined` and `objectFieldAddress_of_confined` keep a formed reference
+A contract for a method taking [class instances](SOUNDNESS-RUNTIME.md#class-instances) names
+fields, not offsets. For every field of an admitted class that its methods load or store, an
+extraction emits a descriptor under `Extracted.Classes`, such as `Account.Balance :
+WordField 8` or `Node.Next : ReferenceField`, carrying the class and the model offset the
+extractor validated. Each comes with a theorem, checked by `decide`, that the descriptor matches
+the operands of an instruction it names (`Account.Balance_accessed`); a field name is a label,
+and only the class, offset and width are relied on.
+
+`CIL.Safety.ObjectFields` gives each descriptor its predicates and lemmas:
+
+| Name | Meaning |
+| --- | --- |
+| `field.of memory object` | The value or reference the field holds, decoded from memory |
+| `field.Readable memory object` | `object` is a live instance whose field loads |
+| `field.Owned memory object` | `Readable` and writable, so the field also stores |
+| `field.Holds memory object value` | `Owned` and holding `value` |
+| `LiveObject memory object` | `object` forms as an object reference older than later allocations |
+| `field.entry object` | The footprint entry of a call that may change the field |
+
+`readable.facts` is the one fact `cil_checked_steps` needs to step a load (for a reference field,
+`readable.facts held targetLive`), and `owned.store value` gives the write, its `Confined`
+footprint and the `Holds` after it. `frame` keeps a field and its value across a call confined
+to a footprint apart from it, `after_confined` and `after_below` keep each predicate across a
+confined call and across memory that keeps old allocations, and `Owned.across` decides aliasing:
+after a call confined to the field of `written`, the same field of `object` holds the written
+value when they are the same object and its old value otherwise. `apart_of_offsets` and
+`apart_of_objects` give `Apart` for two fields of one object and for fields of two different
+objects. `ReferenceField.Holds.of_agree` keeps a held caller reference under `BytesBelow` and
+`SlotsAgreeBelow`, the premise `MethodContract.Holds.of_allocationRenaming` needs. The loop tactics
+carry `LiveObject` and every field predicate across the frame's stores and across a confined call
+whose footprint is apart from the field, as they carry caller buffers.
+
+[DepositBoth](../Examples/Proofs/DepositBoth.lean) composes two `callvirt` calls of
+`Account.Deposit` through `depositContract`, whose precondition is `Account.Balance.Owned` and
+whose postcondition is `Account.Balance.Holds final account (Account.Balance.of initial account +
+amount)`, and proves the null receiver's fault at the caller's pc.
+[BumpBoth](../Examples/Proofs/BumpBoth.lean) proves the static analogue, the distinct and the
+aliased case, and states the null receiver's `NullReferenceException` as an `OutcomeContract`.
+[DepositTimes](../Examples/Proofs/DepositTimes.lean) crosses the same call inside a loop with
+`cil_loop_call`, its invariant an `Account.Balance.Holds` fact the loop tactics carry across the
+counter's store. [LinkedNodes](../Examples/Proofs/LinkedNodes.lean) composes `Link` and
+`SecondValue` through `Node.Next` and `Node.Value`, keeps the linked node's `Value` across the one
+slot `Link` writes, proves both null faults of `SecondValue` at their pcs, and shows `Link`'s
+postcondition stable under a renaming of fresh allocations.
+
+The predicates are built on `CIL.Safety.ObjectFraming`, which states the same facts about the
+references `objectFieldAddress` locates and which a proof about a field no extraction names can
+use directly. It carries object facts across a call confined to a footprint: `formObject_of_confined` and `objectFieldAddress_of_confined` keep a formed reference
 and a located field, given well-formed memory before the call. `objectField_apart_of_ne` makes
 fields of two different objects `Apart`, so `Confined.objectField_read_of_ne` keeps a field of
 one object across a call confined to a field of another, given that the read field's allocation
@@ -272,25 +316,14 @@ store to it, so a contract's footprint names the fields whose bytes or reference
 `loadSlot_of_access` and `storeSlot_of_access` reduce them, given the slot's access check, to
 the held reference and to `setSlot`, which `setSlot_slots_same` and `setSlot_slots_of_ne` read
 back and which leaves bytes, authority and field locations unchanged (`read_setSlot`,
-`access_setSlot`, `objectFieldAddress_setSlot`). [LinkedNodes](../Examples/Proofs/LinkedNodes.lean)
-composes `Link` and `SecondValue` through their contracts, keeps the linked node's `Value` across
-the one slot `Link` writes, proves both null faults of `SecondValue` at their pcs, and shows
-`Link`'s postcondition is stable under `BytesBelow` and `SlotsAgreeBelow`, the premise
-`MethodContract.Holds.of_allocationRenaming` needs: it names only caller references, which
-`SlotsAgreeBelow.held` keeps.
-[BumpBoth](../Examples/Proofs/BumpBoth.lean) composes two calls of `Bump` through one
-`MethodContract`, proves the distinct and the aliased case, and states the null receiver's
-`NullReferenceException` as an `OutcomeContract`.
+`access_setSlot`, `objectFieldAddress_setSlot`).
 
 An instance call compiled as `callvirt` steps like a call once its receiver forms as a live
 object (`step_callInstance_eq`, `receiverCall_address`), so `cil_contract_steps` composes it
 through the callee's contract; a null receiver steps to `NullReferenceException` at the
-`callvirt` itself (`receiverCall_null`). [DepositBoth](../Examples/Proofs/DepositBoth.lean)
-composes two `callvirt` calls of `Account.Deposit` and proves the null receiver's fault at the
-caller's pc. [DepositTimes](../Examples/Proofs/DepositTimes.lean) crosses the same call inside a
-loop with `cil_loop_call`, holding the balance as `Contents` and `Writable` facts; the loop
-tactics carry a `Contents` fact across a call only when it is apart from the callee's footprint,
-so a fact the call may change is restated from the contract's postcondition.
+`callvirt` itself (`receiverCall_null`). The loop tactics carry a fact across a call only when it
+is apart from the callee's footprint, so a fact the call may change is restated from the
+contract's postcondition.
 
 A method that constructs an instance steps its `newobj` with `allocateObject_ok`, given
 well-formed memory and a `Memory.heapBudget` covering the instance, or `allocateObject_insufficient`

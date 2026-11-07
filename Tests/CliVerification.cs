@@ -197,7 +197,7 @@ Run([.. cli, "extract", demoAssembly, "Examples.Objects::DepositBoth(Examples.Ac
 var depositBothProof = At("Examples/Proofs/DepositBoth.lean");
 var unformed = Path.Combine(objectOutput, "UnformedAccount.lean");
 File.WriteAllText(unformed, Edited(File.ReadAllText(depositBothProof).ReplaceLineEndings("\n"),
-    "  cil_checked_steps [secondFormed]\n", "  cil_checked_steps []\n"));
+    "  cil_checked_steps [secondLive.formed]\n", "  cil_checked_steps []\n"));
 RequireReport(Execute([.. cli, "verify", objectOutput, "--proof", unformed, "--theorem",
     "ExampleProof.first_null_throws", "--format", "json"]), 1, "UnformedAccount.json", (objectOutput, "<output>"),
     (unformed, "<proof>"));

@@ -95,6 +95,7 @@ import CIL.Safety.InstructionMemory
 import CIL.Safety.HeapObjects
 import CIL.Safety.HeapObjectFacts
 import CIL.Safety.ObjectFraming
+import CIL.Safety.ObjectFields
 import CIL.Safety.InstructionMemoryLemmas
 import CIL.Safety.InstructionReferences
 import CIL.Safety.LiveState
