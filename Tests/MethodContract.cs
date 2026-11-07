@@ -113,14 +113,12 @@ foreach (var (name, assembly, body) in new[] { ("Original", original, helpers), 
 
 // Each bug fails the original helper proofs, and a concrete run refutes the contract itself.
 const string RefuteArithmetic = """
-def empty : Memory := { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩, views := [], nextIdentity := 0 }
-
 /-- This build returns `Mix(0, 0) = 1`; the contract requires `0 * 3 + 0`. -/
 theorem correctness : ¬ mixContract.Holds Extracted.program mix := by
   intro holds
-  obtain ⟨_, final, values, ran, -, out, encoded, wrong⟩ := holds (0, 0) empty ⟨fun _ _ h => (nomatch h), fun _ h => (nomatch h)⟩
+  obtain ⟨_, final, values, ran, -, out, encoded, wrong⟩ := holds (0, 0) Memory.empty Memory.empty_wellFormed
   obtain ⟨rfl, rfl⟩ := Prod.mk.inj (invoke_ok_unique ran (rfl : invoke Extracted.program 16 mix
-    (mixContract.args (0, 0)) empty = .ok _))
+    (mixContract.args (0, 0)) Memory.empty = .ok _))
   simp only [mixContract] at encoded wrong
   subst wrong
   simp at encoded
