@@ -120,6 +120,11 @@ theorem Extends.private {earlier later : AllocationRenaming} (extension : earlie
 def reference (mapping : AllocationRenaming) (reference : Reference) : Reference :=
   { reference with allocation := mapping.image reference.allocation }
 
+/-- Rename a managed reference, preserving null exactly. -/
+def managedReference (mapping : AllocationRenaming) : ManagedReference → ManagedReference
+  | .null => .null
+  | .address reference => .address (mapping.reference reference)
+
 /-- Later allocations cannot change a reference to already allocated storage. -/
 theorem Extends.reference {earlier later : AllocationRenaming} (extension : earlier.Extends later)
     (reference : Reference) (bound : reference.allocation < earlier.sourceLimit) :

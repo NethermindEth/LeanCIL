@@ -329,6 +329,7 @@ structure ForwardsOut (body calleeBody : CIL.Method) (loads : List (Nat × Optio
   notArray : ∀ element, kind ≠ .array element
   notPointer : ∀ signature, kind ≠ .methodPointer signature
   notTable : ∀ signature, kind ≠ .methodTable signature
+  notObject : kind ≠ .object
   fits : InitializerFits kind initial
   opaqueVectorLocals : body.opaqueVectorLocals = []
   vectorArgs : body.vectorArgs = []
@@ -349,7 +350,7 @@ theorem make_fitting_local (memory : Memory) (activation : Nat) (kind : CIL.Loca
     (notSpan : ∀ width writable, kind ≠ .span width writable)
     (notArray : ∀ element, kind ≠ .array element)
     (notPointer : ∀ signature, kind ≠ .methodPointer signature)
-    (notTable : ∀ signature, kind ≠ .methodTable signature)
+    (notTable : ∀ signature, kind ≠ .methodTable signature) (notObject : kind ≠ .object)
     (fits : InitializerFits kind initial) :
     ∃ reference result,
       makeLocal activation kind initial memory =
@@ -360,10 +361,11 @@ theorem make_fitting_local (memory : Memory) (activation : Nat) (kind : CIL.Loca
   · subst unknown
     obtain ⟨reference, result, made, writable⟩ :=
       make_unknown_local memory activation kind wellFormed numeric notSpan notArray
-        notPointer notTable
+        notPointer notTable notObject
     exact ⟨reference, result, made, writable, Or.inl rfl⟩
   · obtain ⟨number, encoded⟩ :=
-      initializer_numeric_number fits numeric notSpan notArray notPointer notTable unknown
+      initializer_numeric_number fits numeric notSpan notArray notPointer notTable notObject
+        unknown
     obtain ⟨reference, result, made, readback, writable, -⟩ :=
       make_numeric_local memory activation kind initial number wellFormed encoded
     exact ⟨reference, result, made, writable, Or.inr ⟨number, encoded, readback⟩⟩
@@ -386,7 +388,8 @@ theorem ForwardsOut.enterFrame {body calleeBody : CIL.Method}
       MemoryBelow memory.nextIdentity memory result ∧ result.WellFormed := by
   obtain ⟨home, result, made, writable, holds⟩ :=
     make_fitting_local memory memory.nextIdentity kind initial wellFormed forwards.numeric
-      forwards.notSpan forwards.notArray forwards.notPointer forwards.notTable forwards.fits
+      forwards.notSpan forwards.notArray forwards.notPointer forwards.notTable forwards.notObject
+      forwards.fits
   have fresh := (makeLocal_fresh _ _ _ _ _ _ _ made).2 home.allocation (by simp)
   refine ⟨home, result, ?_, fresh.1, writable, holds,
     makeLocal_preserves_caller_memory _ _ _ _ _ _ _ made,

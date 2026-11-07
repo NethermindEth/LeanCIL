@@ -3,6 +3,7 @@ import CIL.Safety.StackAllocation
 import CIL.Safety.ArrayAllocation
 import CIL.Safety.StaticMemory
 import CIL.Safety.ReferenceObservations
+import CIL.Safety.HeapObjects
 import CIL.Safety.NativeMethodTables
 import CIL.NativeEvaluation
 
@@ -66,6 +67,7 @@ theorem bitcastValue_numeric {source target : CIL.SnapshotShape} {input value : 
 def checkedValue (m : Memory) : Value → ExecutionResult Value
   | .methodPointer pointer => .ok (.methodPointer pointer)
   | .methodTable table => .ok (.methodTable table)
+  | .object r => formObject m r
   | .reference r => formValue m r
   | .readOnlyReference r => do
     let _ ← formValue m r
@@ -119,8 +121,8 @@ inductive FrameAction where
 def managedStep (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
     (stack : List Value) (memory : Memory) : ExecutionResult FrameAction := do
   match operation, stack with
-  | .tableLength, .reference .null :: _
-  | .tableElement _, .scalar _ :: .reference .null :: _ =>
+  | .tableLength, .object .null :: _
+  | .tableElement _, .scalar _ :: .object .null :: _ =>
     .error (.thrown "System.NullReferenceException")
   | .address target signature, _ =>
     return .next (pc + 1) (.methodPointer ⟨signature, some target.identity⟩ :: stack) frame memory
@@ -277,6 +279,25 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
   | .bne target, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let equal ← referenceEqual m left right
     return .next (if equal then pc + 1 else target) rest frame m
+  -- Object identity and null tests; `x != null` compiles to `cgt.un` against null.
+  | .eq, .object right :: .object left :: rest =>
+    let equal ← objectEqual m left right
+    return .next (pc + 1) (.scalar (.i32 (if equal then 1 else 0)) :: rest) frame m
+  | .beq target, .object right :: .object left :: rest =>
+    let equal ← objectEqual m left right
+    return .next (if equal then target else pc + 1) rest frame m
+  | .bne target, .object right :: .object left :: rest =>
+    let equal ← objectEqual m left right
+    return .next (if equal then pc + 1 else target) rest frame m
+  | .gtu, .object right :: .object left :: rest =>
+    let present ← objectAboveNull m left right
+    return .next (pc + 1) (.scalar (.i32 (if present then 1 else 0)) :: rest) frame m
+  | .brzero target, .object value :: rest =>
+    let present ← objectNonNull m value
+    return .next (if present then pc + 1 else target) rest frame m
+  | .brnonzero target, .object value :: rest =>
+    let present ← objectNonNull m value
+    return .next (if present then target else pc + 1) rest frame m
   | .stackAlloc initLocals, [.scalar size] =>
     let bytes ← match size with
       | .i32 bits => pure bits.toNat
@@ -338,6 +359,14 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
     if stack.length < argc then .error .invalidState else
       let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
       return .call callee arguments (stack.drop argc) m
+  | .callInstance callee argc, _ =>
+    if stack.length < argc then .error .invalidState else
+      let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
+      -- The receiver is the deepest argument; anything but an object reference is ill-typed.
+      match arguments with
+      | .object (.address _) :: _ => return .call callee arguments (stack.drop argc) m
+      | .object .null :: _ => .error (.thrown "System.NullReferenceException")
+      | _ => .error .invalidState
   | .newVector256 callee argc, _ =>
     if stack.length < argc then .error .invalidState else
       let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
@@ -355,6 +384,12 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
       let frame := { frame with owned := temporary.allocation :: frame.owned }
       return .construct callee (.reference (.address temporary) :: arguments)
         (stack.drop argc) frame temporary (.aggregate size) memory
+  | .newObject constructor argc owner bases size, _ =>
+    if stack.length < argc then .error .invalidState else
+      let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
+      let (object, memory) ← allocateObject m ⟨owner, bases⟩ size
+      let created := Value.object (.address object)
+      return .call constructor (created :: arguments) (created :: stack.drop argc) memory
   | .memory operation, _ =>
     let (memory, values) ← staticInstruction body pc operation stack m
     return .next (pc + 1) values frame memory

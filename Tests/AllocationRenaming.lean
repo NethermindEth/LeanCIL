@@ -30,7 +30,8 @@ def caller : Memory := {
 /-- The test starts from allocated, well-formed caller storage. -/
 theorem caller_formed : caller.WellFormed := by
   constructor
-  · intro identity allocation found
+  case allocations =>
+    intro identity allocation found
     simp only [caller] at found
     split at found
     · rename_i same
@@ -38,10 +39,12 @@ theorem caller_formed : caller.WellFormed := by
       cases found
       exact ⟨by decide, by simp [Allocation.WellFormed, nativeLimit]⟩
     · cases found
-  · intro view member
+  case views =>
+    intro view member
     simp only [caller, List.mem_cons, List.not_mem_nil, or_false] at member
     subst view
     exact ⟨_, rfl, by decide⟩
+  case slots => exact fun _ _ _ held => nomatch held
 #print axioms caller_formed
 
 /-- A one-byte local home carrying its frame's activation label. -/
@@ -71,7 +74,8 @@ theorem private_then_paired : ∃ privateMemory sourceAfter targetAfter,
   refine ⟨privateMemory, sourceAfter, targetAfter, privateAllocated, sourceAllocated, ?_, ?_,
     related.sourceLimit.symm, related.targetLimit.symm⟩
   · simpa only [next] using targetAllocated
-  · exact related.confined (allocate_preserves_memory_below _ _ _ _ sourceAllocated)
+  · exact related.confined caller_formed (by simp [caller])
+      (allocate_preserves_memory_below _ _ _ _ sourceAllocated)
 #print axioms private_then_paired
 
 /-- The later source home maps around the target-only dead home. -/

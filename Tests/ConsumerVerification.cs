@@ -504,7 +504,7 @@ Console.WriteLine("PASS tampered consumer support and proof receipts fall back t
 
 // A changed imported proof must fail, regardless of any existing consumer caches.
 File.WriteAllText(sharedPath, shared.Replace("x + y", "x - y"));
-var importedFailure = Reject("error:");
+var importedFailure = Reject("Lean errors (");
 CheckConsumerLeanSummary(importedFailure, "Client/Shared.lean:", "(building Client.Shared)", "x - y");
 Console.WriteLine("PASS proof-checking failure leads with the located Lean errors of the failing module");
 File.WriteAllText(sharedPath, shared + "\n-- Imported-source identity changed.\n");

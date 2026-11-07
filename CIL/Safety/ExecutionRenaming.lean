@@ -912,13 +912,14 @@ theorem invoke_rename_scalars (transport : StepTransport)
       .ok (final, values.map Value.scalar)) :
     ∃ targetFinal, invoke targetProgram fuel method arguments initial =
       .ok (targetFinal, values.map Value.scalar) ∧
-      MemoryBelow initial.nextIdentity final targetFinal := by
+      BytesBelow initial.nextIdentity final targetFinal ∧
+      SlotsAgreeBelow initial.nextIdentity final targetFinal := by
   obtain ⟨later, after, targetFinal, _, _, memory, targetSuccess⟩ :=
     invoke_rename_below transport programs (Memory.RenamedBelow.refl initial Eq)
       formed formed statics success
   rw [AllocationRenaming.identity_values] at targetSuccess
   simp only [List.map_map, Function.comp_def, AllocationRenaming.value] at targetSuccess
-  exact ⟨targetFinal, targetSuccess, memory.memoryBelow⟩
+  exact ⟨targetFinal, targetSuccess, memory.bytesBelow, memory.slotsAgree⟩
 #print axioms invoke_rename_scalars
 
 /-- Same-input named exception contracts survive local relocation and private frame allocations. -/

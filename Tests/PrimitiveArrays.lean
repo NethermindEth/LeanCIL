@@ -73,9 +73,14 @@ theorem null_length :
 
 /-- The raw null literal has the same runtime array-null behavior. -/
 theorem literal_null_length :
-    memoryInstruction .arrayLength [.reference .null] memory =
+    memoryInstruction .arrayLength [.object .null] memory =
       .error (.thrown "System.NullReferenceException") := rfl
 #print axioms literal_null_length
+
+/-- A null byref, as `Unsafe.NullRef` produces, is not an array and has no length. -/
+theorem byref_null_not_array :
+    memoryInstruction .arrayLength [.reference .null] memory = .error .invalidState := rfl
+#print axioms byref_null_not_array
 
 /-- Narrow signed loads extend the stored byte. -/
 theorem signed_byte_read :
@@ -178,7 +183,7 @@ theorem array_local_round_trip :
 /-- A null literal stored in a typed array home becomes that array type's null value. -/
 theorem null_local_round_trip :
     (do
-      let (slot, updated) ← storeLocal memory (.array .signed32 none) (.reference .null)
+      let (slot, updated) ← storeLocal memory (.array .signed32 none) (.object .null)
       loadLocal updated slot) = .ok (.array ⟨.null, 0, .signed32⟩) := rfl
 #print axioms null_local_round_trip
 

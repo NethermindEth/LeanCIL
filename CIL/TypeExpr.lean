@@ -47,6 +47,8 @@ inductive TypeExpr where
   | signatureParameter (head tail : TypeExpr)
   | constructor (scope name : String)
   | apply (constructor argument : TypeExpr)
+  /-- A class admitted on the checked heap, by its exact scope and name. -/
+  | object (scope name : String)
   deriving DecidableEq, Repr
 
 /-- Structural substitution includes nested type constructors, not just signature strings. -/

@@ -1,5 +1,6 @@
 import CIL.ArrayTypes
 import CIL.Memory
+import CIL.TypeExpr
 import CIL.WideMultiply
 
 /-!
@@ -195,7 +196,25 @@ inductive MemoryOp where
   | arrayTransfer (element : ArrayElement) (store : Bool)
   /-- `Unsafe.NullRef<T>` pushes the null reference; `Unsafe.IsNullRef<T>` tests for it. -/
   | nullRef | isNullRef
+  /-- `ldnull` pushes the null object reference, distinct from a null byref. -/
+  | nullObject
+  /-- `ldfld` of a scalar field of a class instance of type `owner`, at its model offset. -/
+  | objectField (owner : CIL.Extraction.TypeExpr) (offset width : Nat) (signed : Bool)
+  /-- `stfld` of a scalar field of a class instance of type `owner`, at its model offset. -/
+  | setObjectField (owner : CIL.Extraction.TypeExpr) (offset width : Nat)
+  /-- `ldfld` of a class-typed field of a class instance of type `owner`, at its model offset:
+      the object reference the field holds, never bytes. -/
+  | objectReferenceField (owner : CIL.Extraction.TypeExpr) (offset : Nat)
+  /-- `stfld` of a class-typed field of a class instance of type `owner`, at its model offset. -/
+  | setObjectReferenceField (owner : CIL.Extraction.TypeExpr) (offset : Nat)
   deriving Repr
+
+/-- Bytes the model reserves for each class instance field, in declaration order. The layout is
+    sound only while code cannot observe field offsets, so `ldflda` on a class is rejected. -/
+def objectFieldSlot : Nat := 8
+
+/-- The model offset of the class instance field at `index` among the instance fields. -/
+def objectFieldOffset (index : Nat) : Nat := objectFieldSlot * index
 
 /-- Every popped operand; no default, so each new operation states what it reads. -/
 def MemoryOp.argumentCount : MemoryOp → Nat
@@ -218,10 +237,12 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .arrayLoad .. | .arrayAddress .. => 2
   | .arrayTransfer _ store => if store then 3 else 2
   | .arrayStore _ => 3
-  | .store128 | .store256 | .store512 | .add .. | .spanCreate | .spanItem _ => 2
-  | .staticAddress _ | .staticValue _ | .nullRef | .spanEmpty .. => 0
+  | .store128 | .store256 | .store512 | .add .. | .spanCreate | .spanItem _
+  | .setObjectField .. | .setObjectReferenceField .. => 2
+  | .staticAddress _ | .staticValue _ | .nullRef | .nullObject | .spanEmpty .. => 0
   | .load128 | .load256 | .load512 | .init256 | .asRef | .bitcast256 | .bitcastByteBool
-  | .skipInit | .bitcastValue .. | .createSpan _ | .spanReference | .spanLength | .isNullRef => 1
+  | .skipInit | .bitcastValue .. | .createSpan _ | .spanReference | .spanLength | .isNullRef
+  | .objectField .. | .objectReferenceField .. => 1
 
 /-- Signed Int32/native and unsigned native element offsets on the 64-bit target. -/
 def offsetValue (signed : Bool) (value : Value) : Option Int :=

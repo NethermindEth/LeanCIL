@@ -80,7 +80,7 @@ theorem SpanView.validate_below (view : SpanView) {before after : Memory}
         | split at valid
         | simp_all [Bind.bind, Except.bind, Pure.pure, Except.pure]
     | some allocation =>
-      have old := (wellFormed.1 _ _ present).1
+      have old := (wellFormed.allocations _ _ present).1
       simpa only [SpanView.validate, address, liveAllocation, kept.allocations _ old] using valid
 #print axioms SpanView.validate_below
 

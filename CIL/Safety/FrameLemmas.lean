@@ -41,13 +41,13 @@ theorem allocateHome_preserves_wellFormed {alignment : Nat} (m result : Memory)
       Pure.pure, Except.pure] at h
     cases h
     have hw := allocate_preserves_wellFormed _ _ _ _ hm ha
-    refine ⟨hw.1, ?_⟩
+    refine { allocations := hw.allocations, views := ?_, slots := hw.slots }
     intro view hv
     simp only [List.mem_cons] at hv
     rcases hv with rfl | hv
     · have lookup := allocation_lookup m _ id memory ha
       exact ⟨_, lookup, by simp⟩
-    · exact hw.2 view hv
+    · exact hw.views view hv
 
 theorem leaveFrame_preserves_wellFormed (frame : Frame) (m : Memory)
     (hm : m.WellFormed) : (leaveFrame frame m).WellFormed := by

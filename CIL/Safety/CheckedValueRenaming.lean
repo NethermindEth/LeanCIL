@@ -71,6 +71,7 @@ theorem Memory.Renamed.checkedValue {mapping : AllocationRenaming}
     dsimp only [AllocationRenaming.value, CIL.Safety.checkedValue]
     split <;> first | exact .ok rfl | exact .error .invalidState
   | reference reference => exact related.formValue reference bound
+  | object reference => exact related.formObject reference bound
   | readOnlyReference reference =>
     dsimp only [CIL.Safety.checkedValue, AllocationRenaming.value]
     apply (related.formValue reference bound).bind

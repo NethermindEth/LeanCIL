@@ -45,8 +45,18 @@ theorem NarrowKind.extend_ite_ofNat_one_zero (kind : NarrowKind) (p : Prop) [Dec
     kind.extend (if p then 1#32 else 0#32) = if p then 1#32 else 0#32 := by
   cases kind <;> split <;> rfl
 
+/-- A decided comparison returns the literal `1#32`, which every narrow kind keeps. -/
+@[simp] theorem NarrowKind.extend_one (kind : NarrowKind) : kind.extend 1#32 = 1#32 := by
+  cases kind <;> rfl
+
+/-- A decided comparison returns the literal `0#32`, which every narrow kind keeps. -/
+@[simp] theorem NarrowKind.extend_zero (kind : NarrowKind) : kind.extend 0#32 = 0#32 := by
+  cases kind <;> rfl
+
 #print axioms NarrowKind.extend_ite_one_zero
 #print axioms NarrowKind.extend_ite_ofNat_one_zero
+#print axioms NarrowKind.extend_one
+#print axioms NarrowKind.extend_zero
 
 /-- Applies an optional narrowing to an `i32`; narrowing anything else is stuck. -/
 def narrowValue (kind : Option NarrowKind) (value : Value) : Option Value :=
@@ -67,6 +77,8 @@ inductive LocalKind where
   /-- Callable roots retain exact signatures and never expose a numeric byte home. -/
   | methodPointer (signature : ManagedSignature)
   | methodTable (signature : ManagedSignature)
+  /-- An object reference root holds a heap identity, never bytes. -/
+  | object
   | byte | word32 | word64 | vector128 | vector256 | vector512 | reference
   deriving DecidableEq, Repr
 
@@ -154,8 +166,15 @@ inductive Op where
   | bne (target : Nat)
   -- Calls and constructors; `argc` values are popped as arguments.
   | call (method : Nat) (argc : Nat)
+  /-- `callvirt` of a non-virtual instance method of a class: a null receiver, the first of the
+      `argc` arguments, throws `System.NullReferenceException` before the call. -/
+  | callInstance (method : Nat) (argc : Nat)
   | newVector256 (constructor : Nat) (argc : Nat)
   | newAggregate (constructor : Nat) (argc : Nat) (size : Fin (2^64))
+  /-- A fresh zeroed instance of class `owner` with `size` bytes of fields, passed to
+      `constructor` as its receiver ahead of `argc` arguments and pushed once it returns. -/
+  | newObject (constructor : Nat) (argc : Nat) (owner : Extraction.TypeExpr)
+      (bases : List Extraction.TypeExpr) (size : Nat)
   | skipInit | asRef
   /-- Pushes `1` when the method's feature profile has the feature, else `0`. -/
   | feature (id : Feature)

@@ -172,16 +172,22 @@ partial class Program
     static void CheckConsumerLeanSummary(string text, params string[] required)
     {
         var start = text.IndexOf("Lean errors (", StringComparison.Ordinal);
-        var end = text.IndexOf("Full Lean output follows under Details.", StringComparison.Ordinal);
-        var details = end < 0 ? -1 : text.IndexOf("Details:", end, StringComparison.Ordinal);
-        if (start < 0 || end < start || details < end)
+        if (start < 0)
             throw new InvalidOperationException(
                 "Proof-checking failure did not lead with a Lean error summary: " + text);
+        // The summary runs to the shortened errors under Details, the proof's messages, or the end.
+        var end = new[] { "\nDetails:", "  Lean messages (" }
+            .Select(marker => text.IndexOf(marker, start, StringComparison.Ordinal))
+            .Where(index => index >= 0).DefaultIfEmpty(text.Length).Min();
         var summary = text[start..end];
+        // Each error is printed once, in the developer's files: no raw transcript or workspace copy follows.
         if (summary.Split('\n').Length > 60 || summary.Contains("depends on axioms", StringComparison.Ordinal) ||
             summary.Contains("trace:", StringComparison.Ordinal) ||
             required.Any(item => !summary.Contains(item, StringComparison.Ordinal)) ||
-            !text[details..].Contains("Command failed", StringComparison.Ordinal))
+            text.Contains("Full Lean output follows under Details.", StringComparison.Ordinal) ||
+            text[end..].StartsWith("\nDetails:\nCommand failed", StringComparison.Ordinal) ||
+            summary.Contains("LeanCILProof", StringComparison.Ordinal) ||
+            summary.Contains("leancil-consumer-", StringComparison.Ordinal))
             throw new InvalidOperationException("Unexpected Lean error summary:\n" + summary + "\nFull text:\n" + text);
     }
 }

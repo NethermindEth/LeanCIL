@@ -156,15 +156,17 @@ def storage : Memory := {
   views := [⟨0, 0, 16, true, true⟩]
   nextIdentity := 1 }
 
-theorem storage_formed : storage.WellFormed := by
-  refine ⟨fun id allocation found => ?_, fun view member => ?_⟩
-  · by_cases zero : id = 0
+theorem storage_formed : storage.WellFormed where
+  allocations id allocation found := by
+    by_cases zero : id = 0
     · subst zero
       simp only [storage, ite_true, Option.some.injEq] at found
       subst found
       exact ⟨by decide, by decide, by simp, by simp⟩
     · simp [storage, zero] at found
-  · simp only [storage, List.mem_singleton] at member
+  slots _ _ _ held := nomatch held
+  views view member := by
+    simp only [storage, List.mem_singleton] at member
     subst member
     exact ⟨_, rfl, by decide⟩
 

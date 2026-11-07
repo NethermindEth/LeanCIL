@@ -68,7 +68,7 @@ theorem WordSnapshots.after_effect {entered before after : Memory} {boundary : N
       | error fault => simp [h, Bind.bind, Except.bind] at readable
       | ok result => cases result; rfl
     obtain ⟨allocation, requirements⟩ := access_requirements ready
-    have old := (wf.1 _ _ requirements.present).1
+    have old := (wf.allocations _ _ requirements.present).1
     have disjoint := homes.distinct other index .word64 .word64 r reference same found slot
     exact ⟨r, found,
       authority.read_eq readable old (fun offset _ => outside r.allocation old disjoint _)⟩

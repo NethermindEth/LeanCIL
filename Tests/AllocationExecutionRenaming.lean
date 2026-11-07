@@ -17,7 +17,10 @@ open CIL.Safety
 def initial : Memory := { AllocationRenaming.caller with stackLimit := 64 }
 
 /-- Granting the resource quota leaves the existing caller storage well formed. -/
-theorem initial_formed : initial.WellFormed := AllocationRenaming.caller_formed
+theorem initial_formed : initial.WellFormed where
+  allocations := AllocationRenaming.caller_formed.allocations
+  views := AllocationRenaming.caller_formed.views
+  slots := AllocationRenaming.caller_formed.slots
 #print axioms initial_formed
 
 /-- Two retained declarations are interleaved with three private numeric homes. -/
@@ -203,10 +206,10 @@ theorem transferred_contract : scalarContract.Holds (targetProgram returningCode
     exact ⟨initial_formed, by intro binding member; cases member⟩
   · intro output
     exact ⟨[.i32 output], rfl⟩
-  · intro input before sourceFinal targetFinal output permitted related post
+  · intro input before sourceFinal targetFinal output permitted related agree post
     change before = initial at permitted
     subst before
-    exact ⟨post.1, post.2.trans related⟩
+    exact ⟨post.1, agree.confined related initial_formed (Nat.le_refl _) post.2⟩
 #print axioms transferred_contract
 
 /-- The default zero resource quota still rejects the same nonzero dynamic allocation. -/

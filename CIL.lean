@@ -92,6 +92,9 @@ import CIL.Safety.FuelLemmas
 import CIL.Safety.HomeProgress
 import CIL.Safety.ImmutableMemory
 import CIL.Safety.InstructionMemory
+import CIL.Safety.HeapObjects
+import CIL.Safety.HeapObjectFacts
+import CIL.Safety.ObjectFraming
 import CIL.Safety.InstructionMemoryLemmas
 import CIL.Safety.InstructionReferences
 import CIL.Safety.LiveState
@@ -142,6 +145,7 @@ import CIL.Safety.StepAttribute
 import CIL.Safety.StepComposition
 import CIL.Safety.ValueSteps
 import CIL.Safety.MemorySteps
+import CIL.Safety.ObjectSteps
 import CIL.Safety.InstructionSteps
 import CIL.Safety.StepLiveState
 import CIL.Safety.StepLocalReferences
@@ -165,6 +169,7 @@ import CIL.Semantics
 import CIL.StepEquations
 import CIL.SymbolicExecution
 import CIL.Safety.SymbolicExecution
+import CIL.Safety.MissingFacts
 import CIL.Safety.LoopAutomation
 import CIL.Safety.LoopContract
 import CIL.Safety.LoopOutcome

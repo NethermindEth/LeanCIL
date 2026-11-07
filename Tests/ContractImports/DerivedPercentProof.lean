@@ -62,17 +62,6 @@ theorem correctness : DerivedInterface.percentBounded.Holds Extracted.program 0 
     derive is false of the actual extraction. -/
 namespace Rejected
 
-/-- A memory with nothing allocated; `Percent` reads no memory. -/
-def empty : Memory :=
-  { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩, views := [],
-    nextIdentity := 0 }
-
-/-- `empty` meets the public precondition. -/
-theorem empty_formed : empty.WellFormed := by
-  simp [Memory.WellFormed, empty]
-
-#print axioms empty_formed
-
 /-- Two outcomes of one invocation that both raise name the same exception. -/
 theorem raises_unique {method : Nat} {args : List Value} {memory : Memory}
     {one other : String} (first : Raises Extracted.program method args memory one)
@@ -98,10 +87,10 @@ theorem raises_not_returns {method fuel : Nat} {args : List Value} {memory : Mem
 
 /-- `Percent(100)` returns 100. -/
 theorem percent_hundred : ∃ fuel final,
-    invoke Extracted.program fuel 0 [.scalar (.i64 100)] empty =
+    invoke Extracted.program fuel 0 [.scalar (.i64 100)] Memory.empty =
       .ok (final, [.scalar (.i64 100)]) := by
   obtain ⟨fuel, final, values, invoked, -, output, encoded, same⟩ :=
-    percent_exact.returning (input := 100) (initial := empty) trivial (by decide)
+    percent_exact.returning (input := 100) (initial := Memory.empty) trivial (by decide)
   dsimp only [percentExact] at encoded same
   subst same encoded
   exact ⟨fuel, final, invoked⟩
@@ -109,7 +98,7 @@ theorem percent_hundred : ∃ fuel final,
 #print axioms percent_hundred
 
 /-- `Percent(101)` raises `ArgumentOutOfRangeException`. -/
-theorem percent_above : Raises Extracted.program 0 [.scalar (.i64 101)] empty
+theorem percent_above : Raises Extracted.program 0 [.scalar (.i64 101)] Memory.empty
     "System.ArgumentOutOfRangeException" :=
   percent_exact.raising (input := 101) trivial (by decide)
 
@@ -122,13 +111,14 @@ def percentTooStrong : OutcomeContract CIL.W64 CIL.W64 :=
 /-- The exact contract does not refine the stronger post. -/
 theorem stronger_post_not_refines : ¬ percentExact.Refines percentTooStrong := fun refines => by
   have bound : (100 : CIL.W64) < 100 :=
-    refines.post 100 empty empty 100 empty_formed (by decide) (Confined.refl _ _) rfl
+    refines.post 100 Memory.empty Memory.empty 100 Memory.empty_wellFormed (by decide)
+      (Confined.refl _ _) rfl
   exact absurd bound (by decide)
 
 /-- No proof of the stronger post exists for the actual extraction. -/
 theorem stronger_post_rejected : ¬ percentTooStrong.Holds Extracted.program 0 := fun holds => by
   obtain ⟨fuel, final, values, invoked, -, output, rfl, bound⟩ :=
-    holds.returning (input := 100) (initial := empty) empty_formed (by decide)
+    holds.returning (input := 100) (initial := Memory.empty) Memory.empty_wellFormed (by decide)
   obtain ⟨otherFuel, otherFinal, otherInvoked⟩ := percent_hundred
   have same := invoke_ok_unique invoked otherInvoked
   simp only [percentTooStrong, DerivedInterface.percentBounded, Prod.mk.injEq, List.cons.injEq,
@@ -165,12 +155,12 @@ def percentUnguarded : MethodContract CIL.W64 CIL.W64 :=
 
 /-- The in-range contract does not refine the unguarded one. -/
 theorem weaker_pre_not_refines : ¬ percentInRange.Refines percentUnguarded := fun refines => by
-  have bound : (101 : CIL.W64) ≤ 100 := refines.pre 101 empty trivial
+  have bound : (101 : CIL.W64) ≤ 100 := refines.pre 101 Memory.empty trivial
   exact absurd bound (by decide)
 
 /-- No proof of the weaker pre exists for the actual extraction. -/
 theorem weaker_pre_rejected : ¬ percentUnguarded.Holds Extracted.program 0 := fun holds => by
-  obtain ⟨fuel, final, values, invoked, -⟩ := holds 101 empty trivial
+  obtain ⟨fuel, final, values, invoked, -⟩ := holds 101 Memory.empty trivial
   exact raises_not_returns percent_above invoked
 
 /-- A changed exception type: `Percent(101)` throws `ArgumentOutOfRangeException`, not
@@ -181,18 +171,19 @@ def percentRenamed : OutcomeContract CIL.W64 CIL.W64 :=
 
 /-- The exact contract does not refine a renamed exception. -/
 theorem changed_exception_not_refines : ¬ percentExact.Refines percentRenamed :=
-  fun refines => absurd (refines.raises 101 empty empty_formed) (by decide)
+  fun refines => absurd (refines.raises 101 Memory.empty Memory.empty_wellFormed) (by decide)
 
 /-- No proof of the renamed exception exists for the actual extraction. -/
 theorem changed_exception_rejected : ¬ percentRenamed.Holds Extracted.program 0 :=
   fun holds => by
-    have renamed : Raises Extracted.program 0 [.scalar (.i64 101)] empty
-        "System.ArgumentException" := holds.raising (input := 101) empty_formed (by decide)
+    have renamed : Raises Extracted.program 0 [.scalar (.i64 101)] Memory.empty
+        "System.ArgumentException" :=
+      holds.raising (input := 101) Memory.empty_wellFormed (by decide)
     exact absurd (raises_unique renamed percent_above) (by decide)
 
 -- An explicit `sorry` is only a warning, so each refutation's axioms are pinned to fail the build.
 /-- info: 'DerivedPercentProof.Rejected.stronger_post_not_refines'
-  depends on axioms: [propext, Quot.sound] -/
+  does not depend on any axioms -/
 #guard_msgs (whitespace := lax) in
 #print axioms stronger_post_not_refines
 /-- info: 'DerivedPercentProof.Rejected.stronger_post_rejected'
@@ -208,7 +199,7 @@ theorem changed_exception_rejected : ¬ percentRenamed.Holds Extracted.program 0
 #guard_msgs (whitespace := lax) in
 #print axioms weaker_pre_rejected
 /-- info: 'DerivedPercentProof.Rejected.changed_exception_not_refines'
-  depends on axioms: [propext, Quot.sound] -/
+  does not depend on any axioms -/
 #guard_msgs (whitespace := lax) in
 #print axioms changed_exception_not_refines
 /-- info: 'DerivedPercentProof.Rejected.changed_exception_rejected'

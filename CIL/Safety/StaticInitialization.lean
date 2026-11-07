@@ -100,7 +100,7 @@ theorem staticReference_preserves_immutable (descriptor : CIL.StaticDescriptor)
       obtain ⟨found, cells, permissions⟩ := retained other a present kind
       have different : other ≠ id := by
         rw [fresh.1]
-        exact Nat.ne_of_lt (hm.1 other a present).1
+        exact Nat.ne_of_lt (hm.allocations other a present).1
       refine ⟨found, ?_, ?_⟩
       · intro offset
         simp [different, cells]
@@ -151,7 +151,7 @@ theorem staticReference_preserves_static_world (descriptor : CIL.StaticDescripto
             exact Ne.symm notSame
           · obtain ⟨a, present, _, _⟩ := static_registry_fields_live _ _ world binding member
             rw [fresh.1]
-            exact Ne.symm (Nat.ne_of_lt (hm.1 _ _ present).1)
+            exact Ne.symm (Nat.ne_of_lt (hm.allocations _ _ present).1)
         · intro binding member
           simp only [List.mem_cons, registry] at member
           rcases member with rfl | member

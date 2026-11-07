@@ -488,18 +488,21 @@ than treating it as unmodeled.
 
 Starting from the same well-formed memory with bounded static bindings,
 `ProgramRenaming.invoke_scalars` transfers a successful checked invocation with the same fuel and
-exact scalar results. Its final memories satisfy `MemoryBelow` at the initial allocation counter.
-`invoke_confined` also carries a `MemoryBelow` preservation claim from the initial memory to the
-target's final memory. `ProgramRenaming.raises` transfers a named exception and additionally
-requires valid initial arguments. These theorems use the proved complete dispatcher internally. The
-allocation relation extends through local setup, nested calls, constructors, static allocation and
-`stackAlloc`; frame ownership and expiry remain checked.
+exact scalar results. Its final memories satisfy `BytesBelow` at the initial allocation counter:
+the caller's allocations, bytes and authority agree exactly. They satisfy `SlotsAgreeBelow` too:
+a caller field holds the same reference in both wherever the source holds null or a caller
+reference, while a field holding a fresh object may name another identity in the target.
+`invoke_confined` carries a `MemoryBelow` preservation claim, field references included, from the
+initial memory to the target's final memory. `ProgramRenaming.raises` transfers a named exception
+and additionally requires valid initial arguments. These theorems use the proved complete
+dispatcher internally. The allocation relation extends through local setup, nested calls,
+constructors, static allocation and `stackAlloc`; frame ownership and expiry remain checked.
 
 `MethodContract.Holds.of_allocationRenaming` transfers the original complete contract, including its
 precondition and footprint. Supply proofs that the precondition establishes well-formed memory and
 bounded static bindings, that the contract encodes scalar outputs, and that its postcondition is
-preserved by `MemoryBelow` on the initial caller prefix. The adapter derives confinement from the
-actual paired executions; it does not replace the contract with a weaker one.
+preserved by `BytesBelow` and `SlotsAgreeBelow` on the initial caller prefix. The adapter derives
+confinement from the actual paired executions; it does not replace the contract with a weaker one.
 
 This is not exact-memory transport: extra homes change counters and fresh references. Arbitrary
 reference results and postconditions naming fresh allocations need a statement modulo the allocation

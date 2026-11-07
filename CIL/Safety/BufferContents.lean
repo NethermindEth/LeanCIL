@@ -185,7 +185,7 @@ theorem add_element {m : Memory} {base : Reference} {width index : Nat} {writing
     (target : access m (base.element width index) width 1 writing = .ok ()) :
     add m base width (BitVec.ofNat 64 index) = .ok (base.element width index) := by
   obtain ⟨allocation, ready⟩ := access_requirements target
-  have native := (formed.1 _ _ ready.present).2.1
+  have native := (formed.allocations _ _ ready.present).2.1
   have extent := ready.extent
   have bound : base.offset + width * index < 2^64 := by
     change allocation.layout.size < 2^64 at native

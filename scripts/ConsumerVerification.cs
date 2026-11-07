@@ -736,13 +736,17 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return generated;
     }
 
-    static void AddConsumerLibrary(string directory, string name)
+    static void AddConsumerLibrary(string directory, string name, string[]? leanArguments = null)
     {
         var toml = Path.Combine(directory, "lakefile.toml");
+        // TOML and Lean string literals both accept a JSON-quoted string.
+        var quoted = string.Join(", ", (leanArguments ?? []).Select(argument => JsonSerializer.Serialize(argument)));
         if (File.Exists(toml))
-            File.AppendAllText(toml, $"\n[[lean_lib]]\nname = \"{name}\"\n");
+            File.AppendAllText(toml, $"\n[[lean_lib]]\nname = \"{name}\"\n" +
+                (quoted.Length == 0 ? "" : $"moreLeanArgs = [{quoted}]\n"));
         else
-            File.AppendAllText(Path.Combine(directory, "lakefile.lean"), $"\nlean_lib {name}\n");
+            File.AppendAllText(Path.Combine(directory, "lakefile.lean"), $"\nlean_lib {name}\n" +
+                (quoted.Length == 0 ? "" : $"  where moreLeanArgs := #[{quoted}]\n"));
     }
 
     /// <summary>The compiled module directory of a certified library.</summary>
@@ -1033,7 +1037,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     /// modules: the session root for verification, whose leancil resolves to the certified library in
     /// place, or the framework source copy for an editor workspace.
     /// </summary>
-    sealed record ConsumerSession(string Generated, Dictionary<string, string> Copied);
+    /// <summary>
+    /// A prepared consumer workspace: its generated package, the hash of each file placed in it, and the
+    /// developer's files among them, so diagnostics cite those originals.
+    /// </summary>
+    sealed record ConsumerSession(string Generated, Dictionary<string, string> Copied, SourceCopies Sources);
 
     sealed record ExtractionComponents(string InputHash, string Aggregate, Dictionary<string, string> Sources);
     const string ExtractionComponentContext = "namespace Extracted\nopen CIL\nset_option maxRecDepth 4096\n\n";
@@ -1201,6 +1209,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             }
             else Directory.CreateDirectory(destination);
         }
+        var sources = new SourceCopies(session);
         foreach (var (key, hash) in snapshot.Where(p => p.Key.StartsWith("consumer:", StringComparison.Ordinal)))
         {
             var source = key["consumer:".Length..];
@@ -1208,6 +1217,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
             File.Copy(source, destination);
             if (Sha(destination) != hash) throw new InvalidDataException("Consumer source changed during copying: " + source);
+            sources.Add(destination, source);
         }
         var framework = dependencies.Single(d => d.Name == "leancil");
         var frameworkCopy = Within(session, Path.GetRelativePath(root, framework.Source));
@@ -1234,6 +1244,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             throw new InvalidDataException("Extracted is reserved for the selected extraction artifact.");
         File.Copy(Path.Combine(extraction.Output, "Extracted.lean"), Path.Combine(generatedPackage, "Extracted.lean"));
         var generated = Sha(Path.Combine(generatedPackage, "Extracted.lean"));
+        // Components replace this copy with generated text, which then fails the byte comparison and stays unmapped.
+        var extractedCopy = (Path.Combine(generatedPackage, "Extracted.lean"),
+            Path.Combine(extraction.Output, "Extracted.lean"));
         foreach (var output in proofs.Select(proof => proof.Output).Distinct())
             if (generated != JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")))
                 .GetProperty("generatedSha256").GetString())
@@ -1276,6 +1289,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 throw new InvalidDataException("ExtractedSymbols is reserved for the PDB names of the selected extraction.");
             File.Copy(Path.Combine(extraction.Output, "Symbols.lean"), symbolsPath);
             if (Sha(symbolsPath) != symbols) throw new InvalidDataException("PDB names changed during consumer snapshot.");
+            sources.Add(symbolsPath, Path.Combine(extraction.Output, "Symbols.lean"));
             AddConsumerLibrary(generatedPackage, "ExtractedSymbols");
         }
         var copied = snapshot.Keys.Where(k => k.StartsWith("consumer:", StringComparison.Ordinal))
@@ -1318,16 +1332,26 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 string author = module + "Author";
                 string authorPath = Path.Combine(session, author + ".lean");
                 if (File.Exists(authorPath)) throw new InvalidDataException(author + " is reserved for the export author proof.");
-                File.Copy(Path.Combine(session, Path.GetRelativePath(root, proof)), authorPath);
-                AddConsumerLibrary(session, author);
+                File.WriteAllBytes(authorPath,
+                    CheckedProofBytes(File.ReadAllBytes(Path.Combine(session, Path.GetRelativePath(root, proof)))));
+                AddConsumerLibrary(session, author, ProofOptions);
                 copied.Add(authorPath);
                 File.WriteAllText(target, "import " + author + "\n" + audit);
             }
-            else File.Copy(Path.Combine(session, Path.GetRelativePath(root, proof)), target);
-            AddConsumerLibrary(session, module);
+            else
+            {
+                File.WriteAllBytes(target,
+                    CheckedProofBytes(File.ReadAllBytes(Path.Combine(session, Path.GetRelativePath(root, proof)))));
+                var original = Path.ChangeExtension(Path.GetRelativePath(root, proof), null).Replace('\\', '/')
+                    .Replace('/', '.');
+                if (ObservesProof) sources.AddObserved(target, proof, module, original);
+                else sources.Add(target, proof, module, original);
+            }
+            AddConsumerLibrary(session, module, ProofOptions);
             copied.Add(target);
         }
-        return new(generatedPackage, copied.ToDictionary(path => path, Sha));
+        sources.Add(extractedCopy.Item1, extractedCopy.Item2);
+        return new(generatedPackage, copied.ToDictionary(path => path, Sha), sources);
     }
 
     sealed record ConsumerExportAudit(string Source, Action<string, string, string, AuditedOleans> Checked,
@@ -1349,6 +1373,19 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         // Display only, never read by a check: the proof's Lean messages and its printed statement.
         public ProofMessage[]? Messages;
         public StatementView? Statement;
+        // The developer's files the request's workspace copied, which its diagnostics cite.
+        public SourceCopies? Sources;
+
+        /// <summary>The proof's messages, each at its position in `proof` rather than in the workspace's copy.
+        /// </summary>
+        public ProofMessage[]? ProofMessages(string proof) => Sources?.Relocate(proof, Messages) ?? Messages;
+
+        /// <summary>The failure, carrying the workspace's copies so its diagnostics cite the originals.</summary>
+        public Exception? Located()
+        {
+            if (Error is not null && Sources is not null) Error.Data[SourceCopies.Key] = Sources;
+            return Error;
+        }
     }
 
     Report VerifyConsumer(string assembly, string proof, string output, string theorem, string root,
@@ -1358,9 +1395,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         VerifiedStatement = null;
         var outcome = VerifyConsumerRequests(root, [new(assembly, output, proof, theorem, settings)],
             (_, value) => stage?.Invoke(value), batch: false)[0];
-        ProofMessages = outcome.Messages;
+        ProofMessages = outcome.ProofMessages(proof);
         VerifiedStatement = outcome.Statement;
-        if (outcome.Error is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(outcome.Error);
+        if (outcome.Located() is { } error) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(error);
         return outcome.Report!;
     }
 
@@ -1557,7 +1594,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 // PDB names bind only proofs that import them; identity.json does not cover the PDB.
                 // A result cached without a statement view must not satisfy a run that prints one.
                 proofKeys[i] = ConsumerCacheKey("proof", before[i], SemanticExtractionIdentity(extractions[i]) + "\n" + requests[i].Theorem + "\n" + Sha(requests[i].Assembly) +
-                    (symbols[i] is null ? "" : "\n" + symbols[i]) + (viewsStatement ? "\nstatement-view" : ""));
+                    (symbols[i] is null ? "" : "\n" + symbols[i]) + (viewsStatement ? "\nstatement-view" : "") +
+                    ProofOptionsKey);
                 if (requests[i].ExpectRejection || ReferenceOnlyImports(extractions[i])) continue;
                 var receipt = Path.Combine(Path.GetTempPath(), "leancil-consumer-receipt-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(receipt);
@@ -1677,6 +1715,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     i => requestModules[i], i => requests[i].ExportAudit!.Source, StringComparer.Ordinal),
                 generatedSources: generatedSources, components: components, checkRejectedProofs: checkRejectedProofs);
             var generatedPackage = prepared.Generated;
+            foreach (var member in members) outcomes[member].Sources = prepared.Sources;
             var generatedInputPaths = prepared.Copied.Keys.Where(path =>
                     path.StartsWith(generatedPackage + Path.DirectorySeparatorChar, StringComparison.Ordinal))
                 .Concat([Path.Combine(generatedPackage, "lakefile.toml"),

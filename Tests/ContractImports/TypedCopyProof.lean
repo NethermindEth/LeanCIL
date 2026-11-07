@@ -12,10 +12,9 @@ def caller : Memory := {
   nextIdentity := 1
 }
 
-theorem permitted_alias : TypedImportInterface.copy.pre (⟨0, 0⟩, ⟨0, 0⟩, 0) caller := by
-  refine ⟨?_, by rfl, by rfl⟩
-  constructor
-  · intro id allocation found
+/-- `caller` holds one well-formed allocation, its one view, and no object references. -/
+theorem caller_formed : caller.WellFormed where
+  allocations id allocation found := by
     simp only [caller] at found
     split at found
     · rename_i same
@@ -23,10 +22,16 @@ theorem permitted_alias : TypedImportInterface.copy.pre (⟨0, 0⟩, ⟨0, 0⟩,
       cases found
       exact ⟨by decide, by simp [Allocation.WellFormed, nativeLimit]⟩
     · cases found
-  · intro view member
+  slots _ _ _ held := nomatch held
+  views view member := by
     simp only [caller, List.mem_singleton] at member
     subst view
     exact ⟨_, rfl, by decide⟩
+
+#print axioms caller_formed
+
+theorem permitted_alias : TypedImportInterface.copy.pre (⟨0, 0⟩, ⟨0, 0⟩, 0) caller :=
+  ⟨caller_formed, by rfl, by rfl⟩
 
 #print axioms permitted_alias
 

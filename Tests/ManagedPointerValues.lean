@@ -43,9 +43,9 @@ theorem checked_tail_target :
 
 /-- Null array values returned by ordinary helpers retain the same named access fault. -/
 theorem literal_null_table_rejected :
-    managedStep .tableLength 0 frame [.reference .null] memory =
+    managedStep .tableLength 0 frame [.object .null] memory =
       .error (.thrown "System.NullReferenceException") ∧
-    managedStep (.tableElement signature) 0 frame [.scalar (.i32 0), .reference .null] memory =
+    managedStep (.tableElement signature) 0 frame [.scalar (.i32 0), .object .null] memory =
       .error (.thrown "System.NullReferenceException") := ⟨rfl, rfl⟩
 #print axioms literal_null_table_rejected
 

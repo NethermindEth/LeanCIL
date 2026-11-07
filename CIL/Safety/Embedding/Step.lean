@@ -370,6 +370,20 @@ theorem step_relabel_call (callee argc : Nat) : StepRelabel (.call callee argc) 
   · simp only [short, ↓reduceIte] at h ⊢
     lockstep
 
+/-- A receiver-checked call relocates no pc; its null receiver raises rather than calls. -/
+theorem step_relabel_callInstance (callee argc : Nat) :
+    StepRelabel (.callInstance callee argc) := by
+  plain_cases
+  by_cases short : stack.length < argc
+  · simp [short] at h
+  · simp only [short, ↓reduceIte] at h ⊢
+    obtain ⟨arguments, found, h⟩ := except_bind_ok h
+    simp only [found, ok_bind_eq]
+    split at h <;> cases h
+    rfl
+
+#print axioms step_relabel_callInstance
+
 /-- A tail transfer has no continuation pc to relocate. -/
 theorem step_relabel_tailCall (callee argc : Nat) : StepRelabel (.tailCall callee argc) := by
   plain_cases
@@ -394,6 +408,15 @@ theorem step_relabel_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
   by_cases short : (size = 0 || stack.length < argc) = true
   · simp only [short, ↓reduceIte] at h; cases h
   · simp only [short, ↓reduceIte, Bool.false_eq_true] at h ⊢
+    lockstep
+
+theorem step_relabel_newObject (callee argc : Nat) (owner : Extraction.TypeExpr)
+    (bases : List Extraction.TypeExpr) (size : Nat) :
+    StepRelabel (.newObject callee argc owner bases size) := by
+  plain_cases
+  by_cases short : stack.length < argc
+  · simp [short] at h
+  · simp only [short, ↓reduceIte] at h ⊢
     lockstep
 
 theorem step_relabel_intrinsic (operation : Intrinsic) (argc : Nat) :
@@ -445,7 +468,8 @@ theorem step_relabel_ret (narrow : Option NarrowKind) : StepRelabel (.ret narrow
         cases rest <;> fallback_vacuous
       | span reference length =>
         cases rest <;> fallback_vacuous
-      | bufferSpan _ | readOnlyReference _ | array _ | methodPointer _ | methodTable _ =>
+      | bufferSpan _ | readOnlyReference _ | array _ | methodPointer _ | methodTable _
+      | object _ =>
         cases rest <;> fallback_vacuous
 
 theorem step_relabel_unsupported (description : String) :
@@ -615,6 +639,7 @@ theorem step_relabel_bleu (target : Nat) : StepRelabel (.bleu target) := by
 
 #print axioms step_relabel_bleu
 
+set_option maxHeartbeats 300000 in
 /-- Every instruction steps in lockstep with its relabeled form. Pure operations
     share the base-step contract; ordinary memory operations share an unchanged
     instruction result. Dedicated dispatcher cases retain their own proofs. -/
@@ -659,9 +684,12 @@ theorem step_relabel (op : CIL.Op) : StepRelabel op := by
   case localAddr index => exact step_relabel_localAddr index
   case setLocal index narrow => exact step_relabel_setLocal index narrow
   case call method argc => exact step_relabel_call method argc
+  case callInstance method argc => exact step_relabel_callInstance method argc
   case tailCall method argc => exact step_relabel_tailCall method argc
   case newVector256 constructor argc => exact step_relabel_newVector256 constructor argc
   case newAggregate constructor argc size => exact step_relabel_newAggregate constructor argc size
+  case newObject constructor argc owner bases size =>
+    exact step_relabel_newObject constructor argc owner bases size
   case intrinsic operation argc => exact step_relabel_intrinsic operation argc
   case memory operation => exact step_relabel_memory operation
   case ret narrow => exact step_relabel_ret narrow
@@ -917,6 +945,16 @@ theorem step_raise_call (callee argc : Nat) : StepRaise (.call callee argc) := b
   · simp only [short, ↓reduceIte] at h ⊢
     raise_lockstep
 
+/-- A null receiver raises the same exception at the relocated pc. -/
+theorem step_raise_callInstance (callee argc : Nat) : StepRaise (.callInstance callee argc) := by
+  plain_cases
+  by_cases short : stack.length < argc
+  · simp [short] at h
+  · simp only [short, ↓reduceIte] at h ⊢
+    raise_lockstep
+
+#print axioms step_raise_callInstance
+
 /-- Tail-transfer faults retain their original location under pc relocation. -/
 theorem step_raise_tailCall (callee argc : Nat) : StepRaise (.tailCall callee argc) := by
   plain_cases
@@ -937,6 +975,15 @@ theorem step_raise_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
   by_cases short : (size = 0 || stack.length < argc) = true
   · simp only [short, ↓reduceIte] at h; cases h
   · simp only [short, ↓reduceIte, Bool.false_eq_true] at h ⊢
+    raise_lockstep
+
+theorem step_raise_newObject (callee argc : Nat) (owner : Extraction.TypeExpr)
+    (bases : List Extraction.TypeExpr) (size : Nat) :
+    StepRaise (.newObject callee argc owner bases size) := by
+  plain_cases
+  by_cases short : stack.length < argc
+  · simp [short] at h
+  · simp only [short, ↓reduceIte] at h ⊢
     raise_lockstep
 
 theorem step_raise_intrinsic (operation : Intrinsic) (argc : Nat) :
@@ -983,7 +1030,8 @@ theorem step_raise_ret (narrow : Option NarrowKind) : StepRaise (.ret narrow) :=
         cases rest <;> fallback_raise_vacuous
       | span reference length =>
         cases rest <;> fallback_raise_vacuous
-      | bufferSpan _ | readOnlyReference _ | array _ | methodPointer _ | methodTable _ =>
+      | bufferSpan _ | readOnlyReference _ | array _ | methodPointer _ | methodTable _
+      | object _ =>
         cases rest <;> fallback_raise_vacuous
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
@@ -1180,9 +1228,12 @@ theorem step_raise (op : CIL.Op) : StepRaise op := by
         | cons value rest => raise_lockstep
     · cases h
   case call callee argc => exact step_raise_call callee argc
+  case callInstance callee argc => exact step_raise_callInstance callee argc
   case tailCall callee argc => exact step_raise_tailCall callee argc
   case newVector256 callee argc => exact step_raise_newVector256 callee argc
   case newAggregate callee argc size => exact step_raise_newAggregate callee argc size
+  case newObject callee argc owner bases size =>
+    exact step_raise_newObject callee argc owner bases size
   case intrinsic operation argc => exact step_raise_intrinsic operation argc
   case memory operation =>
     plain_cases

@@ -147,8 +147,9 @@ scaffolding](PROOFS-BINDING.md#generate-loop-entry-and-cutpoint-scaffolding)).
 At a return, the tactic leaves the equation between the computed checked result and the stated
 result as a proof goal. It closes that equation automatically only when `with_reducible rfl`
 succeeds after frame cleanup, list normalization and literal shift-count reduction. Cleanup also
-drops the narrowing of an `if p then 1 else 0` result, so a narrow Boolean return needs no unfolding
-of `NarrowKind.extend`. A follow-up `simp [leaveFrame, NarrowKind.extend]; split <;> rfl` after such
+drops the narrowing of an `if p then 1 else 0` result, and the closing `simp` drops it from a
+comparison already decided to `1` or `0`, so a narrow Boolean return needs no unfolding of
+`NarrowKind.extend`. A follow-up `simp [leaveFrame, NarrowKind.extend]; split <;> rfl` after such
 a return fails with "no goals" and must be deleted. Other mathematical results can need a separate
 `simp` or case split. The remaining goal contains the returned values, rather than an unexecuted
 `run`. `cil_contract_steps` likewise leaves the return postcondition as a goal.
@@ -532,6 +533,38 @@ entry's owned identities, closing a postcondition such as `SpanSum`'s; the loop 
 both from the state's frame. [Countdown](../Examples/Proofs/Countdown.lean) and
 [SpanSum](../Examples/Proofs/SpanSum.lean) store through their frames this way; SpanSum's loop
 steps name no frame or span fact.
+
+### See what the tactics did
+
+The [`observer`](../CIL/Observe.lean) linter of `CIL.Observe` reads each declaration's
+elaborated proof after it is checked and reports on it; no tactic runs any of its code, so a
+proof that does not import it
+elaborates exactly as before. Import it and set `trace.CIL.step` to log each step the proof
+takes, whichever tactic or hand-written term took it: any application of a lemma to a
+`step ... = ...` premise counts, so `cil_loop_steps`, `cil_checked_steps`, `cil_contract_steps`,
+the outcome and return tactics and `run_next` by hand are all traced. Each step message gives
+the pc and instruction, the source line from `ExtractedSymbols` when the proof imports it, the
+lemma applied and the one that proved its step, each hypothesis the step's proof used, and the
+parts of the state that changed. A hypothesis whose statement is a `SpanApart`, `Writable`,
+`Filled` or `CheckedSpan` fact also says what it establishes, such as that the footprints are
+disjoint. Each `cil_` tactic the proof names then logs how many steps it took and the obligation
+tags of the goals it left; a step no such tactic took is logged at its tactic block as taken
+outside one. A block whose goal states a run of a method but whose proof applies no step lemma,
+such as one that evaluates the method with `rfl` or `decide`, logs that it took no step to trace.
+
+With `set_option cil.diagnostics true`, the observer logs a failure record for each error a `cil_`
+tactic raised, and for each goal one left that Lean reports as unsolved, as a message starting
+`[LeanCIL failure v1] `: a JSON object of the method, pc and instruction reached, the reached and
+expected state, the kind of fact the step lacks, the obligation the tactic was handed and the
+position of the error it explains, each unknown field with its reason. The kind is the one the
+loop tactics name in their errors, read by [`missingFactOf`](../CIL/Safety/MissingFacts.lean) from
+the step rewritten as far as the step equations and the result facts in scope go; a stuck step on
+a class instance lacks `objectForm`, `objectSlot` or `objectAllocation`. A stepping goal under the
+existentials of a contract's run, as `cil_contract_steps` leaves one at a call, is read as the run
+it states. The error itself is
+unchanged. `leancil verify --trace` and `--format json` add the import to the start of the
+proof's first import line, which moves no other line or column, set these options and report the
+steps and records apart from the proof's messages.
 
 ## Read control flow off one step
 

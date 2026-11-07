@@ -431,9 +431,20 @@ validation as the failing stage and links to the supported subset.
 
 When proof checking fails, the report leads with `Lean errors (N):`: each
 `error:` diagnostic with its `file:line:col`, the module Lake was building and
-its full message block, omitting axiom reports, traces and warnings. Long
-messages are truncated in this summary only; the unmodified Lake output follows
-under `Details:` (and in the `LEANCIL_TRACE_DIRECTORY` transcripts when set).
+its full message block, omitting axiom reports, traces and warnings. Each error
+is printed once. A message longer than 40 lines or 400 columns, and every error
+after the first 20, is shortened or left out of this summary and printed in full
+under `Details:`; nothing else follows. When the output holds no Lean error,
+such as a crashed tool, `Details:` holds the whole output instead. The
+unmodified output is the `message` of [`failed.json`](#failure-reports) and,
+when `LEANCIL_TRACE_DIRECTORY` is set, its transcripts.
+
+Verification checks a copy of the proof, `Extracted.lean`, the PDB names and,
+under `--proof-root`, the package's sources and its proof module. A location
+in a copy cites the file it was copied from, at the same line and column, and
+Lake's module names the proof's own module, so editors and terminals open the
+file the developer edits. Only a copy byte-identical to its original when it
+was made is mapped; a generated module keeps the path Lean printed.
 Direct verification checks the proof with `lean --json` and renders each message
 in Lean's `file:line:col: severity:` form; informational messages, which plain
 Lean output prints without a position, appear there as `info:` entries, and the
@@ -486,8 +497,8 @@ output (for the last request of an output, as with `verified.json`) and as the
 The request's `kind`, `file`, `line` and `column` are those of the first Lean
 error; `diagnostics` lists every error of the request's own modules with its
 message block. Lines are 1-based and columns 0-based, as Lean prints them.
-Locations in workspace or temporary copies are mapped back to the selected
-proof, the artifact's `Extracted.lean` or the consumer package. `message` is the
+Locations in the session's copies cite their originals, as in the text
+report. `message` is the
 original output, unmodified; `rerun` reruns just that request. Classification
 uses only the stage, LeanCIL's own messages and Lean's error prefixes above.
 An unsolved goal is never a refutation: only a verified theorem whose
@@ -495,6 +506,97 @@ elaborated statement is `Not` applied to a contract's `Holds` is, as reported by
 the theorem audit. A verified refutation keeps its `verified.json`, the
 certificate of the refutation, and also writes `failed.json` with kind
 `refutation`, located at the theorem's name.
+
+### Machine-readable verify output
+
+`leancil verify ... --format json` prints one JSON report on stdout instead of
+the text report, and nothing on stderr; the exit code is the same as without
+it. `--format text` is the default. The report has `schema` 1, `result`
+(`verified` or `failed`), the `stage` that failed, the `theorem`, `method`,
+`proof` and `output`, and on success the `axioms` and `statement`. The proof's
+own Lean messages are in `messages`, and `rerun` repeats the run. `failures`
+holds one record per Lean error, or per goal a tactic stopped on, located in
+the developer's file as in the text report:
+
+```json
+{
+  "kind": "elaboration-error",
+  "source": { "file": "/work/Proofs/Countdown.lean", "line": 40, "column": 4 },
+  "message": "cil_loop_steps: target state not matched at pc 8: ...",
+  "tactic": "cil_loop_steps",
+  "stopped": false,
+  "method": { "index": 0, "signature": "System.UInt32 Examples.Loops::Countdown(System.UInt32)" },
+  "cil": {
+    "pc": 8, "ilOffset": 9, "instruction": "brtrue.s IL_0004", "leanInstruction": null,
+    "source": { "file": "Loops.cs", "line": 38, "column": 9 }
+  },
+  "state": {
+    "reached": { "stack": "[CIL.Safety.Value.scalar (CIL.Value.i32 (x - 1#32))]" },
+    "expected": { "stack": "[CIL.Safety.Value.scalar (CIL.Value.i32 (x - 2))]" }
+  },
+  "missing": { "shape": "targetState", "residual": [] },
+  "suggestions": ["state a fact in the reached form, or state the target in it"],
+  "obligations": [],
+  "unknown": {
+    "cil.leanInstruction": "the walk is at the target's pc, so it steps no instruction",
+    "obligations": "the goal the tactic was handed carries no obligation tag"
+  }
+}
+```
+
+`kind`, `resource` and `module` are as in `failed.json`. `tactic`, `stopped`,
+`method`, `cil`, `state` and `missing` come from the failure record `CIL.Observe`
+logged for the error, never from the error's prose. `--format json` checks the
+proof with `import CIL.Observe` added at the start of its first import line,
+which moves no other line or column, and with the Lean option `cil.diagnostics`
+set; the observer then records each error a `cil_` tactic raised, and each goal
+one left that Lean reports as unsolved, with `stopped` true (see
+[PROOFS-STEPPING](PROOFS-STEPPING.md#see-what-the-tactics-did)). An `unsolved
+goals` error with several such goals gives one failure per goal. `ilOffset` and
+`instruction` are read from the manifest at that method and pc. `cil.source` is
+the C# file, line and column of the last visible PDB sequence point at or before
+the pc, read from the extraction's `Symbols.lean` whether or not the proof
+imports `ExtractedSymbols`; an extraction without a matching PDB has no
+`Symbols.lean`, and `unknown` says so. `missing.shape` names the kind of fact the step
+lacks, such as `unsafeAdd`, `spanValidity` or `targetState`, `calleeContract` at a
+`call` or `callvirt`, or on a class instance `objectForm`, `objectSlot` or
+`objectAllocation`, and `residual` the terms it must prove: the step rewritten by
+the proof's step equations and the `_ = .ok _` and `_ = .error _` facts in scope.
+A side condition, such as an unfolded step a tactic could not close, has a shape
+when it names one of these operations. A run stopped before its first instruction
+because the entry could not check an object argument lacks `objectForm`, with the
+`formObject` of each object argument as its residual. `obligations` lists the obligation tags of the goal that
+failed, or of the goals an `unsolved goals` error lists, such as `invariant`.
+`suggestions` is advice, kept apart from these facts. Every field left `null`
+for lack of data, and an empty `obligations`, has its reason under `unknown`,
+keyed by the field's name; an error without a failure record, such as Lean's
+own, says so there. The message is Lean's error as printed; the tactic is the
+one the error names, also when it ran inside another tactic's expansion, such
+as the `cil_loop_steps` that `cil_loop_continue` runs.
+
+### Trace the proof's steps
+
+`leancil verify ... --trace` checks the proof with `import CIL.Observe` added as
+for `--format json` and `trace.CIL.step` set, so the observer logs each step the
+proof takes, whichever tactic or term took it: its pc and instruction, the
+source line when the proof imports `ExtractedSymbols`, the lemmas applied, the
+hypotheses its proof used and what changed, then for each `cil_` tactic the
+number of steps it took and the obligation tags of the goals it left (see
+[PROOFS-STEPPING](PROOFS-STEPPING.md#see-what-the-tactics-did)). The text report
+prints them in full under `Trace (N entries):`, after and apart from the proof's
+`Lean messages`; the JSON report lists them in `trace`, each with its location
+and text. Without `--trace`, `trace` is `null` and `unknown.trace` says why, as
+it does when the run stopped before the proof was checked. A traced result is
+cached apart from an untraced one.
+
+### Batches
+
+`leancil verify-batch requests.json --format json` prints one JSON document on
+stdout instead of the per-request lines: `schema` 1, the `passed` and `failed`
+counts, and `requests`, each with its `expect`, its `status` (`verified`,
+`rejected` or `failed`) and the `report` that `verify --format json` prints for
+it. `--trace` traces every request's proof, after its line in the text report
+and in each `report` in JSON.
 
 ## Export contracts
 

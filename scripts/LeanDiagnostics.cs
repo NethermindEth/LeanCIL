@@ -80,23 +80,40 @@ internal static partial class LeanDiagnostics
     static bool IsBoundary(string line) => Job().IsMatch(line) || Entry().IsMatch(line) || LeanEntry().IsMatch(line) ||
         FailureList().IsMatch(line) || line.StartsWith("Build completed", StringComparison.Ordinal);
 
-    /// <summary>A bounded summary of the error diagnostics, or null when the output has none.</summary>
-    internal static string? Summarize(string output, IReadOnlyCollection<string>? hidden = null)
+    /// <summary>
+    /// A bounded summary of the error diagnostics, and in full only the errors it cut or left out, so a report
+    /// prints each error once.
+    /// `locate` rewrites each `file:line:column` and `module` each module name, such as to a session copy's original.
+    /// </summary>
+    internal sealed record Report(string Text, string Shortened);
+
+    /// <summary>The <see cref="Report"/> of the error diagnostics in `output`, or null when it has none.</summary>
+    internal static Report? Summarize(string output, IReadOnlyCollection<string>? hidden = null,
+        Func<string, string>? locate = null, Func<string, string>? module = null)
     {
         var errors = Errors(output, hidden);
         if (errors.Count == 0) return null;
         var text = new StringBuilder($"Lean errors ({errors.Count}):\n");
-        foreach (var error in errors.Take(MaxErrors))
+        var shortened = new StringBuilder();
+        string Header(Diagnostic error) =>
+            (error.Location is { } location ? locate?.Invoke(location) ?? location : "error") +
+            (error.Module is { } name ? $" (building {module?.Invoke(name) ?? name})" : "");
+        for (var index = 0; index < errors.Count; index++)
         {
-            var origin = error.Module is null ? "" : $" (building {error.Module})";
-            text.Append("  ").Append(error.Location ?? "error").Append(origin).Append('\n');
+            var error = errors[index];
+            var cut = index >= MaxErrors || error.Lines.Count > MaxLines ||
+                error.Lines.Any(line => line.Length > MaxLineLength);
+            if (cut)
+                shortened.Append(Header(error)).Append('\n').AppendJoin('\n', error.Lines).Append('\n');
+            if (index >= MaxErrors) continue;
+            text.Append("  ").Append(Header(error)).Append('\n');
             foreach (var line in error.Lines.Take(MaxLines))
                 text.Append("    ").Append(line.Length <= MaxLineLength ? line : line[..MaxLineLength] + " ...").Append('\n');
             if (error.Lines.Count > MaxLines)
-                text.Append($"    ... {error.Lines.Count - MaxLines} more lines in the full output\n");
+                text.Append($"    ... {error.Lines.Count - MaxLines} more lines under Details\n");
         }
         if (errors.Count > MaxErrors)
-            text.Append($"  ... {errors.Count - MaxErrors} more errors in the full output\n");
-        return text.ToString();
+            text.Append($"  ... {errors.Count - MaxErrors} more errors under Details\n");
+        return new(text.ToString(), shortened.ToString());
     }
 }

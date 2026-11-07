@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Nethermind.LeanCIL;
@@ -12,7 +13,12 @@ partial class Program
     sealed record BatchResult(string output, string proof, string theorem, string expect, string status, string stage,
         string? error, string[]? axioms, string? libraryBuild, FailureReports.Report? failure);
 
-    const string BatchUsage = "Usage: leancil verify-batch requests.json [--fresh] [--rebuild-library] [--parallel count] [--results results.json]";
+    const string BatchUsage = "Usage: leancil verify-batch requests.json [--fresh] [--rebuild-library] " +
+        "[--parallel count] [--results results.json] [--format text|json] [--trace]";
+
+    const string VerifyUsage = "Usage: leancil verify output-directory [--proof proof.lean] [--theorem name] " +
+        "[--fresh] [--rebuild-library] [--proof-root package-directory] [--force-full-verify] " +
+        "[--full-artifact Lib=directory] [--format text|json] [--trace]";
 
     /// <summary>
     /// The tool version, the LeanCIL revision and Lean toolchain its framework comes from, and the
@@ -60,11 +66,18 @@ partial class Program
         var manifestPath = Path.GetFullPath(args[0]);
         var fresh = false;
         var rebuildLibrary = false;
+        var trace = false;
+        string? format = null;
         int? parallelism = null;
         string? resultsPath = null;
         for (var index = 1; index < args.Length; index++)
         {
             var option = args[index];
+            if (option == "--trace" && !trace)
+            {
+                trace = true;
+                continue;
+            }
             if (option == "--rebuild-library" && !rebuildLibrary)
             {
                 rebuildLibrary = true;
@@ -86,10 +99,15 @@ partial class Program
                 case "--results" when resultsPath is null:
                     resultsPath = Path.GetFullPath(args[index]);
                     break;
+                case "--format" when format is null:
+                    format = args[index] is "text" or "json" ? args[index]
+                        : throw new ArgumentException("--format takes text or json.");
+                    break;
                 default:
                     throw new ArgumentException($"Unknown or duplicate option: {option}");
             }
         }
+        var json = format == "json";
 
         var directory = Path.GetDirectoryName(manifestPath)!;
         var manifest = JsonSerializer.Deserialize<BatchManifest>(File.ReadAllText(manifestPath),
@@ -156,22 +174,28 @@ partial class Program
             {
                 if (printed[i]) return passed;
                 printed[i] = true;
+                // The JSON document is printed whole once every request is final.
+                if (json) return passed;
                 if (passed)
                     Console.WriteLine(expect == "rejected"
                         ? $"PASS rejected {CliPaths.Display(outputs[i])} {request.theorem} ({outcome.Stage})"
                         : $"PASS verified {CliPaths.Display(outputs[i])} {request.theorem}");
                 else
                 {
-                    var error = outcome.Error ?? new InvalidOperationException("Verification produced no result.");
+                    var error = outcome.Located() ?? new InvalidOperationException("Verification produced no result.");
                     Console.WriteLine($"FAIL {CliPaths.Display(outputs[i])} {request.theorem} (stage: {outcome.Stage})");
                     CliDiagnostics.Write(new CliFailure(outcome.Stage, error), outcome.Stage, true);
                 }
+                if (trace) Console.Write(TraceReport(Traced(outcome.ProofMessages(proofs[i]), true).Trace, proofs[i]));
                 Console.Out.Flush();
             }
             return passed;
         }
 
-        using (var verification = new Program { freshProofs = fresh, freshLibrary = rebuildLibrary })
+        using (var verification = new Program
+        {
+            freshProofs = fresh, freshLibrary = rebuildLibrary, structuredFailures = json, tracesSteps = trace
+        })
         {
             var verified = requests.Count == 0 ? [] : verification.VerifyConsumerRequests(proofRoot, requests, null, batch: true,
                 parallelism ?? Math.Max(1, Environment.ProcessorCount / 8), (k, outcome) => Print(indices[k], outcome));
@@ -182,6 +206,7 @@ partial class Program
             File.Delete(Path.Combine(outputs[i], "verified.json"));
 
         var results = new List<BatchResult>();
+        var reports = new JsonArray();
         var failed = 0;
         for (var i = 0; i < count; i++)
         {
@@ -192,10 +217,11 @@ partial class Program
             var status = passed ? expect : "failed";
             if (!passed) failed++;
             // A verified refutation is a certificate and a failed contract; any other pass leaves no failure.
-            var failure = outcome.Error is { } error ? FailureReports.Failed(outcome.Stage, error, request.theorem, proofs[i], outputs[i], proofRoot)
+            var failure = outcome.Located() is { } error
+                ? FailureReports.Failed(outcome.Stage, error, request.theorem, proofs[i], outputs[i], proofRoot)
                 : outcome.Report is { } report ? FailureReports.Refuted(report.theoremAudit, request.theorem, proofs[i], outputs[i], proofRoot)
                 : FailureReports.Classify(outcome.Stage, outcome.Detail ?? "Verification produced no result.", outcome.Hidden,
-                    request.theorem, proofs[i], outputs[i], proofRoot);
+                    request.theorem, proofs[i], outputs[i], proofRoot, outcome.Sources);
             if (lastForOutput.Contains(i))
             {
                 if (failure is null) FailureReports.Delete(outputs[i]);
@@ -204,22 +230,48 @@ partial class Program
             results.Add(new(outputs[i], proofs[i], request.theorem, expect, status, outcome.Stage,
                 passed ? null : (outcome.Error?.Message ?? "Verification produced no result."),
                 outcome.Report?.axioms, outcome.Report?.libraryBuild, failure));
+            if (json) reports.Add(BatchEntry(outcome, failure, expect, status, request.theorem, proofs[i], outputs[i]));
         }
         if (resultsPath is not null)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(resultsPath)!);
             File.WriteAllText(resultsPath, JsonSerializer.Serialize(results, Json) + "\n");
         }
-        Console.WriteLine($"Batch: {count - failed} passed, {failed} failed of {count} requests.");
+        if (json)
+            Console.Write(VerifyReports.Serialize(new JsonObject
+            {
+                ["schema"] = VerifyReports.BatchSchema,
+                ["passed"] = count - failed,
+                ["failed"] = failed,
+                ["requests"] = reports,
+            }));
+        else Console.WriteLine($"Batch: {count - failed} passed, {failed} failed of {count} requests.");
         return failed == 0 ? 0 : 1;
+
+        // A request's expectation and status, with the report `verify --format json` gives for it.
+        JsonObject BatchEntry(ConsumerOutcome outcome, FailureReports.Report? failure, string expect, string status,
+            string theorem, string proof, string output)
+        {
+            var messages = outcome.ProofMessages(proof);
+            var verified = outcome.Error is null && outcome.Report is not null;
+            var report = VerifyReports.Result(verified ? "verified" : "failed", failure, theorem, proof, output,
+                proofRoot, verified ? null : outcome.Stage, outcome.Report?.axioms,
+                outcome.Report is { } checkedReport ? StatementOf(checkedReport) : null, JsonMessages(messages), trace,
+                messages is not null);
+            return new JsonObject { ["expect"] = expect, ["status"] = status, ["report"] = report };
+        }
     }
 
     internal static void VerifyArtifacts(string[] args)
     {
         if (args.Length == 0 || args[0].StartsWith("--", StringComparison.Ordinal))
-            throw new ArgumentException("Usage: leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--rebuild-library] [--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory]");
+            throw new ArgumentException(VerifyUsage);
 
         var output = Path.GetFullPath(args[0]);
+        // A request for JSON gets JSON for every outcome, including a rejected option after it.
+        var json = args.Zip(args.Skip(1)).Any(pair => pair is ("--format", "json"));
+        var trace = false;
+        string? format = null;
         string? proof = null;
         string? theorem = null;
         var fresh = false;
@@ -246,16 +298,25 @@ partial class Program
                 fresh = true;
                 continue;
             }
+            if (option == "--trace" && !trace)
+            {
+                trace = true;
+                continue;
+            }
             if (++index == args.Length || args[index].StartsWith("--", StringComparison.Ordinal))
-                throw new ArgumentException($"Missing value for {option}.");
+                throw Rejected(new ArgumentException($"Missing value for {option}."));
 
             switch (option)
             {
+                case "--format" when format is null:
+                    format = args[index] is "text" or "json" ? args[index]
+                        : throw Rejected(new ArgumentException("--format takes text or json."));
+                    break;
                 case "--full-artifact":
                     string[] artifact = args[index].Split('=', 2);
                     if (artifact.Length != 2 || string.IsNullOrWhiteSpace(artifact[0]) || string.IsNullOrWhiteSpace(artifact[1]) ||
                         !fullArtifacts.TryAdd(artifact[0], Path.GetFullPath(artifact[1])))
-                        throw new ArgumentException("--full-artifact requires unique Lib=directory values.");
+                        throw Rejected(new ArgumentException("--full-artifact requires unique Lib=directory values."));
                     break;
                 case "--proof-root" when proofRoot is null:
                     proofRoot = Path.GetFullPath(args[index]);
@@ -267,8 +328,20 @@ partial class Program
                     theorem = args[index];
                     break;
                 default:
-                    throw new ArgumentException($"Unknown or duplicate option: {option}");
+                    throw Rejected(new ArgumentException($"Unknown or duplicate option: {option}"));
             }
+        }
+
+        // A rejected option, reported as JSON when the request asked for it.
+        Exception Rejected(ArgumentException error)
+        {
+            if (!json) return error;
+            var failure = FailureReports.Classify("arguments", error.Message, null,
+                theorem ?? "ExampleProof.correctness", proof ?? Path.Combine(output, "Proof.lean"), output, proofRoot);
+            Console.Write(VerifyReports.Serialize(VerifyReports.Result("failed", failure, failure.theorem,
+                failure.proof, output, proofRoot, "arguments", null, null, [],
+                traceRequested: args.Contains("--trace"), proofChecked: false)));
+            return new CliFailure("arguments", error, reported: true);
         }
 
         var reportPath = Path.Combine(output, "verified.json");
@@ -326,7 +399,9 @@ partial class Program
                 freshProofs = fresh || forceFull,
                 freshLibrary = rebuildLibrary,
                 forceFullVerification = forceFull,
-                viewsStatement = true
+                viewsStatement = true,
+                structuredFailures = json,
+                tracesSteps = trace
             };
             if (forceFull) verification.fullImportAudit = (artifact, session, module, leanPath) =>
                 verification.VerifyFullImports(artifact, session, module, theorem, leanPath, fullArtifacts);
@@ -336,9 +411,19 @@ partial class Program
                     theorem: theorem, existingArtifacts: true, settings: settingsPath, stage: value => stage = value)
                 : verification.VerifyConsumer(assembly, proof, output, theorem, proofRoot, settingsPath, value => stage = value);
 
+            var view = verification.VerifiedStatement;
+            if (json)
+            {
+                var refutation = FailureReports.Refuted(report.theoremAudit, theorem, proof, output, proofRoot);
+                if (refutation is not null) FailureReports.Write(output, refutation);
+                ProofMessagesReport(Traced(verification.ProofMessages, trace).Messages, proof, output);
+                Console.Write(VerifyReports.Serialize(VerifyReports.Result("verified", refutation, report.theorem,
+                    proof, output, proofRoot, null, report.axioms, view?.statement ?? StatementOf(report),
+                    JsonMessages(verification.ProofMessages), trace, verification.ProofMessages is not null)));
+                return;
+            }
             Console.WriteLine($"Verified: {report.theorem}");
             Console.WriteLine($"  Assembly: {identity}");
-            var view = verification.VerifiedStatement;
             foreach (var line in SubjectLines(view))
                 Console.WriteLine("  " + line);
             Console.WriteLine($"  Extraction entry: {entry}");
@@ -377,18 +462,30 @@ partial class Program
             Console.WriteLine($"  Settings: {CliPaths.Display(settingsPath)}");
             Console.WriteLine($"  Report: {CliPaths.Display(reportPath)}");
             Console.WriteLine("  Statement:");
-            var statement = view?.statement ?? report.theoremAudit.Split("'" + report.theorem + "'", 2)[0].Trim();
+            var statement = view?.statement ?? StatementOf(report);
             foreach (var line in statement.Split('\n'))
                 Console.WriteLine("    " + line.TrimEnd());
-            Console.Write(ProofMessagesReport(verification.ProofMessages, proof, output));
+            var (proofMessages, steps) = Traced(verification.ProofMessages, trace);
+            Console.Write(ProofMessagesReport(proofMessages, proof, output));
+            Console.Write(TraceReport(steps, proof));
         }
         catch (Exception error)
         {
             File.Delete(reportPath);
-            FailureReports.Write(output, FailureReports.Failed(stage, error, theorem ?? "ExampleProof.correctness",
-                proof ?? Path.Combine(output, "Proof.lean"), output, proofRoot));
+            var failed = FailureReports.Failed(stage, error, theorem ?? "ExampleProof.correctness",
+                proof ?? Path.Combine(output, "Proof.lean"), output, proofRoot);
+            FailureReports.Write(output, failed);
+            var (proofMessages, steps) = Traced(verification?.ProofMessages, trace);
+            var messages = proof is null ? ""
+                : ProofMessagesReport(proofMessages, proof, output) + TraceReport(steps, proof);
+            if (json)
+            {
+                Console.Write(VerifyReports.Serialize(VerifyReports.Result("failed", failed, failed.theorem,
+                    failed.proof, output, proofRoot, stage, null, null, JsonMessages(verification?.ProofMessages),
+                    trace, verification?.ProofMessages is not null)));
+                throw new CliFailure(stage, error, reported: true);
+            }
             var failure = new CliFailure(stage, error);
-            var messages = proof is null ? "" : ProofMessagesReport(verification?.ProofMessages, proof, output);
             if (messages.Length > 0) failure.Data[CliDiagnostics.ProofMessagesKey] = messages;
             throw failure;
         }
@@ -396,6 +493,40 @@ partial class Program
         {
             ((IDisposable?)verification)?.Dispose();
         }
+    }
+
+    static IEnumerable<(string, int, int, string)> JsonMessages(ProofMessage[]? messages) =>
+        (messages ?? []).Select(message => (message.severity, message.line, message.column, message.text));
+
+    /// <summary>The verified statement as the theorem audit printed it.</summary>
+    static string StatementOf(Report report) => report.theoremAudit.Split("'" + report.theorem + "'", 2)[0].Trim();
+
+    /// <summary>
+    /// The proof's messages without the step trace, and the trace when the run asked for it; a trace message
+    /// in a run that did not ask for one is the proof's own, and stays with its messages.
+    /// </summary>
+    static (ProofMessage[]? Messages, ProofMessage[]? Trace) Traced(ProofMessage[]? messages, bool trace)
+    {
+        if (!trace || messages is null) return (messages, null);
+        return ([.. messages.Where(message => !VerifyReports.IsStep(message.text))],
+            [.. messages.Where(message => VerifyReports.IsStep(message.text))]);
+    }
+
+    /// <summary>
+    /// The step trace in full, each step and each tactic's summary at its location in the proof, or nothing
+    /// without `--trace`.
+    /// </summary>
+    static string TraceReport(ProofMessage[]? steps, string proof)
+    {
+        if (steps is null) return "";
+        var report = new System.Text.StringBuilder($"  Trace ({steps.Length} entries):\n");
+        foreach (var step in steps)
+        {
+            var located = $"{CliPaths.Display(proof)}:{step.line}:{step.column}: {CliDiagnostics.Printable(step.text)}";
+            foreach (var line in located.Split('\n'))
+                report.Append(("    " + line).TrimEnd()).Append('\n');
+        }
+        return report.ToString();
     }
 
     const string ProofMessagesText = "proof-messages.txt";

@@ -251,6 +251,58 @@ caller can pass the same buffers again: `ValidCall.after_write` after any checke
 the inputs lie `Apart` from. `mono` drops buffers, and `input_bound` / `output_bound` give the
 identity bound those relations take.
 
+## Frame class instances
+
+A contract for a method taking [class instances](SOUNDNESS-RUNTIME.md#class-instances) names a
+field by the reference `objectFieldAddress` locates; the first field of an object is the object's
+own reference. `CIL.Safety.ObjectFraming` carries object facts across a call confined to a
+footprint: `formObject_of_confined` and `objectFieldAddress_of_confined` keep a formed reference
+and a located field, given well-formed memory before the call. `objectField_apart_of_ne` makes
+fields of two different objects `Apart`, so `Confined.objectField_read_of_ne` keeps a field of
+one object across a call confined to a field of another, given that the read field's allocation
+is older than the call. Equal references locate the same field (`objectFieldAddress_same`), so
+the aliased case of a proof follows by substitution. `formObject_of_objectFieldAddress` gives the
+formation fact the stepping tactics need for an argument whose field is located.
+
+A class-typed field keeps its reference in the field's slot, not in bytes, and one footprint
+entry starting at the field covers both: `Confined.setSlot` and `Confined.storeSlot` confine a
+store to it, so a contract's footprint names the fields whose bytes or references it may change.
+`Confined.objectSlot_of_ne` keeps the reference a field of a different, older object holds.
+`step_objectReferenceField_eq` and `step_setObjectReferenceField_eq` step the field accesses;
+`loadSlot_of_access` and `storeSlot_of_access` reduce them, given the slot's access check, to
+the held reference and to `setSlot`, which `setSlot_slots_same` and `setSlot_slots_of_ne` read
+back and which leaves bytes, authority and field locations unchanged (`read_setSlot`,
+`access_setSlot`, `objectFieldAddress_setSlot`). [LinkedNodes](../Examples/Proofs/LinkedNodes.lean)
+composes `Link` and `SecondValue` through their contracts, keeps the linked node's `Value` across
+the one slot `Link` writes, proves both null faults of `SecondValue` at their pcs, and shows
+`Link`'s postcondition is stable under `BytesBelow` and `SlotsAgreeBelow`, the premise
+`MethodContract.Holds.of_allocationRenaming` needs: it names only caller references, which
+`SlotsAgreeBelow.held` keeps.
+[BumpBoth](../Examples/Proofs/BumpBoth.lean) composes two calls of `Bump` through one
+`MethodContract`, proves the distinct and the aliased case, and states the null receiver's
+`NullReferenceException` as an `OutcomeContract`.
+
+An instance call compiled as `callvirt` steps like a call once its receiver forms as a live
+object (`step_callInstance_eq`, `receiverCall_address`), so `cil_contract_steps` composes it
+through the callee's contract; a null receiver steps to `NullReferenceException` at the
+`callvirt` itself (`receiverCall_null`). [DepositBoth](../Examples/Proofs/DepositBoth.lean)
+composes two `callvirt` calls of `Account.Deposit` and proves the null receiver's fault at the
+caller's pc. [DepositTimes](../Examples/Proofs/DepositTimes.lean) crosses the same call inside a
+loop with `cil_loop_call`, holding the balance as `Contents` and `Writable` facts; the loop
+tactics carry a `Contents` fact across a call only when it is apart from the callee's footprint,
+so a fact the call may change is restated from the contract's postcondition.
+
+A method that constructs an instance steps its `newobj` with `allocateObject_ok`, given
+well-formed memory and a `Memory.heapBudget` covering the instance, or `allocateObject_insufficient`
+for the `allocationFailure` fault when it does not. `objectMemory_formObject`, `objectMemory_field`
+and `objectMemory_access` give the fresh instance's formation, field addresses and access, and
+`allocateObject_effect` its `MemoryBelow` frame for the caller; `objectMemory_field` takes the
+field's declaring class as a member of the instance's `RuntimeType.lineage`, so it covers fields
+of a base class too.
+[FreshObject](../Examples/Proofs/FreshObject.lean) proves both outcomes, stepping the
+constructor's call in place, and [DerivedObject](../Examples/Proofs/DerivedObject.lean) steps a
+derived class's constructor through its base's.
+
 ## Construct structs through contracts
 
 A `newobj` of a reference-free struct allocates caller-owned storage, writes zero to every byte,

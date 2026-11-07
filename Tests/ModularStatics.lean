@@ -32,13 +32,11 @@ example : (invoke linked 16 0 [] Memory.empty).map (fun result => result.1.stati
 private def afterApp : Safety.Memory :=
   ((staticReference appField Memory.empty).toOption.getD (Memory.empty, ⟨0, 0⟩)).1
 private theorem app_loaded : staticReference appField Memory.empty = .ok (afterApp, ⟨0, 0⟩) := rfl
-private theorem empty_formed : Memory.empty.WellFormed := by
-  simp [Safety.Memory.WellFormed, Memory.empty]
 private theorem app_formed : afterApp.WellFormed :=
-  staticReference_preserves_wellFormed _ _ _ _ empty_formed app_loaded
+  staticReference_preserves_wellFormed _ _ _ _ Memory.empty_wellFormed app_loaded
 
 private theorem app_world : StaticWorldValid [appField] afterApp :=
-  staticReference_preserves_static_world _ _ _ _ _ empty_formed
+  staticReference_preserves_static_world _ _ _ _ _ Memory.empty_wellFormed
     (empty_static_world_valid _ _ (by simp [appField, numberBytes, nativeLimit])
       (by simp) rfl) (by simp) app_loaded
 

@@ -28,6 +28,26 @@ theorem Memory.Equivalent.referenceEqual {m n : Memory} (same : m.Equivalent n)
 
 #print axioms Memory.Equivalent.referenceEqual
 
+/-- Object null tests depend only on the allocation table. -/
+theorem Memory.Equivalent.objectNonNull {m n : Memory} (same : m.Equivalent n)
+    (value : ManagedReference) : objectNonNull m value = objectNonNull n value := by
+  simp only [CIL.Safety.objectNonNull, same.formObject]
+
+/-- Object identity depends only on the allocation table. -/
+theorem Memory.Equivalent.objectEqual {m n : Memory} (same : m.Equivalent n)
+    (left right : ManagedReference) : objectEqual m left right = objectEqual n left right := by
+  simp only [CIL.Safety.objectEqual, same.formObject]
+
+/-- Object presence against null depends only on the allocation table. -/
+theorem Memory.Equivalent.objectAboveNull {m n : Memory} (same : m.Equivalent n)
+    (left right : ManagedReference) :
+    objectAboveNull m left right = objectAboveNull n left right := by
+  cases right <;> simp only [CIL.Safety.objectAboveNull, same.objectNonNull]
+
+#print axioms Memory.Equivalent.objectAboveNull
+#print axioms Memory.Equivalent.objectNonNull
+#print axioms Memory.Equivalent.objectEqual
+
 /-- Equivalent memories give the same unsigned pointer ordering. -/
 theorem Memory.Equivalent.referenceLess {m n : Memory} (same : m.Equivalent n)
     (left right : ManagedReference) : referenceLess m left right = referenceLess n left right := by
@@ -43,7 +63,7 @@ theorem Memory.Equivalent.referenceSubtract {m n : Memory} (same : m.Equivalent 
 theorem Memory.Equivalent.checkedValue {m n : Memory} (same : m.Equivalent n)
     (value : Value) : checkedValue m value = checkedValue n value := by
   cases value <;> simp only [CIL.Safety.checkedValue, same.formValue, same.spanValidate,
-    same.arrayValidate]
+    same.arrayValidate, same.formObject]
 
 theorem Memory.Equivalent.checkedValues {m n : Memory} (same : m.Equivalent n)
     (values : List Value) :
@@ -105,11 +125,51 @@ theorem Memory.Equivalent.allocateArray {m n : Memory} (same : m.Equivalent n)
            { target with cells := fun other offset =>
                if other == identity then ⟨0, true⟩ else target.cells other offset } :=
          ⟨equivalent.allocations, by simp only [equivalent.cells], equivalent.permissions,
-           equivalent.nextIdentity, equivalent.staticBindings, equivalent.stackLimit⟩
+           equivalent.nextIdentity, equivalent.staticBindings,
+               equivalent.stackLimit, equivalent.heapBudget, equivalent.slots⟩
        exact initialized.prependView _)
     | unfold checkedAt
     | split
 #print axioms Memory.Equivalent.allocateArray
+
+/-- Equivalent memories stay equivalent when both are given the same heap budget. -/
+theorem Memory.Equivalent.withHeapBudget {m n : Memory} (same : m.Equivalent n)
+    (budget : Nat) :
+    Memory.Equivalent { m with heapBudget := budget } { n with heapBudget := budget } :=
+  ⟨same.allocations, same.cells, same.permissions, same.nextIdentity, same.staticBindings,
+    same.stackLimit, rfl, same.slots⟩
+#print axioms Memory.Equivalent.withHeapBudget
+
+/-- Object allocation charges equal budgets and grants the same fresh zeroed storage. -/
+theorem Memory.Equivalent.allocateObject {m n : Memory} (same : m.Equivalent n)
+    (type : RuntimeType) (size : Nat) :
+    ResultEquivalent MemoryLastEquivalent (allocateObject m type size)
+      (allocateObject n type size) := by
+  unfold CIL.Safety.allocateObject
+  rw [same.heapBudget]
+  repeat first
+    | exact .error _
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.allocate _).mapError _)
+       intro left right related
+       obtain ⟨identity, source⟩ := left
+       obtain ⟨otherIdentity, target⟩ := right
+       obtain ⟨rfl, equivalent⟩ := related
+       change source.Equivalent target at equivalent
+       apply ResultEquivalent.ok
+       refine ⟨rfl, ?_⟩
+       have initialized : Memory.Equivalent
+           { source with cells := fun other offset =>
+               if other == identity then ⟨0, true⟩ else source.cells other offset }
+           { target with cells := fun other offset =>
+               if other == identity then ⟨0, true⟩ else target.cells other offset } :=
+         ⟨equivalent.allocations, by simp only [equivalent.cells], equivalent.permissions,
+           equivalent.nextIdentity, equivalent.staticBindings,
+               equivalent.stackLimit, equivalent.heapBudget, equivalent.slots⟩
+       exact (initialized.prependView _).withHeapBudget _)
+    | unfold checkedAt
+    | split
+#print axioms Memory.Equivalent.allocateObject
 
 /-- Array length decoding and allocation preserve exact outcomes over equivalent memories. -/
 theorem Memory.Equivalent.newArray {m n : Memory} (same : m.Equivalent n)
@@ -132,7 +192,8 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
   dsimp only
   split <;> try simp only [same.checkedValue, same.checkedValues, same.loadLocal, same.localAddress,
     same.referenceNonNull, same.referenceEqual, same.referenceDifference,
-    same.referenceLess, same.referenceSubtract]
+    same.referenceLess, same.referenceSubtract, same.objectNonNull, same.objectEqual,
+    same.objectAboveNull]
   all_goals repeat' first
     | exact same.managedStep _ _ _ _
     | (apply ResultEquivalent.bind (same.newArray _ _)
@@ -141,6 +202,12 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
        obtain ⟨otherView, otherMemory⟩ := right
        obtain ⟨rfl, equivalent⟩ := related
        exact .ok (.next equivalent _ _ _))
+    | (apply ResultEquivalent.bind (same.allocateObject _ _)
+       intro left right related
+       obtain ⟨object, memory⟩ := left
+       obtain ⟨otherObject, otherMemory⟩ := right
+       obtain ⟨rfl, equivalent⟩ := related
+       exact .ok (.call equivalent _ _ _))
     | (apply ResultEquivalent.bind (same.allocateStack _ _ _)
        intro left right related
        obtain ⟨reference, owner, allocated⟩ := left

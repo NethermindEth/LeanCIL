@@ -330,6 +330,162 @@ private theorem Memory.Renamed.wideArithmeticInstructionResult {mapping : Alloca
     | (split <;> try simp only [*, AllocationRenaming.managedReference, Bind.bind, Except.bind])
 #print axioms Memory.Renamed.wideArithmeticInstructionResult
 
+/-- Locating an object field maps the object's allocation and keeps every check and fault. -/
+theorem Memory.Renamed.objectFieldAddress {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (reference : ManagedReference)
+    (bound : reference.Below mapping.sourceLimit) (owner : CIL.Extraction.TypeExpr)
+    (offset : Nat) :
+    ResultRenamed mapping (fun left right => right = mapping.reference left)
+      (CIL.Safety.objectFieldAddress source reference owner offset)
+      (CIL.Safety.objectFieldAddress target (mapping.managedReference reference) owner
+        offset) := by
+  cases reference with
+  | null => exact .error _
+  | address reference =>
+    have allocations := related.allocations reference.allocation bound
+    have moved := related.checkedAdd reference bound 1 (BitVec.ofNat 64 offset)
+      (.address reference) 0
+    simp only [CIL.Safety.objectFieldAddress, AllocationRenaming.managedReference,
+      AllocationRenaming.reference, CIL.Safety.liveAllocation, checkedAt, Except.mapError,
+      Bind.bind, Except.bind] at moved ⊢
+    generalize source.allocations reference.allocation = sourceAllocation at allocations ⊢
+    generalize target.allocations (mapping.image reference.allocation) = targetAllocation
+      at allocations ⊢
+    cases allocations with
+    | none => exact .error (.memory .missingAllocation (.address reference) 0)
+    | @some sourceDescriptor targetDescriptor descriptors =>
+      obtain ⟨kinds, -, live, -⟩ := descriptors
+      dsimp only
+      rw [← live]
+      cases sourceDescriptor.live with
+      | false => exact .error (.memory .expiredLifetime (.address reference) 0)
+      | true =>
+        simp only [ite_true, Pure.pure, Except.pure]
+        revert kinds
+        generalize sourceDescriptor.kind = sourceKind
+        generalize targetDescriptor.kind = targetKind
+        intro kinds
+        cases kinds with
+        | frame => exact .error .invalidState
+        | same =>
+          cases sourceKind
+          all_goals first
+            | exact .error .invalidState
+            | (rename_i type
+               by_cases origin : reference.offset = 0 <;>
+                 by_cases typed : owner ∈ type.lineage <;>
+                 simp only [origin, typed, ne_eq, not_true_eq_false, not_false_eq_true,
+                   ite_true, ite_false]
+               all_goals first | exact .error _ | (simp only [origin] at moved; exact moved))
+#print axioms Memory.Renamed.objectFieldAddress
+
+/-- Changing the mapped field to the mapped reference keeps the memories related. -/
+theorem Memory.Renamed.setSlot {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (field : Reference)
+    (bound : field.allocation < mapping.sourceLimit) (value : ManagedReference) :
+    Memory.Renamed mapping scopes (CIL.Safety.setSlot source field value)
+      (CIL.Safety.setSlot target (mapping.reference field) (mapping.managedReference value)) := by
+  refine { related with slots := ?_ }
+  intro identity identityBound offset
+  simp only [CIL.Safety.setSlot, AllocationRenaming.reference]
+  by_cases same : identity = field.allocation
+  · subst same
+    by_cases located : offset = field.offset <;>
+      simp only [located, ite_true, ite_false, related.slots _ identityBound]
+  · have apart : mapping.image identity ≠ mapping.image field.allocation :=
+      fun images => same (mapping.injective _ _ identityBound bound images)
+    simp only [same, apart, ite_false, related.slots _ identityBound]
+#print axioms Memory.Renamed.setSlot
+
+/-- Loading the mapped field yields the mapped reference, or the same fault. -/
+theorem Memory.Renamed.loadSlot {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (formed : source.WellFormed)
+    (field : Reference) (bound : field.allocation < mapping.sourceLimit) :
+    ResultRenamed mapping (fun left right => right = mapping.value left)
+      (CIL.Safety.loadSlot source field)
+      (CIL.Safety.loadSlot target (mapping.reference field)) := by
+  unfold CIL.Safety.loadSlot
+  rw [related.access field bound]
+  have held : target.slots (mapping.reference field).allocation
+      (mapping.reference field).offset =
+      mapping.managedReference (source.slots field.allocation field.offset) :=
+    related.slots field.allocation bound field.offset
+  rw [held]
+  apply ((ResultEquivalent.eq_refl _).checkedAt (.address field) objectFieldSlot).bind
+  intro _ _ _
+  apply related.formObject
+  cases stored : source.slots field.allocation field.offset with
+  | null => trivial
+  | address reference =>
+    rw [related.sourceLimit]
+    exact formed.slots _ _ _ stored
+#print axioms Memory.Renamed.loadSlot
+
+/-- Storing the mapped reference into the mapped field relates the memories, or faults alike. -/
+theorem Memory.Renamed.storeSlot {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (field : Reference)
+    (bound : field.allocation < mapping.sourceLimit) (value : ManagedReference)
+    (valueBound : value.Below mapping.sourceLimit) :
+    ResultRenamed mapping (Memory.Renamed mapping scopes)
+      (CIL.Safety.storeSlot source field value)
+      (CIL.Safety.storeSlot target (mapping.reference field)
+        (mapping.managedReference value)) := by
+  unfold CIL.Safety.storeSlot
+  rw [related.access field bound]
+  apply ((ResultEquivalent.eq_refl _).checkedAt (.address field) objectFieldSlot).bind
+  intro _ _ _
+  apply (related.formObject value valueBound).bind
+  intro _ _ _
+  exact .ok (related.setSlot field bound value)
+#print axioms Memory.Renamed.storeSlot
+
+/-- Object field loads and stores touch the mapped field and relate their memories. -/
+private theorem Memory.Renamed.objectFieldInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (operation : CIL.MemoryOp)
+    (formed : source.WellFormed)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (objectFieldInstruction operation stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (objectFieldInstruction operation stack source)
+      (objectFieldInstruction operation (stack.map mapping.value) target) := by
+  unfold objectFieldInstruction at observable ⊢
+  split at observable
+  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try solve | repeat first | contradiction | cases observable | split at observable
+  all_goals clear observable
+  all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
+  all_goals repeat' rcases bounds with ⟨_, bounds⟩
+  all_goals repeat first
+    | exact .ok ⟨related, rfl⟩
+    | exact .error _
+    | (apply (related.objectFieldAddress _ (by assumption) _ _).bindWithSuccess
+       intro first second sourceStep same
+       have addressBound := objectFieldAddress_below (by assumption) sourceStep
+       subst second)
+    | (apply (related.loadValue (.address _) (by assumption) _ _).bindWithSuccess
+       intro first second sourceStep same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply (related.checkedWrite _ (by assumption) _ _ _ _).bindWithSuccess
+       intro first second sourceStep memoryRelated
+       exact .ok ⟨memoryRelated, rfl⟩)
+    | (apply (related.loadSlot formed _ (by assumption)).bind
+       intro first second same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply (related.storeSlot _ (by assumption) _ (by assumption)).bind
+       intro first second memoryRelated
+       exact .ok ⟨memoryRelated, rfl⟩)
+    | (split <;> try simp only [*, AllocationRenaming.managedReference, Bind.bind, Except.bind])
+#print axioms Memory.Renamed.objectFieldInstructionResult
+
 /-- Ordinary memory effects transport independently of the whole-span dispatch families. -/
 private theorem Memory.Renamed.otherMemoryInstructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -675,6 +831,10 @@ theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
     · exact related.arrayFillInstructionResult formed _ _ _ bounds observable
     · exact related.wideArithmeticInstructionResult _ _ bounds observable
     · exact related.wideArithmeticInstructionResult _ _ bounds observable
+    · exact related.objectFieldInstructionResult _ formed _ bounds observable
+    · exact related.objectFieldInstructionResult _ formed _ bounds observable
+    · exact related.objectFieldInstructionResult _ formed _ bounds observable
+    · exact related.objectFieldInstructionResult _ formed _ bounds observable
     · exact related.otherMemoryInstructionResult _ formed _ bounds observable
 
 #print axioms Memory.Renamed.memoryInstructionResult

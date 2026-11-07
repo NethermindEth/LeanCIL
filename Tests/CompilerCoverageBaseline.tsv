@@ -1,4 +1,5 @@
 method	4.14.0/default	4.14.0/latest	5.0.0/14	5.0.0/default	5.0.0/latest	5.9.0/14	5.9.0/default	5.9.0/latest
+Examples:Examples.Account Examples.Objects::FirstPresent(Examples.Account,Examples.Account)	A	A	A	A	A	A	A	A
 Examples:Examples.AggregateArrays/Pair Examples.AggregateArrays::Read(Examples.AggregateArrays/Pair[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:Examples.AggregateArrays/Pair& Examples.AggregateArrays::Address(Examples.AggregateArrays/Pair[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:Examples.AggregateArrays/Pair& Examples.AggregateArrays::Data(Examples.AggregateArrays/Pair[])	A	A	A	A	A	A	A	A
@@ -143,6 +144,10 @@ Examples:System.Boolean Examples.MarshaledMemory::TryWrite(System.Span`1<System.
 Examples:System.Boolean Examples.MemorySpans::BooleanWrite(System.Span`1<System.Boolean>,System.Int32,System.Boolean)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.NullReferences::IsLive(System.UInt64&)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.NullReferences::IsNull()	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.Objects::IsNull(Examples.Account)	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.Objects::IsPresent(Examples.Account)	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.Objects::Same(Examples.Account,Examples.Account)	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.Objects::TwoMarkers()	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.PointerOperations::Greater(System.Byte*,System.Byte*)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.PointerOperations::GreaterEqual(System.Byte*,System.Byte*)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.PointerOperations::Less(System.Byte*,System.Byte*)	A	A	A	A	A	A	A	A
@@ -703,6 +708,7 @@ Examples:System.UInt32 SelectorExamples.One.Collision::Add(System.UInt32,System.
 Examples:System.UInt32& Examples.UnsafeLayouts::Add7int(System.UInt32&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32& Examples.UnsafeLayouts::Add7nint(System.UInt32&,System.IntPtr)	A	A	A	A	A	A	A	A
 Examples:System.UInt32& Examples.UnsafeLayouts::Add7nuint(System.UInt32&,System.UIntPtr)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Account::get_Headroom()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.AddStep::Apply(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Arguments::Struct(Examples.Packet)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
@@ -849,6 +855,13 @@ Examples:System.UInt64 Examples.NullReferences::Optional(Examples.FourLimbs&,Sys
 Examples:System.UInt64 Examples.NullReferences::Read()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.NullReferences::ReadField()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.NullReferences::Unchecked(Examples.FourLimbs&,System.Boolean)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Objects::BalanceOf(Examples.Account)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Objects::Describe(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Objects::Fresh(System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Objects::IdOf(Examples.Shape)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Objects::LinkedValue(Examples.Node,Examples.Node)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Objects::Replace(Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Objects::SecondValue(Examples.Node)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.PackedConstructor::Sum()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.PointerOperations::WriteEnum(Examples.Unsigned64*,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.PrimitiveArrays::ReadUInt64(System.UInt64[],System.Int32)	A	A	A	A	A	A	A	A
@@ -951,6 +964,8 @@ Examples:System.ValueTuple`2<System.UInt32,System.UInt32> Examples.TupleDivision
 Examples:System.ValueTuple`2<System.UInt64,System.UInt64> Examples.TupleDivision::MathUInt64(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.ValueTuple`2<System.UInt64,System.UInt64> Examples.TupleDivision::Pair(System.UInt64,System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.ValueTuple`2<System.UIntPtr,System.UIntPtr> Examples.TupleDivision::MathUIntPtr(System.UIntPtr,System.UIntPtr)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Account::.ctor()	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Account::Deposit(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.AggregateArrays::Write(Examples.AggregateArrays/Pair[],System.Int32,Examples.AggregateArrays/Pair)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.AggregateArrays::WriteVector(System.Runtime.Intrinsics.Vector128`1<System.UInt64>[],System.Int32,System.Runtime.Intrinsics.Vector128`1<System.UInt64>)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.AggregateSpanFill::Aliased(System.Span`1<Examples.AggregateSpans/Words>)	A	A	A	A	A	A	A	A
@@ -975,6 +990,7 @@ Examples:System.Void Examples.Blocks::FillAligned(System.Byte&,System.Byte,Syste
 Examples:System.Void Examples.Blocks::FillPointer(System.Byte*,System.Byte,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Blocks::FillPointerAligned(System.Byte*,System.Byte,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.CheckedConstructor::.ctor(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Circle::.ctor(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ConstructorLeaf::.ctor(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Counter::.ctor(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Counter::Increment(System.Byte&)	A	A	A	A	A	A	A	A
@@ -1009,6 +1025,7 @@ Examples:System.Void Examples.InitializedValue::.cctor()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.Loops::FillWords(System.UInt64&,System.UInt64,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Loops::Stamp(System.UInt32&,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ManagedDispatch::Targets(method System.Int32 *(System.Int32)[])	B	B	B	B	B	B	B	B
+Examples:System.Void Examples.Marker::.ctor()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.MarshaledMemory::Write(System.Span`1<System.Byte>,System.UInt64&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.MarshaledMemory::WriteAggregate(System.Span`1<System.Byte>,Examples.FourLimbs&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.MemorySpans::ClearBytes(System.Span`1<System.Byte>)	A	A	A	A	A	A	A	A
@@ -1017,8 +1034,15 @@ Examples:System.Void Examples.MemorySpans::FillIntegers(System.Span`1<System.Int
 Examples:System.Void Examples.MemorySpans::FillLongSlice(System.Span`1<System.Int64>,System.Int32,System.Int32,System.Int64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.MemorySpans::Write(System.Span`1<System.Int32>,System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.NestedConstructor::.ctor(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Node::.ctor()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.NullReferences::Write(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.NullReferences::WriteField(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Objects::Bump(Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Objects::BumpBoth(Examples.Account,Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Objects::DepositBoth(Examples.Account,Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Objects::DepositTimes(Examples.Account,System.UInt64,System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Objects::Link(Examples.Node,Examples.Node)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Objects::SetLimit(Examples.Account,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PackedConstructor::.ctor(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PackedConstructor::.ctor(System.UInt64,System.Byte)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PrimitiveArrays::FillEnums(Examples.AllocationTag[],Examples.AllocationTag)	A	A	A	A	A	A	A	A
@@ -1041,6 +1065,7 @@ Examples:System.Void Examples.PrimitiveArrays::WriteUInt32(System.UInt32[],Syste
 Examples:System.Void Examples.PrimitiveArrays::WriteUInt64(System.UInt64[],System.Int32,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PrimitiveArrays::WriteUIntPtr(System.UIntPtr[],System.Int32,System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.SeededHash::.cctor()	B	B	B	B	B	B	B	B
+Examples:System.Void Examples.Shape::.ctor(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.SkipInitialization::Skip(Examples.FourLimbs&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.SkipInitialization::Store(Examples.FourLimbs&,System.UInt64,System.UInt64,System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.SpanCopies::Copy(System.Span`1<System.Byte>,System.Span`1<System.Byte>)	A	A	A	A	A	A	A	A
@@ -1060,6 +1085,7 @@ Examples:System.Void Examples.StaticValues::Select(System.Boolean,Examples.Word2
 Examples:System.Void Examples.StructMethods::ChangeCopy(Examples.Counter)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.TailCalls::ForwardVoid(System.Int32&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.TailCalls::Store(System.Int32&)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Tally::.ctor(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Throws::ThrowDivideByZero()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Throws::ThrowNull()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.TypedCopy::Packet(Examples.Packet&,Examples.Packet&)	A	A	A	A	A	A	A	A
@@ -1113,7 +1139,7 @@ ImportFixture.App:System.UInt64 ImportFixture.Application::Entry(System.UInt64)	
 ImportFixture.App:System.UInt64 ImportFixture.Application::Generic(System.UInt64)	B	B	B	B	B	B	B	B
 ImportFixture.App:System.UInt64 ImportFixture.Application::Unrelated(System.UInt64)	A	A	A	A	A	A	A	A
 ImportFixture.Lib:System.UInt64 ImportFixture.Library::AddOne(System.UInt64)	A	A	A	A	A	A	A	A
-ImportFixture.Lib:System.Void ImportFixture.Library::.ctor()	B	B	B	B	B	B	B	B
+ImportFixture.Lib:System.Void ImportFixture.Library::.ctor()	A	A	A	A	A	A	A	A
 ImportFixture.Lib:T ImportFixture.Library::Identity(T)	B	B	B	B	B	B	B	B
 NativeProbe:<>f__AnonymousType1`3<System.String,System.String,System.String[]> Program/<>c::<<Main>$>b__0_3(Mono.Cecil.MethodDefinition)	B	B	B	B	B	B	B	B
 NativeProbe:<architecture>j__TPar <>f__AnonymousType0`15::get_architecture()	B	B	B	B	B	B	B	B
@@ -1152,4 +1178,4 @@ NativeProbe:System.Void <>f__AnonymousType0`15::.ctor(<framework>j__TPar,<archit
 NativeProbe:System.Void <>f__AnonymousType1`3::.ctor(<name>j__TPar,<signature>j__TPar,<instructions>j__TPar)	B	B	B	B	B	B	B	B
 NativeProbe:System.Void Program/<>c::.cctor()	B	B	B	B	B	B	B	B
 NativeProbe:System.Void Program/<>c::.ctor()	B	B	B	B	B	B	B	B
-NativeProbe:System.Void Program::.ctor()	B	B	B	B	B	B	B	B
+NativeProbe:System.Void Program::.ctor()	A	A	A	A	A	A	A	A

@@ -34,9 +34,11 @@ theorem ManagedTarget.find?_relocate (f : Nat → Nat) (catalog : List ManagedTa
     dispatches its operand. -/
 def Op.relocate (f : Nat → Nat) : Op → Op
   | .call method argc => .call (f method) argc
+  | .callInstance method argc => .callInstance (f method) argc
   | .tailCall method argc => .tailCall (f method) argc
   | .newVector256 method argc => .newVector256 (f method) argc
   | .newAggregate method argc size => .newAggregate (f method) argc size
+  | .newObject method argc owner bases size => .newObject (f method) argc owner bases size
   | .managed (.call signature catalog tail) =>
     .managed (.call signature (catalog.map (ManagedTarget.relocate f)) tail)
   | op => op

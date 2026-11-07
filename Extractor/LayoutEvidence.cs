@@ -170,7 +170,9 @@ internal sealed class LayoutEvidence
                         ".ctor" or "get_Empty"))
                     uses.Add($".size {pc} {Index(spanOwner.GenericArguments[0])} .spanElement");
             }
-            if (instruction.OpCode.Code is Code.Ldfld or Code.Stfld or Code.Ldflda)
+            // Class fields sit at model offsets that Lean rechecks without a layout table.
+            if (instruction.OpCode.Code is Code.Ldfld or Code.Stfld or Code.Ldflda &&
+                !ObjectTypes.Candidate(((FieldReference)instruction.Operand).DeclaringType))
             {
                 var reference = (FieldReference)instruction.Operand;
                 var field = reference.Resolve();

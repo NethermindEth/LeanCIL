@@ -33,9 +33,10 @@ theorem Memory.Renamed.confined {mapping : AllocationRenaming}
     (extension : (AllocationRenaming.identity initial.nextIdentity).Extends mapping)
     (sourceLifetime : AllocationsBelow initial source initial.nextIdentity)
     (targetLifetime : AllocationsBelow initial target initial.nextIdentity)
-    (confined : MemoryBelow initial.nextIdentity initial source) :
+    (formed : initial.WellFormed) (confined : MemoryBelow initial.nextIdentity initial source) :
     MemoryBelow initial.nextIdentity initial target :=
-  (related.callerPrefix extension sourceLifetime targetLifetime).confined confined
+  (related.callerPrefix extension sourceLifetime targetLifetime).confined formed (Nat.le_refl _)
+    confined
 #print axioms Memory.Renamed.confined
 
 end CIL.Safety

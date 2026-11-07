@@ -62,12 +62,12 @@ theorem ArrayAllocationEffect.wellFormed {memory result : Memory} {view : ArrayV
   cases effect with
   | fresh _ _ allocation =>
     have ready := allocate_preserves_wellFormed _ _ _ _ valid allocation
-    refine ⟨ready.1, ?_⟩
+    refine { allocations := ready.allocations, views := ?_, slots := ready.slots }
     intro permission member
     rcases List.mem_cons.mp member with rfl | member
     · have found := allocation_lookup _ _ _ _ allocation
       exact ⟨_, found, by simp⟩
-    · exact ready.2 permission member
+    · exact ready.views permission member
 
 #print axioms ArrayAllocationEffect.wellFormed
 
@@ -99,7 +99,7 @@ theorem ArrayAllocationEffect.below {memory result : Memory} {view : ArrayView}
   | fresh _ _ allocation =>
     have before := allocate_preserves_memory_below _ _ _ _ allocation
     have fresh := (allocation_identity_fresh _ _ _ _ allocation).1
-    refine before.trans ⟨fun _ _ => rfl, ?_, ?_⟩
+    refine before.trans ⟨fun _ _ => rfl, ?_, ?_, fun _ _ _ => rfl⟩
     · intro identity old offset
       simp only [arrayMemory, fresh, beq_iff_eq, if_neg (Nat.ne_of_lt old)]
     · intro identity old offset writing

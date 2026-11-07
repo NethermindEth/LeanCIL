@@ -107,7 +107,7 @@ Test("test entry points", () =>
 });
 Test("proof and transitive imports", () =>
 {
-    Equal(VerificationSelection.Select(["Examples/Proofs/Countdown.lean"]), ["contracts", "fsharp", "loops"]);
+    Equal(VerificationSelection.Select(["Examples/Proofs/Countdown.lean"]), ["cli", "contracts", "fsharp", "loops"]);
     Equal(VerificationSelection.Select(["Tests/Support.lean"]), All());
     Equal(VerificationSelection.Select(["Tests/UnsafeCallEvidence.lean"]), ["unsafe"]);
 });

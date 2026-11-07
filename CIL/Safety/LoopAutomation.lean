@@ -2,6 +2,7 @@ import CIL.Safety.Loops
 import CIL.Safety.SymbolicExecution
 import CIL.Safety.LoopFacts
 import CIL.Safety.Obligations
+import CIL.Safety.MissingFacts
 
 /-!
 # Loop path automation
@@ -263,56 +264,9 @@ def LoopFacts.readBy (facts : LoopFacts) (op : Lean.Name) (references : Bool) :
     if loopMovesOnly.contains op then #[] else facts.cases,
     if references then facts.references else #[]]
 
-open Lean Meta in
 /-- A hint naming the fact a stuck step needs, from the residual of that step. -/
-def loopMissingHint (residual : Array Expr) : MetaM MessageData := do
-  let mentions (name : Name) : Bool :=
-    residual.any fun goal => (goal.find? fun term => term.isConstOf name).isSome
-  let spanLocal := residual.any fun goal => (goal.find? fun term =>
-    term.isAppOf ``loadLocal && term.getAppNumArgs >= 2 &&
-      (term.getArg! 1).isAppOf ``LocalSlot.span).isSome
-  if spanLocal || mentions ``SpanView.validate then
-    return m!"the span's validity at this memory: a `CheckedSpan` of the caller's memory, which \
-      the loop tactics read in every frame memory, or `view.validate memory = .ok ()`"
-  if mentions ``SpanView.slice then
-    return m!"the slice: `view.slice memory start length = .ok sliced`, such as from \
-      `CheckedSpan.tail` at the caller's memory"
-  if mentions ``SpanView.element then
-    return m!"the element's address: `view.element memory index = .ok item`, such as from \
-      `CheckedSpan.head`"
-  if mentions ``add then
-    return m!"the `Unsafe.Add` result: `add memory base width offset = .ok reference` at this \
-      memory or the caller's, such as `Writable.add_int`"
-  if mentions ``form || mentions ``formValue then
-    return m!"that the reference forms: `form memory reference = .ok reference`, or an `access` \
-      or `add` fact it follows from, at this memory or the caller's"
-  if mentions ``loadValue || mentions ``read then
-    return m!"what the load reads: a `loadValue` fact at this memory, such as from \
-      `(span.within wellFormed frame).head`"
-  if mentions ``storeLocal || mentions ``storeValue || mentions ``write then
-    return m!"the step equation of a store with this stack"
-  return m!"a `LoopFrame` at this memory for a local, or the step equation of a store with this \
-    stack"
-
-open Lean Elab Tactic Meta in
-/-- The step goal `step` rewritten as far as the step equations and `prepared` go: the goals left,
-    or `none` when nothing rewrites it. -/
-def loopStepResidual (step : MVarId) (prepared : Array Term) : TacticM (Option (Array Expr)) := do
-  let saved ← saveState
-  try
-    let remaining ← Tactic.run step <| Term.withoutErrToSorry <| withoutRecover <|
-      evalTactic (← `(tactic| (
-        simp only [cil_instruction_step, cil_step, cil_guard, CIL.Safety.instructionStep,
-          $[$prepared:term],*]
-        try simp [cil_guard, cil_checked, CIL.Safety.checkedValue, CIL.Safety.numericValue,
-          CIL.Safety.scalars, CIL.Safety.formValue, CIL.Safety.checkedAt, Except.mapError,
-          Bind.bind, Except.bind, Pure.pure, Except.pure, $[$prepared:term],*])))
-    let goals ← remaining.mapM fun goal => do instantiateMVars (← goal.getType)
-    saved.restore
-    return some goals.toArray
-  catch _ =>
-    saved.restore
-    return none
+def loopMissingHint (residual : Array Lean.Expr) : Lean.MetaM Lean.MessageData :=
+  return (missingFactOf residual).hint
 
 open Lean Elab Tactic Meta in
 /-- Fail, as `tactic`, naming why the loop goal cannot be stepped: an undecided branch, an
@@ -336,13 +290,13 @@ def loopStuck (tactic : String) (facts prepared : Array Term)
   let stepGoal := fetched.step
   let opName := ((← whnfR op).getAppFn.constName?).getD Name.anonymous
   if stops opName then saved.restore; return
-  if opName == ``CIL.Op.call then
+  if callsCallee opName then
     saved.restore
     throwError "{tactic}: pc {position} is a call ({op}); cross it with `cil_loop_call` and the \
       callee's contract"
   let obligation := loopLiteralSums (← instantiateMVars (← stepGoal.getType))
   -- The step rewritten as far as its equations and the facts go shows the term left unproved.
-  let residual ← loopStepResidual stepGoal prepared
+  let residual ← stepResidual stepGoal prepared
   saved.restore
   let shown := match residual with
     | some goals => MessageData.joinSep (goals.toList.map (m!"{loopLiteralSums ·}")) "\n"
@@ -418,7 +372,7 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepa
   let stops : Lean.Name → Bool := match mode with
     | .reach => fun _ => false
     | .finish => (· == ``CIL.Op.ret)
-    | .advance => fun op => op == ``CIL.Op.call || op == ``CIL.Op.ret
+    | .advance => fun op => callsCallee op || op == ``CIL.Op.ret
     | .resume _ => fun op => op == ``CIL.Op.setFieldAt || op == ``CIL.Op.initAggregate
   -- A struct store no fact steps ends any walk but `.reach`, for the frame lemmas to take.
   let yields : Lean.Name → Bool := fun op => stops op || (mode != .reach &&

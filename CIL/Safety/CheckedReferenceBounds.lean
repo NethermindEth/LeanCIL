@@ -18,7 +18,7 @@ theorem Memory.WellFormed.form_below {memory : Memory} (formed : memory.WellForm
   cases found : liveAllocation memory reference.allocation with
   | error fault => simp only [found, Bind.bind, Except.bind] at success; cases success
   | ok allocation =>
-    exact (formed.1 _ _ (liveAllocation_ok _ _ _ found).1).1
+    exact (formed.allocations _ _ (liveAllocation_ok _ _ _ found).1).1
 #print axioms Memory.WellFormed.form_below
 
 /-- Extracting a non-null address preserves its prefix bound. -/
@@ -29,6 +29,26 @@ theorem referenceAt_below {limit : Nat} {reference : ManagedReference} {address 
   | null => cases success
   | address source => cases success; exact bound
 #print axioms referenceAt_below
+
+/-- A located object field lies in the object's own allocation. -/
+theorem objectFieldAddress_below {limit : Nat} {memory : Memory} {reference : ManagedReference}
+    {owner : CIL.Extraction.TypeExpr} {offset : Nat} {address : Reference}
+    (bound : reference.Below limit)
+    (located : objectFieldAddress memory reference owner offset = .ok address) :
+    address.allocation < limit := by
+  cases reference with
+  | null => cases located
+  | address source =>
+    unfold objectFieldAddress at located
+    simp only [Bind.bind, Except.bind, checkedAt, Except.mapError] at located
+    repeat' first
+      | contradiction
+      | (cases moved : add memory source 1 (BitVec.ofNat 64 offset) <;>
+           simp only [moved] at located <;> cases located
+         rw [add_preserves_provenance _ _ _ _ _ moved]
+         exact bound)
+      | split at located
+#print axioms objectFieldAddress_below
 
 /-- Valid spans carry null or an address in the allocated prefix. -/
 theorem Memory.WellFormed.span_below {memory : Memory} (formed : memory.WellFormed)
@@ -44,13 +64,13 @@ theorem Memory.WellFormed.span_below {memory : Memory} (formed : memory.WellForm
       | contradiction
       | solve |
           have found : liveAllocation memory address.allocation = .ok _ := by assumption
-          exact (formed.1 _ _ (liveAllocation_ok _ _ _ found).1).1
+          exact (formed.allocations _ _ (liveAllocation_ok _ _ _ found).1).1
       | cases valid
       | split at valid
       | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at valid
     all_goals try simp_all only [ManagedReference.address.injEq]
     all_goals subst_vars
-    all_goals exact (formed.1 _ _ (liveAllocation_ok _ _ _ (by assumption)).1).1
+    all_goals exact (formed.allocations _ _ (liveAllocation_ok _ _ _ (by assumption)).1).1
 #print axioms Memory.WellFormed.span_below
 
 /-- Every valid checked value has bounded allocation identities in well-formed memory. -/
@@ -64,6 +84,16 @@ theorem Value.Valid.below {memory : Memory} (formed : memory.WellFormed)
     cases reference with
     | null => trivial
     | address address => exact formed.form_below valid
+  | object reference =>
+    cases reference with
+    | null => trivial
+    | address address =>
+      change address.allocation < memory.nextIdentity
+      cases found : memory.allocations address.allocation with
+      | none =>
+        simp [Value.Valid, formObject, liveAllocation, found, checkedAt, Except.mapError,
+          Bind.bind, Except.bind] at valid
+      | some allocation => exact (formed.allocations _ _ found).1
 #print axioms Value.Valid.below
 
 /-- A valid evaluation stack supplies all bounds required by allocation renaming. -/

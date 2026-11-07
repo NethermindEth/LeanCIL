@@ -197,4 +197,91 @@ theorem Memory.Renamed.stepNewArray {indices : LocalIndexMap} {mapping : Allocat
 
 #print axioms Memory.Renamed.stepNewArray
 
+/-- Heap-budget and allocator faults cannot discharge a named exception obligation. -/
+theorem allocateObject_not_thrown (memory : Memory) (type : RuntimeType) (size : Nat)
+    (exception : String) : allocateObject memory type size ≠ .error (.thrown exception) := by
+  intro raised
+  unfold allocateObject checkedAt at raised
+  repeat' first
+    | cases raised
+    | split at raised
+    | simp only [Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure] at raised
+  all_goals rename_i found
+  all_goals split at found <;> cases found
+#print axioms allocateObject_not_thrown
+
+/-- `newobj` transports its fresh instance and checked arguments into the constructor call, and
+    leaves the instance under the same mapped caller stack. -/
+theorem Memory.Renamed.stepNewObject {indices : LocalIndexMap} {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
+    (related : Memory.Renamed mapping scopes source target)
+    (sourceFormed : source.WellFormed) (targetFormed : target.WellFormed)
+    (staticBounds : ∀ binding ∈ source.staticBindings,
+      binding.2.allocation < mapping.sourceLimit)
+    (sourceBody targetBody : CIL.Method) (callee argc : Nat) (owner : CIL.Extraction.TypeExpr)
+    (bases : List CIL.Extraction.TypeExpr)
+    (size pc : Nat) (arguments stack : List Value)
+    (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow
+      (step sourceBody (.newObject callee argc owner bases size) pc arguments sourceFrame stack
+        source)) :
+    ∃ later, mapping.Extends later ∧
+      ResultRenamed later (FrameAction.Renamed indices later scopes)
+        (step sourceBody (.newObject callee argc owner bases size) pc arguments sourceFrame stack
+          source)
+        (step targetBody (.newObject callee argc owner bases size) pc (arguments.map mapping.value)
+          targetFrame (stack.map mapping.value) target) := by
+  simp only [step, mapping.unspecifiedOperands, Bool.or_false, List.length_map,
+    ← List.map_take, ← List.map_drop, ← List.map_reverse] at observable ⊢
+  by_cases guard :
+      unspecifiedOperands (observerCount (.newObject callee argc owner bases size)) stack = true
+  · simp only [guard, ite_true, SuccessOrThrow] at observable
+  · simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
+    by_cases short : stack.length < argc
+    · simp only [short, ite_true]
+      exact ⟨mapping, .refl mapping, .error _⟩
+    · simp only [short, ite_false] at observable ⊢
+      have checks := related.checkedValues (stack.take argc).reverse (by
+        intro value member
+        exact bounds value (List.mem_of_mem_take (List.mem_reverse.mp member)))
+      cases checked : (stack.take argc).reverse.mapM (CIL.Safety.checkedValue source) with
+      | error fault =>
+        rw [checked] at checks
+        generalize ((stack.take argc).reverse.map mapping.value).mapM
+          (CIL.Safety.checkedValue target) = targetChecked at checks ⊢
+        cases checks
+        exact ⟨mapping, .refl mapping, .error fault⟩
+      | ok operands =>
+        have operandBounds : ∀ value ∈ operands, value.Below mapping.sourceLimit := by
+          intro value member
+          rw [related.sourceLimit]
+          exact ((checkedValues_valid _ _ _ checked).2 value member).below sourceFormed
+        rw [checked] at checks
+        obtain ⟨targetOperands, targetChecked, rfl⟩ := checks.success
+        simp only [checked, Bind.bind, Except.bind] at observable
+        cases allocated : CIL.Safety.allocateObject source ⟨owner, bases⟩ size with
+        | error fault =>
+          rw [allocated] at observable
+          cases fault <;> simp only [SuccessOrThrow] at observable
+          rename_i exception
+          exact False.elim (allocateObject_not_thrown source _ _ exception allocated)
+        | ok result =>
+          obtain ⟨object, sourceAfter⟩ := result
+          obtain ⟨targetAfter, targetAllocated, memories⟩ := related.allocateObject sourceFormed
+            targetFormed staticBounds _ size object sourceAfter allocated
+          refine ⟨mapping.allocate, mapping.allocate_extends, ?_⟩
+          simp only [checked, targetChecked, allocated, targetAllocated, Bind.bind, Except.bind]
+          have operandsSame := mapping.allocate_extends.values operands operandBounds
+          have restSame := mapping.allocate_extends.values (stack.drop argc) (by
+            intro value member
+            exact bounds value (List.mem_of_mem_drop member))
+          rw [← operandsSame, ← restSame]
+          simpa only [List.map_cons, AllocationRenaming.value,
+            AllocationRenaming.managedReference, Pure.pure, Except.pure] using
+            ResultRenamed.ok (FrameAction.Renamed.call (indices := indices) (callee := callee)
+              (arguments := .object (.address object) :: operands)
+              (rest := .object (.address object) :: stack.drop argc) memories)
+
+#print axioms Memory.Renamed.stepNewObject
+
 end CIL.Safety

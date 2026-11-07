@@ -92,7 +92,7 @@ foreach (var (name, signature, arguments, expected) in new[]
     ("InPlaceArrayConstructor", "System.Int32[],System.Int32,System.Int32",
         "[.array ⟨.address ⟨0, 0⟩, 3, .signed32⟩, .scalar (.i32 1), .scalar (.i32 2)]", 7),
     ("InPlaceArrayLength", "System.Int32[],System.Int32,System.Int32",
-        "[.reference .null, .scalar (.i32 0), .scalar (.i32 0)]", 0),
+        "[.object .null, .scalar (.i32 0), .scalar (.i32 0)]", 0),
     ("ReinitializeArraySpan", "System.Int32[],System.Int32,System.Int32",
         "[.array ⟨.address ⟨0, 0⟩, 3, .signed32⟩, .scalar (.i32 1), .scalar (.i32 2)]", 9),
     ("InPlacePointerSpan", "System.Int32*,System.Int32",
@@ -123,7 +123,7 @@ foreach (var (name, signature, arguments, expected) in new[]
 
             theorem constructor_fault_keeps_call_pc :
                 (CIL.Safety.invoke Extracted.program 64 0
-                  [.reference .null, .scalar (.i32 1), .scalar (.i32 0)] spanMemory).map Prod.snd =
+                  [.object .null, .scalar (.i32 1), .scalar (.i32 0)] spanMemory).map Prod.snd =
                   .error ⟨0, 4, .thrown "System.ArgumentOutOfRangeException"⟩ := rfl
             #print axioms constructor_fault_keeps_call_pc
 
@@ -292,7 +292,7 @@ foreach (var (name, signature, element, width, writable, range) in new[]
 
         theorem compiled_null_array_span :
             (CIL.Safety.invoke Extracted.program 64 0
-              [.reference .null{{zeros}}] arrayMemory).map Prod.snd =
+              [.object .null{{zeros}}] arrayMemory).map Prod.snd =
               .ok [.bufferSpan ⟨.null, 0, {{width}}, {{capability}}⟩] := rfl
         #print axioms compiled_null_array_span
         """);
@@ -318,7 +318,7 @@ foreach (var (name, signature, element, width, writable, range) in new[]
 
             theorem compiled_null_invalid_start :
                 (CIL.Safety.invoke Extracted.program 64 0
-                  [.reference .null, .scalar (.i32 1){{tail}}] arrayMemory).map Prod.snd =
+                  [.object .null, .scalar (.i32 1){{tail}}] arrayMemory).map Prod.snd =
                   .error ⟨0, {{range + 1}}, .thrown "System.ArgumentOutOfRangeException"⟩ := rfl
             #print axioms compiled_null_invalid_start
             """);

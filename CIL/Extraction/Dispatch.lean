@@ -331,6 +331,8 @@ private def typeKeyInto : TypeExpr → List (List UInt8) → List (List UInt8)
     keyBytes "constructor" :: keyBytes scope :: keyBytes name :: rest
   | .apply constructor argument, rest =>
     keyBytes "apply" :: typeKeyInto constructor (typeKeyInto argument rest)
+  | .object scope name, rest =>
+    keyBytes "object" :: keyBytes scope :: keyBytes name :: rest
 
 /-- Raw metadata and its order-preserving method candidate indexes. -/
 structure DispatchTypeIndex where

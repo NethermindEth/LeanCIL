@@ -36,7 +36,7 @@ theorem staticReference_preserves_memory_below (descriptor : CIL.StaticDescripto
       cases resolved
       have retained := allocate_preserves_memory_below _ _ _ _ allocated
       have fresh := (allocation_identity_fresh _ _ _ _ allocated).1
-      refine ⟨retained.allocations, ?_, ?_⟩
+      refine ⟨retained.allocations, ?_, ?_, retained.slots⟩
       · intro other old offset
         have different : other ≠ id := by rw [fresh]; exact Nat.ne_of_lt old
         simpa [different] using retained.cells other old offset

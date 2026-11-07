@@ -142,6 +142,42 @@ theorem Memory.Equivalent.referenceAddInstruction {m n : Memory} (same : m.Equiv
     | split
 #print axioms Memory.Equivalent.referenceAddInstruction
 
+/-- Locating an object field reads only allocation metadata, which equivalent memories share. -/
+theorem Memory.Equivalent.objectFieldAddress {m n : Memory} (same : m.Equivalent n)
+    (reference : ManagedReference) (owner : CIL.Extraction.TypeExpr) (offset : Nat) :
+    CIL.Safety.objectFieldAddress m reference owner offset =
+      CIL.Safety.objectFieldAddress n reference owner offset := by
+  cases reference <;>
+    simp only [CIL.Safety.objectFieldAddress, liveAllocation, same.allocations, same.add]
+#print axioms Memory.Equivalent.objectFieldAddress
+
+/-- Equivalent memories hold the same field references and stay equivalent after one changes. -/
+theorem Memory.Equivalent.setSlot {m n : Memory} (same : m.Equivalent n) (field : Reference)
+    (value : ManagedReference) :
+    (CIL.Safety.setSlot m field value).Equivalent (CIL.Safety.setSlot n field value) :=
+  ⟨same.allocations, same.cells, same.permissions, same.nextIdentity, same.staticBindings,
+    same.stackLimit, same.heapBudget, by simp only [CIL.Safety.setSlot, same.slots]⟩
+#print axioms Memory.Equivalent.setSlot
+
+/-- A field reference load reads the slot, authority and metadata equivalent memories share. -/
+theorem Memory.Equivalent.loadSlot {m n : Memory} (same : m.Equivalent n) (field : Reference) :
+    CIL.Safety.loadSlot m field = CIL.Safety.loadSlot n field := by
+  simp only [CIL.Safety.loadSlot, same.access, same.formObject, same.slots]
+#print axioms Memory.Equivalent.loadSlot
+
+/-- A field reference store makes the same checks and slot change in equivalent memories. -/
+theorem Memory.Equivalent.storeSlot {m n : Memory} (same : m.Equivalent n) (field : Reference)
+    (value : ManagedReference) :
+    ResultEquivalent Memory.Equivalent (CIL.Safety.storeSlot m field value)
+      (CIL.Safety.storeSlot n field value) := by
+  simp only [CIL.Safety.storeSlot, same.access, same.formObject]
+  apply ResultEquivalent.bind_same
+  intro
+  apply ResultEquivalent.bind_same
+  intro
+  exact .ok (same.setSlot field value)
+#print axioms Memory.Equivalent.storeSlot
+
 /-- Non-fill memory operations preserve equivalent memories and identical values. -/
 private theorem Memory.Equivalent.otherMemoryInstruction {m n : Memory} (same : m.Equivalent n)
     (operation : CIL.MemoryOp) (stack : List Value) :
@@ -193,6 +229,26 @@ private theorem Memory.Equivalent.wideArithmeticInstruction {m n : Memory} (same
        exact .ok ⟨related, rfl⟩)
     | split
 #print axioms Memory.Equivalent.wideArithmeticInstruction
+
+/-- Object field accesses locate the same field and perform equivalent checked accesses. -/
+private theorem Memory.Equivalent.objectFieldInstruction {m n : Memory} (same : m.Equivalent n)
+    (operation : CIL.MemoryOp) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (objectFieldInstruction operation stack m)
+      (objectFieldInstruction operation stack n) := by
+  unfold CIL.Safety.objectFieldInstruction
+  split <;> try simp only [same.objectFieldAddress, same.loadValue, same.loadSlot]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind (same.storeSlot _ _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.objectFieldInstruction
 
 /-- Observations depend only on allocation metadata and preserve equivalent memories. -/
 theorem Memory.Equivalent.viewObservationInstruction {m n : Memory} (same : m.Equivalent n)
@@ -316,6 +372,10 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     · exact same.arrayFillInstruction _ _ _
     · exact same.wideArithmeticInstruction _ _
     · exact same.wideArithmeticInstruction _ _
+    · exact same.objectFieldInstruction _ _
+    · exact same.objectFieldInstruction _ _
+    · exact same.objectFieldInstruction _ _
+    · exact same.objectFieldInstruction _ _
     · exact same.otherMemoryInstruction _ _
 
 theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)

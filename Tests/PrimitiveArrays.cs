@@ -74,7 +74,7 @@ foreach (var accessorsByType in accessors.GroupBy(accessor => accessor.Type))
 
                 theorem null_array_fault :
                     (match CIL.Safety.invoke Extracted.program 64 0
-                      [.reference .null, .scalar (.i32 0)] inputMemory with
+                      [.object .null, .scalar (.i32 0)] inputMemory with
                      | .error fault => fault.fault == .thrown "System.NullReferenceException"
                      | .ok _ => false) = true := by decide +kernel
                 #print axioms null_array_fault
@@ -358,7 +358,7 @@ foreach (var (name, _, element, width, counted) in fills)
                       .scalar (.i32 start), .scalar (.i32 count)] fillMemory with
                   | .error fault => fault.fault == .thrown "System.ArgumentOutOfRangeException"
                   | .ok _ => false) = true ∧
-                ([.reference .null, .array ⟨.null, 0, .signed32⟩].all fun input =>
+                ([.object .null, .array ⟨.null, 0, .signed32⟩].all fun input =>
                   match CIL.Safety.invoke Extracted.program 128 0
                     [input, .scalar (.i32 7), .scalar (.i32 (-1)), .scalar (.i32 (-1))] fillMemory with
                   | .error fault => fault.fault == .thrown "System.ArgumentNullException"
@@ -439,7 +439,7 @@ foreach (var (name, _, element, width, counted) in fills)
                   [.array ⟨.address ⟨0, 8⟩, 0, .signed32⟩, .scalar (.i32 7)]
                   { fillMemory with views := [] } with
                  | .ok result => result.2 == [] | .error _ => false) = true ∧
-                ([.reference .null, .array ⟨.null, 0, .signed32⟩].all fun input =>
+                ([.object .null, .array ⟨.null, 0, .signed32⟩].all fun input =>
                   match CIL.Safety.invoke Extracted.program 128 0 [input, .scalar (.i32 7)] fillMemory with
                   | .error fault => fault.fault == .thrown "System.ArgumentNullException"
                   | .ok _ => false) = true ∧

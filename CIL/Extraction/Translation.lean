@@ -55,7 +55,7 @@ def evidenceConstants (evidence : List MethodEvidence) (index : Nat) : Option W3
 
 /-- The zero value of each local kind, used when the method zero-initializes its locals. -/
 private def initialLocal : LocalKind → Value
-  | .reference | .span .. | .array _ | .methodPointer _ | .methodTable _ => .nullRef
+  | .reference | .span .. | .array _ | .methodPointer _ | .methodTable _ | .object => .nullRef
   | .byte => .i8 0
   | .narrow _ | .word32 => .i32 0
   | .word64 => .i64 0

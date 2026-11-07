@@ -29,10 +29,10 @@ theorem Memory.RenamedBelow.refl (memory : Memory) (scopes : Nat → Nat → Pro
 #print axioms Memory.RenamedBelow.refl
 
 /-- The caller's metadata, bytes and authority agree exactly between related executions. -/
-theorem Memory.RenamedBelow.memoryBelow {watermark : Nat} {mapping : AllocationRenaming}
+theorem Memory.RenamedBelow.bytesBelow {watermark : Nat} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
     (related : Memory.RenamedBelow watermark mapping scopes source target) :
-    MemoryBelow watermark source target := by
+    BytesBelow watermark source target := by
   refine ⟨related.descriptors, ?_, ?_⟩
   · intro identity bound offset
     have cells := related.cells identity (Nat.lt_of_lt_of_le bound related.sourceBound) offset
@@ -41,14 +41,67 @@ theorem Memory.RenamedBelow.memoryBelow {watermark : Nat} {mapping : AllocationR
     have permissions := related.permissions ⟨identity, offset⟩
       (Nat.lt_of_lt_of_le bound related.sourceBound) writing
     simpa only [AllocationRenaming.reference, related.fixed identity bound] using permissions
-#print axioms Memory.RenamedBelow.memoryBelow
+#print axioms Memory.RenamedBelow.bytesBelow
+
+/-- Below `watermark`, `target`'s fields hold what `source`'s hold wherever `source` holds null
+    or a reference below `watermark`. A field holding a fresh object may name another identity
+    in `target`, since the two executions may allocate different private storage. -/
+def SlotsAgreeBelow (watermark : Nat) (source target : Memory) : Prop :=
+  ∀ id, id < watermark → ∀ offset,
+    (∀ reference, source.slots id offset = .address reference →
+      reference.allocation < watermark) →
+    target.slots id offset = source.slots id offset
+
+/-- A caller field holding a caller reference holds the same reference in an agreeing memory. -/
+theorem SlotsAgreeBelow.held {watermark : Nat} {source target : Memory}
+    (agree : SlotsAgreeBelow watermark source target) {id offset : Nat} {reference : Reference}
+    (old : id < watermark) (stored : source.slots id offset = .address reference)
+    (caller : reference.allocation < watermark) : target.slots id offset = .address reference :=
+  (agree id old offset fun other same => by
+    rw [stored] at same
+    cases same
+    exact caller).trans stored
+#print axioms SlotsAgreeBelow.held
+
+/-- The renaming fixes caller identities, so it fixes caller fields holding caller references. -/
+theorem Memory.RenamedBelow.slotsAgree {watermark : Nat} {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.RenamedBelow watermark mapping scopes source target) :
+    SlotsAgreeBelow watermark source target := by
+  intro identity bound offset older
+  have renamed := related.slots identity (Nat.lt_of_lt_of_le bound related.sourceBound) offset
+  rw [related.fixed identity bound] at renamed
+  rw [renamed]
+  cases held : source.slots identity offset with
+  | null => rfl
+  | address reference =>
+    simp only [AllocationRenaming.managedReference, AllocationRenaming.reference,
+      related.fixed _ (older reference held)]
+#print axioms Memory.RenamedBelow.slotsAgree
+
+/-- Memory a step keeps below the initial watermark is kept in an agreeing execution too: its
+    fields still hold the initial references, which name identities below the watermark. -/
+theorem SlotsAgreeBelow.confined {watermark : Nat} {initial source target : Memory}
+    (agree : SlotsAgreeBelow watermark source target)
+    (bytes : BytesBelow watermark source target)
+    (formed : initial.WellFormed) (covers : initial.nextIdentity ≤ watermark)
+    (preserved : MemoryBelow watermark initial source) : MemoryBelow watermark initial target := by
+  have kept := preserved.bytes.trans bytes
+  refine ⟨kept.allocations, kept.cells, kept.permissions, ?_⟩
+  intro identity bound offset
+  rw [← preserved.slots identity bound offset]
+  refine agree identity bound offset fun reference held => ?_
+  rw [preserved.slots identity bound offset] at held
+  exact Nat.lt_of_lt_of_le (formed.slots _ _ _ held) covers
+#print axioms SlotsAgreeBelow.confined
 
 /-- Caller confinement transfers without referring to fresh allocation identities. -/
 theorem Memory.RenamedBelow.confined {watermark : Nat} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {initial source target : Memory}
     (related : Memory.RenamedBelow watermark mapping scopes source target)
+    (formed : initial.WellFormed) (covers : initial.nextIdentity ≤ watermark)
     (preserved : MemoryBelow watermark initial source) : MemoryBelow watermark initial target :=
-  preserved.trans related.memoryBelow
+  related.slotsAgree.confined related.bytesBelow formed covers preserved
 #print axioms Memory.RenamedBelow.confined
 
 /-- A paired allocation retains the exact caller prefix as well as the evolving map. -/
