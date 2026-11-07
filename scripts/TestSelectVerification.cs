@@ -104,6 +104,9 @@ Test("test entry points", () =>
     Equal(VerificationSelection.Select(["Tests/SelfAdmissionBaseline.txt"]), ["blockers"]);
     Require(VerificationSelection.Select(["scripts/ContractExport.cs"]).Contains("blockers"),
         "A source compiled into the extractor does not select the self-admission scan");
+    // The suite runs the built command, so no include edge reaches the command's source.
+    Equal(VerificationSelection.Select(["scripts/ProofWorkspace.cs"]).Order(StringComparer.Ordinal),
+        ["blockers", "workspace"]);
 });
 Test("proof and transitive imports", () =>
 {
