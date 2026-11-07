@@ -78,38 +78,86 @@ catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean
 if (!failed || File.Exists(Path.Combine(wrongOutput, "verified.json")))
     throw new InvalidOperationException("Incorrect constructed value accepted");
 
-foreach (var mutation in new[] { "not-constructor", "static", "class", "return", "cycle" })
+// Writes Examples with Counter or its constructor rewritten by one named mutation.
+string Mutate(string mutation, string output)
 {
-    var output = Path.Combine(root, "Reject-" + mutation);
     Directory.CreateDirectory(output);
     var dll = Path.Combine(output, "Examples.dll");
-    using (var module = ModuleDefinition.ReadModule(assembly))
+    using var module = ModuleDefinition.ReadModule(assembly);
+    var type = module.GetType("Examples.Counter");
+    var entry = module.GetType("Examples.Constructors").Methods.Single(m => m.Name == "Return");
+    var instruction = entry.Body.Instructions.Single(i => i.OpCode.Code == Code.Newobj);
+    var constructor = type.Methods.Single(m => m.Name == ".ctor");
+    switch (mutation)
     {
-        var type = module.GetType("Examples.Counter");
-        var entry = module.GetType("Examples.Constructors").Methods.Single(m => m.Name == "Return");
-        var instruction = entry.Body.Instructions.Single(i => i.OpCode.Code == Code.Newobj);
-        var constructor = type.Methods.Single(m => m.Name == ".ctor");
-        switch (mutation)
-        {
-            case "not-constructor": instruction.Operand = type.Methods.Single(m => m.Name == "WriteRead"); break;
-            case "static": constructor.HasThis = false; constructor.IsStatic = true; break;
-            case "class": type.BaseType = module.TypeSystem.Object; break;
-            case "return": constructor.ReturnType = module.TypeSystem.Int32; break;
-            case "cycle":
-                constructor.Body.Instructions.Clear();
-                var il = constructor.Body.GetILProcessor();
-                il.Emit(OpCodes.Ldarg_1);
-                il.Emit(OpCodes.Call, entry);
-                il.Emit(OpCodes.Pop);
-                il.Emit(OpCodes.Ret);
-                break;
-        }
-        module.Write(dll);
+        case "not-constructor": instruction.Operand = type.Methods.Single(m => m.Name == "WriteRead"); break;
+        case "static": constructor.HasThis = false; constructor.IsStatic = true; break;
+        case "class": type.BaseType = module.TypeSystem.Object; break;
+        case "base":
+            type.BaseType = new TypeReference("System", "Exception", module, module.TypeSystem.CoreLibrary);
+            break;
+        case "return": constructor.ReturnType = module.TypeSystem.Int32; break;
+        case "cycle":
+            constructor.Body.Instructions.Clear();
+            var il = constructor.Body.GetILProcessor();
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Call, entry);
+            il.Emit(OpCodes.Pop);
+            il.Emit(OpCodes.Ret);
+            break;
     }
+    module.Write(dll);
+    return dll;
+}
+
+foreach (var mutation in new[] { "not-constructor", "static", "base", "return", "cycle" })
+{
+    var output = Path.Combine(root, "Reject-" + mutation);
+    var dll = Mutate(mutation, output);
     var result = Execute(Extract("extract", dll, "Examples", "Constructors::Return(ulong)", output));
-    var marker = mutation == "cycle" ? "Recursive managed dependency" : "Unsupported";
+    var marker = mutation switch
+    {
+        "cycle" => "Recursive managed dependency",
+        "base" => "Only classes deriving from System.Object through admitted classes are modelled",
+        _ => "Unsupported",
+    };
     if (result.Code == 0 || !result.Output.Contains(marker) || File.Exists(Path.Combine(output, "Extracted.lean")))
         throw new InvalidOperationException($"Invalid constructor accepted: {mutation}\n{result.Output}");
 }
 
-Console.WriteLine($"PASS {cases} constructor comparisons, universal value proof and five malformed constructor rejections");
+// Counter re-declared as a class: newobj must allocate a heap instance charged to the heap
+// budget, never construct struct storage.
+var classOutput = Path.Combine(root, "Class");
+var classDll = Mutate("class", classOutput);
+var classExtraction = Path.Combine(classOutput, "Extraction");
+Run(Extract("extract", classDll, "Examples", "Constructors::Return(ulong)", classExtraction));
+var classLean = File.ReadAllText(Path.Combine(classExtraction, "Extracted.lean"));
+if (!classLean.Contains(".newObject ", StringComparison.Ordinal) ||
+    classLean.Contains(".newAggregate ", StringComparison.Ordinal))
+    throw new InvalidOperationException("Class construction was not extracted as a heap allocation:\n" + classLean);
+var classProof = Path.Combine(classOutput, "ClassProof.lean");
+File.WriteAllText(classProof, """
+import Extracted
+import CIL.Safety.Execution
+set_option maxRecDepth 8192
+namespace ExampleProof
+open CIL.Safety
+
+/-- With heap budget `Return` yields an object reference; without, its 8-byte instance faults. -/
+theorem correctness :
+    (match invoke Extracted.program 128 0 [.scalar (.i64 5)]
+        { Memory.empty with heapBudget := 64 } with
+      | .ok (_, [.object (.address _)]) => true
+      | _ => false) = true ∧
+    (match invoke Extracted.program 128 0 [.scalar (.i64 5)] Memory.empty with
+      | .error failure => failure.fault = .allocationFailure 8 0
+      | .ok _ => False) := ⟨rfl, rfl⟩
+
+end ExampleProof
+""");
+verification.Verify(classDll, "Examples", "Constructors::Return(ulong)", classProof,
+    Path.Combine(classOutput, "Verified"));
+Console.WriteLine("PASS class: newobj allocates a heap instance and faults without heap budget");
+
+Console.WriteLine($"PASS {cases} constructor comparisons, universal value proof, class allocation and " +
+    "five malformed constructor rejections");
