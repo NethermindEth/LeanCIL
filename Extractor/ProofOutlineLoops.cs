@@ -91,6 +91,7 @@ internal static partial class ProofOutline
         Names names)
     {
         readonly MethodDefinition method = extraction.Methods[0];
+        readonly ClassViews views = new(extraction);
         readonly List<Slot> slots = [];
         readonly List<Component> components = [];
         readonly Dictionary<int, string> callees = [];
@@ -104,6 +105,7 @@ internal static partial class ProofOutline
             var imports = new List<string> { "CIL.Verification", "CIL.StructuralLabels" };
             if (callees.Count > 0) imports.Add("CIL.MethodIdentity");
             imports.Add("CIL.Safety.LoopScaffold");
+            if (spec.Framed) imports.Add("CIL.Safety.ObjectFields");
             if (spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.ReadOnlySpan))
                 imports.Add("CIL.Safety.SpanContents");
             Header(lean, spec, imports, "`invariant`, `measure`, `postcondition` and `precondition` (at a call)");
@@ -210,7 +212,7 @@ internal static partial class ProofOutline
         void Callees()
         {
             foreach (var op in body.Ops)
-                if (Regex.Match(op, @"\A\.call (\d+) \d+\z") is { Success: true } call)
+                if (Regex.Match(op, @"\A\.call(?:Instance)? (\d+) \d+\z") is { Success: true } call)
                 {
                     var index = int.Parse(call.Groups[1].Value);
                     if (callees.ContainsKey(index)) continue;
@@ -237,12 +239,21 @@ internal static partial class ProofOutline
         {
             var callee = extraction.Methods[index];
             var name = callees[index];
-            var inputs = callee.Parameters.Select(parameter => parameter.ParameterType switch
+            var receiver = callee.DeclaringType.Name;
+            var declared = (callee.HasThis
+                ? new[]
+                {
+                    (Name: char.ToLowerInvariant(receiver[0]) + receiver[1..], Type: (TypeReference)callee.DeclaringType)
+                }
+                : []).Concat(callee.Parameters.Select(parameter => (parameter.Name, Type: parameter.ParameterType)))
+                .ToArray();
+            var inputs = declared.Select(parameter => parameter.Type switch
             {
                 ByReferenceType reference when ElementWidth(reference.ElementType) is { } width =>
-                    (Type: "Reference", Width: width, Reference: true),
+                    (Type: "Reference", Width: width, Reference: true, Object: (TypeReference?)null),
                 var type when ElementWidth(type) is { } width =>
-                    (Type: WordType(width), Width: width, Reference: false),
+                    (Type: WordType(width), Width: width, Reference: false, Object: null),
+                var type when ObjectTypes.Is(type) => (Type: "Reference", Width: 8, Reference: false, Object: type),
                 var type => throw Unsupported($"callee {callee.Name} takes {type.FullName}")
             }).ToArray();
             var output = callee.ReturnType.FullName == "System.Void" ? (int?)null : ElementWidth(callee.ReturnType)
@@ -251,27 +262,31 @@ internal static partial class ProofOutline
             lean.Line(binding + Quoted(callee.FullName, binding.Length));
             lean.Line("  from Extracted.method0");
             lean.Line();
-            var single = inputs.Length == 1 ? Variable(callee.Parameters[0].Name) : "input";
+            var single = inputs.Length == 1 ? Variable(declared[0].Name) : "input";
             string Input(int position) => inputs.Length == 1 ? single : Projection("input", position, inputs.Length);
             var inputType = inputs.Length == 0 ? "Unit" : Product(inputs.Select(input => input.Type));
             var outputType = output is { } width ? WordType(width) : "Unit";
             lean.Line($"/-- `{callee.Name}` at its calls from the loop: replace `pre` and `post`, and widen");
             lean.Line("    `footprint` if it changes more of the caller's memory. -/");
             lean.Line($"def {name}Contract : MethodContract {inputType} {outputType} where");
-            var arguments = string.Join(", ", inputs.Select((input, position) => input.Reference
-                ? $".reference (.address {Input(position)})"
+            var arguments = string.Join(", ", inputs.Select((input, position) =>
+                input.Reference ? $".reference (.address {Input(position)})"
+                : input.Object is not null ? $".object (.address {Input(position)})"
                 : $".scalar ({ScalarConstructor(input.Width)} {Input(position)})"));
             lean.Line($"  args {(inputs.Length == 0 ? "_" : single)} := [{arguments}]");
             lean.Line(output is { } returned ? $"  results result := [.scalar ({ScalarConstructor(returned)} result)]"
                 : "  results _ := []");
             lean.Line("  pre _ _ := sorry");
-            var footprint = string.Join(", ", inputs.Select((input, position) => (input, position))
-                .Where(pair => pair.input.Reference).Select(pair => $"({Input(pair.position)}, {pair.input.Width})"));
+            var footprint = string.Join(", ", inputs.SelectMany((input, position) =>
+                input.Reference ? [$"({Input(position)}, {input.Width})"]
+                : input.Object is { } type ? views.Of(type).Where(field => field.Stored)
+                    .Select(field => $"{field.Lean}.entry {Input(position)}")
+                : Enumerable.Empty<string>()));
             lean.Line(footprint.Length == 0 ? "  footprint _ := []"
                 : $"  footprint {single} := [{footprint}]");
             lean.Line("  post _ _ _ _ := sorry");
             lean.Line();
-            var steppable = output is not null && inputs.All(input => !input.Reference) &&
+            var steppable = output is not null && inputs.All(input => !input.Reference && input.Object is null) &&
                 extraction.Emitted[index].Metadata.Contains("locals := [],") &&
                 extraction.Emitted[index].Ops.All(Body.Pure);
             lean.Line($"/-- `{callee.Name}` meets its contract; the loop proof uses only the contract. -/");
@@ -282,7 +297,7 @@ internal static partial class ProofOutline
                 {
                     0 => "-",
                     1 => single,
-                    _ => "⟨" + string.Join(", ", callee.Parameters.Select(parameter => Variable(parameter.Name))) +
+                    _ => "⟨" + string.Join(", ", declared.Select(parameter => Variable(parameter.Name))) +
                         "⟩"
                 };
                 lean.Line($"  rintro {pattern} memory permitted");
@@ -296,6 +311,7 @@ internal static partial class ProofOutline
             else
             {
                 var reason = inputs.Any(input => input.Reference) ? "it writes through a reference"
+                    : inputs.Any(input => input.Object is not null) ? "it takes an object, whose fields need facts"
                     : output is null ? "it returns nothing to state"
                     : !extraction.Emitted[index].Metadata.Contains("locals := [],") ? "it has locals"
                     : Unstepped(callee, extraction.Emitted[index].Ops, []);
@@ -344,8 +360,8 @@ internal static partial class ProofOutline
             lean.Line();
         }
 
-        // A method handed a reference may write caller memory, so its frame keeps a named footprint.
-        bool Writes => spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference);
+        // A method handed a reference or an object may write caller memory, so its frame keeps a named footprint.
+        bool Writes => spec.Framed || spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference);
         const string Footprint = "List (Reference × Nat)";
 
         string StateBinders => string.Join(" ", (spec.Symbolic ? new[] { "(memory : Memory)" } : [])
@@ -366,14 +382,7 @@ internal static partial class ProofOutline
 
         void StateAndHeader(Writer lean)
         {
-            if (Writes)
-            {
-                lean.Doc("Replace with the caller memory the loop may write, as references with their " +
-                    "widths in bytes.");
-                lean.Wrapped("def footprint", Grouped(spec.Binders), $": {Footprint} :=");
-                lean.Line("  sorry -- caller memory the loop may write");
-                lean.Line();
-            }
+            if (Writes) spec.Footprint(lean);
             var described = string.Join(", ", components.Select(component => component.Part == Part.Span
                 ? $"the unread suffix of `{component.Name}`" : $"`{component.Name}`"));
             lean.Doc($"The loop's locals at its head: {described}.");
@@ -485,6 +494,8 @@ internal static partial class ProofOutline
 
         void Proof(Writer lean)
         {
+            // A caller object's allocation lies below the frame's watermark, which carrying its facts needs.
+            foreach (var instance in spec.Objects) lean.Line($"  have {instance.Name}Old := {instance.Name}Live.old");
             foreach (var parameter in SpanParameters)
             {
                 lean.Line($"  have {parameter.Name}Checked : CheckedSpan initial {parameter.Name} " +
@@ -500,10 +511,15 @@ internal static partial class ProofOutline
                 }));
             var pattern = Homes.Concat(["entered", "setup"]).Concat(Homes.Select(_ => "-")).Concat(["-", "entryFrame"]);
             lean.Wrapped($"  obtain ⟨{string.Join(", ", pattern)}⟩ :=", ["entry.checked", .. entryArguments], "");
+            var formed = spec.Parameters.SelectMany(parameter => parameter.Shape switch
+            {
+                ParameterShape.Reference => new[] { parameter.Name + "Form" },
+                ParameterShape.ReadOnlySpan => [parameter.Name + "Valid"],
+                ParameterShape.Object => [parameter.Name + "Live.formed"],
+                _ => []
+            });
             var checkedArguments = spec.Symbolic
-                ? "(by simp [cil_checked" + string.Concat(spec.MemoryFacts
-                    .Where(fact => !fact.Name.EndsWith("Contents") && !fact.Name.EndsWith("ReadOnly"))
-                    .Select(fact => ", " + fact.Name)) + "])"
+                ? "(by simp [cil_checked" + string.Concat(formed.Select(fact => ", " + fact)) + "])"
                 : "rfl";
             var header = "(header " + string.Join(" ", (spec.Symbolic ? new[] { "initial" } : [])
                 .Concat(headerParameters).Concat(Writes ? [$"(footprint {spec.Arguments})"] : []).Concat(Homes)) + ")";
@@ -525,6 +541,12 @@ internal static partial class ProofOutline
             var iteration = Initial(component => component.Part == Part.Span
                 ? new SpanTerm(component.Name + "View", component.Name + "Remaining", component.Name + "Span", true)
                 : new Number(component.Name, component.Width, Narrow: component.Width < 4));
+            // An object stays live through the loop; the loop tactics carry the fact across each store.
+            foreach (var instance in spec.Objects)
+            {
+                lean.Line($"  have {instance.Name}Now := {instance.Name}Live.after_confined frame.confined");
+                iteration.Facts.Add(instance.Name + "Now.formed");
+            }
             Guard(iteration);
             Branch(lean, iteration, "  ", "guard");
         }
@@ -631,7 +653,7 @@ internal static partial class ProofOutline
 
         bool Call(Writer lean, PathState state, string indent, int pc)
         {
-            var call = Regex.Match(body.Ops[pc], @"\A\.call (\d+) (\d+)\z");
+            var call = Regex.Match(body.Ops[pc], @"\A\.call(?:Instance)? (\d+) (\d+)\z");
             var callee = int.Parse(call.Groups[1].Value);
             var count = int.Parse(call.Groups[2].Value);
             var arguments = state.Stack.TakeLast(count).ToArray();
@@ -653,7 +675,11 @@ internal static partial class ProofOutline
             }
             var input = terms.Length switch { 0 => "()", 1 => terms[0]!, _ => "(" + string.Join(", ", terms) + ")" };
             if (state.GoalPc != pc) lean.Line($"{indent}cil_loop_advance{Facts(state)}");
-            lean.Line($"{indent}cil_loop_call {callees[callee]}_holds {input}{Facts(state)}");
+            // The frame's footprint is a definition the call's side condition unfolds to find the callee's.
+            var unfolded = spec.Framed && !spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference)
+                ? [.. state.Facts, "footprint"] : state.Facts;
+            var facts = unfolded.Count == 0 ? "" : $" [{string.Join(", ", unfolded)}]";
+            lean.Line($"{indent}cil_loop_call {callees[callee]}_holds {input}{facts}");
             lean.Noted(indent, "case precondition => sorry",
                 $"{extraction.Methods[callee].Name}'s precondition at this call");
             if (extraction.Methods[callee].ReturnType.FullName != "System.Void")
@@ -796,7 +822,7 @@ internal static partial class ProofOutline
                     ParameterShape.Scalar => new Number(parameter.Name, parameter.Width),
                     ParameterShape.Boolean => new Unknown($"the `bool` argument `{parameter.Name}`"),
                     ParameterShape.Narrow => new Unknown($"the narrow argument `{parameter.Name}`"),
-                    ParameterShape.Reference => new ReferenceArgument(parameter.Name),
+                    ParameterShape.Reference or ParameterShape.Object => new ReferenceArgument(parameter.Name),
                     _ => new Unknown($"the span `{parameter.Name}`")
                 });
             }

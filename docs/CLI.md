@@ -240,6 +240,15 @@ comment saying which obligation it is:
   returns, and `precondition` at a call.
 - A call in the loop gets a `MethodContract` for the callee, with `pre` and `post` to replace, and a
   `Holds` theorem that steps the callee when it is arithmetic on its arguments.
+- An instance of an admitted class is a `Reference`, and an instance method binds `this` under its
+  class's name in lower case, such as `account`, or as `receiver` for a compiler-generated class.
+  The statement assumes `LiveObject initial account` and a `Readable` fact for each field the method
+  reads, or `Owned` for one it writes, using the field views the extraction emits in
+  `Extracted.Classes` (see [Frame class instances](PROOFS-CONTRACTS.md#frame-class-instances)). A
+  method that writes a field promises `Confined footprint initial final`, with `footprint` listing
+  the written fields. A body that loads word fields and ends with one store is stepped, leaving the
+  postcondition with `held`, the stored field's `Holds` fact. A loop carries the object facts across
+  its iterations, and a `callvirt` in it gets a contract like any other call.
 
 Where the outline cannot step a path, it leaves a hole whose comment starts with `not outlined:`,
 names what it met and what that step needs, and gives the source line to continue from. The

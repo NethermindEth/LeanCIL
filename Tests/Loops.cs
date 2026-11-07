@@ -840,13 +840,20 @@ foreach (var mutation in new[] { "stack-height", "stack-type", "local-fact", "st
 // A generated starting proof must elaborate with only its holes open, and verification must refuse it
 // until every hole is filled; otherwise an author could mistake the outline for a proof.
 // Loops reuse the checked extraction an earlier section left under their name; the straight-line
-// methods cover `bool` and narrow parameters and a `bool` result.
+// methods cover `bool` and narrow parameters and a `bool` result, and the object methods `this`, field
+// loads and stores, an object result, calls and a loop over a `callvirt`.
 var outlined = new (string Name, string? Selector)[]
 {
     ("Countdown", null), ("FillWords", null), ("CountUntil", null), ("CountCalls", null), ("SpanDrain", null),
     ("SpanAllZero", null), ("SpanSum", null), ("TallyTwice", null), ("CopyUntilZero", null),
     ("Choose", "Arithmetic::Choose(bool,ulong,ulong)"), ("Narrow", "Arguments::Narrow(byte)"),
-    ("ReverseI16", "Bits::ReverseI16(short)"), ("PowerU32", "Bits::PowerU32(uint)")
+    ("ReverseI16", "Bits::ReverseI16(short)"), ("PowerU32", "Bits::PowerU32(uint)"),
+    ("Deposit", "Account::Deposit(System.UInt64)"), ("Headroom", "Account::get_Headroom()"),
+    ("SetLimit", "Objects::SetLimit(Examples.Account,System.UInt32)"),
+    ("Link", "Objects::Link(Examples.Node,Examples.Node)"),
+    ("FirstPresent", "Objects::FirstPresent(Examples.Account,Examples.Account)"),
+    ("DepositBoth", "Objects::DepositBoth(Examples.Account,Examples.Account,System.UInt64)"),
+    ("DepositTimes", "Objects::DepositTimes(Examples.Account,System.UInt64,System.UInt32)")
 };
 var outlineTimer = System.Diagnostics.Stopwatch.StartNew();
 var outlineRoot = Path.Combine(root, "Outlines");
@@ -935,6 +942,33 @@ if (proved.Code != 0 || !proved.Stdout.StartsWith("Verified: ExampleProof.correc
     throw new InvalidOperationException("The filled Countdown outline did not verify:\n" + proved.Output);
 Console.WriteLine("PASS verify refuses the Countdown outline until its holes are filled, then verifies it " +
     $"({outlineTimer.Elapsed.TotalSeconds:F0}s for every outline check)");
+
+// An instance method's outline binds `this`, steps its field load and store through the named field, and
+// verifies once its specification and postcondition are written.
+var depositOutline = Path.Combine(outlineRoot, "Deposit");
+var depositSource = File.ReadAllText(Path.Combine(depositOutline, "Proof.lean"));
+foreach (var (hole, replacement) in new (string Hole, string Filled)[]
+{
+    ("def Precondition (account : Reference) (amount : W64) (initial : Memory) : Prop := sorry",
+        "def Precondition (_ : Reference) (_ : W64) (_ : Memory) : Prop := True"),
+    ("def Postcondition (account : Reference) (amount : W64) (initial final : Memory) : Prop := sorry",
+        "def Postcondition (account : Reference) (amount : W64) (initial final : Memory) : Prop :=\n" +
+        "  Account.Balance.Holds final account (Account.Balance.of initial account + amount)"),
+    ("sorry -- Postcondition of the returned value, with `held` the stored field", "exact held")
+})
+{
+    if (Regex.Matches(depositSource, Regex.Escape(hole)).Count != 1)
+        throw new InvalidOperationException("The Deposit outline lacks the hole " + hole);
+    depositSource = depositSource.Replace(hole, replacement, StringComparison.Ordinal);
+}
+if (Regex.IsMatch(depositSource, @"(?<![`\w])sorry(?![`\w])"))
+    throw new InvalidOperationException("The Deposit outline has a hole the test does not fill");
+var depositFilled = Path.Combine(depositOutline, "Filled.lean");
+File.WriteAllText(depositFilled, depositSource);
+var deposited = Execute(Cli("verify", Path.Combine(depositOutline, "Extraction"), "--proof", depositFilled));
+if (deposited.Code != 0 || !deposited.Stdout.StartsWith("Verified: ExampleProof.correctness"))
+    throw new InvalidOperationException("The filled Deposit outline did not verify:\n" + deposited.Output);
+Console.WriteLine("PASS the filled outline of an instance method that stores a named field verifies");
 
 delegate void FillWordsDelegate(ref ulong destination, ulong value, int count);
 delegate uint CopyUntilZeroDelegate(ReadOnlySpan<uint> values, ref uint output);
