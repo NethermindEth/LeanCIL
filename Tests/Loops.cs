@@ -970,6 +970,32 @@ if (deposited.Code != 0 || !deposited.Stdout.StartsWith("Verified: ExampleProof.
     throw new InvalidOperationException("The filled Deposit outline did not verify:\n" + deposited.Output);
 Console.WriteLine("PASS the filled outline of an instance method that stores a named field verifies");
 
+// LeanCIL's own closure that lays out a static word's bytes: its outline names the captured reference
+// field it cannot step, and the checked-in proof keeps the outline's statement and verifies.
+var wordByte = Path.Combine(outlineRoot, "WordByte");
+var wordByteExtraction = Path.Combine(wordByte, "Extraction");
+Run(Cli("extract", At("Extractor/bin/Nethermind.LeanCIL.dll"),
+    "Nethermind.LeanCIL.StaticValues/<>c__DisplayClass10_0::<Bytes>b__0(System.Int32)", wordByteExtraction));
+var wordByteOutline = Path.Combine(wordByte, "Proof.lean");
+Run(Cli("new-proof", wordByteExtraction, wordByteOutline));
+var wordByteSource = File.ReadAllText(wordByteOutline);
+const string capturedLoad = "-- not outlined: the body meets a load of `«<>c__DisplayClass10_0».word`";
+if (!wordByteSource.Contains(capturedLoad, StringComparison.Ordinal))
+    throw new InvalidOperationException("The closure outline does not name its captured field load:\n" +
+        wordByteSource);
+static string Statement(string source) =>
+    Regex.Match(source.ReplaceLineEndings("\n"), @"^theorem correctness .*?:= by$",
+        RegexOptions.Singleline | RegexOptions.Multiline).Value;
+var wordByteProof = At("Tests/Outlines/WordByte.lean");
+var outlineStatement = Statement(wordByteSource);
+if (outlineStatement.Length == 0 || outlineStatement != Statement(File.ReadAllText(wordByteProof)))
+    throw new InvalidOperationException("Tests/Outlines/WordByte.lean no longer states the outline's theorem:\n" +
+        outlineStatement);
+var wordByteVerified = Execute(Cli("verify", wordByteExtraction, "--proof", wordByteProof));
+if (wordByteVerified.Code != 0 || !wordByteVerified.Stdout.StartsWith("Verified: ExampleProof.correctness"))
+    throw new InvalidOperationException("The closure's filled outline did not verify:\n" + wordByteVerified.Output);
+Console.WriteLine("PASS the outline of LeanCIL's own byte-layout closure, filled, verifies its little-endian byte");
+
 delegate void FillWordsDelegate(ref ulong destination, ulong value, int count);
 delegate uint CopyUntilZeroDelegate(ReadOnlySpan<uint> values, ref uint output);
 delegate bool AllZeroDelegate(ReadOnlySpan<uint> values);
