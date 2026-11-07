@@ -856,7 +856,9 @@ Examples:System.UInt64 Examples.NullReferences::Read()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.NullReferences::ReadField()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.NullReferences::Unchecked(Examples.FourLimbs&,System.Boolean)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Objects::BalanceOf(Examples.Account)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Objects::Describe(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Objects::Fresh(System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Objects::IdOf(Examples.Shape)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Objects::LinkedValue(Examples.Node,Examples.Node)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Objects::Replace(Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Objects::SecondValue(Examples.Node)	A	A	A	A	A	A	A	A
@@ -988,6 +990,7 @@ Examples:System.Void Examples.Blocks::FillAligned(System.Byte&,System.Byte,Syste
 Examples:System.Void Examples.Blocks::FillPointer(System.Byte*,System.Byte,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Blocks::FillPointerAligned(System.Byte*,System.Byte,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.CheckedConstructor::.ctor(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Circle::.ctor(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ConstructorLeaf::.ctor(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Counter::.ctor(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Counter::Increment(System.Byte&)	A	A	A	A	A	A	A	A
@@ -1062,6 +1065,7 @@ Examples:System.Void Examples.PrimitiveArrays::WriteUInt32(System.UInt32[],Syste
 Examples:System.Void Examples.PrimitiveArrays::WriteUInt64(System.UInt64[],System.Int32,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PrimitiveArrays::WriteUIntPtr(System.UIntPtr[],System.Int32,System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.SeededHash::.cctor()	B	B	B	B	B	B	B	B
+Examples:System.Void Examples.Shape::.ctor(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.SkipInitialization::Skip(Examples.FourLimbs&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.SkipInitialization::Store(Examples.FourLimbs&,System.UInt64,System.UInt64,System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.SpanCopies::Copy(System.Span`1<System.Byte>,System.Span`1<System.Byte>)	A	A	A	A	A	A	A	A
