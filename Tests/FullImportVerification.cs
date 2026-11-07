@@ -337,6 +337,17 @@ run_cmd do
         JsonElement mutation = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(mutationMarker));
         // Lean spells paths with mixed separators and a lowercase drive on Windows.
         string target = Path.GetFullPath(mutation.GetProperty("target").GetString()!);
+        // An ordinary caller compiles in the deleted verification workspace, which the CLI names by placeholder.
+        if (!consumer)
+        {
+            string source = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(callerContext))
+                .GetProperty("source").GetString()!;
+            string workspace = Path.GetDirectoryName(Path.GetFullPath(source))!;
+            if (!target.StartsWith(workspace, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase
+                    : StringComparison.Ordinal))
+                throw new InvalidOperationException("Ordinary caller artifact outside its workspace: " + target);
+            target = SourceCopies.Workspace + target[workspace.Length..];
+        }
         string diagnostic = shadow ? "Unexpected full-verification caller artifact: " + target
             : sourceOnly ? "Sources changed during full import audit"
             : "Full-verification source or compiled artifact changed: " + target;
