@@ -1089,7 +1089,115 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
         ("def Postcondition (flag : Bool) (x y result : W64) : Prop := sorry",
             "def Postcondition (flag : Bool) (x y result : W64) : Prop := result = if flag then x else y"),
         ("sorry -- Postcondition of the returned value where `flag` is false", "rfl"),
-        ("sorry -- Postcondition of the returned value where `flag` is true", "rfl")])
+        ("sorry -- Postcondition of the returned value where `flag` is true", "rfl")]),
+    // An `Unsafe.Add` store steps from its write authority, index bound and footprint, each a hole.
+    ("FillWords", [
+        ("""
+            def Precondition (destination : Reference) (value : W64) (count : W32) (initial : Memory)
+                : Prop := sorry
+            """,
+            """
+            def Precondition (destination : Reference) (_ : W64) (count : W32) (initial : Memory)
+                : Prop := count.toNat < 2 ^ 31 ∧ Writable initial destination 8 0 count.toNat
+            """),
+        ("""
+            def Postcondition (destination : Reference) (value : W64) (count : W32) (initial final : Memory)
+                : Prop := sorry
+            """,
+            """
+            def Postcondition (destination : Reference) (value : W64) (count : W32) (_ final : Memory)
+                : Prop := Contents final destination 8 (List.replicate count.toNat (value : BitVec (8 * 8)))
+            """),
+        ("""
+            def footprint (destination : Reference) (value : W64) (count : W32) : List (Reference × Nat) :=
+              sorry -- caller memory the loop may write
+            """,
+            """
+            def footprint (destination : Reference) (_ : W64) (count : W32) : List (Reference × Nat) :=
+              [(destination, 8 * count.toNat)]
+            """),
+        ("    (state : State memory written home0) : Prop := sorry",
+            """
+                (state : State memory written home0) : Prop :=
+              state.values.toNat ≤ count.toNat ∧ Filled state.memory destination 8
+                (List.replicate state.values.toNat (value : BitVec (8 * 8))) (count.toNat - state.values.toNat)
+            """),
+        ("def measure (destination : Reference) (value : W64) (count : W32)",
+            "def measure (_ : Reference) (_ : W64) (count : W32)"),
+        ("    (state : State memory written home0) : Nat := sorry",
+            "    (state : State memory written home0) : Nat := count.toNat - state.values.toNat"),
+        ("    case invariant => sorry -- invariant at the first loop head",
+            """
+                case invariant =>
+                  simp only [Precondition] at assumed
+                  simpa [invariant] using Filled.start (assumed.2.after_confined storedFrame.confined wellFormed)
+            """),
+        ("      sorry -- the loop may write this element of `destination` at its memory",
+            """
+                  by
+                    simp only [Precondition] at assumed
+                    simp only [invariant] at holds
+                    rw [BitVec.toInt_eq_toNat_cond, BitVec.toInt_eq_toNat_cond] at guard
+                    simp only [show 2 * i.toNat < 2 ^ 32 by omega, show 2 * count.toNat < 2 ^ 32 by omega,
+                      ↓reduceIte] at guard
+                    exact holds.2.2.sub (by simp) (by simp; omega)
+            """),
+        ("    have destinationSmall : i.toNat < 2 ^ 31 := sorry -- the index is below 2^31",
+            """
+                have destinationSmall : i.toNat < 2 ^ 31 := by
+                  simp only [Precondition] at assumed
+                  simp only [invariant] at holds
+                  omega
+            """),
+        ("        Within (destination.element 8 i.toNat, 8) entry := sorry -- the element lies in `footprint`",
+            """
+                    Within (destination.element 8 i.toNat, 8) entry := by
+                  simp only [Precondition] at assumed
+                  simp only [invariant] at holds
+                  rw [BitVec.toInt_eq_toNat_cond, BitVec.toInt_eq_toNat_cond] at guard
+                  simp only [show 2 * i.toNat < 2 ^ 32 by omega, show 2 * count.toNat < 2 ^ 32 by omega,
+                    ↓reduceIte] at guard
+                  simp [footprint, Within]
+                  omega
+            """),
+        ("    case invariant => sorry -- invariant again at the loop head",
+            """
+                case invariant =>
+                  simp only [Precondition] at assumed
+                  simp only [invariant] at holds ⊢
+                  obtain ⟨-, filled⟩ := holds
+                  rw [BitVec.toInt_eq_toNat_cond, BitVec.toInt_eq_toNat_cond] at guard
+                  simp only [show 2 * i.toNat < 2 ^ 32 by omega, show 2 * count.toNat < 2 ^ 32 by omega,
+                    ↓reduceIte] at guard
+                  have lower : i.toNat < count.toNat := by omega
+                  rw [show count.toNat - i.toNat = count.toNat - (i.toNat + 1) + 1 by omega] at filled
+                  have pushed := filled.push (x := (value : BitVec (8 * 8))) (by simpa using destinationWrote)
+                  rw [toNat_succ lower, List.replicate_succ']
+                  exact ⟨by omega, pushed.after_below storedBelow (wellFormed.form_bound destinationForm)⟩
+            """),
+        ("    case measure => sorry -- measure decreases over this iteration",
+            """
+                case measure =>
+                  simp only [Precondition] at assumed
+                  simp only [invariant] at holds
+                  rw [BitVec.toInt_eq_toNat_cond, BitVec.toInt_eq_toNat_cond] at guard
+                  simp only [show 2 * i.toNat < 2 ^ 32 by omega, show 2 * count.toNat < 2 ^ 32 by omega,
+                    ↓reduceIte] at guard
+                  simp only [measure, toNat_succ (show i.toNat < count.toNat by omega)]
+                  omega
+            """),
+        ("    case postcondition => sorry -- Postcondition at the return at Loops.cs:69",
+            """
+                case postcondition =>
+                  simp only [Precondition] at assumed
+                  simp only [invariant] at holds
+                  obtain ⟨bounded, filled⟩ := holds
+                  rw [BitVec.toInt_eq_toNat_cond, BitVec.toInt_eq_toNat_cond] at guard
+                  simp only [show 2 * i.toNat < 2 ^ 32 by omega, show 2 * count.toNat < 2 ^ 32 by omega,
+                    ↓reduceIte] at guard
+                  rw [show i.toNat = count.toNat by omega] at filled
+                  exact filled.1.after_below exitBelow (wellFormed.form_bound destinationForm)
+            """)])
 })
 {
     var source = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
@@ -1110,7 +1218,8 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
 Console.WriteLine("PASS filled outlines verify with only their specification written: a field store, " +
     "two reference field stores that may alias, a null test followed through a local, two calls through a " +
     "generated contract, a split on a field value, a call whose callee loads the node a field holds, a " +
-    "span fold that stores its total before each span load and a split on a `bool` argument");
+    "span fold that stores its total before each span load, a split on a `bool` argument and a " +
+    "store through `Unsafe.Add` of a reference argument");
 
 // One hole left, an obligation or a path the outline could not step, keeps an outline from certifying:
 // verify refuses it for `sorryAx` and removes the report the filled proof left.

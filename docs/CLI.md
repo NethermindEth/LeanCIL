@@ -247,7 +247,10 @@ comment saying which obligation it is:
   instance it holds, and an identity test against another object splits it with
   `by_cases branch1 : ...`; a load of a reference field into it is a `not outlined:` hole. A test
   of a 1- or 2-byte struct field splits on the word its load zero-extends, such as
-  `(scanStopped.setWidth 8).setWidth 32 = 0`.
+  `(scanStopped.setWidth 8).setWidth 32 = 0`. A 4- or 8-byte store through `Unsafe.Add` of a
+  reference argument by an `int` index, before any other store of the iteration, is stepped from
+  three holes: write authority over that element at the iteration's memory, the index below
+  `2 ^ 31`, and the element within `footprint`.
 - A call in the loop gets a `MethodContract` for the callee, with `pre` and `post` to replace, and a
   `Holds` theorem that steps the callee when it is arithmetic on its arguments. A callee over
   objects whose body a straight-line outline steps (see below) gets the contract read from its body

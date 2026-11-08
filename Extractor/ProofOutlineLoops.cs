@@ -79,6 +79,8 @@ internal static partial class ProofOutline
     sealed record Sliced(int Component) : Value;
     sealed record ReferenceArgument(string Name) : Value;
     sealed record ObjectTerm(string Term) : Value;
+    /// <summary>`Unsafe.Add` of a reference argument and a word index, scaled by `Width` bytes.</summary>
+    sealed record AddedReference(string Base, string Index, int Width) : Value;
 
     /// <summary>A span's suffix at a point of a path: its view, remaining elements and checked fact.</summary>
     sealed record SpanTerm(string View, string Remaining, string Checked, bool Caseable, string? Head = null,
@@ -94,14 +96,14 @@ internal static partial class ProofOutline
         internal object[] State = [];
         internal List<string> Facts = [];
         internal bool Called;
-        // A word local's store replaces the memory the loop head's liveness facts name.
-        internal bool Stored;
+        // A store replaces the head's memory, at which liveness and write authority are asked.
+        internal bool Moved;
         internal HashSet<string> Obtained = [];
 
         internal PathState Copy() => new()
         {
             Pc = Pc, GoalPc = GoalPc, Stack = [.. Stack], State = [.. State], Facts = [.. Facts],
-            Called = Called, Stored = Stored, Obtained = [.. Obtained]
+            Called = Called, Moved = Moved, Obtained = [.. Obtained]
         };
     }
 
@@ -749,7 +751,6 @@ internal static partial class ProofOutline
             if (extraction.Methods[callee].ReturnType.FullName != "System.Void")
                 state.Stack.Add(new Number("output", ElementWidth(extraction.Methods[callee].ReturnType)!.Value));
             state.Called = true;
-            state.Stored = false;
             state.Pc = pc + 1;
             state.GoalPc = pc + 1;
             return true;
@@ -860,8 +861,8 @@ internal static partial class ProofOutline
                 Walk(lean, Side(absent, term), indent);
                 return;
             }
-            // The liveness hole names the loop head's memory, which a call or a home's store replaces.
-            if (!Regex.IsMatch(term, @"\A[A-Za-z][A-Za-z0-9_]*\z") || state.Called || state.Stored)
+            // The liveness hole names the loop head's memory, which a call or a store replaces.
+            if (!Regex.IsMatch(term, @"\A[A-Za-z][A-Za-z0-9_]*\z") || state.Called || state.Moved)
             {
                 Hole(lean, indent, state,
                     $"the null test at {Location(state.Pc)} of an object the outline cannot name");
@@ -912,11 +913,9 @@ internal static partial class ProofOutline
                 var slot = slots[int.Parse(match.Groups[1].Value)];
                 var first = components.IndexOf(slot.Components[0]);
                 var value = Pop();
+                state.Moved = true;
                 if (slot.Components[0].Part == Part.Word && value is Number or Unknown)
-                {
                     state.State[first] = value;
-                    state.Stored = true;
-                }
                 else if (slot.Components[0].Part == Part.Span && value is Sliced sliced &&
                     state.State[sliced.Component] is SpanTerm { Tail: { } tail } span)
                 {
@@ -968,6 +967,7 @@ internal static partial class ProofOutline
             else if ((match = Regex.Match(op, @"\A\.initAggregate \d+\z")).Success)
             {
                 if (Pop() is not LocalAddress address) return Stop("zeroing storage other than a struct local");
+                state.Moved = true;
                 foreach (var field in slots[address.Slot].Components)
                     state.State[components.IndexOf(field)] = new Number("0", field.Width, Literal: true);
             }
@@ -993,6 +993,7 @@ internal static partial class ProofOutline
                     component.Offset == int.Parse(match.Groups[1].Value)) : null;
                 if (field is null || value is not (Number or Unknown))
                     return Stop("a field store outside a struct local");
+                state.Moved = true;
                 state.State[components.IndexOf(field)] = value is Number { Literal: false } number && field.Width < 4
                     ? number with { Narrow = true } : value;
             }
@@ -1040,9 +1041,35 @@ internal static partial class ProofOutline
             else if (op.StartsWith(".call ", StringComparison.Ordinal) ||
                 op.StartsWith(".callInstance ", StringComparison.Ordinal)) return Event.Call;
             else if (op == ".ret" || op.StartsWith(".ret (some ", StringComparison.Ordinal)) return Event.Return;
+            else if ((match = Regex.Match(op, @"\A\.memory \(\.add (\d+) true\)\z")).Success && current is not null &&
+                !state.Moved && !state.Called && stack.Count >= 2 &&
+                stack[^1] is Number { Width: 4, Narrow: false } index && stack[^2] is ReferenceArgument reference &&
+                spec.Parameters.Any(parameter => parameter.Name == reference.Name &&
+                    parameter.Shape == ParameterShape.Reference))
+            {
+                stack.RemoveRange(stack.Count - 2, 2);
+                stack.Add(new AddedReference(reference.Name, index.Term, int.Parse(match.Groups[1].Value)));
+            }
+            else if (op is ".store64" or ".storeScalar 4" or ".storeScalar 8" && stack.Count >= 2 &&
+                stack[^2] is AddedReference added)
+            {
+                var width = op == ".storeScalar 4" ? 4 : 8;
+                if (stack[^1] is not Number { Narrow: false } stored || stored.Width != width || added.Width != width)
+                    return Stop("a store through `Unsafe.Add` of a value the outline cannot name at the " +
+                        "element's width");
+                stack.RemoveRange(stack.Count - 2, 2);
+                var lemma = op switch
+                {
+                    ".store64" => "step_store64_of_write", ".storeScalar 8" => "step_storeScalar_i64_of_write",
+                    _ => "step_storeScalar_of_write"
+                };
+                state.Facts.AddRange(ElementWrite(added, stored.Term, lemma));
+                state.Moved = true;
+            }
             else if (Regex.IsMatch(op, @"\A\.memory \(\.add \d+ (true|false)\)\z"))
-                return Stop("an `Unsafe.Add`, which needs `add memory base width offset = .ok reference` " +
-                    "(such as from `Writable.add_int`) and write authority for the store in `footprint`");
+                return Stop("an `Unsafe.Add` other than one of a reference argument by a 32-bit index, written " +
+                    "through before any other store of an iteration, which needs `add memory base width offset = " +
+                    ".ok reference` (such as from `Writable.add_int`) and write authority in `footprint`");
             else return Stop($"`{op}`, which the outline does not step");
             state.Pc++;
             return Event.Continue;
@@ -1066,6 +1093,32 @@ internal static partial class ProofOutline
             else if (Writes) apart = $" {name}Apart";
             Pending(state, $"obtain ⟨{name}Item, -, {name}Found, {name}Element⟩ :=",
                 $"({span.Checked}.within wellFormed frame{apart}).head (by decide)");
+        }
+
+        /// <summary>Write `value` to the element `added` names, at the iteration's first memory, leaving its
+        /// authority, index bound and footprint as holes; returns the facts the loop tactics step it with.</summary>
+        string[] ElementWrite(AddedReference added, string value, string lemma)
+        {
+            var name = added.Base;
+            var index = Regex.IsMatch(added.Index, @"\A[A-Za-z_][\w.]*\z") ? added.Index : $"({added.Index} : W32)";
+            var element = $"{name}.element {added.Width} {index}.toNat";
+            var lean = current!;
+            var indent = currentIndent;
+            lean.Line($"{indent}have {name}Slot : Writable current ({element}) {added.Width} 0 1 :=");
+            lean.Noted(indent + "  ", "sorry", $"the loop may write this element of `{name}` at its memory");
+            lean.Noted(indent, $"have {name}Small : {index}.toNat < 2 ^ 31 := sorry", "the index is below 2^31");
+            lean.Line($"{indent}have {name}Within : ∃ entry ∈ footprint {spec.Arguments},");
+            lean.Noted(indent + "    ", $"Within ({element}, {added.Width}) entry := sorry",
+                "the element lies in `footprint`");
+            lean.Line($"{indent}obtain ⟨{name}After, {name}Wrote, -, -, -⟩ := {name}Slot.write_one {value}");
+            lean.Line($"{indent}have {name}Add := add_int_element frame.wellFormed");
+            lean.Line($"{indent}  (frame.caller_form wellFormed {name}Form) {name}Small");
+            lean.Line($"{indent}  (by simpa using {name}Slot 0 (by omega))");
+            // The frame at the written memory is what the loop tactics carry the iteration's other facts in.
+            lean.Line($"{indent}have {name}Frame := frame.write {name}Wrote");
+            lean.Line($"{indent}  (by simpa [numberBytes_length] using {name}Within)");
+            lean.Line($"{indent}  (by simpa [Reference.element_allocation] using wellFormed.form_bound {name}Form)");
+            return [name + "Add", $"{lemma} {name}Wrote"];
         }
 
         void PendingTail(PathState state, int component, SpanTerm span)
