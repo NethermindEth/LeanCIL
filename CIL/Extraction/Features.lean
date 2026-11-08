@@ -455,6 +455,7 @@ private def fallbackFeatureEffect (instruction : RawInstruction) (emitted : Op) 
     | .call .. => instruction.opcode == 40 || instruction.opcode == 111
     | .callInstance .. | .callVirtual .. => instruction.opcode == 111
     | .newAggregate .. | .newVector256 .. | .newObject .. => instruction.opcode == 115
+    | .objectTest .. => instruction.opcode ∈ [116, 117]
     | _ => true
   properCall && match rawFeatureEffect instruction, emittedFeatureEffect emitted returnsValue with
     | some rawEffect, some emittedEffect => rawEffect == emittedEffect

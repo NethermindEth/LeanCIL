@@ -61,7 +61,7 @@ def emittedFeatureEffect (op : Op) (returnsValue : Bool) : Option (Nat × Nat) :
   | .neg | .bnot | .convI1 | .convI2 | .convU2 | .convI8 | .convI4 | .convU1
   | .convU4 | .convU8 | .convU | .checkedConvert ..
   | .loadAggregate _ | .loadScalar .. | .load64 | .fieldAt .. | .fieldAddress _
-  | .aggregateFieldAt .. | .lane _ | .laneAddress _ | .asRef => some (1, 1)
+  | .aggregateFieldAt .. | .lane _ | .laneAddress _ | .asRef | .objectTest .. => some (1, 1)
   -- Two-operand arithmetic and comparisons, plain or with a widened native operand.
   | .add | .sub | .mul | .band | .bor | .bxor | .shl | .shr | .shrUn
   | .lt | .ltu | .gt | .gtu | .eq | .divide .. | .checkedArithmetic .. => some (2, 1)

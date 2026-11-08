@@ -289,12 +289,15 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         // the table resolves each one and omits none.
         var hierarchies = method.Body.Instructions.Where(VirtualDispatch.Is)
             .SelectMany(instruction => VirtualDispatch.Hierarchy((MethodReference)instruction.Operand));
+        // A type test's class is cataloged so Lean can check it is a pinned class, not an interface.
+        var tested = method.Body.Instructions.Where(ObjectTypes.Testable)
+            .Select(instruction => (TypeReference)instruction.Operand);
         var types = receivers.Concat(receivers.SelectMany(type => type.Resolve().Interfaces
                 .Select(implementation => GenericStructs.Substitute(implementation.InterfaceType,
                     type as GenericInstanceType))
                 .Where(implementation => implementation.Resolve() is { } declared &&
                     ConstrainedCalls.Extracted(declared.Module, method.Module))))
-            .Concat(hierarchies)
+            .Concat(hierarchies).Concat(tested)
             .DistinctBy(LayoutEvidence.Identity).OrderBy(LayoutEvidence.Identity, StringComparer.Ordinal);
         return List(types.Select(type =>
         {

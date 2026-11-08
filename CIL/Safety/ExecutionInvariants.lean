@@ -330,6 +330,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
                 · first
                   | rfl
                   | exact (checkedValue_valid _ _ _ (by assumption)).2
+                  | exact objectTest_valid (by assumption)
                   | exact (referenceSubtract_valid _ _ _ _ (by assumption)).1
                   | exact (referenceSubtract_valid _ _ _ _ (by assumption)).2
                   | apply loadLocal_result_valid; assumption

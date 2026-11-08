@@ -549,6 +549,20 @@ theorem step_relabel_brnonzero (target : Nat) : StepRelabel (.brnonzero target) 
 
 #print axioms step_relabel_brnonzero
 
+/-- A type test continues at the next pc with the tested reference or null. -/
+theorem step_relabel_objectTest (type : CIL.Extraction.TypeExpr) (throwing : Bool) :
+    StepRelabel (.objectTest type throwing) := by
+  stack_cases =>
+    first
+        | exact fallback_relabel (profile := expected.profile) _ rfl
+            (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
+            context.next h
+        | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+           cases h
+           simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+
+#print axioms step_relabel_objectTest
+
 /-- Relabel scalar or reference observations while preserving their result. -/
 theorem step_relabel_beq (target : Nat) : StepRelabel (.beq target) := by
   stack_cases =>
@@ -724,6 +738,7 @@ theorem step_relabel (op : CIL.Op) : StepRelabel op := by
   case eq => exact step_relabel_eq
   case brzero target => exact step_relabel_brzero target
   case brnonzero target => exact step_relabel_brnonzero target
+  case objectTest type throwing => exact step_relabel_objectTest type throwing
   case beq target => exact step_relabel_beq target
   case bne target => exact step_relabel_bne target
   case nop | neg | gt | bgt | ble | convI1 | convI2 | convU2 | convI8 | convI4 | convU1
@@ -1094,6 +1109,17 @@ theorem step_raise_brnonzero (target : Nat) : StepRaise (.brnonzero target) := b
 
 #print axioms step_raise_brnonzero
 
+/-- A failed cast raises `InvalidCastException` at the same relabelled location. -/
+theorem step_raise_objectTest (type : CIL.Extraction.TypeExpr) (throwing : Bool) :
+    StepRaise (.objectTest type throwing) := by
+  stack_cases =>
+    first
+        | exact fallback_raise (profile := expected.profile) _ rfl
+            (fun absent => absurd rfl absent) (fun _ ran => ran) context.next h
+        | raise_lockstep
+
+#print axioms step_raise_objectTest
+
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
 theorem step_raise_beq (target : Nat) : StepRaise (.beq target) := by
   stack_cases =>
@@ -1287,6 +1313,7 @@ theorem step_raise (op : CIL.Op) : StepRaise op := by
   case eq => exact step_raise_eq
   case brzero target => exact step_raise_brzero target
   case brnonzero target => exact step_raise_brnonzero target
+  case objectTest type throwing => exact step_raise_objectTest type throwing
   case beq target => exact step_raise_beq target
   case bne target => exact step_raise_bne target
   case nop | neg | gt | bgt | ble | convI1 | convI2 | convU2 | convI8 | convI4 | convU1

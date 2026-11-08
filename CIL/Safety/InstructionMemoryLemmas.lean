@@ -143,6 +143,33 @@ theorem formObject_result_valid {m : Memory} {reference : ManagedReference} {val
   | null => exact True.intro
   | address r => exact formed
 
+/-- A type test leaves a valid object reference: its formed operand, or null. -/
+theorem objectTest_valid {m : Memory} {type : CIL.Extraction.TypeExpr} {throwing : Bool}
+    {reference result : ManagedReference}
+    (tested : objectTest m type throwing reference = .ok result) :
+    (Value.object result).Valid m := by
+  unfold objectTest at tested
+  cases formed : formObject m reference with
+  | error fault => simp [formed, Bind.bind, Except.bind] at tested
+  | ok value =>
+    simp only [formed, Bind.bind, Except.bind] at tested
+    cases reference with
+    | null => cases tested; exact True.intro
+    | address object =>
+      simp only at tested
+      cases typed : runtimeTypeOf m object with
+      | error fault => simp [typed] at tested
+      | ok runtime =>
+        simp only [typed] at tested
+        have valid := formObject_result_valid formed
+        rw [formObject_returns_input formed] at valid
+        split at tested
+        · cases tested; exact valid
+        · split at tested
+          · cases tested
+          · cases tested; exact True.intro
+#print axioms objectTest_valid
+
 /-- Object formation needs only the allocation table entry, which extension keeps. -/
 theorem formObject_preserved {m result : Memory} {reference : ManagedReference}
     (formed : formObject m reference = .ok (.object reference)) (wellFormed : m.WellFormed)

@@ -190,6 +190,15 @@ theorem Memory.Equivalent.virtualTarget {m n : Memory} (same : m.Equivalent n)
   simp only [CIL.Safety.virtualTarget, runtimeTypeOf, liveAllocation, same.allocations]
 #print axioms Memory.Equivalent.virtualTarget
 
+/-- A type test reads only allocation metadata, which equivalent memories share. -/
+theorem Memory.Equivalent.objectTest {m n : Memory} (same : m.Equivalent n)
+    (type : CIL.Extraction.TypeExpr) (throwing : Bool) (reference : ManagedReference) :
+    CIL.Safety.objectTest m type throwing reference =
+      CIL.Safety.objectTest n type throwing reference := by
+  simp only [CIL.Safety.objectTest, runtimeTypeOf, liveAllocation, same.allocations,
+    same.formObject]
+#print axioms Memory.Equivalent.objectTest
+
 theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) :
@@ -200,7 +209,7 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
   split <;> try simp only [same.checkedValue, same.checkedValues, same.loadLocal, same.localAddress,
     same.referenceNonNull, same.referenceEqual, same.referenceDifference,
     same.referenceLess, same.referenceSubtract, same.objectNonNull, same.objectEqual,
-    same.objectAboveNull, same.virtualTarget]
+    same.objectAboveNull, same.virtualTarget, same.objectTest]
   all_goals repeat' first
     | exact same.managedStep _ _ _ _
     | (apply ResultEquivalent.bind (same.newArray _ _)

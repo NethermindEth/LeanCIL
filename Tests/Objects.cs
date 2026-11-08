@@ -37,7 +37,9 @@ foreach (var (proof, entry) in new[]
     ("DerivedObject", "Objects::Describe(System.UInt64,System.UInt64)"),
     ("AnimalLegs", "VirtualCalls::LegsOf(Examples.Animal)"),
     ("AnimalLoudness", "VirtualCalls::LoudnessOf(Examples.Animal)"),
-    ("FreshDogLegs", "VirtualCalls::DogLegs()")
+    ("FreshDogLegs", "VirtualCalls::DogLegs()"),
+    ("DogTest", "ClassTests::IsDog(Examples.Animal)"),
+    ("DogCast", "ClassTests::AsDog(Examples.Animal)")
 })
 {
     verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));
@@ -85,6 +87,22 @@ foreach (var (name, forged) in new[]
     File.WriteAllText(path, dispatched.Replace(table, forged, StringComparison.Ordinal));
     forgedViews.Add(path, $"PASS forged dispatch table rejected: {name}",
         "Extraction.ConstrainedCallsValid method0DispatchTypes");
+}
+// Lean binds a type test to its raw opcode and class, so an emitted test of another class or with
+// the other outcome for a failed cast fails the scalar flow check.
+var cast = File.ReadAllText(Path.Combine(root, "DogCast", "Extracted.lean"));
+var castTest = $".objectTest ({dogEntry.TrimStart('(').TrimEnd(',', ' ')}) true";
+if (!cast.Contains(castTest, StringComparison.Ordinal))
+    throw new InvalidOperationException("The extraction does not test the cast against Dog: " + castTest);
+foreach (var (name, forged) in new[]
+{
+    ("class", castTest.Replace("Examples.Dog", "Examples.Bird", StringComparison.Ordinal)),
+    ("outcome", castTest[..^" true".Length] + " false")
+})
+{
+    var path = Path.Combine(root, $"ForgedCast-{name}.lean");
+    File.WriteAllText(path, cast.Replace(castTest, forged, StringComparison.Ordinal));
+    forgedViews.Add(path, $"PASS forged type test rejected: {name}", "Extraction.ScalarFlowValid");
 }
 forgedViews.Check();
 
@@ -268,6 +286,49 @@ foreach (var mutation in new[] { "librarySlot", "unadmittedSubclass", "newSlotHi
     Console.WriteLine($"PASS dispatch rejection: {mutation}");
 }
 
+// An instance records only its own and its admitted base classes, so a type test against anything
+// else is rejected by name.
+foreach (var mutation in new[] { "interface", "root", "library", "unadmitted" })
+{
+    var output = Path.Combine(root, "RejectCast-" + mutation);
+    Directory.CreateDirectory(output);
+    var dll = Path.Combine(output, "Examples.dll");
+    string target;
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        var test = module.GetType("Examples.ClassTests").Methods.Single(candidate => candidate.Name == "AsDog")
+            .Body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Castclass);
+        TypeReference replaced;
+        switch (mutation)
+        {
+            case "interface": replaced = module.GetType("Examples.ICounterValue"); break;
+            case "root": replaced = module.TypeSystem.Object; break;
+            case "library": replaced = module.TypeSystem.String; break;
+            default:
+                var fish = new TypeDefinition("Examples", "Fish", TypeAttributes.Public | TypeAttributes.Sealed |
+                    TypeAttributes.ExplicitLayout, module.GetType("Examples.Animal"));
+                module.Types.Add(fish);
+                replaced = fish;
+                break;
+        }
+        test.Operand = replaced;
+        target = replaced.FullName;
+        module.Write(dll);
+    }
+    var expected = $"Unsupported type test: castclass {target}\n  " + mutation switch
+    {
+        "interface" => "Interface type tests need the interfaces an instance implements",
+        "root" => "Every instance is a System.Object, which the model does not record.",
+        "library" => "Only classes of the pinned assemblies are tested",
+        _ => "Unsupported class instance type: Examples.Fish\n    Explicit class layout"
+    };
+    var result = Execute(["dotnet", ExtractorPath, "extract", dll, "ClassTests::AsDog(Examples.Animal)", output]);
+    if (result.Code != 1 || File.Exists(Path.Combine(output, "Extracted.lean")) ||
+        !result.Output.Replace("\r\n", "\n").Contains(expected, StringComparison.Ordinal))
+        throw new InvalidOperationException($"Incorrect type test rejection: {mutation}\n{result.Output}");
+    Console.WriteLine($"PASS type test rejection: {mutation}");
+}
+
 // A virtual method's own body is an entry like any instance method: the theorem is about that body,
 // whichever call reaches it.
 var virtualOutput = Path.Combine(root, "VirtualBody");
@@ -285,5 +346,5 @@ verification.Verify(virtualDll, "Examples", "Account::get_Headroom()", At("Examp
 Console.WriteLine("PASS virtual method body proved as an entry");
 
 Console.WriteLine("PASS objects: identity, presence, scalar and reference field, receiver, framed call " +
-    "construction, base class field and virtual dispatch proofs, " +
-    "and named rejection of unmodelled class shapes, field accesses, calls and dispatch tables");
+    "construction, base class field, virtual dispatch and type test proofs, " +
+    "and named rejection of unmodelled class shapes, field accesses, calls, dispatch tables and type tests");

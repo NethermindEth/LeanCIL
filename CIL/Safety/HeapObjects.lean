@@ -79,6 +79,20 @@ theorem virtualTarget_mem {memory : Memory} {targets : List (CIL.Extraction.Type
 
 #print axioms virtualTarget_mem
 
+/-- `castclass` (`throwing`) or `isinst` of class `type` on a formed object reference: null and
+    an object whose runtime lineage contains `type` pass unchanged; any other object becomes
+    null, or throws `System.InvalidCastException` for `castclass` (ECMA-335 III.4.3, III.4.6). -/
+def objectTest (memory : Memory) (type : CIL.Extraction.TypeExpr) (throwing : Bool)
+    (reference : ManagedReference) : ExecutionResult ManagedReference := do
+  let _ ← formObject memory reference
+  match reference with
+  | .null => pure .null
+  | .address object =>
+    let runtime ← runtimeTypeOf memory object
+    if type ∈ runtime.lineage then pure reference
+    else if throwing then .error (.thrown "System.InvalidCastException")
+    else pure .null
+
 /-- Object storage is aligned to the 8-byte field slots of the admitted 64-bit targets. -/
 def objectAlignment : Nat := 8
 

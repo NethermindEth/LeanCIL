@@ -586,4 +586,51 @@ theorem changed_owner_scope_rejected :
       genericReceiver site = none := by decide +kernel
 #print axioms changed_owner_scope_rejected
 
+/-- A class of the fixture assembly that type tests name. -/
+private def dogClass : TypeExpr := .object "Fixture" "Fixture.Dog"
+private def dogEntry : DispatchType := {
+  identity := dogClass, valueType := false, interfaceType := false, interfaces := [],
+  methods := [], assembly := fixturePin }
+/-- `castclass Dog` of the argument, returned. -/
+private def castRaw : RawMethod := { raw with
+  parameters := [dogClass], returnType := dogClass,
+  code := [⟨0, 2, .none⟩, ⟨1, 116, .type dogClass⟩, ⟨6, 42, .none⟩] }
+private def castEmitted : Method := {
+  locals := [], returnsValue := true, code := [.arg 0, .objectTest dogClass true, .ret] }
+
+/-- A cast to a pinned catalog class is a type test of that class. -/
+theorem class_cast_valid :
+    ConstrainedCallsValid [dogEntry] [⟨[], castRaw⟩] castRaw [true, true, true] castEmitted := by
+  decide +kernel
+#print axioms class_cast_valid
+
+/-- An instance's lineage omits its interfaces, so a test against an interface is rejected. -/
+theorem interface_cast_rejected :
+    ¬ ConstrainedCallsValid [{ dogEntry with interfaceType := true }] [⟨[], castRaw⟩] castRaw
+      [true, true, true] castEmitted := by decide +kernel
+#print axioms interface_cast_rejected
+
+/-- A class missing from the catalog is not known to be a pinned class. -/
+theorem uncataloged_cast_rejected :
+    ¬ ConstrainedCallsValid [] [⟨[], castRaw⟩] castRaw [true, true, true] castEmitted := by
+  decide +kernel
+#print axioms uncataloged_cast_rejected
+
+/-- An instance's lineage omits `System.Object`, so a test against it is rejected. -/
+theorem root_cast_rejected :
+    let root : TypeExpr := .object "Fixture" "System.Object"
+    ¬ ConstrainedCallsValid [{ dogEntry with identity := root }]
+      [⟨[], { castRaw with code := [⟨0, 2, .none⟩, ⟨1, 116, .type root⟩, ⟨6, 42, .none⟩] }⟩]
+      { castRaw with code := [⟨0, 2, .none⟩, ⟨1, 116, .type root⟩, ⟨6, 42, .none⟩] }
+      [true, true, true]
+      { castEmitted with code := [.arg 0, .objectTest root true, .ret] } := by decide +kernel
+#print axioms root_cast_rejected
+
+/-- A type test emitted for an instruction that is no cast is rejected. -/
+theorem misplaced_test_rejected :
+    ¬ ConstrainedCallsValid [dogEntry] [⟨[], castRaw⟩]
+      { castRaw with code := [⟨0, 2, .none⟩, ⟨1, 0, .none⟩, ⟨2, 42, .none⟩] }
+      [true, true, true] castEmitted := by decide +kernel
+#print axioms misplaced_test_rejected
+
 end Tests.ConstrainedEvidence

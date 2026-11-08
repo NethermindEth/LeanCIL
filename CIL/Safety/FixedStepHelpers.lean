@@ -101,7 +101,7 @@ def fixedStepFamily : CIL.Op → FixedStepFamily
   | .intrinsic .. | .nativeBinary _ | .checkedConvert .. | .checkedArithmetic ..
   | .divide .. => .numeric
   | .managed _ | .arg .. | .vectorArg _ | .vectorArgAddr _ | .call .. | .callInstance ..
-  | .callVirtual .. | .tailCall ..
+  | .callVirtual .. | .objectTest .. | .tailCall ..
   | .throw _ | .ret _ => .boundary
   | _ => .other
 
@@ -213,7 +213,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
       metadata.returnsValue]
     all_goals try exact (related.stepFallback frames formed operation pc sourceBody.profile
       stack bounds observable)
-    case h_83 =>
+    case h_84 =>
       first
       | (have boundary : fixedStepFamily operation = .boundary := family
          have noManaged : ∀ op, operation = .managed op → False := by assumption

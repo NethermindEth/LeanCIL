@@ -132,18 +132,15 @@ private theorem Memory.Renamed.stepCallInstance {indices : LocalIndexMap}
           exact .error _
 #print axioms Memory.Renamed.stepCallInstance
 
-/-- Renaming keeps a live object's runtime class, so a virtual call selects the same body and
-    fails with the same, renamed, fault. -/
-private theorem Memory.Renamed.virtualTarget {mapping : AllocationRenaming}
+/-- Renaming keeps a live object's runtime type, and maps the fault of any other reference. -/
+private theorem Memory.Renamed.runtimeTypeOf {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
     (related : Memory.Renamed mapping scopes source target) (receiver : Reference)
-    (bound : receiver.allocation < mapping.sourceLimit)
-    (targets : List (CIL.Extraction.TypeExpr × Nat)) :
-    ResultRenamed mapping (fun left right => right = left)
-      (CIL.Safety.virtualTarget source targets receiver)
-      (CIL.Safety.virtualTarget target targets (mapping.reference receiver)) := by
+    (bound : receiver.allocation < mapping.sourceLimit) :
+    ResultRenamed mapping Eq (CIL.Safety.runtimeTypeOf source receiver)
+      (CIL.Safety.runtimeTypeOf target (mapping.reference receiver)) := by
   have allocations := related.allocations receiver.allocation bound
-  simp only [CIL.Safety.virtualTarget, runtimeTypeOf, AllocationRenaming.reference,
+  simp only [CIL.Safety.runtimeTypeOf, AllocationRenaming.reference,
     CIL.Safety.liveAllocation, checkedAt, Except.mapError, Bind.bind, Except.bind]
   generalize source.allocations receiver.allocation = sourceAllocation at allocations ⊢
   generalize target.allocations (mapping.image receiver.allocation) = targetAllocation
@@ -168,11 +165,89 @@ private theorem Memory.Renamed.virtualTarget {mapping : AllocationRenaming}
         cases sourceKind
         all_goals first
           | exact .error .invalidState
-          | (dsimp only
-             split
-             · exact .ok rfl
-             · exact .error outsideDispatchTable)
+          | exact .ok rfl
+#print axioms Memory.Renamed.runtimeTypeOf
+
+/-- Renaming keeps a live object's runtime class, so a virtual call selects the same body and
+    fails with the same, renamed, fault. -/
+private theorem Memory.Renamed.virtualTarget {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (receiver : Reference)
+    (bound : receiver.allocation < mapping.sourceLimit)
+    (targets : List (CIL.Extraction.TypeExpr × Nat)) :
+    ResultRenamed mapping (fun left right => right = left)
+      (CIL.Safety.virtualTarget source targets receiver)
+      (CIL.Safety.virtualTarget target targets (mapping.reference receiver)) := by
+  unfold CIL.Safety.virtualTarget
+  apply (related.runtimeTypeOf receiver bound).bind
+  intro runtime other same
+  subst same
+  split
+  · exact .ok rfl
+  · exact .error outsideDispatchTable
 #print axioms Memory.Renamed.virtualTarget
+
+/-- Renaming keeps a type test's outcome: the same runtime lineage decides it, and a passing
+    reference stays the renamed reference. -/
+private theorem Memory.Renamed.objectTest {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (reference : ManagedReference)
+    (bound : reference.Below mapping.sourceLimit) (type : CIL.Extraction.TypeExpr)
+    (throwing : Bool) :
+    ResultRenamed mapping (fun left right => right = mapping.managedReference left)
+      (CIL.Safety.objectTest source type throwing reference)
+      (CIL.Safety.objectTest target type throwing (mapping.managedReference reference)) := by
+  unfold CIL.Safety.objectTest
+  apply (related.formObject reference bound).bind
+  intro formed otherFormed _
+  cases reference with
+  | null => exact .ok rfl
+  | address object =>
+    simp only [AllocationRenaming.managedReference]
+    apply (related.runtimeTypeOf object bound).bind
+    intro runtime other same
+    subst same
+    split
+    · exact .ok rfl
+    · split
+      · exact .error _
+      · exact .ok rfl
+#print axioms Memory.Renamed.objectTest
+
+/-- A type test transports as a step to the next pc: renaming keeps null, the tested runtime
+    class and the cast's exception. -/
+private theorem Memory.Renamed.stepObjectTest {indices : LocalIndexMap}
+    {mapping : AllocationRenaming} {scopes : Nat → Nat → Prop} {source target : Memory}
+    {sourceFrame targetFrame : Frame} (related : Memory.Renamed mapping scopes source target)
+    (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
+    (sourceBody targetBody : CIL.Method) (type : CIL.Extraction.TypeExpr) (throwing : Bool)
+    (pc : Nat) (arguments stack : List Value)
+    (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit) :
+    ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
+      (step sourceBody (.objectTest type throwing) pc arguments sourceFrame stack source)
+      (step targetBody (.objectTest type throwing) pc (arguments.map mapping.value)
+        targetFrame (stack.map mapping.value) target) := by
+  simp only [step, mapping.unspecifiedOperands, Bool.or_false]
+  by_cases guard : unspecifiedOperands (observerCount (.objectTest type throwing)) stack = true
+  · simp only [guard, ite_true]
+    exact .error _
+  · simp only [guard, Bool.false_eq_true, ite_false]
+    match stack, bounds with
+    | .object reference :: rest, bounds =>
+      have below : reference.Below mapping.sourceLimit := bounds _ List.mem_cons_self
+      simp only [List.map_cons, AllocationRenaming.value]
+      refine (related.objectTest reference below type throwing).bind _ _ ?_
+      intro left right same
+      subst same
+      exact .ok (.next related frames)
+    | [], _ => exact .error _
+    | .scalar _ :: _, _ | .methodPointer _ :: _, _ | .methodTable _ :: _, _
+    | .reference _ :: _, _ | .readOnlyReference _ :: _, _ | .span .. :: _, _
+    | .bufferSpan _ :: _, _ | .array _ :: _, _ =>
+      dsimp only [pureArity, CIL.Safety.instruction]
+      simp only [mapping.unspecifiedOperands]
+      split <;> exact .error _
+#print axioms Memory.Renamed.stepObjectTest
 
 /-- A virtual call transports as a call: renaming keeps a receiver null exactly when it was and
     keeps a live receiver's class, so both runs throw, fault alike or enter the same body. -/
@@ -262,13 +337,18 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
   by_cases dispatched : ∃ targets argc, operation = .callVirtual targets argc
   · rcases dispatched with ⟨targets, argc, rfl⟩
     exact related.stepCallVirtual sourceBody targetBody targets argc pc arguments stack bounds
+  by_cases tested : ∃ type throwing, operation = .objectTest type throwing
+  · rcases tested with ⟨type, throwing, rfl⟩
+    exact related.stepObjectTest frames sourceBody targetBody type throwing pc arguments stack
+      bounds
   ·
     allocation_fixed_step (
       first
       | exact False.elim (isManaged ⟨_, rfl⟩)
       | exact False.elim (receiverChecked ⟨_, _, rfl⟩)
       | exact False.elim (dispatched ⟨_, _, rfl⟩)
-      | (case h_60 =>
+      | exact False.elim (tested ⟨_, _, rfl⟩)
+      | (case h_61 =>
           rename_i _ _ position
           rw [List.getElem?_map]
           cases found : arguments[position]? with
@@ -279,7 +359,7 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
             intro first second same
             subst second
             exact .ok (.next related frames))
-      | (case h_61 =>
+      | (case h_62 =>
           rename_i _ _ position kind
           rw [List.getElem?_map]
           cases found : arguments[position]? with

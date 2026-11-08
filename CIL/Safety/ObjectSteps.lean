@@ -5,7 +5,8 @@ import CIL.Safety.ObjectAllocationLemmas
 # Object step equations
 
 `cil_step` equations for the instructions that observe class instance references: identity
-comparison (`ceq`, `beq`, `bne.un`), presence (`cgt.un` against null, `brtrue`, `brfalse`) and
+comparison (`ceq`, `beq`, `bne.un`), presence (`cgt.un` against null, `brtrue`, `brfalse`),
+`isinst` and `castclass` (`objectTest`, decided by a `runtimeTypeOf` fact) and
 `ldnull`, `ldfld`/`stfld` of scalar class fields, and `newobj` of a class, which calls the
 constructor with a fresh instance that `allocateObject_ok` or `allocateObject_insufficient`
 decides, and `callvirt` of a non-virtual method, which calls with a live receiver and throws
@@ -26,7 +27,7 @@ namespace CIL.Safety
 
 #print axioms formObject_null
 
-attribute [cil_checked] objectNonNull objectEqual objectAboveNull
+attribute [cil_checked] objectNonNull objectEqual objectAboveNull objectTest
 
 /-- A formed object reference is a checked value as it stands. -/
 @[cil_checked] theorem checkedValue_object (memory : Memory) (reference : ManagedReference)
@@ -235,6 +236,15 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
       return .next (if present then target else pc + 1) rest frame memory :=
   rfl
 
+/-- `isinst` and `castclass` replace an object reference by its tested form: itself when its
+    runtime lineage holds the class, else null or `InvalidCastException`. -/
+@[cil_step high] theorem step_objectTest_eq (type : CIL.Extraction.TypeExpr) (throwing : Bool)
+    (value : ManagedReference) (rest : List Value) :
+    step body (.objectTest type throwing) pc args frame (.object value :: rest) memory = do
+      let result ← objectTest memory type throwing value
+      return .next (pc + 1) (.object result :: rest) frame memory :=
+  rfl
+
 /-- `ldnull` pushes the null object reference and leaves memory unchanged. -/
 @[cil_step high] theorem step_nullObject_eq (stack : List Value) :
     step body (.memory .nullObject) pc args frame stack memory =
@@ -433,6 +443,7 @@ end ObjectEquations
 #print axioms step_gtu_object_eq
 #print axioms step_brzero_object_eq
 #print axioms step_brnonzero_object_eq
+#print axioms step_objectTest_eq
 #print axioms step_nullObject_eq
 #print axioms step_objectField_eq
 #print axioms step_setObjectField_i64_eq

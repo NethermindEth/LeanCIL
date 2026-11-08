@@ -114,7 +114,7 @@ correctness and memory-safety claims.
 
 Classes beyond those deriving from `System.Object` through such classes, with scalar fields and
 fields holding such class instances, virtual dispatch outside the extracted classes, interface
-calls, ordinary recursive calls, exception handlers,
+calls and type tests, ordinary recursive calls, exception handlers,
 floating-point arithmetic and arbitrary external calls are outside the supported subset.
 Concurrency, GC implementation correctness and equivalence to arbitrary .NET runtimes are
 outside the model's guarantees. See [soundness and limitations](docs/SOUNDNESS.md).

@@ -238,6 +238,7 @@ internal static class InstructionTranslation
             Code.Conv_I1 => ".convI1", Code.Conv_I2 => ".convI2", Code.Conv_U2 => ".convU2",
             Code.Neg => ".neg",
             Code.Ldnull => ".memory .nullObject",
+            Code.Castclass or Code.Isinst => ObjectTypes.Test(i),
             Code.Cgt => ".gt",
             Code.Bgt or Code.Bgt_S => $".bgt {Target()}",
             Code.Ble or Code.Ble_S => $".ble {Target()}",

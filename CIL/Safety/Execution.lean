@@ -298,6 +298,9 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
   | .brnonzero target, .object value :: rest =>
     let present ← objectNonNull m value
     return .next (if present then target else pc + 1) rest frame m
+  | .objectTest type throwing, .object value :: rest =>
+    let result ← objectTest m type throwing value
+    return .next (pc + 1) (.object result :: rest) frame m
   | .stackAlloc initLocals, [.scalar size] =>
     let bytes ← match size with
       | .i32 bits => pure bits.toNat

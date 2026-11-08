@@ -39,3 +39,13 @@ public static class VirtualCalls
     /// <summary>The legs of a fresh dog, dispatched on the instance it creates.</summary>
     public static ulong DogLegs() => new Dog().Legs();
 }
+
+/// <summary>Type tests that an instance's class lineage decides.</summary>
+public static class ClassTests
+{
+    /// <summary>Whether the animal is a dog; null is not.</summary>
+    public static bool IsDog(Animal animal) => animal is Dog;
+
+    /// <summary>The animal as a dog; any other animal throws InvalidCastException, and null stays null.</summary>
+    public static Dog AsDog(Animal animal) => (Dog)animal;
+}

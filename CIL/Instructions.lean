@@ -179,6 +179,10 @@ inductive Op where
       `constructor` as its receiver ahead of `argc` arguments and pushed once it returns. -/
   | newObject (constructor : Nat) (argc : Nat) (owner : Extraction.TypeExpr)
       (bases : List Extraction.TypeExpr) (size : Nat)
+  /-- `castclass` (`throwing`) or `isinst` of class `type`: an object whose runtime class or one
+      of its bases is `type` stays on the stack, as does null; any other object becomes null,
+      or throws `System.InvalidCastException` for `castclass`. -/
+  | objectTest (type : Extraction.TypeExpr) (throwing : Bool)
   | skipInit | asRef
   /-- Pushes `1` when the method's feature profile has the feature, else `0`. -/
   | feature (id : Feature)

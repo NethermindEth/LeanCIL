@@ -332,6 +332,15 @@ def virtualTableValid (types : List DispatchType) (find : TypeExpr → Option Di
     (classChain find fuel entry.identity site.declaringType).isNone ||
     targets.any (·.1 == entry.identity)
 
+/-- A class `castclass` and `isinst` may test against: a pinned, non-generic catalog class other
+    than `System.Object`. An instance's runtime lineage lists exactly its own and its admitted
+    base classes, so it decides such a test, but not one against an interface or the root. -/
+def castTargetValid (find : TypeExpr → Option DispatchType) (target : TypeExpr) : Bool :=
+  match target with
+  | .object _ name => name != "System.Object" && (find target).any fun entry =>
+    entry.pinned && !entry.valueType && !entry.interfaceType
+  | _ => false
+
 
 /-- Ordered candidate buckets retain every matching metadata entry. -/
 private def groupIndex {α κ : Type} [Ord κ] (key : α → κ) :

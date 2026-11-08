@@ -152,6 +152,42 @@ internal static class ObjectTypes
             $"{BaseList(owner)} {size}";
     }
 
+    /// <summary>
+    /// A castclass or isinst of an admitted class other than System.Object, which an instance's recorded lineage
+    /// decides.
+    /// </summary>
+    internal static bool Testable(Instruction instruction) =>
+        instruction is { OpCode.Code: Code.Castclass or Code.Isinst, Operand: TypeReference target } &&
+        target.FullName != "System.Object" && Is(target);
+
+    /// <summary>
+    /// The checked type test for castclass (throwing InvalidCastException) or isinst (giving null) of an admitted
+    /// class. An instance records only its own and its admitted base classes, so a test against an interface or
+    /// System.Object is rejected, naming why.
+    /// </summary>
+    internal static string Test(Instruction instruction)
+    {
+        var target = (TypeReference)instruction.Operand;
+        var site = $"Unsupported type test: {instruction.OpCode.Name} {target.FullName}\n  ";
+        if (target.FullName == "System.Object")
+            throw new InvalidDataException(site +
+                "Every instance is a System.Object, which the model does not record.");
+        if (target.Resolve() is { IsInterface: true })
+            throw new InvalidDataException(site +
+                "Interface type tests need the interfaces an instance implements, which the model does not record.");
+        if (!Candidate(target))
+            throw new InvalidDataException(site +
+                "Only classes of the pinned assemblies are tested; their instances record their class lineage.");
+        try { Validate(target); }
+        catch (InvalidDataException error)
+        {
+            throw new InvalidDataException(
+                site + error.Message.Replace("\n", "\n  ", StringComparison.Ordinal), error);
+        }
+        var throwing = instruction.OpCode.Code == Code.Castclass ? "true" : "false";
+        return $".objectTest ({GenericEvidence.ObjectType(target)}) {throwing}";
+    }
+
     // Matches `CIL.objectFieldSlot`, which Lean uses to recheck every emitted offset.
     const int FieldSlot = 8;
 }

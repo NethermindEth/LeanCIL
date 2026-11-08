@@ -84,7 +84,7 @@ def observerCount : CIL.Op → Nat
   | .add | .sub | .mul | .band | .bor | .bxor | .shl | .shr | .shrUn
   | .lt | .ltu | .gt | .gtu | .eq | .bgt _ | .ble _ | .bleu _
   | .bltu _ | .bgeu _ | .bgtu _ | .bge _ | .blt _ | .beq _ | .bne _ => 2
-  | .brzero _ | .brnonzero _ | .switch _ => 1
+  | .brzero _ | .brnonzero _ | .switch _ | .objectTest .. => 1
   -- Memory, fields and lanes
   | .loadAggregate _ | .loadScalar .. | .fieldAt .. | .fieldAddress _ | .aggregateFieldAt ..
   | .lane _ | .laneAddress _ | .load64 | .skipInit | .asRef | .initAggregate _ => 1

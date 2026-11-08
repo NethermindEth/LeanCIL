@@ -1026,6 +1026,19 @@ theorem step_appendLocals_brnonzero (target : Nat) :
 
 #print axioms step_appendLocals_brnonzero
 
+/-- `objectTest` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_objectTest (type : CIL.Extraction.TypeExpr) (throwing : Bool) :
+    StepAppendLocals (.objectTest type throwing) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  apply observed_appendLocals
+  append_stack_cases using
+    fallback_appendLocals body.profile (.objectTest type throwing) pc _ frame extra memory
+
+#print axioms step_appendLocals_objectTest
+
 /-- `bltu` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_bltu (target : Nat) :
     StepAppendLocals (.bltu target) := by
@@ -1450,6 +1463,8 @@ theorem step_appendLocals (body : Method) (op : Op) (pc : Nat) (args : List Valu
       exact step_appendLocals_brzero target
     case brnonzero target =>
       exact step_appendLocals_brnonzero target
+    case objectTest type throwing =>
+      exact step_appendLocals_objectTest type throwing
     case bltu target =>
       exact step_appendLocals_bltu target
     case bgeu target =>

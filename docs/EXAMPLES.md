@@ -30,6 +30,14 @@
 - `SeededHash` mixes a value with two `static readonly ulong` seeds drawn from `RandomNumberGenerator`; `OpaqueSeeds.lean` proves the hash for every seed pair and that a fixed seed is not the contract.
 - `SpanTables` indexes `ReadOnlySpan<uint>` and `ReadOnlySpan<ulong>` tables, reads a length and the first element, and faults with `System.IndexOutOfRangeException` out of range.
 - `NullReferences` tests `Unsafe.NullRef<T>` with `Unsafe.IsNullRef<T>`, faults on loads, stores and field accesses through it, and selects an optional `ref` argument that is either unset or bound, as optional outputs do.
+- `VirtualCalls` calls an abstract and a defaulted virtual method of `Animal` on any animal:
+  `AnimalLegs.lean` and `AnimalLoudness.lean` prove the override or inherited body the receiver's
+  runtime class selects, the null receiver's `NullReferenceException`, and that a class outside
+  the extraction faults rather than returning; `FreshDogLegs.lean` dispatches on a constructed
+  instance.
+- `ClassTests` tests and casts an animal: `DogTest.lean` proves `animal is Dog` for a `Dog`, a
+  `Bird` and null, and `DogCast.lean` proves that `(Dog)animal` returns a `Dog` and null unchanged
+  and throws `InvalidCastException` for a `Bird`.
 
 Concrete example proofs establish their displayed inputs. Only explicitly universally quantified theorems claim arbitrary-input correctness. `CheckedAdd64`, `Choose` and `GenericIdentity` quantify caller memory and prove it unchanged. `Struct` quantifies well-formed caller memory and proves `MemoryBelow` preservation of the caller's storage. Other examples fix the caller memory to `CIL.Safety.Memory.empty` or to the 8-byte `callerMemory` the file defines; argument quantification alone does not imply arbitrary caller memory. The allocating generic instance wrapper retains a separate fixed-memory check in `GenericInstance.lean`.
 

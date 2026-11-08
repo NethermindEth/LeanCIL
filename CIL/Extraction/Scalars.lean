@@ -419,7 +419,8 @@ private def objectFieldMatches (instruction : RawInstruction) (stack : List Scal
       owner == .object scope name && offset == objectFieldOffset index
   | _, _, _, _ => false
 
-/-- Covered opcodes emit exactly their encoding. Elsewhere only a decided type test's word,
+/-- Covered opcodes emit exactly their encoding, and a class type test only from `castclass`
+    (throwing) or `isinst` on an object. Elsewhere only a decided type test's word,
     a size constant or an exact runtime query may emit a scalar operation. -/
 def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
     (instruction : RawInstruction)
@@ -427,6 +428,12 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
   if let some (.typeBranch taken) := role then typeBranchMatches instruction taken emitted
   else if let some (.result value) := role then
     match emitted with | .const32 bits => bits == if value then 1 else 0 | _ => false
+  else if let .objectTest type throwing := emitted then
+    match instruction.operand, stack with
+    | .type target, value :: _ =>
+      instruction.opcode ∈ [116, 117] && throwing == (instruction.opcode == 116) &&
+        type == target && value ∈ [.object, .nullObject]
+    | _, _ => false
   else if (match instruction.operand with
     | .call site => referenceContentQuery site | _ => false) then
     match instruction.operand, emitted with
@@ -787,6 +794,12 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     if length ∉ [.word32, .native] then none else
       return .array element :: tail
   if arrayCovered opcode then return (← arrayStep instruction stack).2
+  -- `castclass` and `isinst` of a class leave an object reference.
+  if opcode == 116 || opcode == 117 then
+    match instruction.operand, stack with
+    | .type (.object ..), value :: tail =>
+      if value ∈ [.object, .nullObject] then return .object :: tail
+    | _, _ => pure ()
   if opcode == 20 then
     if instruction.operand == .none then return .nullObject :: stack else none
   if opcode ∈ [44, 45, 57, 58] then

@@ -335,6 +335,12 @@ assembly scope, and stepping looks the class up in the call's table (`step_callV
 fact is `objectMemory_runtimeTypeOf` ([FreshDogLegs](../Examples/Proofs/FreshDogLegs.lean)).
 A class the table omits steps to the model fault `outsideDispatchTable` (`virtualCall_outside`).
 
+`castclass` and `isinst` step on the same fact (`step_objectTest_eq`): with
+`RuntimeType.lineage` and the definitions of the type, its bases and their scope, stepping
+decides whether the tested class is in the lineage, so the reference passes, becomes null or
+throws `InvalidCastException` ([DogTest](../Examples/Proofs/DogTest.lean),
+[DogCast](../Examples/Proofs/DogCast.lean)).
+
 A method that constructs an instance steps its `newobj` with `allocateObject_ok`, given
 well-formed memory and a `Memory.heapBudget` covering the instance, or `allocateObject_insufficient`
 for the `allocationFailure` fault when it does not. `objectMemory_formObject`, `objectMemory_field`

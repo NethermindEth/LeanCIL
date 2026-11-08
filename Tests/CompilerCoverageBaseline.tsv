@@ -10,6 +10,7 @@ Examples:Examples.CheckedConstructor Examples.Constructors::MakeChecked(System.U
 Examples:Examples.Counter Examples.Constructors::Return(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:Examples.Counter Examples.Constructors::WrongReturn(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:Examples.DefaultConstructor Examples.Constructors::MakeDefault()	A	A	A	A	A	A	A	A
+Examples:Examples.Dog Examples.ClassTests::AsDog(Examples.Animal)	A	A	A	A	A	A	A	A
 Examples:Examples.EnumBuffers/Large Examples.EnumBuffers::Wide(Examples.EnumBuffers/Large[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:Examples.EnumBuffers/Small Examples.EnumBuffers::Address(Examples.EnumBuffers/Small[],System.Int32,Examples.EnumBuffers/Small)	A	A	A	A	A	A	A	A
 Examples:Examples.EnumBuffers/Small Examples.EnumBuffers::FillClear(Examples.EnumBuffers/Small[])	A	A	A	A	A	A	A	A
@@ -115,6 +116,7 @@ Examples:System.Boolean Examples.Capabilities::CarrylessMultiply()	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.Capabilities::Crc64()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.Capabilities::Rdm64()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.Capabilities::Vbmi2()	B	B	B	B	B	B	B	B
+Examples:System.Boolean Examples.ClassTests::IsDog(Examples.Animal)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.ComputedFlags::get_Both()	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.ComputedFlags::get_Middle()	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.ComputedFlags::get_NotOff()	A	A	A	A	A	A	A	A

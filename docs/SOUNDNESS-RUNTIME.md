@@ -307,11 +307,23 @@ allocation records. Lean admits a `callVirtual` only at `callvirt` and only into
 with the slot's signature and an object receiver
 ([AnimalLegs](../Examples/Proofs/AnimalLegs.lean)).
 
+`castclass` and `isinst` of an admitted class other than `System.Object` are an `objectTest` of
+that class. It keeps a reference whose runtime type, its own class or one of the admitted bases
+the allocation records, is the class, passes null through, and otherwise gives null (`isinst`)
+or throws `System.InvalidCastException` (`castclass`) (ECMA-335 III.4.3, III.4.6). Those classes
+are the instance's whole lineage below `System.Object`, so the test is exact. For an instance
+the method does not construct, the runtime type, class and bases alike, is the theorem's
+hypothesis, as for field access and dispatch; one it constructs records its constructor's bases. Lean admits an
+`objectTest` only at `castclass` or `isinst` of the same class, on an object reference, and only
+against a pinned catalog class that is no interface
+([DogTest](../Examples/Proofs/DogTest.lean), [DogCast](../Examples/Proofs/DogCast.lean)).
+
 Interface, generic, explicit-layout and finalizable classes, classes deriving from a class that is
 not admitted, `newobj` of an abstract class, byrefs to class
 instances, field addresses on class instances, class fields holding anything but integers or
 admitted class instances (strings, arrays, interfaces, other classes),
-interface calls, virtual calls whose hierarchy the table cannot close or resolve, and the address
+interface calls, virtual calls whose hierarchy the table cannot close or resolve, type tests
+against interfaces, `System.Object` or classes that are not admitted, and the address
 of a class receiver, local or argument are each
 rejected by name during extraction.
 

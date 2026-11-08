@@ -261,7 +261,8 @@ internal static class NativeOperands
                             Slot(method.Body.Variables[FeatureConstants.Local(instruction)].VariableType,
                                 FeatureConstants.Local(instruction)),
                         Code.Ldfld or Code.Ldsfld => Type(FieldType((FieldReference)instruction.Operand)),
-                        Code.Ldobj or Code.Ldelem_Any => Type((TypeReference)instruction.Operand),
+                        Code.Ldobj or Code.Ldelem_Any or Code.Castclass or Code.Isinst =>
+                            Type((TypeReference)instruction.Operand),
                         Code.Newarr => Type(new ArrayType((TypeReference)instruction.Operand)),
                         Code.Ldloca or Code.Ldloca_S =>
                             Type(new ByReferenceType(method.Body.Variables[
