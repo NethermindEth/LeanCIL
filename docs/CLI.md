@@ -303,6 +303,12 @@ comment saying which obligation it is:
   words it names, such as a field value against an argument, splits the proof with
   `by_cases branch1 : ...`, and each side steps on to its own return and leaves its own
   postcondition, commented with the side it is on.
+- A field holding a class outside the model, such as `string`, loads as the reference it holds,
+  `Tagged.Tag.of initial item`, never read through. The statement adds `Tagged.Tag.Forms initial
+  item`, that the reference forms, and the body may store it into such a field, compare it and test
+  it for null, which splits the proof like a test of words. Any reference field may also be set to
+  null, through `Owned.store_formed`. A `bool` result leaves
+  `case result` for the `Bool` the returned word encodes and `case encoded` for the encoding.
 - A call in a body over objects to a method that loads its fields, stores at most one word field of
   an object argument and returns a value it names gets a generated `MethodContract` read from that
   body, with a `Holds` theorem proved by the same stepping; `cil_contract_steps` composes the call

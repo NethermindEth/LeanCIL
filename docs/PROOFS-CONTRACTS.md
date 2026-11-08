@@ -271,6 +271,7 @@ and only the class, offset and width are relied on.
 | `field.Readable memory object` | `object` is a live instance whose field loads |
 | `field.Owned memory object` | `Readable` and writable, so the field also stores |
 | `field.Holds memory object value` | `Owned` and holding `value` |
+| `field.Forms memory object` | The reference a reference field holds forms: null or any live object |
 | `LiveObject memory object` | `object` forms as an object reference older than later allocations |
 | `field.entry object` | The footprint entry of a call that may change the field |
 
@@ -278,7 +279,9 @@ and only the class, offset and width are relied on.
 `readable.facts held targetLive`; for a signed narrow field, `readable.signedFacts`, which pushes
 the value sign-extended), and `owned.store value` gives the write, its `Confined`
 footprint and the `Holds` after it; for a reference field, `owned.store live` stores a live object and
-`owned.store_formed formed` any reference that forms, null included. `frame` keeps a field and its value across a call confined
+`owned.store_formed formed` any reference that forms, null included. A field holding a class outside
+the model is never read through: `readable.load_forms forms` steps its load from `Forms`.
+`frame` keeps a field and its value across a call confined
 to a footprint apart from it, `after_confined` and `after_below` keep each predicate across a
 confined call and across memory that keeps old allocations, and `Owned.across` decides aliasing:
 after a call confined to the field of `written`, the same field of `object` holds the written

@@ -213,6 +213,23 @@ public static class Objects
     /// <summary>Whether the instance holds a tag.</summary>
     public static bool HasTag(Tagged item) => item.Tag is not null;
 
+    /// <summary>Gives <paramref name="target"/> the tag of <paramref name="source"/> when it holds none.</summary>
+    public static void FillTag(Tagged target, Tagged source)
+    {
+        if (target.Tag is null) target.Tag = source.Tag;
+    }
+
+    /// <summary>Removes the instance's tag.</summary>
+    public static void ClearTag(Tagged item) => item.Tag = null;
+
+    /// <summary>Unlinks the node after <paramref name="node"/> and returns it, or null at the end.</summary>
+    public static Node? Detach(Node node)
+    {
+        var next = node.Next;
+        node.Next = null;
+        return next;
+    }
+
     /// <summary>Bumps two accounts through <see cref="Bump"/>; both may be the same instance.</summary>
     public static void BumpBoth(Account first, Account second, ulong amount)
     {

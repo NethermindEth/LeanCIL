@@ -24,20 +24,19 @@ bind_method copyTag copyTagBody :=
 def copyTagContract : MethodContract (Reference × Reference) where
   args := fun (target, source) => [.object (.address target), .object (.address source)]
   pre := fun (target, source) memory => Tagged.Tag.Owned memory target ∧
-    Tagged.Tag.Readable memory source ∧
-    formObject memory (Tagged.Tag.of memory source) = .ok (.object (Tagged.Tag.of memory source))
+    Tagged.Tag.Readable memory source ∧ Tagged.Tag.Forms memory source
   footprint := fun (target, _) => [Tagged.Tag.entry target]
   post := fun (target, source) initial final values => values = [] ∧
     Tagged.Tag.Holds final target (Tagged.Tag.of initial source)
 
 /-- `CopyTag` meets its contract: one `ldfld` and one `stfld` of the tag's slot. -/
 theorem correctness : copyTagContract.Holds Extracted.program copyTag := by
-  rintro ⟨target, source⟩ memory ⟨owned, readable, tagFormed⟩
+  rintro ⟨target, source⟩ memory ⟨owned, readable, forms⟩
   dsimp only [copyTagContract] at *
-  obtain ⟨stored, framed, held⟩ := owned.store_formed tagFormed
+  obtain ⟨stored, framed, held⟩ := owned.store_formed forms.formed
   refine ⟨CIL.executionBound Extracted.program copyTag, _, [], ?_, framed, [], rfl, rfl, held⟩
   cil_checked_steps [owned.live.formed, readable.live.formed, readable.located,
-    readable.load.trans tagFormed, owned.located, stored]
+    readable.load_forms forms, owned.located, stored]
 
 #print axioms correctness
 
@@ -54,13 +53,11 @@ theorem copyTag_null_source_throws (memory : Memory) (target : Reference)
 /-- A null `target` throws `NullReferenceException` at the tag store, pc 3, after the load of
     `source.Tag` succeeds. -/
 theorem copyTag_null_target_throws (memory : Memory) (source : Reference)
-    (readable : Tagged.Tag.Readable memory source)
-    (tagFormed : formObject memory (Tagged.Tag.of memory source) =
-      .ok (.object (Tagged.Tag.of memory source))) :
+    (readable : Tagged.Tag.Readable memory source) (forms : Tagged.Tag.Forms memory source) :
     ∃ fuel, invoke Extracted.program fuel copyTag [.object .null, .object (.address source)]
       memory = .error ⟨copyTag, 3, .thrown "System.NullReferenceException"⟩ := by
   refine ⟨CIL.executionBound Extracted.program copyTag, ?_⟩
-  cil_checked_steps [readable.live.formed, readable.located, readable.load.trans tagFormed]
+  cil_checked_steps [readable.live.formed, readable.located, readable.load_forms forms]
 
 #print axioms copyTag_null_target_throws
 

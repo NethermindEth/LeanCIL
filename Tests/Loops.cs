@@ -867,7 +867,14 @@ var outlined = new (string Name, string? Selector)[]
     ("CheckedAdd", "CheckedArithmetic::Add(uint,uint)"), ("Log64", "Bits::Log64(ulong)"),
     ("AddSigned", "CheckedArithmetic::AddSigned(int,int)"), ("Distance", "Arithmetic::Distance(ulong,ulong)"),
     ("Larger", "Arithmetic::Larger(int,int)"), ("CounterAdd", "Counter::Add(ulong)"),
-    ("OdometerNext", "Odometer::Next()")
+    ("OdometerNext", "Odometer::Next()"),
+    // A string field's reference is copied, compared, tested and cleared without being read through.
+    ("CopyTag", "Objects::CopyTag(Examples.Tagged,Examples.Tagged)"),
+    ("SameTag", "Objects::SameTag(Examples.Tagged,Examples.Tagged)"),
+    ("HasTag", "Objects::HasTag(Examples.Tagged)"),
+    ("FillTag", "Objects::FillTag(Examples.Tagged,Examples.Tagged)"),
+    ("ClearTag", "Objects::ClearTag(Examples.Tagged)"),
+    ("Detach", "Objects::Detach(Examples.Node)")
 };
 var outlineTimer = System.Diagnostics.Stopwatch.StartNew();
 var outlineRoot = Path.Combine(root, "Outlines");
@@ -1605,7 +1612,50 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
                 (result : W64) : Prop :=
               result = odometerCount + 1 ∧ Contents final (odometer.element 1 8) 8 [odometerCount + 1]
             """),
-        ("  case postcondition => sorry", "  case postcondition => exact ⟨rfl, held1⟩")])
+        ("  case postcondition => sorry", "  case postcondition => exact ⟨rfl, held1⟩")]),
+    // The string the tag holds is named by the field it was loaded from, whether or not it is null.
+    ("CopyTag", [
+        ("def Precondition (target1 source : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ _ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (target1 source : Reference) (initial final : Memory) : Prop := sorry",
+            "def Postcondition (target1 source : Reference) (initial final : Memory) : Prop :=\n" +
+            "  Tagged.Tag.Holds final target1 (Tagged.Tag.of initial source)"),
+        (storedHole, "exact held1")]),
+    // A null test of the tag splits the proof; only the side where it is null stores.
+    ("FillTag", [
+        ("def Precondition (target1 source : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ _ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (target1 source : Reference) (initial final : Memory) : Prop := sorry",
+            "def Postcondition (target1 source : Reference) (initial final : Memory) : Prop :=\n" +
+            "  if Tagged.Tag.of initial target1 = .null then\n" +
+            "    Tagged.Tag.Holds final target1 (Tagged.Tag.of initial source)\n" +
+            "  else final = initial"),
+        ("-- Postcondition of the returned value where `branch1` holds, with `held1` the stored fields\n" +
+            "    sorry",
+            "simp only [Postcondition, branch1, ↓reduceIte]\n    exact held1"),
+        ("sorry -- Postcondition of the returned value where `branch1` fails",
+            "simp only [Postcondition, branch1, ↓reduceIte]\n    rfl")]),
+    // The returned word is computed from a comparison, so the proof chooses the Bool it encodes.
+    ("HasTag", [
+        ("def Precondition (item : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (item : Reference) (initial final : Memory) (result : Bool) : Prop := sorry",
+            "def Postcondition (item : Reference) (initial final : Memory) (result : Bool) : Prop :=\n" +
+            "  result = (Tagged.Tag.of initial item != .null) ∧ final = initial"),
+        ("case result => sorry -- the Bool the returned word encodes",
+            "case result => exact Tagged.Tag.of initial item != .null"),
+        ("case encoded => sorry -- the returned word is that Bool's encoding",
+            "case encoded => by_cases present : Tagged.Tag.of initial item = .null <;> simp [present]"),
+        ("sorry -- Postcondition of the returned value", "exact ⟨rfl, rfl⟩")]),
+    // A null store into a class field, after which the returned node must still form.
+    ("Detach", [
+        ("def Precondition (node : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (node : Reference) (initial final : Memory) (result : ManagedReference)\n" +
+            "    : Prop := sorry",
+            "def Postcondition (node : Reference) (initial final : Memory) (result : ManagedReference) : Prop :=\n" +
+            "  result = Node.Next.of initial node ∧ Node.Next.Holds final node .null"),
+        (storedHole, "exact ⟨nodeNextHeld.symm, held1⟩")])
 })
 {
     var source = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
@@ -1630,7 +1680,8 @@ Console.WriteLine("PASS filled outlines verify with only their specification wri
     "store through `Unsafe.Add` of a reference argument, a call to a callee that throws where its " +
     "precondition fails, a call storing through `Unsafe.Add` of a reference argument, two loops in sequence, " +
     "a checked add, a base-two logarithm, a signed checked add, splits on unsigned and signed tests of words, " +
-    "and a field store through a struct receiver at offsets 0 and 8");
+    "a field store through a struct receiver at offsets 0 and 8, a string reference copied, " +
+    "tested for null and compared, and a null store before returning the node it held");
 
 // A written footprint that leaves out the element a loop writes is an error at the write, never an admission.
 var narrowed = Path.Combine(outlineRoot, "FillWords", "Narrowed.lean");

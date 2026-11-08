@@ -58,8 +58,15 @@ internal static partial class ProofOutline
 
     /// <summary>A field access in program order, after `Stores` earlier writes; `Read` and `Own` are the facts
     /// a call's contract needs of the caller's object.</summary>
+    /// <remarks>A reference store of a value that is not an object the body reaches names it by `Value` and the
+    /// fact that it forms by `Formed`.</remarks>
     sealed record Access(Reached Object, ViewField Field, AccessKind Kind, bool Signed, int Stores,
-        string? Value = null, Reached? Target = null);
+        string? Value = null, Reached? Target = null, string? Formed = null)
+    {
+        /// <summary>A load of a reference field whose class is outside the model: its value is named, never
+        /// read through.</summary>
+        internal bool Opaque => Kind == AccessKind.Load && Field.Width is null && Target is null;
+    }
 
     /// <summary>A call through a callee's contract: the facts its precondition needs, the field it writes as a
     /// store of the caller's object, if any, and for each object the callee loads from a reference field, the
@@ -84,8 +91,9 @@ internal static partial class ProofOutline
     }
 
     /// <summary>A body without loops as the facts that step it: field loads and stores of the objects it reaches,
-    /// calls through their callees' contracts, locals, null tests of objects and splits on tests of named words;
-    /// null with the reason when it does more.</summary>
+    /// calls through their callees' contracts, locals, null tests of objects and splits on tests of named words,
+    /// and references to classes outside the model that it loads, compares, tests and stores but never reads
+    /// through; null with the reason when it does more.</summary>
     /// <remarks>A `linear` walk reads every op once in order, ignoring where branches go, to find which fields of
     /// which objects a body with loops touches; its steps are not a proof.</remarks>
     sealed class ObjectWalk(Specification spec, string[] ops, FieldViews views, Func<int, Callee?> callees,
@@ -100,6 +108,9 @@ internal static partial class ProofOutline
         sealed record Word(string? Term, int Width) : Item;
         sealed record Instance(Reached Object) : Item;
         sealed record Null : Item;
+        /// <summary>A reference to an object outside the model, as the field it was loaded from names it before any
+        /// write in a parenthesized `Term`, with the fact that it forms then.</summary>
+        sealed record Opaque(string Term, string Formed) : Item;
 
         int stores;
         int calls;
@@ -147,6 +158,23 @@ internal static partial class ProofOutline
                     Stopped = $"{reason} at {location(pc)}";
                     return false;
                 }
+                // Walks each side of a test from where it continues, with what the path holds so far.
+                bool Branch(string condition, bool takenWhenTrue, int target)
+                {
+                    var (holds, fails) = takenWhenTrue ? (target, pc + 1) : (pc + 1, target);
+                    var walks = new[] { holds, fails }.Select(next => (Next: next, Walk: new ObjectWalk(spec, ops,
+                        views, callees, linear) { Objects = Objects, stores = stores, calls = calls,
+                        splits = splits + 1, previous = [.. PathSteps] })).ToArray();
+                    Steps.Add(new Split($"branch{splits + 1}", condition, (location(holds), walks[0].Walk),
+                        (location(fails), walks[1].Walk)));
+                    foreach (var side in walks)
+                        if (!side.Walk.Walk(side.Next, [.. stack], new(locals), [.. visited], location))
+                        {
+                            Stopped = side.Walk.Stopped;
+                            return false;
+                        }
+                    return true;
+                }
                 if (!visited.Add(pc)) return Stop("a backward jump");
                 if ((match = Regex.Match(op, @"\A\.arg (\d+)\z")).Success)
                 {
@@ -171,7 +199,7 @@ internal static partial class ProofOutline
                         return Stop("a local the body reads before it stores it");
                     stack.Add(item);
                 }
-                else if (op == ".nullObject") stack.Add(new Null());
+                else if (op == ".memory .nullObject") stack.Add(new Null());
                 else if (op == ".dup")
                 {
                     if (stack.Count == 0) return Stop("a duplicate of an empty stack");
@@ -184,6 +212,32 @@ internal static partial class ProofOutline
                     var operands = jump.Groups[1].Value switch { "branch" => 0, "brzero" or "brnonzero" => 1, _ => 2 };
                     for (var operand = 0; operand < operands; operand++)
                         if (Pop() is null) return Stop($"`{op}` on an empty stack");
+                }
+                else if ((match = Regex.Match(op, @"\A\.(brzero|brnonzero) (\d+)\z")).Success &&
+                    stack.Count > 0 && stack[^1] is Opaque)
+                {
+                    var tested = (Opaque)Pop()!;
+                    if (stores > 0) return Stop(Unformed(tested));
+                    // `brfalse` takes its target when the reference is null.
+                    return Branch($"{tested.Term[1..^1]} = .null", match.Groups[1].Value == "brzero",
+                        int.Parse(match.Groups[2].Value));
+                }
+                else if ((match = Regex.Match(op, @"\A\.(beq|bne) (\d+)\z")).Success && stack.Count > 1 &&
+                    (stack[^1] is Opaque || stack[^2] is Opaque))
+                {
+                    var right = Pop();
+                    var left = Pop();
+                    if (Compared(left, right) is not { } condition) return Stop(Uncompared(op));
+                    return Branch(condition, match.Groups[1].Value == "beq", int.Parse(match.Groups[2].Value));
+                }
+                else if (op is ".eq" or ".gtu" && stack.Count > 1 && (stack[^1] is Opaque || stack[^2] is Opaque))
+                {
+                    var right = Pop();
+                    var left = Pop();
+                    // `cgt.un` on references is defined only against null.
+                    if (Compared(left, right) is null || op == ".gtu" && right is not Null)
+                        return Stop(Uncompared(op));
+                    stack.Add(new Word(null, 4));
                 }
                 else if ((match = Regex.Match(op, @"\A\.(brzero|brnonzero) (\d+)\z")).Success &&
                     stack.Count > 0 && stack[^1] is not Word)
@@ -202,20 +256,7 @@ internal static partial class ProofOutline
                         operands.Any(operand => operand!.Width != operands[0]!.Width))
                         return Stop($"`{op}` on a value the outline does not name");
                     var (condition, takenWhenTrue) = Body.Test(name, [.. operands.Select(operand => operand!.Term!)]);
-                    var target = Body.Target(op)!.Value;
-                    var (holds, fails) = takenWhenTrue ? (target, pc + 1) : (pc + 1, target);
-                    var walks = new[] { holds, fails }.Select(next => (Next: next, Walk: new ObjectWalk(spec, ops,
-                        views, callees, linear) { Objects = Objects, stores = stores, calls = calls,
-                        splits = splits + 1, previous = [.. PathSteps] })).ToArray();
-                    Steps.Add(new Split($"branch{splits + 1}", condition, (location(holds), walks[0].Walk),
-                        (location(fails), walks[1].Walk)));
-                    foreach (var side in walks)
-                        if (!side.Walk.Walk(side.Next, [.. stack], new(locals), [.. visited], location))
-                        {
-                            Stopped = side.Walk.Stopped;
-                            return false;
-                        }
-                    return true;
+                    return Branch(condition, takenWhenTrue, Body.Target(op)!.Value);
                 }
                 else if ((match = Regex.Match(op, @"\A\.branch (\d+)\z")).Success)
                     pc = int.Parse(match.Groups[1].Value) - 1;
@@ -285,6 +326,18 @@ internal static partial class ProofOutline
                 {
                     if (Pop() is not Instance instance || Field(instance, referenceLoad) is not { } field)
                         return Stop("a reference field load of an object the outline cannot name");
+                    var held = spec.Method.Body.Instructions[pc].Operand is FieldReference { FieldType: var type }
+                        ? type : null;
+                    if (held is not null && ObjectTypes.Opaque(held))
+                    {
+                        if (stores > 0)
+                            return Stop($"a load of `{field.Lean}` after a store, whose reference the statement " +
+                                "forms only in the caller's memory");
+                        Steps.Add(new Access(instance.Object, field, AccessKind.Load, false, stores));
+                        stack.Add(new Opaque($"({field.Lean}.of initial {instance.Object.Name})",
+                            Fact(instance.Object, field) + "Forms.formed"));
+                        continue;
+                    }
                     if (stores > 0)
                         return Stop($"a load of `{field.Lean}` after a store, whose target the statement names " +
                             "in the caller's memory");
@@ -293,10 +346,9 @@ internal static partial class ProofOutline
                     var reached = Objects.FirstOrDefault(other => other.Name == name + "Target");
                     if (reached is null)
                     {
-                        if (spec.Method.Body.Instructions[pc].Operand is not FieldReference { FieldType: var type } ||
-                            !ObjectTypes.Is(type))
+                        if (held is null || !ObjectTypes.Is(held))
                             return Stop($"a load of `{field.Lean}`, whose class the outline cannot name");
-                        reached = new Reached(name + "Target", views.Of(type), name + "Held", instance.Object.Name);
+                        reached = new Reached(name + "Target", views.Of(held), name + "Held", instance.Object.Name);
                         Objects.Add(reached);
                     }
                     Steps.Add(new Access(instance.Object, field, AccessKind.Load, false, stores, Target: reached));
@@ -307,13 +359,23 @@ internal static partial class ProofOutline
                     var value = Pop();
                     if (Pop() is not Instance instance || Field(instance, referenceStore) is not { } field)
                         return Stop("a reference field store into an object the outline cannot name");
-                    if (value is not Instance target)
-                        return Stop($"a store into `{field.Lean}` of null, which `owned.store` does not take");
                     if (instance.Object.Holder is not null)
                         return Stop($"a store into `{field.Lean}` of an object a field holds, which the footprint " +
                             "cannot name");
-                    Steps.Add(new Access(instance.Object, field, AccessKind.Store, false, stores++,
-                        Target: target.Object));
+                    if (value is Opaque { } late && stores > 0) return Stop(Unformed(late));
+                    Access? stored = value switch
+                    {
+                        Instance target => new(instance.Object, field, AccessKind.Store, false, stores,
+                            Target: target.Object),
+                        Null => new(instance.Object, field, AccessKind.Store, false, stores, ".null", Formed: "rfl"),
+                        Opaque opaque => new(instance.Object, field, AccessKind.Store, false, stores, opaque.Term,
+                            Formed: opaque.Formed),
+                        _ => null
+                    };
+                    if (stored is null)
+                        return Stop($"a store into `{field.Lean}` of a value the outline cannot name");
+                    Steps.Add(stored);
+                    stores++;
                 }
                 else if ((match = Regex.Match(op, @"\A\.call(?:Instance)? (\d+) (\d+)\z")).Success)
                 {
@@ -465,6 +527,29 @@ internal static partial class ProofOutline
 
         internal static string Memory(int stores) => stores == 0 ? "initial" : $"stored{stores}";
 
+        static string Unformed(Opaque opaque) =>
+            $"a use of `{opaque.Term}` after a store, whose reference the statement forms only in the caller's memory";
+
+        static string Uncompared(string op) => $"`{op}` of a reference with a value the outline cannot name";
+
+        /// <summary>The equation a reference test decides, or null when an operand is not a reference the outline
+        /// names or a store has come first, since the statement forms each reference in the caller's memory.
+        /// </summary>
+        string? Compared(Item? left, Item? right)
+        {
+            if (stores > 0) return null;
+            static string? Term(Item? item) => item switch
+            {
+                Opaque opaque => opaque.Term[1..^1],
+                Null => ".null",
+                Instance instance => $"(.address {instance.Object.Name})",
+                _ => null
+            };
+            // The opaque operand comes first, so the equation elaborates at `ManagedReference`.
+            return (Term(left), Term(right)) is ({ } first, { } second)
+                ? left is Opaque ? $"{first} = {second}" : $"{second} = {first}" : null;
+        }
+
         static ViewField? Field(Instance instance, ClassViews.FieldOperation operation) => instance.Object.Fields
             .FirstOrDefault(field => field.Offset == operation.Offset && field.Width == operation.Width);
 
@@ -500,6 +585,9 @@ internal static partial class ProofOutline
                     plan.Premises.Add((Fact(reached, field),
                         $"{field.Lean}.{(owned ? "Owned" : "Readable")} initial {reached.Name}"));
                     if (owned) plan.Entries.Add($"{field.Lean}.entry {reached.Name}");
+                    if (touched.Any(access => access.Opaque))
+                        plan.Premises.Add((Fact(reached, field) + "Forms",
+                            $"{field.Lean}.Forms initial {reached.Name}"));
                 }
             }
             return plan;
@@ -526,7 +614,11 @@ internal static partial class ProofOutline
                 return null;
             var spec = new Specification(method, parameters, DescribeResult(method), true, true);
             var walk = new ObjectWalk(spec, extraction.Emitted[index].Ops, views, _ => null);
+            // A contract states reference stores only of objects the callee reaches, and its caller cannot give
+            // it the premise that a reference outside the model forms.
             if (!walk.Run(_ => "") || walk.Steps.Any(step => step is CallStep or Split) ||
+                walk.Accesses.Any(access => access.Opaque || access.Kind == AccessKind.Store &&
+                    access.Field.Width is null && access.Target is null) ||
                 walk.Accesses.Count(access => access.Kind == AccessKind.Store) >
                     (walk.Objects.Any(reached => reached.Holder is not null) ? 0 : 1) ||
                 (walk.Returned ?? "").Contains("stored", StringComparison.Ordinal) ||
@@ -770,6 +862,15 @@ internal static partial class ProofOutline
         void Access(Access access)
         {
             var fact = FieldFact(access.Object, access.Field, access.Stores);
+            if (access.Opaque)
+            {
+                // The load pushes the reference as it is, so later tests and stores need it to form.
+                var forms = fact + "Forms";
+                Add(fact + ".located");
+                Add($"{fact}.load_forms {forms}");
+                Add(forms + ".formed");
+                return;
+            }
             if (access.Kind == AccessKind.Load)
             {
                 Add(access.Field.Width is null ? $"{fact}.facts {access.Target!.Held} {access.Target.Name}Live"
@@ -779,14 +880,17 @@ internal static partial class ProofOutline
             var stores = access.Stores + 1;
             if (access.Field.Width is null)
             {
-                var target = Live(access.Target!, access.Stores);
-                lean.Line($"{indent}obtain ⟨written{stores}, framed{stores}, held{stores}⟩ := " +
-                    $"{fact}.store {target}");
+                var target = access.Target is { } reached ? Live(reached, access.Stores) : null;
+                var value = access.Target is { } named ? $"(.address {named.Name})" : access.Value!;
+                lean.Line($"{indent}obtain ⟨written{stores}, framed{stores}, held{stores}⟩ := " + (target is null
+                    ? $"{fact}.store_formed {(access.Formed == "rfl" ? $"(value := {value}) rfl" : access.Formed)}"
+                    : $"{fact}.store {target}"));
                 lean.Wrapped($"{indent}generalize", [$"setSlot {ObjectWalk.Memory(access.Stores)} " +
-                    $"({access.Field.Lean}.address {access.Object.Name}) (.address {access.Target!.Name}) = " +
+                    $"({access.Field.Lean}.address {access.Object.Name}) {value} = " +
                     $"stored{stores}"], $"at written{stores} framed{stores} held{stores}");
                 // The store checks the stored reference is formed in the memory it writes.
-                Add(target + ".formed");
+                if (target is not null) Add(target + ".formed");
+                else if (access.Formed != "rfl") Add(access.Formed!);
             }
             else lean.Wrapped($"{indent}obtain ⟨stored{stores}, written{stores}, framed{stores}, held{stores}⟩ :=",
                 [$"{fact}.store {access.Value}"], "");
@@ -802,6 +906,9 @@ internal static partial class ProofOutline
                 .ToArray();
             var confined = widened.Length == 0 ? "Confined.refl _ _"
                 : widened.Skip(1).Aggregate(widened[0], (chain, next) => $"({chain}.trans {next})");
+            // A returned object must still form in the memory the last store left.
+            if (walk.Objects.FirstOrDefault(reached => $"(.address {reached.Name})" == walk.Returned) is { } result)
+                Add(Live(result, stored.Count) + ".formed");
             // The return leaves the method's frame, which owns no caller memory.
             // After a call the steps may already have reached the return.
             Add("leaveFrame");
@@ -813,8 +920,16 @@ internal static partial class ProofOutline
                     [$"⟨{confined},", returns + "⟩"], "");
                 return;
             }
-            lean.Wrapped(spec.Result is null ? $"{indent}refine ⟨rfl," : $"{indent}refine ⟨_, rfl,",
+            var boolean = spec.Result is { Boolean: true };
+            lean.Wrapped(spec.Result is null ? $"{indent}refine ⟨rfl,"
+                : boolean ? $"{indent}refine ⟨?result, ?encoded," : $"{indent}refine ⟨_, rfl,",
                 [confined + ","], "?_⟩");
+            if (boolean)
+            {
+                // The returned word is computed, not named, so the author chooses the Bool it encodes.
+                lean.Noted(indent, "case result => sorry", "the Bool the returned word encodes");
+                lean.Noted(indent, "case encoded => sorry", "the returned word is that Bool's encoding");
+            }
             var held = string.Join(", ", Enumerable.Range(1, stored.Count).Select(index => $"`held{index}`"));
             lean.Noted(indent, "sorry", "Postcondition of the returned value" +
                 (branches.Count == 0 ? "" : " where " + string.Join(" and ", branches)) +

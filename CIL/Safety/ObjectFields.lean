@@ -16,6 +16,8 @@ cannot make a proof succeed, since every field instruction carries its own check
 `field.Readable` packages what a load needs: a live object of the field's class, the field
 located inside it, and readable, initialized storage. `field.Owned` adds write authority, which
 a store needs; `field.Holds memory object value` is `Owned` with the field holding `value`.
+`field.Forms` says the reference a reference field holds forms, which code that loads, tests or
+copies a reference to a class outside the model needs, since it never reads through it.
 Each gives the facts the stepping tactics take (`live`, `located`, `load`, `store`), and keeps
 across a confined call when the call's footprint is apart from the field (`frame`), so a
 contract reads as the C# does: `Account.Balance.Holds final account (balance + amount)`.
@@ -613,6 +615,18 @@ def Holds (field : ReferenceField) (memory : Memory) (object : Reference)
     (value : ManagedReference) : Prop :=
   field.Owned memory object ∧ field.of memory object = value
 
+/-- The reference the field holds forms in `memory`: null, or a live object of any class, which
+    a load pushes as it is, a test compares and a store elsewhere takes. -/
+def Forms (field : ReferenceField) (memory : Memory) (object : Reference) : Prop :=
+  formObject memory (field.of memory object) = .ok (.object (field.of memory object))
+
+/-- `Forms` as the equation the stepping tactics rewrite with. -/
+theorem Forms.formed {field : ReferenceField} {memory : Memory} {object : Reference}
+    (forms : field.Forms memory object) :
+    formObject memory (field.of memory object) = .ok (.object (field.of memory object)) :=
+  forms
+#print axioms Forms.formed
+
 /-- The field's object is live. -/
 theorem Readable.live {field : ReferenceField} {memory : Memory} {object : Reference}
     (readable : field.Readable memory object) : LiveObject memory object :=
@@ -660,6 +674,13 @@ theorem Readable.load_null {field : ReferenceField} {memory : Memory} {object : 
   rw [readable.load, held]
   rfl
 #print axioms Readable.load_null
+
+/-- A readable field whose reference forms loads it as it is, whatever class it names. -/
+theorem Readable.load_forms {field : ReferenceField} {memory : Memory} {object : Reference}
+    (readable : field.Readable memory object) (forms : field.Forms memory object) :
+    loadSlot memory (field.address object) = .ok (.object (field.of memory object)) :=
+  readable.load.trans forms
+#print axioms Readable.load_forms
 
 /-- Storing any reference that forms, null or a live object of any class, into an owned field
     succeeds, confined to the field, and leaves it owned and holding that reference. -/

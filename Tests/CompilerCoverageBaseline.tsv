@@ -39,6 +39,7 @@ Examples:Examples.NestedRecord& Examples.UnsafeLayouts::Add15int(Examples.Nested
 Examples:Examples.NestedRecord& Examples.UnsafeLayouts::Add15nint(Examples.NestedRecord&,System.IntPtr)	A	A	A	A	A	A	A	A
 Examples:Examples.NestedRecord& Examples.UnsafeLayouts::Add15nuint(Examples.NestedRecord&,System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:Examples.NestedRecord[] Examples.PrimitiveArrays::AllocateNested(System.Int32)	A	A	A	A	A	A	A	A
+Examples:Examples.Node Examples.Objects::Detach(Examples.Node)	A	A	A	A	A	A	A	A
 Examples:Examples.PackedConstructor Examples.Constructors::MakePacked(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:Examples.PackedLeaf& Examples.GenericMethods::NextPacked(Examples.PackedLeaf&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:Examples.PackedLeaf& Examples.UnsafeLayouts::Add14int(Examples.PackedLeaf&,System.Int32)	A	A	A	A	A	A	A	A
@@ -1074,10 +1075,12 @@ Examples:System.Void Examples.NullReferences::Write(System.UInt64)	A	A	A	A	A	A	A
 Examples:System.Void Examples.NullReferences::WriteField(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::Bump(Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::BumpBoth(Examples.Account,Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Objects::ClearTag(Examples.Tagged)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::CopyTag(Examples.Tagged,Examples.Tagged)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::DepositBoth(Examples.Account,Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::DepositFrom(Examples.Account,Examples.Account,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::DepositTimes(Examples.Account,System.UInt64,System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Objects::FillTag(Examples.Tagged,Examples.Tagged)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::Link(Examples.Node,Examples.Node)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::LinkBoth(Examples.Node,Examples.Node,Examples.Node)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::Relink(Examples.Node,Examples.Node,Examples.Node)	A	A	A	A	A	A	A	A
