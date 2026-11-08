@@ -232,7 +232,9 @@ comment saying which obligation it is:
   theorem assumes the precondition and promises the postcondition of the returned value, and for
   a method that takes references or spans also of the caller's memory before and after.
 - A method without a loop is stepped by `cil_checked_steps` when its body is arithmetic on 32- and
-  64-bit arguments, leaving only the postcondition.
+  64-bit arguments, leaving only the postcondition. When it also takes up to three `bool`
+  arguments and tests nothing else, it is split with `cases` on each, and every side steps to its
+  own return and leaves its own postcondition, commented with the values it is for.
 - A method with one loop gets its loop state, the cutpoint at the loop's back-edge test (found by
   instruction, never by pc), and `invariant` and `measure` definitions to replace. A method that
   takes a reference also gets a `footprint` to replace: the caller memory the loop may write, which

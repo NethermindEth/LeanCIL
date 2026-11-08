@@ -1074,7 +1074,15 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
         ("sorry -- Postcondition at the return at Loops.cs:25", "simpa [Postcondition, invariant] using holds"),
         ("case invariant => sorry -- invariant again at the loop head",
             "case invariant => simpa [invariant, BitVec.add_assoc] using holds"),
-        ("case measure => sorry -- measure decreases over this iteration", "case measure => simp [measure]")])
+        ("case measure => sorry -- measure decreases over this iteration", "case measure => simp [measure]")]),
+    // A test of a `bool` argument splits the run into one stepped side per value.
+    ("Choose", [
+        ("def Precondition (flag : Bool) (x y : W64) : Prop := sorry",
+            "def Precondition (_ : Bool) (_ _ : W64) : Prop := True"),
+        ("def Postcondition (flag : Bool) (x y result : W64) : Prop := sorry",
+            "def Postcondition (flag : Bool) (x y result : W64) : Prop := result = if flag then x else y"),
+        ("sorry -- Postcondition of the returned value where `flag` is false", "rfl"),
+        ("sorry -- Postcondition of the returned value where `flag` is true", "rfl")])
 })
 {
     var source = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
@@ -1094,8 +1102,8 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
 }
 Console.WriteLine("PASS filled outlines verify with only their specification written: a field store, " +
     "two reference field stores that may alias, a null test followed through a local, two calls through a " +
-    "generated contract, a split on a field value, a call whose callee loads the node a field holds and a " +
-    "span fold that stores its total before each span load");
+    "generated contract, a split on a field value, a call whose callee loads the node a field holds, a " +
+    "span fold that stores its total before each span load and a split on a `bool` argument");
 
 // One hole left, an obligation or a path the outline could not step, keeps an outline from certifying:
 // verify refuses it for `sorryAx` and removes the report the filled proof left.

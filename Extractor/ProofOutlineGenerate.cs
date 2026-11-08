@@ -292,15 +292,25 @@ internal static partial class ProofOutline
         if (spec.Framed) return ObjectStraightLine(extraction, spec, body, lean);
         var steppable = spec.Parameters.All(parameter => parameter.Shape == ParameterShape.Scalar) &&
             body.Ops.All(Body.Pure);
+        var split = !steppable && SplitsOnBooleans(body.Ops, spec.Parameters);
         Header(lean, spec, ["CIL.Verification", "CIL.Safety.SymbolicExecution"],
-            steppable ? "`postcondition`" : null);
+            steppable || split ? "`postcondition`" : null);
         spec.Placeholders(lean);
         spec.Statement(lean);
-        if (steppable)
+        if (steppable) SteppedRun(lean, spec, "  ", "", "Postcondition of the returned value");
+        else if (split)
         {
-            lean.Line("  refine ⟨CIL.executionBound Extracted.program 0, ?final, ?results, ?run, ?postcondition⟩");
-            lean.Line("  case run => cil_checked_steps");
-            spec.Postcondition(lean, "  ", "Postcondition of the returned value");
+            // `cases` on each `bool` makes every test a literal, so each side steps to one return.
+            var booleans = spec.Parameters.Where(parameter => parameter.Shape == ParameterShape.Boolean).ToArray();
+            lean.Line("  " + string.Join(" <;> ", booleans.Select(parameter => "cases " + parameter.Name)));
+            for (var side = 0; side < 1 << booleans.Length; side++)
+            {
+                var where = "where " + string.Join(" and ", booleans.Select((parameter, index) =>
+                    $"`{parameter.Name}` is {((side >> (booleans.Length - 1 - index) & 1) == 1 ? "true" : "false")}"));
+                lean.Line($"  · -- {where}");
+                SteppedRun(lean, spec, "    ", (side + 1).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    $"Postcondition of the returned value {where}");
+            }
         }
         else
         {
@@ -311,6 +321,35 @@ internal static partial class ProofOutline
         }
         Footer(lean);
         return lean.ToString();
+    }
+
+    /// <summary>The checked run of a body `cil_checked_steps` takes alone, and its postcondition hole; `suffix`
+    /// keeps the named holes of each side of a split apart, since a named hole is shared across tactics.</summary>
+    static void SteppedRun(Writer lean, Specification spec, string indent, string suffix, string note)
+    {
+        lean.Line($"{indent}refine ⟨CIL.executionBound Extracted.program 0, ?final{suffix}, ?results{suffix}, " +
+            "?run, ?postcondition⟩");
+        lean.Line($"{indent}case run => cil_checked_steps");
+        spec.Postcondition(lean, indent, note);
+    }
+
+    /// <summary>The most `bool` arguments a straight-line outline splits on, one side per combination.</summary>
+    const int MaxBooleanSplits = 3;
+
+    /// <summary>Whether a body over words and `bool`s steps once each `bool` is a literal: every operation is
+    /// pure or a jump, and every test reads a `bool` argument just loaded.</summary>
+    static bool SplitsOnBooleans(string[] ops, Parameter[] parameters)
+    {
+        var booleans = parameters.Count(parameter => parameter.Shape == ParameterShape.Boolean);
+        if (booleans is 0 or > MaxBooleanSplits ||
+            parameters.Any(parameter => parameter.Shape is not (ParameterShape.Scalar or ParameterShape.Boolean)))
+            return false;
+        bool LoadsBoolean(string op) => Regex.Match(op, @"\A\.arg (\d+)(?: \(some \.unsigned8\))?\z") is
+            { Success: true } load && parameters[int.Parse(load.Groups[1].Value,
+                System.Globalization.CultureInfo.InvariantCulture)].Shape == ParameterShape.Boolean;
+        return ops.Select((op, pc) => Body.Pure(op) || LoadsBoolean(op) ||
+            Body.Target(op) is not null && !Body.Conditional(op) ||
+            Regex.IsMatch(op, @"\A\.br(non)?zero \d+\z") && pc > 0 && LoadsBoolean(ops[pc - 1])).All(stepped => stepped);
     }
 
     /// <summary>A straight-line body over object arguments: stepped when it loads fields and stores at most one
