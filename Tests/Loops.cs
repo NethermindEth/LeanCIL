@@ -859,7 +859,8 @@ var outlined = new (string Name, string? Selector)[]
     ("FirstPresent", "Objects::FirstPresent(Examples.Account,Examples.Account)"),
     ("DepositBoth", "Objects::DepositBoth(Examples.Account,Examples.Account,System.UInt64)"),
     ("DepositTimes", "Objects::DepositTimes(Examples.Account,System.UInt64,System.UInt32)"),
-    ("DepositFrom", "Objects::DepositFrom(Examples.Account,Examples.Account,System.UInt32)")
+    ("DepositFrom", "Objects::DepositFrom(Examples.Account,Examples.Account,System.UInt32)"),
+    ("Withdraw", "Objects::Withdraw(Examples.Account,System.UInt64)")
 };
 var outlineTimer = System.Diagnostics.Stopwatch.StartNew();
 var outlineRoot = Path.Combine(root, "Outlines");
@@ -958,7 +959,8 @@ Console.WriteLine("PASS verify refuses the Countdown outline until its holes are
     $"({outlineTimer.Elapsed.TotalSeconds:F0}s for every outline check)");
 
 // Object outlines leave only their specification: once it is written, an instance method's field store, a
-// reference field store and a null test of an argument followed through a local each verify.
+// reference field store, a null test of an argument followed through a local and a split on a field value
+// each verify.
 const string storedHole = "sorry -- Postcondition of the returned value, with `held1` the stored fields";
 foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] Fills)[]
 {
@@ -1011,7 +1013,24 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
           simp only [Ne.symm distinct, ite_false, held1.2] at firstHeld
           rw [secondBefore] at held2
           exact ⟨firstHeld, held2⟩
-        """.Trim())])
+        """.Trim())]),
+    // Each side of the test on the balance steps to its own return and leaves its own postcondition.
+    ("Withdraw", [
+        ("def Precondition (account : Reference) (amount : W64) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : W64) (_ : Memory) : Prop := True"),
+        ("def Postcondition (account : Reference) (amount : W64) (initial final : Memory) (result : W64)\n" +
+            "    : Prop := sorry",
+            "def Postcondition (account : Reference) (amount : W64) (initial final : Memory) (result : W64)\n" +
+            "    : Prop :=\n" +
+            "  if amount ≤ Account.Balance.of initial account then\n" +
+            "    result = amount ∧\n" +
+            "      Account.Balance.Holds final account (Account.Balance.of initial account - amount)\n" +
+            "  else result = 0 ∧ final = initial"),
+        ("-- Postcondition of the returned value where `branch1` holds, with `held1` the stored fields\n" +
+            "    sorry",
+            "simp only [Postcondition, branch1, ↓reduceIte, true_and]\n    exact held1"),
+        ("sorry -- Postcondition of the returned value where `branch1` fails",
+            "simp only [Postcondition, branch1, ↓reduceIte]\n    exact ⟨rfl, rfl⟩")])
 })
 {
     var source = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
@@ -1030,8 +1049,8 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
         throw new InvalidOperationException($"The filled {name} outline did not verify:\n{verified.Output}");
 }
 Console.WriteLine("PASS filled object outlines verify with only their specification written: a field store, " +
-    "two reference field stores that may alias, a null test followed through a local and two calls through a " +
-    "generated contract");
+    "two reference field stores that may alias, a null test followed through a local, two calls through a " +
+    "generated contract and a split on a field value");
 
 // LeanCIL's own closure that lays out a static word's bytes: its outline states the getter's contract
 // and steps through it, and the checked-in proof fills only the outline's holes and verifies.

@@ -253,7 +253,10 @@ comment saying which obligation it is:
   holds it. A method that writes a field promises `Confined footprint initial final`, with
   `footprint` listing the written fields. The body is stepped through its field loads, its stores,
   locals and null tests of objects, carrying each field's fact across the stores before it, and
-  leaves the postcondition with `held1`, `held2`, ... the stored fields' `Holds` facts.
+  leaves the postcondition with `held1`, `held2`, ... the stored fields' `Holds` facts. A test of
+  words it names, such as a field value against an argument, splits the proof with
+  `by_cases branch1 : ...`, and each side steps on to its own return and leaves its own
+  postcondition, commented with the side it is on.
 - A call in a body over objects to a method that loads its fields, stores at most one word field of
   an object argument and returns a value it names gets a generated `MethodContract` read from that
   body, with a `Holds` theorem proved by the same stepping; `cil_contract_steps` composes the call

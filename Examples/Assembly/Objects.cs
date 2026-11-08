@@ -145,6 +145,17 @@ public static class Objects
             account.Deposit(source.Balance);
     }
 
+    /// <summary>
+    /// Withdraws <paramref name="amount"/> only when the balance covers it; returns what it withdrew.
+    /// </summary>
+    public static ulong Withdraw(Account account, ulong amount)
+    {
+        if (account.Balance < amount)
+            return 0;
+        account.Balance -= amount;
+        return amount;
+    }
+
     /// <summary>Two instances of a class with no fields are still two distinct instances.</summary>
     public static bool TwoMarkers()
     {

@@ -18,6 +18,25 @@ internal static partial class ProofOutline
 
         internal static bool Conditional(string op) => Target(op) is not null && !op.StartsWith(".branch ");
 
+        /// <summary>The proposition a conditional branch tests of its operands' terms, and whether it is taken
+        /// when the proposition holds; signed comparisons read the words through `toInt`.</summary>
+        internal static (string Condition, bool TakenWhenTrue) Test(string name, string[] terms) => name switch
+        {
+            "brzero" => ($"{terms[0]} = 0", true),
+            "brnonzero" => ($"{terms[0]} = 0", false),
+            "beq" => ($"{terms[0]} = {terms[1]}", true),
+            "bne" => ($"{terms[0]} = {terms[1]}", false),
+            "blt" => ($"{terms[0]}.toInt < {terms[1]}.toInt", true),
+            "ble" => ($"{terms[0]}.toInt ≤ {terms[1]}.toInt", true),
+            "bgt" => ($"{terms[1]}.toInt < {terms[0]}.toInt", true),
+            "bge" => ($"{terms[1]}.toInt ≤ {terms[0]}.toInt", true),
+            "bltu" => ($"{terms[0]} < {terms[1]}", true),
+            "bleu" => ($"{terms[0]} ≤ {terms[1]}", true),
+            "bgtu" => ($"{terms[1]} < {terms[0]}", true),
+            "bgeu" => ($"{terms[1]} ≤ {terms[0]}", true),
+            _ => throw new ArgumentException($"`{name}` is not a conditional branch", nameof(name))
+        };
+
         /// <summary>Each loop as its head and latch, the last pc branching back to it, in head order.</summary>
         internal List<(int Head, int Latch)> Loops() => Ops.Select((op, pc) => (Target: Target(op), Pc: pc))
             .Where(edge => edge.Target is { } target && target <= edge.Pc)
@@ -747,21 +766,7 @@ internal static partial class ProofOutline
                 return;
             }
             var terms = operands.Select(operand => ((Number)operand).Term).ToArray();
-            var (condition, takenWhenTrue) = opName switch
-            {
-                "brzero" => ($"{terms[0]} = 0", true),
-                "brnonzero" => ($"{terms[0]} = 0", false),
-                "beq" => ($"{terms[0]} = {terms[1]}", true),
-                "bne" => ($"{terms[0]} = {terms[1]}", false),
-                "blt" => ($"{terms[0]}.toInt < {terms[1]}.toInt", true),
-                "ble" => ($"{terms[0]}.toInt ≤ {terms[1]}.toInt", true),
-                "bgt" => ($"{terms[1]}.toInt < {terms[0]}.toInt", true),
-                "bge" => ($"{terms[1]}.toInt ≤ {terms[0]}.toInt", true),
-                "bltu" => ($"{terms[0]} < {terms[1]}", true),
-                "bleu" => ($"{terms[0]} ≤ {terms[1]}", true),
-                "bgtu" => ($"{terms[1]} < {terms[0]}", true),
-                _ => ($"{terms[1]} ≤ {terms[0]}", true)
-            };
+            var (condition, takenWhenTrue) = Body.Test(opName, terms);
             var holds = Side(takenWhenTrue ? target : pc + 1, fact);
             var fails = Side(takenWhenTrue ? pc + 1 : target, fact);
             lean.Line($"{indent}by_cases {fact} : {condition}");

@@ -65,6 +65,11 @@ internal static partial class ProofOutline
     /// as a store of the caller's object, if any.</summary>
     sealed record CallStep(Callee Callee, int Stores, Access[] Needs, Reached[] Live, Access? Writes, int Number);
 
+    /// <summary>A test of named words that splits the body: `Fact` names `Condition` on the side that holds it
+    /// and its negation on the other, and each side is walked from where it continues to its own return.</summary>
+    sealed record Split(string Fact, string Condition, (string Where, ObjectWalk Walk) Holds,
+        (string Where, ObjectWalk Walk) Fails);
+
     /// <summary>A callee the outline states a contract for from its own walk: the facts it needs of its
     /// objects, at most one field it writes, and its result in terms of its arguments and initial memory.</summary>
     sealed record Callee(int Index, string Name, Specification Spec, ObjectWalk Walk, ObjectPlan Plan)
@@ -73,9 +78,9 @@ internal static partial class ProofOutline
             Walk.Steps.OfType<Access>().SingleOrDefault(access => access.Kind == AccessKind.Store);
     }
 
-    /// <summary>A straight-line body as the facts that step it: field loads and stores of the objects it reaches,
-    /// calls through their callees' contracts, locals and null tests of objects; null with the reason when it
-    /// does more.</summary>
+    /// <summary>A body without loops as the facts that step it: field loads and stores of the objects it reaches,
+    /// calls through their callees' contracts, locals, null tests of objects and splits on tests of named words;
+    /// null with the reason when it does more.</summary>
     /// <remarks>A `linear` walk reads every op once in order, ignoring where branches go, to find which fields of
     /// which objects a body with loops touches; its steps are not a proof.</remarks>
     sealed class ObjectWalk(Specification spec, string[] ops, FieldViews views, Func<int, Callee?> callees,
@@ -83,7 +88,7 @@ internal static partial class ProofOutline
     {
         internal string? Stopped { get; private set; }
         internal string? Returned { get; private set; }
-        internal List<Reached> Objects { get; } = [];
+        internal List<Reached> Objects { get; private init; } = [];
         internal List<object> Steps { get; } = [];
 
         abstract record Item;
@@ -93,8 +98,14 @@ internal static partial class ProofOutline
 
         int stores;
         int calls;
+        int splits;
 
-        internal IEnumerable<Access> Accesses => Steps.SelectMany(step => step switch
+        /// <summary>The steps on every path through the body, each side of a split after the steps before it.
+        /// </summary>
+        internal IEnumerable<object> Flattened => Steps.SelectMany(step => step is Split split
+            ? split.Holds.Walk.Flattened.Concat(split.Fails.Walk.Flattened) : new[] { step });
+
+        internal IEnumerable<Access> Accesses => Flattened.SelectMany(step => step switch
         {
             Access access => [access],
             CallStep call => call.Needs,
@@ -104,10 +115,14 @@ internal static partial class ProofOutline
         internal bool Run(Func<int, string> location)
         {
             foreach (var parameter in spec.Objects) Objects.Add(new Reached(parameter.Name, parameter.Fields));
-            var stack = new List<Item>();
-            var locals = new Dictionary<int, Item>();
-            var visited = new HashSet<int>();
-            for (var pc = 0; pc < ops.Length; pc++)
+            return Walk(0, [], new(), [], location);
+        }
+
+        /// <summary>Walks from `start` with the stack, locals and visited pcs of the path that reaches it.</summary>
+        bool Walk(int start, List<Item> stack, Dictionary<int, Item> locals, HashSet<int> visited,
+            Func<int, string> location)
+        {
+            for (var pc = start; pc < ops.Length; pc++)
             {
                 var op = ops[pc];
                 Match match;
@@ -161,12 +176,37 @@ internal static partial class ProofOutline
                     for (var operand = 0; operand < operands; operand++)
                         if (Pop() is null) return Stop($"`{op}` on an empty stack");
                 }
-                else if ((match = Regex.Match(op, @"\A\.(brzero|brnonzero) (\d+)\z")).Success)
+                else if ((match = Regex.Match(op, @"\A\.(brzero|brnonzero) (\d+)\z")).Success &&
+                    stack.Count > 0 && stack[^1] is not Word)
                 {
                     // An argument object is never null, so its test always goes one way.
-                    var zero = Pop() switch { Instance => false, Null => true, _ => (bool?)null };
-                    if (zero is null) return Stop($"`{op}` on a word, which needs a case split");
+                    var zero = Pop() is Null;
                     if (zero == (match.Groups[1].Value == "brzero")) pc = int.Parse(match.Groups[2].Value) - 1;
+                }
+                else if (Body.Conditional(op))
+                {
+                    var name = Regex.Match(op, @"\A\.(\w+)").Groups[1].Value;
+                    var operands = new Word?[name is "brzero" or "brnonzero" ? 1 : 2];
+                    for (var position = operands.Length - 1; position >= 0; position--)
+                        operands[position] = Pop() as Word;
+                    if (operands.Any(operand => operand?.Term is null) ||
+                        operands.Any(operand => operand!.Width != operands[0]!.Width))
+                        return Stop($"`{op}` on a value the outline does not name");
+                    var (condition, takenWhenTrue) = Body.Test(name, [.. operands.Select(operand => operand!.Term!)]);
+                    var target = Body.Target(op)!.Value;
+                    var (holds, fails) = takenWhenTrue ? (target, pc + 1) : (pc + 1, target);
+                    var walks = new[] { holds, fails }.Select(next => (Next: next, Walk: new ObjectWalk(spec, ops,
+                        views, callees, linear) { Objects = Objects, stores = stores, calls = calls,
+                        splits = splits + 1 })).ToArray();
+                    Steps.Add(new Split($"branch{splits + 1}", condition, (location(holds), walks[0].Walk),
+                        (location(fails), walks[1].Walk)));
+                    foreach (var side in walks)
+                        if (!side.Walk.Walk(side.Next, [.. stack], new(locals), [.. visited], location))
+                        {
+                            Stopped = side.Walk.Stopped;
+                            return false;
+                        }
+                    return true;
                 }
                 else if ((match = Regex.Match(op, @"\A\.branch (\d+)\z")).Success)
                     pc = int.Parse(match.Groups[1].Value) - 1;
@@ -239,14 +279,14 @@ internal static partial class ProofOutline
                     if (stores > 0)
                         return Stop($"a load of `{field.Lean}` after a store, whose target the statement names " +
                             "in the caller's memory");
-                    var reached = Accesses.FirstOrDefault(access => access.Kind == AccessKind.Load &&
-                        access.Target is not null && access.Object == instance.Object && access.Field == field)?.Target;
+                    // Loads of one field on any path reach one target, since no store comes before them.
+                    var name = instance.Object.Name + Capitalized(field.Name);
+                    var reached = Objects.FirstOrDefault(other => other.Name == name + "Target");
                     if (reached is null)
                     {
                         if (spec.Method.Body.Instructions[pc].Operand is not FieldReference { FieldType: var type } ||
                             !ObjectTypes.Is(type))
                             return Stop($"a load of `{field.Lean}`, whose class the outline cannot name");
-                        var name = instance.Object.Name + Capitalized(field.Name);
                         reached = new Reached(name + "Target", views.Of(type), name + "Held", instance.Object.Name);
                         Objects.Add(reached);
                     }
@@ -379,7 +419,8 @@ internal static partial class ProofOutline
         internal ObjectPlan Plan()
         {
             var plan = new ObjectPlan();
-            var all = Accesses.Concat(Steps.OfType<CallStep>().Select(call => call.Writes).OfType<Access>()).ToArray();
+            var all = Accesses.Concat(Flattened.OfType<CallStep>().Select(call => call.Writes).OfType<Access>())
+                .ToArray();
             foreach (var reached in Objects)
             {
                 if (reached.Holder is not null)
@@ -423,7 +464,7 @@ internal static partial class ProofOutline
                 return null;
             var spec = new Specification(method, parameters, DescribeResult(method), true, true);
             var walk = new ObjectWalk(spec, extraction.Emitted[index].Ops, views, _ => null);
-            if (!walk.Run(_ => "") || walk.Steps.OfType<CallStep>().Any() ||
+            if (!walk.Run(_ => "") || walk.Steps.Any(step => step is CallStep or Split) ||
                 walk.Objects.Any(reached => reached.Holder is not null) ||
                 walk.Accesses.Count(access => access.Kind == AccessKind.Store) > 1 ||
                 (walk.Returned ?? "").Contains("stored", StringComparison.Ordinal) ||
@@ -511,23 +552,34 @@ internal static partial class ProofOutline
     }
 
     /// <summary>The proof of a body over objects: each store through `Owned.store`, each call through its
-    /// callee's contract, the facts of later accesses carried across the writes before them, and the run
-    /// stepped with every access's facts. An entry leaves its postcondition as the hole; a callee's proof
-    /// closes its contract's `Returns` with `returns`.</summary>
+    /// callee's contract, the facts of later accesses carried across the writes before them, each split by
+    /// cases on its test, and each path's run stepped with every access's facts. An entry leaves each path's
+    /// postcondition as a hole; a callee's proof closes its contract's `Returns` with `returns`.</summary>
     static void ObjectBody(Writer lean, Specification spec, ObjectWalk walk, string widen,
         string? returns = null)
     {
-        // The name of each fact in the memory after a number of writes, introduced when an access needs it.
         var known = new Dictionary<(string Key, int Stores), string>();
-        var stored = new List<Access>();
         foreach (var reached in walk.Objects)
         {
             known[(reached.Name + "Live", 0)] = reached.Name + "Live";
             foreach (var field in reached.Fields) known[(ObjectWalk.Fact(reached, field), 0)] =
                 ObjectWalk.Fact(reached, field);
         }
+        var facts = walk.Objects.Where(reached => reached.Holder is null)
+            .Select(reached => reached.Name + "Live.formed").ToList();
+        new ObjectPath(lean, spec, widen, returns, "  ", known, [], facts, []).Write(walk);
+    }
+
+    /// <summary>One path of an object body's proof from where its walk starts, `indent` deep: `known` names
+    /// each fact in the memory after a number of writes, `stored` holds the writes so far, `facts` those not
+    /// yet given to a step and `branches` the sides of the splits taken.</summary>
+    sealed class ObjectPath(Writer lean, Specification spec, string widen, string? returns, string indent,
+        Dictionary<(string Key, int Stores), string> known, List<Access> stored, List<string> facts,
+        List<string> branches)
+    {
         string Live(Reached reached, int stores) => Carry(reached.Name + "Live", stores, (previous, level) =>
             $"{previous}.after_confined framed{level}");
+
         string FieldFact(Reached reached, ViewField field, int stores) =>
             Carry(ObjectWalk.Fact(reached, field), stores, (previous, level) =>
             {
@@ -538,99 +590,131 @@ internal static partial class ProofOutline
                 // The two objects may be one, so `across` splits on whether the store reached this field.
                 return $"({previous}.across {Live(store.Object, level - 1)} framed{level} held{level}).1";
             });
+
         string Carry(string key, int stores, Func<string, int, string> across)
         {
             if (known.TryGetValue((key, stores), out var name)) return name;
             var previous = Carry(key, stores - 1, across);
             var carried = across(previous, stores);
             name = key + stores;
-            lean.Line($"  have {name} := {carried}");
+            lean.Line($"{indent}have {name} := {carried}");
             known[(key, stores)] = name;
             return name;
         }
-        var facts = walk.Objects.Where(reached => reached.Holder is null)
-            .Select(reached => reached.Name + "Live.formed").ToList();
+
         void Add(string fact)
         {
             if (!facts.Contains(fact)) facts.Add(fact);
         }
-        foreach (var step in walk.Steps)
+
+        internal void Write(ObjectWalk walk)
         {
-            if (step is CallStep call)
+            foreach (var step in walk.Steps)
             {
-                foreach (var reached in call.Live)
+                if (step is Split split)
                 {
-                    Add(Live(reached, call.Stores));
-                    Add(Live(reached, call.Stores) + ".formed");
+                    // Each side keeps the facts introduced before the split and adds its own after it.
+                    lean.Line($"{indent}by_cases {split.Fact} : {split.Condition}");
+                    foreach (var (where, side, outcome) in new[] { (split.Holds.Where, split.Holds.Walk, "holds"),
+                        (split.Fails.Where, split.Fails.Walk, "fails") })
+                    {
+                        lean.Line($"{indent}· -- `{split.Fact}` {outcome}: continues at {where}");
+                        new ObjectPath(lean, spec, widen, returns, indent + "  ", new(known), [.. stored],
+                            [.. facts, split.Fact], [.. branches, $"`{split.Fact}` {outcome}"]).Write(side);
+                    }
+                    return;
                 }
-                foreach (var need in call.Needs) Add(FieldFact(need.Object, need.Field, call.Stores));
-                Add($"{call.Callee.Name}_holds");
-                Add($"{call.Callee.Name}Contract");
-                Add("leaveFrame");
-                lean.Wrapped("  cil_contract_steps", FactList(facts), "");
-                facts.Clear();
-                var number = call.Number;
-                if (call.Writes is { } writes)
+                if (step is CallStep call)
                 {
-                    var index = writes.Stores + 1;
-                    lean.Line($"  rename_i stored{index} framed{index} output{number} held{index} _");
-                    lean.Line($"  dsimp only [{call.Callee.Name}Contract] at framed{index} held{index}");
-                    stored.Add(writes);
+                    Call(call);
+                    continue;
                 }
-                else
-                {
-                    lean.Line($"  rename_i called{number} _ output{number} post{number} _");
-                    lean.Line($"  dsimp only [{call.Callee.Name}Contract] at post{number}");
-                    // The memory after the call is the caller's: keep the name the specification uses.
-                    if (call.Callee.Walk.Returned is not null)
-                        lean.Line($"  obtain ⟨post{number}, rfl⟩ := post{number}");
-                    lean.Line($"  subst called{number}");
-                }
-                continue;
+                Access((Access)step);
             }
-            var access = (Access)step;
+            Return(walk);
+        }
+
+        void Call(CallStep call)
+        {
+            foreach (var reached in call.Live)
+            {
+                Add(Live(reached, call.Stores));
+                Add(Live(reached, call.Stores) + ".formed");
+            }
+            foreach (var need in call.Needs) Add(FieldFact(need.Object, need.Field, call.Stores));
+            Add($"{call.Callee.Name}_holds");
+            Add($"{call.Callee.Name}Contract");
+            Add("leaveFrame");
+            lean.Wrapped($"{indent}cil_contract_steps", FactList(facts), "");
+            facts.Clear();
+            var number = call.Number;
+            if (call.Writes is { } writes)
+            {
+                var index = writes.Stores + 1;
+                lean.Line($"{indent}rename_i stored{index} framed{index} output{number} held{index} _");
+                lean.Line($"{indent}dsimp only [{call.Callee.Name}Contract] at framed{index} held{index}");
+                stored.Add(writes);
+                return;
+            }
+            lean.Line($"{indent}rename_i called{number} _ output{number} post{number} _");
+            lean.Line($"{indent}dsimp only [{call.Callee.Name}Contract] at post{number}");
+            // The memory after the call is the caller's: keep the name the specification uses.
+            if (call.Callee.Walk.Returned is not null)
+                lean.Line($"{indent}obtain ⟨post{number}, rfl⟩ := post{number}");
+            lean.Line($"{indent}subst called{number}");
+        }
+
+        void Access(Access access)
+        {
             var fact = FieldFact(access.Object, access.Field, access.Stores);
             if (access.Kind == AccessKind.Load)
             {
                 Add(access.Field.Width is null ? $"{fact}.facts {access.Target!.Held} {access.Target.Name}Live"
                     : access.Signed ? fact + ".signedFacts" : fact + ".facts");
-                continue;
+                return;
             }
             var stores = access.Stores + 1;
             if (access.Field.Width is null)
             {
                 var target = Live(access.Target!, access.Stores);
-                lean.Line($"  obtain ⟨written{stores}, framed{stores}, held{stores}⟩ := {fact}.store {target}");
-                lean.Wrapped("  generalize", [$"setSlot {ObjectWalk.Memory(access.Stores)} " +
+                lean.Line($"{indent}obtain ⟨written{stores}, framed{stores}, held{stores}⟩ := " +
+                    $"{fact}.store {target}");
+                lean.Wrapped($"{indent}generalize", [$"setSlot {ObjectWalk.Memory(access.Stores)} " +
                     $"({access.Field.Lean}.address {access.Object.Name}) (.address {access.Target!.Name}) = " +
                     $"stored{stores}"], $"at written{stores} framed{stores} held{stores}");
                 // The store checks the stored reference is formed in the memory it writes.
                 Add(target + ".formed");
             }
-            else lean.Wrapped($"  obtain ⟨stored{stores}, written{stores}, framed{stores}, held{stores}⟩ :=",
+            else lean.Wrapped($"{indent}obtain ⟨stored{stores}, written{stores}, framed{stores}, held{stores}⟩ :=",
                 [$"{fact}.store {access.Value}"], "");
             Add(fact + ".located");
             Add(Live(access.Object, access.Stores) + ".formed");
             Add($"written{stores}");
             stored.Add(access);
         }
-        var widened = Enumerable.Range(1, stored.Count).Select(index => $"(framed{index}.widen (by {widen}))")
-            .ToArray();
-        var confined = widened.Length == 0 ? "Confined.refl _ _"
-            : widened.Skip(1).Aggregate(widened[0], (chain, next) => $"({chain}.trans {next})");
-        // The return leaves the method's frame, which owns no caller memory.
-        // After a call the steps may already have reached the return.
-        Add("leaveFrame");
-        lean.Wrapped(walk.Steps.LastOrDefault() is CallStep
-            ? "  try cil_contract_steps" : "  cil_contract_steps", FactList(facts), "");
-        if (returns is not null)
+
+        void Return(ObjectWalk walk)
         {
-            lean.Wrapped("  exact", [$"⟨{confined},", returns + "⟩"], "");
-            return;
+            var widened = Enumerable.Range(1, stored.Count).Select(index => $"(framed{index}.widen (by {widen}))")
+                .ToArray();
+            var confined = widened.Length == 0 ? "Confined.refl _ _"
+                : widened.Skip(1).Aggregate(widened[0], (chain, next) => $"({chain}.trans {next})");
+            // The return leaves the method's frame, which owns no caller memory.
+            // After a call the steps may already have reached the return.
+            Add("leaveFrame");
+            lean.Wrapped(walk.Steps.LastOrDefault() is CallStep
+                ? $"{indent}try cil_contract_steps" : $"{indent}cil_contract_steps", FactList(facts), "");
+            if (returns is not null)
+            {
+                lean.Wrapped($"{indent}exact", [$"⟨{confined},", returns + "⟩"], "");
+                return;
+            }
+            lean.Wrapped(spec.Result is null ? $"{indent}refine ⟨rfl," : $"{indent}refine ⟨_, rfl,",
+                [confined + ","], "?_⟩");
+            var held = string.Join(", ", Enumerable.Range(1, stored.Count).Select(index => $"`held{index}`"));
+            lean.Noted(indent, "sorry", "Postcondition of the returned value" +
+                (branches.Count == 0 ? "" : " where " + string.Join(" and ", branches)) +
+                (stored.Count == 0 ? "" : $", with {held} the stored fields"));
         }
-        lean.Wrapped(spec.Result is null ? "  refine ⟨rfl," : "  refine ⟨_, rfl,", [confined + ","], "?_⟩");
-        var held = string.Join(", ", Enumerable.Range(1, stored.Count).Select(index => $"`held{index}`"));
-        lean.Noted("  ", "sorry", "Postcondition of the returned value" +
-            (stored.Count == 0 ? "" : $", with {held} the stored fields"));
     }
 }
