@@ -135,6 +135,16 @@ public static class Objects
             account.Deposit(amount);
     }
 
+    /// <summary>
+    /// Deposits the balance of <paramref name="source"/> into <paramref name="account"/> <paramref name="times"/>
+    /// times; <paramref name="source"/> is only read.
+    /// </summary>
+    public static void DepositFrom(Account account, Account source, uint times)
+    {
+        for (uint i = 0; i < times; i++)
+            account.Deposit(source.Balance);
+    }
+
     /// <summary>Two instances of a class with no fields are still two distinct instances.</summary>
     public static bool TwoMarkers()
     {

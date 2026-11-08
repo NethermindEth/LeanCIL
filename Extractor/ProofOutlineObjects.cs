@@ -76,7 +76,10 @@ internal static partial class ProofOutline
     /// <summary>A straight-line body as the facts that step it: field loads and stores of the objects it reaches,
     /// calls through their callees' contracts, locals and null tests of objects; null with the reason when it
     /// does more.</summary>
-    sealed class ObjectWalk(Specification spec, string[] ops, FieldViews views, Func<int, Callee?> callees)
+    /// <remarks>A `linear` walk reads every op once in order, ignoring where branches go, to find which fields of
+    /// which objects a body with loops touches; its steps are not a proof.</remarks>
+    sealed class ObjectWalk(Specification spec, string[] ops, FieldViews views, Func<int, Callee?> callees,
+        bool linear = false)
     {
         internal string? Stopped { get; private set; }
         internal string? Returned { get; private set; }
@@ -151,6 +154,13 @@ internal static partial class ProofOutline
                     stack.Add(stack[^1]);
                 }
                 else if (op == ".pop") { if (Pop() is null) return Stop("a pop of an empty stack"); }
+                else if (linear && Regex.Match(op, @"\A\.(\w+) \d+\z") is { Success: true } jump &&
+                    Body.Target(op) is not null)
+                {
+                    var operands = jump.Groups[1].Value switch { "branch" => 0, "brzero" or "brnonzero" => 1, _ => 2 };
+                    for (var operand = 0; operand < operands; operand++)
+                        if (Pop() is null) return Stop($"`{op}` on an empty stack");
+                }
                 else if ((match = Regex.Match(op, @"\A\.(brzero|brnonzero) (\d+)\z")).Success)
                 {
                     // An argument object is never null, so its test always goes one way.
@@ -215,7 +225,7 @@ internal static partial class ProofOutline
                     if (value is not Word word || word.Width != field.Width)
                         return Stop($"a store into `{field.Lean}` of a value of another width, which the field " +
                             "truncates");
-                    if (word.Term is null)
+                    if (word.Term is null && !linear)
                         return Stop($"a store into `{field.Lean}` of a value the outline does not name");
                     if (instance.Object.Holder is not null)
                         return Stop($"a store into `{field.Lean}` of an object a field holds, which the footprint " +
@@ -264,14 +274,16 @@ internal static partial class ProofOutline
                             "which `cil_contract_steps` composes through a contract you write");
                     var arguments = new Item?[callee.Spec.Parameters.Length];
                     for (var position = arguments.Length - 1; position >= 0; position--) arguments[position] = Pop();
-                    if (arguments.Any(argument => argument is Word { Term: null }))
+                    if (arguments.Any(argument => argument is Word { Term: null }) && !linear)
                         return Stop($"a call to `{callee.Spec.Method.Name}` with a value the outline does not name");
                     if (Call(callee, arguments) is { } reason) return Stop(reason);
                     if (callee.Walk.Returned is { } returned)
                         stack.Add(new Word(Substitute(returned, callee, arguments, Memory(stores)),
                             callee.Spec.Result is { Constructor: ".i64" } ? 8 : 4));
-                    else if (callee.Spec.Result is not null)
+                    else if (callee.Spec.Result is not null && !linear)
                         return Stop($"a call to `{callee.Spec.Method.Name}`, whose result the outline cannot name");
+                    else if (callee.Spec.Result is not null)
+                        stack.Add(new Word(null, callee.Spec.Result is { Constructor: ".i64" } ? 8 : 4));
                 }
                 else if (op == ".nop") { }
                 else if (op == ".ret" || op.StartsWith(".ret (some ", StringComparison.Ordinal))
@@ -290,10 +302,11 @@ internal static partial class ProofOutline
                         if (Returned is null && result is not Word { Term: null })
                             return Stop("a result the outline cannot name");
                     }
-                    return true;
+                    if (!linear) return true;
                 }
                 else return Stop($"`{op}`, which the outline does not step");
             }
+            if (linear) return true;
             Stopped = "the end of the body without a return";
             return false;
         }
@@ -428,6 +441,22 @@ internal static partial class ProofOutline
     /// <summary>A tactic's fact list as parts the writer may wrap after any comma.</summary>
     static IEnumerable<string> FactList(List<string> facts) =>
         facts.Select((fact, index) => (index == 0 ? "[" : "") + fact + (index + 1 < facts.Count ? "," : "]"));
+
+    /// <summary>Gives a body with a loop the premises of the fields it and its callees touch of each object
+    /// argument, `Owned` only where one of them stores, when a linear walk reads the whole body; otherwise the
+    /// statement keeps a fact of every named field.</summary>
+    static void LoopPlan(Extraction extraction, Specification spec, Body body)
+    {
+        if (!spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.Object)) return;
+        var views = new FieldViews(extraction);
+        var names = new Names();
+        var summaries = new Dictionary<int, Callee?>();
+        Callee? Summary(int index) => summaries.TryGetValue(index, out var known) ? known
+            : summaries[index] = Summarize(extraction, index, names.Claim("callee" + index, "callee" + index), views);
+        var walk = new ObjectWalk(spec, body.Ops, views, Summary, linear: true);
+        if (walk.Run(pc => Location(spec.Method, pc)) && walk.Objects.All(reached => reached.Holder is null))
+            spec.Plan = walk.Plan();
+    }
 
     /// <summary>Writes a callee's contract and the proof that its body meets it.</summary>
     static void CalleeContract(Writer lean, Callee callee, string method)

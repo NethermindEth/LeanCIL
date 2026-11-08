@@ -64,7 +64,10 @@ internal static partial class ProofOutline
         if (loops.Count == 0)
             source = StraightLine(extraction, spec, body, lean);
         else if (loops.Count == 1)
+        {
+            LoopPlan(extraction, spec, body);
             source = LoopProof(extraction, spec, body, loops[0], names, lean);
+        }
         else
             throw Unsupported($"{method.FullName} has {loops.Count} loops, with back edges at " +
                 string.Join(", ", loops.Select(loop => Location(method, loop.Latch))) + "; new-proof binds one " +

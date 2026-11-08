@@ -858,7 +858,8 @@ var outlined = new (string Name, string? Selector)[]
     ("Relink", "Objects::Relink(Examples.Node,Examples.Node,Examples.Node)"),
     ("FirstPresent", "Objects::FirstPresent(Examples.Account,Examples.Account)"),
     ("DepositBoth", "Objects::DepositBoth(Examples.Account,Examples.Account,System.UInt64)"),
-    ("DepositTimes", "Objects::DepositTimes(Examples.Account,System.UInt64,System.UInt32)")
+    ("DepositTimes", "Objects::DepositTimes(Examples.Account,System.UInt64,System.UInt32)"),
+    ("DepositFrom", "Objects::DepositFrom(Examples.Account,Examples.Account,System.UInt32)")
 };
 var outlineTimer = System.Diagnostics.Stopwatch.StartNew();
 var outlineRoot = Path.Combine(root, "Outlines");
@@ -892,6 +893,14 @@ var elaborated = outlined.AsParallel().WithDegreeOfParallelism(Environment.Proce
 }).Where(failure => failure is not null).ToArray();
 if (elaborated.Length > 0) throw new InvalidOperationException(string.Join("\n", elaborated));
 Console.WriteLine($"PASS new-proof outlines {outlined.Length} methods that elaborate with only their holes open");
+
+// A loop asks write authority only of the object whose field it or a callee stores; the other is only read.
+var depositFrom = File.ReadAllText(Path.Combine(outlineRoot, "DepositFrom", "Proof.lean"));
+if (!depositFrom.Contains("Account.Balance.Owned initial account", StringComparison.Ordinal) ||
+    !depositFrom.Contains("Account.Balance.Readable initial source", StringComparison.Ordinal) ||
+    depositFrom.Contains("Account.Balance.Owned initial source", StringComparison.Ordinal))
+    throw new InvalidOperationException("The DepositFrom outline does not ask per-object field facts:\n" + depositFrom);
+Console.WriteLine("PASS a loop outline asks Owned only of the object its callee stores and Readable of the one it reads");
 
 // The audit refuses an outline for its holes, whatever the method; one loop shows it end to end.
 var countdownOutline = Path.Combine(root, "Countdown");

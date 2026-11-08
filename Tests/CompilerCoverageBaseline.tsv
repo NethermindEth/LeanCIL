@@ -1040,6 +1040,7 @@ Examples:System.Void Examples.NullReferences::WriteField(System.UInt64)	A	A	A	A	
 Examples:System.Void Examples.Objects::Bump(Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::BumpBoth(Examples.Account,Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::DepositBoth(Examples.Account,Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Objects::DepositFrom(Examples.Account,Examples.Account,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::DepositTimes(Examples.Account,System.UInt64,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::Link(Examples.Node,Examples.Node)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::LinkBoth(Examples.Node,Examples.Node,Examples.Node)	A	A	A	A	A	A	A	A
