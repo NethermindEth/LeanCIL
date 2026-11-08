@@ -17,7 +17,9 @@ internal static partial class ProofOutline
         internal ViewField[] Fields { get; init; } = [];
     }
 
-    enum ParameterShape { Scalar, Boolean, Narrow, Reference, ReadOnlySpan, Object }
+    /// <summary>How an argument is bound; `StructReference` is `this` of a struct instance method, a reference to
+    /// the caller's struct.</summary>
+    enum ParameterShape { Scalar, Boolean, Narrow, Reference, ReadOnlySpan, Object, StructReference }
 
     /// <summary>The method's return as a Lean type and value constructor, or none for `void`; a `bool`
     /// is a `Bool` the returned word encodes as 1 or 0, and an object a possibly null reference.</summary>
@@ -56,13 +58,19 @@ internal static partial class ProofOutline
             Describe(method, parameter, names, views))).ToArray();
         var result = DescribeResult(method);
         bool symbolic = parameters.Any(parameter => parameter.Shape is ParameterShape.Reference or
-            ParameterShape.ReadOnlySpan or ParameterShape.Object);
+            ParameterShape.ReadOnlySpan or ParameterShape.Object or ParameterShape.StructReference);
         var body = new Body(emitted.Ops);
         var lean = new Writer();
         var loops = body.Loops();
         var spec = new Specification(method, parameters, result, symbolic, extraction.Views.Length > 0);
         string source;
-        if (loops.Count == 0)
+        var structReceiver = parameters.Any(parameter => parameter.Shape == ParameterShape.StructReference);
+        if (structReceiver && loops.Count > 0)
+            throw Unsupported($"{method.FullName} is a struct instance method with a loop; new-proof steps the " +
+                "fields of a struct receiver in straight-line bodies only");
+        if (structReceiver)
+            source = StructStraightLine(spec, body, names, lean);
+        else if (loops.Count == 0)
             source = StraightLine(extraction, spec, body, lean);
         // Loops in sequence chain from each exit into the next; a nested or interleaved loop has no such order.
         else if (loops.Zip(loops.Skip(1)).All(pair => pair.First.Latch < pair.Second.Head))
@@ -87,6 +95,9 @@ internal static partial class ProofOutline
     static Parameter Receiver(MethodDefinition method, Names names, FieldViews views)
     {
         var type = method.DeclaringType;
+        if (type.IsValueType && !type.HasGenericParameters)
+            return new(names.Claim(char.ToLowerInvariant(type.Name[0]) + type.Name[1..], "receiver"),
+                ParameterShape.StructReference, "Reference", 8);
         if (!ObjectTypes.Is(type))
             throw Unsupported($"{method.FullName} is an instance method of {type.FullName}, which is not an " +
                 "admitted class; new-proof binds `this` of class instances only");
@@ -201,7 +212,7 @@ internal static partial class ProofOutline
             ParameterShape.Boolean => $".scalar (.i32 (if {parameter.Name} then 1 else 0))",
             ParameterShape.Narrow =>
                 $".scalar (.i32 ({parameter.Name}.{(parameter.Signed ? "signExtend" : "zeroExtend")} 32))",
-            ParameterShape.Reference => $".reference (.address {parameter.Name})",
+            ParameterShape.Reference or ParameterShape.StructReference => $".reference (.address {parameter.Name})",
             ParameterShape.Object => $".object (.address {parameter.Name})",
             _ => $".bufferSpan {parameter.Name}"
         })) + "]";
@@ -407,6 +418,7 @@ internal static partial class ProofOutline
                 ParameterShape.Narrow => "a narrow integer whose extension needs facts",
                 ParameterShape.Reference => "a reference into caller memory",
                 ParameterShape.Object => "an object whose fields need facts",
+                ParameterShape.StructReference => "a struct of caller memory",
                 _ => "a span of caller memory"
             };
         var pc = Array.FindIndex(ops, op => !Body.Pure(op));

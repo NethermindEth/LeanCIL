@@ -866,7 +866,8 @@ var outlined = new (string Name, string? Selector)[]
     ("DownThenUp", "Loops::DownThenUp(uint)"),
     ("CheckedAdd", "CheckedArithmetic::Add(uint,uint)"), ("Log64", "Bits::Log64(ulong)"),
     ("AddSigned", "CheckedArithmetic::AddSigned(int,int)"), ("Distance", "Arithmetic::Distance(ulong,ulong)"),
-    ("Larger", "Arithmetic::Larger(int,int)")
+    ("Larger", "Arithmetic::Larger(int,int)"), ("CounterAdd", "Counter::Add(ulong)"),
+    ("OdometerNext", "Odometer::Next()")
 };
 var outlineTimer = System.Diagnostics.Stopwatch.StartNew();
 var outlineRoot = Path.Combine(root, "Outlines");
@@ -1576,7 +1577,35 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
         ("      sorry -- Postcondition of the returned value where `branch1` holds",
             "      simp [Postcondition, branch1]"),
         ("      sorry -- Postcondition of the returned value where `branch1` fails",
-            "      simp [Postcondition, branch1]")])
+            "      simp [Postcondition, branch1]")]),
+    // A struct receiver's field store leaves its contents as `held1`, which is the postcondition.
+    ("CounterAdd", [
+        ("def Precondition (counter : Reference) (value counterValue : W64) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ _ : W64) (_ : Memory) : Prop := True"),
+        ("""
+        def Postcondition (counter : Reference) (value counterValue : W64) (initial final : Memory)
+            (result : W64) : Prop := sorry
+        """,
+            """
+            def Postcondition (counter : Reference) (value counterValue : W64) (_ final : Memory)
+                (result : W64) : Prop :=
+              result = counterValue + value ∧ Contents final counter 8 [counterValue + value]
+            """),
+        ("  case postcondition => sorry", "  case postcondition => exact ⟨rfl, held1⟩")]),
+    // Its field sits at offset 8, so the outline names it `odometer.element 1 8`.
+    ("OdometerNext", [
+        ("def Precondition (odometer : Reference) (odometerCount : W64) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : W64) (_ : Memory) : Prop := True"),
+        ("""
+        def Postcondition (odometer : Reference) (odometerCount : W64) (initial final : Memory)
+            (result : W64) : Prop := sorry
+        """,
+            """
+            def Postcondition (odometer : Reference) (odometerCount : W64) (_ final : Memory)
+                (result : W64) : Prop :=
+              result = odometerCount + 1 ∧ Contents final (odometer.element 1 8) 8 [odometerCount + 1]
+            """),
+        ("  case postcondition => sorry", "  case postcondition => exact ⟨rfl, held1⟩")])
 })
 {
     var source = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
@@ -1600,7 +1629,8 @@ Console.WriteLine("PASS filled outlines verify with only their specification wri
     "span fold that stores its total before each span load, a split on a `bool` argument, a " +
     "store through `Unsafe.Add` of a reference argument, a call to a callee that throws where its " +
     "precondition fails, a call storing through `Unsafe.Add` of a reference argument, two loops in sequence, " +
-    "a checked add, a base-two logarithm, a signed checked add and splits on unsigned and signed tests of words");
+    "a checked add, a base-two logarithm, a signed checked add, splits on unsigned and signed tests of words, " +
+    "and a field store through a struct receiver at offsets 0 and 8");
 
 // A written footprint that leaves out the element a loop writes is an error at the write, never an admission.
 var narrowed = Path.Combine(outlineRoot, "FillWords", "Narrowed.lean");

@@ -109,3 +109,17 @@ public static class StructMethods
 
     public static ulong Initialized(ulong value) => new InitCounter { Value = value + 1 }.Value;
 }
+
+/// <summary>Two word fields, so the second is accessed at a nonzero offset.</summary>
+public struct Odometer
+{
+    public ulong Trip;
+    public ulong Count;
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public ulong Next()
+    {
+        Count = unchecked(Count + 1);
+        return Count;
+    }
+}

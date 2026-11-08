@@ -279,6 +279,15 @@ comment saying which obligation it is:
   they close the call's precondition. A callee over
   objects whose body a straight-line outline steps (see below) gets the contract read from its body
   instead, proved, leaving only its precondition at each call.
+- A struct instance method binds `this`, a reference to the caller's struct, as a `Reference` named
+  for the struct, such as `counter`. A straight-line body over its 64-bit fields and word
+  arguments is stepped: each field it reads first gets a binder for its value on entry, such as
+  `counterValue`, with `Contents` of the field's address (`counter`, or `counter.element 1 8` at
+  offset 8) in the statement, and the one field it may store gets `Writable` authority there and
+  `Confined` to it; a second store, or a load of another field after the store, is a
+  `not outlined:` hole. The postcondition is left
+  with `held1`, the stored field's `Contents` in the final memory. A struct method with a loop is
+  refused.
 - An instance of an admitted class is a `Reference`, and an instance method binds `this` under its
   class's name in lower case, such as `account`, or as `receiver` for a compiler-generated class.
   A parameter named like a hypothesis or memory the proof introduces, such as `held` or `stored1`,
