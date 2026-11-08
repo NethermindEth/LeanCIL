@@ -7,8 +7,8 @@ using System.Diagnostics;
 using System.Text.Json;
 using Mono.Cecil;
 
-// Admission of LeanCIL's own assembly under the scalar profile, gated on admitted methods only.
-// Fails only when a method admitted in the baseline still exists and is no longer admitted.
+// Admission of LeanCIL's own assembly under the scalar profile against its baseline of admitted methods.
+// Fails on any difference, so a lost admission, an unrecorded gain or a removed method all need review.
 const string Usage = "Usage: SelfAdmission.cs [--update] [--baseline baseline.txt] [--reuse-report]";
 const string Profile = "scalar";
 const int ListedBlockers = 10;
@@ -68,7 +68,7 @@ var blockers = document.RootElement.GetProperty("blockers").EnumerateArray().ToA
 var summary = new List<string>
 {
     "# Self-admission of Nethermind.LeanCIL.dll", "",
-    $"Admission under the `{Profile}` profile; nothing here is proved. Gated on lost admissions only.", "",
+    $"Admission under the `{Profile}` profile; nothing here is proved. Gated on an exact match with the baseline.", "",
     "| Methods | Admitted | Blocked | Not checked | Distinct blockers | Seconds |",
     "| ---: | ---: | ---: | ---: | ---: | ---: |",
     $"| {current.Count} | {Count('A')} | {Count('B')} | {Count('N')} | {blockers.Length} | {elapsed:F1} |", "",
@@ -84,8 +84,8 @@ void List(string heading, IEnumerable<string> methods)
     if (listed.Length > ListedMethods) summary.Add($"- and {listed.Length - ListedMethods} more");
     summary.Add("");
 }
-List("Lost admissions (fail):", lost);
-List("Gained admissions (record with `--update`):", gained);
+List("Lost admissions:", lost);
+List("Gained admissions:", gained);
 List("Removed admitted methods:", removed);
 summary.Add("| Blocker | Entries | Sites |");
 summary.Add("| --- | ---: | ---: |");
@@ -100,4 +100,9 @@ Console.WriteLine(string.Join('\n', summary));
 if (lost.Length != 0)
     throw new InvalidOperationException($"Methods admitted in {baselinePath} are no longer admitted:\n" +
         string.Join('\n', lost) + "\nSee " + report + " for their blockers.");
-Console.WriteLine($"PASS self-admission: {Count('A')} of {current.Count} methods admitted, none lost");
+// A stale baseline stops guarding the methods it omits, so unrecorded gains and removals fail too.
+if (gained.Length != 0 || removed.Length != 0)
+    throw new InvalidOperationException($"{baselinePath} is stale: {gained.Length} admissions gained and " +
+        $"{removed.Length} admitted methods removed. Review them, then record the scan with " +
+        "`dotnet run --file Tests/SelfAdmission.cs -- --update`.");
+Console.WriteLine($"PASS self-admission: {Count('A')} of {current.Count} methods admitted, matching the baseline");

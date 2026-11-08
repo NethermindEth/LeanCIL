@@ -325,18 +325,26 @@ string? Existing(string status) => selfReport.FirstOrDefault(e => e.GetProperty(
     var result = Execute(["dotnet", "run", "--file", selfAdmission, "--", "--baseline", path, "--reuse-report"]);
     return (result.Code, result.Output);
 }
-// Losing an admission that still exists is the only failure.
+// The exact admitted set passes; a lost admission, a removed method or an unrecorded gain each fail.
+var admittedMethods = selfReport.Where(e => e.GetProperty("status").GetString() == "admitted")
+    .Select(e => e.GetProperty("signature").GetString()!).ToArray();
+var exact = Gate(admittedMethods);
+Require(exact.Code == 0 && exact.Output.Contains("matching the baseline"),
+    "The scan's own admitted set failed the gate:\n" + exact.Output);
 var blockedMethod = Existing("blocked")!;
-var lostAdmission = Gate(blockedMethod);
+var lostAdmission = Gate([.. admittedMethods, blockedMethod]);
 Require(lostAdmission.Code != 0 && lostAdmission.Output.Contains("no longer admitted") &&
     lostAdmission.Output.Contains(blockedMethod), "Lost admission passed the gate:\n" + lostAdmission.Output);
-// Removed methods and gained admissions are reported, since the tool's own method set changes every PR.
 const string gone = "System.Int32 Gone::Removed()";
-var admittedMethod = Existing("admitted");
-var reported = Gate(gone);
-Require(reported.Code == 0 && !reported.Output.Contains("Lost admissions") &&
-    reported.Output.Contains("Removed admitted methods:") && reported.Output.Contains(gone) &&
-    (admittedMethod is null || reported.Output.Contains("Gained admissions") &&
-        reported.Output.Contains(admittedMethod)),
-    "Removed or gained methods misreported:\n" + reported.Output);
+var removedMethod = Gate([.. admittedMethods, gone]);
+Require(removedMethod.Code != 0 && removedMethod.Output.Contains("is stale") &&
+    removedMethod.Output.Contains("Removed admitted methods:") && removedMethod.Output.Contains(gone),
+    "A removed admitted method passed the gate:\n" + removedMethod.Output);
+if (admittedMethods.Length != 0)
+{
+    var gained = Gate(admittedMethods[1..]);
+    Require(gained.Code != 0 && gained.Output.Contains("is stale") &&
+        gained.Output.Contains("Gained admissions") && gained.Output.Contains(admittedMethods[0]),
+        "An unrecorded admission passed the gate:\n" + gained.Output);
+}
 Console.WriteLine($"PASS {checks} admission report checks");

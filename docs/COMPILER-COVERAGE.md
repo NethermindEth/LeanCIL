@@ -76,12 +76,13 @@ the extractor's own `Nethermind.LeanCIL.dll`, a realistic program that changes w
 metadata and compares the report with the checked-in
 [baseline](../Tests/SelfAdmissionBaseline.txt), the list of admitted methods. It needs no Lean.
 
-The gate is admission, not blocker totals. The scan fails only when a method that the baseline
-admits still exists and is no longer admitted. Admitted methods removed since the baseline,
-admissions gained, counts and the most widely reached blockers are reported in
-`artifacts/SelfAdmission/summary.md` and the CI job summary, but never fail it. An unrelated PR
-therefore needs no baseline change; a PR that gains an admission records it with
-`dotnet run --file Tests/SelfAdmission.cs -- --update`. A compiler-generated name, such as a
-lambda's, can be renumbered by an unrelated edit, which reports an admitted method as removed and
-gained rather than as lost. Any change to a source compiled into the extractor, or to the
+The gate is admission, not blocker totals, and it requires the admitted set to match the
+baseline exactly. A method the baseline admits that is no longer admitted, an admission the
+baseline omits, and an admitted method that no longer exists each fail the scan, since a stale
+baseline stops guarding the methods it leaves out. Review the difference, then record it with
+`dotnet run --file Tests/SelfAdmission.cs -- --update` in the PR that causes it. Counts, the
+difference and the most widely reached blockers are reported in
+`artifacts/SelfAdmission/summary.md` and the CI job summary. A compiler-generated name, such as
+a lambda's, can be renumbered by an unrelated edit, which reports an admitted method as removed
+and gained rather than as lost. Any change to a source compiled into the extractor, or to the
 baseline, selects the suite.
