@@ -1059,7 +1059,22 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
         ("def Postcondition (node next : Reference) (initial final : Memory) (result : W64) : Prop := sorry",
             "def Postcondition (_ next : Reference) (initial _ : Memory) (result : W64) : Prop :=\n" +
             "  result = Node.Value.of initial next"),
-        (storedHole, "exact (nextValue.frame framed1 (apart_of_entries rfl)).2")])
+        (storedHole, "exact (nextValue.frame framed1 (apart_of_entries rfl)).2")]),
+    // Each path stores the total before it loads the span again, and the loop tactics step on with no frame lemma.
+    ("SpanSum", [
+        ("def Precondition (values1 : SpanView) (values1Elements : List W64) (initial : Memory)\n    : Prop := sorry",
+            "def Precondition (_ : SpanView) (_ : List W64) (_ : Memory) : Prop := True"),
+        ("    (result : W64) : Prop := sorry", "    (result : W64) : Prop := result = values1Elements.sum"),
+        ("{memory : Memory} {home0 : Reference} (state : State memory home0) : Prop := sorry",
+            "{memory : Memory} {home0 : Reference} (state : State memory home0) : Prop :=\n" +
+            "  state.values.1 + state.values.2.values.sum = values1Elements.sum"),
+        ("(state : State memory home0) : Nat := sorry",
+            "(state : State memory home0) : Nat := state.values.2.values.length"),
+        ("case invariant => sorry -- invariant at the first loop head", "case invariant => simp [invariant]"),
+        ("sorry -- Postcondition at the return at Loops.cs:25", "simpa [Postcondition, invariant] using holds"),
+        ("case invariant => sorry -- invariant again at the loop head",
+            "case invariant => simpa [invariant, BitVec.add_assoc] using holds"),
+        ("case measure => sorry -- measure decreases over this iteration", "case measure => simp [measure]")])
 })
 {
     var source = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
@@ -1073,13 +1088,18 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
         throw new InvalidOperationException($"The {name} outline has a hole the test does not fill:\n{source}");
     var filledOutline = Path.Combine(outlineRoot, name, "Filled.lean");
     File.WriteAllText(filledOutline, source);
-    var verified = Execute(Cli("verify", Path.Combine(outlineRoot, name, "Extraction"), "--proof", filledOutline));
+    var verified = Execute(Cli("verify", OutlineExtraction(name), "--proof", filledOutline));
     if (verified.Code != 0 || !verified.Stdout.StartsWith("Verified: ExampleProof.correctness"))
         throw new InvalidOperationException($"The filled {name} outline did not verify:\n{verified.Output}");
 }
-Console.WriteLine("PASS filled object outlines verify with only their specification written: a field store, " +
+Console.WriteLine("PASS filled outlines verify with only their specification written: a field store, " +
     "two reference field stores that may alias, a null test followed through a local, two calls through a " +
-    "generated contract, a split on a field value and a call whose callee loads the node a field holds");
+    "generated contract, a split on a field value, a call whose callee loads the node a field holds and a " +
+    "span fold that stores its total before each span load");
+
+// A loop outline reuses the extraction an earlier section left under its name.
+string OutlineExtraction(string name) => outlined.Single(entry => entry.Name == name).Selector is null
+    ? Path.Combine(root, name) : Path.Combine(outlineRoot, name, "Extraction");
 
 // LeanCIL's own closure that lays out a static word's bytes: its outline states the getter's contract
 // and steps through it, and the checked-in proof fills only the outline's holes and verifies.

@@ -94,7 +94,7 @@ internal static partial class ProofOutline
         internal object[] State = [];
         internal List<string> Facts = [];
         internal bool Called;
-        // A word store's memory has no frame the tactics can read a span's validity in.
+        // A word local's store replaces the memory the loop head's liveness facts name.
         internal bool Stored;
         internal HashSet<string> Obtained = [];
 
@@ -899,9 +899,6 @@ internal static partial class ProofOutline
             {
                 var slot = slots[int.Parse(match.Groups[1].Value)];
                 var first = components.IndexOf(slot.Components[0]);
-                if (slot.Components[0].Part == Part.Span && state.Stored)
-                    return Stop("a span read after a local store, whose memory the loop tactics hold no span " +
-                        "validity in (name it with `LoopFrame.store` and `CheckedSpan.tail_below`)");
                 stack.Add(slot.Components[0].Part is Part.Word or Part.Object ? (Value)state.State[first]
                     : new LocalValue(slot.Index));
             }
