@@ -299,12 +299,20 @@ the check. It also rejects a `callInstance` into a method whose metadata attribu
 virtual, since `callvirt` selects such a body by runtime type; the attributes are metadata the
 extractor decodes, as it decodes `hasThis`.
 
+`callvirt` of a virtual method of an admitted class is a `callVirtual` whose table names the body
+for each class of the extraction's assemblies that derives from the slot's class
+([virtual dispatch](SOUNDNESS-EXECUTION.md#virtual-dispatch)). It checks the receiver for null
+like `callInstance`, then enters the body listed for the receiver's runtime type, which the
+allocation records. Lean admits a `callVirtual` only at `callvirt` and only into virtual methods
+with the slot's signature and an object receiver
+([AnimalLegs](../Examples/Proofs/AnimalLegs.lean)).
+
 Interface, generic, explicit-layout and finalizable classes, classes deriving from a class that is
 not admitted, `newobj` of an abstract class, byrefs to class
 instances, field addresses on class instances, class fields holding anything but integers or
 admitted class instances (strings, arrays, interfaces, other classes),
-`callvirt` of a virtual method and the address of a class receiver, local
-or argument are each
+interface calls, virtual calls whose hierarchy the table cannot close or resolve, and the address
+of a class receiver, local or argument are each
 rejected by name during extraction.
 
 An instance of a class with no fields is an allocation of size zero: it costs no heap budget,

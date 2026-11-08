@@ -40,6 +40,15 @@ alignment. Its successful executions satisfy the proved preservation properties.
 exceptions are distinct from unsupported instructions, invalid states and fuel exhaustion.
 An expected-exception proof cannot use these model failures as its witness.
 
+A virtual call dispatches over a closed world: its table lists every class of the extraction's
+assemblies that derives from the slot's class, each with the body the CLR would select. Lean
+re-resolves every entry from the decoded class catalog and checks that no catalog class is missing.
+An instance of any other class, such as one loaded from an assembly outside the extraction, is
+the model failure `outsideDispatchTable`, so a theorem that concludes a return or a named
+exception has ruled such receivers out. No deployment assumption is needed for this premise:
+the caller's hypothesis about the receiver's runtime type must exclude them, or the proof fails.
+See [virtual dispatch](SOUNDNESS-EXECUTION.md#virtual-dispatch).
+
 Extraction reads compiled CIL; it does not prove that the source compiler preserves a source-level
 specification. JIT correctness, hardware correctness, concurrent interference, GC internals and
 arbitrary runtime versions remain outside the guarantee.

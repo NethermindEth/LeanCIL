@@ -47,6 +47,29 @@ The conventions assume the admitted .NET 10
 [ARM64](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/jit/codegenarm64.cpp) implementations.
 Heap-array lifetime and resource assumptions are in [runtime storage](SOUNDNESS-RUNTIME.md).
 
+### Virtual dispatch
+
+`callvirt` of a virtual method of an admitted class extracts to `.callVirtual targets argc`.
+`targets` pairs each class with the body the CLR selects for its instances: the nearest
+override on its chain up to the slot's class, or the slot's own body. A null receiver throws
+`NullReferenceException`. A live receiver enters the body listed for its exact runtime class;
+a receiver whose class the table omits is the model failure `outsideDispatchTable`.
+
+`ConstrainedCallsValid` re-resolves each table entry over the class catalog the extraction
+emits: it walks the class chain through each class's admitted base, requires the slot to be
+introduced by the called method (`NewSlot`), and requires the listed body's token, owner,
+attributes and signature to match. It also requires every non-abstract catalog class that derives
+from the slot's class to appear. The catalog is decoded metadata, trusted like the rest of
+[extraction evidence](SOUNDNESS-EVIDENCE.md#independently-checked-extraction-evidence); an omitted
+class can only make its instances fault, never run another class's body. The extractor rejects by
+name a slot declared outside those assemblies, a derived class that is not admitted, an override
+in another assembly, a method that hides the slot with `newslot`, a concrete class that inherits
+an abstract slot, an explicit `MethodImpl`, and generic virtual methods.
+
+The closed world is a checked premise, not an assumption: a run that reaches the call with an
+instance of an outside class ends in `outsideDispatchTable`, which is neither a return nor a named
+exception, and more fuel does not change it. Interface calls are not modelled.
+
 ## Aggregate storage
 
 Aggregates are reference-free byte snapshots with initialization masks. Homes allocate their

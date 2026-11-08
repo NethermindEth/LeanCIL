@@ -327,6 +327,14 @@ through the callee's contract; a null receiver steps to `NullReferenceException`
 is apart from the callee's footprint, so a fact the call may change is restated from the
 contract's postcondition.
 
+A virtual call steps the same way once the receiver's runtime type is known: pass a fact
+`runtimeTypeOf memory receiver = .ok type`, together with the definitions of `type` and its
+assembly scope, and stepping looks the class up in the call's table (`step_callVirtual_eq`,
+`virtualCall_address`) and enters the listed body
+([AnimalLegs](../Examples/Proofs/AnimalLegs.lean)). For an instance the method constructs, the
+fact is `objectMemory_runtimeTypeOf` ([FreshDogLegs](../Examples/Proofs/FreshDogLegs.lean)).
+A class the table omits steps to the model fault `outsideDispatchTable` (`virtualCall_outside`).
+
 A method that constructs an instance steps its `newobj` with `allocateObject_ok`, given
 well-formed memory and a `Memory.heapBudget` covering the instance, or `allocateObject_insufficient`
 for the `allocationFailure` fault when it does not. `objectMemory_formObject`, `objectMemory_field`
