@@ -1,5 +1,5 @@
 {
-  "source": "Maximum verification-step duration from runs 40746599661 and 40734844413; excludes job setup; dispatch and evidence from run 41600928344; docs estimated from a local run",
+  "source": "Maximum verification-step duration from runs 40746599661 and 40734844413; excludes job setup; dispatch and evidence from run 41600928344; docs and pool estimated from a local run",
   "seconds": {
     "arguments": 76.0,
     "audit": 53.0,
@@ -63,6 +63,7 @@
     "native": 111.0,
     "nested": 50.0,
     "outcomes": 62.0,
+    "pool": 756.0,
     "primitive": 67.0,
     "scaling": 231.0,
     "symbols": 67.0,

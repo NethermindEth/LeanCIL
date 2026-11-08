@@ -32,12 +32,12 @@ string suite = args switch
         or "generics" or "loops" or "evidence" or "dispatch" or "identity" or "labels" or "names" or "symbols"
         or "callers" or "construction" or "outcomes" or "scaling" or "excluded" or "blockers" or "divrem"
         or "imports" or "exports" or "exceptionlint" or "intrinsics" or "audit" or "workspace" or "templates"
-        or "assemblies" or "docs"] => args[1],
+        or "assemblies" or "pool" or "docs"] => args[1],
     _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|contracts|" +
         "cli|failures|integer|narrow|primitive|division|checked|conversions|native|arguments|layout|copy|bits|" +
         "enums|nested|instance|constructors|fsharp|math|unsafe|blocks|generics|loops|evidence|dispatch|" +
         "identity|labels|names|symbols|callers|construction|outcomes|scaling|excluded|blockers|divrem|imports|" +
-        "exports|exceptionlint|intrinsics|audit|workspace|templates|assemblies|docs]")
+        "exports|exceptionlint|intrinsics|audit|workspace|templates|assemblies|pool|docs]")
 };
 
 using var verification = new Program();
@@ -102,6 +102,7 @@ var independentSuites = new Dictionary<string, (string Script, string Descriptio
     ["assemblies"] = ("Tests/MultiAssembly.cs",
         "bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and " +
         "substitution rejection"),
+    ["pool"] = ("Tests/ItemPool.cs", "object pool reuse, exhaustion and null-pool proofs and the mutations they reject"),
     ["blockers"] = ("Tests/Blockers.cs", "admission reports with deduplicated blockers, call chains, " +
         "profile-excluded branches and self-admission"),
     ["audit"] = ("Tests/OleanAudit.cs", "theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts cannot forge"),

@@ -29,6 +29,10 @@
 - `StaticValues` loads `Word256.Zero`, `One` and `MinValue`, fixed by implicit conversions in the static constructor, proves their limbs and stores them through an out parameter; `MaxValue`, writes and stores outside the static constructor are rejected.
 - `SeededHash` mixes a value with two `static readonly ulong` seeds drawn from `RandomNumberGenerator`; `OpaqueSeeds.lean` proves the hash for every seed pair and that a fixed seed is not the contract.
 - `SpanTables` indexes `ReadOnlySpan<uint>` and `ReadOnlySpan<ulong>` tables, reads a length and the first element, and faults with `System.IndexOutOfRangeException` out of range.
+- `ItemPool.Rent` reuses the head of an intrusive free list. `PoolRent.lean` proves that it
+  returns that head, advances the list past it, clears its link, decrements the idle count and
+  marks it rented, writing no other field; an exhausted pool throws `InvalidOperationException`
+  and a null pool `NullReferenceException`.
 - `NullReferences` tests `Unsafe.NullRef<T>` with `Unsafe.IsNullRef<T>`, faults on loads, stores and field accesses through it, and selects an optional `ref` argument that is either unset or bound, as optional outputs do.
 - `VirtualCalls` calls an abstract and a defaulted virtual method of `Animal` on any animal:
   `AnimalLegs.lean` and `AnimalLoudness.lean` prove the override or inherited body the receiver's

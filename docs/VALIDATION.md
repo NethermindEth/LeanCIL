@@ -23,6 +23,7 @@ Omit `--suite` to run everything. The accepted names and fixture mapping are def
 | Memory and references | `unsafe`, `blocks`, `copy`, `arguments`, `layout` |
 | Calls and contracts | `callers`, `contracts`, `outcomes`, `imports` |
 | Referenced assemblies and pins | `assemblies`, `evidence`, `dispatch`, `exportstyped` |
+| Class-instance proofs over linked objects | `pool`, `evidence` |
 | Loops and shared stepping tactics | `loops`, examples, and `Tests.Automation`, `Tests.StoreFacts`, `Tests.MethodContract`, `Tests.CodeAt` |
 | CLI, artifact identity and theorem selection | `core`, `cli`, `failures`, `workspace`, `audit` |
 | Admission reports and self-admission of the extractor | `blockers`; see [self-admission](COMPILER-COVERAGE.md#self-admission) |
