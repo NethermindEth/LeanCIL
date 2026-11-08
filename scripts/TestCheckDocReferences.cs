@@ -77,6 +77,11 @@ try
 
     const string Extraction = "needs an extraction";
     Fails("an unmarked block importing the extraction", "```lean\nimport Extracted\n```", Extraction);
+    // A proof imports its method's keyed module, which exists only beside an extraction.
+    Fails("an unmarked block importing a keyed extraction", "```lean\nimport Extracted.Loops_Count_0123abcd\n```",
+        Extraction);
+    Passes("a marked block importing a keyed extraction",
+        "```lean extracted\nimport Extracted.Loops_Count_0123abcd\n```");
     Fails("an unmarked block naming the extraction",
         "```lean\nexample : Extracted.program.length = 1 := rfl\n```", Extraction);
     Fails("a variant Lean info string", "```lean4\nexample : True := trivial\n```", "info string as `lean`");

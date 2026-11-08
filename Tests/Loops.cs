@@ -884,6 +884,14 @@ var elaborated = outlined.AsParallel().WithDegreeOfParallelism(Environment.Proce
         return $"new-proof wrote different outlines of {name}";
     Run([verification.LeanExecutable, "--root=" + extraction, "-o", Path.Combine(scratch, "Extracted.olean"),
         Path.Combine(extraction, "Extracted.lean")], leanPath: libraryPath);
+    // The outline imports the keyed module the editor workspace builds, which re-exports the extraction.
+    var keyed = Regex.Match(source, @"\Aimport Extracted\.(\w+)\n");
+    if (!keyed.Success) return $"The {name} outline does not import a keyed extraction module:\n{source}";
+    var module = Path.Combine(scratch, "Extracted", keyed.Groups[1].Value + ".lean");
+    Directory.CreateDirectory(Path.GetDirectoryName(module)!);
+    File.WriteAllText(module, "import Extracted\n");
+    Run([verification.LeanExecutable, "--root=" + scratch, "-o", Path.ChangeExtension(module, ".olean"), module],
+        leanPath: scratch + Path.PathSeparator + libraryPath);
     var result = Execute([verification.LeanExecutable, outline],
         leanPath: scratch + Path.PathSeparator + libraryPath);
     var messages = Regex.Matches(result.Output, @"Proof\.lean:\d+:\d+: (error|warning): (.*)")
@@ -940,7 +948,7 @@ var countdownHoles = new (string Hole, string Filled)[]
 var filledSource = File.ReadAllText(countdownSource);
 // The CLI reference shows this outline, so the page must change when the generator does.
 var documented = Regex.Match(File.ReadAllText(At("docs/CLI.md")).ReplaceLineEndings("\n"),
-    "```lean extracted\n(import Extracted\n.*?)```", RegexOptions.Singleline);
+    "```lean extracted\n(import Extracted\\.\\w+\n.*?)```", RegexOptions.Singleline);
 if (!documented.Success || documented.Groups[1].Value != filledSource)
     throw new InvalidOperationException("docs/CLI.md does not show the current Countdown outline");
 foreach (var (hole, replacement) in countdownHoles)

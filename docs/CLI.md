@@ -218,7 +218,9 @@ Wrote Proofs/Countdown.lean: a starting proof of System.UInt32 Examples.Loops::C
 `new-proof` reads only the extraction directory and first runs the same comparison as
 `leancil check`, so a stale or edited extraction is refused at the `extraction integrity` stage. It
 never replaces a file: when the proof path exists, it exits with `1` and writes nothing. The same
-extraction always gives the same file, byte for byte.
+extraction always gives the same file, byte for byte. It imports the extraction's keyed module,
+`Extracted.KEY` (see [Editor workspace](#editor-workspace)), so the file opens in the editor once
+`leancil workspace` selects the method, and `verify` accepts that import for this extraction only.
 
 The file states `ExampleProof.correctness` as a `CIL.Safety.Ensures` theorem over the method's
 parameters, named as in the PDB, and checks it with `#print axioms correctness`. A `bool` parameter
@@ -280,7 +282,7 @@ warnings that a declaration uses `sorry`, and `leancil verify` rejects it at the
 The countdown's outline:
 
 ```lean extracted
-import Extracted
+import Extracted.Loops_Countdown_1347de14
 import CIL.Verification
 import CIL.StructuralLabels
 import CIL.Safety.LoopScaffold
@@ -711,7 +713,8 @@ module and proofs of several methods stay open at once. After rebuilding the ass
 again to refresh the extraction in place, then restart the file in the editor. A proof outside
 any Lake package gets a package beside it that requires the bundled framework, so no
 `lake update` or `--proof-root` is needed. Verification accepts the keyed import only for the
-extraction it checks and builds it as a re-export of `Extracted`.
+extraction it checks and builds it as a re-export of `Extracted`. `new-proof` writes the same
+keyed import, so its outline opens in the editor as generated.
 
 `leancil watch [package] --project app.csproj... [--configuration name] [--once] [--format text|json]`
 rebuilds the C# on change, refreshes only the extractions whose generated modules changed and
