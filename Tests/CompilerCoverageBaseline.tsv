@@ -1042,6 +1042,8 @@ Examples:System.Void Examples.Objects::BumpBoth(Examples.Account,Examples.Accoun
 Examples:System.Void Examples.Objects::DepositBoth(Examples.Account,Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::DepositTimes(Examples.Account,System.UInt64,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::Link(Examples.Node,Examples.Node)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Objects::LinkBoth(Examples.Node,Examples.Node,Examples.Node)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Objects::Relink(Examples.Node,Examples.Node,Examples.Node)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::SetLimit(Examples.Account,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PackedConstructor::.ctor(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PackedConstructor::.ctor(System.UInt64,System.Byte)	A	A	A	A	A	A	A	A
