@@ -15,10 +15,11 @@ bind_cutpoint cutpoint := Extracted.method0 matching (· matches .brnonzero _) w
 must reduce to successful allocation, or the command must receive a proof of success. An invalid
 entry is rejected.
 
-For reducible span and reference slots, `entry.slotN` names the exact initial slot, while
+For reducible span, reference and object slots, `entry.slotN` names the exact initial slot, while
 `entry.loadN` and `entry.storeN` specialize shared home lemmas to its storage kind. Span facts
 require a valid view with the exact element width and writable mode; store facts accept a
-replacement view and preserve memory. Reference facts require the replacement reference to form.
+replacement view and preserve memory. Reference and object facts require the replacement
+reference to form, null included for an object.
 These facts do not make an uninitialized slot readable or grant backing-memory authority.
 
 Binders parameterize the generated declarations, including memory stores for symbolic arguments:
@@ -94,8 +95,8 @@ locals, each home remembered as its initializer and every other local as `none`.
 with
 `obtain ⟨home, entered, setup, numeric, entryMemory, frame⟩ := entry.checked ...`; this form
 generates no
-`entry.result`, `entry.memory` or `homeN` abbreviations, while span and root slots still get
-`slotN`, `loadN` and `storeN`. `entry.setup` is the setup equation given each home's allocation
+`entry.result`, `entry.memory` or `homeN` abbreviations, while span, root and object slots still
+get `slotN`, `loadN` and `storeN`. `entry.setup` is the setup equation given each home's allocation
 equation `madeN` and `kept`; it is the proof that derived the frame, so `entry.checked` reuses it
 instead of normalizing frame setup again. Homes are threaded through
 [`make_numeric_entry_local`](../CIL/Safety/NumericLocals.lean), and a fact `valid : view.validate

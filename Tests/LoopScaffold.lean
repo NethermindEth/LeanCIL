@@ -175,6 +175,37 @@ theorem rejected_homes :
 
 end Tests.TypedHomeFacts
 
+namespace Tests.ObjectHomeFacts
+open CIL.Safety
+
+/-- An object local starts null and is replaced at each store, as a list walk moves its node. -/
+def body : CIL.Method := {
+  code := [.ret], locals := [.nullRef], returnsValue := false, localKinds := [.object] }
+
+bind_entry entry := body with [] from Memory.empty
+
+/-- The generated object facts load null from entry and store only a reference that forms,
+    keeping memory: a walk's slot changes while the caller's memory does not. -/
+theorem object_replacement (memory : Memory) (reference : ManagedReference)
+    (formed : formObject memory reference = .ok (.object reference)) :
+    entry.slot0 = .object (some .null) ∧
+    loadLocal memory entry.slot0 = .ok (.object .null) ∧
+    storeLocal memory entry.slot0 (.object reference) =
+      .ok (.object (some reference), memory) ∧
+    loadLocal memory (.object (some reference)) = .ok (.object reference) :=
+  ⟨rfl, entry.load0 memory .null rfl, entry.store0 memory (some .null) reference formed,
+    entry.load0 memory reference formed⟩
+#print axioms object_replacement
+
+/-- A store of an object that does not form, such as one in an expired allocation, fails. -/
+theorem dangling_rejected (memory : Memory) (reference : ManagedReference) (fault : ExecutionFault)
+    (dangling : formObject memory reference = .error fault) :
+    storeLocal memory entry.slot0 (.object reference) = .error fault := by
+  simp [storeLocal, Value.hasUnspecified, dangling, Bind.bind, Except.bind]
+#print axioms dangling_rejected
+
+end Tests.ObjectHomeFacts
+
 namespace Tests.SymbolicHomeKinds
 open CIL.Safety
 

@@ -362,9 +362,9 @@ The tactics of [LoopFrameSteps](../CIL/Safety/LoopFrameSteps.lean), which
   takes each struct zeroing, field store and numeric local store on the way through
   `LoopFrame.zero_aggregate`, `store_field` and `store`, naming the memory each produces, and
   applies `hypothesis` at the head state with loop values `values`, the reached memory and its
-  frame, through `LoopFrame.set_local` when a span or reference slot changed. The invariant and
-  the decrease are left as goals tagged `invariant` and `measure`; a state that is not the
-  head's at `values` fails, showing the reached state.
+  frame, through `LoopFrame.set_local` when a span, reference or object slot changed. The
+  invariant and the decrease are left as goals tagged `invariant` and `measure`; a state that is
+  not the head's at `values` fails, showing the reached state.
 
 #### Obligation tags
 

@@ -91,8 +91,8 @@ private def allocationSimplifier {m : Type → Type} [Monad m] [MonadQuotation m
     makeLocal_object_null, Bind.bind, Except.bind, Pure.pure, Except.pure,
     $[$unfolded:term],*]) <;> $normalizer:tactic))
 
-/-- A local slot's generated facts: its index and slot, typed load and store facts for span and
-    root slots, the address of a byte home, and whether the storage kind mentions binders. -/
+/-- A local slot's generated facts: its index and slot, typed load and store facts for span, root
+    and object slots, the address of a byte home, and whether the storage kind mentions binders. -/
 private abbrev SlotFacts :=
   Nat × Term × Option Term × Option Term × Option Term × Bool
 
@@ -118,6 +118,8 @@ private def frameSlots (frame : Expr) : TermElabM (Array SlotFacts) := do
       | (``LocalSlot.readOnlyRoot, _) =>
         pure (some (← `(loadLocal_readOnlyRoot)),
           some (← `(storeLocal_readOnlyRoot_readOnly)), none)
+      | (``LocalSlot.object, _) =>
+        pure (some (← `(loadLocal_object)), some (← `(storeLocal_object)), none)
       | _ => pure (none, none, none)
       let symbolic := match slotValue.getAppFnArgs with
         | (``LocalSlot.span, #[width, writable, _]) => width.hasFVar || writable.hasFVar
@@ -129,8 +131,8 @@ private def frameSlots (frame : Expr) : TermElabM (Array SlotFacts) := do
   return homes
 
 /-- Emit `homeN` for byte homes when `addresses` holds, and `slotN`, `loadN` and `storeN` for
-    span and root slots. Stepping needs no `loadN` or `storeN`: they instantiate `cil_checked`
-    lemmas. -/
+    span, root and object slots. Stepping needs no `loadN` or `storeN`: they instantiate
+    `cil_checked` lemmas. -/
 private def emitSlots (name : Ident)
     (binders : TSyntaxArray ``Lean.Parser.Term.bracketedBinder)
     (slots : Array SlotFacts) (addresses : Bool) : CommandElabM Unit := do

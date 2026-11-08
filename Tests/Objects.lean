@@ -1,5 +1,6 @@
 import CIL.Safety.ObjectSteps
 import CIL.Safety.ObjectFields
+import CIL.Safety.ReferenceSegments
 import CIL.Safety.ClassCatalog
 import CIL.Safety.SymbolicExecution
 import CIL.Observe
@@ -362,5 +363,24 @@ theorem object_sites_checked :
       (createsOne ⟨order.identity, [customer.identity]⟩) := by
   decide
 #print axioms object_sites_checked
+
+/-- A node linked to itself heads no segment to null, whatever nodes it names: a segment is a
+    finite path, so a walk that would never reach null cannot claim a termination measure. -/
+theorem self_linked_no_segment {field : ReferenceField} {linked : CIL.Safety.Memory}
+    {node : Reference}
+    (looped : field.of linked node = .address node) (nodes : List Reference) :
+    ¬ field.Segment linked (.address node) .null nodes := by
+  induction nodes with
+  | nil =>
+    intro segment
+    obtain ⟨_, same, -⟩ := segment.next
+    cases same
+  | cons _ tail shorter =>
+    intro segment
+    obtain ⟨rest, same, -, next⟩ := segment.next
+    cases same
+    rw [looped] at next
+    exact shorter next
+#print axioms self_linked_no_segment
 
 end Tests.Objects
