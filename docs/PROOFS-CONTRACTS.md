@@ -392,9 +392,12 @@ predicates in the `ReferenceArray` namespace:
 | `ReferenceArray.Owned memory array element length index` | `Readable` and writable |
 | `ReferenceArray.Holds memory array element length index value` | `Owned` and holding `value` |
 | `ReferenceArray.entry array index` | The footprint entry of a call that may change the element |
+| `ReferenceArray.Forms memory array index` | The reference element `index` holds forms: null or any live object |
 
-`readable.facts held targetLive` and `readable.facts_null held` step `ldelem.ref`;
-`owned.store targetLive storable` and `owned.store_null` step `stelem.ref` and give its
+`readable.facts held targetLive` and `readable.facts_null held` step `ldelem.ref`, and
+`readable.facts_forms forms` steps it whatever the element holds, never reading through it;
+`owned.store targetLive storable`, `owned.store_null` and `owned.store_formed formed storable`, for
+any reference that forms, such as a string, step `stelem.ref` and give its
 `Confined` footprint and the `Holds` after it, with `storableIn_of_lineage` deciding the
 covariance check for an instance whose class derives from the element class and
 `storableIn_mismatch` giving the `ArrayTypeMismatchException` of one that does not.

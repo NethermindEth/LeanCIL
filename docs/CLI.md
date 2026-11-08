@@ -309,6 +309,17 @@ comment saying which obligation it is:
   it for null, which splits the proof like a test of words. Any reference field may also be set to
   null, through `Owned.store_formed`. A `bool` result leaves
   `case result` for the `Bool` the returned word encodes and `case encoded` for the encoding.
+- An array argument of class references, such as `nodes : Node[]`, binds `nodesElement`, the
+  element class its allocation records, which covariance may make a class derived from the
+  static one, and `nodesLength`. The statement assumes `ReferenceArray.Readable` of each element
+  the body loads and `ReferenceArray.Owned` of each it stores, numbered `nodesSlot1`, ..., or
+  `ReferenceArray.Live` when it only reads the length. A loaded element is the reference
+  `ReferenceArray.of initial nodes index.toNat`, with the premise `ReferenceArray.Forms` that it
+  forms, and a stored object adds the premise that it passes the covariance check,
+  `storableIn initial nodesElement (.address node) = .ok ()`, which the caller discharges from the
+  object's class. The footprint lists `ReferenceArray.entry` of each stored element. These
+  accesses come before any other store, and an element store ends the accesses the body may make;
+  a method with a loop or a `newarr` is left to the author.
 - A call in a body over objects to a method that loads its fields, stores at most one word field of
   an object argument and returns a value it names gets a generated `MethodContract` read from that
   body, with a `Holds` theorem proved by the same stepping; `cil_contract_steps` composes the call

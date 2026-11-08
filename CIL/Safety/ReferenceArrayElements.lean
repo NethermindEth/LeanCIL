@@ -140,6 +140,28 @@ theorem Readable.facts_null {memory : Memory} {array : Reference}
   rfl
 #print axioms Readable.facts_null
 
+/-- The reference element `index` holds forms in `memory`: null, or a live object of any class,
+    which a load pushes as it is. -/
+def Forms (memory : Memory) (array : Reference) (index : Nat) : Prop :=
+  formObject memory (of memory array index) = .ok (.object (of memory array index))
+
+/-- `Forms` as the equation the stepping tactics rewrite with. -/
+theorem Forms.formed {memory : Memory} {array : Reference} {index : Nat}
+    (forms : Forms memory array index) :
+    formObject memory (of memory array index) = .ok (.object (of memory array index)) :=
+  forms
+#print axioms Forms.formed
+
+/-- What a load of a readable element whose reference forms steps with, null or not: the slot is
+    located, and the load pushes the reference it holds. -/
+theorem Readable.facts_forms {memory : Memory} {array : Reference}
+    {element : CIL.Extraction.TypeExpr} {length index : Nat}
+    (readable : Readable memory array element length index) (forms : Forms memory array index) :
+    referenceArraySlot memory (.address array) index = .ok (slot array index, element) ∧
+      loadSlot memory (slot array index) = .ok (.object (of memory array index)) :=
+  ⟨readable.slot_located readable.inside, readable.load.trans forms⟩
+#print axioms Readable.facts_forms
+
 /-- An array keeps its location, and its elements their authority, when one slot changes. -/
 private theorem Owned.after_setSlot {memory : Memory} {array : Reference}
     {element : CIL.Extraction.TypeExpr} {length index : Nat} (field : Reference)
@@ -186,6 +208,25 @@ theorem Owned.store_null {memory : Memory} {array : Reference}
     Confined.setSlot _ (List.mem_singleton_self _) (by decide),
     ⟨owned.after_setSlot _ _, setSlot_slots_same _ _ _⟩⟩
 #print axioms Owned.store_null
+
+/-- Storing any reference that forms and passes the covariance check, such as one to a class
+    outside the model, into an owned element succeeds, confined to the element, and leaves it
+    owned and holding that reference. -/
+theorem Owned.store_formed {memory : Memory} {array : Reference}
+    {element : CIL.Extraction.TypeExpr} {length index : Nat} {value : ManagedReference}
+    (owned : Owned memory array element length index)
+    (formed : formObject memory value = .ok (.object value))
+    (storable : storableIn memory element value = .ok ()) :
+    referenceArraySlot memory (.address array) index = .ok (slot array index, element) ∧
+      storableIn memory element value = .ok () ∧
+      storeSlot memory (slot array index) value =
+        .ok (setSlot memory (slot array index) value) ∧
+      Confined [entry array index] memory (setSlot memory (slot array index) value) ∧
+      Holds (setSlot memory (slot array index) value) array element length index value :=
+  ⟨owned.slot_located owned.inside, storable, storeSlot_of_access owned.writable formed,
+    Confined.setSlot _ (List.mem_singleton_self _) (by decide),
+    ⟨owned.after_setSlot _ _, setSlot_slots_same _ _ _⟩⟩
+#print axioms Owned.store_formed
 
 /-- A live instance whose runtime type has `element` in its lineage is storable into an array of
     `element`, when both are admitted classes. -/

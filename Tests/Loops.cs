@@ -874,7 +874,13 @@ var outlined = new (string Name, string? Selector)[]
     ("HasTag", "Objects::HasTag(Examples.Tagged)"),
     ("FillTag", "Objects::FillTag(Examples.Tagged,Examples.Tagged)"),
     ("ClearTag", "Objects::ClearTag(Examples.Tagged)"),
-    ("Detach", "Objects::Detach(Examples.Node)")
+    ("Detach", "Objects::Detach(Examples.Node)"),
+    // Array arguments of class references: an element load, the length and a covariance-checked store.
+    ("ArrayElement", "NodeArrays::At(Examples.Node[],System.Int32)"),
+    ("ArrayLength", "NodeArrays::Count(Examples.Node[])"),
+    ("ArrayCovariance", "NodeArrays::Put(Examples.Shape[],System.Int32,Examples.Shape)"),
+    ("TagStore", "TagArrays::Put(System.String[],System.Int32,Examples.Tagged)"),
+    ("TagLoad", "TagArrays::Take(Examples.Tagged,System.String[],System.Int32)")
 };
 var outlineTimer = System.Diagnostics.Stopwatch.StartNew();
 var outlineRoot = Path.Combine(root, "Outlines");
@@ -1655,7 +1661,67 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
             "    : Prop := sorry",
             "def Postcondition (node : Reference) (initial final : Memory) (result : ManagedReference) : Prop :=\n" +
             "  result = Node.Next.of initial node ∧ Node.Next.Holds final node .null"),
-        (storedHole, "exact ⟨nodeNextHeld.symm, held1⟩")])
+        (storedHole, "exact ⟨nodeNextHeld.symm, held1⟩")]),
+    // The element is named by the array and index it was loaded from, null or not.
+    ("ArrayElement", [
+        ("def Precondition (nodes : Reference) (nodesElement : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
+            "    (index : W32) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : CIL.Extraction.TypeExpr) (_ : Nat) (_ : W32) (_ : Memory) :\n" +
+            "    Prop := True"),
+        ("def Postcondition (nodes : Reference) (nodesElement : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
+            "    (index : W32) (initial final : Memory) (result : ManagedReference) : Prop := sorry",
+            "def Postcondition (nodes : Reference) (_ : CIL.Extraction.TypeExpr) (_ : Nat) (index : W32)\n" +
+            "    (initial final : Memory) (result : ManagedReference) : Prop :=\n" +
+            "  result = ReferenceArray.of initial nodes index.toNat ∧ final = initial"),
+        ("sorry -- Postcondition of the returned value", "exact ⟨rfl, rfl⟩")]),
+    ("ArrayLength", [
+        ("def Precondition (nodes : Reference) (nodesElement : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
+            "    (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : CIL.Extraction.TypeExpr) (_ : Nat) (_ : Memory) : Prop :=\n" +
+            "  True"),
+        ("def Postcondition (nodes : Reference) (nodesElement : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
+            "    (initial final : Memory) (result : W32) : Prop := sorry",
+            "def Postcondition (_ : Reference) (_ : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
+            "    (initial final : Memory) (result : W32) : Prop :=\n" +
+            "  result = BitVec.ofNat 32 nodesLength ∧ final = initial"),
+        ("sorry -- Postcondition of the returned value", "exact ⟨rfl, rfl⟩")]),
+    // The statement leaves the covariance check of the stored shape as a premise, since a `Shape[]` may be an
+    // array of any class derived from `Shape`.
+    ("ArrayCovariance", [
+        ("def Precondition (shapes : Reference) (shapesElement : CIL.Extraction.TypeExpr) (shapesLength : Nat)\n" +
+            "    (index : W32) (shape : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : CIL.Extraction.TypeExpr) (_ : Nat) (_ : W32)\n" +
+            "    (_ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (shapes : Reference) (shapesElement : CIL.Extraction.TypeExpr)\n" +
+            "    (shapesLength : Nat) (index : W32) (shape : Reference) (initial final : Memory) : Prop := sorry",
+            "def Postcondition (shapes : Reference) (shapesElement : CIL.Extraction.TypeExpr)\n" +
+            "    (shapesLength : Nat) (index : W32) (shape : Reference) (_ final : Memory) : Prop :=\n" +
+            "  ReferenceArray.Holds final shapes shapesElement shapesLength index.toNat (.address shape)"),
+        (storedHole, "exact held1")]),
+    // A string moves between a field and an element as the reference it is, never read through.
+    ("TagStore", [
+        ("def Precondition (tags : Reference) (tagsElement : CIL.Extraction.TypeExpr) (tagsLength : Nat)\n" +
+            "    (index : W32) (tagged : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : CIL.Extraction.TypeExpr) (_ : Nat) (_ : W32)\n" +
+            "    (_ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (tags : Reference) (tagsElement : CIL.Extraction.TypeExpr) (tagsLength : Nat)\n" +
+            "    (index : W32) (tagged : Reference) (initial final : Memory) : Prop := sorry",
+            "def Postcondition (tags : Reference) (tagsElement : CIL.Extraction.TypeExpr) (tagsLength : Nat)\n" +
+            "    (index : W32) (tagged : Reference) (initial final : Memory) : Prop :=\n" +
+            "  ReferenceArray.Holds final tags tagsElement tagsLength index.toNat\n" +
+            "    (Tagged.Tag.of initial tagged)"),
+        (storedHole, "exact held1")]),
+    ("TagLoad", [
+        ("def Precondition (tagged tags : Reference) (tagsElement : CIL.Extraction.TypeExpr)\n" +
+            "    (tagsLength : Nat) (index : W32) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ _ : Reference) (_ : CIL.Extraction.TypeExpr) (_ : Nat) (_ : W32)\n" +
+            "    (_ : Memory) : Prop := True"),
+        ("def Postcondition (tagged tags : Reference) (tagsElement : CIL.Extraction.TypeExpr)\n" +
+            "    (tagsLength : Nat) (index : W32) (initial final : Memory) : Prop := sorry",
+            "def Postcondition (tagged tags : Reference) (_ : CIL.Extraction.TypeExpr) (_ : Nat)\n" +
+            "    (index : W32) (initial final : Memory) : Prop :=\n" +
+            "  Tagged.Tag.Holds final tagged (ReferenceArray.of initial tags index.toNat)"),
+        (storedHole, "exact held1")])
 })
 {
     var source = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
@@ -1681,7 +1747,8 @@ Console.WriteLine("PASS filled outlines verify with only their specification wri
     "precondition fails, a call storing through `Unsafe.Add` of a reference argument, two loops in sequence, " +
     "a checked add, a base-two logarithm, a signed checked add, splits on unsigned and signed tests of words, " +
     "a field store through a struct receiver at offsets 0 and 8, a string reference copied, " +
-    "tested for null and compared, and a null store before returning the node it held");
+    "tested for null and compared, a null store before returning the node it held, and an array argument's " +
+    "element load, length and covariance-checked store");
 
 // A written footprint that leaves out the element a loop writes is an error at the write, never an admission.
 var narrowed = Path.Combine(outlineRoot, "FillWords", "Narrowed.lean");

@@ -13,13 +13,19 @@ internal static partial class ProofOutline
     {
         internal string ElementsName => Name + "Elements";
 
+        /// <summary>The element class and length binders of an array argument.</summary>
+        internal string ElementName => Name + "Element";
+        internal string LengthName => Name + "Length";
+
         /// <summary>The named fields of an object argument's class.</summary>
         internal ViewField[] Fields { get; init; } = [];
     }
 
     /// <summary>How an argument is bound; `StructReference` is `this` of a struct instance method, a reference to
     /// the caller's struct.</summary>
-    enum ParameterShape { Scalar, Boolean, Narrow, Reference, ReadOnlySpan, Object, StructReference }
+    /// <remarks>An `Array` is an array of class references, bound with the element class and length its
+    /// allocation records, since covariance lets it hold a class derived from its static element type.</remarks>
+    enum ParameterShape { Scalar, Boolean, Narrow, Reference, ReadOnlySpan, Object, StructReference, Array }
 
     /// <summary>The method's return as a Lean type and value constructor, or none for `void`; a `bool`
     /// is a `Bool` the returned word encodes as 1 or 0, and an object a possibly null reference.</summary>
@@ -58,7 +64,8 @@ internal static partial class ProofOutline
             Describe(method, parameter, names, views))).ToArray();
         var result = DescribeResult(method);
         bool symbolic = parameters.Any(parameter => parameter.Shape is ParameterShape.Reference or
-            ParameterShape.ReadOnlySpan or ParameterShape.Object or ParameterShape.StructReference);
+            ParameterShape.ReadOnlySpan or ParameterShape.Object or ParameterShape.StructReference or
+            ParameterShape.Array);
         var body = new Body(emitted.Ops);
         var lean = new Writer();
         var loops = body.Loops();
@@ -68,6 +75,10 @@ internal static partial class ProofOutline
         if (structReceiver && loops.Count > 0)
             throw Unsupported($"{method.FullName} is a struct instance method with a loop; new-proof steps the " +
                 "fields of a struct receiver in straight-line bodies only");
+        if (loops.Count > 0 && parameters.FirstOrDefault(parameter => parameter.Shape == ParameterShape.Array) is
+            { } array)
+            throw Unsupported($"parameter `{array.Name}` of {method.Name} is an array of class references, which " +
+                "new-proof outlines only in bodies without loops");
         if (structReceiver)
             source = StructStraightLine(spec, body, names, lean);
         else if (loops.Count == 0)
@@ -112,6 +123,7 @@ internal static partial class ProofOutline
         var type = parameter.ParameterType;
         var name = names.Claim(parameter.Name, "argument" + parameter.Index);
         if (ObjectTypes.Is(type)) return Instance(name, type, views);
+        if (ReferenceArrays.Is(type)) return new(name, ParameterShape.Array, "Reference", 8);
         if (type is ByReferenceType reference && ElementWidth(reference.ElementType) is { } width)
             return new(name, ParameterShape.Reference, "Reference", width);
         if (Spans.Is(type) && type is GenericInstanceType span &&
@@ -128,8 +140,8 @@ internal static partial class ProofOutline
             "System.UInt16" or "System.Char" => new(name, ParameterShape.Narrow, "BitVec 16", 2),
             "System.Int16" => new(name, ParameterShape.Narrow, "BitVec 16", 2, Signed: true),
             _ => throw Unsupported($"parameter `{parameter.Name}` of {method.Name} has type {type.FullName}; " +
-                "new-proof types `bool`, integers of up to 64 bits, admitted classes, and references to and " +
-                "read-only spans of 32- and 64-bit integers")
+                "new-proof types `bool`, integers of up to 64 bits, admitted classes, arrays of class references, " +
+                "and references to and read-only spans of 32- and 64-bit integers")
         };
     }
 
@@ -170,8 +182,11 @@ internal static partial class ProofOutline
         internal IEnumerable<Parameter> Objects =>
             Parameters.Where(parameter => parameter.Shape == ParameterShape.Object);
 
-        /// <summary>Object arguments make the statement confine the run to `footprint`.</summary>
-        internal bool Framed => Objects.Any();
+        internal IEnumerable<Parameter> Arrays =>
+            Parameters.Where(parameter => parameter.Shape == ParameterShape.Array);
+
+        /// <summary>Object and array arguments make the statement confine the run to `footprint`.</summary>
+        internal bool Framed => Objects.Any() || Arrays.Any();
 
         /// <summary>The objects a stepped body reaches and the facts it needs of each; without it every object
         /// argument assumes a fact of each field of its class.</summary>
@@ -181,9 +196,14 @@ internal static partial class ProofOutline
         /// when it is handed a reference.</summary>
         internal void Footprint(Writer lean)
         {
-            var references = Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference);
+            // Which elements of an array argument an unstepped body writes is the author's to state.
+            var loop = Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference);
+            var references = loop || Plan is null && Arrays.Any();
+            var writer = loop ? "loop" : "method";
             lean.Doc(references
-                ? "Replace with the caller memory the loop may write, as references with their widths in bytes."
+                ? $"Replace with the caller memory the {writer} may write, as references with their widths in bytes."
+                : Arrays.Any()
+                ? "The caller memory the method may write: the fields and elements it stores of its arguments."
                 : "The caller memory the method may write: the fields it stores of its object arguments.");
             var entries = Plan is { } plan
                 ? plan.Entries.Select(entry => (Name: entry[(entry.LastIndexOf(' ') + 1)..], Entry: entry)).ToArray()
@@ -191,18 +211,23 @@ internal static partial class ProofOutline
                     .Select(named => (parameter.Name, Entry: $"{named.Lean}.entry {parameter.Name}"))).ToArray();
             // A binder the list does not name is `_`, so the definition elaborates without warnings.
             var binders = references ? Binders
-                : Binders.Select(binder =>
-                    entries.Any(entry => entry.Name == binder.Name) ? binder : ("_", binder.Type));
+                : Binders.Select(binder => entries.Any(entry =>
+                    Regex.IsMatch(entry.Entry, $@"(?<![\w.]){binder.Name}(?!\w)")) ? binder : ("_", binder.Type));
             lean.Wrapped("def footprint", Grouped(binders), ": List (Reference × Nat) :=");
-            if (references) lean.Line("  sorry -- caller memory the loop may write");
+            if (references) lean.Line($"  sorry -- caller memory the {writer} may write");
             else lean.Line("  [" + string.Join(", ", entries.Select(entry => entry.Entry)) + "]");
             lean.Line();
         }
 
         internal IEnumerable<(string Name, string Type)> Binders => Parameters.SelectMany(parameter =>
-            parameter.Shape == ParameterShape.ReadOnlySpan
-                ? new[] { (parameter.Name, "SpanView"), (parameter.ElementsName, $"List {WordType(parameter.Width)}") }
-                : [(parameter.Name, parameter.Lean)]);
+            parameter.Shape switch
+            {
+                ParameterShape.ReadOnlySpan => new[]
+                    { (parameter.Name, "SpanView"), (parameter.ElementsName, $"List {WordType(parameter.Width)}") },
+                ParameterShape.Array => [(parameter.Name, parameter.Lean),
+                    (parameter.ElementName, "CIL.Extraction.TypeExpr"), (parameter.LengthName, "Nat")],
+                _ => [(parameter.Name, parameter.Lean)]
+            });
 
         internal string Arguments => string.Join(" ", Binders.Select(binder => binder.Name));
 
@@ -213,13 +238,14 @@ internal static partial class ProofOutline
             ParameterShape.Narrow =>
                 $".scalar (.i32 ({parameter.Name}.{(parameter.Signed ? "signExtend" : "zeroExtend")} 32))",
             ParameterShape.Reference or ParameterShape.StructReference => $".reference (.address {parameter.Name})",
-            ParameterShape.Object => $".object (.address {parameter.Name})",
+            ParameterShape.Object or ParameterShape.Array => $".object (.address {parameter.Name})",
             _ => $".bufferSpan {parameter.Name}"
         })) + "]";
 
         /// <summary>Premises about the caller's memory that frame entry and stepping need.</summary>
         internal IEnumerable<(string Name, string Statement)> MemoryFacts => Parameters.SelectMany(parameter =>
-            Plan is not null && parameter.Shape == ParameterShape.Object ? [] : parameter.Shape switch
+            Plan is not null && parameter.Shape is ParameterShape.Object or ParameterShape.Array ? []
+            : parameter.Shape switch
             {
                 ParameterShape.Reference => new[] { (parameter.Name + "Form",
                     $"form initial {parameter.Name} = .ok {parameter.Name}") },
@@ -231,6 +257,8 @@ internal static partial class ProofOutline
                 ParameterShape.Object => new[] { (parameter.Name + "Live", $"LiveObject initial {parameter.Name}") }
                     .Concat(parameter.Fields.Select(named =>
                         (FieldFact(parameter, named), FieldPremise(named, "initial", parameter.Name)))),
+                ParameterShape.Array => [(parameter.Name + "Live", $"ReferenceArray.Live initial {parameter.Name} " +
+                    $"{parameter.ElementName} {parameter.LengthName}")],
                 _ => []
             }).Concat(Plan?.Premises ?? []);
 
@@ -385,10 +413,11 @@ internal static partial class ProofOutline
         }
         var walk = new ObjectWalk(spec, body.Ops, views, Summary);
         var stepped = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
-            ParameterShape.Object) && walk.Run(pc => Location(spec.Method, pc));
+            ParameterShape.Object or ParameterShape.Array) && walk.Run(pc => Location(spec.Method, pc));
         if (stepped) spec.Plan = walk.Plan();
-        Header(lean, spec, ["CIL.Verification", "CIL.Safety.SymbolicExecution", "CIL.Safety.ObjectFields"],
-            stepped ? "`postcondition`" : null);
+        string[] imports = ["CIL.Verification", "CIL.Safety.SymbolicExecution", "CIL.Safety.ObjectFields"];
+        if (spec.Arrays.Any()) imports = [.. imports, "CIL.Safety.ReferenceArrayElements"];
+        Header(lean, spec, imports, stepped ? "`postcondition`" : null);
         if (stepped)
             foreach (var callee in walk.Flattened.OfType<CallStep>().Select(call => call.Callee).Distinct())
                 CalleeContract(lean, callee, callee.Index.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -419,6 +448,7 @@ internal static partial class ProofOutline
                 ParameterShape.Reference => "a reference into caller memory",
                 ParameterShape.Object => "an object whose fields need facts",
                 ParameterShape.StructReference => "a struct of caller memory",
+                ParameterShape.Array => "an array whose elements need facts",
                 _ => "a span of caller memory"
             };
         var pc = Array.FindIndex(ops, op => !Body.Pure(op));
