@@ -47,7 +47,9 @@ foreach (var (proof, entry) in new[]
     ("ArrayLength", "NodeArrays::Count(Examples.Node[])"),
     ("ArrayCovariance", "NodeArrays::Put(Examples.Shape[],System.Int32,Examples.Shape)"),
     ("BucketItems", "NodeArrays::First(Examples.Bucket)"),
-    ("BucketRefill", "NodeArrays::Refill(Examples.Bucket,Examples.Node[])")
+    ("BucketRefill", "NodeArrays::Refill(Examples.Bucket,Examples.Node[])"),
+    ("TagStore", "TagArrays::Put(System.String[],System.Int32,Examples.Tagged)"),
+    ("TagLoad", "TagArrays::Take(Examples.Tagged,System.String[],System.Int32)")
 })
 {
     verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));
@@ -129,7 +131,8 @@ Console.WriteLine("PASS construction call proof names the constructor");
 foreach (var mutation in new[]
 {
     "abstract", "base", "baseRejected", "explicit", "finalizer", "interface", "byref", "address", "reference",
-    "fieldType", "receiverAddress", "opaqueRead", "elementAddress", "arrayAddress"
+    "fieldType", "receiverAddress", "opaqueRead", "elementAddress", "arrayAddress", "objectArray",
+    "interfaceArray", "objectArrayParameter"
 })
 {
     var output = Path.Combine(root, "Reject-" + mutation);
@@ -142,6 +145,9 @@ foreach (var mutation in new[]
         var method = module.GetType("Examples.Objects").Methods.Single(candidate => candidate.Name == "IsNull");
         var getter = account.Methods.Single(candidate => candidate.Name == "get_Headroom");
         var arrays = module.GetType("Examples.NodeArrays");
+        var tags = module.GetType("Examples.TagArrays");
+        var create = tags.Methods.Single(candidate => candidate.Name == "Create");
+        var allocation = create.Body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Newarr);
         var runtime = module.TypeSystem.Object.Scope;
         switch (mutation)
         {
@@ -217,6 +223,14 @@ foreach (var mutation in new[]
                 elements.InsertAfter(element, elements.Create(OpCodes.Ldind_Ref));
                 elements.Replace(element, elements.Create(OpCodes.Ldelema, module.GetType("Examples.Node")));
                 break;
+            // An object or interface array may hold an interface array at run time, whose covariance check
+            // the model cannot decide, so neither is an array of class references.
+            case "objectArray": allocation.Operand = module.TypeSystem.Object; break;
+            case "interfaceArray": allocation.Operand = module.GetType("Examples.ICounterValue"); break;
+            case "objectArrayParameter":
+                tags.Methods.Single(candidate => candidate.Name == "Put").Parameters[0].ParameterType =
+                    new ArrayType(module.TypeSystem.Object);
+                break;
             case "arrayAddress":
                 var count = arrays.Methods.Single(candidate => candidate.Name == "Count");
                 var argument = count.Body.Instructions[0];
@@ -242,6 +256,9 @@ foreach (var mutation in new[]
                 "Examples.Account::Owner\n  Only fields holding class instances or arrays of admitted classes " +
                 "are modelled",
             "opaqueRead" => "callvirt requires an adjacent concrete constrained receiver",
+            "objectArray" => "Unsupported instruction: IL_0001: newarr System.Object",
+            "interfaceArray" => "Unsupported instruction: IL_0001: newarr Examples.ICounterValue",
+            "objectArrayParameter" => "Unsupported array shape or element type: System.Object[]",
             "fieldType" => "Unsupported class instance field type: System.Double Examples.Account::Rate",
             "receiverAddress" =>
                 "Unsupported address of a class instance receiver: System.UInt64 Examples.Account::get_Headroom()",
@@ -261,6 +278,8 @@ foreach (var mutation in new[]
         "byref" => "Objects::IsNull(Examples.Account&)",
         "receiverAddress" => "Account::get_Headroom()",
         "opaqueRead" => "Objects::HasTag(Examples.Tagged)",
+        "objectArray" or "interfaceArray" => "TagArrays::Create(System.Int32)",
+        "objectArrayParameter" => "TagArrays::Put(System.Object[],System.Int32,Examples.Tagged)",
         "elementAddress" => "NodeArrays::At(Examples.Node[],System.Int32)",
         "arrayAddress" => "NodeArrays::Count(Examples.Node[])",
         _ => "Objects::IsNull(Examples.Account)"

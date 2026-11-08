@@ -55,7 +55,9 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             return $".parameter {parameter.Position +
                 (parameter.Type == GenericParameterType.Method ? 0 : methodParameterCount)}";
         if (type is ByReferenceType byRef) return $".byref ({Type(byRef.ElementType)})";
-        if (type is ArrayType { IsVector: true } array) return $".array ({Type(array.ElementType)})";
+        // An element class outside the model is named as an object, as the array's reference slots hold it.
+        if (type is ArrayType { IsVector: true } array)
+            return $".array ({(ReferenceArrays.Is(array) ? ObjectType(array.ElementType) : Type(array.ElementType))})";
         if (type is PointerType pointer) return $".pointer ({Type(pointer.ElementType)})";
         if (ValueTuples.Is(type) && layouts.Index(type) is >= 0 and var tuple)
             return $".aggregate {Quote(LayoutEvidence.Identity(type))} {tuple}";
@@ -154,6 +156,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 if (argument < 0) throw new InvalidDataException("Invalid raw argument index");
                 return $".argument {argument}";
             case VariableDefinition local: return $".local {local.Index}";
+            case TypeReference type when instruction.OpCode.Code == Code.Newarr && ReferenceArrays.Element(type):
+                return $".type ({ObjectType(type)})";
             case TypeReference type: return $".type ({Type(type)})";
             case MethodReference callee: return $".call {Call(callee, admittedInstruction, reachable)}";
             case Mono.Cecil.CallSite site when instruction.OpCode.Code == Code.Calli:

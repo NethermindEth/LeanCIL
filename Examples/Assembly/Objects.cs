@@ -125,6 +125,19 @@ public static class NodeArrays
     }
 }
 
+/// <summary>Arrays of strings, whose elements the model holds as opaque references.</summary>
+public static class TagArrays
+{
+    /// <summary>A fresh array of <paramref name="count"/> null strings.</summary>
+    public static string?[] Create(int count) => new string?[count];
+
+    /// <summary>Stores the tag of <paramref name="tagged"/> at <paramref name="index"/>.</summary>
+    public static void Put(string?[] tags, int index, Tagged tagged) => tags[index] = tagged.Tag;
+
+    /// <summary>Replaces the tag of <paramref name="tagged"/> with the element at <paramref name="index"/>.</summary>
+    public static void Take(Tagged tagged, string?[] tags, int index) => tagged.Tag = tags[index];
+}
+
 /// <summary>Reference identity and null tests on class instances.</summary>
 public static class Objects
 {

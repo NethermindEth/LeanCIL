@@ -372,7 +372,7 @@ proofs.
 
 ## Arrays of class references
 
-An array of an admitted class `E` is itself a class instance: `.newReferenceArray E` allocates,
+An array of a class `E` is itself a class instance: `.newReferenceArray E` allocates,
 through `allocateObject`, an allocation of kind `.object` whose runtime type is `E[]`
 (`referenceArrayType`) with no bases, one 8-byte slot per element and nothing else, so its
 length is its size over the slot width. Its elements are references held in
@@ -389,23 +389,32 @@ class references is an ill-typed state. An index read unsigned at or past the le
 throws `IndexOutOfRangeException` (`referenceArraySlot`), so a negative int32 index is out of
 range, as in CoreCLR. A load pushes what the element's slot holds through `loadSlot`, as a
 class-typed field load does. A store first checks covariance (`storableIn`): null is always
-storable, and an instance of an admitted class is storable exactly when the array's element
-class is in its lineage, which records every base up to `System.Object`, so a `Square` stored
-into a `Shape[]` that is really a `Circle[]` throws `ArrayTypeMismatchException`. Any other
-stored value, such as an array, is unsupported rather than an exception: the model does not
-record the interfaces or array covariance the CLR would consult for it. The store itself is
+storable, and an instance of a class, admitted or opaque, is storable exactly when the array's
+element class is in its lineage, which records every base up to `System.Object`, so a `Square`
+stored into a `Shape[]` that is really a `Circle[]` throws `ArrayTypeMismatchException`. That is
+the CLR's rule only because the array's element type is a class: an instance is never assignable
+to a class outside its base chain, while an interface element would also admit the instances
+implementing it, which the lineage does not record. Any other stored value, such as an array, is
+unsupported rather than an exception: the model does not record the interfaces or array
+covariance the CLR would consult for it. The store itself is
 `storeSlot`, so it changes only that slot. The checks run in CoreCLR's order: null array,
 index, then type.
 
-The extractor admits a single-dimensional array of an admitted class as a parameter, local,
-return or `newarr` type, typed as an object on the evaluation stack, and Lean rechecks each
+The extractor admits a single-dimensional array of an admitted class, or of a non-generic class
+outside the model other than `System.Object`, such as `string`, as a parameter, local, return or
+`newarr` type, typed as an object on the evaluation stack. An array of such a static type holds
+elements of a class derived from it at run time, so its element type is a class, as the
+covariance check needs; an array typed by an interface or `object` may be an interface array and
+is rejected. An element of an array of a class outside the model is an opaque reference, which
+is loaded, stored, compared and tested for null but never read through. The extractor names the
+element class as an object in the raw array type, and Lean rechecks each
 `newarr`, `ldlen`, `ldelem.ref` and `stelem.ref` against its raw opcode and operand kinds. An
 element address (`ldelema`) or a typed `ldelem`/`stelem` on such an array is rejected by name,
 since a byref to a reference slot is outside the model, as is the address of an argument or
 local holding such an array. A class field typed as such an array holds the array's reference
 in its slot and is read and written as a class-typed field is, the raw field type rechecked as
-an array of a class. Multi-dimensional arrays and arrays of strings, interfaces or other types
-outside the admitted classes are rejected.
+an array of a class. Multi-dimensional arrays, arrays of interfaces, `object`, generic
+instantiations or value types other than the admitted value arrays are rejected.
 
 ## Sequential struct layout
 

@@ -411,6 +411,10 @@ a `Circle[]` passed as a `Shape[]`, proving the `ArrayTypeMismatchException` of 
 A field holding such an array is a `ReferenceField` whose held reference is the array:
 [BucketItems](../Examples/Proofs/BucketItems.lean) reads an element through one, with its null
 and bounds faults, and [BucketRefill](../Examples/Proofs/BucketRefill.lean) replaces it.
+An array of `string` holds opaque references: [TagStore](../Examples/Proofs/TagStore.lean)
+stores a string a field holds into one, deciding covariance by the string's own class, and
+[TagLoad](../Examples/Proofs/TagLoad.lean) loads one into a field, as `ReferenceField.Forms`
+and `Owned.store_formed` take it.
 
 ## Construct structs through contracts
 

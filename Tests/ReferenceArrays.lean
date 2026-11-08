@@ -119,4 +119,31 @@ theorem array_store_unsupported :
       budgeted = .error ⟨0, 6, .unsupported "Array store outside the admitted classes"⟩ := rfl
 #print axioms array_store_unsupported
 
+/-- `System.String`, a class outside the model: arrays of it hold opaque references. -/
+private def text : CIL.Extraction.TypeExpr := .object Extraction.runtimeScope "System.String"
+
+/-- Caller memory holding one string at identity 0 and one `Square` at identity 1. -/
+private def holdingText : CIL.Safety.Memory :=
+  objectMemory (objectMemory budgeted ⟨text, []⟩ 0) ⟨square, [shape]⟩ 8
+
+/-- A string stores into an array of strings and loads back as itself: the element class is
+    the string's own class. -/
+theorem opaque_store :
+    (runs [.const32 1, .newReferenceArray text, .dup, .const32 0, .arg 0 none,
+      .memory .referenceArrayStore, .const32 0, .memory .referenceArrayLoad, .ret none]
+      [.object (.address ⟨0, 0⟩)] holdingText).map Prod.snd =
+      .ok [.object (.address ⟨0, 0⟩)] := rfl
+#print axioms opaque_store
+
+/-- A `Square` stored into an array of strings throws `ArrayTypeMismatchException`, and a string
+    stored into an array of `Shape` does too: neither class derives from the other. -/
+theorem opaque_mismatch :
+    runs [.const32 1, .newReferenceArray text, .const32 0, .arg 0 none,
+      .memory .referenceArrayStore, .const32 0, .ret none] [.object (.address ⟨1, 0⟩)]
+      holdingText = .error ⟨0, 4, .thrown "System.ArrayTypeMismatchException"⟩ ∧
+    runs [.const32 1, .newReferenceArray shape, .const32 0, .arg 0 none,
+      .memory .referenceArrayStore, .const32 0, .ret none] [.object (.address ⟨0, 0⟩)]
+      holdingText = .error ⟨0, 4, .thrown "System.ArrayTypeMismatchException"⟩ := ⟨rfl, rfl⟩
+#print axioms opaque_mismatch
+
 end Tests.ReferenceArrays

@@ -658,6 +658,7 @@ Examples:System.Span`1<System.Runtime.Intrinsics.Vector128`1<System.UInt64>> Exa
 Examples:System.Span`1<System.UInt32> Examples.ReinterpretedSpans::Words(System.Span`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.Span`1<System.UIntPtr> Examples.MemorySpans::ArrayAsSpanRange(System.UIntPtr[],System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.String SelectorExamples.One.Collision::Unsupported(System.String)	B	B	B	B	B	B	B	B
+Examples:System.String[] Examples.TagArrays::Create(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt16 Examples.Bits::ReverseU16(System.UInt16)	A	A	A	A	A	A	A	A
 Examples:System.UInt16 Examples.IntegerMath::ClampUInt16(System.UInt16,System.UInt16,System.UInt16)	A	A	A	A	A	A	A	A
 Examples:System.UInt16 Examples.IntegerMath::MaxUInt16(System.UInt16,System.UInt16)	A	A	A	A	A	A	A	A
@@ -1137,6 +1138,8 @@ Examples:System.Void Examples.StaticSpans::Write()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.StaticValues::Overwrite()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.StaticValues::Select(System.Boolean,Examples.Word256&)	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.StructMethods::ChangeCopy(Examples.Counter)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.TagArrays::Put(System.String[],System.Int32,Examples.Tagged)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.TagArrays::Take(Examples.Tagged,System.String[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Tagged::.ctor()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.TailCalls::ForwardVoid(System.Int32&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.TailCalls::Store(System.Int32&)	A	A	A	A	A	A	A	A
