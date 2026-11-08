@@ -239,7 +239,37 @@ comment saying which obligation it is:
   tactics tag: `invariant` and `measure` where an iteration continues, `postcondition` where it
   returns, and `precondition` at a call.
 - A call in the loop gets a `MethodContract` for the callee, with `pre` and `post` to replace, and a
-  `Holds` theorem that steps the callee when it is arithmetic on its arguments.
+  `Holds` theorem that steps the callee when it is arithmetic on its arguments. A callee over
+  objects whose body a straight-line outline steps (see below) gets the contract read from its body
+  instead, proved, leaving only its precondition at each call.
+- An instance of an admitted class is a `Reference`, and an instance method binds `this` under its
+  class's name in lower case, such as `account`, or as `receiver` for a compiler-generated class.
+  A parameter named like a hypothesis or memory the proof introduces, such as `held` or `stored1`,
+  is bound as `argument` and its position instead. The statement assumes `LiveObject initial account`, and `Readable` of each field the body or a
+  callee it steps reads of each object and `Owned` of each they write, using the field views the
+  extraction emits in `Extracted.Classes` (see
+  [Frame class instances](PROOFS-CONTRACTS.md#frame-class-instances)). An object the body loads from
+  a reference field is a further binder, such as `nodeNextTarget`, with the premise that the field
+  holds it. A method that writes a field promises `Confined footprint initial final`, with
+  `footprint` listing the written fields. The body is stepped through its field loads, its stores,
+  locals and null tests of objects, carrying each field's fact across the stores before it, and
+  leaves the postcondition with `held1`, `held2`, ... the stored fields' `Holds` facts. A test of
+  words it names, such as a field value against an argument, splits the proof with
+  `by_cases branch1 : ...`, and each side steps on to its own return and leaves its own
+  postcondition, commented with the side it is on.
+- A call in a body over objects to a method that loads its fields, stores at most one word field of
+  an object argument and returns a value it names gets a generated `MethodContract` read from that
+  body, with a `Holds` theorem proved by the same stepping; `cil_contract_steps` composes the call
+  through it, and the callee's store counts as one of the caller's. A callee that loads an object
+  from a reference field and stores nothing gets a `pre` asking that some object, such as
+  `nodeNextTarget`, is held there with the facts it reads, and a `post` stating the result of
+  whichever object the field holds; the caller names that object by its own fact that the field
+  holds it, from a store just before the call or a target of its statement. Any other call is a
+  `not outlined:` hole naming the callee. A loop
+  carries the object facts across its iterations, and a `callvirt` in it gets a contract like any
+  other call. A loop's statement assumes the same per-object facts, read from its body and callees
+  in order; when that reading stops, it assumes a fact of every named field of each object, `Owned`
+  where the method or a callee stores the field.
 
 Where the outline cannot step a path, it leaves a hole whose comment starts with `not outlined:`,
 names what it met and what that step needs, and gives the source line to continue from. The
@@ -672,9 +702,11 @@ No documentation text becomes evidence or a contract premise.
 
 ## Editor workspace
 
-`leancil workspace <assembly> <method> --profile <profile> --proof <file>` creates a
-source package for Lake and the Lean language server. A proof outside any Lake package gets a
-generated package pinned to the bundled framework, so no `lake update` or `--proof-root` is
-needed. See
-[Proof-authoring workspace](CONSUMERS.md#proof-authoring-workspace) for pinned imports,
-stale-input rejection and the separate certification step. Editor checking is not a certificate.
+`leancil workspace <assembly> <method> --profile <profile> --proof <file>` generates the
+method's `Extracted` and `ExtractedSymbols` modules into the proof's Lake package, as the
+framework's `LeanCILEditor` library below `.lake`, so the proof file itself shows live goals.
+After rebuilding the assembly, run it again to refresh the extraction in place, then restart
+the file in the editor. A proof outside any Lake package gets a package beside it that requires
+the bundled framework, so no `lake update` or `--proof-root` is needed. See
+[Proof-authoring workspace](CONSUMERS.md#proof-authoring-workspace) for the loop, pinned
+imports and the separate certification step. Editor checking is not a certificate.

@@ -1,6 +1,7 @@
 import CIL.Safety.LoopFrameFields
 import CIL.Safety.LoopCallerFacts
 import CIL.Safety.LoopContract
+import CIL.Safety.ObjectFields
 
 /-!
 # Loop tactics that carry frame facts
@@ -87,27 +88,57 @@ def loopFieldAt? (layout : Expr) (offset : Nat) : MetaM (Option Nat) := do
 def loopFreshName (base : Name) : TacticM Ident := withMainContext do
   return mkIdent ((← getLCtx).getUnusedName base)
 
-/-- The caller-buffer predicates whose facts follow the walk from memory to memory, each taking
-    the memory first, with their arities. -/
-def loopCarriedHeads : List (Name × Nat) := [(``Contents, 4), (``Filled, 5), (``Writable, 5)]
+/-- A caller predicate whose facts follow the walk from memory to memory: its name and arity, the
+    position of its memory argument, whether crossing a confined call takes the caller's
+    well-formedness and apartness from the call's footprint, and whether crossing a store below
+    the caller's watermark takes the growth of memory up to it, as a class instance's facts do. -/
+structure LoopCarried where
+  head : Name
+  arity : Nat
+  memory : Nat := 0
+  wellFormed : Bool := true
+  apart : Bool := true
+  grows : Bool := false
 
-/-- Re-state each named hypothesis about a caller buffer at `memory` through `carry`, a term from
-    its predicate and name, under the same name; a fact `carry` gives nothing for, or whose term
-    does not elaborate, stays as it is. -/
-def loopCarryFacts (memory : Expr) (carry : Name → Ident → TacticM (Option Term)) :
+/-- The caller-buffer and class-instance predicates whose facts follow the walk. -/
+def loopCarriedHeads : List LoopCarried := [
+  { head := ``Contents, arity := 4 }, { head := ``Filled, arity := 5 },
+  { head := ``Writable, arity := 5, apart := false },
+  { head := ``LiveObject, arity := 2, wellFormed := false, apart := false, grows := true },
+  { head := ``WordField.Readable, arity := 4, memory := 2, wellFormed := false, grows := true },
+  { head := ``WordField.Owned, arity := 4, memory := 2, wellFormed := false, grows := true },
+  { head := ``WordField.Holds, arity := 5, memory := 2, wellFormed := false, grows := true },
+  { head := ``ReferenceField.Readable, arity := 3, memory := 1, wellFormed := false,
+    grows := true },
+  { head := ``ReferenceField.Owned, arity := 3, memory := 1, wellFormed := false, grows := true },
+  { head := ``ReferenceField.Holds, arity := 4, memory := 1, wellFormed := false, grows := true }]
+
+/-- Prove that memory after a store or a frame's exit has allocated up to the caller's watermark,
+    from a `Confined` or `LoopFrame` fact from the caller's memory to it. -/
+macro "cil_caller_grows" : tactic => `(tactic| first
+  | exact Nat.le_refl _
+  | (apply CIL.Safety.Confined.grows; with_reducible assumption)
+  | (apply CIL.Safety.Confined.grows; apply CIL.Safety.LoopFrame.confined
+     with_reducible assumption))
+
+/-- Re-state each named hypothesis about a caller buffer or class instance at `memory` through
+    `carry`, a term from its predicate and name, under the same name; a fact `carry` gives nothing
+    for, or whose term does not elaborate, stays as it is. -/
+def loopCarryFacts (memory : Expr) (carry : LoopCarried → Ident → TacticM (Option Term)) :
     TacticM Unit := do
   let carried ← withMainContext do
     let context ← getLCtx
-    let mut found : Array (Name × Name) := #[]
+    let mut found : Array (LoopCarried × Name) := #[]
     for declaration in context do
       if declaration.isImplementationDetail || declaration.userName.hasMacroScopes then continue
       unless (context.findFromUserName? declaration.userName).any
         (·.fvarId == declaration.fvarId) do continue
       let type := (← instantiateMVars declaration.type).consumeMData
       let some head := type.getAppFn.constName? | continue
-      unless loopCarriedHeads.contains (head, type.getAppNumArgs) do continue
-      unless ← withNewMCtxDepth (isDefEq (type.getArg! 0) memory) do continue
-      found := found.push (head, declaration.userName)
+      let some carried := loopCarriedHeads.find? fun carried =>
+        carried.head == head && carried.arity == type.getAppNumArgs | continue
+      unless ← withNewMCtxDepth (isDefEq (type.getArg! carried.memory) memory) do continue
+      found := found.push (carried, declaration.userName)
     return found
   for (head, name) in carried do
     let some term ← carry head (mkIdent name) | continue
@@ -119,16 +150,28 @@ def loopCarryFacts (memory : Expr) (carry : Name → Ident → TacticM (Option T
 /-- Carry the caller-buffer facts at `memory` across `below`, a store that keeps everything below
     the caller's watermark. -/
 def loopCarryBelow (memory : Expr) (below : Ident) : TacticM Unit :=
-  loopCarryFacts memory fun _ fact =>
+  loopCarryFacts memory fun carried fact => do
+    if carried.grows then
+      return some (← `(($fact).after_below $below (by cil_caller_allocation)
+        (by cil_caller_grows)))
     return some (← `(($fact).after_below $below (by cil_caller_allocation)))
 
 /-- Carry the caller-buffer facts at `memory` across `confined`, a call confined to a footprint
-    that the `unfold` definitions spell out: write authority always, contents when `omega` shows
-    them apart from the footprint. -/
+    that the `unfold` definitions spell out: write authority and live objects always, contents
+    and fields when `omega` shows them apart from the footprint. -/
 def loopCarryConfined (memory : Expr) (confined formed : Term) (unfold : Array Ident) :
     TacticM Unit :=
-  loopCarryFacts memory fun head fact => do
-    if head == ``Writable then return some (← `(($fact).after_confined $confined $formed))
+  loopCarryFacts memory fun carried fact => do
+    unless carried.apart do
+      if carried.wellFormed then return some (← `(($fact).after_confined $confined $formed))
+      return some (← `(($fact).after_confined $confined))
+    unless carried.wellFormed do
+      return some (← `(($fact).after_confined $confined (by
+        simp only [$[$unfold:ident],*, List.forall_mem_cons, List.not_mem_nil, false_implies,
+          implies_true, and_true, Apart, WordField.entry, ReferenceField.entry,
+          WordField.address_allocation, WordField.address_offset,
+          ReferenceField.address_allocation, ReferenceField.address_offset,
+          ne_eq, not_true_eq_false, false_or] <;> (try and_intros) <;> omega)))
     return some (← `(($fact).after_confined $confined $formed (by
       simp only [$[$unfold:ident],*, List.forall_mem_cons, List.not_mem_nil, false_implies,
         implies_true, and_true, Apart, Reference.element_allocation, Reference.element_offset,
@@ -431,7 +474,8 @@ def loopCallSide (unfold : Array Ident) (facts : Array Term) : TacticM Unit := d
   evalTactic (← `(tactic| (
     simp only [$[$unfold:ident],*, List.forall_mem_cons, List.not_mem_nil, false_implies,
       implies_true, and_true, List.mem_cons, exists_eq_or_imp, exists_eq_left, forall_eq_or_imp,
-      forall_eq, Within,
+      forall_eq, Within, WordField.entry, WordField.address_allocation, WordField.address_offset,
+      ReferenceField.entry, ReferenceField.address_allocation, ReferenceField.address_offset,
       Reference.element_allocation, Reference.element_offset, true_and, or_false, $[$facts:term],*]
     all_goals first
       | done

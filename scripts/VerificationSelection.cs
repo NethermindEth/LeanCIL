@@ -168,8 +168,10 @@ internal static class VerificationSelection
             // Other workflows run in their own jobs; only this workflow's definition feeds the suites.
             if (path.StartsWith(".github/workflows/", StringComparison.Ordinal) && path != ".github/workflows/verification.yml") continue;
             if (path == "scripts/ExportVerificationSuites.cs") return all;
+            // A script compiled into the CLI reaches every suite through the built command, include edge or not.
             if (new[] { "CIL/", "Extractor/", "Examples/Assembly/", "Examples/FSharp/" }
-                    .Any(prefix => path.StartsWith(prefix, StringComparison.Ordinal)) || path == "Tests/Support.lean")
+                    .Any(prefix => path.StartsWith(prefix, StringComparison.Ordinal)) || path == "Tests/Support.lean" ||
+                path.StartsWith("scripts/", StringComparison.Ordinal) && inputs["blockers"].Contains(path))
                 return all;
             var owners = inputs.Where(pair => pair.Value.Contains(path)).Select(pair => pair.Key).ToArray();
             if (owners.Length == 0) return all;

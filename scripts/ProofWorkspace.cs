@@ -3,24 +3,21 @@ using Nethermind.LeanCIL;
 
 partial class Program
 {
-    /// <summary>`Proof` lies in `ProofRoot`. `SourceProof` is the file the author edits; it differs only for a
-    /// proof outside any Lake package, whose generated package holds a copy.</summary>
+    /// <summary>A request to refresh the editor extraction of the Lake package `ProofRoot` holding `Proof`.</summary>
     sealed record WorkspaceSettings(string Assembly, string Method, string Profile, string Proof, string ProofRoot,
-        string Output, string? AssemblyIdentity, string[] InitializedTypes, string SourceProof);
-    sealed record EditorWorkspace(int Schema, bool EditorOnly, WorkspaceSettings Settings,
-        SortedDictionary<string, string> Inputs, SortedDictionary<string, string> ManagedFiles);
+        string? AssemblyIdentity, string[] InitializedTypes, bool CreatedPackage);
 
-    const string WorkspaceProof = "LeanCILProofWorkspace";
-    const string WorkspaceManifest = "leancil-workspace.json";
+    /// <summary>The method an editor library currently holds, so replacing it with another one is reported.</summary>
+    sealed record EditorSelection(string Assembly, string Method, string Profile, string? AssemblyIdentity,
+        string[] InitializedTypes);
+
+    /// <summary>Where the framework's editor library reads its sources, relative to the framework package.</summary>
+    const string EditorSourceDirectory = ".lake/leancil";
+    const string EditorSelectionFile = "selection.json";
     const string WorkspaceUsage = "Usage: leancil workspace assembly.dll method --profile profile --proof proof.lean " +
-        "[--proof-root package-directory] [--output workspace-directory] [--assembly identity] [--assume-initialized type]...";
+        "[--proof-root package-directory] [--assembly identity] [--assume-initialized type]...";
 
-    internal static void CreateProofWorkspace(string[] args)
-    {
-        var settings = ParseWorkspaceSettings(args);
-        using var verification = new Program();
-        verification.MaterializeProofWorkspace(settings);
-    }
+    internal static void CreateProofWorkspace(string[] args) => RefreshEditorExtraction(ParseWorkspaceSettings(args));
 
     static WorkspaceSettings ParseWorkspaceSettings(string[] args)
     {
@@ -32,46 +29,32 @@ partial class Program
         for (int index = 2; index < args.Length; index++)
         {
             var option = args[index];
-            if (++index == args.Length || string.IsNullOrWhiteSpace(args[index]) || args[index].StartsWith("--", StringComparison.Ordinal))
+            if (++index == args.Length || string.IsNullOrWhiteSpace(args[index]) ||
+                args[index].StartsWith("--", StringComparison.Ordinal))
                 throw new ArgumentException("Missing value for " + option + ".");
             if (option == "--assume-initialized")
             {
-                if (!initialized.Add(args[index])) throw new ArgumentException("Duplicate initialization assumption: " + args[index]);
+                if (!initialized.Add(args[index]))
+                    throw new ArgumentException("Duplicate initialization assumption: " + args[index]);
             }
-            else if (option is not ("--profile" or "--proof" or "--proof-root" or "--output" or "--assembly") ||
+            else if (option is not ("--profile" or "--proof" or "--proof-root" or "--assembly") ||
                 !options.TryAdd(option, args[index]))
                 throw new ArgumentException("Unknown or duplicate option: " + option);
         }
         if (!options.TryGetValue("--profile", out var profile) || !options.TryGetValue("--proof", out var proof))
             throw new ArgumentException(WorkspaceUsage);
         if (profile.StartsWith('@')) profile = "@" + Path.GetFullPath(profile[1..]);
-        var assembly = Path.GetFullPath(args[0]);
         proof = Path.GetFullPath(proof);
-        var sourceProof = proof;
-        var requestKey = ContentKey(assembly + "\n" + args[1] + "\n" + profile)[..20];
+        if (!File.Exists(proof)) throw new FileNotFoundException("Proof file not found: " + proof);
         var root = options.TryGetValue("--proof-root", out var selectedRoot)
             ? Path.GetFullPath(selectedRoot) : FindProofPackage(proof);
-        string? defaultOutput = null;
-        if (root is null)
-        {
-            // A proof outside any Lake package is opened through a generated package beside it.
-            var work = Path.Combine(Path.GetDirectoryName(proof)!, ".work", "leancil");
-            (root, proof) = ScratchProofPackage(proof, Path.Combine(work, "package-" + ContentKey(proof)[..12]));
-            defaultOutput = Path.Combine(work, requestKey);
-        }
+        var created = root is null;
+        // A proof outside any Lake package becomes the root of a generated one, so it is edited in place.
+        root ??= ScratchProofPackage(Path.GetDirectoryName(proof)!);
+        if (IsScratchPackage(root)) ScratchProofPackage(root);
         Within(root, Path.GetRelativePath(root, proof));
-        var output = options.TryGetValue("--output", out var selectedOutput) ? Path.GetFullPath(selectedOutput)
-            : defaultOutput ?? Path.Combine(root, ".work", "leancil", requestKey);
-        var back = Path.GetRelativePath(output, root);
-        if (!Path.IsPathRooted(back) && back != ".." && !back.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-            throw new ArgumentException("Workspace output must not contain the source consumer package.");
-        var relativeOutput = Path.GetRelativePath(root, output);
-        if (!Path.IsPathRooted(relativeOutput) && relativeOutput != ".." &&
-            !relativeOutput.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) &&
-            relativeOutput.Split(Path.DirectorySeparatorChar)[0] is not (".work" or "artifacts" or "generated" or "bin" or "obj"))
-            throw new ArgumentException("Place a workspace outside the consumer package or under its .work or artifacts directory.");
-        return new(assembly, args[1], profile, proof, root, output, options.GetValueOrDefault("--assembly"),
-            [.. initialized], sourceProof);
+        return new(Path.GetFullPath(args[0]), args[1], profile, proof, root, options.GetValueOrDefault("--assembly"),
+            [.. initialized], created);
     }
 
     static string? FindProofPackage(string proof)
@@ -79,7 +62,8 @@ partial class Program
         DirectoryInfo? directory = new(Path.GetDirectoryName(proof)!);
         while (directory is not null)
         {
-            if (File.Exists(Path.Combine(directory.FullName, "lakefile.toml")) || File.Exists(Path.Combine(directory.FullName, "lakefile.lean")))
+            if (File.Exists(Path.Combine(directory.FullName, "lakefile.toml")) ||
+                File.Exists(Path.Combine(directory.FullName, "lakefile.lean")))
                 return directory.FullName;
             directory = directory.Parent;
         }
@@ -88,15 +72,19 @@ partial class Program
 
     const string ScratchPackageName = "leancil_scratch";
 
+    static bool IsScratchPackage(string root) =>
+        File.Exists(Path.Combine(root, "lakefile.toml")) && File.ReadAllText(Path.Combine(root, "lakefile.toml"))
+            .StartsWith($"name = \"{ScratchPackageName}\"\n", StringComparison.Ordinal);
+
     /// <summary>
-    /// A Lake package at `package` holding a copy of `proof` and requiring, by path, a copy of the bundled
-    /// framework sources inside it; returns the package and the proof copy, which is refreshed on each call.
-    /// Nothing is fetched or committed, so the user's git configuration plays no part.
+    /// Makes `package` a Lake package that requires, by path, a copy of the bundled framework below its `.lake`,
+    /// refreshing the copy when the tool's framework changes. Nothing is fetched or committed, so the user's git
+    /// configuration plays no part.
     /// </summary>
-    static (string Root, string Proof) ScratchProofPackage(string proof, string package)
+    static string ScratchProofPackage(string package)
     {
         var sources = LibrarySources(CommonInputs());
-        // The key regenerates the package when the tool's framework changes.
+        // The key regenerates the framework copy when the tool's framework changes.
         var lakefile = $$"""
             name = "{{ScratchPackageName}}"
             # Bundled LeanCIL framework {{ContentKey(JsonSerializer.Serialize(sources))[..20]}}
@@ -107,138 +95,139 @@ partial class Program
 
             """;
         var lakefilePath = Path.Combine(package, "lakefile.toml");
-        var copy = Path.Combine(package, Path.GetFileName(proof));
-        if (!File.Exists(lakefilePath) || File.ReadAllText(lakefilePath) != lakefile ||
-            !File.Exists(Path.Combine(package, "lake-manifest.json")))
-        {
-            var staging = package + ".staging-" + Guid.NewGuid().ToString("N");
-            try
-            {
-                foreach (var name in sources.Keys)
-                {
-                    var destination = Path.Combine(staging, BundledFrameworkDirectory, name);
-                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                    File.Copy(At(name), destination);
-                }
-                File.WriteAllText(Path.Combine(staging, "lakefile.toml"), lakefile);
-                File.Copy(At("lean-toolchain"), Path.Combine(staging, "lean-toolchain"));
-                Run(["lake", "update"], staging);
-                if (Directory.Exists(package)) Directory.Delete(package, true);
-                Directory.Move(staging, package);
-            }
-            finally
-            {
-                if (Directory.Exists(staging)) Directory.Delete(staging, true);
-            }
-        }
-        if (!File.Exists(copy) || Sha(copy) != Sha(proof)) File.Copy(proof, copy, true);
-        return (package, copy);
-    }
-
-    /// <summary>True for a workspace opened through a generated scratch package.</summary>
-    static bool Scratch(WorkspaceSettings settings) => settings.SourceProof != settings.Proof;
-
-    static SortedDictionary<string, string> WorkspaceInputs(WorkspaceSettings settings)
-    {
-        var inputs = ConsumerSnapshot(settings.ProofRoot, settings.Output,
-            ConsumerDependencies(settings.ProofRoot, Scratch(settings)));
-        foreach (var (path, hash) in LibrarySources(CommonInputs()))
-            inputs["framework:" + path] = hash;
-        inputs["assembly:" + settings.Assembly] = Sha(settings.Assembly);
-        var pdb = Path.ChangeExtension(settings.Assembly, ".pdb");
-        inputs["pdb:" + pdb] = File.Exists(pdb) ? Sha(pdb) : "absent";
-        inputs["extractor"] = Sha(ExtractorPath);
-        inputs["settings"] = ContentKey(JsonSerializer.Serialize(settings));
-        if (settings.Profile.StartsWith('@'))
-        {
-            var profilePath = Path.GetFullPath(settings.Profile[1..]);
-            inputs["profile:" + profilePath] = Sha(profilePath);
-        }
-        return inputs;
-    }
-
-    void MaterializeProofWorkspace(WorkspaceSettings settings)
-    {
-        var inputs = WorkspaceInputs(settings);
-        var manifestPath = Path.Combine(settings.Output, WorkspaceManifest);
-        if (Directory.Exists(settings.Output))
-        {
-            if (!File.Exists(manifestPath)) throw new InvalidDataException("Workspace output already exists without an editor workspace manifest.");
-            var existing = JsonSerializer.Deserialize<EditorWorkspace>(File.ReadAllText(manifestPath))
-                ?? throw new InvalidDataException("Invalid editor workspace manifest.");
-            if (existing.Schema != 1 || !existing.EditorOnly || existing.Inputs is null || existing.ManagedFiles is null ||
-                !Same(inputs, existing.Inputs))
-                throw new InvalidDataException("Stale editor workspace: assembly, profile, PDB, toolchain, framework or consumer dependencies changed. Preserve your proof edits and select a new --output directory.");
-            foreach ((string relative, string hash) in existing.ManagedFiles)
-            {
-                var path = Within(settings.Output, relative);
-                if (!File.Exists(path) || Sha(path) != hash)
-                    throw new InvalidDataException("Editor workspace generated or support source changed: " + relative + ". Select a new --output directory.");
-            }
-            var sources = ConsumerSources(settings.Output).Concat(
-                ConsumerDependencies(settings.Output, Scratch(settings))
-                    .SelectMany(dependency => ConsumerSources(dependency.Directory)));
-            foreach (var path in sources)
-            {
-                var relative = Path.GetRelativePath(settings.Output, path).Replace('\\', '/');
-                if (relative != WorkspaceManifest && relative != WorkspaceProof + ".lean" && !existing.ManagedFiles.ContainsKey(relative))
-                    throw new InvalidDataException("Editor workspace contains an unrecorded source: " + relative + ". Select a new --output directory.");
-            }
-            if (!File.Exists(Path.Combine(settings.Output, WorkspaceProof + ".lean")))
-                throw new InvalidDataException("Editor workspace proof is missing. Select a new --output directory.");
-            PrintWorkspace(settings);
-            return;
-        }
-
-        var staging = settings.Output + ".staging-" + Guid.NewGuid().ToString("N");
-        var extraction = Path.Combine(staging, ".work", "extraction");
-        Directory.CreateDirectory(staging);
+        var toolchainPath = Path.Combine(package, "lean-toolchain");
+        if (File.Exists(lakefilePath) && File.ReadAllText(lakefilePath) == lakefile &&
+            File.Exists(Path.Combine(package, "lake-manifest.json")))
+            return package;
+        var toolchain = File.ReadAllText(At("lean-toolchain")).Trim();
+        if (File.Exists(toolchainPath) && File.ReadAllText(toolchainPath).Trim() != toolchain)
+            throw new InvalidDataException("A different lean-toolchain already pins " + package +
+                "; pass --proof-root for a Lake package on the tool's toolchain.");
+        var framework = Within(package, BundledFrameworkDirectory);
+        var staging = framework + ".staging-" + Guid.NewGuid().ToString("N");
         try
         {
-            Run([.. Extract("extract", settings.Assembly, settings.AssemblyIdentity, settings.Method, extraction, settings.Profile),
-                .. settings.InitializedTypes.SelectMany(type => new[] { "--assume-initialized", type })]);
-            var dependencies = ConsumerDependencies(settings.ProofRoot, Scratch(settings));
-            var symbols = File.Exists(Path.Combine(extraction, "Symbols.lean")) ? Sha(Path.Combine(extraction, "Symbols.lean")) : null;
-            var prepared = PrepareConsumerSession(staging, settings.ProofRoot, dependencies, inputs, null,
-                ExtractionIdentity.Read(extraction), [(WorkspaceProof, settings.Proof, extraction)], symbols,
-                purpose: ConsumerSessionPurpose.Editor);
-            if (!Same(inputs, WorkspaceInputs(settings))) throw new InvalidDataException("Workspace inputs changed during generation.");
-            var managed = new SortedDictionary<string, string>(StringComparer.Ordinal);
-            foreach (var path in prepared.Copied.Keys.Where(path => path != Path.Combine(staging, WorkspaceProof + ".lean")))
-                managed[Path.GetRelativePath(staging, path).Replace('\\', '/')] = Sha(path);
-            foreach (var path in Directory.EnumerateFiles(extraction))
-                managed[Path.GetRelativePath(staging, path).Replace('\\', '/')] = Sha(path);
-            var manifest = new EditorWorkspace(1, true, settings, inputs, managed);
-            File.WriteAllText(Path.Combine(staging, WorkspaceManifest), JsonSerializer.Serialize(manifest, Json) + "\n");
-            File.WriteAllText(Path.Combine(staging, "LEANCIL-WORKSPACE.md"),
-                "# LeanCIL editor workspace\n\nEditor checking is not a certificate. This workspace publishes no verification report or trusted receipt.\n\n" +
-                "Edit " + WorkspaceProof + ".lean. Open this directory with the Lean language server, or run `lake build +" + WorkspaceProof + ":olean`.\n\n" +
-                "Re-run the workspace command before checking after source changes. Changed inputs or generated sources cause an explicit rejection. " +
-                "Keep proof edits and choose a new output directory to refresh.\n\n" +
-                (Scratch(settings)
-                    ? "Copy only the edited proof source back to " + settings.SourceProof + ", then run ordinary " +
-                        "`leancil verify` on an extraction with --proof and that file. "
-                    : "Copy only the edited proof source back to the original consumer proof path, then run " +
-                        "ordinary `leancil verify` with the original package as --proof-root. ") +
-                "Do not copy workspace caches, generated modules, manifests or build artifacts into the source package.\n");
-            Directory.CreateDirectory(Path.GetDirectoryName(settings.Output)!);
-            Directory.Move(staging, settings.Output);
-            PrintWorkspace(settings);
+            foreach (var name in sources.Keys)
+            {
+                var destination = Path.Combine(staging, name);
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.Copy(At(name), destination);
+            }
+            if (Directory.Exists(framework)) Directory.Delete(framework, true);
+            Directory.Move(staging, framework);
         }
         finally
         {
             if (Directory.Exists(staging)) Directory.Delete(staging, true);
         }
+        File.Copy(At("lean-toolchain"), toolchainPath, true);
+        File.WriteAllText(lakefilePath, lakefile);
+        Run(["lake", "update"], package);
+        return package;
     }
 
-    static void PrintWorkspace(WorkspaceSettings settings)
+    /// <summary>
+    /// Writes the selected method's extraction as the framework's editor library in the proof's package and builds
+    /// it there, so `import Extracted` resolves in the proof itself. Nothing here is or yields a certificate.
+    /// </summary>
+    static void RefreshEditorExtraction(WorkspaceSettings settings)
     {
-        Console.WriteLine("Editor workspace: " + CliPaths.Display(settings.Output));
-        Console.WriteLine("  Proof: " + WorkspaceProof + ".lean");
-        Console.WriteLine("  Source proof: " + CliPaths.Display(settings.SourceProof));
-        if (Scratch(settings))
-            Console.WriteLine("  Generated package (no lakefile above the proof): " +
-                CliPaths.Display(settings.ProofRoot));
+        var root = settings.ProofRoot;
+        var editor = Path.Combine(EditorFramework(root), EditorSourceDirectory);
+        var extraction = Path.Combine(Path.GetTempPath(), "leancil-editor-" + Guid.NewGuid().ToString("N"));
+        string[] modules;
+        try
+        {
+            Run([.. Extract("extract", settings.Assembly, settings.AssemblyIdentity, settings.Method, extraction,
+                    settings.Profile),
+                .. settings.InitializedTypes.SelectMany(type => new[] { "--assume-initialized", type })]);
+            // The command takes no --import, so an extraction never needs contract interface modules here.
+            if (ExtractionIdentity.Read(extraction).Sources.Count > 0)
+                throw new InvalidDataException("Editor extraction unexpectedly carries contract interface modules.");
+            Directory.CreateDirectory(editor);
+            var symbols = Path.Combine(extraction, "Symbols.lean");
+            CopyIfChanged(Path.Combine(extraction, "Extracted.lean"), Path.Combine(editor, "Extracted.lean"));
+            // Without a PDB the import fails at its source instead of loading names of an older build.
+            if (File.Exists(symbols)) CopyIfChanged(symbols, Path.Combine(editor, "ExtractedSymbols.lean"));
+            else File.Delete(Path.Combine(editor, "ExtractedSymbols.lean"));
+            modules = File.Exists(symbols) ? ["Extracted", "ExtractedSymbols"] : ["Extracted"];
+        }
+        finally
+        {
+            if (Directory.Exists(extraction)) Directory.Delete(extraction, true);
+        }
+        var selection = new EditorSelection(settings.Assembly, settings.Method, settings.Profile,
+            settings.AssemblyIdentity, settings.InitializedTypes);
+        var selectionPath = Path.Combine(editor, EditorSelectionFile);
+        var previous = File.Exists(selectionPath)
+            ? JsonSerializer.Deserialize<EditorSelection>(File.ReadAllText(selectionPath)) : null;
+        var recorded = JsonSerializer.Serialize(selection, Json) + "\n";
+        if (!File.Exists(selectionPath) || File.ReadAllText(selectionPath) != recorded)
+            File.WriteAllText(selectionPath, recorded);
+        Run(["lake", "build", .. modules.Select(module => "+" + module)], root,
+            progress: "Building " + string.Join(" and ", modules) + " (the first build also builds the framework)");
+        PrintEditorExtraction(settings, editor, modules, previous);
+    }
+
+    /// <summary>
+    /// The framework package whose editor library serves `root`: the root itself in a LeanCIL checkout, otherwise its
+    /// leancil dependency, after the same framework, toolchain and reserved-module checks as consumer verification.
+    /// </summary>
+    static string EditorFramework(string root)
+    {
+        var manifest = JsonSerializer.Deserialize<JsonElement>(
+            File.ReadAllText(Path.Combine(root, "lake-manifest.json")));
+        string framework;
+        string[] packages = [root];
+        if (manifest.GetProperty("name").GetString() == "leancil")
+        {
+            RequireBundledFramework(root, root);
+            framework = root;
+        }
+        else
+        {
+            var dependencies = ConsumerDependencies(root, IsScratchPackage(root));
+            ConsumerSnapshot(root, null, dependencies);
+            framework = dependencies.Single(dependency => dependency.Name == "leancil").Source;
+            packages = [root, .. dependencies.Select(dependency => dependency.Directory)];
+        }
+        var sources = packages.SelectMany(package => ConsumerSources(package)).Where(path =>
+            Path.GetFileName(path) is "Extracted.lean" or "ExtractedSymbols.lean").ToArray();
+        if (sources.Length > 0)
+            throw new InvalidDataException("Extracted and ExtractedSymbols are reserved for the selected " +
+                "extraction; remove " + CliPaths.Display(sources[0]) + ".");
+        var lakefile = Path.Combine(framework, "lakefile.toml");
+        if (!File.Exists(lakefile) || !File.ReadAllText(lakefile).ReplaceLineEndings("\n").Contains(
+                $"[[lean_lib]]\nname = \"{EditorLibraryName}\"\nsrcDir = \"{EditorSourceDirectory}\"\n",
+                StringComparison.Ordinal))
+            throw new InvalidDataException("The leancil framework at " + CliPaths.Display(framework) +
+                " declares no " + EditorLibraryName + " library, so an editor cannot resolve Extracted." +
+                (SourceRevision is { } revision
+                    ? $"\n  Pin leancil to rev \"{revision}\" (see leancil --version)." : ""));
+        return framework;
+    }
+
+    // Unchanged bytes keep Lake's traces, so an unchanged method rebuilds nothing.
+    static void CopyIfChanged(string source, string destination)
+    {
+        if (!File.Exists(destination) || Sha(destination) != Sha(source)) File.Copy(source, destination, true);
+    }
+
+    static void PrintEditorExtraction(WorkspaceSettings settings, string editor, string[] modules,
+        EditorSelection? previous)
+    {
+        Console.WriteLine("Editor extraction: " + settings.Method + " (" + settings.Profile + ")");
+        if (previous is not null && (previous.Assembly != settings.Assembly || previous.Method != settings.Method ||
+                previous.Profile != settings.Profile))
+            Console.WriteLine("  Replaced " + previous.Method + " (" + previous.Profile + "): a package holds one " +
+                "extraction, so every proof in it now sees this one.");
+        Console.WriteLine("  Modules: " + string.Join(", ", modules) + " in " + CliPaths.Display(editor));
+        Console.WriteLine("  Proof: " + CliPaths.Display(settings.Proof));
+        if (settings.CreatedPackage)
+            Console.WriteLine("  Created a Lake package beside the proof (no lakefile above it): lakefile.toml, " +
+                "lean-toolchain and lake-manifest.json, with the bundled framework in " + BundledFrameworkDirectory);
+        Console.WriteLine("  Edit the proof in place. After rebuilding the assembly, run this command again and " +
+            "restart the file in the editor to load the refreshed extraction.");
         Console.WriteLine("  Editor checking is not a certificate. Run ordinary leancil verify for certification.");
     }
 }

@@ -8,7 +8,7 @@ namespace Nethermind.LeanCIL;
 internal static class LeanEmitter
 {
     internal readonly record struct Emission(string Source, string[] LayoutIdentities,
-        TemplateEmitter.Method[] Templates);
+        TemplateEmitter.Method[] Templates, ClassViews.View[] Views);
 
     internal static string? Narrow(TypeReference type) => EnumTypes.Storage(type).FullName switch
     {
@@ -169,6 +169,7 @@ internal static class LeanEmitter
         LayoutEvidence layoutEvidence = new(types, layoutContext);
         layoutEvidence.EmitLayouts(lean);
         GenericEvidence genericEvidence = new(pinned, layoutEvidence, importResolution);
+        var fieldAccesses = new List<ClassViews.Access>();
         for (int n = 0; n < methods.Length; n++)
         {
             MethodDefinition m = methods[n];
@@ -195,6 +196,8 @@ internal static class LeanEmitter
                     ? InstructionTranslation.Translate(i, m, methodIndices, n, instructions, profile,
                         scalarCertificate, parameterHomes, importResolution, layoutContext, constrainedTargets)
                     : ".unsupported \"Unreachable under selected profile\"");
+            fieldAccesses.AddRange(m.Body.Instructions.Select((instruction, pc) =>
+                ClassViews.Of(instruction, n, pc, ops[pc])).OfType<ClassViews.Access>());
             var needsOpaqueLocals = ops.Any(op => op.StartsWith(".intrinsic (.vector .createScalarUnsafe64) ", StringComparison.Ordinal));
             string opaqueLocals = needsOpaqueLocals ? string.Join(", ", m.Body.Variables
                 .Where(variable => variable.VariableType.FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" &&
@@ -321,7 +324,16 @@ internal static class LeanEmitter
         lean.AppendLine("  exact Extraction.MethodsChecked.nil");
         for (int n = 0; n < methods.Length; n++)
             lean.AppendLine($"@[cil_code] theorem lookup{n} : program[{n}]? = some method{n} := rfl");
+        var classViews = ClassViews.Views(fieldAccesses);
+        var views = ClassViews.Emit(fieldAccesses, classViews);
+        if (views.Length > 0)
+        {
+            lean.Append(views);
+            const string imported = "import CIL.Safety.Execution\n";
+            lean.Replace(imported, imported + "import CIL.Safety.ObjectFields\n", 0, lean.ToString().IndexOf(imported,
+                StringComparison.Ordinal) + imported.Length);
+        }
         lean.AppendLine("end Extracted");
-        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray());
+        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), classViews);
     }
 }

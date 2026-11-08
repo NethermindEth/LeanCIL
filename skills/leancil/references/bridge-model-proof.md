@@ -100,9 +100,10 @@ name = "MyLib"
 - Put the model in `MyLib/Model.lean` and the bridge in `MyLib/AddBridge.lean`, starting with
   `import Extracted` and `import MyLib.Model`. Lean requires imports before the `/-! -/` module
   docstring.
-- `Extracted` exists only inside `verify`, so `lake build` of the package cannot build the bridge.
-  Build the model alone with `lake build MyLib.Model`; check the bridge with `verify`, or in a
-  `leancil workspace` (see [write-new-proof.md](write-new-proof.md)).
+- `Extracted` exists in the package only after `leancil workspace` generates it (see
+  [write-new-proof.md](write-new-proof.md)); until then `lake build` of the package cannot build
+  the bridge. Build the model alone with `lake build MyLib.Model`; check the bridge with
+  `verify`, or with `lake build MyLib.AddBridge` after `leancil workspace`.
 - Verify with the package root:
 
   ```sh

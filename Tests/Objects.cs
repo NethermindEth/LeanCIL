@@ -2,6 +2,8 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include PreparedLeanFixtures.cs
+#:include RejectedEvidence.cs
 
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -37,6 +39,28 @@ foreach (var (proof, entry) in new[]
     verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));
     Console.WriteLine($"PASS {proof}: {entry}");
 }
+
+// Each named field is checked against the operation it names, so a view with another offset or
+// width fails its own theorem instead of naming storage the code never touches.
+RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution",
+    "CIL.Safety.ObjectFields");
+var forgedViews = new RejectedEvidence(root);
+var linked = File.ReadAllText(Path.Combine(root, "LinkedNodes", "Extracted.lean"));
+foreach (var (name, view, forged, marker) in new[]
+{
+    ("offset", "def Next : Safety.ReferenceField := ⟨type, 8⟩", "def Next : Safety.ReferenceField := ⟨type, 0⟩",
+        "Next.accessedBy"),
+    ("width", "def Value : Safety.WordField 8 := ⟨type, 0⟩", "def Value : Safety.WordField 4 := ⟨type, 0⟩",
+        "Value.accessedBy")
+})
+{
+    if (!linked.Contains(view, StringComparison.Ordinal))
+        throw new InvalidOperationException("The extraction does not name the field view: " + view);
+    var path = Path.Combine(root, $"ForgedView-{name}.lean");
+    File.WriteAllText(path, linked.Replace(view, forged, StringComparison.Ordinal));
+    forgedViews.Add(path, $"PASS forged field view rejected: {name}", marker);
+}
+forgedViews.Check();
 
 // The entry's call proof simplifies with the constructor's closed body; without it the proof
 // falls back to a whole-method kernel decision.

@@ -19,10 +19,10 @@
       "module": "Proof",
       "source": {
         "file": "<proof>",
-        "line": 176,
+        "line": 108,
         "column": 2
       },
-      "message": "cil_checked_steps took no step: the method or instruction lookup, or the first step, did not close; pass the lookup hypothesis, feature facts or step facts\nmemory : Memory\nsecond : Reference\namount : W64\nsecondFormed :\n  formObject memory (ManagedReference.address second) = Except.ok (Value.object (ManagedReference.address second))\n⊢ invoke Extracted.program 15 depositBoth\n      [Value.object ManagedReference.null, Value.object (ManagedReference.address second),\n        Value.scalar (CIL.Value.i64 amount)]\n      memory =\n    Except.error\n      { method := depositBoth, instruction := 2, fault := ExecutionFault.thrown \"System.NullReferenceException\" }",
+      "message": "cil_checked_steps took no step: the method or instruction lookup, or the first step, did not close; pass the lookup hypothesis, feature facts or step facts\nmemory : Memory\nsecond : Reference\namount : W64\nsecondLive : LiveObject memory second\n⊢ invoke Extracted.program 15 depositBoth\n      [Value.object ManagedReference.null, Value.object (ManagedReference.address second),\n        Value.scalar (CIL.Value.i64 amount)]\n      memory =\n    Except.error\n      { method := depositBoth, instruction := 2, fault := ExecutionFault.thrown \"System.NullReferenceException\" }",
       "tactic": "cil_checked_run_step",
       "stopped": false,
       "method": {
@@ -43,7 +43,7 @@
         ]
       },
       "suggestions": [
-        "supply, for each object argument, that the object reference forms: `formObject memory reference = .ok (.object reference)`, or `objectFieldAddress memory reference owner offset = .ok field` for a field, which gives it through `formObject_of_objectFieldAddress`"
+        "supply, for each object argument, that the object is live: `live.formed` of `live : LiveObject memory object`, or `readable.facts` of a field the extraction names, such as `Account.Balance.Readable memory object`, which also locates the field"
       ],
       "obligations": [],
       "unknown": {
@@ -55,49 +55,35 @@
   "messages": [
     {
       "file": "<proof>",
-      "line": 56,
-      "column": 0,
-      "severity": "info",
-      "text": "'ExampleProof.word_unique' depends on axioms: [propext, Classical.choice, Quot.sound]"
-    },
-    {
-      "file": "<proof>",
-      "line": 72,
+      "line": 44,
       "column": 0,
       "severity": "info",
       "text": "'ExampleProof.deposit_holds' depends on axioms: [propext, Classical.choice, Quot.sound]"
     },
     {
       "file": "<proof>",
-      "line": 112,
-      "column": 0,
-      "severity": "info",
-      "text": "'ExampleProof.balance_after_deposit' depends on axioms: [propext, Classical.choice, Quot.sound]"
-    },
-    {
-      "file": "<proof>",
-      "line": 159,
+      "line": 91,
       "column": 0,
       "severity": "info",
       "text": "'ExampleProof.depositBoth_holds' depends on axioms: [propext, Classical.choice, Quot.sound]"
     },
     {
       "file": "<proof>",
-      "line": 165,
+      "line": 97,
       "column": 0,
       "severity": "info",
       "text": "'ExampleProof.correctness' depends on axioms: [propext, Classical.choice, Quot.sound]"
     },
     {
       "file": "<proof>",
-      "line": 178,
+      "line": 110,
       "column": 0,
       "severity": "info",
       "text": "'ExampleProof.first_null_throws' depends on axioms: [propext, sorryAx, Quot.sound]"
     },
     {
       "file": "<proof>",
-      "line": 204,
+      "line": 134,
       "column": 0,
       "severity": "info",
       "text": "'ExampleProof.second_null_throws' depends on axioms: [propext, Classical.choice, Quot.sound]"

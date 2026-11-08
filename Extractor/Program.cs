@@ -442,7 +442,7 @@ internal static partial class Program
                     "loads read the caller's static binding.");
             checkedTemplate?.Invoke(new(output, assemblyHash, profile, emitted.Templates));
             if (args[0] == "check")
-                inspect?.Invoke(new(methods, emitted.Templates, emitted.LayoutIdentities, source));
+                inspect?.Invoke(new(methods, emitted.Templates, emitted.LayoutIdentities, source, emitted.Views));
         }
         catch (Exception exception)
         {

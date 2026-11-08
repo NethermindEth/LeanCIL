@@ -696,8 +696,8 @@ partial class Program : IDisposable
     const string CheckoutLakefileInput = "checkout:lakefile.toml";
 
     /// <summary>
-    /// The lakefile the certified library is built from: the checkout's, without blank lines, comments
-    /// or any plain <c>[[lean_lib]]</c> table that declares only a library outside CIL.
+    /// The lakefile the certified library is built from: the checkout's, without blank lines, comments,
+    /// the editor library, or any plain <c>[[lean_lib]]</c> table that declares only a library outside CIL.
     /// </summary>
     static string LibraryLakefile(string lakefile)
     {
@@ -716,12 +716,19 @@ partial class Program : IDisposable
             table is ["[[lean_lib]]", var declaration] &&
             LibraryName().Match(declaration) is { Success: true } match && match.Groups[1].Value is var name &&
             name != "CIL" && !name.StartsWith("CIL.", StringComparison.Ordinal) ? name : null;
+        // A certificate must never resolve Extracted to the editor's sources.
+        static bool EditorLibrary(List<string> table) =>
+            table is ["[[lean_lib]]", var declaration, ..] && declaration == $"name = \"{EditorLibraryName}\"";
+        tables.RemoveAll(EditorLibrary);
         var named = string.Join("\n", tables.Where(table => OtherLibrary(table) is null).SelectMany(table => table));
         // A library that a kept table names, such as a default target, stays declared.
         return string.Concat(tables.Where(table => OtherLibrary(table) is not { } name ||
                 named.Contains('"' + name + '"', StringComparison.Ordinal))
             .SelectMany(table => table).Select(line => line + "\n"));
     }
+
+    /// <summary>The framework library whose modules are the editor's extraction, below `.lake/leancil`.</summary>
+    const string EditorLibraryName = "LeanCILEditor";
 
     [GeneratedRegex(@"\Aname = ""([A-Za-z_][A-Za-z0-9_.]*)""\z")]
     private static partial Regex LibraryName();
@@ -1313,10 +1320,10 @@ partial class Program : IDisposable
         "\n[[require]]\nname = \"leancil\"\npath = " +
         JsonSerializer.Serialize(Path.GetRelativePath(owner, FrameworkPackage(owner, certified)).Replace('\\', '/')) + "\n";
 
-    /// <summary>Declarations of every library in a lakefile except the framework's own CIL.</summary>
+    /// <summary>Declarations of every library in a lakefile except the framework's CIL and editor libraries.</summary>
     static string LibraryDeclarations(string lakefile) => string.Concat(
         Regex.Matches(File.ReadAllText(lakefile), @"^\[\[lean_lib\]\]\r?\nname = ""([^""]+)""", RegexOptions.Multiline)
-            .Select(match => match.Groups[1].Value).Where(name => name != "CIL")
+            .Select(match => match.Groups[1].Value).Where(name => name is not ("CIL" or EditorLibraryName))
             .Select(name => $"\n[[lean_lib]]\nname = \"{name}\"\n"));
 
     // Rewriting an unchanged configuration would make Lake reconfigure packages that later builds reuse.

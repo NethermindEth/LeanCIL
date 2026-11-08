@@ -135,6 +135,27 @@ public static class Objects
             account.Deposit(amount);
     }
 
+    /// <summary>
+    /// Deposits the balance of <paramref name="source"/> into <paramref name="account"/> <paramref name="times"/>
+    /// times; <paramref name="source"/> is only read.
+    /// </summary>
+    public static void DepositFrom(Account account, Account source, uint times)
+    {
+        for (uint i = 0; i < times; i++)
+            account.Deposit(source.Balance);
+    }
+
+    /// <summary>
+    /// Withdraws <paramref name="amount"/> only when the balance covers it; returns what it withdrew.
+    /// </summary>
+    public static ulong Withdraw(Account account, ulong amount)
+    {
+        if (account.Balance < amount)
+            return 0;
+        account.Balance -= amount;
+        return amount;
+    }
+
     /// <summary>Two instances of a class with no fields are still two distinct instances.</summary>
     public static bool TwoMarkers()
     {
@@ -146,6 +167,13 @@ public static class Objects
     /// <summary>Makes <paramref name="next"/> follow <paramref name="node"/>; both may be the same node.</summary>
     public static void Link(Node node, Node next) => node.Next = next;
 
+    /// <summary>Makes <paramref name="next"/> follow both nodes; any two of the three may be the same node.</summary>
+    public static void LinkBoth(Node first, Node second, Node next)
+    {
+        first.Next = next;
+        second.Next = next;
+    }
+
     /// <summary>The value of the node after <paramref name="node"/>.</summary>
     public static ulong SecondValue(Node node) => node.Next!.Value;
 
@@ -154,6 +182,13 @@ public static class Objects
     {
         Link(node, next);
         return SecondValue(node);
+    }
+
+    /// <summary>As <see cref="LinkBoth"/>, with nodes named like a proof's own hypotheses and memories.</summary>
+    public static void Relink(Node held1, Node stored1, Node next)
+    {
+        stored1.Next = next;
+        held1.Next = next;
     }
 
     /// <summary>Bumps two accounts through <see cref="Bump"/>; both may be the same instance.</summary>

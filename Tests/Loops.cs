@@ -840,13 +840,28 @@ foreach (var mutation in new[] { "stack-height", "stack-type", "local-fact", "st
 // A generated starting proof must elaborate with only its holes open, and verification must refuse it
 // until every hole is filled; otherwise an author could mistake the outline for a proof.
 // Loops reuse the checked extraction an earlier section left under their name; the straight-line
-// methods cover `bool` and narrow parameters and a `bool` result.
+// methods cover `bool` and narrow parameters and a `bool` result, and the object methods `this`, field
+// loads and stores, an object result, calls and a loop over a `callvirt`.
 var outlined = new (string Name, string? Selector)[]
 {
     ("Countdown", null), ("FillWords", null), ("CountUntil", null), ("CountCalls", null), ("SpanDrain", null),
     ("SpanAllZero", null), ("SpanSum", null), ("TallyTwice", null), ("CopyUntilZero", null),
     ("Choose", "Arithmetic::Choose(bool,ulong,ulong)"), ("Narrow", "Arguments::Narrow(byte)"),
-    ("ReverseI16", "Bits::ReverseI16(short)"), ("PowerU32", "Bits::PowerU32(uint)")
+    ("ReverseI16", "Bits::ReverseI16(short)"), ("PowerU32", "Bits::PowerU32(uint)"),
+    ("Deposit", "Account::Deposit(System.UInt64)"), ("Headroom", "Account::get_Headroom()"),
+    ("SetLimit", "Objects::SetLimit(Examples.Account,System.UInt32)"),
+    ("Replace", "Objects::Replace(Examples.Account,System.UInt64)"),
+    ("SecondValue", "Objects::SecondValue(Examples.Node)"),
+    ("Link", "Objects::Link(Examples.Node,Examples.Node)"),
+    ("LinkBoth", "Objects::LinkBoth(Examples.Node,Examples.Node,Examples.Node)"),
+    // Its nodes are named like the hypotheses and memories the proof introduces, which must not capture them.
+    ("Relink", "Objects::Relink(Examples.Node,Examples.Node,Examples.Node)"),
+    ("FirstPresent", "Objects::FirstPresent(Examples.Account,Examples.Account)"),
+    ("DepositBoth", "Objects::DepositBoth(Examples.Account,Examples.Account,System.UInt64)"),
+    ("DepositTimes", "Objects::DepositTimes(Examples.Account,System.UInt64,System.UInt32)"),
+    ("DepositFrom", "Objects::DepositFrom(Examples.Account,Examples.Account,System.UInt32)"),
+    ("Withdraw", "Objects::Withdraw(Examples.Account,System.UInt64)"),
+    ("LinkedValue", "Objects::LinkedValue(Examples.Node,Examples.Node)")
 };
 var outlineTimer = System.Diagnostics.Stopwatch.StartNew();
 var outlineRoot = Path.Combine(root, "Outlines");
@@ -880,6 +895,14 @@ var elaborated = outlined.AsParallel().WithDegreeOfParallelism(Environment.Proce
 }).Where(failure => failure is not null).ToArray();
 if (elaborated.Length > 0) throw new InvalidOperationException(string.Join("\n", elaborated));
 Console.WriteLine($"PASS new-proof outlines {outlined.Length} methods that elaborate with only their holes open");
+
+// A loop asks write authority only of the object whose field it or a callee stores; the other is only read.
+var depositFrom = File.ReadAllText(Path.Combine(outlineRoot, "DepositFrom", "Proof.lean"));
+if (!depositFrom.Contains("Account.Balance.Owned initial account", StringComparison.Ordinal) ||
+    !depositFrom.Contains("Account.Balance.Readable initial source", StringComparison.Ordinal) ||
+    depositFrom.Contains("Account.Balance.Owned initial source", StringComparison.Ordinal))
+    throw new InvalidOperationException("The DepositFrom outline does not ask per-object field facts:\n" + depositFrom);
+Console.WriteLine("PASS a loop outline asks Owned only of the object its callee stores and Readable of the one it reads");
 
 // The audit refuses an outline for its holes, whatever the method; one loop shows it end to end.
 var countdownOutline = Path.Combine(root, "Countdown");
@@ -935,6 +958,134 @@ if (proved.Code != 0 || !proved.Stdout.StartsWith("Verified: ExampleProof.correc
     throw new InvalidOperationException("The filled Countdown outline did not verify:\n" + proved.Output);
 Console.WriteLine("PASS verify refuses the Countdown outline until its holes are filled, then verifies it " +
     $"({outlineTimer.Elapsed.TotalSeconds:F0}s for every outline check)");
+
+// Object outlines leave only their specification: once it is written, an instance method's field store, a
+// reference field store, a null test of an argument followed through a local, a split on a field value and a
+// call to a callee that loads the object a field holds each verify.
+const string storedHole = "sorry -- Postcondition of the returned value, with `held1` the stored fields";
+foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] Fills)[]
+{
+    ("Deposit", [
+        ("def Precondition (account : Reference) (amount : W64) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : W64) (_ : Memory) : Prop := True"),
+        ("def Postcondition (account : Reference) (amount : W64) (initial final : Memory) : Prop := sorry",
+            "def Postcondition (account : Reference) (amount : W64) (initial final : Memory) : Prop :=\n" +
+            "  Account.Balance.Holds final account (Account.Balance.of initial account + amount)"),
+        (storedHole, "exact held1")]),
+    ("Link", [
+        ("def Precondition (node next : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ _ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (node next : Reference) (initial final : Memory) : Prop := sorry",
+            "def Postcondition (node next : Reference) (_ final : Memory) : Prop :=\n" +
+            "  Node.Next.Holds final node (.address next)"),
+        (storedHole, "exact held1")]),
+    ("FirstPresent", [
+        ("def Precondition (first second : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ _ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (first second : Reference) (initial final : Memory) (result : ManagedReference)\n" +
+            "    : Prop := sorry",
+            "def Postcondition (first _ : Reference) (_ _ : Memory) (result : ManagedReference) : Prop :=\n" +
+            "  result = .address first"),
+        ("sorry -- Postcondition of the returned value", "rfl")]),
+    // The second store may reach the first node's field too, which `across` splits on.
+    ("LinkBoth", [
+        ("def Precondition (first second next : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ _ _ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (first second next : Reference) (initial final : Memory) : Prop := sorry",
+            "def Postcondition (first second next : Reference) (_ final : Memory) : Prop :=\n" +
+            "  Node.Next.Holds final first (.address next) ∧ Node.Next.Holds final second (.address next)"),
+        ("sorry -- Postcondition of the returned value, with `held1`, `held2` the stored fields", """
+        have firstHeld := held1.1.across secondLive1 framed2 held2
+          rw [held1.2, ite_self] at firstHeld
+          exact ⟨firstHeld, held2⟩
+        """.Trim())]),
+    ("DepositBoth", [
+        ("def Precondition (first second : Reference) (amount : W64) (initial : Memory) : Prop := sorry",
+            "def Precondition (first second : Reference) (_ : W64) (_ : Memory) : Prop := first ≠ second"),
+        ("def Postcondition (first second : Reference) (amount : W64) (initial final : Memory) : Prop := sorry",
+            "def Postcondition (first second : Reference) (amount : W64) (initial final : Memory) : Prop :=\n" +
+            "  Account.Balance.Holds final first (Account.Balance.of initial first + amount) ∧\n" +
+            "    Account.Balance.Holds final second (Account.Balance.of initial second + amount)"),
+        ("sorry -- Postcondition of the returned value, with `held1`, `held2` the stored fields", """
+        have distinct : first ≠ second := assumed
+          have firstHeld := held1.1.across secondLive1 framed2 held2
+          have secondBefore := (secondBalance.across firstLive framed1 held1).2
+          simp only [distinct, ite_false] at secondBefore
+          simp only [Ne.symm distinct, ite_false, held1.2] at firstHeld
+          rw [secondBefore] at held2
+          exact ⟨firstHeld, held2⟩
+        """.Trim())]),
+    // Each side of the test on the balance steps to its own return and leaves its own postcondition.
+    ("Withdraw", [
+        ("def Precondition (account : Reference) (amount : W64) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : W64) (_ : Memory) : Prop := True"),
+        ("def Postcondition (account : Reference) (amount : W64) (initial final : Memory) (result : W64)\n" +
+            "    : Prop := sorry",
+            "def Postcondition (account : Reference) (amount : W64) (initial final : Memory) (result : W64)\n" +
+            "    : Prop :=\n" +
+            "  if amount ≤ Account.Balance.of initial account then\n" +
+            "    result = amount ∧\n" +
+            "      Account.Balance.Holds final account (Account.Balance.of initial account - amount)\n" +
+            "  else result = 0 ∧ final = initial"),
+        ("-- Postcondition of the returned value where `branch1` holds, with `held1` the stored fields\n" +
+            "    sorry",
+            "simp only [Postcondition, branch1, ↓reduceIte, true_and]\n    exact held1"),
+        ("sorry -- Postcondition of the returned value where `branch1` fails",
+            "simp only [Postcondition, branch1, ↓reduceIte]\n    exact ⟨rfl, rfl⟩")]),
+    // The callee's contract states its result of whatever node the field holds; the caller names it by the
+    // store just before the call, so the result is the value of `next`.
+    ("LinkedValue", [
+        ("def Precondition (node next : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ _ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (node next : Reference) (initial final : Memory) (result : W64) : Prop := sorry",
+            "def Postcondition (_ next : Reference) (initial _ : Memory) (result : W64) : Prop :=\n" +
+            "  result = Node.Value.of initial next"),
+        (storedHole, "exact (nextValue.frame framed1 (apart_of_entries rfl)).2")])
+})
+{
+    var source = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
+    foreach (var (hole, replacement) in fills)
+    {
+        if (Regex.Matches(source, Regex.Escape(hole)).Count != 1)
+            throw new InvalidOperationException($"The {name} outline lacks the hole {hole}:\n{source}");
+        source = source.Replace(hole, replacement, StringComparison.Ordinal);
+    }
+    if (Regex.IsMatch(source, @"(?<![`\w])sorry(?![`\w])"))
+        throw new InvalidOperationException($"The {name} outline has a hole the test does not fill:\n{source}");
+    var filledOutline = Path.Combine(outlineRoot, name, "Filled.lean");
+    File.WriteAllText(filledOutline, source);
+    var verified = Execute(Cli("verify", Path.Combine(outlineRoot, name, "Extraction"), "--proof", filledOutline));
+    if (verified.Code != 0 || !verified.Stdout.StartsWith("Verified: ExampleProof.correctness"))
+        throw new InvalidOperationException($"The filled {name} outline did not verify:\n{verified.Output}");
+}
+Console.WriteLine("PASS filled object outlines verify with only their specification written: a field store, " +
+    "two reference field stores that may alias, a null test followed through a local, two calls through a " +
+    "generated contract, a split on a field value and a call whose callee loads the node a field holds");
+
+// LeanCIL's own closure that lays out a static word's bytes: its outline states the getter's contract
+// and steps through it, and the checked-in proof fills only the outline's holes and verifies.
+var wordByte = Path.Combine(outlineRoot, "WordByte");
+var wordByteExtraction = Path.Combine(wordByte, "Extraction");
+Run(Cli("extract", At("Extractor/bin/Nethermind.LeanCIL.dll"),
+    "Nethermind.LeanCIL.StaticValues/<>c__DisplayClass10_0::<Bytes>b__0(System.Int32)", wordByteExtraction));
+var wordByteOutline = Path.Combine(wordByte, "Proof.lean");
+Run(Cli("new-proof", wordByteExtraction, wordByteOutline));
+var wordByteSource = File.ReadAllText(wordByteOutline);
+if (wordByteSource.Contains("-- not outlined:", StringComparison.Ordinal) ||
+    !wordByteSource.Contains("theorem get_Bits_holds", StringComparison.Ordinal))
+    throw new InvalidOperationException("The closure outline does not step its getter call:\n" + wordByteSource);
+static string Statement(string source) =>
+    Regex.Match(source.ReplaceLineEndings("\n"), @"^theorem correctness .*?:= by$",
+        RegexOptions.Singleline | RegexOptions.Multiline).Value;
+var wordByteProof = At("Tests/Outlines/WordByte.lean");
+var outlineStatement = Statement(wordByteSource);
+if (outlineStatement.Length == 0 || outlineStatement != Statement(File.ReadAllText(wordByteProof)))
+    throw new InvalidOperationException("Tests/Outlines/WordByte.lean no longer states the outline's theorem:\n" +
+        outlineStatement);
+var wordByteVerified = Execute(Cli("verify", wordByteExtraction, "--proof", wordByteProof));
+if (wordByteVerified.Code != 0 || !wordByteVerified.Stdout.StartsWith("Verified: ExampleProof.correctness"))
+    throw new InvalidOperationException("The closure's filled outline did not verify:\n" + wordByteVerified.Output);
+Console.WriteLine("PASS the outline of LeanCIL's own byte-layout closure, filled, verifies its little-endian byte");
 
 delegate void FillWordsDelegate(ref ulong destination, ulong value, int count);
 delegate uint CopyUntilZeroDelegate(ReadOnlySpan<uint> values, ref uint output);

@@ -65,11 +65,12 @@ def MissingFact.hint : MissingFact → MessageData
   | .objectAllocation => m!"the allocation: `allocateObject memory type size = .ok (object, \
       after)` from `allocateObject_ok` with a heap budget covering the size, or the \
       `allocationFailure` from `allocateObject_insufficient`"
-  | .objectSlot => m!"the reference field's slot: a `loadSlot` or `storeSlot` fact, such as \
-      from `loadSlot_of_access` or `storeSlot_of_access`"
-  | .objectForm => m!"that the object reference forms: `formObject memory reference = .ok \
-      (.object reference)`, or `objectFieldAddress memory reference owner offset = .ok field` \
-      for a field, which gives it through `formObject_of_objectFieldAddress`"
+  | .objectSlot => m!"the reference field's slot: `readable.facts held targetLive` or \
+      `readable.load_null held` of a named `ReferenceField.Readable`, `owned.store targetLive` of \
+      an `Owned` one, or a `loadSlot` or `storeSlot` fact"
+  | .objectForm => m!"that the object is live: `live.formed` of `live : LiveObject memory \
+      object`, or `readable.facts` of a field the extraction names, such as \
+      `Account.Balance.Readable memory object`, which also locates the field"
   | .unsafeAdd => m!"the `Unsafe.Add` result: `add memory base width offset = .ok reference` at \
       this memory or the caller's, such as `Writable.add_int`"
   | .referenceForm => m!"that the reference forms: `form memory reference = .ok reference`, or \
