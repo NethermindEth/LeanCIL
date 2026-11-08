@@ -276,10 +276,10 @@ Under the premise, `Memory.ClassesConsistent.allocation_ne` separates objects lo
 instances of two unrelated cataloged classes.
 
 A caller states the premise once, for its entry memory, and execution keeps it
-([execution classes](../CIL/Safety/ExecutionClasses.lean)). Only `newobj` creates an instance,
-of the class and bases the instruction records; frame homes, statics, arrays and expiry create
-none. `ObjectSitesConsistent catalog program` checks every `newobj` site of the program text
-against the catalog, once per extraction by `decide`. Given it, `step_preserves_classes`,
+([execution classes](../CIL/Safety/ExecutionClasses.lean)). Only `newobj` and `newarr` of a class
+create instances: `newobj` of the class and bases it records, `newarr` an array of its element
+type. Frame homes, statics, value arrays and expiry create none. `ObjectSitesConsistent catalog
+program` checks every such site of the program text against the catalog, once per extraction by `decide`. Given it, `step_preserves_classes`,
 `run_preserves_classes` and `invoke_preserves_classes` keep the premise through every step,
 nested call and frame exit. Formed calls and constructions hand their continuation the same
 fact for the callee's final memory (`ClassesPreserved`, part of `FrameInvariants`). Nothing is
@@ -368,6 +368,18 @@ Object identity, runtime type and field positions are allocation metadata, which
 never change, so distinct object references are distinct allocations and their fields never
 share a byte; [object framing](PROOFS-CONTRACTS.md#frame-class-instances) states this for
 proofs.
+
+## Arrays of class references
+
+An array of an admitted class `E` is itself a class instance: `.newReferenceArray E` allocates,
+through `allocateObject`, an allocation of kind `.object` whose runtime type is `E[]`
+(`referenceArrayType`) with no bases, one 8-byte slot per element and nothing else, so its
+length is its size over the slot width. Its elements are references held in
+`Memory.slots`, as class-typed fields are, and fresh elements are null. The array is charged
+to `Memory.heapBudget` like any instance, without the CoreCLR header and length word the model
+does not lay out, and a short budget is the model's `allocationFailure`. The length decodes as
+`newarr` decodes it for value arrays: a negative `int32` or native length throws
+`System.OverflowException`, and one above `0x7fffffc7` is unsupported.
 
 ## Sequential struct layout
 

@@ -245,6 +245,20 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
       return .next (pc + 1) (.object result :: rest) frame memory :=
   rfl
 
+/-- `newarr` of a class with an int32 length allocates the array and pushes it. -/
+@[cil_step high] theorem step_newReferenceArray_i32_eq (element : CIL.Extraction.TypeExpr)
+    (bits : BitVec 32) (rest : List Value) :
+    step body (.newReferenceArray element) pc args frame (.scalar (.i32 bits) :: rest) memory = do
+      let (array, allocated) ← newReferenceArray memory element (.i32 bits)
+      return .next (pc + 1) (.object (.address array) :: rest) frame allocated := rfl
+
+/-- `newarr` of a class with a native length allocates the array and pushes it. -/
+@[cil_step high] theorem step_newReferenceArray_i64_eq (element : CIL.Extraction.TypeExpr)
+    (bits : BitVec 64) (rest : List Value) :
+    step body (.newReferenceArray element) pc args frame (.scalar (.i64 bits) :: rest) memory = do
+      let (array, allocated) ← newReferenceArray memory element (.i64 bits)
+      return .next (pc + 1) (.object (.address array) :: rest) frame allocated := rfl
+
 /-- `ldnull` pushes the null object reference and leaves memory unchanged. -/
 @[cil_step high] theorem step_nullObject_eq (stack : List Value) :
     step body (.memory .nullObject) pc args frame stack memory =
@@ -445,6 +459,8 @@ end ObjectEquations
 #print axioms step_brnonzero_object_eq
 #print axioms step_objectTest_eq
 #print axioms step_nullObject_eq
+#print axioms step_newReferenceArray_i32_eq
+#print axioms step_newReferenceArray_i64_eq
 #print axioms step_objectField_eq
 #print axioms step_setObjectField_i64_eq
 #print axioms step_setObjectField_i32_eq

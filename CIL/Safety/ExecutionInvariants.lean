@@ -31,9 +31,11 @@ def FrameAction.frameAfter (action : FrameAction) (current : Frame) : Frame :=
   | .call _ _ _ _ | .tailCall _ _ _ | .returned _ _ => current
 
 /-- The runtime type of the instance an instruction creates: `newobj` records its class and
-    bases in the instruction itself; no other instruction creates an instance. -/
+    bases in the instruction itself, `newarr` of a class the array type of its element; no
+    other instruction creates an instance. -/
 def objectSiteType : CIL.Op → Option RuntimeType
   | .newObject _ _ owner bases _ => some ⟨owner, bases⟩
+  | .newReferenceArray element => some (referenceArrayType element)
   | _ => none
 
 /-- A step's memory and frame changes, with successful primitive operations as
@@ -238,6 +240,21 @@ theorem StepContract.objectAllocation {body : CIL.Method} {frame : Frame}
 
 #print axioms StepContract.objectAllocation
 
+/-- `newarr` of a class pushes a fresh array, allocated as an instance of its array type. -/
+theorem StepContract.referenceArrayAllocation {body : CIL.Method} {frame : Frame}
+    {stack : List Value} {memory result : Memory} {array : Reference}
+    {element : CIL.Extraction.TypeExpr} {length : CIL.Value} {pc : Nat}
+    (success : newReferenceArray memory element length = .ok (array, result)) :
+    StepContract body (.newReferenceArray element) frame (.scalar length :: stack) memory
+      (.next pc (.object (.address array) :: stack) frame result) := by
+  obtain ⟨size, allocated⟩ := newReferenceArray_allocation success
+  have effect := allocateObject_effect allocated
+  apply StepContract.of_effect (.objectAllocation effect rfl)
+  intro _ _ retained
+  exact ValuesValid.cons effect.object_valid retained.tail
+
+#print axioms StepContract.referenceArrayAllocation
+
 /-- A successful pointer subtraction forms a valid result without changing its capability. -/
 theorem referenceSubtract_valid (memory : Memory) (reference result : ManagedReference)
     (offset : CIL.Value) (success : referenceSubtract memory reference offset = .ok result) :
@@ -312,6 +329,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
         all_goals assumption
     | solve | exact .stackAllocation (by assumption)
     | solve | exact .arrayAllocation (by assumption)
+    | solve | exact .referenceArrayAllocation (by assumption)
     | solve | exact .objectAllocation (by assumption) (by assumption)
     | solve |
         apply StepContract.staticInstruction

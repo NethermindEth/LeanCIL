@@ -239,6 +239,9 @@ name = "Tests.PointerOperations"
 name = "Tests.Objects"
 
 [[lean_lib]]
+name = "Tests.ReferenceArrays"
+
+[[lean_lib]]
 name = "Tests.PrimitiveArrays"
 
 [[lean_lib]]

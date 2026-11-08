@@ -110,6 +110,8 @@ inductive Op where
   | stackAlloc (initLocals : Bool)
   /-- Fresh zero-initialized primitive heap storage, assuming runtime allocation availability. -/
   | newArray (element : ArrayElement)
+  /-- `newarr` of class `element`: a fresh array of null references on the heap budget. -/
+  | newReferenceArray (element : Extraction.TypeExpr)
   | nop | neg | gt
   -- Signed and unsigned compare-and-branch; more follow `switch` below.
   | bgt (target : Nat)

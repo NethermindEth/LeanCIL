@@ -199,6 +199,20 @@ theorem Memory.Equivalent.objectTest {m n : Memory} (same : m.Equivalent n)
     same.formObject]
 #print axioms Memory.Equivalent.objectTest
 
+/-- Reference array length decoding and allocation preserve exact outcomes over equivalent
+    memories. -/
+theorem Memory.Equivalent.newReferenceArray {m n : Memory} (same : m.Equivalent n)
+    (element : CIL.Extraction.TypeExpr) (length : CIL.Value) :
+    ResultEquivalent MemoryLastEquivalent (newReferenceArray m element length)
+      (newReferenceArray n element length) := by
+  cases length <;> simp only [CIL.Safety.newReferenceArray, Bind.bind, Except.bind, Pure.pure,
+    Except.pure]
+  all_goals repeat first
+    | exact .error _
+    | exact same.allocateObject _ _
+    | split
+#print axioms Memory.Equivalent.newReferenceArray
+
 theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) :
@@ -216,6 +230,12 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
        intro left right related
        obtain ⟨view, memory⟩ := left
        obtain ⟨otherView, otherMemory⟩ := right
+       obtain ⟨rfl, equivalent⟩ := related
+       exact .ok (.next equivalent _ _ _))
+    | (apply ResultEquivalent.bind (same.newReferenceArray _ _)
+       intro left right related
+       obtain ⟨array, memory⟩ := left
+       obtain ⟨otherArray, otherMemory⟩ := right
        obtain ⟨rfl, equivalent⟩ := related
        exact .ok (.next equivalent _ _ _))
     | (apply ResultEquivalent.bind (same.allocateObject _ _)

@@ -226,6 +226,17 @@ theorem step_appendLocals_newArray (element : CIL.ArrayElement) :
 
 #print axioms step_appendLocals_newArray
 
+/-- Reference array allocation does not inspect or change a frame's local slots. -/
+theorem step_appendLocals_newReferenceArray (element : CIL.Extraction.TypeExpr) :
+    StepAppendLocals (.newReferenceArray element) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  simp only [step, bind_map_left]
+  frame_natural
+
+#print axioms step_appendLocals_newReferenceArray
+
 /-- `nop` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_nop :
     StepAppendLocals .nop := by
@@ -1337,6 +1348,7 @@ theorem step_appendLocals (body : Method) (op : Op) (pc : Nat) (args : List Valu
     case stackAlloc initLocals =>
       exact step_appendLocals_stackAlloc initLocals
     case newArray element => exact step_appendLocals_newArray element
+    case newReferenceArray element => exact step_appendLocals_newReferenceArray element
     case nop =>
       exact step_appendLocals_nop
     case neg =>

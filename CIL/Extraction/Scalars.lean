@@ -45,6 +45,7 @@ def scalarType : TypeExpr → ScalarKind
       | .enumSpan identity writable _ => .enumSpan identity writable true
       | _ => .reference
   | .pointer _ => .reference
+  | .array (.object ..) => .object
   | .array element => match managedSignature element with
     | some signature => .methodTable signature
     | none => (arrayElementType element).map ScalarKind.array |>.getD .other
@@ -168,7 +169,7 @@ private def arrayStep (instruction : RawInstruction) (stack : List ScalarKind) :
 
 /-- Array operations cannot be introduced through an unrelated stack-effect-only encoding. -/
 private def arrayEmission : Op → Bool
-  | .newArray _ => true
+  | .newArray _ | .newReferenceArray _ => true
   | .memory .arrayLength | .memory (.arrayLoad ..) | .memory (.arrayStore _)
   | .memory (.arrayAddress ..) => true
   | .memory (.arrayTransfer ..) => true
@@ -182,6 +183,8 @@ private def arrayMatches (instruction : RawInstruction) (stack : List ScalarKind
     | .type token, length :: _, .newArray element =>
       length ∈ [.word32, .native] && element.allocationSupported &&
         arrayElementType token == some element.metadata
+    | .type token@(.object ..), length :: _, .newReferenceArray element =>
+      length ∈ [.word32, .native] && token == element
     | _, _, _ => false
   else
   match arrayStep instruction stack, emitted with
@@ -789,10 +792,12 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
         return .methodPointer signature :: rest
   if opcode == 141 then
     let .type token := instruction.operand | none
-    let element ← arrayElementType token
     let length :: tail := stack | none
     if length ∉ [.word32, .native] then none else
-      return .array element :: tail
+    -- An array of class references is itself an object reference.
+    if token matches .object .. then return .object :: tail else
+    let element ← arrayElementType token
+    return .array element :: tail
   if arrayCovered opcode then return (← arrayStep instruction stack).2
   -- `castclass` and `isinst` of a class leave an object reference.
   if opcode == 116 || opcode == 117 then

@@ -167,4 +167,55 @@ theorem allocateObject_insufficient {memory : Memory} (type : RuntimeType) {size
 
 #print axioms allocateObject_insufficient
 
+/-- A successful `newarr` of a class is an allocation of an instance of its array type. -/
+theorem newReferenceArray_allocation {memory result : Memory} {element : CIL.Extraction.TypeExpr}
+    {length : CIL.Value} {array : Reference}
+    (success : newReferenceArray memory element length = .ok (array, result)) :
+    ∃ size, allocateObject memory (referenceArrayType element) size = .ok (array, result) := by
+  unfold newReferenceArray at success
+  cases length <;> simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at success
+  all_goals try cases success
+  all_goals repeat' split at success
+  all_goals first | cases success | exact ⟨_, success⟩
+
+#print axioms newReferenceArray_allocation
+
+/-- In well-formed memory with budget for it, `newarr` of `length` class references allocates a
+    fresh array at the next identity, all of whose slots hold null. -/
+theorem newReferenceArray_ok {memory : Memory} (formed : memory.WellFormed)
+    (element : CIL.Extraction.TypeExpr) {value : CIL.Value} {length : Nat}
+    (decoded : value = .i32 (BitVec.ofNat 32 length) ∨ value = .i64 (BitVec.ofNat 64 length))
+    (small : length < 2^31) (bounded : length ≤ maxArrayLength)
+    (affordable : objectFieldSlot * length ≤ memory.heapBudget) :
+    newReferenceArray memory element value =
+      .ok (⟨memory.nextIdentity, 0⟩,
+        objectMemory memory (referenceArrayType element) (objectFieldSlot * length)) := by
+  have native : objectFieldSlot * length < nativeLimit := by
+    simp only [objectFieldSlot, nativeLimit]; omega
+  have toNat32 : (BitVec.ofNat 32 length).toNat = length := by
+    simp only [BitVec.toNat_ofNat]; exact Nat.mod_eq_of_lt (by omega)
+  have toNat64 : (BitVec.ofNat 64 length).toNat = length := by
+    simp only [BitVec.toNat_ofNat]; exact Nat.mod_eq_of_lt (by omega)
+  have toInt32 : (BitVec.ofNat 32 length).toInt = length := by
+    rw [BitVec.toInt_eq_toNat_cond, toNat32]; split <;> omega
+  have toInt64 : (BitVec.ofNat 64 length).toInt = length := by
+    rw [BitVec.toInt_eq_toNat_cond, toNat64]; split <;> omega
+  have within : ¬ maxArrayLength < length := Nat.not_lt.mpr bounded
+  rcases decoded with rfl | rfl <;>
+    simp only [newReferenceArray, toInt32, toInt64, Bind.bind, Except.bind, Pure.pure,
+      Except.pure, Int.toNat_natCast, Int.natCast_nonneg, Int.not_lt.mpr, within,
+      ite_false, gt_iff_lt] <;>
+    exact allocateObject_ok formed _ affordable native
+
+#print axioms newReferenceArray_ok
+
+/-- `newarr` of a class with a negative length throws `OverflowException` before allocating. -/
+theorem newReferenceArray_negative (memory : Memory) (element : CIL.Extraction.TypeExpr)
+    (bits : BitVec 32) (negative : bits.toInt < 0) :
+    newReferenceArray memory element (.i32 bits) =
+      .error (.thrown "System.OverflowException") := by
+  simp [newReferenceArray, negative, Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+#print axioms newReferenceArray_negative
+
 end CIL.Safety

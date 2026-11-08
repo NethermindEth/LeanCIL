@@ -416,6 +416,9 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
   | .newArray element, .scalar length :: rest =>
     let (view, memory) ← newArray m element length
     return .next (pc + 1) (.array view :: rest) frame memory
+  | .newReferenceArray element, .scalar length :: rest =>
+    let (array, memory) ← newReferenceArray m element length
+    return .next (pc + 1) (.object (.address array) :: rest) frame memory
   | _, _ =>
     match pureArity op with
     | some argc =>

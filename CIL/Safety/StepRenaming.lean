@@ -48,6 +48,9 @@ theorem stepTransport : StepTransport := by
     case newArray.refl element =>
       exact memories.stepNewArray frames sourceFormed targetFormed staticBounds
         sourceBody targetBody element pc arguments stack bounds observable
+    case newReferenceArray.refl element =>
+      exact memories.stepNewReferenceArray frames sourceFormed targetFormed staticBounds
+        sourceBody targetBody element pc arguments stack bounds observable
     case newObject.refl callee argc owner bases size =>
       exact memories.stepNewObject sourceFormed targetFormed staticBounds sourceBody targetBody
         callee argc owner bases size pc arguments stack bounds observable

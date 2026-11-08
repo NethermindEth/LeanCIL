@@ -123,4 +123,23 @@ def allocateObject (memory : Memory) (type : RuntimeType) (size : Nat) :
   return (⟨identity, 0⟩,
     { arrayMemory allocated identity size with heapBudget := memory.heapBudget - size })
 
+/-- The runtime type of an array of `element` references. System.Array and System.Object are
+    left out of its bases, as System.Object is left out of a class's. -/
+def referenceArrayType (element : CIL.Extraction.TypeExpr) : RuntimeType :=
+  ⟨.array element, []⟩
+
+/-- `newarr` of a class: a fresh array of `length` null references, one 8-byte slot each, charged
+    to the heap budget like an instance of that size. A negative CLI length throws
+    `OverflowException`; one above the CoreCLR ceiling is outside the model, as for `newArray`. -/
+def newReferenceArray (memory : Memory) (element : CIL.Extraction.TypeExpr)
+    (value : CIL.Value) : ExecutionResult (Reference × Memory) := do
+  let length ← match value with
+    | .i32 bits => pure bits.toInt
+    | .i64 bits => pure bits.toInt
+    | _ => .error .invalidState
+  if length < 0 then .error (.thrown "System.OverflowException") else
+  if length.toNat > maxArrayLength then
+    .error (.unsupported "Array length outside supported extent") else
+  allocateObject memory (referenceArrayType element) (objectFieldSlot * length.toNat)
+
 end CIL.Safety

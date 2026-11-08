@@ -6,11 +6,11 @@ import CIL.Safety.ExecutionInvariants
 Memory a caller passes may record any runtime type, so a proof that tells instances of two
 classes apart (`CIL/Safety/ClassCatalog.lean`) needs every object's lineage to agree with the
 class chains the extraction declares: `Memory.ClassesConsistent catalog memory`. The caller
-establishes it once, at entry. The program keeps it when each of its `newobj` sites records a
-type that agrees with the catalog (`ObjectSitesConsistent`), a property of the program text alone
-that `decide` checks once per extraction. Under that premise, `step_preserves_classes` up to
-`invoke_preserves_classes` carry the agreement through every step, nested call and frame exit,
-following `StepEffect`: no other instruction creates an instance.
+establishes it once, at entry. The program keeps it when each of its `newobj` and class `newarr`
+sites records a type that agrees with the catalog (`ObjectSitesConsistent`), a property of the
+program text alone that `decide` checks once per extraction. Under that premise,
+`step_preserves_classes` up to `invoke_preserves_classes` carry the agreement through every step,
+nested call and frame exit, following `StepEffect`: no other instruction creates an instance.
 -/
 
 namespace CIL.Safety
@@ -41,7 +41,7 @@ instance (catalog : List RuntimeType) (operation : CIL.Op) :
   unfold SiteConsistent
   split <;> infer_instance
 
-/-- Every `newobj` site of `program` records a runtime type that agrees with the catalog. -/
+/-- Every allocating site of `program` records a runtime type that agrees with the catalog. -/
 def ObjectSitesConsistent (catalog : List RuntimeType) (program : CIL.Program) : Prop :=
   ∀ body ∈ program, ∀ operation ∈ body.code, SiteConsistent catalog operation
 
