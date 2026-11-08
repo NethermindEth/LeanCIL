@@ -501,7 +501,6 @@ internal static partial class ProofOutline
             lean.Line();
         }
 
-        /// <summary>A value the outline cannot write as a term, named for the hole that meets it.</summary>
         /// <summary>The word an unsigned `width`-byte field holding `term` loads as.</summary>
         static string NarrowRead(string term, int width)
         {
@@ -509,6 +508,7 @@ internal static partial class ProofOutline
             return $"({operand}.setWidth {8 * width}).setWidth 32";
         }
 
+        /// <summary>A value the outline cannot write as a term, named for the hole that meets it.</summary>
         static string Unnamed(Value value) => value switch
         {
             Unknown unknown => unknown.What,
