@@ -39,7 +39,10 @@ Examples:Examples.NestedRecord& Examples.UnsafeLayouts::Add15int(Examples.Nested
 Examples:Examples.NestedRecord& Examples.UnsafeLayouts::Add15nint(Examples.NestedRecord&,System.IntPtr)	A	A	A	A	A	A	A	A
 Examples:Examples.NestedRecord& Examples.UnsafeLayouts::Add15nuint(Examples.NestedRecord&,System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:Examples.NestedRecord[] Examples.PrimitiveArrays::AllocateNested(System.Int32)	A	A	A	A	A	A	A	A
+Examples:Examples.Node Examples.NodeArrays::At(Examples.Node[],System.Int32)	A	A	A	A	A	A	A	A
+Examples:Examples.Node Examples.NodeArrays::Pair(Examples.Node,Examples.Node)	A	A	A	A	A	A	A	A
 Examples:Examples.Node Examples.Objects::Detach(Examples.Node)	A	A	A	A	A	A	A	A
+Examples:Examples.Node[] Examples.NodeArrays::Create(System.Int32)	A	A	A	A	A	A	A	A
 Examples:Examples.PackedConstructor Examples.Constructors::MakePacked(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:Examples.PackedLeaf& Examples.GenericMethods::NextPacked(Examples.PackedLeaf&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:Examples.PackedLeaf& Examples.UnsafeLayouts::Add14int(Examples.PackedLeaf&,System.Int32)	A	A	A	A	A	A	A	A
@@ -355,6 +358,7 @@ Examples:System.Int32 Examples.NativeIntegers::SignedSize()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.NativeIntegers::UnsignedSize()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.NativeManagedDispatch::Dispatch(System.IntPtr*,System.Int32,System.Int32,System.Int32,System.Int64)	B	B	B	B	B	B	B	B
 Examples:System.Int32 Examples.NativeManagedDispatch::Repeat(System.Int32,System.Int32,System.Int64)	B	B	B	B	B	B	B	B
+Examples:System.Int32 Examples.NodeArrays::Count(Examples.Node[])	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.PooledItem::get_Id()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.PrimitiveArrays::AllocateAndWrite(System.Int32,System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.PrimitiveArrays::AllocatePackedAndWrite(System.Int32,System.Int32,System.Int32)	A	A	A	A	A	A	A	A
@@ -1071,6 +1075,7 @@ Examples:System.Void Examples.MemorySpans::FillLongSlice(System.Span`1<System.In
 Examples:System.Void Examples.MemorySpans::Write(System.Span`1<System.Int32>,System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.NestedConstructor::.ctor(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Node::.ctor()	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.NodeArrays::Put(Examples.Shape[],System.Int32,Examples.Shape)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.NullReferences::Write(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.NullReferences::WriteField(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::Bump(Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
@@ -1122,6 +1127,7 @@ Examples:System.Void Examples.SpanReferences::SetHigh(System.ReadOnlySpan`1<Exam
 Examples:System.Void Examples.SpanReferences::WriteFirst(System.Span`1<System.Int32>&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.SpanReferences::WriteSecond(System.ReadOnlySpan`1<System.UInt64>&,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.SpanReferences::WriteWord(System.ReadOnlySpan`1<System.UInt64>&,System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Square::.ctor(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.StaticPair`1::.ctor(T,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.StaticScalars::.cctor()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.StaticSpans::Write()	A	A	A	A	A	A	A	A

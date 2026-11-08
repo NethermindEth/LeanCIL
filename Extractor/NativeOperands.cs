@@ -68,7 +68,7 @@ internal static class NativeOperands
     }
 
     static StackType PrimitiveType(TypeReference type) => type is ByReferenceType or PointerType
-        ? Kind.Reference : ObjectTypes.Is(type) ? Kind.Object : Arrays.Of(type)?.Kind ??
+        ? Kind.Reference : ObjectTypes.Is(type) || ReferenceArrays.Is(type) ? Kind.Object : Arrays.Of(type)?.Kind ??
         EnumTypes.Storage(type).MetadataType switch
     {
         MetadataType.IntPtr or MetadataType.UIntPtr => Kind.Native,
@@ -282,6 +282,7 @@ internal static class NativeOperands
                             Code.Conv_Ovf_I8_Un or Code.Conv_Ovf_U8 or Code.Conv_Ovf_U8_Un => Kind.Word64,
                         Code.Ldtoken => Kind.Other,
                         Code.Ldnull => Kind.NullObject,
+                        Code.Ldelem_Ref when popped[1].Kind is Kind.Object or Kind.NullObject => Kind.Object,
                         Code.Neg or Code.Not => popped[0],
                         // All remaining supported pushi encodings produce int32 (constants,
                         // narrow conversions, sizeof and narrow indirect loads).

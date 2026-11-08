@@ -113,8 +113,9 @@ initialization and alignment. `CIL.Safety.invoke` is the execution model for bot
 correctness and memory-safety claims.
 
 Classes beyond those deriving from `System.Object` through such classes, with scalar fields and
-fields holding class instances (opaque references when the class is outside the model), virtual
-dispatch outside the extracted classes, interface calls and type tests, ordinary recursive calls,
+fields holding class instances (opaque references when the class is outside the model), arrays
+of class references other than one-dimensional arrays of admitted classes, virtual dispatch
+outside the extracted classes, interface calls and type tests, ordinary recursive calls,
 exception handlers,
 floating-point arithmetic and arbitrary external calls are outside the supported subset.
 Concurrency, GC implementation correctness and equivalence to arbitrary .NET runtimes are

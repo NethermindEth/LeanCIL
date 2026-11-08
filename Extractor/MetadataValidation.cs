@@ -370,6 +370,7 @@ internal static class MetadataValidation
         }
         if (type is ArrayType array)
         {
+            if (ReferenceArrays.Is(array)) return;
             if (Arrays.Of(array) is null)
                 throw new InvalidDataException("Unsupported array shape or element type: " + type.FullName);
             Type(array.ElementType, module, architecture: architecture);

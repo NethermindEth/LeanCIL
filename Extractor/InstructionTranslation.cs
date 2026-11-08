@@ -65,6 +65,10 @@ internal static class InstructionTranslation
             return ".nop";
         }
         if (i.Previous?.OpCode.Code == Code.Readonly) Arrays.ValidateReadOnly(instructions, i.Previous);
+        var referenceArray = i.OpCode.Code == Code.Ldlen &&
+            nativeOperands.Incoming.TryGetValue(i, out var lengthStack) &&
+            lengthStack.LastOrDefault().Kind == NativeOperands.Kind.Object;
+        if (ReferenceArrays.Translate(i, referenceArray) is { } referenceOperation) return referenceOperation;
         if (Arrays.Translate(i, profile.Architecture) is { } arrayOperation) return arrayOperation;
         parameterHomes ??= ParameterStorage.IndexHomes(ParameterStorage.Analyze(m, reachable!));
         var translated = TranslateCore(i, m, methods, methodIndex, instructions, profile, parameterHomes,
@@ -270,7 +274,8 @@ internal static class InstructionTranslation
             Code.Ldarg or Code.Ldarg_S => Arg(MethodArguments.Index(m, (ParameterDefinition)i.Operand)),
             Code.Ldloc_0 => LocalOp("local", 0), Code.Ldloc_1 => LocalOp("local", 1), Code.Ldloc_2 => LocalOp("local", 2), Code.Ldloc_3 => LocalOp("local", 3),
             Code.Ldloc or Code.Ldloc_S => LocalOp("local", Local()),
-            Code.Ldloca or Code.Ldloca_S when ObjectTypes.Candidate(((VariableDefinition)i.Operand).VariableType) =>
+            Code.Ldloca or Code.Ldloca_S when ObjectTypes.Candidate(((VariableDefinition)i.Operand).VariableType) ||
+                ReferenceArrays.Is(((VariableDefinition)i.Operand).VariableType) =>
                 throw new InvalidDataException("Unsupported address of a class instance local: " + m.FullName),
             Code.Ldloca or Code.Ldloca_S => LocalOp(
                 !Spans.Is(((VariableDefinition)i.Operand).VariableType) ? "localAddr" : "local", Local()),

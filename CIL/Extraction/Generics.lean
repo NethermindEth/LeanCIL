@@ -151,6 +151,8 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
     let .field kind ← typeStorage layouts underlying | none
     if enumField kind then return .field kind else none
   | .byref _ => some .reference
+  -- An array of class references is itself an object on the heap.
+  | .array (.object _ _) => some .object
   | .array (.aggregate identity index) => do
     let metadata ← layouts[index]?
     if metadata.identity == identity && !metadata.byRefLike then

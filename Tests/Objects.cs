@@ -10,8 +10,9 @@ using Mono.Cecil.Cil;
 using System.Text.RegularExpressions;
 
 // Class instances on the checked heap: proofs about identity, presence, scalar, class-typed and opaque fields,
-// instance receivers, calls framed across objects, construction against the heap budget and fields of base
-// classes, and the named rejection of every class shape or access the model does not represent.
+// instance receivers, calls framed across objects, construction against the heap budget, fields of base
+// classes and arrays of class references, and the named rejection of every class shape or access the model
+// does not represent.
 using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Objects");
@@ -40,7 +41,11 @@ foreach (var (proof, entry) in new[]
     ("AnimalLoudness", "VirtualCalls::LoudnessOf(Examples.Animal)"),
     ("FreshDogLegs", "VirtualCalls::DogLegs()"),
     ("DogTest", "ClassTests::IsDog(Examples.Animal)"),
-    ("DogCast", "ClassTests::AsDog(Examples.Animal)")
+    ("DogCast", "ClassTests::AsDog(Examples.Animal)"),
+    ("NodePair", "NodeArrays::Pair(Examples.Node,Examples.Node)"),
+    ("ArrayElement", "NodeArrays::At(Examples.Node[],System.Int32)"),
+    ("ArrayLength", "NodeArrays::Count(Examples.Node[])"),
+    ("ArrayCovariance", "NodeArrays::Put(Examples.Shape[],System.Int32,Examples.Shape)")
 })
 {
     verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));
@@ -122,7 +127,7 @@ Console.WriteLine("PASS construction call proof names the constructor");
 foreach (var mutation in new[]
 {
     "abstract", "base", "baseRejected", "explicit", "finalizer", "interface", "byref", "address", "reference",
-    "fieldType", "receiverAddress", "opaqueRead"
+    "fieldType", "receiverAddress", "opaqueRead", "elementAddress", "arrayAddress"
 })
 {
     var output = Path.Combine(root, "Reject-" + mutation);
@@ -134,6 +139,7 @@ foreach (var mutation in new[]
         var account = module.GetType("Examples.Account");
         var method = module.GetType("Examples.Objects").Methods.Single(candidate => candidate.Name == "IsNull");
         var getter = account.Methods.Single(candidate => candidate.Name == "get_Headroom");
+        var arrays = module.GetType("Examples.NodeArrays");
         var runtime = module.TypeSystem.Object.Scope;
         switch (mutation)
         {
@@ -202,6 +208,20 @@ foreach (var mutation in new[]
                 body.InsertBefore(getter.Body.Instructions[0],
                     body.Create(OpCodes.Ldarga_S, getter.Body.ThisParameter));
                 break;
+            case "elementAddress":
+                var at = arrays.Methods.Single(candidate => candidate.Name == "At");
+                var element = at.Body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Ldelem_Ref);
+                var elements = at.Body.GetILProcessor();
+                elements.InsertAfter(element, elements.Create(OpCodes.Ldind_Ref));
+                elements.Replace(element, elements.Create(OpCodes.Ldelema, module.GetType("Examples.Node")));
+                break;
+            case "arrayAddress":
+                var count = arrays.Methods.Single(candidate => candidate.Name == "Count");
+                var argument = count.Body.Instructions[0];
+                var counter = count.Body.GetILProcessor();
+                counter.InsertAfter(argument, counter.Create(OpCodes.Ldind_Ref));
+                counter.Replace(argument, counter.Create(OpCodes.Ldarga_S, count.Parameters[0]));
+                break;
         }
         expected = mutation switch
         {
@@ -222,6 +242,11 @@ foreach (var mutation in new[]
             "fieldType" => "Unsupported class instance field type: System.Double Examples.Account::Rate",
             "receiverAddress" =>
                 "Unsupported address of a class instance receiver: System.UInt64 Examples.Account::get_Headroom()",
+            "elementAddress" =>
+                "Unsupported typed element access on an array of class references: ldelema Examples.Node",
+            "arrayAddress" =>
+                "Address of managed-reference or array-root argument is unsupported\n" +
+                "  Method: System.Int32 Examples.NodeArrays::Count(Examples.Node[])",
             _ => throw new InvalidOperationException("Unknown class rejection fixture: " + mutation)
         };
         module.Write(dll);
@@ -233,6 +258,8 @@ foreach (var mutation in new[]
         "byref" => "Objects::IsNull(Examples.Account&)",
         "receiverAddress" => "Account::get_Headroom()",
         "opaqueRead" => "Objects::HasTag(Examples.Tagged)",
+        "elementAddress" => "NodeArrays::At(Examples.Node[],System.Int32)",
+        "arrayAddress" => "NodeArrays::Count(Examples.Node[])",
         _ => "Objects::IsNull(Examples.Account)"
     };
     var result = Execute(["dotnet", ExtractorPath, "extract", dll, selector, output]);
@@ -360,5 +387,6 @@ verification.Verify(virtualDll, "Examples", "Account::get_Headroom()", At("Examp
 Console.WriteLine("PASS virtual method body proved as an entry");
 
 Console.WriteLine("PASS objects: identity, presence, scalar and reference field, receiver, framed call " +
-    "construction, base class field, virtual dispatch and type test proofs, " +
-    "and named rejection of unmodelled class shapes, field accesses, calls, dispatch tables and type tests");
+    "construction, base class field, class reference array, virtual dispatch and type test proofs, " +
+    "and named rejection of unmodelled class shapes, field and element accesses, calls, dispatch tables " +
+    "and type tests");

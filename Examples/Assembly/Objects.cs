@@ -77,6 +77,41 @@ public class Circle : Shape
     public Circle(ulong id, ulong radius) : base(id) => Radius = radius;
 }
 
+/// <summary>A second class derived from <see cref="Shape"/>: no square is a circle.</summary>
+public sealed class Square : Shape
+{
+    /// <summary>The square's side.</summary>
+    public ulong Side;
+
+    /// <summary>Creates a square, chaining to the base constructor for the identifier.</summary>
+    public Square(ulong id, ulong side) : base(id) => Side = side;
+}
+
+/// <summary>Arrays of class instances: each element is a reference, and every store is type-checked.</summary>
+public static class NodeArrays
+{
+    /// <summary>A fresh array of <paramref name="count"/> null references.</summary>
+    public static Node?[] Create(int count) => new Node?[count];
+
+    /// <summary>The number of elements of <paramref name="nodes"/>.</summary>
+    public static int Count(Node?[] nodes) => nodes.Length;
+
+    /// <summary>The element at <paramref name="index"/>.</summary>
+    public static Node? At(Node?[] nodes, int index) => nodes[index];
+
+    /// <summary>Stores <paramref name="shape"/> at <paramref name="index"/> of an array of any derived class.</summary>
+    public static void Put(Shape?[] shapes, int index, Shape? shape) => shapes[index] = shape;
+
+    /// <summary>Holds two nodes in a fresh array and reads the second back.</summary>
+    public static Node? Pair(Node first, Node second)
+    {
+        var nodes = new Node?[2];
+        nodes[0] = first;
+        nodes[1] = second;
+        return nodes[1];
+    }
+}
+
 /// <summary>Reference identity and null tests on class instances.</summary>
 public static class Objects
 {

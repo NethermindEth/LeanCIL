@@ -352,8 +352,9 @@ against a pinned catalog class that is no interface
 
 Interface, generic, explicit-layout and finalizable classes, classes deriving from a class that is
 not admitted, `newobj` of an abstract class, byrefs to class
-instances, field addresses on class instances, class fields of array, generic parameter, modified
-or non-integer value types,
+instances, field addresses on class instances, element addresses and typed element accesses
+on arrays of class references, class fields of array, generic parameter, modified or non-integer
+value types,
 interface calls, virtual calls whose hierarchy the table cannot close or resolve, type tests
 against interfaces, `System.Object` or classes that are not admitted, and the address
 of a class receiver, local or argument are each
@@ -395,6 +396,14 @@ stored value, such as an array, is unsupported rather than an exception: the mod
 record the interfaces or array covariance the CLR would consult for it. The store itself is
 `storeSlot`, so it changes only that slot. The checks run in CoreCLR's order: null array,
 index, then type.
+
+The extractor admits a single-dimensional array of an admitted class as a parameter, local,
+return or `newarr` type, typed as an object on the evaluation stack, and Lean rechecks each
+`newarr`, `ldlen`, `ldelem.ref` and `stelem.ref` against its raw opcode and operand kinds. An
+element address (`ldelema`) or a typed `ldelem`/`stelem` on such an array is rejected by name,
+since a byref to a reference slot is outside the model, as is the address of an argument or
+local holding such an array. Multi-dimensional arrays, arrays of strings, interfaces or other
+types outside the admitted classes, and array-typed class fields are rejected.
 
 ## Sequential struct layout
 

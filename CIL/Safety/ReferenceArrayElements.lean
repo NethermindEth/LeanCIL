@@ -78,6 +78,27 @@ theorem Live.slot_outside {memory : Memory} {array : Reference}
     ite_false]
 #print axioms Live.slot_outside
 
+/-- A live array forms as an object reference, as every argument and local must. -/
+theorem Live.formed {memory : Memory} {array : Reference} {element : CIL.Extraction.TypeExpr}
+    {length : Nat} (live : Live memory array element length) :
+    formObject memory (.address array) = .ok (.object (.address array)) := by
+  have located := live.located
+  simp only [referenceArrayOf, checkedAt, Except.mapError, Bind.bind, Except.bind] at located
+  simp only [formObject, checkedAt, Except.mapError, Bind.bind, Except.bind]
+  repeat' first
+    | contradiction
+    | rfl
+    | split at located
+    | split
+  all_goals simp_all
+#print axioms Live.formed
+
+/-- A live array is a live object. -/
+theorem Live.object {memory : Memory} {array : Reference} {element : CIL.Extraction.TypeExpr}
+    {length : Nat} (live : Live memory array element length) : LiveObject memory array :=
+  ⟨live.formed, live.old⟩
+#print axioms Live.object
+
 /-- A live array keeps its location in memory that keeps its allocation. -/
 theorem Live.of_allocation {before after : Memory} {array : Reference}
     {element : CIL.Extraction.TypeExpr} {length : Nat} (live : Live before array element length)
@@ -169,11 +190,14 @@ theorem Owned.store_null {memory : Memory} {array : Reference}
 /-- A live instance whose runtime type has `element` in its lineage is storable into an array of
     `element`, when both are admitted classes. -/
 theorem storableIn_of_lineage {memory : Memory} {target : Reference}
-    {allocation : Allocation} {type : RuntimeType} {scope name elementScope elementName : String}
+    {allocation : Allocation} {type : RuntimeType} {element : CIL.Extraction.TypeExpr}
+    {scope name elementScope elementName : String}
     (found : liveAllocation memory target.allocation = .ok allocation)
     (kind : allocation.kind = .object type) (identity : type.identity = .object scope name)
-    (member : .object elementScope elementName ∈ type.lineage) :
-    storableIn memory (.object elementScope elementName) (.address target) = .ok () := by
+    (elementClass : element = .object elementScope elementName)
+    (member : element ∈ type.lineage) :
+    storableIn memory element (.address target) = .ok () := by
+  subst elementClass
   simp only [storableIn, found, kind, identity, member, checkedAt, Except.mapError, Bind.bind,
     Except.bind, ite_true]
 #print axioms storableIn_of_lineage
@@ -181,12 +205,15 @@ theorem storableIn_of_lineage {memory : Memory} {target : Reference}
 /-- A live instance of an admitted class whose lineage lacks `element` is not storable into an
     array of `element`: the store throws `ArrayTypeMismatchException`. -/
 theorem storableIn_mismatch {memory : Memory} {target : Reference}
-    {allocation : Allocation} {type : RuntimeType} {scope name elementScope elementName : String}
+    {allocation : Allocation} {type : RuntimeType} {element : CIL.Extraction.TypeExpr}
+    {scope name elementScope elementName : String}
     (found : liveAllocation memory target.allocation = .ok allocation)
     (kind : allocation.kind = .object type) (identity : type.identity = .object scope name)
-    (outside : .object elementScope elementName ∉ type.lineage) :
-    storableIn memory (.object elementScope elementName) (.address target) =
+    (elementClass : element = .object elementScope elementName)
+    (outside : element ∉ type.lineage) :
+    storableIn memory element (.address target) =
       .error (.thrown "System.ArrayTypeMismatchException") := by
+  subst elementClass
   simp only [storableIn, found, kind, identity, outside, checkedAt, Except.mapError, Bind.bind,
     Except.bind, ite_false]
 #print axioms storableIn_mismatch
@@ -198,7 +225,8 @@ theorem Readable.frame {footprint : List (Reference × Nat)} {before after : Mem
     (readable : Readable before array element length index)
     (framed : Confined footprint before after)
     (apart : ∀ entry ∈ footprint, Apart (slot array index) objectFieldSlot entry) :
-    Readable after array element length index ∧ of after array index = of before array index := by
+    Readable after array element length index ∧
+      of after array index = of before array index := by
   have outside := Outside.of_apart apart
   refine ⟨{ toLive := readable.toLive.of_allocation (framed.allocations _ readable.old)
               framed.grows
@@ -253,6 +281,22 @@ theorem Owned.across {before after : Memory} {array : Reference}
     simp only [ReferenceArray.entry, ReferenceArray.slot, objectFieldSlot]
     omega
 #print axioms Owned.across
+
+/-- A store into an element of an array allocated at or above `watermark` keeps all memory
+    below it, so a method that fills an array it created changes nothing its caller held. -/
+theorem setSlot_below {watermark : Nat} (memory : Memory) {field : Reference}
+    (fresh : watermark ≤ field.allocation) (value : ManagedReference) :
+    MemoryBelow watermark memory (setSlot memory field value) :=
+  ⟨fun _ _ => rfl, fun _ _ _ => rfl, fun _ _ _ _ => rfl, fun identity below offset => by
+    simp [CIL.Safety.setSlot, show identity ≠ field.allocation by omega]⟩
+#print axioms setSlot_below
+
+/-- Memory that keeps every allocation below a watermark finds each of them live as before. -/
+theorem liveAllocation_below {watermark : Nat} {before after : Memory} {identity : Nat}
+    (preserved : MemoryBelow watermark before after) (old : identity < watermark) :
+    liveAllocation after identity = liveAllocation before identity := by
+  simp only [liveAllocation, preserved.allocations _ old]
+#print axioms liveAllocation_below
 
 /-- A fresh array of `length` elements is live, and every element inside it is owned and holds
     null. -/

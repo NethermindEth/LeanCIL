@@ -180,18 +180,14 @@ theorem newReferenceArray_allocation {memory result : Memory} {element : CIL.Ext
 
 #print axioms newReferenceArray_allocation
 
-/-- In well-formed memory with budget for it, `newarr` of `length` class references allocates a
-    fresh array at the next identity, all of whose slots hold null. -/
-theorem newReferenceArray_ok {memory : Memory} (formed : memory.WellFormed)
-    (element : CIL.Extraction.TypeExpr) {value : CIL.Value} {length : Nat}
+/-- `newarr` of a decodable, supported `length` of class references allocates an object of the
+    array type with one slot per element; the allocation alone decides success. -/
+theorem newReferenceArray_decoded (memory : Memory) (element : CIL.Extraction.TypeExpr)
+    {value : CIL.Value} {length : Nat}
     (decoded : value = .i32 (BitVec.ofNat 32 length) ∨ value = .i64 (BitVec.ofNat 64 length))
-    (small : length < 2^31) (bounded : length ≤ maxArrayLength)
-    (affordable : objectFieldSlot * length ≤ memory.heapBudget) :
+    (small : length < 2^31) (bounded : length ≤ maxArrayLength) :
     newReferenceArray memory element value =
-      .ok (⟨memory.nextIdentity, 0⟩,
-        objectMemory memory (referenceArrayType element) (objectFieldSlot * length)) := by
-  have native : objectFieldSlot * length < nativeLimit := by
-    simp only [objectFieldSlot, nativeLimit]; omega
+      allocateObject memory (referenceArrayType element) (objectFieldSlot * length) := by
   have toNat32 : (BitVec.ofNat 32 length).toNat = length := by
     simp only [BitVec.toNat_ofNat]; exact Nat.mod_eq_of_lt (by omega)
   have toNat64 : (BitVec.ofNat 64 length).toNat = length := by
@@ -204,10 +200,40 @@ theorem newReferenceArray_ok {memory : Memory} (formed : memory.WellFormed)
   rcases decoded with rfl | rfl <;>
     simp only [newReferenceArray, toInt32, toInt64, Bind.bind, Except.bind, Pure.pure,
       Except.pure, Int.toNat_natCast, Int.natCast_nonneg, Int.not_lt.mpr, within,
-      ite_false, gt_iff_lt] <;>
-    exact allocateObject_ok formed _ affordable native
+      ite_false, gt_iff_lt]
+
+#print axioms newReferenceArray_decoded
+
+/-- In well-formed memory with budget for it, `newarr` of `length` class references allocates a
+    fresh array at the next identity, all of whose slots hold null. -/
+theorem newReferenceArray_ok {memory : Memory} (formed : memory.WellFormed)
+    (element : CIL.Extraction.TypeExpr) {value : CIL.Value} {length : Nat}
+    (decoded : value = .i32 (BitVec.ofNat 32 length) ∨ value = .i64 (BitVec.ofNat 64 length))
+    (small : length < 2^31) (bounded : length ≤ maxArrayLength)
+    (affordable : objectFieldSlot * length ≤ memory.heapBudget) :
+    newReferenceArray memory element value =
+      .ok (⟨memory.nextIdentity, 0⟩,
+        objectMemory memory (referenceArrayType element) (objectFieldSlot * length)) := by
+  have native : objectFieldSlot * length < nativeLimit := by
+    simp only [objectFieldSlot, nativeLimit]; omega
+  rw [newReferenceArray_decoded memory element decoded small bounded]
+  exact allocateObject_ok formed _ affordable native
 
 #print axioms newReferenceArray_ok
+
+/-- Without budget for its slots, `newarr` of `length` class references fails with the model's
+    `allocationFailure`, which is not a CLR exception. -/
+theorem newReferenceArray_insufficient (memory : Memory) (element : CIL.Extraction.TypeExpr)
+    {value : CIL.Value} {length : Nat}
+    (decoded : value = .i32 (BitVec.ofNat 32 length) ∨ value = .i64 (BitVec.ofNat 64 length))
+    (small : length < 2^31) (bounded : length ≤ maxArrayLength)
+    (short : memory.heapBudget < objectFieldSlot * length) :
+    newReferenceArray memory element value =
+      .error (.allocationFailure (objectFieldSlot * length) memory.heapBudget) := by
+  rw [newReferenceArray_decoded memory element decoded small bounded]
+  exact allocateObject_insufficient _ short
+
+#print axioms newReferenceArray_insufficient
 
 /-- `newarr` of a class with a negative length throws `OverflowException` before allocating. -/
 theorem newReferenceArray_negative (memory : Memory) (element : CIL.Extraction.TypeExpr)

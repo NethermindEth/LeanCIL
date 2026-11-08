@@ -403,6 +403,11 @@ covariance check for an instance whose class derives from the element class and
 call as they do fields, and `ReferenceArray.fresh` gives a fresh array from `newReferenceArray_ok`
 as live with every element owned and null. `step_referenceArrayLength_eq`,
 `step_referenceArrayLoad_eq` and `step_referenceArrayStore_eq` step the three instructions.
+[NodePair](../Examples/Proofs/NodePair.lean) fills a fresh array and reads it back, with its
+`allocationFailure` without budget; [ArrayElement](../Examples/Proofs/ArrayElement.lean) and
+[ArrayLength](../Examples/Proofs/ArrayLength.lean) read an element and the length, with the
+bounds and null faults; [ArrayCovariance](../Examples/Proofs/ArrayCovariance.lean) stores into
+a `Circle[]` passed as a `Shape[]`, proving the `ArrayTypeMismatchException` of a `Square`.
 
 ## Construct structs through contracts
 
