@@ -139,7 +139,10 @@ The frame-entry and return premises (checked arguments, frame setup and checked 
 outcome and loop tactics share this closer, `cil_checked_side`. Pass only the facts a step needs,
 such as `form memory r = .ok r` or a `loadValue` result; these definitions, and the `cil_guard`
 names `observerCount`, `unspecifiedOperands`, `hasUnspecified` and `argumentCount`, need not be
-listed. A closed call steps its caller's continuation from the cleaned `returned ++ rest` stack.
+listed. At a call, including `callvirt` and the constructor call of `newobj`, the tactic proves the
+callee by stepping it or from an invocation fact in context, then keeps stepping the caller from
+the cleaned `returned ++ rest` stack; one `cil_checked_steps` crosses any number of calls, and
+`cil_checked_steps n` counts each call as one step.
 Over symbolic caller memory, frame setup of a method with numeric locals is not a closed term;
 `bind_entry ... allocating` supplies its setup equation and home facts instead (see [loop
 scaffolding](PROOFS-BINDING.md#generate-loop-entry-and-cutpoint-scaffolding)).

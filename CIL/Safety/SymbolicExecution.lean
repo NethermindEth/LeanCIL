@@ -784,19 +784,8 @@ elab_rules : tactic
       catch _ => saved.restore
     throwError "No child invocation evidence matches the requested fuel and state"
 
-/-- Takes a fetched call through `run_call_of_invoke`, given the lookups, stepping both the
-    callee and the caller's continuation to completion. -/
-macro "cil_checked_call_at " methodFound:term:max instructionFound:term:max
-    "[" facts:term,* "]" : tactic =>
-  `(tactic| cil_strict refine CIL.Safety.run_call_of_invoke $methodFound $instructionFound
-    (by cil_checked_step_normalized [$[$facts:term],*])
-    (by first | cil_checked_child [$[$facts:term],*]
-              | (cil_checked_steps_normalized [$[$facts:term],*]; done))
-    -- The continuation starts on `returned ++ rest`, which per-shape equations cannot match.
-    (by cil_stack_cleanup; cil_checked_steps_normalized [$[$facts:term],*]; done))
-
-/-- `cil_checked_call_at`, except that only the callee runs to its return; the caller's
-    continuation stays open as the goal. -/
+/-- Takes a fetched call through `run_call_of_invoke`, given the lookups: the callee runs to its
+    return, and the caller's continuation, on the returned values, stays open as the goal. -/
 macro "cil_checked_call_open_at " methodFound:term:max instructionFound:term:max
     "[" facts:term,* "]" : tactic =>
   `(tactic| (
@@ -863,9 +852,9 @@ def callsCallee (operation : Lean.Name) : Bool :=
 
 open Lean Elab Tactic Meta in
 /-- One `run` step: prove the method and instruction lookups once, then apply only the
-    composition lemma for the fetched opcode. With `openCall`, a call leaves the caller's
+    composition lemma for the fetched opcode. A call proves its callee and leaves the caller's
     continuation as the goal. Toward a stated fault, a step that raises it ends the run. -/
-def cilRunStep (facts : Array Term) (openCall : Bool) : TacticM Unit := withMainContext do
+def cilRunStep (facts : Array Term) : TacticM Unit := withMainContext do
   -- `run_fault` can close only at the pc the stated fault names; elsewhere it only costs.
   let target := (← instantiateMVars (← getMainTarget)).consumeMData
   let faulting ← match target.eq? with
@@ -890,9 +879,7 @@ def cilRunStep (facts : Array Term) (openCall : Bool) : TacticM Unit := withMain
   evalTactic (← if operation == ``CIL.Op.ret then
       `(tactic| cil_checked_return_at $methodSyntax $instructionSyntax [$facts,*])
     else if callsCallee operation || constructs then
-      let call ← if openCall then
-          `(tactic| cil_checked_call_open_at $methodSyntax $instructionSyntax [$facts,*])
-        else `(tactic| cil_checked_call_at $methodSyntax $instructionSyntax [$facts,*])
+      let call ← `(tactic| cil_checked_call_open_at $methodSyntax $instructionSyntax [$facts,*])
       if faulting && faultsFirst then
         `(tactic| first
           | cil_checked_fault_at $methodSyntax $instructionSyntax [$facts,*]
@@ -905,12 +892,12 @@ def cilRunStep (facts : Array Term) (openCall : Bool) : TacticM Unit := withMain
     else
       `(tactic| cil_checked_next_at $methodSyntax $instructionSyntax [$facts,*]))
 
-/-- One `run` step of the goal, chosen by the fetched opcode; at a call it also proves the
-    caller's whole continuation. -/
+/-- One `run` step of the goal, chosen by the fetched opcode; at a call it proves the callee and
+    leaves the caller's continuation. -/
 syntax "cil_checked_run_step" "[" term,* "]" : tactic
 
 elab_rules : tactic
-  | `(tactic| cil_checked_run_step [$facts:term,*]) => cilRunStep facts.getElems false
+  | `(tactic| cil_checked_run_step [$facts:term,*]) => cilRunStep facts.getElems
 
 macro_rules
   | `(tactic| cil_checked_steps_normalized [$facts:term,*]) =>
@@ -950,7 +937,7 @@ elab_rules : tactic
       for taken in [:count.getNat] do
         if (← getGoals).isEmpty then
           throwError "cil_checked_steps {count.getNat}: the goal closed after {taken} steps"
-        cilRunStep prepared true
+        cilRunStep prepared
       -- Fold the stepped pc (`2 + 1`) so the residual matches a target stated with a numeral.
       unless (← getGoals).isEmpty do
         evalTactic (← `(tactic| try (conv => lhs; arg 4; simp only [Nat.reduceAdd])))

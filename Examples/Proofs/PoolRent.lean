@@ -130,9 +130,8 @@ theorem rent_reuses (memory : Memory) (pool head : Reference) (wellFormed : memo
     cil_checked_steps [setup, entry.frame, free.live.formed, free0.1.live.formed, free0.1.located,
       headLoad, headLive.formed, link0.1.located, linkLoad, freeStored,
       link1.live.formed, link1.located, nullStored, idleFacts, countWritten,
-      rented3.live.formed, rented3.located, markWritten]
-    cil_checked_steps [rented3.live.formed, rented3.located, markWritten, headMarked.formed,
-      headKept, entry.frame]
+      rented3.live.formed, rented3.located, markWritten, headMarked.formed, headKept]
+    rfl
   · exact (((freeHeld.after_confined nullFramed (apart_of_entries rfl)).after_confined countFramed
       (apart_of_entries rfl)).after_confined markFramed (apart_of_entries rfl)).after_below left
       free.old past
@@ -348,14 +347,12 @@ theorem rent_creates (memory : Memory) (pool : Reference) (wellFormed : memory.W
   · have itemMarked := rentedOwned.live.after_confined markFramed
     cil_checked_steps [setup, entry.frame, free.live.formed, free0.1.live.formed, free0.1.located,
       emptyLoad, liveFacts, capacityFacts, room, nextIdFacts, idStored, idLoaded,
-      nextId1.1.live.formed, nextId1.1.located, nextWritten, idLoaded2]
-    cil_checked_steps 1 [allocated, nextHeld.1.live.formed, poolLive3.formed, created,
-      ownerFresh.1.located, ownerStored, idOwned.live.formed, idOwned.located, itemIdWritten,
-      itemType, itemSize, PooledItem.type]
-    cil_checked_steps [itemIdHeld.1.live.formed, liveFacts5, liveWritten, rentedOwned.live.formed,
-      rentedOwned.located, markWritten]
-    cil_checked_steps 1 [rentedOwned.live.formed, rentedOwned.located, markWritten]
-    cil_checked_steps [itemMarked.formed, itemHome, entry.frame]
+      nextId1.1.live.formed, nextId1.1.located, nextWritten, idLoaded2, allocated,
+      nextHeld.1.live.formed, poolLive3.formed, created, ownerFresh.1.located, ownerStored,
+      idOwned.live.formed, idOwned.located, itemIdWritten, itemType, itemSize, PooledItem.type,
+      itemIdHeld.1.live.formed, liveFacts5, liveWritten, rentedOwned.live.formed,
+      rentedOwned.located, markWritten, itemMarked.formed, itemHome]
+    rfl
   · exact ((((nextHeld.after_below poolKept nextHeld.1.old allocatedNext).after_confined
       ownerFramed (apart_of_entries rfl)).after_confined itemIdFramed (apart_of_entries rfl))
       |>.after_confined liveFramed (apart_of_entries rfl)).after_confined markFramed
