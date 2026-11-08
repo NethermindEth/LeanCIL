@@ -353,8 +353,8 @@ against a pinned catalog class that is no interface
 Interface, generic, explicit-layout and finalizable classes, classes deriving from a class that is
 not admitted, `newobj` of an abstract class, byrefs to class
 instances, field addresses on class instances, element addresses and typed element accesses
-on arrays of class references, class fields of array, generic parameter, modified or non-integer
-value types,
+on arrays of class references, class fields of value-array, generic parameter, modified or
+non-integer value types,
 interface calls, virtual calls whose hierarchy the table cannot close or resolve, type tests
 against interfaces, `System.Object` or classes that are not admitted, and the address
 of a class receiver, local or argument are each
@@ -402,8 +402,10 @@ return or `newarr` type, typed as an object on the evaluation stack, and Lean re
 `newarr`, `ldlen`, `ldelem.ref` and `stelem.ref` against its raw opcode and operand kinds. An
 element address (`ldelema`) or a typed `ldelem`/`stelem` on such an array is rejected by name,
 since a byref to a reference slot is outside the model, as is the address of an argument or
-local holding such an array. Multi-dimensional arrays, arrays of strings, interfaces or other
-types outside the admitted classes, and array-typed class fields are rejected.
+local holding such an array. A class field typed as such an array holds the array's reference
+in its slot and is read and written as a class-typed field is, the raw field type rechecked as
+an array of a class. Multi-dimensional arrays and arrays of strings, interfaces or other types
+outside the admitted classes are rejected.
 
 ## Sequential struct layout
 

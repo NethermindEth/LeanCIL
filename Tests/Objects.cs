@@ -45,7 +45,9 @@ foreach (var (proof, entry) in new[]
     ("NodePair", "NodeArrays::Pair(Examples.Node,Examples.Node)"),
     ("ArrayElement", "NodeArrays::At(Examples.Node[],System.Int32)"),
     ("ArrayLength", "NodeArrays::Count(Examples.Node[])"),
-    ("ArrayCovariance", "NodeArrays::Put(Examples.Shape[],System.Int32,Examples.Shape)")
+    ("ArrayCovariance", "NodeArrays::Put(Examples.Shape[],System.Int32,Examples.Shape)"),
+    ("BucketItems", "NodeArrays::First(Examples.Bucket)"),
+    ("BucketRefill", "NodeArrays::Refill(Examples.Bucket,Examples.Node[])")
 })
 {
     verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));
@@ -237,7 +239,8 @@ foreach (var mutation in new[]
             "byref" => "Unsupported by-reference class instance: Examples.Account&",
             "address" => "Unsupported field address on a class instance: System.UInt32 Examples.Account::Limit",
             "reference" => "Unsupported reference-typed field: System.String modopt(System.Object) " +
-                "Examples.Account::Owner\n  Only fields holding class instances are modelled",
+                "Examples.Account::Owner\n  Only fields holding class instances or arrays of admitted classes " +
+                "are modelled",
             "opaqueRead" => "callvirt requires an adjacent concrete constrained receiver",
             "fieldType" => "Unsupported class instance field type: System.Double Examples.Account::Rate",
             "receiverAddress" =>

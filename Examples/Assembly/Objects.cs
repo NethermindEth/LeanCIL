@@ -39,6 +39,13 @@ public sealed class Node
     public Node? Next;
 }
 
+/// <summary>A class holding an array of nodes in a field: the slot holds the array's reference.</summary>
+public sealed class Bucket
+{
+    /// <summary>The nodes of the bucket, or null.</summary>
+    public Node?[]? Items;
+}
+
 /// <summary>
 /// A class holding a string, whose class the model does not represent: the reference is copied, compared and
 /// tested for null, never read through.
@@ -101,6 +108,12 @@ public static class NodeArrays
 
     /// <summary>Stores <paramref name="shape"/> at <paramref name="index"/> of an array of any derived class.</summary>
     public static void Put(Shape?[] shapes, int index, Shape? shape) => shapes[index] = shape;
+
+    /// <summary>The first element of the array <paramref name="bucket"/> holds.</summary>
+    public static Node? First(Bucket bucket) => bucket.Items![0];
+
+    /// <summary>Replaces the array <paramref name="bucket"/> holds.</summary>
+    public static void Refill(Bucket bucket, Node?[] items) => bucket.Items = items;
 
     /// <summary>Holds two nodes in a fresh array and reads the second back.</summary>
     public static Node? Pair(Node first, Node second)

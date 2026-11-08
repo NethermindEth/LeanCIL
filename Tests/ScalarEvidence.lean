@@ -625,6 +625,17 @@ example : scalarEmissionMatches #[] none (i 125 nextField) [.object, .object]
     (.memory (.setObjectField node 8 8)) = false := by decide
 example : scalarEmissionMatches #[] none (i 125 (.field node 0 word false)) [.word64, .object]
     (.memory (.setObjectReferenceField node 0)) = false := by decide
+-- A field typed as an array of a class holds the array's reference in its slot; a value array
+-- field is never a reference slot.
+private def itemsField : RawOperand := .field node 1 (.array node) false
+example : scalarEmissionMatches #[] none (i 123 itemsField) [.object]
+    (.memory (.objectReferenceField node 8)) = true := by decide
+example : scalarEmissionMatches #[] none (i 125 itemsField) [.nullObject, .object]
+    (.memory (.setObjectReferenceField node 8)) = true := by decide
+example : scalarEmissionMatches #[] none (i 123 (.field node 1 (.array word) false)) [.object]
+    (.memory (.objectReferenceField node 8)) = false := by decide
+example : scalarEmissionMatches #[] none (i 125 (.field node 1 (.array word) false))
+    [.object, .object] (.memory (.setObjectReferenceField node 8)) = false := by decide
 
 -- Size constants are the only uncovered literal producers; primitive widths are bound here.
 private def sizeRaw (instruction : RawInstruction) := raw [instruction, i 38, i 2, i 42] [word]

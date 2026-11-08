@@ -107,9 +107,9 @@ internal static class ObjectTypes
         !Is(type);
 
     /// <summary>
-    /// The checked operation for <c>ldfld</c> or <c>stfld</c> of an integer or class-typed field of a class
-    /// instance, at the model offset of its slot. A class-typed field, admitted or opaque, holds an object
-    /// reference in its slot, never in bytes.
+    /// The checked operation for <c>ldfld</c> or <c>stfld</c> of an integer, class-typed or class-array field of
+    /// a class instance, at the model offset of its slot. A class-typed field, admitted or opaque, or a field
+    /// holding an array of an admitted class holds an object reference in its slot, never in bytes.
     /// </summary>
     internal static string FieldOperation(FieldReference field, FieldDefinition resolved, bool store, bool address)
     {
@@ -120,10 +120,10 @@ internal static class ObjectTypes
                 "\n  Class field offsets are chosen by the model, so no address may observe them.");
         var type = resolved.FieldType;
         var holdsReference = !type.IsValueType && type is not PointerType and not FunctionPointerType;
-        if (holdsReference && !Is(type) && !Opaque(type))
+        if (holdsReference && !Is(type) && !Opaque(type) && !ReferenceArrays.Is(type))
             throw new InvalidDataException("Unsupported reference-typed field: " + field.FullName +
-                "\n  Only fields holding class instances are modelled; " + type.FullName +
-                " is an array, generic parameter or modified type.");
+                "\n  Only fields holding class instances or arrays of admitted classes are modelled; " +
+                type.FullName + " is another array, a generic parameter or a modified type.");
         var offset = FieldSlot * FieldIndex(owner, resolved);
         if (holdsReference)
             return store ? $".memory (.setObjectReferenceField ({GenericEvidence.ObjectType(owner)}) {offset})"

@@ -408,6 +408,9 @@ as live with every element owned and null. `step_referenceArrayLength_eq`,
 [ArrayLength](../Examples/Proofs/ArrayLength.lean) read an element and the length, with the
 bounds and null faults; [ArrayCovariance](../Examples/Proofs/ArrayCovariance.lean) stores into
 a `Circle[]` passed as a `Shape[]`, proving the `ArrayTypeMismatchException` of a `Square`.
+A field holding such an array is a `ReferenceField` whose held reference is the array:
+[BucketItems](../Examples/Proofs/BucketItems.lean) reads an element through one, with its null
+and bounds faults, and [BucketRefill](../Examples/Proofs/BucketRefill.lean) replaces it.
 
 ## Construct structs through contracts
 

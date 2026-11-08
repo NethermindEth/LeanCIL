@@ -40,6 +40,7 @@ Examples:Examples.NestedRecord& Examples.UnsafeLayouts::Add15nint(Examples.Neste
 Examples:Examples.NestedRecord& Examples.UnsafeLayouts::Add15nuint(Examples.NestedRecord&,System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:Examples.NestedRecord[] Examples.PrimitiveArrays::AllocateNested(System.Int32)	A	A	A	A	A	A	A	A
 Examples:Examples.Node Examples.NodeArrays::At(Examples.Node[],System.Int32)	A	A	A	A	A	A	A	A
+Examples:Examples.Node Examples.NodeArrays::First(Examples.Bucket)	A	A	A	A	A	A	A	A
 Examples:Examples.Node Examples.NodeArrays::Pair(Examples.Node,Examples.Node)	A	A	A	A	A	A	A	A
 Examples:Examples.Node Examples.Objects::Detach(Examples.Node)	A	A	A	A	A	A	A	A
 Examples:Examples.Node[] Examples.NodeArrays::Create(System.Int32)	A	A	A	A	A	A	A	A
@@ -1025,6 +1026,7 @@ Examples:System.Void Examples.Blocks::Fill(System.Byte&,System.Byte,System.UInt3
 Examples:System.Void Examples.Blocks::FillAligned(System.Byte&,System.Byte,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Blocks::FillPointer(System.Byte*,System.Byte,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Blocks::FillPointerAligned(System.Byte*,System.Byte,System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Bucket::.ctor()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.CheckedConstructor::.ctor(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Circle::.ctor(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ConstructorLeaf::.ctor(System.UInt32)	A	A	A	A	A	A	A	A
@@ -1076,6 +1078,7 @@ Examples:System.Void Examples.MemorySpans::Write(System.Span`1<System.Int32>,Sys
 Examples:System.Void Examples.NestedConstructor::.ctor(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Node::.ctor()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.NodeArrays::Put(Examples.Shape[],System.Int32,Examples.Shape)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.NodeArrays::Refill(Examples.Bucket,Examples.Node[])	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.NullReferences::Write(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.NullReferences::WriteField(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Objects::Bump(Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A

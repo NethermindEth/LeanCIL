@@ -420,10 +420,16 @@ private def objectFieldSite (instruction : RawInstruction) (emitted : Op) : Bool
   | .memory (.objectReferenceField ..) | .memory (.setObjectReferenceField ..) => true
   | _ => false
 
+/-- A class instance field whose slot holds an object reference: one typed as an admitted class
+    or as an array of one, which is itself an object on the heap. -/
+private def referenceFieldType : TypeExpr → Bool
+  | .object _ _ | .array (.object _ _) => true
+  | _ => false
+
 /-- `ldfld` and `stfld` of a class instance field emit the checked field operation for that
     owner, at the field's model offset: with its width and extension for a scalar field, as a
-    reference slot for a class-typed one, whose stored value must be an object or null. `ldflda`
-    never does. -/
+    reference slot for a class-typed or class-array-typed one, whose stored value must be an
+    object or null. `ldflda` never does. -/
 private def objectFieldMatches (instruction : RawInstruction) (stack : List ScalarKind)
     (emitted : Op) : Bool :=
   match instruction.opcode, instruction.operand, stack, emitted with
@@ -435,14 +441,15 @@ private def objectFieldMatches (instruction : RawInstruction) (stack : List Scal
       .memory (.setObjectField owner offset width) =>
     receiver ∈ [.object, .nullObject] && owner == .object scope name &&
       offset == objectFieldOffset index && (objectFieldShape type).map (·.1) == some width
-  | 123, .field (.object scope name) index (.object _ _) false, receiver :: _,
+  | 123, .field (.object scope name) index type false, receiver :: _,
       .memory (.objectReferenceField owner offset) =>
-    receiver ∈ [.object, .nullObject] && owner == .object scope name &&
-      offset == objectFieldOffset index
-  | 125, .field (.object scope name) index (.object _ _) false, value :: receiver :: _,
-      .memory (.setObjectReferenceField owner offset) =>
-    value ∈ [.object, .nullObject] && receiver ∈ [.object, .nullObject] &&
+    referenceFieldType type && receiver ∈ [.object, .nullObject] &&
       owner == .object scope name && offset == objectFieldOffset index
+  | 125, .field (.object scope name) index type false, value :: receiver :: _,
+      .memory (.setObjectReferenceField owner offset) =>
+    referenceFieldType type && value ∈ [.object, .nullObject] &&
+      receiver ∈ [.object, .nullObject] && owner == .object scope name &&
+      offset == objectFieldOffset index
   | _, _, _, _ => false
 
 /-- Covered opcodes emit exactly their encoding, and a class type test only from `castclass`
