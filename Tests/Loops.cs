@@ -1097,6 +1097,30 @@ Console.WriteLine("PASS filled outlines verify with only their specification wri
     "generated contract, a split on a field value, a call whose callee loads the node a field holds and a " +
     "span fold that stores its total before each span load");
 
+// One hole left, an obligation or a path the outline could not step, keeps an outline from certifying:
+// verify refuses it for `sorryAx` and removes the report the filled proof left.
+var unfinished = new List<(string Name, string Source)>
+{
+    ("SpanSum", File.ReadAllText(Path.Combine(outlineRoot, "SpanSum", "Filled.lean"))
+        .Replace("case measure => simp [measure]", "case measure => sorry"))
+};
+var unstepped = outlined.Select(entry => entry.Name).FirstOrDefault(name => File.ReadAllText(
+    Path.Combine(outlineRoot, name, "Proof.lean")).Contains("-- not outlined:", StringComparison.Ordinal));
+if (unstepped is not null)
+    unfinished.Add((unstepped, File.ReadAllText(Path.Combine(outlineRoot, unstepped, "Proof.lean"))));
+foreach (var (name, source) in unfinished)
+{
+    var partial = Path.Combine(outlineRoot, name, "Unfinished.lean");
+    File.WriteAllText(partial, source);
+    var refused = Execute(Cli("verify", OutlineExtraction(name), "--proof", partial));
+    if (refused.Code == 0 || !refused.Output.Contains("Unapproved proof axioms: sorryAx") ||
+        refused.Output.Contains(": error") || File.Exists(Path.Combine(OutlineExtraction(name), "verified.json")))
+        throw new InvalidOperationException($"verify did not refuse the unfinished {name} outline:\n{refused.Output}");
+}
+Console.WriteLine(unstepped is null
+    ? "PASS verify refuses an outline with one obligation left; no outline leaves a path not outlined"
+    : $"PASS verify refuses an outline with one obligation left and the {unstepped} outline's path not outlined");
+
 // A loop outline reuses the extraction an earlier section left under its name.
 string OutlineExtraction(string name) => outlined.Single(entry => entry.Name == name).Selector is null
     ? Path.Combine(root, name) : Path.Combine(outlineRoot, name, "Extraction");
