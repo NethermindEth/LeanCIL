@@ -501,8 +501,8 @@ makes the same check for `lake serve`, taking its own environment as the editor'
 failure appears at setup rather than as unresolved imports. Lake prints a variable it unsets
 as empty; counting it can overstate the size by a few bytes, never understate it.
 
-Lake adds a package's source directory to `LEAN_SRC_PATH` once for every `lean_lib` the
-package declares, without merging repeats. The framework copy `leancil workspace` writes for
+Lake adds a package's source directory to `LEAN_SRC_PATH` once for every `[[lean_lib]]`
+table in the package's lakefile, without merging repeats. The framework copy `leancil workspace` writes for
 a proof outside any package declares only the framework and editor libraries, but a consumer
 that pins the `leancil` repository gets its lakefile with one library per test module, so the
 framework directory appears about ninety times in that consumer's `LEAN_SRC_PATH`. A shorter
