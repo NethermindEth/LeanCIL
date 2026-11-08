@@ -260,7 +260,9 @@ comment saying which obligation it is:
   through it, and the callee's store counts as one of the caller's. Any other call is a
   `not outlined:` hole naming the callee. A loop
   carries the object facts across its iterations, and a `callvirt` in it gets a contract like any
-  other call.
+  other call. A loop's statement assumes the same per-object facts, read from its body and callees
+  in order; when that reading stops, it assumes a fact of every named field of each object, `Owned`
+  where the method or a callee stores the field.
 
 Where the outline cannot step a path, it leaves a hole whose comment starts with `not outlined:`,
 names what it met and what that step needs, and gives the source line to continue from. The
