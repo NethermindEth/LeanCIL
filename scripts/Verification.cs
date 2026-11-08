@@ -1882,7 +1882,8 @@ partial class Program : IDisposable
             module.StartsWith("Extracted.", StringComparison.Ordinal) ||
             module.StartsWith("ExtractedSymbols.", StringComparison.Ordinal);
 
-        internal static bool IsSymbols(string module) => module.StartsWith("ExtractedSymbols.", StringComparison.Ordinal);
+        internal static bool IsSymbols(string module) =>
+            module.StartsWith("ExtractedSymbols.", StringComparison.Ordinal);
 
         /// <summary>The source of a keyed module: the plain module it stands for, so it adds no declaration.</summary>
         internal static string Source(string module) =>
@@ -2527,7 +2528,8 @@ partial class Program : IDisposable
         var session = Library(before);
         HashSet<string> importSourceNames = extraction.Sources.Keys.ToHashSet(StringComparer.Ordinal);
         var support = Regex.Matches(proofSource, @"^import\s+([A-Za-z_][A-Za-z0-9_.]*)", RegexOptions.Multiline)
-            .Select(m => m.Groups[1].Value).Where(n => n is not ("Extracted" or "ExtractedSymbols") && !SelectionModules.Is(n) &&
+            .Select(m => m.Groups[1].Value)
+            .Where(n => n is not ("Extracted" or "ExtractedSymbols") && !SelectionModules.Is(n) &&
                 !importSourceNames.Contains(n) && n.Split('.')[0] is not ("Init" or "Lean" or "Std")).ToArray();
 
         if (support.Length > 0)

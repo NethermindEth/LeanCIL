@@ -469,7 +469,8 @@ partial class Program
                     invalid.Add(import);
             invalid = DependentModules(graph, invalid);
             result.UnionWith(manifest.Modules.Keys.Where(name => !invalid.Contains(name) && name != "CIL" &&
-                !name.StartsWith("CIL.", StringComparison.Ordinal) && name is not ("Extracted" or "ExtractedSymbols" or "ExtractionAudit") && !SelectionModules.Is(name) &&
+                !name.StartsWith("CIL.", StringComparison.Ordinal) &&
+                name is not ("Extracted" or "ExtractedSymbols" or "ExtractionAudit") && !SelectionModules.Is(name) &&
                 !name.StartsWith("LeanCILProof", StringComparison.Ordinal)));
         }
         return result;
@@ -1714,7 +1715,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             foreach (var module in members.SelectMany(member => selections[member]))
             {
                 generatedSources[module] = SelectionModules.Source(module);
-                bound["<generated>/" + module.Replace('.', '/') + ".lean"] = ContentKey(SelectionModules.Source(module));
+                bound["<generated>/" + module.Replace('.', '/') + ".lean"] =
+                    ContentKey(SelectionModules.Source(module));
             }
             var names =members.Length == 1 ? ["LeanCILProof"] : members.Select((_, k) => "LeanCILProof" + k).ToArray();
             var requestModules = members.Select((member, index) => (member, module: names[index]))
