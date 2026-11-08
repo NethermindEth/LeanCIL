@@ -242,7 +242,8 @@ comment saying which obligation it is:
   `Holds` theorem that steps the callee when it is arithmetic on its arguments.
 - An instance of an admitted class is a `Reference`, and an instance method binds `this` under its
   class's name in lower case, such as `account`, or as `receiver` for a compiler-generated class.
-  The statement assumes `LiveObject initial account`, and `Readable` of each field the body or a
+  A parameter named like a hypothesis or memory the proof introduces, such as `held` or `stored1`,
+  is bound as `argument` and its position instead. The statement assumes `LiveObject initial account`, and `Readable` of each field the body or a
   callee it steps reads of each object and `Owned` of each they write, using the field views the
   extraction emits in `Extracted.Classes` (see
   [Frame class instances](PROOFS-CONTRACTS.md#frame-class-instances)). An object the body loads from

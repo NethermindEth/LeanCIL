@@ -163,6 +163,13 @@ public static class Objects
         return SecondValue(node);
     }
 
+    /// <summary>As <see cref="LinkBoth"/>, with nodes named like a proof's own hypotheses and memories.</summary>
+    public static void Relink(Node held1, Node stored1, Node next)
+    {
+        stored1.Next = next;
+        held1.Next = next;
+    }
+
     /// <summary>Bumps two accounts through <see cref="Bump"/>; both may be the same instance.</summary>
     public static void BumpBoth(Account first, Account second, ulong amount)
     {

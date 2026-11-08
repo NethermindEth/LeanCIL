@@ -406,12 +406,19 @@ internal static partial class ProofOutline
 
         internal string Claim(string? wanted, string fallback)
         {
-            var name = Regex.IsMatch(wanted ?? "", @"\A[A-Za-z][A-Za-z0-9_]*\z") ? wanted! : fallback;
+            // A parameter named like a generated hypothesis would be captured by the names the proof introduces.
+            var name = Regex.IsMatch(wanted ?? "", @"\A[A-Za-z][A-Za-z0-9_]*\z") && !Generated().IsMatch(wanted!)
+                ? wanted! : fallback;
             var candidate = name;
             for (var suffix = 1; !used.Add(candidate); suffix++) candidate = name + suffix;
             return candidate;
         }
     }
+
+    /// <summary>The numbered hypotheses and memories an outline's proof introduces after each store and call.
+    /// </summary>
+    [GeneratedRegex(@"\A(?:stored|framed|held|written|output|called|post|initial|memory)\d*\z")]
+    private static partial Regex Generated();
 
     /// <summary>Lean source with two-space indentation and lines kept under 100 characters.</summary>
     sealed class Writer

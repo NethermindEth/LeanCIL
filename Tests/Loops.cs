@@ -854,6 +854,8 @@ var outlined = new (string Name, string? Selector)[]
     ("SecondValue", "Objects::SecondValue(Examples.Node)"),
     ("Link", "Objects::Link(Examples.Node,Examples.Node)"),
     ("LinkBoth", "Objects::LinkBoth(Examples.Node,Examples.Node,Examples.Node)"),
+    // Its nodes are named like the hypotheses and memories the proof introduces, which must not capture them.
+    ("Relink", "Objects::Relink(Examples.Node,Examples.Node,Examples.Node)"),
     ("FirstPresent", "Objects::FirstPresent(Examples.Account,Examples.Account)"),
     ("DepositBoth", "Objects::DepositBoth(Examples.Account,Examples.Account,System.UInt64)"),
     ("DepositTimes", "Objects::DepositTimes(Examples.Account,System.UInt64,System.UInt32)")
