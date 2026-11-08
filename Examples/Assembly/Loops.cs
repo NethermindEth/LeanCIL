@@ -144,4 +144,16 @@ public static class Loops
         }
         return count;
     }
+
+    // Counts its input down to zero, then a second loop counts back up to it.
+    public static uint DownThenUp(uint value)
+    {
+        uint remaining = value;
+        while (remaining != 0)
+            remaining = unchecked(remaining - 1);
+        uint climbed = 0;
+        while (climbed != value)
+            climbed = unchecked(climbed + 1);
+        return climbed;
+    }
 }

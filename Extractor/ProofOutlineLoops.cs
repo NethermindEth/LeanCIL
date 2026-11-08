@@ -110,9 +110,17 @@ internal static partial class ProofOutline
     /// <summary>What an evaluated operation does to the walk.</summary>
     enum Event { Continue, Branch, Call, Return, Stop }
 
-    sealed class LoopOutline(Extraction extraction, Specification spec, Body body, (int Head, int Latch) loop,
-        Names names)
+    sealed class LoopOutline(Extraction extraction, Specification spec, Body body,
+        IReadOnlyList<(int Head, int Latch)> loops, Names names)
     {
+        // The loop a walk is in; a path leaving it for the next loop's head chains into that loop.
+        int active;
+        (int Head, int Latch) loop => loops[active];
+
+        /// <summary>The suffix of the names bound for loop `index`: none for the first, its ordinal after.</summary>
+        static string Suffix(int index) =>
+            index == 0 ? "" : (index + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
         readonly MethodDefinition method = extraction.Methods[0];
         readonly FieldViews views = new(extraction);
         readonly List<Slot> slots = [];
@@ -542,7 +550,9 @@ internal static partial class ProofOutline
             var facts = SpanParameters.SelectMany(parameter => new[]
                 { parameter.Name + "Valid", parameter.Name + "Width", parameter.Name + "ReadOnly" }).ToArray();
             if (facts.Length > 0) lean.Line($"  simplifying [{string.Join(", ", facts)}]");
-            lean.Line("bind_loop loop := Extracted.method0");
+            for (var index = 0; index < loops.Count; index++)
+                lean.Line($"bind_loop loop{Suffix(index)} := Extracted.method0" +
+                    (loops.Count > 1 ? $" [{index}]" : ""));
             lean.Line();
         }
 
@@ -564,7 +574,16 @@ internal static partial class ProofOutline
             string.Join(" ", (spec.Symbolic ? new[] { memory } : [])
                 .Concat(components.Where(component => component.Part == Part.Span).Select(view)).Concat(Homes));
 
-        List<string> headerParameters = [];
+        List<string>[] headerParameters = [];
+
+        /// <summary>Each slot's frame entry at the loop head, from the state values at `root`.</summary>
+        string[] SlotTerms(string root) => slots.Select(slot => slot.Home is { } home
+            ? $".bytes {(slot.Kind.Contains(' ') ? $"({slot.Kind})" : slot.Kind)} {home}"
+            : slot.Components[0].Part == Part.Object
+            ? $".object (some {Projection(root, components.IndexOf(slot.Components[0]), components.Count)})"
+            : $".span {slot.Components[0].Width} false " +
+                $"(some {Projection(root, components.IndexOf(slot.Components[0]), components.Count)}.view)")
+            .ToArray();
 
         void StateAndHeader(Writer lean)
         {
@@ -573,13 +592,6 @@ internal static partial class ProofOutline
                 ? $"the unread suffix of `{component.Name}`" : $"`{component.Name}`"));
             lean.Doc($"The loop's locals at its head: {described}.");
             lean.Line($"abbrev State{(StateBinders.Length > 0 ? " " + StateBinders : "")} :=");
-            string[] SlotTerms(string root) => slots.Select(slot => slot.Home is { } home
-                ? $".bytes {(slot.Kind.Contains(' ') ? $"({slot.Kind})" : slot.Kind)} {home}"
-                : slot.Components[0].Part == Part.Object
-                ? $".object (some {Projection(root, components.IndexOf(slot.Components[0]), components.Count)})"
-                : $".span {slot.Components[0].Width} false " +
-                    $"(some {Projection(root, components.IndexOf(slot.Components[0]), components.Count)}.view)")
-                .ToArray();
             var project = (Component component) =>
                 Projection("values", components.IndexOf(component), components.Count);
             var slotTerms = SlotTerms("values");
@@ -603,6 +615,15 @@ internal static partial class ProofOutline
                 lean.Line("    " + knownLine);
             }
             lean.Line();
+            headerParameters = new List<string>[loops.Count];
+            for (active = 0; active < loops.Count; active++) LoopHeader(lean);
+            active = 0;
+        }
+
+        /// <summary>The cutpoint, invariant and measure of the active loop.</summary>
+        void LoopHeader(Writer lean)
+        {
+            var suffix = Suffix(active);
             var latchOp = body.Ops[loop.Latch];
             var opName = Regex.Match(latchOp, @"\A\.(\w+)").Groups[1].Value;
             if (!Body.Conditional(latchOp))
@@ -617,17 +638,17 @@ internal static partial class ProofOutline
             });
             var operands = Guard(state);
             var stack = operands.AsEnumerable().Reverse().Select(operand => StackValue(operand, state)).ToArray();
-            headerParameters = spec.Parameters.Where(parameter => stack.Any(item =>
+            headerParameters[active] = spec.Parameters.Where(parameter => stack.Any(item =>
                 Regex.IsMatch(item, $@"(?<![.\w]){parameter.Name}\b"))).Select(parameter => parameter.Name).ToList();
             var binders = (spec.Symbolic ? new[] { "(memory : Memory)" } : [])
-                .Concat(Grouped(spec.Parameters.Where(parameter => headerParameters.Contains(parameter.Name))
+                .Concat(Grouped(spec.Parameters.Where(parameter => headerParameters[active].Contains(parameter.Name))
                     .Select(parameter => (parameter.Name, parameter.Lean))))
                 .Concat(Writes ? [$"(written : {Footprint})"] : [])
                 .Concat(Homes.Length > 0 ? [$"({string.Join(" ", Homes)} : Reference)"] : [])
                 .Append($"(state : {StateType("memory")})");
             lean.Line($"-- The cutpoint is the loop's back-edge test at {Location(loop.Latch)}.");
-            lean.Wrapped("bind_cutpoint header", binders, ":=");
-            lean.Line($"  Extracted.method0 at loop.latch matching (· matches .{opName} _)");
+            lean.Wrapped($"bind_cutpoint header{suffix}", binders, ":=");
+            lean.Line($"  Extracted.method0 at loop{suffix}.latch matching (· matches .{opName} _)");
             var frame = FrameArguments(component =>
                 Projection("state.values", components.IndexOf(component), components.Count) + ".view", "memory");
             var entryFrame = $"entry.frame{(frame.Length > 0 ? " " + frame : "")}";
@@ -646,11 +667,14 @@ internal static partial class ProofOutline
             var explicitBinders = Grouped(spec.Binders).ToList();
             if (implicitBinders.Length > 0) explicitBinders.Add(implicitBinders);
             explicitBinders.Add($"(state : {StateType("memory")})");
-            lean.Line("/-- Replace with what holds at every loop head. -/");
-            lean.Wrapped("def invariant", explicitBinders, ": Prop := sorry");
+            var ordinal = active + 1;
+            lean.Line(loops.Count == 1 ? "/-- Replace with what holds at every loop head. -/"
+                : $"/-- Replace with what holds at every head of loop {ordinal}, tested at {Location(loop.Latch)}. -/");
+            lean.Wrapped($"def invariant{suffix}", explicitBinders, ": Prop := sorry");
             lean.Line();
-            lean.Line("/-- Replace with a quantity each iteration decreases. -/");
-            lean.Wrapped("def measure", explicitBinders, ": Nat := sorry");
+            lean.Line(loops.Count == 1 ? "/-- Replace with a quantity each iteration decreases. -/"
+                : $"/-- Replace with a quantity each iteration of loop {ordinal} decreases. -/");
+            lean.Wrapped($"def measure{suffix}", explicitBinders, ": Nat := sorry");
             lean.Line();
         }
 
@@ -728,10 +752,8 @@ internal static partial class ProofOutline
             var checkedArguments = spec.Symbolic
                 ? "(by simp [cil_checked" + string.Concat(formed.Select(fact => ", " + fact)) + "])"
                 : "rfl";
-            var header = "(header " + string.Join(" ", (spec.Symbolic ? new[] { "initial" } : [])
-                .Concat(headerParameters).Concat(Writes ? [$"(footprint {spec.Arguments})"] : []).Concat(Homes)) + ")";
-            var header0 = header == "(header )" ? "header" : header;
-            lean.Wrapped("  refine invoke_loop_satisfies", ["Extracted.lookup0", checkedArguments, "setup", header0,
+            lean.Wrapped("  refine invoke_loop_satisfies", ["Extracted.lookup0", checkedArguments, "setup",
+                HeaderTerm(),
                 $"(invariant {spec.Arguments})", $"(measure {spec.Arguments})", "(fun start => ?_)", "?_"], "");
             lean.Line(Writes ? $"  · have entryFrame := entryFrame (footprint {spec.Arguments})"
                 : "  · have entryFrame := entryFrame []");
@@ -746,8 +768,13 @@ internal static partial class ProofOutline
                 }).ToArray()
             };
             EntryPath(lean, entry);
-            var intro = Pattern();
-            lean.Line($"  rintro ⟨{intro}, current, frame⟩ holds recurse");
+            Iteration(lean, "  ");
+        }
+
+        /// <summary>An iteration of the active loop from its head, at `indent`.</summary>
+        void Iteration(Writer lean, string indent)
+        {
+            lean.Line($"{indent}rintro ⟨{Pattern()}, current, frame⟩ holds recurse");
             var iteration = Initial(component => component.Part switch
             {
                 Part.Span => new SpanTerm(component.Name + "View", component.Name + "Remaining",
@@ -758,11 +785,42 @@ internal static partial class ProofOutline
             // An object stays live through the loop; the loop tactics carry the fact across each store.
             foreach (var instance in spec.Objects)
             {
-                lean.Line($"  have {instance.Name}Now := {instance.Name}Live.after_confined frame.confined");
+                lean.Line($"{indent}have {instance.Name}Now := {instance.Name}Live.after_confined frame.confined");
                 iteration.Facts.Add(instance.Name + "Now.formed");
             }
             Guard(iteration);
-            Branch(lean, iteration, "  ", "guard");
+            Branch(lean, iteration, indent, "guard");
+        }
+
+        /// <summary>The active loop's cutpoint applied to the caller's memory, its parameters, footprint and homes.
+        /// </summary>
+        string HeaderTerm()
+        {
+            var arguments = (spec.Symbolic ? new[] { "initial" } : []).Concat(headerParameters[active])
+                .Concat(Writes ? [$"(footprint {spec.Arguments})"] : []).Concat(Homes).ToArray();
+            return arguments.Length == 0 ? $"header{Suffix(active)}"
+                : $"(header{Suffix(active)} {string.Join(" ", arguments)})";
+        }
+
+        /// <summary>Leave the active loop at the next loop's test: reach that loop's first head through
+        /// `loop_terminates_then`, then walk an iteration of it, which returns or chains on in turn.</summary>
+        void Chain(Writer lean, PathState state, string indent)
+        {
+            if (Values(state) is not { } values)
+            {
+                Hole(lean, indent, state, $"the next loop's first state holds {stopReason}");
+                return;
+            }
+            var previous = active;
+            active++;
+            var suffix = Suffix(active);
+            lean.Wrapped($"{indent}refine loop_terminates_then", [HeaderTerm(), $"(invariant{suffix} {spec.Arguments})",
+                $"(measure{suffix} {spec.Arguments})", $"(fun start{suffix} => ?_)", "?_"], "");
+            lean.Line($"{indent}· cil_loop_recurse start{suffix} {values}{Facts(state)}");
+            lean.Noted(indent + "  ", "case invariant => sorry",
+                $"invariant{suffix} at loop {active + 1}'s first head");
+            Iteration(lean, indent);
+            active = previous;
         }
 
         string Pattern()
@@ -840,6 +898,11 @@ internal static partial class ProofOutline
                     lean.Line($"{indent}cil_loop_recurse recurse {values}{Facts(state)}");
                     lean.Noted(indent, "case invariant => sorry", $"invariant again at the loop head");
                     lean.Noted(indent, "case measure => sorry", $"measure decreases over this iteration");
+                    return;
+                }
+                if (active + 1 < loops.Count && state.Pc == loops[active + 1].Latch)
+                {
+                    Chain(lean, state, indent);
                     return;
                 }
                 var pc = state.Pc;
@@ -1324,6 +1387,7 @@ internal static partial class ProofOutline
         }
     }
 
-    static string LoopProof(Extraction extraction, Specification spec, Body body, (int Head, int Latch) loop,
-        Names names, Writer lean) => new LoopOutline(extraction, spec, body, loop, names).Emit(lean);
+    static string LoopProof(Extraction extraction, Specification spec, Body body,
+        IReadOnlyList<(int Head, int Latch)> loops, Names names, Writer lean) =>
+        new LoopOutline(extraction, spec, body, loops, names).Emit(lean);
 }

@@ -64,15 +64,16 @@ internal static partial class ProofOutline
         string source;
         if (loops.Count == 0)
             source = StraightLine(extraction, spec, body, lean);
-        else if (loops.Count == 1)
+        // Loops in sequence chain from each exit into the next; a nested or interleaved loop has no such order.
+        else if (loops.Zip(loops.Skip(1)).All(pair => pair.First.Latch < pair.Second.Head))
         {
             LoopPlan(extraction, spec, body);
-            source = LoopProof(extraction, spec, body, loops[0], names, lean);
+            source = LoopProof(extraction, spec, body, loops, names, lean);
         }
         else
             throw Unsupported($"{method.FullName} has {loops.Count} loops, with back edges at " +
-                string.Join(", ", loops.Select(loop => Location(method, loop.Latch))) + "; new-proof binds one " +
-                "cutpoint and does not chain the state from one loop's exit into the next");
+                string.Join(", ", loops.Select(loop => Location(method, loop.Latch))) + ", one inside another; " +
+                "new-proof chains loops in sequence only");
         source = $"import {module}\n" + source;
         var holes = Regex.Matches(source, @"(?<![`\w])sorry(?![`\w])").Count;
         var paths = Regex.Matches(source, "-- " + NotOutlined).Count;

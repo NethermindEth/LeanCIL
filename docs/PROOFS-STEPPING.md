@@ -333,7 +333,10 @@ Its result is the `∃ fuel final, invoke ... = .ok (final, values) ∧ kept fin
 `invoke_loop_results`.
 [`invoke_loop_satisfies`](../CIL/Safety/LoopContract.lean) takes the same arguments for any
 postcondition on the final memory and results, so it closes a `CIL.Safety.Ensures` goal once its
-premises are introduced; the outlines `leancil new-proof` writes start from it.
+premises are introduced; the outlines `leancil new-proof` writes start from it. A later loop in
+sequence is entered with [`loop_terminates_then`](../CIL/Safety/LoopContract.lean): given that
+loop's configuration, invariant and measure, it leaves the path to that loop's first head, which may
+assume every invariant head of it terminates, and that loop's iteration.
 
 The tactics of [LoopFrameSteps](../CIL/Safety/LoopFrameSteps.lean), which
 `CIL.Safety.LoopScaffold` imports, walk these goals while keeping the loop's `LoopFrame` current:

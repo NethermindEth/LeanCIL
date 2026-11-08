@@ -862,7 +862,8 @@ var outlined = new (string Name, string? Selector)[]
     ("DepositFrom", "Objects::DepositFrom(Examples.Account,Examples.Account,System.UInt32)"),
     ("Withdraw", "Objects::Withdraw(Examples.Account,System.UInt64)"),
     ("LinkedValue", "Objects::LinkedValue(Examples.Node,Examples.Node)"),
-    ("IsIdle", "ItemPool::IsIdle(Examples.PooledItem)")
+    ("IsIdle", "ItemPool::IsIdle(Examples.PooledItem)"),
+    ("DownThenUp", "Loops::DownThenUp(uint)")
 };
 var outlineTimer = System.Diagnostics.Stopwatch.StartNew();
 var outlineRoot = Path.Combine(root, "Outlines");
@@ -1457,6 +1458,71 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
                     simp
                     omega
                   case measure => simp [measure]
+            """)]),
+    // The first loop's exit enters the second loop, whose own invariant and measure the proof writes.
+    ("DownThenUp", [
+        ("def Precondition (value : W32) : Prop := sorry",
+            "def Precondition (_ : W32) : Prop := True"),
+        ("def Postcondition (value result : W32) : Prop := sorry",
+            "def Postcondition (value result : W32) : Prop := result = value"),
+        ("def invariant (value : W32) {home0 home1 : Reference} (state : State home0 home1) : Prop := sorry",
+            "def invariant (_ : W32) {home0 home1 : Reference} (_ : State home0 home1) : Prop := True"),
+        ("def measure (value : W32) {home0 home1 : Reference} (state : State home0 home1) : Nat := sorry",
+            """
+            def measure (_ : W32) {home0 home1 : Reference} (state : State home0 home1) : Nat :=
+              state.values.1.toNat
+            """),
+        ("def invariant2 (value : W32) {home0 home1 : Reference} (state : State home0 home1) : Prop := sorry",
+            """
+            def invariant2 (value : W32) {home0 home1 : Reference} (state : State home0 home1) : Prop :=
+              state.values.2.toNat ≤ value.toNat
+            """),
+        ("def measure2 (value : W32) {home0 home1 : Reference} (state : State home0 home1) : Nat := sorry",
+            """
+            def measure2 (value : W32) {home0 home1 : Reference} (state : State home0 home1) : Nat :=
+              value.toNat - state.values.2.toNat
+            """),
+        ("    case invariant => sorry -- invariant at the first loop head",
+            "    case invariant => trivial"),
+        ("      case invariant => sorry -- invariant2 at loop 2's first head",
+            "      case invariant => simp [invariant2]"),
+        ("        sorry -- Postcondition at the return at Loops.cs:157",
+            "        simp [Postcondition]"),
+        ("""
+                  cil_loop_recurse recurse (remaining, climbed + 1) [guard]
+                  case invariant => sorry -- invariant again at the loop head
+                  case measure => sorry -- measure decreases over this iteration
+            """,
+            """
+                  cil_loop_recurse recurse (remaining, climbed + 1) [guard]
+                  case invariant =>
+                    simp only [invariant2] at holds ⊢
+                    have below : climbed.toNat < value.toNat :=
+                      Nat.lt_of_le_of_ne holds fun same => guard (BitVec.eq_of_toNat_eq same)
+                    rw [BitVec.toNat_add_of_lt (by simp; omega)]
+                    simp
+                    omega
+                  case measure =>
+                    simp only [invariant2] at holds
+                    have below : climbed.toNat < value.toNat :=
+                      Nat.lt_of_le_of_ne holds fun same => guard (BitVec.eq_of_toNat_eq same)
+                    simp only [measure2]
+                    rw [BitVec.toNat_add_of_lt (by simp; omega)]
+                    simp
+                    omega
+            """),
+        ("""
+                cil_loop_recurse recurse (remaining - 1, climbed) [guard]
+                case invariant => sorry -- invariant again at the loop head
+                case measure => sorry -- measure decreases over this iteration
+            """,
+            """
+                cil_loop_recurse recurse (remaining - 1, climbed) [guard]
+                case invariant => trivial
+                case measure =>
+                  have positive : remaining.toNat ≠ 0 := fun zero => guard (BitVec.eq_of_toNat_eq zero)
+                  simp [measure, BitVec.toNat_sub]
+                  omega
             """)])
 })
 {
@@ -1480,7 +1546,7 @@ Console.WriteLine("PASS filled outlines verify with only their specification wri
     "generated contract, a split on a field value, a call whose callee loads the node a field holds, a " +
     "span fold that stores its total before each span load, a split on a `bool` argument, a " +
     "store through `Unsafe.Add` of a reference argument, a call to a callee that throws where its " +
-    "precondition fails and a call storing through `Unsafe.Add` of a reference argument");
+    "precondition fails, a call storing through `Unsafe.Add` of a reference argument and two loops in sequence");
 
 // A written footprint that leaves out the element a loop writes is an error at the write, never an admission.
 var narrowed = Path.Combine(outlineRoot, "FillWords", "Narrowed.lean");

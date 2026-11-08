@@ -254,6 +254,10 @@ comment saying which obligation it is:
   and footprint the author writes, by `omega` over their conjuncts or from a `Filled` or `Writable`
   fact covering the element; it is a hole while any of those is `sorry`, and an error at the write
   once they are written and do not imply it.
+- Loops in sequence are bound in pc order (`loop`, `loop2`, ...), each with its own cutpoint,
+  `invariant` and `measure` (`header2`, `invariant2`, `measure2`, ...). The path leaving one loop
+  for the next loop's test enters that loop through `loop_terminates_then`, leaving its invariant at
+  its first head, and that loop's iteration follows. A loop nested in another is refused.
 - A call in the loop gets a `MethodContract` for the callee, with `pre` and `post` to replace, and a
   `Holds` theorem that steps the callee when it is arithmetic on its arguments. A callee of words
   that tests them and returns or throws on each side is split with `by_cases` on each test: each
