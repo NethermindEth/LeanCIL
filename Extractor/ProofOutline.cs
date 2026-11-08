@@ -5,7 +5,8 @@ using Mono.Cecil;
 namespace Nethermind.LeanCIL;
 
 // `new-proof`: a starting Lean proof for a checked extraction's entry method. Every hole is a
-// `sorry`, so the file elaborates but `verify` rejects it until each hole is filled.
+// `sorry`, so the file elaborates but `verify` rejects it until each hole is filled. It imports
+// the extraction's keyed module, which resolves both in the editor workspace and under verify.
 internal static partial class ProofOutline
 {
     /// <summary>A checked extraction: its methods while still loaded, their emitted operations and
@@ -30,7 +31,9 @@ internal static partial class ProofOutline
         {
             read(directory, extraction =>
             {
-                try { outline = Generate(extraction); }
+                var module = "Extracted." + global::Program.SelectionModules.Key(
+                    global::Program.ExtractionIdentity.Read(directory).Root);
+                try { outline = Generate(extraction, module); }
                 catch (Exception error) { generation = error; }
             });
         }

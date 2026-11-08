@@ -9,11 +9,13 @@ var root = At("artifacts/DebugNames");
 const string Selector = "Calls::Sum(uint,uint)";
 const string Sum = "System.UInt32 Names.Calls::Sum(System.UInt32,System.UInt32)";
 
+// A keyed module stands for the symbols of one extraction, so importing it needs them too.
 foreach (var import in new[] { "import ExtractedSymbols", "  import ExtractedSymbols -- names\r\n",
-    "import ExtractedSymbols /- names -/", "public meta import all ExtractedSymbols -- names" })
+    "import ExtractedSymbols /- names -/", "public meta import all ExtractedSymbols -- names",
+    "import ExtractedSymbols.Calls_Sum_0123abcd" })
     if (!ImportsSymbols(import)) throw new InvalidOperationException("Missed PDB import: " + import);
 foreach (var import in new[] { "-- import ExtractedSymbols", "import ExtractedSymbolsExtra",
-    "import ExtractedSymbols.Other", "import ExtractedSymbols'" })
+    "import Extracted.Calls_Sum_0123abcd", "import ExtractedSymbols'" })
     if (ImportsSymbols(import)) throw new InvalidOperationException("Spurious PDB import: " + import);
 
 string Source(string inserted) => string.Join("\n",

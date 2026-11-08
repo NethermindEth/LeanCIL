@@ -79,6 +79,7 @@ memory access and compiled F#.
 | `leancil new-proof` | Write a starting proof, with its holes marked, for an extraction |
 | `leancil verify` | Check, kernel-replay and audit a named theorem |
 | `leancil workspace` | Generate a method's extraction into the proof's package for live editor goals |
+| `leancil watch` | Rebuild C# on change, refresh the changed extractions and verify the affected proofs |
 | `leancil verify-batch` | Verify multiple requests against one consumer snapshot |
 
 `check` validates extraction consistency; `verify` establishes the selected theorem.

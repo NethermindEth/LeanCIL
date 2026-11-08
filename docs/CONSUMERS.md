@@ -42,7 +42,7 @@ single-file verification. `verification.json` remembers the package root.
 Edit the proof file itself with live goals. Generate the selected extraction into the package:
 
 ```sh
-leancil workspace path/to/Library.dll 'Type::Method(parameter-types)' --profile arm64-advsimd --proof proofs/Method.lean --proof-root .
+leancil workspace path/to/Library.dll 'Type::Method(parameter-types)' --profile arm64-advsimd --proof proofs/Method.lean --theorem MyProof.correctness --proof-root .
 ```
 
 Use the exact assembly and method selector for the consumer build. The command
@@ -50,32 +50,97 @@ requires an explicit profile and proof. It finds the nearest Lake package when
 `--proof-root` is omitted. Run `lake update` in that source package first. The
 same pinned Git dependencies and framework/toolchain checks as consumer
 verification apply. `--assembly` and `--assume-initialized` have the extraction
-command's meaning.
+command's meaning. `--theorem` names the theorem `leancil watch` verifies.
 
-The pinned `leancil` package declares an editor library, `LeanCILEditor`, whose
-`Extracted` and `ExtractedSymbols` modules live in its ignored
-`.lake/packages/leancil/.lake/leancil` directory. The command extracts the method
-into that directory and builds both modules with Lake, so `import Extracted`
-resolves in the proof and in any helper module of the package, and Lake rebuilds
-helpers that import it when the extraction changes. In a LeanCIL checkout the
-root package is `leancil`, so the directory is the checkout's own
-`.lake/leancil`. `ExtractedSymbols` exists only while the assembly has a matching
-portable PDB. Consumer sources named `Extracted.lean` or `ExtractedSymbols.lean`
-are rejected because they would shadow the extraction.
+### One module per method
+
+Each selected method and profile gets its own module, so proofs of different
+methods share a package and stay open at once. The command prints the import:
+
+```text
+Editor extraction: Workspace.Wide::get_IsZeroOrOne() (scalar)
+  Import: import Extracted.Wide_get_IsZeroOrOne_1f0c2a9e, import ExtractedSymbols.Wide_get_IsZeroOrOne_1f0c2a9e
+```
+
+The module name is `Extracted.KEY`, and `ExtractedSymbols.KEY` for PDB names.
+KEY is the method's type and name followed by the first eight hex digits of the
+SHA-256 of the assembly's simple name, the method's full signature, the profile
+name and the initialization assumptions, so a rebuild or an assembly version
+change keeps it and overloads or profiles of one method get different keys. The
+declarations keep the `Extracted` and `ExtractedSymbols` namespaces, so a proof
+names `Extracted.program` whichever key it imports. The command warns when the
+proof imports plain `Extracted` or another method's key and names the import to
+use.
+
+The pinned `leancil` package declares an editor library, `LeanCILEditor`, below
+its ignored `.lake/packages/leancil/.lake/leancil` directory. The command
+extracts the method, writes `Extracted/KEY.lean` and `ExtractedSymbols/KEY.lean`
+there and builds them with Lake, so the import resolves in the proof and in any
+helper module of the package, and Lake rebuilds helpers that import it when that
+extraction changes. Other methods' modules are left as they are. In a LeanCIL
+checkout the root package is `leancil`, so the directory is the checkout's own
+`.lake/leancil`. No plain `Extracted` module is generated: a proof that names no
+method fails at its import instead of checking against whichever method was
+selected last. `ExtractedSymbols.KEY` exists only while the assembly has a
+matching portable PDB. `selections/KEY/selection.json` records the selection
+and its proofs. `leancil workspace --remove KEY` drops a method: it deletes that
+directory, both modules and their Lake outputs, and rebuilds nothing. A method
+selector in place of KEY works when it names one recorded profile, or with
+`--profile`. `leancil new-proof` writes the keyed import, so a generated outline
+resolves in the editor without editing.
+Consumer sources named `Extracted.lean` or `ExtractedSymbols.lean`, or inside an
+`Extracted` or `ExtractedSymbols` directory, are rejected because they would
+shadow an extraction.
 
 The loop is:
 
 1. Open the proof in the editor and edit it in place.
 2. After changing and rebuilding the C# assembly, run the same `leancil workspace`
-   command. It regenerates the extraction in place; an unchanged method changes
-   no file and rebuilds nothing.
+   command, or keep `leancil watch` running. Either regenerates the extraction in
+   place; an unchanged method changes no file and rebuilds nothing.
 3. Restart the file in the editor (Lean 4: Restart File) to load the new
    extraction. From a terminal, `lake lean proofs/Method.lean` checks the proof
    the way the language server does.
 
-A package holds one extraction at a time. Selecting another method or profile
-replaces it for every proof in the package, and the command says which
-selection it replaced.
+### Watch
+
+```sh
+leancil watch . --project src/Library/Library.csproj
+```
+
+`leancil watch [package] --project app.csproj...` keeps every selection the
+package records current. It polls the projects' C# and MSBuild files, the
+selected assemblies and the package's Lean sources. After a change it runs
+`dotnet build` when C# changed, extracts each selection again into a scratch
+directory, replaces the modules of the methods whose extraction changed and
+builds those, then runs ordinary `leancil verify --format json` for each proof
+whose extraction or sources (the proof, the package modules its imports reach
+and the Lake configuration) changed since its last run. Each proof is verified
+against its own copy of the extraction under `selections/KEY/proofs/`.
+`--configuration` defaults to `Release`, `--once` runs one cycle and exits with
+status 1 unless every proof verified or names no theorem, and `--format json` prints each cycle as
+one JSON line.
+
+Each proof gets one status per cycle:
+
+| Status | Meaning |
+| --- | --- |
+| `verified` | ordinary verification passed |
+| `failed` | verification failed; the verify report locates each error in the Lean source and, for a stepping tactic, the C# line |
+| `stale` | the C# build failed; its errors are listed with their C# locations, and every proof's earlier certificate is deleted |
+| `missing` | the method no longer extracts (deleted or renamed); its editor modules are removed, so the proof fails at its import, and the selection stays recorded until the method returns or its directory is deleted |
+| `unverified` | the selection names no `--theorem`; only the editor modules were refreshed |
+
+A result whose inputs did not change is reported again with `rechecked` false.
+That is a statement about byte-identical extraction text and sources, not a new
+certificate: its `verified.json` still names the assembly it was verified
+against. A failed build never leaves a green result, because it deletes every
+certificate and the next good build verifies every proof again.
+
+On Windows the command also checks that the environment `lake serve` hands Lean
+fits Lean's 32,767-byte limit, and fails with the largest variables instead of
+leaving the editor without `LEAN_PATH`; see
+[environment size on Windows](CLI.md#environment-size-on-windows).
 
 A proof with no `lakefile.toml` or `lakefile.lean` in its directory or above it
 needs no setup. The command makes that directory a Lake package: it writes a
@@ -85,11 +150,12 @@ framework sources into `.lake/packages/leancil`, which the package requires by
 repository or commit, so Git settings such as `commit.gpgsign` do not apply. A
 tool with different framework sources refreshes the copy. Verification accepts
 only dependencies pinned by a Git revision, so pass such a proof to ordinary
-`leancil verify <extraction> --proof <file>` without `--proof-root`.
+`leancil verify <extraction> --proof <file>` without `--proof-root`; `watch` does
+that for such a package.
 
-**Editor checking is not a certificate.** The command writes no `verified.json`,
-trusted support manifest or verification receipt. Run ordinary verification on
-the same files:
+**Editor checking is not a certificate.** The workspace command writes no
+`verified.json`, trusted support manifest or verification receipt. Run ordinary
+verification on the same files:
 
 ```sh
 leancil extract path/to/Library.dll 'Type::Method(parameter-types)' artifacts/Method arm64-advsimd
@@ -98,8 +164,12 @@ leancil verify artifacts/Method --proof proofs/Method.lean --proof-root . --theo
 
 Verification never reads the editor library. Its fresh source package skips
 `.lake`, takes `Extracted` from the extraction it checks, and builds on a
-certified library whose lakefile does not declare `LeanCILEditor`. It still
-requires extraction identity checks, exact theorem and certificate audits, and
+certified library whose lakefile does not declare `LeanCILEditor`. For each
+`Extracted.KEY` or `ExtractedSymbols.KEY` the proof's closure imports, it
+generates a module containing only `import Extracted` (or `import
+ExtractedSymbols`), after checking that KEY is the key of the extraction it
+checks; a key of another extraction is rejected. The theorem and certificate
+audits still read `Extracted` itself, with extraction identity checks and
 independent kernel replay. The CI workspace fixture builds a small in-repo
 library with a four-limb `Workspace.Wide` struct and opens
 `Workspace.Wide::get_IsZeroOrOne()` under the scalar profile, with the existing
@@ -107,7 +177,12 @@ library with a four-limb `Workspace.Wide` struct and opens
 place, adds a helper about the method body, rebuilds the C# with a different
 body and expects that helper to fail after a refresh with no Lean edit. It then
 verifies the same files freshly, shows that a forged editor module changes
-nothing verification reads, and rejects a tampered extraction.
+nothing verification reads, and rejects a tampered extraction and a proof that
+imports another extraction's key. A second method, `Workspace.Arith::Twice`, is
+then watched beside the first: editing it refreshes and rechecks only its
+proof, which fails at its theorem, while every file of the first method stays
+byte-identical with unchanged times; a C# syntax error makes both proofs stale
+and deletes both certificates; renaming the method reports its proof missing.
 
 ## Local support cache
 

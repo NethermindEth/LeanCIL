@@ -389,6 +389,9 @@ partial class Program
                 proofRoot is null ? null : Path.GetRelativePath(output, proofRoot).Replace('\\', '/'));
             File.WriteAllText(settingsPath, JsonSerializer.Serialize(settings, Json) + "\n");
             stage = "extraction integrity";
+            if (ExtractAgainIfRebuilt(output) is { } reason)
+                (json ? Console.Error : Console.Out).WriteLine("Re-extracted " + CliPaths.Display(output) + ": " +
+                    reason + " since extraction.");
             var manifest = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
             var assembly = Path.GetFullPath(manifest.GetProperty("assemblyPath").GetString()!, output);
             var identity = manifest.GetProperty("assemblyIdentity").GetString()!;
@@ -493,6 +496,23 @@ partial class Program
         {
             ((IDisposable?)verification)?.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Extracts `output` again from its recorded settings when its assembly or the extractor changed since
+    /// extraction, and says which; null when both are unchanged. A changed artifact with unchanged inputs is
+    /// left for the integrity check to reject.
+    /// </summary>
+    internal static string? ExtractAgainIfRebuilt(string output)
+    {
+        var identity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
+        var assembly = Path.GetFullPath(identity.GetProperty("assemblyPath").GetString()!, output);
+        string? reason = !File.Exists(assembly) ? null
+            : Sha(assembly) != identity.GetProperty("assemblySha256").GetString() ? "the assembly changed"
+            : Sha(ExtractorPath) != identity.GetProperty("extractorSha256").GetString() ? "the extractor changed"
+            : null;
+        if (reason is not null) Nethermind.LeanCIL.Program.ExtractRecorded(output);
+        return reason;
     }
 
     static IEnumerable<(string, int, int, string)> JsonMessages(ProofMessage[]? messages) =>

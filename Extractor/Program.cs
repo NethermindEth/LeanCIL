@@ -16,8 +16,11 @@ internal static partial class Program
         "[--assume-initialized Namespace.Type]... [--reference Lib.dll]... [--import Lib.leancil.contracts] " +
         "[--import-implementation Lib=path] [--import-sha256 Lib=hex] [--import-interface-sha256 Lib=hex]\n" +
         "       leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]\n" +
-        "       leancil workspace assembly.dll method --profile profile --proof proof.lean " +
-        "[--proof-root package-directory] [--output workspace-directory]\n" +
+        "       leancil workspace assembly.dll method --profile profile --proof proof.lean [--theorem name] " +
+        "[--proof-root package-directory] [--assembly identity] [--assume-initialized Namespace.Type]...\n" +
+        "       leancil workspace --remove key-or-method [--profile profile] [--proof-root package-directory]\n" +
+        "       leancil watch [package-directory] [--project project.csproj]... [--configuration name] [--once] " +
+        "[--format text|json]\n" +
         "       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] " +
         "[--assembly 'assembly name or full identity'] [--reference Lib.dll]...\n" +
         "       leancil check output-directory [--assembly-path assembly.dll] " +
@@ -42,6 +45,13 @@ internal static partial class Program
         Run(args, report: TextWriter.Null, rethrow: true);
     }
 
+    /// <summary>
+    /// Extracts `output` again from the settings its manifest records (assembly path, entry, profile, assumptions,
+    /// references and imports), as <c>extract</c> with those arguments would; a rejection throws.
+    /// </summary>
+    internal static void ExtractRecorded(string output) =>
+        Run(["check", output], report: TextWriter.Null, rethrow: true, refresh: true);
+
     static int Main(string[] args)
     {
         // Lean statements and messages are Unicode; a legacy console code page would print `?`.
@@ -51,7 +61,7 @@ internal static partial class Program
 
     static int Run(string[] args, ExtractionBatch? batch = null,
         Action<TemplateEmitter.Variant>? checkedTemplate = null, TextWriter? report = null, bool rethrow = false,
-        Action<ProofOutline.Extraction>? inspect = null)
+        Action<ProofOutline.Extraction>? inspect = null, bool refresh = false)
     {
         report ??= Console.Out;
         if (args.Length == 0 || args is ["--help"] or ["-h"])
@@ -84,6 +94,11 @@ internal static partial class Program
                 stage = "editor workspace";
                 global::Program.CreateProofWorkspace(args[1..]);
                 return 0;
+            }
+            if (args[0] == "watch")
+            {
+                stage = "proof watch";
+                return global::Program.Watch(args[1..]);
             }
             if (args[0] == "new-proof")
             {
@@ -308,7 +323,7 @@ internal static partial class Program
             StaticIdentityRecord[] staticIdentities = LeanEmitter.StaticIdentities(methods, profile);
             imports.ValidateStatics(staticIdentities);
             var extractorHash = batch?.ExtractorHash ?? Hash(File.ReadAllBytes(typeof(LeanEmitter).Assembly.Location));
-            if (recorded is { } prior)
+            if (recorded is { } prior && !refresh)
             {
                 stage = "extraction integrity";
                 if (prior.GetProperty("assemblySha256").GetString() != assemblyHash)
@@ -389,7 +404,7 @@ internal static partial class Program
             string leanPath = Path.Combine(output, "Extracted.lean");
             string symbolPath = Path.Combine(output, "Symbols.lean");
             string? symbolSource = symbols is null ? null : Symbols.Emit(methods, symbols);
-            if (args[0] == "check")
+            if (args[0] == "check" && !refresh)
             {
                 stage = "extraction integrity";
                 if (File.ReadAllText(leanPath) != source)
@@ -441,7 +456,7 @@ internal static partial class Program
                 report.WriteLine($"  Unknown static value: {name} is not computed; " +
                     "loads read the caller's static binding.");
             checkedTemplate?.Invoke(new(output, assemblyHash, profile, emitted.Templates));
-            if (args[0] == "check")
+            if (args[0] == "check" && !refresh)
                 inspect?.Invoke(new(methods, emitted.Templates, emitted.LayoutIdentities, source, emitted.Views));
         }
         catch (Exception exception)

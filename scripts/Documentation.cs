@@ -326,7 +326,8 @@ static partial class Documentation
         if (module is "Lean" or "Std" || module.StartsWith("Lean.", StringComparison.Ordinal) ||
             module.StartsWith("Std.", StringComparison.Ordinal))
             return null;
-        if (module is "Extracted" or "ExtractedSymbols")
+        if (module is "Extracted" or "ExtractedSymbols" || module.StartsWith("Extracted.", StringComparison.Ordinal) ||
+            module.StartsWith("ExtractedSymbols.", StringComparison.Ordinal))
             return kind == SnippetKind.Checked ? $"`import {module}` needs an extraction; mark the block" : null;
         if (module == "CIL" || module.StartsWith("CIL.", StringComparison.Ordinal))
             return File.Exists(Path.Combine(root, ModulePath(module))) ? null

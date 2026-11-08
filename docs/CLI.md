@@ -218,7 +218,9 @@ Wrote Proofs/Countdown.lean: a starting proof of System.UInt32 Examples.Loops::C
 `new-proof` reads only the extraction directory and first runs the same comparison as
 `leancil check`, so a stale or edited extraction is refused at the `extraction integrity` stage. It
 never replaces a file: when the proof path exists, it exits with `1` and writes nothing. The same
-extraction always gives the same file, byte for byte.
+extraction always gives the same file, byte for byte. It imports the extraction's keyed module,
+`Extracted.KEY` (see [Editor workspace](#editor-workspace)), so the file opens in the editor once
+`leancil workspace` selects the method, and `verify` accepts that import for this extraction only.
 
 The file states `ExampleProof.correctness` as a `CIL.Safety.Ensures` theorem over the method's
 parameters, named as in the PDB, and checks it with `#print axioms correctness`. A `bool` parameter
@@ -280,7 +282,7 @@ warnings that a declaration uses `sorry`, and `leancil verify` rejects it at the
 The countdown's outline:
 
 ```lean extracted
-import Extracted
+import Extracted.Loops_Countdown_1347de14
 import CIL.Verification
 import CIL.StructuralLabels
 import CIL.Safety.LoopScaffold
@@ -359,7 +361,7 @@ writing nothing; the message names the parameter, local, loop or test and what i
 
 ## Verify
 
-`verify` first checks the extraction artifacts, reuses an integrity-checked source-keyed library cache (or builds it on a cache miss), checks and kernel-replays the selected proof, and audits its transitive axioms. Use `--fresh` to bypass proof and support reuse while retaining the source-bound library cache. Use `--rebuild-library` to rebuild the library as well; CI bypasses the local library cache automatically. Interactive terminals receive build progress on stderr; stdout and redirected stderr retain their stable formats. Only `propext`, `Quot.sound` and `Classical.choice` are permitted. It checks artifact and source identity again before writing `artifacts/Add/verified.json`. Lean and Lake must be installed. The tool ships the framework's `CIL` sources only: proofs import `Extracted` and `CIL.*`, and `CIL.Safety.Memory.empty` is the caller memory with no allocations. LeanCIL's own example and test modules are not shipped; a proof importing one is rejected as `invalid-request`.
+`verify` first checks the extraction artifacts, reuses an integrity-checked source-keyed library cache (or builds it on a cache miss), checks and kernel-replays the selected proof, and audits its transitive axioms. Use `--fresh` to bypass proof and support reuse while retaining the source-bound library cache. Use `--rebuild-library` to rebuild the library as well; CI bypasses the local library cache automatically. Interactive terminals receive build progress on stderr; stdout and redirected stderr retain their stable formats. Only `propext`, `Quot.sound` and `Classical.choice` are permitted. It checks artifact and source identity again before writing `artifacts/Add/verified.json`. Lean and Lake must be installed. The tool ships the framework's `CIL` sources only: proofs import `Extracted` (or a method's `Extracted.KEY`, see [Editor workspace](#editor-workspace)) and `CIL.*`, and `CIL.Safety.Memory.empty` is the caller memory with no allocations. LeanCIL's own example and test modules are not shipped; a proof importing one is rejected as `invalid-request`.
 
 The theorem defaults to `ExampleProof.correctness`; select another with `--theorem Namespace.theoremName`. The first invocation saves the selection in `artifacts/Add/verification.json`, independently of the generated success report:
 
@@ -379,7 +381,7 @@ Run verification using the saved settings:
 leancil verify artifacts/Add
 ```
 
-Every invocation checks the proof afresh. A failed proof removes the previous verification report. `extract` generates definitions and `check` validates extraction consistency; `verify` establishes the selected theorem about those definitions. Its guarantee is exactly the theorem's statement, including its preconditions and quantifiers.
+Every invocation checks the proof afresh. A failed proof removes the previous verification report. When the assembly or the extractor changed since extraction, `verify` first extracts again from the settings `identity.json` records (assembly path, method, profile, assumptions, references and imports) and prints `Re-extracted artifacts/Add: the assembly changed since extraction.` (on stderr with `--format json`); a method that no longer exists then fails at extraction. An artifact that changed while its assembly and extractor did not is still rejected as tampered. `verify-batch` does not extract again; it reports such an output as a stale input. `extract` generates definitions and `check` validates extraction consistency; `verify` establishes the selected theorem about those definitions. Its guarantee is exactly the theorem's statement, including its preconditions and quantifiers.
 
 ### Reading the report
 
@@ -479,6 +481,34 @@ Direct verification checks the proof with `lean --json` and renders each message
 in Lean's `file:line:col: severity:` form; informational messages, which plain
 Lean output prints without a position, appear there as `info:` entries, and the
 proof's own messages follow under `Lean messages` as described above.
+
+### Environment size on Windows
+
+Lean on Windows builds the environment of each process it starts in a 32,767-byte buffer.
+Lake starts Lean, including the editor's language server, with its own variables
+(`LEAN_PATH`, `LEAN_SRC_PATH`, `PATH` and others) added to the environment it inherited,
+and Lean drops every variable that no longer fits without an error, so `LEAN_PATH` can
+vanish and imports stop resolving. Each `name=value` entry counts its UTF-8 bytes plus a
+terminator, and the block adds one more. Lean replaces an inherited variable only when the
+name matches exactly, so Lake's `PATH` is added beside an inherited `Path` and the search
+path counts twice.
+
+Before running Lake, leancil computes what Lake will pass on: the environment it gives Lake,
+with the changes elan's `lake` proxy makes, and the variables `lake env` prints (for
+`lake build`, which passes Lean only `LEAN_PATH`, just that one). It fails when the result
+exceeds the limit, naming the size, the limit and the largest variables. `leancil workspace`
+makes the same check for `lake serve`, taking its own environment as the editor's, so the
+failure appears at setup rather than as unresolved imports. Lake prints a variable it unsets
+as empty; counting it can overstate the size by a few bytes, never understate it.
+
+Lake adds a package's source directory to `LEAN_SRC_PATH` once for every `[[lean_lib]]`
+table in the package's lakefile, without merging repeats. The framework copy `leancil workspace` writes for
+a proof outside any package declares only the framework and editor libraries, but a consumer
+that pins the `leancil` repository gets its lakefile with one library per test module, so the
+framework directory appears about ninety times in that consumer's `LEAN_SRC_PATH`. A shorter
+checkout path and fewer `PATH` entries leave more room. Setting
+`LEANCIL_LEAN_ENVIRONMENT_LIMIT` to a byte count lowers the limit; on other systems, where
+Lean has no such buffer, it enables the check, for example to measure headroom.
 
 ## Failure reports
 
@@ -702,11 +732,28 @@ No documentation text becomes evidence or a contract premise.
 
 ## Editor workspace
 
-`leancil workspace <assembly> <method> --profile <profile> --proof <file>` generates the
-method's `Extracted` and `ExtractedSymbols` modules into the proof's Lake package, as the
-framework's `LeanCILEditor` library below `.lake`, so the proof file itself shows live goals.
-After rebuilding the assembly, run it again to refresh the extraction in place, then restart
-the file in the editor. A proof outside any Lake package gets a package beside it that requires
-the bundled framework, so no `lake update` or `--proof-root` is needed. See
-[Proof-authoring workspace](CONSUMERS.md#proof-authoring-workspace) for the loop, pinned
-imports and the separate certification step. Editor checking is not a certificate.
+`leancil workspace <assembly> <method> --profile <profile> --proof <file> [--theorem name]`
+generates the method's extraction into the proof's Lake package as `Extracted.KEY` and
+`ExtractedSymbols.KEY`, modules of the framework's `LeanCILEditor` library below `.lake`, so the
+proof file itself shows live goals. It prints the import; KEY names the method and digests its
+assembly name, signature, profile and initialization assumptions, so each method keeps its own
+module and proofs of several methods stay open at once. After rebuilding the assembly, run it
+again to refresh the extraction in place, then restart the file in the editor. A proof outside
+any Lake package gets a package beside it that requires the bundled framework, so no
+`lake update` or `--proof-root` is needed. Verification accepts the keyed import only for the
+extraction it checks and builds it as a re-export of `Extracted`. `new-proof` writes the same
+keyed import, so its outline opens in the editor as generated.
+
+`leancil workspace --remove <key-or-method> [--profile profile] [--proof-root package]` drops one
+selection from the package (by default the one holding the current directory): its record, both
+modules and their Lake outputs. A method selector must name one recorded profile, so pass the
+key or `--profile` when it names several. Nothing else is rebuilt.
+
+`leancil watch [package] --project app.csproj... [--configuration name] [--once] [--format text|json]`
+rebuilds the C# on change, refreshes only the extractions whose generated modules changed and
+runs ordinary `verify` for each recorded proof whose extraction or sources changed. A failed
+build reports every proof `stale` with the compiler errors' C# locations and deletes their
+certificates; a method that no longer extracts is `missing`. See
+[Proof-authoring workspace](CONSUMERS.md#proof-authoring-workspace) for the loop, the watch
+statuses, pinned imports and the separate certification step. Editor checking is not a
+certificate.

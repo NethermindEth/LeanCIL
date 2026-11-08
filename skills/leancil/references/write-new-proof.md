@@ -27,17 +27,19 @@ Copy the closest example's structure and change the statement first.
 
 ## 3. Iterate in a workspace, then verify
 
-`leancil workspace` generates `Extracted` into the proof's own package, so the Lean language
-server shows goals in `proofs/Method.lean` itself:
+`leancil workspace` generates the method's extraction into the proof's own package as the module
+`Extracted.KEY`, so the Lean language server shows goals in `proofs/Method.lean` itself:
 
 ```sh
 leancil workspace path/to/Lib.dll 'Type::Method(ulong)' --profile scalar --proof proofs/Method.lean --proof-root .
 ```
 
-Edit the proof in place and check it from a terminal with `lake lean proofs/Method.lean`. After
-rebuilding the C# assembly, run the same command again and restart the file in the editor. When
-the proof checks, run `leancil extract` and `leancil verify` on the same file. Only `verify`
-counts.
+The command prints the `import` line the proof needs; `new-proof` already writes it. Each
+selected method gets its own module, so several proofs can be open at once; `leancil workspace
+--remove KEY` drops one. Check a proof from a terminal with `lake lean proofs/Method.lean`.
+After changing the C#, `leancil watch --project path/to/Lib.csproj` rebuilds it, refreshes only
+the changed extractions and re-verifies the affected proofs; restart the file in the editor to
+see the new goals. Only `leancil verify` (which `watch` runs) counts.
 Details: [editor workspace](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CONSUMERS.md#proof-authoring-workspace).
 
 ## 4. Keep the proof local

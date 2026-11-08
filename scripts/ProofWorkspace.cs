@@ -5,19 +5,31 @@ partial class Program
 {
     /// <summary>A request to refresh the editor extraction of the Lake package `ProofRoot` holding `Proof`.</summary>
     sealed record WorkspaceSettings(string Assembly, string Method, string Profile, string Proof, string ProofRoot,
-        string? AssemblyIdentity, string[] InitializedTypes, bool CreatedPackage);
+        string? AssemblyIdentity, string[] InitializedTypes, string? Theorem, bool CreatedPackage);
 
-    /// <summary>The method an editor library currently holds, so replacing it with another one is reported.</summary>
+    /// <summary>
+    /// One method extraction in the editor library, as `extract` takes it, and the proofs written against it.
+    /// </summary>
     sealed record EditorSelection(string Assembly, string Method, string Profile, string? AssemblyIdentity,
-        string[] InitializedTypes);
+        string[] InitializedTypes, EditorProof[] Proofs);
+
+    /// <summary>A proof of a selection, relative to its package, and the theorem that verifies it, if named.</summary>
+    sealed record EditorProof(string Proof, string? Theorem);
 
     /// <summary>Where the framework's editor library reads its sources, relative to the framework package.</summary>
     const string EditorSourceDirectory = ".lake/leancil";
+    /// <summary>Below the editor sources: per key, the selection and the verification outputs of its proofs.</summary>
+    const string EditorSelectionsDirectory = "selections";
     const string EditorSelectionFile = "selection.json";
     const string WorkspaceUsage = "Usage: leancil workspace assembly.dll method --profile profile --proof proof.lean " +
-        "[--proof-root package-directory] [--assembly identity] [--assume-initialized type]...";
+        "[--theorem name] [--proof-root package-directory] [--assembly identity] [--assume-initialized type]...\n" +
+        "       leancil workspace --remove key-or-method [--profile profile] [--proof-root package-directory]";
 
-    internal static void CreateProofWorkspace(string[] args) => RefreshEditorExtraction(ParseWorkspaceSettings(args));
+    internal static void CreateProofWorkspace(string[] args)
+    {
+        if (args.Length > 0 && args[0] == "--remove") RemoveEditorSelection(args[1..]);
+        else RefreshEditorExtraction(ParseWorkspaceSettings(args));
+    }
 
     static WorkspaceSettings ParseWorkspaceSettings(string[] args)
     {
@@ -37,13 +49,17 @@ partial class Program
                 if (!initialized.Add(args[index]))
                     throw new ArgumentException("Duplicate initialization assumption: " + args[index]);
             }
-            else if (option is not ("--profile" or "--proof" or "--proof-root" or "--assembly") ||
+            else if (option is not ("--profile" or "--proof" or "--proof-root" or "--assembly" or "--theorem") ||
                 !options.TryAdd(option, args[index]))
                 throw new ArgumentException("Unknown or duplicate option: " + option);
         }
         if (!options.TryGetValue("--profile", out var profile) || !options.TryGetValue("--proof", out var proof))
             throw new ArgumentException(WorkspaceUsage);
         if (profile.StartsWith('@')) profile = "@" + Path.GetFullPath(profile[1..]);
+        var theorem = options.GetValueOrDefault("--theorem");
+        if (theorem is not null &&
+            !System.Text.RegularExpressions.Regex.IsMatch(theorem, @"\A[A-Za-z_][A-Za-z0-9_.]*\z"))
+            throw new ArgumentException("Invalid theorem name: " + theorem);
         proof = Path.GetFullPath(proof);
         if (!File.Exists(proof)) throw new FileNotFoundException("Proof file not found: " + proof);
         var root = options.TryGetValue("--proof-root", out var selectedRoot)
@@ -54,12 +70,15 @@ partial class Program
         if (IsScratchPackage(root)) ScratchProofPackage(root);
         Within(root, Path.GetRelativePath(root, proof));
         return new(Path.GetFullPath(args[0]), args[1], profile, proof, root, options.GetValueOrDefault("--assembly"),
-            [.. initialized], created);
+            [.. initialized], theorem, created);
     }
 
-    static string? FindProofPackage(string proof)
+    static string? FindProofPackage(string proof) => FindPackage(Path.GetDirectoryName(proof)!);
+
+    /// <summary>The nearest directory at or above `start` holding a Lake package, if any.</summary>
+    static string? FindPackage(string start)
     {
-        DirectoryInfo? directory = new(Path.GetDirectoryName(proof)!);
+        DirectoryInfo? directory = new(start);
         while (directory is not null)
         {
             if (File.Exists(Path.Combine(directory.FullName, "lakefile.toml")) ||
@@ -84,10 +103,12 @@ partial class Program
     static string ScratchProofPackage(string package)
     {
         var sources = LibrarySources(CommonInputs());
-        // The key regenerates the framework copy when the tool's framework changes.
+        var frameworkLakefile = EditorFrameworkLakefile(File.ReadAllText(At("lakefile.toml")));
+        // The key regenerates the framework copy when the tool's framework or its lakefile view changes.
+        var key = ContentKey(JsonSerializer.Serialize(sources) + "\n" + frameworkLakefile)[..20];
         var lakefile = $$"""
             name = "{{ScratchPackageName}}"
-            # Bundled LeanCIL framework {{ContentKey(JsonSerializer.Serialize(sources))[..20]}}
+            # Bundled LeanCIL framework {{key}}
 
             [[require]]
             name = "leancil"
@@ -111,7 +132,9 @@ partial class Program
             {
                 var destination = Path.Combine(staging, name);
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                File.Copy(At(name), destination);
+                // Only the framework and editor libraries: Lake lists a source directory once per library.
+                if (name == "lakefile.toml") File.WriteAllText(destination, frameworkLakefile);
+                else File.Copy(At(name), destination);
             }
             if (Directory.Exists(framework)) Directory.Delete(framework, true);
             Directory.Move(staging, framework);
@@ -127,46 +150,198 @@ partial class Program
     }
 
     /// <summary>
-    /// Writes the selected method's extraction as the framework's editor library in the proof's package and builds
-    /// it there, so `import Extracted` resolves in the proof itself. Nothing here is or yields a certificate.
+    /// Writes the selected method's extraction into the framework's editor library in the proof's package as
+    /// `Extracted.KEY` (and `ExtractedSymbols.KEY`) and builds it there, so the proof resolves its own method's
+    /// extraction in place beside other methods' ones. Nothing here is or yields a certificate.
     /// </summary>
     static void RefreshEditorExtraction(WorkspaceSettings settings)
     {
         var root = settings.ProofRoot;
         var editor = Path.Combine(EditorFramework(root), EditorSourceDirectory);
-        var extraction = Path.Combine(Path.GetTempPath(), "leancil-editor-" + Guid.NewGuid().ToString("N"));
-        string[] modules;
+        // The editor's `lake serve` starts Lean the same way; an oversized environment fails here, not as imports.
+        RequireLeanEnvironmentFits(["lake", "serve"], root, new System.Diagnostics.ProcessStartInfo().Environment);
+        var selection = new EditorSelection(settings.Assembly, settings.Method, settings.Profile,
+            settings.AssemblyIdentity, settings.InitializedTypes, []);
+        var extraction = ExtractEditorSelection(selection);
         try
         {
-            Run([.. Extract("extract", settings.Assembly, settings.AssemblyIdentity, settings.Method, extraction,
-                    settings.Profile),
-                .. settings.InitializedTypes.SelectMany(type => new[] { "--assume-initialized", type })]);
-            // The command takes no --import, so an extraction never needs contract interface modules here.
-            if (ExtractionIdentity.Read(extraction).Sources.Count > 0)
-                throw new InvalidDataException("Editor extraction unexpectedly carries contract interface modules.");
-            Directory.CreateDirectory(editor);
-            var symbols = Path.Combine(extraction, "Symbols.lean");
-            CopyIfChanged(Path.Combine(extraction, "Extracted.lean"), Path.Combine(editor, "Extracted.lean"));
-            // Without a PDB the import fails at its source instead of loading names of an older build.
-            if (File.Exists(symbols)) CopyIfChanged(symbols, Path.Combine(editor, "ExtractedSymbols.lean"));
-            else File.Delete(Path.Combine(editor, "ExtractedSymbols.lean"));
-            modules = File.Exists(symbols) ? ["Extracted", "ExtractedSymbols"] : ["Extracted"];
+            var key = SelectionModules.Key(ExtractionIdentity.Read(extraction).Root);
+            var proof = new EditorProof(Path.GetRelativePath(root, settings.Proof).Replace('\\', '/'),
+                settings.Theorem);
+            var previous = ReadEditorSelection(Path.Combine(editor, EditorSelectionsDirectory, key));
+            selection = selection with
+            {
+                Proofs = [.. (previous?.Proofs ?? []).Where(other => other.Proof != proof.Proof).Append(proof)
+                    .OrderBy(other => other.Proof, StringComparer.Ordinal)]
+            };
+            var modules = ApplyEditorExtraction(editor, key, extraction, selection);
+            BuildEditorModules(root, modules);
+            PrintEditorExtraction(settings, editor, key, modules);
         }
         finally
         {
-            if (Directory.Exists(extraction)) Directory.Delete(extraction, true);
+            Directory.Delete(extraction, true);
         }
-        var selection = new EditorSelection(settings.Assembly, settings.Method, settings.Profile,
-            settings.AssemblyIdentity, settings.InitializedTypes);
-        var selectionPath = Path.Combine(editor, EditorSelectionFile);
-        var previous = File.Exists(selectionPath)
-            ? JsonSerializer.Deserialize<EditorSelection>(File.ReadAllText(selectionPath)) : null;
-        var recorded = JsonSerializer.Serialize(selection, Json) + "\n";
-        if (!File.Exists(selectionPath) || File.ReadAllText(selectionPath) != recorded)
-            File.WriteAllText(selectionPath, recorded);
-        Run(["lake", "build", .. modules.Select(module => "+" + module)], root,
-            progress: "Building " + string.Join(" and ", modules) + " (the first build also builds the framework)");
-        PrintEditorExtraction(settings, editor, modules, previous);
+    }
+
+    /// <summary>Extracts `selection` into a new scratch directory, which the caller deletes.</summary>
+    static string ExtractEditorSelection(EditorSelection selection)
+    {
+        var extraction = Path.Combine(Path.GetTempPath(), "leancil-editor-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            ExtractEditorSelection(selection, extraction);
+            return extraction;
+        }
+        catch
+        {
+            if (Directory.Exists(extraction)) Directory.Delete(extraction, true);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Extracts `selection` into `extraction`. Its identity records the assembly relative to that directory, so an
+    /// extraction is never copied elsewhere to be verified.
+    /// </summary>
+    static void ExtractEditorSelection(EditorSelection selection, string extraction)
+    {
+        RunExtractor([.. Extract("extract", selection.Assembly, selection.AssemblyIdentity, selection.Method,
+                extraction, selection.Profile),
+            .. selection.InitializedTypes.SelectMany(type => new[] { "--assume-initialized", type })]);
+        // The command takes no --import, so an extraction never needs contract interface modules here.
+        if (ExtractionIdentity.Read(extraction).Sources.Count > 0)
+            throw new InvalidDataException("Editor extraction unexpectedly carries contract interface modules.");
+    }
+
+    static EditorSelection? ReadEditorSelection(string directory) =>
+        Path.Combine(directory, EditorSelectionFile) is var path && File.Exists(path)
+            ? JsonSerializer.Deserialize<EditorSelection>(File.ReadAllText(path)) : null;
+
+    /// <summary>Every selection recorded in the editor library at `editor`, by key.</summary>
+    static SortedDictionary<string, EditorSelection> EditorSelections(string editor)
+    {
+        var selections = new SortedDictionary<string, EditorSelection>(StringComparer.Ordinal);
+        var directory = Path.Combine(editor, EditorSelectionsDirectory);
+        if (!Directory.Exists(directory)) return selections;
+        foreach (var selection in Directory.EnumerateDirectories(directory))
+            if (ReadEditorSelection(selection) is { } recorded) selections[Path.GetFileName(selection)] = recorded;
+        return selections;
+    }
+
+    static string EditorModulePath(string editor, string module) =>
+        Path.Combine(editor, module.Replace('.', Path.DirectorySeparatorChar) + ".lean");
+
+    /// <summary>
+    /// The editor's copy of PDB names: the extraction's `Symbols.lean` without the PDB hash in its first line, so
+    /// a rebuild that moves no line of this method leaves the module and its importers unbuilt.
+    /// </summary>
+    static string EditorSymbols(string symbols) => System.Text.RegularExpressions.Regex.Replace(symbols,
+        @"\A-- Generated from the portable PDB with SHA-256 [0-9a-f]+\.", "-- Generated from the portable PDB.");
+
+    /// <summary>Whether the editor modules of `key` differ from the extraction in `extraction`.</summary>
+    static bool EditorModulesDiffer(string editor, string key, string extraction)
+    {
+        var module = EditorModulePath(editor, "Extracted." + key);
+        var symbolsModule = EditorModulePath(editor, "ExtractedSymbols." + key);
+        var symbols = Path.Combine(extraction, "Symbols.lean");
+        return !File.Exists(module) || File.ReadAllText(module) != File.ReadAllText(Path.Combine(extraction,
+                "Extracted.lean")) ||
+            File.Exists(symbols) != File.Exists(symbolsModule) ||
+            (File.Exists(symbols) && File.ReadAllText(symbolsModule) != EditorSymbols(File.ReadAllText(symbols)));
+    }
+
+    /// <summary>
+    /// Records `selection` and the extraction in `extraction` under `key` and returns its editor modules. Unchanged
+    /// bytes are not rewritten, which keeps Lake's traces, so an unchanged method rebuilds nothing.
+    /// </summary>
+    static string[] ApplyEditorExtraction(string editor, string key, string extraction, EditorSelection selection)
+    {
+        Directory.CreateDirectory(editor);
+        // A plain module here would let a proof that names no method check against whichever method wrote it.
+        File.Delete(Path.Combine(editor, "Extracted.lean"));
+        File.Delete(Path.Combine(editor, "ExtractedSymbols.lean"));
+        var directory = Path.Combine(editor, EditorSelectionsDirectory, key);
+        Directory.CreateDirectory(directory);
+        WriteIfChanged(Path.Combine(directory, EditorSelectionFile), JsonSerializer.Serialize(selection, Json) + "\n");
+        var module = EditorModulePath(editor, "Extracted." + key);
+        Directory.CreateDirectory(Path.GetDirectoryName(module)!);
+        CopyIfChanged(Path.Combine(extraction, "Extracted.lean"), module);
+        var symbols = Path.Combine(extraction, "Symbols.lean");
+        var symbolsModule = EditorModulePath(editor, "ExtractedSymbols." + key);
+        // Without a PDB the import fails at its source instead of loading names of an older build.
+        if (!File.Exists(symbols))
+        {
+            File.Delete(symbolsModule);
+            return ["Extracted." + key];
+        }
+        Directory.CreateDirectory(Path.GetDirectoryName(symbolsModule)!);
+        WriteIfChanged(symbolsModule, EditorSymbols(File.ReadAllText(symbols)));
+        return ["Extracted." + key, "ExtractedSymbols." + key];
+    }
+
+    /// <summary>Removes the editor modules of `key`, so a proof importing them fails at the import.</summary>
+    static void RemoveEditorModules(string editor, string key)
+    {
+        File.Delete(EditorModulePath(editor, "Extracted." + key));
+        File.Delete(EditorModulePath(editor, "ExtractedSymbols." + key));
+    }
+
+    /// <summary>
+    /// Drops one selection from the package's editor library: its record, the verification outputs of its proofs,
+    /// both modules and their Lake outputs, so a proof importing them fails at the import. Nothing is rebuilt.
+    /// </summary>
+    static void RemoveEditorSelection(string[] args)
+    {
+        if (args.Length == 0 || args[0].StartsWith("--", StringComparison.Ordinal))
+            throw new ArgumentException(WorkspaceUsage);
+        var options = new Dictionary<string, string>(StringComparer.Ordinal);
+        for (int index = 1; index < args.Length; index++)
+        {
+            var option = args[index];
+            if (++index == args.Length || args[index].StartsWith("--", StringComparison.Ordinal))
+                throw new ArgumentException("Missing value for " + option + ".");
+            if (option is not ("--profile" or "--proof-root") || !options.TryAdd(option, args[index]))
+                throw new ArgumentException("Unknown or duplicate option: " + option);
+        }
+        var root = options.TryGetValue("--proof-root", out var selectedRoot) ? Path.GetFullPath(selectedRoot)
+            : FindPackage(Environment.CurrentDirectory) ?? throw new InvalidDataException(
+                "No Lake package holds the current directory; pass --proof-root.");
+        var framework = EditorFramework(root);
+        var editor = Path.Combine(framework, EditorSourceDirectory);
+        var selections = EditorSelections(editor);
+        var profile = options.GetValueOrDefault("--profile");
+        // The key names one selection; a method selector names each profile of it that the package recorded.
+        string[] matched = selections.ContainsKey(args[0]) ? [args[0]]
+            : [.. selections.Where(pair => pair.Value.Method == args[0] &&
+                (profile is null || pair.Value.Profile == profile)).Select(pair => pair.Key)];
+        if (matched.Length != 1)
+            throw new InvalidDataException((matched.Length == 0 ? "No recorded selection matches " + args[0]
+                    : args[0] + " names " + matched.Length + " selections; pass its key or --profile") + ". " +
+                (selections.Count == 0 ? "The package records no selection." : "Recorded: " + string.Join(", ",
+                    selections.Select(pair => $"{pair.Key} ({pair.Value.Method}, {pair.Value.Profile})")) + "."));
+        var key = matched[0];
+        var selection = selections[key];
+        RemoveEditorModules(editor, key);
+        Directory.Delete(Path.Combine(editor, EditorSelectionsDirectory, key), true);
+        var build = Path.Combine(framework, ".lake", "build");
+        if (Directory.Exists(build))
+            foreach (var output in Directory.EnumerateFiles(build, key + ".*", SearchOption.AllDirectories)
+                .Where(path => Path.GetFileName(Path.GetDirectoryName(path)) is "Extracted" or "ExtractedSymbols"))
+                File.Delete(output);
+        Console.WriteLine($"Removed editor extraction {key}: {selection.Method} ({selection.Profile})");
+        foreach (var proof in selection.Proofs.Select(proof => Path.Combine(root, proof.Proof)).Where(File.Exists))
+            if (SourceImport().Matches(File.ReadAllText(proof)).Any(import => import.Groups[1].Value.EndsWith(
+                    "." + key, StringComparison.Ordinal) && SelectionModules.Is(import.Groups[1].Value)))
+                Console.WriteLine("  " + CliPaths.Display(proof) + " imports it and now fails at that import.");
+        Console.WriteLine("  Other methods' modules are unchanged and nothing was rebuilt.");
+    }
+
+    static void BuildEditorModules(string root, IReadOnlyCollection<string> modules)
+    {
+        if (modules.Count > 0)
+            Run(["lake", "build", .. modules.Select(module => "+" + module)], root,
+                progress: "Building " + string.Join(", ", modules) + " (the first build also builds the framework)");
     }
 
     /// <summary>
@@ -191,11 +366,14 @@ partial class Program
             framework = dependencies.Single(dependency => dependency.Name == "leancil").Source;
             packages = [root, .. dependencies.Select(dependency => dependency.Directory)];
         }
-        var sources = packages.SelectMany(package => ConsumerSources(package)).Where(path =>
-            Path.GetFileName(path) is "Extracted.lean" or "ExtractedSymbols.lean").ToArray();
+        // A source that a keyed import could resolve to would shadow the generated extraction.
+        var sources = packages.SelectMany(package => ConsumerSources(package).Where(path =>
+            Path.GetFileName(path) is "Extracted.lean" or "ExtractedSymbols.lean" ||
+            Path.GetRelativePath(package, path).Split('/', '\\')[..^1]
+                .Any(directory => directory is "Extracted" or "ExtractedSymbols"))).ToArray();
         if (sources.Length > 0)
             throw new InvalidDataException("Extracted and ExtractedSymbols are reserved for the selected " +
-                "extraction; remove " + CliPaths.Display(sources[0]) + ".");
+                "extractions; remove " + CliPaths.Display(sources[0]) + ".");
         var lakefile = Path.Combine(framework, "lakefile.toml");
         if (!File.Exists(lakefile) || !File.ReadAllText(lakefile).ReplaceLineEndings("\n").Contains(
                 $"[[lean_lib]]\nname = \"{EditorLibraryName}\"\nsrcDir = \"{EditorSourceDirectory}\"\n",
@@ -213,21 +391,29 @@ partial class Program
         if (!File.Exists(destination) || Sha(destination) != Sha(source)) File.Copy(source, destination, true);
     }
 
-    static void PrintEditorExtraction(WorkspaceSettings settings, string editor, string[] modules,
-        EditorSelection? previous)
+    static void PrintEditorExtraction(WorkspaceSettings settings, string editor, string key, string[] modules)
     {
         Console.WriteLine("Editor extraction: " + settings.Method + " (" + settings.Profile + ")");
-        if (previous is not null && (previous.Assembly != settings.Assembly || previous.Method != settings.Method ||
-                previous.Profile != settings.Profile))
-            Console.WriteLine("  Replaced " + previous.Method + " (" + previous.Profile + "): a package holds one " +
-                "extraction, so every proof in it now sees this one.");
-        Console.WriteLine("  Modules: " + string.Join(", ", modules) + " in " + CliPaths.Display(editor));
+        Console.WriteLine("  Import: " + string.Join(", ", modules.Select(module => "import " + module)));
+        Console.WriteLine("  Modules in " + CliPaths.Display(editor));
         Console.WriteLine("  Proof: " + CliPaths.Display(settings.Proof));
+        // The editor resolves no plain Extracted, so a proof still naming it, or another method, fails at its import.
+        foreach (var import in SourceImport().Matches(File.ReadAllText(settings.Proof))
+            .Select(match => match.Groups[1].Value).Distinct(StringComparer.Ordinal))
+            if (import is "Extracted" or "ExtractedSymbols" ||
+                (SelectionModules.Is(import) && !modules.Contains(import, StringComparer.Ordinal)))
+                Console.WriteLine("  The proof imports " + import + ", which is not this method's extraction; " +
+                    "replace it with import " + (import.StartsWith("ExtractedSymbols", StringComparison.Ordinal)
+                        ? "ExtractedSymbols." : "Extracted.") + key + ".");
+        var others = EditorSelections(editor).Count(pair => pair.Key != key);
+        if (others > 0)
+            Console.WriteLine($"  The package holds {others} other method extraction{(others == 1 ? "" : "s")}; " +
+                "their modules are unchanged.");
         if (settings.CreatedPackage)
             Console.WriteLine("  Created a Lake package beside the proof (no lakefile above it): lakefile.toml, " +
                 "lean-toolchain and lake-manifest.json, with the bundled framework in " + BundledFrameworkDirectory);
-        Console.WriteLine("  Edit the proof in place. After rebuilding the assembly, run this command again and " +
-            "restart the file in the editor to load the refreshed extraction.");
+        Console.WriteLine("  Edit the proof in place. After rebuilding the assembly, run this command again, or keep " +
+            "leancil watch running, and restart the file in the editor to load the refreshed extraction.");
         Console.WriteLine("  Editor checking is not a certificate. Run ordinary leancil verify for certification.");
     }
 }

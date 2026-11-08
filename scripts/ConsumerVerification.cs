@@ -469,7 +469,8 @@ partial class Program
                     invalid.Add(import);
             invalid = DependentModules(graph, invalid);
             result.UnionWith(manifest.Modules.Keys.Where(name => !invalid.Contains(name) && name != "CIL" &&
-                !name.StartsWith("CIL.", StringComparison.Ordinal) && name is not ("Extracted" or "ExtractedSymbols" or "ExtractionAudit") &&
+                !name.StartsWith("CIL.", StringComparison.Ordinal) &&
+                name is not ("Extracted" or "ExtractedSymbols" or "ExtractionAudit") && !SelectionModules.Is(name) &&
                 !name.StartsWith("LeanCILProof", StringComparison.Ordinal)));
         }
         return result;
@@ -682,7 +683,22 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
     // Read from source text before any build, so the proof key can bind PDB names; Lean's
     // compiled import headers confirm it after the build. Ambiguous module paths all count.
-    static bool ConsumerImportsSymbols(string proof, SortedDictionary<string, string> snapshot, string root)
+    static bool ConsumerImportsSymbols(string proof, SortedDictionary<string, string> snapshot, string root) =>
+        ConsumerGeneratedImports(proof, snapshot, root).Any(import =>
+            import.Module == "ExtractedSymbols" || SelectionModules.IsSymbols(import.Module));
+
+    /// <summary>
+    /// The keyed extraction modules the proof's import closure names, after rejecting a key of another extraction.
+    /// </summary>
+    static string[] ConsumerSelectedModules(string proof, SortedDictionary<string, string> snapshot, string root,
+        JsonElement identity) =>
+        [.. ConsumerGeneratedImports(proof, snapshot, root).Where(import => SelectionModules.Is(import.Module))
+            .GroupBy(import => import.Module, StringComparer.Ordinal)
+            .SelectMany(group => SelectionModules.Selected([group.Key], identity, group.First().Source))];
+
+    // Imports of the proof's closure that no consumer source provides, with the source naming each.
+    static IEnumerable<(string Module, string Source)> ConsumerGeneratedImports(string proof,
+        SortedDictionary<string, string> snapshot, string root)
     {
         var sources = snapshot.Keys.Where(key => key.StartsWith("consumer:", StringComparison.Ordinal) && key.EndsWith(".lean", StringComparison.Ordinal))
             .Select(key => (Path: key["consumer:".Length..], Relative: "/" + Path.GetRelativePath(root, key["consumer:".Length..]).Replace('\\', '/'))).ToArray();
@@ -693,13 +709,13 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             if (!seen.Add(path)) continue;
             foreach (Match import in SourceImport().Matches(File.ReadAllText(path)))
             {
-                if (import.Groups[1].Value == "ExtractedSymbols") return true;
-                var module = "/" + import.Groups[1].Value.Replace('.', '/') + ".lean";
+                var name = import.Groups[1].Value;
+                if (name == "ExtractedSymbols" || SelectionModules.Is(name)) yield return (name, path);
+                var module = "/" + name.Replace('.', '/') + ".lean";
                 foreach (var source in sources.Where(source => source.Relative.EndsWith(module, StringComparison.Ordinal)))
                     pending.Enqueue(source.Path);
             }
         }
-        return false;
     }
 
     /// <summary>Package name of the session package that holds the generated certificate modules.</summary>
@@ -1179,7 +1195,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 pending.Enqueue(import);
         while (pending.TryDequeue(out var module))
         {
-            if (excluded.Contains(module) || imports.ContainsKey(module) || module == "CIL" ||
+            if (excluded.Contains(module) || SelectionModules.Is(module) || imports.ContainsKey(module) ||
+                module == "CIL" ||
                 module.StartsWith("CIL.", StringComparison.Ordinal)) continue;
             var relative = module.Replace('.', Path.DirectorySeparatorChar) + ".lean";
             if (File.Exists(Path.Combine(toolchainModules, Path.ChangeExtension(relative, ".olean")))) continue;
@@ -1445,6 +1462,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         var proofKeys = new string[requests.Count];
         // Symbols.lean hash for requests whose proofs import ExtractedSymbols, else null.
         var symbols = new string?[requests.Count];
+        // Keyed extraction modules each request's proof closure imports, generated as re-exports.
+        var selections = requests.Select(_ => Array.Empty<string>()).ToArray();
         var outputs = requests.Select(request => Path.GetFullPath(request.Output)).ToArray();
         var proofs = new string[requests.Count];
         SortedDictionary<string, string> BoundRequestInputs(int index, SortedDictionary<string, string> common)
@@ -1517,6 +1536,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                         }
                         symbols[i] = Sha(path);
                     }
+                    selections[i] = ConsumerSelectedModules(proofs[i], snapshot, root, JsonSerializer
+                        .Deserialize<JsonElement>(File.ReadAllText(Path.Combine(outputs[i], "identity.json"))));
                 }
                 catch (Exception error) { Fail([i], error); }
         }
@@ -1691,7 +1712,13 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     generatedSources[module] = source;
                     bound["<generated>/" + module.Replace('.', '/') + ".lean"] = ContentKey(source);
                 }
-            var names = members.Length == 1 ? ["LeanCILProof"] : members.Select((_, k) => "LeanCILProof" + k).ToArray();
+            foreach (var module in members.SelectMany(member => selections[member]))
+            {
+                generatedSources[module] = SelectionModules.Source(module);
+                bound["<generated>/" + module.Replace('.', '/') + ".lean"] =
+                    ContentKey(SelectionModules.Source(module));
+            }
+            var names =members.Length == 1 ? ["LeanCILProof"] : members.Select((_, k) => "LeanCILProof" + k).ToArray();
             var requestModules = members.Select((member, index) => (member, module: names[index]))
                 .ToDictionary(pair => pair.member, pair => pair.module);
             // Groups share one Symbols.lean hash or none.
@@ -2226,6 +2253,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 // Records bind no PDB names, so importers of ExtractedSymbols stay unbound and are never cached.
                 var excluded = DependentModules(graph, names);
                 excluded.Add("ExtractedSymbols");
+                excluded.UnionWith(members.SelectMany(member => selections[member]).Where(SelectionModules.IsSymbols));
                 var collected = UseSuccessCache || share || exporting
                     ? CollectConsumerSupport(session, currentArtifacts, graph, excluded, extractionDependent, bound) : null;
                 try

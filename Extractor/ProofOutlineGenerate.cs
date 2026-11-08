@@ -44,7 +44,8 @@ internal static partial class ProofOutline
         "confined", "target"
     };
 
-    static Outline Generate(Extraction extraction)
+    // `module` is the keyed extraction module the outline imports, ahead of the library modules its form needs.
+    static Outline Generate(Extraction extraction, string module)
     {
         var method = extraction.Methods[0];
         var emitted = extraction.Emitted[0];
@@ -72,6 +73,7 @@ internal static partial class ProofOutline
             throw Unsupported($"{method.FullName} has {loops.Count} loops, with back edges at " +
                 string.Join(", ", loops.Select(loop => Location(method, loop.Latch))) + "; new-proof binds one " +
                 "cutpoint and does not chain the state from one loop's exit into the next");
+        source = $"import {module}\n" + source;
         var holes = Regex.Matches(source, @"(?<![`\w])sorry(?![`\w])").Count;
         var paths = Regex.Matches(source, "-- " + NotOutlined).Count;
         return new(method.FullName, source, holes - paths, paths);
@@ -378,7 +380,6 @@ internal static partial class ProofOutline
     // `tags` names the goals the generated tactics leave, or is null when the proof is one hole.
     static void Header(Writer lean, Specification spec, IEnumerable<string> imports, string? tags)
     {
-        lean.Line("import Extracted");
         foreach (var module in imports) lean.Line("import " + module);
         lean.Line();
         var selected = tags is null ? ""
