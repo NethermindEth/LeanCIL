@@ -515,7 +515,8 @@ postcondition, and from the method arguments only when the program reads one wit
 right side of each kept equation then extends it. A derived fact must be about variables reached
 without an equation. A fact about a memory that no state of the goal holds and no kept equation
 produces, such as the caller's memory once the frame has stored, is dropped; a frame fact at a
-memory that a kept store or call produces is kept. Derived facts are added as hygienic
+memory that a kept store or call produces is kept, and so are the caller facts that frame
+carries, such as a span's validity, so a span local loads after a word local's store. Derived facts are added as hygienic
 hypotheses, so the stepper looks them up by name instead of elaborating a proof term at every
 step, and a statement already gathered is not added again. `SpanSum` names no fact but its
 invariant equation.

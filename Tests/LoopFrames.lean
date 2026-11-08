@@ -1,6 +1,7 @@
 import CIL.MethodIdentity
 import CIL.Safety.LoopScaffold
 import CIL.Safety.LoopVC
+import CIL.Verification
 
 /-!
 # Loop frame tests
@@ -16,6 +17,8 @@ generated frame that mixes a home with a span parameter follows the frame's loca
 `frame.locals` lemmas store and load its home, while its span local loads as no home. Facts
 at the caller's memory that read only allocations hold at every frame memory, a slice of a span
 apart from an entry stays apart, and a stored word extends a filled run only right after it.
+A span local loaded after a store to a word local reads its validity at the stored memory, so the
+loop tactics step a span fold without a frame lemma in the proof.
 -/
 
 namespace Tests.LoopFrames
@@ -381,3 +384,76 @@ example {memory after : Memory} {target : Reference} {bits : CIL.W32}
 #print axioms extended
 
 end Tests.LoopFrames.CallerFacts
+
+namespace Tests.LoopFrames.StoredSpan
+open CIL.Safety
+open CIL (W64)
+
+/-- `ulong total = 0; while (values.Length != 0) { total += values[0]; values = values.Slice(1); }
+    return total;` over a read-only span of 64-bit words, as the C# compiler emits it. -/
+@[cil_code] def spanSum : CIL.Method := {
+  returnsValue := true, locals := [.i64 0], localKinds := [.word64],
+  parameterHomes := [(0, .span 8 false)]
+  code := [.const32 0, .convI8, .setLocal 0, .branch 15, .local 0, .local 1, .const32 0,
+    .memory (.spanItem 8), .load64, .add, .setLocal 0, .local 1, .const32 1,
+    .memory (.spanSlice false), .setLocal 1, .local 1, .memory .spanLength, .brnonzero 4,
+    .local 0, .ret] }
+
+/-- The program of `spanSum` alone. -/
+@[cil_code] def spanSumProgram : CIL.Program := [spanSum]
+
+/-- The entered frame of `spanSum` over a valid read-only span of words. -/
+bind_entry spanSumEntry (memory : Memory) (view : SpanView) (wellFormed : memory.WellFormed)
+    (valid : view.validate memory = .ok ()) (width : view.width = 8)
+    (readOnly : view.writable = false) := spanSum
+  with [.bufferSpan view] from memory allocating wellFormed
+  simplifying [valid, width, readOnly]
+
+/-- The running total in its home and the unread suffix of the caller's span. -/
+abbrev SpanSumState (memory : Memory) (home : Reference) :=
+  FrameState [] memory [.word64, .span 8 false] (W64 × SpanSuffix memory 8 false)
+    (fun values => [.bytes .word64 home, .span 8 false (some values.2.view)])
+    fun values => [some (.i64 values.1), none]
+
+/-- The loop test, with the unread suffix's length on the stack. -/
+bind_cutpoint spanSumHeader (memory : Memory) (home : Reference)
+    (state : SpanSumState memory home) :=
+  spanSum matching (· matches .brnonzero _)
+  with spanSumEntry.frame memory state.values.2.view home,
+    [.scalar (.i32 (BitVec.ofNat 32 state.values.2.view.length))], state.memory
+
+/-- Each path stores the total before it loads the span again, and the loop tactics read the
+    span's validity at the stored memory from its `CheckedSpan` through the frame after the
+    store: the proof names no frame lemma or memory. -/
+theorem span_sum_by_default (view : SpanView) (values : List W64) : Ensures spanSumProgram 0
+    (fun args initial => args = [.bufferSpan view] ∧ initial.WellFormed ∧
+      view.validate initial = .ok () ∧ view.writable = false ∧ SpanContents initial view 8 values)
+    (fun _ _ _ results => results = [.scalar (.i64 values.sum)]) := by
+  rintro args initial ⟨rfl, wellFormed, valid, readOnly, contents⟩
+  have checked : CheckedSpan initial view 8 false values := ⟨valid, readOnly, contents⟩
+  obtain ⟨home, entered, setup, -, -, entryFrame⟩ :=
+    spanSumEntry.checked initial view wellFormed valid contents.elementWidth readOnly
+  refine invoke_loop_satisfies (by rfl) (by simp [cil_checked, valid]) setup
+    (spanSumHeader initial home) (fun state => state.values.1 + state.values.2.values.sum =
+      values.sum) (fun state => state.values.2.values.length) (fun start => ?_) ?_
+  · have entryFrame := entryFrame []
+    cil_loop_recurse start (0, ⟨view, values, checked⟩)
+    case invariant => simp
+  rintro ⟨⟨total, ⟨remainingView, remaining, remainingSpan⟩⟩, current, frame⟩ holds recurse
+  cases remaining with
+  | nil =>
+    cil_loop_finish
+    case postcondition => simpa using holds
+  | cons head tail =>
+    obtain ⟨item, -, found, element⟩ := (remainingSpan.within wellFormed frame).head (by decide)
+    obtain ⟨sliced, cut, next⟩ := remainingSpan.tail
+    cil_loop_recurse recurse (total + head, ⟨sliced, tail, next⟩)
+    case invariant => simpa [BitVec.add_assoc] using holds
+    case measure => simp
+
+/-- info: 'Tests.LoopFrames.StoredSpan.span_sum_by_default' depends on axioms: [propext,
+ Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+#print axioms span_sum_by_default
+
+end Tests.LoopFrames.StoredSpan

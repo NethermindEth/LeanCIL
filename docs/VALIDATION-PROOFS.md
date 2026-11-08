@@ -171,7 +171,9 @@ signature through `bind_method` is entered over its body name, cut with the bind
 to the extracted method. The caller-fact lemmas carry a formed reference, an `Unsafe.Add` result and a
 span's validity and slice from the caller's memory to a frame's, and reject a fact about another
 memory; a slice of a span apart from an entry stays apart, and a stored word extends a filled run
-only right after it, so a word past the next one is refused.
+only right after it, so a word past the next one is refused. A span fold that stores its total
+before each load of the span steps through `cil_loop_recurse` alone, so the span's validity
+reaches the memory a word local's store produces.
 
 `Tests.LoopDiagnostics` proves a loop over a struct local that calls a method, passing no facts to
 the loop tactics: the gathered frame facts read the struct's fields by value and by address, and

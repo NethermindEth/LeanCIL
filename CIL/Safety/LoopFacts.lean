@@ -377,50 +377,54 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
       else if values.isAppOfArity ``List.cons 3 then
         candidates := candidates.push
           (`spanLength, applied `CheckedSpan.length_cons #[fact], subject, #[], #[])
+      -- A frame's memory may be one only a kept step produces, such as a local store's.
       for (frame, frameType) in typed do
         unless frameType.isAppOfArity `CIL.Safety.LoopFrame 6 &&
-          frameType.getArg! 1 == arguments[0]! && isLive (frameType.getArg! 2) do continue
+          frameType.getArg! 1 == arguments[0]! do continue
         for (formed, formedType) in typed do
           unless formedType.isAppOfArity ``Memory.WellFormed 1 &&
             formedType.appArg! == arguments[0]! do continue
           candidates := candidates.push (`spanFacts,
             applied `CheckedSpan.valid_within #[fact, named formed, named frame],
-            variables #[frameType.getArg! 2, arguments[1]!], #[], #[])
+            variables #[frameType.getArg! 2, arguments[1]!], #[frameType.getArg! 2], #[])
     -- A reference check or address, or a caller fact a frame carries to its own memory. The
     -- caller's memory can be live too, since a frame's activation names its watermark.
     let hole : Term ← `(_)
-    let carriers (memory : Expr) : Array (LocalDecl × LocalDecl) := Id.run do
+    -- Each frame from `memory` with its well-formedness, and the frame's memory, which is kept
+    -- once a state holds it or a kept step, such as a local store, produces it.
+    let carriers (memory : Expr) : Array (LocalDecl × LocalDecl × Expr) := Id.run do
       let mut found := #[]
       for (frame, frameType) in typed do
         unless frameType.isAppOfArity `CIL.Safety.LoopFrame 6 && frameType.getArg! 1 == memory &&
-          frameType.getArg! 2 != memory && isLive (frameType.getArg! 2) do continue
+          frameType.getArg! 2 != memory do continue
         for (formed, formedType) in typed do
           if formedType.isAppOfArity ``Memory.WellFormed 1 && formedType.appArg! == memory then
-            found := found.push (frame, formed)
+            found := found.push (frame, formed, frameType.getArg! 2)
       return found
-    let formTerms (memory : Expr) (proof : Term) : Array Term :=
-      (if isLive memory then #[proof] else #[]) ++ (carriers memory).map fun (frame, formed) =>
-        applied `LoopFrame.caller_form #[named frame, named formed, proof]
+    let formTerms (memory : Expr) (proof : Term) : Array (Term × Array Expr) :=
+      (if isLive memory then #[(proof, #[])] else #[]) ++
+        (carriers memory).map fun (frame, formed, framed) =>
+          (applied `LoopFrame.caller_form #[named frame, named formed, proof], #[framed])
     if let some (_, checked, _) := type.eq? then
       if checked.isAppOfArity `CIL.Safety.access 5 then
-        for proof in formTerms (checked.getArg! 0) (applied `access_reference_valid
+        for (proof, memories) in formTerms (checked.getArg! 0) (applied `access_reference_valid
             #[hole, hole, hole, hole, hole, fact]) do
-          candidates := candidates.push (`referenceFact, proof, #[], #[], #[])
+          candidates := candidates.push (`referenceFact, proof, #[], memories, #[])
     if let some (carry, memory, formedResult) ← loopCallerFact? type then
       -- An `Unsafe.Add` result forms; a span element's load needs no `form` of its own.
       if formedResult.isSome && (type.consumeMData.eq?.any fun (_, lhs, _) =>
           lhs.isAppOf ``CIL.Safety.add) then
-        for proof in formTerms memory (applied `add_formed #[fact]) do
-          candidates := candidates.push (`referenceFact, proof, #[], #[], #[])
+        for (proof, memories) in formTerms memory (applied `add_formed #[fact]) do
+          candidates := candidates.push (`referenceFact, proof, #[], memories, #[])
       -- A span fact is carried only for a span the goal names; each produces its result.
       if let some (_, lhs, rhs) := type.consumeMData.eq? then
         let subject := if formedResult.isSome then #[]
           else (variables lhs.getAppArgs).filter (· != memory.fvarId!)
         -- A span's validity stays with every step, since loading a span local reads it.
         let base := if carry == `LoopFrame.caller_valid then `callerFact else `referenceFact
-        for (frame, formed) in carriers memory do
+        for (frame, formed, framed) in carriers memory do
           candidates := candidates.push (base,
-            applied carry #[named frame, named formed, fact], subject, #[], variables #[rhs])
+            applied carry #[named frame, named formed, fact], subject, #[framed], variables #[rhs])
     if type.isAppOfArity `CIL.Safety.SpanContents 4 then
       candidates := candidates.push (`elementWidth, applied `SpanContents.elementWidth #[fact],
         variables #[arguments[1]!], #[], #[])
