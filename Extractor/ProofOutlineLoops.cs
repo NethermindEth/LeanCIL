@@ -91,7 +91,7 @@ internal static partial class ProofOutline
         Names names)
     {
         readonly MethodDefinition method = extraction.Methods[0];
-        readonly ClassViews views = new(extraction);
+        readonly FieldViews views = new(extraction);
         readonly List<Slot> slots = [];
         readonly List<Component> components = [];
         readonly Dictionary<int, string> callees = [];

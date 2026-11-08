@@ -8,7 +8,7 @@ namespace Nethermind.LeanCIL;
 internal static class LeanEmitter
 {
     internal readonly record struct Emission(string Source, string[] LayoutIdentities,
-        TemplateEmitter.Method[] Templates);
+        TemplateEmitter.Method[] Templates, ClassViews.View[] Views);
 
     internal static string? Narrow(TypeReference type) => EnumTypes.Storage(type).FullName switch
     {
@@ -324,7 +324,8 @@ internal static class LeanEmitter
         lean.AppendLine("  exact Extraction.MethodsChecked.nil");
         for (int n = 0; n < methods.Length; n++)
             lean.AppendLine($"@[cil_code] theorem lookup{n} : program[{n}]? = some method{n} := rfl");
-        var views = ClassViews.Emit(fieldAccesses);
+        var classViews = ClassViews.Views(fieldAccesses);
+        var views = ClassViews.Emit(fieldAccesses, classViews);
         if (views.Length > 0)
         {
             lean.Append(views);
@@ -333,6 +334,6 @@ internal static class LeanEmitter
                 StringComparison.Ordinal) + imported.Length);
         }
         lean.AppendLine("end Extracted");
-        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray());
+        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), classViews);
     }
 }

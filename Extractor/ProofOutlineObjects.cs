@@ -8,36 +8,23 @@ namespace Nethermind.LeanCIL;
 internal static partial class ProofOutline
 {
     /// <summary>A field an extraction names, as `Path.Name`; a reference field has no width.</summary>
-    sealed record ViewField(string Path, string Name, int? Width, int Offset, bool Stored)
+    sealed record ViewField(string Path, string Name, int? Width, int Offset, bool Stored, int[] Loaders,
+        int[] Storers)
     {
         internal string Lean => Path + "." + Name;
     }
 
     /// <summary>The fields an extraction's `Extracted.Classes` names, by the full name of their class, and whether
     /// any of its methods stores each.</summary>
-    sealed class ClassViews
+    sealed class FieldViews
     {
         readonly Dictionary<string, ViewField[]> classes = new(StringComparer.Ordinal);
 
-        internal ClassViews(Extraction extraction)
+        internal FieldViews(Extraction extraction)
         {
-            var stores = extraction.Emitted.SelectMany(method => method.Ops)
-                .Select(op => FieldStore().Match(op)).Where(match => match.Success)
-                .Select(match => (Owner: match.Groups["owner"].Value, Offset: int.Parse(match.Groups["offset"].Value)))
-                .ToHashSet();
-            foreach (Match view in ClassBlock().Matches(extraction.Source))
-            {
-                var path = view.Groups["path"].Value;
-                var owner = view.Groups["type"].Value;
-                classes[view.Groups["name"].Value] = ViewDefinition().Matches(view.Groups["body"].Value)
-                    .Select(field =>
-                    {
-                        var offset = int.Parse(field.Groups["offset"].Value);
-                        return new ViewField(path, field.Groups["field"].Value,
-                            field.Groups["width"].Success ? int.Parse(field.Groups["width"].Value) : null, offset,
-                            stores.Contains((owner, offset)));
-                    }).ToArray();
-            }
+            foreach (var view in extraction.Views)
+                classes[view.FullName] = [.. view.Fields.Select(field => new ViewField(view.Path, field.Lean,
+                    field.Width, field.Offset, field.Storers.Length > 0, field.Loaders, field.Storers))];
         }
 
         /// <summary>The named fields of an instance of `type`: its class's and its bases', nearest first.</summary>
@@ -45,19 +32,6 @@ internal static partial class ProofOutline
             [.. new[] { type }.Concat(ObjectTypes.Bases(type))
                 .SelectMany(owner => classes.GetValueOrDefault(owner.FullName) ?? [])];
     }
-
-    [GeneratedRegex(@"\A\.memory \(\.(?:setObjectField|setObjectReferenceField) \((?<owner>.*)\) (?<offset>\d+)" +
-        @"(?: \d+)?\)\z")]
-    private static partial Regex FieldStore();
-
-    [GeneratedRegex(@"^-- The fields of `(?<name>[^`]+)` this extraction's methods load or store\.\r?\n" +
-        @"namespace (?<path>\S+)\r?\n@\[reducible\] def type : Extraction\.TypeExpr := (?<type>.*?)\r?\n" +
-        @"(?<body>.*?)^end \k<path>\r?$", RegexOptions.Multiline | RegexOptions.Singleline)]
-    private static partial Regex ClassBlock();
-
-    [GeneratedRegex(@"^@\[reducible\] def (?<field>\S+) : Safety\.(?:WordField (?<width>\d+)|ReferenceField) := " +
-        @"⟨type, (?<offset>\d+)⟩\r?$", RegexOptions.Multiline)]
-    private static partial Regex ViewDefinition();
 
     /// <summary>The premise an object argument gives each named field: `Owned` when some method stores it.</summary>
     static string FieldPremise(ViewField field, string memory, string name) =>
@@ -102,7 +76,7 @@ internal static partial class ProofOutline
     /// <summary>A straight-line body as the facts that step it: field loads and stores of the objects it reaches,
     /// calls through their callees' contracts, locals and null tests of objects; null with the reason when it
     /// does more.</summary>
-    sealed class ObjectWalk(Specification spec, string[] ops, ClassViews views, Func<int, Callee?> callees)
+    sealed class ObjectWalk(Specification spec, string[] ops, FieldViews views, Func<int, Callee?> callees)
     {
         internal string? Stopped { get; private set; }
         internal string? Returned { get; private set; }
@@ -220,12 +194,11 @@ internal static partial class ProofOutline
                     if (Pop() is not Word word) return Stop($"`{op}` on a value that is not a word");
                     stack.Add(new Word(null, op.StartsWith(".conv", StringComparison.Ordinal) ? 4 : word.Width));
                 }
-                else if ((match = Regex.Match(op,
-                    @"\A\.memory \(\.objectField \(.*\) (\d+) (\d+) (true|false)\)\z")).Success)
+                else if (ClassViews.Decode(op) is { Store: false, Reference: false } load)
                 {
-                    if (Pop() is not Instance instance || Field(instance, match) is not { } field)
+                    if (Pop() is not Instance instance || Field(instance, load) is not { } field)
                         return Stop("a field load of an object the outline cannot name");
-                    var signed = match.Groups[3].Value == "true";
+                    var signed = load.Signed;
                     Steps.Add(new Access(instance.Object, field, AccessKind.Load, signed, stores));
                     var term = $"({field.Lean}.of {Memory(stores)} {instance.Object.Name})";
                     stack.Add(field.Width switch
@@ -234,10 +207,10 @@ internal static partial class ProofOutline
                         _ => new Word(term, field.Width!.Value)
                     });
                 }
-                else if ((match = Regex.Match(op, @"\A\.memory \(\.setObjectField \(.*\) (\d+) (\d+)\)\z")).Success)
+                else if (ClassViews.Decode(op) is { Store: true, Reference: false } store)
                 {
                     var value = Pop();
-                    if (Pop() is not Instance instance || Field(instance, match) is not { } field)
+                    if (Pop() is not Instance instance || Field(instance, store) is not { } field)
                         return Stop("a field store into an object the outline cannot name");
                     if (value is not Word word || word.Width != field.Width)
                         return Stop($"a store into `{field.Lean}` of a value of another width, which the field " +
@@ -249,9 +222,9 @@ internal static partial class ProofOutline
                             "cannot name");
                     Steps.Add(new Access(instance.Object, field, AccessKind.Store, false, stores++, word.Term));
                 }
-                else if ((match = Regex.Match(op, @"\A\.memory \(\.objectReferenceField \(.*\) (\d+)\)\z")).Success)
+                else if (ClassViews.Decode(op) is { Store: false, Reference: true } referenceLoad)
                 {
-                    if (Pop() is not Instance instance || ReferenceField(instance, match) is not { } field)
+                    if (Pop() is not Instance instance || Field(instance, referenceLoad) is not { } field)
                         return Stop("a reference field load of an object the outline cannot name");
                     if (stores > 0)
                         return Stop($"a load of `{field.Lean}` after a store, whose target the statement names " +
@@ -270,11 +243,10 @@ internal static partial class ProofOutline
                     Steps.Add(new Access(instance.Object, field, AccessKind.Load, false, stores, Target: reached));
                     stack.Add(new Instance(reached));
                 }
-                else if ((match = Regex.Match(op,
-                    @"\A\.memory \(\.setObjectReferenceField \(.*\) (\d+)\)\z")).Success)
+                else if (ClassViews.Decode(op) is { Store: true, Reference: true } referenceStore)
                 {
                     var value = Pop();
-                    if (Pop() is not Instance instance || ReferenceField(instance, match) is not { } field)
+                    if (Pop() is not Instance instance || Field(instance, referenceStore) is not { } field)
                         return Stop("a reference field store into an object the outline cannot name");
                     if (value is not Instance target)
                         return Stop($"a store into `{field.Lean}` of null, which `owned.store` does not take");
@@ -375,7 +347,7 @@ internal static partial class ProofOutline
             var names = callee.Spec.Parameters.Select((parameter, position) => (parameter.Name,
                 Value: arguments[position] switch
                 {
-                    Word word => word.Term,
+                    Word { Term: { } named } => named,
                     Instance instance => instance.Object.Name,
                     _ => parameter.Name
                 })).Append(("initial", memory)).ToDictionary(pair => pair.Item1, pair => pair.Item2);
@@ -385,11 +357,8 @@ internal static partial class ProofOutline
 
         internal static string Memory(int stores) => stores == 0 ? "initial" : $"stored{stores}";
 
-        static ViewField? Field(Instance instance, Match match) => instance.Object.Fields.FirstOrDefault(field =>
-            field.Offset == int.Parse(match.Groups[1].Value) && field.Width == int.Parse(match.Groups[2].Value));
-
-        static ViewField? ReferenceField(Instance instance, Match match) => instance.Object.Fields
-            .FirstOrDefault(field => field.Width is null && field.Offset == int.Parse(match.Groups[1].Value));
+        static ViewField? Field(Instance instance, ClassViews.FieldOperation operation) => instance.Object.Fields
+            .FirstOrDefault(field => field.Offset == operation.Offset && field.Width == operation.Width);
 
         /// <summary>The statement's facts about the reached objects: each is live, a target is what its field
         /// holds, and each field the body touches is `Owned` when it or a callee stores it and `Readable`
@@ -428,7 +397,7 @@ internal static partial class ProofOutline
 
     /// <summary>The contract of a callee whose body the walk steps with no call of its own, no reference field
     /// load and at most one store: `pre` its facts, `post` its store and its result, and its proof.</summary>
-    static Callee? Summarize(Extraction extraction, int index, string name, ClassViews views)
+    static Callee? Summarize(Extraction extraction, int index, string name, FieldViews views)
     {
         var method = extraction.Methods[index];
         try

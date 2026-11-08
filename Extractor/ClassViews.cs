@@ -9,58 +9,107 @@ namespace Nethermind.LeanCIL;
 // instead of an owner and offset. Each name is checked in Lean against an emitted field operation.
 internal static partial class ClassViews
 {
+    /// <summary>A class instance field operation as emitted: a load or store of a word of `Width` bytes, or of
+    /// an object reference when `Width` is null, at model offset `Offset` of an instance of `Owner`.</summary>
+    internal sealed record FieldOperation(bool Store, string Owner, int Offset, int? Width, bool Signed)
+    {
+        internal bool Reference => Width is null;
+    }
+
     /// <summary>One field access: the method and pc whose emitted operation loads or stores the field.</summary>
-    internal sealed record Access(FieldDefinition Field, TypeReference Owner, int Method, int Pc, string Op);
+    internal sealed record Access(FieldDefinition Field, TypeReference Owner, int Method, int Pc,
+        FieldOperation Operation);
+
+    /// <summary>A named field of a class: where it lives, and which methods load and store it.</summary>
+    internal sealed record Field(string Name, int Offset, int? Width, int[] Loaders, int[] Storers)
+    {
+        /// <summary>The name as a Lean identifier.</summary>
+        internal string Lean => Identifier(Name);
+    }
+
+    /// <summary>A class's `Extracted.Classes` namespace: its full name, Lean path and named fields.</summary>
+    internal sealed record View(string FullName, string Path, string Type, Field[] Fields);
+
+    /// <summary>The field operation an emitted op performs, or none; every reader of field ops decodes here.
+    /// </summary>
+    internal static FieldOperation? Decode(string op)
+    {
+        var match = FieldOperationPattern().Match(op);
+        if (!match.Success) return null;
+        var kind = match.Groups["kind"].Value;
+        return new(kind.StartsWith("set", StringComparison.Ordinal), match.Groups["owner"].Value,
+            int.Parse(match.Groups["offset"].Value),
+            match.Groups["width"].Success ? int.Parse(match.Groups["width"].Value) : null,
+            match.Groups["signed"].Value == "true");
+    }
 
     /// <summary>The access a <c>ldfld</c> or <c>stfld</c> on a class instance field emitted, or none.</summary>
     internal static Access? Of(Instruction instruction, int method, int pc, string op) =>
         instruction is { OpCode.Code: Code.Ldfld or Code.Stfld, Operand: FieldReference field } &&
-        FieldOperation().IsMatch(op) && field.Resolve() is { } resolved
-            ? new(resolved, field.DeclaringType, method, pc, op) : null;
+        Decode(op) is { } operation && field.Resolve() is { } resolved
+            ? new(resolved, field.DeclaringType, method, pc, operation) : null;
 
-    /// <summary>
-    /// The `Extracted.Classes` namespace: per class, its type and one descriptor per accessed field with a theorem
-    /// that the descriptor is the operand of the access it names. Empty when no method accesses a class field.
+    /// <summary>The views of the classes whose fields the accesses touch, each field named once per class.
     /// </summary>
-    internal static string Emit(IEnumerable<Access> accesses)
+    internal static View[] Views(IEnumerable<Access> accesses)
     {
         var classes = accesses.GroupBy(access => access.Owner.FullName, StringComparer.Ordinal)
             .OrderBy(group => group.Key, StringComparer.Ordinal).ToArray();
-        if (classes.Length == 0) return "";
         var shortNames = classes.GroupBy(group => ShortName(group.First().Owner), StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
-        var lean = new StringBuilder();
-        lean.AppendLine("namespace Classes");
-        foreach (var owner in classes)
+        return [.. classes.Select(owner =>
         {
             var type = owner.First().Owner;
             var shortName = ShortName(type);
             var path = shortNames[shortName] == 1 ? Identifier(shortName)
                 : string.Join('.', type.FullName.Split('.', '/').Select(Identifier));
-            lean.AppendLine($"-- The fields of `{type.FullName}` this extraction's methods load or store.");
-            lean.AppendLine($"namespace {path}");
-            lean.AppendLine($"@[reducible] def type : Extraction.TypeExpr := {GenericEvidence.ObjectType(type)}");
             var used = new HashSet<string>(["type"], StringComparer.Ordinal);
-            foreach (var field in owner.GroupBy(access => access.Field)
-                .Select(group => group.OrderBy(access => access.Method).ThenBy(access => access.Pc).First())
-                .OrderBy(access => ObjectTypes.FieldIndex(type, access.Field)))
+            var fields = owner.GroupBy(access => access.Field)
+                .OrderBy(group => ObjectTypes.FieldIndex(type, group.Key))
+                .Select(group =>
+                {
+                    var wanted = FieldName(group.Key);
+                    var name = wanted;
+                    for (var suffix = 1; !used.Add(name); suffix++) name = wanted + suffix;
+                    var operation = group.First().Operation;
+                    int[] Methods(bool store) => [.. group.Where(access => access.Operation.Store == store)
+                        .Select(access => access.Method).Distinct().Order()];
+                    return new Field(name, operation.Offset, operation.Width, Methods(false),
+                        Methods(true));
+                }).ToArray();
+            return new View(type.FullName, path, GenericEvidence.ObjectType(type), fields);
+        })];
+    }
+
+    /// <summary>
+    /// The `Extracted.Classes` namespace: per class, its type and one descriptor per accessed field with a theorem
+    /// that the descriptor is the operand of the access it names. Empty when no method accesses a class field.
+    /// </summary>
+    internal static string Emit(IEnumerable<Access> accesses, View[] views)
+    {
+        if (views.Length == 0) return "";
+        var first = accesses.GroupBy(access => (access.Owner.FullName, access.Operation.Offset))
+            .ToDictionary(group => group.Key,
+                group => group.OrderBy(access => access.Method).ThenBy(access => access.Pc).First());
+        var lean = new StringBuilder();
+        lean.AppendLine("namespace Classes");
+        foreach (var view in views)
+        {
+            lean.AppendLine($"-- The fields of `{view.FullName}` this extraction's methods load or store.");
+            lean.AppendLine($"namespace {view.Path}");
+            lean.AppendLine($"@[reducible] def type : Extraction.TypeExpr := {view.Type}");
+            foreach (var field in view.Fields)
             {
-                var wanted = FieldName(field.Field);
-                var name = wanted;
-                for (var suffix = 1; !used.Add(name); suffix++) name = wanted + suffix;
-                var operation = FieldOperation().Match(field.Op);
-                var offset = operation.Groups["offset"].Value;
-                var reference = operation.Groups["kind"].Value.Contains("Reference", StringComparison.Ordinal);
-                var descriptor = reference ? "Safety.ReferenceField"
-                    : $"Safety.WordField {operation.Groups["width"].Value}";
-                lean.AppendLine($"/-- `{field.Field.FieldType.FullName} {type.FullName}::{field.Field.Name}`, " +
-                    $"at model offset {offset}. -/");
-                lean.AppendLine($"@[reducible] def {Identifier(name)} : {descriptor} := ⟨type, {offset}⟩");
-                lean.AppendLine($"theorem {Identifier(name + "_accessed")} : " +
-                    $"(method{field.Method}.code[{field.Pc}]?).any {Identifier(name)}.accessedBy = true := " +
+                var access = first[(view.FullName, field.Offset)];
+                var descriptor = field.Width is { } width ? $"Safety.WordField {width}" : "Safety.ReferenceField";
+                lean.AppendLine($"/-- `{access.Field.FieldType.FullName} {view.FullName}::{access.Field.Name}`, " +
+                    $"at model offset {field.Offset}. -/");
+                lean.AppendLine($"@[reducible] def {field.Lean} : {descriptor} := ⟨type, {field.Offset}⟩");
+                lean.AppendLine($"theorem {Identifier(field.Name + "_accessed")} : " +
+                    $"(method{access.Method}.code[{access.Pc}]?).any {field.Lean}.accessedBy = true := " +
                     LeanEmitter.Decide);
             }
-            lean.AppendLine($"end {path}");
+            lean.AppendLine($"end {view.Path}");
         }
         lean.AppendLine("end Classes");
         return lean.ToString();
@@ -92,6 +141,6 @@ internal static partial class ClassViews
     private static partial Regex LeanIdentifier();
 
     [GeneratedRegex(@"\A\.memory \(\.(?<kind>objectField|setObjectField|objectReferenceField|" +
-        @"setObjectReferenceField) \(.*\) (?<offset>\d+)(?: (?<width>\d+))?(?: (true|false))?\)\z")]
-    private static partial Regex FieldOperation();
+        @"setObjectReferenceField) \((?<owner>.*)\) (?<offset>\d+)(?: (?<width>\d+))?(?: (?<signed>true|false))?\)\z")]
+    private static partial Regex FieldOperationPattern();
 }

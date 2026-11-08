@@ -49,7 +49,7 @@ internal static partial class ProofOutline
         var method = extraction.Methods[0];
         var emitted = extraction.Emitted[0];
         var names = new Names();
-        var views = new ClassViews(extraction);
+        var views = new FieldViews(extraction);
         var receiver = method.HasThis ? new[] { Receiver(method, names, views) } : [];
         var parameters = receiver.Concat(method.Parameters.Select(parameter =>
             Describe(method, parameter, names, views))).ToArray();
@@ -59,8 +59,7 @@ internal static partial class ProofOutline
         var body = new Body(emitted.Ops);
         var lean = new Writer();
         var loops = body.Loops();
-        var spec = new Specification(method, parameters, result, symbolic,
-            Regex.IsMatch(extraction.Source, @"^namespace Classes\r?$", RegexOptions.Multiline));
+        var spec = new Specification(method, parameters, result, symbolic, extraction.Views.Length > 0);
         string source;
         if (loops.Count == 0)
             source = StraightLine(extraction, spec, body, lean);
@@ -79,7 +78,7 @@ internal static partial class ProofOutline
         new("new-proof cannot outline this method: " + message + ".");
 
     /// <summary>`this` of an instance method, named for its class.</summary>
-    static Parameter Receiver(MethodDefinition method, Names names, ClassViews views)
+    static Parameter Receiver(MethodDefinition method, Names names, FieldViews views)
     {
         var type = method.DeclaringType;
         if (!ObjectTypes.Is(type))
@@ -88,10 +87,10 @@ internal static partial class ProofOutline
         return Instance(names.Claim(char.ToLowerInvariant(type.Name[0]) + type.Name[1..], "receiver"), type, views);
     }
 
-    static Parameter Instance(string name, TypeReference type, ClassViews views) =>
+    static Parameter Instance(string name, TypeReference type, FieldViews views) =>
         new(name, ParameterShape.Object, "Reference", 8) { Fields = views.Of(type) };
 
-    static Parameter Describe(MethodDefinition method, ParameterDefinition parameter, Names names, ClassViews views)
+    static Parameter Describe(MethodDefinition method, ParameterDefinition parameter, Names names, FieldViews views)
     {
         var type = parameter.ParameterType;
         var name = names.Claim(parameter.Name, "argument" + parameter.Index);
@@ -313,7 +312,7 @@ internal static partial class ProofOutline
     /// before it returns, otherwise one hole naming where the walk stopped.</summary>
     static string ObjectStraightLine(Extraction extraction, Specification spec, Body body, Writer lean)
     {
-        var views = new ClassViews(extraction);
+        var views = new FieldViews(extraction);
         var names = new Names();
         foreach (var parameter in spec.Parameters) names.Claim(parameter.Name, parameter.Name);
         var summaries = new Dictionary<int, Callee?>();
