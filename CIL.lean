@@ -94,6 +94,7 @@ import CIL.Safety.ImmutableMemory
 import CIL.Safety.InstructionMemory
 import CIL.Safety.HeapObjects
 import CIL.Safety.HeapObjectFacts
+import CIL.Safety.ClassCatalog
 import CIL.Safety.ObjectFraming
 import CIL.Safety.ObjectFields
 import CIL.Safety.InstructionMemoryLemmas
