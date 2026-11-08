@@ -70,11 +70,12 @@ internal static partial class ProofOutline
 
     enum ElementKind { Length, Load, Store }
 
-    /// <summary>An access of an array argument: its length, or a load or store of the element at `Index`, a `Nat`
-    /// term, whose fact is `Slot`. A store writes `Value`: an object the body reaches as `Target`, null, or a
-    /// reference outside the model whose formation `Formed` states.</summary>
-    sealed record ElementAccess(string Array, ElementKind Kind, string? Index = null, string? Value = null,
-        Reached? Target = null, string? Formed = null, string? Slot = null)
+    /// <summary>An access of an array argument after `Stores` earlier writes: its length, or a load or store of the
+    /// element at `Index`, a `Nat` term, whose fact is `Slot`. A store writes and a load pushes `Value`: an object
+    /// the body reaches as `Target`, null, or a reference outside the model whose formation in the caller's memory
+    /// `Formed` states. A `Reread` load reads back what an earlier store on its path wrote.</summary>
+    sealed record ElementAccess(string Array, ElementKind Kind, int Stores, string? Index = null,
+        string? Value = null, Reached? Target = null, string? Formed = null, string? Slot = null, bool Reread = false)
     {
         /// <summary>The premise that the stored object passes the covariance check of the array's element class.
         /// </summary>
@@ -134,9 +135,6 @@ internal static partial class ProofOutline
         /// <summary>The value stored into each element fact, shared by every path.</summary>
         Dictionary<string, string> Stored { get; init; } = [];
 
-        /// <summary>An element store came first, after which the walk takes no further access or call, since
-        /// the facts of other fields and elements are not carried across it.</summary>
-        bool elementStored;
         int stores;
         int calls;
         int splits;
@@ -189,8 +187,7 @@ internal static partial class ProofOutline
                     var (holds, fails) = takenWhenTrue ? (target, pc + 1) : (pc + 1, target);
                     var walks = new[] { holds, fails }.Select(next => (Next: next, Walk: new ObjectWalk(spec, ops,
                         views, callees, linear) { Objects = Objects, Slots = Slots, Stored = Stored, stores = stores,
-                        calls = calls, splits = splits + 1, elementStored = elementStored,
-                        previous = [.. PathSteps] })).ToArray();
+                        calls = calls, splits = splits + 1, previous = [.. PathSteps] })).ToArray();
                     Steps.Add(new Split($"branch{splits + 1}", condition, (location(holds), walks[0].Walk),
                         (location(fails), walks[1].Walk)));
                     foreach (var side in walks)
@@ -202,9 +199,6 @@ internal static partial class ProofOutline
                     return true;
                 }
                 if (!visited.Add(pc)) return Stop("a backward jump");
-                if (elementStored && (ClassViews.Decode(op) is not null || op.StartsWith(".memory .referenceArray",
-                    StringComparison.Ordinal) || op.StartsWith(".call", StringComparison.Ordinal)))
-                    return Stop($"`{op}` after an element store, whose facts the outline does not carry across it");
                 if ((match = Regex.Match(op, @"\A\.arg (\d+)\z")).Success)
                 {
                     var parameter = spec.Parameters[int.Parse(match.Groups[1].Value)];
@@ -392,7 +386,7 @@ internal static partial class ProofOutline
                     if (instance.Object.Holder is not null)
                         return Stop($"a store into `{field.Lean}` of an object a field holds, which the footprint " +
                             "cannot name");
-                    if (value is Opaque { } late && stores > 0) return Stop(Unformed(late));
+                    if (value is Opaque { } late && CallWrote) return Stop(Uncarried(late));
                     Access? stored = value switch
                     {
                         Instance target => new(instance.Object, field, AccessKind.Store, false, stores,
@@ -429,33 +423,51 @@ internal static partial class ProofOutline
                 else if (op == ".memory .referenceArrayLength")
                 {
                     if (Pop() is not ArrayArgument array) return Stop("`ldlen` of an array the outline cannot name");
-                    if (stores > 0) return Stop(Unwritten(op));
-                    Steps.Add(new ElementAccess(array.Name, ElementKind.Length));
+                    Steps.Add(new ElementAccess(array.Name, ElementKind.Length, stores));
                     stack.Add(new Word($"(BitVec.ofNat 64 {array.Name}Length)", 8));
                 }
                 else if (op == ".memory .referenceArrayLoad")
                 {
                     if (Pop() is not Word index || Pop() is not ArrayArgument array || Index(index) is not { } at)
                         return Stop("`ldelem.ref` of an array or index the outline cannot name");
-                    if (stores > 0) return Stop(Unwritten(op));
+                    if (Unseparated(array.Name, at) is { } reason) return Stop(reason);
                     var slot = Slot(array.Name, at);
-                    Steps.Add(new ElementAccess(array.Name, ElementKind.Load, at, Slot: slot));
-                    stack.Add(new Opaque($"(ReferenceArray.of initial {array.Name} {at})", slot + "Forms.formed"));
+                    // The element holds what this path last stored into it, or what it held in the caller's memory.
+                    if (PathSteps.OfType<ElementAccess>().LastOrDefault(access => access.Kind == ElementKind.Store &&
+                        access.Slot == slot) is { } written)
+                    {
+                        Item reread = written switch
+                        {
+                            { Target: { } target } => new Instance(target),
+                            { Value: ".null" } => new Null(),
+                            _ => new Opaque(written.Value!, written.Formed!)
+                        };
+                        if (reread is Opaque opaque && CallWrote) return Stop(Uncarried(opaque));
+                        Steps.Add(written with { Kind = ElementKind.Load, Stores = stores, Reread = true });
+                        stack.Add(reread);
+                        continue;
+                    }
+                    var held = new Opaque($"(ReferenceArray.of initial {array.Name} {at})", slot + "Forms.formed");
+                    if (CallWrote) return Stop(Uncarried(held));
+                    Steps.Add(new ElementAccess(array.Name, ElementKind.Load, stores, at, held.Term,
+                        Formed: held.Formed, Slot: slot));
+                    stack.Add(held);
                 }
                 else if (op == ".memory .referenceArrayStore")
                 {
                     var value = Pop();
                     if (Pop() is not Word index || Pop() is not ArrayArgument array || Index(index) is not { } at)
                         return Stop("`stelem.ref` into an array or at an index the outline cannot name");
-                    if (stores > 0) return Stop(Unwritten(op));
+                    if (Unseparated(array.Name, at) is { } reason) return Stop(reason);
+                    if (value is Opaque late && CallWrote) return Stop(Uncarried(late));
                     var slot = Slot(array.Name, at);
                     ElementAccess? stored = value switch
                     {
-                        Instance target => new(array.Name, ElementKind.Store, at, $"(.address {target.Object.Name})",
-                            target.Object, Slot: slot),
-                        Null => new(array.Name, ElementKind.Store, at, ".null", Slot: slot),
-                        Opaque opaque => new(array.Name, ElementKind.Store, at, opaque.Term, Formed: opaque.Formed,
-                            Slot: slot),
+                        Instance target => new(array.Name, ElementKind.Store, stores, at,
+                            $"(.address {target.Object.Name})", target.Object, Slot: slot),
+                        Null => new(array.Name, ElementKind.Store, stores, at, ".null", Slot: slot),
+                        Opaque opaque => new(array.Name, ElementKind.Store, stores, at, opaque.Term,
+                            Formed: opaque.Formed, Slot: slot),
                         _ => null
                     };
                     if (stored is null) return Stop("`stelem.ref` of a value the outline cannot name");
@@ -465,7 +477,6 @@ internal static partial class ProofOutline
                     Stored[slot] = stored.Value!;
                     Steps.Add(stored);
                     stores++;
-                    elementStored = true;
                 }
                 else if (op == ".nop") { }
                 else if (op == ".ret" || op.StartsWith(".ret (some ", StringComparison.Ordinal))
@@ -568,9 +579,10 @@ internal static partial class ProofOutline
                 {
                     Access { Kind: AccessKind.Store } access => access,
                     CallStep call => call.Writes,
+                    ElementAccess { Kind: ElementKind.Store } element => (object)element,
                     _ => null
-                }).OfType<Access>().LastOrDefault();
-                return last is { Target: { } stored } && last.Object == holder && last.Field == field
+                }).OfType<object>().LastOrDefault();
+                return last is Access { Target: { } stored } access && access.Object == holder && access.Field == field
                     ? (stored, $"held{stores}.2", false) : null;
             }
             var name = holder.Name + Capitalized(field.Name);
@@ -602,8 +614,30 @@ internal static partial class ProofOutline
         static string Unformed(Opaque opaque) =>
             $"a use of `{opaque.Term}` after a store, whose reference the statement forms only in the caller's memory";
 
-        static string Unwritten(string op) =>
-            $"`{op}` after a store, whose array facts the statement states only of the caller's memory";
+        /// <summary>A call on this path wrote memory, across which no reference outside the model is known to
+        /// form, since its contract keeps only allocations older than its caller's.</summary>
+        bool CallWrote => PathSteps.Any(step => step is CallStep { Writes: not null });
+
+        static string Uncarried(Opaque opaque) =>
+            $"a use of `{opaque.Term}` after a call that writes, across which the statement's formation of it " +
+            "does not carry";
+
+        /// <summary>Why the facts of element `index` of `array` do not carry across this path's element stores:
+        /// one into another array, which may be the same one, or one at an index not provably different.</summary>
+        string? Unseparated(string array, string index)
+        {
+            foreach (var store in PathSteps.OfType<ElementAccess>().Where(access => access.Kind == ElementKind.Store))
+            {
+                if (store.Array != array)
+                    return $"an access of `{array}` after a store into `{store.Array}`, which may be the same array";
+                if (store.Index != index && !(Numeral(store.Index!) && Numeral(index)))
+                    return $"an access of element `{index}` of `{array}` after a store into element `{store.Index}`, " +
+                        "which the statement cannot tell apart";
+            }
+            return null;
+        }
+
+        static bool Numeral(string index) => Regex.IsMatch(index, @"\A\d+\z");
 
         /// <summary>The element number a named int32 index selects, as the CLR reads it: unsigned.</summary>
         static string? Index(Word index) => index switch
@@ -698,7 +732,7 @@ internal static partial class ProofOutline
                     var owned = slot.Any(access => access.Kind == ElementKind.Store);
                     plan.Premises.Add((slot.Key,
                         $"ReferenceArray.{(owned ? "Owned" : "Readable")} initial {shape} {index}"));
-                    if (slot.Any(access => access.Kind == ElementKind.Load))
+                    if (slot.Any(access => access.Kind == ElementKind.Load && !access.Reread))
                         plan.Premises.Add((slot.Key + "Forms", $"ReferenceArray.Forms initial {array.Name} {index}"));
                     if (slot.FirstOrDefault(access => access.Storable is not null) is { } store)
                         plan.Premises.Add((store.Storable!,
@@ -867,18 +901,26 @@ internal static partial class ProofOutline
             foreach (var field in reached.Fields) known[(ObjectWalk.Fact(reached, field), 0)] =
                 ObjectWalk.Fact(reached, field);
         }
+        // A carried element fact also states what the element holds, starting from what it held in `initial`.
+        var elements = walk.Flattened.OfType<ElementAccess>().Where(access => access.Slot is not null).ToArray();
+        var owned = elements.Where(access => access.Kind == ElementKind.Store).Select(access => access.Slot!)
+            .ToHashSet();
+        foreach (var slot in elements.Select(access => access.Slot!).Distinct())
+            known[(slot + "At", 0)] = owned.Contains(slot) ? $"({slot}.holds)" : $"({slot}.reads)";
+        foreach (var array in spec.Arrays)
+            known[(array.Name + "Live", 0)] = walk.ArrayFact(array.Name) is var fact && fact == array.Name + "Live"
+                ? fact : fact + ".toLive";
         var facts = walk.Objects.Where(reached => reached.Holder is null)
             .Select(reached => reached.Name + "Live.formed")
             .Concat(spec.Arrays.Select(array => walk.ArrayFact(array.Name) + ".formed")).ToList();
-        new ObjectPath(lean, spec, walk.Owns, walk.ArrayFact, widen, returns, "  ", known, [], facts, [])
-            .Write(walk);
+        new ObjectPath(lean, spec, walk.Owns, owned, widen, returns, "  ", known, [], facts, []).Write(walk);
     }
 
     /// <summary>One path of an object body's proof from where its walk starts, `indent` deep: `known` names
     /// each fact in the memory after a number of writes, `stored` holds the writes so far, `facts` those not
     /// yet given to a step and `branches` the sides of the splits taken.</summary>
     sealed class ObjectPath(Writer lean, Specification spec, Func<Reached, ViewField, bool> owns,
-        Func<string, string> arrayFact, string widen, string? returns, string indent,
+        HashSet<string> ownedSlots, string widen, string? returns, string indent,
         Dictionary<(string Key, int Stores), string> known, List<object> stored, List<string> facts,
         List<string> branches)
     {
@@ -888,7 +930,11 @@ internal static partial class ProofOutline
         string FieldFact(Reached reached, ViewField field, int stores) =>
             Carry(ObjectWalk.Fact(reached, field), stores, (previous, level) =>
             {
-                // The walk takes no field access after an element store, so each earlier write is a field's.
+                // No object with a located field is an array, so an element store is apart from every field.
+                if (stored[level - 1] is ElementAccess element)
+                    return $"{previous}.after_confined framed{level} (ReferenceArray.apart_single (show " +
+                        $"{reached.Name}.allocation ≠ {element.Array}.allocation from " +
+                        $"{ArrayLive(element.Array, level - 1)}.field_ne {previous}.located rfl))";
                 var store = (Access)stored[level - 1];
                 if (store.Field != field)
                     return $"{previous}.after_confined framed{level} (apart_of_entries rfl)";
@@ -897,13 +943,59 @@ internal static partial class ProofOutline
                 return $"({previous}.across {Live(store.Object, level - 1)} framed{level} held{level}).1";
             });
 
+        /// <summary>An array argument's `Live` fact after `stores` writes, which keep every older allocation.
+        /// </summary>
+        string ArrayLive(string array, int stores) => Carry(array + "Live", stores, (previous, level) =>
+            $"{previous}.after_confined framed{level}");
+
+        /// <summary>What element fact `slot` of `array` holds after `stores` writes: `Holds` when the statement
+        /// owns it and `Reads` otherwise. The walk lets no element fact cross a store into another array or at an
+        /// index not provably different, nor a call that writes an element.</summary>
+        string ElementFact(string array, string slot, int stores) => Carry(slot + "At", stores, (previous, level) =>
+            stored[level - 1] switch
+            {
+                ElementAccess { Slot: var written } when written == slot => $"held{level}",
+                ElementAccess => $"{previous}.across_ne framed{level} (by decide)",
+                Access store => $"{previous}.after_confined framed{level} (ReferenceArray.apart_single (show " +
+                    $"{array}.allocation ≠ {store.Object.Name}.allocation from ({ArrayLive(array, level - 1)}" +
+                    $".field_ne {FieldFact(store.Object, store.Field, level - 1)}.located rfl).symm))",
+                _ => throw new InvalidOperationException($"no carry of `{slot}` across write {level}")
+            });
+
+        /// <summary>That write `level` keeps every allocation: a slot store's equation or a field write's.
+        /// </summary>
+        string Kept(int level) => stored[level - 1] is Access { Field.Width: not null }
+            ? $"(write_allocations _ _ _ _ _ written{level})" : $"(ReferenceArray.allocations_of_setSlot wrote{level})";
+
+        /// <summary>`formed`, the formation of a reference in `initial`, after `stores` writes; the walk lets
+        /// none cross a call that writes.</summary>
+        string FormedAt(string formed, int stores)
+        {
+            if (stores == 0 || formed == "rfl") return formed;
+            var key = formed.EndsWith(".formed", StringComparison.Ordinal) ? formed[..^".formed".Length] : formed;
+            known.TryAdd((key, 0), formed);
+            return Carry(key, stores, (previous, level) =>
+                $"(formObject_of_allocations {Kept(level)} _).trans {previous}");
+        }
+
+        /// <summary>A store's covariance premise after `stores` writes: an object of the model keeps its class
+        /// across any confined write, and any other reference across writes that keep every allocation.</summary>
+        string StorableAt(ElementAccess access, int stores)
+        {
+            known.TryAdd((access.Storable!, 0), access.Storable!);
+            return Carry(access.Storable!, stores, (previous, level) => access.Target is { } target
+                ? $"ReferenceArray.storableIn_after_confined {previous} framed{level} {Live(target, level - 1)}.old"
+                : $"(ReferenceArray.storableIn_of_allocations {Kept(level)} _ _).trans {previous}");
+        }
+
         string Carry(string key, int stores, Func<string, int, string> across)
         {
             if (known.TryGetValue((key, stores), out var name)) return name;
+            if (stores == 0) throw new InvalidOperationException($"no fact `{key}` in the caller's memory");
             var previous = Carry(key, stores - 1, across);
             var carried = across(previous, stores);
             name = key + stores;
-            lean.Line($"{indent}have {name} := {carried}");
+            lean.Wrapped($"{indent}have {name} :=", carried.Split(' '), "");
             known[(key, stores)] = name;
             return name;
         }
@@ -925,7 +1017,7 @@ internal static partial class ProofOutline
                         (split.Fails.Where, split.Fails.Walk, "fails") })
                     {
                         lean.Line($"{indent}· -- `{split.Fact}` {outcome}: continues at {where}");
-                        new ObjectPath(lean, spec, owns, arrayFact, widen, returns, indent + "  ", new(known),
+                        new ObjectPath(lean, spec, owns, ownedSlots, widen, returns, indent + "  ", new(known),
                             [.. stored], [.. facts, split.Fact], [.. branches, $"`{split.Fact}` {outcome}"])
                             .Write(side);
                     }
@@ -946,37 +1038,57 @@ internal static partial class ProofOutline
             Return(walk);
         }
 
-        /// <summary>An array argument's length or element access, before any other write.</summary>
+        /// <summary>An array argument's length or element access, with its facts carried across the writes
+        /// before it.</summary>
         void Element(ElementAccess access)
         {
-            var slot = access.Slot;
+            var slot = access.Slot!;
+            var level = access.Stores;
+            // The array argument is pushed again in the memory the access runs in.
+            if (level > 0) Add(ArrayLive(access.Array, level) + ".formed");
             if (access.Kind == ElementKind.Length)
             {
-                Add(arrayFact(access.Array) + ".located");
+                Add(ArrayLive(access.Array, level) + ".located");
                 return;
             }
+            // What the access pushes or stores must form in the memory it runs in.
+            var formed = access switch
+            {
+                { Target: { } target } => Live(target, level) + ".formed",
+                { Value: ".null" } => "rfl",
+                _ => FormedAt(access.Formed!, level)
+            };
             if (access.Kind == ElementKind.Load)
             {
-                // The load pushes the element as it is, so later tests and stores need it to form.
-                Add($"({slot}.facts_forms {slot}Forms).1");
-                Add($"({slot}.facts_forms {slot}Forms).2");
-                Add(slot + "Forms.formed");
+                if (level == 0)
+                {
+                    Add($"({slot}.facts_forms {slot}Forms).1");
+                    Add($"({slot}.facts_forms {slot}Forms).2");
+                }
+                else
+                {
+                    var fact = ElementFact(access.Array, slot, level);
+                    var reads = ownedSlots.Contains(slot) ? fact + ".reads" : fact;
+                    Add($"({reads}.facts {formed}).1");
+                    Add($"({reads}.facts {formed}).2");
+                }
+                Add(formed);
                 return;
             }
-            var number = stored.Count + 1;
+            var number = level + 1;
+            var owned = level == 0 ? slot : ElementFact(access.Array, slot, level) + ".1";
             var obtained = access switch
             {
-                { Target: { } target } => $"{slot}.store {Live(target, 0)} {access.Storable}",
-                { Value: ".null" } => $"{slot}.store_null",
-                _ => $"{slot}.store_formed {access.Formed} {access.Storable}"
+                { Target: not null } => $"{owned}.store {Live(access.Target, level)} {StorableAt(access, level)}",
+                { Value: ".null" } => $"{owned}.store_null",
+                _ => $"{owned}.store_formed {formed} {StorableAt(access, level)}"
             };
             lean.Wrapped($"{indent}obtain ⟨located{number}, checked{number}, written{number}, framed{number}, " +
                 $"held{number}⟩ :=", [obtained], "");
-            lean.Wrapped($"{indent}generalize",
-                ["setSlot initial", $"(ReferenceArray.slot {access.Array} {access.Index})", access.Value!,
-                    $"= stored{number}"], $"at written{number} framed{number} held{number}");
-            if (access.Target is { } reached) Add(Live(reached, 0) + ".formed");
-            else if (access.Formed is { } formed) Add(formed);
+            lean.Wrapped($"{indent}generalize wrote{number} :",
+                [$"setSlot {ObjectWalk.Memory(level)}", $"(ReferenceArray.slot {access.Array} {access.Index})",
+                    access.Value!, $"= stored{number}"], $"at written{number} framed{number} held{number}");
+            if (access.Value != ".null") Add(formed);
             Add($"located{number}");
             Add($"checked{number}");
             Add($"written{number}");
@@ -1050,15 +1162,16 @@ internal static partial class ProofOutline
             {
                 var target = access.Target is { } reached ? Live(reached, access.Stores) : null;
                 var value = access.Target is { } named ? $"(.address {named.Name})" : access.Value!;
+                var formed = access.Formed is null ? null : FormedAt(access.Formed, access.Stores);
                 lean.Line($"{indent}obtain ⟨written{stores}, framed{stores}, held{stores}⟩ := " + (target is null
-                    ? $"{fact}.store_formed {(access.Formed == "rfl" ? $"(value := {value}) rfl" : access.Formed)}"
+                    ? $"{fact}.store_formed {(formed == "rfl" ? $"(value := {value}) rfl" : formed)}"
                     : $"{fact}.store {target}"));
-                lean.Wrapped($"{indent}generalize", [$"setSlot {ObjectWalk.Memory(access.Stores)}",
+                lean.Wrapped($"{indent}generalize wrote{stores} :", [$"setSlot {ObjectWalk.Memory(access.Stores)}",
                     $"({access.Field.Lean}.address {access.Object.Name})", value, $"= stored{stores}"],
                     $"at written{stores} framed{stores} held{stores}");
                 // The store checks the stored reference is formed in the memory it writes.
                 if (target is not null) Add(target + ".formed");
-                else if (access.Formed != "rfl") Add(access.Formed!);
+                else if (formed != "rfl") Add(formed!);
             }
             else lean.Wrapped($"{indent}obtain ⟨stored{stores}, written{stores}, framed{stores}, held{stores}⟩ :=",
                 [$"{fact}.store {access.Value}"], "");

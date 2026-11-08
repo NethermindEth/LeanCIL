@@ -115,6 +115,24 @@ public static class NodeArrays
     /// <summary>Replaces the array <paramref name="bucket"/> holds.</summary>
     public static void Refill(Bucket bucket, Node?[] items) => bucket.Items = items;
 
+    /// <summary>Moves the first node to the second element, puts <paramref name="node"/> first and reads the second
+    /// back.</summary>
+    public static Node? Shift(Node?[] nodes, Node node)
+    {
+        nodes[1] = nodes[0];
+        nodes[0] = node;
+        return nodes[1];
+    }
+
+    /// <summary>Stores <paramref name="node"/> at <paramref name="index"/>, sets its value and reads the element
+    /// back.</summary>
+    public static Node? Install(Node?[] nodes, int index, Node node, ulong value)
+    {
+        nodes[index] = node;
+        node.Value = value;
+        return nodes[index];
+    }
+
     /// <summary>Holds two nodes in a fresh array and reads the second back.</summary>
     public static Node? Pair(Node first, Node second)
     {
@@ -133,6 +151,14 @@ public static class TagArrays
 
     /// <summary>Stores the tag of <paramref name="tagged"/> at <paramref name="index"/>.</summary>
     public static void Put(string?[] tags, int index, Tagged tagged) => tags[index] = tagged.Tag;
+
+    /// <summary>Gives <paramref name="tagged"/> the identifier <paramref name="id"/>, then copies the first tag to
+    /// the second element.</summary>
+    public static void Stamp(string?[] tags, Tagged tagged, ulong id)
+    {
+        tagged.Id = id;
+        tags[1] = tags[0];
+    }
 
     /// <summary>Replaces the tag of <paramref name="tagged"/> with the element at <paramref name="index"/>.</summary>
     public static void Take(Tagged tagged, string?[] tags, int index) => tagged.Tag = tags[index];

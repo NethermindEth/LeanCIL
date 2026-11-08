@@ -880,7 +880,11 @@ var outlined = new (string Name, string? Selector)[]
     ("ArrayLength", "NodeArrays::Count(Examples.Node[])"),
     ("ArrayCovariance", "NodeArrays::Put(Examples.Shape[],System.Int32,Examples.Shape)"),
     ("TagStore", "TagArrays::Put(System.String[],System.Int32,Examples.Tagged)"),
-    ("TagLoad", "TagArrays::Take(Examples.Tagged,System.String[],System.Int32)")
+    ("TagLoad", "TagArrays::Take(Examples.Tagged,System.String[],System.Int32)"),
+    // Element facts carried across element and field stores: a load after them reads back what was stored.
+    ("ElementShift", "NodeArrays::Shift(Examples.Node[],Examples.Node)"),
+    ("ElementInstall", "NodeArrays::Install(Examples.Node[],System.Int32,Examples.Node,System.UInt64)"),
+    ("ElementStamp", "TagArrays::Stamp(System.String[],Examples.Tagged,System.UInt64)")
 };
 var outlineTimer = System.Diagnostics.Stopwatch.StartNew();
 var outlineRoot = Path.Combine(root, "Outlines");
@@ -1721,7 +1725,55 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
             "def Postcondition (tagged tags : Reference) (_ : CIL.Extraction.TypeExpr) (_ : Nat)\n" +
             "    (index : W32) (initial final : Memory) : Prop :=\n" +
             "  Tagged.Tag.Holds final tagged (ReferenceArray.of initial tags index.toNat)"),
-        (storedHole, "exact held1")])
+        (storedHole, "exact held1")]),
+    // The load after two stores reads back the first element's old reference, carried across the store into
+    // the other element.
+    ("ElementShift", [
+        ("def Precondition (nodes : Reference) (nodesElement : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
+            "    (node : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : CIL.Extraction.TypeExpr) (_ : Nat) (_ : Reference)\n" +
+            "    (_ : Memory) : Prop := True"),
+        ("def Postcondition (nodes : Reference) (nodesElement : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
+            "    (node : Reference) (initial final : Memory) (result : ManagedReference) : Prop := sorry",
+            "def Postcondition (nodes : Reference) (nodesElement : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
+            "    (node : Reference) (initial final : Memory) (result : ManagedReference) : Prop :=\n" +
+            "  result = ReferenceArray.of initial nodes 0 ∧\n" +
+            "    ReferenceArray.Holds final nodes nodesElement nodesLength 0 (.address node) ∧\n" +
+            "    ReferenceArray.Holds final nodes nodesElement nodesLength 1 (ReferenceArray.of initial nodes 0)"),
+        ("sorry -- Postcondition of the returned value, with `held1`, `held2` the stored fields",
+            "exact ⟨rfl, held2, nodesSlot2At2⟩")]),
+    // The element keeps the stored node across the store into the node's own field.
+    ("ElementInstall", [
+        ("def Precondition (nodes : Reference) (nodesElement : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
+            "    (index : W32) (node : Reference) (value : W64) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : CIL.Extraction.TypeExpr) (_ : Nat) (_ : W32)\n" +
+            "    (_ : Reference) (_ : W64) (_ : Memory) : Prop := True"),
+        ("def Postcondition (nodes : Reference) (nodesElement : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
+            "    (index : W32) (node : Reference) (value : W64) (initial final : Memory)\n" +
+            "    (result : ManagedReference) : Prop := sorry",
+            "def Postcondition (nodes : Reference) (nodesElement : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
+            "    (index : W32) (node : Reference) (value : W64) (_ final : Memory)\n" +
+            "    (result : ManagedReference) : Prop :=\n" +
+            "  result = .address node ∧\n" +
+            "    ReferenceArray.Holds final nodes nodesElement nodesLength index.toNat (.address node) ∧\n" +
+            "    Node.Value.Holds final node value"),
+        ("sorry -- Postcondition of the returned value, with `held1`, `held2` the stored fields",
+            "exact ⟨rfl, nodesSlot1At2, held2⟩")]),
+    // A string element copied after a field store forms and passes the covariance check as it did before it.
+    ("ElementStamp", [
+        ("def Precondition (tags : Reference) (tagsElement : CIL.Extraction.TypeExpr) (tagsLength : Nat)\n" +
+            "    (tagged : Reference) (id : W64) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : CIL.Extraction.TypeExpr) (_ : Nat) (_ : Reference)\n" +
+            "    (_ : W64) (_ : Memory) : Prop := True"),
+        ("def Postcondition (tags : Reference) (tagsElement : CIL.Extraction.TypeExpr) (tagsLength : Nat)\n" +
+            "    (tagged : Reference) (id : W64) (initial final : Memory) : Prop := sorry",
+            "def Postcondition (tags : Reference) (tagsElement : CIL.Extraction.TypeExpr) (tagsLength : Nat)\n" +
+            "    (tagged : Reference) (id : W64) (initial final : Memory) : Prop :=\n" +
+            "  Tagged.Id.Holds final tagged id ∧\n" +
+            "    ReferenceArray.Holds final tags tagsElement tagsLength 1 (ReferenceArray.of initial tags 0)"),
+        ("sorry -- Postcondition of the returned value, with `held1`, `held2` the stored fields",
+            "exact ⟨held1.after_confined framed2 (ReferenceArray.apart_single (show\n" +
+            "      tagged.allocation ≠ tags.allocation from tagsLive1.field_ne held1.1.located rfl)), held2⟩")])
 })
 {
     var source = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
@@ -1747,8 +1799,8 @@ Console.WriteLine("PASS filled outlines verify with only their specification wri
     "precondition fails, a call storing through `Unsafe.Add` of a reference argument, two loops in sequence, " +
     "a checked add, a base-two logarithm, a signed checked add, splits on unsigned and signed tests of words, " +
     "a field store through a struct receiver at offsets 0 and 8, a string reference copied, " +
-    "tested for null and compared, a null store before returning the node it held, and an array argument's " +
-    "element load, length and covariance-checked store");
+    "tested for null and compared, a null store before returning the node it held, an array argument's element " +
+    "load, length and covariance-checked store, and element facts carried across element and field stores");
 
 // A written footprint that leaves out the element a loop writes is an error at the write, never an admission.
 var narrowed = Path.Combine(outlineRoot, "FillWords", "Narrowed.lean");

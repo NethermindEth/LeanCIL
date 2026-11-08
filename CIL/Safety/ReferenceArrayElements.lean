@@ -11,10 +11,12 @@ Proofs name an element by its array and index, as they name a class field by its
 `ReferenceArray.Live memory array element length` is a live array of `element` with `length`
 elements. `ReferenceArray.of memory array index` is what an element holds, whether or not it is
 readable. `Readable` packages what `ldelem.ref` needs and `Owned` adds what `stelem.ref` needs;
-`Holds` is `Owned` with the element holding a value. Each gives the facts the stepping tactics
-take (`facts`, `store`, `store_null`), keeps across a confined call whose footprint is apart from
-the element (`frame`), and `across` decides aliasing between two elements. A fresh array is live
-with every element owned and null (`fresh`).
+`Holds` is `Owned` with the element holding a value, and `Reads` is `Readable` with it. Each gives
+the facts the stepping tactics take (`facts`, `store`, `store_null`), keeps across a confined call
+whose footprint is apart from the element (`frame`), and `across` decides aliasing between two
+elements. `Live.field_ne` separates an array from every object with a field, so element and field
+facts carry across each other's stores. A fresh array is live with every element owned and null
+(`fresh`).
 -/
 
 namespace CIL.Safety
@@ -322,6 +324,168 @@ theorem Owned.across {before after : Memory} {array : Reference}
     simp only [ReferenceArray.entry, ReferenceArray.slot, objectFieldSlot]
     omega
 #print axioms Owned.across
+
+/-- After a call confined to element `written` of `array`, an owned element at another index
+    holds what it held before. -/
+theorem Owned.across_ne {before after : Memory} {array : Reference}
+    {element : CIL.Extraction.TypeExpr} {length index written : Nat}
+    (owned : Owned before array element length index)
+    (framed : Confined [entry array written] before after) (other : written ≠ index) :
+    Holds after array element length index (of before array index) := by
+  refine owned.frame framed fun entry member => ?_
+  simp only [List.mem_singleton] at member
+  subst member
+  refine Or.inr ?_
+  simp only [ReferenceArray.entry, ReferenceArray.slot, objectFieldSlot]
+  omega
+#print axioms Owned.across_ne
+
+/-- An element holding `value` holds it after a call confined to another element of its array. -/
+theorem Holds.across_ne {before after : Memory} {array : Reference}
+    {element : CIL.Extraction.TypeExpr} {length index written : Nat} {value : ManagedReference}
+    (held : Holds before array element length index value)
+    (framed : Confined [entry array written] before after) (other : written ≠ index) :
+    Holds after array element length index value :=
+  held.2 ▸ held.1.across_ne framed other
+#print axioms Holds.across_ne
+
+/-- A live object that passes an array's covariance check passes it after a call confined to any
+    footprint, which keeps every older allocation and so the object's class. -/
+theorem storableIn_after_confined {footprint : List (Reference × Nat)} {before after : Memory}
+    {element : CIL.Extraction.TypeExpr} {target : Reference}
+    (storable : storableIn before element (.address target) = .ok ())
+    (framed : Confined footprint before after) (old : target.allocation < before.nextIdentity) :
+    storableIn after element (.address target) = .ok () := by
+  rw [← storable]
+  simp only [storableIn, liveAllocation, framed.allocations _ old]
+#print axioms storableIn_after_confined
+
+/-- The covariance check reads only allocations, so memory with the same allocations, such as
+    after a store, decides it alike. -/
+theorem storableIn_of_allocations {before after : Memory}
+    (same : after.allocations = before.allocations) (element : CIL.Extraction.TypeExpr)
+    (value : ManagedReference) :
+    storableIn after element value = storableIn before element value := by
+  cases value <;> simp only [storableIn, liveAllocation, same]
+#print axioms storableIn_of_allocations
+
+/-- A slot store keeps every allocation, so what reads only allocations reads alike after it. -/
+theorem allocations_of_setSlot {before after : Memory} {field : Reference}
+    {value : ManagedReference} (wrote : setSlot before field value = after) :
+    after.allocations = before.allocations := by
+  subst wrote
+  rfl
+#print axioms allocations_of_setSlot
+
+/-- A live array stays live, of the same class and length, across a confined call. -/
+theorem Live.after_confined {footprint : List (Reference × Nat)} {before after : Memory}
+    {array : Reference} {element : CIL.Extraction.TypeExpr} {length : Nat}
+    (live : Live before array element length) (framed : Confined footprint before after) :
+    Live after array element length :=
+  live.of_allocation (framed.allocations _ live.old) framed.grows
+#print axioms Live.after_confined
+
+/-- An array is no object with a located field of a class: an array's lineage is its own array
+    type, which no class owns a field of. -/
+theorem Live.field_ne {memory : Memory} {array object field : Reference}
+    {element owner : CIL.Extraction.TypeExpr} {length offset : Nat} {scope name : String}
+    (live : Live memory array element length)
+    (located : objectFieldAddress memory (.address object) owner offset = .ok field)
+    (ownerClass : owner = .object scope name) :
+    object.allocation ≠ array.allocation := by
+  subst ownerClass
+  intro same
+  have array_located := live.located
+  cases found : liveAllocation memory array.allocation with
+  | error fault =>
+    simp only [referenceArrayOf, found, checkedAt, Except.mapError, Bind.bind, Except.bind]
+      at array_located
+    cases array_located
+  | ok allocation =>
+    simp only [referenceArrayOf, found, checkedAt, Except.mapError, Bind.bind, Except.bind]
+      at array_located
+    split at array_located
+    · rename_i kind
+      simp only [objectFieldAddress, same, found, kind, checkedAt, Except.mapError, Bind.bind,
+        Except.bind, RuntimeType.lineage] at located
+      split at located <;> cases located
+    · cases array_located
+#print axioms Live.field_ne
+
+/-- Storage in another allocation is apart from the one entry of a footprint. -/
+theorem apart_single {address : Reference} {width : Nat} {entry : Reference × Nat}
+    (other : address.allocation ≠ entry.1.allocation) :
+    ∀ written ∈ [entry], Apart address width written := by
+  intro written member
+  simp only [List.mem_singleton] at member
+  subst member
+  exact Or.inl other
+#print axioms apart_single
+
+/-- Element `index` is `Readable` and holds `value`: what a load reads after earlier writes. -/
+def Reads (memory : Memory) (array : Reference) (element : CIL.Extraction.TypeExpr)
+    (length index : Nat) (value : ManagedReference) : Prop :=
+  Readable memory array element length index ∧ of memory array index = value
+
+/-- A readable element reads what it holds. -/
+theorem Readable.reads {memory : Memory} {array : Reference} {element : CIL.Extraction.TypeExpr}
+    {length index : Nat} (readable : Readable memory array element length index) :
+    Reads memory array element length index (of memory array index) :=
+  ⟨readable, rfl⟩
+#print axioms Readable.reads
+
+/-- An owned element holds what it holds. -/
+theorem Owned.holds {memory : Memory} {array : Reference} {element : CIL.Extraction.TypeExpr}
+    {length index : Nat} (owned : Owned memory array element length index) :
+    Holds memory array element length index (of memory array index) :=
+  ⟨owned, rfl⟩
+#print axioms Owned.holds
+
+/-- An element read as `value` reads it across a call confined to a footprint apart from it. -/
+theorem Reads.after_confined {footprint : List (Reference × Nat)} {before after : Memory}
+    {array : Reference} {element : CIL.Extraction.TypeExpr} {length index : Nat}
+    {value : ManagedReference} (reads : Reads before array element length index value)
+    (framed : Confined footprint before after)
+    (apart : ∀ entry ∈ footprint, Apart (slot array index) objectFieldSlot entry) :
+    Reads after array element length index value :=
+  have kept := reads.1.frame framed apart
+  ⟨kept.1, kept.2.trans reads.2⟩
+#print axioms Reads.after_confined
+
+/-- An element read as `value` reads it after a call confined to another element of its array. -/
+theorem Reads.across_ne {before after : Memory} {array : Reference}
+    {element : CIL.Extraction.TypeExpr} {length index written : Nat} {value : ManagedReference}
+    (reads : Reads before array element length index value)
+    (framed : Confined [entry array written] before after) (other : written ≠ index) :
+    Reads after array element length index value := by
+  refine reads.after_confined framed fun entry member => ?_
+  simp only [List.mem_singleton] at member
+  subst member
+  refine Or.inr ?_
+  simp only [ReferenceArray.entry, ReferenceArray.slot, objectFieldSlot]
+  omega
+#print axioms Reads.across_ne
+
+/-- What a load of an element read as a reference that forms steps with: the slot is located,
+    and the load pushes that reference. -/
+theorem Reads.facts {memory : Memory} {array : Reference} {element : CIL.Extraction.TypeExpr}
+    {length index : Nat} {value : ManagedReference}
+    (reads : Reads memory array element length index value)
+    (formed : formObject memory value = .ok (.object value)) :
+    referenceArraySlot memory (.address array) index = .ok (slot array index, element) ∧
+      loadSlot memory (slot array index) = .ok (.object value) := by
+  refine ⟨reads.1.slot_located reads.1.inside, ?_⟩
+  rw [reads.1.load, reads.2]
+  exact formed
+#print axioms Reads.facts
+
+/-- An element holding `value` reads it. -/
+theorem Holds.reads {memory : Memory} {array : Reference} {element : CIL.Extraction.TypeExpr}
+    {length index : Nat} {value : ManagedReference}
+    (held : Holds memory array element length index value) :
+    Reads memory array element length index value :=
+  ⟨held.1.toReadable, held.2⟩
+#print axioms Holds.reads
 
 /-- A store into an element of an array allocated at or above `watermark` keeps all memory
     below it, so a method that fills an array it created changes nothing its caller held. -/

@@ -317,9 +317,13 @@ comment saying which obligation it is:
   `ReferenceArray.of initial nodes index.toNat`, with the premise `ReferenceArray.Forms` that it
   forms, and a stored object adds the premise that it passes the covariance check,
   `storableIn initial nodesElement (.address node) = .ok ()`, which the caller discharges from the
-  object's class. The footprint lists `ReferenceArray.entry` of each stored element. These
-  accesses come before any other store, and an element store ends the accesses the body may make;
-  a method with a loop or a `newarr` is left to the author.
+  object's class. The footprint lists `ReferenceArray.entry` of each stored element. Each element
+  fact is carried across the stores before it as `ReferenceArray.Holds` or `ReferenceArray.Reads`
+  of what the element holds, so a load after a store reads back the stored reference, and field
+  facts cross element stores, since no array has fields. An access after a store into another
+  array, or into the same array at an index that is not a different literal, is a
+  `not outlined:` hole, since the two may be one element; so is a reference outside the model used
+  after a call that writes. A method with a loop or a `newarr` is left to the author.
 - A call in a body over objects to a method that loads its fields, stores at most one word field of
   an object argument and returns a value it names gets a generated `MethodContract` read from that
   body, with a `Holds` theorem proved by the same stepping; `cil_contract_steps` composes the call

@@ -41,7 +41,9 @@ Examples:Examples.NestedRecord& Examples.UnsafeLayouts::Add15nuint(Examples.Nest
 Examples:Examples.NestedRecord[] Examples.PrimitiveArrays::AllocateNested(System.Int32)	A	A	A	A	A	A	A	A
 Examples:Examples.Node Examples.NodeArrays::At(Examples.Node[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:Examples.Node Examples.NodeArrays::First(Examples.Bucket)	A	A	A	A	A	A	A	A
+Examples:Examples.Node Examples.NodeArrays::Install(Examples.Node[],System.Int32,Examples.Node,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:Examples.Node Examples.NodeArrays::Pair(Examples.Node,Examples.Node)	A	A	A	A	A	A	A	A
+Examples:Examples.Node Examples.NodeArrays::Shift(Examples.Node[],Examples.Node)	A	A	A	A	A	A	A	A
 Examples:Examples.Node Examples.Objects::Detach(Examples.Node)	A	A	A	A	A	A	A	A
 Examples:Examples.Node[] Examples.NodeArrays::Create(System.Int32)	A	A	A	A	A	A	A	A
 Examples:Examples.PackedConstructor Examples.Constructors::MakePacked(System.UInt64)	A	A	A	A	A	A	A	A
@@ -1142,6 +1144,7 @@ Examples:System.Void Examples.StaticValues::Overwrite()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.StaticValues::Select(System.Boolean,Examples.Word256&)	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.StructMethods::ChangeCopy(Examples.Counter)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.TagArrays::Put(System.String[],System.Int32,Examples.Tagged)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.TagArrays::Stamp(System.String[],Examples.Tagged,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.TagArrays::Take(Examples.Tagged,System.String[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Tagged::.ctor()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.TailCalls::ForwardVoid(System.Int32&)	A	A	A	A	A	A	A	A

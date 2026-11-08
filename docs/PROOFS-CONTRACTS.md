@@ -391,6 +391,7 @@ predicates in the `ReferenceArray` namespace:
 | `ReferenceArray.Readable memory array element length index` | `Live`, `index` inside, readable |
 | `ReferenceArray.Owned memory array element length index` | `Readable` and writable |
 | `ReferenceArray.Holds memory array element length index value` | `Owned` and holding `value` |
+| `ReferenceArray.Reads memory array element length index value` | `Readable` and holding `value` |
 | `ReferenceArray.entry array index` | The footprint entry of a call that may change the element |
 | `ReferenceArray.Forms memory array index` | The reference element `index` holds forms: null or any live object |
 
@@ -403,7 +404,13 @@ covariance check for an instance whose class derives from the element class and
 `storableIn_mismatch` giving the `ArrayTypeMismatchException` of one that does not.
 `live.slot_outside` gives the `IndexOutOfRangeException` of an index past the length.
 `frame`, `Holds.after_confined` and `Owned.across` keep and decide elements across a confined
-call as they do fields, and `ReferenceArray.fresh` gives a fresh array from `newReferenceArray_ok`
+call as they do fields. `Holds.across_ne` and `Reads.across_ne` keep an element across a store
+into another index of its array, `Live.field_ne` separates an array from every object with a
+located field, so `apart_single` frames elements and fields across each other's stores, and
+`reads.facts formed` steps a load of what an earlier store wrote. `storableIn_after_confined` and
+`storableIn_of_allocations` carry a covariance check, and `formObject_of_allocations` with
+`allocations_of_setSlot` a formation, across later stores. `ReferenceArray.fresh` gives a fresh
+array from `newReferenceArray_ok`
 as live with every element owned and null. `step_referenceArrayLength_eq`,
 `step_referenceArrayLoad_eq` and `step_referenceArrayStore_eq` step the three instructions.
 [NodePair](../Examples/Proofs/NodePair.lean) fills a fresh array and reads it back, with its
