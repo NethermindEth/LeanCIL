@@ -850,6 +850,8 @@ var outlined = new (string Name, string? Selector)[]
     ("ReverseI16", "Bits::ReverseI16(short)"), ("PowerU32", "Bits::PowerU32(uint)"),
     ("Deposit", "Account::Deposit(System.UInt64)"), ("Headroom", "Account::get_Headroom()"),
     ("SetLimit", "Objects::SetLimit(Examples.Account,System.UInt32)"),
+    ("Replace", "Objects::Replace(Examples.Account,System.UInt64)"),
+    ("SecondValue", "Objects::SecondValue(Examples.Node)"),
     ("Link", "Objects::Link(Examples.Node,Examples.Node)"),
     ("FirstPresent", "Objects::FirstPresent(Examples.Account,Examples.Account)"),
     ("DepositBoth", "Objects::DepositBoth(Examples.Account,Examples.Account,System.UInt64)"),
@@ -943,35 +945,55 @@ if (proved.Code != 0 || !proved.Stdout.StartsWith("Verified: ExampleProof.correc
 Console.WriteLine("PASS verify refuses the Countdown outline until its holes are filled, then verifies it " +
     $"({outlineTimer.Elapsed.TotalSeconds:F0}s for every outline check)");
 
-// An instance method's outline binds `this`, steps its field load and store through the named field, and
-// verifies once its specification and postcondition are written.
-var depositOutline = Path.Combine(outlineRoot, "Deposit");
-var depositSource = File.ReadAllText(Path.Combine(depositOutline, "Proof.lean"));
-foreach (var (hole, replacement) in new (string Hole, string Filled)[]
+// Object outlines leave only their specification: once it is written, an instance method's field store, a
+// reference field store and a null test of an argument followed through a local each verify.
+const string storedHole = "sorry -- Postcondition of the returned value, with `held1` the stored fields";
+foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] Fills)[]
 {
-    ("def Precondition (account : Reference) (amount : W64) (initial : Memory) : Prop := sorry",
-        "def Precondition (_ : Reference) (_ : W64) (_ : Memory) : Prop := True"),
-    ("def Postcondition (account : Reference) (amount : W64) (initial final : Memory) : Prop := sorry",
-        "def Postcondition (account : Reference) (amount : W64) (initial final : Memory) : Prop :=\n" +
-        "  Account.Balance.Holds final account (Account.Balance.of initial account + amount)"),
-    ("sorry -- Postcondition of the returned value, with `held` the stored field", "exact held")
+    ("Deposit", [
+        ("def Precondition (account : Reference) (amount : W64) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : W64) (_ : Memory) : Prop := True"),
+        ("def Postcondition (account : Reference) (amount : W64) (initial final : Memory) : Prop := sorry",
+            "def Postcondition (account : Reference) (amount : W64) (initial final : Memory) : Prop :=\n" +
+            "  Account.Balance.Holds final account (Account.Balance.of initial account + amount)"),
+        (storedHole, "exact held1")]),
+    ("Link", [
+        ("def Precondition (node next : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ _ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (node next : Reference) (initial final : Memory) : Prop := sorry",
+            "def Postcondition (node next : Reference) (_ final : Memory) : Prop :=\n" +
+            "  Node.Next.Holds final node (.address next)"),
+        (storedHole, "exact held1")]),
+    ("FirstPresent", [
+        ("def Precondition (first second : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ _ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (first second : Reference) (initial final : Memory) (result : ManagedReference)\n" +
+            "    : Prop := sorry",
+            "def Postcondition (first _ : Reference) (_ _ : Memory) (result : ManagedReference) : Prop :=\n" +
+            "  result = .address first"),
+        ("sorry -- Postcondition of the returned value", "rfl")])
 })
 {
-    if (Regex.Matches(depositSource, Regex.Escape(hole)).Count != 1)
-        throw new InvalidOperationException("The Deposit outline lacks the hole " + hole);
-    depositSource = depositSource.Replace(hole, replacement, StringComparison.Ordinal);
+    var source = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
+    foreach (var (hole, replacement) in fills)
+    {
+        if (Regex.Matches(source, Regex.Escape(hole)).Count != 1)
+            throw new InvalidOperationException($"The {name} outline lacks the hole {hole}:\n{source}");
+        source = source.Replace(hole, replacement, StringComparison.Ordinal);
+    }
+    if (Regex.IsMatch(source, @"(?<![`\w])sorry(?![`\w])"))
+        throw new InvalidOperationException($"The {name} outline has a hole the test does not fill:\n{source}");
+    var filledOutline = Path.Combine(outlineRoot, name, "Filled.lean");
+    File.WriteAllText(filledOutline, source);
+    var verified = Execute(Cli("verify", Path.Combine(outlineRoot, name, "Extraction"), "--proof", filledOutline));
+    if (verified.Code != 0 || !verified.Stdout.StartsWith("Verified: ExampleProof.correctness"))
+        throw new InvalidOperationException($"The filled {name} outline did not verify:\n{verified.Output}");
 }
-if (Regex.IsMatch(depositSource, @"(?<![`\w])sorry(?![`\w])"))
-    throw new InvalidOperationException("The Deposit outline has a hole the test does not fill");
-var depositFilled = Path.Combine(depositOutline, "Filled.lean");
-File.WriteAllText(depositFilled, depositSource);
-var deposited = Execute(Cli("verify", Path.Combine(depositOutline, "Extraction"), "--proof", depositFilled));
-if (deposited.Code != 0 || !deposited.Stdout.StartsWith("Verified: ExampleProof.correctness"))
-    throw new InvalidOperationException("The filled Deposit outline did not verify:\n" + deposited.Output);
-Console.WriteLine("PASS the filled outline of an instance method that stores a named field verifies");
+Console.WriteLine("PASS filled object outlines verify with only their specification written: a field store, " +
+    "a reference field store and a null test followed through a local");
 
-// LeanCIL's own closure that lays out a static word's bytes: its outline names the captured reference
-// field it cannot step, and the checked-in proof keeps the outline's statement and verifies.
+// LeanCIL's own closure that lays out a static word's bytes: its outline names the getter call
+// it cannot step, and the checked-in proof keeps the outline's statement and verifies.
 var wordByte = Path.Combine(outlineRoot, "WordByte");
 var wordByteExtraction = Path.Combine(wordByte, "Extraction");
 Run(Cli("extract", At("Extractor/bin/Nethermind.LeanCIL.dll"),
@@ -979,9 +1001,9 @@ Run(Cli("extract", At("Extractor/bin/Nethermind.LeanCIL.dll"),
 var wordByteOutline = Path.Combine(wordByte, "Proof.lean");
 Run(Cli("new-proof", wordByteExtraction, wordByteOutline));
 var wordByteSource = File.ReadAllText(wordByteOutline);
-const string capturedLoad = "-- not outlined: the body meets a load of `«<>c__DisplayClass10_0».word`";
-if (!wordByteSource.Contains(capturedLoad, StringComparison.Ordinal))
-    throw new InvalidOperationException("The closure outline does not name its captured field load:\n" +
+const string getterCall = "-- not outlined: the body meets a call, which `cil_contract_steps` composes";
+if (!wordByteSource.Contains(getterCall, StringComparison.Ordinal))
+    throw new InvalidOperationException("The closure outline does not name its getter call:\n" +
         wordByteSource);
 static string Statement(string source) =>
     Regex.Match(source.ReplaceLineEndings("\n"), @"^theorem correctness .*?:= by$",

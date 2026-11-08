@@ -40,7 +40,8 @@ internal static partial class ProofOutline
         "stored", "framed", "held", "instance", "class", "structure", "inductive", "abbrev", "example",
         "for", "return", "mut", "unless", "variable", "universe", "deriving", "extends", "private",
         "protected", "partial", "mutual", "macro", "syntax", "notation", "calc", "nomatch", "nofun",
-        "export", "attribute", "opaque", "axiom", "Type", "Prop", "Sort"
+        "export", "attribute", "opaque", "axiom", "Type", "Prop", "Sort", "middle", "values", "post",
+        "confined", "target"
     };
 
     static Outline Generate(Extraction extraction)
@@ -156,6 +157,10 @@ internal static partial class ProofOutline
         /// <summary>Object arguments make the statement confine the run to `footprint`.</summary>
         internal bool Framed => Objects.Any();
 
+        /// <summary>The objects a stepped body reaches and the facts it needs of each; without it every object
+        /// argument assumes a fact of each field of its class.</summary>
+        internal ObjectPlan? Plan { get; set; }
+
         /// <summary>The caller memory the method may write: the stored fields of its object arguments, or a hole
         /// when it is handed a reference.</summary>
         internal void Footprint(Writer lean)
@@ -164,8 +169,10 @@ internal static partial class ProofOutline
             lean.Doc(references
                 ? "Replace with the caller memory the loop may write, as references with their widths in bytes."
                 : "The caller memory the method may write: the fields it stores of its object arguments.");
-            var entries = Objects.SelectMany(parameter => parameter.Fields.Where(named => named.Stored)
-                .Select(named => (parameter.Name, Entry: $"{named.Lean}.entry {parameter.Name}"))).ToArray();
+            var entries = Plan is { } plan
+                ? plan.Entries.Select(entry => (Name: entry[(entry.LastIndexOf(' ') + 1)..], Entry: entry)).ToArray()
+                : Objects.SelectMany(parameter => parameter.Fields.Where(named => named.Stored)
+                    .Select(named => (parameter.Name, Entry: $"{named.Lean}.entry {parameter.Name}"))).ToArray();
             // A binder the list does not name is `_`, so the definition elaborates without warnings.
             var binders = references ? Binders
                 : Binders.Select(binder =>
@@ -196,7 +203,7 @@ internal static partial class ProofOutline
 
         /// <summary>Premises about the caller's memory that frame entry and stepping need.</summary>
         internal IEnumerable<(string Name, string Statement)> MemoryFacts => Parameters.SelectMany(parameter =>
-            parameter.Shape switch
+            Plan is not null && parameter.Shape == ParameterShape.Object ? [] : parameter.Shape switch
             {
                 ParameterShape.Reference => new[] { (parameter.Name + "Form",
                     $"form initial {parameter.Name} = .ok {parameter.Name}") },
@@ -209,7 +216,7 @@ internal static partial class ProofOutline
                     .Concat(parameter.Fields.Select(named =>
                         (FieldFact(parameter, named), FieldPremise(named, "initial", parameter.Name)))),
                 _ => []
-            });
+            }).Concat(Plan?.Premises ?? []);
 
         internal string MemoryArguments(string initial, string final) => Symbolic ? $" {initial} {final}" : "";
 
@@ -229,7 +236,7 @@ internal static partial class ProofOutline
 
         internal void Statement(Writer lean)
         {
-            var binders = Grouped(Binders);
+            var binders = Grouped(Binders.Concat((Plan?.Targets ?? []).Select(target => (target, "Reference"))));
             lean.Wrapped("theorem correctness", binders, ": Ensures Extracted.program 0");
             var memory = Symbolic ? "initial.WellFormed" : "initial = Memory.empty";
             var premises = new[] { $"args = {ArgumentValues}", memory }
@@ -278,7 +285,7 @@ internal static partial class ProofOutline
 
     static string StraightLine(Extraction extraction, Specification spec, Body body, Writer lean)
     {
-        if (spec.Framed) return ObjectStraightLine(spec, body, lean);
+        if (spec.Framed) return ObjectStraightLine(spec, body, new ClassViews(extraction), lean);
         var steppable = spec.Parameters.All(parameter => parameter.Shape == ParameterShape.Scalar) &&
             body.Ops.All(Body.Pure);
         Header(lean, spec, ["CIL.Verification", "CIL.Safety.SymbolicExecution"],
@@ -304,11 +311,12 @@ internal static partial class ProofOutline
 
     /// <summary>A straight-line body over object arguments: stepped when it loads fields and stores at most one
     /// before it returns, otherwise one hole naming where the walk stopped.</summary>
-    static string ObjectStraightLine(Specification spec, Body body, Writer lean)
+    static string ObjectStraightLine(Specification spec, Body body, ClassViews views, Writer lean)
     {
-        var walk = new ObjectWalk(spec, body.Ops);
+        var walk = new ObjectWalk(spec, body.Ops, views);
         var stepped = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
             ParameterShape.Object) && walk.Run(pc => Location(spec.Method, pc));
+        if (stepped) spec.Plan = walk.Plan();
         Header(lean, spec, ["CIL.Verification", "CIL.Safety.SymbolicExecution", "CIL.Safety.ObjectFields"],
             stepped ? "`postcondition`" : null);
         spec.Placeholders(lean);

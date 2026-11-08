@@ -728,6 +728,18 @@ theorem apart_of_offsets {address : Reference} {width : Nat} {entry : Reference 
   Or.inr disjoint
 #print axioms apart_of_offsets
 
+/-- A field is apart from every entry of a footprint whose offset range misses its own, whichever
+    objects the entries belong to; `decide` checks it for the views an extraction names. -/
+theorem apart_of_entries {address : Reference} {width : Nat} {footprint : List (Reference × Nat)}
+    (disjoint : footprint.all (fun entry => decide (address.offset + width ≤ entry.1.offset) ||
+      decide (entry.1.offset + entry.2 ≤ address.offset)) = true) :
+    ∀ entry ∈ footprint, Apart address width entry := by
+  intro entry member
+  have missed := List.all_eq_true.mp disjoint entry member
+  simp only [Bool.or_eq_true, decide_eq_true_eq] at missed
+  exact apart_of_offsets missed
+#print axioms apart_of_entries
+
 /-- Storage of two different live objects is apart, whatever fields of them it holds. -/
 theorem apart_of_objects {memory : Memory} {object other : Reference} {offset width : Nat}
     {entry : Reference × Nat} (live : LiveObject memory object)
