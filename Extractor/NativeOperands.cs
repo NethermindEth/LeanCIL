@@ -68,7 +68,7 @@ internal static class NativeOperands
     }
 
     static StackType PrimitiveType(TypeReference type) => type is ByReferenceType or PointerType
-        ? Kind.Reference : ObjectTypes.Is(type) || ReferenceArrays.Is(type) ? Kind.Object : Arrays.Of(type)?.Kind ??
+        ? Kind.Reference : ObjectTypes.Reference(type) || ReferenceArrays.Is(type) ? Kind.Object : Arrays.Of(type)?.Kind ??
         EnumTypes.Storage(type).MetadataType switch
     {
         MetadataType.IntPtr or MetadataType.UIntPtr => Kind.Native,

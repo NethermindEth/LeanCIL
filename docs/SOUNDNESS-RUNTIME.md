@@ -313,6 +313,16 @@ runtime type the model never inspects. Fields of generic parameter type or a mod
 rejected, as do fields holding arrays of structs or vectors, whose element width comes from a
 layout the field token does not carry.
 
+`System.String` of `System.Runtime`, matched exactly, is the one such class that is also admitted
+as the type of an argument, a local and a result ([StringValues](../Examples/Proofs/StringValues.lean),
+[StringLabel](../Examples/Proofs/StringLabel.lean)). A string is an object reference on the stack
+and in a root, typed `.object` with its exact scope and name, so it is passed, returned, stored in
+an opaque field, compared for identity and tested against null like any object reference, and
+an argument must form like one: null or a live object allocation. No string method is admitted
+as a call, so nothing reads its length or characters, and a string root has no address: `ldarga`,
+`ldloca` and `string&` are rejected by name, as for class instances. A modified string type stays
+rejected.
+
 An instance method of an admitted class, virtual or not, is an entry whose receiver `this` is an
 object reference, not a byref. A theorem about a virtual method is about that body, which a `call`
 (a base call, or a direct call into it) runs exactly. The raw method records the class receiver (`objectReceiver`),

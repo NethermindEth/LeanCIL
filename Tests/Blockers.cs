@@ -57,7 +57,7 @@ public sealed class Counter
 
 public static class Signatures
 {
-    public static int Measure(string text, int x) => new decimal[x].Length;
+    public static int Measure(object text, int x) => new decimal[x].Length;
 }
 
 public struct Point
@@ -108,7 +108,7 @@ File.WriteAllText(manifest, JsonSerializer.Serialize(new
         new { signature = "Fixture::Size()", profile = "scalar", typeArguments = new[] { "System.String" } },
         new { signature = "Fixture::Size()", profile = "scalar", typeArguments = "Pair" },
         new { signature = "Counter::Add(int)", profile = "scalar" },
-        new { signature = "Signatures::Measure(string,int)", profile = "scalar" },
+        new { signature = "Signatures::Measure(object,int)", profile = "scalar" },
         new { signature = "Point::set_X(int)", profile = "scalar" },
         new { signature = "Cell`1::Twice(int)", profile = "scalar" },
         new { signature = "Seeded::.cctor()", profile = "scalar" },
@@ -160,7 +160,7 @@ Require(blockers.Select(b => b.GetProperty("construct").GetString()).Order(Strin
         "Unsupported static field store: stsfld System.Int32 Seeded::Seed",
         "Unsupported static field store: stsfld System.Int32 Views::value",
         "Unsupported static initialisation: static constructors are never extracted",
-        "Unsupported type: System.String"]),
+        "Unsupported type: System.Object"]),
     "Expected one blocker per unsupported construct");
 var allocation = Blocker("Unsupported instruction: newarr System.Single");
 var generation = Blocker("Rejected external call: System.Int32 System.GC::GetGeneration(System.Object)");
@@ -224,9 +224,9 @@ string[] Constructs(int index) => Ids(index).Select(id => blockers.Single(b => I
     .GetProperty("construct").GetString()!).ToArray();
 var decimals = Blocker("Unsupported instruction: newarr System.Decimal");
 Require(Constructs(12).Order(StringComparer.Ordinal).SequenceEqual(
-    ["Unsupported instruction: newarr System.Decimal", "Unsupported type: System.String"]) &&
+    ["Unsupported instruction: newarr System.Decimal", "Unsupported type: System.Object"]) &&
     decimals.GetProperty("sites").EnumerateArray().Any(s =>
-        s.GetProperty("method").GetString() == "System.Int32 Signatures::Measure(System.String,System.Int32)"),
+        s.GetProperty("method").GetString() == "System.Int32 Signatures::Measure(System.Object,System.Int32)"),
     "Rejected signature hid the body's blockers: " + string.Join("; ", Constructs(12)));
 // A non-virtual method of an admitted class is blocked only by its body.
 Require(Constructs(11).SequenceEqual(["Unsupported instruction: newarr System.Decimal"]),

@@ -33,7 +33,7 @@ internal static class LeanEmitter
             return $".{(type is ArrayType ? "methodTable" : "methodPointer")} " +
                 ManagedPointers.SignatureEvidence(pointer);
         if (type is ByReferenceType or PointerType) return ".reference";
-        if (ObjectTypes.Is(type) || ReferenceArrays.Is(type)) return ".object";
+        if (ObjectTypes.Reference(type) || ReferenceArrays.Is(type)) return ".object";
         if (Arrays.Of(type, architecture) is { } element) return $".array {element.Expression}";
         if (Spans.Width(type, architecture) is { } width)
             return $".span {width} {(Spans.Writable(type) ? "true" : "false")}";

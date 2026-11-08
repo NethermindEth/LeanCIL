@@ -4,7 +4,7 @@ namespace SelectorExamples.One
     {
         public static ulong Add(ulong x, ulong y) => unchecked(x + y);
         public static uint Add(uint x, uint y) => unchecked(x + y);
-        public static string Unsupported(string value) => value;
+        public static object Unsupported(object value) => value;
     }
 }
 

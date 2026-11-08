@@ -86,7 +86,7 @@ foreach (var selector in new[]
 Rejected("ManagedDispatch::Dispatch(method int *(long)[],int,int)", "No method matches selector");
 
 // Selection does not bypass validation of unsupported runtime types.
-Rejected("string SelectorExamples.One.Collision::Unsupported(string)", "Unsupported type");
+Rejected("object SelectorExamples.One.Collision::Unsupported(object)", "Unsupported type");
 
 // CLR metadata can contain overloads distinguished only by return type.
 var returnOverload = At("artifacts/Selectors/return-overload.dll");

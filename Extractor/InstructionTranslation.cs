@@ -210,7 +210,7 @@ internal static class InstructionTranslation
             Code.Ldarga or Code.Ldarga_S when m.HasThis && i.Operand == m.Body.ThisParameter &&
                 ObjectTypes.Candidate(m.DeclaringType) =>
                 throw new InvalidDataException("Unsupported address of a class instance receiver: " + m.FullName),
-            Code.Ldarga or Code.Ldarga_S when ObjectTypes.Candidate(((ParameterDefinition)i.Operand).ParameterType) =>
+            Code.Ldarga or Code.Ldarga_S when ObjectTypes.Rooted(((ParameterDefinition)i.Operand).ParameterType) =>
                 throw new InvalidDataException("Unsupported address of a class instance argument: " + m.FullName),
             Code.Ldarga or Code.Ldarga_S => Parameter(
                 !Spans.Is(((ParameterDefinition)i.Operand).ParameterType) ? "localAddr" : "local"),
@@ -274,7 +274,7 @@ internal static class InstructionTranslation
             Code.Ldarg or Code.Ldarg_S => Arg(MethodArguments.Index(m, (ParameterDefinition)i.Operand)),
             Code.Ldloc_0 => LocalOp("local", 0), Code.Ldloc_1 => LocalOp("local", 1), Code.Ldloc_2 => LocalOp("local", 2), Code.Ldloc_3 => LocalOp("local", 3),
             Code.Ldloc or Code.Ldloc_S => LocalOp("local", Local()),
-            Code.Ldloca or Code.Ldloca_S when ObjectTypes.Candidate(((VariableDefinition)i.Operand).VariableType) ||
+            Code.Ldloca or Code.Ldloca_S when ObjectTypes.Rooted(((VariableDefinition)i.Operand).VariableType) ||
                 ReferenceArrays.Is(((VariableDefinition)i.Operand).VariableType) =>
                 throw new InvalidDataException("Unsupported address of a class instance local: " + m.FullName),
             Code.Ldloca or Code.Ldloca_S => LocalOp(

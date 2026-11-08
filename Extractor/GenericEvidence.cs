@@ -75,7 +75,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             var underlying = type.Resolve().Fields.Single(field => !field.IsStatic).FieldType;
             return $".enum {Quote(LayoutEvidence.Identity(type))} ({Type(underlying)})";
         }
-        if (ObjectTypes.Is(type)) return ObjectType(type);
+        if (ObjectTypes.Reference(type)) return ObjectType(type);
         var index = layouts.Index(type);
         if (index >= 0 && !layouts.Metadata.IsImported(type))
             return $".aggregate {Quote(LayoutEvidence.Identity(type))} {index}";

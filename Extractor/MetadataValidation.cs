@@ -348,7 +348,9 @@ internal static class MetadataValidation
         return new AggregateInfo(fields.Length * width, width, offsets);
     }
 
-    internal static void Type(TypeReference type, ModuleDefinition module, bool returns = false, string architecture = "scalar")
+    // `strings` admits System.String: a signature or local root may hold one, a generic argument or element not.
+    internal static void Type(TypeReference type, ModuleDefinition module, bool returns = false, string architecture = "scalar",
+        bool strings = false)
     {
         if (ManagedPointers.Signature(type) is { } managed)
         {
@@ -388,7 +390,7 @@ internal static class MetadataValidation
                     "locals, returns, fields or external signatures.");
             if (byRef.ElementType is ByReferenceType)
                 throw new InvalidDataException("Unsupported nested managed reference");
-            if (ObjectTypes.Candidate(byRef.ElementType))
+            if (ObjectTypes.Rooted(byRef.ElementType))
                 throw new InvalidDataException("Unsupported by-reference class instance: " + type.FullName +
                     "\n  Object references live in roots without byte storage, so they have no address.");
             Type(byRef.ElementType, module, architecture: architecture);
@@ -399,6 +401,7 @@ internal static class MetadataValidation
             ObjectTypes.Validate(type);
             return;
         }
+        if (strings && ObjectTypes.IsString(type)) return;
         type = EnumTypes.Storage(type);
         if (IsAggregate(type, module)) { Layout(type, module, architecture); return; }
         if (!(returns && type.FullName == "System.Void") && type.FullName is not
@@ -599,7 +602,7 @@ internal static class MetadataValidation
                     (method.Name != ".ctor" || !method.HasThis || method.ReturnType.MetadataType != MetadataType.Void))
                     throw new InvalidDataException($"Unsupported constructor signature: {method.FullName}");
                 Type(InitAccessors.Return(method.ReturnType), module, returns: true,
-                    architecture: profile.Architecture);
+                    architecture: profile.Architecture, strings: true);
             }, named: true);
             foreach (ParameterDefinition parameter in method.Parameters)
                 Check(method, null, () =>
@@ -608,14 +611,14 @@ internal static class MetadataValidation
                     if (SpanReferences.Is(type))
                         SpanReferences.ValidateParameter(method, parameter, module, profile.Architecture);
                     else if (type is not ByReferenceType || importedByref?.Invoke(type) != true)
-                        Type(type, module, architecture: profile.Architecture);
+                        Type(type, module, architecture: profile.Architecture, strings: true);
                 }, named: true);
             if (Check(method, null, () => Spans.Analyze(method, profile), named: true))
                 foreach (VariableDefinition local in method.Body.Variables)
                     Check(method, null, () =>
                     {
                         if (imports?.ValidateLocal(local.VariableType, profile) == true) ImportedLocal(method, local);
-                        else Type(local.VariableType, module, architecture: profile.Architecture);
+                        else Type(local.VariableType, module, architecture: profile.Architecture, strings: true);
                     }, named: true);
             HashSet<Instruction> reachable = [];
             TypeTests.Analysis? typeTests = null;

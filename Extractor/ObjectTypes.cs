@@ -98,6 +98,26 @@ internal static class ObjectTypes
     }
 
     /// <summary>
+    /// The exact <c>System.String</c> of <c>System.Runtime</c>: a value of it is an object reference the model can
+    /// pass, store, compare and test for null, never read through, since no admitted operation reads characters.
+    /// </summary>
+    internal static bool IsString(TypeReference type) =>
+        type is not TypeSpecification && type.FullName == "System.String" &&
+        RuntimeModels.ExactScope(type.Scope, "System.Runtime");
+
+    /// <summary>
+    /// A type whose values are object references on the stack and in argument and local roots: an admitted class,
+    /// or <c>string</c>, which is opaque.
+    /// </summary>
+    internal static bool Reference(TypeReference type) => Is(type) || IsString(type);
+
+    /// <summary>
+    /// A candidate class or <c>string</c>: its values live in roots without byte storage, so neither an argument,
+    /// a local nor a by-reference type may address one.
+    /// </summary>
+    internal static bool Rooted(TypeReference type) => Candidate(type) || IsString(type);
+
+    /// <summary>
     /// A class, interface or delegate type outside the model, such as <c>string</c>, a generic or library class:
     /// a field of this type holds a reference the model can copy, compare and test for null but never dereference,
     /// since no admitted operation accepts the type as an owner, receiver, argument, local or result.

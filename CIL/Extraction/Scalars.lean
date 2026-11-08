@@ -918,9 +918,14 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
         (if opcode == 40 then [scalarType (.byref site.declaringType)] else []) else
       site.parameterTypes.reverse.map scalarType ++
         (if opcode != 115 && site.hasThis then [receiverKind site.declaringType] else [])
-    let inputs := if opcode == 115 && role == some .interior then
+    -- A folded throw's literal or null message arguments are never values on the stack.
+    let folded := opcode == 115 && role == some .interior
+    let inputs := if folded then
         stack.map (fun kind => if kind == .nullObject then .other else kind)
       else stack
+    let expected := if folded then
+        expected.map (fun kind => if kind == .object then .other else kind)
+      else expected
     let pops := expected.length
     if !callParametersMatch site || pops > stack.length || !((inputs.take pops).zip expected).all (fun (value, home) =>
         value == home || (value == .nullObject &&
