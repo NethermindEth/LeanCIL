@@ -98,9 +98,9 @@ name = "MyLib"
 - The pinned LeanCIL `CIL` sources must match the framework bundled with the installed tool;
   `verify` rejects a mismatch and names the revision to pin.
 - Put the model in `MyLib/Model.lean` and the bridge in `MyLib/AddBridge.lean`, starting with
-  `import Extracted` and `import MyLib.Model`. Lean requires imports before the `/-! -/` module
-  docstring.
-- `Extracted` exists in the package only after `leancil workspace` generates it (see
+  the `import Extracted.KEY` line `leancil workspace` prints and `import MyLib.Model`. Lean
+  requires imports before the `/-! -/` module docstring.
+- `Extracted.KEY` exists in the package only after `leancil workspace` generates it (see
   [write-new-proof.md](write-new-proof.md)); until then `lake build` of the package cannot build
   the bridge. Build the model alone with `lake build MyLib.Model`; check the bridge with
   `verify`, or with `lake build MyLib.AddBridge` after `leancil workspace`.
