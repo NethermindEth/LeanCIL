@@ -16,8 +16,8 @@ internal static partial class Program
         "[--assume-initialized Namespace.Type]... [--reference Lib.dll]... [--import Lib.leancil.contracts] " +
         "[--import-implementation Lib=path] [--import-sha256 Lib=hex] [--import-interface-sha256 Lib=hex]\n" +
         "       leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]\n" +
-        "       leancil workspace assembly.dll method --profile profile --proof proof.lean " +
-        "[--proof-root package-directory] [--output workspace-directory]\n" +
+        "       leancil workspace assembly.dll method --profile profile --proof proof.lean [--theorem name] " +
+        "[--proof-root package-directory] [--assembly identity] [--assume-initialized Namespace.Type]...\n" +
         "       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] " +
         "[--assembly 'assembly name or full identity'] [--reference Lib.dll]...\n" +
         "       leancil check output-directory [--assembly-path assembly.dll] " +
