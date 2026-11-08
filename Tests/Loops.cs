@@ -926,7 +926,8 @@ Console.WriteLine("PASS a loop outline carries an object local in its head and s
 var copyOutline = File.ReadAllText(Path.Combine(outlineRoot, "CopyUntilZero", "Proof.lean"));
 if (!copyOutline.Contains("by_cases branch1 : (scanStopped.setWidth 8).setWidth 32 = 0", StringComparison.Ordinal) ||
     copyOutline.Contains("narrow field", StringComparison.Ordinal))
-    throw new InvalidOperationException("The CopyUntilZero outline does not split on its narrow field:\n" + copyOutline);
+    throw new InvalidOperationException(
+        "The CopyUntilZero outline does not split on its narrow field:\n" + copyOutline);
 Console.WriteLine("PASS a loop outline splits on a narrow struct field's loaded word");
 
 // The audit refuses an outline for its holes, whatever the method; one loop shows it end to end.

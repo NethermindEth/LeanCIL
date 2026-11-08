@@ -348,8 +348,9 @@ internal static partial class ProofOutline
             { Success: true } load && parameters[int.Parse(load.Groups[1].Value,
                 System.Globalization.CultureInfo.InvariantCulture)].Shape == ParameterShape.Boolean;
         return ops.Select((op, pc) => Body.Pure(op) || LoadsBoolean(op) ||
-            Body.Target(op) is not null && !Body.Conditional(op) ||
-            Regex.IsMatch(op, @"\A\.br(non)?zero \d+\z") && pc > 0 && LoadsBoolean(ops[pc - 1])).All(stepped => stepped);
+                Body.Target(op) is not null && !Body.Conditional(op) ||
+                Regex.IsMatch(op, @"\A\.br(non)?zero \d+\z") && pc > 0 && LoadsBoolean(ops[pc - 1]))
+            .All(stepped => stepped);
     }
 
     /// <summary>A straight-line body over object arguments: stepped when it loads fields and stores at most one
