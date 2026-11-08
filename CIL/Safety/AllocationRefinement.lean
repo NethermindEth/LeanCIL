@@ -65,8 +65,9 @@ theorem MethodContract.Holds.of_allocationRenaming {Input Output : Type}
     (programs : ProgramRenaming sourceProgram targetProgram)
     (ready : ∀ input initial, contract.pre input initial →
       initial.WellFormed ∧ initial.StaticBindingsBounded)
-    (scalarResults : ∀ output, ∃ values : List CIL.Value,
-      contract.results output = values.map Value.scalar)
+    (scalarResults : ∀ input initial final output, contract.pre input initial →
+      contract.post input initial final output →
+      ∃ values : List CIL.Value, contract.results output = values.map Value.scalar)
     (stablePost : ∀ input initial sourceFinal targetFinal output,
       contract.pre input initial → BytesBelow initial.nextIdentity sourceFinal targetFinal →
       SlotsAgreeBelow initial.nextIdentity sourceFinal targetFinal →
@@ -77,7 +78,7 @@ theorem MethodContract.Holds.of_allocationRenaming {Input Output : Type}
   intro input initial permitted
   obtain ⟨fuel, final, values, success, confined, output, encoded, post⟩ :=
     holds input initial permitted
-  obtain ⟨scalars, scalarEncoding⟩ := scalarResults output
+  obtain ⟨scalars, scalarEncoding⟩ := scalarResults input initial final output permitted post
   rw [encoded, scalarEncoding] at success
   obtain ⟨formed, statics⟩ := ready input initial permitted
   obtain ⟨targetFinal, targetSuccess, related, agree⟩ :=
@@ -101,5 +102,21 @@ theorem MethodContract.Holds.of_allocationRenaming {Input Output : Type}
       rw [kept] at held
       exact formed.slots _ _ _ held⟩
 #print axioms MethodContract.Holds.of_allocationRenaming
+
+/-- `contract` from the initial memory every caller holds: well-formed, with each static binding
+    naming an issued allocation. `of_allocationRenaming` transfers it whatever `contract.pre` says
+    about memory as a whole. -/
+def MethodContract.fromReadyMemory {Input Output : Type} (contract : MethodContract Input Output) :
+    MethodContract Input Output :=
+  { contract with
+    pre := fun input initial =>
+      initial.WellFormed ∧ initial.StaticBindingsBounded ∧ contract.pre input initial }
+
+/-- A contract holds from ready memory, since ready memory meets its own precondition. -/
+theorem MethodContract.Holds.fromReadyMemory {Input Output : Type}
+    {contract : MethodContract Input Output} {program : CIL.Program} {method : Nat}
+    (holds : contract.Holds program method) : contract.fromReadyMemory.Holds program method :=
+  fun input initial ready => holds input initial ready.2.2
+#print axioms MethodContract.Holds.fromReadyMemory
 
 end CIL.Safety

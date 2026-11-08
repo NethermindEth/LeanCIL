@@ -501,10 +501,14 @@ constructors, static allocation and `stackAlloc`; frame ownership and expiry rem
 
 `MethodContract.Holds.of_allocationRenaming` transfers the original complete contract, including its
 precondition and footprint. Supply proofs that the precondition establishes well-formed memory and
-bounded static bindings, that the contract encodes scalar outputs, and that its postcondition is
-preserved by `BytesBelow` and `SlotsAgreeBelow` on the initial caller prefix, given that the target's
-final memory has allocated past that prefix. The adapter derives
+bounded static bindings, that every output its postcondition admits encodes as scalars, and that
+its postcondition is preserved by `BytesBelow` and `SlotsAgreeBelow` on the initial caller prefix,
+given that the target's final memory has allocated past that prefix. The adapter derives
 confinement from the actual paired executions; it does not replace the contract with a weaker one.
+A contract whose precondition names only fields and objects does not establish memory readiness;
+`MethodContract.fromReadyMemory` adds it to the precondition, and `Holds.fromReadyMemory` proves
+the result from the contract's own proof, so the transfer states the contract for every initial
+memory a caller can hold ([LinkedNodes](../Examples/Proofs/LinkedNodes.lean)).
 
 This is not exact-memory transport: extra homes change counters and fresh references. Arbitrary
 reference results and postconditions naming fresh allocations need a statement modulo the allocation

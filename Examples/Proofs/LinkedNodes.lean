@@ -1,6 +1,7 @@
 import Extracted
 import CIL.MethodIdentity
 import CIL.Safety.ObjectFields
+import CIL.Safety.AllocationRefinement
 
 /-!
 # Linked nodes
@@ -11,8 +12,8 @@ next)` stores `next` into `node.Next`, `SecondValue(node)` reads `node.Next.Valu
 `Link` changes one slot, which is its whole footprint. Proved: each method's contract,
 `LinkedValue` returning `next.Value` whether or not `next` is `node`, the
 `NullReferenceException` of `SecondValue` at each field load, `Link` keeping every other node's
-`Next` and every node's `Value`, and `Link`'s postcondition surviving a renaming of fresh
-allocations.
+`Next` and every node's `Value`, and `Link`'s contract transferring to any program that renames
+its fresh allocations.
 -/
 
 open CIL.Safety
@@ -124,6 +125,20 @@ theorem link_post_stable (input : Reference × Reference) (initial source target
   exact ⟨returned, held.of_agree bytes agree owned.old nextLive.old grows⟩
 
 #print axioms link_post_stable
+
+/-- `Link` meets its contract in any program that renames this one's private storage, such as one
+    whose locals take more homes, from every initial memory a caller can hold: well-formed, with
+    bounded static bindings. -/
+theorem link_holds_renamed {target : CIL.Program}
+    (programs : ProgramRenaming Extracted.program target) :
+    linkContract.fromReadyMemory.Holds target link :=
+  link_holds.fromReadyMemory.of_allocationRenaming programs
+    (fun _ _ ready => ⟨ready.1, ready.2.1⟩)
+    (fun _ _ _ _ _ post => ⟨[], post.1⟩)
+    (fun input initial _ _ output ready bytes agree grows post =>
+      link_post_stable input initial _ _ output ready.2.2 bytes agree grows post)
+
+#print axioms link_holds_renamed
 
 /-- `LinkedValue(node, next)` returns `next.Value` and leaves `next` in `node.Next`, whether or
     not `next` is `node`; its footprint is the one slot `Link` writes. -/

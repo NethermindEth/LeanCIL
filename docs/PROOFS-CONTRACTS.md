@@ -322,8 +322,8 @@ aliased case, and states the null receiver's `NullReferenceException` as an `Out
 `cil_loop_call`, its invariant an `Account.Balance.Holds` fact the loop tactics carry across the
 counter's store. [LinkedNodes](../Examples/Proofs/LinkedNodes.lean) composes `Link` and
 `SecondValue` through `Node.Next` and `Node.Value`, keeps the linked node's `Value` across the one
-slot `Link` writes, proves both null faults of `SecondValue` at their pcs, and shows `Link`'s
-postcondition stable under a renaming of fresh allocations.
+slot `Link` writes, proves both null faults of `SecondValue` at their pcs, and transfers `Link`'s
+contract to any program that renames its fresh allocations.
 
 The predicates are built on `CIL.Safety.ObjectFraming`, which states the same facts about the
 references `objectFieldAddress` locates and which a proof about a field no extraction names can

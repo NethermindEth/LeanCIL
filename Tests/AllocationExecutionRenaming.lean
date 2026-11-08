@@ -204,7 +204,7 @@ theorem transferred_contract : scalarContract.Holds (targetProgram returningCode
     change memory = initial at permitted
     subst memory
     exact ⟨initial_formed, by intro binding member; cases member⟩
-  · intro output
+  · intro _ _ _ output _ _
     exact ⟨[.i32 output], rfl⟩
   · intro input before sourceFinal targetFinal output permitted related agree _ post
     change before = initial at permitted
