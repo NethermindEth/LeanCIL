@@ -33,6 +33,45 @@ def checkedBits (kind : CheckedBinaryKind) (signed : Bool) (x y : BitVec width) 
   if lower ≤ result ∧ result < bound then .ok (BitVec.ofInt width result)
   else .error .overflow
 
+private theorem power_cast (width : Nat) : (2 : Int) ^ width = ((2 ^ width : Nat) : Int) := by
+  norm_cast
+
+/-- An unsigned checked sum that fits is the wrapping sum. -/
+theorem checkedBits_add_unsigned {width : Nat} {x y : BitVec width}
+    (fits : x.toNat + y.toNat < 2 ^ width) : checkedBits .add false x y = .ok (x + y) := by
+  have range : (0 : Int) ≤ (x.toNat : Int) + y.toNat ∧ (x.toNat : Int) + y.toNat < 2 ^ width := by
+    rw [power_cast]; constructor <;> omega
+  simp only [checkedBits, Bool.false_eq_true, ite_false, ite_eq_left range]
+  congr 1
+#print axioms checkedBits_add_unsigned
+
+/-- An unsigned checked difference that does not go below zero is the wrapping difference. -/
+theorem checkedBits_sub_unsigned {width : Nat} {x y : BitVec width}
+    (fits : y.toNat ≤ x.toNat) : checkedBits .sub false x y = .ok (x - y) := by
+  have below := x.isLt
+  have range : (0 : Int) ≤ (x.toNat : Int) - y.toNat ∧ (x.toNat : Int) - y.toNat < 2 ^ width := by
+    rw [power_cast]; constructor <;> omega
+  simp only [checkedBits, Bool.false_eq_true, ite_false, ite_eq_left range]
+  congr 1
+  apply BitVec.eq_of_toNat_eq
+  rw [BitVec.toNat_sub,
+    show (x.toNat : Int) - y.toNat = ((x.toNat - y.toNat : Nat) : Int) by omega,
+    BitVec.ofInt_natCast, BitVec.toNat_ofNat, Nat.mod_eq_of_lt (by omega),
+    show 2 ^ width - y.toNat + x.toNat = x.toNat - y.toNat + 2 ^ width by omega, Nat.add_mod_right,
+    Nat.mod_eq_of_lt (by omega)]
+#print axioms checkedBits_sub_unsigned
+
+/-- An unsigned checked product that fits is the wrapping product. -/
+theorem checkedBits_mul_unsigned {width : Nat} {x y : BitVec width}
+    (fits : x.toNat * y.toNat < 2 ^ width) : checkedBits .mul false x y = .ok (x * y) := by
+  have range : (0 : Int) ≤ (x.toNat : Int) * y.toNat ∧ (x.toNat : Int) * y.toNat < 2 ^ width := by
+    rw [power_cast,
+      show (x.toNat : Int) * y.toNat = ((x.toNat * y.toNat : Nat) : Int) by push_cast; rfl]
+    constructor <;> omega
+  simp only [checkedBits, Bool.false_eq_true, ite_false, ite_eq_left range]
+  congr 1
+#print axioms checkedBits_mul_unsigned
+
 /-- An overflow-checked binary instruction on two `i32` or two `i64` stack values. -/
 def checkedValues (kind : CheckedBinaryKind) (signed : Bool) (x y : Value) :
     Except ArithmeticFault Value :=
@@ -40,6 +79,44 @@ def checkedValues (kind : CheckedBinaryKind) (signed : Bool) (x y : Value) :
   | .i32 x, .i32 y => (checkedBits kind signed x y).map Value.i32
   | .i64 x, .i64 y => (checkedBits kind signed x y).map Value.i64
   | _, _ => .error .invalidOperands
+
+/-- An unsigned checked `add` of two `i32` values: a sum that fits is the wrapping sum. -/
+theorem checkedValues_add_i32 {x y : BitVec 32} (fits : x.toNat + y.toNat < 2 ^ 32) :
+    checkedValues .add false (.i32 x) (.i32 y) = .ok (.i32 (x + y)) := by
+  simp only [checkedValues, checkedBits_add_unsigned fits]; rfl
+#print axioms checkedValues_add_i32
+
+/-- An unsigned checked `add` of two `i64` values: a sum that fits is the wrapping sum. -/
+theorem checkedValues_add_i64 {x y : BitVec 64} (fits : x.toNat + y.toNat < 2 ^ 64) :
+    checkedValues .add false (.i64 x) (.i64 y) = .ok (.i64 (x + y)) := by
+  simp only [checkedValues, checkedBits_add_unsigned fits]; rfl
+#print axioms checkedValues_add_i64
+
+/-- An unsigned checked `sub` of two `i32` values: a difference that stays at or above zero is
+    the wrapping difference. -/
+theorem checkedValues_sub_i32 {x y : BitVec 32} (fits : y.toNat ≤ x.toNat) :
+    checkedValues .sub false (.i32 x) (.i32 y) = .ok (.i32 (x - y)) := by
+  simp only [checkedValues, checkedBits_sub_unsigned fits]; rfl
+#print axioms checkedValues_sub_i32
+
+/-- An unsigned checked `sub` of two `i64` values: a difference that stays at or above zero is
+    the wrapping difference. -/
+theorem checkedValues_sub_i64 {x y : BitVec 64} (fits : y.toNat ≤ x.toNat) :
+    checkedValues .sub false (.i64 x) (.i64 y) = .ok (.i64 (x - y)) := by
+  simp only [checkedValues, checkedBits_sub_unsigned fits]; rfl
+#print axioms checkedValues_sub_i64
+
+/-- An unsigned checked `mul` of two `i32` values: a product that fits is the wrapping product. -/
+theorem checkedValues_mul_i32 {x y : BitVec 32} (fits : x.toNat * y.toNat < 2 ^ 32) :
+    checkedValues .mul false (.i32 x) (.i32 y) = .ok (.i32 (x * y)) := by
+  simp only [checkedValues, checkedBits_mul_unsigned fits]; rfl
+#print axioms checkedValues_mul_i32
+
+/-- An unsigned checked `mul` of two `i64` values: a product that fits is the wrapping product. -/
+theorem checkedValues_mul_i64 {x y : BitVec 64} (fits : x.toNat * y.toNat < 2 ^ 64) :
+    checkedValues .mul false (.i64 x) (.i64 y) = .ok (.i64 (x * y)) := by
+  simp only [checkedValues, checkedBits_mul_unsigned fits]; rfl
+#print axioms checkedValues_mul_i64
 
 /-- Checked integer conversion preserves the mathematical input value. Narrow
     destinations are returned in a 32-bit evaluation-stack slot. -/

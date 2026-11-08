@@ -863,7 +863,8 @@ var outlined = new (string Name, string? Selector)[]
     ("Withdraw", "Objects::Withdraw(Examples.Account,System.UInt64)"),
     ("LinkedValue", "Objects::LinkedValue(Examples.Node,Examples.Node)"),
     ("IsIdle", "ItemPool::IsIdle(Examples.PooledItem)"),
-    ("DownThenUp", "Loops::DownThenUp(uint)")
+    ("DownThenUp", "Loops::DownThenUp(uint)"),
+    ("CheckedAdd", "CheckedArithmetic::Add(uint,uint)"), ("Log64", "Bits::Log64(ulong)")
 };
 var outlineTimer = System.Diagnostics.Stopwatch.StartNew();
 var outlineRoot = Path.Combine(root, "Outlines");
@@ -1523,7 +1524,28 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
                   have positive : remaining.toNat ≠ 0 := fun zero => guard (BitVec.eq_of_toNat_eq zero)
                   simp [measure, BitVec.toNat_sub]
                   omega
-            """)])
+            """)]),
+    // The overflow side is closed from the precondition, so only the fitting side is left.
+    ("CheckedAdd", [
+        ("def Precondition (x y : W32) : Prop := sorry",
+            "def Precondition (x y : W32) : Prop := x.toNat + y.toNat < 2 ^ 32"),
+        ("def Postcondition (x y result : W32) : Prop := sorry",
+            "def Postcondition (x y result : W32) : Prop := result.toNat = x.toNat + y.toNat"),
+        ("      sorry -- Postcondition of the returned value",
+            """
+                  simp only [Postcondition]
+                  rw [BitVec.toNat_add, Nat.mod_eq_of_lt fits1]
+            """)]),
+    ("Log64", [
+        ("def Precondition (value : W64) : Prop := sorry",
+            "def Precondition (_ : W64) : Prop := True"),
+        ("def Postcondition (value : W64) (result : W32) : Prop := sorry",
+            """
+            def Postcondition (value : W64) (result : W32) : Prop :=
+              result = BitVec.ofNat 32 value.toNat.log2
+            """),
+        ("    sorry -- Postcondition of the returned value",
+            "    rfl")])
 })
 {
     var source = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
@@ -1546,7 +1568,8 @@ Console.WriteLine("PASS filled outlines verify with only their specification wri
     "generated contract, a split on a field value, a call whose callee loads the node a field holds, a " +
     "span fold that stores its total before each span load, a split on a `bool` argument, a " +
     "store through `Unsafe.Add` of a reference argument, a call to a callee that throws where its " +
-    "precondition fails, a call storing through `Unsafe.Add` of a reference argument and two loops in sequence");
+    "precondition fails, a call storing through `Unsafe.Add` of a reference argument, two loops in sequence, " +
+    "a checked add and a base-two logarithm");
 
 // A written footprint that leaves out the element a loop writes is an error at the write, never an admission.
 var narrowed = Path.Combine(outlineRoot, "FillWords", "Narrowed.lean");

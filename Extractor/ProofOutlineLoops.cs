@@ -55,9 +55,13 @@ internal static partial class ProofOutline
             return leaders.Where(leader => leader <= pc).Max();
         }
 
-        /// <summary>An operation that steps without a branch, a call, a fault or memory.</summary>
+        /// <summary>An operation that steps without a branch, a call, a fault or memory: arithmetic, conversions
+        /// and the bit counts, which are total.</summary>
         internal static bool Pure(string op) => Regex.IsMatch(op,
-            @"\A\.(arg \d+|const32 \S.*|const64 \S.*|add|sub|mul|band|bor|bxor|nop|ret|convI8|convU8|convU4|convI4)\z");
+            @"\A\.(arg \d+|const32 \S.*|const64 \S.*|add|sub|mul|band|bor|bxor|nop|ret|convI8|convU8|convU4|" +
+            @"convI4)\z") ||
+            Regex.IsMatch(op, @"\A\.intrinsic \(\.scalar \(\.(log2|popCount|leadingZeroCount|trailingZeroCount) " +
+                @"\d+ \.word(32|64)\)\) 1\z");
     }
 
     enum Part { Word, Field, Span, Object }
