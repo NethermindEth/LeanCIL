@@ -333,7 +333,7 @@ internal static partial class ProofOutline
         Header(lean, spec, ["CIL.Verification", "CIL.Safety.SymbolicExecution", "CIL.Safety.ObjectFields"],
             stepped ? "`postcondition`" : null);
         if (stepped)
-            foreach (var callee in walk.Steps.OfType<CallStep>().Select(call => call.Callee).Distinct())
+            foreach (var callee in walk.Flattened.OfType<CallStep>().Select(call => call.Callee).Distinct())
                 CalleeContract(lean, callee, callee.Index.ToString(System.Globalization.CultureInfo.InvariantCulture));
         spec.Placeholders(lean);
         spec.Footprint(lean);
@@ -418,9 +418,9 @@ internal static partial class ProofOutline
         }
     }
 
-    /// <summary>The numbered hypotheses and memories an outline's proof introduces after each store and call.
-    /// </summary>
-    [GeneratedRegex(@"\A(?:stored|framed|held|written|output|called|post|initial|memory)\d*\z")]
+    /// <summary>The numbered hypotheses and memories an outline's proof introduces after each store, call and
+    /// split.</summary>
+    [GeneratedRegex(@"\A(?:stored|framed|held|written|output|called|post|returned|found|branch|initial|memory)\d*\z")]
     private static partial Regex Generated();
 
     /// <summary>Lean source with two-space indentation and lines kept under 100 characters.</summary>

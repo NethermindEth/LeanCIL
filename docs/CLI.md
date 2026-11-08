@@ -253,11 +253,18 @@ comment saying which obligation it is:
   holds it. A method that writes a field promises `Confined footprint initial final`, with
   `footprint` listing the written fields. The body is stepped through its field loads, its stores,
   locals and null tests of objects, carrying each field's fact across the stores before it, and
-  leaves the postcondition with `held1`, `held2`, ... the stored fields' `Holds` facts.
+  leaves the postcondition with `held1`, `held2`, ... the stored fields' `Holds` facts. A test of
+  words it names, such as a field value against an argument, splits the proof with
+  `by_cases branch1 : ...`, and each side steps on to its own return and leaves its own
+  postcondition, commented with the side it is on.
 - A call in a body over objects to a method that loads its fields, stores at most one word field of
   an object argument and returns a value it names gets a generated `MethodContract` read from that
   body, with a `Holds` theorem proved by the same stepping; `cil_contract_steps` composes the call
-  through it, and the callee's store counts as one of the caller's. Any other call is a
+  through it, and the callee's store counts as one of the caller's. A callee that loads an object
+  from a reference field and stores nothing gets a `pre` asking that some object, such as
+  `nodeNextTarget`, is held there with the facts it reads, and a `post` stating the result of
+  whichever object the field holds; the caller names that object by its own fact that the field
+  holds it, from a store just before the call or a target of its statement. Any other call is a
   `not outlined:` hole naming the callee. A loop
   carries the object facts across its iterations, and a `callvirt` in it gets a contract like any
   other call. A loop's statement assumes the same per-object facts, read from its body and callees

@@ -862,6 +862,7 @@ Examples:System.UInt64 Examples.Objects::IdOf(Examples.Shape)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Objects::LinkedValue(Examples.Node,Examples.Node)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Objects::Replace(Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Objects::SecondValue(Examples.Node)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Objects::Withdraw(Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.PackedConstructor::Sum()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.PointerOperations::WriteEnum(Examples.Unsigned64*,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.PrimitiveArrays::ReadUInt64(System.UInt64[],System.Int32)	A	A	A	A	A	A	A	A
