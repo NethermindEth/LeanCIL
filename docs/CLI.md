@@ -245,7 +245,9 @@ comment saying which obligation it is:
   `ManagedReference` of the loop state, and the cutpoint's frame names its slot from the state. A
   null test of it splits the proof with `cases node`, leaving a hole for the liveness of the
   instance it holds, and an identity test against another object splits it with
-  `by_cases branch1 : ...`; a load of a reference field into it is a `not outlined:` hole.
+  `by_cases branch1 : ...`; a load of a reference field into it is a `not outlined:` hole. A test
+  of a 1- or 2-byte struct field splits on the word its load zero-extends, such as
+  `(scanStopped.setWidth 8).setWidth 32 = 0`.
 - A call in the loop gets a `MethodContract` for the callee, with `pre` and `post` to replace, and a
   `Holds` theorem that steps the callee when it is arithmetic on its arguments. A callee over
   objects whose body a straight-line outline steps (see below) gets the contract read from its body

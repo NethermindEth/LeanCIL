@@ -460,7 +460,7 @@ internal static partial class ProofOutline
             {
                 Part.Span => new SpanTerm(Projected(component) + ".view", "", "", false),
                 Part.Object => new ObjectTerm(Projected(component)),
-                _ => new Number(Projected(component), component.Width, Narrow: component.Width < 4)
+                _ => new Number(Projected(component), component.Width)
             });
             var operands = Guard(state);
             var stack = operands.AsEnumerable().Reverse().Select(operand => StackValue(operand, state)).ToArray();
@@ -502,10 +502,15 @@ internal static partial class ProofOutline
         }
 
         /// <summary>A value the outline cannot write as a term, named for the hole that meets it.</summary>
+        /// <summary>The word an unsigned `width`-byte field holding `term` loads as.</summary>
+        static string NarrowRead(string term, int width)
+        {
+            var operand = Regex.IsMatch(term, @"\A[\w.]+\z") ? term : $"({term})";
+            return $"({operand}.setWidth {8 * width}).setWidth 32";
+        }
+
         static string Unnamed(Value value) => value switch
         {
-            Number { Narrow: true } field => $"the narrow field `{field.Term}`, which a load sign- or " +
-                "zero-extends and the outline does not split on",
             Unknown unknown => unknown.What,
             Element => "a span element before it is loaded",
             SpanLength => "a span length outside the loop test",
@@ -595,7 +600,7 @@ internal static partial class ProofOutline
                 Part.Span => new SpanTerm(component.Name + "View", component.Name + "Remaining",
                     component.Name + "Span", true),
                 Part.Object => new ObjectTerm(component.Name),
-                _ => new Number(component.Name, component.Width, Narrow: component.Width < 4)
+                _ => new Number(component.Name, component.Width)
             });
             // An object stays live through the loop; the loop tactics carry the fact across each store.
             foreach (var instance in spec.Objects)
@@ -976,7 +981,10 @@ internal static partial class ProofOutline
                 var field = slot < 0 ? null : slots[slot].Components.FirstOrDefault(component =>
                     component.Offset == int.Parse(match.Groups[1].Value));
                 if (field is null) return Stop("a field read outside a struct local");
-                stack.Add((Value)state.State[components.IndexOf(field)]);
+                var held = (Value)state.State[components.IndexOf(field)];
+                // A narrow field loads its low bytes zero-extended, as `narrowLoad` reads the word it holds.
+                stack.Add(field.Width < 4 && held is Number { Literal: false } word
+                    ? new Number(NarrowRead(word.Term, field.Width), 4) : held);
             }
             else if ((match = Regex.Match(op, @"\A\.setFieldAt (\d+) (\d+)\z")).Success)
             {
