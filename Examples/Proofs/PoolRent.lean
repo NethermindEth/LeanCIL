@@ -123,7 +123,8 @@ theorem rent_reuses (memory : Memory) (pool head : Reference) (wellFormed : memo
   refine ⟨CIL.executionBound Extracted.program rent, _, ?_, changed, ?_, ?_, ?_, ?_⟩
   · cil_checked_steps [setup, entry.frame, free.live.formed, free0.1.live.formed, free0.1.located,
       headLoad, headLive.formed, link0.1.located, linkLoad, freeStored,
-      link1.live.formed, link1.located, nullStored, idleFacts, countWritten, rented3.live.formed, rented3.located, markWritten]
+      link1.live.formed, link1.located, nullStored, idleFacts, countWritten,
+      rented3.live.formed, rented3.located, markWritten]
     cil_checked_steps 1 [rented3.live.formed, rented3.located, markWritten]
     have headMarked := rented3.live.after_confined markFramed
     have headLeft := (headMarked.after_below left link.old past).formed
