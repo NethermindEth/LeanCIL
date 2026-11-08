@@ -9,7 +9,7 @@ using Mono.Cecil;
 using Mono.Cecil.Cil;
 using System.Text.RegularExpressions;
 
-// Class instances on the checked heap: proofs about identity, presence, scalar and class-typed fields,
+// Class instances on the checked heap: proofs about identity, presence, scalar, class-typed and opaque fields,
 // instance receivers, calls framed across objects, construction against the heap budget and fields of base
 // classes, and the named rejection of every class shape or access the model does not represent.
 using var verification = new Program();
@@ -33,6 +33,7 @@ foreach (var (proof, entry) in new[]
     ("DepositTimes", "Objects::DepositTimes(Examples.Account,System.UInt64,System.UInt32)"),
     ("TwoMarkers", "Objects::TwoMarkers()"),
     ("LinkedNodes", "Objects::LinkedValue(Examples.Node,Examples.Node)"),
+    ("OpaqueTag", "Objects::CopyTag(Examples.Tagged,Examples.Tagged)"),
     ("BaseField", "Objects::IdOf(Examples.Shape)"),
     ("DerivedObject", "Objects::Describe(System.UInt64,System.UInt64)"),
     ("AnimalLegs", "VirtualCalls::LegsOf(Examples.Animal)"),
@@ -121,7 +122,7 @@ Console.WriteLine("PASS construction call proof names the constructor");
 foreach (var mutation in new[]
 {
     "abstract", "base", "baseRejected", "explicit", "finalizer", "interface", "byref", "address", "reference",
-    "fieldType", "receiverAddress"
+    "fieldType", "receiverAddress", "opaqueRead"
 })
 {
     var output = Path.Combine(root, "Reject-" + mutation);
@@ -170,10 +171,21 @@ foreach (var mutation in new[]
                 processor.Replace(method.Body.Instructions[3], processor.Create(OpCodes.Ldc_I4_0));
                 break;
             case "reference":
-                var owner = new FieldDefinition("Owner", FieldAttributes.Public, module.TypeSystem.String);
+                var owner = new FieldDefinition("Owner", FieldAttributes.Public,
+                    new OptionalModifierType(module.TypeSystem.Object, module.TypeSystem.String));
                 account.Fields.Add(owner);
                 method.Body.GetILProcessor().InsertAfter(method.Body.Instructions[0],
                     Instruction.Create(OpCodes.Ldfld, owner));
+                break;
+            case "opaqueRead":
+                var tagged = module.GetType("Examples.Objects").Methods.Single(candidate => candidate.Name == "HasTag");
+                var load = tagged.Body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Ldfld);
+                var reads = tagged.Body.GetILProcessor();
+                var length = new MethodReference("get_Length", module.TypeSystem.Int32, module.TypeSystem.String)
+                    { HasThis = true };
+                reads.InsertAfter(load, reads.Create(OpCodes.Pop));
+                reads.InsertAfter(load, reads.Create(OpCodes.Callvirt, length));
+                reads.InsertAfter(load, reads.Create(OpCodes.Dup));
                 break;
             case "fieldType":
                 var rate = new FieldDefinition("Rate", FieldAttributes.Public, module.TypeSystem.Double);
@@ -204,8 +216,9 @@ foreach (var mutation in new[]
             "interface" => "Unsupported class instance type: Examples.ICounterValue\n  Interface-typed values",
             "byref" => "Unsupported by-reference class instance: Examples.Account&",
             "address" => "Unsupported field address on a class instance: System.UInt32 Examples.Account::Limit",
-            "reference" => "Unsupported reference-typed field: System.String Examples.Account::Owner\n" +
-                "  Only fields holding instances of admitted classes are modelled; System.String is not one.",
+            "reference" => "Unsupported reference-typed field: System.String modopt(System.Object) " +
+                "Examples.Account::Owner\n  Only fields holding class instances are modelled",
+            "opaqueRead" => "callvirt requires an adjacent concrete constrained receiver",
             "fieldType" => "Unsupported class instance field type: System.Double Examples.Account::Rate",
             "receiverAddress" =>
                 "Unsupported address of a class instance receiver: System.UInt64 Examples.Account::get_Headroom()",
@@ -219,6 +232,7 @@ foreach (var mutation in new[]
         "interface" => "Objects::IsNull(Examples.ICounterValue)",
         "byref" => "Objects::IsNull(Examples.Account&)",
         "receiverAddress" => "Account::get_Headroom()",
+        "opaqueRead" => "Objects::HasTag(Examples.Tagged)",
         _ => "Objects::IsNull(Examples.Account)"
     };
     var result = Execute(["dotnet", ExtractorPath, "extract", dll, selector, output]);

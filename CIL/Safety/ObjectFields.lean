@@ -661,8 +661,8 @@ theorem Readable.load_null {field : ReferenceField} {memory : Memory} {object : 
   rfl
 #print axioms Readable.load_null
 
-/-- Storing a reference that forms, null included, into an owned field succeeds, confined to the
-    field, and leaves it owned and holding that reference. -/
+/-- Storing any reference that forms, null or a live object of any class, into an owned field
+    succeeds, confined to the field, and leaves it owned and holding that reference. -/
 theorem Owned.store_formed {field : ReferenceField} {memory : Memory} {object : Reference}
     {value : ManagedReference} (owned : field.Owned memory object)
     (formed : formObject memory value = .ok (.object value)) :

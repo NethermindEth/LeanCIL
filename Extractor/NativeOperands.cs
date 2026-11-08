@@ -78,6 +78,11 @@ internal static class NativeOperands
         _ => Kind.Other
     };
 
+    // An object reference whose class is outside the model; it only ever reaches a field, a test or a comparison.
+    static bool OpaqueClassField(FieldReference field) =>
+        field.Resolve() is { IsStatic: false } && ObjectTypes.Is(field.DeclaringType) &&
+        ObjectTypes.Opaque(FieldType(field));
+
     static TypeReference FieldType(FieldReference field) => field.Resolve() is { IsStatic: true }
         ? field.FieldType : MetadataValidation.InstanceFieldOf(field).Type;
 
@@ -260,6 +265,7 @@ internal static class NativeOperands
                         Code.Ldloc or Code.Ldloc_S or Code.Ldloc_0 or Code.Ldloc_1 or Code.Ldloc_2 or Code.Ldloc_3 =>
                             Slot(method.Body.Variables[FeatureConstants.Local(instruction)].VariableType,
                                 FeatureConstants.Local(instruction)),
+                        Code.Ldfld when OpaqueClassField((FieldReference)instruction.Operand) => Kind.Object,
                         Code.Ldfld or Code.Ldsfld => Type(FieldType((FieldReference)instruction.Operand)),
                         Code.Ldobj or Code.Ldelem_Any or Code.Castclass or Code.Isinst =>
                             Type((TypeReference)instruction.Operand),

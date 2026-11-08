@@ -303,6 +303,16 @@ object, not that its class is the field's type: that is the verifier's typing, a
 and an object of another class read back through the field fails its next field access with
 the owner check rather than reading another class's fields.
 
+A field whose type is a class outside the model, such as `string`, an interface, a delegate or a
+generic or library class, holds its reference in a slot through the same operations
+([OpaqueTag](../Examples/Proofs/OpaqueTag.lean)). Its value is opaque: the reference can be
+loaded, stored into another such field, compared for identity and tested against null, but no
+admitted operation takes its type as a field owner, call receiver, argument, local or result, so
+nothing reads through it. Its referent is an object allocation like any other, whose recorded
+runtime type the model never inspects. Fields of array type, generic parameter type or a modified
+type stay rejected: an array is a different kind of value, with a length, than an object
+reference.
+
 An instance method of an admitted class, virtual or not, is an entry whose receiver `this` is an
 object reference, not a byref. A theorem about a virtual method is about that body, which a `call`
 (a base call, or a direct call into it) runs exactly. The raw method records the class receiver (`objectReceiver`),
@@ -342,8 +352,8 @@ against a pinned catalog class that is no interface
 
 Interface, generic, explicit-layout and finalizable classes, classes deriving from a class that is
 not admitted, `newobj` of an abstract class, byrefs to class
-instances, field addresses on class instances, class fields holding anything but integers or
-admitted class instances (strings, arrays, interfaces, other classes),
+instances, field addresses on class instances, class fields of array, generic parameter, modified
+or non-integer value types,
 interface calls, virtual calls whose hierarchy the table cannot close or resolve, type tests
 against interfaces, `System.Object` or classes that are not admitted, and the address
 of a class receiver, local or argument are each

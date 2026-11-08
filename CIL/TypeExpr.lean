@@ -47,7 +47,9 @@ inductive TypeExpr where
   | signatureParameter (head tail : TypeExpr)
   | constructor (scope name : String)
   | apply (constructor argument : TypeExpr)
-  /-- A class admitted on the checked heap, by its exact scope and name. -/
+  /-- A class on the checked heap, by its exact scope and name: an admitted class, or, as the
+      type a class field holds, a class outside the model whose references are never read
+      through. -/
   | object (scope name : String)
   deriving DecidableEq, Repr
 

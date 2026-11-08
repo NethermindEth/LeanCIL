@@ -39,6 +39,19 @@ public sealed class Node
     public Node? Next;
 }
 
+/// <summary>
+/// A class holding a string, whose class the model does not represent: the reference is copied, compared and
+/// tested for null, never read through.
+/// </summary>
+public sealed class Tagged
+{
+    /// <summary>The instance's identifier.</summary>
+    public ulong Id;
+
+    /// <summary>The tag, or null.</summary>
+    public string? Tag;
+}
+
 /// <summary>A class with no fields: its instances have identity and nothing else.</summary>
 public sealed class Marker
 {
@@ -190,6 +203,15 @@ public static class Objects
         stored1.Next = next;
         held1.Next = next;
     }
+
+    /// <summary>Copies the tag of <paramref name="source"/> into <paramref name="target"/>, which may be it.</summary>
+    public static void CopyTag(Tagged target, Tagged source) => target.Tag = source.Tag;
+
+    /// <summary>Whether two instances hold the same tag reference, or both hold none.</summary>
+    public static bool SameTag(Tagged left, Tagged right) => (object?)left.Tag == (object?)right.Tag;
+
+    /// <summary>Whether the instance holds a tag.</summary>
+    public static bool HasTag(Tagged item) => item.Tag is not null;
 
     /// <summary>Bumps two accounts through <see cref="Bump"/>; both may be the same instance.</summary>
     public static void BumpBoth(Account first, Account second, ulong amount)

@@ -182,7 +182,10 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                     if (index < 0) throw new InvalidDataException("Unresolved tuple field: " + field.FullName);
                     fieldType = fields[index].Type;
                 }
-                return $".field ({Type(field.DeclaringType)}) {index} ({Type(fieldType)}) {Bool(isStatic)}";
+                // A class field of a type outside the model holds an object reference like an admitted one.
+                var heldType = !isStatic && ObjectTypes.Is(field.DeclaringType) && ObjectTypes.Opaque(fieldType)
+                    ? ObjectType(fieldType) : Type(fieldType);
+                return $".field ({Type(field.DeclaringType)}) {index} ({heldType}) {Bool(isStatic)}";
             case string text: return $".text {Quote(text)}";
             case float number: return $".text {Quote("float:" + BitConverter.SingleToInt32Bits(number).ToString(CultureInfo.InvariantCulture))}";
             case double number: return $".text {Quote("double:" + BitConverter.DoubleToInt64Bits(number).ToString(CultureInfo.InvariantCulture))}";
