@@ -277,7 +277,8 @@ and only the class, offset and width are relied on.
 `readable.facts` is the one fact `cil_checked_steps` needs to step a load (for a reference field,
 `readable.facts held targetLive`; for a signed narrow field, `readable.signedFacts`, which pushes
 the value sign-extended), and `owned.store value` gives the write, its `Confined`
-footprint and the `Holds` after it. `frame` keeps a field and its value across a call confined
+footprint and the `Holds` after it; for a reference field, `owned.store live` stores a live object and
+`owned.store_formed formed` any reference that forms, null included. `frame` keeps a field and its value across a call confined
 to a footprint apart from it, `after_confined` and `after_below` keep each predicate across a
 confined call and across memory that keeps old allocations, and `Owned.across` decides aliasing:
 after a call confined to the field of `written`, the same field of `object` holds the written

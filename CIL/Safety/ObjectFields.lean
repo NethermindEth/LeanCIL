@@ -661,6 +661,23 @@ theorem Readable.load_null {field : ReferenceField} {memory : Memory} {object : 
   rfl
 #print axioms Readable.load_null
 
+/-- Storing a reference that forms, null included, into an owned field succeeds, confined to the
+    field, and leaves it owned and holding that reference. -/
+theorem Owned.store_formed {field : ReferenceField} {memory : Memory} {object : Reference}
+    {value : ManagedReference} (owned : field.Owned memory object)
+    (formed : formObject memory value = .ok (.object value)) :
+    storeSlot memory (field.address object) value =
+        .ok (setSlot memory (field.address object) value) ∧
+      Confined [field.entry object] memory (setSlot memory (field.address object) value) ∧
+      field.Holds (setSlot memory (field.address object) value) object value :=
+  ⟨storeSlot_of_access owned.writable formed,
+    Confined.setSlot _ (List.mem_singleton_self _) (by decide),
+    ⟨{ located := by rw [objectFieldAddress_setSlot]; exact owned.located
+       old := owned.old
+       readable := owned.readable
+       writable := owned.writable }, setSlot_slots_same _ _ _⟩⟩
+#print axioms Owned.store_formed
+
 /-- Storing a live object into an owned field succeeds, confined to the field, and leaves it
     owned and holding the object. -/
 theorem Owned.store {field : ReferenceField} {memory : Memory} {object target : Reference}
@@ -671,12 +688,7 @@ theorem Owned.store {field : ReferenceField} {memory : Memory} {object target : 
         (setSlot memory (field.address object) (.address target)) ∧
       field.Holds (setSlot memory (field.address object) (.address target)) object
           (.address target) :=
-  ⟨storeSlot_of_access owned.writable live.formed,
-    Confined.setSlot _ (List.mem_singleton_self _) (by decide),
-    ⟨{ located := by rw [objectFieldAddress_setSlot]; exact owned.located
-       old := owned.old
-       readable := owned.readable
-       writable := owned.writable }, setSlot_slots_same _ _ _⟩⟩
+  owned.store_formed live.formed
 #print axioms Owned.store
 
 /-- A readable field keeps its slot, its authority and what it holds across a call confined to a

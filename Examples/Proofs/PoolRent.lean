@@ -25,25 +25,6 @@ bind_method rent rentBody := "Examples.PooledItem Examples.ItemPool::Rent()"
 bind_entry entry (memory : Memory) (pool : ManagedReference) (wellFormed : memory.WellFormed) :=
   rentBody with [.object pool] from memory allocating wellFormed
 
-/-- Storing a reference that forms, null included, into an owned reference field succeeds,
-    confined to the field, and leaves it owned and holding that reference. Remove once the
-    library's `ReferenceField.Owned.store_formed` lands. -/
-theorem storeFormed {field : ReferenceField} {memory : Memory} {object : Reference}
-    {value : ManagedReference} (owned : field.Owned memory object)
-    (formed : formObject memory value = .ok (.object value)) :
-    storeSlot memory (field.address object) value =
-        .ok (setSlot memory (field.address object) value) ∧
-      Confined [field.entry object] memory (setSlot memory (field.address object) value) ∧
-      field.Holds (setSlot memory (field.address object) value) object value :=
-  ⟨storeSlot_of_access owned.writable formed,
-    Confined.setSlot _ (List.mem_singleton_self _) (by decide),
-    ⟨{ located := by rw [objectFieldAddress_setSlot]; exact owned.located
-       old := owned.old
-       readable := owned.readable
-       writable := owned.writable }, setSlot_slots_same _ _ _⟩⟩
-
-#print axioms storeFormed
-
 /-- What an item's `NextFree` holds is null or a live item, as in every free list. -/
 def Links (memory : Memory) (item : Reference) : Prop :=
   PooledItem.NextFree.of memory item = .null ∨
@@ -97,9 +78,9 @@ theorem rent_reuses (memory : Memory) (pool head : Reference) (wellFormed : memo
   have linkFormed := links.formed keep grown
   have linkLoad := link0.1.toReadable.load.trans (link0.2 ▸ linkFormed)
   rw [link0.2] at linkLoad
-  obtain ⟨freeStored, freeFramed, freeHeld⟩ := storeFormed free0.1 linkFormed
+  obtain ⟨freeStored, freeFramed, freeHeld⟩ := free0.1.store_formed linkFormed
   have link1 := link0.1.after_confined freeFramed (apart_of_entries rfl)
-  obtain ⟨nullStored, nullFramed, nullHeld⟩ := storeFormed link1 (value := .null) rfl
+  obtain ⟨nullStored, nullFramed, nullHeld⟩ := link1.store_formed (value := .null) rfl
   have idle2 := ((idle0.after_confined freeFramed (apart_of_entries rfl)).after_confined nullFramed
     (apart_of_entries rfl))
   obtain ⟨counted, countWritten, countFramed, countHeld⟩ :=
@@ -282,7 +263,7 @@ theorem rent_creates (memory : Memory) (pool : Reference) (wellFormed : memory.W
     RuntimeType.identity_mem_lineage _
   have ownerFresh := ReferenceField.fresh_holds_null (field := PooledItem.Owner)
     (size := itemSize) numbered itemType declared (by decide) (by decide)
-  obtain ⟨ownerStored, ownerFramed, ownerHeld⟩ := storeFormed ownerFresh.1 poolLive3.formed
+  obtain ⟨ownerStored, ownerFramed, ownerHeld⟩ := ownerFresh.1.store_formed poolLive3.formed
   have idOwned := (WordField.fresh_owned (field := PooledItem.Id) (size := itemSize) numbered
     itemType declared (by decide) (by decide) (by decide)).after_confined ownerFramed
     (apart_of_entries rfl)
