@@ -102,6 +102,16 @@ void Rebuild(string from, string to)
     Run(["dotnet", "build", Path.Combine(consumer, "Workspace.csproj"), "-c", "Release"]);
 }
 
+Console.WriteLine("Rejecting an editor environment Lean would truncate, before writing the editor library");
+// A lowered limit stands in for Lean's Windows buffer on every OS; the editor's `lake serve` would lose LEAN_PATH.
+var crowded = Execute(command,
+    environment: new Dictionary<string, string> { [LeanEnvironmentLimitVariable] = "1000" });
+var serveCheck = "`lake serve` in " + Path.GetFullPath(package);
+if (crowded.Code == 0 || !crowded.Output.Contains(serveCheck, StringComparison.Ordinal) ||
+    !crowded.Output.Contains("1,000-byte limit", StringComparison.Ordinal) || Directory.Exists(editor))
+    throw new InvalidOperationException("An oversized editor environment was not rejected at setup:\n" +
+        crowded.Output);
+
 Console.WriteLine("Generating the editor extraction in the consumer package and checking the proof in place");
 var created = Run(command);
 string[] editorFiles = ["Extracted.lean", "ExtractedSymbols.lean", "selection.json"];

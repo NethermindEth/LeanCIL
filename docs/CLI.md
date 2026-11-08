@@ -494,8 +494,10 @@ path counts twice.
 Before running Lake, leancil computes what Lake will pass on: the environment it gives Lake,
 with the changes elan's `lake` proxy makes, and the variables `lake env` prints (for
 `lake build`, which passes Lean only `LEAN_PATH`, just that one). It fails when the result
-exceeds the limit, naming the size, the limit and the largest variables. Lake prints a
-variable it unsets as empty; counting it can overstate the size by a few bytes, never understate it.
+exceeds the limit, naming the size, the limit and the largest variables. `leancil workspace`
+makes the same check for `lake serve`, taking its own environment as the editor's, so the
+failure appears at setup rather than as unresolved imports. Lake prints a variable it unsets
+as empty; counting it can overstate the size by a few bytes, never understate it.
 
 Lake adds a package's source directory to `LEAN_SRC_PATH` once for every `lean_lib` the
 package declares, without merging repeats, and the `leancil` package declares one library

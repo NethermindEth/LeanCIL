@@ -134,6 +134,8 @@ partial class Program
     {
         var root = settings.ProofRoot;
         var editor = Path.Combine(EditorFramework(root), EditorSourceDirectory);
+        // The editor's `lake serve` starts Lean the same way; an oversized environment fails here, not as imports.
+        RequireLeanEnvironmentFits(["lake", "serve"], root, new System.Diagnostics.ProcessStartInfo().Environment);
         var extraction = Path.Combine(Path.GetTempPath(), "leancil-editor-" + Guid.NewGuid().ToString("N"));
         string[] modules;
         try
