@@ -30,7 +30,7 @@ try
     // sizes are UTF-8 bytes, so a three-byte character costs three.
     var counted = LeanChildEnvironment(
         [KeyValuePair.Create("Path", "abc"), KeyValuePair.Create("A", "inherited")],
-        [KeyValuePair.Create("PATH", "xy"), KeyValuePair.Create("A", "中")]);
+        [KeyValuePair.Create("PATH", "xy"), KeyValuePair.Create("A", "\u4E2D")]);
     if (!counted.Select(entry => entry.Name).SequenceEqual(["Path", "PATH", "A"]) ||
         EnvironmentBlockBytes(counted) != "Path=abc".Length + 1 + "PATH=xy".Length + 1 + "A=".Length + 3 + 1 + 1)
         throw new InvalidOperationException("The environment block is not counted as Lean builds it.");
