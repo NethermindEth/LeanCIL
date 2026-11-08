@@ -380,6 +380,30 @@ of a base class too.
 constructor's call in place, and [DerivedObject](../Examples/Proofs/DerivedObject.lean) steps a
 derived class's constructor through its base's.
 
+An [array of class references](SOUNDNESS-RUNTIME.md#arrays-of-class-references) names an
+element by its array and index. `CIL.Safety.ReferenceArrayElements` mirrors the field
+predicates in the `ReferenceArray` namespace:
+
+| Name | Meaning |
+| --- | --- |
+| `ReferenceArray.Live memory array element length` | `array` is a live `element[]` of `length` |
+| `ReferenceArray.of memory array index` | The reference element `index` holds |
+| `ReferenceArray.Readable memory array element length index` | `Live`, `index` inside, readable |
+| `ReferenceArray.Owned memory array element length index` | `Readable` and writable |
+| `ReferenceArray.Holds memory array element length index value` | `Owned` and holding `value` |
+| `ReferenceArray.entry array index` | The footprint entry of a call that may change the element |
+
+`readable.facts held targetLive` and `readable.facts_null held` step `ldelem.ref`;
+`owned.store targetLive storable` and `owned.store_null` step `stelem.ref` and give its
+`Confined` footprint and the `Holds` after it, with `storableIn_of_lineage` deciding the
+covariance check for an instance whose class derives from the element class and
+`storableIn_mismatch` giving the `ArrayTypeMismatchException` of one that does not.
+`live.slot_outside` gives the `IndexOutOfRangeException` of an index past the length.
+`frame`, `Holds.after_confined` and `Owned.across` keep and decide elements across a confined
+call as they do fields, and `ReferenceArray.fresh` gives a fresh array from `newReferenceArray_ok`
+as live with every element owned and null. `step_referenceArrayLength_eq`,
+`step_referenceArrayLoad_eq` and `step_referenceArrayStore_eq` step the three instructions.
+
 ## Construct structs through contracts
 
 A `newobj` of a reference-free struct allocates caller-owned storage, writes zero to every byte,

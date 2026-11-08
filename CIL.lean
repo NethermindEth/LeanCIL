@@ -98,6 +98,7 @@ import CIL.Safety.ClassCatalog
 import CIL.Safety.ObjectFraming
 import CIL.Safety.ObjectFields
 import CIL.Safety.ReferenceSegments
+import CIL.Safety.ReferenceArrayElements
 import CIL.Safety.InstructionMemoryLemmas
 import CIL.Safety.InstructionReferences
 import CIL.Safety.LiveState
