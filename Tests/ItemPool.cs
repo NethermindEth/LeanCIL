@@ -7,9 +7,9 @@ using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
-// An object pool with an intrusive free list: Rent reuses the free-list head, throws when every
-// item is rented out, and faults on a null pool. Each mutation breaks one stated postcondition, so
-// the unchanged proof must fail inside the theorem that states it.
+// An object pool with an intrusive free list: Rent reuses the free-list head, creates an item while
+// under capacity, throws when every item is rented out, and faults on a null pool. Each mutation breaks one stated
+// postcondition, so the unchanged proof must fail inside the theorem that states it.
 using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/ItemPool");
@@ -18,14 +18,17 @@ const string Rent = "ItemPool::Rent()";
 var proof = At("Examples/Proofs/PoolRent.lean");
 var proofLines = File.ReadAllLines(proof);
 verification.Verify(assembly, "Examples", Rent, proof, Path.Combine(root, "Rent"));
-Console.WriteLine("PASS Rent reuses the free-list head, throws when exhausted and faults on a null pool");
+Console.WriteLine("PASS Rent reuses the free-list head, creates under capacity, throws when exhausted or null");
 
-foreach (var (mutation, theorem) in new[]
+// Both paths share the final IsRented store, and the capacity test decides between creating and throwing,
+// so those mutations break two theorems each.
+foreach (var (mutation, theorems) in new[]
 {
-    ("unmarked", "rent_reuses"),
-    ("stale-link", "rent_reuses"),
-    ("double-count", "rent_reuses"),
-    ("inverted-capacity", "rent_exhausted_throws")
+    ("unmarked", new[] { "rent_reuses", "rent_creates" }),
+    ("stale-link", new[] { "rent_reuses" }),
+    ("double-count", new[] { "rent_reuses" }),
+    ("repeated-id", new[] { "rent_creates" }),
+    ("inverted-capacity", new[] { "rent_creates", "rent_exhausted_throws" })
 })
 {
     var output = Path.Combine(root, "Mutated-" + mutation);
@@ -63,6 +66,12 @@ foreach (var (mutation, theorem) in new[]
                 var decrement = instructions.Single(instruction => instruction.OpCode == OpCodes.Sub);
                 Require(decrement.Previous, OpCodes.Ldc_I4_1).OpCode = OpCodes.Ldc_I4_2;
                 break;
+            case "repeated-id":
+                // _nextId += 0, so the next item created repeats this item's id
+                var counter = instructions.Single(instruction => instruction.OpCode == OpCodes.Stfld &&
+                    instruction.Operand is FieldReference field && field.Name == "_nextId");
+                Require(Require(counter.Previous, OpCodes.Add).Previous, OpCodes.Ldc_I4_1).OpCode = OpCodes.Ldc_I4_0;
+                break;
             case "inverted-capacity":
                 // creates a new item exactly when every item the capacity allows is alive
                 var capacity = instructions.Single(instruction => instruction.Operand is FieldReference field &&
@@ -86,8 +95,8 @@ foreach (var (mutation, theorem) in new[]
     }
     if (refusal.Length == 0 || File.Exists(Path.Combine(output, "verified.json")))
         throw new InvalidOperationException($"Rent satisfied its proof after the {mutation} mutation");
-    RequireFailureIn(theorem, mutation, refusal);
-    Console.WriteLine($"PASS {mutation} mutation fails {theorem}");
+    RequireFailureIn(theorems, mutation, refusal);
+    Console.WriteLine($"PASS {mutation} mutation fails {string.Join(" and ", theorems)}");
 }
 Console.WriteLine("PASS item pool: Rent proofs and the mutations each postcondition rejects");
 
@@ -95,16 +104,25 @@ Instruction Require(Instruction instruction, OpCode expected) => instruction.OpC
     ? instruction
     : throw new InvalidOperationException($"Expected {expected} before the mutated store, found {instruction}");
 
-// A failure outside the stated theorem would mean the mutation broke the proof's scaffolding,
-// not the postcondition it targets.
-void RequireFailureIn(string theorem, string mutation, string refusal)
+// A failure outside the stated theorems would mean the mutation broke the proof's scaffolding,
+// not the postconditions it targets; each stated theorem must fail.
+void RequireFailureIn(string[] theorems, string mutation, string refusal)
+{
+    var ranges = theorems.Select(TheoremLines).ToArray();
+    var lines = Regex.Matches(refusal, @"\.lean:(\d+):\d+: error").Select(match => int.Parse(match.Groups[1].Value))
+        .ToArray();
+    bool Inside(int line, (int Start, int End) range) => line > range.Start && line <= range.End + 1;
+    var stray = lines.Length == 0 || lines.Any(line => !ranges.Any(range => Inside(line, range)));
+    if (stray || ranges.Any(range => !lines.Any(line => Inside(line, range))))
+        throw new InvalidOperationException(
+            $"The {mutation} mutation did not fail exactly inside {string.Join(", ", theorems)}:\n{refusal}");
+}
+
+(int Start, int End) TheoremLines(string theorem)
 {
     var start = Array.FindIndex(proofLines, line => line.StartsWith($"theorem {theorem} ", StringComparison.Ordinal));
     var end = Array.FindIndex(proofLines, line => line == $"#print axioms {theorem}");
-    if (start < 0 || end < start)
-        throw new InvalidDataException("Examples/Proofs/PoolRent.lean does not state " + theorem);
-    var lines = Regex.Matches(refusal, @"\.lean:(\d+):\d+: error").Select(match => int.Parse(match.Groups[1].Value))
-        .ToArray();
-    if (lines.Length == 0 || lines.Any(line => line <= start || line > end + 1))
-        throw new InvalidOperationException($"The {mutation} mutation did not fail only inside {theorem}:\n{refusal}");
+    return start < 0 || end < start
+        ? throw new InvalidDataException("Examples/Proofs/PoolRent.lean does not state " + theorem)
+        : (start, end);
 }
