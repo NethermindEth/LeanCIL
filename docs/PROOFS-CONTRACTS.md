@@ -287,6 +287,16 @@ objects. `ReferenceField.Holds.of_agree` keeps a held caller reference under `By
 carry `LiveObject` and every field predicate across the frame's stores and across a confined call
 whose footprint is apart from the field, as they carry caller buffers.
 
+A method that creates an instance starts from `WordField.fresh_owned` and
+`ReferenceField.fresh_holds_null`, which give each field of the fresh instance before its
+constructor runs; `enterFrame_heapBudget` shows the caller's heap budget reaches the `newobj`
+unchanged by frame entry. No frame owns an instance, so `leaveFrame_memoryAt` gives `MemoryAt`
+for it when the method returns, and the `after_kept` lemmas carry its field predicates there;
+`cil_checked_steps` returns it given that its allocation is not the frame's home. Fields of two
+unrelated classes are apart under the [class catalog](SOUNDNESS-RUNTIME.md#class-instances)
+premise, through `Memory.ClassesConsistent.allocation_ne`.
+[PoolRent](../Examples/Proofs/PoolRent.lean) uses each of these.
+
 [DepositBoth](../Examples/Proofs/DepositBoth.lean) composes two `callvirt` calls of
 `Account.Deposit` through `depositContract`, whose precondition is `Account.Balance.Owned` and
 whose postcondition is `Account.Balance.Holds final account (Account.Balance.of initial account +

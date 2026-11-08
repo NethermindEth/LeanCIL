@@ -31,8 +31,10 @@
 - `SpanTables` indexes `ReadOnlySpan<uint>` and `ReadOnlySpan<ulong>` tables, reads a length and the first element, and faults with `System.IndexOutOfRangeException` out of range.
 - `ItemPool.Rent` reuses the head of an intrusive free list. `PoolRent.lean` proves that it
   returns that head, advances the list past it, clears its link, decrements the idle count and
-  marks it rented, writing no other field; an exhausted pool throws `InvalidOperationException`
-  and a null pool `NullReferenceException`.
+  marks it rented, writing no other field, and under the class catalog premise leaves the live
+  count alone; with an empty list and room under the capacity it creates an item owned by the
+  pool, numbered with the next id and marked rented; an exhausted pool throws
+  `InvalidOperationException` and a null pool `NullReferenceException`.
 - `NullReferences` tests `Unsafe.NullRef<T>` with `Unsafe.IsNullRef<T>`, faults on loads, stores and field accesses through it, and selects an optional `ref` argument that is either unset or bound, as optional outputs do.
 - `VirtualCalls` calls an abstract and a defaulted virtual method of `Animal` on any animal:
   `AnimalLegs.lean` and `AnimalLoudness.lean` prove the override or inherited body the receiver's

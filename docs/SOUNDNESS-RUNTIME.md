@@ -263,6 +263,19 @@ rechecks that exact target wherever `.pop` stands for a call. No frame owns
 an instance, so leaving the method that created it never expires it: an instance lives as long
 as a reference can observe it, which is the reachability the collector maintains.
 
+Memory a caller passes may record any runtime type, so `Memory.WellFormed` alone does not stop
+one allocation from claiming two unrelated classes, and fields of two such classes may then
+alias. A proof that needs instances of unrelated classes to be different objects states
+`Memory.ClassesConsistent (declaredClasses Extracted.methodEvidence) memory` as a premise
+([class catalog](../CIL/Safety/ClassCatalog.lean)): each cataloged class in an object's lineage
+brings its whole base chain as the lineage's tail, which single inheritance makes true of every
+CLR object. The catalog lists the class and admitted bases that each object-receiver method's
+metadata records (`RawMethod.owner`, `RawMethod.objectBases`); these are metadata the extractor
+decodes, and `translation_valid` certifies the evidence that holds them. Under the premise,
+`Memory.ClassesConsistent.allocation_ne` separates objects located as instances of two unrelated
+cataloged classes. The premise describes the memory it is stated for; no theorem yet carries it
+across execution, so a proof composing calls states it for each call's entry memory.
+
 References held by fields are kept apart from bytes: `Memory.slots` records, by allocation and
 field offset, the object reference a field holds, and fresh storage holds null. No byte encodes
 a reference, so no byte access can forge or observe one. `Memory.WellFormed` requires every
