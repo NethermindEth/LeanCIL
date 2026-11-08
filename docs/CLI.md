@@ -249,8 +249,11 @@ comment saying which obligation it is:
   of a 1- or 2-byte struct field splits on the word its load zero-extends, such as
   `(scanStopped.setWidth 8).setWidth 32 = 0`. A 4- or 8-byte store through `Unsafe.Add` of a
   reference argument by an `int` index, before any other store of the iteration, is stepped from
-  three holes: write authority over that element at the iteration's memory, the index below
-  `2 ^ 31`, and the element within `footprint`.
+  write authority over that element at the iteration's memory, the index below `2 ^ 31` and the
+  element within `footprint`. `cil_loop_obligation` proves each from the invariant, precondition
+  and footprint the author writes, by `omega` over their conjuncts or from a `Filled` or `Writable`
+  fact covering the element; it is a hole while any of those is `sorry`, and an error at the write
+  once they are written and do not imply it.
 - A call in the loop gets a `MethodContract` for the callee, with `pre` and `post` to replace, and a
   `Holds` theorem that steps the callee when it is arithmetic on its arguments. A callee over
   objects whose body a straight-line outline steps (see below) gets the contract read from its body

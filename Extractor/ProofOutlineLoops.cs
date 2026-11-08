@@ -128,6 +128,9 @@ internal static partial class ProofOutline
             var imports = new List<string> { "CIL.Verification", "CIL.StructuralLabels" };
             if (callees.Count > 0) imports.Add("CIL.MethodIdentity");
             imports.Add("CIL.Safety.LoopScaffold");
+            if (body.Ops.Any(op => op.StartsWith(".memory (.add ", StringComparison.Ordinal)) &&
+                spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference))
+                imports.Add("CIL.Safety.LoopObligations");
             if (spec.Framed) imports.Add("CIL.Safety.ObjectFields");
             if (spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.ReadOnlySpan))
                 imports.Add("CIL.Safety.SpanContents");
@@ -1104,12 +1107,15 @@ internal static partial class ProofOutline
             var element = $"{name}.element {added.Width} {index}.toNat";
             var lean = current!;
             var indent = currentIndent;
-            lean.Line($"{indent}have {name}Slot : Writable current ({element}) {added.Width} 0 1 :=");
-            lean.Noted(indent + "  ", "sorry", $"the loop may write this element of `{name}` at its memory");
-            lean.Noted(indent, $"have {name}Small : {index}.toNat < 2 ^ 31 := sorry", "the index is below 2^31");
+            // Each side condition follows from the author's definitions, so it is a hole only while they are.
+            var closer = $"{indent}  cil_loop_obligation [invariant, Precondition, footprint]";
+            lean.Line($"{indent}have {name}Slot : Writable current ({element}) {added.Width} 0 1 := by");
+            lean.Line(closer);
+            lean.Line($"{indent}have {name}Small : {index}.toNat < 2 ^ 31 := by");
+            lean.Line(closer);
             lean.Line($"{indent}have {name}Within : ∃ entry ∈ footprint {spec.Arguments},");
-            lean.Noted(indent + "    ", $"Within ({element}, {added.Width}) entry := sorry",
-                "the element lies in `footprint`");
+            lean.Line($"{indent}    Within ({element}, {added.Width}) entry := by");
+            lean.Line(closer);
             lean.Line($"{indent}obtain ⟨{name}After, {name}Wrote, -, -, -⟩ := {name}Slot.write_one {value}");
             lean.Line($"{indent}have {name}Add := add_int_element frame.wellFormed");
             lean.Line($"{indent}  (frame.caller_form wellFormed {name}Form) {name}Small");

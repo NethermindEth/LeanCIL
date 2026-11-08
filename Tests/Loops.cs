@@ -1090,7 +1090,7 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
             "def Postcondition (flag : Bool) (x y result : W64) : Prop := result = if flag then x else y"),
         ("sorry -- Postcondition of the returned value where `flag` is false", "rfl"),
         ("sorry -- Postcondition of the returned value where `flag` is true", "rfl")]),
-    // An `Unsafe.Add` store steps from its write authority, index bound and footprint, each a hole.
+    // An `Unsafe.Add` store's write authority, index bound and footprint follow from the specification.
     ("FillWords", [
         ("""
             def Precondition (destination : Reference) (value : W64) (count : W32) (initial : Memory)
@@ -1131,34 +1131,6 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
                 case invariant =>
                   simp only [Precondition] at assumed
                   simpa [invariant] using Filled.start (assumed.2.after_confined storedFrame.confined wellFormed)
-            """),
-        ("      sorry -- the loop may write this element of `destination` at its memory",
-            """
-                  by
-                    simp only [Precondition] at assumed
-                    simp only [invariant] at holds
-                    rw [BitVec.toInt_eq_toNat_cond, BitVec.toInt_eq_toNat_cond] at guard
-                    simp only [show 2 * i.toNat < 2 ^ 32 by omega, show 2 * count.toNat < 2 ^ 32 by omega,
-                      ↓reduceIte] at guard
-                    exact holds.2.2.sub (by simp) (by simp; omega)
-            """),
-        ("    have destinationSmall : i.toNat < 2 ^ 31 := sorry -- the index is below 2^31",
-            """
-                have destinationSmall : i.toNat < 2 ^ 31 := by
-                  simp only [Precondition] at assumed
-                  simp only [invariant] at holds
-                  omega
-            """),
-        ("        Within (destination.element 8 i.toNat, 8) entry := sorry -- the element lies in `footprint`",
-            """
-                    Within (destination.element 8 i.toNat, 8) entry := by
-                  simp only [Precondition] at assumed
-                  simp only [invariant] at holds
-                  rw [BitVec.toInt_eq_toNat_cond, BitVec.toInt_eq_toNat_cond] at guard
-                  simp only [show 2 * i.toNat < 2 ^ 32 by omega, show 2 * count.toNat < 2 ^ 32 by omega,
-                    ↓reduceIte] at guard
-                  simp [footprint, Within]
-                  omega
             """),
         ("    case invariant => sorry -- invariant again at the loop head",
             """
@@ -1220,6 +1192,15 @@ Console.WriteLine("PASS filled outlines verify with only their specification wri
     "generated contract, a split on a field value, a call whose callee loads the node a field holds, a " +
     "span fold that stores its total before each span load, a split on a `bool` argument and a " +
     "store through `Unsafe.Add` of a reference argument");
+
+// A written footprint that leaves out the element a loop writes is an error at the write, never an admission.
+var narrowed = Path.Combine(outlineRoot, "FillWords", "Narrowed.lean");
+File.WriteAllText(narrowed, File.ReadAllText(Path.Combine(outlineRoot, "FillWords", "Filled.lean"))
+    .Replace("  [(destination, 8 * count.toNat)]", "  []", StringComparison.Ordinal));
+var outside = Execute(Cli("verify", OutlineExtraction("FillWords"), "--proof", narrowed));
+if (outside.Code == 0 || !outside.Output.Contains("cil_loop_obligation could not prove"))
+    throw new InvalidOperationException("verify did not reject a write outside the footprint:\n" + outside.Output);
+Console.WriteLine("PASS a loop write outside its written footprint is an error at the write");
 
 // One hole left, an obligation or a path the outline could not step, keeps an outline from certifying:
 // verify refuses it for `sorryAx` and removes the report the filled proof left.

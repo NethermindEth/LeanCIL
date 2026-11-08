@@ -176,6 +176,7 @@ import CIL.Safety.MissingFacts
 import CIL.Safety.LoopAutomation
 import CIL.Safety.LoopContract
 import CIL.Safety.LoopOutcome
+import CIL.Safety.LoopObligations
 import CIL.Types
 import CIL.VectorMemory
 import CIL.VectorMemoryLemmas

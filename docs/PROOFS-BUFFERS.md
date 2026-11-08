@@ -286,6 +286,10 @@ at the caller's memory: `(span.within wellFormed frame).head` reads a caller spa
 in frame memory, with `cil_span_apart` finding each entry's `SpanApart` in context, and
 `writable.add_int wellFormed formed` gives an `int` index's `Unsafe.Add` address for every frame.
 [CopyUntilZero](../Examples/Proofs/CopyUntilZero.lean) states only these.
+`Filled.element_writable` and `Writable.element_writable` give write authority over one element
+of a run, and `cil_loop_obligation [defs]` proves an element write's authority, index bound and
+footprint membership from the hypotheses with `defs` unfolded, failing at the write when they do
+not imply it.
 
 A caller buffer is written word by word through these lemmas of
 [BufferContents](../CIL/Safety/BufferContents.lean):
