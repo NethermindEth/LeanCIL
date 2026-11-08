@@ -342,10 +342,13 @@ partial class Program
         if (proof.Theorem is null)
             return WatchOutcome(key, selection, proof, "unverified", true,
                 "no --theorem was given to leancil workspace; only the editor modules were refreshed", null);
+        // A copy of the cycle's extraction would carry assembly paths relative to the scratch directory.
         foreach (var name in new[] { "identity.json", "Extracted.lean", "Symbols.lean" })
-            if (File.Exists(Path.Combine(extraction, name)))
-                CopyIfChanged(Path.Combine(extraction, name), Path.Combine(directory, name));
-            else File.Delete(Path.Combine(directory, name));
+            File.Delete(Path.Combine(directory, name));
+        ExtractEditorSelection(selection, directory);
+        if (Sha(Path.Combine(directory, "Extracted.lean")) != Sha(Path.Combine(extraction, "Extracted.lean")))
+            return WatchOutcome(key, selection, proof, "failed", true,
+                "the assembly changed during the cycle; the next cycle checks the new build", null);
         var proofPath = Path.GetFullPath(proof.Proof, settings.Root);
         // A generated scratch package requires the framework by path, which only single-file verification accepts.
         string[] root = IsScratchPackage(settings.Root) ? [] : ["--proof-root", settings.Root];

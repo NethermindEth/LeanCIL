@@ -444,10 +444,18 @@ CheckedProof();
 if (CheckProof(twiceProof).Code != 0) throw new InvalidOperationException("The second proof does not check in place.");
 
 string[] watch = [.. cli, "watch", package, "--project", project, "--format", "json"];
+// Scratch extractions on the package's drive, as on a single-drive machine, so a path recorded relative to one
+// cannot resolve from the directory a proof is verified in; kept short for Lean's Windows path limit.
+var watchTemp = At("artifacts/t-" + Guid.NewGuid().ToString("N")[..8]);
+Directory.CreateDirectory(watchTemp);
+var watchEnvironment = new Dictionary<string, string>
+{
+    ["TMP"] = watchTemp, ["TEMP"] = watchTemp, ["TMPDIR"] = watchTemp
+};
 (JsonElement Cycle, TimeSpan Elapsed) WatchOnce(bool passes)
 {
     var started = Stopwatch.StartNew();
-    var result = Execute([.. watch, "--once"]);
+    var result = Execute([.. watch, "--once"], environment: watchEnvironment);
     var line = result.Stdout.Split('\n').LastOrDefault(text => text.StartsWith('{'))
         ?? throw new InvalidOperationException("watch printed no cycle: " + result.Output);
     var cycle = JsonSerializer.Deserialize<JsonElement>(line);
@@ -485,6 +493,20 @@ if (crowdedWatch.Code == 0 || !crowdedWatch.Output.Contains(serveCheck, StringCo
 var (first, firstTime) = WatchOnce(passes: true);
 Expect(first, "Proof.lean", "verified", rechecked: true);
 Expect(first, "TwiceProof.lean", "verified", rechecked: true);
+// Each proof is verified against an extraction made in its own directory, whose recorded assembly path is
+// relative to that directory; a rooted recorded path names itself wherever the extraction lies.
+foreach (var identity in Directory.EnumerateFiles(Path.Combine(editor, "selections"), "identity.json",
+             SearchOption.AllDirectories))
+{
+    var copy = Path.GetDirectoryName(identity)!;
+    var recorded = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(identity)).GetProperty("assemblyPath")
+        .GetString()!;
+    if (Path.GetFullPath(ExtractionIdentity.Resolve(copy, recorded)) != Path.GetFullPath(assembly))
+        throw new InvalidOperationException($"{identity} records {recorded}, which names no built assembly.");
+}
+foreach (var rooted in OperatingSystem.IsWindows() ? new[] { @"C:\x\y.dll", @"\\server\share\y.dll" } : ["/x/y.dll"])
+    if (ExtractionIdentity.Resolve(editor, rooted) != rooted)
+        throw new InvalidOperationException("A rooted assembly path resolved against the extraction: " + rooted);
 var (quiet, quietTime) = WatchOnce(passes: true);
 Expect(quiet, "Proof.lean", "verified", rechecked: false);
 Expect(quiet, "TwiceProof.lean", "verified", rechecked: false);
@@ -551,6 +573,7 @@ Console.WriteLine("PASS a renamed method is reported missing and its proof fails
 
 // The loop: a running watch notices the C# edit, rebuilds and reports without any command.
 var loop = new ProcessStartInfo(watch[0]) { RedirectStandardOutput = true, RedirectStandardError = true };
+foreach (var (name, value) in watchEnvironment) loop.Environment[name] = value;
 foreach (var argument in watch.Skip(1)) loop.ArgumentList.Add(argument);
 using var watcher = Process.Start(loop)!;
 var cycles = new BlockingCollection<string>();

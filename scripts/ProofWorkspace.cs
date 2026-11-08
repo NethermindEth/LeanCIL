@@ -190,12 +190,7 @@ partial class Program
         var extraction = Path.Combine(Path.GetTempPath(), "leancil-editor-" + Guid.NewGuid().ToString("N"));
         try
         {
-            RunExtractor([.. Extract("extract", selection.Assembly, selection.AssemblyIdentity, selection.Method,
-                    extraction, selection.Profile),
-                .. selection.InitializedTypes.SelectMany(type => new[] { "--assume-initialized", type })]);
-            // The command takes no --import, so an extraction never needs contract interface modules here.
-            if (ExtractionIdentity.Read(extraction).Sources.Count > 0)
-                throw new InvalidDataException("Editor extraction unexpectedly carries contract interface modules.");
+            ExtractEditorSelection(selection, extraction);
             return extraction;
         }
         catch
@@ -203,6 +198,20 @@ partial class Program
             if (Directory.Exists(extraction)) Directory.Delete(extraction, true);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Extracts `selection` into `extraction`. Its identity records the assembly relative to that directory, so an
+    /// extraction is never copied elsewhere to be verified.
+    /// </summary>
+    static void ExtractEditorSelection(EditorSelection selection, string extraction)
+    {
+        RunExtractor([.. Extract("extract", selection.Assembly, selection.AssemblyIdentity, selection.Method,
+                extraction, selection.Profile),
+            .. selection.InitializedTypes.SelectMany(type => new[] { "--assume-initialized", type })]);
+        // The command takes no --import, so an extraction never needs contract interface modules here.
+        if (ExtractionIdentity.Read(extraction).Sources.Count > 0)
+            throw new InvalidDataException("Editor extraction unexpectedly carries contract interface modules.");
     }
 
     static EditorSelection? ReadEditorSelection(string directory) =>
