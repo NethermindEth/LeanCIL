@@ -444,6 +444,26 @@ theorem Owned.across {field : WordField width} {before after : Memory}
       writtenLive.allocation_ne owned.toReadable.live same equal.symm
 #print axioms Owned.across
 
+/-- After a call confined to this field of `written` that leaves it holding `value`, the same
+    field of a readable `object` is readable and holds `value` when the two are the same object,
+    and what it held before the call when they are different objects. -/
+theorem Readable.across {field : WordField width} {before after : Memory}
+    {object written : Reference} {value : BitVec (8 * width)}
+    (readable : field.Readable before object) (writtenLive : LiveObject before written)
+    (framed : Confined [field.entry written] before after)
+    (held : field.Holds after written value) :
+    field.Readable after object ∧
+      field.of after object = if written = object then value else field.of before object := by
+  by_cases same : written = object
+  · subst same
+    simpa using ⟨held.1.toReadable, held.2⟩
+  · simp only [same, ite_false]
+    refine readable.frame framed fun entry member => ?_
+    simp only [List.mem_singleton] at member
+    subst member
+    exact Or.inl fun equal => writtenLive.allocation_ne readable.live same equal.symm
+#print axioms Readable.across
+
 /-- A readable field keeps its storage and value in memory that keeps every allocation below a
     watermark above it and has allocated up to the watermark. -/
 theorem Readable.below {watermark : Nat} {field : WordField width} {before after : Memory}
@@ -658,6 +678,46 @@ theorem Holds.after_confined {footprint : List (Reference × Nat)} {field : Refe
     field.Holds after object value :=
   held.2 ▸ held.1.frame framed apart
 #print axioms Holds.after_confined
+
+/-- After a call confined to this field of `written` that leaves it holding `value`, the same
+    field of `object` holds `value` when the two are the same object, and what it held before
+    the call when they are different objects. -/
+theorem Owned.across {field : ReferenceField} {before after : Memory}
+    {object written : Reference} {value : ManagedReference}
+    (owned : field.Owned before object) (writtenLive : LiveObject before written)
+    (framed : Confined [field.entry written] before after)
+    (held : field.Holds after written value) :
+    field.Holds after object (if written = object then value else field.of before object) := by
+  by_cases same : written = object
+  · subst same
+    simpa using held
+  · simp only [same, ite_false]
+    refine owned.frame framed fun entry member => ?_
+    simp only [List.mem_singleton] at member
+    subst member
+    exact Or.inl fun equal =>
+      writtenLive.allocation_ne owned.toReadable.live same equal.symm
+#print axioms Owned.across
+
+/-- After a call confined to this field of `written` that leaves it holding `value`, the same
+    field of a readable `object` is readable and holds `value` when the two are the same object,
+    and what it held before the call when they are different objects. -/
+theorem Readable.across {field : ReferenceField} {before after : Memory}
+    {object written : Reference} {value : ManagedReference}
+    (readable : field.Readable before object) (writtenLive : LiveObject before written)
+    (framed : Confined [field.entry written] before after)
+    (held : field.Holds after written value) :
+    field.Readable after object ∧
+      field.of after object = if written = object then value else field.of before object := by
+  by_cases same : written = object
+  · subst same
+    simpa using ⟨held.1.toReadable, held.2⟩
+  · simp only [same, ite_false]
+    refine readable.frame framed fun entry member => ?_
+    simp only [List.mem_singleton] at member
+    subst member
+    exact Or.inl fun equal => writtenLive.allocation_ne readable.live same equal.symm
+#print axioms Readable.across
 
 /-- A readable field keeps its slot and what it holds in memory that keeps every allocation
     below a watermark above it and has allocated up to the watermark. -/

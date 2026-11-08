@@ -853,6 +853,7 @@ var outlined = new (string Name, string? Selector)[]
     ("Replace", "Objects::Replace(Examples.Account,System.UInt64)"),
     ("SecondValue", "Objects::SecondValue(Examples.Node)"),
     ("Link", "Objects::Link(Examples.Node,Examples.Node)"),
+    ("LinkBoth", "Objects::LinkBoth(Examples.Node,Examples.Node,Examples.Node)"),
     ("FirstPresent", "Objects::FirstPresent(Examples.Account,Examples.Account)"),
     ("DepositBoth", "Objects::DepositBoth(Examples.Account,Examples.Account,System.UInt64)"),
     ("DepositTimes", "Objects::DepositTimes(Examples.Account,System.UInt64,System.UInt32)")
@@ -972,6 +973,18 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
             "def Postcondition (first _ : Reference) (_ _ : Memory) (result : ManagedReference) : Prop :=\n" +
             "  result = .address first"),
         ("sorry -- Postcondition of the returned value", "rfl")]),
+    // The second store may reach the first node's field too, which `across` splits on.
+    ("LinkBoth", [
+        ("def Precondition (first second next : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ _ _ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (first second next : Reference) (initial final : Memory) : Prop := sorry",
+            "def Postcondition (first second next : Reference) (_ final : Memory) : Prop :=\n" +
+            "  Node.Next.Holds final first (.address next) ∧ Node.Next.Holds final second (.address next)"),
+        ("sorry -- Postcondition of the returned value, with `held1`, `held2` the stored fields", """
+        have firstHeld := held1.1.across secondLive1 framed2 held2
+          rw [held1.2, ite_self] at firstHeld
+          exact ⟨firstHeld, held2⟩
+        """.Trim())]),
     ("DepositBoth", [
         ("def Precondition (first second : Reference) (amount : W64) (initial : Memory) : Prop := sorry",
             "def Precondition (first second : Reference) (_ : W64) (_ : Memory) : Prop := first ≠ second"),
@@ -1006,7 +1019,8 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
         throw new InvalidOperationException($"The filled {name} outline did not verify:\n{verified.Output}");
 }
 Console.WriteLine("PASS filled object outlines verify with only their specification written: a field store, " +
-    "a reference field store, a null test followed through a local and two calls through a generated contract");
+    "two reference field stores that may alias, a null test followed through a local and two calls through a " +
+    "generated contract");
 
 // LeanCIL's own closure that lays out a static word's bytes: its outline states the getter's contract
 // and steps through it, and the checked-in proof fills only the outline's holes and verifies.

@@ -279,7 +279,8 @@ footprint and the `Holds` after it. `frame` keeps a field and its value across a
 to a footprint apart from it, `after_confined` and `after_below` keep each predicate across a
 confined call and across memory that keeps old allocations, and `Owned.across` decides aliasing:
 after a call confined to the field of `written`, the same field of `object` holds the written
-value when they are the same object and its old value otherwise. `apart_of_offsets` and
+value when they are the same object and its old value otherwise, for word and reference fields;
+`Readable.across` does the same for a field the caller only reads. `apart_of_offsets` and
 `apart_of_objects` give `Apart` for two fields of one object and for fields of two different
 objects. `ReferenceField.Holds.of_agree` keeps a held caller reference under `BytesBelow` and
 `SlotsAgreeBelow`, the premise `MethodContract.Holds.of_allocationRenaming` needs. The loop tactics

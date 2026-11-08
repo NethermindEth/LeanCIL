@@ -146,6 +146,13 @@ public static class Objects
     /// <summary>Makes <paramref name="next"/> follow <paramref name="node"/>; both may be the same node.</summary>
     public static void Link(Node node, Node next) => node.Next = next;
 
+    /// <summary>Makes <paramref name="next"/> follow both nodes; any two of the three may be the same node.</summary>
+    public static void LinkBoth(Node first, Node second, Node next)
+    {
+        first.Next = next;
+        second.Next = next;
+    }
+
     /// <summary>The value of the node after <paramref name="node"/>.</summary>
     public static ulong SecondValue(Node node) => node.Next!.Value;
 

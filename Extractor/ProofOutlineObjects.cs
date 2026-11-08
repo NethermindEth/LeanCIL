@@ -506,15 +506,14 @@ internal static partial class ProofOutline
                 if (store.Field != field)
                     return $"{previous}.after_confined framed{level} (apart_of_entries rfl)";
                 if (store.Object == reached) return $"held{level}.1";
-                return field.Width is null ? null
-                    : $"({previous}.across {Live(store.Object, level - 1)} framed{level} held{level}).1";
+                // The two objects may be one, so `across` splits on whether the store reached this field.
+                return $"({previous}.across {Live(store.Object, level - 1)} framed{level} held{level}).1";
             });
-        string Carry(string key, int stores, Func<string, int, string?> across)
+        string Carry(string key, int stores, Func<string, int, string> across)
         {
             if (known.TryGetValue((key, stores), out var name)) return name;
             var previous = Carry(key, stores - 1, across);
-            var carried = across(previous, stores) ?? throw new InvalidOperationException(
-                $"{key} has no fact after a store into the same reference field of another object");
+            var carried = across(previous, stores);
             name = key + stores;
             lean.Line($"  have {name} := {carried}");
             known[(key, stores)] = name;
@@ -576,6 +575,8 @@ internal static partial class ProofOutline
                 lean.Wrapped("  generalize", [$"setSlot {ObjectWalk.Memory(access.Stores)} " +
                     $"({access.Field.Lean}.address {access.Object.Name}) (.address {access.Target!.Name}) = " +
                     $"stored{stores}"], $"at written{stores} framed{stores} held{stores}");
+                // The store checks the stored reference is formed in the memory it writes.
+                Add(target + ".formed");
             }
             else lean.Wrapped($"  obtain ⟨stored{stores}, written{stores}, framed{stores}, held{stores}⟩ :=",
                 [$"{fact}.store {access.Value}"], "");
