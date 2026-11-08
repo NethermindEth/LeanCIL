@@ -1663,8 +1663,9 @@ partial class Program : IDisposable
     [GeneratedRegex(@"^[ \t]*(?:(?:public|meta)[ \t]+)*import[ \t]+(?:all[ \t]+)?([A-Za-z_][A-Za-z0-9_'.]*)(?=[ \t]*(?:--|/-|\r?$))", RegexOptions.Multiline)]
     private static partial Regex SourceImport();
 
-    // Proofs opt in to PDB names and locations with `import ExtractedSymbols`.
-    static bool ImportsSymbols(string proof) => SourceImport().Matches(proof).Any(import => import.Groups[1].Value == "ExtractedSymbols");
+    // Proofs opt in to PDB names and locations with `import ExtractedSymbols` or its keyed form.
+    static bool ImportsSymbols(string proof) => SourceImport().Matches(proof).Any(import =>
+        import.Groups[1].Value is var module && (module == "ExtractedSymbols" || SelectionModules.IsSymbols(module)));
 
     static string SymbolsFor(string output) => Path.Combine(output, "Symbols.lean") is var path && File.Exists(path) ? path
         : throw new InvalidOperationException(MissingSymbols(output));
@@ -1843,6 +1844,67 @@ partial class Program : IDisposable
 
         internal static bool Interface(string? value) => Name(value) && value!.Split('.')[0] is var root &&
             !ReservedRoots.Contains(root, StringComparer.OrdinalIgnoreCase) && !root.StartsWith("LeanCIL", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// `Extracted.KEY` and `ExtractedSymbols.KEY` name one method's extraction, so proofs of different methods
+    /// share a package. Verification builds each as a re-export of the extraction it checks: a key selects
+    /// which extraction a proof expects, never what is certified.
+    /// </summary>
+    internal static class SelectionModules
+    {
+        const int DigestLength = 8;
+
+        /// <summary>
+        /// The key of the extraction `identity` describes: the method's type and name, then a digest of the
+        /// assembly name, entry, profile name and initialization assumptions. Rebuilds and versions keep it.
+        /// </summary>
+        internal static string Key(JsonElement identity)
+        {
+            var assembly = identity.GetProperty("assemblyIdentity").GetString()!.Split(',')[0].Trim();
+            var entry = identity.GetProperty("entry").GetString()!;
+            var profile = identity.GetProperty("profile").GetProperty("Name").GetString()!;
+            string[] initialized = identity.TryGetProperty("initializedTypes", out var types)
+                ? [.. types.EnumerateArray().Select(type => type.GetString()!)] : [];
+            var digest = ContentKey(string.Join("\n", [assembly, entry, profile, .. initialized]))[..DigestLength];
+            var member = entry[..entry.IndexOf('(')];
+            member = member[(member.LastIndexOf(' ') + 1)..];
+            var type = member[..member.IndexOf("::", StringComparison.Ordinal)];
+            type = type.Split('<')[0];
+            type = type[(type.LastIndexOfAny(['.', '/']) + 1)..];
+            var readable = Regex.Replace(type + "_" + member[(member.IndexOf("::", StringComparison.Ordinal) + 2)..],
+                "[^A-Za-z0-9_]", "_");
+            return (char.IsAsciiLetter(readable[0]) ? "" : "M") + readable + "_" + digest;
+        }
+
+        /// <summary>Whether `module` names a keyed extraction module rather than a source of the package.</summary>
+        internal static bool Is(string module) =>
+            module.StartsWith("Extracted.", StringComparison.Ordinal) ||
+            module.StartsWith("ExtractedSymbols.", StringComparison.Ordinal);
+
+        internal static bool IsSymbols(string module) => module.StartsWith("ExtractedSymbols.", StringComparison.Ordinal);
+
+        /// <summary>The source of a keyed module: the plain module it stands for, so it adds no declaration.</summary>
+        internal static string Source(string module) =>
+            "import " + (IsSymbols(module) ? "ExtractedSymbols" : "Extracted") + "\n";
+
+        /// <summary>
+        /// The keyed modules `imports` names, after rejecting a key of another extraction: a proof written for one
+        /// method must not be checked against another one's program.
+        /// </summary>
+        internal static string[] Selected(IEnumerable<string> imports, JsonElement identity, string source)
+        {
+            var key = Key(identity);
+            var selected = imports.Where(Is).Distinct(StringComparer.Ordinal).ToArray();
+            foreach (var module in selected)
+                if (module != "Extracted." + key && module != "ExtractedSymbols." + key)
+                    throw new InvalidDataException(source + " imports " + module +
+                        ", which names another extraction. This extraction of " +
+                        identity.GetProperty("entry").GetString() + " under the " +
+                        identity.GetProperty("profile").GetProperty("Name").GetString() + " profile is Extracted." +
+                        key + "; import that, or select the method the proof was written for.");
+            return selected;
+        }
     }
 
     // One read of identity.json and of the import sources it pins; staging, keys and reports all derive from it.
@@ -2449,6 +2511,8 @@ partial class Program : IDisposable
             throw new InvalidOperationException("Proof inputs changed before their source snapshot");
         ExtractionIdentity extraction = ExtractionIdentity.Read(output);
         referenceOnlyAuthoring = ReferenceOnlyImports(extraction);
+        string[] selected = SelectionModules.Selected(
+            SourceImport().Matches(proofSource).Select(import => import.Groups[1].Value), extraction.Root, proof);
 
         // Retain the selected bytes before support or interface builds can run code.
         void RequireOriginalProofSources()
@@ -2463,7 +2527,8 @@ partial class Program : IDisposable
         var session = Library(before);
         HashSet<string> importSourceNames = extraction.Sources.Keys.ToHashSet(StringComparer.Ordinal);
         var support = Regex.Matches(proofSource, @"^import\s+([A-Za-z_][A-Za-z0-9_.]*)", RegexOptions.Multiline)
-            .Select(m => m.Groups[1].Value).Where(n => n is not ("Extracted" or "ExtractedSymbols") && !importSourceNames.Contains(n) && n.Split('.')[0] is not ("Init" or "Lean" or "Std")).ToArray();
+            .Select(m => m.Groups[1].Value).Where(n => n is not ("Extracted" or "ExtractedSymbols") && !SelectionModules.Is(n) &&
+                !importSourceNames.Contains(n) && n.Split('.')[0] is not ("Init" or "Lean" or "Std")).ToArray();
 
         if (support.Length > 0)
         {
@@ -2578,6 +2643,22 @@ partial class Program : IDisposable
             }
             // Interfaces, symbols and the proof each run code when built: each build may add only its own oleans.
             var bound = OleanHashes(fresh, session);
+            // A keyed module only re-exports its plain one, which is what the audits below read.
+            void BuildSelected(bool symbolsModules)
+            {
+                foreach (var module in selected.Where(module => SelectionModules.IsSymbols(module) == symbolsModules))
+                {
+                    var path = Path.Combine(fresh, module.Replace('.', Path.DirectorySeparatorChar) + ".lean");
+                    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                    File.WriteAllText(path, SelectionModules.Source(module));
+                    Run([LeanExecutable, "--root=" + fresh, "-o", Path.ChangeExtension(path, ".olean"), path],
+                        leanPath: leanPath, progress: "Checking " + module);
+                    var next = OleanHashes(fresh, session);
+                    RequireOnlyAdded(bound, next, module.Replace('.', '/'));
+                    bound = next;
+                }
+            }
+            BuildSelected(symbolsModules: false);
             foreach (string module in importModules.Where(module => module != "ExtractedImports"))
             {
                 string source = Path.Combine(fresh, module.Replace('.', Path.DirectorySeparatorChar) + ".lean");
@@ -2630,6 +2711,7 @@ partial class Program : IDisposable
                 var next = OleanHashes(fresh, session);
                 RequireOnlyAdded(bound, next, "ExtractedSymbols");
                 bound = next;
+                BuildSelected(symbolsModules: true);
                 RequireStagedProofSources();
             }
             RequireStagedProofSources();
