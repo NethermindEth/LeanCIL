@@ -482,6 +482,34 @@ in Lean's `file:line:col: severity:` form; informational messages, which plain
 Lean output prints without a position, appear there as `info:` entries, and the
 proof's own messages follow under `Lean messages` as described above.
 
+### Environment size on Windows
+
+Lean on Windows builds the environment of each process it starts in a 32,767-byte buffer.
+Lake starts Lean, including the editor's language server, with its own variables
+(`LEAN_PATH`, `LEAN_SRC_PATH`, `PATH` and others) added to the environment it inherited,
+and Lean drops every variable that no longer fits without an error, so `LEAN_PATH` can
+vanish and imports stop resolving. Each `name=value` entry counts its UTF-8 bytes plus a
+terminator, and the block adds one more. Lean replaces an inherited variable only when the
+name matches exactly, so Lake's `PATH` is added beside an inherited `Path` and the search
+path counts twice.
+
+Before running Lake, leancil computes what Lake will pass on: the environment it gives Lake,
+with the changes elan's `lake` proxy makes, and the variables `lake env` prints (for
+`lake build`, which passes Lean only `LEAN_PATH`, just that one). It fails when the result
+exceeds the limit, naming the size, the limit and the largest variables. `leancil workspace`
+makes the same check for `lake serve`, taking its own environment as the editor's, so the
+failure appears at setup rather than as unresolved imports. Lake prints a variable it unsets
+as empty; counting it can overstate the size by a few bytes, never understate it.
+
+Lake adds a package's source directory to `LEAN_SRC_PATH` once for every `lean_lib` the
+package declares, without merging repeats. The framework copy `leancil workspace` writes for
+a proof outside any package declares only the framework and editor libraries, but a consumer
+that pins the `leancil` repository gets its lakefile with one library per test module, so the
+framework directory appears about ninety times in that consumer's `LEAN_SRC_PATH`. A shorter
+checkout path and fewer `PATH` entries leave more room. Setting
+`LEANCIL_LEAN_ENVIRONMENT_LIMIT` to a byte count lowers the limit; on other systems, where
+Lean has no such buffer, it enables the check, for example to measure headroom.
+
 ## Failure reports
 
 A failed `verify` writes `failed.json` next to where `verified.json` would go and

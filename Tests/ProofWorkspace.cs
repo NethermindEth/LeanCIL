@@ -110,6 +110,15 @@ void Rebuild(string from, string to)
 string[] EditorFiles() => [.. Directory.EnumerateFiles(editor, "*", SearchOption.AllDirectories)
     .Select(path => Path.GetRelativePath(editor, path).Replace('\\', '/')).Order(StringComparer.Ordinal)];
 
+Console.WriteLine("Rejecting an editor environment Lean would truncate, before writing the editor library");
+// A lowered limit stands in for Lean's Windows buffer on every OS; the editor's `lake serve` would lose LEAN_PATH.
+var crowded = Execute(command,
+    environment: new Dictionary<string, string> { [LeanEnvironmentLimitVariable] = "1000" });
+var serveCheck = "`lake serve` in " + Path.GetFullPath(package);
+if (crowded.Code == 0 || !crowded.Output.Contains(serveCheck, StringComparison.Ordinal) ||
+    !crowded.Output.Contains("1,000-byte limit", StringComparison.Ordinal) || Directory.Exists(editor))
+    throw new InvalidOperationException("An oversized editor environment was not rejected at setup:\n" +
+        crowded.Output);
 Console.WriteLine("Generating the editor extraction in the consumer package and checking the proof in place");
 var created = Run(command);
 var key = KeyOf(created);
@@ -378,6 +387,16 @@ try
         """);
     if (Directory.EnumerateDirectories(standalone, ".git", SearchOption.AllDirectories).Any())
         throw new InvalidOperationException("A standalone workspace created a git repository.");
+    // Lake lists a source directory once per library, so test libraries would crowd LEAN_SRC_PATH toward
+    // Lean's Windows environment limit; the copy declares only the framework and editor libraries.
+    var bundled = Path.GetFullPath(Path.Combine(standalone, ".lake", "packages", "leancil"));
+    var sourcePath = Run(["lake", "env"], standalone).Split('\n', StringSplitOptions.TrimEntries)
+        .Single(line => line.StartsWith("LEAN_SRC_PATH=", StringComparison.Ordinal))["LEAN_SRC_PATH=".Length..];
+    var frameworkEntries = sourcePath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+        .Count(entry => Path.GetFullPath(entry).StartsWith(bundled, StringComparison.OrdinalIgnoreCase));
+    if (frameworkEntries != 2)
+        throw new InvalidOperationException($"The bundled framework adds {frameworkEntries} source directories " +
+            "to LEAN_SRC_PATH instead of one each for CIL and the editor library: " + sourcePath);
     Run(["lake", "lean", scratchProof], standalone);
     // The framework copy is required by path, which certification never accepts in place of a pinned revision.
     var unpinned = Execute([.. cli, "verify", output, "--proof", scratchProof, "--proof-root", standalone,
@@ -455,6 +474,13 @@ Dictionary<string, (string Hash, DateTime Time)> WideSnapshot() =>
             .Select(directory => Path.Combine(directory, module)).Where(Directory.Exists)
             .SelectMany(directory => Directory.EnumerateFiles(directory, key + ".*"))))
         .ToDictionary(path => path, path => (Sha(path), File.GetLastWriteTimeUtc(path)));
+
+// watch refreshes the modules the editor loads, so it refuses the same truncated environment before any cycle.
+var crowdedWatch = Execute([.. watch, "--once"],
+    environment: new Dictionary<string, string> { [LeanEnvironmentLimitVariable] = "1000" });
+if (crowdedWatch.Code == 0 || !crowdedWatch.Output.Contains(serveCheck, StringComparison.Ordinal) ||
+    crowdedWatch.Stdout.Contains('{'))
+    throw new InvalidOperationException("watch ran a cycle in an oversized environment:\n" + crowdedWatch.Output);
 
 var (first, firstTime) = WatchOnce(passes: true);
 Expect(first, "Proof.lean", "verified", rechecked: true);

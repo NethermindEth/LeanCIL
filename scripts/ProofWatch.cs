@@ -47,6 +47,9 @@ partial class Program
         if (EditorSelections(editor).Count == 0)
             throw new InvalidDataException("No method extraction is recorded in " + CliPaths.Display(settings.Root) +
                 "; run leancil workspace for each proof first.");
+        // The modules watch refreshes are what the editor's `lake serve` loads; an oversized environment fails here.
+        RequireLeanEnvironmentFits(["lake", "serve"], settings.Root,
+            new System.Diagnostics.ProcessStartInfo().Environment);
         var inputs = WatchedInputs(settings, editor);
         var passed = WatchCycle(settings, editor, 1, build: true);
         if (settings.Once) return passed ? 0 : 1;

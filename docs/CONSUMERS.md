@@ -137,6 +137,11 @@ certificate: its `verified.json` still names the assembly it was verified
 against. A failed build never leaves a green result, because it deletes every
 certificate and the next good build verifies every proof again.
 
+On Windows the command also checks that the environment `lake serve` hands Lean
+fits Lean's 32,767-byte limit, and fails with the largest variables instead of
+leaving the editor without `LEAN_PATH`; see
+[environment size on Windows](CLI.md#environment-size-on-windows).
+
 A proof with no `lakefile.toml` or `lakefile.lean` in its directory or above it
 needs no setup. The command makes that directory a Lake package: it writes a
 `lakefile.toml` and `lean-toolchain` beside the proof, copies the tool's bundled
