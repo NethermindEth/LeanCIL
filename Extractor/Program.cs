@@ -42,6 +42,13 @@ internal static partial class Program
         Run(args, report: TextWriter.Null, rethrow: true);
     }
 
+    /// <summary>
+    /// Extracts `output` again from the settings its manifest records (assembly path, entry, profile, assumptions,
+    /// references and imports), as <c>extract</c> with those arguments would; a rejection throws.
+    /// </summary>
+    internal static void ExtractRecorded(string output) =>
+        Run(["check", output], report: TextWriter.Null, rethrow: true, refresh: true);
+
     static int Main(string[] args)
     {
         // Lean statements and messages are Unicode; a legacy console code page would print `?`.
@@ -51,7 +58,7 @@ internal static partial class Program
 
     static int Run(string[] args, ExtractionBatch? batch = null,
         Action<TemplateEmitter.Variant>? checkedTemplate = null, TextWriter? report = null, bool rethrow = false,
-        Action<ProofOutline.Extraction>? inspect = null)
+        Action<ProofOutline.Extraction>? inspect = null, bool refresh = false)
     {
         report ??= Console.Out;
         if (args.Length == 0 || args is ["--help"] or ["-h"])
@@ -308,7 +315,7 @@ internal static partial class Program
             StaticIdentityRecord[] staticIdentities = LeanEmitter.StaticIdentities(methods, profile);
             imports.ValidateStatics(staticIdentities);
             var extractorHash = batch?.ExtractorHash ?? Hash(File.ReadAllBytes(typeof(LeanEmitter).Assembly.Location));
-            if (recorded is { } prior)
+            if (recorded is { } prior && !refresh)
             {
                 stage = "extraction integrity";
                 if (prior.GetProperty("assemblySha256").GetString() != assemblyHash)
@@ -389,7 +396,7 @@ internal static partial class Program
             string leanPath = Path.Combine(output, "Extracted.lean");
             string symbolPath = Path.Combine(output, "Symbols.lean");
             string? symbolSource = symbols is null ? null : Symbols.Emit(methods, symbols);
-            if (args[0] == "check")
+            if (args[0] == "check" && !refresh)
             {
                 stage = "extraction integrity";
                 if (File.ReadAllText(leanPath) != source)
@@ -441,7 +448,7 @@ internal static partial class Program
                 report.WriteLine($"  Unknown static value: {name} is not computed; " +
                     "loads read the caller's static binding.");
             checkedTemplate?.Invoke(new(output, assemblyHash, profile, emitted.Templates));
-            if (args[0] == "check")
+            if (args[0] == "check" && !refresh)
                 inspect?.Invoke(new(methods, emitted.Templates, emitted.LayoutIdentities, source, emitted.Views));
         }
         catch (Exception exception)
