@@ -469,21 +469,27 @@ elab_rules : tactic
 
 /-- The tactic that proves a frame side condition after a call: that each callee footprint entry
     lies inside the frame's footprint, or below the caller's watermark, from the `unfold`
-    definitions, `facts`, arithmetic and `form` facts of the caller's memory. -/
+    definitions, `facts`, arithmetic and `form` facts of the caller's memory, or a hypothesis
+    placing a single entry in the frame's footprint. -/
 def loopCallSide (unfold : Array Ident) (facts : Array Term) : TacticM Unit := do
-  evalTactic (← `(tactic| (
-    simp only [$[$unfold:ident],*, List.forall_mem_cons, List.not_mem_nil, false_implies,
-      implies_true, and_true, List.mem_cons, exists_eq_or_imp, exists_eq_left, forall_eq_or_imp,
-      forall_eq, Within, WordField.entry, WordField.address_allocation, WordField.address_offset,
-      ReferenceField.entry, ReferenceField.address_allocation, ReferenceField.address_offset,
-      Reference.element_allocation, Reference.element_offset, true_and, or_false, $[$facts:term],*]
-    all_goals first
-      | done
-      | (and_intros <;> omega)
-      | omega
-      | exact CIL.Safety.Memory.WellFormed.form_bound (by with_reducible assumption)
-          (by with_reducible assumption)
-      | cil_caller_allocation)))
+  evalTactic (← `(tactic| first
+    | (intro _ member
+       simp only [List.mem_cons, List.not_mem_nil, or_false] at member
+       subst member
+       with_reducible assumption)
+    | (simp only [$[$unfold:ident],*, List.forall_mem_cons, List.not_mem_nil, false_implies,
+        implies_true, and_true, List.mem_cons, exists_eq_or_imp, exists_eq_left, forall_eq_or_imp,
+        forall_eq, Within, WordField.entry, WordField.address_allocation, WordField.address_offset,
+        ReferenceField.entry, ReferenceField.address_allocation, ReferenceField.address_offset,
+        Reference.element_allocation, Reference.element_offset, true_and, or_false,
+        $[$facts:term],*]
+       all_goals first
+         | done
+         | (and_intros <;> omega)
+         | omega
+         | exact CIL.Safety.Memory.WellFormed.form_bound (by with_reducible assumption)
+             (by with_reducible assumption)
+         | cil_caller_allocation)))
 
 /-- Continue a call's `LoopTerminates` continuation with its results and the frame after it:
     names the returned memory, the contract's output (substituted where the postcondition states

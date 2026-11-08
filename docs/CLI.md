@@ -260,7 +260,11 @@ comment saying which obligation it is:
   returning side is stepped and leaves `post`, and each throwing side is closed from `pre` by
   `cil_loop_obligation`. A call whose callee returns a value is crossed with
   `cil_loop_call keeping`, so the next loop state names its result `output` whatever `post`
-  states. A callee over
+  states. A callee that only stores a word argument through a reference argument gets the
+  contract its body meets, proved: write authority over that word before, its contents after. When
+  the loop passes it `Unsafe.Add` of a reference argument by an `int` index, the element is named
+  with the same three side conditions as a store, its authority stated at the caller's memory, and
+  they close the call's precondition. A callee over
   objects whose body a straight-line outline steps (see below) gets the contract read from its body
   instead, proved, leaving only its precondition at each call.
 - An instance of an admitted class is a `Reference`, and an instance method binds `this` under its

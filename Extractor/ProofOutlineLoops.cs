@@ -305,8 +305,17 @@ internal static partial class ProofOutline
             string Input(int position) => inputs.Length == 1 ? single : Projection("input", position, inputs.Length);
             var inputType = inputs.Length == 0 ? "Unit" : Product(inputs.Select(input => input.Type));
             var outputType = output is { } width ? WordType(width) : "Unit";
-            lean.Line($"/-- `{callee.Name}` at its calls from the loop: replace `pre` and `post`, and widen");
-            lean.Line("    `footprint` if it changes more of the caller's memory. -/");
+            var store = Stores(index);
+            if (store is not null)
+            {
+                lean.Line($"/-- `{callee.Name}` stores its argument through its reference, given write authority over");
+                lean.Line("    the element, and touches nothing else: the contract its body meets. -/");
+            }
+            else
+            {
+                lean.Line($"/-- `{callee.Name}` at its calls from the loop: replace `pre` and `post`, and widen");
+                lean.Line("    `footprint` if it changes more of the caller's memory. -/");
+            }
             lean.Line($"def {name}Contract : MethodContract {inputType} {outputType} where");
             var arguments = string.Join(", ", inputs.Select((input, position) =>
                 input.Reference ? $".reference (.address {Input(position)})"
@@ -315,7 +324,9 @@ internal static partial class ProofOutline
             lean.Line($"  args {(inputs.Length == 0 ? "_" : single)} := [{arguments}]");
             lean.Line(output is { } returned ? $"  results result := [.scalar ({ScalarConstructor(returned)} result)]"
                 : "  results _ := []");
-            lean.Line("  pre _ _ := sorry");
+            lean.Line(store is { } stored
+                ? $"  pre {single} memory := Writable memory {Input(stored.Slot)} {stored.Width} 0 1"
+                : "  pre _ _ := sorry");
             var footprint = string.Join(", ", inputs.SelectMany((input, position) =>
                 input.Reference ? [$"({Input(position)}, {input.Width})"]
                 : input.Object is { } type ? views.Of(type).Where(field => field.Stored)
@@ -323,7 +334,10 @@ internal static partial class ProofOutline
                 : Enumerable.Empty<string>()));
             lean.Line(footprint.Length == 0 ? "  footprint _ := []"
                 : $"  footprint {single} := [{footprint}]");
-            lean.Line("  post _ _ _ _ := sorry");
+            lean.Line(store is { } written
+                ? $"  post {single} _ final _ := Contents final {Input(written.Slot)} {written.Width} " +
+                    $"[{Input(written.Value)}]"
+                : "  post _ _ _ _ := sorry");
             lean.Line();
             var steppable = output is not null && inputs.All(input => !input.Reference && input.Object is null) &&
                 extraction.Emitted[index].Metadata.Contains("locals := [],") &&
@@ -346,6 +360,21 @@ internal static partial class ProofOutline
                 lean.Line("  case run => cil_checked_steps");
                 lean.Noted("  ", "case postcondition => sorry", $"{name}Contract.post of the returned value");
             }
+            else if (store is { } body)
+            {
+                var value = Variable(declared[body.Value].Name);
+                var lemma = body.Op switch
+                {
+                    ".store64" => "step_store64_of_write", ".storeScalar 8" => "step_storeScalar_i64_of_write",
+                    _ => "step_storeScalar_of_write"
+                };
+                lean.Line($"  rintro {pattern} memory writable");
+                lean.Line($"  dsimp only [{name}Contract] at writable ⊢");
+                lean.Line($"  obtain ⟨after, wrote, formed, confined, filled⟩ := writable.write_one {value}");
+                lean.Line($"  refine ⟨CIL.executionBound Extracted.program {name}, after, [], ?_, confined, (), rfl, " +
+                    "filled⟩");
+                lean.Line($"  cil_checked_steps [{lemma} wrote, formed]");
+            }
             else if (Branches(index))
             {
                 lean.Line($"  rintro {pattern} memory permitted");
@@ -364,6 +393,25 @@ internal static partial class ProofOutline
                     reason);
             }
             lean.Line();
+        }
+
+        /// <summary>The reference and value parameters, width and store of a static callee whose body only
+        /// stores one word argument through one reference argument of that word's width.</summary>
+        (int Slot, int Value, int Width, string Op)? Stores(int index)
+        {
+            var callee = extraction.Methods[index];
+            var ops = extraction.Emitted[index].Ops.Where(op => op != ".nop").ToArray();
+            if (callee.HasThis || callee.ReturnType.FullName != "System.Void" || ops.Length != 4 ||
+                !extraction.Emitted[index].Metadata.Contains("locals := [],") || ops[3] != ".ret") return null;
+            var slot = Regex.Match(ops[0], @"\A\.arg (\d+)\z");
+            var value = Regex.Match(ops[1], @"\A\.arg (\d+)\z");
+            if (!slot.Success || !value.Success) return null;
+            var (reference, word) = (int.Parse(slot.Groups[1].Value), int.Parse(value.Groups[1].Value));
+            if (callee.Parameters[reference].ParameterType is not ByReferenceType target ||
+                ElementWidth(target.ElementType) is not { } width ||
+                ElementWidth(callee.Parameters[word].ParameterType) != width) return null;
+            var stores = width == 4 ? ops[2] == ".storeScalar 4" : ops[2] is ".store64" or ".storeScalar 8";
+            return stores ? (reference, word, width, ops[2]) : null;
         }
 
         /// <summary>Whether a callee of words with no locals tests its arguments and returns a word or throws on
@@ -827,21 +875,28 @@ internal static partial class ProofOutline
             var count = int.Parse(call.Groups[2].Value);
             var arguments = state.Stack.TakeLast(count).ToArray();
             state.Stack.RemoveRange(state.Stack.Count - count, count);
-            var terms = arguments.Select(argument => argument switch
-            {
-                Number { Narrow: false } number => number.Term,
-                ReferenceArgument reference => reference.Name,
-                _ => null
-            }).ToArray();
-            if (state.Called || terms.Any(term => term is null))
+            var stores = Stores(callee) is not null;
+            bool Named(Value argument) => argument is Number { Narrow: false } or ReferenceArgument ||
+                argument is AddedReference && stores;
+            if (state.Called || !arguments.All(Named))
             {
                 Hole(lean, indent, state, state.Called
                     ? $"a second call at {Location(pc)}, whose input depends on the first call's state"
-                    : $"the call at {Location(pc)} passes " +
-                        Unnamed(arguments.First(argument => argument is not (Number { Narrow: false } or
-                            ReferenceArgument))));
+                    : $"the call at {Location(pc)} passes " + Unnamed(arguments.First(argument => !Named(argument))));
                 return false;
             }
+            // An element a storing callee writes is named with its side conditions, which close its precondition.
+            var elementFacts = new List<string>();
+            (current, currentIndent) = (lean, indent);
+            var terms = arguments.Select(argument => argument switch
+            {
+                Number number => number.Term,
+                ReferenceArgument reference => reference.Name,
+                AddedReference added => ElementSlot(added, elementFacts, caller: true),
+                _ => throw new InvalidOperationException("unnamed argument")
+            }).ToArray();
+            current = null;
+            state.Facts.AddRange(elementFacts);
             var input = terms.Length switch { 0 => "()", 1 => terms[0]!, _ => "(" + string.Join(", ", terms) + ")" };
             if (state.GoalPc != pc) lean.Line($"{indent}cil_loop_advance{Facts(state)}");
             // The frame's footprint is a definition the call's side condition unfolds to find the callee's.
@@ -851,8 +906,9 @@ internal static partial class ProofOutline
             // The output keeps its name, so the next loop state may name it whatever the postcondition says.
             var keeping = extraction.Methods[callee].ReturnType.FullName != "System.Void" ? "keeping " : "";
             lean.Line($"{indent}cil_loop_call {keeping}{callees[callee]}_holds {input}{facts}");
-            lean.Noted(indent, "case precondition => sorry",
-                $"{extraction.Methods[callee].Name}'s precondition at this call");
+            if (elementFacts.Count == 0)
+                lean.Noted(indent, "case precondition => sorry",
+                    $"{extraction.Methods[callee].Name}'s precondition at this call");
             if (extraction.Methods[callee].ReturnType.FullName != "System.Void")
                 state.Stack.Add(new Number("output", ElementWidth(extraction.Methods[callee].ReturnType)!.Value));
             state.Called = true;
@@ -1147,7 +1203,7 @@ internal static partial class ProofOutline
                 op.StartsWith(".callInstance ", StringComparison.Ordinal)) return Event.Call;
             else if (op == ".ret" || op.StartsWith(".ret (some ", StringComparison.Ordinal)) return Event.Return;
             else if ((match = Regex.Match(op, @"\A\.memory \(\.add (\d+) true\)\z")).Success && current is not null &&
-                !state.Moved && !state.Called && stack.Count >= 2 &&
+                !state.Called && stack.Count >= 2 &&
                 stack[^1] is Number { Width: 4, Narrow: false } index && stack[^2] is ReferenceArgument reference &&
                 spec.Parameters.Any(parameter => parameter.Name == reference.Name &&
                     parameter.Shape == ParameterShape.Reference))
@@ -1156,7 +1212,7 @@ internal static partial class ProofOutline
                 stack.Add(new AddedReference(reference.Name, index.Term, int.Parse(match.Groups[1].Value)));
             }
             else if (op is ".store64" or ".storeScalar 4" or ".storeScalar 8" && stack.Count >= 2 &&
-                stack[^2] is AddedReference added)
+                stack[^2] is AddedReference added && !state.Moved)
             {
                 var width = op == ".storeScalar 4" ? 4 : 8;
                 if (stack[^1] is not Number { Narrow: false } stored || stored.Width != width || added.Width != width)
@@ -1205,28 +1261,54 @@ internal static partial class ProofOutline
         string[] ElementWrite(AddedReference added, string value, string lemma)
         {
             var name = added.Base;
+            var facts = new List<string>();
+            ElementSlot(added, facts);
+            var lean = current!;
+            var indent = currentIndent;
+            lean.Line($"{indent}obtain ⟨{name}After, {name}Wrote, -, -, -⟩ := {name}Slot.write_one {value}");
+            // The frame at the written memory is what the loop tactics carry the iteration's other facts in.
+            lean.Line($"{indent}have {name}Frame := frame.write {name}Wrote");
+            lean.Line($"{indent}  (by simpa [numberBytes_length] using {name}Within)");
+            lean.Line($"{indent}  (by simpa [Reference.element_allocation] using wellFormed.form_bound {name}Form)");
+            return [name + "Add", $"{lemma} {name}Wrote"];
+        }
+
+        /// <summary>Name the element `added` addresses with its write authority at the iteration's first memory,
+        /// index bound, footprint entry and `add` fact; adds the facts a step through it needs to `facts`. With
+        /// `caller`, authority and `add` are stated at the caller's memory, which the loop tactics carry past
+        /// the iteration's local stores.</summary>
+        string ElementSlot(AddedReference added, List<string> facts, bool caller = false)
+        {
+            var name = added.Base;
             var index = Regex.IsMatch(added.Index, @"\A[A-Za-z_][\w.]*\z") ? added.Index : $"({added.Index} : W32)";
             var element = $"{name}.element {added.Width} {index}.toNat";
             var lean = current!;
             var indent = currentIndent;
             // Each side condition follows from the author's definitions, so it is a hole only while they are.
             var closer = $"{indent}  cil_loop_obligation [invariant, Precondition, footprint]";
-            lean.Line($"{indent}have {name}Slot : Writable current ({element}) {added.Width} 0 1 := by");
+            var authority = caller ? name + "Reach" : name + "Slot";
+            lean.Line($"{indent}have {authority} : Writable {(caller ? "initial" : "current")} ({element}) " +
+                $"{added.Width} 0 1 := by");
             lean.Line(closer);
             lean.Line($"{indent}have {name}Small : {index}.toNat < 2 ^ 31 := by");
             lean.Line(closer);
             lean.Line($"{indent}have {name}Within : ∃ entry ∈ footprint {spec.Arguments},");
             lean.Line($"{indent}    Within ({element}, {added.Width}) entry := by");
             lean.Line(closer);
-            lean.Line($"{indent}obtain ⟨{name}After, {name}Wrote, -, -, -⟩ := {name}Slot.write_one {value}");
-            lean.Line($"{indent}have {name}Add := add_int_element frame.wellFormed");
-            lean.Line($"{indent}  (frame.caller_form wellFormed {name}Form) {name}Small");
-            lean.Line($"{indent}  (by simpa using {name}Slot 0 (by omega))");
-            // The frame at the written memory is what the loop tactics carry the iteration's other facts in.
-            lean.Line($"{indent}have {name}Frame := frame.write {name}Wrote");
-            lean.Line($"{indent}  (by simpa [numberBytes_length] using {name}Within)");
-            lean.Line($"{indent}  (by simpa [Reference.element_allocation] using wellFormed.form_bound {name}Form)");
-            return [name + "Add", $"{lemma} {name}Wrote"];
+            if (caller)
+            {
+                lean.Line($"{indent}have {name}Add := add_int_element wellFormed {name}Form {name}Small");
+                lean.Line($"{indent}  (by simpa using {name}Reach 0 (by omega))");
+                lean.Line($"{indent}have {name}Slot := {name}Reach.after_confined frame.confined wellFormed");
+            }
+            else
+            {
+                lean.Line($"{indent}have {name}Add := add_int_element frame.wellFormed");
+                lean.Line($"{indent}  (frame.caller_form wellFormed {name}Form) {name}Small");
+                lean.Line($"{indent}  (by simpa using {name}Slot 0 (by omega))");
+            }
+            facts.Add(name + "Add");
+            return element;
         }
 
         void PendingTail(PathState state, int component, SpanTerm span)

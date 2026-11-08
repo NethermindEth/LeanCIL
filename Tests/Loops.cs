@@ -1233,6 +1233,230 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
                     guard (BitVec.eq_of_toNat_eq (by simpa using zero))
                   simp [measure, BitVec.toNat_sub]
                   omega
+            """)]),
+    // A storing callee's contract is proved from its body, and the element passed to it through `Unsafe.Add`
+    // is named at the call; this specification needs its own proofs of the element's side conditions.
+    ("CopyUntilZero", [
+        ("""
+            /-- Replace with what callers must guarantee about the arguments, or `True`. -/
+            def Precondition (values1 : SpanView) (values1Elements : List W32) (argument1 : Reference)
+                (initial : Memory) : Prop := sorry
+            """,
+            """
+            /-- The words copied: those before the first zero, or all of them. -/
+            def copied (values : List W32) : List W32 := values.takeWhile (· ≠ 0)
+
+            /-- The count of copied words, with bit 31 set exactly when a zero ended the copy. -/
+            def answer (values : List W32) : W32 :=
+              let count := BitVec.ofNat 32 (copied values).length
+              if (0 : W32) ∈ values then count ||| 0x80000000 else count
+
+            /-- Copying is unaffected by a nonzero prefix. -/
+            theorem copied_append {done : List W32} (nonzero : (0 : W32) ∉ done) (rest : List W32) :
+                copied (done ++ rest) = done ++ copied rest :=
+              List.takeWhile_append_of_pos fun word mem => by
+                simpa using fun same : word = 0 => nonzero (same ▸ mem)
+
+            /-- A nonzero word after a nonzero prefix is copied. -/
+            theorem copy_bound {values done tail : List W32} {head : W32} (nonzero : (0 : W32) ∉ done)
+                (more : ¬head = 0) (split : values = done ++ head :: tail) :
+                done.length < (copied values).length := by
+              rw [split, copied_append nonzero]
+              simp -bitVecOfNat [copied, more]
+
+            /-- The output has room for the copied words, apart from the span. -/
+            def Precondition (values1 : SpanView) (values1Elements : List W32) (argument1 : Reference)
+                (initial : Memory) : Prop :=
+              Writable initial argument1 4 0 (copied values1Elements).length ∧
+                SpanApart values1 (argument1, 4 * (copied values1Elements).length)
+            """),
+        ("""
+            def Postcondition (values1 : SpanView) (values1Elements : List W32) (argument1 : Reference)
+                (initial final : Memory) (result : W32) : Prop := sorry
+            """,
+            """
+            def Postcondition (_ : SpanView) (values1Elements : List W32) (argument1 : Reference)
+                (_ final : Memory) (result : W32) : Prop :=
+              result = answer values1Elements ∧ Contents final argument1 4 (copied values1Elements)
+            """),
+        ("""
+            def footprint (values1 : SpanView) (values1Elements : List W32) (argument1 : Reference)
+                : List (Reference × Nat) :=
+              sorry -- caller memory the loop may write
+            """,
+            """
+            def footprint (_ : SpanView) (values1Elements : List W32) (argument1 : Reference)
+                : List (Reference × Nat) :=
+              [(argument1, 4 * (copied values1Elements).length)]
+            """),
+        ("    (state : State memory written home0 home1) : Prop := sorry",
+            """
+                (state : State memory written home0 home1) : Prop :=
+              ∃ done, values1Elements = done ++ state.values.2.2.2.values ∧ (0 : W32) ∉ done ∧
+                state.values.1.toNat = done.length ∧ state.values.2.1 = 0 ∧
+                Filled state.memory argument1 4 done (copied state.values.2.2.2.values).length ∧
+                SpanApart state.values.2.2.2.view (argument1, 4 * (copied values1Elements).length)
+            """),
+        ("def measure (values1 : SpanView) (values1Elements : List W32) (argument1 : Reference)",
+            "def measure (_ : SpanView) (_ : List W32) (_ : Reference)"),
+        ("    (state : State memory written home0 home1) : Nat := sorry",
+            "    (state : State memory written home0 home1) : Nat := state.values.2.2.2.values.length"),
+        ("    case invariant => sorry -- invariant at the first loop head",
+            """
+                case invariant =>
+                  simp only [Precondition] at assumed
+                  simp only [invariant]
+                  exact ⟨[], by simp, by simp, by simp, by simp,
+                    Filled.start (assumed.1.after_confined storedFrame.confined wellFormed), assumed.2⟩
+            """),
+        ("""
+                have values1Apart : ∀ entry ∈ footprint values1 values1Elements argument1,
+                    SpanApart values1View entry :=
+                    sorry -- `values1` lies apart from the memory the loop writes
+            """,
+            """
+                have values1Apart : ∀ entry ∈ footprint values1 values1Elements argument1,
+                    SpanApart values1View entry := by
+                  simp only [invariant] at holds
+                  obtain ⟨-, -, -, -, -, -, apart⟩ := holds
+                  simpa [footprint] using apart
+            """),
+        ("""
+                  have argument1Reach : Writable initial (argument1.element 4 scanCount.toNat) 4 0 1 := by
+                    cil_loop_obligation [invariant, Precondition, footprint]
+            """,
+            """
+                  have argument1Reach : Writable initial (argument1.element 4 scanCount.toNat) 4 0 1 := by
+                    simp only [invariant] at holds
+                    simp only [Precondition] at assumed
+                    obtain ⟨done, split, nonzero, counted, -, -, -⟩ := holds
+                    have := copy_bound nonzero branch2 split
+                    exact Writable.element_writable assumed.1 (by omega) (by omega)
+            """),
+        ("""
+                  have argument1Small : scanCount.toNat < 2 ^ 31 := by
+                    cil_loop_obligation [invariant, Precondition, footprint]
+            """,
+            """
+                  have argument1Small : scanCount.toNat < 2 ^ 31 := by
+                    simp only [invariant] at holds
+                    obtain ⟨done, split, -, counted, -, -, -⟩ := holds
+                    have short := values1Contents.length ▸ SpanView.length_bounded values1 initial values1Valid
+                    have lengths := congrArg List.length split
+                    simp only [List.length_append, List.length_cons] at lengths
+                    omega
+            """),
+        ("""
+                      Within (argument1.element 4 scanCount.toNat, 4) entry := by
+                    cil_loop_obligation [invariant, Precondition, footprint]
+            """,
+            """
+                      Within (argument1.element 4 scanCount.toNat, 4) entry := by
+                    simp only [invariant] at holds
+                    obtain ⟨done, split, nonzero, counted, -, -, -⟩ := holds
+                    have := copy_bound nonzero branch2 split
+                    refine ⟨_, List.mem_singleton_self _, ?_⟩
+                    simp [Within]
+                    omega
+            """),
+        ("""
+            def invariant (values1 : SpanView) (values1Elements : List W32) (argument1 : Reference)
+                {memory : Memory}
+            """,
+            """
+            def invariant (_ : SpanView) (values1Elements : List W32) (argument1 : Reference)
+                {memory : Memory}
+            """),
+        ("""
+                · -- leaves the loop at Loops.cs:129
+                  cil_loop_finish [branch1]
+                  case postcondition =>
+                    refine ⟨_, rfl, ?_⟩
+                    sorry -- Postcondition at the return at Loops.cs:129
+                · -- leaves the loop at Loops.cs:129
+                  cil_loop_finish [branch1]
+                  case postcondition =>
+                    refine ⟨_, rfl, ?_⟩
+                    sorry -- Postcondition at the return at Loops.cs:129
+            """,
+            """
+                · -- leaves the loop at Loops.cs:129
+                  cil_loop_finish [branch1]
+                  case postcondition =>
+                    refine ⟨_, rfl, ?_⟩
+                    simp only [invariant] at holds
+                    obtain ⟨done, split, nonzero, counted, stopped, filled, -⟩ := holds
+                    simp only [List.append_nil] at split
+                    subst split
+                    have whole : copied values1Elements = values1Elements := by
+                      simpa [copied] using copied_append nonzero []
+                    simp only [Postcondition]
+                    refine ⟨?_, ?_⟩
+                    · simp only [answer, whole, nonzero, ite_false, ← counted, BitVec.ofNat_toNat,
+                        BitVec.setWidth_eq]
+                    · rw [whole]
+                      exact filled.1.after_below exitBelow (wellFormed.form_bound argument1Form)
+                · -- leaves the loop at Loops.cs:129
+                  cil_loop_finish [branch1]
+                  case postcondition =>
+                    simp only [invariant] at holds
+                    obtain ⟨-, -, -, -, stopped, -, -⟩ := holds
+                    simp [stopped] at branch1
+            """),
+        ("""
+                  cil_loop_finish [branch2]
+                  case postcondition =>
+                    refine ⟨_, rfl, ?_⟩
+                    sorry -- Postcondition at the return at Loops.cs:129
+            """,
+            """
+                  cil_loop_finish [branch2]
+                  case postcondition =>
+                    refine ⟨_, rfl, ?_⟩
+                    simp only [invariant] at holds
+                    obtain ⟨done, split, nonzero, counted, stopped, filled, -⟩ := holds
+                    subst branch2
+                    have whole : copied values1Elements = done := by
+                      rw [split, copied_append nonzero]
+                      simp [copied]
+                    have old := wellFormed.form_bound argument1Form
+                    simp only [Postcondition]
+                    refine ⟨?_, ?_⟩
+                    · unfold answer
+                      rw [whole, ← counted, BitVec.ofNat_toNat, BitVec.setWidth_eq]
+                      simp [split]
+                    · rw [whole]
+                      exact ((filled.1.after_below storedBelow old).after_below storedBelow_1 old).after_below
+                        exitBelow old
+            """),
+        ("""
+                  case invariant => sorry -- invariant again at the loop head
+                  case measure => sorry -- measure decreases over this iteration
+            """,
+            """
+                  case invariant =>
+                    simp only [invariant] at holds ⊢
+                    obtain ⟨done, split, nonzero, counted, stopped, filled, apart⟩ := holds
+                    have room : (copied (values1Head :: values1Tail)).length =
+                        (copied values1Tail).length + 1 := by
+                      simp -bitVecOfNat [copied, branch2]
+                    have old := wellFormed.form_bound argument1Form
+                    have atCalled := (filled.after_below storedBelow old).after_confined confined
+                      storedFrame.wellFormed (by
+                        intro entry member
+                        simp only [List.mem_cons, List.not_mem_nil, or_false] at member
+                        subst member
+                        right; left
+                        simp [Reference.element_offset]
+                        omega)
+                    have atHead := atCalled.after_below storedBelow_1 old
+                    rw [room] at atHead
+                    refine ⟨done ++ [values1Head], by simp [split], by simpa using ⟨nonzero, Ne.symm branch2⟩,
+                      ?_, stopped, atHead.extend returned (by omega), apart.slice values1Cut⟩
+                    simp only [List.length_append, List.length_singleton, ← counted, BitVec.toNat_add]
+                    simp
+                    omega
+                  case measure => simp [measure]
             """)])
 })
 {
@@ -1255,8 +1479,8 @@ Console.WriteLine("PASS filled outlines verify with only their specification wri
     "two reference field stores that may alias, a null test followed through a local, two calls through a " +
     "generated contract, a split on a field value, a call whose callee loads the node a field holds, a " +
     "span fold that stores its total before each span load, a split on a `bool` argument, a " +
-    "store through `Unsafe.Add` of a reference argument and a call to a callee that throws where its " +
-    "precondition fails");
+    "store through `Unsafe.Add` of a reference argument, a call to a callee that throws where its " +
+    "precondition fails and a call storing through `Unsafe.Add` of a reference argument");
 
 // A written footprint that leaves out the element a loop writes is an error at the write, never an admission.
 var narrowed = Path.Combine(outlineRoot, "FillWords", "Narrowed.lean");
