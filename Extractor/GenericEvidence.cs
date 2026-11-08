@@ -285,11 +285,16 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             .Where(type => ConstrainedCalls.Extracted(type.Resolve().Module, method.Module)).ToArray();
         // Each receiver's interfaces are cataloged from whichever extracted assembly declares them, as resolution
         // requires; an interface outside them is left out, so Lean cannot select an interface-level body past it.
+        // A virtual call's catalog holds every class deriving from the slot's class, so Lean can check that
+        // the table resolves each one and omits none.
+        var hierarchies = method.Body.Instructions.Where(VirtualDispatch.Is)
+            .SelectMany(instruction => VirtualDispatch.Hierarchy((MethodReference)instruction.Operand));
         var types = receivers.Concat(receivers.SelectMany(type => type.Resolve().Interfaces
                 .Select(implementation => GenericStructs.Substitute(implementation.InterfaceType,
                     type as GenericInstanceType))
                 .Where(implementation => implementation.Resolve() is { } declared &&
                     ConstrainedCalls.Extracted(declared.Module, method.Module))))
+            .Concat(hierarchies)
             .DistinctBy(LayoutEvidence.Identity).OrderBy(LayoutEvidence.Identity, StringComparer.Ordinal);
         return List(types.Select(type =>
         {
@@ -306,8 +311,18 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 $"interfaces := {List(original.Interfaces.Select(implementation =>
                     Type(GenericStructs.Substitute(implementation.InterfaceType, owner))))}, " +
                 $"methods := {List(original.Methods.Select(member => DispatchMethod(member, owner)))}, " +
-                $"assembly := {{ identity := {Quote(PinIdentity(module))} }} }}";
+                $"assembly := {{ identity := {Quote(PinIdentity(module))} }}" + ClassEvidence(original) + " }";
         }));
+    }
+
+    // An admitted class's base, when that is an admitted class, and whether it is abstract; virtual dispatch walks
+    // these, and other catalog entries keep the defaults.
+    static string ClassEvidence(TypeDefinition type)
+    {
+        if (!ObjectTypes.Is(type)) return "";
+        var parent = type.BaseType is { } baseType && ObjectTypes.Is(baseType)
+            ? $", base := {ObjectType(baseType)}" : "";
+        return parent + (type.IsAbstract ? ", abstractType := true" : "");
     }
 
     // The pin whose metadata supplied a catalog entry; Lean requires it to scope the entry's type.

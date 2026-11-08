@@ -31,6 +31,54 @@ def objectAboveNull (memory : Memory) (left right : ManagedReference) :
   | .null => objectNonNull memory left
   | .address _ => .error .invalidState
 
+/-- The runtime type the allocation of the live object `receiver` records. A reference to
+    anything but an object is ill-typed. -/
+def runtimeTypeOf (memory : Memory) (receiver : Reference) : ExecutionResult RuntimeType := do
+  let allocation ← checkedAt (.address receiver) 0 (liveAllocation memory receiver.allocation)
+  match allocation.kind with
+  | .object type => .ok type
+  | _ => .error .invalidState
+
+/-- The model fault of a virtual call on an instance of a class its dispatch table omits: the
+    class is outside the extraction's closed set, so the model selects no body for it. -/
+def outsideDispatchTable : ExecutionFault :=
+  .unsupported "Virtual call on an instance of a class outside its dispatch table"
+
+/-- The body a virtual call enters for the live object `receiver`: the entry of `targets` for
+    its exact runtime class, or `outsideDispatchTable`. -/
+def virtualTarget (memory : Memory) (targets : List (CIL.Extraction.TypeExpr × Nat))
+    (receiver : Reference) : ExecutionResult Nat := do
+  let type ← runtimeTypeOf memory receiver
+  match targets.lookup type.identity with
+  | some callee => .ok callee
+  | none => .error outsideDispatchTable
+
+/-- A selected body is one the table lists. -/
+theorem virtualTarget_mem {memory : Memory} {targets : List (CIL.Extraction.TypeExpr × Nat)}
+    {receiver : Reference} {callee : Nat}
+    (selected : virtualTarget memory targets receiver = .ok callee) :
+    callee ∈ targets.map Prod.snd := by
+  unfold virtualTarget at selected
+  cases typed : runtimeTypeOf memory receiver with
+  | error fault => simp [typed, Bind.bind, Except.bind] at selected
+  | ok type =>
+    simp only [typed, Bind.bind, Except.bind] at selected
+    cases found : targets.lookup type.identity with
+    | none => simp [found] at selected
+    | some entry =>
+      simp only [found, Except.ok.injEq] at selected
+      subst selected
+      induction targets with
+      | nil => simp at found
+      | cons head tail ih =>
+        obtain ⟨identity, index⟩ := head
+        simp only [List.lookup_cons] at found
+        split at found
+        · cases found; exact List.mem_cons_self
+        · exact List.mem_cons_of_mem _ (ih found)
+
+#print axioms virtualTarget_mem
+
 /-- Object storage is aligned to the 8-byte field slots of the admitted 64-bit targets. -/
 def objectAlignment : Nat := 8
 

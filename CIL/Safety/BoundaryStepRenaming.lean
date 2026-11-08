@@ -132,6 +132,103 @@ private theorem Memory.Renamed.stepCallInstance {indices : LocalIndexMap}
           exact .error _
 #print axioms Memory.Renamed.stepCallInstance
 
+/-- Renaming keeps a live object's runtime class, so a virtual call selects the same body and
+    fails with the same, renamed, fault. -/
+private theorem Memory.Renamed.virtualTarget {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (receiver : Reference)
+    (bound : receiver.allocation < mapping.sourceLimit)
+    (targets : List (CIL.Extraction.TypeExpr × Nat)) :
+    ResultRenamed mapping (fun left right => right = left)
+      (CIL.Safety.virtualTarget source targets receiver)
+      (CIL.Safety.virtualTarget target targets (mapping.reference receiver)) := by
+  have allocations := related.allocations receiver.allocation bound
+  simp only [CIL.Safety.virtualTarget, runtimeTypeOf, AllocationRenaming.reference,
+    CIL.Safety.liveAllocation, checkedAt, Except.mapError, Bind.bind, Except.bind]
+  generalize source.allocations receiver.allocation = sourceAllocation at allocations ⊢
+  generalize target.allocations (mapping.image receiver.allocation) = targetAllocation
+    at allocations ⊢
+  cases allocations with
+  | none => exact .error (.memory .missingAllocation (.address receiver) 0)
+  | @some sourceDescriptor targetDescriptor descriptors =>
+    obtain ⟨kinds, -, live, -⟩ := descriptors
+    dsimp only
+    rw [← live]
+    cases sourceDescriptor.live with
+    | false => exact .error (.memory .expiredLifetime (.address receiver) 0)
+    | true =>
+      simp only [ite_true, Pure.pure, Except.pure]
+      revert kinds
+      generalize sourceDescriptor.kind = sourceKind
+      generalize targetDescriptor.kind = targetKind
+      intro kinds
+      cases kinds with
+      | frame => exact .error .invalidState
+      | same =>
+        cases sourceKind
+        all_goals first
+          | exact .error .invalidState
+          | (dsimp only
+             split
+             · exact .ok rfl
+             · exact .error outsideDispatchTable)
+#print axioms Memory.Renamed.virtualTarget
+
+/-- A virtual call transports as a call: renaming keeps a receiver null exactly when it was and
+    keeps a live receiver's class, so both runs throw, fault alike or enter the same body. -/
+private theorem Memory.Renamed.stepCallVirtual {indices : LocalIndexMap}
+    {mapping : AllocationRenaming} {scopes : Nat → Nat → Prop} {source target : Memory}
+    {sourceFrame targetFrame : Frame} (related : Memory.Renamed mapping scopes source target)
+    (sourceBody targetBody : CIL.Method) (targets : List (CIL.Extraction.TypeExpr × Nat))
+    (argc pc : Nat) (arguments stack : List Value)
+    (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit) :
+    ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
+      (step sourceBody (.callVirtual targets argc) pc arguments sourceFrame stack source)
+      (step targetBody (.callVirtual targets argc) pc (arguments.map mapping.value)
+        targetFrame (stack.map mapping.value) target) := by
+  simp only [step, mapping.unspecifiedOperands, Bool.or_false, List.length_map,
+    ← List.map_take, ← List.map_drop, ← List.map_reverse]
+  by_cases guard : unspecifiedOperands (observerCount (.callVirtual targets argc)) stack = true
+  · simp only [guard, ite_true]
+    exact .error _
+  · simp only [guard, Bool.false_eq_true, ite_false]
+    by_cases short : stack.length < argc
+    · simp only [short, ite_true]
+      exact .error _
+    · simp only [short, ite_false]
+      have checks := related.checkedValues (stack.take argc).reverse (by
+        intro value member
+        exact bounds value (List.mem_of_mem_take (List.mem_reverse.mp member)))
+      cases checked : (stack.take argc).reverse.mapM (CIL.Safety.checkedValue source) with
+      | error fault =>
+        rw [checked] at checks
+        generalize ((stack.take argc).reverse.map mapping.value).mapM
+          (CIL.Safety.checkedValue target) = targetChecked at checks ⊢
+        cases checks
+        exact .error fault
+      | ok operands =>
+        rw [checked] at checks
+        obtain ⟨targetOperands, targetChecked, rfl⟩ := checks.success
+        have unchanged := (checkedValues_valid _ _ _ checked).1
+        simp only [targetChecked, Bind.bind, Except.bind]
+        match operands, unchanged with
+        | [], _ => exact .error _
+        | .object (.address receiver) :: tail, unchanged =>
+          have below := bounds _ (List.mem_of_mem_take (List.mem_reverse.mp
+            (unchanged ▸ List.mem_cons_self ..)))
+          simp only [Value.Below, ManagedReference.Below] at below
+          simp only [List.map_cons, AllocationRenaming.value, AllocationRenaming.managedReference]
+          refine (related.virtualTarget receiver below targets).bind _ _ ?_
+          intro left right same
+          subst same
+          exact .ok (FrameAction.Renamed.call related)
+        | .object .null :: _, _ => exact .error _
+        | .scalar _ :: _, _ | .methodPointer _ :: _, _ | .methodTable _ :: _, _
+        | .reference _ :: _, _ | .readOnlyReference _ :: _, _ | .span .. :: _, _
+        | .bufferSpan _ :: _, _ | .array _ :: _, _ =>
+          exact .error _
+#print axioms Memory.Renamed.stepCallVirtual
+
 /-- Argument loads, calls and returns preserve their checked values and control flow. -/
 theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
@@ -162,11 +259,15 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
   · rcases receiverChecked with ⟨callee, argc, rfl⟩
     exact related.stepCallInstance formed sourceBody targetBody callee argc pc arguments stack
       bounds
+  by_cases dispatched : ∃ targets argc, operation = .callVirtual targets argc
+  · rcases dispatched with ⟨targets, argc, rfl⟩
+    exact related.stepCallVirtual sourceBody targetBody targets argc pc arguments stack bounds
   ·
     allocation_fixed_step (
       first
       | exact False.elim (isManaged ⟨_, rfl⟩)
       | exact False.elim (receiverChecked ⟨_, _, rfl⟩)
+      | exact False.elim (dispatched ⟨_, _, rfl⟩)
       | (case h_60 =>
           rename_i _ _ position
           rw [List.getElem?_map]

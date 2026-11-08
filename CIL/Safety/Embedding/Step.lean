@@ -384,6 +384,24 @@ theorem step_relabel_callInstance (callee argc : Nat) :
 
 #print axioms step_relabel_callInstance
 
+/-- A virtual call relocates no pc; its body is selected from memory, which relabeling keeps. -/
+theorem step_relabel_callVirtual (targets : List (CIL.Extraction.TypeExpr × Nat)) (argc : Nat) :
+    StepRelabel (.callVirtual targets argc) := by
+  plain_cases
+  by_cases short : stack.length < argc
+  · simp [short] at h
+  · simp only [short, ↓reduceIte] at h ⊢
+    obtain ⟨arguments, found, h⟩ := except_bind_ok h
+    simp only [found, ok_bind_eq]
+    split at h
+    · obtain ⟨callee, selected, h⟩ := except_bind_ok h
+      simp only [selected, ok_bind_eq]
+      cases h
+      rfl
+    all_goals cases h
+
+#print axioms step_relabel_callVirtual
+
 /-- A tail transfer has no continuation pc to relocate. -/
 theorem step_relabel_tailCall (callee argc : Nat) : StepRelabel (.tailCall callee argc) := by
   plain_cases
@@ -685,6 +703,7 @@ theorem step_relabel (op : CIL.Op) : StepRelabel op := by
   case setLocal index narrow => exact step_relabel_setLocal index narrow
   case call method argc => exact step_relabel_call method argc
   case callInstance method argc => exact step_relabel_callInstance method argc
+  case callVirtual targets argc => exact step_relabel_callVirtual targets argc
   case tailCall method argc => exact step_relabel_tailCall method argc
   case newVector256 constructor argc => exact step_relabel_newVector256 constructor argc
   case newAggregate constructor argc size => exact step_relabel_newAggregate constructor argc size
@@ -954,6 +973,17 @@ theorem step_raise_callInstance (callee argc : Nat) : StepRaise (.callInstance c
     raise_lockstep
 
 #print axioms step_raise_callInstance
+
+/-- A null receiver raises the same exception at the relocated pc. -/
+theorem step_raise_callVirtual (targets : List (CIL.Extraction.TypeExpr × Nat)) (argc : Nat) :
+    StepRaise (.callVirtual targets argc) := by
+  plain_cases
+  by_cases short : stack.length < argc
+  · simp [short] at h
+  · simp only [short, ↓reduceIte] at h ⊢
+    raise_lockstep
+
+#print axioms step_raise_callVirtual
 
 /-- Tail-transfer faults retain their original location under pc relocation. -/
 theorem step_raise_tailCall (callee argc : Nat) : StepRaise (.tailCall callee argc) := by
@@ -1229,6 +1259,7 @@ theorem step_raise (op : CIL.Op) : StepRaise op := by
     · cases h
   case call callee argc => exact step_raise_call callee argc
   case callInstance callee argc => exact step_raise_callInstance callee argc
+  case callVirtual targets argc => exact step_raise_callVirtual targets argc
   case tailCall callee argc => exact step_raise_tailCall callee argc
   case newVector256 callee argc => exact step_raise_newVector256 callee argc
   case newAggregate callee argc size => exact step_raise_newAggregate callee argc size

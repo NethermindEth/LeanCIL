@@ -367,6 +367,14 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
       | .object (.address _) :: _ => return .call callee arguments (stack.drop argc) m
       | .object .null :: _ => .error (.thrown "System.NullReferenceException")
       | _ => .error .invalidState
+  | .callVirtual targets argc, _ =>
+    if stack.length < argc then .error .invalidState else
+      let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
+      match arguments with
+      | .object (.address receiver) :: _ =>
+        return .call (← virtualTarget m targets receiver) arguments (stack.drop argc) m
+      | .object .null :: _ => .error (.thrown "System.NullReferenceException")
+      | _ => .error .invalidState
   | .newVector256 callee argc, _ =>
     if stack.length < argc then .error .invalidState else
       let arguments ← (stack.take argc).reverse.mapM (checkedValue m)

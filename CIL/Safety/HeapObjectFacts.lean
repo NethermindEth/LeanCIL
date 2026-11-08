@@ -6,11 +6,13 @@ import CIL.Safety.WordMemory
 
 Facts about class instance fields that proofs about extracted methods compose. An object's
 identity, runtime type and field positions live in allocation metadata, which byte writes
-never change, so a reference formed or a field located before a write stays so after it
-(`formObject_of_allocations`, `objectFieldAddress_of_allocations`). A field written with a value
-reads back as that value (`objectField_readback_i64`). A fresh instance (`objectMemory`) forms,
-locates each field inside its size and grants access to its bytes (`objectMemory_formObject`,
-`objectMemory_field`, `objectMemory_access`).
+never change, so a reference formed, a field located or a runtime type read before a write stays
+so after it (`formObject_of_allocations`, `objectFieldAddress_of_allocations`,
+`runtimeTypeOf_of_allocations`). A field written with a value reads back as that value
+(`objectField_readback_i64`). A fresh instance (`objectMemory`) forms, has the runtime type it
+was constructed with, locates each field inside its size and grants access to its bytes
+(`objectMemory_formObject`, `objectMemory_runtimeTypeOf`, `objectMemory_field`,
+`objectMemory_access`).
 -/
 
 namespace CIL.Safety
@@ -30,6 +32,13 @@ theorem objectFieldAddress_of_allocations {memory after : Memory}
       objectFieldAddress memory reference owner offset := by
   cases reference <;> simp only [objectFieldAddress, liveAllocation, add, form, unchanged]
 #print axioms objectFieldAddress_of_allocations
+
+/-- An object's runtime type, which a virtual call dispatches on, is allocation metadata. -/
+theorem runtimeTypeOf_of_allocations {memory after : Memory}
+    (unchanged : after.allocations = memory.allocations) (receiver : Reference) :
+    runtimeTypeOf after receiver = runtimeTypeOf memory receiver := by
+  simp only [runtimeTypeOf, liveAllocation, unchanged]
+#print axioms runtimeTypeOf_of_allocations
 
 /-- A 64-bit field written with `bits` loads back as `bits`. -/
 theorem objectField_readback_i64 {memory after : Memory} {field : Reference} {bits : BitVec 64}
@@ -102,6 +111,13 @@ theorem objectMemory_formObject (memory : Memory) (type : RuntimeType) (size : N
   simp [formObject, liveAllocation, objectMemory, checkedAt, Except.mapError, Bind.bind,
     Except.bind, Pure.pure, Except.pure]
 #print axioms objectMemory_formObject
+
+/-- A fresh instance has the runtime type it was constructed with. -/
+theorem objectMemory_runtimeTypeOf (memory : Memory) (type : RuntimeType) (size : Nat) :
+    runtimeTypeOf (objectMemory memory type size) ⟨memory.nextIdentity, 0⟩ = .ok type := by
+  simp [runtimeTypeOf, liveAllocation, objectMemory, checkedAt, Except.mapError, Bind.bind,
+    Except.bind, Pure.pure, Except.pure]
+#print axioms objectMemory_runtimeTypeOf
 
 /-- A field of a fresh instance inside its size, declared by its class or one of its bases, is
     located at its offset in the instance. -/

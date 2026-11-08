@@ -163,6 +163,18 @@ internal static class InstructionTranslation
             SpanReferences.ValidateCopy(m, i, instructions);
             return ".nop";
         }
+        if (VirtualDispatch.Is(i))
+        {
+            var slot = (MethodReference)i.Operand;
+            var entries = VirtualDispatch.Table(slot).Select(entry =>
+            {
+                var index = methods.GetValueOrDefault(entry.Body, -1);
+                if (index <= methodIndex)
+                    throw new InvalidDataException("Unresolved virtual implementation: " + entry.Body.FullName);
+                return $"({GenericEvidence.ObjectType(entry.Class)}, {index})";
+            });
+            return $".callVirtual [{string.Join(", ", entries)}] {slot.Parameters.Count + 1}";
+        }
         if (i.OpCode.Code is Code.Call or Code.Newobj || receiverCall)
         {
             var r = (MethodReference)i.Operand;

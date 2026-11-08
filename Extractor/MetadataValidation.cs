@@ -639,13 +639,25 @@ internal static class MetadataValidation
             {
                 if (ObjectTypes.ReceiverCall(instruction))
                 {
-                    if (reference.Resolve() is { IsVirtual: true })
-                        throw Call("Unsupported virtual call", reference, method, instruction,
-                            "Dispatch on class instances is not modelled (#477).");
+                    if (VirtualDispatch.Is(instruction))
+                    {
+                        VirtualDispatch.Entry[] table;
+                        try { table = VirtualDispatch.Table(reference); }
+                        catch (InvalidDataException error) when (Rejections.Of(error) is null)
+                        {
+                            throw Call("Unsupported virtual call", reference, method, instruction, error.Message,
+                                error);
+                        }
+                        foreach (var body in table.Select(entry => entry.Body).Distinct())
+                            Enter(body, reference, instruction);
+                        return;
+                    }
                 }
                 else if (instruction.OpCode.Code == Code.Callvirt ||
                     instruction is { OpCode.Code: Code.Call, Previous.OpCode.Code: Code.Constrained })
                 {
+                    if (VirtualDispatch.Unresolvable(instruction) is { } reason)
+                        throw Call("Unsupported virtual call", reference, method, instruction, reason);
                     var resolved = ConstrainedCalls.Resolve(method, instruction, instructions, profile.Architecture);
                     Enter(ConstrainedCalls.Specialize(resolved, specializations), reference, instruction);
                     return;

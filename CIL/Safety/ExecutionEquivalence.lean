@@ -183,6 +183,13 @@ theorem Memory.Equivalent.newArray {m n : Memory} (same : m.Equivalent n)
     | split
 #print axioms Memory.Equivalent.newArray
 
+/-- Virtual dispatch reads only allocation metadata, which equivalent memories share. -/
+theorem Memory.Equivalent.virtualTarget {m n : Memory} (same : m.Equivalent n)
+    (targets : List (CIL.Extraction.TypeExpr × Nat)) (receiver : Reference) :
+    CIL.Safety.virtualTarget m targets receiver = CIL.Safety.virtualTarget n targets receiver := by
+  simp only [CIL.Safety.virtualTarget, runtimeTypeOf, liveAllocation, same.allocations]
+#print axioms Memory.Equivalent.virtualTarget
+
 theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) :
@@ -193,7 +200,7 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
   split <;> try simp only [same.checkedValue, same.checkedValues, same.loadLocal, same.localAddress,
     same.referenceNonNull, same.referenceEqual, same.referenceDifference,
     same.referenceLess, same.referenceSubtract, same.objectNonNull, same.objectEqual,
-    same.objectAboveNull]
+    same.objectAboveNull, same.virtualTarget]
   all_goals repeat' first
     | exact same.managedStep _ _ _ _
     | (apply ResultEquivalent.bind (same.newArray _ _)

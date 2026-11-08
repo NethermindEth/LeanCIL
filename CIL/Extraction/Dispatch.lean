@@ -40,6 +40,10 @@ structure DispatchType where
   methods : List DispatchMethod
   /-- The pinned assembly whose metadata supplied this entry. -/
   assembly : AssemblyPin := {}
+  /-- A class's base class, or `.void` when it derives from `System.Object` or is no class. -/
+  base : TypeExpr := .void
+  /-- The class is abstract, so it has no instances of its own. -/
+  abstractType : Bool := false
   deriving DecidableEq, Repr
 
 /-- The entry names a valid pin that scopes its type. Dispatch reads only such entries, so every
@@ -248,6 +252,86 @@ def resolveConstrained (types : List DispatchType) (receiver : TypeExpr) (site :
         concrete slot token site)
   checkedTarget receiver site target
 
+/-- The `NewSlot` flag of a method's attributes: the method introduces a slot rather than
+    overriding the nearest inherited one (ECMA-335 II.10.3.1). -/
+def newSlotAttribute : Nat := 0x100
+
+/-- Whether a catalog method introduces a new virtual slot. -/
+def DispatchMethod.isNewSlot (method : DispatchMethod) : Bool :=
+  method.attributes &&& newSlotAttribute != 0
+
+/-- The catalog classes from `current` up to and including `root`, following `base`, in at most
+    `fuel` entries; `none` when a class is missing or the chain ends without reaching `root`. -/
+def classChain (find : TypeExpr → Option DispatchType) : Nat → TypeExpr → TypeExpr →
+    Option (List DispatchType)
+  | 0, _, _ => none
+  | fuel + 1, current, root => do
+    let entry ← find current
+    if current == root then pure [entry] else
+    match entry.base with
+    | .void => none
+    | base => (entry :: ·) <$> classChain find fuel base root
+
+/-- The body `callvirt` of the class slot `site` names runs on an instance of exactly `runtime`,
+    with the class declaring it: the nearest class from `runtime` up to the slot's class with a
+    virtual method of the slot's name and signature (ECMA-335 II.10.3.2). The slot must
+    introduce itself (`NewSlot`) in a non-generic class; every class on the chain is a pinned
+    class of the slot's assembly, and none has a `MethodImpl` naming a class of the chain. A
+    nearer match that starts its own slot (hiding), is abstract or is ambiguous fails rather
+    than select a less specific body. -/
+def resolveVirtualWith (find : TypeExpr → Option DispatchType) (fuel : Nat) (runtime : TypeExpr)
+    (site : CallSite) : Option (TypeExpr × DispatchMethod) := do
+  let .managed token := site.target | none
+  if !site.hasThis || !site.typeArguments.isEmpty then none else pure ()
+  let declaring ← find site.declaringType
+  let slot ← unique (declaring.methods.filter fun method => method.token == token)
+  if !slot.isVirtual || !slot.isNewSlot || slot.name != site.name ||
+      !signatureMatches slot site then none else pure ()
+  let chain ← classChain find fuel runtime site.declaringType
+  let classes := chain.map (·.identity)
+  if !(chain.all fun entry => entry.pinned && !entry.valueType && !entry.interfaceType &&
+      entry.assembly == declaring.assembly &&
+      entry.methods.all fun method =>
+        method.overrides.all fun (_, owner) => !classes.contains owner)
+    then none else pure ()
+  let selected ← chain.findSome? fun entry =>
+    if entry.identity == site.declaringType then some (entry.identity, some slot) else
+    match entry.methods.filter fun method =>
+        method.isVirtual && method.name == slot.name && signatureMatches method site with
+    | [] => none
+    | [method] => some (entry.identity, if method.isNewSlot then none else some method)
+    | _ => some (entry.identity, none)
+  let (owner, some method) := selected | none
+  if method.isAbstract || !method.hasBody then none else pure (owner, method)
+
+/-- Exactly one catalog entry with this identity, as dispatch reads it. -/
+def findDispatchType (types : List DispatchType) (identity : TypeExpr) : Option DispatchType :=
+  unique (types.filter fun type => type.identity == identity)
+
+/-- Every class a virtual call's table lists is bound to the body `resolveVirtualWith` selects:
+    an extracted, non-generic instance method of the selecting class with the site's signature.
+    Each class appears once, and no concrete catalog class whose chain reaches the slot's class
+    is left out. -/
+def virtualTableValid (types : List DispatchType) (find : TypeExpr → Option DispatchType)
+    (methods : Nat → Option SpecializedMethod) (site : CallSite)
+    (targets : List (TypeExpr × Nat)) (count : Nat) : Bool :=
+  let fuel := types.length
+  !targets.isEmpty && decide (targets.map Prod.fst).Nodup &&
+  count == site.parameterCount + 1 &&
+  (targets.all fun (runtime, index) =>
+    match resolveVirtualWith find fuel runtime site, methods index with
+    | some (owner, method), some callee =>
+      callee.arguments.isEmpty && callee.closed.token == method.token &&
+      managedOwner owner == some (callee.closed.owner, []) &&
+      callee.closed.objectReceiver && callee.closed.hasThis && !callee.closed.code.isEmpty &&
+      callee.closed.attributes == method.attributes &&
+      callee.closed.returnType == site.returnType &&
+      callee.closed.parameters == site.parameterTypes
+    | _, _ => false) &&
+  types.all fun entry => entry.abstractType ||
+    (classChain find fuel entry.identity site.declaringType).isNone ||
+    targets.any (·.1 == entry.identity)
+
 
 /-- Ordered candidate buckets retain every matching metadata entry. -/
 private def groupIndex {α κ : Type} [Ord κ] (key : α → κ) :
@@ -383,6 +467,17 @@ theorem DispatchIndex.findType_ofTypes (types : List DispatchType) (identity : T
   rw [predicates, unique_map]
 
 #print axioms DispatchIndex.findType_ofTypes
+
+/-- The indexed lookup finds exactly the entry `findDispatchType` does. -/
+theorem DispatchIndex.findType_raw (types : List DispatchType) :
+    (fun identity => ((DispatchIndex.ofTypes types).findType identity).map (·.raw)) =
+      findDispatchType types := by
+  funext identity
+  rw [DispatchIndex.findType_ofTypes, Option.map_map]
+  unfold findDispatchType
+  cases unique (types.filter fun type => type.identity == identity) <;> rfl
+
+#print axioms DispatchIndex.findType_raw
 
 /-- Resolve a constrained call against indexed candidates, retaining all original filters. -/
 def DispatchIndex.resolve (index : DispatchIndex) (receiver : TypeExpr) (site : CallSite) :

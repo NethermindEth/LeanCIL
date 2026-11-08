@@ -642,6 +642,19 @@ def validateManagedCallWith (methodCount : Nat)
   match emitted with
   | .managed (.address target signature) => managedAddressMatches methods raw target signature
   | .managed (.call signature catalog _) => managedIndirectMatches methods raw signature catalog
+  -- Each listed body is a virtual instance method of a class with the slot's signature; which
+  -- body each class selects is checked against the dispatch catalog.
+  | .callVirtual targets count => match raw.operand with
+    | .call site => raw.opcode == 111 && site.hasThis && !targets.isEmpty &&
+      (match site.target with | .managed _ => true | .external _ => false) &&
+      count == site.parameterCount + 1 &&
+      targets.all fun (_, index) => match methods index with
+        | some callee => callee.arguments.isEmpty && callee.closed.objectReceiver &&
+          callee.closed.hasThis && callee.closed.isVirtual &&
+          callee.closed.parameters == site.parameterTypes &&
+          callee.closed.returnType == site.returnType
+        | none => false
+    | _ => false
   | _ =>
   match raw.operand with
   | .call site => match site.target with

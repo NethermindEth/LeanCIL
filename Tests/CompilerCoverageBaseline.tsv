@@ -710,6 +710,8 @@ Examples:System.UInt32& Examples.UnsafeLayouts::Add7nint(System.UInt32&,System.I
 Examples:System.UInt32& Examples.UnsafeLayouts::Add7nuint(System.UInt32&,System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Account::get_Headroom()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.AddStep::Apply(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Animal::Legs()	B	B	B	B	B	B	B	B
+Examples:System.UInt64 Examples.Animal::Loudness()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Arguments::Struct(Examples.Packet)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Arithmetic::Alias(System.UInt64&,System.UInt64&)	A	A	A	A	A	A	A	A
@@ -729,6 +731,7 @@ Examples:System.UInt64 Examples.BinarySpans::ReadBig(System.ReadOnlySpan`1<Syste
 Examples:System.UInt64 Examples.BinarySpans::ReadLittle(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.BinarySpans::TryReadBig(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.BinarySpans::TryReadLittle(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Bird::Legs()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Bits::Left64(System.UInt64,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Bits::PrimitiveCountsU64(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Bits::PrimitiveLeftU64(System.UInt64,System.Int32)	A	A	A	A	A	A	A	A
@@ -783,6 +786,8 @@ Examples:System.UInt64 Examples.DivisionIntrinsics::UnsafeCall(System.UInt64)	A	
 Examples:System.UInt64 Examples.DivisionIntrinsics::UnsafeHigh(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.DivisionIntrinsics::UnsafeLow(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.DivisionIntrinsics::Xor(System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
+Examples:System.UInt64 Examples.Dog::Legs()	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Dog::Loudness()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.ExceptionDocumentation::DivRem(System.UInt64,System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.ExceptionDocumentation::UnsignedDivide(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.GenericLayouts::Composed(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
@@ -918,6 +923,9 @@ Examples:System.UInt64 Examples.UnalignedMemory::ReadWord(System.Byte&)	A	A	A	A	
 Examples:System.UInt64 Examples.UnsafeReferences::PastEnd(Examples.FourLimbs&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.UnsafeReferences::Read(Examples.FourLimbs&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.UnsafeReferences::Store(Examples.FourLimbs&,System.UInt64,System.UInt64,System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.VirtualCalls::DogLegs()	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.VirtualCalls::LegsOf(Examples.Animal)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.VirtualCalls::LoudnessOf(Examples.Animal)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.WideProduct::BigMul(System.UInt64,System.UInt64,System.UInt64&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.WideProduct::UnsignedBigMul32(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.XorStep::Examples.IBinaryStep.Apply(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
@@ -978,10 +986,12 @@ Examples:System.Void Examples.AggregateSpanFill::Words(System.Span`1<Examples.Ag
 Examples:System.Void Examples.AggregateSpans::Clear(System.Span`1<Examples.AggregateSpans/Words>)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.AggregateSpans::Write(System.Span`1<Examples.AggregateSpans/Words>,Examples.AggregateSpans/Words)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.AggregateSpans::WriteVector(System.Span`1<System.Runtime.Intrinsics.Vector128`1<System.UInt64>>,System.Runtime.Intrinsics.Vector128`1<System.UInt64>)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Animal::.ctor()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Arguments::Increment(System.UInt32&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Arithmetic::Mutate(System.UInt64&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.BinarySpans::WriteBig(System.Span`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.BinarySpans::WriteLittle(System.Span`1<System.Byte>)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Bird::.ctor()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Blocks::Copy(System.Byte&,System.Byte&,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Blocks::CopyAligned(System.Byte&,System.Byte&,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Blocks::CopyPointer(System.Byte*,System.Byte*,System.UInt32)	A	A	A	A	A	A	A	A
@@ -1004,6 +1014,7 @@ Examples:System.Void Examples.DivisionIntrinsics::Init256(System.Runtime.Intrins
 Examples:System.Void Examples.DivisionIntrinsics::Init512(System.Runtime.Intrinsics.Vector512`1<System.UInt64>&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.DivisionIntrinsics::SwapHalves(System.ReadOnlySpan`1<System.Byte>,System.Span`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.DivisionIntrinsics::UnsafeStore(System.Runtime.Intrinsics.Vector128`1<System.UInt64>&,System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Dog::.ctor()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Enums::Assign(Examples.Unsigned64&,Examples.Unsigned64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ExceptionDocumentation::Reference(System.UInt64&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ExplicitCounterValue::Examples.ICounterValue.Increment()	A	A	A	A	A	A	A	A

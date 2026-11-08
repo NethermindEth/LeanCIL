@@ -9,7 +9,9 @@ comparison (`ceq`, `beq`, `bne.un`), presence (`cgt.un` against null, `brtrue`, 
 `ldnull`, `ldfld`/`stfld` of scalar class fields, and `newobj` of a class, which calls the
 constructor with a fresh instance that `allocateObject_ok` or `allocateObject_insufficient`
 decides, and `callvirt` of a non-virtual method, which calls with a live receiver and throws
-`NullReferenceException` on a null one (`receiverCall`). Each states the dispatcher arm of
+`NullReferenceException` on a null one (`receiverCall`), and `callvirt` of a virtual method,
+which enters the body its dispatch table lists for the receiver's runtime class (`virtualCall`,
+decided by a `runtimeTypeOf` fact). Each states the dispatcher arm of
 `CIL/Safety/Execution.lean` for object operands, so stepping never unfolds the dispatcher. The
 observations themselves unfold through `cil_checked` down to `formObject`, which a caller's
 facts or `formObject_null` decide; field accesses leave `objectFieldAddress` and the byte
@@ -110,6 +112,82 @@ def receiverCall (callee : Nat) (arguments rest : List Value) (memory : Memory) 
       .error (.thrown "System.NullReferenceException") := rfl
 
 #print axioms receiverCall_null
+
+/-- The call a virtual `callvirt` makes with checked `arguments`, receiver first: into the body
+    `targets` lists for a live receiver's runtime class, `NullReferenceException` for a null
+    receiver. This is the `callVirtual` arm of `step` after its argument checks. -/
+def virtualCall (targets : List (CIL.Extraction.TypeExpr × Nat)) (arguments rest : List Value)
+    (memory : Memory) : ExecutionResult FrameAction :=
+  match arguments with
+  | .object (.address receiver) :: _ => do
+    return .call (← virtualTarget memory targets receiver) arguments rest memory
+  | .object .null :: _ => .error (.thrown "System.NullReferenceException")
+  | _ => .error .invalidState
+
+/-- `callvirt` of a virtual method checks its `argc` arguments and enters the body its table
+    selects for the receiver; a null receiver throws `NullReferenceException` before the call. -/
+@[cil_step] theorem step_callVirtual_eq (targets : List (CIL.Extraction.TypeExpr × Nat))
+    (argc : Nat) (stack : List Value) :
+    step body (.callVirtual targets argc) pc args frame stack memory =
+      if unspecifiedOperands argc stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else if stack.length < argc then .error .invalidState
+      else (do
+        let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
+        virtualCall targets arguments (stack.drop argc) memory) := by
+  simp only [step, observerCount, Bool.or_false]
+  rfl
+
+#print axioms step_callVirtual_eq
+
+/-- A live receiver enters the body the table lists for its runtime class; a step fact for
+    `runtimeTypeOf` then decides the lookup. -/
+@[cil_checked] theorem virtualCall_address (targets : List (CIL.Extraction.TypeExpr × Nat))
+    (receiver : Reference) (arguments rest : List Value) :
+    virtualCall targets (.object (.address receiver) :: arguments) rest memory = (do
+      let type ← runtimeTypeOf memory receiver
+      match targets.lookup type.identity with
+      | some callee => .ok (.call callee (.object (.address receiver) :: arguments) rest memory)
+      | none => .error outsideDispatchTable) := by
+  simp only [virtualCall, virtualTarget, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cases runtimeTypeOf memory receiver with
+  | error => rfl
+  | ok type =>
+    dsimp only
+    cases targets.lookup type.identity <;> rfl
+
+#print axioms virtualCall_address
+
+/-- A live receiver of a class the table lists enters that class's body. -/
+theorem virtualCall_listed (targets : List (CIL.Extraction.TypeExpr × Nat))
+    (receiver : Reference) (type : RuntimeType) (callee : Nat) (arguments rest : List Value)
+    (typed : runtimeTypeOf memory receiver = .ok type)
+    (listed : targets.lookup type.identity = some callee) :
+    virtualCall targets (.object (.address receiver) :: arguments) rest memory =
+      .ok (.call callee (.object (.address receiver) :: arguments) rest memory) := by
+  simp [virtualCall_address, typed, listed, Bind.bind, Except.bind]
+
+#print axioms virtualCall_listed
+
+/-- A live receiver of a class the table omits is the model fault `outsideDispatchTable`, never
+    a call or a named exception. -/
+theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
+    (receiver : Reference) (type : RuntimeType) (arguments rest : List Value)
+    (typed : runtimeTypeOf memory receiver = .ok type)
+    (omitted : targets.lookup type.identity = none) :
+    virtualCall targets (.object (.address receiver) :: arguments) rest memory =
+      .error outsideDispatchTable := by
+  simp [virtualCall_address, typed, omitted, Bind.bind, Except.bind]
+
+#print axioms virtualCall_outside
+
+/-- A null receiver throws before the call. -/
+@[cil_checked] theorem virtualCall_null (targets : List (CIL.Extraction.TypeExpr × Nat))
+    (arguments rest : List Value) :
+    virtualCall targets (.object .null :: arguments) rest memory =
+      .error (.thrown "System.NullReferenceException") := rfl
+
+#print axioms virtualCall_null
 
 /-- `ceq` on two object references pushes their identity comparison. -/
 @[cil_step high] theorem step_eq_object_eq (left right : ManagedReference) (rest : List Value) :

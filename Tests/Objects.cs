@@ -7,6 +7,7 @@
 
 using Mono.Cecil;
 using Mono.Cecil.Cil;
+using System.Text.RegularExpressions;
 
 // Class instances on the checked heap: proofs about identity, presence, scalar and class-typed fields,
 // instance receivers, calls framed across objects, construction against the heap budget and fields of base
@@ -33,7 +34,10 @@ foreach (var (proof, entry) in new[]
     ("TwoMarkers", "Objects::TwoMarkers()"),
     ("LinkedNodes", "Objects::LinkedValue(Examples.Node,Examples.Node)"),
     ("BaseField", "Objects::IdOf(Examples.Shape)"),
-    ("DerivedObject", "Objects::Describe(System.UInt64,System.UInt64)")
+    ("DerivedObject", "Objects::Describe(System.UInt64,System.UInt64)"),
+    ("AnimalLegs", "VirtualCalls::LegsOf(Examples.Animal)"),
+    ("AnimalLoudness", "VirtualCalls::LoudnessOf(Examples.Animal)"),
+    ("FreshDogLegs", "VirtualCalls::DogLegs()")
 })
 {
     verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));
@@ -60,6 +64,28 @@ foreach (var (name, view, forged, marker) in new[]
     File.WriteAllText(path, linked.Replace(view, forged, StringComparison.Ordinal));
     forgedViews.Add(path, $"PASS forged field view rejected: {name}", marker);
 }
+// Lean re-resolves every dispatch table entry from the catalog and requires every concrete class
+// deriving from the slot's class, so a table that swaps bodies or omits a class fails its check.
+var dispatched = File.ReadAllText(Path.Combine(root, "AnimalLegs", "Extracted.lean"));
+const string animalScope = "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null";
+var birdEntry = $"(.object \"{animalScope}\" \"Examples.Bird\", ";
+var dogEntry = $"(.object \"{animalScope}\" \"Examples.Dog\", ";
+var table = Regex.Match(dispatched, @"\.callVirtual \[\(.*?\)\] 1").Value;
+var entries = Regex.Matches(table, @"(\(\.object [^)]*?, )(\d+)\)").Select(entry => entry.Groups).ToArray();
+if (entries.Length != 2 || !table.Contains(birdEntry + entries[0][2].Value, StringComparison.Ordinal) ||
+    !table.Contains(dogEntry + entries[1][2].Value, StringComparison.Ordinal))
+    throw new InvalidOperationException("The extraction does not list Bird and Dog in its dispatch table: " + table);
+foreach (var (name, forged) in new[]
+{
+    ("swapped", $".callVirtual [{birdEntry}{entries[1][2].Value}), {dogEntry}{entries[0][2].Value})] 1"),
+    ("omitted", $".callVirtual [{dogEntry}{entries[1][2].Value})] 1")
+})
+{
+    var path = Path.Combine(root, $"ForgedTable-{name}.lean");
+    File.WriteAllText(path, dispatched.Replace(table, forged, StringComparison.Ordinal));
+    forgedViews.Add(path, $"PASS forged dispatch table rejected: {name}",
+        "Extraction.ConstrainedCallsValid method0DispatchTypes");
+}
 forgedViews.Check();
 
 // The entry's call proof simplifies with the constructor's closed body; without it the proof
@@ -77,7 +103,7 @@ Console.WriteLine("PASS construction call proof names the constructor");
 foreach (var mutation in new[]
 {
     "abstract", "base", "baseRejected", "explicit", "finalizer", "interface", "byref", "address", "reference",
-    "fieldType", "virtualCall", "receiverAddress"
+    "fieldType", "receiverAddress"
 })
 {
     var output = Path.Combine(root, "Reject-" + mutation);
@@ -140,15 +166,6 @@ foreach (var mutation in new[]
                 editor.InsertAfter(first, editor.Create(OpCodes.Pop));
                 editor.InsertAfter(first, editor.Create(OpCodes.Ldfld, rate));
                 break;
-            case "virtualCall":
-                getter.IsVirtual = true;
-                getter.IsNewSlot = true;
-                var start = method.Body.Instructions[0];
-                var calls = method.Body.GetILProcessor();
-                calls.InsertAfter(start, calls.Create(OpCodes.Ldarg_0));
-                calls.InsertAfter(start, calls.Create(OpCodes.Pop));
-                calls.InsertAfter(start, calls.Create(OpCodes.Callvirt, getter));
-                break;
             case "receiverAddress":
                 var body = getter.Body.GetILProcessor();
                 body.InsertBefore(getter.Body.Instructions[0], body.Create(OpCodes.Pop));
@@ -172,7 +189,6 @@ foreach (var mutation in new[]
             "reference" => "Unsupported reference-typed field: System.String Examples.Account::Owner\n" +
                 "  Only fields holding instances of admitted classes are modelled; System.String is not one.",
             "fieldType" => "Unsupported class instance field type: System.Double Examples.Account::Rate",
-            "virtualCall" => "Unsupported virtual call: System.UInt64 Examples.Account::get_Headroom()",
             "receiverAddress" =>
                 "Unsupported address of a class instance receiver: System.UInt64 Examples.Account::get_Headroom()",
             _ => throw new InvalidOperationException("Unknown class rejection fixture: " + mutation)
@@ -193,8 +209,67 @@ foreach (var mutation in new[]
         throw new InvalidOperationException($"Incorrect class rejection: {mutation}\n{result.Output}");
     Console.WriteLine($"PASS class rejection: {mutation}");
 }
+// A dispatch table must cover every class whose instances can reach the call, with the body the runtime selects;
+// each hierarchy the extraction cannot close or resolve is rejected by name.
+foreach (var mutation in new[] { "librarySlot", "unadmittedSubclass", "newSlotHiding", "reabstraction", "explicit" })
+{
+    var output = Path.Combine(root, "RejectDispatch-" + mutation);
+    Directory.CreateDirectory(output);
+    var dll = Path.Combine(output, "Examples.dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        var animal = module.GetType("Examples.Animal");
+        var birdLegs = module.GetType("Examples.Bird").Methods.Single(candidate => candidate.Name == "Legs");
+        switch (mutation)
+        {
+            case "librarySlot":
+                var legsOf = module.GetType("Examples.VirtualCalls").Methods.Single(candidate =>
+                    candidate.Name == "LegsOf");
+                var editor = legsOf.Body.GetILProcessor();
+                var call = legsOf.Body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Callvirt);
+                editor.InsertAfter(call, editor.Create(OpCodes.Conv_U8));
+                editor.Replace(call, editor.Create(OpCodes.Callvirt,
+                    module.ImportReference(typeof(object).GetMethod("GetHashCode"))));
+                break;
+            case "unadmittedSubclass":
+                module.Types.Add(new TypeDefinition("Examples", "Fish",
+                    TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.ExplicitLayout, animal));
+                break;
+            case "newSlotHiding": birdLegs.IsNewSlot = true; break;
+            case "reabstraction":
+                birdLegs.IsAbstract = true;
+                birdLegs.Body = null;
+                break;
+            case "explicit":
+                module.GetType("Examples.Dog").Methods.Single(candidate => candidate.Name == "Legs").Overrides
+                    .Add(animal.Methods.Single(candidate => candidate.Name == "Legs"));
+                break;
+        }
+        module.Write(dll);
+    }
+    var expected = mutation switch
+    {
+        "librarySlot" => "Unsupported virtual call: System.Int32 System.Object::GetHashCode()\n" +
+            "  Caller: System.UInt64 Examples.VirtualCalls::LegsOf(Examples.Animal) at IL_0001\n" +
+            "  The slot is declared outside the extracted assemblies",
+        "unadmittedSubclass" => "Examples.Fish derives from Examples.Animal but is not an admitted class",
+        "newSlotHiding" => "System.UInt64 Examples.Bird::Legs() hides the slot with a new virtual method",
+        "reabstraction" => "System.UInt64 Examples.Bird::Legs() re-abstracts the slot for Examples.Bird.",
+        "explicit" => "System.UInt64 Examples.Dog::Legs() overrides by an explicit MethodImpl",
+        _ => throw new InvalidOperationException("Unknown dispatch rejection fixture: " + mutation)
+    };
+    if (mutation != "librarySlot")
+        expected = "Unsupported virtual call: System.UInt64 Examples.Animal::Legs()\n" +
+            "  Caller: System.UInt64 Examples.VirtualCalls::LegsOf(Examples.Animal) at IL_0001\n  " + expected;
+    var result = Execute(["dotnet", ExtractorPath, "extract", dll, "VirtualCalls::LegsOf(Examples.Animal)", output]);
+    if (result.Code != 1 || File.Exists(Path.Combine(output, "Extracted.lean")) ||
+        !result.Output.Replace("\r\n", "\n").Contains(expected, StringComparison.Ordinal))
+        throw new InvalidOperationException($"Incorrect dispatch rejection: {mutation}\n{result.Output}");
+    Console.WriteLine($"PASS dispatch rejection: {mutation}");
+}
+
 // A virtual method's own body is an entry like any instance method: the theorem is about that body,
-// whichever call reaches it. Only a callvirt of it needs dispatch, rejected above.
+// whichever call reaches it.
 var virtualOutput = Path.Combine(root, "VirtualBody");
 Directory.CreateDirectory(virtualOutput);
 var virtualDll = Path.Combine(virtualOutput, "Examples.dll");
@@ -210,5 +285,5 @@ verification.Verify(virtualDll, "Examples", "Account::get_Headroom()", At("Examp
 Console.WriteLine("PASS virtual method body proved as an entry");
 
 Console.WriteLine("PASS objects: identity, presence, scalar and reference field, receiver, framed call " +
-    "construction and base class field proofs, " +
-    "and named rejection of unmodelled class shapes, field accesses and calls");
+    "construction, base class field and virtual dispatch proofs, " +
+    "and named rejection of unmodelled class shapes, field accesses, calls and dispatch tables");
