@@ -461,6 +461,40 @@ theorem storeSlot_of_access {memory : Memory} {field : Reference} {value : Manag
   simp only [storeSlot, writable, formed, checkedAt, Except.mapError, Bind.bind, Except.bind,
     Pure.pure, Except.pure]
 
+/-- A readable value-array slot loads the array the reference it holds names. -/
+theorem loadArraySlot_of_access {memory : Memory} {field : Reference}
+    {element : CIL.ArrayElement}
+    (readable : access memory field objectFieldSlot ordinaryAccessAlignment false = .ok ()) :
+    loadArraySlot memory field element =
+      arrayOfSlot memory (memory.slots field.allocation field.offset) element := by
+  simp only [loadArraySlot, readable, checkedAt, Except.mapError, Bind.bind, Except.bind]
+
+/-- A reference to offset 0 of a live heap allocation of `length` elements names that whole
+    array, once its extent validates. -/
+theorem arrayOfSlot_whole {memory : Memory} {array : Reference} {allocation : Allocation}
+    {length : Nat} {element : CIL.ArrayElement}
+    (found : liveAllocation memory array.allocation = .ok allocation)
+    (heap : allocation.kind = .managedHeap) (origin : array.offset = 0)
+    (positive : 0 < element.width) (whole : allocation.layout.size = length * element.width)
+    (valid : ArrayView.validate ⟨.address array, length, element⟩ memory = .ok ()) :
+    arrayOfSlot memory (.address array) element =
+      .ok (.array ⟨.address array, length, element⟩) := by
+  simp only [arrayOfSlot, found, heap, origin, positive, whole, Nat.mul_mod_left,
+    Nat.mul_div_cancel _ positive, valid, checkedAt, Except.mapError, Bind.bind, Except.bind,
+    Pure.pure, Except.pure, and_self, ↓reduceIte]
+
+/-- A writable value-array slot stores the origin of a whole live heap array of its element. -/
+theorem storeArraySlot_whole {memory : Memory} {field array : Reference}
+    {allocation : Allocation} {length : Nat} {element : CIL.ArrayElement}
+    (writable : access memory field objectFieldSlot ordinaryAccessAlignment true = .ok ())
+    (found : liveAllocation memory array.allocation = .ok allocation)
+    (heap : allocation.kind = .managedHeap) (origin : array.offset = 0)
+    (whole : allocation.layout.size = length * element.width) :
+    storeArraySlot memory field ⟨.address array, length, element⟩ element =
+      .ok (setSlot memory field (.address array)) := by
+  simp only [storeArraySlot, arraySlotValue, writable, found, heap, origin, whole, checkedAt,
+    Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure, and_self, ↓reduceIte]
+
 /-- `ldfld` of a 1-byte object field, as `step_objectField_eq` states it. -/
 @[cil_step high] theorem step_objectField_1_eq (owner : CIL.Extraction.TypeExpr)
     (offset : Nat) (signed : Bool) (reference : ManagedReference) (rest : List Value) :
@@ -563,6 +597,9 @@ end ObjectEquations
 #print axioms step_referenceArrayStore_eq
 #print axioms step_arrayField_eq
 #print axioms step_setArrayField_eq
+#print axioms loadArraySlot_of_access
+#print axioms arrayOfSlot_whole
+#print axioms storeArraySlot_whole
 #print axioms loadSlot_of_access
 #print axioms storeSlot_of_access
 
