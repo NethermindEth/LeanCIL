@@ -233,10 +233,14 @@ comment saying which obligation it is:
   a method that takes references or spans also of the caller's memory before and after.
 - A method without a loop is stepped by `cil_checked_steps` when its body is arithmetic on 32- and
   64-bit arguments or a total bit count (`Log2`, `PopCount`, `LeadingZeroCount`,
-  `TrailingZeroCount`), leaving only the postcondition. An unsigned checked `+`, `-` or `*` is split
-  with `by_cases` on whether it fits: the side where every one fits steps with
-  `checkedValues_add_i32` and its siblings, and each overflowing side, which throws, is closed from
-  the precondition by `cil_loop_obligation`. When it also takes up to three `bool`
+  `TrailingZeroCount`), leaving only the postcondition. A signed or unsigned checked `+`, `-` or
+  `*` is split with `by_cases fitsN` on whether its integer result fits: the side where it fits
+  steps with `checkedValues_add_unsigned_i32`, `checkedValues_add_signed_i32` or their siblings,
+  and the overflowing side, which throws, is closed from the precondition by
+  `cil_loop_obligation`. A conditional branch on words the body computes from its arguments, signed
+  or unsigned, is split with `by_cases branchN` on the condition it tests, and each side steps on
+  to its own return and leaves its own postcondition, commented with the side it is on; a body
+  splits into at most eight returns. When it also takes up to three `bool`
   arguments and tests nothing else, it is split with `cases` on each, and every side steps to its
   own return and leaves its own postcondition, commented with the values it is for.
 - A method with a loop gets its loop state, the cutpoint at the loop's back-edge test (found by

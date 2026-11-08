@@ -64,9 +64,11 @@ elab_rules : tactic
       replaceMainGoal [← splitConjunctions (← getMainGoal)]
       -- A signed comparison of small words is the unsigned one `omega` reads.
       evalTactic (← `(tactic| (try simp (disch := omega) only [BitVec.toInt_eq_toNat_of_lt] at *)))
+      -- `omega` comes first: `contradiction` can exceed the recursion depth deciding a
+      -- comparison of large literals, which `first` does not catch.
       evalTactic (← `(tactic| first
-        | contradiction
         | omega
+        | contradiction
         | (simp [Within] <;> omega)
         | (refine Filled.element_writable ‹_› ?_ ?_ <;> (try simp) <;> omega)
         | (refine Writable.element_writable ‹_› ?_ ?_ <;> (try simp) <;> omega)))

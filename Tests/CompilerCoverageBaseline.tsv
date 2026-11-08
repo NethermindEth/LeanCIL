@@ -231,6 +231,7 @@ Examples:System.Int16& Examples.UnsafeLayouts::Add4nint(System.Int16&,System.Int
 Examples:System.Int16& Examples.UnsafeLayouts::Add4nuint(System.Int16&,System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Int16[] Examples.PrimitiveArrays::AllocateShorts(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.AggregateArrays::ConstructedLength(Examples.AggregateArrays/Pair[],System.Int32,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Arithmetic::Larger(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Arithmetic::Unsupported(System.Int32)	B	B	B	B	B	B	B	B
 Examples:System.Int32 Examples.ArrayElementReferences::Read(System.Int32[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ArrayElementReferences::Write(System.Int32[],System.Int32,System.Int32)	A	A	A	A	A	A	A	A
@@ -265,6 +266,7 @@ Examples:System.Int32 Examples.Capabilities::Endian()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Capabilities::Platform()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Capabilities::ReferenceFree()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Capabilities::VbmiCount(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.CheckedArithmetic::AddSigned(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ClosedInterfaceCounter::Examples.IClosedCounter<System.Int32>.Read()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ClosedInterfaceCounter::Examples.IClosedCounter<System.Int64>.Read()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ConstrainedCalls::ClosedBoth(Examples.ClosedInterfaceCounter&)	A	A	A	A	A	A	A	A
@@ -731,6 +733,7 @@ Examples:System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64)	A	A
 Examples:System.UInt64 Examples.Arithmetic::Alias(System.UInt64&,System.UInt64&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Arithmetic::Calls(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Arithmetic::Choose(System.Boolean,System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Arithmetic::Distance(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Arithmetic::Increment(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Arithmetic::LargeStruct(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Arithmetic::PastEnd(System.UInt64&)	A	A	A	A	A	A	A	A

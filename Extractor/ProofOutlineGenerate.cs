@@ -294,14 +294,14 @@ internal static partial class ProofOutline
         var steppable = spec.Parameters.All(parameter => parameter.Shape == ParameterShape.Scalar) &&
             body.Ops.All(Body.Pure);
         var split = !steppable && SplitsOnBooleans(body.Ops, spec.Parameters);
-        var checks = steppable || split ? null : CheckedOperations(spec, body.Ops);
-        Header(lean, spec, checks is null ? ["CIL.Verification", "CIL.Safety.SymbolicExecution"]
+        var paths = steppable || split ? null : ScalarPaths(spec, body.Ops);
+        Header(lean, spec, paths is null ? ["CIL.Verification", "CIL.Safety.SymbolicExecution"]
                 : ["CIL.Verification", "CIL.Safety.SymbolicExecution", "CIL.Safety.LoopObligations"],
-            steppable || split || checks is not null ? "`postcondition`" : null);
+            steppable || split || paths is not null ? "`postcondition`" : null);
         spec.Placeholders(lean);
         spec.Statement(lean);
         if (steppable) SteppedRun(lean, spec, "  ", "", "Postcondition of the returned value");
-        else if (checks is not null) CheckedRun(lean, spec, checks, 0, "  ");
+        else if (paths is not null) ScalarRun(lean, spec, paths);
         else if (split)
         {
             // `cases` on each `bool` makes every test a literal, so each side steps to one return.
@@ -335,88 +335,6 @@ internal static partial class ProofOutline
             "?run, ?postcondition⟩");
         lean.Line($"{indent}case run => cil_checked_steps");
         spec.Postcondition(lean, indent, note);
-    }
-
-    /// <summary>An unsigned overflow-checked operation of a body: the fact under which it does not fault, the
-    /// lemma that steps it given that fact, and where it is.</summary>
-    sealed record CheckedOperation(string Fits, string Lemma, string Operation, int Pc);
-
-    /// <summary>The unsigned checked operations of a body over word arguments whose other operations are pure,
-    /// with each operand named, or null when the body has none or another operation.</summary>
-    static CheckedOperation[]? CheckedOperations(Specification spec, string[] ops)
-    {
-        if (spec.Parameters.Any(parameter => parameter.Shape != ParameterShape.Scalar)) return null;
-        var stack = new Stack<(string Term, int Bits)>();
-        var checks = new List<CheckedOperation>();
-        static string Operand(string term) => Regex.IsMatch(term, @"\A[\w.]+\z") ? term : $"({term})";
-        for (var pc = 0; pc < ops.Length; pc++)
-        {
-            var op = ops[pc];
-            Match match;
-            if ((match = Regex.Match(op, @"\A\.arg (\d+)\z")).Success)
-            {
-                var parameter = spec.Parameters[int.Parse(match.Groups[1].Value,
-                    System.Globalization.CultureInfo.InvariantCulture)];
-                stack.Push((parameter.Name, 8 * parameter.Width));
-            }
-            else if ((match = Regex.Match(op, @"\A\.const(32|64) (\d+)\z")).Success)
-                stack.Push((match.Groups[2].Value, match.Groups[1].Value == "32" ? 32 : 64));
-            else if ((match = Regex.Match(op, @"\A\.(add|sub|mul|band|bor|bxor)\z")).Success && stack.Count >= 2)
-            {
-                var (right, bits) = stack.Pop();
-                var (left, _) = stack.Pop();
-                var symbol = match.Groups[1].Value switch
-                {
-                    "add" => "+", "sub" => "-", "mul" => "*", "band" => "&&&", "bor" => "|||", _ => "^^^"
-                };
-                stack.Push(($"{Operand(left)} {symbol} {Operand(right)}", bits));
-            }
-            else if ((match = Regex.Match(op, @"\A\.checkedArithmetic \.(add|sub|mul) false\z")).Success &&
-                stack.Count >= 2)
-            {
-                var (right, bits) = stack.Pop();
-                var (left, _) = stack.Pop();
-                var (a, b) = ($"{Operand(left)}.toNat", $"{Operand(right)}.toNat");
-                var (fits, symbol) = match.Groups[1].Value switch
-                {
-                    "add" => ($"{a} + {b} < 2 ^ {bits}", "+"),
-                    "sub" => ($"{b} ≤ {a}", "-"),
-                    _ => ($"{a} * {b} < 2 ^ {bits}", "*")
-                };
-                checks.Add(new(fits, $"CIL.checkedValues_{match.Groups[1].Value}_i{bits}", match.Groups[1].Value, pc));
-                stack.Push(($"{Operand(left)} {symbol} {Operand(right)}", bits));
-            }
-            else if (op is ".nop") { }
-            else if (op is ".ret" && pc == ops.Length - 1) { }
-            else return null;
-        }
-        return checks.Count == 0 ? null : [.. checks];
-    }
-
-    /// <summary>Split on whether each checked operation fits: where all fit the body steps to its return, and
-    /// where one does not it faults, a side the precondition must rule out.</summary>
-    static void CheckedRun(Writer lean, Specification spec, CheckedOperation[] checks, int index, string indent)
-    {
-        if (index == checks.Length)
-        {
-            var facts = string.Join(", ", checks.Select((_, position) => $"checked{position + 1}"));
-            lean.Line($"{indent}refine ⟨CIL.executionBound Extracted.program 0, ?final, ?results, ?run, " +
-                "?postcondition⟩");
-            lean.Line($"{indent}case run => cil_checked_steps [{facts}]");
-            spec.Postcondition(lean, indent, "Postcondition of the returned value");
-            return;
-        }
-        var check = checks[index];
-        var name = $"fits{index + 1}";
-        lean.Line($"{indent}by_cases {name} : {check.Fits}");
-        var location = Location(spec.Method, check.Pc);
-        lean.Line($"{indent}· -- the checked {check.Operation} at {location} fits");
-        // A fact at the stepped instruction's level; the step reduces with it where the bounds alone recurse.
-        lean.Line($"{indent}  have checked{index + 1} := {check.Lemma} {name}");
-        CheckedRun(lean, spec, checks, index + 1, indent + "  ");
-        lean.Line($"{indent}· -- it overflows and throws at {location}, which Precondition must rule out");
-        lean.Line($"{indent}  exfalso");
-        lean.Line($"{indent}  cil_loop_obligation [Precondition]");
     }
 
     /// <summary>The most `bool` arguments a straight-line outline splits on, one side per combination.</summary>

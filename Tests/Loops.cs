@@ -864,7 +864,9 @@ var outlined = new (string Name, string? Selector)[]
     ("LinkedValue", "Objects::LinkedValue(Examples.Node,Examples.Node)"),
     ("IsIdle", "ItemPool::IsIdle(Examples.PooledItem)"),
     ("DownThenUp", "Loops::DownThenUp(uint)"),
-    ("CheckedAdd", "CheckedArithmetic::Add(uint,uint)"), ("Log64", "Bits::Log64(ulong)")
+    ("CheckedAdd", "CheckedArithmetic::Add(uint,uint)"), ("Log64", "Bits::Log64(ulong)"),
+    ("AddSigned", "CheckedArithmetic::AddSigned(int,int)"), ("Distance", "Arithmetic::Distance(ulong,ulong)"),
+    ("Larger", "Arithmetic::Larger(int,int)")
 };
 var outlineTimer = System.Diagnostics.Stopwatch.StartNew();
 var outlineRoot = Path.Combine(root, "Outlines");
@@ -1545,7 +1547,36 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
               result = BitVec.ofNat 32 value.toNat.log2
             """),
         ("    sorry -- Postcondition of the returned value",
-            "    rfl")])
+            "    rfl")]),
+    ("AddSigned", [
+        ("def Precondition (x y : W32) : Prop := sorry",
+            "def Precondition (x y : W32) : Prop := -2 ^ 31 ≤ x.toInt + y.toInt ∧ x.toInt + y.toInt < 2 ^ 31"),
+        ("def Postcondition (x y result : W32) : Prop := sorry",
+            "def Postcondition (x y result : W32) : Prop := result.toInt = x.toInt + y.toInt"),
+        ("      sorry -- Postcondition of the returned value",
+            """
+                  simp only [Postcondition]
+                  rw [BitVec.toInt_add_of_not_saddOverflow]
+                  simp only [BitVec.saddOverflow, Bool.or_eq_true, decide_eq_true_eq, not_or, Nat.reduceSub]
+                  omega
+            """)]),
+    ("Distance", [
+        ("def Precondition (x y : W64) : Prop := sorry", "def Precondition (_ _ : W64) : Prop := True"),
+        ("def Postcondition (x y result : W64) : Prop := sorry",
+            "def Postcondition (x y result : W64) : Prop := result = if x < y then y - x else x - y"),
+        ("      sorry -- Postcondition of the returned value where `branch1` holds",
+            "      simp [Postcondition, branch1]"),
+        ("      sorry -- Postcondition of the returned value where `branch1` fails",
+            "      simp [Postcondition, branch1]")]),
+    // A signed test splits on the words read through `toInt`.
+    ("Larger", [
+        ("def Precondition (x y : W32) : Prop := sorry", "def Precondition (_ _ : W32) : Prop := True"),
+        ("def Postcondition (x y result : W32) : Prop := sorry",
+            "def Postcondition (x y result : W32) : Prop := result = if x.toInt < y.toInt then y else x"),
+        ("      sorry -- Postcondition of the returned value where `branch1` holds",
+            "      simp [Postcondition, branch1]"),
+        ("      sorry -- Postcondition of the returned value where `branch1` fails",
+            "      simp [Postcondition, branch1]")])
 })
 {
     var source = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
@@ -1569,7 +1600,7 @@ Console.WriteLine("PASS filled outlines verify with only their specification wri
     "span fold that stores its total before each span load, a split on a `bool` argument, a " +
     "store through `Unsafe.Add` of a reference argument, a call to a callee that throws where its " +
     "precondition fails, a call storing through `Unsafe.Add` of a reference argument, two loops in sequence, " +
-    "a checked add and a base-two logarithm");
+    "a checked add, a base-two logarithm, a signed checked add and splits on unsigned and signed tests of words");
 
 // A written footprint that leaves out the element a loop writes is an error at the write, never an admission.
 var narrowed = Path.Combine(outlineRoot, "FillWords", "Narrowed.lean");
