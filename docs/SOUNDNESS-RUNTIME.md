@@ -309,9 +309,9 @@ generic or library class, holds its reference in a slot through the same operati
 loaded, stored into another such field, compared for identity and tested against null, but no
 admitted operation takes its type as a field owner, call receiver, argument, local or result, so
 nothing reads through it. Its referent is an object allocation like any other, whose recorded
-runtime type the model never inspects. Fields of array type, generic parameter type or a modified
-type stay rejected: an array is a different kind of value, with a length, than an object
-reference.
+runtime type the model never inspects. Fields of generic parameter type or a modified type stay
+rejected, as do fields holding arrays of structs or vectors, whose element width comes from a
+layout the field token does not carry.
 
 An instance method of an admitted class, virtual or not, is an entry whose receiver `this` is an
 object reference, not a byref. A theorem about a virtual method is about that body, which a `call`
@@ -353,8 +353,8 @@ against a pinned catalog class that is no interface
 Interface, generic, explicit-layout and finalizable classes, classes deriving from a class that is
 not admitted, `newobj` of an abstract class, byrefs to class
 instances, field addresses on class instances, element addresses and typed element accesses
-on arrays of class references, class fields of value-array, generic parameter, modified or
-non-integer value types,
+on arrays of class references, class fields of struct-array, vector-array, generic parameter,
+modified or non-integer value types,
 interface calls, virtual calls whose hierarchy the table cannot close or resolve, type tests
 against interfaces, `System.Object` or classes that are not admitted, and the address
 of a class receiver, local or argument are each
@@ -417,6 +417,10 @@ supplies: a value-array field slot holding a reference at entry names offset 0 o
 allocation that is the whole runtime array of the field's element type, the relation to the
 runtime array a supplied array argument already requires. The allocation records no element type,
 so the field's declared element is what the load trusts.
+
+The extractor emits these operations for a field typed as a single-dimensional array of an
+integer, Boolean, char or integer-backed enum, and Lean rechecks the emitted element against the
+raw field token, and a stored value against an array of that element on the evaluation stack.
 
 The extractor admits a single-dimensional array of an admitted class, or of a non-generic class
 outside the model other than `System.Object`, such as `string`, as a parameter, local, return or

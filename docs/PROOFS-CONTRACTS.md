@@ -416,6 +416,14 @@ stores a string a field holds into one, deciding covariance by the string's own 
 [TagLoad](../Examples/Proofs/TagLoad.lean) loads one into a field, as `ReferenceField.Forms`
 and `Owned.store_formed` take it.
 
+A field holding an array of integers, Booleans, chars or enums keeps the whole array's origin in
+its slot. `loadArraySlot_of_access` reads the slot of a readable field, `arrayOfSlot_whole` turns
+a slot naming offset 0 of a live heap allocation of `length` elements into that array, and
+`storeArraySlot_whole` stores such an array into a writable field; `step_arrayField_eq` and
+`step_setArrayField_eq` step `ldfld` and `stfld`.
+[SampleValues](../Examples/Proofs/SampleValues.lean) returns the array a field holds, and the
+null array for a null field, and [SampleRefill](../Examples/Proofs/SampleRefill.lean) replaces it.
+
 ## Construct structs through contracts
 
 A `newobj` of a reference-free struct allocates caller-owned storage, writes zero to every byte,

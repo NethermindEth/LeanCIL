@@ -11,8 +11,8 @@ using System.Text.RegularExpressions;
 
 // Class instances on the checked heap: proofs about identity, presence, scalar, class-typed and opaque fields,
 // instance receivers, calls framed across objects, construction against the heap budget, fields of base
-// classes and arrays of class references, and the named rejection of every class shape or access the model
-// does not represent.
+// classes, arrays of class references and value-array fields, and the named rejection of every class shape or
+// access the model does not represent.
 using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Objects");
@@ -49,7 +49,9 @@ foreach (var (proof, entry) in new[]
     ("BucketItems", "NodeArrays::First(Examples.Bucket)"),
     ("BucketRefill", "NodeArrays::Refill(Examples.Bucket,Examples.Node[])"),
     ("TagStore", "TagArrays::Put(System.String[],System.Int32,Examples.Tagged)"),
-    ("TagLoad", "TagArrays::Take(Examples.Tagged,System.String[],System.Int32)")
+    ("TagLoad", "TagArrays::Take(Examples.Tagged,System.String[],System.Int32)"),
+    ("SampleValues", "SampleArrays::ValuesOf(Examples.Samples)"),
+    ("SampleRefill", "SampleArrays::Refill(Examples.Samples,System.Int32[])")
 })
 {
     verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));
@@ -132,7 +134,7 @@ foreach (var mutation in new[]
 {
     "abstract", "base", "baseRejected", "explicit", "finalizer", "interface", "byref", "address", "reference",
     "fieldType", "receiverAddress", "opaqueRead", "elementAddress", "arrayAddress", "objectArray",
-    "interfaceArray", "objectArrayParameter"
+    "interfaceArray", "objectArrayParameter", "structArrayField"
 })
 {
     var output = Path.Combine(root, "Reject-" + mutation);
@@ -231,6 +233,11 @@ foreach (var mutation in new[]
                 tags.Methods.Single(candidate => candidate.Name == "Put").Parameters[0].ParameterType =
                     new ArrayType(module.TypeSystem.Object);
                 break;
+            // A struct element's width comes from a layout the field token does not carry.
+            case "structArrayField":
+                module.GetType("Examples.Samples").Fields.Single().FieldType =
+                    new ArrayType(module.GetType("Examples.AggregateArrays/Pair"));
+                break;
             case "arrayAddress":
                 var count = arrays.Methods.Single(candidate => candidate.Name == "Count");
                 var argument = count.Body.Instructions[0];
@@ -253,8 +260,12 @@ foreach (var mutation in new[]
             "byref" => "Unsupported by-reference class instance: Examples.Account&",
             "address" => "Unsupported field address on a class instance: System.UInt32 Examples.Account::Limit",
             "reference" => "Unsupported reference-typed field: System.String modopt(System.Object) " +
-                "Examples.Account::Owner\n  Only fields holding class instances or arrays of admitted classes " +
-                "are modelled",
+                "Examples.Account::Owner\n  Only fields holding class instances, arrays of classes or arrays of " +
+                "integers, Booleans, chars or enums are modelled",
+            "structArrayField" => "Unsupported reference-typed field: Examples.AggregateArrays/Pair[] " +
+                "Examples.Samples::Values\n" +
+                "  Only fields holding class instances, arrays of classes or arrays of integers, Booleans, chars " +
+                "or enums are modelled; Examples.AggregateArrays/Pair[] is another array",
             "opaqueRead" => "callvirt requires an adjacent concrete constrained receiver",
             "objectArray" => "Unsupported instruction: IL_0001: newarr System.Object",
             "interfaceArray" => "Unsupported instruction: IL_0001: newarr Examples.ICounterValue",
@@ -282,6 +293,7 @@ foreach (var mutation in new[]
         "objectArrayParameter" => "TagArrays::Put(System.Object[],System.Int32,Examples.Tagged)",
         "elementAddress" => "NodeArrays::At(Examples.Node[],System.Int32)",
         "arrayAddress" => "NodeArrays::Count(Examples.Node[])",
+        "structArrayField" => "SampleArrays::ValuesOf(Examples.Samples)",
         _ => "Objects::IsNull(Examples.Account)"
     };
     var result = Execute(["dotnet", ExtractorPath, "extract", dll, selector, output]);
@@ -409,6 +421,6 @@ verification.Verify(virtualDll, "Examples", "Account::get_Headroom()", At("Examp
 Console.WriteLine("PASS virtual method body proved as an entry");
 
 Console.WriteLine("PASS objects: identity, presence, scalar and reference field, receiver, framed call " +
-    "construction, base class field, class reference array, virtual dispatch and type test proofs, " +
-    "and named rejection of unmodelled class shapes, field and element accesses, calls, dispatch tables " +
-    "and type tests");
+    "construction, base class field, class reference array, value-array field, virtual dispatch and type " +
+    "test proofs, and named rejection of unmodelled class shapes, field and element accesses, calls, " +
+    "dispatch tables and type tests");

@@ -138,6 +138,23 @@ public static class TagArrays
     public static void Take(Tagged tagged, string?[] tags, int index) => tagged.Tag = tags[index];
 }
 
+/// <summary>A class holding an array of integers in a field: the slot holds the whole array.</summary>
+public sealed class Samples
+{
+    /// <summary>The samples, or null.</summary>
+    public int[]? Values;
+}
+
+/// <summary>Loads and stores of an integer array held in a class field.</summary>
+public static class SampleArrays
+{
+    /// <summary>The array of samples, or null.</summary>
+    public static int[]? ValuesOf(Samples samples) => samples.Values;
+
+    /// <summary>Replaces the samples with <paramref name="values"/>.</summary>
+    public static void Refill(Samples samples, int[] values) => samples.Values = values;
+}
+
 /// <summary>Reference identity and null tests on class instances.</summary>
 public static class Objects
 {

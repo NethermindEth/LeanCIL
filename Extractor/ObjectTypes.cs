@@ -107,9 +107,10 @@ internal static class ObjectTypes
         !Is(type);
 
     /// <summary>
-    /// The checked operation for <c>ldfld</c> or <c>stfld</c> of an integer, class-typed or class-array field of
-    /// a class instance, at the model offset of its slot. A class-typed field, admitted or opaque, or a field
-    /// holding an array of an admitted class holds an object reference in its slot, never in bytes.
+    /// The checked operation for <c>ldfld</c> or <c>stfld</c> of an integer, class-typed, class-array or
+    /// value-array field of a class instance, at the model offset of its slot. A class-typed field, admitted or
+    /// opaque, or a field holding an array of a class holds an object reference in its slot, never in bytes; a
+    /// value-array field holds the origin of a whole array of its element type there.
     /// </summary>
     internal static string FieldOperation(FieldReference field, FieldDefinition resolved, bool store, bool address)
     {
@@ -120,11 +121,18 @@ internal static class ObjectTypes
                 "\n  Class field offsets are chosen by the model, so no address may observe them.");
         var type = resolved.FieldType;
         var holdsReference = !type.IsValueType && type is not PointerType and not FunctionPointerType;
-        if (holdsReference && !Is(type) && !Opaque(type) && !ReferenceArrays.Is(type))
+        // Struct and vector elements need layouts Lean cannot recheck from the field token.
+        var valueArray = Arrays.Of(type) is { Kind: not NativeOperands.Kind.ArrayComposite } element ? element : null;
+        if (holdsReference && !Is(type) && !Opaque(type) && !ReferenceArrays.Is(type) && valueArray is null)
             throw new InvalidDataException("Unsupported reference-typed field: " + field.FullName +
-                "\n  Only fields holding class instances or arrays of admitted classes are modelled; " +
-                type.FullName + " is another array, a generic parameter or a modified type.");
+                "\n  Only fields holding class instances, arrays of classes or arrays of integers, Booleans, chars " +
+                "or enums are modelled; " + type.FullName +
+                " is another array, a generic parameter or a modified type.");
         var offset = FieldSlot * FieldIndex(owner, resolved);
+        if (valueArray is not null)
+            return store
+                ? $".memory (.setArrayField ({GenericEvidence.ObjectType(owner)}) {offset} {valueArray.Expression})"
+                : $".memory (.arrayField ({GenericEvidence.ObjectType(owner)}) {offset} {valueArray.Expression})";
         if (holdsReference)
             return store ? $".memory (.setObjectReferenceField ({GenericEvidence.ObjectType(owner)}) {offset})"
                 : $".memory (.objectReferenceField ({GenericEvidence.ObjectType(owner)}) {offset})";

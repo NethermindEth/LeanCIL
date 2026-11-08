@@ -449,6 +449,7 @@ Examples:System.Int32* Examples.StackAllocation::EscapingStorage()	A	A	A	A	A	A	A
 Examples:System.Int32[] Examples.PrimitiveArrays::Allocate(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32[] Examples.PrimitiveArrays::Identity(System.Int32[])	A	A	A	A	A	A	A	A
 Examples:System.Int32[] Examples.PrimitiveArrays::ReadJagged(System.Int32[][],System.Int32)	B	B	B	B	B	B	B	B
+Examples:System.Int32[] Examples.SampleArrays::ValuesOf(Examples.Samples)	A	A	A	A	A	A	A	A
 Examples:System.Int64 Examples.Bits::PrimitiveCounts64(System.Int64)	A	A	A	A	A	A	A	A
 Examples:System.Int64 Examples.Bits::PrimitiveLeft64(System.Int64,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int64 Examples.Bits::PrimitiveRight64(System.Int64,System.Int32)	A	A	A	A	A	A	A	A
@@ -1118,6 +1119,8 @@ Examples:System.Void Examples.PrimitiveArrays::WriteUInt16(System.UInt16[],Syste
 Examples:System.Void Examples.PrimitiveArrays::WriteUInt32(System.UInt32[],System.Int32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PrimitiveArrays::WriteUInt64(System.UInt64[],System.Int32,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PrimitiveArrays::WriteUIntPtr(System.UIntPtr[],System.Int32,System.UIntPtr)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.SampleArrays::Refill(Examples.Samples,System.Int32[])	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Samples::.ctor()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.SeededHash::.cctor()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.Shape::.ctor(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.SkipInitialization::Skip(Examples.FourLimbs&)	A	A	A	A	A	A	A	A
