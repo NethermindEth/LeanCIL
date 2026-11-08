@@ -500,9 +500,11 @@ failure appears at setup rather than as unresolved imports. Lake prints a variab
 as empty; counting it can overstate the size by a few bytes, never understate it.
 
 Lake adds a package's source directory to `LEAN_SRC_PATH` once for every `lean_lib` the
-package declares, without merging repeats, and the `leancil` package declares one library
-per test module, so its directory appears many times in a consumer's `LEAN_SRC_PATH`. A
-shorter checkout path and fewer `PATH` entries leave more room. Setting
+package declares, without merging repeats. The framework copy `leancil workspace` writes for
+a proof outside any package declares only the framework and editor libraries, but a consumer
+that pins the `leancil` repository gets its lakefile with one library per test module, so the
+framework directory appears about ninety times in that consumer's `LEAN_SRC_PATH`. A shorter
+checkout path and fewer `PATH` entries leave more room. Setting
 `LEANCIL_LEAN_ENVIRONMENT_LIMIT` to a byte count lowers the limit; on other systems, where
 Lean has no such buffer, it enables the check, for example to measure headroom.
 

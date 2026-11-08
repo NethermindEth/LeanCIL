@@ -868,7 +868,15 @@ partial class Program : IDisposable
     /// The lakefile the certified library is built from: the checkout's, without blank lines, comments,
     /// the editor library, or any plain <c>[[lean_lib]]</c> table that declares only a library outside CIL.
     /// </summary>
-    static string LibraryLakefile(string lakefile)
+    static string LibraryLakefile(string lakefile) => FrameworkLakefile(lakefile, editor: false);
+
+    /// <summary>
+    /// The lakefile of the framework copy an editor workspace requires: the certified library's, with the
+    /// editor library kept, so Lake lists the framework's sources once per library a consumer needs.
+    /// </summary>
+    static string EditorFrameworkLakefile(string lakefile) => FrameworkLakefile(lakefile, editor: true);
+
+    static string FrameworkLakefile(string lakefile, bool editor)
     {
         var lines = lakefile.ReplaceLineEndings("\n").Split('\n');
         // A multi-line string can hold header-like lines, so such a file is kept whole.
@@ -888,7 +896,7 @@ partial class Program : IDisposable
         // A certificate must never resolve Extracted to the editor's sources.
         static bool EditorLibrary(List<string> table) =>
             table is ["[[lean_lib]]", var declaration, ..] && declaration == $"name = \"{EditorLibraryName}\"";
-        tables.RemoveAll(EditorLibrary);
+        if (!editor) tables.RemoveAll(EditorLibrary);
         var named = string.Join("\n", tables.Where(table => OtherLibrary(table) is null).SelectMany(table => table));
         // A library that a kept table names, such as a default target, stays declared.
         return string.Concat(tables.Where(table => OtherLibrary(table) is not { } name ||

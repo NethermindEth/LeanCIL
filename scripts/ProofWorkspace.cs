@@ -84,10 +84,12 @@ partial class Program
     static string ScratchProofPackage(string package)
     {
         var sources = LibrarySources(CommonInputs());
-        // The key regenerates the framework copy when the tool's framework changes.
+        var frameworkLakefile = EditorFrameworkLakefile(File.ReadAllText(At("lakefile.toml")));
+        // The key regenerates the framework copy when the tool's framework or its lakefile view changes.
+        var key = ContentKey(JsonSerializer.Serialize(sources) + "\n" + frameworkLakefile)[..20];
         var lakefile = $$"""
             name = "{{ScratchPackageName}}"
-            # Bundled LeanCIL framework {{ContentKey(JsonSerializer.Serialize(sources))[..20]}}
+            # Bundled LeanCIL framework {{key}}
 
             [[require]]
             name = "leancil"
@@ -111,7 +113,9 @@ partial class Program
             {
                 var destination = Path.Combine(staging, name);
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                File.Copy(At(name), destination);
+                // Only the framework and editor libraries: Lake lists a source directory once per library.
+                if (name == "lakefile.toml") File.WriteAllText(destination, frameworkLakefile);
+                else File.Copy(At(name), destination);
             }
             if (Directory.Exists(framework)) Directory.Delete(framework, true);
             Directory.Move(staging, framework);

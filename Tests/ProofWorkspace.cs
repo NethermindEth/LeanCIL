@@ -293,6 +293,16 @@ try
         throw new InvalidOperationException("A standalone proof did not get a package beside it: " + opened);
     if (Directory.EnumerateDirectories(standalone, ".git", SearchOption.AllDirectories).Any())
         throw new InvalidOperationException("A standalone workspace created a git repository.");
+    // Lake lists a source directory once per library, so test libraries would crowd LEAN_SRC_PATH toward
+    // Lean's Windows environment limit; the copy declares only the framework and editor libraries.
+    var bundled = Path.GetFullPath(Path.Combine(standalone, ".lake", "packages", "leancil"));
+    var sourcePath = Run(["lake", "env"], standalone).Split('\n', StringSplitOptions.TrimEntries)
+        .Single(line => line.StartsWith("LEAN_SRC_PATH=", StringComparison.Ordinal))["LEAN_SRC_PATH=".Length..];
+    var frameworkEntries = sourcePath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+        .Count(entry => Path.GetFullPath(entry).StartsWith(bundled, StringComparison.OrdinalIgnoreCase));
+    if (frameworkEntries != 2)
+        throw new InvalidOperationException($"The bundled framework adds {frameworkEntries} source directories " +
+            "to LEAN_SRC_PATH instead of one each for CIL and the editor library: " + sourcePath);
     Run(["lake", "lean", scratchProof], standalone);
     // The framework copy is required by path, which certification never accepts in place of a pinned revision.
     var unpinned = Execute([.. cli, "verify", output, "--proof", scratchProof, "--proof-root", standalone,
