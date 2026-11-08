@@ -2,6 +2,7 @@ import CIL.Safety.ObjectFraming
 import CIL.Safety.ByteRoundTrip
 import CIL.Safety.MemoryBelow
 import CIL.Safety.RenamedMemoryBelow
+import CIL.Safety.AggregateFields
 
 /-!
 # Named fields of class instances
@@ -126,36 +127,47 @@ theorem Confined.access_read {footprint : List (Reference × Nat)} {before after
 class FieldWidth (width : Nat) where
   /-- The pushed value. -/
   loaded : BitVec (8 * width) → CIL.Value
+  /-- What a signed load pushes: a narrow value sign-extended to 32 bits. -/
+  signedLoaded : BitVec (8 * width) → CIL.Value
   scalar : ScalarWidth width
   numeric : ∀ value, numericOfWidth width value.toNat = loaded value
+  signed : ∀ value, signedOfWidth width value.toNat = signedLoaded value
 
 instance : FieldWidth 8 where
   loaded value := .i64 value
+  signedLoaded value := .i64 value
   scalar := by decide
   numeric value := by simp [numericOfWidth]
+  signed value := by simp [signedOfWidth, numericOfWidth]
 
 instance : FieldWidth 4 where
   loaded value := .i32 value
+  signedLoaded value := .i32 value
   scalar := by decide
   numeric value := by simp [numericOfWidth]
+  signed value := by simp [signedOfWidth, numericOfWidth]
 
 instance : FieldWidth 2 where
   loaded value := .i32 (value.setWidth 32)
+  signedLoaded value := .i32 (value.signExtend 32)
   scalar := by decide
   numeric value := by
     simp only [numericOfWidth]
     congr 1
     apply BitVec.eq_of_toNat_eq
     simp only [BitVec.toNat_ofNat, BitVec.toNat_setWidth]
+  signed value := by simp [signedOfWidth]
 
 instance : FieldWidth 1 where
   loaded value := .i32 (value.setWidth 32)
+  signedLoaded value := .i32 (value.signExtend 32)
   scalar := by decide
   numeric value := by
     simp only [numericOfWidth]
     congr 1
     apply BitVec.eq_of_toNat_eq
     simp only [BitVec.toNat_ofNat, BitVec.toNat_setWidth]
+  signed value := by simp [signedOfWidth]
 
 /-- A 64-bit field loads as its word. -/
 @[simp] theorem FieldWidth.loaded_word64 (value : BitVec 64) :
@@ -284,6 +296,22 @@ theorem Readable.facts [shape : FieldWidth width] {field : WordField width} {mem
         .ok (FieldWidth.loaded (field.of memory object)) :=
   ⟨readable.live.formed, readable.located, by rw [readable.load shape.scalar, shape.numeric]⟩
 #print axioms Readable.facts
+
+/-- What a signed load of a readable field steps with: as `facts`, with the value the field
+    holds sign-extended to 32 bits when the field is narrower. -/
+theorem Readable.signedFacts [shape : FieldWidth width] {field : WordField width}
+    {memory : Memory} {object : Reference} (readable : field.Readable memory object) :
+    formObject memory (.address object) = .ok (.object (.address object)) ∧
+      objectFieldAddress memory (.address object) field.owner field.offset =
+        .ok (field.address object) ∧
+      loadValue memory (.address (field.address object)) width true =
+        .ok (FieldWidth.signedLoaded (field.of memory object)) := by
+  refine ⟨readable.live.formed, readable.located, ?_⟩
+  rw [loadValue_signed_of_read shape.scalar readable.read, byteNumber_numberBytes,
+    Nat.mod_eq_of_lt (by
+      show _ < (2 ^ 8) ^ width; rw [← Nat.pow_mul]; exact (field.of memory object).isLt),
+    shape.signed]
+#print axioms Readable.signedFacts
 
 /-- A readable 64-bit field loads as the word it holds. -/
 theorem Readable.load_i64 {field : WordField 8} {memory : Memory} {object : Reference}

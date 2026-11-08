@@ -1,4 +1,5 @@
 import CIL.Safety.ObjectSteps
+import CIL.Safety.ObjectFields
 import CIL.Safety.SymbolicExecution
 import CIL.Observe
 
@@ -269,5 +270,24 @@ example (memory : CIL.Safety.Memory) (object : Reference) :
     invoke observed 100 0 [.object (.address object)] memory =
       .error ⟨0, 1, .thrown "System.NullReferenceException"⟩ := by
   cil_checked_steps
+
+/-- A signed `ldfld` of a 16-bit field holding `0xFFFF` pushes -1, sign-extended to 32 bits, and
+    an unsigned one pushes 65535: `signedFacts` and `facts` must not be interchangeable. -/
+theorem narrow_field_loads_extend_by_sign {memory : CIL.Safety.Memory} {object : Reference}
+    {field : WordField 2} (readable : field.Readable memory object)
+    (held : field.of memory object = 0xFFFF) :
+    CIL.Safety.step body (.memory (.objectField field.owner field.offset 2 true)) 0 [] frame
+        [.object (.address object)] memory =
+      .ok (.next 1 [.scalar (.i32 0xFFFFFFFF)] frame memory) ∧
+    CIL.Safety.step body (.memory (.objectField field.owner field.offset 2 false)) 0 [] frame
+        [.object (.address object)] memory =
+      .ok (.next 1 [.scalar (.i32 0xFFFF)] frame memory) := by
+  obtain ⟨_, located, signedLoad⟩ := readable.signedFacts
+  obtain ⟨_, _, unsignedLoad⟩ := readable.facts
+  rw [held] at signedLoad unsignedLoad
+  constructor <;> rw [step_objectField_2_eq] <;>
+    simp only [located, signedLoad, unsignedLoad, Bind.bind, Except.bind, Pure.pure,
+      Except.pure] <;> rfl
+#print axioms narrow_field_loads_extend_by_sign
 
 end Tests.Objects

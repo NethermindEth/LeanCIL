@@ -273,7 +273,8 @@ and only the class, offset and width are relied on.
 | `field.entry object` | The footprint entry of a call that may change the field |
 
 `readable.facts` is the one fact `cil_checked_steps` needs to step a load (for a reference field,
-`readable.facts held targetLive`), and `owned.store value` gives the write, its `Confined`
+`readable.facts held targetLive`; for a signed narrow field, `readable.signedFacts`, which pushes
+the value sign-extended), and `owned.store value` gives the write, its `Confined`
 footprint and the `Holds` after it. `frame` keeps a field and its value across a call confined
 to a footprint apart from it, `after_confined` and `after_below` keep each predicate across a
 confined call and across memory that keeps old allocations, and `Owned.across` decides aliasing:
