@@ -69,6 +69,9 @@ theorem InstructionEffect.objectsKept {before after : Memory}
   | slot stored =>
     obtain ⟨-, -, rfl⟩ := storeSlot_ok stored
     exact .of_allocations rfl
+  | arraySlot stored =>
+    obtain ⟨-, -, -, rfl⟩ := storeArraySlot_ok stored
+    exact .of_allocations rfl
 
 /-- Resolving a static field binds its existing storage or allocates an immutable static. -/
 theorem staticReference_objectsKept {descriptor : CIL.StaticDescriptor} {before after : Memory}

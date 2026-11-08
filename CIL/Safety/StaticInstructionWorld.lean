@@ -52,6 +52,9 @@ theorem InstructionEffect.staticWorld {m result : Memory} (effect : InstructionE
   | slot h =>
     obtain ⟨-, -, rfl⟩ := storeSlot_ok h
     exact world
+  | arraySlot h =>
+    obtain ⟨-, -, -, rfl⟩ := storeArraySlot_ok h
+    exact world
 
 theorem storeValue_preserves_static_world (descriptors : List CIL.StaticDescriptor)
     (m result : Memory) (reference : ManagedReference) (value : CIL.Value)

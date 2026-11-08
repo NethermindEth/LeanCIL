@@ -417,7 +417,8 @@ private def objectFieldSite (instruction : RawInstruction) (emitted : Op) : Bool
     | _ => false) ||
   match emitted with
   | .memory (.objectField ..) | .memory (.setObjectField ..)
-  | .memory (.objectReferenceField ..) | .memory (.setObjectReferenceField ..) => true
+  | .memory (.objectReferenceField ..) | .memory (.setObjectReferenceField ..)
+  | .memory (.arrayField ..) | .memory (.setArrayField ..) => true
   | _ => false
 
 /-- A class instance field whose slot holds an object reference: one typed as an admitted class
@@ -426,10 +427,20 @@ private def referenceFieldType : TypeExpr → Bool
   | .object _ _ | .array (.object _ _) => true
   | _ => false
 
+/-- The element of a class instance field typed as an array of integers, Booleans, chars or
+    enums; arrays of structs and vectors need layouts the field token does not carry. -/
+private def valueArrayFieldElement (type : TypeExpr) : Option ArrayElement :=
+  match type with
+  | .array element => match arrayElementType element with
+    | some (.aggregate ..) | some (.vector ..) => none
+    | element => element
+  | _ => none
+
 /-- `ldfld` and `stfld` of a class instance field emit the checked field operation for that
     owner, at the field's model offset: with its width and extension for a scalar field, as a
     reference slot for a class-typed or class-array-typed one, whose stored value must be an
-    object or null. `ldflda` never does. -/
+    object or null, and as an array slot for a value-array-typed one, whose stored value must
+    be an array of that element. `ldflda` never does. -/
 private def objectFieldMatches (instruction : RawInstruction) (stack : List ScalarKind)
     (emitted : Op) : Bool :=
   match instruction.opcode, instruction.operand, stack, emitted with
@@ -448,6 +459,15 @@ private def objectFieldMatches (instruction : RawInstruction) (stack : List Scal
   | 125, .field (.object scope name) index type false, value :: receiver :: _,
       .memory (.setObjectReferenceField owner offset) =>
     referenceFieldType type && value ∈ [.object, .nullObject] &&
+      receiver ∈ [.object, .nullObject] && owner == .object scope name &&
+      offset == objectFieldOffset index
+  | 123, .field (.object scope name) index type false, receiver :: _,
+      .memory (.arrayField owner offset element) =>
+    valueArrayFieldElement type == some element && receiver ∈ [.object, .nullObject] &&
+      owner == .object scope name && offset == objectFieldOffset index
+  | 125, .field (.object scope name) index type false, value :: receiver :: _,
+      .memory (.setArrayField owner offset element) =>
+    valueArrayFieldElement type == some element && value == .array element &&
       receiver ∈ [.object, .nullObject] && owner == .object scope name &&
       offset == objectFieldOffset index
   | _, _, _, _ => false

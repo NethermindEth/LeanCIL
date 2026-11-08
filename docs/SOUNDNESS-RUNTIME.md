@@ -400,6 +400,24 @@ covariance the CLR would consult for it. The store itself is
 `storeSlot`, so it changes only that slot. The checks run in CoreCLR's order: null array,
 index, then type.
 
+## Value-array fields
+
+A class field typed as an array of a value element `E` (`.arrayField`, `.setArrayField`) holds
+the array's reference in the object's slot for that field, as a class-typed field does; the
+array's bytes stay in their own allocation. The field is located like any other, so a null
+receiver throws `NullReferenceException`, and the slot needs read or write authority. A store
+(`storeArraySlot`) keeps null for the null array, and otherwise the array's origin, which must
+be offset 0 of a live heap allocation exactly `length * width E` bytes long, with element type
+`E`; anything else, such as a slice, a caller buffer or an array of another element, is an
+ill-typed state. A load (`loadArraySlot`) rebuilds the array from the slot: null gives the null
+array, and an origin gives the whole allocation as an array of `E`, its length the allocation's
+size over the element width, validated like any array before it is pushed. A load of what a
+store kept therefore returns the stored array exactly. The caller assumes the same of memory it
+supplies: a value-array field slot holding a reference at entry names offset 0 of a heap
+allocation that is the whole runtime array of the field's element type, the relation to the
+runtime array a supplied array argument already requires. The allocation records no element type,
+so the field's declared element is what the load trusts.
+
 The extractor admits a single-dimensional array of an admitted class, or of a non-generic class
 outside the model other than `System.Object`, such as `string`, as a parameter, local, return or
 `newarr` type, typed as an object on the evaluation stack. An array of such a static type holds

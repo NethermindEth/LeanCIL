@@ -636,6 +636,23 @@ example : scalarEmissionMatches #[] none (i 123 (.field node 1 (.array word) fal
     (.memory (.objectReferenceField node 8)) = false := by decide
 example : scalarEmissionMatches #[] none (i 125 (.field node 1 (.array word) false))
     [.object, .object] (.memory (.setObjectReferenceField node 8)) = false := by decide
+-- A value-array field is an array slot of the field's element type; it stores only an array
+-- of that element, and a class-array field is never one.
+private def samplesField : RawOperand := .field node 1 (.array word) false
+example : scalarEmissionMatches #[] none (i 123 samplesField) [.object]
+    (.memory (.arrayField node 8 .unsigned64)) = true := by decide
+example : scalarEmissionMatches #[] none (i 123 samplesField) [.object]
+    (.memory (.arrayField node 8 .signed64)) = false := by decide
+example : scalarEmissionMatches #[] none (i 123 samplesField) [.object]
+    (.memory (.arrayField node 0 .unsigned64)) = false := by decide
+example : scalarEmissionMatches #[] none (i 123 itemsField) [.object]
+    (.memory (.arrayField node 8 .unsigned64)) = false := by decide
+example : scalarEmissionMatches #[] none (i 125 samplesField) [.array .unsigned64, .object]
+    (.memory (.setArrayField node 8 .unsigned64)) = true := by decide
+example : scalarEmissionMatches #[] none (i 125 samplesField) [.array .signed32, .object]
+    (.memory (.setArrayField node 8 .unsigned64)) = false := by decide
+example : scalarEmissionMatches #[] none (i 125 samplesField) [.object, .object]
+    (.memory (.setArrayField node 8 .unsigned64)) = false := by decide
 
 -- Size constants are the only uncovered literal producers; primitive widths are bound here.
 private def sizeRaw (instruction : RawInstruction) := raw [instruction, i 38, i 2, i 42] [word]

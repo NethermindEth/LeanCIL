@@ -939,6 +939,55 @@ def storableIn (memory : Memory) (element : CIL.Extraction.TypeExpr) (value : Ma
       | _, _ => .error (.unsupported "Array store outside the admitted classes")
     | _ => .error .invalidState
 
+/-- The value array a value-array field holds, from the reference `held` in its slot: null, or
+    the whole live array of `element` starting at offset 0 of the allocation `held` names, its
+    length the allocation's size over the element width. A slot holding anything else is an
+    ill-typed state. -/
+def arrayOfSlot (memory : Memory) (held : ManagedReference) (element : CIL.ArrayElement) :
+    ExecutionResult Value :=
+  match held with
+  | .null => do
+    let view : ArrayView := ⟨.null, 0, element⟩
+    let _ ← checkedAt held 0 (view.validate memory)
+    return .array view
+  | .address address => do
+    let allocation ← checkedAt held 0 (liveAllocation memory address.allocation)
+    if allocation.kind = .managedHeap ∧ address.offset = 0 ∧ 0 < element.width ∧
+        allocation.layout.size % element.width = 0 then
+      let view : ArrayView := ⟨held, allocation.layout.size / element.width, element⟩
+      let _ ← checkedAt held 0 (view.validate memory)
+      return .array view
+    else .error .invalidState
+
+/-- Loads the value array the value-array field at `field` holds. -/
+def loadArraySlot (memory : Memory) (field : Reference) (element : CIL.ArrayElement) :
+    ExecutionResult Value := do
+  let _ ← checkedAt (.address field) objectFieldSlot
+    (access memory field objectFieldSlot ordinaryAccessAlignment false)
+  arrayOfSlot memory (memory.slots field.allocation field.offset) element
+
+/-- The reference a value-array field keeps for the array `view`: null for a null array, and
+    otherwise its origin, which must start a whole live array of `element`. A view of anything
+    else is an ill-typed state. -/
+def arraySlotValue (memory : Memory) (view : ArrayView) (element : CIL.ArrayElement) :
+    ExecutionResult ManagedReference :=
+  match view.reference with
+  | .null => .ok .null
+  | .address address => do
+    let allocation ← checkedAt view.reference 0 (liveAllocation memory address.allocation)
+    if allocation.kind = .managedHeap ∧ address.offset = 0 ∧ view.elementType = element ∧
+        view.length * element.width = allocation.layout.size then .ok (.address address)
+    else .error .invalidState
+
+/-- Stores the array `view` into the value-array field at `field`, whose slot must be writable;
+    the slot keeps the array's origin. -/
+def storeArraySlot (memory : Memory) (field : Reference) (view : ArrayView)
+    (element : CIL.ArrayElement) : ExecutionResult Memory := do
+  let _ ← checkedAt (.address field) objectFieldSlot
+    (access memory field objectFieldSlot ordinaryAccessAlignment true)
+  let held ← arraySlotValue memory view element
+  return setSlot memory field held
+
 /-- `ldfld` and `stfld` of a field of a class instance, at the field's model offset: a scalar
     field moves bytes, a class-typed field moves the object reference its slot holds. `ldlen`,
     `ldelem.ref` and `stelem.ref` reach the slots of an array of class references the same way,
@@ -976,6 +1025,12 @@ def objectFieldInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     let (slot, element) ← referenceArraySlot memory array index
     let _ ← storableIn memory element value
     return (← storeSlot memory slot value, rest)
+  | .arrayField owner offset element, .object reference :: rest =>
+    let address ← objectFieldAddress memory reference owner offset
+    return (memory, (← loadArraySlot memory address element) :: rest)
+  | .setArrayField owner offset element, .array view :: .object reference :: rest =>
+    let address ← objectFieldAddress memory reference owner offset
+    return (← storeArraySlot memory address view element, rest)
   | _, _ => .error .invalidState
 
 /-- Runs a `.memory` operation on the stack (top first), giving the new memory and stack.
@@ -1005,7 +1060,8 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .bigMul64 _ | .divRemOut _ => wideArithmeticInstruction operation stack memory
   | .objectField .. | .setObjectField ..
   | .objectReferenceField .. | .setObjectReferenceField ..
-  | .referenceArrayLength | .referenceArrayLoad | .referenceArrayStore =>
+  | .referenceArrayLength | .referenceArrayLoad | .referenceArrayStore
+  | .arrayField .. | .setArrayField .. =>
     objectFieldInstruction operation stack memory
   | _ => otherMemoryInstruction operation stack memory
 

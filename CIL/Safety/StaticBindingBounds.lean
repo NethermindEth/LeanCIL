@@ -63,6 +63,9 @@ theorem InstructionEffect.staticBindingsBounded {source target : Memory}
   | slot success =>
     obtain ⟨-, -, rfl⟩ := storeSlot_ok success
     rfl
+  | arraySlot success =>
+    obtain ⟨-, -, -, rfl⟩ := storeArraySlot_ok success
+    rfl
 #print axioms InstructionEffect.staticBindingsBounded
 
 /-- Frame-local storage preserves existing registry bounds. -/

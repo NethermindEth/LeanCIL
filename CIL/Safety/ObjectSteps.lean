@@ -412,6 +412,41 @@ theorem step_setObjectField_i32_eq (owner : CIL.Extraction.TypeExpr)
   dsimp only
   cases storeSlot memory slot.1 value <;> rfl
 
+/-- `ldfld` of a value-array field pushes the whole array its located slot names. -/
+@[cil_step high] theorem step_arrayField_eq (owner : CIL.Extraction.TypeExpr) (offset : Nat)
+    (element : CIL.ArrayElement) (reference : ManagedReference) (rest : List Value) :
+    step body (.memory (.arrayField owner offset element)) pc args frame
+        (.object reference :: rest) memory = do
+      let address ← objectFieldAddress memory reference owner offset
+      let value ← loadArraySlot memory address element
+      return .next (pc + 1) (value :: rest) frame memory := by
+  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    List.any, Value.hasUnspecified, Bool.false_eq_true, ite_false, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
+  cases objectFieldAddress memory reference owner offset <;> try rfl
+  rename_i address
+  dsimp only
+  cases loadArraySlot memory address element <;> rfl
+
+/-- `stfld` of a value-array field keeps the stored array's origin in its located slot. -/
+@[cil_step high] theorem step_setArrayField_eq (owner : CIL.Extraction.TypeExpr) (offset : Nat)
+    (element : CIL.ArrayElement) (view : ArrayView) (reference : ManagedReference)
+    (rest : List Value) :
+    step body (.memory (.setArrayField owner offset element)) pc args frame
+        (.array view :: .object reference :: rest) memory = do
+      let address ← objectFieldAddress memory reference owner offset
+      let after ← storeArraySlot memory address view element
+      return .next (pc + 1) rest frame after := by
+  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    List.any, Value.hasUnspecified, Bool.false_eq_true, ite_false, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
+  cases objectFieldAddress memory reference owner offset <;> try rfl
+  rename_i address
+  dsimp only
+  cases storeArraySlot memory address view element <;> rfl
+
 /-- A readable slot loads the reference it holds, which must still form. -/
 theorem loadSlot_of_access {memory : Memory} {field : Reference}
     (readable : access memory field objectFieldSlot ordinaryAccessAlignment false = .ok ()) :
@@ -526,6 +561,8 @@ end ObjectEquations
 #print axioms step_referenceArrayLength_eq
 #print axioms step_referenceArrayLoad_eq
 #print axioms step_referenceArrayStore_eq
+#print axioms step_arrayField_eq
+#print axioms step_setArrayField_eq
 #print axioms loadSlot_of_access
 #print axioms storeSlot_of_access
 

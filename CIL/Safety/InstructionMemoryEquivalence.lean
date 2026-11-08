@@ -199,6 +199,38 @@ theorem Memory.Equivalent.storeSlot {m n : Memory} (same : m.Equivalent n) (fiel
   exact .ok (same.setSlot field value)
 #print axioms Memory.Equivalent.storeSlot
 
+/-- The array a value-array field holds reads only allocation metadata and the view's bounds. -/
+theorem Memory.Equivalent.arrayOfSlot {m n : Memory} (same : m.Equivalent n)
+    (held : ManagedReference) (element : CIL.ArrayElement) :
+    CIL.Safety.arrayOfSlot m held element = CIL.Safety.arrayOfSlot n held element := by
+  cases held <;> simp only [CIL.Safety.arrayOfSlot, liveAllocation, same.allocations,
+    same.arrayValidate]
+#print axioms Memory.Equivalent.arrayOfSlot
+
+/-- A value-array field load reads the slot, authority and metadata equivalent memories share. -/
+theorem Memory.Equivalent.loadArraySlot {m n : Memory} (same : m.Equivalent n)
+    (field : Reference) (element : CIL.ArrayElement) :
+    CIL.Safety.loadArraySlot m field element = CIL.Safety.loadArraySlot n field element := by
+  simp only [CIL.Safety.loadArraySlot, same.access, same.arrayOfSlot, same.slots]
+#print axioms Memory.Equivalent.loadArraySlot
+
+/-- A value-array field store makes the same checks and slot change in equivalent memories. -/
+theorem Memory.Equivalent.storeArraySlot {m n : Memory} (same : m.Equivalent n)
+    (field : Reference) (view : ArrayView) (element : CIL.ArrayElement) :
+    ResultEquivalent Memory.Equivalent (CIL.Safety.storeArraySlot m field view element)
+      (CIL.Safety.storeArraySlot n field view element) := by
+  have held : CIL.Safety.arraySlotValue m view element =
+      CIL.Safety.arraySlotValue n view element := by
+    unfold CIL.Safety.arraySlotValue
+    split <;> simp only [liveAllocation, same.allocations]
+  simp only [CIL.Safety.storeArraySlot, same.access, held]
+  apply ResultEquivalent.bind_same
+  intro
+  apply ResultEquivalent.bind_same
+  intro held
+  exact .ok (same.setSlot field held)
+#print axioms Memory.Equivalent.storeArraySlot
+
 /-- Non-fill memory operations preserve equivalent memories and identical values. -/
 private theorem Memory.Equivalent.otherMemoryInstruction {m n : Memory} (same : m.Equivalent n)
     (operation : CIL.MemoryOp) (stack : List Value) :
@@ -258,7 +290,7 @@ private theorem Memory.Equivalent.objectFieldInstruction {m n : Memory} (same : 
       (objectFieldInstruction operation stack n) := by
   unfold CIL.Safety.objectFieldInstruction
   split <;> try simp only [same.objectFieldAddress, same.loadValue, same.loadSlot,
-    same.referenceArrayOf, same.referenceArraySlot, same.storableIn]
+    same.referenceArrayOf, same.referenceArraySlot, same.storableIn, same.loadArraySlot]
   all_goals repeat first
     | exact .error _
     | exact .ok ⟨same, rfl⟩
@@ -267,6 +299,9 @@ private theorem Memory.Equivalent.objectFieldInstruction {m n : Memory} (same : 
        intro left right related
        exact .ok ⟨related, rfl⟩)
     | (apply ResultEquivalent.bind (same.storeSlot _ _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind (same.storeArraySlot _ _ _)
        intro left right related
        exact .ok ⟨related, rfl⟩)
     | split
@@ -394,6 +429,8 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     · exact same.arrayFillInstruction _ _ _
     · exact same.wideArithmeticInstruction _ _
     · exact same.wideArithmeticInstruction _ _
+    · exact same.objectFieldInstruction _ _
+    · exact same.objectFieldInstruction _ _
     · exact same.objectFieldInstruction _ _
     · exact same.objectFieldInstruction _ _
     · exact same.objectFieldInstruction _ _

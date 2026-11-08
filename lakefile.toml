@@ -242,6 +242,9 @@ name = "Tests.Objects"
 name = "Tests.ReferenceArrays"
 
 [[lean_lib]]
+name = "Tests.ArrayFields"
+
+[[lean_lib]]
 name = "Tests.PrimitiveArrays"
 
 [[lean_lib]]
