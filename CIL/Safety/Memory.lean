@@ -19,7 +19,8 @@ namespace CIL.Safety
 abbrev AllocationId := Nat
 
 /-- The runtime type an object allocation records: its exact class identity and the admitted
-    classes it derives from, nearest first, up to but excluding `System.Object`. -/
+    classes it derives from, nearest first, up to but excluding `System.Object`. An array of
+    class references records its array type `E[]` and no bases. -/
 structure RuntimeType where
   identity : CIL.Extraction.TypeExpr
   bases : List CIL.Extraction.TypeExpr

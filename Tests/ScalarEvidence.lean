@@ -197,7 +197,11 @@ example : ¬ ScalarFlowValid #[] (floatRaw 107) floatFeatures (floatStates.set 2
 example : ¬ ScalarFlowValid #[] (floatRaw 108) floatFeatures (floatStates.set 2 (some [.other])) floatMethod.code := by decide
 example : scalarTransfer addRaw (i 80) [.reference] = some [.other] := by decide
 example : scalarTransfer addRaw (i 150) [.word32, .reference] = none := by decide
-example : scalarTransfer addRaw (i 154) [.word32, .reference] = some [.other] := by decide
+-- `ldelem.ref` and `stelem.ref` are covered: only an object or null array of class references.
+example : scalarTransfer addRaw (i 154) [.word32, .reference] = none := by decide
+example : scalarTransfer addRaw (i 154) [.word32, .object] = some [.object] := by decide
+example : scalarTransfer addRaw (i 162) [.nullObject, .native, .object] = some [] := by decide
+example : scalarTransfer addRaw (i 162) [.word32, .word32, .object] = none := by decide
 
 example : scalarTransfer { addRaw with locals := [intType] } (i 10) [.other] = none := by decide
 example : scalarTransfer { addRaw with locals := [intType] } (i 10) [.word64] = none := by decide

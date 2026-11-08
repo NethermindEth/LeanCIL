@@ -947,6 +947,9 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
     · exact objectFieldInstruction_contract _ _ _ _ _ h
     · exact objectFieldInstruction_contract _ _ _ _ _ h
     · exact objectFieldInstruction_contract _ _ _ _ _ h
+    · exact objectFieldInstruction_contract _ _ _ _ _ h
+    · exact objectFieldInstruction_contract _ _ _ _ _ h
+    · exact objectFieldInstruction_contract _ _ _ _ _ h
     · exact otherMemoryInstruction_contract _ _ _ _ _ h
 
 set_option maxHeartbeats 800000 in

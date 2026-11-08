@@ -380,6 +380,102 @@ theorem Memory.Renamed.objectFieldAddress {mapping : AllocationRenaming}
                all_goals first | exact .error _ | (simp only [origin] at moved; exact moved))
 #print axioms Memory.Renamed.objectFieldAddress
 
+/-- Locating an array of class references maps its origin and keeps its element class, its
+    length, and every check and fault. -/
+theorem Memory.Renamed.referenceArrayOf {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (array : ManagedReference)
+    (bound : array.Below mapping.sourceLimit) :
+    ResultRenamed mapping (fun left right => right = (mapping.reference left.1, left.2))
+      (CIL.Safety.referenceArrayOf source array)
+      (CIL.Safety.referenceArrayOf target (mapping.managedReference array)) := by
+  cases array with
+  | null => exact .error _
+  | address address =>
+    have found := related.liveAllocation address.allocation bound
+    simp only [CIL.Safety.referenceArrayOf, AllocationRenaming.managedReference,
+      AllocationRenaming.reference, checkedAt, Except.mapError, Bind.bind, Except.bind]
+    revert found
+    generalize CIL.Safety.liveAllocation source address.allocation = sourceFound
+    generalize CIL.Safety.liveAllocation target (mapping.image address.allocation) =
+      targetFound
+    intro found
+    cases found with
+    | error fault => exact .error (.memory fault (.address address) 0)
+    | @ok sourceDescriptor targetDescriptor descriptors =>
+      obtain ⟨kinds, layouts, -, -⟩ := descriptors
+      dsimp only
+      rw [← layouts]
+      revert kinds
+      generalize sourceDescriptor.kind = sourceKind
+      generalize targetDescriptor.kind = targetKind
+      intro kinds
+      cases kinds with
+      | frame => exact .error .invalidState
+      | same =>
+        split
+        · by_cases origin : address.offset = 0
+          · simp only [origin, ite_true]
+            exact .ok (by simp only [origin])
+          · simp only [origin, ite_false]
+            exact .error .invalidState
+        · exact .error .invalidState
+#print axioms Memory.Renamed.referenceArrayOf
+
+/-- Locating an element slot maps the array's allocation and keeps every check and fault. -/
+theorem Memory.Renamed.referenceArraySlot {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (array : ManagedReference)
+    (bound : array.Below mapping.sourceLimit) (index : Nat) :
+    ResultRenamed mapping (fun left right => right = (mapping.reference left.1, left.2))
+      (CIL.Safety.referenceArraySlot source array index)
+      (CIL.Safety.referenceArraySlot target (mapping.managedReference array) index) := by
+  unfold CIL.Safety.referenceArraySlot
+  apply (related.referenceArrayOf array bound).bind
+  intro left right same
+  subst same
+  by_cases inside : index < left.2.2 <;> simp only [inside, ite_true, ite_false]
+  · exact .ok rfl
+  · exact .error _
+#print axioms Memory.Renamed.referenceArraySlot
+
+/-- The covariance check gives the same answer for the mapped value: related allocations keep
+    their runtime type. -/
+theorem Memory.Renamed.storableIn {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (element : CIL.Extraction.TypeExpr)
+    (value : ManagedReference) (bound : value.Below mapping.sourceLimit) :
+    ResultRenamed mapping Eq (CIL.Safety.storableIn source element value)
+      (CIL.Safety.storableIn target element (mapping.managedReference value)) := by
+  cases value with
+  | null => exact .ok rfl
+  | address address =>
+    have found := related.liveAllocation address.allocation bound
+    simp only [CIL.Safety.storableIn, AllocationRenaming.managedReference,
+      AllocationRenaming.reference, checkedAt, Except.mapError, Bind.bind, Except.bind]
+    revert found
+    generalize CIL.Safety.liveAllocation source address.allocation = sourceFound
+    generalize CIL.Safety.liveAllocation target (mapping.image address.allocation) =
+      targetFound
+    intro found
+    cases found with
+    | error fault => exact .error (.memory fault (.address address) 0)
+    | @ok sourceDescriptor targetDescriptor descriptors =>
+      obtain ⟨kinds, -, -, -⟩ := descriptors
+      dsimp only
+      revert kinds
+      generalize sourceDescriptor.kind = sourceKind
+      generalize targetDescriptor.kind = targetKind
+      intro kinds
+      cases kinds with
+      | frame => exact .error .invalidState
+      | same =>
+        repeat first
+          | exact .ok rfl
+          | exact .error _
+          | split
+#print axioms Memory.Renamed.storableIn
+
 /-- Changing the mapped field to the mapped reference keeps the memories related. -/
 theorem Memory.Renamed.setSlot {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -480,6 +576,17 @@ private theorem Memory.Renamed.objectFieldInstructionResult {mapping : Allocatio
        intro first second same
        subst second
        exact .ok ⟨related, rfl⟩)
+    | (apply (related.referenceArrayOf _ (by assumption)).bind
+       intro first second same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply (related.referenceArraySlot _ (by assumption) _).bindWithSuccess
+       intro first second sourceStep same
+       have slotBound := referenceArraySlot_below (by assumption) sourceStep
+       subst second)
+    | (apply (related.storableIn _ _ (by assumption)).bind
+       intro first second same
+       subst second)
     | (apply (related.storeSlot _ (by assumption) _ (by assumption)).bind
        intro first second memoryRelated
        exact .ok ⟨memoryRelated, rfl⟩)
@@ -831,6 +938,9 @@ theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
     · exact related.arrayFillInstructionResult formed _ _ _ bounds observable
     · exact related.wideArithmeticInstructionResult _ _ bounds observable
     · exact related.wideArithmeticInstructionResult _ _ bounds observable
+    · exact related.objectFieldInstructionResult _ formed _ bounds observable
+    · exact related.objectFieldInstructionResult _ formed _ bounds observable
+    · exact related.objectFieldInstructionResult _ formed _ bounds observable
     · exact related.objectFieldInstructionResult _ formed _ bounds observable
     · exact related.objectFieldInstructionResult _ formed _ bounds observable
     · exact related.objectFieldInstructionResult _ formed _ bounds observable

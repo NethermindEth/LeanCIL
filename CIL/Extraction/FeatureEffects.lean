@@ -38,8 +38,10 @@ private def memoryFeatureEffect : MemoryOp → Nat × Nat
   | .store128 | .store256 | .store512 => (2, 0)
   | .init256 | .skipInit => (1, 0)
   | .staticAddress _ | .staticValue _ | .nullRef | .nullObject => (0, 1)
-  | .objectField .. | .objectReferenceField .. => (1, 1)
+  | .objectField .. | .objectReferenceField .. | .referenceArrayLength => (1, 1)
   | .setObjectField .. | .setObjectReferenceField .. => (2, 0)
+  | .referenceArrayLoad => (2, 1)
+  | .referenceArrayStore => (3, 0)
   | .add .. | .spanCreate | .spanItem _ => (2, 1)
   | .load128 | .load256 | .load512 | .asRef | .bitcast256 | .bitcastByteBool | .bitcastValue ..
   | .createSpan _ | .spanReference | .spanLength | .isNullRef => (1, 1)

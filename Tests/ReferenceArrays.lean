@@ -44,4 +44,79 @@ theorem empty_allocation :
       (result.1, result.2.heapBudget)) = .ok (⟨0, 0⟩, 32) := rfl
 #print axioms empty_allocation
 
+private def shape : CIL.Extraction.TypeExpr := .object "Examples" "Examples.Shape"
+private def circle : CIL.Extraction.TypeExpr := .object "Examples" "Examples.Circle"
+private def square : CIL.Extraction.TypeExpr := .object "Examples" "Examples.Square"
+
+/-- Caller memory holding one `Square`, a `Shape`, at identity 0, with 32 bytes of budget. -/
+private def holdingSquare : CIL.Safety.Memory := objectMemory budgeted ⟨square, [shape]⟩ 8
+
+/-- The `Square` the caller holds. -/
+private def squareObject : CIL.Safety.Value := .object (.address ⟨0, 0⟩)
+
+/-- Runs straight-line `code` returning one value, with the given arguments. -/
+private def runs (code : List CIL.Op) (arguments : List CIL.Safety.Value)
+    (memory : CIL.Safety.Memory) :
+    Except LocatedFault (CIL.Safety.Memory × List CIL.Safety.Value) :=
+  invoke [{ returnsValue := true, locals := [], code := code }] 16 0 arguments memory
+
+/-- `ldlen` reads the length back from the allocation's size. -/
+theorem length_of_fresh :
+    (runs [.const32 3, .newReferenceArray node, .memory .referenceArrayLength, .ret none] []
+      budgeted).map Prod.snd = .ok [.scalar (.i64 3)] := rfl
+#print axioms length_of_fresh
+
+/-- `ldlen`, `ldelem.ref` and `stelem.ref` of a null array throw `NullReferenceException`. -/
+theorem null_array_throws :
+    runs [.memory .nullObject, .memory .referenceArrayLength, .ret none] [] budgeted =
+      .error ⟨0, 1, .thrown "System.NullReferenceException"⟩ ∧
+    runs [.memory .nullObject, .const32 0, .memory .referenceArrayLoad, .ret none] [] budgeted =
+      .error ⟨0, 2, .thrown "System.NullReferenceException"⟩ ∧
+    runs [.memory .nullObject, .const32 0, .memory .nullObject, .memory .referenceArrayStore,
+      .const32 0, .ret none] [] budgeted =
+      .error ⟨0, 3, .thrown "System.NullReferenceException"⟩ := ⟨rfl, rfl, rfl⟩
+#print axioms null_array_throws
+
+/-- An index at the length, or a negative one read unsigned, throws `IndexOutOfRangeException`
+    before a stored value's class is checked. -/
+theorem index_out_of_range :
+    runs [.const32 2, .newReferenceArray node, .const32 2, .memory .referenceArrayLoad,
+      .ret none] [] budgeted = .error ⟨0, 3, .thrown "System.IndexOutOfRangeException"⟩ ∧
+    runs [.const32 2, .newReferenceArray circle, .const32 (-1), .arg 0 none,
+      .memory .referenceArrayStore, .const32 0, .ret none] [squareObject] holdingSquare =
+      .error ⟨0, 4, .thrown "System.IndexOutOfRangeException"⟩ := ⟨rfl, rfl⟩
+#print axioms index_out_of_range
+
+/-- A fresh element is null, and null is storable into any array of class references. -/
+theorem null_elements :
+    (runs [.const32 1, .newReferenceArray node, .const32 0, .memory .referenceArrayLoad,
+      .ret none] [] budgeted).map Prod.snd = .ok [.object .null] ∧
+    (runs [.const32 1, .newReferenceArray circle, .dup, .const32 0, .memory .nullObject,
+      .memory .referenceArrayStore, .const32 0, .memory .referenceArrayLoad, .ret none] []
+      budgeted).map Prod.snd = .ok [.object .null] := ⟨rfl, rfl⟩
+#print axioms null_elements
+
+/-- A `Square` is storable into an array of `Shape` and loads back as itself. -/
+theorem covariant_store :
+    (runs [.const32 1, .newReferenceArray shape, .dup, .const32 0, .arg 0 none,
+      .memory .referenceArrayStore, .const32 0, .memory .referenceArrayLoad, .ret none]
+      [squareObject] holdingSquare).map Prod.snd = .ok [squareObject] := rfl
+#print axioms covariant_store
+
+/-- Storing a `Square` into an array of `Circle` throws `ArrayTypeMismatchException`, and the
+    element keeps what it held. -/
+theorem mismatched_store :
+    runs [.const32 1, .newReferenceArray circle, .const32 0, .arg 0 none,
+      .memory .referenceArrayStore, .const32 0, .ret none] [squareObject] holdingSquare =
+      .error ⟨0, 4, .thrown "System.ArrayTypeMismatchException"⟩ := rfl
+#print axioms mismatched_store
+
+/-- Storing an array, whose class is no admitted class, is outside the model rather than an
+    exception the CLR might not throw. -/
+theorem array_store_unsupported :
+    runs [.const32 1, .newReferenceArray shape, .dup, .const32 0, .const32 1,
+      .newReferenceArray shape, .memory .referenceArrayStore, .const32 0, .ret none] []
+      budgeted = .error ⟨0, 6, .unsupported "Array store outside the admitted classes"⟩ := rfl
+#print axioms array_store_unsupported
+
 end Tests.ReferenceArrays

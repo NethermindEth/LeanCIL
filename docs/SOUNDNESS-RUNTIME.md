@@ -381,6 +381,21 @@ does not lay out, and a short budget is the model's `allocationFailure`. The len
 `newarr` decodes it for value arrays: a negative `int32` or native length throws
 `System.OverflowException`, and one above `0x7fffffc7` is unsupported.
 
+`ldlen`, `ldelem.ref` and `stelem.ref` on such an array (`.referenceArrayLength`,
+`.referenceArrayLoad`, `.referenceArrayStore`) locate it with `referenceArrayOf`: a null array
+throws `NullReferenceException`, and a reference to anything but offset 0 of a live array of
+class references is an ill-typed state. An index read unsigned at or past the length then
+throws `IndexOutOfRangeException` (`referenceArraySlot`), so a negative int32 index is out of
+range, as in CoreCLR. A load pushes what the element's slot holds through `loadSlot`, as a
+class-typed field load does. A store first checks covariance (`storableIn`): null is always
+storable, and an instance of an admitted class is storable exactly when the array's element
+class is in its lineage, which records every base up to `System.Object`, so a `Square` stored
+into a `Shape[]` that is really a `Circle[]` throws `ArrayTypeMismatchException`. Any other
+stored value, such as an array, is unsupported rather than an exception: the model does not
+record the interfaces or array covariance the CLR would consult for it. The store itself is
+`storeSlot`, so it changes only that slot. The checks run in CoreCLR's order: null array,
+index, then type.
+
 ## Sequential struct layout
 
 Admitted layouts are reference-free and bounded by 65,536 bytes. Sequential fields include supported

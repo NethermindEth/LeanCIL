@@ -103,10 +103,10 @@ private def compareBranch (opcode : Nat) : Bool :=
 private def unsignedBranch (opcode : Nat) : Bool :=
   (51 <= opcode && opcode <= 55) || (64 <= opcode && opcode <= 68)
 
-/-- Raw array opcodes in the supported integer and element-address subset. -/
+/-- Raw array opcodes in the supported integer, element-address and class reference subset. -/
 private def arrayCovered (opcode : Nat) : Bool :=
   (142 ≤ opcode && opcode ≤ 151) ||
-    (155 ≤ opcode && opcode ≤ 159) || opcode ∈ [163, 164]
+    (155 ≤ opcode && opcode ≤ 159) || opcode ∈ [154, 162, 163, 164]
 
 /-- Null is a permitted array operand, but arbitrary opaque/reference values are not. -/
 private def arrayOperand : ScalarKind → Option (Option ArrayElement)
@@ -114,9 +114,27 @@ private def arrayOperand : ScalarKind → Option (Option ArrayElement)
   | .nullObject => some none
   | _ => none
 
+/-- `ldlen`, `ldelem.ref` and `stelem.ref` on an array of class references, which is an object;
+    a null array reaches the same operations, which throw for it. -/
+private def referenceArrayStep (instruction : RawInstruction) (stack : List ScalarKind) :
+    Option (MemoryOp × List ScalarKind) :=
+  if instruction.operand != .none then none else
+  match instruction.opcode, stack with
+  | 142, .object :: tail => some (.referenceArrayLength, .native :: tail)
+  | 154, index :: array :: tail =>
+    if index ∈ [.word32, .native] && array ∈ [.object, .nullObject] then
+      some (.referenceArrayLoad, .object :: tail)
+    else none
+  | 162, value :: index :: array :: tail =>
+    if value ∈ [.object, .nullObject] && index ∈ [.word32, .native] &&
+        array ∈ [.object, .nullObject] then some (.referenceArrayStore, tail)
+    else none
+  | _, _ => none
+
 /-- Exact array instruction and stack transition, including primitive tokens and element types. -/
 private def arrayStep (instruction : RawInstruction) (stack : List ScalarKind) :
     Option (MemoryOp × List ScalarKind) := do
+  if let some step := referenceArrayStep instruction stack then return step
   let opcode := instruction.opcode
   if opcode == 142 then
     let array :: tail := stack | none
@@ -173,6 +191,8 @@ private def arrayEmission : Op → Bool
   | .memory .arrayLength | .memory (.arrayLoad ..) | .memory (.arrayStore _)
   | .memory (.arrayAddress ..) => true
   | .memory (.arrayTransfer ..) => true
+  | .memory .referenceArrayLength | .memory .referenceArrayLoad
+  | .memory .referenceArrayStore => true
   | _ => false
 
 /-- The emitted array operation agrees exactly with its independently decoded raw opcode. -/
@@ -196,6 +216,9 @@ private def arrayMatches (instruction : RawInstruction) (stack : List ScalarKind
     element == actual.metadata
   | some (.arrayTransfer element store, _), .memory (.arrayTransfer actual actualStore) =>
     element == actual.metadata && store == actualStore
+  | some (.referenceArrayLength, _), .memory .referenceArrayLength
+  | some (.referenceArrayLoad, _), .memory .referenceArrayLoad
+  | some (.referenceArrayStore, _), .memory .referenceArrayStore => true
   | _, _ => false
 /-- Opcodes whose emitted encoding the scalar check fixes: integer constants, arithmetic,
     shifts, `neg`, `not`, conversions and compare-branches. -/

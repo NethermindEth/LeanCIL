@@ -896,8 +896,53 @@ def storeSlot (memory : Memory) (field : Reference) (value : ManagedReference) :
   let _ ← formObject memory value
   return setSlot memory field value
 
+/-- The array of class references `array` names: its origin, element class and length, one
+    element per slot. A null array throws `NullReferenceException`, as `ldlen`, `ldelem.ref` and
+    `stelem.ref` do; a reference to anything but such an array is an ill-typed state. -/
+def referenceArrayOf (memory : Memory) (array : ManagedReference) :
+    ExecutionResult (Reference × CIL.Extraction.TypeExpr × Nat) :=
+  match array with
+  | .null => .error (.thrown "System.NullReferenceException")
+  | .address address => do
+    let allocation ← checkedAt array 0 (liveAllocation memory address.allocation)
+    match allocation.kind with
+    | .object ⟨.array element, []⟩ =>
+      if address.offset = 0 then
+        .ok (address, element, allocation.layout.size / objectFieldSlot)
+      else .error .invalidState
+    | _ => .error .invalidState
+
+/-- The slot of element `index` of `array` and the array's element class. An index at or past
+    the length throws `IndexOutOfRangeException`, after the null check. -/
+def referenceArraySlot (memory : Memory) (array : ManagedReference) (index : Nat) :
+    ExecutionResult (Reference × CIL.Extraction.TypeExpr) := do
+  let (origin, element, length) ← referenceArrayOf memory array
+  if index < length then return (⟨origin.allocation, objectFieldSlot * index⟩, element)
+  else .error (.thrown "System.IndexOutOfRangeException")
+
+/-- The covariance check of `stelem.ref` storing `value` into an array of class `element`. Null
+    is always storable; an instance of an admitted class is storable exactly when `element` is in
+    its lineage, which lists every base up to `System.Object`, and otherwise the store throws
+    `ArrayTypeMismatchException`. Any other value is outside the model, never an exception. -/
+def storableIn (memory : Memory) (element : CIL.Extraction.TypeExpr) (value : ManagedReference) :
+    ExecutionResult Unit :=
+  match value with
+  | .null => .ok ()
+  | .address address => do
+    let allocation ← checkedAt value 0 (liveAllocation memory address.allocation)
+    match allocation.kind with
+    | .object type =>
+      match type.identity, element with
+      | .object .., .object .. =>
+        if element ∈ type.lineage then .ok ()
+        else .error (.thrown "System.ArrayTypeMismatchException")
+      | _, _ => .error (.unsupported "Array store outside the admitted classes")
+    | _ => .error .invalidState
+
 /-- `ldfld` and `stfld` of a field of a class instance, at the field's model offset: a scalar
-    field moves bytes, a class-typed field moves the object reference its slot holds. -/
+    field moves bytes, a class-typed field moves the object reference its slot holds. `ldlen`,
+    `ldelem.ref` and `stelem.ref` reach the slots of an array of class references the same way,
+    checking the null array, then the index, then a stored value's class, as the CLR does. -/
 def objectFieldInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) := do
   match operation, stack with
@@ -919,6 +964,18 @@ def objectFieldInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
   | .setObjectReferenceField owner offset, .object value :: .object reference :: rest =>
     let address ← objectFieldAddress memory reference owner offset
     return (← storeSlot memory address value, rest)
+  | .referenceArrayLength, .object array :: rest =>
+    let (_, _, length) ← referenceArrayOf memory array
+    return (memory, .scalar (.i64 (BitVec.ofNat 64 length)) :: rest)
+  | .referenceArrayLoad, .scalar index :: .object array :: rest =>
+    let some index := arrayIndex index | .error .invalidState
+    let (slot, _) ← referenceArraySlot memory array index
+    return (memory, (← loadSlot memory slot) :: rest)
+  | .referenceArrayStore, .object value :: .scalar index :: .object array :: rest =>
+    let some index := arrayIndex index | .error .invalidState
+    let (slot, element) ← referenceArraySlot memory array index
+    let _ ← storableIn memory element value
+    return (← storeSlot memory slot value, rest)
   | _, _ => .error .invalidState
 
 /-- Runs a `.memory` operation on the stack (top first), giving the new memory and stack.
@@ -947,7 +1004,8 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .arrayFill element counted => arrayFillInstruction element counted stack memory
   | .bigMul64 _ | .divRemOut _ => wideArithmeticInstruction operation stack memory
   | .objectField .. | .setObjectField ..
-  | .objectReferenceField .. | .setObjectReferenceField .. =>
+  | .objectReferenceField .. | .setObjectReferenceField ..
+  | .referenceArrayLength | .referenceArrayLoad | .referenceArrayStore =>
     objectFieldInstruction operation stack memory
   | _ => otherMemoryInstruction operation stack memory
 

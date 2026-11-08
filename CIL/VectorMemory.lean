@@ -207,6 +207,12 @@ inductive MemoryOp where
   | objectReferenceField (owner : CIL.Extraction.TypeExpr) (offset : Nat)
   /-- `stfld` of a class-typed field of a class instance of type `owner`, at its model offset. -/
   | setObjectReferenceField (owner : CIL.Extraction.TypeExpr) (offset : Nat)
+  /-- `ldlen` of an array of class references: its element count, as a native integer. -/
+  | referenceArrayLength
+  /-- `ldelem.ref` of an array of class references: the reference its element's slot holds. -/
+  | referenceArrayLoad
+  /-- `stelem.ref` of an array of class references, after the CLR's covariance check. -/
+  | referenceArrayStore
   deriving Repr
 
 /-- Bytes the model reserves for each class instance field, in declaration order. The layout is
@@ -236,13 +242,14 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .spanReinterpret .. | .spanReadOnly | .arrayLength => 1
   | .arrayLoad .. | .arrayAddress .. => 2
   | .arrayTransfer _ store => if store then 3 else 2
-  | .arrayStore _ => 3
+  | .arrayStore _ | .referenceArrayStore => 3
+  | .referenceArrayLoad => 2
   | .store128 | .store256 | .store512 | .add .. | .spanCreate | .spanItem _
   | .setObjectField .. | .setObjectReferenceField .. => 2
   | .staticAddress _ | .staticValue _ | .nullRef | .nullObject | .spanEmpty .. => 0
   | .load128 | .load256 | .load512 | .init256 | .asRef | .bitcast256 | .bitcastByteBool
   | .skipInit | .bitcastValue .. | .createSpan _ | .spanReference | .spanLength | .isNullRef
-  | .objectField .. | .objectReferenceField .. => 1
+  | .objectField .. | .objectReferenceField .. | .referenceArrayLength => 1
 
 /-- Signed Int32/native and unsigned native element offsets on the 64-bit target. -/
 def offsetValue (signed : Bool) (value : Value) : Option Int :=

@@ -151,6 +151,27 @@ theorem Memory.Equivalent.objectFieldAddress {m n : Memory} (same : m.Equivalent
     simp only [CIL.Safety.objectFieldAddress, liveAllocation, same.allocations, same.add]
 #print axioms Memory.Equivalent.objectFieldAddress
 
+/-- Locating an array of class references reads only allocation metadata. -/
+theorem Memory.Equivalent.referenceArrayOf {m n : Memory} (same : m.Equivalent n)
+    (array : ManagedReference) :
+    CIL.Safety.referenceArrayOf m array = CIL.Safety.referenceArrayOf n array := by
+  cases array <;> simp only [CIL.Safety.referenceArrayOf, liveAllocation, same.allocations]
+#print axioms Memory.Equivalent.referenceArrayOf
+
+/-- Locating an element slot of an array of class references reads only allocation metadata. -/
+theorem Memory.Equivalent.referenceArraySlot {m n : Memory} (same : m.Equivalent n)
+    (array : ManagedReference) (index : Nat) :
+    CIL.Safety.referenceArraySlot m array index = CIL.Safety.referenceArraySlot n array index :=
+  by simp only [CIL.Safety.referenceArraySlot, same.referenceArrayOf]
+#print axioms Memory.Equivalent.referenceArraySlot
+
+/-- The covariance check reads only the stored object's runtime type. -/
+theorem Memory.Equivalent.storableIn {m n : Memory} (same : m.Equivalent n)
+    (element : CIL.Extraction.TypeExpr) (value : ManagedReference) :
+    CIL.Safety.storableIn m element value = CIL.Safety.storableIn n element value := by
+  cases value <;> simp only [CIL.Safety.storableIn, liveAllocation, same.allocations]
+#print axioms Memory.Equivalent.storableIn
+
 /-- Equivalent memories hold the same field references and stay equivalent after one changes. -/
 theorem Memory.Equivalent.setSlot {m n : Memory} (same : m.Equivalent n) (field : Reference)
     (value : ManagedReference) :
@@ -236,7 +257,8 @@ private theorem Memory.Equivalent.objectFieldInstruction {m n : Memory} (same : 
     ResultEquivalent MemoryFirstEquivalent (objectFieldInstruction operation stack m)
       (objectFieldInstruction operation stack n) := by
   unfold CIL.Safety.objectFieldInstruction
-  split <;> try simp only [same.objectFieldAddress, same.loadValue, same.loadSlot]
+  split <;> try simp only [same.objectFieldAddress, same.loadValue, same.loadSlot,
+    same.referenceArrayOf, same.referenceArraySlot, same.storableIn]
   all_goals repeat first
     | exact .error _
     | exact .ok ⟨same, rfl⟩
@@ -372,6 +394,9 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     · exact same.arrayFillInstruction _ _ _
     · exact same.wideArithmeticInstruction _ _
     · exact same.wideArithmeticInstruction _ _
+    · exact same.objectFieldInstruction _ _
+    · exact same.objectFieldInstruction _ _
+    · exact same.objectFieldInstruction _ _
     · exact same.objectFieldInstruction _ _
     · exact same.objectFieldInstruction _ _
     · exact same.objectFieldInstruction _ _

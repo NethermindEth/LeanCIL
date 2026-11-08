@@ -362,6 +362,56 @@ theorem step_setObjectField_i32_eq (owner : CIL.Extraction.TypeExpr)
   dsimp only
   cases storeSlot memory address value <;> rfl
 
+/-- `ldlen` of an array of class references pushes its length as a native integer. -/
+@[cil_step high] theorem step_referenceArrayLength_eq (array : ManagedReference)
+    (rest : List Value) :
+    step body (.memory .referenceArrayLength) pc args frame (.object array :: rest) memory = do
+      let found ← referenceArrayOf memory array
+      return .next (pc + 1) (.scalar (.i64 (BitVec.ofNat 64 found.2.2)) :: rest) frame memory := by
+  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    List.any, Value.hasUnspecified, Bool.false_eq_true, ite_false, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
+  cases referenceArrayOf memory array <;> rfl
+
+/-- `ldelem.ref` with an int32 index pushes the reference its element's slot holds. -/
+@[cil_step high] theorem step_referenceArrayLoad_eq (index : BitVec 32)
+    (array : ManagedReference) (rest : List Value) :
+    step body (.memory .referenceArrayLoad) pc args frame
+        (.scalar (.i32 index) :: .object array :: rest) memory = do
+      let slot ← referenceArraySlot memory array index.toNat
+      let value ← loadSlot memory slot.1
+      return .next (pc + 1) (value :: rest) frame memory := by
+  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    List.any, Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false,
+    arrayIndex, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cases referenceArraySlot memory array index.toNat <;> try rfl
+  rename_i slot
+  dsimp only
+  cases loadSlot memory slot.1 <;> rfl
+
+/-- `stelem.ref` with an int32 index checks the stored object's class against the element
+    class, then stores it into the element's slot. -/
+@[cil_step high] theorem step_referenceArrayStore_eq (index : BitVec 32)
+    (value array : ManagedReference) (rest : List Value) :
+    step body (.memory .referenceArrayStore) pc args frame
+        (.object value :: .scalar (.i32 index) :: .object array :: rest) memory = do
+      let slot ← referenceArraySlot memory array index.toNat
+      let _ ← storableIn memory slot.2 value
+      let after ← storeSlot memory slot.1 value
+      return .next (pc + 1) rest frame after := by
+  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    List.any, Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false,
+    arrayIndex, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cases referenceArraySlot memory array index.toNat <;> try rfl
+  rename_i slot
+  dsimp only
+  cases storableIn memory slot.2 value <;> try rfl
+  dsimp only
+  cases storeSlot memory slot.1 value <;> rfl
+
 /-- A readable slot loads the reference it holds, which must still form. -/
 theorem loadSlot_of_access {memory : Memory} {field : Reference}
     (readable : access memory field objectFieldSlot ordinaryAccessAlignment false = .ok ()) :
@@ -473,6 +523,9 @@ end ObjectEquations
 #print axioms step_setObjectField_i32_4_eq
 #print axioms step_objectReferenceField_eq
 #print axioms step_setObjectReferenceField_eq
+#print axioms step_referenceArrayLength_eq
+#print axioms step_referenceArrayLoad_eq
+#print axioms step_referenceArrayStore_eq
 #print axioms loadSlot_of_access
 #print axioms storeSlot_of_access
 
