@@ -102,11 +102,11 @@ Test("test entry points", () =>
     Equal(VerificationSelection.Select(["Tests/VectorStorage.lean"]), ["unsafe"]);
     // Sources compiled into the extractor change the self-admission scan, as does its baseline.
     Equal(VerificationSelection.Select(["Tests/SelfAdmissionBaseline.txt"]), ["blockers"]);
-    Require(VerificationSelection.Select(["scripts/ContractExport.cs"]).Contains("blockers"),
-        "A source compiled into the extractor does not select the self-admission scan");
-    // The suite runs the built command, so no include edge reaches the command's source.
-    Equal(VerificationSelection.Select(["scripts/ProofWorkspace.cs"]).Order(StringComparer.Ordinal),
-        ["blockers", "workspace"]);
+    // Suites run the built command, so a script compiled into it selects every suite; `leancil workspace`,
+    // contract export and verify reports are reached by no include edge.
+    var everySuite = VerificationSelection.SuiteInputs().Keys.Order(StringComparer.Ordinal).ToArray();
+    foreach (var script in new[] { "scripts/ContractExport.cs", "scripts/ProofWorkspace.cs", "scripts/VerifyReports.cs" })
+        Equal(VerificationSelection.Select([script]), everySuite);
 });
 Test("proof and transitive imports", () =>
 {

@@ -102,8 +102,6 @@ internal static class VerificationSelection
         inputs["imports"].UnionWith(["Tests/ContractClosure.lean", "Tests/ContractImports/Lib.leancil.contracts", "Tests/ContractImports/ImportFixture.lean", "Tests/ContractImports/Caller.lean",
             "Tests/ContractImports/Lib/Lib.csproj", "Tests/ContractImports/Lib/Library.cs", "Tests/ContractImports/App/App.csproj", "Tests/ContractImports/App/Application.cs"]);
         inputs["unsafe"].UnionWith(["Tests/SkipInitialization.cs", "Tests/NullReferences.cs"]);
-        // The fixture runs the built `leancil workspace`, which no include edge links to its source.
-        inputs["workspace"].Add("scripts/ProofWorkspace.cs");
         // Self-admission scans the extractor itself, so every source compiled into it can change the result.
         inputs["blockers"].Add("Tests/SelfAdmissionBaseline.txt");
         inputs["blockers"].UnionWith(Matches(File.ReadAllText(Path.Combine(root, "Extractor/Extractor.csproj")),
@@ -170,8 +168,10 @@ internal static class VerificationSelection
             // Other workflows run in their own jobs; only this workflow's definition feeds the suites.
             if (path.StartsWith(".github/workflows/", StringComparison.Ordinal) && path != ".github/workflows/verification.yml") continue;
             if (path == "scripts/ExportVerificationSuites.cs") return all;
+            // A script compiled into the CLI reaches every suite through the built command, include edge or not.
             if (new[] { "CIL/", "Extractor/", "Examples/Assembly/", "Examples/FSharp/" }
-                    .Any(prefix => path.StartsWith(prefix, StringComparison.Ordinal)) || path == "Tests/Support.lean")
+                    .Any(prefix => path.StartsWith(prefix, StringComparison.Ordinal)) || path == "Tests/Support.lean" ||
+                path.StartsWith("scripts/", StringComparison.Ordinal) && inputs["blockers"].Contains(path))
                 return all;
             var owners = inputs.Where(pair => pair.Value.Contains(path)).Select(pair => pair.Key).ToArray();
             if (owners.Length == 0) return all;
