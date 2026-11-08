@@ -586,6 +586,8 @@ partial class Program : IDisposable
 #endif
         foreach (var (name, value) in environment ?? new Dictionary<string, string>())
             start.Environment[name] = value;
+        if (ChecksLeanEnvironment(args, leanPath is not null))
+            RequireLeanEnvironmentFits(args, start.WorkingDirectory, start.Environment);
 
         if (progress is not null) Console.WriteLine("START " + progress);
         var startedAtUtc = DateTimeOffset.UtcNow;
@@ -655,6 +657,170 @@ partial class Program : IDisposable
             throw new InvalidOperationException($"Command failed ({result.Code}): {string.Join(' ', args)}\n{result.Output}");
 
         return result.Output;
+    }
+
+    /// <summary>
+    /// Lean on Windows builds a child's environment in one buffer of this many bytes: inherited entries are copied
+    /// unchecked, and an override that no longer fits is dropped silently, with every override after it.
+    /// </summary>
+    const int LeanEnvironmentBuffer = 0x7fff;
+    /// <summary>Lowers, never raises, the enforced block size; set on another OS, it enables the check.</summary>
+    const string LeanEnvironmentLimitVariable = "LEANCIL_LEAN_ENVIRONMENT_LIMIT";
+    const int LargestVariablesShown = 6;
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, KeyValuePair<string, string>[]?>
+        LakeVariables = new(StringComparer.Ordinal);
+
+    /// <summary>One `name=value` entry of an environment block, and whether Lake set it.</summary>
+    sealed record EnvironmentEntry(string Name, string Value, bool SetByLake)
+    {
+        /// <summary>The entry's bytes with its terminator; Lean's executables use the UTF-8 code page.</summary>
+        public int Bytes => Encoding.UTF8.GetByteCount(Name) + Encoding.UTF8.GetByteCount(Value) + 2;
+    }
+
+    /// <summary>The largest environment block a Lean process can pass on; null where Lean has no limit.</summary>
+    static int? LeanEnvironmentLimit()
+    {
+        int? limit = OperatingSystem.IsWindows() ? LeanEnvironmentBuffer : null;
+        var configured = Environment.GetEnvironmentVariable(LeanEnvironmentLimitVariable);
+        if (string.IsNullOrEmpty(configured)) return limit;
+        if (!int.TryParse(configured, System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var lowered) || lowered <= 0)
+            throw new ArgumentException(LeanEnvironmentLimitVariable + " must be a positive number of bytes.");
+        return Math.Min(limit ?? lowered, lowered);
+    }
+
+    /// <summary>Whether `command` starts Lean processes that may start others with their own environment.</summary>
+    static bool ChecksLeanEnvironment(string[] command, bool leanSearchPath) =>
+        (leanSearchPath || Path.GetFileNameWithoutExtension(command[0]) == "lake") &&
+        LeanEnvironmentLimit() is not null;
+
+    /// <summary>
+    /// Fails before `command` starts when the environment its Lean processes would hand their children exceeds the
+    /// limit, naming the size and the largest variables, instead of letting Lean drop LEAN_PATH without an error.
+    /// </summary>
+    static void RequireLeanEnvironmentFits(string[] command, string cwd, IDictionary<string, string?> environment)
+    {
+        if (LeanEnvironmentLimit() is not { } limit ||
+            PredictedLeanChildEnvironment(command, cwd, environment) is not { } entries) return;
+        var size = EnvironmentBlockBytes(entries);
+        if (size > limit)
+            throw new InvalidOperationException(LeanEnvironmentOverflow(command, cwd, entries, size, limit));
+    }
+
+    /// <summary>
+    /// The block a Lean process started by `command` builds for its own children: for Lake, its inherited
+    /// environment after the elan proxy's changes plus the variables Lake sets; for another Lean program, the
+    /// environment it is given. Null when the command starts no child with an environment of its own.
+    /// </summary>
+    static EnvironmentEntry[]? PredictedLeanChildEnvironment(string[] command, string cwd,
+        IDictionary<string, string?> environment)
+    {
+        var inherited = environment.Where(entry => entry.Value is not null)
+            .Select(entry => KeyValuePair.Create(entry.Key, entry.Value!)).ToList();
+        if (Path.GetFileNameWithoutExtension(command[0]) != "lake") return LeanChildEnvironment(inherited, []);
+        var subcommand = command.Skip(1).FirstOrDefault(argument => !argument.StartsWith('-'));
+        // Printing its variables and updating dependencies start no Lean process with an environment.
+        if (subcommand is null or "update" || subcommand == "env" && command[^1] == "env") return null;
+        if (LakeEnvironment(cwd, inherited) is not { } lake) return LeanChildEnvironment(inherited, []);
+        ApplyElanProxy(inherited, lake);
+        // A build starts Lean with LEAN_PATH alone; the printed value also holds Lake's own library directory.
+        return LeanChildEnvironment(inherited,
+            subcommand == "build" ? [.. lake.Where(entry => entry.Key == "LEAN_PATH")] : lake);
+    }
+
+    /// <summary>
+    /// The block Lean builds from `inherited` and `overrides`: the inherited entries whose name no override spells
+    /// exactly, since Lean compares names case-sensitively even on Windows, then every override.
+    /// </summary>
+    static EnvironmentEntry[] LeanChildEnvironment(IEnumerable<KeyValuePair<string, string>> inherited,
+        IReadOnlyCollection<KeyValuePair<string, string>> overrides)
+    {
+        var replaced = overrides.Select(entry => entry.Key).ToHashSet(StringComparer.Ordinal);
+        return [.. inherited.Where(entry => !replaced.Contains(entry.Key))
+                .Select(entry => new EnvironmentEntry(entry.Key, entry.Value, false)),
+            .. overrides.Select(entry => new EnvironmentEntry(entry.Key, entry.Value, true))];
+    }
+
+    /// <summary>The block's size in bytes: every entry with its terminator, then the block's own terminator.</summary>
+    static int EnvironmentBlockBytes(IEnumerable<EnvironmentEntry> entries) => entries.Sum(entry => entry.Bytes) + 1;
+
+    /// <summary>
+    /// The variables Lake sets for Lean in `cwd` under `environment`, as `lake env` prints them, or null when Lake
+    /// cannot load the workspace. Lake prints a variable it unsets as empty, so counting it can only overcount.
+    /// </summary>
+    static KeyValuePair<string, string>[]? LakeEnvironment(string cwd,
+        IReadOnlyCollection<KeyValuePair<string, string>> environment)
+    {
+        var given = environment.ToDictionary(entry => entry.Key, entry => entry.Value);
+        var key = Path.GetFullPath(cwd) + "\n" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
+            string.Join('\0', given.OrderBy(entry => entry.Key, StringComparer.Ordinal)
+                .Select(entry => entry.Key + "=" + entry.Value)))));
+        return LakeVariables.GetOrAdd(key, _ =>
+        {
+            var printed = Execute(["lake", "env"], cwd, environment: given);
+            // A workspace Lake cannot load fails the command itself, with Lake's own error.
+            return printed.Code != 0 ? null : [.. printed.Stdout.Split('\n')
+                .Select(line => line.TrimEnd('\r')).Where(line => line.Contains('='))
+                .Select(line => KeyValuePair.Create(line[..line.IndexOf('=')], line[(line.IndexOf('=') + 1)..]))];
+        });
+    }
+
+    /// <summary>
+    /// Applies what elan's proxy sets before it starts the toolchain's Lake, when a bare `lake` resolves to it:
+    /// elan's and (on Windows) the toolchain's bin directories ahead of PATH, a raised LEAN_RECURSION_COUNT, and
+    /// ELAN_TOOLCHAIN and ELAN_HOME, each under the spelling the environment already uses.
+    /// </summary>
+    static void ApplyElanProxy(List<KeyValuePair<string, string>> inherited,
+        IReadOnlyCollection<KeyValuePair<string, string>> lake)
+    {
+        string Printed(string name) => lake.FirstOrDefault(entry => entry.Key == name).Value ?? "";
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var elanBin = Printed("ELAN_HOME") is { Length: > 0 } home ? Path.Combine(home, "bin") : null;
+        if (elanBin is null || LakeOnPath() is not { } proxy ||
+            !string.Equals(Path.GetDirectoryName(proxy), elanBin, comparison)) return;
+        void Set(string name, Func<string?, string> value)
+        {
+            var index = inherited.FindIndex(entry => entry.Key.Equals(name, comparison));
+            var entry = KeyValuePair.Create(index < 0 ? name : inherited[index].Key,
+                value(index < 0 ? null : inherited[index].Value));
+            if (index < 0) inherited.Add(entry);
+            else inherited[index] = entry;
+        }
+        string[] prefix = OperatingSystem.IsWindows()
+            ? [elanBin, Path.Combine(Printed("LEAN_SYSROOT"), "bin")] : [elanBin];
+        Set("PATH", current => string.Join(Path.PathSeparator, current is null ? prefix : [.. prefix, current]));
+        Set("LEAN_RECURSION_COUNT", current => ((uint.TryParse(current, System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out var count) ? count : 0) + 1)
+            .ToString(System.Globalization.CultureInfo.InvariantCulture));
+        Set("ELAN_TOOLCHAIN", _ => Printed("ELAN_TOOLCHAIN"));
+        Set("ELAN_HOME", _ => Printed("ELAN_HOME"));
+    }
+
+    /// <summary>The executable a bare `lake` command starts: the first one on this process's PATH.</summary>
+    static string? LakeOnPath() =>
+        (Environment.GetEnvironmentVariable("PATH") ?? "")
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(directory => Path.Combine(directory.Trim('"'), OperatingSystem.IsWindows() ? "lake.exe" : "lake"))
+            .FirstOrDefault(File.Exists);
+
+    static string LeanEnvironmentOverflow(string[] command, string cwd, EnvironmentEntry[] entries, int size,
+        int limit)
+    {
+        var invariant = System.Globalization.CultureInfo.InvariantCulture;
+        var largest = entries.OrderByDescending(entry => entry.Bytes).Take(LargestVariablesShown)
+            .Select(entry => string.Create(invariant,
+                $"\n  {entry.Name} {entry.Bytes:N0}{(entry.SetByLake ? " (set by Lake)" : "")}"));
+        var doubled = entries.GroupBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1).Select(group => string.Join(" and ", group.Select(entry => entry.Name)))
+            .Select(names => "\n" + names + " are both passed: Lean keeps an inherited spelling beside Lake's.");
+        return string.Create(invariant, $"`{string.Join(' ', command.Take(2))}` in {cwd} would start Lean ") +
+            string.Create(invariant, $"processes that pass on a {size:N0}-byte environment, over the ") +
+            string.Create(invariant, $"{limit:N0}-byte limit ") +
+            "of the environment Lean on Windows can pass to a process. Lean would drop LEAN_PATH and the other " +
+            "variables set for it without an error, so imports would not resolve.\n" +
+            "Largest variables (bytes of name=value):" +
+            string.Concat(largest) + string.Concat(doubled) +
+            "\nRemove unneeded variables or PATH entries from the environment leancil runs in.";
     }
 
     static SortedDictionary<string, string> Inputs(string proof, string? settings = null)

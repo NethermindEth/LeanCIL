@@ -165,7 +165,8 @@ if (suite is "all" or "core")
     projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs",
         "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "Tests/BuildReuse.cs", "Tests/VerificationCache.cs",
         "Tests/VerificationReuse.cs", "Tests/ExtractionBatch.cs", "Tests/InstructionIndexes.cs", "Tests/TemplateIndexes.cs", "Tests/ImportIndexes.cs", "Tests/StaticValueIndexes.cs",
-        "Tests/BatchVerification.cs", "Tests/JointReplay.cs", "Tests/AllocationImports.cs", "scripts/Verify.cs"]);
+        "Tests/BatchVerification.cs", "Tests/JointReplay.cs", "Tests/AllocationImports.cs", "scripts/Verify.cs",
+        "Tests/EnvironmentLimit.cs"]);
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/MemorySpans.cs", "Tests/ReferenceInstructions.cs", "Tests/PointerOperations.cs",
         "Tests/PrimitiveArrays.cs", "Tests/ArrayElementReferences.cs", "Tests/ReadOnlyArrayReferences.cs",
@@ -230,6 +231,9 @@ if (suite is not ("all" or "core"))
 // Check method selection before starting the longer Lean verification run.
 RunFixture("Tests/LibraryCache.cs", [], streamOutput: true, progress: "Library cache checks");
 Passed("library cache integrity and source keys");
+
+RunFixture("Tests/EnvironmentLimit.cs", [], streamOutput: true, progress: "Lean environment limit checks");
+Passed("Lean environment blocks counted as Lean builds them and rejected before Lake drops LEAN_PATH");
 
 RunFixture("Tests/BuildReuse.cs", [], streamOutput: true, progress: "Prepared build reuse checks");
 Passed("prepared extractor source and output identity");
