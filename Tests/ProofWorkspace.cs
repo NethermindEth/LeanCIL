@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
 
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -16,6 +17,10 @@ const string method = "Workspace.Wide::get_IsZeroOrOne()";
 const string initializedType = "Workspace.Wide";
 const string shiftedBody = "((u0 >> 1) | u1 | u2 | u3) == 0";
 const string unshiftedBody = "(u0 | u1 | u2 | u3) == 0";
+// A second method in its own file, so editing it moves no sequence point of the first.
+const string twiceMethod = "Workspace.Arith::Twice(ulong)";
+const string twiceBody = "x + x;";
+const string changedTwiceBody = "x + x + 1;";
 Directory.CreateDirectory(consumer);
 var project = Path.Combine(consumer, "Workspace.csproj");
 File.WriteAllText(project, """
@@ -35,6 +40,15 @@ File.WriteAllText(wide, """
         readonly ulong u0 = u0, u1 = u1, u2 = u2, u3 = u3;
 
         public bool IsZeroOrOne => ((u0 >> 1) | u1 | u2 | u3) == 0;
+    }
+    """);
+var arith = Path.Combine(consumer, "Arith.cs");
+File.WriteAllText(arith, """
+    namespace Workspace;
+
+    public static class Arith
+    {
+        public static ulong Twice(ulong x) => x + x;
     }
     """);
 Console.WriteLine("Building the workspace consumer fixture");
@@ -378,3 +392,151 @@ finally
 Console.WriteLine("PASS a standalone proof gets a package beside it without git commits or a pinned framework, " +
     "verifies as a single file and refreshes on re-run");
 
+Console.WriteLine("Watching two proofs of two methods in one package");
+var twiceProof = Path.Combine(package, "TwiceProof.lean");
+File.WriteAllText(twiceProof, "-- written once the module name is known\n");
+var twiceKey = KeyOf(Run([.. cli, "workspace", assembly, twiceMethod, "--profile", "scalar", "--proof", twiceProof,
+    "--theorem", "TwiceProof.length"]));
+void WriteTwiceProof(int length) => File.WriteAllText(twiceProof, $"""
+import Extracted.{twiceKey}
+namespace TwiceProof
+theorem length : Extracted.method0.code.length = {length} := by decide
+#print axioms length
+end TwiceProof
+""");
+var twiceLength = CodeLength(twiceKey);
+WriteTwiceProof(twiceLength);
+// Both proofs are open at once: each checks in place against its own method's extraction.
+CheckedProof();
+if (CheckProof(twiceProof).Code != 0) throw new InvalidOperationException("The second proof does not check in place.");
+
+string[] watch = [.. cli, "watch", package, "--project", project, "--format", "json"];
+(JsonElement Cycle, TimeSpan Elapsed) WatchOnce(bool passes)
+{
+    var started = Stopwatch.StartNew();
+    var result = Execute([.. watch, "--once"]);
+    var line = result.Stdout.Split('\n').LastOrDefault(text => text.StartsWith('{'))
+        ?? throw new InvalidOperationException("watch printed no cycle: " + result.Output);
+    var cycle = JsonSerializer.Deserialize<JsonElement>(line);
+    if ((result.Code == 0) != passes || cycle.GetProperty("passed").GetBoolean() != passes)
+        throw new InvalidOperationException($"watch {(passes ? "failed" : "passed")} unexpectedly: " + result.Output);
+    return (cycle, started.Elapsed);
+}
+JsonElement Outcome(JsonElement cycle, string file) => cycle.GetProperty("results").EnumerateArray()
+    .Single(result => result.GetProperty("proof").GetString() == file);
+void Expect(JsonElement cycle, string file, string status, bool rechecked)
+{
+    var outcome = Outcome(cycle, file);
+    if (outcome.GetProperty("status").GetString() != status ||
+        outcome.GetProperty("rechecked").GetBoolean() != rechecked)
+        throw new InvalidOperationException($"Expected {file} {status} (rechecked {rechecked}): {cycle}");
+}
+string[] Refreshed(JsonElement cycle) =>
+    [.. cycle.GetProperty("refreshed").EnumerateArray().Select(module => module.GetString()!)];
+// Every file of the first method's extraction: editor modules, Lake outputs and verification records.
+Dictionary<string, (string Hash, DateTime Time)> WideSnapshot() =>
+    new[] { Path.Combine(editor, "selections", key) }
+        .SelectMany(directory => Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+        .Concat(new[] { "Extracted", "ExtractedSymbols" }.SelectMany(module => new[] { editor, compiledModules }
+            .Select(directory => Path.Combine(directory, module)).Where(Directory.Exists)
+            .SelectMany(directory => Directory.EnumerateFiles(directory, key + ".*"))))
+        .ToDictionary(path => path, path => (Sha(path), File.GetLastWriteTimeUtc(path)));
+
+var (first, firstTime) = WatchOnce(passes: true);
+Expect(first, "Proof.lean", "verified", rechecked: true);
+Expect(first, "TwiceProof.lean", "verified", rechecked: true);
+var (quiet, quietTime) = WatchOnce(passes: true);
+Expect(quiet, "Proof.lean", "verified", rechecked: false);
+Expect(quiet, "TwiceProof.lean", "verified", rechecked: false);
+if (Refreshed(quiet).Length != 0) throw new InvalidOperationException("An unchanged build refreshed: " + quiet);
+Console.WriteLine($"PASS watch verifies both proofs ({firstTime.TotalSeconds:F1}s), then reruns nothing when " +
+    $"nothing changed ({quietTime.TotalSeconds:F1}s)");
+
+var wideBefore = WideSnapshot();
+if (!wideBefore.Keys.Any(path => Path.GetFileName(path) == "verified.json"))
+    throw new InvalidOperationException("The first method's verification left no certificate.");
+Edit(arith, twiceBody, changedTwiceBody);
+var (edited, editedTime) = WatchOnce(passes: false);
+// Exactly the edited method's extraction is refreshed and its proof rechecked; the other one is not touched.
+if (!Refreshed(edited).Contains("Extracted." + twiceKey) ||
+    Refreshed(edited).Any(module => module.EndsWith("." + key, StringComparison.Ordinal)))
+    throw new InvalidOperationException("The edit did not refresh exactly the edited method: " + edited);
+Expect(edited, "TwiceProof.lean", "failed", rechecked: true);
+Expect(edited, "Proof.lean", "verified", rechecked: false);
+var located = Outcome(edited, "TwiceProof.lean").GetProperty("report").GetProperty("failures")[0].GetProperty("source");
+if (Path.GetFullPath(located.GetProperty("file").GetString()!) != Path.GetFullPath(twiceProof) ||
+    located.GetProperty("line").GetInt32() != 3)
+    throw new InvalidOperationException("The failure is not located at the proof's theorem: " + edited);
+var wideAfter = WideSnapshot();
+if (wideAfter.Count != wideBefore.Count || wideAfter.Any(entry =>
+        !wideBefore.TryGetValue(entry.Key, out var before) || before != entry.Value))
+    throw new InvalidOperationException("Editing the second method touched the first method's files.");
+var changedTwice = CodeLength(twiceKey);
+WriteTwiceProof(changedTwice);
+var (fixedProof, fixTime) = WatchOnce(passes: true);
+Expect(fixedProof, "TwiceProof.lean", "verified", rechecked: true);
+Expect(fixedProof, "Proof.lean", "verified", rechecked: false);
+Console.WriteLine($"PASS a C# edit refreshes and rechecks exactly its method, located at TwiceProof.lean:3 " +
+    $"({editedTime.TotalSeconds:F1}s edit to feedback); the other method's files are byte-identical with " +
+    $"unchanged times; the fixed proof verifies ({fixTime.TotalSeconds:F1}s)");
+
+// A failed build must never leave an earlier build's result green: every proof is stale and loses its certificate.
+Edit(arith, changedTwiceBody, "x + x +;");
+var (broken, _) = WatchOnce(passes: false);
+var errors = broken.GetProperty("build").EnumerateArray().ToArray();
+if (errors.Length == 0 || errors.Any(error => Path.GetFileName(error.GetProperty("file").GetString()) != "Arith.cs") ||
+    errors[0].GetProperty("line").GetInt32() != 5)
+    throw new InvalidOperationException("The build failure is not located in the C# source: " + broken);
+Expect(broken, "Proof.lean", "stale", rechecked: true);
+Expect(broken, "TwiceProof.lean", "stale", rechecked: true);
+if (Directory.EnumerateFiles(Path.Combine(editor, "selections"), "verified.json", SearchOption.AllDirectories).Any())
+    throw new InvalidOperationException("A failed build left a certificate of an earlier build.");
+Edit(arith, "x + x +;", changedTwiceBody);
+var (restored, _) = WatchOnce(passes: true);
+Expect(restored, "Proof.lean", "verified", rechecked: true);
+Expect(restored, "TwiceProof.lean", "verified", rechecked: true);
+Console.WriteLine("PASS a failed C# build is located at Arith.cs:5, makes every proof stale and deletes its " +
+    "certificate; the next good build verifies both again");
+
+// A proof whose method is renamed away reports it, and its editor module is removed so the editor fails too.
+Edit(arith, "Twice(ulong x)", "Doubled(ulong x)");
+var (renamed, _) = WatchOnce(passes: false);
+Expect(renamed, "TwiceProof.lean", "missing", rechecked: true);
+Expect(renamed, "Proof.lean", "verified", rechecked: false);
+if (!Outcome(renamed, "TwiceProof.lean").GetProperty("message").GetString()!.Contains("no longer in the assembly",
+        StringComparison.Ordinal) ||
+    File.Exists(Path.Combine(editor, "Extracted", twiceKey + ".lean")) || CheckProof(twiceProof).Code == 0)
+    throw new InvalidOperationException("A renamed method was not reported missing: " + renamed);
+Console.WriteLine("PASS a renamed method is reported missing and its proof fails at its import in the editor");
+
+// The loop: a running watch notices the C# edit, rebuilds and reports without any command.
+var loop = new ProcessStartInfo(watch[0]) { RedirectStandardOutput = true, RedirectStandardError = true };
+foreach (var argument in watch.Skip(1)) loop.ArgumentList.Add(argument);
+using var watcher = Process.Start(loop)!;
+var cycles = new BlockingCollection<string>();
+watcher.OutputDataReceived += (_, line) => { if (line.Data?.StartsWith('{') == true) cycles.Add(line.Data); };
+watcher.ErrorDataReceived += (_, _) => { };
+watcher.BeginOutputReadLine();
+watcher.BeginErrorReadLine();
+try
+{
+    JsonElement Next()
+    {
+        if (!cycles.TryTake(out var line, TimeSpan.FromMinutes(10)))
+            throw new InvalidOperationException("watch reported no cycle within ten minutes.");
+        return JsonSerializer.Deserialize<JsonElement>(line);
+    }
+    Next();
+    var edit = Stopwatch.StartNew();
+    Edit(arith, "Doubled(ulong x)", "Twice(ulong x)");
+    var noticed = Next();
+    var feedback = edit.Elapsed;
+    Expect(noticed, "TwiceProof.lean", "verified", rechecked: true);
+    Expect(noticed, "Proof.lean", "verified", rechecked: false);
+    Console.WriteLine($"PASS a running watch rebuilds, refreshes and verifies the restored method " +
+        $"{feedback.TotalSeconds:F1}s after the C# edit");
+}
+finally
+{
+    if (!watcher.HasExited) watcher.Kill(entireProcessTree: true);
+}

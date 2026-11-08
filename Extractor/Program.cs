@@ -18,6 +18,8 @@ internal static partial class Program
         "       leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]\n" +
         "       leancil workspace assembly.dll method --profile profile --proof proof.lean [--theorem name] " +
         "[--proof-root package-directory] [--assembly identity] [--assume-initialized Namespace.Type]...\n" +
+        "       leancil watch [package-directory] [--project project.csproj]... [--configuration name] [--once] " +
+        "[--format text|json]\n" +
         "       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] " +
         "[--assembly 'assembly name or full identity'] [--reference Lib.dll]...\n" +
         "       leancil check output-directory [--assembly-path assembly.dll] " +
@@ -91,6 +93,11 @@ internal static partial class Program
                 stage = "editor workspace";
                 global::Program.CreateProofWorkspace(args[1..]);
                 return 0;
+            }
+            if (args[0] == "watch")
+            {
+                stage = "proof watch";
+                return global::Program.Watch(args[1..]);
             }
             if (args[0] == "new-proof")
             {

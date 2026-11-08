@@ -54,7 +54,8 @@ var independentSuites = new Dictionary<string, (string Script, string Descriptio
 {
     ["templates"] = ("Tests/ProfileTemplates.cs",
         "shared profile templates, exact instruction equations and checked bindings"),
-    ["workspace"] = ("Tests/ProofWorkspace.cs", "in-place editor extraction and ordinary fresh certification"),
+    ["workspace"] = ("Tests/ProofWorkspace.cs",
+        "per-method editor extractions, watch refresh and ordinary fresh certification"),
     ["imports"] = ("Tests/ContractImports.cs", "implementation-bound contract imports and conditional caller verification"),
     ["exceptionlint"] = ("Tests/ExceptionLint.cs", "diagnostic XML exception drift without proof claims"),
     ["contracts"] = ("Tests/UniversalContracts.cs", "universal checked contracts, caller memory preservation and incorrect implementations"),

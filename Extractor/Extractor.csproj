@@ -25,6 +25,7 @@
     <Compile Include="../scripts/Verification.cs" Link="Verification.cs" />
     <Compile Include="../scripts/ConsumerVerification.cs" Link="ConsumerVerification.cs" />
     <Compile Include="../scripts/ProofWorkspace.cs" Link="ProofWorkspace.cs" />
+    <Compile Include="../scripts/ProofWatch.cs" Link="ProofWatch.cs" />
     <Compile Include="../scripts/ContractExport.cs" Link="ContractExport.cs" />
     <Compile Include="../scripts/FullImportVerification.cs" Link="FullImportVerification.cs" />
     <Compile Include="../scripts/FullModuleResolution.cs" Link="FullModuleResolution.cs" />

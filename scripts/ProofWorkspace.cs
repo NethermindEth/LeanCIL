@@ -339,8 +339,8 @@ partial class Program
         if (settings.CreatedPackage)
             Console.WriteLine("  Created a Lake package beside the proof (no lakefile above it): lakefile.toml, " +
                 "lean-toolchain and lake-manifest.json, with the bundled framework in " + BundledFrameworkDirectory);
-        Console.WriteLine("  Edit the proof in place. After rebuilding the assembly, run this command again and " +
-            "restart the file in the editor to load the refreshed extraction.");
+        Console.WriteLine("  Edit the proof in place. After rebuilding the assembly, run this command again, or keep " +
+            "leancil watch running, and restart the file in the editor to load the refreshed extraction.");
         Console.WriteLine("  Editor checking is not a certificate. Run ordinary leancil verify for certification.");
     }
 }
