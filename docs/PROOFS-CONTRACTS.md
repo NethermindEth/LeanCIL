@@ -369,6 +369,15 @@ decides whether the tested class is in the lineage, so the reference passes, bec
 throws `InvalidCastException` ([DogTest](../Examples/Proofs/DogTest.lean),
 [DogCast](../Examples/Proofs/DogCast.lean)).
 
+An `ldstr` steps to the object the caller bound to its text: given `bound`, that
+`memory.literals.lookup text = some literal`, and the literal's formation fact, pass
+`literalObject_of_lookup bound` and that fact to `cil_checked_steps`. With the text unbound,
+`literalObject` reduces to the `unsupported` fault. No call rebinds a literal
+(`invoke_literals`), so the same `bound` steps an `ldstr` after a call; the literal's formation
+fact crosses the call like any other object's
+([StringLiterals](../Examples/Proofs/StringLiterals.lean),
+[StringDefault](../Examples/Proofs/StringDefault.lean)).
+
 A method that constructs an instance steps its `newobj` with `allocateObject_ok`, given
 well-formed memory and a `Memory.heapBudget` covering the instance, or `allocateObject_insufficient`
 for the `allocationFailure` fault when it does not. `objectMemory_formObject`, `objectMemory_field`

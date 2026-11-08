@@ -12,7 +12,7 @@ public sealed class Labelled
 
 /// <summary>
 /// Strings as opaque references: they are passed, returned, stored, compared by identity and tested for null,
-/// and nothing reads their characters.
+/// literals load the interned instance of their text, and nothing reads their characters.
 /// </summary>
 public static class Strings
 {
@@ -26,6 +26,12 @@ public static class Strings
 
     /// <summary>Whether two labels are the same string instance, or both absent.</summary>
     public static bool SameLabel(string? left, string? right) => ReferenceEquals(left, right);
+
+    /// <summary>Whether two loads of one literal are the same string instance; literals are interned.</summary>
+    public static bool SameText() => ReferenceEquals("x", "x");
+
+    /// <summary>The label, or the literal "none" when it is absent.</summary>
+    public static string OrNone(string? label) => label ?? "none";
 
     /// <summary>Replaces the label of <paramref name="item"/> and returns the label it held.</summary>
     public static string? Relabel(Labelled item, string? label)

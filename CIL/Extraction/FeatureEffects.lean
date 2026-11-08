@@ -37,7 +37,7 @@ private def memoryFeatureEffect : MemoryOp → Nat × Nat
   | .copyBlock _ | .initBlock _ => (3, 0)
   | .store128 | .store256 | .store512 => (2, 0)
   | .init256 | .skipInit => (1, 0)
-  | .staticAddress _ | .staticValue _ | .nullRef | .nullObject => (0, 1)
+  | .staticAddress _ | .staticValue _ | .nullRef | .nullObject | .stringLiteral _ => (0, 1)
   | .objectField .. | .objectReferenceField .. | .referenceArrayLength | .arrayField .. => (1, 1)
   | .setObjectField .. | .setObjectReferenceField .. | .setArrayField .. => (2, 0)
   | .referenceArrayLoad => (2, 1)

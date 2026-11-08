@@ -198,6 +198,9 @@ inductive MemoryOp where
   | nullRef | isNullRef
   /-- `ldnull` pushes the null object reference, distinct from a null byref. -/
   | nullObject
+  /-- `ldstr`: the interned string object the caller bound to `text`. No operation reads its
+      characters. -/
+  | stringLiteral (text : String)
   /-- `ldfld` of a scalar field of a class instance of type `owner`, at its model offset. -/
   | objectField (owner : CIL.Extraction.TypeExpr) (offset width : Nat) (signed : Bool)
   /-- `stfld` of a scalar field of a class instance of type `owner`, at its model offset. -/
@@ -251,7 +254,8 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .referenceArrayLoad => 2
   | .store128 | .store256 | .store512 | .add .. | .spanCreate | .spanItem _
   | .setObjectField .. | .setObjectReferenceField .. | .setArrayField .. => 2
-  | .staticAddress _ | .staticValue _ | .nullRef | .nullObject | .spanEmpty .. => 0
+  | .staticAddress _ | .staticValue _ | .nullRef | .nullObject | .stringLiteral _
+  | .spanEmpty .. => 0
   | .load128 | .load256 | .load512 | .init256 | .asRef | .bitcast256 | .bitcastByteBool
   | .skipInit | .bitcastValue .. | .createSpan _ | .spanReference | .spanLength | .isNullRef
   | .objectField .. | .objectReferenceField .. | .referenceArrayLength | .arrayField .. => 1

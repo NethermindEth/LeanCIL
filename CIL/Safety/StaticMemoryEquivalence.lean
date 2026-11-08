@@ -43,7 +43,7 @@ theorem Memory.Equivalent.staticReference {m n : Memory} (same : m.Equivalent n)
     apply ResultEquivalent.ok
     refine ⟨?_, rfl⟩
     refine ⟨equivalent.allocations, ?_, ?_, equivalent.nextIdentity, ?_,
-        equivalent.stackLimit, equivalent.heapBudget, equivalent.slots⟩
+        equivalent.stackLimit, equivalent.heapBudget, equivalent.slots, equivalent.literals⟩
     · simp only [equivalent.cells]
     · exact (equivalent.prependView _).permissions
     · simp only [equivalent.staticBindings]

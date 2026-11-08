@@ -260,6 +260,45 @@ theorem storeLocal_heapBudget {m result : Memory} {slot final : LocalSlot} {valu
     | split at h
     | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
 
+/-- A checked write changes bytes, never the literal bindings. -/
+theorem write_literals {m result : Memory} {r : Reference} {bytes : List (BitVec 8)}
+    {alignment : Nat} (h : write m r bytes alignment = .ok result) :
+    result.literals = m.literals := by
+  unfold write at h
+  cases ha : access m r bytes.length alignment true <;>
+    simp only [ha, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  · cases h
+  · cases h; rfl
+
+/-- A snapshot write changes bytes and initialization, never the literal bindings. -/
+theorem writeSnapshot_literals {m result : Memory} {r : Reference}
+    {bytes : List (BitVec 8 × Bool)} {alignment : Nat}
+    (h : writeSnapshot m r bytes alignment = .ok result) :
+    result.literals = m.literals := by
+  unfold writeSnapshot at h
+  cases hw : write m r (bytes.map Prod.fst) alignment <;>
+    simp only [hw, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  · cases h
+  · cases h
+    have literals := write_literals hw
+    exact literals
+
+/-- Storing a local never rebinds a string literal. -/
+theorem storeLocal_literals {m result : Memory} {slot final : LocalSlot} {value : Value}
+    (h : storeLocal m slot value = .ok (final, result)) :
+    result.literals = m.literals := by
+  unfold storeLocal at h
+  repeat' first
+    | rfl
+    | solve | exact write_literals (checkedAt_ok (by assumption))
+    | solve | exact writeSnapshot_literals (checkedAt_ok (by assumption))
+    | cases h
+    | split at h
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+
+#print axioms write_literals
+#print axioms writeSnapshot_literals
+#print axioms storeLocal_literals
 #print axioms write_heapBudget
 #print axioms writeSnapshot_heapBudget
 #print axioms storeLocal_heapBudget
@@ -386,6 +425,8 @@ structure FrameSetup (activation : Nat) (before after : Memory)
   allocations : FrameAllocations after activation owned
   below : MemoryBelow before.nextIdentity before after
   registry : after.staticBindings = before.staticBindings
+  /-- Frame setup never rebinds a string literal. -/
+  literals : after.literals = before.literals
   wellFormed : before.WellFormed → after.WellFormed
   references : before.WellFormed → SlotsReferencesValid after slots
   above : ∀ slot ∈ slots, slot.Above before.nextIdentity
@@ -395,7 +436,7 @@ structure FrameSetup (activation : Nat) (before after : Memory)
   objects : ObjectsKept before after
 
 theorem FrameSetup.empty (activation : Nat) (m : Memory) : FrameSetup activation m m [] [] :=
-  ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id,
+  ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, rfl, id,
     by simp [SlotsReferencesValid], by simp, rfl, .refl _⟩
 
 /-- Compose effects once; clients project their required invariant. -/
@@ -408,6 +449,7 @@ theorem FrameSetup.append {activation : Nat} {first middle last : Memory}
     (a.allocations.preserve b.fresh.1 (fun id member => (a.fresh.2 id member).2)).append
       b.allocations,
     a.below.trans (b.below.weaken a.fresh.1.next), b.registry.trans a.registry,
+    b.literals.trans a.literals,
     fun hm => b.wellFormed (a.wellFormed hm), ?_, ?_, b.budget.trans a.budget,
     a.objects.trans b.objects⟩
   · intro hm slot member
@@ -433,12 +475,20 @@ theorem allocateHome_setup {alignment : Nat} (m result : Memory) (activation wid
     FrameSetup activation m result [.bytes kind r] [r.allocation] := by
   have fresh := allocateHome_fresh _ _ _ _ _ h
   refine ⟨⟨fresh.1, ?_⟩, allocateHome_owned _ _ _ _ _ h,
-    allocateHome_preserves_caller_memory _ _ _ _ _ h, ?_,
+    allocateHome_preserves_caller_memory _ _ _ _ _ h, ?_, ?_,
     fun hm => allocateHome_preserves_wellFormed _ _ _ _ _ hm h, ?_, ?_, ?_,
     allocateHome_objectsKept h⟩
   · intro id member
     obtain rfl := List.mem_singleton.mp member
     exact ⟨Nat.le_of_eq fresh.2.1.symm, fresh.2.2⟩
+  · unfold allocateHome at h
+    cases ha : allocate m ⟨.frame activation, ⟨width, alignment, []⟩, true, [width]⟩ <;>
+      simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure,
+        Except.pure] at h
+    · cases h
+    · cases h
+      unfold allocate at ha
+      repeat' first | rfl | cases ha | split at ha
   · unfold allocateHome at h
     cases ha : allocate m ⟨.frame activation, ⟨width, alignment, []⟩, true, [width]⟩ <;>
       simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure,
@@ -474,6 +524,7 @@ theorem FrameSetup.store {activation : Nat} {before home result : Memory}
     setup.allocations.preserve ext (fun id member => (setup.fresh.2 id member).2),
     setup.below.trans (storeLocal_memory_below above h),
     (storeLocal_staticBindings h).trans setup.registry,
+    (storeLocal_literals h).trans setup.literals,
     fun hm => storeLocal_preserves_wellFormed _ _ _ _ _ (setup.wellFormed hm) h, ?_, ?_,
     (storeLocal_heapBudget h).trans setup.budget,
     setup.objects.trans (storeLocal_objectsKept h)⟩
@@ -487,7 +538,7 @@ theorem FrameSetup.store {activation : Nat} {before home result : Memory}
 
 theorem FrameSetup.root (activation : Nat) (m : Memory) (r : Option ManagedReference)
     (valid : (LocalSlot.root r).ReferencesValid m) : FrameSetup activation m m [.root r] [] :=
-  ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id,
+  ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, rfl, id,
     fun _ slot member => by obtain rfl := List.mem_singleton.mp member; exact valid,
     fun slot member => by obtain rfl := List.mem_singleton.mp member; trivial, rfl, .refl _⟩
 
@@ -495,7 +546,7 @@ theorem FrameSetup.root (activation : Nat) (m : Memory) (r : Option ManagedRefer
 theorem FrameSetup.object (activation : Nat) (m : Memory) (r : Option ManagedReference)
     (valid : (LocalSlot.object r).ReferencesValid m) :
     FrameSetup activation m m [.object r] [] :=
-  ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id,
+  ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, rfl, id,
     fun _ slot member => by obtain rfl := List.mem_singleton.mp member; exact valid,
     fun slot member => by obtain rfl := List.mem_singleton.mp member; trivial, rfl, .refl _⟩
 
@@ -507,12 +558,12 @@ theorem makeLocal_setup (m result : Memory) (activation : Nat) (kind : CIL.Local
   split at h
   · split at h <;> first
       | (solve | cases h)
-      | (cases h; exact ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id,
+      | (cases h; exact ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, rfl, id,
           by simp [SlotsReferencesValid, LocalSlot.ReferencesValid],
           by simp [LocalSlot.Above], rfl, .refl _⟩)
   · split at h <;> first
       | (solve | cases h)
-      | (cases h; exact ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id,
+      | (cases h; exact ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, rfl, id,
           by simp [SlotsReferencesValid, LocalSlot.ReferencesValid],
           by simp [LocalSlot.Above], rfl, .refl _⟩)
   · rename_i element
@@ -521,7 +572,7 @@ theorem makeLocal_setup (m result : Memory) (activation : Nat) (kind : CIL.Local
       · cases h
       rename_i width
       cases h
-      refine ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id, ?_, ?_, rfl,
+      refine ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, rfl, id, ?_, ?_, rfl,
         .refl _⟩
       · intro _ entry member
         obtain rfl := List.mem_singleton.mp member
@@ -530,7 +581,7 @@ theorem makeLocal_setup (m result : Memory) (activation : Nat) (kind : CIL.Local
         obtain rfl := List.mem_singleton.mp member
         trivial
     · cases h
-      exact ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id,
+      exact ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, rfl, id,
         by simp [SlotsReferencesValid, LocalSlot.ReferencesValid],
         by simp [LocalSlot.Above], rfl, .refl _⟩
     · cases h
@@ -540,8 +591,8 @@ theorem makeLocal_setup (m result : Memory) (activation : Nat) (kind : CIL.Local
     · rename_i widthValid
       split at h
       · cases h
-        refine ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id, ?_, ?_, rfl,
-          .refl _⟩
+        refine ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, rfl, id, ?_, ?_,
+          rfl, .refl _⟩
         · intro _ entry member
           obtain rfl := List.mem_singleton.mp member
           simp_all [LocalSlot.ReferencesValid, SpanView.validate, Bind.bind, Except.bind,
@@ -550,7 +601,7 @@ theorem makeLocal_setup (m result : Memory) (activation : Nat) (kind : CIL.Local
           obtain rfl := List.mem_singleton.mp member
           trivial
       · cases h
-        exact ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id,
+        exact ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, rfl, id,
           by simp [SlotsReferencesValid, LocalSlot.ReferencesValid],
           by simp [LocalSlot.Above], rfl, .refl _⟩
       · cases h
@@ -606,7 +657,7 @@ theorem makeLocals_setup (m result : Memory) (activation : Nat) (kinds : List CI
 
 theorem FrameSetup.opaque128 (activation : Nat) (m : Memory) (value : Option Opaque128Value) :
     FrameSetup activation m m [.opaque128 value] [] :=
-  ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id,
+  ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, rfl, id,
     fun _ slot member => by obtain rfl := List.mem_singleton.mp member; trivial,
     fun slot member => by obtain rfl := List.mem_singleton.mp member; trivial, rfl, .refl _⟩
 

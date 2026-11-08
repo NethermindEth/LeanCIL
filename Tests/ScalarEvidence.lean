@@ -654,6 +654,18 @@ example : scalarEmissionMatches #[] none (i 125 samplesField) [.array .signed32,
 example : scalarEmissionMatches #[] none (i 125 samplesField) [.object, .object]
     (.memory (.setArrayField node 8 .unsigned64)) = false := by decide
 
+-- `ldstr` loads exactly its own text, nothing else loads a literal, and a folded throw's
+-- message emits nothing.
+example : scalarEmissionMatches #[] none (i 114 (.text "a")) []
+    (.memory (.stringLiteral "a")) = true := by decide
+example : scalarEmissionMatches #[] none (i 114 (.text "a")) []
+    (.memory (.stringLiteral "b")) = false := by decide
+example : scalarEmissionMatches #[] none (i 0) [] (.memory (.stringLiteral "a")) = false := by
+  decide
+example : scalarEmissionMatches #[] (some .interior) (i 114 (.text "a")) []
+    (.memory (.stringLiteral "a")) = false := by decide
+example : scalarEmissionMatches #[] none (i 114 (.text "a")) [] .nop = false := by decide
+
 -- Size constants are the only uncovered literal producers; primitive widths are bound here.
 private def sizeRaw (instruction : RawInstruction) := raw [instruction, i 38, i 2, i 42] [word]
 private def sizeStates : ScalarCertificate := [some [], some [.word32], some [], some [.word64]]

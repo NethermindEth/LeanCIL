@@ -1,5 +1,6 @@
 import CIL.Safety.MethodRenaming
 import CIL.Safety.StaticBindingBounds
+import CIL.Safety.LiteralBindings
 import CIL.Safety.ReturnReferences
 import CIL.Safety.RenamedMemoryBelow
 import CIL.Safety.LocalLoadRenaming
@@ -906,8 +907,8 @@ theorem invoke_rename_scalars (transport : StepTransport)
     {sourceProgram targetProgram : CIL.Program}
     (programs : ProgramRenaming sourceProgram targetProgram)
     {initial final : Memory} (formed : initial.WellFormed)
-    (statics : initial.StaticBindingsBounded) {fuel method : Nat} {arguments : List Value}
-    {values : List CIL.Value}
+    (statics : initial.StaticBindingsBounded) (literals : initial.LiteralsBounded)
+    {fuel method : Nat} {arguments : List Value} {values : List CIL.Value}
     (success : invoke sourceProgram fuel method arguments initial =
       .ok (final, values.map Value.scalar)) :
     ∃ targetFinal, invoke targetProgram fuel method arguments initial =
@@ -915,7 +916,7 @@ theorem invoke_rename_scalars (transport : StepTransport)
       BytesBelow initial.nextIdentity final targetFinal ∧
       SlotsAgreeBelow initial.nextIdentity final targetFinal := by
   obtain ⟨later, after, targetFinal, _, _, memory, targetSuccess⟩ :=
-    invoke_rename_below transport programs (Memory.RenamedBelow.refl initial Eq)
+    invoke_rename_below transport programs (Memory.RenamedBelow.refl initial Eq literals)
       formed formed statics success
   rw [AllocationRenaming.identity_values] at targetSuccess
   simp only [List.map_map, Function.comp_def, AllocationRenaming.value] at targetSuccess
@@ -927,12 +928,13 @@ theorem Raises.rename (transport : StepTransport)
     {sourceProgram targetProgram : CIL.Program}
     (programs : ProgramRenaming sourceProgram targetProgram)
     {initial : Memory} (formed : initial.WellFormed) (statics : initial.StaticBindingsBounded)
-    {method : Nat} {arguments : List Value} (argumentValues : ValuesValid initial arguments)
+    (literals : initial.LiteralsBounded) {method : Nat} {arguments : List Value}
+    (argumentValues : ValuesValid initial arguments)
     {exception : String} (raised : Raises sourceProgram method arguments initial exception) :
     Raises targetProgram method arguments initial exception := by
   obtain ⟨fuel, fault, failed, thrown⟩ := raised
   have targetFailed := invoke_throw_rename transport programs
-    (Memory.Renamed.refl initial Eq) formed formed statics argumentValues failed thrown
+    (Memory.Renamed.refl initial Eq literals) formed formed statics argumentValues failed thrown
   rw [AllocationRenaming.identity_values] at targetFailed
   exact ⟨fuel, fault, targetFailed, thrown⟩
 #print axioms Raises.rename

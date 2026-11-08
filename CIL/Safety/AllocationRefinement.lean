@@ -15,15 +15,15 @@ theorem ProgramRenaming.invoke_scalars
     {sourceProgram targetProgram : CIL.Program}
     (programs : ProgramRenaming sourceProgram targetProgram)
     {initial final : Memory} (formed : initial.WellFormed)
-    (statics : initial.StaticBindingsBounded) {fuel method : Nat} {arguments : List Value}
-    {values : List CIL.Value}
+    (statics : initial.StaticBindingsBounded) (literals : initial.LiteralsBounded)
+    {fuel method : Nat} {arguments : List Value} {values : List CIL.Value}
     (success : invoke sourceProgram fuel method arguments initial =
       .ok (final, values.map Value.scalar)) :
     ∃ targetFinal, invoke targetProgram fuel method arguments initial =
       .ok (targetFinal, values.map Value.scalar) ∧
       BytesBelow initial.nextIdentity final targetFinal ∧
       SlotsAgreeBelow initial.nextIdentity final targetFinal :=
-  invoke_rename_scalars StepRenaming.stepTransport programs formed statics success
+  invoke_rename_scalars StepRenaming.stepTransport programs formed statics literals success
 #print axioms ProgramRenaming.invoke_scalars
 
 /-- A caller-prefix postcondition transfers with exact scalar outputs despite private target homes.
@@ -32,8 +32,8 @@ theorem ProgramRenaming.invoke_confined
     {sourceProgram targetProgram : CIL.Program}
     (programs : ProgramRenaming sourceProgram targetProgram)
     {initial final : Memory} (formed : initial.WellFormed)
-    (statics : initial.StaticBindingsBounded) {fuel method : Nat} {arguments : List Value}
-    {values : List CIL.Value}
+    (statics : initial.StaticBindingsBounded) (literals : initial.LiteralsBounded)
+    {fuel method : Nat} {arguments : List Value} {values : List CIL.Value}
     (success : invoke sourceProgram fuel method arguments initial =
       .ok (final, values.map Value.scalar))
     (preserved : MemoryBelow initial.nextIdentity initial final) :
@@ -41,7 +41,7 @@ theorem ProgramRenaming.invoke_confined
       .ok (targetFinal, values.map Value.scalar) ∧
       MemoryBelow initial.nextIdentity initial targetFinal := by
   obtain ⟨targetFinal, finished, bytes, agree⟩ :=
-    programs.invoke_scalars formed statics success
+    programs.invoke_scalars formed statics literals success
   exact ⟨targetFinal, finished, agree.confined bytes formed (Nat.le_refl _) preserved⟩
 #print axioms ProgramRenaming.invoke_confined
 
@@ -51,10 +51,11 @@ theorem ProgramRenaming.raises
     {sourceProgram targetProgram : CIL.Program}
     (programs : ProgramRenaming sourceProgram targetProgram)
     {initial : Memory} (formed : initial.WellFormed) (statics : initial.StaticBindingsBounded)
-    {method : Nat} {arguments : List Value} (argumentValues : ValuesValid initial arguments)
+    (literals : initial.LiteralsBounded) {method : Nat} {arguments : List Value}
+    (argumentValues : ValuesValid initial arguments)
     {exception : String} (raised : Raises sourceProgram method arguments initial exception) :
     Raises targetProgram method arguments initial exception :=
-  raised.rename StepRenaming.stepTransport programs formed statics argumentValues
+  raised.rename StepRenaming.stepTransport programs formed statics literals argumentValues
 #print axioms ProgramRenaming.raises
 
 /-- Scalar contracts transfer unchanged when their precondition establishes memory readiness and
@@ -64,7 +65,7 @@ theorem MethodContract.Holds.of_allocationRenaming {Input Output : Type}
     {method : Nat} (holds : contract.Holds sourceProgram method)
     (programs : ProgramRenaming sourceProgram targetProgram)
     (ready : ∀ input initial, contract.pre input initial →
-      initial.WellFormed ∧ initial.StaticBindingsBounded)
+      initial.WellFormed ∧ initial.StaticBindingsBounded ∧ initial.LiteralsBounded)
     (scalarResults : ∀ input initial final output, contract.pre input initial →
       contract.post input initial final output →
       ∃ values : List CIL.Value, contract.results output = values.map Value.scalar)
@@ -80,9 +81,9 @@ theorem MethodContract.Holds.of_allocationRenaming {Input Output : Type}
     holds input initial permitted
   obtain ⟨scalars, scalarEncoding⟩ := scalarResults input initial final output permitted post
   rw [encoded, scalarEncoding] at success
-  obtain ⟨formed, statics⟩ := ready input initial permitted
+  obtain ⟨formed, statics, literals⟩ := ready input initial permitted
   obtain ⟨targetFinal, targetSuccess, related, agree⟩ :=
-    programs.invoke_scalars formed statics success
+    programs.invoke_scalars formed statics literals success
   have targetGrowth :=
     (invoke_preserves_caller_allocations _ _ _ _ _ _ _ targetSuccess).next
   refine ⟨fuel, targetFinal, scalars.map Value.scalar, targetSuccess, ?_,
@@ -104,19 +105,20 @@ theorem MethodContract.Holds.of_allocationRenaming {Input Output : Type}
 #print axioms MethodContract.Holds.of_allocationRenaming
 
 /-- `contract` from the initial memory every caller holds: well-formed, with each static binding
-    naming an issued allocation. `of_allocationRenaming` transfers it whatever `contract.pre` says
-    about memory as a whole. -/
+    and string literal naming an issued allocation. `of_allocationRenaming` transfers it whatever
+    `contract.pre` says about memory as a whole. -/
 def MethodContract.fromReadyMemory {Input Output : Type} (contract : MethodContract Input Output) :
     MethodContract Input Output :=
   { contract with
     pre := fun input initial =>
-      initial.WellFormed ∧ initial.StaticBindingsBounded ∧ contract.pre input initial }
+      initial.WellFormed ∧ initial.StaticBindingsBounded ∧ initial.LiteralsBounded ∧
+        contract.pre input initial }
 
 /-- A contract holds from ready memory, since ready memory meets its own precondition. -/
 theorem MethodContract.Holds.fromReadyMemory {Input Output : Type}
     {contract : MethodContract Input Output} {program : CIL.Program} {method : Nat}
     (holds : contract.Holds program method) : contract.fromReadyMemory.Holds program method :=
-  fun input initial ready => holds input initial ready.2.2
+  fun input initial ready => holds input initial ready.2.2.2
 #print axioms MethodContract.Holds.fromReadyMemory
 
 end CIL.Safety

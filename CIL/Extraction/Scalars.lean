@@ -472,6 +472,14 @@ private def objectFieldMatches (instruction : RawInstruction) (stack : List Scal
       offset == objectFieldOffset index
   | _, _, _, _ => false
 
+/-- Only `ldstr` loads a literal, and only its own text; inside a folded throw it emits nothing. -/
+private def stringLiteralMatches (role : Option FoldRole) (instruction : RawInstruction)
+    (emitted : Op) : Bool :=
+  match instruction.opcode, instruction.operand, emitted with
+  | 114, .text _, .nop => role ∈ [some .head, some .interior]
+  | 114, .text text, .memory (.stringLiteral actual) => role == none && text == actual
+  | _, _, _ => false
+
 /-- Covered opcodes emit exactly their encoding, and a class type test only from `castclass`
     (throwing) or `isinst` on an object. Elsewhere only a decided type test's word,
     a size constant or an exact runtime query may emit a scalar operation. -/
@@ -522,6 +530,9 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
     | _, _ => false
   else if let some helper := unsafeReferenceHelper instruction then helper.matches emitted
   else if arrayEmission emitted then arrayMatches instruction stack emitted
+  else if instruction.opcode == 114 ||
+      (match emitted with | .memory (.stringLiteral _) => true | _ => false) then
+    stringLiteralMatches role instruction emitted
   else if instruction.opcode == 20 && role ∈ [some .head, some .interior] then
     instruction.operand == .none && match emitted with | .nop => true | _ => false
   else if objectFieldSite instruction emitted then objectFieldMatches instruction stack emitted
@@ -809,6 +820,10 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
   if role matches some (.result _) then
     let _ :: _ :: tail := stack | none
     return .word32 :: tail
+  -- A literal outside a folded throw is an object; a folded throw's message is never a value.
+  if opcode == 114 && role == none then
+    let .text _ := instruction.operand | none
+    return .object :: stack
   if opcode == 65030 then
     let .call site := instruction.operand | none
     let signature : ManagedSignature :=

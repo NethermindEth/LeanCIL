@@ -47,6 +47,10 @@ theorem caller_formed : caller.WellFormed := by
   case slots => exact fun _ _ _ held => nomatch held
 #print axioms caller_formed
 
+/-- The caller binds no string literals. -/
+theorem caller_literals : caller.LiteralsBounded := fun _ member => nomatch member
+#print axioms caller_literals
+
 /-- A one-byte local home carrying its frame's activation label. -/
 def home (activation : Nat) : Allocation := ⟨.frame activation, ⟨1, 1, []⟩, true, []⟩
 
@@ -60,7 +64,7 @@ theorem private_then_paired : ∃ privateMemory sourceAfter targetAfter,
     allocate privateMemory (home 2) = .ok (2, targetAfter) ∧
     MemoryBelow 1 caller targetAfter ∧ sourceAfter.nextIdentity = 2 ∧
     targetAfter.nextIdentity = 3 := by
-  have initial := Memory.RenamedBelow.refl caller scopes
+  have initial := Memory.RenamedBelow.refl caller scopes caller_literals
   obtain ⟨privateMemory, privateAllocated, privateRelated⟩ :=
     initial.skipTarget caller_formed (home 1) (by decide)
   have privateFormed := allocate_preserves_wellFormed caller privateMemory (home 1) 1
@@ -137,7 +141,8 @@ theorem interleaved_frames :
       Frame.Renamed indices later (enterScopes Eq 1 1) sourceFrame targetFrame := by
   have selected : indices.Selects Eq sourceBody.localKinds targetBody.localKinds :=
     .skip CIL.LocalKind.word32 (.keep rfl (.skip CIL.LocalKind.word32 .nil))
-  exact (Memory.Renamed.refl caller Eq).enterFrameUnmodeled caller_formed caller_formed
+  exact (Memory.Renamed.refl caller Eq caller_literals).enterFrameUnmodeled caller_formed
+    caller_formed
     (by simp [caller]) entry_ready.1 entry_ready.2 indices selected [] []
 #print axioms interleaved_frames
 
@@ -179,7 +184,8 @@ theorem initialized_helper_frames :
   have sourceEntry : ∃ frame after, enterFrame initializedSource [] caller = .ok (frame, after) :=
     ⟨_, _, rfl⟩
   obtain ⟨frame, after, entered⟩ := sourceEntry
-  exact (Memory.Renamed.refl caller Eq).enterFrameInitialized caller_formed caller_formed
+  exact (Memory.Renamed.refl caller Eq caller_literals).enterFrameInitialized caller_formed
+    caller_formed
     (by simp [caller]) sourceReady targetReady indices selected [] [] entered
 #print axioms initialized_helper_frames
 

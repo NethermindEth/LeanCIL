@@ -6,8 +6,8 @@
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
-// Strings as opaque object references: proofs that they are passed, returned and stored unchanged, and the named
-// rejection of every operation that would read through one or address its root.
+// Strings as opaque object references: proofs that they are passed, returned, stored and loaded as literals, and the
+// named rejection of every operation that would read through one, address its root or load an unencodable literal.
 using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Strings");
@@ -16,14 +16,16 @@ Directory.CreateDirectory(root);
 foreach (var (proof, entry) in new[]
 {
     ("StringValues", "Strings::Pick(System.Boolean,System.String,System.String)"),
-    ("StringLabel", "Strings::Relabel(Examples.Labelled,System.String)")
+    ("StringLabel", "Strings::Relabel(Examples.Labelled,System.String)"),
+    ("StringLiterals", "Strings::SameText()"),
+    ("StringDefault", "Strings::OrNone(System.String)")
 })
 {
     verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));
     Console.WriteLine($"PASS {proof}: {entry}");
 }
 
-foreach (var mutation in new[] { "read", "argumentAddress", "localAddress", "byref", "modified" })
+foreach (var mutation in new[] { "read", "surrogate", "argumentAddress", "localAddress", "byref", "modified" })
 {
     var output = Path.Combine(root, "Reject-" + mutation);
     Directory.CreateDirectory(output);
@@ -44,6 +46,11 @@ foreach (var mutation in new[] { "read", "argumentAddress", "localAddress", "byr
                 il.InsertBefore(start, il.Create(OpCodes.Call, empty));
                 il.InsertBefore(start, il.Create(OpCodes.Pop));
                 expected = "Rejected external call: System.Boolean System.String::IsNullOrEmpty(System.String)";
+                break;
+            case "surrogate":
+                il.InsertBefore(start, il.Create(OpCodes.Ldstr, "\uD800"));
+                il.InsertBefore(start, il.Create(OpCodes.Pop));
+                expected = "Unsupported string literal: a surrogate, backspace or form feed";
                 break;
             case "argumentAddress":
                 il.InsertBefore(start, il.Create(OpCodes.Ldarga_S, method.Parameters[1]));
@@ -75,4 +82,4 @@ foreach (var mutation in new[] { "read", "argumentAddress", "localAddress", "byr
         throw new InvalidOperationException($"Incorrect string rejection: {mutation}\n{result.Output}");
     Console.WriteLine($"PASS string rejection: {mutation}");
 }
-Console.WriteLine("PASS strings: passed, returned and stored unchanged, and named rejection of reads and addresses");
+Console.WriteLine("PASS strings: passed, returned, stored and loaded as literals; reads and addresses rejected by name");

@@ -49,6 +49,10 @@
 - `ClassTests` tests and casts an animal: `DogTest.lean` proves `animal is Dog` for a `Dog`, a
   `Bird` and null, and `DogCast.lean` proves that `(Dog)animal` returns a `Dog` and null unchanged
   and throws `InvalidCastException` for a `Bird`.
+- `Strings` passes, stores and returns strings as opaque references (`StringValues.lean`,
+  `StringLabel.lean`). `StringLiterals.lean` proves two loads of one literal are one object, and
+  `StringDefault.lean` proves `label ?? "none"` returns the label or the bound `"none"` object;
+  both show an unbound literal stops as unsupported rather than loading null.
 
 Concrete example proofs establish their displayed inputs. Only explicitly universally quantified theorems claim arbitrary-input correctness. `CheckedAdd64`, `Choose` and `GenericIdentity` quantify caller memory and prove it unchanged. `Struct` quantifies well-formed caller memory and proves `MemoryBelow` preservation of the caller's storage. Other examples fix the caller memory to `CIL.Safety.Memory.empty` or to the 8-byte `callerMemory` the file defines; argument quantification alone does not imply arbitrary caller memory. The allocating generic instance wrapper retains a separate fixed-memory check in `GenericInstance.lean`.
 

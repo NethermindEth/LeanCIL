@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -243,6 +244,7 @@ internal static class InstructionTranslation
             Code.Neg => ".neg",
             Code.Ldnull => ".memory .nullObject",
             Code.Castclass or Code.Isinst => ObjectTypes.Test(i),
+            Code.Ldstr => StringLiteral((string)i.Operand),
             Code.Cgt => ".gt",
             Code.Bgt or Code.Bgt_S => $".bgt {Target()}",
             Code.Ble or Code.Ble_S => $".ble {Target()}",
@@ -314,4 +316,13 @@ internal static class InstructionTranslation
         MetadataValidation.LayoutContext? layouts) => MetadataValidation.IsAggregate(type, module)
         ? layouts?.Size(type) ?? MetadataValidation.Layout(type, module, architecture)
         : MetadataValidation.IntegerVectorWidth(type) ?? MetadataValidation.PrimitiveWidth(type);
+
+    // Lean reads a surrogate escape as NUL, which would give distinct literals one key, and has no \b or \f.
+    static string StringLiteral(string text)
+    {
+        var unrepresentable = text.Any(c => char.IsSurrogate(c) || c is '\b' or '\f');
+        if (unrepresentable)
+            throw new InvalidDataException("Unsupported string literal: a surrogate, backspace or form feed");
+        return $".memory (.stringLiteral {JsonSerializer.Serialize(text)})";
+    }
 }

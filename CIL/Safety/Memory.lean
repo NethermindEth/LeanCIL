@@ -87,7 +87,7 @@ structure View where
   deriving DecidableEq, Repr
 
 /-- The whole checked heap: allocation table, byte cells, granted views, the next fresh
-    identity, and the references bound to loaded static fields. -/
+    identity, and the references bound to loaded static fields and to string literals. -/
 structure Memory where
   allocations : AllocationId → Option Allocation
   cells : AllocationId → Nat → Cell
@@ -105,6 +105,10 @@ structure Memory where
   /-- The object reference each reference-typed field of a class instance holds, by allocation
       and field byte offset. No field's bytes encode a reference; zeroed storage holds null. -/
   slots : AllocationId → Nat → ManagedReference := fun _ _ => .null
+  /-- The interned string object `ldstr` loads for each literal text, bound by the caller and
+      never allocated here. One text loads one object (ECMA-335 III.4.16); nothing assumes that
+      distinct texts load distinct objects, or that a literal differs from a caller's string. -/
+  literals : List (String × Reference) := []
 
 /-- Caller memory with no allocations, views or static bindings. It describes a caller that
     passes only scalars, so it grants no storage a method could read or write. -/

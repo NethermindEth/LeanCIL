@@ -22,9 +22,10 @@ structure Memory.RenamedBelow (watermark : Nat) (mapping : AllocationRenaming)
     target.allocations identity = source.allocations identity
 
 /-- The original caller memory satisfies the exact-prefix relation. -/
-theorem Memory.RenamedBelow.refl (memory : Memory) (scopes : Nat → Nat → Prop) :
+theorem Memory.RenamedBelow.refl (memory : Memory) (scopes : Nat → Nat → Prop)
+    (literals : memory.LiteralsBounded) :
     Memory.RenamedBelow memory.nextIdentity (.identity memory.nextIdentity) scopes memory memory :=
-  ⟨Memory.Renamed.refl memory scopes, Nat.le_refl _, Nat.le_refl _, fun _ _ => rfl,
+  ⟨Memory.Renamed.refl memory scopes literals, Nat.le_refl _, Nat.le_refl _, fun _ _ => rfl,
     fun _ _ => rfl⟩
 #print axioms Memory.RenamedBelow.refl
 

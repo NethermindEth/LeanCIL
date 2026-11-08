@@ -283,6 +283,8 @@ internal static class NativeOperands
                         Code.Ldtoken => Kind.Other,
                         Code.Ldnull => Kind.NullObject,
                         Code.Ldelem_Ref when popped[1].Kind is Kind.Object or Kind.NullObject => Kind.Object,
+                        // A folded throw's message is never a value; any other literal is a string object.
+                        Code.Ldstr => Throws.Analyze(method).Operands.Contains(instruction) ? Kind.Other : Kind.Object,
                         Code.Neg or Code.Not => popped[0],
                         // All remaining supported pushi encodings produce int32 (constants,
                         // narrow conversions, sizeof and narrow indirect loads).

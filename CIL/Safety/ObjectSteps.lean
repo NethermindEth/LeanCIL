@@ -6,13 +6,14 @@ import CIL.Safety.ObjectAllocationLemmas
 
 `cil_step` equations for the instructions that observe class instance references: identity
 comparison (`ceq`, `beq`, `bne.un`), presence (`cgt.un` against null, `brtrue`, `brfalse`),
-`isinst` and `castclass` (`objectTest`, decided by a `runtimeTypeOf` fact) and
-`ldnull`, `ldfld`/`stfld` of scalar class fields, and `newobj` of a class, which calls the
-constructor with a fresh instance that `allocateObject_ok` or `allocateObject_insufficient`
-decides, and `callvirt` of a non-virtual method, which calls with a live receiver and throws
-`NullReferenceException` on a null one (`receiverCall`), and `callvirt` of a virtual method,
-which enters the body its dispatch table lists for the receiver's runtime class (`virtualCall`,
-decided by a `runtimeTypeOf` fact). Each states the dispatcher arm of
+`isinst` and `castclass` (`objectTest`, decided by a `runtimeTypeOf` fact), `ldnull`,
+`ldstr` of a caller-bound literal (`literalObject_of_lookup`), `ldfld`/`stfld` of scalar class
+fields, and `newobj` of a class, which calls the constructor with a fresh instance that
+`allocateObject_ok` or `allocateObject_insufficient` decides, and `callvirt` of a non-virtual
+method, which calls with a live receiver and throws `NullReferenceException` on a null one
+(`receiverCall`), and `callvirt` of a virtual method, which enters the body its dispatch table
+lists for the receiver's runtime class (`virtualCall`, decided by a `runtimeTypeOf` fact).
+Each states the dispatcher arm of
 `CIL/Safety/Execution.lean` for object operands, so stepping never unfolds the dispatcher. The
 observations themselves unfold through `cil_checked` down to `formObject`, which a caller's
 facts or `formObject_null` decide; field accesses leave `objectFieldAddress` and the byte
@@ -26,6 +27,14 @@ namespace CIL.Safety
     formObject memory .null = .ok (.object .null) := rfl
 
 #print axioms formObject_null
+
+/-- A literal bound to `reference` loads what forming that reference gives. -/
+theorem literalObject_of_lookup {memory : Memory} {text : String} {reference : Reference}
+    (bound : memory.literals.lookup text = some reference) :
+    literalObject memory text = formObject memory (.address reference) := by
+  simp only [literalObject, bound]
+
+#print axioms literalObject_of_lookup
 
 attribute [cil_checked] objectNonNull objectEqual objectAboveNull objectTest
 
@@ -267,6 +276,15 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
     CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any]
   rfl
 
+/-- `ldstr` pushes the object bound to its text and leaves memory unchanged. -/
+@[cil_step high] theorem step_stringLiteral_eq (text : String) (stack : List Value) :
+    step body (.memory (.stringLiteral text)) pc args frame stack memory = do
+      let value ← literalObject memory text
+      return .next (pc + 1) (value :: stack) frame memory := by
+  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+    stringLiteralInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    List.any, Bool.false_eq_true, ite_false, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cases literalObject memory text <;> rfl
 /-- `ldfld` of a scalar field of an object loads it from the field's located address. -/
 theorem step_objectField_eq (owner : CIL.Extraction.TypeExpr)
     (offset width : Nat) (signed : Bool) (fits : width ∈ [1, 2, 4, 8])
@@ -580,6 +598,7 @@ end ObjectEquations
 #print axioms step_nullObject_eq
 #print axioms step_newReferenceArray_i32_eq
 #print axioms step_newReferenceArray_i64_eq
+#print axioms step_stringLiteral_eq
 #print axioms step_objectField_eq
 #print axioms step_setObjectField_i64_eq
 #print axioms step_setObjectField_i32_eq

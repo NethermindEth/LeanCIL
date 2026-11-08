@@ -1033,6 +1033,18 @@ def objectFieldInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     return (← storeArraySlot memory address view element, rest)
   | _, _ => .error .invalidState
 
+/-- The object the caller bound to the literal `text`, which must be a live object. An unbound
+    text is unsupported rather than null, since a literal is never null. -/
+def literalObject (memory : Memory) (text : String) : ExecutionResult Value := do
+  let some reference := memory.literals.lookup text |
+    .error (.unsupported "String literal is not bound by the caller")
+  formObject memory (.address reference)
+
+/-- `ldstr text` pushes the literal's bound object and leaves memory unchanged. -/
+def stringLiteralInstruction (text : String) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  return (memory, (← literalObject memory text) :: stack)
+
 /-- Runs a `.memory` operation on the stack (top first), giving the new memory and stack.
     Operands with unspecified bits are rejected first. The static-field and span-construction
     operations need extracted metadata, so `staticInstruction` runs them and they are
@@ -1063,6 +1075,7 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .referenceArrayLength | .referenceArrayLoad | .referenceArrayStore
   | .arrayField .. | .setArrayField .. =>
     objectFieldInstruction operation stack memory
+  | .stringLiteral text => stringLiteralInstruction text stack memory
   | _ => otherMemoryInstruction operation stack memory
 
 /-- Runs an op on the stack (top first) and memory: loads, stores, typed copies, aggregate

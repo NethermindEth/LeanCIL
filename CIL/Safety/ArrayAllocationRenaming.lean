@@ -20,7 +20,8 @@ theorem Memory.Renamed.arrayMemory {mapping : AllocationRenaming} {scopes : Nat 
       { target with cells := fun other offset =>
           if other == mapping.image identity then ⟨0, true⟩ else target.cells other offset } := by
     refine ⟨related.sourceLimit, related.targetLimit, related.allocations, ?_,
-      related.permissions, related.staticBindings, related.stackLimit, related.heapBudget, related.slots⟩
+      related.permissions, related.staticBindings, related.stackLimit, related.heapBudget,
+      related.slots, related.literals, related.literalsIssued⟩
     intro other otherBound offset
     have same : mapping.image other = mapping.image identity ↔ other = identity :=
       ⟨mapping.injective _ _ otherBound bound, congrArg mapping.image⟩
@@ -89,7 +90,8 @@ theorem Memory.Renamed.withHeapBudget {mapping : AllocationRenaming}
     Memory.Renamed mapping scopes { source with heapBudget := budget }
       { target with heapBudget := budget } :=
   ⟨related.sourceLimit, related.targetLimit, related.allocations, related.cells,
-    related.permissions, related.staticBindings, related.stackLimit, rfl, related.slots⟩
+    related.permissions, related.staticBindings, related.stackLimit, rfl, related.slots,
+    related.literals, related.literalsIssued⟩
 
 #print axioms Memory.Renamed.withHeapBudget
 

@@ -741,6 +741,62 @@ private theorem Memory.Renamed.objectFieldInstructionResult {mapping : Allocatio
     | (split <;> try simp only [*, AllocationRenaming.managedReference, Bind.bind, Except.bind])
 #print axioms Memory.Renamed.objectFieldInstructionResult
 
+/-- Looking up a renamed literal table gives the renamed binding. -/
+theorem lookup_renamedLiterals (bindings : List (String × Reference))
+    (mapping : AllocationRenaming) (text : String) :
+    (bindings.map (fun binding => (binding.1, mapping.reference binding.2))).lookup text =
+      (bindings.lookup text).map mapping.reference := by
+  induction bindings with
+  | nil => rfl
+  | cons binding rest previous =>
+    simp only [List.map_cons, List.lookup]
+    split <;> simp_all
+#print axioms lookup_renamedLiterals
+
+/-- An observable formation of an address cannot fail. -/
+private theorem formObject_observable {memory : Memory} {reference : Reference}
+    (observable : SuccessOrThrow (formObject memory (.address reference))) :
+    ∃ value, formObject memory (.address reference) = .ok value := by
+  revert observable
+  simp only [formObject, checkedAt, Except.mapError, Bind.bind, Except.bind]
+  cases liveAllocation memory reference.allocation with
+  | error fault => intro observable; cases observable
+  | ok allocation =>
+    dsimp only
+    split
+    · split
+      · exact fun _ => ⟨_, rfl⟩
+      · intro observable; cases observable
+    · intro observable; cases observable
+#print axioms formObject_observable
+
+/-- A string literal loads the renamed binding of its text, formed alike. -/
+private theorem Memory.Renamed.stringLiteralInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (formed : source.WellFormed)
+    (text : String) (stack : List Value)
+    (observable : SuccessOrThrow (stringLiteralInstruction text stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (stringLiteralInstruction text stack source)
+      (stringLiteralInstruction text (stack.map mapping.value) target) := by
+  unfold stringLiteralInstruction literalObject at observable ⊢
+  rw [related.literals, lookup_renamedLiterals]
+  cases bound : source.literals.lookup text with
+  | none => simp only [bound] at observable; cases observable
+  | some reference =>
+    simp only [bound, Option.map_some] at observable ⊢
+    obtain ⟨value, sourceFormed⟩ := formObject_observable (SuccessOrThrow.bind_left observable)
+    have issued : reference.allocation < mapping.sourceLimit := by
+      rw [related.sourceLimit]
+      exact formObject_issued sourceFormed formed
+    apply (related.formObject (.address reference) issued).bind
+    intro first second same
+    subst second
+    exact .ok ⟨related, rfl⟩
+#print axioms Memory.Renamed.stringLiteralInstructionResult
+
 /-- Ordinary memory effects transport independently of the whole-span dispatch families. -/
 private theorem Memory.Renamed.otherMemoryInstructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -1095,6 +1151,7 @@ theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
     · exact related.objectFieldInstructionResult _ formed _ bounds observable
     · exact related.objectFieldInstructionResult _ formed _ bounds observable
     · exact related.objectFieldInstructionResult _ formed _ bounds observable
+    · exact related.stringLiteralInstructionResult formed _ _ observable
     · exact related.otherMemoryInstructionResult _ formed _ bounds observable
 
 #print axioms Memory.Renamed.memoryInstructionResult

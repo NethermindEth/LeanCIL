@@ -177,7 +177,7 @@ theorem Memory.Equivalent.setSlot {m n : Memory} (same : m.Equivalent n) (field 
     (value : ManagedReference) :
     (CIL.Safety.setSlot m field value).Equivalent (CIL.Safety.setSlot n field value) :=
   ⟨same.allocations, same.cells, same.permissions, same.nextIdentity, same.staticBindings,
-    same.stackLimit, same.heapBudget, by simp only [CIL.Safety.setSlot, same.slots]⟩
+    same.stackLimit, same.heapBudget, by simp only [CIL.Safety.setSlot, same.slots], same.literals⟩
 #print axioms Memory.Equivalent.setSlot
 
 /-- A field reference load reads the slot, authority and metadata equivalent memories share. -/
@@ -306,6 +306,22 @@ private theorem Memory.Equivalent.objectFieldInstruction {m n : Memory} (same : 
        exact .ok ⟨related, rfl⟩)
     | split
 #print axioms Memory.Equivalent.objectFieldInstruction
+
+/-- A string literal loads the same bound object from equivalent memories. -/
+private theorem Memory.Equivalent.stringLiteralInstruction {m n : Memory} (same : m.Equivalent n)
+    (text : String) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (stringLiteralInstruction text stack m)
+      (stringLiteralInstruction text stack n) := by
+  unfold CIL.Safety.stringLiteralInstruction CIL.Safety.literalObject
+  rw [same.literals]
+  split
+  all_goals first
+    | exact .error _
+    | (rw [same.formObject]
+       apply ResultEquivalent.bind_same
+       intro
+       exact .ok ⟨same, rfl⟩)
+#print axioms Memory.Equivalent.stringLiteralInstruction
 
 /-- Observations depend only on allocation metadata and preserve equivalent memories. -/
 theorem Memory.Equivalent.viewObservationInstruction {m n : Memory} (same : m.Equivalent n)
@@ -438,6 +454,7 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     · exact same.objectFieldInstruction _ _
     · exact same.objectFieldInstruction _ _
     · exact same.objectFieldInstruction _ _
+    · exact same.stringLiteralInstruction _ _
     · exact same.otherMemoryInstruction _ _
 
 theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)

@@ -852,6 +852,25 @@ theorem objectFieldInstruction_contract (operation : CIL.MemoryOp)
     | split at executed
 #print axioms objectFieldInstruction_contract
 
+/-- A string literal leaves memory unchanged and pushes a formed object reference. -/
+theorem stringLiteralInstruction_contract (text : String)
+    (stack values : List Value) (memory result : Memory)
+    (executed : stringLiteralInstruction text stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold stringLiteralInstruction literalObject at executed
+  cases bound : memory.literals.lookup text with
+  | none => simp only [bound, Bind.bind, Except.bind] at executed; cases executed
+  | some reference =>
+    cases formed : formObject memory (.address reference) with
+    | error fault => simp only [bound, formed, Bind.bind, Except.bind] at executed; cases executed
+    | ok value =>
+      simp only [bound, formed, Bind.bind, Except.bind, Pure.pure, Except.pure, Except.ok.injEq,
+        Prod.mk.injEq] at executed
+      obtain ⟨rfl, rfl⟩ := executed
+      exact InstructionContract.of_effect (.unchanged _)
+        (fun retained => ValuesValid.cons (formObject_result_valid formed) retained)
+#print axioms stringLiteralInstruction_contract
+
 set_option maxHeartbeats 800000 in
 /-- The remaining memory operations preserve their checked effects and stack validity. -/
 private theorem otherMemoryInstruction_contract (operation : CIL.MemoryOp)
@@ -1039,6 +1058,7 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
     · exact objectFieldInstruction_contract _ _ _ _ _ h
     · exact objectFieldInstruction_contract _ _ _ _ _ h
     · exact objectFieldInstruction_contract _ _ _ _ _ h
+    · exact stringLiteralInstruction_contract _ _ _ _ _ h
     · exact otherMemoryInstruction_contract _ _ _ _ _ h
 
 set_option maxHeartbeats 800000 in

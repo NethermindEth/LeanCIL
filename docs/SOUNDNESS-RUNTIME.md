@@ -448,6 +448,28 @@ in its slot and is read and written as a class-typed field is, the raw field typ
 an array of a class. Multi-dimensional arrays, arrays of interfaces, `object`, generic
 instantiations or value types other than the admitted value arrays are rejected.
 
+## String literals
+
+`ldstr` pushes the object `Memory.literals` binds to its text; the model never allocates one
+([StringLiterals](../Examples/Proofs/StringLiterals.lean),
+[StringDefault](../Examples/Proofs/StringDefault.lean)). Execution never changes the bindings
+(`invoke_literals`),
+so within a run one text always loads one object, and two loads of it are identical. That is
+ECMA-335 III.4.16. Roslyn marks assemblies `CompilationRelaxations(NoStringInterning)`, which
+lets a runtime drop that guarantee, so the claim rests on CoreCLR: in .NET 10,
+`StringLiteralMap::GetStringLiteral` (`src/coreclr/vm/stringliteralmap.cpp`) resolves every
+literal through the one `SystemDomain::GetGlobalStringLiteralMap()`, collectible modules
+included, and never consults the relaxation.
+
+The model claims nothing further. Distinct texts may bind one object, and a literal may be the
+same object as a caller's string, as interning that string at run time makes it. The bound object must form as a
+live object; an unbound text stops as unsupported rather than loading null, since a literal is
+never null. A literal is an opaque string like any other, so nothing reads its length or
+characters. Each bound literal must name an issued identity (`Memory.LiteralsBounded`) for a
+contract to transfer across [allocation renaming](PROOFS-BINDING.md), since a literal names the
+caller's object and not one the method allocates. The extractor rejects a text containing a
+surrogate, backspace or form feed, which a Lean string literal cannot carry exactly.
+
 ## Sequential struct layout
 
 Admitted layouts are reference-free and bounded by 65,536 bytes. Sequential fields include supported
