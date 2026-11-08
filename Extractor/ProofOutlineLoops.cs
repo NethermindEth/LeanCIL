@@ -262,6 +262,12 @@ internal static partial class ProofOutline
             lean.Line(binding + Quoted(callee.FullName, binding.Length));
             lean.Line("  from Extracted.method0");
             lean.Line();
+            // An object callee whose body the outline reads gets the contract that body meets, proved.
+            if (inputs.Any(input => input.Object is not null) && Summarize(extraction, index, name, views) is { } read)
+            {
+                CalleeContract(lean, read, name);
+                return;
+            }
             var single = inputs.Length == 1 ? Variable(declared[0].Name) : "input";
             string Input(int position) => inputs.Length == 1 ? single : Projection("input", position, inputs.Length);
             var inputType = inputs.Length == 0 ? "Unit" : Product(inputs.Select(input => input.Type));

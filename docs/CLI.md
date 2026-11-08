@@ -239,7 +239,9 @@ comment saying which obligation it is:
   tactics tag: `invariant` and `measure` where an iteration continues, `postcondition` where it
   returns, and `precondition` at a call.
 - A call in the loop gets a `MethodContract` for the callee, with `pre` and `post` to replace, and a
-  `Holds` theorem that steps the callee when it is arithmetic on its arguments.
+  `Holds` theorem that steps the callee when it is arithmetic on its arguments. A callee over
+  objects whose body a straight-line outline steps (see below) gets the contract read from its body
+  instead, proved, leaving only its precondition at each call.
 - An instance of an admitted class is a `Reference`, and an instance method binds `this` under its
   class's name in lower case, such as `account`, or as `receiver` for a compiler-generated class.
   A parameter named like a hypothesis or memory the proof introduces, such as `held` or `stored1`,
