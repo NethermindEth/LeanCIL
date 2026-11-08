@@ -115,6 +115,10 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
             Resolve(name);
     }
 
+    /// <summary>Whether <see cref="Resolve(AssemblyNameReference)"/> answers the reference rather than rejecting it.
+    /// </summary>
+    internal bool Resolves(AssemblyNameReference name) => modules.ContainsKey(name.FullName) || Platform(name);
+
     public AssemblyDefinition Resolve(AssemblyNameReference name) => Resolve(name, new ReaderParameters());
 
     public AssemblyDefinition Resolve(AssemblyNameReference name, ReaderParameters parameters)

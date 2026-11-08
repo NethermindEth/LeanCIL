@@ -52,8 +52,11 @@ internal static class VirtualDispatch
     /// </summary>
     internal static string? Unresolvable(Instruction call)
     {
+        // A callee the pins cannot resolve, such as a contract import, is left to the rejections that name it.
         if (call is not { OpCode.Code: Code.Callvirt, Operand: MethodReference reference } ||
             call.Previous?.OpCode.Code == Code.Constrained || ObjectTypes.ReceiverCall(call) ||
+            reference.DeclaringType.Scope is AssemblyNameReference scope &&
+                PinnedAssemblies.Active is { } pins && !pins.Resolves(scope) ||
             reference.Resolve() is not { IsVirtual: true } slot)
             return null;
         if (slot.DeclaringType.IsInterface)
