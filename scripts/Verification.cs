@@ -752,9 +752,12 @@ partial class Program : IDisposable
         IReadOnlyCollection<KeyValuePair<string, string>> environment)
     {
         var given = environment.ToDictionary(entry => entry.Key, entry => entry.Value);
+        // Lake's paths follow the package's libraries and dependencies, so an edited lakefile or manifest re-asks.
+        var workspace = new[] { "lakefile.toml", "lakefile.lean", "lake-manifest.json" }
+            .Select(name => Path.Combine(cwd, name)).Where(File.Exists).Select(path => path + "=" + Sha(path));
         var key = Path.GetFullPath(cwd) + "\n" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
             string.Join('\0', given.OrderBy(entry => entry.Key, StringComparer.Ordinal)
-                .Select(entry => entry.Key + "=" + entry.Value)))));
+                .Select(entry => entry.Key + "=" + entry.Value).Concat(workspace)))));
         return LakeVariables.GetOrAdd(key, _ =>
         {
             var printed = Execute(["lake", "env"], cwd, environment: given);

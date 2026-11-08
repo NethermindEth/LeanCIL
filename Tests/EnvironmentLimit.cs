@@ -62,6 +62,15 @@ try
     if (!File.Exists(olean)) throw new InvalidOperationException("A fitting Lake environment did not build.");
     Environment.SetEnvironmentVariable(LeanEnvironmentLimitVariable, null);
 
+    Console.WriteLine("Asking Lake again after the package declares another library");
+    // Each library adds its source directory to LEAN_SRC_PATH; a stale answer would undercount the block.
+    int ServeBytes() => EnvironmentBlockBytes(
+        PredictedLeanChildEnvironment(["lake", "serve"], package, new ProcessStartInfo().Environment)!);
+    var before = ServeBytes();
+    File.AppendAllText(Path.Combine(package, "lakefile.toml"), "[[lean_lib]]\nname = \"Second\"\n");
+    if (ServeBytes() <= before)
+        throw new InvalidOperationException("A changed lakefile reused Lake's earlier variables.");
+
     if (OperatingSystem.IsWindows())
         CheckWindowsBoundary();
     else Console.WriteLine("Lean's environment buffer exists only on Windows; skipping the boundary checks");
