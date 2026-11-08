@@ -60,9 +60,10 @@ internal static partial class ProofOutline
             @"\A\.(arg \d+|const32 \S.*|const64 \S.*|add|sub|mul|band|bor|bxor|nop|ret|convI8|convU8|convU4|convI4)\z");
     }
 
-    enum Part { Word, Field, Span }
+    enum Part { Word, Field, Span, Object }
 
-    /// <summary>One value of the loop state: a numeric local, a struct field or a span's suffix.</summary>
+    /// <summary>One value of the loop state: a numeric local, a struct field, a span's suffix or an object
+    /// reference local.</summary>
     sealed record Component(string Name, Part Part, int Width, int Slot, int Offset, Parameter? Span);
 
     /// <summary>A frame slot: a local's home, or a span parameter's home.</summary>
@@ -77,6 +78,7 @@ internal static partial class ProofOutline
     sealed record SpanLength(int Component) : Value;
     sealed record Sliced(int Component) : Value;
     sealed record ReferenceArgument(string Name) : Value;
+    sealed record ObjectTerm(string Term) : Value;
 
     /// <summary>A span's suffix at a point of a path: its view, remaining elements and checked fact.</summary>
     sealed record SpanTerm(string View, string Remaining, string Checked, bool Caseable, string? Head = null,
@@ -165,6 +167,8 @@ internal static partial class ProofOutline
                 }
                 else if (Regex.Match(kind, @"\A\.aggregate (\d+)\z").Success)
                     Add(Aggregate(index, kind, home, name));
+                else if (kind == ".object")
+                    Add(new(index, kind, null, -1, [new(name, Part.Object, 8, index, 0, null)]));
                 else throw Unsupported($"local `{name}` has kind {kind}");
             }
             foreach (var (argument, kind) in homes)
@@ -251,8 +255,12 @@ internal static partial class ProofOutline
         static string Projection(string root, int index, int count) =>
             count == 1 ? root : root + string.Concat(Enumerable.Repeat(".2", index)) + (index == count - 1 ? "" : ".1");
 
-        string ValuesType => Product(components.Select(component => component.Part == Part.Span
-            ? $"SpanSuffix {Memory} {component.Width} false" : WordType(component.Width)));
+        string ValuesType => Product(components.Select(component => component.Part switch
+        {
+            Part.Span => $"SpanSuffix {Memory} {component.Width} false",
+            Part.Object => "ManagedReference",
+            _ => WordType(component.Width)
+        }));
 
         void Contract(Writer lean, int index)
         {
@@ -412,11 +420,16 @@ internal static partial class ProofOutline
                 ? $"the unread suffix of `{component.Name}`" : $"`{component.Name}`"));
             lean.Doc($"The loop's locals at its head: {described}.");
             lean.Line($"abbrev State{(StateBinders.Length > 0 ? " " + StateBinders : "")} :=");
+            string[] SlotTerms(string root) => slots.Select(slot => slot.Home is { } home
+                ? $".bytes {(slot.Kind.Contains(' ') ? $"({slot.Kind})" : slot.Kind)} {home}"
+                : slot.Components[0].Part == Part.Object
+                ? $".object (some {Projection(root, components.IndexOf(slot.Components[0]), components.Count)})"
+                : $".span {slot.Components[0].Width} false " +
+                    $"(some {Projection(root, components.IndexOf(slot.Components[0]), components.Count)}.view)")
+                .ToArray();
             var project = (Component component) =>
                 Projection("values", components.IndexOf(component), components.Count);
-            var slotTerms = slots.Select(slot => slot.Home is { } home
-                ? $".bytes {(slot.Kind.Contains(' ') ? $"({slot.Kind})" : slot.Kind)} {home}"
-                : $".span {slot.Components[0].Width} false (some {project(slot.Components[0])}.view)").ToArray();
+            var slotTerms = SlotTerms("values");
             var remembered = slots.Select(slot => slot.Components[0].Part switch
             {
                 Part.Word => $"some ({ScalarConstructor(slot.Components[0].Width)} {project(slot.Components[0])})",
@@ -443,9 +456,12 @@ internal static partial class ProofOutline
                 throw Unsupported($"its loop at {Location(loop.Latch)} does not test a condition at its back edge");
             string Projected(Component component) =>
                 Projection("state.values", components.IndexOf(component), components.Count);
-            var state = Initial(component => component.Part == Part.Span
-                ? new SpanTerm(Projected(component) + ".view", "", "", false)
-                : new Number(Projected(component), component.Width, Narrow: component.Width < 4));
+            var state = Initial(component => component.Part switch
+            {
+                Part.Span => new SpanTerm(Projected(component) + ".view", "", "", false),
+                Part.Object => new ObjectTerm(Projected(component)),
+                _ => new Number(Projected(component), component.Width, Narrow: component.Width < 4)
+            });
             var operands = Guard(state);
             var stack = operands.AsEnumerable().Reverse().Select(operand => StackValue(operand, state)).ToArray();
             headerParameters = spec.Parameters.Where(parameter => stack.Any(item =>
@@ -461,8 +477,15 @@ internal static partial class ProofOutline
             lean.Line($"  Extracted.method0 at loop.latch matching (· matches .{opName} _)");
             var frame = FrameArguments(component =>
                 Projection("state.values", components.IndexOf(component), components.Count) + ".view", "memory");
-            lean.Wrapped($"  with entry.frame{(frame.Length > 0 ? " " + frame : "")},",
-                [$"[{string.Join(", ", stack)}],", "state.memory"], "");
+            var entryFrame = $"entry.frame{(frame.Length > 0 ? " " + frame : "")}";
+            // An object local's slot changes with each store, so the head names every slot from the state.
+            if (slots.Any(slot => slot.Components[0].Part == Part.Object))
+            {
+                lean.Line($"  with {{ {entryFrame} with");
+                lean.Line($"      locals := [{string.Join(", ", SlotTerms("state.values"))}] }},");
+                lean.Wrapped("   ", [$"[{string.Join(", ", stack)}],", "state.memory"], "");
+            }
+            else lean.Wrapped($"  with {entryFrame},", [$"[{string.Join(", ", stack)}],", "state.memory"], "");
             lean.Line();
             var implicitBinders = string.Join(" ", (spec.Symbolic ? new[] { "{memory : Memory}" } : [])
                 .Concat(Writes ? [$"{{written : {Footprint}}}"] : [])
@@ -494,6 +517,7 @@ internal static partial class ProofOutline
         string StackValue(Value operand, PathState state) => operand switch
         {
             Number number => $".scalar ({ScalarConstructor(number.Width)} {number.Term})",
+            ObjectTerm reference => $".object {reference.Term}",
             SpanLength length =>
                 $".scalar (.i32 (BitVec.ofNat 32 {((SpanTerm)state.State[length.Component]).View}.length))",
             _ => throw Unsupported($"the loop test at {Location(loop.Latch)} reads a value the outline cannot name")
@@ -555,17 +579,24 @@ internal static partial class ProofOutline
                 : "  · have entryFrame := entryFrame []");
             var entry = new PathState
             {
-                Pc = 0, GoalPc = 0, State = components.Select(component => component.Part == Part.Span
-                    ? new SpanTerm(component.Span!.Name, component.Span.ElementsName, component.Span.Name + "Checked",
-                        false)
-                    : (object)new Number("0", component.Width, Literal: true)).ToArray()
+                Pc = 0, GoalPc = 0, State = components.Select(component => component.Part switch
+                {
+                    Part.Span => new SpanTerm(component.Span!.Name, component.Span.ElementsName,
+                        component.Span.Name + "Checked", false),
+                    Part.Object => new ObjectTerm(".null"),
+                    _ => (object)new Number("0", component.Width, Literal: true)
+                }).ToArray()
             };
             EntryPath(lean, entry);
             var intro = Pattern();
             lean.Line($"  rintro ⟨{intro}, current, frame⟩ holds recurse");
-            var iteration = Initial(component => component.Part == Part.Span
-                ? new SpanTerm(component.Name + "View", component.Name + "Remaining", component.Name + "Span", true)
-                : new Number(component.Name, component.Width, Narrow: component.Width < 4));
+            var iteration = Initial(component => component.Part switch
+            {
+                Part.Span => new SpanTerm(component.Name + "View", component.Name + "Remaining",
+                    component.Name + "Span", true),
+                Part.Object => new ObjectTerm(component.Name),
+                _ => new Number(component.Name, component.Width, Narrow: component.Width < 4)
+            });
             // An object stays live through the loop; the loop tactics carry the fact across each store.
             foreach (var instance in spec.Objects)
             {
@@ -617,6 +648,9 @@ internal static partial class ProofOutline
                         break;
                     case SpanTerm span:
                         parts.Add($"⟨{span.View}, {span.Remaining}, {span.Checked}⟩");
+                        break;
+                    case ObjectTerm reference:
+                        parts.Add(reference.Term);
                         break;
                     default:
                         stopReason = value is Unknown unknown ? unknown.What : "a narrow struct field";
@@ -760,6 +794,33 @@ internal static partial class ProofOutline
                 Walk(lean, state, indent);
                 return;
             }
+            if (unary && operands[0] is ObjectTerm reference)
+            {
+                NullTest(lean, state, indent, reference.Term, opName == "brnonzero" ? target : pc + 1,
+                    opName == "brnonzero" ? pc + 1 : target);
+                return;
+            }
+            // Identity of two object references: the object locals and caller instances the walk names.
+            var identities = operands.Select(operand => operand switch
+            {
+                ObjectTerm term => term.Term,
+                ReferenceArgument argument when spec.Parameters.Any(parameter => parameter.Name == argument.Name &&
+                    parameter.Shape == ParameterShape.Object) => $"(.address {argument.Name})",
+                _ => null
+            }).ToArray();
+            if (opName is "beq" or "bne" && identities.All(term => term is not null))
+            {
+                var (identity, equalTaken) =
+                    Body.Test(opName, [$"({identities[0]} : ManagedReference)", identities[1]!]);
+                var same = Side(equalTaken ? target : pc + 1, fact);
+                var different = Side(equalTaken ? pc + 1 : target, fact);
+                lean.Line($"{indent}by_cases {fact} : {identity}");
+                lean.Line($"{indent}· -- {Describe(same.Pc)}");
+                Walk(lean, same, indent + "  ");
+                lean.Line($"{indent}· -- {Describe(different.Pc)}");
+                Walk(lean, different, indent + "  ");
+                return;
+            }
             if (operands.FirstOrDefault(operand => operand is not Number { Narrow: false }) is { } unnamed)
             {
                 Hole(lean, indent, state, $"the test at {Location(pc)} reads {Unnamed(unnamed)}");
@@ -774,6 +835,43 @@ internal static partial class ProofOutline
             Walk(lean, holds, indent + "  ");
             lean.Line($"{indent}· -- {Describe(fails.Pc)}");
             Walk(lean, fails, indent + "  ");
+        }
+
+        /// <summary>Split the goal on whether the object local holding `term` is null and walk each side; the
+        /// instance it may hold is live only by a fact the author proves.</summary>
+        void NullTest(Writer lean, PathState state, string indent, string term, int present, int absent)
+        {
+            PathState Side(int next, string value)
+            {
+                var side = state.Copy();
+                side.Pc = next;
+                for (var index = 0; index < side.State.Length; index++)
+                    if (side.State[index] is ObjectTerm held && held.Term == term)
+                        side.State[index] = new ObjectTerm(value);
+                return side;
+            }
+            if (term == ".null")
+            {
+                Walk(lean, Side(absent, term), indent);
+                return;
+            }
+            // The liveness hole names the loop head's memory, which a call or a home's store replaces.
+            if (!Regex.IsMatch(term, @"\A[A-Za-z][A-Za-z0-9_]*\z") || state.Called || state.Stored)
+            {
+                Hole(lean, indent, state,
+                    $"the null test at {Location(state.Pc)} of an object the outline cannot name");
+                return;
+            }
+            var instance = term + "Object";
+            var live = Side(present, $"(.address {instance})");
+            live.Facts.Add(instance + "Live.formed");
+            lean.Line($"{indent}cases {term} with");
+            lean.Line($"{indent}| null =>");
+            Walk(lean, Side(absent, ".null"), indent + "  ");
+            lean.Line($"{indent}| address {instance} =>");
+            lean.Noted(indent + "  ", $"have {instance}Live : LiveObject current {instance} := sorry",
+                $"`{term}` holds a live instance");
+            Walk(lean, live, indent + "  ");
         }
 
         string Describe(int pc) => pc == loop.Head ? "another iteration"
@@ -804,7 +902,7 @@ internal static partial class ProofOutline
                 if (slot.Components[0].Part == Part.Span && state.Stored)
                     return Stop("a span read after a local store, whose memory the loop tactics hold no span " +
                         "validity in (name it with `LoopFrame.store` and `CheckedSpan.tail_below`)");
-                stack.Add(slot.Components[0].Part == Part.Word ? (Value)state.State[first]
+                stack.Add(slot.Components[0].Part is Part.Word or Part.Object ? (Value)state.State[first]
                     : new LocalValue(slot.Index));
             }
             else if ((match = Regex.Match(op, @"\A\.setLocal (\d+)\z")).Success)
@@ -823,6 +921,8 @@ internal static partial class ProofOutline
                     var name = components[sliced.Component].Name;
                     state.State[first] = new SpanTerm(name + "Sliced", tail, name + "Next", false);
                 }
+                else if (slot.Components[0].Part == Part.Object && value is ObjectTerm)
+                    state.State[first] = value;
                 else return Stop("a store of a value the outline cannot name");
             }
             else if ((match = Regex.Match(op, @"\A\.arg (\d+)\z")).Success)

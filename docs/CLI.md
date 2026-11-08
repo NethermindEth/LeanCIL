@@ -239,7 +239,11 @@ comment saying which obligation it is:
   the loop state carries. The proof applies `invoke_loop_satisfies`, steps the entry to the first
   loop head, splits the iteration where the body branches, and leaves the obligations the loop
   tactics tag: `invariant` and `measure` where an iteration continues, `postcondition` where it
-  returns, and `precondition` at a call.
+  returns, and `precondition` at a call. An object local, such as a list walk's `node`, is a
+  `ManagedReference` of the loop state, and the cutpoint's frame names its slot from the state. A
+  null test of it splits the proof with `cases node`, leaving a hole for the liveness of the
+  instance it holds, and an identity test against another object splits it with
+  `by_cases branch1 : ...`; a load of a reference field into it is a `not outlined:` hole.
 - A call in the loop gets a `MethodContract` for the callee, with `pre` and `post` to replace, and a
   `Holds` theorem that steps the callee when it is arithmetic on its arguments. A callee over
   objects whose body a straight-line outline steps (see below) gets the contract read from its body

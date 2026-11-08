@@ -861,7 +861,8 @@ var outlined = new (string Name, string? Selector)[]
     ("DepositTimes", "Objects::DepositTimes(Examples.Account,System.UInt64,System.UInt32)"),
     ("DepositFrom", "Objects::DepositFrom(Examples.Account,Examples.Account,System.UInt32)"),
     ("Withdraw", "Objects::Withdraw(Examples.Account,System.UInt64)"),
-    ("LinkedValue", "Objects::LinkedValue(Examples.Node,Examples.Node)")
+    ("LinkedValue", "Objects::LinkedValue(Examples.Node,Examples.Node)"),
+    ("IsIdle", "ItemPool::IsIdle(Examples.PooledItem)")
 };
 var outlineTimer = System.Diagnostics.Stopwatch.StartNew();
 var outlineRoot = Path.Combine(root, "Outlines");
@@ -911,6 +912,16 @@ if (!depositFrom.Contains("Account.Balance.Owned initial account", StringCompari
     depositFrom.Contains("Account.Balance.Owned initial source", StringComparison.Ordinal))
     throw new InvalidOperationException("The DepositFrom outline does not ask per-object field facts:\n" + depositFrom);
 Console.WriteLine("PASS a loop outline asks Owned only of the object its callee stores and Readable of the one it reads");
+
+// An object local changes its frame slot at each store, so the head must name the slot from the loop state, and its
+// null test must split the walk rather than stop it.
+var isIdle = File.ReadAllText(Path.Combine(outlineRoot, "IsIdle", "Proof.lean"));
+if (!isIdle.Contains("locals := [.object (some state.values)]", StringComparison.Ordinal) ||
+    !isIdle.Contains("cases node with", StringComparison.Ordinal) ||
+    !isIdle.Contains("by_cases branch1 : ((.address nodeObject) : ManagedReference) = (.address item)",
+        StringComparison.Ordinal))
+    throw new InvalidOperationException("The IsIdle outline does not follow its object local:\n" + isIdle);
+Console.WriteLine("PASS a loop outline carries an object local in its head and splits on its null and identity tests");
 
 // The audit refuses an outline for its holes, whatever the method; one loop shows it end to end.
 var countdownOutline = Path.Combine(root, "Countdown");
