@@ -420,7 +420,7 @@ internal static partial class ProofOutline
 
     /// <summary>The numbered hypotheses and memories an outline's proof introduces after each store, call and
     /// split.</summary>
-    [GeneratedRegex(@"\A(?:stored|framed|held|written|output|called|post|branch|initial|memory)\d*\z")]
+    [GeneratedRegex(@"\A(?:stored|framed|held|written|output|called|post|returned|found|branch|initial|memory)\d*\z")]
     private static partial Regex Generated();
 
     /// <summary>Lean source with two-space indentation and lines kept under 100 characters.</summary>

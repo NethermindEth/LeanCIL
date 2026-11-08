@@ -860,7 +860,8 @@ var outlined = new (string Name, string? Selector)[]
     ("DepositBoth", "Objects::DepositBoth(Examples.Account,Examples.Account,System.UInt64)"),
     ("DepositTimes", "Objects::DepositTimes(Examples.Account,System.UInt64,System.UInt32)"),
     ("DepositFrom", "Objects::DepositFrom(Examples.Account,Examples.Account,System.UInt32)"),
-    ("Withdraw", "Objects::Withdraw(Examples.Account,System.UInt64)")
+    ("Withdraw", "Objects::Withdraw(Examples.Account,System.UInt64)"),
+    ("LinkedValue", "Objects::LinkedValue(Examples.Node,Examples.Node)")
 };
 var outlineTimer = System.Diagnostics.Stopwatch.StartNew();
 var outlineRoot = Path.Combine(root, "Outlines");
@@ -959,8 +960,8 @@ Console.WriteLine("PASS verify refuses the Countdown outline until its holes are
     $"({outlineTimer.Elapsed.TotalSeconds:F0}s for every outline check)");
 
 // Object outlines leave only their specification: once it is written, an instance method's field store, a
-// reference field store, a null test of an argument followed through a local and a split on a field value
-// each verify.
+// reference field store, a null test of an argument followed through a local, a split on a field value and a
+// call to a callee that loads the object a field holds each verify.
 const string storedHole = "sorry -- Postcondition of the returned value, with `held1` the stored fields";
 foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] Fills)[]
 {
@@ -1030,7 +1031,16 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
             "    sorry",
             "simp only [Postcondition, branch1, ↓reduceIte, true_and]\n    exact held1"),
         ("sorry -- Postcondition of the returned value where `branch1` fails",
-            "simp only [Postcondition, branch1, ↓reduceIte]\n    exact ⟨rfl, rfl⟩")])
+            "simp only [Postcondition, branch1, ↓reduceIte]\n    exact ⟨rfl, rfl⟩")]),
+    // The callee's contract states its result of whatever node the field holds; the caller names it by the
+    // store just before the call, so the result is the value of `next`.
+    ("LinkedValue", [
+        ("def Precondition (node next : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ _ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (node next : Reference) (initial final : Memory) (result : W64) : Prop := sorry",
+            "def Postcondition (_ next : Reference) (initial _ : Memory) (result : W64) : Prop :=\n" +
+            "  result = Node.Value.of initial next"),
+        (storedHole, "exact (nextValue.frame framed1 (apart_of_entries rfl)).2")])
 })
 {
     var source = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
@@ -1050,7 +1060,7 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
 }
 Console.WriteLine("PASS filled object outlines verify with only their specification written: a field store, " +
     "two reference field stores that may alias, a null test followed through a local, two calls through a " +
-    "generated contract and a split on a field value");
+    "generated contract, a split on a field value and a call whose callee loads the node a field holds");
 
 // LeanCIL's own closure that lays out a static word's bytes: its outline states the getter's contract
 // and steps through it, and the checked-in proof fills only the outline's holes and verifies.
