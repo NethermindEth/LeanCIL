@@ -350,7 +350,7 @@ The tactics of [LoopFrameSteps](../CIL/Safety/LoopFrameSteps.lean), which
   the `bind_call` site or, without `at site`, at the fetched call. It leaves the precondition,
   tagged `precondition.<callee>`, unless `trivial` or a hypothesis proves it, then continues: it
   names the returned memory, unfolds the contract, substitutes an output its postcondition states
-  as an equation, names the callee's `WellFormed` (`calledFormed`) and proves the frame at the
+  as an equation (unless `cil_loop_call keeping`, which keeps it as `output`), names the callee's `WellFormed` (`calledFormed`) and proves the frame at the
   returned memory (`calledFrame`, through `LoopFrame.after_confined`), and carries the
   caller-buffer facts across the call: write authority always, contents when `omega` shows them
   apart from the callee's footprint. It fails naming the pc and instruction when the goal is not at a call, the argument

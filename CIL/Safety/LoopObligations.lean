@@ -8,8 +8,9 @@ A loop outline that writes through `Unsafe.Add` of a reference argument needs th
 iteration's memory: write authority over the element, the index below `2 ^ 31` and the element
 within the footprint. `cil_loop_obligation` proves each from the hypotheses the iteration holds,
 with the author's invariant, precondition and footprint unfolded, so the author writes only those
-definitions. While a definition is still `sorry` it leaves an ordinary hole; once all are written,
-a fact it cannot prove is an error at that fact, never a silent admission.
+definitions. A callee's contract proof uses it the same way at a throw its precondition rules
+out. While a definition is still `sorry` it leaves an ordinary hole; once all are written, a fact
+it cannot prove is an error at that fact, never a silent admission.
 -/
 
 namespace CIL.Safety
@@ -42,7 +43,8 @@ private partial def splitConjunctions (goal : MVarId) : MetaM MVarId := goal.wit
       return ← splitConjunctions split.mvarId
   return goal
 
-/-- Prove a loop write's side condition from the hypotheses with `definitions` unfolded: an
+/-- Prove a side condition the specification implies from the hypotheses with `definitions`
+    unfolded: a contradiction among them, such as a callee's throw its precondition excludes, an
     index bound by `omega`, footprint membership by `simp [Within]` and `omega`, and write
     authority from a `Filled` or `Writable` fact covering the element. -/
 syntax (name := loopObligation) "cil_loop_obligation " "[" ident,* "]" : tactic
@@ -63,6 +65,7 @@ elab_rules : tactic
       -- A signed comparison of small words is the unsigned one `omega` reads.
       evalTactic (← `(tactic| (try simp (disch := omega) only [BitVec.toInt_eq_toNat_of_lt] at *)))
       evalTactic (← `(tactic| first
+        | contradiction
         | omega
         | (simp [Within] <;> omega)
         | (refine Filled.element_writable ‹_› ?_ ?_ <;> (try simp) <;> omega)

@@ -255,7 +255,12 @@ comment saying which obligation it is:
   fact covering the element; it is a hole while any of those is `sorry`, and an error at the write
   once they are written and do not imply it.
 - A call in the loop gets a `MethodContract` for the callee, with `pre` and `post` to replace, and a
-  `Holds` theorem that steps the callee when it is arithmetic on its arguments. A callee over
+  `Holds` theorem that steps the callee when it is arithmetic on its arguments. A callee of words
+  that tests them and returns or throws on each side is split with `by_cases` on each test: each
+  returning side is stepped and leaves `post`, and each throwing side is closed from `pre` by
+  `cil_loop_obligation`. A call whose callee returns a value is crossed with
+  `cil_loop_call keeping`, so the next loop state names its result `output` whatever `post`
+  states. A callee over
   objects whose body a straight-line outline steps (see below) gets the contract read from its body
   instead, proved, leaving only its precondition at each call.
 - An instance of an admitted class is a `Reference`, and an instance method binds `this` under its

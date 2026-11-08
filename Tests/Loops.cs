@@ -1169,6 +1169,70 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
                     ↓reduceIte] at guard
                   rw [show i.toNat = count.toNat by omega] at filled
                   exact filled.1.after_below exitBelow (wellFormed.form_bound destinationForm)
+            """)]),
+    // A callee that throws where its precondition fails is split, and the call keeps its output's name.
+    ("CountUntil", [
+        ("  pre _ _ := sorry",
+            "  pre input _ := input.1 ≠ input.2"),
+        ("  post _ _ _ _ := sorry",
+            "  post input _ _ result := result = input.1 + 1"),
+        ("    case postcondition1 => sorry",
+            "    case postcondition1 => rfl"),
+        ("def Precondition (value limit : W32) : Prop := sorry",
+            "def Precondition (value limit : W32) : Prop := value.toNat ≤ limit.toNat"),
+        ("def Postcondition (value limit result : W32) : Prop := sorry",
+            "def Postcondition (value _ result : W32) : Prop := result = value"),
+        ("""
+            def invariant (value limit : W32) {home0 home1 : Reference} (state : State home0 home1)
+                : Prop := sorry
+            """,
+            """
+            def invariant (value _ : W32) {home0 home1 : Reference} (state : State home0 home1)
+                : Prop := state.values.1.toNat + state.values.2.toNat = value.toNat
+            """),
+        ("def measure (value limit : W32) {home0 home1 : Reference} (state : State home0 home1) : Nat := sorry",
+            """
+            def measure (_ _ : W32) {home0 home1 : Reference} (state : State home0 home1) : Nat :=
+              state.values.1.toNat
+            """),
+        ("    case invariant => sorry -- invariant at the first loop head",
+            "    case invariant => simp [invariant]"),
+        ("      sorry -- Postcondition at the return at Loops.cs:145",
+            """
+                  simp only [invariant] at holds
+                  simp only [Postcondition]
+                  subst guard
+                  exact BitVec.eq_of_toNat_eq (by simpa using holds)
+            """),
+        ("    case precondition => sorry -- Bump's precondition at this call",
+            """
+                case precondition =>
+                  simp only [invariant] at holds
+                  simp only [Precondition] at assumed
+                  have positive : remaining.toNat ≠ 0 := fun zero =>
+                    guard (BitVec.eq_of_toNat_eq (by simpa using zero))
+                  intro same
+                  subst same
+                  omega
+            """),
+        ("    case invariant => sorry -- invariant again at the loop head",
+            """
+                case invariant =>
+                  simp only [invariant] at holds ⊢
+                  simp only [Precondition] at assumed
+                  subst returned
+                  have positive : remaining.toNat ≠ 0 := fun zero =>
+                    guard (BitVec.eq_of_toNat_eq (by simpa using zero))
+                  simp [BitVec.toNat_sub, BitVec.toNat_add]
+                  omega
+            """),
+        ("    case measure => sorry -- measure decreases over this iteration",
+            """
+                case measure =>
+                  have positive : remaining.toNat ≠ 0 := fun zero =>
+                    guard (BitVec.eq_of_toNat_eq (by simpa using zero))
+                  simp [measure, BitVec.toNat_sub]
+                  omega
             """)])
 })
 {
@@ -1190,8 +1254,9 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
 Console.WriteLine("PASS filled outlines verify with only their specification written: a field store, " +
     "two reference field stores that may alias, a null test followed through a local, two calls through a " +
     "generated contract, a split on a field value, a call whose callee loads the node a field holds, a " +
-    "span fold that stores its total before each span load, a split on a `bool` argument and a " +
-    "store through `Unsafe.Add` of a reference argument");
+    "span fold that stores its total before each span load, a split on a `bool` argument, a " +
+    "store through `Unsafe.Add` of a reference argument and a call to a callee that throws where its " +
+    "precondition fails");
 
 // A written footprint that leaves out the element a loop writes is an error at the write, never an admission.
 var narrowed = Path.Combine(outlineRoot, "FillWords", "Narrowed.lean");

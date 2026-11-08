@@ -129,7 +129,8 @@ internal static partial class ProofOutline
             if (callees.Count > 0) imports.Add("CIL.MethodIdentity");
             imports.Add("CIL.Safety.LoopScaffold");
             if (body.Ops.Any(op => op.StartsWith(".memory (.add ", StringComparison.Ordinal)) &&
-                spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference))
+                spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference) ||
+                callees.Keys.Any(Branches))
                 imports.Add("CIL.Safety.LoopObligations");
             if (spec.Framed) imports.Add("CIL.Safety.ObjectFields");
             if (spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.ReadOnlySpan))
@@ -327,17 +328,16 @@ internal static partial class ProofOutline
             var steppable = output is not null && inputs.All(input => !input.Reference && input.Object is null) &&
                 extraction.Emitted[index].Metadata.Contains("locals := [],") &&
                 extraction.Emitted[index].Ops.All(Body.Pure);
+            var pattern = inputs.Length switch
+            {
+                0 => "-",
+                1 => single,
+                _ => "⟨" + string.Join(", ", declared.Select(parameter => Variable(parameter.Name))) + "⟩"
+            };
             lean.Line($"/-- `{callee.Name}` meets its contract; the loop proof uses only the contract. -/");
             lean.Line($"theorem {name}_holds : {name}Contract.Holds Extracted.program {name} := by");
             if (steppable)
             {
-                var pattern = inputs.Length switch
-                {
-                    0 => "-",
-                    1 => single,
-                    _ => "⟨" + string.Join(", ", declared.Select(parameter => Variable(parameter.Name))) +
-                        "⟩"
-                };
                 lean.Line($"  rintro {pattern} memory permitted");
                 lean.Line($"  refine ⟨CIL.executionBound Extracted.program {name}, memory,");
                 lean.Line($"    [.scalar ({ScalarConstructor(output!.Value)} ?output)], ?run, " +
@@ -345,6 +345,13 @@ internal static partial class ProofOutline
                 lean.Line("    ?postcondition⟩");
                 lean.Line("  case run => cil_checked_steps");
                 lean.Noted("  ", "case postcondition => sorry", $"{name}Contract.post of the returned value");
+            }
+            else if (Branches(index))
+            {
+                lean.Line($"  rintro {pattern} memory permitted");
+                var sides = 0;
+                BranchedCallee(lean, index, name, declared.Select(parameter => Variable(parameter.Name)).ToArray(),
+                    output!.Value, 0, [], [], "  ", ref sides);
             }
             else
             {
@@ -357,6 +364,99 @@ internal static partial class ProofOutline
                     reason);
             }
             lean.Line();
+        }
+
+        /// <summary>Whether a callee of words with no locals tests its arguments and returns a word or throws on
+        /// each side, so its contract proof splits on each test and steps every returning side.</summary>
+        bool Branches(int index)
+        {
+            var callee = extraction.Methods[index];
+            var ops = extraction.Emitted[index].Ops;
+            return !callee.HasThis &&
+                callee.Parameters.All(parameter => ElementWidth(parameter.ParameterType) is not null) &&
+                callee.ReturnType.FullName != "System.Void" && ElementWidth(callee.ReturnType) is not null &&
+                extraction.Emitted[index].Metadata.Contains("locals := [],") &&
+                ops.Any(op => Body.Conditional(op) || op.StartsWith(".throw ", StringComparison.Ordinal)) &&
+                ops.All(op =>
+                    Regex.IsMatch(op, @"\A\.(arg \d+|const(32|64) \S.*|add|sub|mul|band|bor|bxor|nop|ret)\z") ||
+                    Body.Target(op) is not null || op.StartsWith(".throw ", StringComparison.Ordinal));
+        }
+
+        /// <summary>The contract proof of a branching callee from `pc`: a `by_cases` on each test, each returning
+        /// side stepped with the tests' facts, and each throwing side closed from the precondition.</summary>
+        void BranchedCallee(Writer lean, int index, string name, string[] arguments, int width, int pc,
+            List<string> stack, List<(string Fact, string Text)> facts, string indent, ref int sides)
+        {
+            var callee = extraction.Methods[index];
+            var ops = extraction.Emitted[index].Ops;
+            string Where() => facts.Count == 0 ? "" : " where " + string.Join(" and ", facts.Select(fact => fact.Text));
+            while (true)
+            {
+                var op = ops[pc];
+                Match match;
+                if ((match = Regex.Match(op, @"\A\.arg (\d+)\z")).Success)
+                    stack.Add(arguments[int.Parse(match.Groups[1].Value)]);
+                else if ((match = Regex.Match(op, @"\A\.const(?:32|64) (.+)\z")).Success)
+                    stack.Add(match.Groups[1].Value);
+                else if ((match = Regex.Match(op, @"\A\.(add|sub|mul|band|bor|bxor)\z")).Success)
+                {
+                    var right = stack[^1];
+                    var left = stack[^2];
+                    stack.RemoveRange(stack.Count - 2, 2);
+                    var symbol = match.Groups[1].Value switch
+                    {
+                        "add" => "+", "sub" => "-", "mul" => "*", "band" => "&&&", "bor" => "|||", _ => "^^^"
+                    };
+                    stack.Add($"({left} {symbol} {right})");
+                }
+                else if (op == ".ret")
+                {
+                    var suffix = (++sides).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    var steps = facts.Count == 0 ? "" : $" [{string.Join(", ", facts.Select(fact => fact.Fact))}]";
+                    lean.Line($"{indent}refine ⟨CIL.executionBound Extracted.program {name}, memory,");
+                    lean.Line($"{indent}  [.scalar ({ScalarConstructor(width)} ?output{suffix})], ?run{suffix}, " +
+                        $"Confined.refl _ memory, ?output{suffix}, rfl,");
+                    lean.Line($"{indent}  ?postcondition{suffix}⟩");
+                    lean.Line($"{indent}case run{suffix} => cil_checked_steps{steps}");
+                    lean.Noted(indent, $"case postcondition{suffix} => sorry",
+                        $"{name}Contract.post of the returned value{Where()}");
+                    return;
+                }
+                else if (op.StartsWith(".throw ", StringComparison.Ordinal))
+                {
+                    lean.Line($"{indent}-- `{callee.Name}` throws at {ProofOutline.Location(callee, pc)}{Where()}, " +
+                        "which its precondition must rule out");
+                    lean.Line($"{indent}exfalso");
+                    lean.Line($"{indent}cil_loop_obligation [{name}Contract]");
+                    return;
+                }
+                else if (Body.Target(op) is { } target && !Body.Conditional(op))
+                {
+                    pc = target;
+                    continue;
+                }
+                else if (Body.Conditional(op))
+                {
+                    var taken = Body.Target(op)!.Value;
+                    var opName = Regex.Match(op, @"\A\.(\w+)").Groups[1].Value;
+                    var arity = opName is "brzero" or "brnonzero" ? 1 : 2;
+                    var operands = stack.TakeLast(arity).ToArray();
+                    var rest = stack.Take(stack.Count - arity).ToList();
+                    var (condition, takenWhenTrue) = Body.Test(opName, operands);
+                    var fact = $"branch{facts.Count + 1}";
+                    lean.Line($"{indent}by_cases {fact} : {condition}");
+                    foreach (var holds in new[] { true, false })
+                    {
+                        var next = holds == takenWhenTrue ? taken : pc + 1;
+                        var text = holds ? $"`{condition}`" : $"not `{condition}`";
+                        lean.Line($"{indent}· -- {text}");
+                        BranchedCallee(lean, index, name, arguments, width, next, [.. rest],
+                            [.. facts, (fact, text)], indent + "  ", ref sides);
+                    }
+                    return;
+                }
+                pc++;
+            }
         }
 
         static string Variable(string name) => Regex.IsMatch(name, @"\A[A-Za-z][A-Za-z0-9_]*\z") &&
@@ -748,7 +848,9 @@ internal static partial class ProofOutline
             var unfolded = spec.Framed && !spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference)
                 ? [.. state.Facts, "footprint"] : state.Facts;
             var facts = unfolded.Count == 0 ? "" : $" [{string.Join(", ", unfolded)}]";
-            lean.Line($"{indent}cil_loop_call {callees[callee]}_holds {input}{facts}");
+            // The output keeps its name, so the next loop state may name it whatever the postcondition says.
+            var keeping = extraction.Methods[callee].ReturnType.FullName != "System.Void" ? "keeping " : "";
+            lean.Line($"{indent}cil_loop_call {keeping}{callees[callee]}_holds {input}{facts}");
             lean.Noted(indent, "case precondition => sorry",
                 $"{extraction.Methods[callee].Name}'s precondition at this call");
             if (extraction.Methods[callee].ReturnType.FullName != "System.Void")
