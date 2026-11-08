@@ -190,16 +190,18 @@ the continuation keeps the call goal's tag, so `case precondition =>` selects th
 `n = 0`, no instruction is executed. `cil_contract_steps [facts] until continuation` tries the
 continuation before each step, including at the initial goal. It stops when the continuation closes
 the goal or no instruction can be stepped. `cil_formed_call` (`run_call_of_contract_formed`) also
-takes the caller memory's `WellFormed` and hands the continuation the callee's `final.WellFormed`
-and static-world preservation, so contracts need not restate either; `cil_formed_outcome_call` does
-the same for `cil_outcome_call`.
+takes the caller memory's `WellFormed` and hands the continuation the callee's `final.WellFormed`,
+static-world preservation and class catalog agreement, so contracts need not restate any of them;
+`cil_formed_outcome_call` does the same for `cil_outcome_call`.
 
-`StaticWorldPreserved program before after` names static-world preservation. Use `left.trans right`
-to compose it across calls. `FrameInvariants program before after` bundles `after.WellFormed` with
-that preservation. Its `formed` and `staticWorld` projections give each fact, and `left.trans right`
-composes both invariants. `call_frame_invariants` and `construct_frame_invariants` return this
-bundle. Both names are abbreviations, so existing conjunction proofs and formed-call continuations
-keep their proof structure and argument order.
+`StaticWorldPreserved program before after` names static-world preservation, and
+`ClassesPreserved program before after` says objects that agree with a catalog keep agreeing when
+the program's object sites do (see [class instances](SOUNDNESS-RUNTIME.md#class-instances)). Use
+`left.trans right` to compose either across calls. `FrameInvariants program before after` bundles
+`after.WellFormed` with both. Its `formed`, `staticWorld` and `classes` projections give each fact,
+and `left.trans right` composes all three. `call_frame_invariants` and
+`construct_frame_invariants` return this bundle. The names are abbreviations, so conjunction
+proofs work on them directly; a formed continuation takes the three facts in that order.
 
 Store facts may name their values in source form, such as `write m r (numberBytes (a + b + c).toNat
 8) 1 = .ok m'`. Each checked step simplifies the goal with the default simp set, its interpreter
@@ -294,7 +296,9 @@ unchanged by frame entry. No frame owns an instance, so `leaveFrame_memoryAt` gi
 for it when the method returns, and the `after_kept` lemmas carry its field predicates there;
 `cil_checked_steps` returns it given that its allocation is not the frame's home. Fields of two
 unrelated classes are apart under the [class catalog](SOUNDNESS-RUNTIME.md#class-instances)
-premise, through `Memory.ClassesConsistent.allocation_ne`.
+premise, through `Memory.ClassesConsistent.allocation_ne`. A caller states the premise once at
+entry: `decide` proves `ObjectSitesConsistent` for the extraction, and `invoke_preserves_classes`
+keeps the premise across any invocation, including the instances it creates.
 [PoolRent](../Examples/Proofs/PoolRent.lean) uses each of these.
 
 [DepositBoth](../Examples/Proofs/DepositBoth.lean) composes two `callvirt` calls of
@@ -404,8 +408,8 @@ storage, and a continuation that resumes at `pc + 1` with the read-back value on
 obligations receive `ConstructStorage memory updated this size`: the storage reads back as `size`
 zero bytes, is writable at full width, is allocated at `memory.nextIdentity`, and the step kept all
 older memory. The continuation also gets the constructor's invocation, the final memory's
-`WellFormed`, static-world preservation, `Confined` and `post`. No invocation, step or `loadLocal`
-equation is stated. `ConstructStorage.confined` moves `Confined` back to the memory before `newobj`;
+`WellFormed`, static-world preservation, catalog agreement, `Confined` and `post`. No invocation,
+step or `loadLocal` equation is stated. `ConstructStorage.confined` moves `Confined` back to the memory before `newobj`;
 `Confined.forget_fresh` then drops the storage, which the caller's frame owns and expires on return.
 
 Because `newobj` zeroes the storage, a constructor that leaves a field unassigned still has a

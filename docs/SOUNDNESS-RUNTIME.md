@@ -272,9 +272,18 @@ brings its whole base chain as the lineage's tail, which single inheritance make
 CLR object. The catalog lists the class and admitted bases that each object-receiver method's
 metadata records (`RawMethod.owner`, `RawMethod.objectBases`); these are metadata the extractor
 decodes, and each extraction's translation certificate covers the evidence that holds them.
-Under the premise, `Memory.ClassesConsistent.allocation_ne` separates objects located as instances of two unrelated
-cataloged classes. The premise describes the memory it is stated for; no theorem yet carries it
-across execution, so a proof composing calls states it for each call's entry memory.
+Under the premise, `Memory.ClassesConsistent.allocation_ne` separates objects located as
+instances of two unrelated cataloged classes.
+
+A caller states the premise once, for its entry memory, and execution keeps it
+([execution classes](../CIL/Safety/ExecutionClasses.lean)). Only `newobj` creates an instance,
+of the class and bases the instruction records; frame homes, statics, arrays and expiry create
+none. `ObjectSitesConsistent catalog program` checks every `newobj` site of the program text
+against the catalog, once per extraction by `decide`. Given it, `step_preserves_classes`,
+`run_preserves_classes` and `invoke_preserves_classes` keep the premise through every step,
+nested call and frame exit. Formed calls and constructions hand their continuation the same
+fact for the callee's final memory (`ClassesPreserved`, part of `FrameInvariants`). Nothing is
+assumed about memory the program cannot produce: the entry premise stays the caller's.
 
 References held by fields are kept apart from bytes: `Memory.slots` records, by allocation and
 field offset, the object reference a field holds, and fresh storage holds null. No byte encodes

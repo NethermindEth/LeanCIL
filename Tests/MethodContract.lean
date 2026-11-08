@@ -146,7 +146,7 @@ theorem root_holds (mixHolds : mixContract.Holds Extracted.program mix)
   case precondition => exact ⟨readR, readB, writable⟩
   case wellFormed => exact formed
   -- The call supplies `m1.WellFormed`, which `mixContract.pre` needs; `addContract.post` does not state it.
-  rintro m1 _ - formed1 - framed1 ⟨_, rfl, rfl, readR1⟩
+  rintro m1 _ - formed1 - - framed1 ⟨_, rfl, rfl, readR1⟩
   have readB1 : read m1 b 8 1 = .ok (numberBytes y.toNat 8) :=
     (framed1.read_eq b bOld 8 1 disjoint.outside).trans readB
   have writable1 : access m1 r 8 1 true = .ok () := (framed1.access_write r rOld 8 1).trans writable
@@ -202,18 +202,22 @@ theorem call_keeps_caller_read (body : CIL.Method) (args : List Value) (m entere
 example (program : CIL.Program) (before after : Memory) :
     FrameInvariants program before after =
       (after.WellFormed ∧ (StaticWorldValid (programStaticDescriptors program) before →
-        StaticWorldValid (programStaticDescriptors program) after)) := rfl
+        StaticWorldValid (programStaticDescriptors program) after) ∧
+        ∀ catalog, ObjectSitesConsistent catalog program →
+          before.ClassesConsistent catalog → after.ClassesConsistent catalog) := rfl
 
 example (program : CIL.Program) (memory : Memory) (formed : memory.WellFormed) :
     FrameInvariants program memory memory :=
   FrameInvariants.refl program formed
 
 example (program : CIL.Program) (before after : Memory) (formed : after.WellFormed)
-    (preserved : StaticWorldPreserved program before after) : FrameInvariants program before after := by
-  constructor
-  · exact formed
+    (preserved : StaticWorldPreserved program before after)
+    (classes : ClassesPreserved program before after) : FrameInvariants program before after := by
+  refine ⟨formed, ?_, ?_⟩
   · intro world
     exact preserved world
+  · intro catalog sites consistent
+    exact classes catalog sites consistent
 
 example {program : CIL.Program} {first middle last : Memory}
     (left : StaticWorldPreserved program first middle) (right : StaticWorldPreserved program middle last) :

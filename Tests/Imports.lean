@@ -93,7 +93,7 @@ theorem root_given : HoldsGiven Extracted.program importsAdd (fun linked => root
   cil_formed_call addHolds ⟨r, b, r, x, y⟩ at addSite [fr, fb]
   · exact ⟨readR, readB, writable⟩
   · exact formed
-  rintro m1 _ - formed1 - framed1 ⟨_, rfl, rfl, readR1⟩
+  rintro m1 _ - formed1 - - framed1 ⟨_, rfl, rfl, readR1⟩
   have readB1 : read m1 b 8 1 = .ok (numberBytes y.toNat 8) :=
     (framed1.read_eq b bOld 8 1 disjoint.outside).trans readB
   have writable1 : access m1 r 8 1 true = .ok () := (framed1.access_write r rOld 8 1).trans writable

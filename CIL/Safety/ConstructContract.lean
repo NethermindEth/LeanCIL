@@ -82,7 +82,7 @@ theorem run_construct_of_contract {Input Output : Type} {c : MethodContract Inpu
   exact ⟨fuel, result, values, composed, finished⟩
 
 /-- A successful construction from a well-formed memory returns a well-formed memory and keeps
-    the static world. -/
+    the static world and catalog agreement. -/
 theorem construct_frame_invariants {program : CIL.Program} {method pc callee fuel : Nat}
     {body : CIL.Method} {op : CIL.Op} {args stack arguments rest values : List Value}
     {frame constructedFrame : Frame} {temporary : Reference} {kind : CIL.LocalKind}
@@ -100,10 +100,12 @@ theorem construct_frame_invariants {program : CIL.Program} {method pc callee fue
     programStep_preserves_wellFormed _ _ _ _ _ _ _ _ formed constructed
   exact ⟨invoke_preserves_wellFormed _ _ _ _ _ _ _ entered invoked, fun world =>
     invoke_preserves_static_world _ _ _ _ _ _ _ entered
-      (programStep_preserves_static_world constructed formed world) invoked⟩
+      (programStep_preserves_static_world constructed formed world) invoked,
+    fun _ sites consistent => invoke_preserves_classes sites
+      (programStep_preserves_classes sites consistent constructed) invoked⟩
 
-/-- `run_construct_of_contract` from a well-formed memory: the continuation also receives both
-    invariants. -/
+/-- `run_construct_of_contract` from a well-formed memory: the continuation also receives the
+    frame invariants. -/
 theorem run_construct_of_contract_formed {Input Output : Type} {c : MethodContract Input Output}
     {program : CIL.Program} {method pc callee : Nat} {size : Fin (2^64)} {body : CIL.Method}
     {op : CIL.Op} {args stack arguments rest : List Value} {frame constructedFrame : Frame}
@@ -118,7 +120,7 @@ theorem run_construct_of_contract_formed {Input Output : Type} {c : MethodContra
     (formed : memory.WellFormed)
     (continuation : ∀ final out,
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, [])) → final.WellFormed →
-      StaticWorldPreserved program memory final →
+      StaticWorldPreserved program memory final → ClassesPreserved program memory final →
       Confined (c.footprint input) updated final → c.post input updated final out →
       ∃ fuel result returned,
         run program fuel method (pc + 1) args constructedFrame
@@ -130,7 +132,7 @@ theorem run_construct_of_contract_formed {Input Output : Type} {c : MethodContra
   run_construct_of_contract holds constructs input methodFound instructionFound stepped located
     encoded permitted fun final out ⟨fuel, invoked⟩ =>
       have kept := construct_frame_invariants methodFound instructionFound stepped formed invoked
-      continuation final out ⟨fuel, invoked⟩ kept.1 kept.2
+      continuation final out ⟨fuel, invoked⟩ kept.formed kept.staticWorld kept.classes
 
 /-- Construct at a fetched `newobj` from its constructor's contract alone; `input` names the
     fresh storage `newobj` zeroes. -/
@@ -154,6 +156,7 @@ theorem run_newAggregate_of_contract {Input Output : Type} {c : MethodContract I
       (∃ fuel, invoke program fuel callee (c.args (input temporary)) updated = .ok (final, [])) →
       final.WellFormed →
       StaticWorldPreserved program memory final →
+      ClassesPreserved program memory final →
       Confined (c.footprint (input temporary)) updated final →
       c.post (input temporary) updated final out →
       ∃ fuel result returned,

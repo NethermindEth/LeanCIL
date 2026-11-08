@@ -1,11 +1,13 @@
 import CIL.Safety.ExecutionStaticWorld
+import CIL.Safety.ExecutionClasses
 
 /-!
 # Frame invariants
 
 The memory invariants every successful call or construction keeps, whatever the callee's
-contract states: the result memory is well formed, and a valid static world stays valid.
-Both are reflexive and transitive, so the invariants of consecutive steps compose.
+contract states: the result memory is well formed, a valid static world stays valid, and objects
+that agree with a class catalog keep agreeing when the program's object sites do. All three are
+reflexive and transitive, so the invariants of consecutive steps compose.
 -/
 
 namespace CIL.Safety
@@ -25,9 +27,27 @@ theorem StaticWorldPreserved.trans {program : CIL.Program} {first middle last : 
     StaticWorldPreserved program first last :=
   fun world => right (left world)
 
-/-- `after` is well formed and preserves the static world of `before`. -/
+/-- For every catalog the object sites of `program` agree with, if the objects of `before` agree
+    with it, so do the objects of `after`. -/
+abbrev ClassesPreserved (program : CIL.Program) (before after : Memory) : Prop :=
+  ∀ catalog, ObjectSitesConsistent catalog program →
+    before.ClassesConsistent catalog → after.ClassesConsistent catalog
+
+theorem ClassesPreserved.refl (program : CIL.Program) (memory : Memory) :
+    ClassesPreserved program memory memory :=
+  fun _ _ consistent => consistent
+
+theorem ClassesPreserved.trans {program : CIL.Program} {first middle last : Memory}
+    (left : ClassesPreserved program first middle)
+    (right : ClassesPreserved program middle last) :
+    ClassesPreserved program first last :=
+  fun catalog sites consistent => right catalog sites (left catalog sites consistent)
+
+/-- `after` is well formed, preserves the static world of `before` and keeps its objects'
+    agreement with any catalog the program's object sites agree with. -/
 abbrev FrameInvariants (program : CIL.Program) (before after : Memory) : Prop :=
-  after.WellFormed ∧ StaticWorldPreserved program before after
+  after.WellFormed ∧ StaticWorldPreserved program before after ∧
+    ClassesPreserved program before after
 
 theorem FrameInvariants.formed {program : CIL.Program} {before after : Memory}
     (kept : FrameInvariants program before after) : after.WellFormed :=
@@ -35,16 +55,20 @@ theorem FrameInvariants.formed {program : CIL.Program} {before after : Memory}
 
 theorem FrameInvariants.staticWorld {program : CIL.Program} {before after : Memory}
     (kept : FrameInvariants program before after) : StaticWorldPreserved program before after :=
-  kept.2
+  kept.2.1
+
+theorem FrameInvariants.classes {program : CIL.Program} {before after : Memory}
+    (kept : FrameInvariants program before after) : ClassesPreserved program before after :=
+  kept.2.2
 
 theorem FrameInvariants.refl (program : CIL.Program) {memory : Memory}
     (formed : memory.WellFormed) :
     FrameInvariants program memory memory :=
-  ⟨formed, StaticWorldPreserved.refl program memory⟩
+  ⟨formed, StaticWorldPreserved.refl program memory, ClassesPreserved.refl program memory⟩
 
 theorem FrameInvariants.trans {program : CIL.Program} {first middle last : Memory}
     (left : FrameInvariants program first middle) (right : FrameInvariants program middle last) :
     FrameInvariants program first last :=
-  ⟨right.formed, left.staticWorld.trans right.staticWorld⟩
+  ⟨right.formed, left.staticWorld.trans right.staticWorld, left.classes.trans right.classes⟩
 
 end CIL.Safety

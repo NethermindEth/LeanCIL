@@ -34,7 +34,8 @@
   marks it rented, writing no other field, and under the class catalog premise leaves the live
   count alone; with an empty list and room under the capacity it creates an item owned by the
   pool, numbered with the next id and marked rented; an exhausted pool throws
-  `InvalidOperationException` and a null pool `NullReferenceException`.
+  `InvalidOperationException` and a null pool `NullReferenceException`. Its object sites agree
+  with the catalog, so the premise stated at entry holds after any invocation of the program.
 - `NullReferences` tests `Unsafe.NullRef<T>` with `Unsafe.IsNullRef<T>`, faults on loads, stores and field accesses through it, and selects an optional `ref` argument that is either unset or bound, as optional outputs do.
 - `VirtualCalls` calls an abstract and a defaulted virtual method of `Animal` on any animal:
   `AnimalLegs.lean` and `AnimalLoudness.lean` prove the override or inherited body the receiver's

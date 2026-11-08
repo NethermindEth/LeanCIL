@@ -50,8 +50,8 @@ theorem loop_terminates_call {Input Output : Type} {c : MethodContract Input Out
   run_call_of_contract holds input methodFound instructionFound stepped encoded permitted
     continuation
 
-/-- `loop_terminates_call` that also hands the continuation the callee's `WellFormed` and
-    static world. -/
+/-- `loop_terminates_call` that also hands the continuation the callee's `WellFormed`, static
+    world and catalog agreement. -/
 theorem loop_terminates_call_formed {Input Output : Type} {c : MethodContract Input Output}
     {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
@@ -66,6 +66,7 @@ theorem loop_terminates_call_formed {Input Output : Type} {c : MethodContract In
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
       final.WellFormed →
       StaticWorldPreserved program memory final →
+      ClassesPreserved program memory final →
       Confined (c.footprint input) updated final → c.Returns input updated final values →
       LoopTerminates program method args post ⟨pc + 1, frame, values ++ rest, final⟩) :
     LoopTerminates program method args post ⟨pc, frame, stack, memory⟩ :=

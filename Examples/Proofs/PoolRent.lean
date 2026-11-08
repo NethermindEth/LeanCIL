@@ -158,6 +158,22 @@ theorem pool_ne_item {memory : Memory} (consistent : memory.ClassesConsistent po
 
 #print axioms pool_ne_item
 
+/-- Every `newobj` of the extraction creates an instance whose base chain agrees with the
+    extraction's classes. -/
+theorem pool_sites : ObjectSitesConsistent poolClasses Extracted.program := by decide +kernel
+
+#print axioms pool_sites
+
+/-- A caller that establishes agreement with the extraction's classes once, at entry, keeps it
+    across any invocation of the program, whichever objects it creates. -/
+theorem invoke_keeps_classes {fuel method : Nat} {args values : List Value}
+    {memory final : Memory} (consistent : memory.ClassesConsistent poolClasses)
+    (invoked : invoke Extracted.program fuel method args memory = .ok (final, values)) :
+    final.ClassesConsistent poolClasses :=
+  invoke_preserves_classes pool_sites consistent invoked
+
+#print axioms invoke_keeps_classes
+
 /-- Reusing an item leaves the pool's live count as it was, in memory whose objects agree with
     the extraction's classes. -/
 theorem rent_reuses_keeps_live (memory : Memory) (pool head : Reference)

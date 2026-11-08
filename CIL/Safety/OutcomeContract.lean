@@ -238,7 +238,7 @@ theorem run_call_raises_after_outcome {Input Output : Type} {c : OutcomeContract
   exact ⟨childFuel + parentFuel + 1, fault,
     run_call_of_invoke methodFound instructionFound stepped child parent, thrown⟩
 
-/-- `run_call_of_outcome` from a well-formed memory, with both call invariants supplied. -/
+/-- `run_call_of_outcome` from a well-formed memory, with the frame invariants supplied. -/
 theorem run_call_of_outcome_formed {Input Output : Type} {c : OutcomeContract Input Output}
     {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
@@ -254,6 +254,7 @@ theorem run_call_of_outcome_formed {Input Output : Type} {c : OutcomeContract In
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
       final.WellFormed →
       StaticWorldPreserved program memory final →
+      ClassesPreserved program memory final →
       Confined (c.footprint input) updated final → c.Returns input updated final values →
       ∃ fuel result returned,
         run program fuel method (pc + 1) args frame (values ++ rest) final =
@@ -265,9 +266,9 @@ theorem run_call_of_outcome_formed {Input Output : Type} {c : OutcomeContract In
   run_call_of_outcome holds input methodFound instructionFound stepped encoded permitted normal
     fun final values ⟨fuel, invoked⟩ =>
       have kept := call_frame_invariants methodFound instructionFound stepped formed invoked
-      continuation final values ⟨fuel, invoked⟩ kept.1 kept.2
+      continuation final values ⟨fuel, invoked⟩ kept.formed kept.staticWorld kept.classes
 
-/-- `run_call_raises_after_outcome` from a well-formed memory, with both call invariants
+/-- `run_call_raises_after_outcome` from a well-formed memory, with the frame invariants
     supplied. -/
 theorem run_call_raises_after_outcome_formed {Input Output : Type}
     {c : OutcomeContract Input Output} {program : CIL.Program}
@@ -285,6 +286,7 @@ theorem run_call_raises_after_outcome_formed {Input Output : Type}
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
       final.WellFormed →
       StaticWorldPreserved program memory final →
+      ClassesPreserved program memory final →
       Confined (c.footprint input) updated final → c.Returns input updated final values →
       RunRaises program method (pc + 1) args frame (values ++ rest) final exception) :
     RunRaises program method pc args frame stack memory exception :=
@@ -292,7 +294,7 @@ theorem run_call_raises_after_outcome_formed {Input Output : Type}
     permitted normal
     fun final values ⟨fuel, invoked⟩ =>
       have kept := call_frame_invariants methodFound instructionFound stepped formed invoked
-      continuation final values ⟨fuel, invoked⟩ kept.1 kept.2
+      continuation final values ⟨fuel, invoked⟩ kept.formed kept.staticWorld kept.classes
 
 /-- `exported` follows from `internal`: same encodings and outcome under a weaker pre; on
     return, covering footprint and implied post. -/

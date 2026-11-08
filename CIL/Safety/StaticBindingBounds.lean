@@ -136,8 +136,9 @@ theorem StackAllocationEffect.staticBindingsBounded {source target : Memory}
 #print axioms StackAllocationEffect.staticBindingsBounded
 
 /-- Every checked dispatcher effect preserves static allocation bounds. -/
-theorem StepEffect.staticBindingsBounded {body : CIL.Method} {source target : Memory}
-    {frame final : Frame} (effect : StepEffect body frame source final target)
+theorem StepEffect.staticBindingsBounded {body : CIL.Method} {operation : CIL.Op}
+    {source target : Memory} {frame final : Frame}
+    (effect : StepEffect body operation frame source final target)
     (bounded : source.StaticBindingsBounded) : target.StaticBindingsBounded := by
   cases effect with
   | arrayAllocation effect => exact bounded.preserve effect.registry effect.allocations.next

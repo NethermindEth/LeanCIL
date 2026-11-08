@@ -157,7 +157,7 @@ theorem root_formed (strictHolds : strictContract.Holds Extracted.program strict
     case precondition => trivial
     case wellFormed => exact formed
     case raises => exact raised
-    rintro m1 _ - formed1 - confined ⟨out, rfl, same⟩
+    rintro m1 _ - formed1 - - confined ⟨out, rfl, same⟩
     subst out
     dsimp only [strictContract]
     cil_contract_steps []
@@ -171,7 +171,7 @@ example (percentHolds : percentContract.Holds Extracted.program percent) (m : Me
   case precondition => trivial
   case wellFormed => exact formed
   case raises => simp only [percentContract]; decide
-  rintro m1 _ - - - - ⟨_, rfl, rfl⟩
+  rintro m1 _ - - - - - ⟨_, rfl, rfl⟩
   dsimp only [percentContract]
   cil_raise_steps [CIL.truth]
 

@@ -1,6 +1,7 @@
 import CIL.Safety.ObjectFields
 import CIL.Safety.HeapObjectFacts
 import CIL.Extraction.Translation
+import CIL.Safety.ExecutionClasses
 
 /-!
 # Class catalogs and distinct objects
@@ -40,15 +41,6 @@ def declaredClass (method : CIL.Extraction.RawMethod) : Option RuntimeType :=
 def declaredClasses (evidence : List CIL.Extraction.MethodEvidence) : List RuntimeType :=
   evidence.filterMap fun method => declaredClass method.original
 
-/-- A runtime type agrees with a catalog: every cataloged class in its lineage brings that
-    class's own lineage as the lineage's tail. -/
-def RuntimeType.ConsistentWith (catalog : List RuntimeType) (type : RuntimeType) : Prop :=
-  ∀ known ∈ catalog, known.identity ∈ type.lineage → known.lineage <:+ type.lineage
-
-/-- Every object in memory has a runtime type that agrees with the catalog. -/
-def Memory.ClassesConsistent (catalog : List RuntimeType) (memory : Memory) : Prop :=
-  ∀ id allocation type, memory.allocations id = some allocation →
-    allocation.kind = .object type → type.ConsistentWith catalog
 
 /-- Two cataloged classes in one consistent lineage are related: one derives from the other. -/
 theorem RuntimeType.ConsistentWith.related {catalog : List RuntimeType} {type : RuntimeType}

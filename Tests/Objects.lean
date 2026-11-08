@@ -348,4 +348,19 @@ theorem unrelated_classes_need_catalog :
   exact absurd tail (by decide)
 #print axioms unrelated_classes_need_catalog
 
+/-- A one-method program whose only `newobj` creates an instance of `type`. -/
+private def createsOne (type : RuntimeType) : CIL.Program :=
+  [{ returnsValue := true, locals := [],
+     code := [.newObject 1 0 type.identity type.bases 16, .ret] }]
+
+/-- The site check accepts a program creating a cataloged class with its own chain, and rejects
+    one whose `newobj` records the lineage no CLR object can have, so execution of it is not
+    covered by `run_preserves_classes`. -/
+theorem object_sites_checked :
+    ObjectSitesConsistent [order, customer] (createsOne order) ∧
+    ¬ ObjectSitesConsistent [order, customer]
+      (createsOne ⟨order.identity, [customer.identity]⟩) := by
+  decide
+#print axioms object_sites_checked
+
 end Tests.Objects
