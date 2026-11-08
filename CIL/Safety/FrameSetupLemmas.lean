@@ -223,6 +223,46 @@ theorem storeLocal_staticBindings {m result : Memory} {slot final : LocalSlot} {
     | split at h
     | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
 
+/-- A byte write charges nothing to the object heap budget. -/
+theorem write_heapBudget {m result : Memory} {r : Reference} {bytes : List (BitVec 8)}
+    {alignment : Nat} (h : write m r bytes alignment = .ok result) :
+    result.heapBudget = m.heapBudget := by
+  unfold write at h
+  cases ha : access m r bytes.length alignment true <;>
+    simp only [ha, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  · cases h
+  · cases h; rfl
+
+/-- A snapshot write charges nothing to the object heap budget. -/
+theorem writeSnapshot_heapBudget {m result : Memory} {r : Reference}
+    {bytes : List (BitVec 8 × Bool)} {alignment : Nat}
+    (h : writeSnapshot m r bytes alignment = .ok result) :
+    result.heapBudget = m.heapBudget := by
+  unfold writeSnapshot at h
+  cases hw : write m r (bytes.map Prod.fst) alignment <;>
+    simp only [hw, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  · cases h
+  · cases h
+    have budget := write_heapBudget hw
+    exact budget
+
+/-- Storing a local charges nothing to the object heap budget. -/
+theorem storeLocal_heapBudget {m result : Memory} {slot final : LocalSlot} {value : Value}
+    (h : storeLocal m slot value = .ok (final, result)) :
+    result.heapBudget = m.heapBudget := by
+  unfold storeLocal at h
+  repeat' first
+    | rfl
+    | solve | exact write_heapBudget (checkedAt_ok (by assumption))
+    | solve | exact writeSnapshot_heapBudget (checkedAt_ok (by assumption))
+    | cases h
+    | split at h
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+
+#print axioms write_heapBudget
+#print axioms writeSnapshot_heapBudget
+#print axioms storeLocal_heapBudget
+
 theorem storeLocal_above {m result : Memory} {slot final : LocalSlot} {value : Value}
     {watermark : Nat}
     (above : slot.Above watermark) (h : storeLocal m slot value = .ok (final, result)) :
@@ -307,10 +347,12 @@ structure FrameSetup (activation : Nat) (before after : Memory)
   wellFormed : before.WellFormed → after.WellFormed
   references : before.WellFormed → SlotsReferencesValid after slots
   above : ∀ slot ∈ slots, slot.Above before.nextIdentity
+  /-- Frame homes are not objects, so setup leaves the object heap budget untouched. -/
+  budget : after.heapBudget = before.heapBudget
 
 theorem FrameSetup.empty (activation : Nat) (m : Memory) : FrameSetup activation m m [] [] :=
   ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id,
-    by simp [SlotsReferencesValid], by simp⟩
+    by simp [SlotsReferencesValid], by simp, rfl⟩
 
 /-- Compose effects once; clients project their required invariant. -/
 theorem FrameSetup.append {activation : Nat} {first middle last : Memory}
@@ -322,7 +364,7 @@ theorem FrameSetup.append {activation : Nat} {first middle last : Memory}
     (a.allocations.preserve b.fresh.1 (fun id member => (a.fresh.2 id member).2)).append
       b.allocations,
     a.below.trans (b.below.weaken a.fresh.1.next), b.registry.trans a.registry,
-    fun hm => b.wellFormed (a.wellFormed hm), ?_, ?_⟩
+    fun hm => b.wellFormed (a.wellFormed hm), ?_, ?_, b.budget.trans a.budget⟩
   · intro hm slot member
     rcases List.mem_append.mp member with member | member
     · exact (a.references hm slot member).preserve (a.wellFormed hm) b.fresh.1
@@ -347,7 +389,7 @@ theorem allocateHome_setup {alignment : Nat} (m result : Memory) (activation wid
   have fresh := allocateHome_fresh _ _ _ _ _ h
   refine ⟨⟨fresh.1, ?_⟩, allocateHome_owned _ _ _ _ _ h,
     allocateHome_preserves_caller_memory _ _ _ _ _ h, ?_,
-    fun hm => allocateHome_preserves_wellFormed _ _ _ _ _ hm h, ?_, ?_⟩
+    fun hm => allocateHome_preserves_wellFormed _ _ _ _ _ hm h, ?_, ?_, ?_⟩
   · intro id member
     obtain rfl := List.mem_singleton.mp member
     exact ⟨Nat.le_of_eq fresh.2.1.symm, fresh.2.2⟩
@@ -365,6 +407,14 @@ theorem allocateHome_setup {alignment : Nat} (m result : Memory) (activation wid
   · intro slot member
     obtain rfl := List.mem_singleton.mp member
     exact Nat.le_of_eq fresh.2.1.symm
+  · unfold allocateHome at h
+    cases ha : allocate m ⟨.frame activation, ⟨width, alignment, []⟩, true, [width]⟩ <;>
+      simp only [ha, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure,
+        Except.pure] at h
+    · cases h
+    · cases h
+      unfold allocate at ha
+      repeat' first | rfl | cases ha | split at ha
 
 theorem FrameSetup.store {activation : Nat} {before home result : Memory}
     {slot final : LocalSlot} {owned : List AllocationId} {value : Value}
@@ -378,7 +428,8 @@ theorem FrameSetup.store {activation : Nat} {before home result : Memory}
     setup.allocations.preserve ext (fun id member => (setup.fresh.2 id member).2),
     setup.below.trans (storeLocal_memory_below above h),
     (storeLocal_staticBindings h).trans setup.registry,
-    fun hm => storeLocal_preserves_wellFormed _ _ _ _ _ (setup.wellFormed hm) h, ?_, ?_⟩
+    fun hm => storeLocal_preserves_wellFormed _ _ _ _ _ (setup.wellFormed hm) h, ?_, ?_,
+    (storeLocal_heapBudget h).trans setup.budget⟩
   · intro hm slot member
     obtain rfl := List.mem_singleton.mp member
     exact storeLocal_preserves_reference_validity _ _ _ _ _ (setup.wellFormed hm)
@@ -391,7 +442,7 @@ theorem FrameSetup.root (activation : Nat) (m : Memory) (r : Option ManagedRefer
     (valid : (LocalSlot.root r).ReferencesValid m) : FrameSetup activation m m [.root r] [] :=
   ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id,
     fun _ slot member => by obtain rfl := List.mem_singleton.mp member; exact valid,
-    fun slot member => by obtain rfl := List.mem_singleton.mp member; trivial⟩
+    fun slot member => by obtain rfl := List.mem_singleton.mp member; trivial, rfl⟩
 
 /-- An object local owns no bytes and holds a reference checked against `m`. -/
 theorem FrameSetup.object (activation : Nat) (m : Memory) (r : Option ManagedReference)
@@ -399,7 +450,7 @@ theorem FrameSetup.object (activation : Nat) (m : Memory) (r : Option ManagedRef
     FrameSetup activation m m [.object r] [] :=
   ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id,
     fun _ slot member => by obtain rfl := List.mem_singleton.mp member; exact valid,
-    fun slot member => by obtain rfl := List.mem_singleton.mp member; trivial⟩
+    fun slot member => by obtain rfl := List.mem_singleton.mp member; trivial, rfl⟩
 
 theorem makeLocal_setup (m result : Memory) (activation : Nat) (kind : CIL.LocalKind)
     (initial : CIL.Value) (slot : LocalSlot) (owned : List AllocationId)
@@ -411,19 +462,19 @@ theorem makeLocal_setup (m result : Memory) (activation : Nat) (kind : CIL.Local
       | (solve | cases h)
       | (cases h; exact ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id,
           by simp [SlotsReferencesValid, LocalSlot.ReferencesValid],
-          by simp [LocalSlot.Above]⟩)
+          by simp [LocalSlot.Above], rfl⟩)
   · split at h <;> first
       | (solve | cases h)
       | (cases h; exact ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id,
           by simp [SlotsReferencesValid, LocalSlot.ReferencesValid],
-          by simp [LocalSlot.Above]⟩)
+          by simp [LocalSlot.Above], rfl⟩)
   · rename_i element
     split at h
     · split at h
       · cases h
       rename_i width
       cases h
-      refine ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id, ?_, ?_⟩
+      refine ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id, ?_, ?_, rfl⟩
       · intro _ entry member
         obtain rfl := List.mem_singleton.mp member
         exact ArrayView.null_valid element m (by simpa using width)
@@ -433,7 +484,7 @@ theorem makeLocal_setup (m result : Memory) (activation : Nat) (kind : CIL.Local
     · cases h
       exact ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id,
         by simp [SlotsReferencesValid, LocalSlot.ReferencesValid],
-        by simp [LocalSlot.Above]⟩
+        by simp [LocalSlot.Above], rfl⟩
     · cases h
   · rename_i width writable
     split at h
@@ -441,7 +492,7 @@ theorem makeLocal_setup (m result : Memory) (activation : Nat) (kind : CIL.Local
     · rename_i widthValid
       split at h
       · cases h
-        refine ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id, ?_, ?_⟩
+        refine ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id, ?_, ?_, rfl⟩
         · intro _ entry member
           obtain rfl := List.mem_singleton.mp member
           simp_all [LocalSlot.ReferencesValid, SpanView.validate, Bind.bind, Except.bind,
@@ -452,7 +503,7 @@ theorem makeLocal_setup (m result : Memory) (activation : Nat) (kind : CIL.Local
       · cases h
         exact ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id,
           by simp [SlotsReferencesValid, LocalSlot.ReferencesValid],
-          by simp [LocalSlot.Above]⟩
+          by simp [LocalSlot.Above], rfl⟩
       · cases h
   · split at h
     · cases h; exact .root _ _ _ True.intro
@@ -508,7 +559,7 @@ theorem FrameSetup.opaque128 (activation : Nat) (m : Memory) (value : Option Opa
     FrameSetup activation m m [.opaque128 value] [] :=
   ⟨⟨.refl _, by simp⟩, by simp [FrameAllocations], .refl _ _, rfl, id,
     fun _ slot member => by obtain rfl := List.mem_singleton.mp member; trivial,
-    fun slot member => by obtain rfl := List.mem_singleton.mp member; trivial⟩
+    fun slot member => by obtain rfl := List.mem_singleton.mp member; trivial, rfl⟩
 
 theorem makeOpaque128_setup (m result : Memory) (activation : Nat) (initial : CIL.Value)
     (slot : LocalSlot) (owned : List AllocationId)
@@ -689,6 +740,14 @@ theorem enterFrame_setup (body : CIL.Method) (args : List Value) (m result : Mem
         · exact Or.inr right
         · exact Or.inl (Or.inr middle)
 
+/-- Entering a frame charges nothing to the object heap budget, so a caller's grant reaches the
+    callee's first `newobj` whole. -/
+theorem enterFrame_heapBudget {body : CIL.Method} {args : List Value} {m result : Memory}
+    {frame : Frame} (h : enterFrame body args m = .ok (frame, result)) :
+    result.heapBudget = m.heapBudget :=
+  (enterFrame_setup _ _ _ _ _ h).budget
+
+#print axioms enterFrame_heapBudget
 #print axioms makeLocal_setup
 #print axioms makeLocals_setup
 #print axioms makeArgumentHomes_setup

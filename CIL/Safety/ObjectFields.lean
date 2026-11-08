@@ -85,6 +85,15 @@ theorem LiveObject.after_below {watermark : Nat} {before after : Memory} {object
     Nat.lt_of_lt_of_le old grows⟩
 #print axioms LiveObject.after_below
 
+/-- A live object stays live in memory that keeps its allocation and does not lower the next
+    identity. -/
+theorem LiveObject.after_kept {before after : Memory} {object : Reference}
+    (live : LiveObject before object) (preserved : MemoryAt object.allocation before after)
+    (grows : before.nextIdentity ≤ after.nextIdentity) : LiveObject after object :=
+  ⟨by rw [formObject_of_allocation preserved.allocations]; exact live.formed,
+    Nat.lt_of_lt_of_le live.old grows⟩
+#print axioms LiveObject.after_kept
+
 /-- A scalar field of a class: `width` bytes at model offset `offset` of every instance of
     `owner` and of the classes derived from it. -/
 structure WordField (width : Nat) where
@@ -508,6 +517,54 @@ theorem Holds.after_below {watermark : Nat} {field : WordField width} {before af
     (held.1.toReadable.below preserved old grows).2.trans held.2⟩
 #print axioms Holds.after_below
 
+/-- A readable field keeps its storage and value in memory that keeps its object's allocation
+    and does not lower the next identity. -/
+theorem Readable.kept {field : WordField width} {before after : Memory} {object : Reference}
+    (readable : field.Readable before object) (preserved : MemoryAt object.allocation before after)
+    (grows : before.nextIdentity ≤ after.nextIdentity) :
+    field.Readable after object ∧ field.of after object = field.of before object := by
+  refine ⟨⟨?_, Nat.lt_of_lt_of_le readable.old grows, ?_⟩, ?_⟩
+  · rw [objectFieldAddress_of_allocation (reference := object) preserved.allocations]
+    exact readable.located
+  · obtain ⟨bytes, loaded⟩ := readable.readable
+    exact ⟨bytes, (MemoryAt.read (r := field.address object) preserved width 1).trans loaded⟩
+  · simp only [WordField.of, WordField.bytes, preserved.cells]
+#print axioms Readable.kept
+
+/-- An owned field stays owned in memory that keeps its object's allocation. -/
+theorem Owned.after_kept {field : WordField width} {before after : Memory} {object : Reference}
+    (owned : field.Owned before object) (preserved : MemoryAt object.allocation before after)
+    (grows : before.nextIdentity ≤ after.nextIdentity) : field.Owned after object :=
+  { (owned.toReadable.kept preserved grows).1 with
+    writable := (MemoryAt.access (r := field.address object) preserved width 1 true).trans
+      owned.writable }
+#print axioms Owned.after_kept
+
+/-- A field holding `value` holds it in memory that keeps its object's allocation. -/
+theorem Holds.after_kept {field : WordField width} {before after : Memory} {object : Reference}
+    {value : BitVec (8 * width)} (held : field.Holds before object value)
+    (preserved : MemoryAt object.allocation before after)
+    (grows : before.nextIdentity ≤ after.nextIdentity) : field.Holds after object value :=
+  ⟨held.1.after_kept preserved grows, (held.1.toReadable.kept preserved grows).2.trans held.2⟩
+#print axioms Holds.after_kept
+
+/-- A field of a fresh instance, declared by its class or one of its bases and inside its size,
+    is owned: `newobj` grants the instance's storage to the code that created it. -/
+theorem fresh_owned {field : WordField width} (memory : Memory) (type : RuntimeType)
+    {size : Nat} (declared : field.owner ∈ type.lineage) (bounded : size < nativeLimit)
+    (fits : field.offset + width ≤ size) (nonempty : 0 < width) :
+    field.Owned (objectMemory memory type size) ⟨memory.nextIdentity, 0⟩ where
+  located := objectMemory_field memory type declared bounded (by omega)
+  old := by simp [objectMemory]
+  readable := by
+    refine ⟨(List.range width).map fun _ => 0, ?_⟩
+    have accessed := objectMemory_access memory type bounded fits nonempty false
+    simp only [CIL.Safety.read, WordField.address, Bind.bind, Except.bind]
+    rw [accessed]
+    simp [objectMemory, Pure.pure, Except.pure]
+  writable := objectMemory_access memory type bounded fits nonempty true
+#print axioms fresh_owned
+
 end WordField
 
 namespace ReferenceField
@@ -762,6 +819,36 @@ theorem Holds.after_below {watermark : Nat} {field : ReferenceField} {before aft
     (held.1.toReadable.below preserved old grows).2.trans held.2⟩
 #print axioms Holds.after_below
 
+/-- A readable field keeps its slot and what it holds in memory that keeps its object's
+    allocation and does not lower the next identity. -/
+theorem Readable.kept {field : ReferenceField} {before after : Memory} {object : Reference}
+    (readable : field.Readable before object) (preserved : MemoryAt object.allocation before after)
+    (grows : before.nextIdentity ≤ after.nextIdentity) :
+    field.Readable after object ∧ field.of after object = field.of before object := by
+  refine ⟨⟨?_, Nat.lt_of_lt_of_le readable.old grows,
+    (MemoryAt.access (r := field.address object) preserved _ 1 false).trans readable.readable⟩,
+    preserved.slots _⟩
+  rw [objectFieldAddress_of_allocation (reference := object) preserved.allocations]
+  exact readable.located
+#print axioms Readable.kept
+
+/-- An owned field stays owned in memory that keeps its object's allocation. -/
+theorem Owned.after_kept {field : ReferenceField} {before after : Memory} {object : Reference}
+    (owned : field.Owned before object) (preserved : MemoryAt object.allocation before after)
+    (grows : before.nextIdentity ≤ after.nextIdentity) : field.Owned after object :=
+  { (owned.toReadable.kept preserved grows).1 with
+    writable := (MemoryAt.access (r := field.address object) preserved _ 1 true).trans
+      owned.writable }
+#print axioms Owned.after_kept
+
+/-- A field holding `value` holds it in memory that keeps its object's allocation. -/
+theorem Holds.after_kept {field : ReferenceField} {before after : Memory} {object : Reference}
+    {value : ManagedReference} (held : field.Holds before object value)
+    (preserved : MemoryAt object.allocation before after)
+    (grows : before.nextIdentity ≤ after.nextIdentity) : field.Holds after object value :=
+  ⟨held.1.after_kept preserved grows, (held.1.toReadable.kept preserved grows).2.trans held.2⟩
+#print axioms Holds.after_kept
+
 /-- A field holding a caller object holds it in memory whose bytes, authority and caller
     references agree below a watermark above both objects, and that has allocated up to it: the
     memory an execution allocating different private storage leaves. -/
@@ -777,6 +864,20 @@ theorem Holds.of_agree {watermark : Nat} {field : ReferenceField} {source target
   rw [objectFieldAddress_of_allocation (reference := object) (bytes.allocations _ old)]
   exact holds.1.located
 #print axioms Holds.of_agree
+
+/-- A reference field of a fresh instance, declared by its class or one of its bases and inside
+    its size, is owned and holds null, as `newobj` zeroes every field. -/
+theorem fresh_holds_null {field : ReferenceField} (memory : Memory) (type : RuntimeType)
+    {size : Nat} (declared : field.owner ∈ type.lineage) (bounded : size < nativeLimit)
+    (fits : field.offset + objectFieldSlot ≤ size) :
+    field.Holds (objectMemory memory type size) ⟨memory.nextIdentity, 0⟩ .null :=
+  ⟨{ located := objectMemory_field memory type declared bounded
+        (by simp only [objectFieldSlot] at fits; omega)
+     old := by simp [objectMemory]
+     readable := objectMemory_access memory type bounded fits (by decide) false
+     writable := objectMemory_access memory type bounded fits (by decide) true },
+    by simp [ReferenceField.of, objectMemory]⟩
+#print axioms fresh_holds_null
 
 end ReferenceField
 
