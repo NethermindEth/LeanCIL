@@ -31,6 +31,7 @@ Examples:Examples.IndirectValues/Box`1<Examples.IndirectValues/Pair> Examples.In
 Examples:Examples.IndirectValues/Pair Examples.IndirectValues::Read(Examples.IndirectValues/Pair&)	A	A	A	A	A	A	A	A
 Examples:Examples.IndirectValues/Pair Examples.IndirectValues::Record(Examples.IndirectValues/Pair)	A	A	A	A	A	A	A	A
 Examples:Examples.IndirectValues/Pair Examples.IndirectValues::Reference(Examples.IndirectValues/Pair&)	A	A	A	A	A	A	A	A
+Examples:Examples.ItemPool Examples.PooledItem::get_Owner()	A	A	A	A	A	A	A	A
 Examples:Examples.Leaf Examples.Nested::Extract(Examples.NestedRecord)	A	A	A	A	A	A	A	A
 Examples:Examples.Leaf Examples.Nested::WrongExtract(Examples.NestedRecord)	A	A	A	A	A	A	A	A
 Examples:Examples.NestedConstructor Examples.Constructors::MakeNested(System.UInt64)	A	A	A	A	A	A	A	A
@@ -47,6 +48,7 @@ Examples:Examples.PackedLeaf[] Examples.PrimitiveArrays::AllocatePacked(System.I
 Examples:Examples.Packet& Examples.UnsafeLayouts::Add16int(Examples.Packet&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:Examples.Packet& Examples.UnsafeLayouts::Add16nint(Examples.Packet&,System.IntPtr)	A	A	A	A	A	A	A	A
 Examples:Examples.Packet& Examples.UnsafeLayouts::Add16nuint(Examples.Packet&,System.UIntPtr)	A	A	A	A	A	A	A	A
+Examples:Examples.PooledItem Examples.ItemPool::Rent()	A	A	A	A	A	A	A	A
 Examples:Examples.Signed16 Examples.Enums::IdentityS16(Examples.Signed16)	A	A	A	A	A	A	A	A
 Examples:Examples.Signed16 Examples.Enums::ThroughCall(Examples.Signed16)	A	A	A	A	A	A	A	A
 Examples:Examples.Signed16 Examples.PointerOperations::ReadEnum(Examples.Signed16*,System.Int32)	A	A	A	A	A	A	A	A
@@ -139,6 +141,8 @@ Examples:System.Boolean Examples.IRefundingAllowance`1::Examples.IAllowance<TSel
 Examples:System.Boolean Examples.IStepFlag::get_IsActive()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.IntegerOperations::Greater32(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.IntegerOperations::Greater64(System.Int64,System.Int64)	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.ItemPool::IsIdle(Examples.PooledItem)	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.ItemPool::TryRent(Examples.PooledItem&)	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.Loops::AllZero(System.ReadOnlySpan`1<System.UInt32>)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.MarshaledMemory::TryRead(System.ReadOnlySpan`1<System.Byte>,System.UInt64&)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.MarshaledMemory::TryReadAggregate(System.ReadOnlySpan`1<System.Byte>,Examples.FourLimbs&)	A	A	A	A	A	A	A	A
@@ -154,6 +158,7 @@ Examples:System.Boolean Examples.PointerOperations::Greater(System.Byte*,System.
 Examples:System.Boolean Examples.PointerOperations::GreaterEqual(System.Byte*,System.Byte*)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.PointerOperations::Less(System.Byte*,System.Byte*)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.PointerOperations::LessEqual(System.Byte*,System.Byte*)	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.PooledItem::get_IsRented()	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.PrimitiveArrays::ReadBoolean(System.Boolean[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.RefundingAllowance::Spend(Examples.RefundingAllowance&,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.SpanCopies::TryCopy(System.Span`1<System.Byte>,System.Span`1<System.Byte>)	A	A	A	A	A	A	A	A
@@ -311,6 +316,10 @@ Examples:System.Int32 Examples.IntegerMath::SignInt64(System.Int64)	A	A	A	A	A	A	
 Examples:System.Int32 Examples.IntegerMath::SignInt8(System.SByte)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.IntegerMath::SignNative(System.IntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.IntegerOperations::Negate32(System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.ItemPool::Trim(System.Int32)	B	B	B	B	B	B	B	B
+Examples:System.Int32 Examples.ItemPool::get_Available()	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.ItemPool::get_Capacity()	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.ItemPool::get_Rented()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Loops::Drain(System.ReadOnlySpan`1<System.Int32>)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ManagedDispatch::Address(System.Int32)	B	B	B	B	B	B	B	B
 Examples:System.Int32 Examples.ManagedDispatch::Dispatch(method System.Int32 *(System.Int32)[],System.Int32,System.Int32)	B	B	B	B	B	B	B	B
@@ -341,6 +350,7 @@ Examples:System.Int32 Examples.NativeIntegers::SignedSize()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.NativeIntegers::UnsignedSize()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.NativeManagedDispatch::Dispatch(System.IntPtr*,System.Int32,System.Int32,System.Int32,System.Int64)	B	B	B	B	B	B	B	B
 Examples:System.Int32 Examples.NativeManagedDispatch::Repeat(System.Int32,System.Int32,System.Int64)	B	B	B	B	B	B	B	B
+Examples:System.Int32 Examples.PooledItem::get_Id()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.PrimitiveArrays::AllocateAndWrite(System.Int32,System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.PrimitiveArrays::AllocatePackedAndWrite(System.Int32,System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.PrimitiveArrays::Length(System.Int32[])	A	A	A	A	A	A	A	A
@@ -442,6 +452,7 @@ Examples:System.Int64 Examples.IntegerMath::MinInt64(System.Int64,System.Int64)	
 Examples:System.Int64 Examples.IntegerMath::WrongMin(System.Int64,System.Int64)	A	A	A	A	A	A	A	A
 Examples:System.Int64 Examples.IntegerOperations::Negate64(System.Int64)	A	A	A	A	A	A	A	A
 Examples:System.Int64 Examples.PointerOperations::Difference(System.Byte*,System.Byte*)	A	A	A	A	A	A	A	A
+Examples:System.Int64 Examples.PooledItem::get_Payload()	A	A	A	A	A	A	A	A
 Examples:System.Int64 Examples.PrimitiveArrays::ReadInt64(System.Int64[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int64 Examples.StaticScalars::ReadSignedLong()	B	B	B	B	B	B	B	B
 Examples:System.Int64 Examples.TupleDivision::MathOutInt64(System.Int64,System.Int64,System.Int64&)	A	A	A	A	A	A	A	A
@@ -1036,6 +1047,9 @@ Examples:System.Void Examples.InWord::Examples.IInWord<Examples.InWord>.Add(Exam
 Examples:System.Void Examples.InitializedHelper::.cctor()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.InitializedTypes::.cctor()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.InitializedValue::.cctor()	B	B	B	B	B	B	B	B
+Examples:System.Void Examples.ItemPool::.ctor(System.Int32)	B	B	B	B	B	B	B	B
+Examples:System.Void Examples.ItemPool::Prewarm(System.Int32)	B	B	B	B	B	B	B	B
+Examples:System.Void Examples.ItemPool::Return(Examples.PooledItem)	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.Loops::FillWords(System.UInt64&,System.UInt64,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Loops::Stamp(System.UInt32&,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ManagedDispatch::Targets(method System.Int32 *(System.Int32)[])	B	B	B	B	B	B	B	B
@@ -1062,6 +1076,9 @@ Examples:System.Void Examples.Objects::Relink(Examples.Node,Examples.Node,Exampl
 Examples:System.Void Examples.Objects::SetLimit(Examples.Account,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PackedConstructor::.ctor(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PackedConstructor::.ctor(System.UInt64,System.Byte)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.PooledItem::.ctor(Examples.ItemPool,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.PooledItem::set_IsRented(System.Boolean)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.PooledItem::set_Payload(System.Int64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PrimitiveArrays::FillEnums(Examples.AllocationTag[],Examples.AllocationTag)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.PrimitiveArrays::FillGeneric(T[],T)	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.PrimitiveArrays::FillIntegers(System.Int32[],System.Int32)	A	A	A	A	A	A	A	A
