@@ -357,14 +357,16 @@ macro "cil_checked_memory_by_equations " "[" facts:term,* "]" : tactic =>
 /-- Closes a frame-entry or return premise (checked argument or result values, the entered
     frame) by `rfl`, by `simp` with `facts`, or by also unfolding the checked-value definitions
     that `cil_checked_step_by_equations` unfolds. Facts alone come first, so a supplied
-    `checkedValue` result is used before its definition is unfolded past it. -/
+    `checkedValue` result is used before its definition is unfolded past it. A returned object
+    the frame does not own forms as it did before the frame is left. -/
 macro "cil_checked_side " "[" facts:term,* "]" : tactic =>
   `(tactic| first
     | rfl
     | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)
     | (simp [cil_checked, CIL.Safety.checkedValue, CIL.Safety.numericValue,
-         CIL.Safety.formValue, CIL.Safety.checkedAt, Except.mapError, Bind.bind, Except.bind,
-         Pure.pure, Except.pure, $[$facts:term],*] <;> (repeat constructor) <;> rfl))
+         CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.formObject_leaveFrame,
+         Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure, $[$facts:term],*] <;>
+         (repeat constructor) <;> rfl))
 
 /-- Closes a checked `step` goal for an op with no `@[cil_step]` equation by unfolding
     `CIL.Safety.step` and `CIL.step` with `facts`, unfolding the return checks only if needed. -/
