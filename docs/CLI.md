@@ -242,15 +242,20 @@ comment saying which obligation it is:
   `Holds` theorem that steps the callee when it is arithmetic on its arguments.
 - An instance of an admitted class is a `Reference`, and an instance method binds `this` under its
   class's name in lower case, such as `account`, or as `receiver` for a compiler-generated class.
-  The statement assumes `LiveObject initial account`, and for a body without calls, `Readable` of
-  each field it reads of each object and `Owned` of each it writes, using the field views the
+  The statement assumes `LiveObject initial account`, and `Readable` of each field the body or a
+  callee it steps reads of each object and `Owned` of each they write, using the field views the
   extraction emits in `Extracted.Classes` (see
   [Frame class instances](PROOFS-CONTRACTS.md#frame-class-instances)). An object the body loads from
   a reference field is a further binder, such as `nodeNextTarget`, with the premise that the field
   holds it. A method that writes a field promises `Confined footprint initial final`, with
   `footprint` listing the written fields. The body is stepped through its field loads, its stores,
   locals and null tests of objects, carrying each field's fact across the stores before it, and
-  leaves the postcondition with `held1`, `held2`, ... the stored fields' `Holds` facts. A loop
+  leaves the postcondition with `held1`, `held2`, ... the stored fields' `Holds` facts.
+- A call in a body over objects to a method that loads its fields, stores at most one word field of
+  an object argument and returns a value it names gets a generated `MethodContract` read from that
+  body, with a `Holds` theorem proved by the same stepping; `cil_contract_steps` composes the call
+  through it, and the callee's store counts as one of the caller's. Any other call is a
+  `not outlined:` hole naming the callee. A loop
   carries the object facts across its iterations, and a `callvirt` in it gets a contract like any
   other call.
 

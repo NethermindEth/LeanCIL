@@ -971,7 +971,23 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
             "    : Prop := sorry",
             "def Postcondition (first _ : Reference) (_ _ : Memory) (result : ManagedReference) : Prop :=\n" +
             "  result = .address first"),
-        ("sorry -- Postcondition of the returned value", "rfl")])
+        ("sorry -- Postcondition of the returned value", "rfl")]),
+    ("DepositBoth", [
+        ("def Precondition (first second : Reference) (amount : W64) (initial : Memory) : Prop := sorry",
+            "def Precondition (first second : Reference) (_ : W64) (_ : Memory) : Prop := first ≠ second"),
+        ("def Postcondition (first second : Reference) (amount : W64) (initial final : Memory) : Prop := sorry",
+            "def Postcondition (first second : Reference) (amount : W64) (initial final : Memory) : Prop :=\n" +
+            "  Account.Balance.Holds final first (Account.Balance.of initial first + amount) ∧\n" +
+            "    Account.Balance.Holds final second (Account.Balance.of initial second + amount)"),
+        ("sorry -- Postcondition of the returned value, with `held1`, `held2` the stored fields", """
+        have distinct : first ≠ second := assumed
+          have firstHeld := held1.1.across secondLive1 framed2 held2
+          have secondBefore := (secondBalance.across firstLive framed1 held1).2
+          simp only [distinct, ite_false] at secondBefore
+          simp only [Ne.symm distinct, ite_false, held1.2] at firstHeld
+          rw [secondBefore] at held2
+          exact ⟨firstHeld, held2⟩
+        """.Trim())])
 })
 {
     var source = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
@@ -990,10 +1006,10 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
         throw new InvalidOperationException($"The filled {name} outline did not verify:\n{verified.Output}");
 }
 Console.WriteLine("PASS filled object outlines verify with only their specification written: a field store, " +
-    "a reference field store and a null test followed through a local");
+    "a reference field store, a null test followed through a local and two calls through a generated contract");
 
-// LeanCIL's own closure that lays out a static word's bytes: its outline names the getter call
-// it cannot step, and the checked-in proof keeps the outline's statement and verifies.
+// LeanCIL's own closure that lays out a static word's bytes: its outline states the getter's contract
+// and steps through it, and the checked-in proof fills only the outline's holes and verifies.
 var wordByte = Path.Combine(outlineRoot, "WordByte");
 var wordByteExtraction = Path.Combine(wordByte, "Extraction");
 Run(Cli("extract", At("Extractor/bin/Nethermind.LeanCIL.dll"),
@@ -1001,10 +1017,9 @@ Run(Cli("extract", At("Extractor/bin/Nethermind.LeanCIL.dll"),
 var wordByteOutline = Path.Combine(wordByte, "Proof.lean");
 Run(Cli("new-proof", wordByteExtraction, wordByteOutline));
 var wordByteSource = File.ReadAllText(wordByteOutline);
-const string getterCall = "-- not outlined: the body meets a call, which `cil_contract_steps` composes";
-if (!wordByteSource.Contains(getterCall, StringComparison.Ordinal))
-    throw new InvalidOperationException("The closure outline does not name its getter call:\n" +
-        wordByteSource);
+if (wordByteSource.Contains("-- not outlined:", StringComparison.Ordinal) ||
+    !wordByteSource.Contains("theorem get_Bits_holds", StringComparison.Ordinal))
+    throw new InvalidOperationException("The closure outline does not step its getter call:\n" + wordByteSource);
 static string Statement(string source) =>
     Regex.Match(source.ReplaceLineEndings("\n"), @"^theorem correctness .*?:= by$",
         RegexOptions.Singleline | RegexOptions.Multiline).Value;

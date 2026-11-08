@@ -285,7 +285,7 @@ internal static partial class ProofOutline
 
     static string StraightLine(Extraction extraction, Specification spec, Body body, Writer lean)
     {
-        if (spec.Framed) return ObjectStraightLine(spec, body, new ClassViews(extraction), lean);
+        if (spec.Framed) return ObjectStraightLine(extraction, spec, body, lean);
         var steppable = spec.Parameters.All(parameter => parameter.Shape == ParameterShape.Scalar) &&
             body.Ops.All(Body.Pure);
         Header(lean, spec, ["CIL.Verification", "CIL.Safety.SymbolicExecution"],
@@ -311,18 +311,32 @@ internal static partial class ProofOutline
 
     /// <summary>A straight-line body over object arguments: stepped when it loads fields and stores at most one
     /// before it returns, otherwise one hole naming where the walk stopped.</summary>
-    static string ObjectStraightLine(Specification spec, Body body, ClassViews views, Writer lean)
+    static string ObjectStraightLine(Extraction extraction, Specification spec, Body body, Writer lean)
     {
-        var walk = new ObjectWalk(spec, body.Ops, views);
+        var views = new ClassViews(extraction);
+        var names = new Names();
+        foreach (var parameter in spec.Parameters) names.Claim(parameter.Name, parameter.Name);
+        var summaries = new Dictionary<int, Callee?>();
+        Callee? Summary(int index)
+        {
+            if (summaries.TryGetValue(index, out var known)) return known;
+            var callee = extraction.Methods[index];
+            var name = names.Claim(char.ToLowerInvariant(callee.Name[0]) + callee.Name[1..], "callee" + index);
+            return summaries[index] = Summarize(extraction, index, name, views);
+        }
+        var walk = new ObjectWalk(spec, body.Ops, views, Summary);
         var stepped = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
             ParameterShape.Object) && walk.Run(pc => Location(spec.Method, pc));
         if (stepped) spec.Plan = walk.Plan();
         Header(lean, spec, ["CIL.Verification", "CIL.Safety.SymbolicExecution", "CIL.Safety.ObjectFields"],
             stepped ? "`postcondition`" : null);
+        if (stepped)
+            foreach (var callee in walk.Steps.OfType<CallStep>().Select(call => call.Callee).Distinct())
+                CalleeContract(lean, callee, callee.Index.ToString(System.Globalization.CultureInfo.InvariantCulture));
         spec.Placeholders(lean);
         spec.Footprint(lean);
         spec.Statement(lean);
-        if (stepped) ObjectBody(lean, spec, walk);
+        if (stepped) ObjectBody(lean, spec, walk, "simp [footprint]");
         else
         {
             lean.Line("  -- Choose a fuel bound and step the body with `cil_checked_steps [facts]`, giving each");
