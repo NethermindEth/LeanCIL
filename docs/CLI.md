@@ -359,7 +359,7 @@ writing nothing; the message names the parameter, local, loop or test and what i
 
 ## Verify
 
-`verify` first checks the extraction artifacts, reuses an integrity-checked source-keyed library cache (or builds it on a cache miss), checks and kernel-replays the selected proof, and audits its transitive axioms. Use `--fresh` to bypass proof and support reuse while retaining the source-bound library cache. Use `--rebuild-library` to rebuild the library as well; CI bypasses the local library cache automatically. Interactive terminals receive build progress on stderr; stdout and redirected stderr retain their stable formats. Only `propext`, `Quot.sound` and `Classical.choice` are permitted. It checks artifact and source identity again before writing `artifacts/Add/verified.json`. Lean and Lake must be installed. The tool ships the framework's `CIL` sources only: proofs import `Extracted` and `CIL.*`, and `CIL.Safety.Memory.empty` is the caller memory with no allocations. LeanCIL's own example and test modules are not shipped; a proof importing one is rejected as `invalid-request`.
+`verify` first checks the extraction artifacts, reuses an integrity-checked source-keyed library cache (or builds it on a cache miss), checks and kernel-replays the selected proof, and audits its transitive axioms. Use `--fresh` to bypass proof and support reuse while retaining the source-bound library cache. Use `--rebuild-library` to rebuild the library as well; CI bypasses the local library cache automatically. Interactive terminals receive build progress on stderr; stdout and redirected stderr retain their stable formats. Only `propext`, `Quot.sound` and `Classical.choice` are permitted. It checks artifact and source identity again before writing `artifacts/Add/verified.json`. Lean and Lake must be installed. The tool ships the framework's `CIL` sources only: proofs import `Extracted` (or a method's `Extracted.KEY`, see [Editor workspace](#editor-workspace)) and `CIL.*`, and `CIL.Safety.Memory.empty` is the caller memory with no allocations. LeanCIL's own example and test modules are not shipped; a proof importing one is rejected as `invalid-request`.
 
 The theorem defaults to `ExampleProof.correctness`; select another with `--theorem Namespace.theoremName`. The first invocation saves the selection in `artifacts/Add/verification.json`, independently of the generated success report:
 
@@ -379,7 +379,7 @@ Run verification using the saved settings:
 leancil verify artifacts/Add
 ```
 
-Every invocation checks the proof afresh. A failed proof removes the previous verification report. `extract` generates definitions and `check` validates extraction consistency; `verify` establishes the selected theorem about those definitions. Its guarantee is exactly the theorem's statement, including its preconditions and quantifiers.
+Every invocation checks the proof afresh. A failed proof removes the previous verification report. When the assembly or the extractor changed since extraction, `verify` first extracts again from the settings `identity.json` records (assembly path, method, profile, assumptions, references and imports) and prints `Re-extracted artifacts/Add: the assembly changed since extraction.` (on stderr with `--format json`); a method that no longer exists then fails at extraction. An artifact that changed while its assembly and extractor did not is still rejected as tampered. `verify-batch` does not extract again; it reports such an output as a stale input. `extract` generates definitions and `check` validates extraction consistency; `verify` establishes the selected theorem about those definitions. Its guarantee is exactly the theorem's statement, including its preconditions and quantifiers.
 
 ### Reading the report
 
@@ -702,11 +702,22 @@ No documentation text becomes evidence or a contract premise.
 
 ## Editor workspace
 
-`leancil workspace <assembly> <method> --profile <profile> --proof <file>` generates the
-method's `Extracted` and `ExtractedSymbols` modules into the proof's Lake package, as the
-framework's `LeanCILEditor` library below `.lake`, so the proof file itself shows live goals.
-After rebuilding the assembly, run it again to refresh the extraction in place, then restart
-the file in the editor. A proof outside any Lake package gets a package beside it that requires
-the bundled framework, so no `lake update` or `--proof-root` is needed. See
-[Proof-authoring workspace](CONSUMERS.md#proof-authoring-workspace) for the loop, pinned
-imports and the separate certification step. Editor checking is not a certificate.
+`leancil workspace <assembly> <method> --profile <profile> --proof <file> [--theorem name]`
+generates the method's extraction into the proof's Lake package as `Extracted.KEY` and
+`ExtractedSymbols.KEY`, modules of the framework's `LeanCILEditor` library below `.lake`, so the
+proof file itself shows live goals. It prints the import; KEY names the method and digests its
+assembly name, signature, profile and initialization assumptions, so each method keeps its own
+module and proofs of several methods stay open at once. After rebuilding the assembly, run it
+again to refresh the extraction in place, then restart the file in the editor. A proof outside
+any Lake package gets a package beside it that requires the bundled framework, so no
+`lake update` or `--proof-root` is needed. Verification accepts the keyed import only for the
+extraction it checks and builds it as a re-export of `Extracted`.
+
+`leancil watch [package] --project app.csproj... [--configuration name] [--once] [--format text|json]`
+rebuilds the C# on change, refreshes only the extractions whose generated modules changed and
+runs ordinary `verify` for each recorded proof whose extraction or sources changed. A failed
+build reports every proof `stale` with the compiler errors' C# locations and deletes their
+certificates; a method that no longer extracts is `missing`. See
+[Proof-authoring workspace](CONSUMERS.md#proof-authoring-workspace) for the loop, the watch
+statuses, pinned imports and the separate certification step. Editor checking is not a
+certificate.
