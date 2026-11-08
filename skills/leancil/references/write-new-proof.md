@@ -19,6 +19,7 @@ expensive failure here, and LeanCIL cannot detect it.
 | Straight-line arithmetic | [Add](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/Add.lean) | [instruction composition](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-STEPPING.md#compose-instructions) |
 | Calls helper methods | [CountCalls](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/CountCalls.lean) | [contract composition](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md#compose-calls-through-contracts) |
 | Contains a loop | [Countdown](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/Countdown.lean) | [loop cutpoints](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-BINDING.md#loop-heads-and-call-sites) |
+| Walks a linked list | [PoolIdle](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/PoolIdle.lean) | [class instances](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md#frame-class-instances) |
 | Writes a buffer or span | [FillWords](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/FillWords.lean) | [buffer predicates](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-BUFFERS.md) |
 | Can throw | [CountUntil](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/CountUntil.lean) | [outcome contracts](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md#name-exceptional-outcomes) |
 

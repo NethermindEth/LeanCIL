@@ -95,10 +95,36 @@ foreach (var (mutation, theorems) in new[]
     }
     if (refusal.Length == 0 || File.Exists(Path.Combine(output, "verified.json")))
         throw new InvalidOperationException($"Rent satisfied its proof after the {mutation} mutation");
-    RequireFailureIn(theorems, mutation, refusal);
+    RequireFailureIn(proofLines, theorems, mutation, refusal);
     Console.WriteLine($"PASS {mutation} mutation fails {string.Join(" and ", theorems)}");
 }
-Console.WriteLine("PASS item pool: Rent proofs and the mutations each postcondition rejects");
+
+// IsIdle walks the free list through an object local; answering false on a match must break its contract.
+const string IsIdle = "ItemPool::IsIdle(Examples.PooledItem)";
+var idleProof = At("Examples/Proofs/PoolIdle.lean");
+verification.Verify(assembly, "Examples", IsIdle, idleProof, Path.Combine(root, "IsIdle"));
+Console.WriteLine("PASS IsIdle answers whether the item is on the null-terminated free list");
+var unmatched = Path.Combine(root, "Mutated-unmatched");
+Directory.CreateDirectory(unmatched);
+var unmatchedDll = Path.Combine(unmatched, "Examples.dll");
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var method = module.GetType("Examples.ItemPool").Methods.Single(candidate => candidate.Name == "IsIdle");
+    // return false where the walk meets the item
+    method.Body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Ldc_I4_1).OpCode = OpCodes.Ldc_I4_0;
+    module.Write(unmatchedDll);
+}
+var idleRefusal = "";
+try { verification.Verify(unmatchedDll, "Examples", IsIdle, idleProof, unmatched); }
+catch (InvalidOperationException error) when (error.Message.Contains("error:"))
+{
+    idleRefusal = error.Message;
+}
+if (idleRefusal.Length == 0 || File.Exists(Path.Combine(unmatched, "verified.json")))
+    throw new InvalidOperationException("IsIdle satisfied its proof after the unmatched mutation");
+RequireFailureIn(File.ReadAllLines(idleProof), ["idle_holds"], "unmatched", idleRefusal);
+Console.WriteLine("PASS unmatched mutation fails idle_holds");
+Console.WriteLine("PASS item pool: Rent and IsIdle proofs and the mutations each postcondition rejects");
 
 Instruction Require(Instruction instruction, OpCode expected) => instruction.OpCode == expected
     ? instruction
@@ -106,9 +132,9 @@ Instruction Require(Instruction instruction, OpCode expected) => instruction.OpC
 
 // A failure outside the stated theorems would mean the mutation broke the proof's scaffolding,
 // not the postconditions it targets; each stated theorem must fail.
-void RequireFailureIn(string[] theorems, string mutation, string refusal)
+void RequireFailureIn(string[] source, string[] theorems, string mutation, string refusal)
 {
-    var ranges = theorems.Select(TheoremLines).ToArray();
+    var ranges = theorems.Select(theorem => TheoremLines(source, theorem)).ToArray();
     var lines = Regex.Matches(refusal, @"\.lean:(\d+):\d+: error").Select(match => int.Parse(match.Groups[1].Value))
         .ToArray();
     bool Inside(int line, (int Start, int End) range) => line > range.Start && line <= range.End + 1;
@@ -118,11 +144,11 @@ void RequireFailureIn(string[] theorems, string mutation, string refusal)
             $"The {mutation} mutation did not fail exactly inside {string.Join(", ", theorems)}:\n{refusal}");
 }
 
-(int Start, int End) TheoremLines(string theorem)
+(int Start, int End) TheoremLines(string[] lines, string theorem)
 {
-    var start = Array.FindIndex(proofLines, line => line.StartsWith($"theorem {theorem} ", StringComparison.Ordinal));
-    var end = Array.FindIndex(proofLines, line => line == $"#print axioms {theorem}");
+    var start = Array.FindIndex(lines, line => line.StartsWith($"theorem {theorem} ", StringComparison.Ordinal));
+    var end = Array.FindIndex(lines, line => line == $"#print axioms {theorem}");
     return start < 0 || end < start
-        ? throw new InvalidDataException("Examples/Proofs/PoolRent.lean does not state " + theorem)
+        ? throw new InvalidDataException("The pool proofs do not state " + theorem)
         : (start, end);
 }

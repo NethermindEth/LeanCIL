@@ -36,6 +36,10 @@
   pool, numbered with the next id and marked rented; an exhausted pool throws
   `InvalidOperationException` and a null pool `NullReferenceException`. Its object sites agree
   with the catalog, so the premise stated at entry holds after any invocation of the program.
+- `ItemPool.IsIdle` walks the free list through an object local. `PoolIdle.lean` takes the list
+  as a `Segment` to null visiting `nodes`, whose length is the loop's measure, and proves that
+  the method answers whether the item is one of `nodes`, for a null or any live item, and writes
+  nothing.
 - `NullReferences` tests `Unsafe.NullRef<T>` with `Unsafe.IsNullRef<T>`, faults on loads, stores and field accesses through it, and selects an optional `ref` argument that is either unset or bound, as optional outputs do.
 - `VirtualCalls` calls an abstract and a defaulted virtual method of `Animal` on any animal:
   `AnimalLegs.lean` and `AnimalLoudness.lean` prove the override or inherited body the receiver's

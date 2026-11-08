@@ -301,6 +301,16 @@ entry: `decide` proves `ObjectSitesConsistent` for the extraction, and `invoke_p
 keeps the premise across any invocation, including the instances it creates.
 [PoolRent](../Examples/Proofs/PoolRent.lean) uses each of these.
 
+A list linked through a reference field, such as a free list, is described by
+`ReferenceField.Segment field memory start stop nodes`: following `field` from `start` visits the
+readable instances `nodes` and arrives at `stop`. A segment is a finite path, so one to null
+shows no cycle is reachable from `start`, and `nodes.length` is the measure of a loop that walks
+it: `Segment.next` gives the head's readable field and the one-shorter rest, and
+`Segment.formed` the reference the walk loads and compares. It is a precondition the caller
+proves of its memory; a program can link a cycle, and then no segment to null exists.
+`Segment.after_below` carries it into the entered frame.
+[PoolIdle](../Examples/Proofs/PoolIdle.lean) proves a search of the pool's free list this way.
+
 [DepositBoth](../Examples/Proofs/DepositBoth.lean) composes two `callvirt` calls of
 `Account.Deposit` through `depositContract`, whose precondition is `Account.Balance.Owned` and
 whose postcondition is `Account.Balance.Holds final account (Account.Balance.of initial account +

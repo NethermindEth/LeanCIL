@@ -103,7 +103,8 @@ var independentSuites = new Dictionary<string, (string Script, string Descriptio
         "bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and " +
         "substitution rejection"),
     ["pool"] = ("Tests/ItemPool.cs",
-        "object pool reuse, creation, exhaustion and null-pool proofs and the mutations they reject"),
+        "object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations " +
+        "they reject"),
     ["blockers"] = ("Tests/Blockers.cs", "admission reports with deduplicated blockers, call chains, " +
         "profile-excluded branches and self-admission"),
     ["audit"] = ("Tests/OleanAudit.cs", "theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts cannot forge"),

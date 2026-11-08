@@ -15,6 +15,7 @@ interface that expresses the result:
 | Prove a loop terminates | [Loop examples](EXAMPLES.md) and [loop cutpoints](PROOFS-BINDING.md#loop-heads-and-call-sites) | [Countdown](../Examples/Proofs/Countdown.lean) |
 | Store and load struct fields through a layout | [Struct field views](PROOFS-BUFFERS.md#view-struct-fields) | [Struct](../Examples/Proofs/Struct.lean) |
 | Name class fields in contracts and frame them across calls | [Class instances](PROOFS-CONTRACTS.md#frame-class-instances) | [DepositBoth](../Examples/Proofs/DepositBoth.lean) |
+| Walk a linked list to null in a loop | [Class instances](PROOFS-CONTRACTS.md#frame-class-instances) | [PoolIdle](../Examples/Proofs/PoolIdle.lean) |
 | Establish buffer contents and preserve neighbours | [Buffer predicates](PROOFS-BUFFERS.md#describe-buffer-contents) | [FillWords](../Examples/Proofs/FillWords.lean) |
 | Keep frame facts out of a loop invariant | [Loop frames](PROOFS-BUFFERS.md#carry-frame-facts-through-a-loop) | [FillWords](../Examples/Proofs/FillWords.lean) |
 | Specify normal and exceptional outcomes | [Outcome contracts](PROOFS-CONTRACTS.md#name-exceptional-outcomes) | [CountUntil](../Examples/Proofs/CountUntil.lean) |
