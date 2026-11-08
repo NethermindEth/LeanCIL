@@ -27,16 +27,17 @@ Copy the closest example's structure and change the statement first.
 
 ## 3. Iterate in a workspace, then verify
 
-`leancil workspace` builds an editable Lake workspace with `Extracted` available, so the Lean
-language server shows goals:
+`leancil workspace` generates `Extracted` into the proof's own package, so the Lean language
+server shows goals in `proofs/Method.lean` itself:
 
 ```sh
 leancil workspace path/to/Lib.dll 'Type::Method(ulong)' --profile scalar --proof proofs/Method.lean --proof-root .
 ```
 
-Edit `LeanCILProofWorkspace.lean` there and check it with
-`lake build +LeanCILProofWorkspace:olean`. When it builds, copy the proof back to
-`proofs/Method.lean` and run `leancil extract` and `leancil verify`. Only `verify` counts.
+Edit the proof in place and check it from a terminal with `lake lean proofs/Method.lean`. After
+rebuilding the C# assembly, run the same command again and restart the file in the editor. When
+the proof checks, run `leancil extract` and `leancil verify` on the same file. Only `verify`
+counts.
 Details: [editor workspace](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CONSUMERS.md#proof-authoring-workspace).
 
 ## 4. Keep the proof local

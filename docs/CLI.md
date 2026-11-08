@@ -693,9 +693,11 @@ No documentation text becomes evidence or a contract premise.
 
 ## Editor workspace
 
-`leancil workspace <assembly> <method> --profile <profile> --proof <file>` creates a
-source package for Lake and the Lean language server. A proof outside any Lake package gets a
-generated package pinned to the bundled framework, so no `lake update` or `--proof-root` is
-needed. See
-[Proof-authoring workspace](CONSUMERS.md#proof-authoring-workspace) for pinned imports,
-stale-input rejection and the separate certification step. Editor checking is not a certificate.
+`leancil workspace <assembly> <method> --profile <profile> --proof <file>` generates the
+method's `Extracted` and `ExtractedSymbols` modules into the proof's Lake package, as the
+framework's `LeanCILEditor` library below `.lake`, so the proof file itself shows live goals.
+After rebuilding the assembly, run it again to refresh the extraction in place, then restart
+the file in the editor. A proof outside any Lake package gets a package beside it that requires
+the bundled framework, so no `lake update` or `--proof-root` is needed. See
+[Proof-authoring workspace](CONSUMERS.md#proof-authoring-workspace) for the loop, pinned
+imports and the separate certification step. Editor checking is not a certificate.

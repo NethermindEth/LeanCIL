@@ -39,7 +39,7 @@ single-file verification. `verification.json` remembers the package root.
 
 ## Proof-authoring workspace
 
-Materialize the same source package and selected extraction for editor tooling:
+Edit the proof file itself with live goals. Generate the selected extraction into the package:
 
 ```sh
 leancil workspace path/to/Library.dll 'Type::Method(parameter-types)' --profile arm64-advsimd --proof proofs/Method.lean --proof-root .
@@ -52,68 +52,62 @@ same pinned Git dependencies and framework/toolchain checks as consumer
 verification apply. `--assembly` and `--assume-initialized` have the extraction
 command's meaning.
 
+The pinned `leancil` package declares an editor library, `LeanCILEditor`, whose
+`Extracted` and `ExtractedSymbols` modules live in its ignored
+`.lake/packages/leancil/.lake/leancil` directory. The command extracts the method
+into that directory and builds both modules with Lake, so `import Extracted`
+resolves in the proof and in any helper module of the package, and Lake rebuilds
+helpers that import it when the extraction changes. In a LeanCIL checkout the
+root package is `leancil`, so the directory is the checkout's own
+`.lake/leancil`. `ExtractedSymbols` exists only while the assembly has a matching
+portable PDB. Consumer sources named `Extracted.lean` or `ExtractedSymbols.lean`
+are rejected because they would shadow the extraction.
+
+The loop is:
+
+1. Open the proof in the editor and edit it in place.
+2. After changing and rebuilding the C# assembly, run the same `leancil workspace`
+   command. It regenerates the extraction in place; an unchanged method changes
+   no file and rebuilds nothing.
+3. Restart the file in the editor (Lean 4: Restart File) to load the new
+   extraction. From a terminal, `lake lean proofs/Method.lean` checks the proof
+   the way the language server does.
+
+A package holds one extraction at a time. Selecting another method or profile
+replaces it for every proof in the package, and the command says which
+selection it replaced.
+
 A proof with no `lakefile.toml` or `lakefile.lean` in its directory or above it
-needs no setup. The command generates a package at
-`.work/leancil/package-<key>` beside the proof, holding a copy of the proof and a
-copy of the tool's bundled framework sources in `.lake/packages/leancil`, which
-the package requires by `path`. It runs `lake update` there without network
-access and creates no Git repository or commit, so Git settings such as
-`commit.gpgsign` do not apply. It then opens that package as above. A tool with
-different framework sources regenerates the package. Verification accepts only
-dependencies pinned by a Git revision, so the generated package cannot be passed
-to `--proof-root`. The default output
-is `.work/leancil/<request-key>` beside the proof. Each run refreshes the copy, so
-an edited source proof makes an existing workspace stale like any consumer
-source change. Copy the edited workspace proof back to the original file and
-verify it with ordinary `leancil verify <extraction> --proof <file>`.
-
-The default output is `.work/leancil/<request-key>` under the source package.
-Use `--output directory` to choose an external directory, or one under the
-package's excluded `.work`, `artifacts`, `generated`, `bin` or `obj` tree. The
-output must not already contain unrelated files.
-
-Open the printed workspace directory with the Lean language server. Edit
-`LeanCILProofWorkspace.lean`, or check it with:
-
-```sh
-lake build +LeanCILProofWorkspace:olean
-```
-
-The workspace copies source dependencies and configuration. It supplies
-`Extracted` and, when the assembly has a matching portable PDB, `ExtractedSymbols`
-as Lake targets. It does not import consumer build caches or certified artifacts.
-The editor proof starts with exactly the selected proof's bytes. Editor changes
-stay separate from the recorded generated/support sources.
-
-Re-run the same workspace command before checking after an input change.
-It hashes the assembly, PDB presence and bytes, extractor, profile configuration,
-exact bundled framework sources and configuration, consumer sources, dependency sources
-and pinned revisions. It also checks the
-recorded generated modules, framework, Lake configuration and toolchain pin in
-the workspace. Changed inputs or managed files cause an explicit rejection;
-select a new `--output` directory after preserving proof edits. Reopening an
-unchanged workspace preserves the edited proof and Lake build outputs. Editor
-tooling itself does not watch or invalidate an external assembly automatically.
+needs no setup. The command makes that directory a Lake package: it writes a
+`lakefile.toml` and `lean-toolchain` beside the proof, copies the tool's bundled
+framework sources into `.lake/packages/leancil`, which the package requires by
+`path`, and runs `lake update` without network access. It creates no Git
+repository or commit, so Git settings such as `commit.gpgsign` do not apply. A
+tool with different framework sources refreshes the copy. Verification accepts
+only dependencies pinned by a Git revision, so pass such a proof to ordinary
+`leancil verify <extraction> --proof <file>` without `--proof-root`.
 
 **Editor checking is not a certificate.** The command writes no `verified.json`,
-trusted support manifest or verification receipt. Copy only the edited proof
-source back to the original consumer proof path, then run ordinary verification:
+trusted support manifest or verification receipt. Run ordinary verification on
+the same files:
 
 ```sh
 leancil extract path/to/Library.dll 'Type::Method(parameter-types)' artifacts/Method arm64-advsimd
 leancil verify artifacts/Method --proof proofs/Method.lean --proof-root . --theorem MyProof.correctness --fresh
 ```
 
-Keep workspace generated files, caches and manifests out of that source package.
-The ordinary verifier still requires extraction identity checks, its fresh source
-package, exact theorem and certificate audits, and independent kernel replay.
-The workspace root itself is not a supported `--proof-root` because it contains
-reserved generated modules. The CI workspace fixture builds a small in-repo library with a
-four-limb `Workspace.Wide` struct and opens `Workspace.Wide::get_IsZeroOrOne()` under the
-scalar profile. It uses the existing `--assume-initialized Workspace.Wide` caller premise;
-assembly and method admission rules are unchanged. The fixture checks transitive consumer and
-symbol imports, then verifies the unchanged selected-method proof through ordinary fresh
-verification. This tests workspace reproducibility, not an arithmetic contract.
+Verification never reads the editor library. Its fresh source package skips
+`.lake`, takes `Extracted` from the extraction it checks, and builds on a
+certified library whose lakefile does not declare `LeanCILEditor`. It still
+requires extraction identity checks, exact theorem and certificate audits, and
+independent kernel replay. The CI workspace fixture builds a small in-repo
+library with a four-limb `Workspace.Wide` struct and opens
+`Workspace.Wide::get_IsZeroOrOne()` under the scalar profile, with the existing
+`--assume-initialized Workspace.Wide` caller premise. It checks the proof in
+place, adds a helper about the method body, rebuilds the C# with a different
+body and expects that helper to fail after a refresh with no Lean edit. It then
+verifies the same files freshly, shows that a forged editor module changes
+nothing verification reads, and rejects a tampered extraction.
 
 ## Local support cache
 
