@@ -271,8 +271,8 @@ alias. A proof that needs instances of unrelated classes to be different objects
 brings its whole base chain as the lineage's tail, which single inheritance makes true of every
 CLR object. The catalog lists the class and admitted bases that each object-receiver method's
 metadata records (`RawMethod.owner`, `RawMethod.objectBases`); these are metadata the extractor
-decodes, and `translation_valid` certifies the evidence that holds them. Under the premise,
-`Memory.ClassesConsistent.allocation_ne` separates objects located as instances of two unrelated
+decodes, and each extraction's translation certificate covers the evidence that holds them.
+Under the premise, `Memory.ClassesConsistent.allocation_ne` separates objects located as instances of two unrelated
 cataloged classes. The premise describes the memory it is stated for; no theorem yet carries it
 across execution, so a proof composing calls states it for each call's entry memory.
 
