@@ -429,8 +429,8 @@ Each store names its memory, step and frame (`stored`, `storing`, `storedFrame`,
 the stored-over memory, or about the caller's, at the new one under the same name, so an
 invariant reads them at the memory it is stated at. All gather facts as the other loop tactics
 do, so the lists are optional.
-`loop_terminates_call_formed` gives the continuation `WellFormed` and the static world when a
-proof composes the call by hand. The [counted-loop
+`loop_terminates_call_formed` gives the continuation `WellFormed`, the static world and catalog
+agreement when a proof composes the call by hand. The [counted-loop
 proof](../Examples/Proofs/CountCalls.lean) never unfolds the helper or names its fuel; the loop
 suite reuses it unedited for a reimplemented helper and requires it to reject a discarded helper
 result and a broken count. On the correct build, a nondecreasing measure and an invariant that holds
