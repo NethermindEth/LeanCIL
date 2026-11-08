@@ -18,6 +18,7 @@ internal static partial class Program
         "       leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]\n" +
         "       leancil workspace assembly.dll method --profile profile --proof proof.lean [--theorem name] " +
         "[--proof-root package-directory] [--assembly identity] [--assume-initialized Namespace.Type]...\n" +
+        "       leancil workspace --remove key-or-method [--profile profile] [--proof-root package-directory]\n" +
         "       leancil watch [package-directory] [--project project.csproj]... [--configuration name] [--once] " +
         "[--format text|json]\n" +
         "       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] " +

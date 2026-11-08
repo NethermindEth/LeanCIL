@@ -310,12 +310,26 @@ if (otherKey == key || !otherProfile.Contains("1 other method extraction", Strin
     wideAt.Any(entry => File.GetLastWriteTimeUtc(entry.Key) != entry.Value))
     throw new InvalidOperationException("A second selection replaced or touched the first: " + otherProfile);
 CheckedProof();
-Directory.Delete(Path.Combine(editor, "selections", otherKey), true);
-File.Delete(Path.Combine(editor, "Extracted", otherKey + ".lean"));
-File.Delete(Path.Combine(editor, "ExtractedSymbols", otherKey + ".lean"));
-if (!EditorFiles().SequenceEqual(wideFiles))
-    throw new InvalidOperationException("Removing the other selection left files behind: " +
-        string.Join(", ", EditorFiles()));
+// Dropping a selection takes its modules and Lake outputs and leaves the other method's files and build alone.
+var otherCompiled = Path.Combine(compiledModules, "Extracted", otherKey + ".olean");
+if (!File.Exists(otherCompiled)) throw new InvalidOperationException("The other selection was not built.");
+var wideBuilt = Directory.EnumerateFiles(compiledModules, key + ".*", SearchOption.AllDirectories)
+    .ToDictionary(path => path, File.GetLastWriteTimeUtc);
+Reject([.. cli, "workspace", "--remove", method, "--proof-root", package], "names 2 selections");
+Reject([.. cli, "workspace", "--remove", "Wide_get_IsZeroOrOne_00000000", "--proof-root", package],
+    "No recorded selection matches");
+var removed = Run([.. cli, "workspace", "--remove", method, "--profile", "arm64-advsimd", "--proof-root", package]);
+var removedProbe = Path.Combine(package, "Removed.lean");
+File.WriteAllText(removedProbe, $"import Extracted.{otherKey}\n");
+var removedCheck = CheckProof(removedProbe);
+File.Delete(removedProbe);
+if (!removed.Contains("Removed editor extraction " + otherKey, StringComparison.Ordinal) ||
+    !EditorFiles().SequenceEqual(wideFiles) || File.Exists(otherCompiled) || removedCheck.Code == 0 ||
+    wideAt.Any(entry => File.GetLastWriteTimeUtc(entry.Key) != entry.Value) ||
+    wideBuilt.Any(entry => File.GetLastWriteTimeUtc(entry.Key) != entry.Value))
+    throw new InvalidOperationException("Removing the other selection left files behind or touched the first: " +
+        removed + string.Join(", ", EditorFiles()) + removedCheck.Output);
+CheckedProof();
 var olderRevision = Run(["git", "rev-parse", "HEAD^"], framework).Trim();
 try
 {
@@ -336,7 +350,7 @@ File.AppendAllText(Path.Combine(toolCopy, "verification", "CIL", "ProfileEquival
 Reject(["dotnet", Path.Combine(toolCopy, Path.GetFileName(ExtractorPath)), .. command[2..]],
     "differ from the verifier's bundled framework");
 Console.WriteLine("PASS reserved sources, other frameworks and moved dependency revisions are rejected; another " +
-    "profile is a second extraction beside the first");
+    "profile is a second extraction beside the first, and removing it leaves the first untouched");
 
 // A scratch proof has no Lake package above it; the temp directory keeps the checkout's lakefile out of reach.
 var standalone = Path.Combine(Path.GetTempPath(), "leancil-standalone-" + Guid.NewGuid().ToString("N"));

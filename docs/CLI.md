@@ -716,6 +716,11 @@ any Lake package gets a package beside it that requires the bundled framework, s
 extraction it checks and builds it as a re-export of `Extracted`. `new-proof` writes the same
 keyed import, so its outline opens in the editor as generated.
 
+`leancil workspace --remove <key-or-method> [--profile profile] [--proof-root package]` drops one
+selection from the package (by default the one holding the current directory): its record, both
+modules and their Lake outputs. A method selector must name one recorded profile, so pass the
+key or `--profile` when it names several. Nothing else is rebuilt.
+
 `leancil watch [package] --project app.csproj... [--configuration name] [--once] [--format text|json]`
 rebuilds the C# on change, refreshes only the extractions whose generated modules changed and
 runs ordinary `verify` for each recorded proof whose extraction or sources changed. A failed

@@ -83,7 +83,11 @@ checkout the root package is `leancil`, so the directory is the checkout's own
 method fails at its import instead of checking against whichever method was
 selected last. `ExtractedSymbols.KEY` exists only while the assembly has a
 matching portable PDB. `selections/KEY/selection.json` records the selection
-and its proofs; delete that directory and the two modules to drop a method.
+and its proofs. `leancil workspace --remove KEY` drops a method: it deletes that
+directory, both modules and their Lake outputs, and rebuilds nothing. A method
+selector in place of KEY works when it names one recorded profile, or with
+`--profile`. `leancil new-proof` writes the keyed import, so a generated outline
+resolves in the editor without editing.
 Consumer sources named `Extracted.lean` or `ExtractedSymbols.lean`, or inside an
 `Extracted` or `ExtractedSymbols` directory, are rejected because they would
 shadow an extraction.

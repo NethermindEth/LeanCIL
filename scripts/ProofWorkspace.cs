@@ -22,9 +22,14 @@ partial class Program
     const string EditorSelectionsDirectory = "selections";
     const string EditorSelectionFile = "selection.json";
     const string WorkspaceUsage = "Usage: leancil workspace assembly.dll method --profile profile --proof proof.lean " +
-        "[--theorem name] [--proof-root package-directory] [--assembly identity] [--assume-initialized type]...";
+        "[--theorem name] [--proof-root package-directory] [--assembly identity] [--assume-initialized type]...\n" +
+        "       leancil workspace --remove key-or-method [--profile profile] [--proof-root package-directory]";
 
-    internal static void CreateProofWorkspace(string[] args) => RefreshEditorExtraction(ParseWorkspaceSettings(args));
+    internal static void CreateProofWorkspace(string[] args)
+    {
+        if (args.Length > 0 && args[0] == "--remove") RemoveEditorSelection(args[1..]);
+        else RefreshEditorExtraction(ParseWorkspaceSettings(args));
+    }
 
     static WorkspaceSettings ParseWorkspaceSettings(string[] args)
     {
@@ -68,9 +73,12 @@ partial class Program
             [.. initialized], theorem, created);
     }
 
-    static string? FindProofPackage(string proof)
+    static string? FindProofPackage(string proof) => FindPackage(Path.GetDirectoryName(proof)!);
+
+    /// <summary>The nearest directory at or above `start` holding a Lake package, if any.</summary>
+    static string? FindPackage(string start)
     {
-        DirectoryInfo? directory = new(Path.GetDirectoryName(proof)!);
+        DirectoryInfo? directory = new(start);
         while (directory is not null)
         {
             if (File.Exists(Path.Combine(directory.FullName, "lakefile.toml")) ||
@@ -262,6 +270,56 @@ partial class Program
     {
         File.Delete(EditorModulePath(editor, "Extracted." + key));
         File.Delete(EditorModulePath(editor, "ExtractedSymbols." + key));
+    }
+
+    /// <summary>
+    /// Drops one selection from the package's editor library: its record, the verification outputs of its proofs,
+    /// both modules and their Lake outputs, so a proof importing them fails at the import. Nothing is rebuilt.
+    /// </summary>
+    static void RemoveEditorSelection(string[] args)
+    {
+        if (args.Length == 0 || args[0].StartsWith("--", StringComparison.Ordinal))
+            throw new ArgumentException(WorkspaceUsage);
+        var options = new Dictionary<string, string>(StringComparer.Ordinal);
+        for (int index = 1; index < args.Length; index++)
+        {
+            var option = args[index];
+            if (++index == args.Length || args[index].StartsWith("--", StringComparison.Ordinal))
+                throw new ArgumentException("Missing value for " + option + ".");
+            if (option is not ("--profile" or "--proof-root") || !options.TryAdd(option, args[index]))
+                throw new ArgumentException("Unknown or duplicate option: " + option);
+        }
+        var root = options.TryGetValue("--proof-root", out var selectedRoot) ? Path.GetFullPath(selectedRoot)
+            : FindPackage(Environment.CurrentDirectory) ?? throw new InvalidDataException(
+                "No Lake package holds the current directory; pass --proof-root.");
+        var framework = EditorFramework(root);
+        var editor = Path.Combine(framework, EditorSourceDirectory);
+        var selections = EditorSelections(editor);
+        var profile = options.GetValueOrDefault("--profile");
+        // The key names one selection; a method selector names each profile of it that the package recorded.
+        string[] matched = selections.ContainsKey(args[0]) ? [args[0]]
+            : [.. selections.Where(pair => pair.Value.Method == args[0] &&
+                (profile is null || pair.Value.Profile == profile)).Select(pair => pair.Key)];
+        if (matched.Length != 1)
+            throw new InvalidDataException((matched.Length == 0 ? "No recorded selection matches " + args[0]
+                    : args[0] + " names " + matched.Length + " selections; pass its key or --profile") + ". " +
+                (selections.Count == 0 ? "The package records no selection." : "Recorded: " + string.Join(", ",
+                    selections.Select(pair => $"{pair.Key} ({pair.Value.Method}, {pair.Value.Profile})")) + "."));
+        var key = matched[0];
+        var selection = selections[key];
+        RemoveEditorModules(editor, key);
+        Directory.Delete(Path.Combine(editor, EditorSelectionsDirectory, key), true);
+        var build = Path.Combine(framework, ".lake", "build");
+        if (Directory.Exists(build))
+            foreach (var output in Directory.EnumerateFiles(build, key + ".*", SearchOption.AllDirectories)
+                .Where(path => Path.GetFileName(Path.GetDirectoryName(path)) is "Extracted" or "ExtractedSymbols"))
+                File.Delete(output);
+        Console.WriteLine($"Removed editor extraction {key}: {selection.Method} ({selection.Profile})");
+        foreach (var proof in selection.Proofs.Select(proof => Path.Combine(root, proof.Proof)).Where(File.Exists))
+            if (SourceImport().Matches(File.ReadAllText(proof)).Any(import => import.Groups[1].Value.EndsWith(
+                    "." + key, StringComparison.Ordinal) && SelectionModules.Is(import.Groups[1].Value)))
+                Console.WriteLine("  " + CliPaths.Display(proof) + " imports it and now fails at that import.");
+        Console.WriteLine("  Other methods' modules are unchanged and nothing was rebuilt.");
     }
 
     static void BuildEditorModules(string root, IReadOnlyCollection<string> modules)
