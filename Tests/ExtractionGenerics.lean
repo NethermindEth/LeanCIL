@@ -152,6 +152,17 @@ theorem receiver_checked_calls :
       ⟨0, 111, .call depositSite⟩ true (.callInstance 0 2) := by decide +kernel
 #print axioms receiver_checked_calls
 
+/-- `deposit` marked virtual, as an override or a `virtual` member is. -/
+def virtualDeposit : RawMethod := { deposit with attributes := virtualMethodAttribute }
+
+-- A virtual body is admitted as the target of a plain `call`, which runs exactly that body, but a
+-- `callvirt` of it can never become a fixed-target receiver-checked call.
+theorem virtual_bodies_called_directly :
+    validateManagedCall [⟨[], virtualDeposit⟩] [] ⟨0, 40, .call depositSite⟩ true (.call 0 2) ∧
+    ¬ validateManagedCall [⟨[], virtualDeposit⟩] [] ⟨0, 111, .call depositSite⟩ true
+      (.callInstance 0 2) := by decide +kernel
+#print axioms virtual_bodies_called_directly
+
 /-- A method with a class instance local and parameter beside a scalar of each. -/
 def holder : RawMethod := { closed with
   parameters := [tally, word], locals := [tally, word], code := [] }

@@ -563,9 +563,6 @@ internal static class MetadataValidation
             {
                 if (classReceiver && ObjectTypes.Candidate(receiver)) ObjectTypes.Validate(receiver);
             }, named: true);
-            Reject(() => classReceiver && method.IsVirtual,
-                "Unsupported virtual instance method\n" +
-                "  Dispatch on class instances is not modelled (#477).");
             Reject(() => (method.ImplAttributes & MethodImplAttributes.Synchronized) != 0,
                 "Unsupported method metadata: synchronized method");
             Reject(() => method.HasGenericParameters,

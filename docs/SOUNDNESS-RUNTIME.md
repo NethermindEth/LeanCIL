@@ -281,8 +281,9 @@ object, not that its class is the field's type: that is the verifier's typing, a
 and an object of another class read back through the field fails its next field access with
 the owner check rather than reading another class's fields.
 
-A non-virtual instance method of an admitted class is an entry whose receiver `this` is an
-object reference, not a byref: the raw method records the class receiver (`objectReceiver`),
+An instance method of an admitted class, virtual or not, is an entry whose receiver `this` is an
+object reference, not a byref. A theorem about a virtual method is about that body, which a `call`
+(a base call, or a direct call into it) runs exactly. The raw method records the class receiver (`objectReceiver`),
 from which Lean derives the receiver's storage and scalar kind. Lean rejects the address of
 the receiver and of any class-typed local or argument, so no byref can stand in for an object
 receiver.
@@ -294,14 +295,15 @@ target, so it is a call (`callInstance`) that first checks its receiver: a null 
 (ECMA-335 III.3.19), and a receiver that is no object reference is ill-typed. Lean admits a
 `callInstance` only at `callvirt`, only into a method whose receiver is an object, counting the
 receiver among its arguments, and rejects a plain `call` emitted for `callvirt`, which would skip
-the check. That the target is not virtual is metadata the extractor decodes and checks, as it
-decodes `hasThis`.
+the check. It also rejects a `callInstance` into a method whose metadata attributes mark it
+virtual, since `callvirt` selects such a body by runtime type; the attributes are metadata the
+extractor decodes, as it decodes `hasThis`.
 
 Interface, generic, explicit-layout and finalizable classes, classes deriving from a class that is
 not admitted, `newobj` of an abstract class, byrefs to class
 instances, field addresses on class instances, class fields holding anything but integers or
 admitted class instances (strings, arrays, interfaces, other classes),
-virtual class methods, `callvirt` of a virtual method and the address of a class receiver, local
+`callvirt` of a virtual method and the address of a class receiver, local
 or argument are each
 rejected by name during extraction.
 

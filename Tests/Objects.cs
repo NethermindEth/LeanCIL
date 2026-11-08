@@ -77,7 +77,7 @@ Console.WriteLine("PASS construction call proof names the constructor");
 foreach (var mutation in new[]
 {
     "abstract", "base", "baseRejected", "explicit", "finalizer", "interface", "byref", "address", "reference",
-    "fieldType", "virtual", "virtualCall", "receiverAddress"
+    "fieldType", "virtualCall", "receiverAddress"
 })
 {
     var output = Path.Combine(root, "Reject-" + mutation);
@@ -140,10 +140,6 @@ foreach (var mutation in new[]
                 editor.InsertAfter(first, editor.Create(OpCodes.Pop));
                 editor.InsertAfter(first, editor.Create(OpCodes.Ldfld, rate));
                 break;
-            case "virtual":
-                getter.IsVirtual = true;
-                getter.IsNewSlot = true;
-                break;
             case "virtualCall":
                 getter.IsVirtual = true;
                 getter.IsNewSlot = true;
@@ -176,7 +172,6 @@ foreach (var mutation in new[]
             "reference" => "Unsupported reference-typed field: System.String Examples.Account::Owner\n" +
                 "  Only fields holding instances of admitted classes are modelled; System.String is not one.",
             "fieldType" => "Unsupported class instance field type: System.Double Examples.Account::Rate",
-            "virtual" => "Unsupported virtual instance method\n  Dispatch on class instances",
             "virtualCall" => "Unsupported virtual call: System.UInt64 Examples.Account::get_Headroom()",
             "receiverAddress" =>
                 "Unsupported address of a class instance receiver: System.UInt64 Examples.Account::get_Headroom()",
@@ -189,7 +184,7 @@ foreach (var mutation in new[]
         "abstract" => "Objects::Fresh(System.UInt32)",
         "interface" => "Objects::IsNull(Examples.ICounterValue)",
         "byref" => "Objects::IsNull(Examples.Account&)",
-        "virtual" or "receiverAddress" => "Account::get_Headroom()",
+        "receiverAddress" => "Account::get_Headroom()",
         _ => "Objects::IsNull(Examples.Account)"
     };
     var result = Execute(["dotnet", ExtractorPath, "extract", dll, selector, output]);
@@ -198,6 +193,22 @@ foreach (var mutation in new[]
         throw new InvalidOperationException($"Incorrect class rejection: {mutation}\n{result.Output}");
     Console.WriteLine($"PASS class rejection: {mutation}");
 }
+// A virtual method's own body is an entry like any instance method: the theorem is about that body,
+// whichever call reaches it. Only a callvirt of it needs dispatch, rejected above.
+var virtualOutput = Path.Combine(root, "VirtualBody");
+Directory.CreateDirectory(virtualOutput);
+var virtualDll = Path.Combine(virtualOutput, "Examples.dll");
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var getter = module.GetType("Examples.Account").Methods.Single(candidate => candidate.Name == "get_Headroom");
+    getter.IsVirtual = true;
+    getter.IsNewSlot = true;
+    module.Write(virtualDll);
+}
+verification.Verify(virtualDll, "Examples", "Account::get_Headroom()", At("Examples/Proofs/HeadroomReceiver.lean"),
+    Path.Combine(virtualOutput, "Proof"));
+Console.WriteLine("PASS virtual method body proved as an entry");
+
 Console.WriteLine("PASS objects: identity, presence, scalar and reference field, receiver, framed call " +
     "construction and base class field proofs, " +
     "and named rejection of unmodelled class shapes, field accesses and calls");

@@ -531,10 +531,18 @@ def constructedOwnerMatches (site : CallSite) (callee : RawMethod) : Op → Bool
     match owner with | .object .. => true | _ => false
   | _ => true
 
+/-- The `Virtual` flag of a method's metadata attributes (ECMA-335 II.23.1.10). -/
+def virtualMethodAttribute : Nat := 0x40
+
+/-- Whether a method's metadata marks it virtual, so `callvirt` selects its body by runtime type. -/
+def RawMethod.isVirtual (method : RawMethod) : Bool :=
+  method.attributes &&& virtualMethodAttribute != 0
+
 /-- A receiver-checked call enters a non-virtual method of an admitted class, whose receiver is an
-    object reference; no other managed call checks its receiver. -/
+    object reference; no other managed call checks its receiver. A virtual callee would need
+    dispatch, which one fixed target does not perform. -/
 def checkedReceiverMatches (callee : RawMethod) : Op → Bool
-  | .callInstance .. => callee.objectReceiver
+  | .callInstance .. => callee.objectReceiver && !callee.isVirtual
   | _ => true
 
 /-- Legacy slots accept only primitive signatures; new families require exact typed metadata. -/
