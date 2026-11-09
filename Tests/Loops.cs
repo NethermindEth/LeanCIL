@@ -954,16 +954,20 @@ var elaborated = outlined.AsParallel().WithDegreeOfParallelism(Environment.Proce
 if (elaborated.Length > 0) throw new InvalidOperationException(string.Join("\n", elaborated));
 Console.WriteLine($"PASS new-proof outlines {outlined.Length} methods that elaborate with only their holes open");
 
-// The element definition must read back as the extraction's own element, or the outline states another array type.
-var pairElement = Regex.Match(File.ReadAllText(Path.Combine(outlineRoot, "PairLength", "Proof.lean")),
+// The element definition must read back as the extraction's own element, or the outline states another array type,
+// and a body the outline does not step may write the array, so its footprint is the author's to state.
+var pairOutline = File.ReadAllText(Path.Combine(outlineRoot, "PairLength", "Proof.lean"));
+var pairElement = Regex.Match(pairOutline,
     @"@\[reducible\] def sourceElement : CIL\.ArrayElement :=\n  (?<term>(?:[^\n]*\\\n)+[^\n]*)\n");
 var pairExtraction = File.ReadAllText(Path.Combine(outlineRoot, "PairLength", "Extraction", "Extracted.lean"));
 if (!pairElement.Success ||
     !pairExtraction.Contains($"({Regex.Replace(pairElement.Groups["term"].Value, @"\\\n\s*", "")})",
-        StringComparison.Ordinal))
-    throw new InvalidOperationException("The PairLength outline does not name its struct element across lines:\n" +
-        File.ReadAllText(Path.Combine(outlineRoot, "PairLength", "Proof.lean")));
-Console.WriteLine("PASS a struct element wider than a line reads back as the extraction's element");
+        StringComparison.Ordinal) ||
+    !pairOutline.Contains("  sorry -- caller memory the method may write", StringComparison.Ordinal))
+    throw new InvalidOperationException("The PairLength outline does not name its struct element across lines " +
+        "or leaves its footprint stated:\n" + pairOutline);
+Console.WriteLine("PASS a struct element wider than a line reads back as the extraction's element, and an " +
+    "unstepped body over a value array leaves its footprint to the author");
 
 // A loop asks write authority only of the object whose field it or a callee stores; the other is only read.
 var depositFrom = File.ReadAllText(Path.Combine(outlineRoot, "DepositFrom", "Proof.lean"));

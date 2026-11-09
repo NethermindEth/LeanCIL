@@ -382,9 +382,10 @@ comment saying which obligation it is:
   field holds it and that it is whole. A store into such a field of an argument or loaded array
   steps through `Owned.store_whole`, and each `ldlen`, local, call argument and return of an array
   is stepped with its `WholeArray` fact carried across the writes before it. A value-array result is
-  an `ArrayView`. A load of the field after a write, a store of null into it, and a call to a method
-  that takes a value array or loads a value-array field are `not outlined:` holes. A method with a
-  loop that takes or returns a value array is refused.
+  an `ArrayView`. A load of the field after a write, a store of a null array into it, and a call to a
+  method that takes a value array or loads a value-array field are `not outlined:` holes, and an
+  unstepped body over a value array leaves its `footprint` to the author. A struct instance method
+  or a method with a loop that takes a value array, or a loop that returns one, is refused.
 - A call in a body over objects to a method that loads its fields, stores at most one word field of
   an object argument and returns a value it names gets a generated `MethodContract` read from that
   body, with a `Holds` theorem proved by the same stepping; `cil_contract_steps` composes the call

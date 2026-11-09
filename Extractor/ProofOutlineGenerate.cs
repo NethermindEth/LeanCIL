@@ -116,6 +116,10 @@ internal static partial class ProofOutline
             { } array)
             throw Unsupported($"parameter `{array.Name}` of {method.Name} is an array of class references, which " +
                 "new-proof outlines only in bodies without loops");
+        if (structReceiver && parameters.FirstOrDefault(parameter => parameter.Shape == ParameterShape.ValueArray)
+            is { } structValues)
+            throw Unsupported($"parameter `{structValues.Name}` of {method.FullName} is an array of values, which " +
+                "new-proof outlines only beside class instances, not a struct receiver");
         if (loops.Count > 0 && parameters.FirstOrDefault(parameter => parameter.Shape == ParameterShape.ValueArray)
             is { } values)
             throw Unsupported($"parameter `{values.Name}` of {method.Name} is an array of values, which new-proof " +
@@ -300,7 +304,7 @@ internal static partial class ProofOutline
         {
             // Which elements of an array argument an unstepped body writes is the author's to state.
             var loop = Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference);
-            var references = loop || Plan is null && Arrays.Any();
+            var references = loop || Plan is null && (Arrays.Any() || ValueArrays.Any());
             var writer = loop ? "loop" : "method";
             var lent = Parameters.Where(parameter => parameter.Writable).ToArray();
             var spans = lent.Select(parameter => parameter.Name).ToArray();

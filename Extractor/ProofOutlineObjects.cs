@@ -472,9 +472,9 @@ internal static partial class ProofOutline
                     if (instance.Object.Holder is not null)
                         return Stop($"a store into `{field.Lean}` of an object a field holds, which the footprint " +
                             "cannot name");
-                    // The model's array field store takes an array view; `ldnull` pushes an object reference.
+                    // A null array reaches the store only as the view an array local holds, which no item names.
                     if (value is Null)
-                        return Stop($"a store of null into `{field.Lean}`, which the model does not step");
+                        return Stop($"a store of null into `{field.Lean}`, whose null view the outline does not name");
                     if (value is not Values values)
                         return Stop($"a store into `{field.Lean}` of an array the outline cannot name");
                     Steps.Add(new ArrayUse(values.Array, stores));
@@ -936,7 +936,7 @@ internal static partial class ProofOutline
                     (walk.Objects.Any(reached => reached.Holder is not null) ? 0 : 1) ||
                 (walk.Returned ?? "").Contains("stored", StringComparison.Ordinal) ||
                 (spec.Result is not null && walk.Returned is null) ||
-                spec.Result is { Boolean: true } or { Object: true })
+                spec.Result is { Boolean: true } or { Object: true } or { Array: true })
                 return null;
             return new Callee(index, name, spec, walk, walk.Plan());
         }
