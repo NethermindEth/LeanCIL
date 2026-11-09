@@ -448,8 +448,8 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
         let subject := if formedResult.isSome then #[]
           else (variables lhs.getAppArgs).filter (· != memory.fvarId!)
         -- A span's or array's validity stays with every step, since loading either reads it.
-        let base := if carry == `LoopFrame.caller_valid || carry == `LoopFrame.caller_array_valid then
-          `callerFact else `referenceFact
+        let viewValid := carry == `LoopFrame.caller_valid || carry == `LoopFrame.caller_array_valid
+        let base := if viewValid then `callerFact else `referenceFact
         for (frame, formed, framed) in carriers memory do
           candidates := candidates.push (base,
             applied carry #[named frame, named formed, fact], subject, #[framed], variables #[rhs])

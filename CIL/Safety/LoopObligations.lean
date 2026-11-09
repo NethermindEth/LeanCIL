@@ -9,8 +9,9 @@ iteration's memory: write authority over the element, the index below `2 ^ 31` a
 within the footprint. `cil_loop_obligation` proves each from the hypotheses the iteration holds,
 with the author's invariant, precondition and footprint unfolded, so the author writes only those
 definitions. A callee's contract proof uses it the same way at a throw its precondition rules
-out, and an array loop for its index bound, tested signed against the array's length. While a definition is still `sorry` it leaves an ordinary hole; once all are written, a fact
-it cannot prove is an error at that fact, never a silent admission.
+out, and an array loop for its index bound, tested signed against the array's length. While a
+definition is still `sorry` it leaves an ordinary hole; once all are written, a fact it cannot
+prove is an error at that fact, never a silent admission.
 -/
 
 namespace CIL.Safety
