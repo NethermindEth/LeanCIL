@@ -1,5 +1,5 @@
 /// <summary>A suite that runs one fixture script, in its own CI job and its own checkout.</summary>
-internal sealed record IndependentSuite(string Name, string Script, string Description);
+internal sealed record IndependentSuite(string Name, string Script, string Description, string[]? Arguments = null);
 
 /// <summary>
 /// Every name <c>scripts/Test.cs --suite</c> accepts. The suite table in docs/VALIDATION.md must list
@@ -29,6 +29,16 @@ internal static class VerificationSuites
             "constrained and managed dispatch, constant calls, stack allocation and pinned compiler coverage"),
         new("loops", "Tests/Loops.cs",
             "cyclic control-flow validation, universal termination and negative contracts"),
+        new("outlines-control", "Tests/ProofOutlines.cs",
+            "control-flow and value proof outlines", ["--group", "control"]),
+        new("outlines-objects", "Tests/ProofOutlines.cs",
+            "object and reference-array proof outlines", ["--group", "objects"]),
+        new("outlines-buffers", "Tests/ProofOutlines.cs",
+            "word-array, span and array-field proof outlines", ["--group", "buffers"]),
+        new("structoutlines", "Tests/StructOutlines.cs", "struct value and field proof outlines"),
+        new("receiveroutlines", "Tests/ReceiverLoopOutlines.cs", "struct receiver loop proof outlines"),
+        new("wordreader", "Tests/WordReaderOutlines.cs", "class helper and array-read component proofs"),
+        new("savedwordreader", "Tests/SavedWordReaderOutlines.cs", "numeric local homes across class helper calls"),
         new("generics", "Tests/GenericMethods.cs",
             "C# and F# generic method specialization, provenance and rejection proofs"),
         new("blocks", "Tests/Blocks.cs", "block memory, alignment prefixes, runtime comparisons and safety faults"),

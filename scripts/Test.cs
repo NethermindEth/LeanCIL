@@ -42,9 +42,9 @@ void RunFixture(string script, string[] arguments, bool streamOutput = false, st
 }
 
 var independentSuites = VerificationSuites.Independent.ToDictionary(entry => entry.Name,
-    entry => (entry.Script, entry.Description), StringComparer.Ordinal);
+    entry => (entry.Script, entry.Description, Arguments: entry.Arguments ?? []), StringComparer.Ordinal);
 foreach (ExportSuite entry in ExportVerificationSuites.Plan())
-    independentSuites.Add(entry.Name, (entry.Script, entry.Description));
+    independentSuites.Add(entry.Name, (entry.Script, entry.Description, entry.Arguments));
 
 void Passed(string name)
 {
@@ -54,9 +54,7 @@ void Passed(string name)
 
 void RunSuite(string name)
 {
-    (string script, string description) = independentSuites[name];
-    ExportSuite? export = ExportVerificationSuites.Plan().FirstOrDefault(entry => entry.Name == name);
-    string[] arguments = export?.Arguments ?? [];
+    (string script, string description, string[] arguments) = independentSuites[name];
     RunFixture(script, arguments, streamOutput: true, progress: "Suite " + name);
     Passed(description);
 }
@@ -119,9 +117,6 @@ if (suite is "all" or "evidence")
         "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/StaticScalarValues.cs",
         "Tests/TranslationAudit.cs"]);
 if (suite is "all" or "blockers") projects.Add("Tests/SelfAdmission.cs");
-if (suite is "all" or "loops")
-    projects.AddRange(["Tests/StructOutlines.cs", "Tests/ReceiverLoopOutlines.cs", "Tests/WordReaderOutlines.cs",
-        "Tests/SavedWordReaderOutlines.cs"]);
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
 if (suite is "all" or "generics") projects.AddRange(["Tests/GenericOwners.cs", "Tests/GenericLayouts.cs"]);
 if (suite is "all" or "unsafe")
