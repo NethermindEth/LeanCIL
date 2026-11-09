@@ -3083,6 +3083,9 @@ partial class Program : IDisposable
             AuditRequest[] proofAudits =
                 [ProofTheorem(theorem, extraction), ExtractionCertificate("Extracted.translation_valid")];
             AuditedOleans? audited = null;
+            // A caller that ends the run at the stage after the proof check must do so before the display starts.
+            var replays = replay.Length > 0;
+            stage?.Invoke(replays ? "kernel replay" : "theorem audit");
             // The display runs beside replay and audit; it feeds no check and is read only after all of them.
             var statementView = Path.Combine(fresh, StatementViewFile);
             var statementCached = proofRestored && File.Exists(statementView);
@@ -3092,9 +3095,8 @@ partial class Program : IDisposable
             StatementView? viewed;
             try
             {
-                if (replay.Length > 0)
+                if (replays)
                 {
-                    stage?.Invoke("kernel replay");
                     RequireStagedProofSources();
                     if (Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") != "true")
                     {
@@ -3109,9 +3111,9 @@ partial class Program : IDisposable
                     if (audited is null)
                         ReplayCheckedModules(replay, leanPath,
                             (proofRestored ? "Kernel replay of extraction: " : "Kernel replay: ") + entry);
+                    stage?.Invoke("theorem audit");
                 }
                 // The audit reads the replayed bytes; all source and artifact guards still follow it.
-                stage?.Invoke("theorem audit");
                 RequireStagedProofSources();
                 audited ??= AuditOleans(leanPath, auditModules, proofAudits, ImportPremise(extraction));
             }
