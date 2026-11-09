@@ -2,8 +2,8 @@
 
 `leancil resolve-imports` derives `--import` and `--import-implementation` from
 SDK deps/NuGet asset selection; see [resolving imports](CONTRACT-INTERFACES.md#resolving-imports-from-sdk-assets).
-It only locates files. Pins, caller audits, kernel replay and deployment
-obligations are unchanged.
+It only locates files; verification requires pins, caller audits, kernel replay and deployment
+obligations to be satisfied.
 
 This page shows the commands and states what
 consumer and batch verification check, what they reuse, and how support is shared across machines.
@@ -388,8 +388,9 @@ concurrency even when that environment variable is set.
 
 ## Library audits
 
-`leancil audit-library` replaces an elaborated `Audit.lean` (`run_cmd` over `env.constants` with
-`collectAxioms`, or `#print axioms`), which the audited code can forge:
+`leancil audit-library` checks compiled library theorems through independent kernel replay and
+native axiom auditing. An elaborated `run_cmd` audit or `#print axioms` output is insufficient,
+because the audited code can forge that output:
 
 ```sh
 leancil audit-library --project . --module MyLib --prefix MyLib. --prefix MyLemmas. \
@@ -561,7 +562,7 @@ constant's defining module, not its namespace.
 The App theorem must retain `HoldsGiven Extracted.program Extracted.ImportsHold
 claim`. Its imported conditions use the canonical `MethodContract.Holds` or
 `OutcomeContract.Holds` predicates at their absolute slots. The implementation
-proofs are not elaborated or replayed. The unchanged axiom audit applies to the
+proofs are not elaborated or replayed. The axiom audit applies to the
 caller theorem; imports are explicit hypotheses.
 
 Schema-4 reports identify these imports as `published-certification`. They record

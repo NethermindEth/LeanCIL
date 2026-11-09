@@ -168,7 +168,7 @@ Recognised `IsSupported` getters are `X86Base.X64`, `Sse2`, `Ssse3`, `Sse41`, `S
 
 Profiles target .NET 10 CoreCLR. Both the extractor and Lean certificate reject capability sets that split its runtime groups. Custom profiles must supply every field and satisfy the same constraints. A v3/v4 custom profile may disable `vector256Accelerated` for a runtime configured with `PreferredVectorBitWidth=128`; it cannot enable it without AVX2.
 
-See [runtime-profile evidence and migration](RUNTIME-PROFILES.md) for measured x64/arm64 versions, retired names and consumer migration. Changing a profile requires fresh extraction and proof verification; old certificates do not acquire the new capabilities.
+See [runtime-profile evidence and selection](RUNTIME-PROFILES.md) for measured x64/arm64 versions and profile constraints. Changing a profile requires fresh extraction and proof verification; old certificates do not acquire the new capabilities.
 
 Pass the profile after the extraction output directory, for example:
 

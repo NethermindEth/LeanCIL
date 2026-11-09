@@ -15,9 +15,7 @@
 
 ## Writing compact checked proofs
 
-Return arity and fully specified results share one checked dispatcher proof. The existing
-step, run and invocation theorems retain their statements while avoiding duplicate case analysis
-during compilation and kernel replay.
+Return arity and fully specified results share one checked dispatcher proof.
 
 Allocation-renaming proofs share dispatcher reasoning across ordinary instructions and
 reference-aware arithmetic and branches, avoiding separate proofs of overlapping cases.

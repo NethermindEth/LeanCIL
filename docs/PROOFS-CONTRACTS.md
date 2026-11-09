@@ -79,8 +79,7 @@ existential result such as `∃ after, run ... = .ok (after, result)`. The local
 each store's new memory, updated snapshots and preserved access facts, so later stores need no
 manually split execution segments. Loads use the latest remembered value; overwrites replace it. It
 stops at an unsupported step or an unproved obligation, and fails if it takes no step. It does not
-infer authority, initialization, or preservation across calls and unrelated writes. Ordinary
-`cil_checked_steps [facts]` is unchanged. Its vector and int32 store-and-reload regressions are
+infer authority, initialization, or preservation across calls and unrelated writes. Vector and int32 store-and-reload regressions are
 listed in [coverage](VALIDATION-COVERAGE.md).
 
 A snapshot overlapping the footprint needs a postcondition instead. The contract fixes no profile:
@@ -139,7 +138,7 @@ Their compiled artifacts are still fixed before producer proof code runs and che
 every selected profile retains its extraction replay and exact audit.
 
 Profiles must be distinct built-in names and match their artifacts. A family entry cannot also
-specify `artifact`; ordinary single-profile entries are unchanged. Family transport currently
+specify `artifact`. Family transport currently
 requires a closed extraction without imported-contract slots. Explicit type-initialization premises
 remain bound to each exported profile; static-value assumptions remain unsupported. Full
 source-bundle verification rejects initialization premises, as for single-profile exports.
