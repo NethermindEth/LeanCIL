@@ -193,4 +193,41 @@ public static class Loops
     {
         for (var index = 0; index < values.Length; index++) values[index] = value;
     }
+
+    // Adds the array's elements through a span local that drops each element it has read.
+    public static ulong SumThroughSpan(ulong[] values)
+    {
+        ReadOnlySpan<ulong> rest = values;
+        ulong total = 0;
+        while (rest.Length != 0)
+        {
+            total = unchecked(total + rest[0]);
+            rest = rest.Slice(1);
+        }
+        return total;
+    }
+
+    // Adds a span's elements through a local copy of it.
+    public static ulong SumThroughLocal(ReadOnlySpan<ulong> values)
+    {
+        var rest = values;
+        ulong total = 0;
+        while (rest.Length != 0)
+        {
+            total = unchecked(total + rest[0]);
+            rest = rest.Slice(1);
+        }
+        return total;
+    }
+
+    // Stores the value into every element of the array through a span local over it.
+    public static void FillThroughSpan(uint[] values, uint value)
+    {
+        Span<uint> rest = values;
+        while (rest.Length != 0)
+        {
+            rest[0] = value;
+            rest = rest.Slice(1);
+        }
+    }
 }

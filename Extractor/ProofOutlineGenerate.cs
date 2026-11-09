@@ -127,13 +127,14 @@ internal static partial class ProofOutline
         return new(method.FullName, source, holes - paths, paths);
     }
 
-    /// <summary>`parameters` with the array a loop stores into marked written; a loop's store is followed only
-    /// into a method's one array argument. A straight-line store stays a hole over the array's contents.</summary>
+    /// <summary>`parameters` with the array a loop stores into, by index or through a writable span over it,
+    /// marked written; a loop's store is followed only into a method's one array argument. A straight-line store
+    /// stays a hole over the array's contents.</summary>
     static Parameter[] WrittenArrays(MethodDefinition method, Parameter[] parameters, string[] ops, int loops)
     {
         var arrays = parameters.Where(parameter => parameter.Shape == ParameterShape.WordArray).ToArray();
-        if (loops == 0 || arrays.Length == 0 ||
-            !ops.Any(op => op.StartsWith(".memory (.arrayStore ", StringComparison.Ordinal))) return parameters;
+        if (loops == 0 || arrays.Length == 0 || !ops.Any(op => op.StartsWith(".memory (.arrayStore ",
+            StringComparison.Ordinal) || Regex.IsMatch(op, @"\A\.memory \(\.arraySpan \S+ true "))) return parameters;
         if (arrays.Length > 1)
             throw Unsupported($"{method.FullName} stores into one of {arrays.Length} array arguments in a loop; " +
                 "new-proof follows a loop's stores into a method's one array argument");

@@ -294,6 +294,16 @@ comment saying which obligation it is:
   call's footprint side conditions; the invariant then extends the prefix with `Filled.extend`.
   Such a callee outlined on its own is stepped through `WritableSpan.write_head`; an empty span
   throws there, a hole the precondition closes. Any other write to a span outside a loop is refused.
+- The span such a loop reads or fills may be a local, `ReadOnlySpan<T> rest = values` or
+  `Span<T> rest = values`, assigned once before the loop from a span argument or from the whole of
+  an array argument. The local's suffix is the loop state, and the cutpoint's frame names its slot
+  from the state, since the entered frame holds the null span there. A copied span argument is
+  checked as when the loop slices the argument itself. An array spanned this way is not
+  destructured: the loop starts from `values.span false` or `values.span true`, the span
+  `step_arraySpan_whole` pushes, checked by `CheckedSpan.of_array` for a read and by
+  `WritableSpan.of_array` for a fill, whose authority and `footprint` are the array's storage span.
+  A null array converts to an empty span, so the precondition need not exclude it. A local
+  assigned anything else, or an array also read other than through the local, is refused.
 - Loops in sequence are bound in pc order (`loop`, `loop2`, ...), each with its own cutpoint,
   `invariant` and `measure` (`header2`, `invariant2`, `measure2`, ...). The path leaving one loop
   for the next loop's test enters that loop through `loop_terminates_then`, leaving its invariant at

@@ -841,8 +841,8 @@ foreach (var mutation in new[] { "stack-height", "stack-type", "local-fact", "st
 // until every hole is filled; otherwise an author could mistake the outline for a proof.
 // Loops reuse the checked extraction an earlier section left under their name; the straight-line
 // methods cover `bool`, narrow and array parameters and a `bool` result, the indexed loops reading and storing
-// array elements, and the object methods `this`, field loads and stores, an object result, calls and a loop
-// over a `callvirt`.
+// array elements, the loops slicing a span local made from a span or an array argument, and the object methods
+// `this`, field loads and stores, an object result, calls and a loop over a `callvirt`.
 var outlined = new (string Name, string? Selector)[]
 {
     ("Countdown", null), ("FillWords", null), ("CountUntil", null), ("CountCalls", null), ("SpanDrain", null),
@@ -897,7 +897,9 @@ var outlined = new (string Name, string? Selector)[]
     ("ArrayReadInt32", "PrimitiveArrays::ReadInt32(int[],int)"),
     ("ArrayReadUInt64", "PrimitiveArrays::ReadUInt64(ulong[],int)"),
     ("ArrayRead", "ArrayElementReferences::Read(int[],int)"),
-    ("ArraySum", "Loops::SumIndexed(ulong[])"), ("ArrayFill", "Loops::FillIndexed(uint[],uint)")
+    ("ArraySum", "Loops::SumIndexed(ulong[])"), ("ArrayFill", "Loops::FillIndexed(uint[],uint)"),
+    ("SpanLocalSum", "Loops::SumThroughLocal(System.ReadOnlySpan`1<System.UInt64>)"),
+    ("ArraySpanSum", "Loops::SumThroughSpan(ulong[])"), ("ArraySpanFill", "Loops::FillThroughSpan(uint[],uint)")
 };
 var outlineTimer = System.Diagnostics.Stopwatch.StartNew();
 var outlineRoot = Path.Combine(root, "Outlines");
@@ -1095,6 +1097,24 @@ Console.WriteLine("PASS verify refuses the Countdown outline until its holes are
               simp only [measure]
               omega
         """)];
+
+// A span local over a span argument or a whole array folds as the argument itself does: the local's suffix is
+// the loop state, and the theorem names the source's elements.
+(string Hole, string Filled)[] SpanLocalSumSpecification(string source, int returnLine) => [
+    ($"def Precondition (values1 : {source}) (values1Elements : List W64) (initial : Memory)\n    : Prop := sorry",
+        $"def Precondition (_ : {source}) (_ : List W64) (_ : Memory) : Prop := True"),
+    ("    (result : W64) : Prop := sorry", "    (result : W64) : Prop := result = values1Elements.sum"),
+    ("{memory : Memory} {home1 : Reference} (state : State memory home1) : Prop := sorry",
+        "{memory : Memory} {home1 : Reference} (state : State memory home1) : Prop :=\n" +
+        "  state.values.2 + state.values.1.values.sum = values1Elements.sum"),
+    ("(state : State memory home1) : Nat := sorry",
+        "(state : State memory home1) : Nat := state.values.1.values.length"),
+    ("case invariant => sorry -- invariant at the first loop head", "case invariant => simp [invariant]"),
+    ($"sorry -- Postcondition at the return at Loops.cs:{returnLine}",
+        "simpa [Postcondition, invariant] using holds"),
+    ("case invariant => sorry -- invariant again at the loop head",
+        "case invariant => simpa [invariant, BitVec.add_assoc] using holds"),
+    ("case measure => sorry -- measure decreases over this iteration", "case measure => simp [measure]")];
 
 // Object outlines leave only their specification: once it is written, an instance method's field store, a
 // reference field store, a null test of an argument followed through a local, a split on a field value and a
@@ -2094,6 +2114,86 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
                   have filled := holds.2 values1Base rfl
                   rw [done, Nat.sub_self] at filled
                   simpa using (filled.after_below exitBelow values1Below).complete
+            """)]),
+    ("SpanLocalSum", SpanLocalSumSpecification("SpanView", 220)),
+    // A span over a whole array, null or not, holds the storage span's elements under the span's access mode.
+    ("ArraySpanSum", SpanLocalSumSpecification("ArrayView", 207)),
+    // A fill through a writable span over the array has authority over its storage span, as an indexed fill does.
+    ("ArraySpanFill", [
+        ("def Precondition (values1 : ArrayView) (value : W32) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : ArrayView) (_ : W32) (_ : Memory) : Prop := True"),
+        ("def Postcondition (values1 : ArrayView) (value : W32) (initial final : Memory) : Prop := sorry",
+            """
+            def Postcondition (values1 : ArrayView) (value : W32) (_ final : Memory) : Prop :=
+              ∀ base, values1.reference = .address base →
+                Contents final base 4 (List.replicate values1.length (value : BitVec (8 * 4)))
+            """),
+        ("""
+        def invariant (values1 : ArrayView) (value : W32)
+            {memory : Memory} {written : List (Reference × Nat)} (state : State memory written)
+            : Prop := sorry
+        """,
+            """
+            def invariant (values1 : ArrayView) (value : W32)
+                {memory : Memory} {written : List (Reference × Nat)} (state : State memory written)
+                : Prop :=
+              ∀ base, values1.reference = .address base → ∃ done,
+                done + state.values.remaining = values1.length ∧
+                state.values.view.reference = .address (base.element 4 done) ∧
+                Filled state.memory base 4 (List.replicate done (value : BitVec (8 * 4)))
+                  state.values.remaining
+            """),
+        ("""
+        def measure (values1 : ArrayView) (value : W32) {memory : Memory} {written : List (Reference × Nat)}
+            (state : State memory written) : Nat := sorry
+        """,
+            """
+            def measure (_ : ArrayView) (_ : W32) {memory : Memory} {written : List (Reference × Nat)}
+                (state : State memory written) : Nat := state.values.remaining
+            """),
+        ("    case invariant => sorry -- invariant at the first loop head",
+            """
+                case invariant =>
+                  dsimp only [invariant]
+                  intro base address
+                  refine ⟨0, by simp, by simp [ArrayView.span, address], ?_⟩
+                  have room := (values1Authority.writable base address).after_confined entryFrame.confined
+                    wellFormed
+                  simp only [ArrayView.storage, values1Type, CIL.ArrayElement.width] at room
+                  simpa using Filled.start room
+            """),
+        ("    case measure => sorry -- measure decreases over this iteration",
+            """
+                case measure =>
+                  simp only [measure]
+                  omega
+            """),
+        ("    case postcondition => sorry -- Postcondition at the return at Loops.cs:232",
+            """
+                case postcondition =>
+                  dsimp only [invariant] at holds
+                  intro base address
+                  obtain ⟨done, total, -, filled⟩ := holds base address
+                  rw [Nat.add_zero] at total
+                  subst total
+                  exact filled.complete.after_below exitBelow
+                    (SpanView.allocation_below (view := values1.storage) values1Valid wellFormed address)
+            """),
+        ("    case invariant => sorry -- invariant again at the loop head",
+            """
+                case invariant =>
+                  dsimp only [invariant] at holds ⊢
+                  intro base address
+                  obtain ⟨done, total, place, filled⟩ := holds base address
+                  rw [place] at restAddress
+                  cases restAddress
+                  refine ⟨done + 1, by omega, ?_, ?_⟩
+                  · rw [SpanView.slice_reference _ _ _ _ _ _ place restCut, restSpan.elementWidth]
+                    simp only [Reference.element, ManagedReference.address.injEq, Reference.mk.injEq,
+                      true_and]
+                    omega
+                  · rw [List.replicate_succ']
+                    exact filled.push (by simpa using restWrote)
             """)])
 })
 {
@@ -2124,8 +2224,8 @@ Console.WriteLine("PASS filled outlines verify with only their specification wri
     "load, length and covariance-checked store, element facts carried across element and field stores, and " +
     "an array the method allocates, fills and reads back, a fill through a writable span, and a fill through a " +
     "helper storing the first element of the span it is lent, that helper alone, and element reads of `int[]` and " +
-    "`ulong[]` arrays, directly and through a helper returning the element's address, and an indexed sum and fill " +
-    "of arrays");
+    "`ulong[]` arrays, directly and through a helper returning the element's address, an indexed sum and fill of " +
+    "arrays, and a sum and fill through a span local over a span or an array");
 
 // A written footprint that leaves out the element a loop writes is an error at the write, never an admission.
 var narrowed = Path.Combine(outlineRoot, "FillWords", "Narrowed.lean");
