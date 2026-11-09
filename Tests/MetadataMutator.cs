@@ -51,7 +51,7 @@ switch (args[2])
         break;
 
     case "local":
-        add.Body.Variables.Add(new VariableDefinition(module.TypeSystem.String));
+        add.Body.Variables.Add(new VariableDefinition(module.TypeSystem.Double));
         break;
 
     case "initializer":
