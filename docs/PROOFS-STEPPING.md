@@ -321,6 +321,31 @@ or `0x80000000#32` ([LiteralDisplay](../CIL/LiteralDisplay.lean)), and smaller o
   reaches the target's pc in another state, in the reached form and the target's;
 - an undecided pc asks for a fact deciding the branch condition.
 
+When a bit-vector hypothesis will be passed to default `simp`, write its literals in
+simp-normal form: `0#32`, `1#64` or `0x80000000#32`. Use the same form in definitions that
+the proof unfolds. Default `simp` normalizes ordinary numerals in the goal, but a supplied
+hypothesis written as `value ≠ 0` can then fail to match `value ≠ 0#32`.
+For example:
+
+```lean
+import CIL
+
+example (value : CIL.W32) (nonzero : value ≠ 0#32) : value ≠ 0#32 := by
+  simp [nonzero]
+```
+
+The [copy-until-zero proof](../Examples/Proofs/CopyUntilZero.lean) uses this convention in its
+list predicate and branch hypotheses, so ordinary `simp` handles the nonzero case without a
+literal-normalization override. Natural-number lengths, offsets and fuel remain ordinary numerals.
+For an existing hypothesis using an ordinary numeral, pass its canonical restatement:
+
+```lean
+import CIL
+
+example (value : CIL.W32) (nonzero : value ≠ 0) : value ≠ 0#32 := by
+  simp [show value ≠ 0#32 from nonzero]
+```
+
 A loop body that calls a helper composes through the helper's `MethodContract`
 ([LoopContract](../CIL/Safety/LoopContract.lean)). `LoopSegment` fixes one cost for every
 continuation budget, which a contract's existential fuel cannot supply, so

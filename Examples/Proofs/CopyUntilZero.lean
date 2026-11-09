@@ -38,18 +38,18 @@ theorem stamp_holds : stampContract.Holds Extracted.program stamp := by
   cil_checked_steps [step_storeScalar_of_write wrote, formed]
 
 /-- The words copied: those before the first zero, or all of them. -/
-def copied (values : List W32) : List W32 := values.takeWhile (· ≠ 0)
+def copied (values : List W32) : List W32 := values.takeWhile (· ≠ 0#32)
 
 /-- The count of copied words, with bit 31 set exactly when a zero ended the copy. -/
 def result (values : List W32) : W32 :=
   let count := BitVec.ofNat 32 (copied values).length
-  if (0 : W32) ∈ values then count ||| 0x80000000 else count
+  if 0#32 ∈ values then count ||| 0x80000000#32 else count
 
 /-- Copying is unaffected by a nonzero prefix. -/
-theorem copied_append {done : List W32} (nonzero : (0 : W32) ∉ done) (rest : List W32) :
+theorem copied_append {done : List W32} (nonzero : 0#32 ∉ done) (rest : List W32) :
     copied (done ++ rest) = done ++ copied rest :=
   List.takeWhile_append_of_pos fun word mem => by
-    simpa using fun same : word = 0 => nonzero (same ▸ mem)
+    simpa using fun same : word = 0#32 => nonzero (same ▸ mem)
 
 bind_entry entry (memory : Memory) (view : SpanView) (output : Reference)
     (wellFormed : memory.WellFormed) (valid : view.validate memory = .ok ())
@@ -78,7 +78,7 @@ bind_cutpoint header (memory : Memory) (output : Reference) (room : Nat)
 /-- The words read so far are nonzero, counted, and stored at the start of `output`. -/
 def Invariant (values : List W32) (output : Reference) {memory : Memory} {room : Nat}
     {home0 home1 : Reference} (state : State memory output room home0 home1) : Prop :=
-  ∃ done, values = done ++ state.values.1.values ∧ (0 : W32) ∉ done ∧
+  ∃ done, values = done ++ state.values.1.values ∧ 0#32 ∉ done ∧
     state.values.2.1.toNat = done.length ∧
     Filled state.memory output 4 done (copied state.values.1.values).length ∧
     SpanApart state.values.1.view (output, 4 * room)
@@ -103,7 +103,7 @@ theorem correctness (memory : Memory) (view : SpanView) (values : List W32) (out
     (header memory output (copied values).length home0 home1) (Invariant values output)
     (·.values.1.values.length) (fun start => ?_) ?_
   · simp [cil_checked, valid, formed]
-  · cil_loop_recurse start (⟨view, values, ⟨valid, readOnly, contents⟩⟩, 0, 0)
+  · cil_loop_recurse start (⟨view, values, ⟨valid, readOnly, contents⟩⟩, 0#32, 0#32)
     exact ⟨[], by simp, by simp, rfl, ⟨Contents.nil, writable⟩, apart⟩
   rintro ⟨⟨⟨suffix, remaining, span⟩, count, last⟩, current, frame⟩
     ⟨done, split, nonzero, counted, filled, spanApart⟩ recurse
@@ -120,19 +120,19 @@ theorem correctness (memory : Memory) (view : SpanView) (values : List W32) (out
     simpa [whole] using filled.1
   | cons value rest =>
     obtain ⟨item, -, found, element⟩ := (span.within wellFormed frame).head (by decide)
-    by_cases zero : value = 0
+    by_cases zero : value = 0#32
     · subst zero
       have whole : copied values = done := by
         rw [split, copied_append nonzero]
         simp [copied]
-      have answer : result values = count ||| 0x80000000 := by
+      have answer : result values = count ||| 0x80000000#32 := by
         unfold result
         rw [whole, ← counted, BitVec.ofNat_toNat, BitVec.setWidth_eq]
         simp [split]
       cil_loop_finish [answer]
       simpa [whole] using filled.1
     · have room : (copied (value :: rest)).length = (copied rest).length + 1 := by
-        simp -bitVecOfNat [copied, zero]
+        simp [copied, zero]
       have short := contents.length ▸ SpanView.length_bounded view memory valid
       have lengths : done.length + 1 + rest.length = values.length := by simp [split]; omega
       have total : (copied values).length = done.length + (copied (value :: rest)).length := by
@@ -143,7 +143,7 @@ theorem correctness (memory : Memory) (view : SpanView) (values : List W32) (out
       obtain ⟨sliced, cut, next⟩ := span.tail
       cil_loop_advance
       cil_loop_call stamp_holds (output.element 4 count.toNat, value) at stampSite
-      cil_loop_recurse recurse (⟨sliced, rest, next⟩, count + 1, value)
+      cil_loop_recurse recurse (⟨sliced, rest, next⟩, count + 1#32, value)
       case invariant =>
         refine ⟨done ++ [value], by simp [split], by simpa using ⟨nonzero, Ne.symm zero⟩, ?_,
           (room ▸ filled).extend returned counted, spanApart.slice cut⟩
