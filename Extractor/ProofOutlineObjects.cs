@@ -75,17 +75,20 @@ internal static partial class ProofOutline
     /// argument load, a length, a store or a return.</summary>
     sealed record ArrayUse(HeldArray Array, int Stores, bool Length = false);
 
-    /// <summary>A scalar element read whose contents are carried across reference-slot stores.</summary>
-    sealed record WordRead(Parameter Array, string Index, int Stores, string Name);
+    /// <summary>A scalar element read and the field footprints its contents must be disjoint from.</summary>
+    sealed record WordRead(Parameter Array, string Index, int Stores, string Name,
+        (Access Write, string Apart)[] Writes, bool CallerIndex);
 
     enum AccessKind { Load, Store, Read, Own }
 
     /// <summary>A field access in program order, after `Stores` earlier writes; `Read` and `Own` are the facts
     /// a call's contract needs of the caller's object.</summary>
     /// <remarks>A reference store of a value that is not an object the body reaches names it by `Value` and the
-    /// fact that it forms by `Formed`. An array field access loads or stores `Array`.</remarks>
+    /// fact that it forms by `Formed`. An array field access loads or stores `Array`. `Called` means only a
+    /// callee's footprint, rather than a concrete store equation, describes the memory change.</remarks>
     sealed record Access(Reached Object, ViewField Field, AccessKind Kind, bool Signed, int Stores,
-        string? Value = null, Reached? Target = null, string? Formed = null, HeldArray? Array = null)
+        string? Value = null, Reached? Target = null, string? Formed = null, HeldArray? Array = null,
+        bool Called = false)
     {
         /// <summary>A load of a reference field whose class is outside the model: its value is named, never
         /// read through.</summary>
@@ -175,6 +178,9 @@ internal static partial class ProofOutline
         /// <summary>The value stored into each element fact, shared by every path.</summary>
         Dictionary<string, string> Stored { get; init; } = [];
 
+        /// <summary>Separation premises shared by all paths and reads of the same array and field.</summary>
+        Dictionary<(Parameter Array, Reached Object, ViewField Field), string> ArrayApart { get; init; } = [];
+
         int stores;
         int calls;
         int splits;
@@ -197,6 +203,14 @@ internal static partial class ProofOutline
 
         internal bool Run(Func<int, string> location)
         {
+            if (!linear && spec.Method.Body.Variables.Any(variable =>
+                LeanEmitter.Narrow(variable.VariableType) is not null ||
+                EnumTypes.Storage(variable.VariableType).FullName is "System.Int32" or "System.UInt32" or
+                    "System.Int64" or "System.UInt64" or "System.IntPtr" or "System.UIntPtr"))
+            {
+                Stopped = "scalar local homes in a class method, whose frame storage the outline does not carry";
+                return false;
+            }
             foreach (var parameter in spec.Objects) Objects.Add(new Reached(parameter.Name, parameter.Fields));
             foreach (var parameter in spec.ValueArrays)
                 Arrays.Add(new HeldArray(parameter.Name, parameter.LengthName, parameter.ArrayElement,
@@ -233,6 +247,7 @@ internal static partial class ProofOutline
                     var (holds, fails) = takenWhenTrue ? (target, pc + 1) : (pc + 1, target);
                     var walks = new[] { holds, fails }.Select(next => (Next: next, Walk: new ObjectWalk(spec, ops,
                         views, callees, linear) { Objects = Objects, Arrays = Arrays, Slots = Slots, Stored = Stored,
+                        ArrayApart = ArrayApart,
                         stores = stores,
                         calls = calls, splits = splits + 1, Fresh = Fresh, previous = [.. PathSteps] })).ToArray();
                     Steps.Add(new Split($"branch{splits + 1}", condition, (location(holds), walks[0].Walk),
@@ -497,12 +512,21 @@ internal static partial class ProofOutline
                         array.Width != int.Parse(match.Groups[1].Value))
                         return Stop("an array element read without a named word array and index");
                     if (linear) { stack.Add(new Word(null, array.Width)); continue; }
-                    if (PathSteps.OfType<Access>().Any(access => access.Kind == AccessKind.Store &&
-                        access.Field.Kind == ClassViews.FieldKind.Word) ||
-                        PathSteps.Any(step => step is CallStep or Allocation))
-                        return Stop("an array element read after a write whose byte effects need a contract");
+                    var callerIndex = !Regex.IsMatch(term, @"\bstored\d+\b");
                     var name = array.Name + "Read" + pc;
-                    Steps.Add(new WordRead(array, $"({term} : W32).toNat", stores, name));
+                    var writes = PathSteps.Select(step => step switch
+                    {
+                        Access { Kind: AccessKind.Store, Field.Kind: ClassViews.FieldKind.Word } access => access,
+                        CallStep call => call.Writes,
+                        _ => null
+                    }).OfType<Access>().Select(write =>
+                    {
+                        var key = (array, write.Object, write.Field);
+                        if (!ArrayApart.TryGetValue(key, out var apart))
+                            ArrayApart.Add(key, apart = "arrayApart" + ArrayApart.Count);
+                        return (write, apart);
+                    }).ToArray();
+                    Steps.Add(new WordRead(array, $"({term} : W32).toNat", stores, name, writes, callerIndex));
                     stack.Add(new Word($"{array.ElementsName}[({term} : W32).toNat]", array.Width));
                 }
                 else if (op == ".memory .arrayLength")
@@ -523,8 +547,11 @@ internal static partial class ProofOutline
                         return Stop($"a call to `{callee.Spec.Method.Name}` with a value the outline does not name");
                     if (Call(callee, arguments) is { } reason) return Stop(reason);
                     if (callee.Walk.Returned is { } returned)
-                        stack.Add(new Word(Substitute(returned, callee, arguments, Memory(stores),
-                            ((CallStep)Steps[^1]).Found), callee.Spec.Result is { Constructor: ".i64" } ? 8 : 4));
+                    {
+                        var call = (CallStep)Steps[^1];
+                        stack.Add(new Word(Substitute(returned, callee, arguments, Memory(call.Stores),
+                            call.Found), callee.Spec.Result is { Constructor: ".i64" } ? 8 : 4));
+                    }
                     else if (callee.Spec.Result is not null && !linear)
                         return Stop($"a call to `{callee.Spec.Method.Name}`, whose result the outline cannot name");
                     else if (callee.Spec.Result is not null)
@@ -699,7 +726,7 @@ internal static partial class ProofOutline
                 writes = new Access(owner, owner.Fields.First(field => field.Lean == store.Field.Lean),
                     AccessKind.Store, false, stores,
                     store.Value is null ? null : Substitute(store.Value, callee, arguments, Memory(stores), []),
-                    store.Target is null ? null : objects[store.Target]);
+                    store.Target is null ? null : objects[store.Target], Called: true);
             }
             Steps.Add(new CallStep(callee, stores, [.. needs], [.. live.Distinct()], writes, ++calls, [.. found]));
             if (writes is not null) stores++;
@@ -856,8 +883,15 @@ internal static partial class ProofOutline
                 if (whole)
                     plan.Premises.Add((array.Whole, $"WholeArray initial {array.Element} {array.Name} {array.Length}"));
             }
-            foreach (var read in Flattened.OfType<WordRead>().DistinctBy(read => read.Name))
+            foreach (var read in Flattened.OfType<WordRead>().Where(read => read.CallerIndex)
+                .DistinctBy(read => read.Name))
                 plan.Premises.Add((read.Name + "Bound", $"{read.Index} < {read.Array.ElementsName}.length"));
+            foreach (var (array, write, apart) in Flattened.OfType<WordRead>()
+                .SelectMany(read => read.Writes.Select(write => (read.Array, write.Write, write.Apart)))
+                .DistinctBy(pair => pair.Apart))
+                plan.Premises.Add((apart,
+                    $"SpanApart {array.Name}.storage " +
+                    $"({write.Field.Lean}.entry {write.Object.Name})"));
             foreach (var reached in Objects)
             {
                 if (reached.Holder is not null)
@@ -1284,14 +1318,16 @@ internal static partial class ProofOutline
         }
 
         /// <summary>An array view remains valid across confined writes, calls and allocation.</summary>
-        string WordValid(Parameter array, int stores)
+        string WordValid(Parameter array, int stores) => Carry(array.Name + "Valid", stores, (_, level) =>
+            $"{array.Name}.validate_preserved {array.Name}Valid wellFormed {ArrayAllocations(level)}");
+
+        /// <summary>Every caller allocation remains present after the writes on this path.</summary>
+        string ArrayAllocations(int stores)
         {
             known.TryAdd(("arrayAllocations", 0), "(AllocationExtension.refl initial)");
-            string Extension(int count) => Carry("arrayAllocations", count, (previous, level) =>
+            return Carry("arrayAllocations", stores, (previous, level) =>
                 $"{previous}.trans (show AllocationExtension {ObjectWalk.Memory(level - 1)} stored{level} " +
                 $"from ⟨framed{level}.grows, framed{level}.allocations⟩)");
-            return Carry(array.Name + "Valid", stores, (_, level) =>
-                $"{array.Name}.validate_preserved {array.Name}Valid wellFormed {Extension(level)}");
         }
 
         /// <summary>A non-null array's length, without changing the array view's binding.</summary>
@@ -1310,15 +1346,33 @@ internal static partial class ProofOutline
             Add(name);
         }
 
-        /// <summary>A scalar read from the supplied contents after reference-slot writes.</summary>
+        /// <summary>A scalar read from contents preserved by disjoint confined effects or slot writes.</summary>
         void WordElement(WordRead read)
         {
             var array = read.Array;
+            if (!read.CallerIndex)
+            {
+                lean.Wrapped($"{indent}have {read.Name}Bound :", [read.Index, "<", array.ElementsName + ".length"],
+                    ":= by");
+                lean.Noted(indent + "  ", "sorry", "the index in the current memory is within the supplied array");
+            }
             known.TryAdd((array.Name + "Contents", 0), array.Name + "Contents");
             var contents = Carry(array.Name + "Contents", read.Stores, (previous, level) =>
-                $"(by rw [← wrote{level}]; exact {previous}.after_setSlot _ _ : " +
-                $"SpanContents stored{level} {array.Name}.storage " +
-                $"{array.Width} {array.ElementsName})");
+            {
+                if (stored[level - 1] is Access { Called: true } or
+                    Access { Field.Kind: ClassViews.FieldKind.Word } or Allocation)
+                {
+                    var apart = stored[level - 1] is Access write
+                        ? $"(by simpa only [SpanApart, {previous}.elementWidth, {previous}.length, " +
+                            $"List.mem_singleton, forall_eq] using " +
+                            $"{read.Writes.First(item => item.Write == write).Apart})"
+                        : "(by intro _ _ _ member; nomatch member)";
+                    return $"{previous}.after_confined_valid {array.Name}Valid wellFormed " +
+                        $"{ArrayAllocations(level - 1)}.next framed{level} {apart}";
+                }
+                return $"(by rw [← wrote{level}]; exact {previous}.after_setSlot _ _ : " +
+                    $"SpanContents stored{level} {array.Name}.storage {array.Width} {array.ElementsName})";
+            });
             lean.Wrapped($"{indent}obtain ⟨{read.Name}Reference, {read.Name}Found, {read.Name}Loaded⟩ :=",
                 $"{contents}.array_load {WordValid(array, read.Stores)} (by decide) {read.Name}Bound".Terms(), "");
             Add($"step_arrayLoad_of_element (index := .i32 _) rfl {read.Name}Found {read.Name}Loaded");
@@ -1443,6 +1497,12 @@ internal static partial class ProofOutline
                 var index = writes.Stores + 1;
                 lean.Line($"{indent}rename_i stored{index} framed{index} output{number} held{index} _");
                 lean.Line($"{indent}dsimp only [{call.Callee.Name}Contract] at framed{index} held{index}");
+                if (call.Callee.Walk.Returned is not null)
+                {
+                    lean.Line($"{indent}obtain ⟨held{index}, returned{number}⟩ := held{index}");
+                    lean.Line($"{indent}subst output{number}");
+                    lean.Line($"{indent}dsimp only [{call.Callee.Name}Contract]");
+                }
                 stored.Add(writes);
                 return;
             }

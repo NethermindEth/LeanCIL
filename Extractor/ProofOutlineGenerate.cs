@@ -432,7 +432,9 @@ internal static partial class ProofOutline
                     [$"results = [{Result.Encode(ResultWord)}]", .. confined, post + " result"], ") := by");
             var pattern = new[] { "rfl", Symbolic ? "wellFormed" : "rfl" }
                 .Concat(MemoryFacts.Select(fact => fact.Name)).Append("assumed");
-            lean.Line($"  rintro args initial ⟨{string.Join(", ", pattern)}⟩");
+            var names = pattern.ToArray();
+            lean.Wrapped("  rintro args initial", names.Select((name, index) =>
+                (index == 0 ? "⟨" : "") + name + (index + 1 < names.Length ? "," : "⟩")), "");
         }
 
         string ResultWord => Result is { Boolean: true } ? "(if result then 1 else 0)" : "result";
@@ -555,7 +557,7 @@ internal static partial class ProofOutline
         if (stepped) spec.Plan = walk.Plan();
         string[] imports = ["CIL.Verification", "CIL.Safety.SymbolicExecution", "CIL.Safety.ObjectFields"];
         if (spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.WordArray))
-            imports = [.. imports, "CIL.Safety.ArrayContents"];
+            imports = [.. imports, "CIL.Safety.ArrayContents", "CIL.Safety.LoopCallerFacts"];
         var fresh = stepped ? walk.Flattened.OfType<Allocation>().FirstOrDefault() : null;
         if (spec.Arrays.Any() || fresh is not null) imports = [.. imports, "CIL.Safety.ReferenceArrayElements"];
         Header(lean, spec, imports, stepped ? "`postcondition`" : null);
@@ -683,7 +685,7 @@ internal static partial class ProofOutline
     /// <summary>The numbered hypotheses and memories an outline's proof introduces after each store, call and
     /// split.</summary>
     [GeneratedRegex(@"\A(?:(?:stored|framed|held|written|output|called|post|returned|found|branch|initial|memory|" +
-        @"encoded|changed|combined|formed|form|loadSigned)\d*|" +
+        @"encoded|changed|combined|formed|form|loadSigned|arrayApart)\d*|" +
         @"(?:owned|kept|added|loaded)\d+(?:Field\d+)?(?:Signed)?)\z")]
     private static partial Regex Generated();
 

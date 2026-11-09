@@ -88,16 +88,29 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
+      - name: Install pinned elan
+        timeout-minutes: 6
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/elan.tar.gz"
+          curl --fail --location --retry 1 --retry-all-errors --retry-delay 30 --max-time 150 \
+            https://github.com/leanprover/elan/releases/download/v4.2.4/elan-x86_64-unknown-linux-gnu.tar.gz \
+            --output "$archive"
+          echo "42b94d4244e8353142c456ec0e4ca6528fd898a6c604d4059f494e706e431f63  $archive" | sha256sum --check --status
+          mkdir -p "$RUNNER_TEMP/elan-installer"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/elan-installer"
+          "$RUNNER_TEMP/elan-installer/elan-init" -y --default-toolchain none --no-modify-path
+          "$HOME/.elan/bin/elan" --version
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - name: Install Lean toolchain
         id: lean
         timeout-minutes: 3
         # The toolchain download fails transiently; retry once after a pause.
         continue-on-error: true
-        uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
-        with:
-          auto-config: false
-          use-github-cache: false
-          use-mathlib-cache: false
+        shell: bash
+        run: |
+          lean --version
+          lake --version
       - name: Wait before retrying the Lean toolchain install
         if: steps.lean.outcome == 'failure'
         shell: bash
@@ -105,11 +118,10 @@ jobs:
       - name: Retry Lean toolchain install
         if: steps.lean.outcome == 'failure'
         timeout-minutes: 3
-        uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
-        with:
-          auto-config: false
-          use-github-cache: false
-          use-mathlib-cache: false
+        shell: bash
+        run: |
+          lean --version
+          lake --version
       - name: Package the installed Lean toolchain
         id: pack-toolchain
         shell: bash

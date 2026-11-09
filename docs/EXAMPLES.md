@@ -29,6 +29,14 @@
 - `StaticValues` loads `Word256.Zero`, `One` and `MinValue`, fixed by implicit conversions in the static constructor, proves their limbs and stores them through an out parameter; `MaxValue`, writes and stores outside the static constructor are rejected.
 - `SeededHash` mixes a value with two `static readonly ulong` seeds drawn from `RandomNumberGenerator`; `OpaqueSeeds.lean` proves the hash for every seed pair and that a fixed seed is not the contract.
 - `SpanTables` indexes `ReadOnlySpan<uint>` and `ReadOnlySpan<ulong>` tables, reads a length and the first element, and faults with `System.IndexOutOfRangeException` out of range.
+- [`WordReader.Read`](../Examples/Assembly/WordReader.cs) consumes a word from a caller-supplied
+  array: a helper advances `Position`, the caller decrements `Remaining`, then reads the element.
+  Its completed outline proves the returned element and cursor consumption for a nonempty remaining
+  range with `Position + Remaining` equal to the array length and length below `2^32`. The theorem
+  assumes valid array contents, field write authority and separation of the array from the cursor
+  fields. `SkipAndPeek` consumes one position and reads the following word, requiring at least two
+  remaining words; its bound is proved after the cursor update. Outside the stated assumptions,
+  an invalid read can throw after bookkeeping has changed.
 - `ItemPool.Rent` reuses the head of an intrusive free list. `PoolRent.lean` proves that it
   returns that head, advances the list past it, clears its link, decrements the idle count and
   marks it rented, writing no other field, and under the class catalog premise leaves the live
