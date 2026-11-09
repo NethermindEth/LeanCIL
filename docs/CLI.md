@@ -388,7 +388,16 @@ comment saying which obligation it is:
   receiver, so indexed element reads and loops use the same outline as a standalone word array.
   Storing the array into a class field also requires its `WholeArray` fact and its storage's origin
   to match the array reference. Field-slot writes preserve the array's element contents, allowing
-  an element read after the field store.
+  an element read after the field store. A straight-line element read after a scalar-field write
+  or a supported helper call requires separation between the array storage and each written field.
+  The outline carries the original contents through the checked write footprints; array validity
+  alone does not establish unchanged contents. Allocation preserves existing contents without a
+  separation premise for the fresh storage. Calls that change the array's elements need a contract
+  describing those changes and are outside this outline pattern. An index expressed in the caller's
+  initial bindings has an entry bound premise. An index depending on memory after a write leaves a
+  bound obligation at the read, where the helper and field-store postconditions are available.
+  Straight-line class methods with scalar local homes remain unsupported: their outlines need
+  private frame storage and lifetime facts as well as the class-field facts.
 - An array argument of structs or vectors binds `valuesLength` and is passed as `.array ⟨.address values,
   valuesLength, element⟩`, with the premise `WholeArray initial element values valuesLength`. The
   element is the `elementType` of a field that holds such arrays, such as `Tiles.Pairs.elementType`,
