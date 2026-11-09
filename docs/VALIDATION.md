@@ -9,6 +9,7 @@ Concurrent suites need separate checkouts because they build and mutate `artifac
 dotnet run --file scripts/Test.cs -- --suite core
 dotnet run --file scripts/Test.cs -- --suite evidence
 dotnet run --file scripts/Test.cs -- --suite loops
+dotnet run --file scripts/Test.cs -- --suite outlines-objects
 ```
 
 Omit `--suite` to run everything; the [suite table](#suites) lists each name.
@@ -22,7 +23,9 @@ Omit `--suite` to run everything; the [suite table](#suites) lists each name.
 | Calls and contracts | `callers`, `contracts`, `outcomes`, `imports` |
 | Referenced assemblies and pins | `assemblies`, `evidence`, `dispatch`, `exportstyped` |
 | Class-instance proofs over linked objects | `pool`, `evidence` |
-| Loops and shared stepping tactics | `loops`, examples, and `Tests.Automation`, `Tests.StoreFacts`, `Tests.MethodContract`, `Tests.CodeAt` |
+| Loop contracts, runtime comparisons and control-flow validation | `loops` |
+| Generated proof outlines | `outlines-control`, `outlines-objects`, `outlines-buffers`, `structoutlines`, `receiveroutlines`, `wordreader`, `savedwordreader` |
+| Shared stepping, return and contract tactics | All loop and outline suites above, examples, and `Tests.Automation`, `Tests.StoreFacts`, `Tests.MethodContract`, `Tests.CodeAt` |
 | CLI, artifact identity and theorem selection | `core`, `cli`, `failures`, `workspace`, `audit` |
 | Admission reports and self-admission of the extractor | `blockers`; see [self-admission](COMPILER-COVERAGE.md#self-admission) |
 | Exported interfaces and implementation checks | The affected `exports` partition in the [suite table](#suites) |
@@ -49,7 +52,14 @@ Every name `--suite` accepts, in the order a full run executes them. The names c
 | `contracts` | universal checked contracts, caller memory preservation and incorrect implementations |
 | `evidence` | independent extraction certificates and malformed evidence rejection |
 | `dispatch` | constrained and managed dispatch, constant calls, stack allocation and pinned compiler coverage |
-| `loops` | cyclic control-flow validation, universal termination and negative contracts |
+| `loops` | cyclic control-flow validation, universal termination, negative contracts and class/word-array composition |
+| `outlines-control` | generated outlines for control flow, arithmetic and value types, completed proofs and rejection checks |
+| `outlines-objects` | generated outlines for objects and reference arrays, completed proofs and rejection checks |
+| `outlines-buffers` | generated outlines for word arrays, spans and array-valued fields, completed proofs and rejection checks |
+| `structoutlines` | generated struct outlines, repeated field stores, nested values and narrow fields |
+| `receiveroutlines` | struct receiver loop outlines with completed invariants and mutation rejection |
+| `wordreader` | class cursor reads and skip/peek consumption, array separation and semantic mutation rejection |
+| `savedwordreader` | saved numeric locals across class helper calls, 64-bit results, frame boundaries and semantic mutation rejection |
 | `generics` | C# and F# generic method specialization, provenance and rejection proofs |
 | `blocks` | block memory, alignment prefixes, runtime comparisons and safety faults |
 | `unsafe` | layout-based Unsafe sizes, reference offsets and metadata validation |

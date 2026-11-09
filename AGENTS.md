@@ -11,8 +11,9 @@ LeanCIL extracts .NET CIL into Lean and proves properties of the compiled code. 
 - Run one suite with `dotnet run --file scripts/Test.cs -- --suite <name>`; names are in VALIDATION.
   Run concurrent suites in separate checkouts, since they build and mutate `artifacts/`.
 - Stepping, return and contract tactics are shared by `Tests/Automation`, `Tests/StoreFacts`,
-  `Tests/MethodContract`, `Tests/CodeAt`, the `loops` suite and the examples. A tactic change must
-  pass all of them.
+  `Tests/MethodContract`, `Tests/CodeAt`, the examples and the `loops`, `outlines-control`,
+  `outlines-objects`, `outlines-buffers`, `structoutlines`, `receiveroutlines`, `wordreader` and
+  `savedwordreader` suites. A tactic change must pass all of them.
 
 ## Writing code
 

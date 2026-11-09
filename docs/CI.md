@@ -77,6 +77,13 @@ its own cache and transcript; a failure does not skip later members, and any mem
 fails the group. Selection still includes exactly the requested suites. This removes repeated
 toolchain/library downloads without reducing coverage or increasing concurrent runners.
 
+The `loops` suite covers core loop contracts and class/word-array composition. Generated outline
+checks run in `outlines-control`, `outlines-objects` and `outlines-buffers`; each selects its
+cases from the shared `Tests/ProofOutlines.cs` runner with `--group`. Each partition prepares
+its own extractions and checks its completed proofs and rejection cases. The `structoutlines`,
+`receiveroutlines`, `wordreader` and `savedwordreader` suites run their respective focused
+fixtures independently. All partitions use the shared certified library and tool artifacts.
+
 Checked stepping rewrites feature and return instructions before using the general dispatcher.
 Child invocation matching skips duplicate facts and incompatible literal fuel budgets for
 abstract programs. The library and tactic regressions kernel-check the resulting proofs.
@@ -85,8 +92,6 @@ Single-request contract exports combine declaration replay with the complete the
 and closure audit. Source and artifact checks still surround the export callback. External-call
 mutation fixtures check only the intended division/intrinsic validator, with a complete positive
 certificate and a checked unchanged-obligation control in the replayed evidence batch.
-For the wrong-raw-target mutation, three serial Windows checks measured median time of 3.10
-seconds before narrowing and 2.37 seconds afterwards, with the same validator rejection.
 
 The required `Build and verify` check always runs. It succeeds only when selection
 succeeds and every selected suite passes, or when selection explicitly reports
