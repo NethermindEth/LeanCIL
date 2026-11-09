@@ -44,8 +44,8 @@ A goal `∃ fuel, invoke program fuel method args memory = result` is opened wit
 `CIL.executionBound program method` as its fuel, so a proof states none; fuel that is already a
 term is left as written. `cil_checked_steps` and `cil_contract_steps` also state the goal with the
 `args`, `results`, `pre`, `footprint` and `post` of each defined contract unfolded, at entry and in
-each call's continuation, so a contract proof needs no `dsimp only [contract]` of its goal. A
-contract variable and `Returns` stay folded.
+each call's continuation, so a goal they step needs no `dsimp only [contract]` first. A contract
+variable and `Returns` stay folded, as does a goal a proof enters by hand.
 
 After each step the tactics evaluate the closed literal operands the state holds with the
 `cil_literal` simp set: a width conversion, sign extension or `toNat` of a bit-vector numeral, and
