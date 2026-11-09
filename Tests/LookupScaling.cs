@@ -79,12 +79,11 @@ if (brief.Instructions < 500 || extended.Instructions < 4 * brief.Instructions -
         $"Expected about 500 and 2,000 instructions; found {brief.Instructions} and {extended.Instructions}.");
 double Cost((int Instructions, long Heartbeats) run) => (double)(run.Heartbeats - floor) / run.Instructions;
 var growth = Cost(extended) / Cost(brief);
-Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
-    $"{brief.Instructions} instructions: {Cost(brief):F0} heartbeats each; " +
-    $"{extended.Instructions} instructions: {Cost(extended):F0} heartbeats each; growth {growth:F2}"));
+var measured = string.Create(CultureInfo.InvariantCulture,
+    $"{Cost(brief):F0} heartbeats per instruction at {brief.Instructions} instructions and " +
+    $"{Cost(extended):F0} at {extended.Instructions}, {growth:F2} times as many");
 if (growth > AllowedGrowth)
     throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-        $"Compiling an extracted method costs {growth:F2} times more per instruction at " +
-        $"{extended.Instructions} instructions than at {brief.Instructions}; the limit is {AllowedGrowth}."));
+        $"Compiling an extracted method costs {measured}; the limit is {AllowedGrowth}."));
 Console.WriteLine($"PASS {extended.Instructions} instructions compile at the emitted recursion depth");
-Console.WriteLine("PASS instruction lookup equations cost the same per instruction in a long method");
+Console.WriteLine("PASS compiling an extracted method costs " + measured);
