@@ -9,19 +9,23 @@ namespace Nethermind.LeanCIL;
 // instead of an owner and offset. Each name is checked in Lean against an emitted field operation.
 internal static partial class ClassViews
 {
-    /// <summary>A class instance field operation as emitted: a load or store of a word of `Width` bytes, or of
-    /// an object reference when `Width` is null, at model offset `Offset` of an instance of `Owner`.</summary>
-    internal sealed record FieldOperation(bool Store, string Owner, int Offset, int? Width, bool Signed)
-    {
-        internal bool Reference => Width is null;
-    }
+    /// <summary>What a class instance field holds: a word, an object reference, or the origin of a whole array of
+    /// a value element.</summary>
+    internal enum FieldKind { Word, Reference, Array }
+
+    /// <summary>A class instance field operation as emitted: a load or store at model offset `Offset` of an
+    /// instance of `Owner`, of a word of `Width` bytes, an object reference, or an array of `Element`.</summary>
+    internal sealed record FieldOperation(bool Store, string Owner, int Offset, FieldKind Kind, int? Width,
+        bool Signed, string? Element);
 
     /// <summary>One field access: the method and pc whose emitted operation loads or stores the field.</summary>
     internal sealed record Access(FieldDefinition Field, TypeReference Owner, int Method, int Pc,
         FieldOperation Operation);
 
-    /// <summary>A named field of a class: where it lives, and which methods load and store it.</summary>
-    internal sealed record Field(string Name, int Offset, int? Width, int[] Loaders, int[] Storers)
+    /// <summary>A named field of a class: where it lives, what it holds, and which methods load and store it.
+    /// </summary>
+    internal sealed record Field(string Name, int Offset, FieldKind Kind, int? Width, string? Element, int[] Loaders,
+        int[] Storers)
     {
         /// <summary>The name as a Lean identifier.</summary>
         internal string Lean => Identifier(Name);
@@ -36,11 +40,18 @@ internal static partial class ClassViews
     {
         var match = FieldOperationPattern().Match(op);
         if (!match.Success) return null;
-        var kind = match.Groups["kind"].Value;
-        return new(kind.StartsWith("set", StringComparison.Ordinal), match.Groups["owner"].Value,
-            int.Parse(match.Groups["offset"].Value),
+        var name = match.Groups["kind"].Value;
+        var kind = name switch
+        {
+            "arrayField" or "setArrayField" => FieldKind.Array,
+            "objectReferenceField" or "setObjectReferenceField" => FieldKind.Reference,
+            _ => FieldKind.Word
+        };
+        return new(name.StartsWith("set", StringComparison.Ordinal), match.Groups["owner"].Value,
+            int.Parse(match.Groups["offset"].Value), kind,
             match.Groups["width"].Success ? int.Parse(match.Groups["width"].Value) : null,
-            match.Groups["signed"].Value == "true");
+            match.Groups["signed"].Value == "true",
+            match.Groups["element"].Success ? match.Groups["element"].Value : null);
     }
 
     /// <summary>The access a <c>ldfld</c> or <c>stfld</c> on a class instance field emitted, or none.</summary>
@@ -74,8 +85,8 @@ internal static partial class ClassViews
                     var operation = group.First().Operation;
                     int[] Methods(bool store) => [.. group.Where(access => access.Operation.Store == store)
                         .Select(access => access.Method).Distinct().Order()];
-                    return new Field(name, operation.Offset, operation.Width, Methods(false),
-                        Methods(true));
+                    return new Field(name, operation.Offset, operation.Kind, operation.Width, operation.Element,
+                        Methods(false), Methods(true));
                 }).ToArray();
             return new View(type.FullName, path, GenericEvidence.ObjectType(type), fields);
         })];
@@ -101,7 +112,12 @@ internal static partial class ClassViews
             foreach (var field in view.Fields)
             {
                 var access = first[(view.FullName, field.Offset)];
-                var descriptor = field.Width is { } width ? $"Safety.WordField {width}" : "Safety.ReferenceField";
+                var descriptor = field.Kind switch
+                {
+                    FieldKind.Word => $"Safety.WordField {field.Width}",
+                    FieldKind.Array => $"Safety.ArrayField {field.Element}",
+                    _ => "Safety.ReferenceField"
+                };
                 lean.AppendLine($"/-- `{access.Field.FieldType.FullName} {view.FullName}::{access.Field.Name}`, " +
                     $"at model offset {field.Offset}. -/");
                 lean.AppendLine($"@[reducible] def {field.Lean} : {descriptor} := ⟨type, {field.Offset}⟩");
@@ -140,7 +156,9 @@ internal static partial class ClassViews
     [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_']*\z")]
     private static partial Regex LeanIdentifier();
 
+    // The owner is matched lazily, since an array element such as an enumeration is parenthesized too.
     [GeneratedRegex(@"\A\.memory \(\.(?<kind>objectField|setObjectField|objectReferenceField|" +
-        @"setObjectReferenceField) \((?<owner>.*)\) (?<offset>\d+)(?: (?<width>\d+))?(?: (?<signed>true|false))?\)\z")]
+        @"setObjectReferenceField|arrayField|setArrayField) \((?<owner>.*?)\) (?<offset>\d+)" +
+        @"(?: (?<width>\d+)(?: (?<signed>true|false))?| (?<element>\.\w+|\(.*\)))?\)\z")]
     private static partial Regex FieldOperationPattern();
 }

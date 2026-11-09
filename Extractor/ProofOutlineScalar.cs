@@ -87,7 +87,7 @@ internal static partial class ProofOutline
                     if (operands.Any(operand => operand.Term is null || operand.Bits != operands[0].Bits))
                         return null;
                     var (condition, takenWhenTrue) = Body.Test(name, [.. operands.Select(operand =>
-                        Operand(operand.Term!))]);
+                        Operand(operand.Term!))], operands[0].Bits);
                     var (holds, fails) = takenWhenTrue ? (target, pc + 1) : (pc + 1, target);
                     decided = true;
                     if (Walk(holds, stack) is not { } holdsStep || Walk(fails, stack) is not { } failsStep)

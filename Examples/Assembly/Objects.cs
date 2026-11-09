@@ -179,6 +179,29 @@ public static class SampleArrays
 
     /// <summary>Replaces the samples with <paramref name="values"/>.</summary>
     public static void Refill(Samples samples, int[] values) => samples.Values = values;
+
+    /// <summary>The number of samples; a null array throws.</summary>
+    public static int Count(Samples samples) => samples.Values!.Length;
+
+    /// <summary>
+    /// Gives <paramref name="target"/> the samples of <paramref name="source"/> and counts them after the store.
+    /// </summary>
+    public static int Share(Samples source, Samples target)
+    {
+        var shared = source.Values!;
+        target.Values = shared;
+        return shared.Length;
+    }
+
+    /// <summary>
+    /// Refills <paramref name="other"/>, then counts the samples of <paramref name="samples"/>, which may be the same
+    /// holder.
+    /// </summary>
+    public static int CountAfterRefill(Samples samples, Samples other, int[] values)
+    {
+        Refill(other, values);
+        return samples.Values!.Length;
+    }
 }
 
 /// <summary>Reference identity and null tests on class instances.</summary>

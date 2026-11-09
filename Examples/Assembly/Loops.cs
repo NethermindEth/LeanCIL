@@ -156,4 +156,78 @@ public static class Loops
             climbed = unchecked(climbed + 1);
         return climbed;
     }
+
+    // Writes every element through the span, which need not have been readable before.
+    public static void Fill(Span<uint> target, uint value)
+    {
+        while (target.Length != 0)
+        {
+            target[0] = value;
+            target = target.Slice(1);
+        }
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    static void Put(Span<uint> target, uint value) => target[0] = value;
+
+    // Fills the span through a helper that writes only the first element of the span it is passed.
+    public static void FillThrough(Span<uint> target, uint value)
+    {
+        while (target.Length != 0)
+        {
+            Put(target, value);
+            target = target.Slice(1);
+        }
+    }
+
+    // Adds the array's elements by index; the bound test reads the array's length each iteration.
+    public static ulong SumIndexed(ulong[] values)
+    {
+        ulong total = 0;
+        for (var index = 0; index < values.Length; index++) total = unchecked(total + values[index]);
+        return total;
+    }
+
+    // Stores the value into every element of the array by index.
+    public static void FillIndexed(uint[] values, uint value)
+    {
+        for (var index = 0; index < values.Length; index++) values[index] = value;
+    }
+
+    // Adds the array's elements through a span local that drops each element it has read.
+    public static ulong SumThroughSpan(ulong[] values)
+    {
+        ReadOnlySpan<ulong> rest = values;
+        ulong total = 0;
+        while (rest.Length != 0)
+        {
+            total = unchecked(total + rest[0]);
+            rest = rest.Slice(1);
+        }
+        return total;
+    }
+
+    // Adds a span's elements through a local copy of it.
+    public static ulong SumThroughLocal(ReadOnlySpan<ulong> values)
+    {
+        var rest = values;
+        ulong total = 0;
+        while (rest.Length != 0)
+        {
+            total = unchecked(total + rest[0]);
+            rest = rest.Slice(1);
+        }
+        return total;
+    }
+
+    // Stores the value into every element of the array through a span local over it.
+    public static void FillThroughSpan(uint[] values, uint value)
+    {
+        Span<uint> rest = values;
+        while (rest.Length != 0)
+        {
+            rest[0] = value;
+            rest = rest.Slice(1);
+        }
+    }
 }

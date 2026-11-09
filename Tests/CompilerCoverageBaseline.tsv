@@ -3,6 +3,7 @@ Examples:Examples.Account Examples.Objects::FirstPresent(Examples.Account,Exampl
 Examples:Examples.AggregateArrays/Pair Examples.AggregateArrays::Read(Examples.AggregateArrays/Pair[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:Examples.AggregateArrays/Pair& Examples.AggregateArrays::Address(Examples.AggregateArrays/Pair[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:Examples.AggregateArrays/Pair& Examples.AggregateArrays::Data(Examples.AggregateArrays/Pair[])	A	A	A	A	A	A	A	A
+Examples:Examples.AggregateArrays/Pair[] Examples.TileArrays::PairsOf(Examples.Tiles)	A	A	A	A	A	A	A	A
 Examples:Examples.AggregateSpans/VectorRecord Examples.AggregateSpans::LayoutRead(System.ReadOnlySpan`1<Examples.AggregateSpans/VectorRecord>)	B	B	B	B	B	B	B	B
 Examples:Examples.AggregateSpans/Words Examples.AggregateSpans::Read(System.ReadOnlySpan`1<Examples.AggregateSpans/Words>)	A	A	A	A	A	A	A	A
 Examples:Examples.AllocationTag[] Examples.PrimitiveArrays::AllocateUnnamedZero(System.Int32)	A	A	A	A	A	A	A	A
@@ -76,6 +77,7 @@ Examples:Examples.StaticPair`1<System.UInt32> Examples.StaticValues::Pair32()	B	
 Examples:Examples.StaticPair`1<System.UInt64> Examples.StaticValues::Pair64()	B	B	B	B	B	B	B	B
 Examples:Examples.StaticSigned Examples.StaticScalars::ReadSignedEnum()	B	B	B	B	B	B	B	B
 Examples:Examples.StaticUnsigned Examples.StaticScalars::ReadUnsignedEnum()	B	B	B	B	B	B	B	B
+Examples:Examples.Tiles Examples.TileArrays::Hold(Examples.AggregateArrays/Pair[],System.Runtime.Intrinsics.Vector128`1<System.UInt64>[])	A	A	A	A	A	A	A	A
 Examples:Examples.Unsigned16 Examples.Enums::IdentityU16(Examples.Unsigned16)	A	A	A	A	A	A	A	A
 Examples:Examples.Unsigned16[] Examples.PrimitiveArrays::AllocateUnsigned16(System.Int32)	A	A	A	A	A	A	A	A
 Examples:Examples.Unsigned32 Examples.Enums::IdentityU32(Examples.Unsigned32)	A	A	A	A	A	A	A	A
@@ -379,6 +381,9 @@ Examples:System.Int32 Examples.PrimitiveOperations::Alias(System.Int16&,System.I
 Examples:System.Int32 Examples.PrimitiveOperations::Choose(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.PrimitiveOperations::PacketSize()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.PrimitiveOperations::ReadWrite(System.Int32&,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SampleArrays::Count(Examples.Samples)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SampleArrays::CountAfterRefill(Examples.Samples,Examples.Samples,System.Int32[])	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SampleArrays::Share(Examples.Samples,Examples.Samples)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Sequential::PackedSize()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Sequential::RecordSize()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SpanConstructors::AggregateLocal(Examples.AggregateSpans/Words&)	A	A	A	A	A	A	A	A
@@ -416,6 +421,7 @@ Examples:System.Int32 Examples.TailCalls::Increment(System.Int32)	A	A	A	A	A	A	A	
 Examples:System.Int32 Examples.TailCalls::LocalReference(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.TailCalls::Raise(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.TailCalls::Read(System.Int32&)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.TileArrays::PairCount(Examples.Tiles)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.TupleDivision::MathOutInt32(System.Int32,System.Int32,System.Int32&)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.TupleDivision::MathQuotient(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.TupleDivision::MathWrongQuotient(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
@@ -875,6 +881,9 @@ Examples:System.UInt64 Examples.IntegerMath::ClampUInt64(System.UInt64,System.UI
 Examples:System.UInt64 Examples.IntegerMath::MaxUInt64(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.IntegerMath::MinUInt64(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Loops::Sum(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Loops::SumIndexed(System.UInt64[])	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Loops::SumThroughLocal(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Loops::SumThroughSpan(System.UInt64[])	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.MarshaledMemory::Read(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Measured`1::Width(System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.MostSpecificBodies::Five(System.UInt64)	A	A	A	A	A	A	A	A
@@ -1077,7 +1086,12 @@ Examples:System.Void Examples.ItemPool::.ctor(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ItemPool::Prewarm(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ItemPool::Return(Examples.PooledItem)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Labelled::.ctor()	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Loops::Fill(System.Span`1<System.UInt32>,System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Loops::FillIndexed(System.UInt32[],System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Loops::FillThrough(System.Span`1<System.UInt32>,System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Loops::FillThroughSpan(System.UInt32[],System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Loops::FillWords(System.UInt64&,System.UInt64,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Loops::Put(System.Span`1<System.UInt32>,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Loops::Stamp(System.UInt32&,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ManagedDispatch::Targets(method System.Int32 *(System.Int32)[])	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.Marker::.ctor()	A	A	A	A	A	A	A	A
@@ -1161,6 +1175,8 @@ Examples:System.Void Examples.TailCalls::Store(System.Int32&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Tally::.ctor(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Throws::ThrowDivideByZero()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Throws::ThrowNull()	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.TileArrays::Relane(Examples.Tiles,System.Runtime.Intrinsics.Vector128`1<System.UInt64>[])	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Tiles::.ctor()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.TypedCopy::Packet(Examples.Packet&,Examples.Packet&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.TypedCopy::Record(Examples.Record&,Examples.Record&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.TypedCopy::Vector128(System.Runtime.Intrinsics.Vector128`1<System.UInt64>&,System.Runtime.Intrinsics.Vector128`1<System.UInt64>&)	A	A	A	A	A	A	A	A

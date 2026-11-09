@@ -9,8 +9,9 @@ iteration's memory: write authority over the element, the index below `2 ^ 31` a
 within the footprint. `cil_loop_obligation` proves each from the hypotheses the iteration holds,
 with the author's invariant, precondition and footprint unfolded, so the author writes only those
 definitions. A callee's contract proof uses it the same way at a throw its precondition rules
-out. While a definition is still `sorry` it leaves an ordinary hole; once all are written, a fact
-it cannot prove is an error at that fact, never a silent admission.
+out, and an array loop for its index bound, tested signed against the array's length. While a
+definition is still `sorry` it leaves an ordinary hole; once all are written, a fact it cannot
+prove is an error at that fact, never a silent admission.
 -/
 
 namespace CIL.Safety
@@ -30,8 +31,16 @@ theorem Writable.element_writable {m : Memory} {base : Reference} {width start c
     (high : index < start + count) : Writable m (base.element width index) width 0 1 :=
   writable.sub low (by omega)
 
+/-- A length below `2 ^ (width - 1)`, such as an array's, reads back as itself signed. -/
+theorem toInt_ofNat_of_lt {width length : Nat} (small : 2 * length < 2 ^ width) :
+    (BitVec.ofNat width length).toInt = length := by
+  have below : length < 2 ^ width := by omega
+  rw [BitVec.toInt_eq_toNat_of_lt (by simpa [Nat.mod_eq_of_lt below] using small)]
+  simp [Nat.mod_eq_of_lt below]
+
 #print axioms Filled.element_writable
 #print axioms Writable.element_writable
+#print axioms toInt_ofNat_of_lt
 
 /-- Replace each conjunction among the hypotheses by its parts. -/
 private partial def splitConjunctions (goal : MVarId) : MetaM MVarId := goal.withContext do
@@ -62,8 +71,9 @@ elab_rules : tactic
     try
       evalTactic (← `(tactic| (try simp only [$unfolded,*] at *)))
       replaceMainGoal [← splitConjunctions (← getMainGoal)]
-      -- A signed comparison of small words is the unsigned one `omega` reads.
-      evalTactic (← `(tactic| (try simp (disch := omega) only [BitVec.toInt_eq_toNat_of_lt] at *)))
+      -- A signed comparison of small words, or with an array's length, is one `omega` reads.
+      evalTactic (← `(tactic|
+        (try simp (disch := omega) only [BitVec.toInt_eq_toNat_of_lt, toInt_ofNat_of_lt] at *)))
       -- `omega` comes first: `contradiction` can exceed the recursion depth deciding a
       -- comparison of large literals, which `first` does not catch.
       evalTactic (← `(tactic| first

@@ -51,31 +51,44 @@ foreach (var (proof, entry) in new[]
     ("TagStore", "TagArrays::Put(System.String[],System.Int32,Examples.Tagged)"),
     ("TagLoad", "TagArrays::Take(Examples.Tagged,System.String[],System.Int32)"),
     ("SampleValues", "SampleArrays::ValuesOf(Examples.Samples)"),
-    ("SampleRefill", "SampleArrays::Refill(Examples.Samples,System.Int32[])")
+    ("SampleRefill", "SampleArrays::Refill(Examples.Samples,System.Int32[])"),
+    ("SampleCount", "SampleArrays::Count(Examples.Samples)"),
+    ("TilePairs", "TileArrays::PairsOf(Examples.Tiles)"),
+    ("TilePairCount", "TileArrays::PairCount(Examples.Tiles)"),
+    ("TileRelane", "TileArrays::Relane(Examples.Tiles,System.Runtime.Intrinsics.Vector128`1<System.UInt64>[])"),
+    ("SampleCountAfterRefill", "SampleArrays::CountAfterRefill(Examples.Samples,Examples.Samples,System.Int32[])"),
+    ("TileHold",
+        "TileArrays::Hold(Examples.AggregateArrays/Pair[],System.Runtime.Intrinsics.Vector128`1<System.UInt64>[])")
 })
 {
     verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));
     Console.WriteLine($"PASS {proof}: {entry}");
 }
 
-// Each named field is checked against the operation it names, so a view with another offset or
-// width fails its own theorem instead of naming storage the code never touches.
+// Each named field is checked against the operation it names, so a view with another offset, width or
+// element fails its own theorem instead of naming storage the code never touches.
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution",
     "CIL.Safety.ObjectFields");
 var forgedViews = new RejectedEvidence(root);
-var linked = File.ReadAllText(Path.Combine(root, "LinkedNodes", "Extracted.lean"));
-foreach (var (name, view, forged, marker) in new[]
+foreach (var (name, proof, view, forged, marker) in new[]
 {
-    ("offset", "def Next : Safety.ReferenceField := ⟨type, 8⟩", "def Next : Safety.ReferenceField := ⟨type, 0⟩",
-        "Next.accessedBy"),
-    ("width", "def Value : Safety.WordField 8 := ⟨type, 0⟩", "def Value : Safety.WordField 4 := ⟨type, 0⟩",
-        "Value.accessedBy")
+    ("offset", "LinkedNodes", "def Next : Safety.ReferenceField := ⟨type, 8⟩",
+        "def Next : Safety.ReferenceField := ⟨type, 0⟩", "Next.accessedBy"),
+    ("width", "LinkedNodes", "def Value : Safety.WordField 8 := ⟨type, 0⟩",
+        "def Value : Safety.WordField 4 := ⟨type, 0⟩", "Value.accessedBy"),
+    ("element", "SampleValues", "def Values : Safety.ArrayField .signed32 := ⟨type, 0⟩",
+        "def Values : Safety.ArrayField .unsigned32 := ⟨type, 0⟩", "Values.accessedBy"),
+    // A struct element's width is its layout's, so a field operation with another width fails its layout use.
+    ("structWidth", "TilePairs", "PublicKeyToken=null::Examples.AggregateArrays/Pair\" 16)",
+        "PublicKeyToken=null::Examples.AggregateArrays/Pair\" 8)",
+        "Extraction.MethodLayoutsValid rawLayouts computedLayouts method0 method0LayoutUses")
 })
 {
-    if (!linked.Contains(view, StringComparison.Ordinal))
+    var extracted = File.ReadAllText(Path.Combine(root, proof, "Extracted.lean"));
+    if (!extracted.Contains(view, StringComparison.Ordinal))
         throw new InvalidOperationException("The extraction does not name the field view: " + view);
     var path = Path.Combine(root, $"ForgedView-{name}.lean");
-    File.WriteAllText(path, linked.Replace(view, forged, StringComparison.Ordinal));
+    File.WriteAllText(path, extracted.Replace(view, forged, StringComparison.Ordinal));
     forgedViews.Add(path, $"PASS forged field view rejected: {name}", marker);
 }
 // Lean re-resolves every dispatch table entry from the catalog and requires every concrete class
@@ -134,7 +147,7 @@ foreach (var mutation in new[]
 {
     "abstract", "base", "baseRejected", "explicit", "finalizer", "interface", "byref", "address", "reference",
     "fieldType", "receiverAddress", "opaqueRead", "elementAddress", "arrayAddress", "objectArray",
-    "interfaceArray", "objectArrayParameter", "structArrayField"
+    "interfaceArray", "objectArrayParameter", "matrixField"
 })
 {
     var output = Path.Combine(root, "Reject-" + mutation);
@@ -233,10 +246,10 @@ foreach (var mutation in new[]
                 tags.Methods.Single(candidate => candidate.Name == "Put").Parameters[0].ParameterType =
                     new ArrayType(module.TypeSystem.Object);
                 break;
-            // A struct element's width comes from a layout the field token does not carry.
-            case "structArrayField":
+            // A multi-dimensional array has a shape the field's slot cannot recover from its allocation.
+            case "matrixField":
                 module.GetType("Examples.Samples").Fields.Single().FieldType =
-                    new ArrayType(module.GetType("Examples.AggregateArrays/Pair"));
+                    new ArrayType(module.TypeSystem.Int32, 2);
                 break;
             case "arrayAddress":
                 var count = arrays.Methods.Single(candidate => candidate.Name == "Count");
@@ -260,12 +273,12 @@ foreach (var mutation in new[]
             "byref" => "Unsupported by-reference class instance: Examples.Account&",
             "address" => "Unsupported field address on a class instance: System.UInt32 Examples.Account::Limit",
             "reference" => "Unsupported reference-typed field: System.String modopt(System.Object) " +
-                "Examples.Account::Owner\n  Only fields holding class instances, arrays of classes or arrays of " +
-                "integers, Booleans, chars or enums are modelled",
-            "structArrayField" => "Unsupported reference-typed field: Examples.AggregateArrays/Pair[] " +
+                "Examples.Account::Owner\n  Only fields holding class instances, arrays of classes or " +
+                "single-dimensional arrays of reference-free value types are modelled",
+            "matrixField" => "Unsupported reference-typed field: System.Int32[,] " +
                 "Examples.Samples::Values\n" +
-                "  Only fields holding class instances, arrays of classes or arrays of integers, Booleans, chars " +
-                "or enums are modelled; Examples.AggregateArrays/Pair[] is another array",
+                "  Only fields holding class instances, arrays of classes or single-dimensional arrays of " +
+                "reference-free value types are modelled; System.Int32[,] is another array",
             "opaqueRead" => "callvirt requires an adjacent concrete constrained receiver",
             "objectArray" => "Unsupported instruction: IL_0001: newarr System.Object",
             "interfaceArray" => "Unsupported instruction: IL_0001: newarr Examples.ICounterValue",
@@ -293,7 +306,7 @@ foreach (var mutation in new[]
         "objectArrayParameter" => "TagArrays::Put(System.Object[],System.Int32,Examples.Tagged)",
         "elementAddress" => "NodeArrays::At(Examples.Node[],System.Int32)",
         "arrayAddress" => "NodeArrays::Count(Examples.Node[])",
-        "structArrayField" => "SampleArrays::ValuesOf(Examples.Samples)",
+        "matrixField" => "SampleArrays::ValuesOf(Examples.Samples)",
         _ => "Objects::IsNull(Examples.Account)"
     };
     var result = Execute(["dotnet", ExtractorPath, "extract", dll, selector, output]);

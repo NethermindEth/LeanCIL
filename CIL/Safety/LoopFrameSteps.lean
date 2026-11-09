@@ -469,10 +469,12 @@ elab_rules : tactic
 
 /-- The tactic that proves a frame side condition after a call: that each callee footprint entry
     lies inside the frame's footprint, or below the caller's watermark, from the `unfold`
-    definitions, `facts`, arithmetic and `form` facts of the caller's memory, or a hypothesis
-    placing a single entry in the frame's footprint. -/
+    definitions, `facts`, arithmetic and `form` facts of the caller's memory, a hypothesis
+    placing a single entry in the frame's footprint, or one stating the condition itself, such
+    as `WritableSpan.covered` for a lent span. -/
 def loopCallSide (unfold : Array Ident) (facts : Array Term) : TacticM Unit := do
   evalTactic (← `(tactic| first
+    | with_reducible assumption
     | (intro _ member
        simp only [List.mem_cons, List.not_mem_nil, or_false] at member
        subst member

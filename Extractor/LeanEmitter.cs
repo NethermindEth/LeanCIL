@@ -96,7 +96,11 @@ internal static class LeanEmitter
             .Concat(MethodSpecialization.Arguments(m))
             .Concat(m.Body.Instructions.Where(i => i.Operand is TypeReference).Select(i => (TypeReference)i.Operand))
             .Concat(m.Body.Instructions.Where(i => i.Operand is GenericInstanceMethod).SelectMany(i => ((GenericInstanceMethod)i.Operand).GenericArguments))
-            .Concat(m.Body.Instructions.Where(i => i.Operand is FieldReference).Select(i => ((FieldReference)i.Operand).DeclaringType)))
+            .Concat(m.Body.Instructions.Select(i => i.Operand).OfType<FieldReference>()
+                .Select(field => field.DeclaringType))
+            // A class field holding an array of structs needs the struct's layout for its element width.
+            .Concat(m.Body.Instructions.Select(i => i.Operand).OfType<FieldReference>()
+                .Where(field => field.FieldType is ArrayType).Select(field => field.FieldType)))
             .Select(t => t is ByReferenceType r ? r.ElementType : t)
             .Select(t => t is ArrayType array ? array.ElementType : t)
             .Select(t => Spans.Is(t) ? ((GenericInstanceType)t).GenericArguments[0] : t)

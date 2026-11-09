@@ -14,20 +14,22 @@ head of their type, so a context of unrelated hypotheses adds nothing to simp.
 namespace CIL.Safety
 
 /-- Heads of the equations the loop tactics take from the context: checked steps, local and
-    memory loads and stores, span element, slice, validity, width and mode checks, formed
-    references and `Unsafe.Add` results. -/
+    memory loads and stores, span element, slice, validity, width and mode checks, array validity,
+    formed references and `Unsafe.Add` results. -/
 def loopFactHeads : List Lean.Name :=
   [``CIL.Safety.step, ``CIL.Safety.instruction, ``CIL.Safety.memoryInstruction,
     ``CIL.Safety.staticInstruction, ``CIL.Safety.loadLocal, ``CIL.Safety.storeLocal,
     ``CIL.Safety.loadValue, ``CIL.Safety.storeValue, ``CIL.Safety.SpanView.element,
     ``CIL.Safety.SpanView.slice, ``CIL.Safety.SpanView.validate, ``CIL.Safety.SpanView.width,
-    ``CIL.Safety.SpanView.writable, ``CIL.Safety.form, ``CIL.Safety.add]
+    ``CIL.Safety.SpanView.writable, ``CIL.Safety.ArrayView.validate, ``CIL.Safety.form,
+    ``CIL.Safety.add]
 
 /-- The facts about caller storage that read only allocations, so a loop frame carries them from
     its caller's memory to its own (`CIL.Safety.LoopCallerFacts`), with the lemma that does. -/
 def loopCallerFacts : List (Lean.Name × Lean.Name) :=
   [(``CIL.Safety.form, `LoopFrame.caller_form), (``CIL.Safety.add, `LoopFrame.caller_add),
     (``CIL.Safety.SpanView.validate, `LoopFrame.caller_valid),
+    (``CIL.Safety.ArrayView.validate, `LoopFrame.caller_array_valid),
     (``CIL.Safety.SpanView.element, `LoopFrame.caller_element),
     (``CIL.Safety.SpanView.slice, `LoopFrame.caller_slice)]
 
@@ -281,7 +283,8 @@ open Lean Elab Tactic Meta in
     * hypotheses `loopFactSides?` recognizes;
     * for `span : CheckedSpan`, `span.facts`, `span.length_nil` or `span.length_cons` when its
       values are `[]` or a cons, and `span.valid_within wellFormed frame` for each
-      `frame : LoopFrame` from its memory with that memory's `wellFormed` in context;
+      `frame : LoopFrame` from its memory with that memory's `wellFormed` in context; the same for
+      `span : WritableSpan` when its count is `0` or a successor;
     * for a formed reference, `Unsafe.Add` result, or span validity, element or slice equation at
       the caller memory of a `frame : LoopFrame` with that memory's `wellFormed` in context, the
       equation at the frame's memory (`LoopFrame.caller_form` and its kind), and for an `add`
@@ -387,6 +390,30 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
           candidates := candidates.push (`spanFacts,
             applied `CheckedSpan.valid_within #[fact, named formed, named frame],
             variables #[frameType.getArg! 2, arguments[1]!], #[frameType.getArg! 2], #[])
+    if type.isAppOfArity `CIL.Safety.WritableSpan 5 then
+      let subject := variables #[arguments[0]!, arguments[2]!]
+      if isLive arguments[0]! then
+        candidates := candidates.push
+          (`spanFacts, applied `WritableSpan.facts #[fact], subject, #[], #[])
+      let count := arguments[4]!.consumeMData
+      let literal (term : Expr) (value : Nat) : Bool := term.rawNatLit? == some value ||
+        (term.isAppOfArity ``OfNat.ofNat 3 && term.appFn!.appArg!.rawNatLit? == some value)
+      if count.isConstOf ``Nat.zero || literal count 0 then
+        candidates := candidates.push
+          (`spanLength, applied `WritableSpan.length_nil #[fact], subject, #[], #[])
+      else if count.isAppOfArity ``Nat.succ 1 ||
+          (count.isAppOfArity ``HAdd.hAdd 6 && literal count.appArg! 1) then
+        candidates := candidates.push
+          (`spanLength, applied `WritableSpan.length_cons #[fact], subject, #[], #[])
+      for (frame, frameType) in typed do
+        unless frameType.isAppOfArity `CIL.Safety.LoopFrame 6 &&
+          frameType.getArg! 1 == arguments[0]! do continue
+        for (formed, formedType) in typed do
+          unless formedType.isAppOfArity ``Memory.WellFormed 1 &&
+            formedType.appArg! == arguments[0]! do continue
+          candidates := candidates.push (`spanFacts,
+            applied `WritableSpan.valid_within #[fact, named formed, named frame],
+            variables #[frameType.getArg! 2, arguments[2]!], #[frameType.getArg! 2], #[])
     -- A reference check or address, or a caller fact a frame carries to its own memory. The
     -- caller's memory can be live too, since a frame's activation names its watermark.
     let hole : Term ← `(_)
@@ -420,8 +447,9 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
       if let some (_, lhs, rhs) := type.consumeMData.eq? then
         let subject := if formedResult.isSome then #[]
           else (variables lhs.getAppArgs).filter (· != memory.fvarId!)
-        -- A span's validity stays with every step, since loading a span local reads it.
-        let base := if carry == `LoopFrame.caller_valid then `callerFact else `referenceFact
+        -- A span's or array's validity stays with every step, since loading either reads it.
+        let viewValid := carry == `LoopFrame.caller_valid || carry == `LoopFrame.caller_array_valid
+        let base := if viewValid then `callerFact else `referenceFact
         for (frame, formed, framed) in carriers memory do
           candidates := candidates.push (base,
             applied carry #[named frame, named formed, fact], subject, #[framed], variables #[rhs])

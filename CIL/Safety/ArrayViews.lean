@@ -22,6 +22,11 @@ structure ArrayView where
 def ArrayView.storage (view : ArrayView) : SpanView :=
   ⟨view.reference, view.length, view.elementType.width, true⟩
 
+/-- The span a `Span` or `ReadOnlySpan` conversion makes of the whole array: its storage
+    extent under the conversion's access mode. -/
+def ArrayView.span (view : ArrayView) (writable : Bool) : SpanView :=
+  ⟨view.reference, view.length, view.elementType.width, writable⟩
+
 /-- Formation checks preserve null arrays and validate live, bounded non-null extents. -/
 def ArrayView.validate (view : ArrayView) (memory : Memory) : Checked Unit :=
   view.storage.validate memory

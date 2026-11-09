@@ -230,7 +230,7 @@ comment saying which obligation it is:
 
 - `Precondition` and `Postcondition` are definitions to replace with the specification. The
   theorem assumes the precondition and promises the postcondition of the returned value, and for
-  a method that takes references or spans also of the caller's memory before and after.
+  a method that takes references, spans or arrays also of the caller's memory before and after.
 - A method without a loop is stepped by `cil_checked_steps` when its body is arithmetic on 32- and
   64-bit arguments or a total bit count (`Log2`, `PopCount`, `LeadingZeroCount`,
   `TrailingZeroCount`), leaving only the postcondition. A signed or unsigned checked `+`, `-` or
@@ -240,9 +240,31 @@ comment saying which obligation it is:
   `cil_loop_obligation`. A conditional branch on words the body computes from its arguments, signed
   or unsigned, is split with `by_cases branchN` on the condition it tests, and each side steps on
   to its own return and leaves its own postcondition, commented with the side it is on; a body
-  splits into at most eight returns. When it also takes up to three `bool`
+  splits into at most eight returns. A literal in a split's condition is in the form default `simp`
+  leaves it, such as `count = 0#32` or, in a signed comparison, `value.toInt < (-1)`, so the split's
+  fact rewrites a simplified goal without restating it. When it also takes up to three `bool`
   arguments and tests nothing else, it is split with `cases` on each, and every side steps to its
   own return and leaves its own postcondition, commented with the values it is for.
+- An `int[]`, `uint[]`, `long[]` or `ulong[]` parameter of a method that neither takes nor is called
+  on a class instance is an `ArrayView` with a list of its elements, and the theorem assumes the
+  view validates, has its element type and holds those elements in its storage span, `SpanContents
+  initial values.storage`. A method returning `values[index]` for an `int` argument `index`, read by
+  `ldelem` or through a static helper whose body only returns `ref values[index]`, is split with
+  `by_cases valuesBound` on whether the index is below the number of elements; a null array has
+  none, so the bound alone excludes it. The in-bound side steps through `SpanContents.array_load`,
+  the helper's call through a contract proved from its body, and leaves the postcondition; an index
+  outside throws, a hole the precondition closes. Any other straight-line body over an array is a
+  `not outlined:` hole.
+- A loop over an array indexes it with an `int` local tested against `values.Length`. The proof
+  destructures the array into `valuesBase` and `valuesLength` before the loop, the precondition
+  excluding a null array, and the cutpoint takes `valuesLength`, which a valid array keeps below
+  `2 ^ 31` (`SpanView.length_bounded` of its storage span). A read of `values[index]` steps through
+  `array_load` of the storage span's contents, carried into the iteration's frame, and loads
+  `valuesElements[index.toNat]`. An array the loop stores into is a written one: the theorem gives
+  authority over its storage span, `footprint` is that span's, and a store of `values[index]` steps
+  through `arrayElement_of_access`. Each access leaves its index bound, and a store its write
+  authority and footprint entry, to `cil_loop_obligation` from the author's definitions. A method
+  storing into one of several arrays is refused.
 - A method with a loop gets its loop state, the cutpoint at the loop's back-edge test (found by
   instruction, never by pc), and `invariant` and `measure` definitions to replace. A method that
   takes a reference also gets a `footprint` to replace: the caller memory the loop may write, which
@@ -262,6 +284,29 @@ comment saying which obligation it is:
   and footprint the author writes, by `omega` over their conjuncts or from a `Filled` or `Writable`
   fact covering the element; it is a hole while any of those is `sorry`, and an error at the write
   once they are written and do not imply it.
+- A loop over a `Span<T>` of 32- or 64-bit integers that stores `span[0]` and continues with
+  `span.Slice(1)` keeps the span as a `WritableSuffix`: its `WritableSpan` holds the view's checks
+  and `SpanWritable` authority in the caller's memory, not its contents, so the caller need not
+  have initialized it. The loop splits on the remaining length with `cases`, the store, before any
+  other store of the iteration, steps through `frame.write_span_head`, which names the element's
+  address, and `Slice(1)` through `WritableSpan.tail`. The span's bytes are its `footprint`, and
+  the theorem assumes `SpanWritable` over them. A read of the written span is a `not outlined:`
+  hole. Passing the span instead to a static `(Span<T> target, T value)` callee whose body only
+  stores `value` into `target[0]` gives the callee a proved contract over the span's bytes, lends
+  it the span through `WritableSpan.lend` and names `WritableSpan.covered` and `below` for the
+  call's footprint side conditions; the invariant then extends the prefix with `Filled.extend`.
+  Such a callee outlined on its own is stepped through `WritableSpan.write_head`; an empty span
+  throws there, a hole the precondition closes. Any other write to a span outside a loop is refused.
+- The span such a loop reads or fills may be a local, `ReadOnlySpan<T> rest = values` or
+  `Span<T> rest = values`, assigned once before the loop from a span argument or from the whole of
+  an array argument. The local's suffix is the loop state, and the cutpoint's frame names its slot
+  from the state, since the entered frame holds the null span there. A copied span argument is
+  checked as when the loop slices the argument itself. An array spanned this way is not
+  destructured: the loop starts from `values.span false` or `values.span true`, the span
+  `step_arraySpan_whole` pushes, checked by `CheckedSpan.of_array` for a read and by
+  `WritableSpan.of_array` for a fill, whose authority and `footprint` are the array's storage span.
+  A null array converts to an empty span, so the precondition need not exclude it. A local
+  assigned anything else, or an array also read other than through the local, is refused.
 - Loops in sequence are bound in pc order (`loop`, `loop2`, ...), each with its own cutpoint,
   `invariant` and `measure` (`header2`, `invariant2`, `measure2`, ...). The path leaving one loop
   for the next loop's test enters that loop through `loop_terminates_then`, leaving its invariant at
@@ -329,6 +374,20 @@ comment saying which obligation it is:
   `fresh1` with `fresh1Identity` dating it after every caller allocation, and the footprint
   forgets its elements through `Confined.forget_fresh`. An index into it that is not a literal
   below its length is a `not outlined:` hole, as is a method with a loop.
+- An array argument of structs or vectors, or of words beside a class instance argument or receiver,
+  such as `values : int[]`, binds `valuesLength` and is passed as `.array ⟨.address values,
+  valuesLength, element⟩`, with the premise `WholeArray initial element values valuesLength`. The
+  element is the `elementType` of a field that holds such arrays, such as `Tiles.Pairs.elementType`,
+  or a literal such as `.signed32`; a struct or vector element no field names is a reducible
+  `valuesElement` def. A load of a field holding a value array, before any write, binds the array
+  and its length, such as `samplesValuesArray` and `samplesValuesLength`, with premises that the
+  field holds it and that it is whole. A store into such a field of an argument or loaded array
+  steps through `Owned.store_whole`, and each `ldlen`, local, call argument and return of an array
+  is stepped with its `WholeArray` fact carried across the writes before it. A value-array result is
+  an `ArrayView`. A load of the field after a write, a store of a null array into it, and a call to a
+  method that takes a value array or loads a value-array field are `not outlined:` holes, and an
+  unstepped body over a value array leaves its `footprint` to the author. A struct instance method
+  or a method with a loop that takes a value array, or a loop that returns one, is refused.
 - A call in a body over objects to a method that loads its fields, stores at most one word field of
   an object argument and returns a value it names gets a generated `MethodContract` read from that
   body, with a `Holds` theorem proved by the same stepping; `cil_contract_steps` composes the call
@@ -407,7 +466,7 @@ theorem correctness (value : W32) : Ensures Extracted.program 0
     cil_loop_recurse start value
     case invariant => sorry -- invariant at the first loop head
   rintro ⟨remaining, current, frame⟩ holds recurse
-  by_cases guard : remaining = 0
+  by_cases guard : remaining = 0#32
   · -- leaves the loop at Loops.cs:40
     cil_loop_finish [guard]
     case postcondition =>

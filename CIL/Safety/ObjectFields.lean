@@ -8,16 +8,18 @@ import CIL.Safety.AggregateFields
 # Named fields of class instances
 
 Proofs about class instances name a field by its class and field name instead of a byte offset.
-An extraction generates one `WordField` or `ReferenceField` per instance field of each admitted
-class it uses, carrying the class and the model offset the extractor validated; a wrong one
-cannot make a proof succeed, since every field instruction carries its own checked operands.
+An extraction generates one `WordField`, `ReferenceField` or `ArrayField` per instance field of
+each admitted class it uses, carrying the class and the model offset the extractor validated; a
+wrong one cannot make a proof succeed, since every field instruction carries its own checked
+operands.
 
 `field.of memory object` is what the field holds, read from memory without checking authority.
 `field.Readable` packages what a load needs: a live object of the field's class, the field
 located inside it, and readable, initialized storage. `field.Owned` adds write authority, which
 a store needs; `field.Holds memory object value` is `Owned` with the field holding `value`.
 `field.Forms` says the reference a reference field holds forms, which code that loads, tests or
-copies a reference to a class outside the model needs, since it never reads through it.
+copies a reference to a class outside the model needs, since it never reads through it. An
+`ArrayField` holds null or the origin of a `WholeArray`, which a load rebuilds as the array.
 Each gives the facts the stepping tactics take (`live`, `located`, `load`, `store`), and keeps
 across a confined call when the call's footprint is apart from the field (`frame`), so a
 contract reads as the C# does: `Account.Balance.Holds final account (balance + amount)`.
@@ -109,6 +111,65 @@ structure ReferenceField where
   owner : CIL.Extraction.TypeExpr
   offset : Nat
   deriving DecidableEq, Repr
+
+/-- A value-array field: the slot at model offset `offset` of every instance of `owner` and of
+    the classes derived from it, holding null or the origin of a whole array of `element`. -/
+structure ArrayField (element : CIL.ArrayElement) where
+  owner : CIL.Extraction.TypeExpr
+  offset : Nat
+  deriving DecidableEq, Repr
+
+/-- `array` starts a whole live heap array of `length` elements of `element` whose view
+    validates, allocated before any later one: what a value-array field holds when not null. -/
+structure WholeArray (memory : Memory) (element : CIL.ArrayElement) (array : Reference)
+    (length : Nat) : Prop where
+  found : ∃ allocation, liveAllocation memory array.allocation = .ok allocation ∧
+    allocation.kind = .managedHeap ∧ allocation.layout.size = length * element.width
+  origin : array.offset = 0
+  old : array.allocation < memory.nextIdentity
+  valid : ArrayView.validate ⟨.address array, length, element⟩ memory = .ok ()
+
+/-- A whole array stays whole in memory that keeps its allocation's descriptor and has issued
+    its identity, whatever its elements then hold. -/
+theorem WholeArray.of_allocation {before after : Memory} {element : CIL.ArrayElement}
+    {array : Reference} {length : Nat} (whole : WholeArray before element array length)
+    (same : after.allocations array.allocation = before.allocations array.allocation)
+    (old : array.allocation < after.nextIdentity) : WholeArray after element array length := by
+  have live : liveAllocation after array.allocation = liveAllocation before array.allocation := by
+    simp only [liveAllocation, same]
+  refine ⟨by rw [live]; exact whole.found, whole.origin, old, ?_⟩
+  have valid := whole.valid
+  simp only [ArrayView.validate, ArrayView.storage, SpanView.validate] at valid ⊢
+  rw [live]
+  exact valid
+#print axioms WholeArray.of_allocation
+
+/-- A whole array stays whole across a confined call, which never replaces an allocation. -/
+theorem WholeArray.after_confined {footprint : List (Reference × Nat)} {before after : Memory}
+    {element : CIL.ArrayElement} {array : Reference} {length : Nat}
+    (whole : WholeArray before element array length) (framed : Confined footprint before after) :
+    WholeArray after element array length :=
+  whole.of_allocation (framed.allocations _ whole.old) (Nat.lt_of_lt_of_le whole.old framed.grows)
+#print axioms WholeArray.after_confined
+
+/-- A whole array stays whole in memory that keeps every allocation below a watermark above it
+    and has allocated up to the watermark. -/
+theorem WholeArray.after_below {watermark : Nat} {before after : Memory}
+    {element : CIL.ArrayElement} {array : Reference} {length : Nat}
+    (whole : WholeArray before element array length)
+    (preserved : MemoryBelow watermark before after) (old : array.allocation < watermark)
+    (grows : watermark ≤ after.nextIdentity) : WholeArray after element array length :=
+  whole.of_allocation (preserved.allocations _ old) (Nat.lt_of_lt_of_le old grows)
+#print axioms WholeArray.after_below
+
+/-- A whole array stays whole in memory that keeps its allocation and does not lower the next
+    identity. -/
+theorem WholeArray.after_kept {before after : Memory} {element : CIL.ArrayElement}
+    {array : Reference} {length : Nat} (whole : WholeArray before element array length)
+    (preserved : MemoryAt array.allocation before after)
+    (grows : before.nextIdentity ≤ after.nextIdentity) : WholeArray after element array length :=
+  whole.of_allocation preserved.allocations (Nat.lt_of_lt_of_le whole.old grows)
+#print axioms WholeArray.after_kept
 
 /-- Read authority over bytes wholly outside a call's footprint is what it was. -/
 theorem Confined.access_read {footprint : List (Reference × Nat)} {before after : Memory}
@@ -913,6 +974,357 @@ theorem fresh_holds_null {field : ReferenceField} (memory : Memory) (type : Runt
 #print axioms fresh_holds_null
 
 end ReferenceField
+
+namespace ArrayField
+
+variable {element : CIL.ArrayElement}
+
+/-- Where the field's slot lies in `object`. -/
+def address (field : ArrayField element) (object : Reference) : Reference :=
+  ⟨object.allocation, field.offset⟩
+
+/-- The footprint entry a call that may change the field names. -/
+def entry (field : ArrayField element) (object : Reference) : Reference × Nat :=
+  (field.address object, objectFieldSlot)
+
+/-- `op` loads or stores this field: a value-array field operation of its class, offset and
+    element. An extraction checks each field it names against an operation of its own code. -/
+def accessedBy (field : ArrayField element) : CIL.Op → Bool
+  | .memory (.arrayField owner offset held) | .memory (.setArrayField owner offset held) =>
+    owner == field.owner && offset == field.offset && held == element
+  | _ => false
+
+/-- The element of the arrays the field holds, so a statement can name it through the field. -/
+@[reducible] def elementType (_ : ArrayField element) : CIL.ArrayElement := element
+
+@[simp] theorem address_allocation (field : ArrayField element) (object : Reference) :
+    (field.address object).allocation = object.allocation := rfl
+
+@[simp] theorem address_offset (field : ArrayField element) (object : Reference) :
+    (field.address object).offset = field.offset := rfl
+
+/-- The reference the field's slot holds in `memory`: null or an array's origin. -/
+def of (field : ArrayField element) (memory : Memory) (object : Reference) : ManagedReference :=
+  memory.slots object.allocation field.offset
+
+/-- A load of the field reaches its slot: `object` is a live instance of the field's class, the
+    field is located inside it, and its slot is readable. -/
+structure Readable (field : ArrayField element) (memory : Memory) (object : Reference) :
+    Prop where
+  located : objectFieldAddress memory (.address object) field.owner field.offset =
+    .ok (field.address object)
+  old : object.allocation < memory.nextIdentity
+  readable : access memory (field.address object) objectFieldSlot 1 false = .ok ()
+
+/-- A load and a store of the field reach its slot: it is `Readable` and writable. -/
+structure Owned (field : ArrayField element) (memory : Memory) (object : Reference) : Prop
+    extends Readable field memory object where
+  writable : access memory (field.address object) objectFieldSlot 1 true = .ok ()
+
+/-- The field is `Owned` and its slot holds `value`. -/
+def Holds (field : ArrayField element) (memory : Memory) (object : Reference)
+    (value : ManagedReference) : Prop :=
+  field.Owned memory object ∧ field.of memory object = value
+
+/-- The field's object is live. -/
+theorem Readable.live {field : ArrayField element} {memory : Memory} {object : Reference}
+    (readable : field.Readable memory object) : LiveObject memory object :=
+  ⟨formObject_of_objectFieldAddress readable.located, readable.old⟩
+#print axioms Readable.live
+
+/-- A readable field loads the array its slot names. -/
+theorem Readable.load {field : ArrayField element} {memory : Memory} {object : Reference}
+    (readable : field.Readable memory object) :
+    loadArraySlot memory (field.address object) element =
+      arrayOfSlot memory (field.of memory object) element :=
+  loadArraySlot_of_access readable.readable
+#print axioms Readable.load
+
+/-- A readable field holding the origin of a whole array of `length` elements loads that array. -/
+theorem Readable.load_whole {field : ArrayField element} {memory : Memory}
+    {object array : Reference} {length : Nat} (readable : field.Readable memory object)
+    (held : field.of memory object = .address array)
+    (whole : WholeArray memory element array length)
+    (positive : 0 < element.width) :
+    loadArraySlot memory (field.address object) element =
+      .ok (.array ⟨.address array, length, element⟩) := by
+  obtain ⟨allocation, found, heap, size⟩ := whole.found
+  rw [readable.load, held]
+  exact arrayOfSlot_whole found heap whole.origin positive size whole.valid
+#print axioms Readable.load_whole
+
+/-- A readable field holding null loads the null array, whose view validates for any element
+    of a supported width (`rfl` for a concrete element). -/
+theorem Readable.load_null {field : ArrayField element} {memory : Memory} {object : Reference}
+    (readable : field.Readable memory object) (held : field.of memory object = .null)
+    (valid : ArrayView.validate ⟨.null, 0, element⟩ memory = .ok ()) :
+    loadArraySlot memory (field.address object) element = .ok (.array ⟨.null, 0, element⟩) := by
+  rw [readable.load, held]
+  simp only [arrayOfSlot, valid, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure,
+    Except.pure]
+#print axioms Readable.load_null
+
+/-- What a load of a readable field holding a whole array steps with, as one fact: the field's
+    object forms, the field is located in it, and the load pushes the array. -/
+theorem Readable.facts {field : ArrayField element} {memory : Memory} {object array : Reference}
+    {length : Nat} (readable : field.Readable memory object)
+    (held : field.of memory object = .address array)
+    (whole : WholeArray memory element array length)
+    (positive : 0 < element.width) :
+    formObject memory (.address object) = .ok (.object (.address object)) ∧
+      objectFieldAddress memory (.address object) field.owner field.offset =
+        .ok (field.address object) ∧
+      loadArraySlot memory (field.address object) element =
+        .ok (.array ⟨.address array, length, element⟩) :=
+  ⟨readable.live.formed, readable.located, readable.load_whole held whole positive⟩
+#print axioms Readable.facts
+
+/-- Storing a whole array of `length` elements into an owned field succeeds, confined to the
+    field, and leaves it owned and holding the array's origin. -/
+theorem Owned.store_whole {field : ArrayField element} {memory : Memory}
+    {object array : Reference} {length : Nat} (owned : field.Owned memory object)
+    (whole : WholeArray memory element array length) :
+    storeArraySlot memory (field.address object) ⟨.address array, length, element⟩ element =
+        .ok (setSlot memory (field.address object) (.address array)) ∧
+      Confined [field.entry object] memory
+        (setSlot memory (field.address object) (.address array)) ∧
+      field.Holds (setSlot memory (field.address object) (.address array)) object
+        (.address array) := by
+  obtain ⟨allocation, found, heap, size⟩ := whole.found
+  exact ⟨storeArraySlot_whole owned.writable found heap whole.origin size,
+    Confined.setSlot _ (List.mem_singleton_self _) (by decide),
+    ⟨{ located := by rw [objectFieldAddress_setSlot]; exact owned.located
+       old := owned.old
+       readable := owned.readable
+       writable := owned.writable }, setSlot_slots_same _ _ _⟩⟩
+#print axioms Owned.store_whole
+
+/-- Storing the null array into an owned field succeeds, confined to the field, and leaves it
+    owned and holding null. -/
+theorem Owned.store_null {field : ArrayField element} {memory : Memory} {object : Reference}
+    {length : Nat} (owned : field.Owned memory object) :
+    storeArraySlot memory (field.address object) ⟨.null, length, element⟩ element =
+        .ok (setSlot memory (field.address object) .null) ∧
+      Confined [field.entry object] memory (setSlot memory (field.address object) .null) ∧
+      field.Holds (setSlot memory (field.address object) .null) object .null := by
+  refine ⟨?_, Confined.setSlot _ (List.mem_singleton_self _) (by decide),
+    ⟨{ located := by rw [objectFieldAddress_setSlot]; exact owned.located
+       old := owned.old
+       readable := owned.readable
+       writable := owned.writable }, setSlot_slots_same _ _ _⟩⟩
+  have writable := owned.writable
+  simp only [storeArraySlot, arraySlotValue, ordinaryAccessAlignment, writable, checkedAt,
+    Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+#print axioms Owned.store_null
+
+/-- A readable field keeps its slot, its authority and what it holds across a call confined to a
+    footprint apart from it. -/
+theorem Readable.frame {footprint : List (Reference × Nat)} {field : ArrayField element}
+    {before after : Memory} {object : Reference} (readable : field.Readable before object)
+    (framed : Confined footprint before after)
+    (apart : ∀ entry ∈ footprint, Apart (field.address object) objectFieldSlot entry) :
+    field.Readable after object ∧ field.of after object = field.of before object := by
+  have outside := Outside.of_apart apart
+  refine ⟨⟨?_, Nat.lt_of_lt_of_le readable.old framed.grows, ?_⟩, ?_⟩
+  · rw [objectFieldAddress_of_allocation (reference := object)
+      (framed.allocations _ readable.old)]
+    exact readable.located
+  · rw [← readable.readable]
+    exact framed.access_read (field.address object) readable.old _ _ outside
+  · exact framed.slots _ readable.old _ (by simpa using outside 0 (by decide))
+#print axioms Readable.frame
+
+/-- An owned field stays owned, holding what it held, across a call confined to a footprint
+    apart from it. -/
+theorem Owned.frame {footprint : List (Reference × Nat)} {field : ArrayField element}
+    {before after : Memory} {object : Reference} (owned : field.Owned before object)
+    (framed : Confined footprint before after)
+    (apart : ∀ entry ∈ footprint, Apart (field.address object) objectFieldSlot entry) :
+    field.Holds after object (field.of before object) :=
+  have kept := owned.toReadable.frame framed apart
+  ⟨{ kept.1 with
+      writable := (framed.access_write (field.address object) owned.old _ _).trans
+        owned.writable }, kept.2⟩
+#print axioms Owned.frame
+
+/-- An owned field holds what its slot holds. -/
+theorem Owned.holds {field : ArrayField element} {memory : Memory} {object : Reference}
+    (owned : field.Owned memory object) : field.Holds memory object (field.of memory object) :=
+  ⟨owned, rfl⟩
+#print axioms Owned.holds
+
+/-- A readable field stays readable across a call confined to a footprint apart from it. -/
+theorem Readable.after_confined {footprint : List (Reference × Nat)} {field : ArrayField element}
+    {before after : Memory} {object : Reference} (readable : field.Readable before object)
+    (framed : Confined footprint before after)
+    (apart : ∀ entry ∈ footprint, Apart (field.address object) objectFieldSlot entry) :
+    field.Readable after object :=
+  (readable.frame framed apart).1
+#print axioms Readable.after_confined
+
+/-- An owned field stays owned across a call confined to a footprint apart from it. -/
+theorem Owned.after_confined {footprint : List (Reference × Nat)} {field : ArrayField element}
+    {before after : Memory} {object : Reference} (owned : field.Owned before object)
+    (framed : Confined footprint before after)
+    (apart : ∀ entry ∈ footprint, Apart (field.address object) objectFieldSlot entry) :
+    field.Owned after object :=
+  (owned.frame framed apart).1
+#print axioms Owned.after_confined
+
+/-- A field holding `value` holds it across a call confined to a footprint apart from it. -/
+theorem Holds.after_confined {footprint : List (Reference × Nat)} {field : ArrayField element}
+    {before after : Memory} {object : Reference} {value : ManagedReference}
+    (held : field.Holds before object value) (framed : Confined footprint before after)
+    (apart : ∀ entry ∈ footprint, Apart (field.address object) objectFieldSlot entry) :
+    field.Holds after object value :=
+  held.2 ▸ held.1.frame framed apart
+#print axioms Holds.after_confined
+
+/-- After a call confined to this field of `written` that leaves it holding `value`, the same
+    field of `object` holds `value` when the two are the same object, and what it held before
+    the call when they are different objects. -/
+theorem Owned.across {field : ArrayField element} {before after : Memory}
+    {object written : Reference} {value : ManagedReference}
+    (owned : field.Owned before object) (writtenLive : LiveObject before written)
+    (framed : Confined [field.entry written] before after)
+    (held : field.Holds after written value) :
+    field.Holds after object (if written = object then value else field.of before object) := by
+  by_cases same : written = object
+  · subst same
+    simpa using held
+  · simp only [same, ite_false]
+    refine owned.frame framed fun entry member => ?_
+    simp only [List.mem_singleton] at member
+    subst member
+    exact Or.inl fun equal =>
+      writtenLive.allocation_ne owned.toReadable.live same equal.symm
+#print axioms Owned.across
+
+/-- After a call confined to this field of `written` that leaves it holding `value`, the same
+    field of a readable `object` is readable and holds `value` when the two are the same object,
+    and what it held before the call when they are different objects. -/
+theorem Readable.across {field : ArrayField element} {before after : Memory}
+    {object written : Reference} {value : ManagedReference}
+    (readable : field.Readable before object) (writtenLive : LiveObject before written)
+    (framed : Confined [field.entry written] before after)
+    (held : field.Holds after written value) :
+    field.Readable after object ∧
+      field.of after object = if written = object then value else field.of before object := by
+  by_cases same : written = object
+  · subst same
+    simpa using ⟨held.1.toReadable, held.2⟩
+  · simp only [same, ite_false]
+    refine readable.frame framed fun entry member => ?_
+    simp only [List.mem_singleton] at member
+    subst member
+    exact Or.inl fun equal => writtenLive.allocation_ne readable.live same equal.symm
+#print axioms Readable.across
+
+/-- A readable field keeps its slot and what it holds in memory that keeps every allocation
+    below a watermark above it and has allocated up to the watermark. -/
+theorem Readable.below {watermark : Nat} {field : ArrayField element} {before after : Memory}
+    {object : Reference} (readable : field.Readable before object)
+    (preserved : MemoryBelow watermark before after) (old : object.allocation < watermark)
+    (grows : watermark ≤ after.nextIdentity) :
+    field.Readable after object ∧ field.of after object = field.of before object := by
+  refine ⟨⟨?_, Nat.lt_of_lt_of_le old grows,
+    (preserved.access (field.address object) old _ 1 false).trans readable.readable⟩,
+    preserved.slots _ old _⟩
+  rw [objectFieldAddress_of_allocation (reference := object) (preserved.allocations _ old)]
+  exact readable.located
+#print axioms Readable.below
+
+/-- A readable field stays readable in memory that keeps every allocation below a watermark
+    above it and has allocated up to the watermark. -/
+theorem Readable.after_below {watermark : Nat} {field : ArrayField element}
+    {before after : Memory} {object : Reference} (readable : field.Readable before object)
+    (preserved : MemoryBelow watermark before after) (old : object.allocation < watermark)
+    (grows : watermark ≤ after.nextIdentity) : field.Readable after object :=
+  (readable.below preserved old grows).1
+#print axioms Readable.after_below
+
+/-- An owned field stays owned in memory that keeps every allocation below a watermark above it
+    and has allocated up to the watermark. -/
+theorem Owned.after_below {watermark : Nat} {field : ArrayField element} {before after : Memory}
+    {object : Reference} (owned : field.Owned before object)
+    (preserved : MemoryBelow watermark before after) (old : object.allocation < watermark)
+    (grows : watermark ≤ after.nextIdentity) : field.Owned after object :=
+  { owned.toReadable.after_below preserved old grows with
+    writable := (preserved.access (field.address object) old _ 1 true).trans owned.writable }
+#print axioms Owned.after_below
+
+/-- A field holding `value` holds it in memory that keeps every allocation below a watermark
+    above it and has allocated up to the watermark. -/
+theorem Holds.after_below {watermark : Nat} {field : ArrayField element} {before after : Memory}
+    {object : Reference} {value : ManagedReference} (held : field.Holds before object value)
+    (preserved : MemoryBelow watermark before after) (old : object.allocation < watermark)
+    (grows : watermark ≤ after.nextIdentity) : field.Holds after object value :=
+  ⟨held.1.after_below preserved old grows,
+    (held.1.toReadable.below preserved old grows).2.trans held.2⟩
+#print axioms Holds.after_below
+
+/-- A readable field keeps its slot and what it holds in memory that keeps its object's
+    allocation and does not lower the next identity. -/
+theorem Readable.kept {field : ArrayField element} {before after : Memory} {object : Reference}
+    (readable : field.Readable before object) (preserved : MemoryAt object.allocation before after)
+    (grows : before.nextIdentity ≤ after.nextIdentity) :
+    field.Readable after object ∧ field.of after object = field.of before object := by
+  refine ⟨⟨?_, Nat.lt_of_lt_of_le readable.old grows,
+    (MemoryAt.access (r := field.address object) preserved _ 1 false).trans readable.readable⟩,
+    preserved.slots _⟩
+  rw [objectFieldAddress_of_allocation (reference := object) preserved.allocations]
+  exact readable.located
+#print axioms Readable.kept
+
+/-- An owned field stays owned in memory that keeps its object's allocation. -/
+theorem Owned.after_kept {field : ArrayField element} {before after : Memory}
+    {object : Reference} (owned : field.Owned before object)
+    (preserved : MemoryAt object.allocation before after)
+    (grows : before.nextIdentity ≤ after.nextIdentity) : field.Owned after object :=
+  { (owned.toReadable.kept preserved grows).1 with
+    writable := (MemoryAt.access (r := field.address object) preserved _ 1 true).trans
+      owned.writable }
+#print axioms Owned.after_kept
+
+/-- A field holding `value` holds it in memory that keeps its object's allocation. -/
+theorem Holds.after_kept {field : ArrayField element} {before after : Memory}
+    {object : Reference} {value : ManagedReference} (held : field.Holds before object value)
+    (preserved : MemoryAt object.allocation before after)
+    (grows : before.nextIdentity ≤ after.nextIdentity) : field.Holds after object value :=
+  ⟨held.1.after_kept preserved grows, (held.1.toReadable.kept preserved grows).2.trans held.2⟩
+#print axioms Holds.after_kept
+
+/-- A field holding a caller array holds it in memory whose bytes, authority and caller
+    references agree below a watermark above the object and the array, and that has allocated
+    up to it: the memory an execution allocating different private storage leaves. -/
+theorem Holds.of_agree {watermark : Nat} {field : ArrayField element} {source target : Memory}
+    {object held : Reference} (holds : field.Holds source object (.address held))
+    (bytes : BytesBelow watermark source target) (agree : SlotsAgreeBelow watermark source target)
+    (old : object.allocation < watermark) (heldOld : held.allocation < watermark)
+    (grows : watermark ≤ target.nextIdentity) : field.Holds target object (.address held) := by
+  refine ⟨⟨⟨?_, Nat.lt_of_lt_of_le old grows,
+      (bytes.access (field.address object) old _ _ _).trans holds.1.readable⟩,
+      (bytes.access (field.address object) old _ _ _).trans holds.1.writable⟩,
+    agree.held old holds.2 heldOld⟩
+  rw [objectFieldAddress_of_allocation (reference := object) (bytes.allocations _ old)]
+  exact holds.1.located
+#print axioms Holds.of_agree
+
+/-- A value-array field of a fresh instance, declared by its class or one of its bases and
+    inside its size, is owned and holds null, as `newobj` zeroes every field. -/
+theorem fresh_holds_null {field : ArrayField element} (memory : Memory) (type : RuntimeType)
+    {size : Nat} (declared : field.owner ∈ type.lineage) (bounded : size < nativeLimit)
+    (fits : field.offset + objectFieldSlot ≤ size) :
+    field.Holds (objectMemory memory type size) ⟨memory.nextIdentity, 0⟩ .null :=
+  ⟨{ located := objectMemory_field memory type declared bounded
+        (by simp only [objectFieldSlot] at fits; omega)
+     old := by simp [objectMemory]
+     readable := objectMemory_access memory type bounded fits (by decide) false
+     writable := objectMemory_access memory type bounded fits (by decide) true },
+    by simp [ArrayField.of, objectMemory]⟩
+#print axioms fresh_holds_null
+
+end ArrayField
 
 /-- Fields at disjoint byte ranges are apart, whichever objects hold them. -/
 theorem apart_of_offsets {address : Reference} {width : Nat} {entry : Reference × Nat}

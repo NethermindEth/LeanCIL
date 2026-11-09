@@ -1,5 +1,6 @@
 import CIL.Safety.LoopFrames
 import CIL.Safety.SpanContents
+import CIL.Safety.ArrayViewLemmas
 
 /-!
 # Caller facts in loop frames
@@ -9,7 +10,8 @@ every allocation the caller made (`LoopFrame.confined`). A fact about caller sto
 only allocations therefore holds in every frame memory: a formed reference
 (`LoopFrame.caller_form`), an `Unsafe.Add` result (`LoopFrame.caller_add`), a span's validity,
 element and slice (`LoopFrame.caller_valid`, `LoopFrame.caller_element`,
-`LoopFrame.caller_slice`) and a checked span's own checks (`CheckedSpan.valid_within`). A span's
+`LoopFrame.caller_slice`), an array's validity (`LoopFrame.caller_array_valid`) and a checked
+span's own checks (`CheckedSpan.valid_within`). A span's
 contents also hold there when the span lies apart from the footprint (`SpanApart`,
 `CheckedSpan.within`). The loop tactics of `CIL.Safety.LoopFrameSteps` derive these facts at the
 memories they name themselves, so a proof states them once, at the caller's memory.
@@ -113,6 +115,12 @@ theorem LoopFrame.view_congr (frame : LoopFrame footprint caller current kinds s
 /-- A view valid in the caller's memory is valid in frame memory. -/
 theorem LoopFrame.caller_valid (frame : LoopFrame footprint caller current kinds slots known)
     (wellFormed : caller.WellFormed) {view : SpanView} (valid : view.validate caller = .ok ()) :
+    view.validate current = .ok () :=
+  view.validate_preserved valid wellFormed frame.extension
+
+/-- An array valid in the caller's memory is valid in frame memory. -/
+theorem LoopFrame.caller_array_valid (frame : LoopFrame footprint caller current kinds slots known)
+    (wellFormed : caller.WellFormed) {view : ArrayView} (valid : view.validate caller = .ok ()) :
     view.validate current = .ok () :=
   view.validate_preserved valid wellFormed frame.extension
 
@@ -234,6 +242,7 @@ theorem Writable.add_int {memory : Memory} {base : Reference} {width start count
 #print axioms LoopFrame.caller_add
 #print axioms LoopFrame.view_congr
 #print axioms LoopFrame.caller_valid
+#print axioms LoopFrame.caller_array_valid
 #print axioms LoopFrame.caller_element
 #print axioms LoopFrame.caller_slice
 #print axioms CheckedSpan.valid_within

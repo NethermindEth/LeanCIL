@@ -108,10 +108,11 @@ SIMD intrinsics.
 
 It also supports classes deriving from `System.Object` through admitted classes, created on a
 budgeted heap, with scalar fields, reference fields holding class instances, and fields holding
-arrays of class references or arrays of integers, Booleans, chars or enums. A `callvirt` of a
-virtual method dispatches over the extracted classes on the receiver's runtime type, and
-`castclass` and `isinst` decide an admitted class from the instance's lineage. One-dimensional
-arrays of class references are allocated, loaded and stored with the runtime's covariance check.
+arrays of class references or single-dimensional arrays of integers, Booleans, chars, enums,
+reference-free structs or integer vectors. A `callvirt` of a virtual method dispatches over the
+extracted classes on the receiver's runtime type, and `castclass` and `isinst` decide an admitted
+class from the instance's lineage. One-dimensional arrays of class references are allocated,
+loaded and stored with the runtime's covariance check.
 Strings, including interned literals, and classes outside the model are opaque references that
 are passed, stored, compared and tested against null but never read. Framework argument guards
 such as `ArgumentNullException.ThrowIfNull` are checked as runtime contracts.

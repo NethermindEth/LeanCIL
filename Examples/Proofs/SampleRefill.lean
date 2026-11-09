@@ -6,40 +6,37 @@ import CIL.Safety.ObjectFields
 /-!
 # Replacing an integer array held in a class field
 
-`SampleArrays.Refill(samples, values)` stores the `int[]` `values` into `samples.Values`. The
-field's slot keeps the array's origin. Proved: for a whole live heap array, the store changes
-that slot alone, to the array's origin, and a null receiver throws `NullReferenceException` at
-the `stfld`.
+`SampleArrays.Refill(samples, values)` stores the `int[]` `values` into `samples.Values`, which
+the extraction names `Samples.Values`. Proved: its contract, for a whole live heap array, with
+the field's slot as its whole footprint and the array's origin as what the field then holds;
+and the `NullReferenceException` of a null receiver at the `stfld`.
 -/
 
 open CIL.Safety
+open Extracted.Classes
 namespace ExampleProof
-
-/-- The class identity of `Examples.Samples`. -/
-@[reducible] def samplesType : CIL.Extraction.TypeExpr :=
-  .object "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" "Examples.Samples"
 
 bind_method refill refillBody :=
   "System.Void Examples.SampleArrays::Refill(Examples.Samples,System.Int32[])"
 
-/-- Storing a whole array of `length` integers changes only the field's slot, which then holds
-    the array's origin. -/
-theorem correctness (memory : Memory) (samples field values : Reference)
-    (allocation : Allocation) (length : Nat)
-    (formed : formObject memory (.address samples) = .ok (.object (.address samples)))
-    (located : objectFieldAddress memory (.address samples) samplesType 0 = .ok field)
-    (writable : access memory field CIL.objectFieldSlot ordinaryAccessAlignment true = .ok ())
-    (found : liveAllocation memory values.allocation = .ok allocation)
-    (heap : allocation.kind = .managedHeap) (origin : values.offset = 0)
-    (whole : allocation.layout.size = length * 4)
-    (valid : ArrayView.validate ⟨.address values, length, .signed32⟩ memory = .ok ()) :
-    ∃ fuel, invoke Extracted.program fuel refill
-        [.object (.address samples), .array ⟨.address values, length, .signed32⟩] memory =
-      .ok (setSlot memory field (.address values), []) := by
-  have stored := storeArraySlot_whole (length := length) (element := .signed32) writable found
-    heap origin whole
-  refine ⟨CIL.executionBound Extracted.program refill, ?_⟩
-  cil_checked_steps [formed, located, stored, valid]
+/-- `Refill(samples, values)` leaves `samples.Values` holding the origin of the whole array of
+    `length` integers it is given, and changes nothing else. -/
+def refillContract : MethodContract (Reference × Reference × Nat) where
+  args := fun (samples, values, length) =>
+    [.object (.address samples), .array ⟨.address values, length, .signed32⟩]
+  pre := fun (samples, values, length) memory => Samples.Values.Owned memory samples ∧
+    WholeArray memory .signed32 values length
+  footprint := fun (samples, _, _) => [Samples.Values.entry samples]
+  post := fun (samples, values, _) _ final results => results = [] ∧
+    Samples.Values.Holds final samples (.address values)
+
+/-- `Refill` meets its contract: one `stfld` of the field's slot. -/
+theorem correctness : refillContract.Holds Extracted.program refill := by
+  rintro ⟨samples, values, length⟩ memory ⟨owned, whole⟩
+  dsimp only [refillContract] at *
+  obtain ⟨stored, framed, held⟩ := owned.store_whole whole
+  refine ⟨CIL.executionBound Extracted.program refill, _, [], ?_, framed, [], rfl, rfl, held⟩
+  cil_checked_steps [owned.live.formed, owned.located, stored, whole.valid]
 
 #print axioms correctness
 

@@ -26,6 +26,26 @@ the memory of a `LoopFrame` confined to no caller storage, and `span.tail_below`
 keeping the suffix checked in caller memory. The loop tactics take these facts from a `CheckedSpan`
 in context.
 
+A loop that writes a span from the front needs authority over its elements, not their contents.
+[`SpanWritable`](../CIL/Safety/SpanWrites.lean) `memory footprint view` is write access to every
+element of `view` with its bytes inside an entry of `footprint`; `SpanWritable.own` builds it over
+`view.footprint` from a `Writable` run, `SpanWritable.slice` keeps it for any slice and
+`SpanWritable.within` carries it into every `LoopFrame` memory.
+[`WritableSpan`](../CIL/Safety/SpanWrites.lean) `memory footprint view width count` adds the
+view's validity, mode, width and length, and `WritableSuffix` is a loop state over it.
+`span.length_nil` and `span.length_cons` decide the `Length != 0` guard, `span.tail` gives
+`Slice(1)`, and `frame.write_span_head wellFormed span x` stores `x` into the first element in the
+frame's memory, returning the element's address `view.reference = .address item`, the write and
+the frame after it. The loop tactics take the guard and validity facts from a `WritableSpan` in
+context. An invariant states the written prefix from the span's original base as
+`Filled state.memory base width (List.replicate done x) state.values.remaining` and extends it
+with `Filled.push`. A loop that passes the span to a callee lends it: `span.lend wellFormed frame`
+is a `WritableSpan` in the frame's memory over the view's own bytes, a callee's precondition,
+and `span.covered` and `span.below wellFormed` place those bytes in the frame's footprint and
+below the caller's watermark, which `cil_loop_call` takes for the frame after the call.
+`span.write_head x` is the store a callee writing `target[0]` makes, confined to the view's
+bytes; after the call the invariant moves the prefix with `Filled.after_confined` and extends it
+with `Filled.extend`.
 Callee frames allocate locals above the caller's memory. For well-formed caller memory,
 `SpanView.validate_below`, `SpanView.slice_below` and `SpanContents.after_below` transport validity,
 successful slices and contents to any memory related by `MemoryBelow memory.nextIdentity`, such as
@@ -56,6 +76,36 @@ across each store with `frame.store` and each slice with `set_local`; see [loop 
 conditions](PROOFS-STEPPING.md#loop-verification-conditions). Both measure the remaining length,
 prove the loop inside the public theorem through `invoke_loop_returns` or `invoke_loop_results`, and
 cover null empty spans.
+
+## Read a supplied array
+
+An array argument `.array values` is an `ArrayView` whose bytes are the span `values.storage`, so
+its elements are stated as `SpanContents memory values.storage width elements`, beside
+`values.validate memory = .ok ()` and its `elementType`. A null array has no elements, so an
+index below `elements.length` is in bounds of a non-null array.
+[`SpanContents.array_load`](../CIL/Safety/ArrayContents.lean), applied as
+contents.array_load valid scalar bound, gives the element's address
+`arrayElement memory values index width = .ok item` and its load, the element's value.
+`step_arrayLoad_of_element` steps `ldelem` from those two facts and `step_arrayAddress_of_element`
+steps `ldelema` from the address; `arrayElement_formed` forms that address, so a helper may return
+it. An index outside the array throws, which a precondition bounding the index rules out.
+
+A loop indexing the array reads it the way a span loop does, through the storage span: the caller's
+`CheckedSpan initial values.storage width true elements` carries into each iteration's frame by
+`CheckedSpan.within`, and `array_load` of its contents names the element. A loop storing into the
+array holds `SpanWritable` authority over `values.storage` instead; with the array addressed at
+`base`, `arrayElement_of_access` turns write authority over `base.element width index` and the
+bound into the element `arrayElement` returns, and `step_arrayStore_of_write` steps `stelem` to the
+written memory. The bound test compares the index with `values.Length` as signed words;
+`SpanView.length_bounded` of the storage span keeps the length below `2 ^ 31`, and
+`toInt_ofNat_of_lt`, which `cil_loop_obligation` applies, reads that comparison as unsigned.
+
+Converting the whole array to a span, as `ReadOnlySpan<T> rest = values` does, pushes
+`values.span writable`, the storage extent under the conversion's access mode;
+`step_arraySpan_whole` steps it from the array's validity and element type, and a null array
+converts to an empty span. `CheckedSpan.of_array` checks that span to hold the storage span's
+elements, and `WritableSpan.of_array` gives a writable one the storage span's authority, so a loop
+slicing the span is proved as one slicing a span argument.
 
 ## Describe buffer contents
 
@@ -189,7 +239,8 @@ byte home is a skipped `WritableHomes` slot and a `none` value, and so the lemma
 pairs the loop's values with a memory and its `LoopFrame`, with the slots and remembered values as
 functions of the loop's values, so an invariant over a `FrameState` states only the property.
 `bind_entry ... allocating` proves the frame of the entered locals and parameter homes for any
-footprint, with each home remembered as its initializer and every other local as `none`.
+footprint, with each home remembered as its initializer and every other local as `none`; a
+default span or object local holds the null span or null and allocates nothing.
 `LoopFrame.ofEntry`, `WritableHomes.entry` and `skip`, and `LocalSnapshots.entry` and `skip` are
 the lemmas it composes. `set_local` keeps the frame when a local without a byte home is assigned,
 as the span fold slices its span and a list walk moves its object local to the next node; it
