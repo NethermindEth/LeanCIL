@@ -99,7 +99,8 @@ foreach (var methodName in new[] { "Drain", "Clear" })
         var dll = Path.Combine(output, "Examples.dll");
         using (var module = ModuleDefinition.ReadModule(assembly))
         {
-            var method = module.GetType("Examples.OutlineCountdown").Methods.Single(method => method.Name == methodName);
+            var method = module.GetType("Examples.OutlineCountdown").Methods
+                .Single(method => method.Name == methodName);
             var operation = method.Body.Instructions.Single(instruction => instruction.OpCode.Code ==
                 (mutation == "wrong-count" ? Code.Add : Code.Sub));
             operation.OpCode = mutation == "wrong-count" ? OpCodes.Sub : OpCodes.Add;
@@ -112,7 +113,8 @@ foreach (var methodName in new[] { "Drain", "Clear" })
             throw new InvalidOperationException("Receiver-loop mutation was not rejected during proof checking:\n" +
                 rejected.Output);
     }
-    Console.WriteLine("PASS receiver loop termination, accumulated count, field contents, frame and mutation rejection");
+    Console.WriteLine("PASS receiver loop termination, accumulated count, field contents, frame " +
+        "and mutation rejection");
 }
 
 var doWhileRoot = At("artifacts/ReceiverLoopOutlines/DoWhile");
