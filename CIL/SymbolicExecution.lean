@@ -1,4 +1,5 @@
 import Lean
+import CIL.CodeSuffix
 import CIL.ExecutionLemmas
 
 /-! Shared extraction simp sets, bounded execution estimates and checked summary elaboration. -/

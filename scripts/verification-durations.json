@@ -1,5 +1,5 @@
 {
-  "source": "Latest successful verification timings from run 42657450791; standalone suites use verification-step duration excluding job setup; grouped suites use individual runner duration including startup. Unselected suites retain measurements from runs 40746599661, 40734844413 and 41600928344, with docs and pool estimates from local runs.",
+  "source": "Latest successful verification timings from run 42657450791; standalone suites use verification-step duration excluding job setup; grouped suites use individual runner duration including startup. Unselected suites retain measurements from runs 40746599661, 40734844413 and 41600928344, with docs, lookups and pool estimates from local runs.",
   "seconds": {
     "assemblies": 303.0,
     "arguments": 87.0,
@@ -57,6 +57,7 @@
     "intrinsics": 168.0,
     "labels": 21.0,
     "layout": 82.0,
+    "lookups": 150.0,
     "loops": 370.0,
     "math": 169.0,
     "names": 51.0,

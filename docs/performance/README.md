@@ -15,6 +15,7 @@ Local gains are not automatically whole-job CI gains; inclusive stage times can 
 | Current-file declaration lookup | [Import declarations](ImportDeclarations.md) |
 | Feature-flow mutation checks | [Evidence harness reuse](EvidenceHarnessReuse.md) |
 | Long excluded-branch certificates | [Excluded-branch scaling](ExcludedBranchScaling.md) |
+| Instruction lookup equations of long methods | [Instruction lookups](InstructionLookups.md) |
 | Generic constraint certificates | [Generic evidence](GenericEvidence.md) |
 | Typed runtime-case deduplication | [Runtime bits](RuntimeBits.md) |
 | Embedding, scalar and span proof work | [Proof work](ProofWork.md) |

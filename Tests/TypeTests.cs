@@ -24,7 +24,7 @@ RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.
     "Tests.TypeTestEvidence");
 
 string[] Ops(string source, int method) => Regex.Matches(source,
-    $@"(?m)^@\[cil_code ↓\] theorem method{method}_instruction\d+ : method{method}\.code\[\d+\]\? = some \((.*) : Op\) := rfl\r?$")
+    $@"(?m)^@\[cil_code ↓\] theorem method{method}_instruction\d+ : method{method}\.code\[\d+\]\? = some \((.*) : Op\) := [^\r\n]*$")
     .Select(match => match.Groups[1].Value).ToArray();
 
 // A fold is exactly four emitted no-ops followed by the decided word.

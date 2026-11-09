@@ -49,7 +49,7 @@ foreach (var (name, selector, inputs) in new (string, string, int[][])[]
     var folder = Path.Combine(root, name);
     Run(Extract("extract", assembly, "Examples", selector, folder));
     var source = File.ReadAllText(Path.Combine(folder, "Extracted.lean"));
-    var site = Regex.Match(source, @"(?m)^@\[cil_code ↓\] theorem method(\d+)_instruction(\d+) : method\d+\.code\[\d+\]\? = some \(\.memory \(\.spanItem \d\) : Op\) := rfl\r?$");
+    var site = Regex.Match(source, @"(?m)^@\[cil_code ↓\] theorem method(\d+)_instruction(\d+) : method\d+\.code\[\d+\]\? = some \(\.memory \(\.spanItem \d\) : Op\) := [^\r\n]*$");
     var claims = inputs.Select(input =>
     {
         try { return Claim(assembly, name, input, $".ok [{Scalar(runtime.GetMethod(name)!.Invoke(null, [.. input.Cast<object>()])!)}]"); }

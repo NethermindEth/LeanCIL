@@ -140,6 +140,47 @@ internal static class LeanEmitter
             new[] { $"method{target}Closed", $"method{target}TypeArgumentsRaw" }));
     }
 
+    /// <summary>The recursion depth every generated declaration fits in, whatever the method length.</summary>
+    const int BaseRecursionDepth = 4096;
+
+    /// <summary>Recursion depth Lean needs per instruction to compile and compare a method's code lists.</summary>
+    const int RecursionDepthPerInstruction = 16;
+
+    // Lean compares and compiles a code list one nested cell per instruction, so the depth follows the longest body.
+    static int RecursionDepth(MethodDefinition[] methods) => Math.Max(BaseRecursionDepth,
+        RecursionDepthPerInstruction * methods.Max(method => method.Body.Instructions.Count));
+
+    /// <summary>Instructions per named code suffix; no instruction equation walks more cells than this.</summary>
+    const int SuffixBlock = 16;
+
+    /// <summary>
+    /// Emits <c>method{n}_instruction{pc}</c>, the lookup equation of each instruction. Each is proved from the
+    /// named suffix that starts its block, and each suffix from the one before, so the proofs of one method
+    /// cost time linear in its length; <c>rfl</c> against the whole list would walk <c>pc</c> cells each.
+    /// </summary>
+    static void EmitInstructionEquations(StringBuilder lean, int n, IReadOnlyList<string> ops)
+    {
+        if (ops.Count == 0) return;
+        // Each suffix is its block followed by the next suffix, so the last one is defined first.
+        for (var start = (ops.Count - 1) / SuffixBlock * SuffixBlock; start >= 0; start -= SuffixBlock)
+        {
+            var end = Math.Min(start + SuffixBlock, ops.Count);
+            var block = string.Concat(ops.Skip(start).Take(end - start).Select(op => $"({op} : Op) :: "));
+            var rest = end < ops.Count ? $"method{n}_suffix{end}" : "[]";
+            // Proofs alone read the suffixes, so they need no compiled code.
+            lean.AppendLine($"noncomputable def method{n}_suffix{start} : List Op := {block}{rest}");
+        }
+        lean.AppendLine($"theorem method{n}_suffix0_placed : method{n}.code.drop 0 = method{n}_suffix0 := rfl");
+        for (var start = SuffixBlock; start < ops.Count; start += SuffixBlock)
+            lean.AppendLine($"theorem method{n}_suffix{start}_placed : " +
+                $"method{n}.code.drop {start} = method{n}_suffix{start} := " +
+                $"CodeSuffix.advance {SuffixBlock} method{n}_suffix{start - SuffixBlock}_placed rfl");
+        for (var pc = 0; pc < ops.Count; pc++)
+            lean.AppendLine($"@[cil_code ↓] theorem method{n}_instruction{pc} : " +
+                $"method{n}.code[{pc}]? = some ({ops[pc]} : Op) := " +
+                $"CodeSuffix.lookup {pc % SuffixBlock} method{n}_suffix{pc - pc % SuffixBlock}_placed rfl");
+    }
+
     internal static Emission Emit(MethodDefinition[] methods, FeatureProfile profile, PinnedAssemblies pinned,
         ImportResolution? importResolution = null,
         StaticIdentityRecord[]? staticIdentities = null, bool collectTemplates = false)
@@ -149,7 +190,18 @@ internal static class LeanEmitter
         var constrainedTargets = new ConstrainedCalls.TargetIndex(methods);
         var templates = new List<TemplateEmitter.Method>();
         var callDefinitions = new string?[methods.Length];
-        StringBuilder lean = new("import CIL.Extraction.Translation\nimport CIL.SymbolicExecution\nimport CIL.Safety.Execution\n\nnamespace Extracted\nopen CIL\n\nset_option maxRecDepth 4096\n\n");
+        StringBuilder lean = new($"""
+            import CIL.Extraction.Translation
+            import CIL.SymbolicExecution
+            import CIL.Safety.Execution
+
+            namespace Extracted
+            open CIL
+
+            set_option maxRecDepth {RecursionDepth(methods)}
+
+
+            """.ReplaceLineEndings("\n"));
         lean.AppendLine($"@[cil_code] def profile : FeatureProfile := {profile.Lean}");
         lean.AppendLine("theorem profile_valid : profile.Valid := " + Decide);
         StaticIdentity.Validate(staticIdentities ?? StaticIdentities(methods, profile));
@@ -260,8 +312,7 @@ internal static class LeanEmitter
             lean.AppendLine($"@[cil_code] theorem method{n}_opaqueVectorLocals : method{n}.opaqueVectorLocals = [{opaqueLocals}] := rfl");
             ScalarEvidence.Emit(lean, m, n, scalarCertificate);
             lean.AppendLine($"@[cil_code] theorem method{n}_parameterHomes : method{n}.parameterHomes = [{parameters}] := rfl");
-            for (int pc = 0; pc < ops.Count; pc++)
-                lean.AppendLine($"@[cil_code ↓] theorem method{n}_instruction{pc} : method{n}.code[{pc}]? = some ({ops[pc]} : Op) := rfl");
+            EmitInstructionEquations(lean, n, ops);
             foreach (string field in new[] { "profile", "locals", "localKinds", "returnsValue", "staticSites", "vectorLocals", "vectorArgs" })
                 lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({(field == "profile" ? "profile" : field == "locals" ? $"[{locals}]" : field == "localKinds" ? $"[{kinds}]" : field == "returnsValue" ? (ReturnsValue(m) ? "true" : "false") : field == "staticSites" ? $"[{sites}]" : "[]")}) := rfl");
         }
