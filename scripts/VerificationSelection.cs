@@ -62,11 +62,9 @@ internal static class VerificationSelection
     internal static Dictionary<string, HashSet<string>> SuiteInputs(string? root = null)
     {
         root ??= Root;
-        var runner = File.ReadAllText(Path.Combine(root, "scripts/Test.cs"));
         var inputs = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
-        foreach (Match match in Regex.Matches(runner, @"\[""([a-z]+)""\] = \(""(Tests/[^""\n]+\.cs)"""))
-            inputs[match.Groups[1].Value] = new(StringComparer.Ordinal) { match.Groups[2].Value };
-        if (!inputs.ContainsKey("unsafe")) throw new InvalidDataException("Could not read verification suite registry");
+        foreach (IndependentSuite suite in VerificationSuites.Independent)
+            inputs.Add(suite.Name, new(StringComparer.Ordinal) { suite.Script });
         foreach (ExportSuite entry in ExportVerificationSuites.Plan())
         {
             if (!File.Exists(Path.Combine(root, entry.Script)))

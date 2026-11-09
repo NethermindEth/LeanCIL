@@ -131,6 +131,17 @@ try
         $"```lean excerpt Examples/Proofs/Sample.lean\n{WideSource}\n```", "characters; wrap it within 100");
     Passes("an excerpt of a wrapped source line",
         $"```lean excerpt Examples/Proofs/Sample.lean\n{WrappedSource}\n```");
+
+    // A suite the runner gained without a row would be invisible to anyone choosing what to run.
+    const string Table = "## Suites\n\n| Suite | Checks |\n| --- | --- |\n";
+    SuitesPass("a suite table listing every suite", Table + "| `core` | runner checks |\n| `loops` | loops |");
+    SuitesFail("a suite table missing a suite", Table + "| `core` | runner checks |", "suite `loops` is missing");
+    SuitesFail("a suite table naming no suite", Table + "| `core` | a |\n| `loops` | b |\n| `gone` | c |",
+        "`gone` is not a suite");
+    SuitesFail("a suite listed twice", Table + "| `core` | a |\n| `loops` | b |\n| `core` | c |", "listed twice");
+    SuitesFail("a row under a later heading",
+        Table + "| `core` | a |\n\n## Other\n\n| `loops` | b |", "suite `loops` is missing");
+    SuitesFail("no suite table", "| `core` | a |\n| `loops` | b |", "no `## Suites` table");
     Console.WriteLine($"All {checks} documentation reference checks passed.");
     return 0;
 }
@@ -160,6 +171,31 @@ void Passes(string name, string text)
         throw new InvalidOperationException($"{name} was rejected:\n{string.Join('\n', failures)}");
     checks++;
     Console.WriteLine($"PASS {name}");
+}
+
+List<string> SuiteCheck(string text)
+{
+    Write(Documentation.SuiteDocument, $"# Validation\n\n{text}\n");
+    var page = Documentation.Read(root, Path.Combine(root, Documentation.SuiteDocument));
+    return Documentation.CheckSuiteTable(root, page, ["core", "loops"]);
+}
+
+void SuitesPass(string name, string text)
+{
+    var failures = SuiteCheck(text);
+    if (failures.Count != 0)
+        throw new InvalidOperationException($"{name} was rejected:\n{string.Join('\n', failures)}");
+    checks++;
+    Console.WriteLine($"PASS {name}");
+}
+
+void SuitesFail(string name, string text, string reason)
+{
+    var failures = SuiteCheck(text);
+    if (!failures.Any(failure => failure.Contains(reason, StringComparison.Ordinal)))
+        throw new InvalidOperationException($"{name} did not fail with `{reason}`:\n{string.Join('\n', failures)}");
+    checks++;
+    Console.WriteLine($"PASS {name} fails");
 }
 
 void Fails(string name, string text, string reason)

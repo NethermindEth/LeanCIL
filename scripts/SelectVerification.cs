@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:include VerificationSelection.cs
 #:include ExportVerificationSuites.cs
+#:include VerificationSuites.cs
 
 using System.Diagnostics;
 using System.Text;
