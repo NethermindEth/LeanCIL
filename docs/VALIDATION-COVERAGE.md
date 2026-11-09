@@ -88,11 +88,6 @@ hashes and whole-assembly signature validation are shared within the batch. Long
 fixtures use a separate batch after writing their modified assembly. Expected extraction failures
 remain isolated, since a batch stops at its first failure.
 
-On Windows, the 45 positive array/generic extractions took 7.90s as individual commands and 0.59s in
-three batches. Their emitted Lean sources were byte-identical, and their positive proofs,
-independent replay and mutation checks passed. This measures extraction work, not the complete
-Evidence suite or hosted CI wall time.
-
 Generated positive evidence in `PrimitiveArrays`, `LayoutEvidence`, `ParameterEvidence`,
 `GenericEvidence` and `StaticScalarValues` shares imports within each fixture. Each extraction and
 its proof remain in their own namespace, following the generated verification batch pattern. The
@@ -119,31 +114,14 @@ diagnostic classification codes. Feature-flow and folded-span mutations use the 
 controls and retain only the intended feature-flow obligation in each negative fixture. Every
 rejection must identify `FeatureFlowValid` as false. Full positive certificates, runtime
 comparisons, and consumer replay remain; folded instructions with an unrecognized theorem cannot
-silently skip a test. On Apple M4 with the indexed constrained-dispatch library already built, the
-constrained positive batch fell from 5.67s to 5.26s. Generic positive compilation, independent
-replay and controls took 18.79s before reuse and 16.84s afterward, including replay of the controls
-in the combined batch. These fixture measurements exclude extraction, dependency setup and unchanged
-rejection checks; they are incremental gains on top of the dispatch improvement, not whole-suite CI
-timings.
+silently skip a test.
 
 Each of these five scripts accepts `--measure`, which first checks the same final source files
 separately. `artifacts/<fixture>/batch-timings.json` records source hashes, separate time and batch
-compilation/replay time. One local run measured:
+compilation/replay time.
 
-| Positive evidence | Files | Separate checking | Batch checking and replay |
-| --- | ---: | ---: | ---: |
-| Primitive arrays | 30 | 68.37s | 18.34s |
-| Layouts | 7 | 17.64s | 14.11s |
-| Parameter homes | 11 | 43.06s | 14.28s |
-| Generic specializations | 15 | 42.84s | 32.16s |
-| Static scalar values | 16 | 40.39s | 8.16s |
-| Total | 79 | 212.29s | 87.04s |
-
-These timings exclude extraction, dependency setup and unchanged rejection cases; they are not
-whole-suite CI timings. `GenericEvidence` also checks that an invalid proof fails batch compilation
-and that an unchecked declaration reaches, and fails, independent kernel replay. The complete local
-`PrimitiveArrays` fixture, including extraction and rejection checks, took 76.20 seconds before
-batching and 31.72 seconds afterward.
+`GenericEvidence` also checks that an invalid proof fails batch compilation
+and that an unchecked declaration reaches, and fails, independent kernel replay.
 
 ```sh
 dotnet run --file Tests/PrimitiveArrays.cs -- --measure
@@ -185,10 +163,7 @@ dotnet run --file Tests/ConsumerBatchSetup.cs -- --separate
 dotnet run --file Tests/ConsumerBatchSetup.cs
 ```
 
-One local comparison of these nine requests, against the same certified base, took 113.79 seconds
-separately and 65.66 seconds batched. Base copies fell from three to one, consumer builds from five
-to three, and replay invocations from six to three. This is a measurement of the selected cases, not
-the whole core suite or a CI wall-time guarantee.
+## Artifact identity and consumer reuse
 
 `Tests/ExternalIdentityEncoding.cs` kernel-checks generated identity strings against their literal
 values, including empty strings, embedded NULs, escaping and Unicode characters crossing chunk
@@ -271,42 +246,18 @@ Run `dotnet run --file Tests/ConsumerVerification.cs -- --check certificate-reus
 and post-restoration artifact mutation checks. Run `dotnet run --file Tests/ConsumerVerification.cs
 -- --check components --configuration-reuse` to check that split certificates retain their complete
 generated dependency set across a consumer configuration change. These extra requests are opt-in and
-are excluded from the unchanged full-workload timing comparison.
-
-The complete Windows consumer workload took 615.93s before this configuration reuse and 605.23s
-after it, with the same 29 top-level assertions and helper fixtures. Certificate builds fell from 37
-to 35 (89.31s to 84.88s); fresh consumer builds remained 48, joint replays 52 and fallback replays
-4. The focused configuration-only request took 5.30s versus 7.19s with `--fresh`, avoiding a 2.06s
-certificate build. Both full runs used isolated success caches and the same authenticated framework
-donor. This removes specific redundant work; the 1.7% total improvement is not a substantial suite
-speedup.
-
-On Windows, the unchanged-extraction request removed one 0.186s certificate process; total request
-time was 4.976s before and 4.952s after, so this run establishes the eliminated work but not a
-significant overall latency gain. Both measurements used an already certified library and retained
-independent replay of `Extracted` and `LeanCILProof`.
+are excluded from the default workload.
 
 Ordinary consumer requests regenerate the extraction and recheck their original inputs once after
 proof execution. Export and full-import callbacks retain another recheck after the callback
-executes. The fixture records these recheck counts and times: four requests dropped from eight
-rechecks (0.675s) to four (0.341s) on Windows. Total request times were noisy, so this measures
-eliminated work rather than an established overall latency improvement. The export and full-import
-mutation cohorts continue to check the post-callback integrity guards.
+executes. The fixture records these recheck counts and times. The export and full-import
+mutation cohorts check the post-callback integrity guards.
 
 `Tests/StandaloneCertificateReuse.cs` measures complete CLI requests against an already certified
 library, including source guards, native theorem audits and independent kernel replay. Standalone
 verification audits `Extracted.translation_valid` directly, eliminating the separate
 `ExtractionAudit` elaboration. The fixture checks frontend process counts for initial, unchanged,
-proof-edited, changed-extraction and `--fresh` requests. Pass a baseline extractor DLL and
-`--measure` to compare the previous wrapper-based implementation.
-
-| Windows request | Before | After | Frontend processes before → after |
-| --- | ---: | ---: | ---: |
-| Initial verification | 7.613s | 5.729s | 3 → 2 |
-| Unchanged verification | 1.784s | 1.783s | 0 → 0 |
-| Proof-only edit | 5.611s | 5.611s | 1 → 1 |
-| Changed extraction | 7.603s | 5.740s | 3 → 2 |
-| Fresh proof verification | 7.462s | 5.714s | 3 → 2 |
+proof-edited, changed-extraction and `--fresh` requests.
 
 The existing `Tests/TranslationAudit.cs` independently checks the direct certificate's exact type
 and rejects missing, unrelated, non-theorem and wrong-import-table declarations, as well as a
@@ -322,6 +273,8 @@ workload. The consumer still verifies the original extraction. `Tests/Translatio
 and replays the prefix once across certificate mutations; each variant retains its original
 certificate audit and rejection assertions. A changed prefix is rejected before any suffix can use
 the checked module.
+
+## Execution and extraction regressions
 
 `Tests.CertificateFlow` covers streaming fallthrough, indexed forward/backward edges, missing
 states, out-of-bounds targets and mismatched certificate lengths. The feature and scalar equivalence
@@ -358,7 +311,7 @@ returns the full arbitrary 256-bit input after the other locals are written. Mis
 authority, mismatched local kinds and unknown local contents remain rejected. Each rejection uses an
 isolated store or load and a matching successful run with only the missing authority, correct value
 kind or remembered contents supplied. Strict proof elaboration prevents an incomplete rejected proof
-from inserting a placeholder. The ordinary shared tactic tests run unchanged.
+from inserting a placeholder.
 
 `Tests/PrimitiveArrays.cs` checks compiled loads and stores for twelve primitive integer element
 types against runtime results and certified checked execution. It also covers length, helper calls,
@@ -395,6 +348,8 @@ that reads a seed without a caller binding, a value forged into a seed's placeho
 a seed, and missing assumptions, mutable fields, repeated stores and outside stores. It runs in the
 evidence suite.
 
+## Running the suites
+
 The repository pins .NET SDK **10.0.403** and Lean **4.35.0**. The checks below cover semantic
 behavior, extracted contracts, artifact integrity and rejection cases.
 
@@ -403,7 +358,7 @@ lake build
 dotnet run --file scripts/Test.cs
 ```
 
-The regression runner covers **54 check groups** across twenty-three test partitions. This includes
+The regression runner covers
 initial CLI proof selection and theorem output, an actual addition-to-subtraction source edit and
 rebuild, recovery using settings retained after the failed proof, the invalid-memory-access theorem,
 the integer opcode, narrow-storage and primitive-operation matrices, and `new-proof` refusing an
@@ -418,6 +373,8 @@ session package that requires the library as a path dependency, so Lake writes o
 session. File-based C# apps provide the test runner, verifier and metadata fixture generator.
 Metadata tooling uses the same pinned Mono.Cecil version as the extractor; the F# example assembly
 also uses pinned FSharp.Core.
+
+## Certified library preparation
 
 CI prepares the certified library once per workflow attempt and passes its immutable artifact ID,
 the run that uploaded it and its manifest digest from the producer job to the suite jobs. The
@@ -470,14 +427,6 @@ are regenerated before a new source-bound manifest is published. CI tries this a
 then falls back to a cold build if incremental preparation fails. `Tests/LibraryIncremental.cs`
 covers artifact tampering, incompatible identities/configuration, source removal and copy isolation.
 
-A Windows run with an `OleanAudit`-only comment edit rebuilt that module, its native object and the
-auditor executable: compilation took 4.31s, full replay 11.75s, fingerprints 7.89s, and total
-preparation 32.43s. Exact reuse took 12.36s. The donor's cold compilation on the same host/toolchain
-took 189.40s during fixture setup; that setup overlapped other short validation work, so this is not
-a controlled paired timing. All compiled module-part hashes matched the donor after the comment
-edit; the new certificate bound the changed source. These are local library timings, not full CI job
-measurements.
-
 `Tests/LibraryReplayCoverage.cs` uses a small synthetic producer manifest with a valid aggregate and
 an invalid theorem in a separate module. Both joint replay and its external-checker fallback must
 reject that declaration; checking only the aggregate is insufficient. The cache fixture runs this
@@ -491,7 +440,9 @@ prerequisites (in CI, one job builds the extractor and example assembly with `--
 `artifacts/test-results-<suite>.json`; running without arguments checks everything and writes
 `artifacts/test-results.json`.
 
-| Coverage | Result |
+## Coverage by behavior
+
+| Coverage | Checks |
 | --- | --- |
 | Profile-parametric templates | Compiled AVX2/SSE4.2 dispatch helper, one generated template proof on three profiles, renumbered managed callees, exact per-pc equations, independent kernel replay, and wrong flag/callee/branch/equation, stale source and metadata rejection |
 | Cyclic control flow and termination | Universal checked countdown proof for every `uint`, including zero and maximum value; a counted loop proved through its helper's contract, unchanged for a reimplemented helper and rejecting a discarded result or double count; a loop that returns or raises its helper's exception after earlier calls, proved for every pair of `uint`s from the helper's outcome contract, unchanged for a reimplemented helper and rejecting another exception type, a nondecreasing measure, a non-inductive invariant and a wrong specified exception; a buffer fill loop proved to write exactly `count` words for every nonnegative count, with four runtime comparisons and shifted or skipping stores rejected; 17 runtime comparisons; incorrect implementation rejected under the unchanged contract; infinite loop proved to exhaust every fuel budget; backward switch, native arithmetic and fixed-feature loops checked; eight malformed or unsupported fixtures rejected; `new-proof` outlines of eighteen loop examples (one with two loops in sequence, one searching a free list through an object local, one filling a writable span, one filling it through a helper that stores the first element of the span it is lent, one summing and one filling an array by index, and three slicing a span local, which sum a span and an array and fill an array), thirteen straight-line methods with `bool`, narrow, writable span and array parameters, a `bool` result, unsigned and signed checked adds, a bit count and splits on unsigned and signed word tests, 29 straight-line methods over class instances, string fields and arrays of class references, including element facts carried across element and field stores and an array the method allocates, eight over value arrays of words, structs and vectors that class fields hold, including a struct element named across lines, and two struct instance methods storing a field at offsets 0 and 8 elaborate with only `sorry` warnings and are byte-identical across runs; the countdown outline is refused for `sorryAx` and verifies once only its holes are filled, as do 51 other filled outlines |
@@ -519,60 +470,60 @@ prerequisites (in CI, one job builds the extractor and example assembly with `--
 | `X86Base.X64.DivRem` through `ValueTuple<ulong, ulong>` Item1/Item2 reads | Runtime tuple offset probe; 500 checked-execution boundary cases across five read shapes compared with hardware and a `UInt128` oracle, including divide-by-zero and overflow faults; universal quotient and fault proof; remainder substituted for quotient rejected; eight forged calls, scopes and tuple layouts rejected |
 | `Math.DivRem` tuple and `out` overloads | Runtime equal-width tuple offset probe; 562 checked-execution comparisons with .NET over the ten tuple overloads, a narrow Item2 read and both `out` overloads, including divide-by-zero, wide `MinValue / -1` overflow, wrapping narrow `MinValue / -1` and null output faults; universal `int` quotient, divide-by-zero and overflow proof; remainder substituted for quotient rejected; forged mixed-width tuple rejected |
 | Signed and 32-bit `Math.BigMul` | Universal signed high/low proof with exact `Int` recomposition and 81 signed boundary cases with uninitialized output storage; unsigned high-word contract rejected for the signed call; universal exact `BigMul(int, int)` proof; 36 signed and 36 unsigned 32-bit boundary cases compared with .NET |
-| Library, scalar/SIMD semantics, allocation, permissions, initialization, lifetime and symbolic automation | Passed |
-| Ten extracted arithmetic, branching, call, aliasing, aggregate and semantic-negative proofs, each with artifact checks | Passed |
-| Compiled C# negation: universal modular additive-inverse contracts for 32- and 64-bit inputs | Both proofs passed |
-| Exact `nop`, `neg`, `cgt`, `bgt`, `bgt.s`, `ble`, `ble.s`, `ble.un`, `ble.un.s` encodings in independent Cecil fixtures | 370 checked-execution boundary cases passed across 32- and 64-bit operands |
-| Identity substituted for negation, with the unchanged universal contract | Both widths rejected by proof checking; no successful report retained |
-| New scalar operations: stack underflow, mixed widths and reference operands; `nop` preserves arbitrary stacks | Semantic tests passed |
-| Compiled C# unsigned-short conversion: universal result `x % 65536` for every 32-bit input | Proof passed |
-| Narrow conversions, locals, arguments, returns, calls and fields, including aggregate snapshots | 744 checked-execution boundary cases passed, including 144 deliberate faults |
+| Library, scalar/SIMD semantics, allocation, permissions, initialization, lifetime and symbolic automation | Regression checks |
+| Ten extracted arithmetic, branching, call, aliasing, aggregate and semantic-negative proofs, each with artifact checks | Regression checks |
+| Compiled C# negation: universal modular additive-inverse contracts for 32- and 64-bit inputs | Universal proofs at both widths |
+| Exact `nop`, `neg`, `cgt`, `bgt`, `bgt.s`, `ble`, `ble.s`, `ble.un`, `ble.un.s` encodings in independent Cecil fixtures | 370 checked-execution boundary cases across 32- and 64-bit operands |
+| Identity substituted for negation, with the unchanged universal contract | Rejects both widths during proof checking; no successful report retained |
+| Scalar operations: stack underflow, mixed widths and reference operands; `nop` preserves arbitrary stacks | Semantic tests |
+| Compiled C# unsigned-short conversion: universal result `x % 65536` for every 32-bit input | Proof checking |
+| Narrow conversions, locals, arguments, returns, calls and fields, including aggregate snapshots | 744 checked-execution boundary cases, including 144 deliberate faults |
 | Uninitialized narrow locals and 64-bit stores into narrow homes | Rejected with the expected located faults |
 | Two-byte field overrun and forged narrow runtime type identity | Both rejected during extraction |
-| Signed conversion substituted for unsigned conversion, with the unchanged universal contract | Rejected by proof checking; no successful report retained |
-| Narrow access bounds, permissions and lifetime; generic typed store/load normalization | Semantic tests and universal roundtrip theorem passed |
-| Compiled C# `ref int` store/load: every 32-bit input returned unchanged | Universal proof passed |
-| Primitive `ldobj`, `stobj`, `initobj`, indirect loads/stores, C# aliasing, `switch` and `sizeof`, including native integer storage | 534 cases passed, including memory faults, initialization and preservation of neighboring bytes |
-| Empty/duplicate switch tables, out-of-range unsigned indices and switch-only managed dependencies | Passed |
+| Signed conversion substituted for unsigned conversion, with the unchanged universal contract | Rejects during proof checking; no successful report retained |
+| Narrow access bounds, permissions and lifetime; generic typed store/load normalization | Semantic tests and universal roundtrip theorem |
+| Compiled C# `ref int` store/load: every 32-bit input returned unchanged | Universal proof |
+| Primitive `ldobj`, `stobj`, `initobj`, indirect loads/stores, C# aliasing, `switch` and `sizeof`, including native integer storage | 534 cases, including memory faults, initialization and preservation of neighboring bytes |
+| Empty/duplicate switch tables, out-of-range unsigned indices and switch-only managed dependencies | Regression checks |
 | Corrupted switch target, unsupported arm, four forged type tokens and floating-point size | Seven intended extraction rejections |
 | `sizeof` on pointers, managed references, objects, strings, arrays, double, auto layouts and malformed sequential field offsets, reference-containing structs and unsupported generic layouts | Eleven intended extraction rejections; no Lean extraction produced |
-| Constant-zero write substituted for the input, with the unchanged universal store/load contract | Rejected by proof checking; no successful report retained |
-| Scalar access operand/width checks, bounds and lifetime; arbitrary-memory 32-bit store/load roundtrip | Semantic tests and universal roundtrip theorem passed |
-| Short and full assembly selectors retain the same complete manifest identity | Passed |
+| Constant-zero write substituted for the input, with the unchanged universal store/load contract | Rejects during proof checking; no successful report retained |
+| Scalar access operand/width checks, bounds and lifetime; arbitrary-memory 32-bit store/load roundtrip | Semantic tests and universal roundtrip theorem |
+| Short and full assembly selectors retain the same complete manifest identity | Regression checks |
 | Explicit version, culture and public-key-token mismatches | Three intended identity rejections |
-| Method selectors: aliases, optional returns, short declaring types, overloads, canonical artifact identity, malformed inputs and candidate diagnostics | 23 checks passed |
-| Assembly inference from a renamed DLL, equivalent explicit identities, mismatched constraints, malformed options and stale outputs without `--assembly` | Passed |
-| Directory-only checks: recorded profiles, moved DLL override, missing DLL, invalid profile and modified artifacts | Passed |
-| Independent hardware-feature assembly built from a single C# file | Passed |
-| CLI packaging smoke checks: build and publish `leancil.exe`, `dotnet run`, isolated .NET tool installation, installed `leancil extract` and `leancil check` | Passed separately |
-| One-command worked example: `dotnet run --file Examples/Verify.cs` | Passed; `ExampleProof.correctness` verified |
-| Installed `leancil verify`: explicit proof, printed theorem, portable settings, source mutation, failure/recovery, memory fault theorem and stdout/stderr | Four CLI regression stages passed |
-| Method discovery includes canonical selectors and unsupported candidates without claiming support | Passed |
-| Malformed settings, missing proof, unsupported CIL, changed assembly and missing Lake produce stage-specific guidance | Passed |
-| Subtraction rejected by the unchanged universal addition contract | Passed; no successful report retained |
+| Method selectors: aliases, optional returns, short declaring types, overloads, canonical artifact identity, malformed inputs and candidate diagnostics | 23 checks |
+| Assembly inference from a renamed DLL, equivalent explicit identities, mismatched constraints, malformed options and stale outputs without `--assembly` | Regression checks |
+| Directory-only checks: recorded profiles, moved DLL override, missing DLL, invalid profile and modified artifacts | Regression checks |
+| Independent hardware-feature assembly built from a single C# file | Regression checks |
+| CLI packaging smoke checks: build and publish `leancil.exe`, `dotnet run`, isolated .NET tool installation, installed `leancil extract` and `leancil check` | Packaging smoke checks |
+| One-command worked example: `dotnet run --file Examples/Verify.cs` | Verifies `ExampleProof.correctness` |
+| Installed `leancil verify`: explicit proof, printed theorem, portable settings, source mutation, failure/recovery, memory fault theorem and stdout/stderr | Four CLI regression stages |
+| Method discovery includes canonical selectors and unsupported candidates without claiming support | Regression checks |
+| Malformed settings, missing proof, unsupported CIL, changed assembly and missing Lake produce stage-specific guidance | Regression checks |
+| Subtraction rejected by the unchanged universal addition contract | Rejects the implementation and removes any successful report |
 | Reference-free array allocation | Checked primitive/enum, packed/nested aggregate and vector zero initialization, payload alignment, empty/non-null identity, negative/native lengths, helper returns and packed field stores; forged element identity, layout identity/width and byref-like certificates, malformed markers and unsupported extents rejected |
-| Integer `div`, `div.un`, `rem`, `rem.un`, both widths | 648 comparisons against actual .NET execution and corresponding Lean proofs passed, including divide-by-zero and signed overflow |
-| Extracted unsigned quotient for arbitrary inputs with a nonzero divisor | Universal proofs passed for 32 and 64 bits; multiplication substituted for division rejected by the unchanged contract |
-| Division with mixed widths, references, stack underflow or a zero divisor | Semantic rejection tests passed |
-| Checked add/subtract/multiply, signed and unsigned at both widths | 2,028 comparisons against actual .NET results or overflow exceptions and corresponding Lean proofs passed |
-| Checked addition with a sum that fits | Universal 32-/64-bit natural-number addition proofs passed; subtraction substituted for addition rejected |
-| All 20 integer checked-conversion encodings, from both input widths | 762 comparisons against actual .NET execution and corresponding Lean proofs passed, including native destinations and overflow |
-| Checked 64-to-32-bit unsigned narrowing with a representable input | Universal preservation proof passed; an eight-bit truncating implementation rejected |
-| Native signatures, locals, calls, fields, references, arithmetic, shifts, casts and `sizeof`, plus exact mixed native/int32 operations in both operand orders | 2,511 comparisons against actual .NET results or arithmetic exceptions and corresponding Lean proofs passed; all 60 ambiguous mixed unsigned-branch forms rejected unless explicitly widened |
-| Extracted native addition on the admitted 64-bit target | Universal modular-addition proof passed |
+| Integer `div`, `div.un`, `rem`, `rem.un`, both widths | 648 comparisons against actual .NET execution and corresponding Lean proofs, including divide-by-zero and signed overflow |
+| Extracted unsigned quotient for arbitrary inputs with a nonzero divisor | Universal proofs for 32 and 64 bits; multiplication substituted for division rejected by the unchanged contract |
+| Division with mixed widths, references, stack underflow or a zero divisor | Semantic rejection tests |
+| Checked add/subtract/multiply, signed and unsigned at both widths | 2,028 comparisons against actual .NET results or overflow exceptions and corresponding Lean proofs |
+| Checked addition with a sum that fits | Universal 32-/64-bit natural-number addition proofs; subtraction substituted for addition rejected |
+| All 20 integer checked-conversion encodings, from both input widths | 762 comparisons against actual .NET execution and corresponding Lean proofs, including native destinations and overflow |
+| Checked 64-to-32-bit unsigned narrowing with a representable input | Universal preservation proof; an eight-bit truncating implementation rejected |
+| Native signatures, locals, calls, fields, references, arithmetic, shifts, casts and `sizeof`, plus exact mixed native/int32 operations in both operand orders | 2,511 comparisons against actual .NET results or arithmetic exceptions and corresponding Lean proofs; all 60 ambiguous mixed unsigned-branch forms rejected unless explicitly widened |
+| Extracted native addition on the admitted 64-bit target | Universal modular-addition proof |
 | Required-32-bit assembly, forged native type identity, native field overrun, native/int64 operands and 32-bit execution profile | Five intended extraction rejections |
-| Native widening wrapper with memory instructions, nested wrappers or references | Semantic rejection tests passed; unsigned branch/comparison widening differences checked explicitly |
-| Argument assignment/addressing, both full and short encodings, all admitted integer storage types, aliases, calls, byref reassignment and structs | 639 runtime/memory cases passed, including 636 actual .NET comparisons |
-| Overwriting an argument with a replacement value | Universal proof passed for arbitrary inputs; assignment to the wrong parameter rejected |
+| Native widening wrapper with memory instructions, nested wrappers or references | Semantic rejection tests; unsigned branch/comparison widening differences checked explicitly |
+| Argument assignment/addressing, both full and short encodings, all admitted integer storage types, aliases, calls, byref reassignment and structs | 639 runtime/memory cases, including 636 actual .NET comparisons |
+| Overwriting an argument with a replacement value | Universal proof for arbitrary inputs; assignment to the wrong parameter rejected |
 | Returning an address into a parameter home | Lifetime fault proved for every input; successful execution ruled out for every fuel budget |
-| Parameter setup with missing inputs or incompatible scalar/reference values, and narrow initialization | Semantic checks passed; taking the address of a byref parameter rejected during extraction |
-| Ordinary and packed sequential structs, all admitted packing values, small/odd explicit sizes and empty structs | 187 runtime layout/execution cases passed; emitted sizes and field offsets agree with managed runtime probes |
-| Sequential struct field store/load | Universal preservation proof passed for every 32-bit input |
+| Parameter setup with missing inputs or incompatible scalar/reference values, and narrow initialization | Semantic checks; taking the address of a byref parameter rejected during extraction |
+| Ordinary and packed sequential structs, all admitted packing values, small/odd explicit sizes and empty structs | 187 runtime layout/execution cases; emitted sizes and field offsets agree with managed runtime probes |
+| Sequential struct field store/load | Universal preservation proof for every 32-bit input |
 | Invalid packing, oversized layout, auto layout, reference/float fields, inline arrays, generics, explicit offsets on sequential fields, nested reference-bearing and recursive fields | Ten intended metadata rejections |
 | Synchronized methods, wrong framework/identity, invalid field layout, unsupported locals, static initializer and forged runtime scope | Seven intended metadata rejections |
-| Identity-bound static RVA data | Passed |
+| Identity-bound static RVA data | Regression checks |
 | Static `ReadOnlySpan<uint>`/`<ulong>` tables | Indexed reads, length and first element compared with .NET, including negative and past-end indices faulting with `System.IndexOutOfRangeException`; forged receiver folds fail the feature certificate; tampered RVA bytes change the proved word; branches into the fold rejected |
-| Memory-backed primitive spans | Compiled readonly and writable slices passed to helpers; sequence-content read and update contracts, and readonly/writable caller composition without unfolding helper bodies; creation over an existing reference; forged element widths and write capabilities rejected by specialization evidence; empty end slices, invalid indexes and slices, alias visibility, missing write authority, uninitialized reads and expired local storage; by-reference and floating-point span signatures rejected |
+| Memory-backed primitive spans | Compiled readonly and writable slices to helpers; sequence-content read and update contracts, and readonly/writable caller composition without unfolding helper bodies; creation over an existing reference; forged element widths and write capabilities rejected by specialization evidence; empty end slices, invalid indexes and slices, alias visibility, missing write authority, uninitialized reads and expired local storage; by-reference and floating-point span signatures rejected |
 | Static readonly struct values | `Zero`, `One` and `MinValue` limbs proved and compared with the values .NET's static constructor stored, also through an out parameter; a changed constructor argument changes the proved limbs; forged value bytes fail `Extracted.translation_valid`; a missing initialization assumption, a `newobj` initializer, `ldsflda`, a store outside the static constructor and a second store rejected; Lean regressions for the load semantics and a self-justifying initializer |
 | Static `ReadOnlySpan<byte>` lookup tables | First and last byte proved; past-end read and write to immutable data rejected; tampered RVA bytes change the proved value; four intended span metadata rejections and positive stored-span parameter/local fixtures |
 | Tampered Lean output, changed compiled assembly, changed assembly version with a short selector, changed proof and changed feature profile | Five intended stale-artifact rejections |
@@ -584,21 +535,20 @@ successful execution for every fuel budget. The subtraction theorem independentl
 intended addition result. Other example claims have the quantifiers and inputs displayed in their
 theorem statements; concrete examples do not establish universal method correctness.
 
-All audited example theorems use only the permitted standard Lean axioms, if any. No new axioms,
-`sorry`, `admit`, native proof evaluation or unproved summaries were added. See [the trusted
-base](SOUNDNESS.md) for runtime and extraction assumptions.
+Audited example theorems must use only the permitted standard Lean axioms, if any.
+The verifier rejects `sorry`, `admit`, native proof evaluation and unproved summaries.
+See [the trusted base](SOUNDNESS.md) for runtime and extraction assumptions.
 
 Machine-readable results are written to `artifacts/test-results.json`; each successful proof
 produces an identity-bound `verified.json`. These generated files are reproducible outputs and are
-not committed. Consumer-project integration and broad .NET runtime coverage are outside these
-validation results.
+not committed. Passing the suites does not establish support for arbitrary .NET programs;
+see the [support boundary](SOUNDNESS.md).
 
-Typed copy validation: 648 runtime result/byte-copy checks passed across 18 primitive, struct and
-vector types, including self-copies. The universal UInt64 copy contract passed and rejected reversed
-source/destination operands. Four unsupported/forged type-token cases were rejected during
-extraction. Ten semantic tests cover initialization, permissions, lifetime, GC-sensitive storage,
-bounds, null references and partial overlap. The generic copy snapshot theorem and the full Lean
-library/semantic/automation build passed.
+Typed copy validation covers 648 runtime result/byte-copy cases across 18 primitive, struct and
+vector types, including self-copies. The universal UInt64 copy contract rejects reversed
+source/destination operands. Four unsupported/forged type-token cases test extraction rejection.
+Ten semantic tests cover initialization, permissions, lifetime, GC-sensitive storage,
+bounds, null references and partial overlap. A generic snapshot theorem covers typed copying.
 Packed test inputs use explicitly unaligned stores to their managed field addresses, so constructing
 them does not require aligned reflection stores on ARM64 or interop marshaling of Boolean/char fields.
 
@@ -606,41 +556,38 @@ Portable helper validation compares actual .NET results with extracted execution
 power-of-two boundaries, zero/all-ones values, signed boundaries and negative/oversized rotation
 counts. Primitive 32-bit, 64-bit and native rotation aliases use compact boundary samples;
 the full BitOperations matrix covers their shared scalar operation.
-Universal 64-bit rotation round-trip and integer-logarithm proofs passed with only approved Lean
-axioms; incorrect implementations failed the unchanged contracts. Nine malformed/unsupported runtime
-calls were rejected before extraction. Semantic tests reject incorrect arity, widths and operand
-types.
+Universal 64-bit rotation round-trip and integer-logarithm proofs use only approved Lean axioms.
+Incorrect implementations must fail those contracts. Nine malformed/unsupported runtime calls
+test extraction rejection. Semantic tests reject incorrect arity, widths and operand types.
 
-Enum validation: 378 runtime comparisons passed across all eight underlying integer types, flags,
-calls, fields and typed storage. The universal flags proof passed and rejected an incorrect
-implementation. Eleven malformed metadata cases were rejected.
+Enum validation covers 378 runtime comparisons across all eight underlying integer types, flags,
+calls, fields and typed storage. A universal flags proof rejects an incorrect implementation.
+Eleven malformed metadata cases test extraction rejection.
 
-Nested struct validation: 123 runtime/layout comparisons passed, including sixteen packing
-combinations. A universal nested snapshot proof passed and rejected an incorrect implementation.
-Seven malformed layouts and seven semantic memory-fault cases were rejected.
+Nested struct validation covers 123 runtime/layout comparisons, including sixteen packing
+combinations. A universal nested snapshot proof rejects an incorrect implementation.
+Seven malformed layouts and seven semantic memory-fault cases test rejection.
 
-Struct instance-call validation: 132 runtime comparisons passed, including short and full argument
+Struct instance-call validation covers 132 runtime comparisons, including short and full argument
 encodings, by-value copy isolation, direct constructor calls and a call to an `init` accessor,
 which is also proved as an entry, and with the marker declared locally or by another
-System.Runtime version. A universal instance store/load proof passed and rejected an incorrect
-implementation. Four malformed metadata cases were rejected. For the `init` modifier, `modopt`,
+System.Runtime version. A universal instance store/load proof rejects an incorrect
+implementation. Four malformed metadata cases test rejection. For the `init` modifier, `modopt`,
 another `modreq` type, a same-named marker in another namespace and a value-returning or
 parameter placement are rejected by name, both as an entry and behind its caller; selectors and
 recorded entries tell the accessor from a plain void setter, and both members of a
 modifier-only pair are rejected. An `init` accessor export is rejected as non-static.
 
-Struct construction validation: 56 runtime comparisons passed, covering packed and nested structs,
-chained and parameterless constructors, zero-initialized storage and checked arithmetic faults. A
-universal constructed-value proof passed for every 64-bit input; an incorrect constructor result
-failed the unchanged contract. Five malformed constructor cases were rejected. Semantic tests cover
-zero-sized construction, missing arguments, zero initialization and a non-void constructor result.
-The full 125-job Lean library, semantic and automation build passed.
+Struct construction validation covers 56 runtime comparisons for packed and nested structs,
+chained and parameterless constructors, zero-initialized storage and checked arithmetic faults.
+A universal constructed-value proof covers every 64-bit input and rejects an incorrect result.
+Five malformed constructor cases test rejection. Semantic tests cover zero-sized construction,
+missing arguments, zero initialization and a non-void constructor result.
 
-F# validation: 324 comparisons with actual .NET execution passed for addition, unsigned branching,
-managed calls, mutable structs and by-reference stores. The existing addition, store/load and
-constructor contracts passed unchanged against the F# assembly. Subtraction failed the addition
-contract, and a list-returning function was rejected during extraction. These examples require no
-F#-specific CIL semantics or proof shortcuts.
+F# validation compares actual .NET execution for addition, unsigned branching, managed calls,
+mutable structs and by-reference stores across 324 cases. The addition, store/load and constructor
+contracts are checked against the F# assembly. Subtraction must fail the addition contract,
+and a list-returning function must fail extraction. These examples use the shared CIL semantics.
 
 ## Contracts and extraction evidence
 
@@ -686,27 +633,23 @@ under its well-formedness hypothesis. Each unchanged contract rejects its incorr
 implementation. Countdown validation covers original instructions, inserted NOPs and reordered
 blocks, and rejects wrong results and nontermination.
 
-Extraction evidence validation passed 74 Lean regressions, 34 compiled certificate fixtures, 29
-generated-evidence mutation rejections, and mandatory-certificate positive/negative checks. All six
-CLI checks passed, including kernel replay of imported helpers and rejection of unchecked
-direct/transitive proofs. `Tests/ImportEvidence.lean` accepts an external call into a matching
+Extraction evidence validation covers Lean regressions, compiled certificate fixtures,
+generated-evidence mutations and mandatory-certificate positive/negative checks. CLI checks
+include kernel replay of imported helpers and rejection of unchecked direct/transitive proofs.
+`Tests/ImportEvidence.lean` accepts an external call into a matching
 import slot and rejects a forged identity, parameter count, receiver or result shape, a wrong
 emitted argument count, a slot index inside the program or past the table, constructor and generic
 sites, and managed or non-call sites reaching the import range; the certificate audit also rejects a
 certificate over a different import table. These tests do not establish full raw-CIL/runtime
 correspondence.
 
-The native extraction suite passed 2,511 runtime comparisons and kernel proofs, its universal
+The native extraction suite checks 2,511 runtime comparisons and kernel proofs, a universal
 addition contract, 60 ambiguous mixed unsigned-branch rejections and five metadata/profile
-rejections. Separate pinned .NET 10.0.0 probes on x64 and ARM64 each passed 3,600 admitted cases;
-500 rejected cases retain 38 historical model divergences. Full JIT optimization produced identical
-per-case results. See [native evidence](evidence/native/README.md) for exact provenance and
-reproduction commands.
+rejections. See the [pinned native evidence](evidence/native/README.md) for recorded x64 and ARM64
+observations, model divergences, provenance and reproduction commands.
 
 Memory-view equivalence covers access, writes and subsequent checked execution, including calls,
-constructors and frame cleanup. At 128 alternating stores the benchmark retained one view rather
-than 129; median local kernel-reduction time was 5.6s versus 17.7s over three runs, including
-startup and shared-machine activity. These timings are illustrative, not a performance guarantee.
+constructors and frame cleanup.
 
 The initialized-types end-to-end test and four mandatory-certificate audit cases check that
 verification reports record both the schema-3 extraction audit and initialized-type assumptions.

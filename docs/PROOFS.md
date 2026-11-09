@@ -4,8 +4,30 @@ State the property independently of the emitted instructions. Use `CIL.Safety.in
 `Ensures`, `MethodContract` or `OutcomeContract` when the claim includes checked execution.
 Make input quantifiers, initial-memory assumptions and permitted writes explicit.
 
-Start with the [addition walkthrough](GETTING-STARTED.md), then select the smallest proof
-interface that expresses the result:
+## Author workflow
+
+1. **State the specification.** Quantify over the inputs and memory allowed by the contract.
+   For addition, the result must equal the sum for every pair of input words; checking a few
+   concrete calls does not prove that claim.
+2. **Bind the method.** Extract the assembly and bind the proof's method body to the generated
+   program with the [body-binding API](PROOFS-BINDING.md#bind-bodies-to-the-extraction).
+   A theorem about a handwritten instruction list alone does not establish an assembly property.
+3. **Step straight-line code.** Use `cil_checked_steps` to compose checked execution steps.
+   Supply facts for symbolic branches and memory operations when their conditions are not
+   definitionally true. The [worked instruction example](PROOFS-STEPPING.md#compose-instructions)
+   shows a complete theorem over symbolic inputs and arbitrary caller memory.
+4. **Compose calls and loops.** Apply a helper's proved contract at a call site. For a loop,
+   state an invariant at its checked cutpoint and a measure that decreases on every continuing
+   iteration. See [call contracts](PROOFS-CONTRACTS.md#compose-calls-through-contracts) and
+   [loop cutpoints](PROOFS-BINDING.md#loop-heads-and-call-sites).
+5. **Verify the assembly-bound proof.** Inspect `#print axioms`, then run `leancil verify` on
+   the extracted artifact with `--proof`. Verification checks the extraction binding and replays the
+   compiled proof; elaboration alone is insufficient.
+
+Follow the [addition walkthrough](GETTING-STARTED.md) for the extraction, proof and verification
+commands, then select the smallest proof interface that expresses the result:
+
+## Choose a proof interface
 
 | Task | Guide | Executable example |
 | --- | --- | --- |

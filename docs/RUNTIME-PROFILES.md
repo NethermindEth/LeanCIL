@@ -78,16 +78,7 @@ Vector256 acceleration without disabling AVX2. On the measured ARM64 runtime,
 EnableHWIntrinsic=0 disables ArmBase, AdvSimd, AdvSimd.Arm64 and Vector128 acceleration
 together; the tested individual ARM switches do not split that group.
 
-## Migration
-
-Impossible built-ins are retired with an error, not silently remapped:
-
-| Retired name | Starting point for a new proof |
-| --- | --- |
-| x64-sse41 | x64-sse42 |
-| x64-avx2, x64-avx2-bmi1, x64-bmi2, x64-vector256 | x64-v3 |
-| x64-avx512, x64-avx512-bmi1 | x64-v4 |
-| arm64-armbase | arm64-advsimd |
+## Profile selection
 
 `x64-sse2` supplies the x64 baseline with SSE4.2 and higher groups disabled.
 `scalar` remains the no-hardware-intrinsics profile. The repo's extraction and
@@ -142,13 +133,12 @@ AES group, remains unclassified.
 Custom consumer profiles must obey the same constraints. Set AVX2/BMI1/BMI2 together;
 set all four modeled AVX-512 flags together; set `avx512Vbmi` only with them; set `aes` only on x64
 and `armAes` only on ARM64; set all three
-modeled SSE4.2-group flags together. Custom profiles written before `avx512Vbmi` existed are
-rejected for the missing field, as are those written before `aes` and `armAes`; add each with the
-value the deployment reports. ARM64 profiles
+modeled SSE4.2-group flags together. Custom profiles must include `avx512Vbmi`, `aes` and
+`armAes`, each with the value the deployment reports. ARM64 profiles
 must set ArmBase/AdvSimd/Vector128 together and cannot enable Vector256 acceleration. A reduced-width x64 profile may retain
 `vector256Accelerated: false` with the full AVX2 group enabled.
 
-These changes can select different CIL branches. Regenerate extraction, reprove
+Changing a profile can select different CIL branches. Regenerate extraction, reprove
 each affected method/profile, re-export interfaces and rebuild full-verification
 bundles. Update consumer gates only after those proofs pass. Do not reuse old
 certificates, merely rename a profile, suppress the group checks, or weaken a

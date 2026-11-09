@@ -1,89 +1,5 @@
 # Instruction composition and proof reduction
 
-## Preparation and shared infrastructure
-
-`CIL.Safety.step_return_properties` proves declared return arity and the absence of unspecified SIMD
-lanes together. `step_return_length` and `step_return_known` project the two results, so the checked
-dispatcher is analyzed once. Run traces preserve the declared arity across tail calls, whose callees
-must have the same return arity. A tail call retires the current frame before rechecking its
-arguments and entering the callee; pointers into that frame's local storage therefore cannot escape
-through a tail call, even if the callee ignores them. `run_success_return_trace` and
-`run_success_live_return_trace` expose the terminal method and arguments as existential witnesses:
-after a tail call, the final `ret` belongs to the callee. `run_return_length` and invocation
-result-validity guarantees apply to the original invocation. The return proof uses an explicit
-simplification set: unrestricted `simp_all` repeatedly tries to discharge irrelevant dispatcher
-exclusions. Keep that set narrow when extending the proof. The callee proof reduces each fixed
-opcode before splitting the remaining dispatcher matches, avoiding repeated case analysis of
-branches already excluded by that opcode. Successful binds supply their successful result directly,
-so their impossible error branches are never expanded. Trailing-local proofs normalize maps over
-monadic binds before trying congruence, so shared computations need not be split into their possible
-results to prove the continuation unchanged. They also discharge dispatcher-tail cases before
-inspecting an irrelevant second operand.
-
-Relabeling proofs close unary and invalid-first-operand cases before inspecting a second operand.
-Their local `stack_cases => ...` helper tries the instruction's proof after each operand split,
-avoiding duplicate dispatcher-tail proofs for irrelevant stack shapes. The success and
-named-exception statements, interpreter definitions and allowed axioms are unchanged.
-
-Ordinary allocation-renaming instructions share the proof of `Memory.Renamed.instructionResult`.
-Reference-aware subtraction, comparisons and branches share `Memory.Renamed.stepReference` and
-`FixedStepFamily.reference`. These replace `stepSubtract`, `stepCompare`, `stepUnsignedBranch` and
-`stepEqualityBranch`, and their four separate family constructors. `stepTransport` and its
-successful/exceptional execution guarantees retain their statements. The ordinary instruction proof
-normalizes mapped stack constructors with a single simplifier pass, avoiding repeated traversal of
-the dispatcher. Later normalization retains full simplification. The execution-invariant dispatcher
-applies contract lemmas before searching for their success hypotheses, and uses an explicit simp set
-to establish scalar-stack validity. The precomputed intrinsic signature-byte table is checked
-against its original strings with `decide +kernel`, avoiding expensive whole-table definitional
-equality while retaining an axiom-free equality theorem.
-
-Certificate validation streams fallthrough states and uses balanced indexes for branch destinations.
-`FeatureFlowValid`, `ScalarFlowValid`, their transfer/emission checks and feature-edge predicates
-take an explicit array of raw layouts. Generated certificates pass `rawLayouts.toArray`; standalone
-fixtures without aggregate queries pass `#[]`. The enclosing translation certificate validates that
-same layout table, binding reference-content queries to their aggregate identities.
-`FeatureFlowValid_iff_list` and `ScalarFlowValid_iff_list` recover the original list-indexed rules
-without changing their entry, reachability, opcode or bounds requirements. `foldEntry` takes the
-optional lookup result, so a list-based caller writes `foldEntry roles[target]?`. Missing entries
-retain the original permissive fold-role result; the successor-state check independently rejects a
-target missing from its certificate.
-
-Exact intrinsic validation classifies each emitted intrinsic once and removes the common assembly
-scope once when recognizing a raw call's family. Its signature-byte table is generated from the
-existing signature strings at elaboration time; a kernel-checked equality proves the table exact
-without adding axioms. `ExactIntrinsicsValid_iff_original` proves equivalence to the original
-signature lookup, malformed-family rejection, arity, reachability, profile availability and length
-checks for arbitrary raw metadata, including non-ASCII identities.
-
-Feature getter validation likewise checks the common assembly/type prefix once, then compares
-literal UTF-8 suffixes. `featureGetter_eq_original` proves equality with the original lookup for
-every raw call site; a separate kernel-checked equality validates the generated suffix table. Prefix
-truncation, trailing bytes, non-ASCII names and call-shape mismatches remain rejected. This changes
-certificate checking cost, not the admitted feature getters.
-
-Generated managed-call certificates use `cil_managed_calls` to prove the unchanged
-`ManagedCallsValid` proposition. The tactic unfolds the supplied generated definitions and proves
-identical scoped types and generic arguments by reflexivity. Remaining checks use kernel decision;
-unsupported proof shapes fall back to the original complete decision. The validator still checks
-targets, method tokens, type arguments, exact parameter and return types, instance metadata,
-reachability and argument counts. This changes proof construction; source binding, certificate
-audits and kernel replay are unchanged.
-
-Generated primitive and generic-constructor types reference `Extraction.runtimeScope` only when
-their full assembly identity matches it exactly. Its materialized UTF-8 bytes are definitionally
-equal to the original string, as proved by `runtimeScope_eq`. Version, culture and public-key token
-remain part of the identity; all other scopes retain their literal values. This representation
-avoids decoding the same string during each certificate decision.
-
-Each distinct reachable external-call identity similarly receives one generated byte constant. Its
-`Bytes_eq` theorem proves exact equality with the original full string's UTF-8 bytes by reflexivity.
-The string's UTF-8 validity proof and its equality theorem reuse that checked equality; neither
-introduces axioms. Repeated occurrences of an identical target, including across original and
-specialized metadata, share the constant. Validators still parse and compare the full identity,
-including assembly version, culture, public-key token, declaring type, method and signature.
-Pruned-only calls retain literals, and call-free extractions emit no additional declarations. This
-changes data representation, not scalar, division, specialization or admission rules.
-
 Use `CIL.Safety.invoke` for specifications that include checked memory execution. State the
 mathematical contract and its input/memory preconditions independently of the implementation. The
 [soundness boundary](SOUNDNESS.md) describes what a successful checked execution establishes.
@@ -297,8 +213,7 @@ both tactics add the facts
 conditions](#loop-verification-conditions), so the list carries only invariant equations, the
 positive side of a case split and other facts of no recognized shape.
 A case split's negative side, such as `¬count = value`, is gathered and decides the branch. A step equation in the context, quantified or not,
-is used whenever its instruction is reached, so a run that used to stop at an instruction such a
-hypothesis justifies now continues past it. The exit closes with the normalised facts, then again
+is used whenever its instruction is reached, allowing the run to continue past that instruction. The exit closes with the normalised facts, then again
 after unfolding `leaveFrame` and narrow extension, so a fact about the exited frame's memory is
 tried before cleanup rewrites past it. Supply an invariant and decreasing measure to the loop
 termination theorem; these tactics do not infer termination. See the [countdown

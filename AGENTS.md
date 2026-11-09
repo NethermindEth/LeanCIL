@@ -37,8 +37,9 @@ Write for the next reader; [Semantics.lean](./CIL/Semantics.lean) is the model.
 
 - Keep the README focused on project capabilities, limitations and getting started. Put proof API
   details, CI operation and performance measurements in `docs/`, with links from the README.
-- Update documentation in the PR that changes the behavior. Avoid adding implementation history
-  or benchmark results to the README for each change.
+- Update documentation in the PR that changes the behavior. Document current behavior and usage;
+  remove change notes rather than archiving them, since git history records changes. Keep history,
+  benchmark reports and future plans in explicitly scoped documents.
 - Lean blocks in the README, `docs/` and `skills/` are elaborated by the `docs` suite unless marked,
   and documents for users cite nothing under `Tests/`; see
   [documentation checks](./docs/CI.md#documentation-checks).

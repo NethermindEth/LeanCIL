@@ -79,7 +79,7 @@ decrease goal and an invariant that is not preserved at its preservation goal.
 
 ### Consumer stepping regressions
 
-The consumer failures reported in #252 are covered by the following proofs. These use the public
+The following proofs check consumer-facing stepping and reduction behavior. These use the public
 tactics with symbolic values and memory; they do not replace the checked interpreter with
 consumer-specific execution rules.
 
