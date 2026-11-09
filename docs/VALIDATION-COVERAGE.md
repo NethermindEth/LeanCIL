@@ -549,6 +549,8 @@ vector types, including self-copies. The universal UInt64 copy contract rejects 
 source/destination operands. Four unsupported/forged type-token cases test extraction rejection.
 Ten semantic tests cover initialization, permissions, lifetime, GC-sensitive storage,
 bounds, null references and partial overlap. A generic snapshot theorem covers typed copying.
+Packed test inputs use explicitly unaligned stores to their managed field addresses, so constructing
+them does not require aligned reflection stores on ARM64 or interop marshaling of Boolean/char fields.
 
 Portable helper validation compares actual .NET results with extracted execution, covering
 power-of-two boundaries, zero/all-ones values, signed boundaries and negative/oversized rotation
