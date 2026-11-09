@@ -490,6 +490,19 @@ Test("certified library binding, main republication and observability", () =>
     var suites = workflow[workflow.IndexOf("  suites:", StringComparison.Ordinal)..];
     Require(!suites.Contains("uses: leanprover/lean-action@", StringComparison.Ordinal),
         "Suite jobs must restore the producer toolchain without another installation");
+    var installer = workflow[workflow.IndexOf("      - name: Install pinned elan", StringComparison.Ordinal)..
+        workflow.IndexOf("      - name: Install Lean toolchain", StringComparison.Ordinal)];
+    Require(installer.Contains("/releases/download/v4.2.4/elan-x86_64-unknown-linux-gnu.tar.gz",
+            StringComparison.Ordinal) &&
+        installer.Contains("42b94d4244e8353142c456ec0e4ca6528fd898a6c604d4059f494e706e431f63",
+            StringComparison.Ordinal), "Elan must bind an exact release archive and digest");
+    var authenticated = installer.IndexOf("sha256sum --check --status", StringComparison.Ordinal);
+    Require(authenticated >= 0 && authenticated < installer.IndexOf("tar -xzf", StringComparison.Ordinal),
+        "Authenticate the elan archive before extracting or executing it");
+    Require(!workflow.Contains("uses: leanprover/lean-action@", StringComparison.Ordinal) &&
+        !installer.Contains("/latest/", StringComparison.Ordinal) &&
+        !installer.Contains("/master/", StringComparison.Ordinal),
+        "Toolchain preparation must not run a moving elan installer or release");
     Require(workflow.ReplaceLineEndings("\n").Split("timeout-minutes: 3\n", StringSplitOptions.None).Length == 3,
         "Both toolchain installation attempts must have bounded timeouts");
 });

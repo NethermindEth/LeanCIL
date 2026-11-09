@@ -52,10 +52,14 @@ helper, which reports authentication, extraction and publication time separately
 authenticate their manifests and compiled outputs before reuse; source, SDK or runtime changes
 fall back to a local build. Assembly mutation tests still rebuild their changed inputs.
 
-The preparation job also publishes its pinned Lean installation as a Zstandard archive.
+The preparation job installs elan 4.2.4 from its Linux x64 release archive, checking the pinned
+SHA-256 before extracting or executing the installer. The archive download retries once after
+30 seconds; each download attempt is limited to 150 seconds. The installer uses no moving
+installer script or release alias. Lean and Lake resolve the checkout's `lean-toolchain` pin.
+The preparation job publishes that installation as a Zstandard archive.
 Suite jobs verify the producer's archive and toolchain-file hashes before restoring executable
-permissions and links, avoiding repeated release downloads. The initial installation and its
-retry each have a three-minute limit. Failed-suite reruns retain the producer's artifact ID.
+permissions and links, avoiding repeated release downloads. The Lean toolchain installation and
+its retry each have a three-minute limit. Failed-suite reruns retain the producer's artifact ID.
 The [compression measurements](performance/ToolchainDistribution.md) retain the complete
 installation while reducing the archive size and repeated decompression work.
 
