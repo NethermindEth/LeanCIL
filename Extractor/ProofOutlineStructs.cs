@@ -33,6 +33,17 @@ internal static partial class ProofOutline
         internal string? Stopped { get; set; }
     }
 
+    /// <summary>A scalar literal with its stack width in bytes; conversions preserve this source width.</summary>
+    static (string Term, int Width)? StructLiteral(string op)
+    {
+        var match = Regex.Match(op,
+            @"\A\.const(32|64) (?:(\d+)|(\(BitVec\.ofInt \1 \(-?\d+\)\)))\z");
+        if (!match.Success) return null;
+        var term = match.Groups[2].Success ? $"({match.Groups[2].Value}#{match.Groups[1].Value})"
+            : match.Groups[3].Value;
+        return (term, match.Groups[1].Value == "64" ? 8 : 4);
+    }
+
     /// <summary>Walks a branch-free body over the receiver's disjoint scalar fields and integer arguments.</summary>
     static StructWalk WalkStruct(Specification spec, string[] ops, Names names)
     {
@@ -69,17 +80,7 @@ internal static partial class ProofOutline
                     stack.Push($"({parameter.Name}.{(parameter.Signed ? "signExtend" : "setWidth")} 32)");
                 else return Stop($"the argument `{parameter.Name}`", pc);
             }
-            else if ((match = Regex.Match(op, @"\A\.const64 (\d+)\z")).Success)
-                stack.Push($"({match.Groups[1].Value}#64)");
-            // A small literal the compiler loads as an int and widens is the same 64-bit literal.
-            else if ((match = Regex.Match(op, @"\A\.const32 (\d+)\z")).Success && pc + 1 < ops.Length &&
-                ops[pc + 1] is ".convU8" or ".convI8")
-            {
-                stack.Push($"({match.Groups[1].Value}#64)");
-                pc++;
-            }
-            else if ((match = Regex.Match(op, @"\A\.const32 (\d+)\z")).Success)
-                stack.Push($"({match.Groups[1].Value}#32)");
+            else if (StructLiteral(op) is { } literal) stack.Push(literal.Term);
             else if ((match = Regex.Match(op, @"\A\.conv([UI])([1248])\z")).Success)
             {
                 if (stack.Count == 0 || stack.Pop() is not { } value || value == Receiver)

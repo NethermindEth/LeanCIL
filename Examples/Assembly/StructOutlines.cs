@@ -6,6 +6,18 @@ public struct OutlineCounters
     public ulong First;
     public ulong Second;
 
+    public long SignedLiteral()
+    {
+        First = unchecked((ulong)-1L);
+        return (long)First;
+    }
+
+    public ulong UnsignedLiteral()
+    {
+        First = uint.MaxValue;
+        return First;
+    }
+
     public ulong ExchangeAdd(ulong value)
     {
         First = value;

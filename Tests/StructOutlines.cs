@@ -75,3 +75,24 @@ readSource = readSource.Replace("case postcondition => sorry", "case postconditi
 File.WriteAllText(readProof, readSource);
 Run(Cli("verify", read, "--proof", readProof));
 Console.WriteLine("PASS read-only initial narrow field contents and signed extension");
+
+foreach (var (method, expected) in new[] { ("SignedLiteral", "(-1 : W64)"),
+    ("UnsignedLiteral", "(4294967295 : W64)") })
+{
+    var literal = Path.Combine(root, method);
+    Run(Extract("extract", assembly, "Examples", $"OutlineCounters::{method}()", literal));
+    var proof = Path.Combine(root, method + ".lean");
+    File.Delete(proof);
+    Run(Cli("new-proof", literal, proof));
+    var literalSource = File.ReadAllText(proof);
+    if (literalSource.Contains("-- not outlined:", StringComparison.Ordinal))
+        throw new InvalidOperationException($"The {method} constant was not outlined:\n" + literalSource);
+    literalSource = Regex.Replace(literalSource, @"(def Precondition[\s\S]*?: Prop :=) sorry", "$1 True");
+    literalSource = Regex.Replace(literalSource, @"(def Postcondition[\s\S]*?: Prop :=) sorry",
+        $"$1 result = {expected} ∧ Contents final outlineCounters 8 [{expected}]");
+    literalSource = literalSource.Replace("case postcondition => sorry",
+        "case postcondition => exact ⟨rfl, held1⟩", StringComparison.Ordinal);
+    File.WriteAllText(proof, literalSource);
+    Run(Cli("verify", literal, "--proof", proof));
+}
+Console.WriteLine("PASS signed and unsigned widening of the all-ones 32-bit constant");
