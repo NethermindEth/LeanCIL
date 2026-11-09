@@ -24,8 +24,7 @@ def decrementContract : MethodContract W32 W32 where
 
 theorem decrement_holds : decrementContract.Holds Extracted.program decrement := by
   rintro x m -
-  refine MethodContract.Holds.intro m _ ⟨8, ?_⟩ (Confined.refl _ m) rfl
-  dsimp only [decrementContract]
+  refine MethodContract.Holds.intro m _ ?_ (Confined.refl _ m) rfl
   cil_checked_steps
 
 bind_entry entry (x : W32) := countBody with [.scalar (.i32 x)] from Memory.empty

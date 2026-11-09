@@ -42,6 +42,74 @@ elab "cil_strict " tactic:tactic : tactic =>
     evalTactic tactic
     if errors (← Core.getMessageLog) > earlier then throwError "Checked step candidate failed"
 
+/-- The projections of a method contract that stepping unfolds in a goal: its argument and
+    result encodings, precondition, footprint and postcondition. -/
+def contractProjections : List Lean.Name :=
+  [`CIL.Safety.MethodContract.args, `CIL.Safety.MethodContract.results,
+    `CIL.Safety.MethodContract.pre, `CIL.Safety.MethodContract.footprint,
+    `CIL.Safety.MethodContract.post]
+
+open Lean Meta in
+/-- `term` with each projection of a defined contract replaced by what the contract's
+    definition states for its arguments. A contract that is a variable, as in a rule stated for
+    every contract, is left folded, and so is `Returns`, which a proof may restate. -/
+def unfoldContractProjections (term : Expr) : MetaM Expr := do
+  let named (e : Expr) : Bool := e.getAppFn.constName?.any contractProjections.contains
+  -- Most goals name no contract, and are returned without being rebuilt.
+  if (term.find? named).isNone then return term
+  Meta.transform term (pre := fun e => do
+    unless named e do return .continue
+    let arguments := e.getAppArgs
+    let some contract := arguments[2]? | return .continue
+    let defined ← whnf contract
+    unless defined.isAppOf `CIL.Safety.MethodContract.mk do return .continue
+    let some info ← getProjectionFnInfo? e.getAppFn.constName! | return .continue
+    let some field := defined.getAppArgs[info.numParams + info.i]? | return .continue
+    return .visit (← whnfCore (mkAppN field (arguments.extract 3 arguments.size)).headBeta))
+
+open Lean Elab Tactic Meta in
+/-- State the goal with the projections of each defined contract unfolded, as
+    `unfoldContractProjections` gives them; a goal that names none is left as it is. -/
+elab "cil_unfold_contracts" : tactic => withMainContext do
+  let goal ← getMainGoal
+  let target ← instantiateMVars (← goal.getType)
+  let unfolded ← unfoldContractProjections target
+  unless unfolded == target do replaceMainGoal [← goal.replaceTargetDefEq unfolded]
+
+open Lean Elab Tactic Meta in
+/-- State the goal with `leaveFrame frame memory` as `memory` wherever `frame` is a literal
+    frame that owns no allocation; nothing else in the goal changes. -/
+elab "cil_frame_exit" : tactic => withMainContext do
+  let goal ← getMainGoal
+  let target ← instantiateMVars (← goal.getType)
+  let leaves (e : Expr) : Bool := e.isAppOfArity `CIL.Safety.leaveFrame 2
+  if (target.find? leaves).isNone then return
+  let exited ← Meta.transform target (pre := fun e => do
+    unless leaves e do return .continue
+    let frame ← whnfR e.appFn!.appArg!
+    unless frame.isAppOfArity `CIL.Safety.Frame.mk 5 do return .continue
+    unless (← whnfR frame.getAppArgs[2]!).isAppOfArity ``List.nil 1 do return .continue
+    return .visit e.appArg!)
+  unless exited == target do replaceMainGoal [← goal.replaceTargetDefEq exited]
+
+open Lean Elab Tactic Meta in
+/-- Open a goal `∃ fuel, invoke program fuel method .. = ..` with the execution bound of its
+    program and method as the fuel. Any other goal, such as one whose fuel is already a
+    numeral, is left as it is. -/
+elab "cil_supply_fuel" : tactic => withMainContext do
+  let target := (← instantiateMVars (← getMainTarget)).consumeMData
+  unless target.isAppOfArity ``Exists 2 do return
+  let .lam _ _ body _ := target.appArg! | return
+  let some (_, invocation, _) := body.consumeMData.eq? | return
+  unless invocation.isAppOfArity `CIL.Safety.invoke 5 do return
+  let arguments := invocation.getAppArgs
+  let program := arguments[0]!
+  let method := arguments[2]!
+  unless arguments[1]! == .bvar 0 && !program.hasLooseBVars && !method.hasLooseBVars do return
+  let bound := mkApp2 (mkConst ``CIL.executionBound) program method
+  let witness ← Term.exprToSyntax bound
+  evalTactic (← `(tactic| refine ⟨$witness, ?_⟩))
+
 /-- `cil_fact_simp (config) [lemmas] [facts]` runs `simp (config) [lemmas, facts]`, adding each
     local fact normalised by the default simp set and the non-local facts. -/
 syntax "cil_fact_simp" Lean.Parser.Tactic.optConfig " [" term,* "]" " [" term,* "]" : tactic
@@ -362,9 +430,10 @@ macro "cil_checked_memory_by_equations " "[" facts:term,* "]" : tactic =>
 macro "cil_checked_side " "[" facts:term,* "]" : tactic =>
   `(tactic| first
     | rfl
-    | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)
+    | (simp [CIL.Safety.leaveFrame_unowned, $[$facts:term],*] <;> (repeat constructor) <;> rfl)
     | (simp [cil_checked, CIL.Safety.checkedValue, CIL.Safety.numericValue,
          CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.formObject_leaveFrame,
+         CIL.Safety.leaveFrame_unowned,
          Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure, $[$facts:term],*] <;>
          (repeat constructor) <;> rfl))
 
@@ -909,13 +978,16 @@ macro_rules
       cil_checked_run_step [$[$facts:term],*]))
 
 /-- Proves an `invoke` or `run` goal, returning or stating a located fault, by checked
-    stepping with `facts`, normalised once at entry. Stops at the first step it cannot take,
-    leaving that goal; fails if it takes none. -/
+    stepping with `facts`, normalised once at entry. A goal `∃ fuel, invoke ..` takes the
+    execution bound of its method as the fuel, and the projections of a defined contract are
+    unfolded. Stops at the first step it cannot take, leaving that goal; fails if it takes
+    none. -/
 syntax "cil_checked_steps" "[" term,* "]" : tactic
 
 open Lean Elab Tactic in
 elab_rules : tactic
   | `(tactic| cil_checked_steps [$facts:term,*]) => do
+    evalTactic (← `(tactic| (cil_supply_fuel; cil_unfold_contracts)))
     let config ← `(Lean.Parser.Tactic.optConfig|)
     let prepared ← normaliseStepFacts config facts.getElems
     withMainContext <| evalTactic (← `(tactic| cil_checked_steps_normalized [$[$prepared:term],*]))

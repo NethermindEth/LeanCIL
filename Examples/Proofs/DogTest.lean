@@ -29,7 +29,6 @@ theorem dog_is_dog (memory : CIL.Safety.Memory) (animal : Reference)
     (typed : runtimeTypeOf memory animal = .ok dog) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object (.address animal)] memory =
       .ok (memory, [.scalar (.i32 1)]) := by
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
   cil_checked_steps [formed, typed, dog, scope, RuntimeType.lineage]
 
 #print axioms dog_is_dog
@@ -40,7 +39,6 @@ theorem bird_is_not_dog (memory : CIL.Safety.Memory) (animal : Reference)
     (typed : runtimeTypeOf memory animal = .ok bird) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object (.address animal)] memory =
       .ok (memory, [.scalar (.i32 0)]) := by
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
   cil_checked_steps [formed, typed, bird, scope, animalType, RuntimeType.lineage]
 
 #print axioms bird_is_not_dog
@@ -49,7 +47,6 @@ theorem bird_is_not_dog (memory : CIL.Safety.Memory) (animal : Reference)
 theorem null_is_not_dog (memory : CIL.Safety.Memory) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object .null] memory =
       .ok (memory, [.scalar (.i32 0)]) := by
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
   cil_checked_steps
 
 #print axioms null_is_not_dog

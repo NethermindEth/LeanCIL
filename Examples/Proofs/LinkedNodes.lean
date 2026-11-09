@@ -51,9 +51,7 @@ def secondValueContract : MethodContract Reference W64 where
 theorem link_holds : linkContract.Holds Extracted.program link := by
   rintro ⟨node, next⟩ memory ⟨owned, nextLive⟩
   obtain ⟨stored, framed, held⟩ := owned.store nextLive
-  refine MethodContract.Holds.intro _ []
-    ⟨CIL.executionBound Extracted.program link, ?_⟩ framed ⟨rfl, held⟩
-  dsimp only [linkContract]
+  refine MethodContract.Holds.intro _ [] ?_ framed ⟨rfl, held⟩
   cil_checked_steps [owned.live.formed, owned.located, nextLive.formed, stored]
 
 #print axioms link_holds
@@ -73,7 +71,6 @@ theorem secondValue_holds : secondValueContract.Holds Extracted.program secondVa
 theorem secondValue_null_node_throws (memory : Memory) :
     ∃ fuel, invoke Extracted.program fuel secondValue [.object .null] memory =
       .error ⟨secondValue, 1, .thrown "System.NullReferenceException"⟩ := by
-  refine ⟨CIL.executionBound Extracted.program secondValue, ?_⟩
   cil_checked_steps []
 
 #print axioms secondValue_null_node_throws
@@ -84,7 +81,6 @@ theorem secondValue_null_next_throws (memory : Memory) (node : Reference)
     (readable : Node.Next.Readable memory node) (held : Node.Next.of memory node = .null) :
     ∃ fuel, invoke Extracted.program fuel secondValue [.object (.address node)] memory =
       .error ⟨secondValue, 2, .thrown "System.NullReferenceException"⟩ := by
-  refine ⟨CIL.executionBound Extracted.program secondValue, ?_⟩
   cil_checked_steps [readable.live.formed, readable.located, readable.load_null held]
 
 #print axioms secondValue_null_next_throws

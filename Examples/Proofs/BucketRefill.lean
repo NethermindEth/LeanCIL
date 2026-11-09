@@ -43,7 +43,6 @@ theorem null_bucket (memory : Memory) (items : Reference) (length : Nat)
     (live : ReferenceArray.Live memory items nodeType length) :
     ∃ fuel, invoke Extracted.program fuel refill [.object .null, .object (.address items)]
         memory = .error ⟨refill, 2, .thrown "System.NullReferenceException"⟩ := by
-  refine ⟨CIL.executionBound Extracted.program refill, ?_⟩
   cil_checked_steps [live.formed]
 
 #print axioms null_bucket

@@ -72,7 +72,6 @@ def rootContract : MethodContract RootInput where
 theorem mix_holds : mixContract.Holds Extracted.program mix := by
   rintro ⟨x, y⟩ m -
   refine MethodContract.Holds.intro m _ ⟨8, ?_⟩ (Confined.refl _ m) rfl
-  dsimp only [mixContract]
   cil_checked_steps
 
 /-- The import's contract is the only assumption about `AddTo`; no body is fixed at its slot. -/
@@ -117,7 +116,6 @@ theorem root_given : HoldsGiven Extracted.program importsAdd (fun linked => root
   obtain ⟨m3, wrote, store, readback⟩ := store_word64 v writable2
   have fr2 := access_reference_valid _ _ _ _ _ writable2
   cil_contract_steps [fr2, store]
-  simp only [leaveFrame, List.foldl_nil]
   exact ⟨framed1.trans ((framed2.widen (by simp [mixContract])).trans (Confined.write wrote (by simp [addContract, numberBytes]))),
     _, rfl, rfl, readback⟩
 

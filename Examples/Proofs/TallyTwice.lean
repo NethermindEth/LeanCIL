@@ -28,8 +28,7 @@ def addTwoContract : MethodContract W32 W32 where
 
 theorem addTwo_holds : addTwoContract.Holds Extracted.program addTwo := by
   rintro x m -
-  refine MethodContract.Holds.intro m _ ⟨8, ?_⟩ (Confined.refl _ m) rfl
-  dsimp only [addTwoContract]
+  refine MethodContract.Holds.intro m _ ?_ (Confined.refl _ m) rfl
   cil_checked_steps
 
 bind_entry entry (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) :=

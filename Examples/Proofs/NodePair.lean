@@ -78,7 +78,7 @@ theorem correctness (memory : Memory) (formed : memory.WellFormed)
   · simp only [nodeType]
     cil_checked_steps [allocated, located0, checked0, stored0, located1, checked1, stored1,
       loaded.1, loaded.2, firstLive.formed, secondLive.formed, firstFormed, secondFormed,
-      nodeType, leaveFrame]
+      nodeType]
   · exact below.trans
       ((ReferenceArray.setSlot_below (field := ReferenceArray.slot ⟨memory.nextIdentity, 0⟩ 0) _
         (Nat.le_refl _) _).trans
@@ -96,7 +96,6 @@ theorem insufficient_budget (memory : Memory) (short : memory.heapBudget < objec
       .error ⟨pair, 1, .allocationFailure (objectFieldSlot * 2) memory.heapBudget⟩ := by
   have failed := newReferenceArray_insufficient memory nodeType (value := .i32 2) (length := 2)
     (Or.inl rfl) (by decide) (by decide) short
-  refine ⟨CIL.executionBound Extracted.program pair, ?_⟩
   cil_checked_steps [failed, firstFormed, secondFormed, nodeType]
 
 #print axioms insufficient_budget

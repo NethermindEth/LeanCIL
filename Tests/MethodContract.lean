@@ -116,7 +116,6 @@ theorem contract_steps_until_postcondition (frame : Frame) (memory : Memory)
 theorem mix_holds : mixContract.Holds Extracted.program mix := by
   rintro ⟨x, y⟩ m -
   refine MethodContract.Holds.intro m _ ⟨8, ?_⟩ (Confined.refl _ m) rfl
-  dsimp only [mixContract]
   cil_checked_steps
 
 theorem add_holds : addContract.Holds Extracted.program addTo := by
@@ -130,7 +129,6 @@ theorem add_holds : addContract.Holds Extracted.program addTo := by
   have lb := load_word64_of_read readB
   refine MethodContract.Holds.intro stored _
     ⟨9, ?_⟩ (Confined.write wrote (by simp [addContract, numberBytes])) ⟨rfl, readback⟩
-  dsimp only [addContract]
   cil_checked_steps [fa, fb, fr, la, lb, store]
 
 set_option maxHeartbeats 400000 in
@@ -172,7 +170,6 @@ theorem root_holds (mixHolds : mixContract.Holds Extracted.program mix)
   have fr2 := access_reference_valid _ _ _ _ _ writable2
   cil_contract_steps [fr2, store]
   case postcondition =>
-    simp only [leaveFrame, List.foldl_nil]
     exact ⟨framed1.trans ((framed2.widen (by simp [mixContract])).trans
         (Confined.write wrote (by simp [addContract, numberBytes]))),
       _, rfl, rfl, readback⟩

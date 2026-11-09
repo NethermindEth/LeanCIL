@@ -35,9 +35,7 @@ theorem bump_holds : bumpContract.Holds Extracted.program bump := by
   dsimp only [bumpContract] at owned
   obtain ⟨after, written, framed, held⟩ :=
     owned.store (Account.Balance.of memory account + amount)
-  refine MethodContract.Holds.intro after []
-    ⟨CIL.executionBound Extracted.program bump, ?_⟩ framed ⟨rfl, held⟩
-  dsimp only [bumpContract]
+  refine MethodContract.Holds.intro after [] ?_ framed ⟨rfl, held⟩
   cil_checked_steps [owned.facts, written]
 
 #print axioms bump_holds
@@ -63,18 +61,16 @@ def bumpBothContract : MethodContract (Reference × Reference × W64) where
 theorem bumpBoth_holds (holds : bumpContract.Holds Extracted.program bump) :
     bumpBothContract.Holds Extracted.program bumpBoth := by
   rintro ⟨first, second, amount⟩ memory ⟨firstOwned, secondOwned⟩
-  dsimp only [bumpBothContract]
   cil_contract_steps [holds, bumpContract, firstOwned, firstOwned.facts, secondOwned.facts]
     with middle values firstCall
   obtain ⟨rfl, firstHeld⟩ := firstCall.post
   have firstFramed := firstCall.framed
   have secondHeld := secondOwned.across firstOwned.live firstFramed firstHeld
-  dsimp only [bumpContract]
   cil_contract_steps [holds, bumpContract, secondHeld.1, secondHeld.1.facts]
     with final values secondCall
   obtain ⟨rfl, secondFinal⟩ := secondCall.post
   have secondFramed := secondCall.framed
-  dsimp only [bumpContract] at firstFramed secondFramed ⊢
+  dsimp only [bumpContract] at firstFramed secondFramed
   cil_contract_steps []
   change Confined _ memory final ∧
     bumpBothContract.Returns (first, second, amount) memory final []
@@ -101,7 +97,6 @@ theorem correctness : bumpBothContract.Holds Extracted.program bumpBoth :=
 theorem bump_null_throws (memory : Memory) (amount : W64) :
     ∃ fuel, invoke Extracted.program fuel bump [.object .null, .scalar (.i64 amount)] memory =
       .error ⟨bump, 2, .thrown "System.NullReferenceException"⟩ := by
-  refine ⟨CIL.executionBound Extracted.program bump, ?_⟩
   cil_checked_steps []
 
 #print axioms bump_null_throws

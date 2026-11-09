@@ -35,9 +35,7 @@ def relaneContract : MethodContract (Reference × Reference × Nat) where
 theorem correctness : relaneContract.Holds Extracted.program relane := by
   rintro ⟨tiles, lanes, length⟩ memory ⟨owned, whole⟩
   obtain ⟨stored, framed, held⟩ := owned.store_whole whole
-  refine MethodContract.Holds.intro _ []
-    ⟨CIL.executionBound Extracted.program relane, ?_⟩ framed ⟨rfl, held⟩
-  dsimp only [relaneContract]
+  refine MethodContract.Holds.intro _ [] ?_ framed ⟨rfl, held⟩
   cil_checked_steps [owned.live.formed, owned.located, stored, whole.valid]
 
 #print axioms correctness

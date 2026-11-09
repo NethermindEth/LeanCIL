@@ -108,7 +108,6 @@ theorem pair_holds : pairContract.Holds Extracted.program pair := by
   have c2 : Confined [(⟨id, offset⟩, 16)] m1 m2 :=
     Confined.write_within w2 ⟨_, List.mem_singleton_self _, rfl, by simp, by simp [length]⟩
   refine MethodContract.Holds.intro m2 () ⟨8, ?_⟩ (c1.trans c2) readback
-  dsimp only [pairContract]
   cil_checked_steps [f0, f1, a1, a2, w1, w2]
 
 theorem word_holds : wordContract.Holds Extracted.program word := by

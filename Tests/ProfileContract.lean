@@ -51,7 +51,6 @@ theorem uniform : ∀ body ∈ program, body.profile = avx2Profile := by decide
 theorem avx2_holds : avx2Contract.Holds program 0 := by
   rintro - memory -
   refine MethodContract.Holds.intro memory _ ⟨10, ?_⟩ (Confined.refl _ memory) rfl
-  dsimp only [avx2Contract]
   cil_checked_steps [program, avx2Profile]
 
 /-- The contract holds on x86-64-v4, with agreement checked by `decide`. -/

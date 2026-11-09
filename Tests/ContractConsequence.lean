@@ -278,8 +278,7 @@ theorem add_internal : addInternal.Holds Extracted.program addTo := by
   have lb := load_word64_of_read readB
   refine MethodContract.Holds.intro stored _
     ⟨9, ?_⟩ (Confined.write wrote (by simp [addInternal, numberBytes])) ⟨rfl, readback⟩
-  dsimp only [addInternal, addArgs]
-  cil_checked_steps [fa, fb, fr, la, lb, store]
+  cil_checked_steps [addArgs, fa, fb, fr, la, lb, store]
 
 /-- The frame fact comes from the internal footprint, not from re-executing `AddTo`. -/
 theorem add_public_refines : addInternal.Refines addPublic where
@@ -309,7 +308,6 @@ theorem sum_holds (addHolds : addPublic.Holds Extracted.program addTo) : sumCont
   intro m1 out call
   obtain ⟨rfl, readRes, readA1⟩ := call.post
   cil_contract_steps []
-  simp only [leaveFrame, List.foldl_nil]
   exact ⟨call.framed, _, rfl, rfl, readRes, readA1⟩
 
 theorem sum_correct : sumContract.Holds Extracted.program sum := sum_holds add_public

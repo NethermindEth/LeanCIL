@@ -107,9 +107,64 @@ theorem supplied_contract (program : Program) (memory : Safety.Memory)
 @[cil_contract] theorem registered_seven : seven.Holds boundProgram 1 := by
   intro input memory _
   refine MethodContract.Holds.intro memory 7 ⟨3, ?_⟩ (Confined.refl _ memory) rfl
-  dsimp only [seven]
   cil_checked_steps [seven]
 #print axioms registered_seven
+
+/-- The stepper opens `∃ fuel, invoke ..` with the method's execution bound and unfolds the
+    contract it proves, so the proof states neither. -/
+theorem supplied_fuel : seven.Holds boundProgram 1 := by
+  intro input memory _
+  refine MethodContract.Holds.intro memory 7 ?_ (Confined.refl _ memory) rfl
+  cil_checked_steps []
+#print axioms supplied_fuel
+
+/-- The supplied fuel is the execution bound; an author's own witness is left as written. -/
+example (memory : Safety.Memory) :
+    ∃ fuel, Safety.invoke boundProgram fuel 1 [] memory = .ok (memory, [.scalar (.i32 7)]) := by
+  cil_supply_fuel
+  show Safety.invoke boundProgram (CIL.executionBound boundProgram 1) 1 [] memory = _
+  cil_checked_steps []
+
+example (memory : Safety.Memory) :
+    ∃ fuel, Safety.invoke boundProgram fuel 1 [] memory = .ok (memory, [.scalar (.i32 7)]) := by
+  refine ⟨3, ?_⟩
+  cil_supply_fuel
+  show Safety.invoke boundProgram 3 1 [] memory = _
+  cil_checked_steps []
+
+/-- A fuel too small for the method is not replaced: the proof fails as it did. -/
+example (memory : Safety.Memory) (rest : Safety.invoke boundProgram 1 1 [] memory =
+    .ok (memory, [.scalar (.i32 7)])) :
+    Safety.invoke boundProgram 1 1 [] memory = .ok (memory, [.scalar (.i32 7)]) := by
+  fail_if_success (cil_checked_steps []; done)
+  exact rest
+
+/-- Only projections of a defined contract unfold: one over a contract variable stays folded,
+    as does `Returns`. -/
+example {Input Output : Type} (c : MethodContract Input Output) (input : Input)
+    (memory : Safety.Memory) (holds : c.pre input memory ∧ seven.pre () memory) :
+    c.pre input memory ∧ True := by
+  cil_unfold_contracts
+  exact ⟨holds.1, trivial⟩
+
+example (memory final : Safety.Memory) (returned : seven.Returns () memory final []) :
+    seven.Returns () memory final [] ∧ seven.footprint () = [] := by
+  cil_unfold_contracts
+  show seven.Returns () memory final [] ∧ ([] : List (Safety.Reference × Nat)) = []
+  exact ⟨returned, rfl⟩
+
+/-- Leaving a literal frame that owns nothing is stated as the memory it left; a frame that
+    owns an allocation, or is a variable, keeps `leaveFrame`. -/
+example (memory : Safety.Memory) (frame : Safety.Frame)
+    (kept : memory.WellFormed ∧ (Safety.leaveFrame ⟨0, [], [3], [], 0⟩ memory).WellFormed ∧
+      (Safety.leaveFrame frame memory).WellFormed) :
+    (Safety.leaveFrame ⟨0, [], [], [], 0⟩ memory).WellFormed ∧
+      (Safety.leaveFrame ⟨0, [], [3], [], 0⟩ memory).WellFormed ∧
+      (Safety.leaveFrame frame memory).WellFormed := by
+  cil_frame_exit
+  show memory.WellFormed ∧ (Safety.leaveFrame ⟨0, [], [3], [], 0⟩ memory).WellFormed ∧
+    (Safety.leaveFrame frame memory).WellFormed
+  exact kept
 
 /-- Registration supplies the callee contract without an explicit holds fact. -/
 theorem registered_caller (memory : Safety.Memory) :
@@ -178,7 +233,6 @@ theorem explicit_precondition (program : Program) (memory : Safety.Memory) (left
     (found : program[1]? = some helper) : seven.Holds program 1 := by
   intro input memory _
   refine MethodContract.Holds.intro memory 7 ⟨3, ?_⟩ (Confined.refl _ memory) rfl
-  dsimp only [seven]
   cil_checked_steps [found, seven]
 #print axioms bound_seven
 

@@ -38,9 +38,7 @@ theorem deposit_holds : depositContract.Holds Extracted.program deposit := by
   dsimp only [depositContract] at owned
   obtain ⟨after, written, framed, held⟩ :=
     owned.store (Account.Balance.of memory account + amount)
-  refine MethodContract.Holds.intro after []
-    ⟨CIL.executionBound Extracted.program deposit, ?_⟩ framed ⟨rfl, held⟩
-  dsimp only [depositContract]
+  refine MethodContract.Holds.intro after [] ?_ framed ⟨rfl, held⟩
   cil_checked_steps [owned.facts, written]
 
 #print axioms deposit_holds
@@ -66,18 +64,16 @@ def depositBothContract : MethodContract (Reference × Reference × W64) where
 theorem depositBoth_holds (holds : depositContract.Holds Extracted.program deposit) :
     depositBothContract.Holds Extracted.program depositBoth := by
   rintro ⟨first, second, amount⟩ memory ⟨firstOwned, secondOwned⟩
-  dsimp only [depositBothContract]
   cil_contract_steps [holds, depositContract, firstOwned, firstOwned.facts, secondOwned.facts]
     with middle values firstCall
   obtain ⟨rfl, firstHeld⟩ := firstCall.post
   have firstFramed := firstCall.framed
   have secondHeld := secondOwned.across firstOwned.live firstFramed firstHeld
-  dsimp only [depositContract]
   cil_contract_steps [holds, depositContract, secondHeld.1, secondHeld.1.facts]
     with final values secondCall
   obtain ⟨rfl, secondFinal⟩ := secondCall.post
   have secondFramed := secondCall.framed
-  dsimp only [depositContract] at firstFramed secondFramed ⊢
+  dsimp only [depositContract] at firstFramed secondFramed
   cil_contract_steps []
   change Confined _ memory final ∧
     depositBothContract.Returns (first, second, amount) memory final []
@@ -108,7 +104,6 @@ theorem first_null_throws (memory : Memory) (second : Reference) (amount : W64)
     ∃ fuel, invoke Extracted.program fuel depositBoth
         [.object .null, .object (.address second), .scalar (.i64 amount)] memory =
       .error ⟨depositBoth, 2, .thrown "System.NullReferenceException"⟩ := by
-  refine ⟨CIL.executionBound Extracted.program depositBoth, ?_⟩
   cil_checked_steps [secondLive.formed]
 
 #print axioms first_null_throws

@@ -686,7 +686,8 @@ theorem MethodContract.Holds.weaken {Input Output : Type}
     `invoke_exists_of_run` so stepping can start at pc 0. Used by `cil_contract_steps`. -/
 macro "cil_contract_prepare" "[" facts:term,* "]" : tactic =>
   `(tactic| (
-    -- A contract continuation resumes at `pc + 1` on `values ++ rest` with projected inputs.
+    -- A contract continuation resumes at `pc + 1` on `results ++ rest` with projected inputs.
+    cil_unfold_contracts
     try dsimp only [Nat.reduceAdd]
     cil_stack_cleanup
     try (cil_strict refine CIL.Safety.invoke_exists_of_run
@@ -840,6 +841,7 @@ def cilContractApply (methodFound instructionFound : Term) (facts : Array Term) 
       let (called, output, call) ← continuation.withContext cilCallNames
       evalTactic (← `(tactic| (
         intro $called:ident $output:ident $call:ident
+        cil_unfold_contracts
         cil_stack_cleanup)))
       let remaining ← getGoals
       setGoals ((if ← permitted.isAssigned then [] else [permitted]) ++ remaining ++ siblings)
@@ -864,7 +866,9 @@ elab_rules : tactic
         $methodFound $instructionFound
         (by cil_checked_step_normalized [$[$facts:term],*])
         (by cil_checked_side [$[$facts:term],*]) ?_))
-      -- What is left at a return is the method's postcondition.
+      -- What is left at a return is the method's postcondition, of the memory the body left
+      -- when the frame owns nothing.
+      evalTactic (← `(tactic| cil_frame_exit))
       (← getMainGoal).setTag `postcondition
       return
     evalTactic (←

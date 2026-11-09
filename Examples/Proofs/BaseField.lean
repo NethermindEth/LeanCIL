@@ -30,7 +30,6 @@ theorem correctness (memory : CIL.Safety.Memory) (shape : ManagedReference) (fie
     (loaded : loadValue memory (.address field) 8 = .ok (.i64 id)) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object shape] memory =
       .ok (memory, [.scalar (.i64 id)]) := by
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
   cil_checked_steps [formed, located, loaded, shapeType]
 
 #print axioms correctness
@@ -59,7 +58,6 @@ theorem unrelated_rejected (memory : CIL.Safety.Memory) (type : RuntimeType)
 theorem null_throws (memory : CIL.Safety.Memory) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object .null] memory =
       .error ⟨0, 1, .thrown "System.NullReferenceException"⟩ := by
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
   cil_checked_steps [objectFieldAddress]
 
 #print axioms null_throws

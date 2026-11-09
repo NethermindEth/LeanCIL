@@ -29,7 +29,6 @@ theorem correctness (memory : CIL.Safety.Memory) (formed : memory.WellFormed) :
   have allocated := allocateObject_ok formed dog (Nat.zero_le _) (by decide)
   have created := objectMemory_formObject memory dog 0
   have typed := objectMemory_runtimeTypeOf memory dog 0
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
   cil_checked_steps [allocated, created, typed, dog, scope]
 
 #print axioms correctness

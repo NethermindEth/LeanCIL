@@ -92,7 +92,6 @@ def echoContract : MethodContract CIL.W64 CIL.W64 where
 theorem echo_holds : echoContract.Holds program echoMethod := by
   rintro v memory -
   refine MethodContract.Holds.intro memory v ⟨echoFuel, ?_⟩ (Confined.refl _ memory) rfl
-  dsimp only [echoContract]
   cil_checked_steps []
 
 /-- The precondition supplies the entry premises, so the proved contract is certified. -/
@@ -145,7 +144,6 @@ def echoAnywhere : MethodContract CIL.W64 CIL.W64 :=
 theorem echo_anywhere : echoAnywhere.Holds program echoMethod := by
   rintro v memory -
   refine MethodContract.Holds.intro memory v ⟨echoFuel, ?_⟩ (Confined.refl _ memory) rfl
-  dsimp only [echoAnywhere, echoContract]
   cil_checked_steps []
 
 /-- Names the frame `Echo(v)` enters from `memory` and a fuel at which that frame's run
@@ -174,8 +172,8 @@ macro "relay_finish" : tactic => `(tactic| (
   obtain ⟨-, body, frame, entered, lookup, -, setup, finished, -, visits, -⟩ := certificate
   cases lookup
   cil_contract_steps []
-  -- `Relay` owns no allocation, so leaving its frame keeps all memory below its watermark.
-  exact ⟨call.framed.after_leaveFrame (fun _ member => nomatch member), out, rfl, rfl,
+  -- `Relay` owns no allocation, so its postcondition is stated of the memory `Echo` left.
+  exact ⟨call.framed, out, rfl, rfl,
     calleeFuel, frame, entered, final, setup, finished, visits⟩
   ))
 

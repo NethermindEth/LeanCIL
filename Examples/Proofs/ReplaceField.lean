@@ -24,7 +24,6 @@ theorem correctness (memory after : CIL.Safety.Memory) (account : CIL.Safety.Man
   have locatedAfter :=
     (CIL.Safety.objectFieldAddress_of_allocations unchanged account accountType 0).trans located
   have readback := CIL.Safety.objectField_readback_i64 written
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
   cil_checked_steps [formed, located, written, formedAfter, locatedAfter, readback,
     accountType]
 

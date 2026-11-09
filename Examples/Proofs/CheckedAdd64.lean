@@ -15,7 +15,6 @@ theorem correctness (memory : CIL.Safety.Memory) (x y : W64) (fits : x.toNat + y
     simp only [checkedValues, checkedBits, Bool.false_eq_true, ite_false]
     rw [ite_eq_left range]
     rfl
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
   cil_checked_steps [calculation]
 
 #print axioms correctness

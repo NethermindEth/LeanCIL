@@ -64,7 +64,6 @@ theorem check_in_range : checkInRange.Holds literal 1 := by
   rintro v m (within : v ≤ 100)
   have bound : ¬ 100#64 < v := by simpa using within
   refine MethodContract.Holds.intro m _ ⟨10, ?_⟩ (Confined.refl _ m) rfl
-  dsimp only [checkInRange]
   cil_checked_steps [bound]
 
 -- The method contract transfers to the extraction without reading `extractedCheck`.

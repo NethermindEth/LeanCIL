@@ -26,8 +26,7 @@ theorem correctness (memory : Memory) (tiles pairs : Reference) (length : Nat)
     ∃ fuel, invoke Extracted.program fuel pairCount [.object (.address tiles)] memory =
       .ok (memory, [.scalar (.i32 (BitVec.ofNat 32 length))]) := by
   obtain ⟨formed, located, loaded⟩ := readable.facts held whole (by decide)
-  refine ⟨CIL.executionBound Extracted.program pairCount, ?_⟩
-  cil_checked_steps [formed, located, loaded, whole.valid, leaveFrame]
+  cil_checked_steps [formed, located, loaded, whole.valid]
 
 #print axioms correctness
 
@@ -37,7 +36,6 @@ theorem null_pairs (memory : Memory) (tiles : Reference)
     (held : Tiles.Pairs.of memory tiles = .null) :
     ∃ fuel, invoke Extracted.program fuel pairCount [.object (.address tiles)] memory =
       .error ⟨pairCount, 2, .thrown "System.NullReferenceException"⟩ := by
-  refine ⟨CIL.executionBound Extracted.program pairCount, ?_⟩
   cil_checked_steps [readable.live.formed, readable.located, readable.load_null held rfl]
 
 #print axioms null_pairs

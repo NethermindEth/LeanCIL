@@ -373,7 +373,6 @@ theorem rent_exhausted_throws (memory : Memory) (pool : Reference)
   have emptyLoad := free0.1.load_null (free0.2.trans empty)
   have liveFacts := live0.2 ▸ live0.1.facts
   have capacityFacts := capacity0.2 ▸ capacity0.1.facts
-  refine ⟨CIL.executionBound Extracted.program rent, ?_⟩
   cil_checked_steps [enter.setup, entry.frame, free.live.formed, free0.1.live.formed,
     free0.1.located, emptyLoad, liveFacts, capacityFacts, full]
 
@@ -384,7 +383,6 @@ theorem rent_null_pool_throws (memory : Memory) (wellFormed : memory.WellFormed)
     ∃ fuel, invoke Extracted.program fuel rent [.object .null] memory =
       .error ⟨rent, 1, .thrown "System.NullReferenceException"⟩ := by
   obtain ⟨home, entered, enter⟩ := entry.checked memory .null wellFormed
-  refine ⟨CIL.executionBound Extracted.program rent, ?_⟩
   cil_checked_steps [enter.setup]
 
 #print axioms rent_null_pool_throws

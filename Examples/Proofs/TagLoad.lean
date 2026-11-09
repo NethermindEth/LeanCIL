@@ -66,7 +66,6 @@ theorem index_out_of_range (memory : Memory) (tagged tags : Reference) (length :
     ∃ fuel, invoke Extracted.program fuel take
         [.object (.address tagged), .object (.address tags), .scalar (.i32 index)] memory =
       .error ⟨take, 3, .thrown "System.IndexOutOfRangeException"⟩ := by
-  refine ⟨CIL.executionBound Extracted.program take, ?_⟩
   cil_checked_steps [object.formed, live.formed, live.slot_outside outside]
 
 #print axioms index_out_of_range

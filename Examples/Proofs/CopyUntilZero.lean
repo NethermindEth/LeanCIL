@@ -34,8 +34,7 @@ theorem stamp_holds : stampContract.Holds Extracted.program stamp := by
   rintro ⟨slot, value⟩ memory writable
   dsimp only [stampContract] at writable
   obtain ⟨after, wrote, formed, confined, filled⟩ := writable.write_one value
-  refine MethodContract.Holds.intro after () ⟨8, ?_⟩ confined filled
-  dsimp only [stampContract]
+  refine MethodContract.Holds.intro after () ?_ confined filled
   cil_checked_steps [step_storeScalar_of_write wrote, formed]
 
 /-- The words copied: those before the first zero, or all of them. -/

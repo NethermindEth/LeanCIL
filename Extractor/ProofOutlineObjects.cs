@@ -1670,7 +1670,6 @@ internal static partial class ProofOutline
                 {
                     lean.Line($"{indent}obtain ⟨held{index}, returned{number}⟩ := held{index}");
                     lean.Line($"{indent}subst output{number}");
-                    lean.Line($"{indent}dsimp only [{call.Callee.Name}Contract]");
                 }
                 stored.Add(writes);
                 return;
@@ -1689,7 +1688,6 @@ internal static partial class ProofOutline
                 if (call.Callee.Walk.Returned is not null)
                 {
                     lean.Line($"{indent}subst output{number}");
-                    lean.Line($"{indent}dsimp only [{call.Callee.Name}Contract]");
                 }
                 stored.Add(call);
                 return;

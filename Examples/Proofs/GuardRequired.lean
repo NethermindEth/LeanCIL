@@ -18,7 +18,6 @@ theorem null_raises (memory : Memory) (literal : Reference)
     (formed : formObject memory (.address literal) = .ok (.object (.address literal))) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object .null] memory =
       .error ⟨0, 2, .thrown "System.ArgumentNullException"⟩ := by
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
   cil_checked_steps [literalObject_of_lookup bound, formed]
 
 #print axioms null_raises
@@ -30,8 +29,7 @@ theorem keeps_label (memory : Memory) (label literal : Reference)
     (formed : formObject memory (.address literal) = .ok (.object (.address literal))) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object (.address label)] memory =
       .ok (memory, [.object (.address label)]) := by
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
-  cil_checked_steps [labelFormed, literalObject_of_lookup bound, formed, leaveFrame]
+  cil_checked_steps [labelFormed, literalObject_of_lookup bound, formed]
 
 #print axioms keeps_label
 

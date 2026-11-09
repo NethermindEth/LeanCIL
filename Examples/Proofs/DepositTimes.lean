@@ -39,9 +39,7 @@ theorem deposit_holds : depositContract.Holds Extracted.program deposit := by
   dsimp only [depositContract] at owned
   obtain ⟨after, written, framed, held⟩ :=
     owned.store (Account.Balance.of memory account + amount)
-  refine MethodContract.Holds.intro after []
-    ⟨CIL.executionBound Extracted.program deposit, ?_⟩ framed ⟨rfl, held⟩
-  dsimp only [depositContract]
+  refine MethodContract.Holds.intro after [] ?_ framed ⟨rfl, held⟩
   cil_checked_steps [owned.facts, written]
 
 #print axioms deposit_holds

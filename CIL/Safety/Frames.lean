@@ -392,6 +392,12 @@ def enterFrame (body : CIL.Method) (args : List Value) (m : Memory) :
 def leaveFrame (frame : Frame) (m : Memory) : Memory :=
   frame.owned.foldl expire m
 
+/-- Leaving a frame that owns no allocation keeps the memory, so a return from one states its
+    postcondition of the memory the body left. -/
+theorem leaveFrame_unowned (activation : Nat) (locals : List LocalSlot)
+    (arguments : List (Nat × LocalSlot)) (stackBytes : Nat) (m : Memory) :
+    leaveFrame { activation, locals, owned := [], arguments, stackBytes } m = m := rfl
+
 /-- The pre-opaque frame equation, under its explicit default-metadata premise. -/
 theorem enterFrame_of_no_opaque (body : CIL.Method) (args : List Value) (m : Memory)
     (noOpaque : body.opaqueVectorLocals = []) :

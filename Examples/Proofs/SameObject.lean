@@ -11,7 +11,6 @@ theorem correctness (memory : CIL.Safety.Memory) (left right : CIL.Safety.Manage
     (rightFormed : CIL.Safety.formObject memory right = .ok (.object right)) :
     ∃ fuel, CIL.Safety.invoke Extracted.program fuel 0 [.object left, .object right] memory =
       .ok (memory, [.scalar (.i32 (if left = right then 1 else 0))]) := by
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
   cil_checked_steps [leftFormed, rightFormed]
 
 #print axioms correctness

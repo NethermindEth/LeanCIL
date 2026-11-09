@@ -34,9 +34,7 @@ def refillContract : MethodContract (Reference × Reference × Nat) where
 theorem correctness : refillContract.Holds Extracted.program refill := by
   rintro ⟨samples, values, length⟩ memory ⟨owned, whole⟩
   obtain ⟨stored, framed, held⟩ := owned.store_whole whole
-  refine MethodContract.Holds.intro _ []
-    ⟨CIL.executionBound Extracted.program refill, ?_⟩ framed ⟨rfl, held⟩
-  dsimp only [refillContract]
+  refine MethodContract.Holds.intro _ [] ?_ framed ⟨rfl, held⟩
   cil_checked_steps [owned.live.formed, owned.located, stored, whole.valid]
 
 #print axioms correctness
@@ -47,7 +45,6 @@ theorem null_samples (memory : Memory) (values : Reference) (length : Nat)
     ∃ fuel, invoke Extracted.program fuel refill
         [.object .null, .array ⟨.address values, length, .signed32⟩] memory =
       .error ⟨refill, 2, .thrown "System.NullReferenceException"⟩ := by
-  refine ⟨CIL.executionBound Extracted.program refill, ?_⟩
   cil_checked_steps [valid]
 
 #print axioms null_samples

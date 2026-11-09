@@ -32,8 +32,7 @@ theorem correctness (memory : Memory) (nodes target : Reference) (length : Nat)
         [.object (.address nodes), .scalar (.i32 index)] memory =
       .ok (memory, [.object (.address target)]) := by
   have loaded := readable.facts held live
-  refine ⟨CIL.executionBound Extracted.program elementAt, ?_⟩
-  cil_checked_steps [readable.formed, live.formed, loaded.1, loaded.2, leaveFrame]
+  cil_checked_steps [readable.formed, live.formed, loaded.1, loaded.2]
 
 #print axioms correctness
 
@@ -45,8 +44,7 @@ theorem returns_null (memory : Memory) (nodes : Reference) (length : Nat) (index
         [.object (.address nodes), .scalar (.i32 index)] memory =
       .ok (memory, [.object .null]) := by
   have loaded := readable.facts_null held
-  refine ⟨CIL.executionBound Extracted.program elementAt, ?_⟩
-  cil_checked_steps [readable.formed, loaded.1, loaded.2, leaveFrame]
+  cil_checked_steps [readable.formed, loaded.1, loaded.2]
 
 #print axioms returns_null
 
@@ -59,7 +57,6 @@ theorem index_out_of_range (memory : Memory) (nodes : Reference) (length : Nat)
         [.object (.address nodes), .scalar (.i32 index)] memory =
       .error ⟨elementAt, 2, .thrown "System.IndexOutOfRangeException"⟩ := by
   have past := live.slot_outside outside
-  refine ⟨CIL.executionBound Extracted.program elementAt, ?_⟩
   cil_checked_steps [live.formed, past]
 
 #print axioms index_out_of_range
@@ -81,7 +78,6 @@ theorem negative_out_of_range (memory : Memory) (nodes : Reference) (length : Na
 theorem null_array (memory : Memory) (index : BitVec 32) :
     ∃ fuel, invoke Extracted.program fuel elementAt [.object .null, .scalar (.i32 index)]
         memory = .error ⟨elementAt, 2, .thrown "System.NullReferenceException"⟩ := by
-  refine ⟨CIL.executionBound Extracted.program elementAt, ?_⟩
   cil_checked_steps []
 
 #print axioms null_array
