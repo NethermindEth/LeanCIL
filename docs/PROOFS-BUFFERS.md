@@ -89,6 +89,16 @@ address `arrayElement memory values index width = .ok item` and its load, the el
 steps `ldelema` from the address; `arrayElement_formed` forms that address, so a helper may return
 it. An index outside the array throws, which a precondition bounding the index rules out.
 
+A loop indexing the array reads it the way a span loop does, through the storage span: the caller's
+`CheckedSpan initial values.storage width true elements` carries into each iteration's frame by
+`CheckedSpan.within`, and `array_load` of its contents names the element. A loop storing into the
+array holds `SpanWritable` authority over `values.storage` instead; with the array addressed at
+`base`, `arrayElement_of_access` turns write authority over `base.element width index` and the
+bound into the element `arrayElement` returns, and `step_arrayStore_of_write` steps `stelem` to the
+written memory. The bound test compares the index with `values.Length` as signed words;
+`SpanView.length_bounded` of the storage span keeps the length below `2 ^ 31`, and
+`toInt_ofNat_of_lt`, which `cil_loop_obligation` applies, reads that comparison as unsigned.
+
 ## Describe buffer contents
 
 `CIL.Safety.BufferContents` states what a contiguous run of integer elements holds, over the checked

@@ -14,20 +14,22 @@ head of their type, so a context of unrelated hypotheses adds nothing to simp.
 namespace CIL.Safety
 
 /-- Heads of the equations the loop tactics take from the context: checked steps, local and
-    memory loads and stores, span element, slice, validity, width and mode checks, formed
-    references and `Unsafe.Add` results. -/
+    memory loads and stores, span element, slice, validity, width and mode checks, array validity,
+    formed references and `Unsafe.Add` results. -/
 def loopFactHeads : List Lean.Name :=
   [``CIL.Safety.step, ``CIL.Safety.instruction, ``CIL.Safety.memoryInstruction,
     ``CIL.Safety.staticInstruction, ``CIL.Safety.loadLocal, ``CIL.Safety.storeLocal,
     ``CIL.Safety.loadValue, ``CIL.Safety.storeValue, ``CIL.Safety.SpanView.element,
     ``CIL.Safety.SpanView.slice, ``CIL.Safety.SpanView.validate, ``CIL.Safety.SpanView.width,
-    ``CIL.Safety.SpanView.writable, ``CIL.Safety.form, ``CIL.Safety.add]
+    ``CIL.Safety.SpanView.writable, ``CIL.Safety.ArrayView.validate, ``CIL.Safety.form,
+    ``CIL.Safety.add]
 
 /-- The facts about caller storage that read only allocations, so a loop frame carries them from
     its caller's memory to its own (`CIL.Safety.LoopCallerFacts`), with the lemma that does. -/
 def loopCallerFacts : List (Lean.Name × Lean.Name) :=
   [(``CIL.Safety.form, `LoopFrame.caller_form), (``CIL.Safety.add, `LoopFrame.caller_add),
     (``CIL.Safety.SpanView.validate, `LoopFrame.caller_valid),
+    (``CIL.Safety.ArrayView.validate, `LoopFrame.caller_array_valid),
     (``CIL.Safety.SpanView.element, `LoopFrame.caller_element),
     (``CIL.Safety.SpanView.slice, `LoopFrame.caller_slice)]
 
@@ -445,8 +447,9 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
       if let some (_, lhs, rhs) := type.consumeMData.eq? then
         let subject := if formedResult.isSome then #[]
           else (variables lhs.getAppArgs).filter (· != memory.fvarId!)
-        -- A span's validity stays with every step, since loading a span local reads it.
-        let base := if carry == `LoopFrame.caller_valid then `callerFact else `referenceFact
+        -- A span's or array's validity stays with every step, since loading either reads it.
+        let base := if carry == `LoopFrame.caller_valid || carry == `LoopFrame.caller_array_valid then
+          `callerFact else `referenceFact
         for (frame, formed, framed) in carriers memory do
           candidates := candidates.push (base,
             applied carry #[named frame, named formed, fact], subject, #[framed], variables #[rhs])

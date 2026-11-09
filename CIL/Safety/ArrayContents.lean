@@ -1,6 +1,7 @@
 import CIL.Safety.SpanContents
 import CIL.Safety.ArrayViewLemmas
 import CIL.Safety.StepComposition
+import CIL.Safety.BufferContents
 
 /-!
 # Reading a supplied array
@@ -10,7 +11,10 @@ method needs of its elements are `SpanContents` over that span. `SpanContents.ar
 turns them into the element reference and loaded value of an in-bound index; a null array
 has no elements, so the bound alone rules it out. `step_arrayLoad_of_element` and
 `step_arrayAddress_of_element` step `ldelem` and `ldelema` from those facts, and
-`arrayElement_formed` lets a method return the element address.
+`arrayElement_formed` lets a method return the element address. A loop indexing the array
+names the element it stores to with `arrayElement_of_access` and steps `stelem` with
+`step_arrayStore_of_write`; `SpanView.length_bounded` of the storage span lets its signed bound
+test read as unsigned.
 -/
 
 namespace CIL.Safety
@@ -95,5 +99,76 @@ theorem arrayElement_formed {memory : Memory} {view : ArrayView} {index width : 
     | simp only [checkedAt, Except.mapError, Bind.bind, Except.bind] at found
 
 #print axioms arrayElement_formed
+
+/-- An in-bound element of a valid array that may be accessed is the array's element at that
+    index, so a loop holding write authority over it may store there. -/
+theorem arrayElement_of_access {memory : Memory} {view : ArrayView} {base : Reference}
+    {index width : Nat} {writing : Bool}
+    (valid : view.validate memory = .ok ()) (address : view.reference = .address base)
+    (typed : view.elementType.width = width) (bound : index < view.length)
+    (target : access memory (base.element width index) width 1 writing = .ok ()) :
+    arrayElement memory view index width = .ok (base.element width index) := by
+  have formed := access_reference_valid _ _ _ _ _ target
+  have moved :
+      { base with offset := base.offset + index * width } = base.element width index := by
+    simp [Reference.element, Nat.mul_comm]
+  have stored : view.storage.reference = .address base := address
+  have length : view.storage.length = view.length := rfl
+  have sized : view.storage.width = width := typed
+  have checked : view.storage.validate memory = .ok () := valid
+  have element : view.storage.element memory index = .ok (base.element width index) := by
+    simp [SpanView.element, checked, length, bound, stored, sized, moved, formed, Bind.bind,
+      Except.bind]
+  have present : (view.reference == .null) = false := by simp [address]
+  simp [arrayElement, ArrayView.element, ArrayView.validate, checked, typed, present, element,
+    bound, checkedAt, Except.mapError, Bind.bind, Except.bind]
+
+#print axioms arrayElement_of_access
+
+/-- `stelem` of a 1-, 2- or 4-byte word into an element whose write succeeds leaves that
+    write's memory. -/
+theorem step_arrayStore_of_write {memory after : Memory} {view : ArrayView} {index : CIL.Value}
+    {position width : Nat} {reference : Reference} {bits : CIL.W32}
+    (indexed : arrayIndex index = some position)
+    (found : arrayElement memory view position width = .ok reference)
+    (written : write memory reference (numberBytes bits.toNat width) 1 = .ok after)
+    (narrow : width = 1 ∨ width = 2 ∨ width = 4 := by decide) :
+    ∀ body pc args frame rest,
+      step body (.memory (.arrayStore width)) pc args frame
+        (.scalar (.i32 bits) :: .scalar index :: .array view :: rest) memory =
+        .ok (.next (pc + 1) rest frame after) := by
+  intro body pc args frame rest
+  rw [step_memory_eq]
+  rcases narrow with rfl | rfl | rfl <;>
+  cases index <;> simp only [arrayIndex, reduceCtorEq, Option.some.injEq] at indexed <;>
+    subst indexed <;>
+    simp [unspecifiedOperands, CIL.MemoryOp.argumentCount, Value.hasUnspecified,
+      CIL.Value.hasUnspecified, staticInstruction, memoryInstruction, otherMemoryInstruction,
+      arrayIndex, found, written, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure,
+      Except.pure]
+
+#print axioms step_arrayStore_of_write
+
+/-- `stelem` of an 8-byte word into an element whose write succeeds leaves that write's
+    memory. -/
+theorem step_arrayStore_i64_of_write {memory after : Memory} {view : ArrayView}
+    {index : CIL.Value} {position : Nat} {reference : Reference} {bits : CIL.W64}
+    (indexed : arrayIndex index = some position)
+    (found : arrayElement memory view position 8 = .ok reference)
+    (written : write memory reference (numberBytes bits.toNat 8) 1 = .ok after) :
+    ∀ body pc args frame rest,
+      step body (.memory (.arrayStore 8)) pc args frame
+        (.scalar (.i64 bits) :: .scalar index :: .array view :: rest) memory =
+        .ok (.next (pc + 1) rest frame after) := by
+  intro body pc args frame rest
+  rw [step_memory_eq]
+  cases index <;> simp only [arrayIndex, reduceCtorEq, Option.some.injEq] at indexed <;>
+    subst indexed <;>
+    simp [unspecifiedOperands, CIL.MemoryOp.argumentCount, Value.hasUnspecified,
+      CIL.Value.hasUnspecified, staticInstruction, memoryInstruction, otherMemoryInstruction,
+      arrayIndex, found, written, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure,
+      Except.pure]
+
+#print axioms step_arrayStore_i64_of_write
 
 end CIL.Safety
