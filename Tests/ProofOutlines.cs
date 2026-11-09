@@ -55,6 +55,11 @@ var catalog = new (string Name, string Selector, string Group)[]
     ("Withdraw", "Objects::Withdraw(Examples.Account,System.UInt64)", "objects"),
     ("LinkedValue", "Objects::LinkedValue(Examples.Node,Examples.Node)", "objects"),
     ("IsIdle", "ItemPool::IsIdle(Examples.PooledItem)", "objects"),
+    // A static helper that tests its word arguments gets a contract stub: its result returned, stored into a
+    // field after the call, and returned by a caller over words alone.
+    ("HelperResult", "Gauge::Current()", "objects"),
+    ("HelperStore", "Gauge::Settle()", "objects"),
+    ("HelperWords", "Gauge::Smaller(int,int)", "control"),
     ("DownThenUp", "Loops::DownThenUp(uint)", "control"),
     ("CheckedAdd", "CheckedArithmetic::Add(uint,uint)", "control"),
     ("Log64", "Bits::Log64(ulong)", "control"),
@@ -95,6 +100,8 @@ var catalog = new (string Name, string Selector, string Group)[]
     ("ArrayRead", "ArrayElementReferences::Read(int[],int)", "buffers"),
     ("ArraySum", "Loops::SumIndexed(ulong[])", "buffers"),
     ("ArrayFill", "Loops::FillIndexed(uint[],uint)", "buffers"),
+    // The receiver of a class instance method beside the array it indexes.
+    ("ReceiverArraySum", "Gauge::Total(int[])", "buffers"),
     ("SpanLocalSum", "Loops::SumThroughLocal(System.ReadOnlySpan`1<System.UInt64>)", "buffers"),
     ("ArraySpanSum", "Loops::SumThroughSpan(ulong[])", "buffers"),
     ("ArraySpanFill", "Loops::FillThroughSpan(uint[],uint)", "buffers"),
@@ -380,8 +387,63 @@ if (Selected("Countdown"))
 // reference field store, a null test of an argument followed through a local, a split on a field value and a
 // call to a callee that loads the object a field holds each verify.
 const string storedHole = "sorry -- Postcondition of the returned value, with `held1` the stored fields";
+// A helper's stub leaves its contract to the author: here it needs nothing and returns the smaller argument as a
+// signed word, which each side of its test then proves, and its caller proves `pre` at the call.
+(string Hole, string Filled)[] SaturateStub(int line) => [
+    ("  pre := fun (value, limit) memory => sorry", "  pre := fun (value, limit) memory => True"),
+    ("final = initial ∧ sorry", "final = initial ∧ result.toInt = min value.toInt limit.toInt"),
+    ("""
+          -- what `saturateContract.post` states of the returned value where `value.toInt <
+          -- limit.toInt`, from `permitted`, its `pre`
+          sorry
+    """, "      omega"),
+    ("""
+          -- what `saturateContract.post` states of the returned value where not `value.toInt <
+          -- limit.toInt`, from `permitted`, its `pre`
+          sorry
+    """, "      omega"),
+    ($"    sorry -- `saturateContract.pre` at the call at OutlineHelpers.cs:{line}, from `assumed`", "    trivial")];
+const string smallerLevel = "min (Gauge.Level.of initial gauge).toInt (Gauge.Limit.of initial gauge).toInt";
 foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] Fills)[]
 {
+    // The caller learns of the helper's result only what the contract's `post` states, `post1`.
+    ("HelperResult", [
+        .. SaturateStub(15),
+        ("def Precondition (gauge : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (gauge : Reference) (initial : Memory) : Prop := True"),
+        ("def Postcondition (gauge : Reference) (initial final : Memory) (result : W32) : Prop := sorry",
+            "def Postcondition (gauge : Reference) (initial final : Memory) (result : W32) : Prop :=\n" +
+            $"  result.toInt = {smallerLevel}"),
+        ("""
+          -- Postcondition of the returned value, from `assumed` and `post1`, the helper's `post` of
+          -- `output1`
+          sorry
+        """, "  exact post1")]),
+    // The helper keeps the memory, so the store after it starts from the caller's own field facts.
+    ("HelperStore", [
+        .. SaturateStub(18),
+        ("def Precondition (gauge : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (gauge : Reference) (initial : Memory) : Prop := True"),
+        ("def Postcondition (gauge : Reference) (initial final : Memory) : Prop := sorry",
+            "def Postcondition (gauge : Reference) (initial final : Memory) : Prop :=\n" +
+            $"  ∃ settled : W32, Gauge.Limit.Holds final gauge settled ∧ settled.toInt = {smallerLevel}"),
+        ("""
+          -- Postcondition of the returned value, with `held1` the stored fields, from `assumed` and
+          -- `post1`, the helper's `post` of `output1`
+          sorry
+        """, "  exact ⟨_, held1, post1⟩")]),
+    // A caller over words alone composes the helper the same way, from the empty memory.
+    ("HelperWords", [
+        .. SaturateStub(21),
+        ("def Precondition (value limit : W32) : Prop := sorry",
+            "def Precondition (value limit : W32) : Prop := True"),
+        ("def Postcondition (value limit result : W32) : Prop := sorry",
+            "def Postcondition (value limit result : W32) : Prop := result.toInt = min value.toInt limit.toInt"),
+        ("""
+          -- Postcondition of the returned value, from `assumed` and `post1`, the helper's `post` of
+          -- `output1`
+          sorry
+        """, "  exact post1")]),
     ("Deposit", [
         ("def Precondition (account : Reference) (amount : W64) (initial : Memory) : Prop := sorry",
             "def Precondition (_ : Reference) (_ : W64) (_ : Memory) : Prop := True"),
@@ -1259,14 +1321,8 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
     // An indexed loop over an array reads each element from the storage span's contents; the bound test reads
     // the array's length as a signed word, below 2^31 for a valid array.
     ("ArraySum", [
-        ("""
-        def Precondition (values1 : ArrayView) (values1Elements : List W64) (initial : Memory)
-            : Prop := sorry
-        """,
-            """
-            def Precondition (values1 : ArrayView) (_ : List W64) (_ : Memory) : Prop :=
-              values1.reference ≠ .null
-            """),
+        // The outline states the null exclusion; only what else callers guarantee is left.
+        ("  values1.reference ≠ .null ∧ sorry", "  values1.reference ≠ .null ∧ True"),
         ("""
         def Postcondition (values1 : ArrayView) (values1Elements : List W64) (initial final : Memory)
             (result : W64) : Prop := sorry
@@ -1326,8 +1382,7 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
     // An indexed fill stores into the storage span by authority alone; the invariant states the filled prefix
     // from the array's own address.
     ("ArrayFill", [
-        ("def Precondition (values1 : ArrayView) (value : W32) (initial : Memory) : Prop := sorry",
-            "def Precondition (values1 : ArrayView) (_ : W32) (_ : Memory) : Prop := values1.reference ≠ .null"),
+        ("  values1.reference ≠ .null ∧ sorry", "  values1.reference ≠ .null ∧ True"),
         ("def Postcondition (values1 : ArrayView) (value : W32) (initial final : Memory) : Prop := sorry",
             """
             def Postcondition (values1 : ArrayView) (value : W32) (_ final : Memory) : Prop :=
@@ -1614,6 +1669,69 @@ if (Selected("FillWords"))
     if (outside.Code == 0 || !outside.Output.Contains("cil_loop_obligation could not prove"))
         throw new InvalidOperationException("verify did not reject a write outside the footprint:\n" + outside.Output);
     Console.WriteLine("PASS a loop write outside its written footprint is an error at the write");
+}
+
+if (Selected("ArraySum"))
+{
+    // The loop reads the array's length, so its outline must show the null exclusion where the author writes the
+    // precondition, and a precondition without it must fail naming null, not an unexplained `False`.
+    var sumOutline = File.ReadAllText(Path.Combine(outlineRoot, "ArraySum", "Proof.lean"));
+    if (!sumOutline.Contains("""
+              -- `values1` is not null: `values.Length` throws on a null array.
+              values1.reference ≠ .null ∧ sorry
+            """, StringComparison.Ordinal) ||
+        !sumOutline.Contains("The C# parameter `values` is bound as `values1`", StringComparison.Ordinal))
+        throw new InvalidOperationException("The ArraySum outline does not show its null exclusion or its renamed " +
+            "parameter:\n" + sumOutline);
+    var nullable = Path.Combine(outlineRoot, "ArraySum", "Nullable.lean");
+    File.WriteAllText(nullable, File.ReadAllText(Path.Combine(outlineRoot, "ArraySum", "Filled.lean"))
+        .Replace("  values1.reference ≠ .null ∧ True", "  True", StringComparison.Ordinal));
+    var admitsNull = Execute(Cli("verify", OutlineExtraction("ArraySum"), "--proof", nullable));
+    if (admitsNull.Code == 0 || !admitsNull.Output.Contains("Stage: proof checking") ||
+        !admitsNull.Output.Contains("Precondition must exclude null: `values1.reference ≠ .null`"))
+        throw new InvalidOperationException("verify did not name the null array a precondition admits:\n" +
+            admitsNull.Output);
+    Console.WriteLine("PASS an indexed loop's outline states the null exclusion, and a precondition without it " +
+        "fails naming null");
+}
+
+if (Selected("ReceiverArraySum"))
+{
+    // An array beside the receiver of a class instance method keeps its element view, so the indexed loop steps.
+    var receiverSum = File.ReadAllText(Path.Combine(outlineRoot, "ReceiverArraySum", "Proof.lean"));
+    if (receiverSum.Contains("-- not outlined:", StringComparison.Ordinal) ||
+        !receiverSum.Contains("  readings.reference ≠ .null ∧ sorry", StringComparison.Ordinal) ||
+        !receiverSum.Contains(".array_load", StringComparison.Ordinal))
+        throw new InvalidOperationException("The ReceiverArraySum outline does not step its indexed loop:\n" +
+            receiverSum);
+    Console.WriteLine("PASS an indexed loop over an array beside a class receiver is outlined with no path left");
+}
+
+if (Selected("HelperResult"))
+{
+    // A stub's contract is proved, never assumed: a `post` the helper's body does not meet fails in its `Holds`
+    // theorem, and one the caller's postcondition does not follow from fails at the caller.
+    var helperFilled = File.ReadAllText(Path.Combine(outlineRoot, "HelperResult", "Filled.lean"));
+    foreach (var (label, wrong) in new[]
+    {
+        ("a post its helper does not meet", helperFilled.Replace(
+            "final = initial ∧ result.toInt = min value.toInt limit.toInt",
+            "final = initial ∧ result.toInt = max value.toInt limit.toInt", StringComparison.Ordinal)),
+        ("a postcondition its helper's post does not give", helperFilled.Replace(
+            $"  result.toInt = {smallerLevel}", "  result = Gauge.Level.of initial gauge", StringComparison.Ordinal))
+    })
+    {
+        if (wrong == helperFilled)
+            throw new InvalidOperationException("The HelperResult proof lacks the text of " + label);
+        var wrongProof = Path.Combine(outlineRoot, "HelperResult", "Wrong.lean");
+        File.WriteAllText(wrongProof, wrong);
+        var rejected = Execute(Cli("verify", OutlineExtraction("HelperResult"), "--proof", wrongProof));
+        if (rejected.Code == 0 || !rejected.Output.Contains("Stage: proof checking") ||
+            File.Exists(Path.Combine(OutlineExtraction("HelperResult"), "verified.json")))
+            throw new InvalidOperationException($"verify accepted {label}:\n{rejected.Output}");
+    }
+    Console.WriteLine("PASS a helper's contract stub is proved: a post its body does not meet and a postcondition " +
+        "its post does not give are both rejected");
 }
 
 // One hole left, an obligation or a path the outline could not step, keeps an outline from certifying:

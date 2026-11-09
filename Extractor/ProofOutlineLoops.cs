@@ -178,7 +178,7 @@ internal static partial class ProofOutline
             imports.Add("CIL.Safety.LoopScaffold");
             if (body.Ops.Any(op => op.StartsWith(".memory (.add ", StringComparison.Ordinal)) &&
                 spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference) ||
-                callees.Keys.Any(Branches) || Indexed.Any())
+                callees.Keys.Any(index => Branches(extraction, index)) || Indexed.Any())
                 imports.Add("CIL.Safety.LoopObligations");
             if (spec.Framed) imports.Add("CIL.Safety.ObjectFields");
             if (spec.Parameters.Any(parameter => parameter.Writable)) imports.Add("CIL.Safety.SpanWrites");
@@ -186,6 +186,7 @@ internal static partial class ProofOutline
             if (WordArrays.Any()) imports.Add("CIL.Safety.ArrayContents");
             Header(lean, spec, imports, "`invariant`, `measure`, `postcondition` and `precondition` (at a call)");
             foreach (var index in callees.Keys.Order()) Contract(lean, index);
+            spec.NonNull = [.. Indexed];
             spec.Placeholders(lean);
             Entry(lean);
             StateAndHeader(lean);
@@ -499,10 +500,7 @@ internal static partial class ProofOutline
             if (steppable)
             {
                 lean.Line($"  rintro {pattern} memory permitted");
-                lean.Line($"  refine ⟨CIL.executionBound Extracted.program {name}, memory,");
-                lean.Line($"    [.scalar ({ScalarConstructor(output!.Value)} ?output)], ?run, " +
-                    "Confined.refl _ memory, ?output, rfl,");
-                lean.Line("    ?postcondition⟩");
+                ContractEvidence.Returns(lean, "  ", name, output!.Value, "");
                 lean.Line("  case run => cil_checked_steps");
                 lean.Noted("  ", "case postcondition => sorry", $"{name}Contract.post of the returned value");
             }
@@ -518,12 +516,13 @@ internal static partial class ProofOutline
             }
             else if (spanStore is { } spanBody)
                 SpanStoreContract(lean, index, name, pattern, Variable(declared[1].Name), spanBody.Op);
-            else if (Branches(index))
+            else if (Branches(extraction, index))
             {
                 lean.Line($"  rintro {pattern} memory permitted");
                 var sides = 0;
-                BranchedCallee(lean, index, name, declared.Select(parameter => Variable(parameter.Name)).ToArray(),
-                    output!.Value, 0, [], [], "  ", ref sides);
+                BranchedCallee(lean, extraction, index, name, name,
+                    declared.Select(parameter => Variable(parameter.Name)).ToArray(), output!.Value, 0, [], [], "  ",
+                    ref sides, kept: false);
             }
             else
             {
@@ -560,7 +559,7 @@ internal static partial class ProofOutline
 
         /// <summary>Whether a callee of words with no locals tests its arguments and returns a word or throws on
         /// each side, so its contract proof splits on each test and steps every returning side.</summary>
-        bool Branches(int index)
+        internal static bool Branches(Extraction extraction, int index)
         {
             var callee = extraction.Methods[index];
             var ops = extraction.Emitted[index].Ops;
@@ -575,10 +574,12 @@ internal static partial class ProofOutline
         }
 
         /// <summary>The contract proof of a branching callee from `pc`: a `by_cases` on each test, each returning
-        /// side stepped with the tests' facts, and each throwing side closed from the precondition.</summary>
-        void BranchedCallee(Writer lean, int index, string name, string[] arguments, int width, int pc,
-            List<(string Term, int Bits)> stack, List<(string Fact, string Text)> facts, string indent,
-            ref int sides)
+        /// side stepped with the tests' facts, and each throwing side closed from the precondition. `program`
+        /// names the callee in `Extracted.program`, and a `kept` contract's `post` first states that the memory
+        /// is as it was, which each returning side proves.</summary>
+        internal static void BranchedCallee(Writer lean, Extraction extraction, int index, string name,
+            string program, string[] arguments, int width, int pc, List<(string Term, int Bits)> stack,
+            List<(string Fact, string Text)> facts, string indent, ref int sides, bool kept)
         {
             var callee = extraction.Methods[index];
             var ops = extraction.Emitted[index].Ops;
@@ -610,12 +611,10 @@ internal static partial class ProofOutline
                 {
                     var suffix = (++sides).ToString(System.Globalization.CultureInfo.InvariantCulture);
                     var steps = facts.Count == 0 ? "" : $" [{string.Join(", ", facts.Select(fact => fact.Fact))}]";
-                    lean.Line($"{indent}refine ⟨CIL.executionBound Extracted.program {name}, memory,");
-                    lean.Line($"{indent}  [.scalar ({ScalarConstructor(width)} ?output{suffix})], ?run{suffix}, " +
-                        $"Confined.refl _ memory, ?output{suffix}, rfl,");
-                    lean.Line($"{indent}  ?postcondition{suffix}⟩");
+                    ContractEvidence.Returns(lean, indent, program, width, suffix);
                     lean.Line($"{indent}case run{suffix} => cil_checked_steps{steps}");
-                    lean.Noted(indent, $"case postcondition{suffix} => sorry",
+                    if (kept) KeptPost(lean, indent, name, suffix, Where());
+                    else lean.Noted(indent, $"case postcondition{suffix} => sorry",
                         $"{name}Contract.post of the returned value{Where()}");
                     return;
                 }
@@ -648,8 +647,8 @@ internal static partial class ProofOutline
                         var next = holds == takenWhenTrue ? taken : pc + 1;
                         var text = holds ? $"`{condition}`" : $"not `{condition}`";
                         lean.Line($"{indent}· -- {text}");
-                        BranchedCallee(lean, index, name, arguments, width, next, [.. rest],
-                            [.. facts, (fact, text)], indent + "  ", ref sides);
+                        BranchedCallee(lean, extraction, index, name, program, arguments, width, next, [.. rest],
+                            [.. facts, (fact, text)], indent + "  ", ref sides, kept);
                     }
                     return;
                 }
@@ -817,10 +816,12 @@ internal static partial class ProofOutline
             if (implicitBinders.Length > 0) explicitBinders.Add(implicitBinders);
             explicitBinders.Add($"(state : {StateType("memory")})");
             var ordinal = active + 1;
+            lean.Quiet();
             lean.Line(loops.Count == 1 ? "/-- Replace with what holds at every loop head. -/"
                 : $"/-- Replace with what holds at every head of loop {ordinal}, tested at {Location(loop.Latch)}. -/");
             lean.Wrapped($"def invariant{suffix}", explicitBinders, ": Prop := sorry");
             lean.Line();
+            lean.Quiet();
             lean.Line(loops.Count == 1 ? "/-- Replace with a quantity each iteration decreases. -/"
                 : $"/-- Replace with a quantity each iteration of loop {ordinal} decreases. -/");
             lean.Wrapped($"def measure{suffix}", explicitBinders, ": Nat := sorry");
@@ -967,8 +968,11 @@ internal static partial class ProofOutline
             var name = array.Name;
             var storage = $"(ArrayView.storage {Destructured(array)})";
             lean.Line($"  rcases {name} with ⟨_ | {name}Base, {name}Length, {name}ElementType⟩");
-            lean.Line("  · exfalso");
-            lean.Line("    cil_loop_obligation [Precondition]");
+            lean.Line($"  · -- a null `{name}` throws at its length, which Precondition rules out");
+            lean.Line("    exfalso");
+            lean.Line("    first");
+            lean.Line("    | cil_loop_obligation [Precondition]");
+            lean.Line($"    | fail \"Precondition must exclude null: `{name}.reference ≠ .null`\"");
             lean.Line($"  simp only at {name}Type");
             lean.Line($"  subst {name}Type");
             // A valid array is shorter than `2 ^ 31`, so its signed bound test reads as unsigned.
@@ -990,6 +994,8 @@ internal static partial class ProofOutline
         void Iteration(Writer lean, string indent)
         {
             lean.Line($"{indent}rintro ⟨{Pattern()}, current, frame⟩ holds recurse");
+            lean.Comment($"{indent}-- ", $"{indent}-- ", "`holds` is the invariant at this loop head and `assumed` " +
+                "the Precondition; each side below names the test it took, such as `guard`.");
             var iteration = Initial(component => component.Part switch
             {
                 Part.Span => new SpanTerm(component.Name + "View", component.Name + "Remaining",
