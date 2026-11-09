@@ -428,6 +428,20 @@ if (!unfinishedGoals.Contains("  Goals (1):\n" +
     unfinishedGoals.Contains("[LeanCIL goal"))
     throw new InvalidOperationException("verify --goals did not print a --proof-root proof's goal: " +
         unfinishedGoals);
+// A hole in a package's proof is reported as open goals too, although the package's audit refuses it first.
+var holeProof = Path.Combine(consumerPackage, "Proofs", "Hole.lean");
+File.WriteAllText(holeProof, "import Extracted\ntheorem ExampleProof.correctness : 1 + 1 = 2 := by\n  sorry\n");
+var hole = Execute([.. cli, "verify", consumerOutput, "--proof", holeProof, "--proof-root", consumerPackage,
+    "--goals"]);
+var holeText = hole.Stderr.ReplaceLineEndings("\n");
+if (hole.Code != 1 ||
+    !holeText.StartsWith("Invalid: 1 goal remains in artifacts/CliConsumer/Package/Proofs/Hole.lean.\n") ||
+    !holeText.Contains("  Stage: open goals\n") || !holeText.Contains("  Goals (1):\n" +
+        "    artifacts/CliConsumer/Package/Proofs/Hole.lean:3:2: sorry\n      ⊢ 1 + 1 = 2\n") ||
+    JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(consumerOutput, "failed.json")))
+        .GetProperty("kind").GetString() != "unsolved-goal")
+    throw new InvalidOperationException("verify --goals did not report a --proof-root proof's hole as an open " +
+        "goal: " + hole.Output);
 // A --proof-root report cites the package's own file and module, as the text report does.
 var unfinishedJson = Execute([.. cli, "verify", consumerOutput, "--proof", unfinishedProof,
     "--proof-root", consumerPackage, "--format", "json"]);
@@ -506,7 +520,7 @@ var reportedHoles = Regex.Matches(outlineGoalsText, @"^    \S*AddProof\.lean:(\d
     .Select(goal => (Line: int.Parse(goal.Groups[1].Value), Column: int.Parse(goal.Groups[2].Value))).ToArray();
 if (outlineGoals.Code != 1 || outlineGoals.Stdout.Length != 0 || holes.Length != 3 ||
     !reportedHoles.SequenceEqual(holes) || !outlineGoalsText.Contains("  Stage: open goals\n") ||
-    !outlineGoalsText.Contains("Invalid: 3 goals remain in artifacts/CliOutline/AddProof.lean") ||
+    !outlineGoalsText.StartsWith("Invalid: 3 goals remain in artifacts/CliOutline/AddProof.lean.\n") ||
     !outlineGoalsText.Contains("  Goals (3):\n") || !outlineGoalsText.Contains("      ⊢ Prop\n") ||
     outlineGoalsText.Contains("warning") || outlineGoalsText.Contains("Hint") ||
     outlineGoalsText.Contains("[LeanCIL goal") || File.Exists(Path.Combine(outlined, "verified.json")))

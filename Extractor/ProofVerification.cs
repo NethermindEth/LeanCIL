@@ -355,15 +355,15 @@ partial class Program
         var settingsPath = Path.Combine(output, "verification.json");
         var stage = "proof selection";
         Program? verification = null;
+        int OpenGoalCount() => goals ? Observed(verification?.ProofMessages, trace, goals).Goals.Length : 0;
+        Exception OpenGoals(int count) => new InvalidOperationException(
+            $"{count} goal{(count == 1 ? " remains" : "s remain")} in {CliPaths.Display(proof!)}.");
         // With --goals, a proof that leaves goals ends the run there: neither replay nor audit can accept it.
         void RequireNoOpenGoals()
         {
-            var open = goals ? Observed(verification?.ProofMessages, trace, goals).Goals : [];
-            if (open.Length == 0) return;
+            if (OpenGoalCount() is not (> 0 and var count)) return;
             stage = OpenGoalsStage;
-            throw new InvalidOperationException(
-                $"{open.Length} goal{(open.Length == 1 ? " remains" : "s remain")} in {CliPaths.Display(proof!)}; " +
-                "the theorem was not replayed or audited.");
+            throw OpenGoals(count);
         }
         try
         {
@@ -506,6 +506,10 @@ partial class Program
         catch (Exception error)
         {
             File.Delete(reportPath);
+            // A package's goals are read after its replay and audit, which a `sorry` fails first; a Lean
+            // error keeps its own stage and report.
+            if (stage is not ("proof checking" or OpenGoalsStage) && OpenGoalCount() is > 0 and var open)
+                (stage, error) = (OpenGoalsStage, OpenGoals(open));
             var failed = FailureReports.Failed(stage, error, theorem ?? "ExampleProof.correctness",
                 proof ?? Path.Combine(output, "Proof.lean"), output, proofRoot);
             FailureReports.Write(output, failed);

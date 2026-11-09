@@ -602,7 +602,7 @@ leancil verify artifacts/Countdown --proof Proofs/Countdown.lean --goals
 Its diagnostic on standard error starts with:
 
 ```text stderr
-Invalid: 8 goals remain in Proofs/Countdown.lean; the theorem was not replayed or audited.
+Invalid: 8 goals remain in Proofs/Countdown.lean.
   Stage: open goals
   Next: Prove each goal listed below in place of its `sorry` or failing tactic, then rerun.
   Goals (8):
@@ -619,13 +619,16 @@ goal as Lean prints it there: its case tag, hypotheses and target, in the names 
 opens. A `sorry` written as a term, such as the body of a definition, is listed with the type it
 stands for.
 
-When any goal is open, the run stops after the proof check and exits with `1` at the
-`open goals` stage, with kind `unsolved-goal` in [`failed.json`](#failure-reports). Kernel replay
-and the audit, which could only refuse such a proof, are not run, so the goals arrive sooner than
-the refusal of the same file without the option. With no goal open, verification continues as it
-does without `--goals`. The proof's other messages are not listed with the goals: the report
-gives their count and `proof-messages.txt`, which holds them. A failed verification without
-`--goals` names the option on a `Goals:` line after `Next:`.
+When any goal is open, the run exits with `1` at the `open goals` stage, with kind
+`unsolved-goal` in [`failed.json`](#failure-reports), unless Lean reported an error, which fails
+at `proof checking` as without the option. A verification without `--proof-root` stops right
+after the proof check: kernel replay and the audit, which could only refuse such a proof, are
+not run, so the goals arrive sooner than the refusal of the same file without the option. Under
+`--proof-root` the package's replay and audit run before the goals are read. With no goal open,
+verification continues as it does without `--goals`, and a `sorry` anywhere in the proof file is
+an open goal, whichever theorem is selected. The proof's other messages are not listed with
+the goals: the report gives their count and `proof-messages.txt`, which holds them. A failed
+verification without `--goals` names the option on a `Goals:` line after `Next:`.
 
 `--goals` checks the proof with `import CIL.Observe` added as for `--format json` and the Lean
 option `cil.goals` set (see [PROOFS-STEPPING](PROOFS-STEPPING.md#see-what-the-tactics-did)), and

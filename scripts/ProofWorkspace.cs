@@ -354,25 +354,29 @@ partial class Program
         var manifest = JsonSerializer.Deserialize<JsonElement>(
             File.ReadAllText(Path.Combine(root, "lake-manifest.json")));
         string framework;
-        string[] packages = [root];
+        // A source that a keyed import could resolve to would shadow the generated extraction.
+        void RequireNoReservedModule(string[] packages)
+        {
+            var sources = packages.SelectMany(package => ConsumerSources(package).Where(path =>
+                Path.GetFileName(path) is "Extracted.lean" or "ExtractedSymbols.lean" ||
+                Path.GetRelativePath(package, path).Split('/', '\\')[..^1]
+                    .Any(directory => directory is "Extracted" or "ExtractedSymbols"))).ToArray();
+            if (sources.Length > 0) throw ReservedModule(root, sources[0]);
+        }
         if (manifest.GetProperty("name").GetString() == "leancil")
         {
             RequireBundledFramework(root, root);
+            RequireNoReservedModule([root]);
             framework = root;
         }
         else
         {
             var dependencies = ConsumerDependencies(root, IsScratchPackage(root));
+            // Before the snapshot, which refuses the same sources without saying which or what to do.
+            RequireNoReservedModule([root, .. dependencies.Select(dependency => dependency.Directory)]);
             ConsumerSnapshot(root, null, dependencies);
             framework = dependencies.Single(dependency => dependency.Name == "leancil").Source;
-            packages = [root, .. dependencies.Select(dependency => dependency.Directory)];
         }
-        // A source that a keyed import could resolve to would shadow the generated extraction.
-        var sources = packages.SelectMany(package => ConsumerSources(package).Where(path =>
-            Path.GetFileName(path) is "Extracted.lean" or "ExtractedSymbols.lean" ||
-            Path.GetRelativePath(package, path).Split('/', '\\')[..^1]
-                .Any(directory => directory is "Extracted" or "ExtractedSymbols"))).ToArray();
-        if (sources.Length > 0) throw ReservedModule(root, sources[0]);
         var lakefile = Path.Combine(framework, "lakefile.toml");
         if (!File.Exists(lakefile) || !File.ReadAllText(lakefile).ReplaceLineEndings("\n").Contains(
                 $"[[lean_lib]]\nname = \"{EditorLibraryName}\"\nsrcDir = \"{EditorSourceDirectory}\"\n",
