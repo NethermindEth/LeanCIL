@@ -34,8 +34,6 @@ partial class Program : IDisposable
     /// <summary>The certified library, read in place; deleted on disposal only when this process built it.</summary>
     string? library;
     bool ownsLibrary;
-    /// <summary>Set before <see cref="Library"/> by producers that write into the library, which then get a private copy.</summary>
-    bool writesLibrary;
     /// <summary>This process's writable package, which requires <see cref="library"/> by path.</summary>
     string? session;
     /// <summary>The base library's compiled module artifacts, taken from its validated manifest.</summary>
@@ -1255,9 +1253,10 @@ partial class Program : IDisposable
 
     /// <summary>
     /// The writable session package for this process: it requires the certified library in place
-    /// as a path dependency, so support and proof builds write only their own modules.
+    /// as a path dependency, so support and proof builds write only their own modules. A caller
+    /// that writes into the library itself passes <paramref name="writes"/> and gets a private copy.
     /// </summary>
-    string Library(SortedDictionary<string, string> snapshot)
+    string Library(SortedDictionary<string, string> snapshot, bool writes = false)
     {
         var common = new SortedDictionary<string, string>(snapshot.Where(p =>
             !p.Key.StartsWith("proof:", StringComparison.Ordinal) && !p.Key.StartsWith("settings:", StringComparison.Ordinal)).ToDictionary(), StringComparer.Ordinal);
@@ -1368,7 +1367,7 @@ partial class Program : IDisposable
         var incomplete = manifest.Keys.Any(name => name.StartsWith("CIL/", StringComparison.Ordinal) &&
             name.EndsWith(".lean", StringComparison.Ordinal) &&
             !manifest.ContainsKey(compiledPrefix + name[..^".lean".Length] + ".olean"));
-        if (!ownsLibrary && (incomplete || writesLibrary))
+        if (!ownsLibrary && (incomplete || writes))
         {
             var started = DateTimeOffset.UtcNow;
             var elapsed = Stopwatch.StartNew();

@@ -51,8 +51,7 @@ partial class Program
     {
         if (session is not null && !ownsLibrary)
             throw new InvalidOperationException("Fingerprint metadata must be written before the library is opened in place.");
-        writesLibrary = true;
-        Library(Inputs(At("CIL.lean")));
+        Library(Inputs(At("CIL.lean")), writes: true);
         var certified = library!;
         var executable = CheckedAuditExecutable();
         var tools = CanonicalFingerprintTools(auditExecutableSha!);

@@ -231,8 +231,19 @@ internal static partial class VerifyReports
     }
 
     /// <summary>The report of a run: `verified`, or `failed` with one record per failure, never both.</summary>
+    /// <param name="result">`verified` or `failed`.</param>
+    /// <param name="failure">The failure behind a `failed` result; null when the run verified.</param>
+    /// <param name="theorem">The theorem the run checked.</param>
+    /// <param name="proof">The proof file, which every located message and failure names.</param>
+    /// <param name="output">The extraction the proof was checked against.</param>
+    /// <param name="proofRoot">The proof root the rerun command passes, if the run had one.</param>
+    /// <param name="stage">The stage the run reached or failed at.</param>
+    /// <param name="axioms">The theorem's axioms, when the proof was checked far enough to read them.</param>
+    /// <param name="statement">The theorem's statement, when it was read.</param>
     /// <param name="messages">The proof's informational and warning messages, failure records and trace included.
     /// </param>
+    /// <param name="traceRequested">Whether `--trace` asked for each step the proof took.</param>
+    /// <param name="proofChecked">Whether Lean checked the proof, so its trace messages exist.</param>
     internal static JsonObject Result(string result, FailureReports.Report? failure, string theorem, string proof,
         string output, string? proofRoot, string? stage, string[]? axioms, string? statement,
         IEnumerable<(string Severity, int Line, int Column, string Text)> messages, bool traceRequested = false,
