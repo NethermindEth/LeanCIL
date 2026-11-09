@@ -97,7 +97,7 @@ if (!baseline)
 }
 var validImported = Execute([.. importedCli, "verify", importedOutput, "--proof", importedProof, "--fresh"],
     progress: "Checking valid imported helper against modified library", environment: verificationEnvironment);
-if (validImported.Code != 0 || validImported.Stderr.Length != 0 ||
+if (validImported.Code != 0 || WithoutStageProgress(validImported.Stderr).Length != 0 ||
     !validImported.Stdout.StartsWith("Verified: ExampleProof.correctness"))
     throw new InvalidOperationException("Valid imported CIL helper rejected: " + validImported.Output);
 File.WriteAllText(importedProof,

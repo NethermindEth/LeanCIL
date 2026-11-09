@@ -566,6 +566,15 @@ partial class Program : IDisposable
     /// <summary>Milliseconds between progress lines when stderr is redirected; a shorter stage prints none.</summary>
     const int RedirectedProgressInterval = 20_000;
 
+    /// <summary>
+    /// Stderr without stage progress lines, which a run prints for any stage that outlasts an interval:
+    /// what remains is the command's own diagnostics.
+    /// </summary>
+    internal static string WithoutStageProgress(string stderr) => StageProgressLine().Replace(stderr, "");
+
+    [GeneratedRegex(@"^(?:START|PROGRESS|END) [^\n]*(?:\n|\z)", RegexOptions.Multiline)]
+    private static partial Regex StageProgressLine();
+
     static readonly object TraceGate = new();
     // A reused process id must not append to an earlier process's trace, which a reader treats as old.
     static readonly string TraceFile = $"{Environment.ProcessId}-{Guid.NewGuid():N}.jsonl";

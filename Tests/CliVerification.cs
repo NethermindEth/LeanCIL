@@ -18,7 +18,7 @@ void Verified(params string[] options)
 {
     var result = Execute([.. cli, "verify", output, .. options]);
 
-    if (result.Code != 0 || result.Stderr.Length != 0 || !result.Stdout.StartsWith("Verified: ExampleProof.correctness") ||
+    if (result.Code != 0 || WithoutStageProgress(result.Stderr).Length != 0 || !result.Stdout.StartsWith("Verified: ExampleProof.correctness") ||
         !result.Stdout.Contains("Statement:") || !result.Stdout.Contains("BitVec.toNat") ||
         !result.Stdout.Contains("(x y : CIL.W64)"))
         throw new InvalidOperationException("CLI proof failed: " + result.Output);
@@ -122,7 +122,7 @@ if (stale.Code != 1 || !stale.Stderr.Contains("assembly has changed") || !stale.
 Run([.. cli, "extract", demoAssembly, "Arithmetic::Add(ulong,ulong)", output]);
 var rejected = Execute([.. cli, "verify", output]);
 
-if (rejected.Code != 1 || rejected.Stdout.Length != 0 || !rejected.Stderr.StartsWith("Invalid:") ||
+if (rejected.Code != 1 || rejected.Stdout.Length != 0 || !WithoutStageProgress(rejected.Stderr).StartsWith("Invalid:") ||
     !rejected.Stderr.Contains("Lean errors (") || !rejected.Stderr.Contains("Stage: proof checking") ||
     !rejected.Stderr.Contains("Next:") || File.Exists(Path.Combine(output, "verified.json")) ||
     File.ReadAllText(settingsPath) != settings)
@@ -213,7 +213,7 @@ Console.WriteLine("PASS CLI reports a proof stuck on a class instance and traces
 var memoryOutput = At("artifacts/CliMemory");
 Run([.. cli, "extract", assembly, "Arithmetic::PastEnd(ulong&)", memoryOutput]);
 var memory = Execute([.. cli, "verify", memoryOutput, "--proof", At("Examples/Proofs/PastEnd.lean")]);
-if (memory.Code != 0 || memory.Stderr.Length != 0 || !memory.Stdout.Contains("Statement:") ||
+if (memory.Code != 0 || WithoutStageProgress(memory.Stderr).Length != 0 || !memory.Stdout.Contains("Statement:") ||
     !memory.Stdout.Contains("fuel") || !memory.Stdout.Contains("Except.ok"))
     throw new InvalidOperationException("Missing checked invalid-access theorem: " + memory.Output);
 Console.WriteLine("PASS CLI invalid memory-access theorem");
@@ -346,7 +346,7 @@ RequireSourceLocations(unfinishedText,
 var unfinishedJson = Execute([.. cli, "verify", consumerOutput, "--proof", unfinishedProof,
     "--proof-root", consumerPackage, "--format", "json"]);
 var unfinishedFailure = (JsonNode.Parse(unfinishedJson.Stdout) as JsonObject)?["failures"]?[0];
-if (unfinishedJson.Code != 1 || unfinishedJson.Stderr.Length != 0 ||
+if (unfinishedJson.Code != 1 || WithoutStageProgress(unfinishedJson.Stderr).Length != 0 ||
     unfinishedFailure?["module"]?.GetValue<string>() != "Proofs.Unfinished" ||
     unfinishedFailure["source"]?["file"]?.GetValue<string>() != Path.GetFullPath(unfinishedProof))
     throw new InvalidOperationException("A --proof-root JSON report did not cite the package's file: " +
@@ -367,7 +367,7 @@ File.WriteAllText(batchManifest, JsonSerializer.Serialize(new
 var batch = Execute([.. cli, "verify-batch", batchManifest, "--format", "json", "--trace"]);
 var batchReport = JsonNode.Parse(batch.Stdout) as JsonObject;
 var batchRequests = batchReport?["requests"]?.AsArray();
-if (batch.Code != 0 || batch.Stderr.Length != 0 || batchReport?["schema"]?.GetValue<int>() != 1 ||
+if (batch.Code != 0 || WithoutStageProgress(batch.Stderr).Length != 0 || batchReport?["schema"]?.GetValue<int>() != 1 ||
     batchReport["passed"]?.GetValue<int>() != 2 || batchRequests is not { Count: 2 } ||
     batchRequests[0]!["status"]!.GetValue<string>() != "verified" ||
     batchRequests[0]!["report"]!["result"]!.GetValue<string>() != "verified" ||
@@ -460,7 +460,7 @@ static void RequireReport((int Code, string Output, string Stdout, string Stderr
     params (string Path, string Name)[] paths)
 {
     var report = JsonNode.Parse(run.Stdout) as JsonObject;
-    if (run.Code != code || run.Stderr.Length != 0 || report?["schema"]?.GetValue<int>() != 1)
+    if (run.Code != code || WithoutStageProgress(run.Stderr).Length != 0 || report?["schema"]?.GetValue<int>() != 1)
         throw new InvalidOperationException($"verify --format json did not exit {code} with one report: " + run.Output);
     var actual = Normalized(report, paths)!.ToJsonString(new JsonSerializerOptions
     {
