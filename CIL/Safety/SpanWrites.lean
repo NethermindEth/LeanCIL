@@ -106,6 +106,14 @@ theorem facts (span : WritableSpan memory footprint view width count) :
     view.validate memory = .ok () ∧ view.width = width ∧ view.writable = true :=
   ⟨span.valid, span.elementWidth, span.mode⟩
 
+/-- A writable span over the whole of a valid array of `element`s, with authority over its
+    storage, may be written at every element. -/
+theorem of_array {array : ArrayView} {element : CIL.ArrayElement}
+    (valid : array.validate memory = .ok ()) (typed : array.elementType = element)
+    (authority : SpanWritable memory footprint array.storage) :
+    WritableSpan memory footprint (array.span true) element.width array.length :=
+  ⟨ArrayView.span_valid true valid, rfl, congrArg CIL.ArrayElement.width typed, rfl, authority⟩
+
 /-- An empty writable span has length zero, so a `Length != 0` guard fails. -/
 theorem length_nil (span : WritableSpan memory footprint view width 0) :
     BitVec.ofNat 32 view.length = 0 := by
@@ -250,6 +258,7 @@ structure WritableSuffix (memory : Memory) (footprint : List (Reference × Nat))
 #print axioms SpanWritable.slice
 #print axioms SpanWritable.within
 #print axioms WritableSpan.facts
+#print axioms WritableSpan.of_array
 #print axioms WritableSpan.length_nil
 #print axioms WritableSpan.length_cons
 #print axioms WritableSpan.valid_within

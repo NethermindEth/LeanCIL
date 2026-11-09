@@ -80,15 +80,26 @@ theorem makeLocal_object_null (activation : Nat) (memory : Memory) :
     makeLocal activation .object .nullRef memory = .ok (.object (some .null), [], memory) := rfl
 #print axioms makeLocal_object_null
 
+/-- A default span local is a slot holding the null span; it allocates nothing and keeps memory.
+    Its width conditions are literal comparisons, which `Nat.reduceLT` discharges. -/
+theorem makeLocal_span_null (activation width : Nat) (writable : Bool) (memory : Memory)
+    (positive : 0 < width) (bounded : width < 2 ^ 64) :
+    makeLocal activation (.span width writable) .nullRef memory =
+      .ok (.span width writable (some ⟨.null, 0, width, writable⟩), [], memory) := by
+  simp [makeLocal, positive, bounded]
+#print axioms makeLocal_span_null
+
 /-- Rewrite each numeric local by its allocation equation before `makeLocal` is unfolded, then
-    normalize the rest of frame setup; an unmatched equation leaves allocation unresolved. Object
-    locals reduce first, so a later home's equation meets the memory it was stated over. -/
+    normalize the rest of frame setup; an unmatched equation leaves allocation unresolved.
+    Object and span locals reduce first, so a later home's equation meets the memory it was
+    stated over. -/
 private def allocationSimplifier {m : Type → Type} [Monad m] [MonadQuotation m]
     (definitions facts made : Array (TSyntax `term)) : m (TSyntax `tactic) := do
   let unfolded := definitions ++ facts ++ made
   let normalizer ← entrySimplifier definitions (facts ++ made)
   `(tactic| ((simp only [enterFrame, makeSelectedLocals, makeLocals, List.isEmpty, ite_true,
-    makeLocal_object_null, Bind.bind, Except.bind, Pure.pure, Except.pure,
+    makeLocal_object_null, makeLocal_span_null, Nat.reduceLT, Nat.reducePow, Bind.bind,
+    Except.bind, Pure.pure, Except.pure,
     $[$unfolded:term],*]) <;> $normalizer:tactic))
 
 /-- A local slot's generated facts: its index and slot, typed load and store facts for span, root

@@ -28,6 +28,13 @@ theorem ArrayView.validate_preserved (view : ArrayView) {before after : Memory}
 #print axioms ArrayView.validate_congr
 #print axioms ArrayView.validate_preserved
 
+/-- A valid array spans to a valid view in either access mode, which validation ignores. -/
+theorem ArrayView.span_valid {view : ArrayView} {memory : Memory} (writable : Bool)
+    (valid : view.validate memory = .ok ()) : (view.span writable).validate memory = .ok () :=
+  valid
+
+#print axioms ArrayView.span_valid
+
 /-- Successful element lookup returns a reference that forms in the same memory. -/
 theorem ArrayView.element_formed (view : ArrayView) (memory : Memory) (index : Nat)
     (reference : Reference) (found : view.element memory index = .ok reference) :

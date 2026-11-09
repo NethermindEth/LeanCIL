@@ -171,4 +171,42 @@ theorem step_arrayStore_i64_of_write {memory after : Memory} {view : ArrayView}
 
 #print axioms step_arrayStore_i64_of_write
 
+/-- `values` are the elements of a span over the whole array in either access mode, which shares
+    its storage extent. -/
+theorem SpanContents.array_span {memory : Memory} {view : ArrayView} {width : Nat}
+    {values : List (BitVec (8 * width))} (contents : SpanContents memory view.storage width values)
+    (writable : Bool) : SpanContents memory (view.span writable) width values :=
+  ⟨contents.elementWidth, contents.length, contents.contents⟩
+
+#print axioms SpanContents.array_span
+
+/-- A span over the whole of a valid array holding `values` is checked to hold them. -/
+theorem CheckedSpan.of_array {memory : Memory} {view : ArrayView} {width : Nat}
+    {values : List (BitVec (8 * width))} (valid : view.validate memory = .ok ())
+    (contents : SpanContents memory view.storage width values) (writable : Bool) :
+    CheckedSpan memory (view.span writable) width writable values :=
+  ⟨ArrayView.span_valid writable valid, rfl, contents.array_span writable⟩
+
+#print axioms CheckedSpan.of_array
+
+/-- Converting a valid array of `element`s to a span over all of it pushes that span. -/
+theorem step_arraySpan_whole {memory : Memory} {view : ArrayView} {element : CIL.ArrayElement}
+    {writable : Bool} (typed : view.elementType = element)
+    (valid : view.validate memory = .ok ()) :
+    ∀ body pc args frame rest,
+      step body (.memory (.arraySpan element writable .whole)) pc args frame
+        (.array view :: rest) memory =
+        .ok (.next (pc + 1) (.bufferSpan (view.span writable) :: rest) frame memory) := by
+  intro body pc args frame rest
+  subst typed
+  have checked : (view.span writable).validate memory = .ok () :=
+    ArrayView.span_valid writable valid
+  simp only [ArrayView.span] at checked
+  rw [step_memory_eq]
+  simp [unspecifiedOperands, CIL.MemoryOp.argumentCount, CIL.ArraySpanRange.argumentCount,
+    Value.hasUnspecified, staticInstruction, memoryInstruction, otherMemoryInstruction, checked,
+    ArrayView.span, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+#print axioms step_arraySpan_whole
+
 end CIL.Safety

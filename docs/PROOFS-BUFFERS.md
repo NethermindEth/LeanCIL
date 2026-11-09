@@ -99,6 +99,13 @@ written memory. The bound test compares the index with `values.Length` as signed
 `SpanView.length_bounded` of the storage span keeps the length below `2 ^ 31`, and
 `toInt_ofNat_of_lt`, which `cil_loop_obligation` applies, reads that comparison as unsigned.
 
+Converting the whole array to a span, as `ReadOnlySpan<T> rest = values` does, pushes
+`values.span writable`, the storage extent under the conversion's access mode;
+`step_arraySpan_whole` steps it from the array's validity and element type, and a null array
+converts to an empty span. `CheckedSpan.of_array` checks that span to hold the storage span's
+elements, and `WritableSpan.of_array` gives a writable one the storage span's authority, so a loop
+slicing the span is proved as one slicing a span argument.
+
 ## Describe buffer contents
 
 `CIL.Safety.BufferContents` states what a contiguous run of integer elements holds, over the checked
@@ -231,7 +238,8 @@ byte home is a skipped `WritableHomes` slot and a `none` value, and so the lemma
 pairs the loop's values with a memory and its `LoopFrame`, with the slots and remembered values as
 functions of the loop's values, so an invariant over a `FrameState` states only the property.
 `bind_entry ... allocating` proves the frame of the entered locals and parameter homes for any
-footprint, with each home remembered as its initializer and every other local as `none`.
+footprint, with each home remembered as its initializer and every other local as `none`; a
+default span or object local holds the null span or null and allocates nothing.
 `LoopFrame.ofEntry`, `WritableHomes.entry` and `skip`, and `LocalSnapshots.entry` and `skip` are
 the lemmas it composes. `set_local` keeps the frame when a local without a byte home is assigned,
 as the span fold slices its span and a list walk moves its object local to the next node; it
