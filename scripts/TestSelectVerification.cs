@@ -122,6 +122,9 @@ Test("proof and transitive imports", () =>
     Equal(VerificationSelection.Select(["Examples/Proofs/Countdown.lean"]), ["cli", "contracts", "fsharp", "loops"]);
     Equal(VerificationSelection.Select(["Tests/Support.lean"]), All());
     Equal(VerificationSelection.Select(["Tests/UnsafeCallEvidence.lean"]), ["unsafe"]);
+    // A proof a documented command verifies changes what that command prints.
+    Require(VerificationSelection.Select(["Examples/Proofs/PastEnd.lean"]).Contains("docs"),
+        "A proof the getting-started walkthrough verifies does not select the docs suite");
 });
 Test("dynamic proof paths", () =>
 {

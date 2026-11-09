@@ -20,7 +20,7 @@ internal static partial class Program
         "[--proof-root package-directory] [--assembly identity] [--assume-initialized Namespace.Type]...\n" +
         "       leancil workspace --remove key-or-method [--profile profile] [--proof-root package-directory]\n" +
         "       leancil watch [package-directory] [--project project.csproj]... [--configuration name] [--once] " +
-        "[--format text|json]\n" +
+        "[--goals] [--format text|json]\n" +
         "       leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] " +
         "[--assembly 'assembly name or full identity'] [--reference Lib.dll]...\n" +
         "       leancil check output-directory [--assembly-path assembly.dll] " +
@@ -28,7 +28,7 @@ internal static partial class Program
         "       leancil new-proof extraction-directory proof.lean\n" +
         "       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--rebuild-library] " +
         "[--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory]... " +
-        "[--format text|json] [--trace]\n" +
+        "[--format text|json] [--trace] [--goals]\n" +
         "       leancil verify-batch requests.json [--fresh] [--rebuild-library] [--parallel count] " +
         "[--results results.json] [--format text|json] [--trace]\n" +
         "       leancil audit-library --project package-directory --module M... --prefix P... [--axioms a,b,c] " +

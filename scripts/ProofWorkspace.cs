@@ -350,30 +350,33 @@ partial class Program
     /// </summary>
     static string EditorFramework(string root)
     {
+        RequireResolvedPackage(root);
         var manifest = JsonSerializer.Deserialize<JsonElement>(
             File.ReadAllText(Path.Combine(root, "lake-manifest.json")));
         string framework;
-        string[] packages = [root];
+        // A source that a keyed import could resolve to would shadow the generated extraction.
+        void RequireNoReservedModule(string[] packages)
+        {
+            var sources = packages.SelectMany(package => ConsumerSources(package).Where(path =>
+                Path.GetFileName(path) is "Extracted.lean" or "ExtractedSymbols.lean" ||
+                Path.GetRelativePath(package, path).Split('/', '\\')[..^1]
+                    .Any(directory => directory is "Extracted" or "ExtractedSymbols"))).ToArray();
+            if (sources.Length > 0) throw ReservedModule(root, sources[0]);
+        }
         if (manifest.GetProperty("name").GetString() == "leancil")
         {
             RequireBundledFramework(root, root);
+            RequireNoReservedModule([root]);
             framework = root;
         }
         else
         {
             var dependencies = ConsumerDependencies(root, IsScratchPackage(root));
+            // Before the snapshot, which refuses the same sources without saying which or what to do.
+            RequireNoReservedModule([root, .. dependencies.Select(dependency => dependency.Directory)]);
             ConsumerSnapshot(root, null, dependencies);
             framework = dependencies.Single(dependency => dependency.Name == "leancil").Source;
-            packages = [root, .. dependencies.Select(dependency => dependency.Directory)];
         }
-        // A source that a keyed import could resolve to would shadow the generated extraction.
-        var sources = packages.SelectMany(package => ConsumerSources(package).Where(path =>
-            Path.GetFileName(path) is "Extracted.lean" or "ExtractedSymbols.lean" ||
-            Path.GetRelativePath(package, path).Split('/', '\\')[..^1]
-                .Any(directory => directory is "Extracted" or "ExtractedSymbols"))).ToArray();
-        if (sources.Length > 0)
-            throw new InvalidDataException("Extracted and ExtractedSymbols are reserved for the selected " +
-                "extractions; remove " + CliPaths.Display(sources[0]) + ".");
         var lakefile = Path.Combine(framework, "lakefile.toml");
         if (!File.Exists(lakefile) || !File.ReadAllText(lakefile).ReplaceLineEndings("\n").Contains(
                 $"[[lean_lib]]\nname = \"{EditorLibraryName}\"\nsrcDir = \"{EditorSourceDirectory}\"\n",
@@ -383,6 +386,47 @@ partial class Program
                 (SourceRevision is { } revision
                     ? $"\n  Pin leancil to rev \"{revision}\" (see leancil --version)." : ""));
         return framework;
+    }
+
+    /// <summary>
+    /// Fails, naming the cause and its fix, unless `root` is a Lake package whose dependencies are resolved:
+    /// the editor library is found through the package's manifest.
+    /// </summary>
+    static void RequireResolvedPackage(string root)
+    {
+        var shown = CliPaths.Display(root);
+        const string generated = "for a proof outside any Lake package, omit --proof-root and leancil workspace " +
+            "generates a package beside the proof";
+        if (!File.Exists(Path.Combine(root, "lakefile.toml")) && !File.Exists(Path.Combine(root, "lakefile.lean")))
+            throw CliDiagnostics.WithNext(new InvalidDataException(
+                    $"The proof root {shown} is not a Lake package: it has no lakefile.toml or lakefile.lean."),
+                $"Pass --proof-root the directory holding the lakefile of the proof's package; {generated}.");
+        if (!File.Exists(Path.Combine(root, "lake-manifest.json")))
+            throw CliDiagnostics.WithNext(new InvalidDataException(
+                    $"The proof root {shown} has no lake-manifest.json, so its leancil dependency is not resolved."),
+                $"Run `lake update` in {shown}, then run this command again; {generated}.");
+    }
+
+    /// <summary>
+    /// The failure for `source`, a module of the package at `root` or of a dependency that a keyed
+    /// `Extracted` import could resolve to: its cause and fix differ for an extraction directory.
+    /// </summary>
+    static InvalidDataException ReservedModule(string root, string source)
+    {
+        var directory = Path.GetDirectoryName(source)!;
+        var extraction = Path.GetFileName(source) == "Extracted.lean" &&
+            File.Exists(Path.Combine(directory, "identity.json"));
+        if (extraction)
+            return CliDiagnostics.WithNext(new InvalidDataException(
+                    $"The extraction directory {CliPaths.Display(directory)} is inside the proof package " +
+                    $"{CliPaths.Display(root)}: its Extracted.lean would shadow the extraction leancil workspace " +
+                    "generates for the editor."),
+                $"Extract to a directory outside {CliPaths.Display(root)} and delete " +
+                $"{CliPaths.Display(directory)}, then run this command again.");
+        return CliDiagnostics.WithNext(new InvalidDataException(
+                $"{CliPaths.Display(source)} is in the proof package or a dependency under the name Extracted or " +
+                "ExtractedSymbols, which are reserved for the extractions leancil workspace generates for the editor."),
+            "Rename or remove that module or directory, then run this command again.");
     }
 
     // Unchanged bytes keep Lake's traces, so an unchanged method rebuilds nothing.

@@ -82,6 +82,7 @@ internal static partial class FailureReports
             {
                 "kernel replay" or "theorem audit" => ReplayOrAuditRejected,
                 "proof selection" or "arguments" => InvalidRequest,
+                "open goals" => UnsolvedGoal,
                 _ => Unclassified
             };
         var first = diagnostics.FirstOrDefault();

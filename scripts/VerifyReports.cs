@@ -56,6 +56,24 @@ internal static partial class VerifyReports
         catch (JsonException) { return null; }
     }
 
+    /// <summary>
+    /// The open goal of `text`, a message `CIL.Observe` logged under `cil.goals`, or null for any other message:
+    /// why it is open, in the report's words, and the goal as Lean prints it.
+    /// </summary>
+    internal static (string Kind, string Goal)? Goal(string text)
+    {
+        if (!text.StartsWith(Program.GoalMarker, StringComparison.Ordinal)) return null;
+        var parts = text[Program.GoalMarker.Length..].Split('\n', 2);
+        var kind = parts[0] switch
+        {
+            "sorry" => "sorry",
+            "error" => "failing tactic",
+            "unsolved" => "unsolved",
+            _ => null
+        };
+        return kind is null || parts.Length != 2 ? null : (kind, parts[1]);
+    }
+
     /// <summary>Whether `text` is a step of the `CIL.step` trace.</summary>
     internal static bool IsStep(string text) => text.StartsWith(Program.TraceHeader, StringComparison.Ordinal);
 
@@ -244,10 +262,13 @@ internal static partial class VerifyReports
     /// </param>
     /// <param name="traceRequested">Whether `--trace` asked for each step the proof took.</param>
     /// <param name="proofChecked">Whether Lean checked the proof, so its trace messages exist.</param>
+    /// <param name="goalsRequested">Whether `--goals` asked for the goal at each `sorry` and failing tactic.</param>
+    /// <param name="specification">The proof module's definitions the statement is stated with, when read.</param>
     internal static JsonObject Result(string result, FailureReports.Report? failure, string theorem, string proof,
         string output, string? proofRoot, string? stage, string[]? axioms, string? statement,
         IEnumerable<(string Severity, int Line, int Column, string Text)> messages, bool traceRequested = false,
-        bool proofChecked = true)
+        bool proofChecked = true, bool goalsRequested = false,
+        IEnumerable<(string Name, string Text)>? specification = null)
     {
         var all = messages.ToArray();
         var methods = Methods(output);
@@ -271,6 +292,13 @@ internal static partial class VerifyReports
             ["file"] = proof, ["line"] = message.Line, ["column"] = message.Column,
             ["severity"] = severity ? message.Severity : null, ["text"] = message.Text
         };
+        var unknown = new JsonObject();
+        if (!traceRequested || !proofChecked)
+            unknown["trace"] = traceRequested ? "the proof was not checked, so no step was traced"
+                : "not requested; --trace traces each step the proof takes";
+        if (!goalsRequested || !proofChecked)
+            unknown["goals"] = goalsRequested ? "the proof was not checked, so no goal was read"
+                : "not requested; --goals reports the goal at each sorry and failing tactic";
         return new JsonObject
         {
             ["schema"] = Schema,
@@ -282,11 +310,26 @@ internal static partial class VerifyReports
             ["output"] = output,
             ["axioms"] = axioms is null ? null : new JsonArray([.. axioms.Select(axiom => (JsonNode?)axiom)]),
             ["statement"] = statement,
+            // The definitions of the proof module the statement names, as Lean prints their elaborated bodies.
+            ["specification"] = specification is null ? null : new JsonArray([.. specification.Select(definition =>
+                (JsonNode?)new JsonObject { ["name"] = definition.Name, ["text"] = definition.Text })]),
             ["failures"] = failures,
-            // The proof's own messages; the observer's records are in `failures` and its steps in `trace`.
+            // The proof's own messages; the observer's records are in `failures`, its steps in `trace` and
+            // the open goals in `goals`.
             ["messages"] = new JsonArray([.. all.Where(message => Record(message.Text) is null &&
-                    !(traceRequested && IsStep(message.Text)))
+                    !(traceRequested && IsStep(message.Text)) && !(goalsRequested && Goal(message.Text) is not null))
                 .Select(message => (JsonNode?)Located(message, true))]),
+            // Each goal at a `sorry`, before a failing tactic or left unsolved, as `CIL.Observe` logged it.
+            ["goals"] = !goalsRequested || !proofChecked ? null
+                : new JsonArray([.. all.Where(message => Goal(message.Text) is not null).Select(message =>
+                {
+                    var (kind, goal) = Goal(message.Text)!.Value;
+                    return (JsonNode?)new JsonObject
+                    {
+                        ["file"] = proof, ["line"] = message.Line, ["column"] = message.Column,
+                        ["kind"] = kind, ["goal"] = goal
+                    };
+                })]),
             // Each step the proof took, as `CIL.Observe` traced it under `--trace`.
             ["trace"] = !traceRequested || !proofChecked ? null
                 : new JsonArray([.. all.Where(message => IsStep(message.Text)).Select(message =>
@@ -295,13 +338,10 @@ internal static partial class VerifyReports
                     step.Remove("severity");
                     return (JsonNode?)step;
                 })]),
-            ["unknown"] = traceRequested && proofChecked ? new JsonObject() : new JsonObject
-            {
-                ["trace"] = traceRequested ? "the proof was not checked, so no step was traced"
-                    : "not requested; --trace traces each step the proof takes"
-            },
+            ["unknown"] = unknown,
             ["rerun"] = new JsonArray([.. FailureReports.Rerun(theorem, proof, output, proofRoot)
-                .Concat(traceRequested ? ["--format", "json", "--trace"] : ["--format", "json"])
+                .Concat(["--format", "json", .. traceRequested ? ["--trace"] : Array.Empty<string>(),
+                    .. goalsRequested ? ["--goals"] : Array.Empty<string>()])
                 .Select(argument => (JsonNode?)argument)]),
         };
     }

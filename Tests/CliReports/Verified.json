@@ -15,6 +15,7 @@
     "Quot.sound"
   ],
   "statement": "ExampleProof.correctness (x y : CIL.W64) :\n  ∃ result,\n    Except.map Prod.snd\n          (CIL.Safety.invoke Extracted.program 4 0\n            [CIL.Safety.Value.scalar (CIL.Value.i64 x), CIL.Safety.Value.scalar (CIL.Value.i64 y)]\n            CIL.Safety.Memory.empty) =\n        Except.ok [CIL.Safety.Value.scalar (CIL.Value.i64 result)] ∧\n      BitVec.toNat result = (BitVec.toNat x + BitVec.toNat y) % 2 ^ 64",
+  "specification": [],
   "failures": [],
   "messages": [
     {
@@ -25,9 +26,11 @@
       "text": "'ExampleProof.correctness' depends on axioms: [propext, Quot.sound]"
     }
   ],
+  "goals": null,
   "trace": null,
   "unknown": {
-    "trace": "not requested; --trace traces each step the proof takes"
+    "trace": "not requested; --trace traces each step the proof takes",
+    "goals": "not requested; --goals reports the goal at each sorry and failing tactic"
   },
   "rerun": [
     "leancil",

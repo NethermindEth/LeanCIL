@@ -44,7 +44,7 @@ Failure: read `artifacts/Method/failed.json` and act on `kind`:
 | `unsupported-extraction` | The method or something it calls is outside the supported subset | Report the named item; see [opcodes](https://github.com/NethermindEth/LeanCIL/blob/main/docs/OPCODES.md) |
 | `invalid-request` | Proof path or theorem name is wrong | Fix `--proof` / `--theorem` |
 | `elaboration-error` | Any other Lean error: a failed tactic (`Tactic rfl failed`), missing import, renamed API | A failed tactic can mean the code is wrong; see below. Otherwise fix the proof |
-| `unsolved-goal` | A tactic block left goals open | The code may not satisfy the theorem; see below |
+| `unsolved-goal` | A tactic block left goals open, or a `--goals` run stopped at the goals it found open | The code may not satisfy the theorem; see below. `verify --goals` prints each open goal |
 | `resource-limit` | Heartbeats or recursion depth ran out | Confirm the method and profile first; a proof run on the wrong method or a false property can also exhaust limits. Do not raise limits blindly |
 | `replay-or-audit-rejected` | Kernel replay or the axiom audit failed | Treat as a failed proof; look for `sorry` or extra axioms |
 
@@ -59,7 +59,7 @@ maintenance task, not evidence about the code.
 
 From a LeanCIL checkout, the shipped addition proof checks like this:
 
-```sh
+```sh run
 dotnet build Examples/Assembly -c Release
 leancil extract Examples/Assembly/bin/Examples.dll "Arithmetic::Add(ulong,ulong)" artifacts/Add
 leancil verify artifacts/Add --proof Examples/Proofs/Add.lean

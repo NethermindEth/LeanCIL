@@ -37,8 +37,9 @@ leancil verify artifacts/Method --proof proofs/Method.lean --theorem MyProof.cor
 
 - The selector needs the parameter list. C# aliases (`ulong`) and an unqualified type name are
   accepted when unique; `leancil list` prints the full forms. Use `ulong&` for `ref`/`out`.
-  Several types can declare a method with the same name and parameters: the `Entry:` line of
-  `verify` shows the method actually checked; report it, and ask the user when the choice is unclear.
+  Several types can declare a method with the same name and parameters: the `Extraction entry:`
+  line of `verify` shows the method extracted and `Subject:` the method the theorem is about;
+  report them, and ask the user when the choice is unclear.
 - The profile defaults to `scalar` (no hardware intrinsics). Built-in names are `scalar`,
   `x64-sse2`, `x64-sse42`, `x64-v3`, `x64-v4` and `arm64-advsimd`; custom ones are JSON
   ([runtime profiles](https://github.com/NethermindEth/LeanCIL/blob/main/docs/RUNTIME-PROFILES.md)).
@@ -54,11 +55,12 @@ leancil verify artifacts/Method --proof proofs/Method.lean --theorem MyProof.cor
 
 ## Report a result honestly
 
-On success `verify` prints `Verified: <theorem>`, the axioms, and the elaborated `Statement:`,
-and writes `verified.json`. Statements usually run the method with
+On success `verify` prints `Verified: <theorem>`, the axioms, the elaborated `Statement:` and,
+under `Specification:`, the proof file's definitions the statement names, such as its
+precondition and postcondition, and writes `verified.json`. Statements usually run the method with
 `CIL.Safety.invoke program fuel methodIndex args memory`: the entry method is index `0`, `args`
 are the argument values and `memory` is the caller memory. Before telling the user the code is
-verified, read the printed statement and confirm:
+verified, read the printed statement and specification and confirm:
 
 - It quantifies over every input the user cares about, not a few concrete values.
 - The caller memory is either quantified or a fixed one such as `CIL.Safety.Memory.empty` (no
@@ -80,6 +82,9 @@ On failure `verify` exits nonzero, prints `Invalid:` with the Lean errors, and w
 `failed.json`, whose `kind` classifies the failure (`stale-input`, `unsupported-extraction`,
 `unsolved-goal`, `resource-limit`, ...) and whose `rerun` repeats the request
 ([failure reports](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CLI.md#failure-reports)).
+`leancil verify ... --goals` prints the goal at each `sorry`, before each failing tactic and left
+unsolved, which is how to read goals without an editor
+([goals](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CLI.md#goals-of-an-unfinished-proof)).
 
 ## Rules
 

@@ -2360,8 +2360,15 @@ partial class Program : IDisposable
     /// <summary>A method that a verified statement names through a framework predicate.</summary>
     internal sealed record StatementSubject(string role, string head, bool extracted, int? method, string? signature);
 
-    /// <summary>A verified statement as framework notation prints it, and the methods it names.</summary>
-    internal sealed record StatementView(string statement, StatementSubject[] subjects);
+    /// <summary>A definition of the proof module as Lean prints it: `def name binders : type := body`.</summary>
+    internal sealed record StatementDefinition(string name, string text);
+
+    /// <summary>
+    /// A verified statement as framework notation prints it, the methods it names and the proof module's
+    /// definitions it is stated with, each before the ones its body uses; null when they were not read.
+    /// </summary>
+    internal sealed record StatementView(string statement, StatementSubject[] subjects,
+        StatementDefinition[]? definitions = null);
 
     /// <summary>Set by callers that print <see cref="VerifiedStatement"/>; printing costs one Lean run.</summary>
     bool viewsStatement { get; init; }
@@ -2391,12 +2398,27 @@ partial class Program : IDisposable
     /// <summary>The start of a message of the `CIL.step` trace class.</summary>
     internal const string TraceHeader = "[CIL.step]";
 
-    /// <summary>Whether the proof is checked as <see cref="ObservedProof"/>, as records and a trace need.</summary>
-    bool ObservesProof => structuredFailures || tracesSteps;
+    /// <summary>
+    /// Set by callers that print open goals: the proof is checked as <see cref="ObservedProof"/> with
+    /// <see cref="GoalsOption"/>, so the goal at each `sorry` and failing tactic is logged after
+    /// <see cref="GoalMarker"/>.
+    /// </summary>
+    bool showsGoals { get; init; }
 
-    /// <summary>The options the proof module is checked with: none unless asked for records or a trace.</summary>
+    /// <summary>The Lean option `cil.goals`, which `CIL.Observe` reads.</summary>
+    internal const string GoalsOption = "-Dweak.cil.goals=true";
+
+    /// <summary>`CIL.Safety.goalMarker`, which starts each open goal the observer logs.</summary>
+    internal const string GoalMarker = "[LeanCIL goal v1] ";
+
+    /// <summary>Whether the proof is checked as <see cref="ObservedProof"/>: records, a trace and goals need it.
+    /// </summary>
+    bool ObservesProof => structuredFailures || tracesSteps || showsGoals;
+
+    /// <summary>The options the proof module is checked with: none unless asked for records, a trace or goals.
+    /// </summary>
     string[] ProofOptions => [.. structuredFailures ? [DiagnosticsOption] : Array.Empty<string>(),
-        .. tracesSteps ? [TraceOption] : Array.Empty<string>()];
+        .. tracesSteps ? [TraceOption] : Array.Empty<string>(), .. showsGoals ? [GoalsOption] : Array.Empty<string>()];
 
     /// <summary>The bytes the proof module is checked from: the developer's, or <see cref="ObservedProof"/>.</summary>
     byte[] CheckedProofBytes(byte[] source) => ObservesProof ? ObservedProof.Insert(source).Bytes : source;
@@ -2551,6 +2573,45 @@ partial class Program : IDisposable
                   ("method", toJson index), ("signature", toJson signature)]))
               found.get
 
+            /-- How many leading binders of `type` a printed signature names before its colon. -/
+            def LeanCILStatement.namedBinders : Expr -> Nat
+              | .forallE name _ body info =>
+                if name.hasMacroScopes && !info.isInstImplicit then 0
+                else LeanCILStatement.namedBinders body + 1
+              | _ => 0
+
+            /-- Whether `value` only projects a field of its argument, as a structure's accessor does. -/
+            def LeanCILStatement.projects : Expr -> Bool
+              | .lam _ _ body _ => LeanCILStatement.projects body
+              | .proj .. => true
+              | _ => false
+
+            /-- The proof's definitions that `root` is stated with, each before those its body uses,
+                printed as `def name binders : type := body` from its elaborated value. A structure's
+                accessors are not listed: the statement names the structure and its fields. -/
+            partial def LeanCILStatement.definitions (root : Expr) (proof : NameSet) :
+                MetaM (Array Json) := do
+              let seen <- IO.mkRef ({} : NameSet)
+              let found <- IO.mkRef (#[] : Array Json)
+              let rec visit (expression : Expr) : MetaM Unit := do
+                for name in expression.getUsedConstants do
+                  unless proof.contains name && !(<- seen.get).contains name do continue
+                  seen.modify (fun names => names.insert name)
+                  let some (.defnInfo definition) := (<- getEnv).find? name | continue
+                  if name.isInternalDetail || LeanCILStatement.projects definition.value then continue
+                  let named := LeanCILStatement.namedBinders definition.type
+                  let signature <- PrettyPrinter.ppSignature name
+                  let printed <- lambdaBoundedTelescope definition.value named fun binders body => do
+                    if binders.size == named then
+                      return f!"def {signature.fmt} :=" ++ Format.nest 2 (Format.line ++ (<- ppExpr body))
+                    return f!"def {name} : {<- ppExpr definition.type} :=" ++
+                      Format.nest 2 (Format.line ++ (<- ppExpr definition.value))
+                  found.modify (fun entries => entries.push (Json.mkObj
+                    [("name", toJson name.toString), ("text", toJson (toString printed.group))]))
+                  visit definition.value
+              visit root
+              found.get
+
             #eval show CommandElabM Unit from do
               let (data, _) <- readModuleData {{LeanString(olean.Replace('\\', '/'))}}
               let mut env <- getEnv
@@ -2574,7 +2635,8 @@ partial class Program : IDisposable
                       (<- LeanCILStatement.methods "premise" (<- inferType binder) table proof)
                   subjects := subjects ++ (<- LeanCILStatement.methods "conclusion" body table proof)
                   return Json.mkObj [("statement", toJson (toString statement.fmt)),
-                    ("subjects", toJson subjects)]
+                    ("subjects", toJson subjects),
+                    ("definitions", toJson (<- LeanCILStatement.definitions info.type proof))]
               IO.FS.writeFile {{LeanString(result.Replace('\\', '/'))}} result.compress
 
             """);
@@ -2619,7 +2681,8 @@ partial class Program : IDisposable
         string? batchSourceSha256 = null, string? batchTheorem = null, string? consumerSupportSha256 = null,
         string[]? staticValues = null, string[]? contractImports = null, PublishedImport[]? imports = null,
         DeploymentDependency[]? contractDependencies = null, string? compositionTheorem = null, string? compositionAudit = null,
-        JsonElement[]? initializationAssumptions = null, string[]? opaqueStaticValues = null);
+        JsonElement[]? initializationAssumptions = null, string[]? opaqueStaticValues = null,
+        StatementDefinition[]? specification = null);
 
     static JsonElement[] InitializationAssumptions(JsonElement extraction) =>
         extraction.TryGetProperty("initializationAssumptions", out var assumptions)

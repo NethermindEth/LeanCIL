@@ -29,7 +29,7 @@ Omit `--suite` to run everything; the [suite table](#suites) lists each name.
 | CLI, artifact identity and theorem selection | `core`, `cli`, `failures`, `workspace`, `audit` |
 | Admission reports and self-admission of the extractor | `blockers`; see [self-admission](COMPILER-COVERAGE.md#self-admission) |
 | Exported interfaces and implementation checks | The affected `exports` partition in the [suite table](#suites) |
-| Documentation, its Lean snippets and cited names | `docs`, plus `scripts/CheckDocReferences.cs`; see [documentation checks](CI.md#documentation-checks) |
+| Documentation, its Lean snippets, cited names and documented command output | `docs`, plus `scripts/CheckDocReferences.cs`; see [documentation checks](CI.md#documentation-checks) |
 
 `lake build` builds only `CIL`. Changes under `CIL/` require building every library target in
 `lakefile.toml` before pushing. C# changes require analyzer validation, including changed
@@ -97,7 +97,7 @@ Every name `--suite` accepts, in the order a full run executes them. The names c
 | `pool` | object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations they reject |
 | `blockers` | admission reports with deduplicated blockers, call chains, profile-excluded branches and self-admission |
 | `audit` | theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts cannot forge |
-| `docs` | documentation Lean snippets and cited library names against the current library |
+| `docs` | documentation Lean snippets, cited library names and documented commands against the library and tool |
 | `exports` | contract production, restrictions and caller reuse |
 | `exportsaudit` | post-callback export integrity |
 | `exportsprotected` | protected static export and separately compiled derived caller |

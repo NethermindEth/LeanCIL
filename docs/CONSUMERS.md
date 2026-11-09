@@ -90,7 +90,10 @@ selector in place of KEY works when it names one recorded profile, or with
 resolves in the editor without editing.
 Consumer sources named `Extracted.lean` or `ExtractedSymbols.lean`, or inside an
 `Extracted` or `ExtractedSymbols` directory, are rejected because they would
-shadow an extraction.
+shadow an extraction. That includes the output directory of `leancil extract`:
+keep it outside the proof package, as the message says when it finds one inside.
+A proof root that has no lakefile, or no `lake-manifest.json` because
+`lake update` has not run there, is rejected with that cause and the fix.
 
 The loop is:
 
@@ -120,6 +123,12 @@ against its own copy of the extraction under `selections/KEY/proofs/`.
 `--configuration` defaults to `Release`, `--once` runs one cycle and exits with
 status 1 unless every proof verified or names no theorem, and `--format json` prints each cycle as
 one JSON line.
+
+`--goals` runs each verification with [`verify --goals`](CLI.md#goals-of-an-unfinished-proof)
+and prints, under each proof, the goal at every `sorry`, before every failing tactic and left
+unsolved, so a terminal shows what is left to prove after each save. The goals of a proof whose
+inputs did not change are printed again from its last run, and each result's `goals` holds them
+in the JSON line; without `--goals` it is `null`.
 
 Each proof gets one status per cycle:
 

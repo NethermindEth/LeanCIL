@@ -26,6 +26,14 @@ try
           rfl
         """);
     Write("Tests/Fixture.lean", "def helper : Nat := 0\n");
+    Write("Examples/Assembly/Methods.cs", """
+        public static class Arithmetic
+        {
+            public static ulong Add(ulong x, ulong y) => unchecked(x + y);
+            public static ulong Twice(ulong x) => x + x;
+            public static ulong Twice(uint x) => x + x;
+        }
+        """);
 
     Passes("a checked snippet, an excerpt and shipped citations", """
         See `CIL/Sample.lean`, [the example](../Examples/Proofs/Sample.lean) and [`CIL.sample`](../CIL/Sample.lean).
@@ -49,6 +57,72 @@ try
 
         `Tests/Fixture.lean` and [its source](../Tests/Fixture.lean) check `Tests.Fixture.helper`.
         """);
+
+    Passes("a walkthrough of commands, their output and an edit", """
+        ```sh run
+        dotnet build Examples/Assembly -c Release
+        leancil extract Examples/Assembly/bin/Examples.dll "Arithmetic::Add(ulong,ulong)" artifacts/Add
+        ```
+
+        ```text stdout
+        Extracted 1 reachable method into artifacts/Add/Extracted.lean
+        ```
+
+        ```csharp edit Examples/Assembly/Methods.cs
+        public static ulong Add(ulong x, ulong y) => unchecked(x - y);
+        ```
+
+        ```sh run fails
+        leancil verify artifacts/Add
+        ```
+
+        ```text stderr
+        Invalid: Lean could not prove the selected theorem.
+        ```
+
+        ```sh
+        dotnet tool update --global Nethermind.LeanCIL
+        ```
+        """);
+    Fails("a misspelt walkthrough marker", "```sh runs\nleancil list a.dll\n```", "unknown `sh` block marker");
+    Fails("a misspelt output marker", "```text output\nVerified\n```", "unknown `text` block marker");
+    Fails("a run block with a command the suite does not run", "```sh run\nrm -rf artifacts\n```",
+        "runs only `leancil`");
+    Fails("an empty run block", "```sh run\n```", "holds no command");
+    Fails("an output block before any command", "```text stdout\nVerified\n```", "follows no `sh run` block");
+    Fails("an edit of a file outside the examples", "```csharp edit CIL/Sample.lean\ndef a => b\n```",
+        "is not a file under Examples/");
+    Fails("an edit that names no member", "```csharp edit Examples/Assembly/Methods.cs\nreturn 1;\n```",
+        "is not an expression-bodied member");
+    Fails("an edit of a member the file does not declare",
+        "```csharp edit Examples/Assembly/Methods.cs\npublic static ulong Sub(ulong x) => x;\n```",
+        "is declared on 0 lines");
+
+    // Output is compared whole, with `...` for any lines and positions and hashes named, not spelt.
+    var hash = new string('a', 64);
+    OutputPasses("the whole standard output", "```text stdout\nVerified: T\n  Proof: P.lean:3:0\n  Key: " +
+        new string('b', 64) + "\n```", new(0, $"Verified: T\r\n  Proof: P.lean:15:2\r\n  Key: {hash}\r\n", ""));
+    OutputPasses("an elided run of lines", "```text stdout\nVerified: T\n...\n  Statement:\n    x = x\n```",
+        new(0, "Verified: T\n  Axioms: none\n  Report: r\n  Statement:\n    x = x\n", ""));
+    OutputPasses("error lines in a row", "```text stderr\nInvalid: no\n  Stage: proof checking\n```",
+        new(1, "", "Checking Proof\nInvalid: no\n  Stage: proof checking\n  Next: read\n"), fails: true);
+    OutputFails("a documented line the command does not print",
+        "```text stdout\nVerified: T\n  Entry: m\n  Axioms: none\n```",
+        new(0, "Verified: T\n  Subject: m\n  Axioms: none\n", ""),
+        "docs/Case.md:9: documented `  Entry: m`, but the command prints `  Subject: m`");
+    OutputFails("a printed line the document lacks", "```text stdout\nVerified: T\n```",
+        new(0, "Verified: T\n  Subject: m\n", ""), "docs/Case.md:8: the command prints more");
+    OutputFails("a printed line fewer than documented", "```text stdout\nVerified: T\n  Subject: m\n```",
+        new(0, "Verified: T\n", ""), "docs/Case.md:9: documented `  Subject: m`, but the command prints nothing more");
+    OutputFails("lines after an elision that are not printed", "```text stdout\nVerified: T\n...\n  Report: r\n```",
+        new(0, "Verified: T\n  Axioms: none\n", ""), "docs/Case.md:10: documented `  Report: r`");
+    OutputFails("error lines that are not in a row",
+        "```text stderr\nInvalid: no\n  Next: read\n```", new(1, "", "Invalid: no\n  Stage: s\n  Next: read\n"),
+        "docs/Case.md:9: documented `  Next: read`", fails: true);
+    OutputFails("a command that fails undocumented", "```text stdout\nVerified: T\n```", new(1, "", "Error: no\n"),
+        "docs/Case.md:4: `leancil verify artifacts/Add` exited with 1");
+    OutputFails("a command documented to fail that succeeds", "```text stdout\nVerified: T\n```",
+        new(0, "Verified: T\n", ""), "is documented to fail and succeeded", fails: true);
 
     const string Unshipped = "Tests/ is not shipped";
     Fails("a user document citing a test path", "`Tests/Fixture.lean` shows the API.", Unshipped);
@@ -162,6 +236,33 @@ List<string> Check(string text)
     Write("docs/Case.md", $"# Case\n\n{text}\n");
     var page = Documentation.Read(root, Path.Combine(root, "docs", "Case.md"));
     return Documentation.CheckReferences(root, [page]).Failures;
+}
+
+// The failures of a document running one command, with `result` as what it exits with and prints.
+List<string> OutputCheck(string output, CommandResult result, bool fails)
+{
+    var marker = fails ? "sh run fails" : "sh run";
+    Write("docs/Case.md", $"# Case\n\n```{marker}\nleancil verify artifacts/Add\n```\n\n{output}\n");
+    var page = Documentation.Read(root, Path.Combine(root, "docs", "Case.md"));
+    return Documentation.RunWalkthrough(page, _ => result, _ => { });
+}
+
+void OutputPasses(string name, string output, CommandResult result, bool fails = false)
+{
+    var failures = OutputCheck(output, result, fails);
+    if (failures.Count != 0)
+        throw new InvalidOperationException($"{name} was rejected:\n{string.Join('\n', failures)}");
+    checks++;
+    Console.WriteLine($"PASS {name}");
+}
+
+void OutputFails(string name, string output, CommandResult result, string reason, bool fails = false)
+{
+    var failures = OutputCheck(output, result, fails);
+    if (!failures.Any(failure => failure.Contains(reason, StringComparison.Ordinal)))
+        throw new InvalidOperationException($"{name} did not fail with `{reason}`:\n{string.Join('\n', failures)}");
+    checks++;
+    Console.WriteLine($"PASS {name} fails");
 }
 
 void Passes(string name, string text)
