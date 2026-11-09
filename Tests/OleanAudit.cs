@@ -286,7 +286,7 @@ if (library.Result is not { error: not null, count: 1, rejected: [{ name: "Lib.t
 var cliResults = Path.Combine(root, "library-results.json");
 var cli = Execute(["dotnet", ExtractorPath, "audit-library", "--project", package, "--module", "Lib", "--prefix", "Missing",
     "--results", cliResults]);
-if (cli.Code != 1 || !cli.Stderr.StartsWith("Invalid: Library audit failed: No theorems under namespace prefixes: Missing", StringComparison.Ordinal) ||
+if (cli.Code != 1 || !WithoutStageProgress(cli.Stderr).StartsWith("Invalid: Library audit failed: No theorems under namespace prefixes: Missing", StringComparison.Ordinal) ||
     !File.Exists(cliResults) || JsonDocument.Parse(File.ReadAllText(cliResults)).RootElement.GetProperty("count").GetInt32() != 0)
     throw new InvalidOperationException($"audit-library CLI exit {cli.Code}: {cli.Output}");
 Core("""

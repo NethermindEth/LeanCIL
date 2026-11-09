@@ -157,7 +157,8 @@ partial class Program
     static void RefreshEditorExtraction(WorkspaceSettings settings)
     {
         var root = settings.ProofRoot;
-        var editor = Path.Combine(EditorFramework(root), EditorSourceDirectory);
+        var framework = EditorFramework(root);
+        var editor = Path.Combine(framework, EditorSourceDirectory);
         // The editor's `lake serve` starts Lean the same way; an oversized environment fails here, not as imports.
         RequireLeanEnvironmentFits(["lake", "serve"], root, new System.Diagnostics.ProcessStartInfo().Environment);
         var selection = new EditorSelection(settings.Assembly, settings.Method, settings.Profile,
@@ -175,6 +176,7 @@ partial class Program
                     .OrderBy(other => other.Proof, StringComparer.Ordinal)]
             };
             var modules = ApplyEditorExtraction(editor, key, extraction, selection);
+            SeedFrameworkBuild(framework);
             BuildEditorModules(root, modules);
             PrintEditorExtraction(settings, editor, key, modules);
         }
@@ -341,7 +343,7 @@ partial class Program
     {
         if (modules.Count > 0)
             Run(["lake", "build", .. modules.Select(module => "+" + module)], root,
-                progress: "Building " + string.Join(", ", modules) + " (the first build also builds the framework)");
+                progress: "Building " + string.Join(", ", modules));
     }
 
     /// <summary>

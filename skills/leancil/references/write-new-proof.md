@@ -37,7 +37,9 @@ Copy the closest example's structure and change the statement first.
 leancil workspace path/to/Lib.dll 'Type::Method(ulong)' --profile scalar --proof proofs/Method.lean --proof-root .
 ```
 
-The command prints the `import` line the proof needs; `new-proof` already writes it. Each
+The command prints the `import` line the proof needs; `new-proof` already writes it. The first
+`workspace` or `verify` on a machine builds the certified library for several minutes and reports
+Lake's job count on stderr; both then reuse it. Each
 selected method gets its own module, so several proofs can be open at once; `leancil workspace
 --remove KEY` drops one. Check a proof from a terminal with `lake lean proofs/Method.lean`.
 After changing the C#, `leancil watch --project path/to/Lib.csproj` rebuilds it, refreshes only

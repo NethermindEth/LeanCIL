@@ -1,7 +1,9 @@
 # Getting started
 
 Install the Lean version in [lean-toolchain](../lean-toolchain) through elan and the .NET SDK
-in [global.json](../global.json). From the repository root, run `lake build`.
+in [global.json](../global.json). The tool carries the framework sources and builds its own
+library from them, so using it needs no `lake build` of this checkout; that command is for
+working on the framework itself.
 
 Build and install the .NET tool from this checkout:
 
@@ -57,6 +59,14 @@ Verified: ExampleProof.correctness
 
 `Subject:` is the method the theorem's conclusion is about and `Extraction entry:` the method the
 extraction started from; see [reading the report](CLI.md#reading-the-report).
+
+The first `verify` or `workspace` on a machine builds the certified library: it compiles every
+framework module (about 330 Lake jobs) and kernel-replays all of them, which takes several
+minutes. Stderr says so when the build starts and then reports the job count, every 10 seconds on
+a terminal and every 20 seconds when redirected; see [stage progress](CLI.md#stage-progress). The
+library is cached in `LEANCIL_CACHE_DIR` (default `<local application data>/LeanCIL/libraries`)
+under a key of the framework sources, toolchain and platform, and both commands reuse it, so
+later runs take seconds. A release package downloads the library instead of building it.
 
 Every invocation validates the request's identity and required proof evidence. Authenticated caches can reuse unchanged certified builds; source/hash checks, audits and required kernel replay still apply. Use `--fresh` to bypass proof and support reuse while retaining the source-bound library cache; add `--rebuild-library` to rebuild the library. Release packages can download a package-pinned certified library on first use, with independent integrity checks and kernel replay. A failed proof removes the previous verification report. `extract` generates definitions and `check` validates extraction consistency; `verify` establishes the selected theorem about those definitions. Its guarantee is exactly the theorem's statement, including its preconditions and quantifiers.
 
