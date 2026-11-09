@@ -140,7 +140,8 @@ internal static class InstructionTranslation
             var f = (FieldReference)i.Operand;
             FieldDefinition resolved = f.Resolve() ?? throw new InvalidDataException("Unresolved field");
             if (ObjectTypes.Candidate(f.DeclaringType))
-                return ObjectTypes.FieldOperation(f, resolved, store: op == "setField", address: op == "fieldAddr");
+                return ObjectTypes.FieldOperation(f, resolved, store: op == "setField", address: op == "fieldAddr",
+                    profile.Architecture);
             Layout(f.DeclaringType);
             var actual = MetadataValidation.InstanceFieldOf(f);
             var fieldType = actual.Type;

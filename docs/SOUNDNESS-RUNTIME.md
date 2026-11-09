@@ -310,8 +310,8 @@ loaded, stored into another such field, compared for identity and tested against
 admitted operation takes its type as a field owner, call receiver, argument, local or result, so
 nothing reads through it. Its referent is an object allocation like any other, whose recorded
 runtime type the model never inspects. Fields of generic parameter type or a modified type stay
-rejected, as do fields holding arrays of structs or vectors, whose element width comes from a
-layout the field token does not carry.
+rejected, as do fields holding multi-dimensional arrays, whose shape a slot cannot recover from
+the allocation it names.
 
 `System.String` of `System.Runtime`, matched exactly, is the one such class that is also admitted
 as the type of an argument, a local and a result ([StringValues](../Examples/Proofs/StringValues.lean),
@@ -363,7 +363,7 @@ against a pinned catalog class that is no interface
 Interface, generic, explicit-layout and finalizable classes, classes deriving from a class that is
 not admitted, `newobj` of an abstract class, byrefs to class
 instances, field addresses on class instances, element addresses and typed element accesses
-on arrays of class references, class fields of struct-array, vector-array, generic parameter,
+on arrays of class references, class fields of multi-dimensional array, generic parameter,
 modified or non-integer value types,
 interface calls, virtual calls whose hierarchy the table cannot close or resolve, type tests
 against interfaces, `System.Object` or classes that are not admitted, and the address
@@ -429,8 +429,13 @@ runtime array a supplied array argument already requires. The allocation records
 so the field's declared element is what the load trusts.
 
 The extractor emits these operations for a field typed as a single-dimensional array of an
-integer, Boolean, char or integer-backed enum, and Lean rechecks the emitted element against the
-raw field token, and a stored value against an array of that element on the evaluation stack.
+integer, Boolean, char, integer-backed enum, reference-free struct or integer vector, and Lean
+rechecks the emitted element against the raw field token, and a stored value against an array of
+that element on the evaluation stack. A vector's width is fixed by its type. A struct's comes
+from its layout: the raw body names the field access as a layout use of the struct
+(`LayoutUsesComplete`), and `MethodLayoutsValid` requires the emitted width to be the size Lean
+computes for that layout, as for any other array of the struct
+([TilePairs](../Examples/Proofs/TilePairs.lean)).
 
 The extractor admits a single-dimensional array of an admitted class, or of a non-generic class
 outside the model other than `System.Object`, such as `string`, as a parameter, local, return or

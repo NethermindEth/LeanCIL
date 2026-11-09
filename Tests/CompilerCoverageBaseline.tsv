@@ -3,6 +3,7 @@ Examples:Examples.Account Examples.Objects::FirstPresent(Examples.Account,Exampl
 Examples:Examples.AggregateArrays/Pair Examples.AggregateArrays::Read(Examples.AggregateArrays/Pair[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:Examples.AggregateArrays/Pair& Examples.AggregateArrays::Address(Examples.AggregateArrays/Pair[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:Examples.AggregateArrays/Pair& Examples.AggregateArrays::Data(Examples.AggregateArrays/Pair[])	A	A	A	A	A	A	A	A
+Examples:Examples.AggregateArrays/Pair[] Examples.TileArrays::PairsOf(Examples.Tiles)	A	A	A	A	A	A	A	A
 Examples:Examples.AggregateSpans/VectorRecord Examples.AggregateSpans::LayoutRead(System.ReadOnlySpan`1<Examples.AggregateSpans/VectorRecord>)	B	B	B	B	B	B	B	B
 Examples:Examples.AggregateSpans/Words Examples.AggregateSpans::Read(System.ReadOnlySpan`1<Examples.AggregateSpans/Words>)	A	A	A	A	A	A	A	A
 Examples:Examples.AllocationTag[] Examples.PrimitiveArrays::AllocateUnnamedZero(System.Int32)	A	A	A	A	A	A	A	A
@@ -417,6 +418,7 @@ Examples:System.Int32 Examples.TailCalls::Increment(System.Int32)	A	A	A	A	A	A	A	
 Examples:System.Int32 Examples.TailCalls::LocalReference(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.TailCalls::Raise(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.TailCalls::Read(System.Int32&)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.TileArrays::PairCount(Examples.Tiles)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.TupleDivision::MathOutInt32(System.Int32,System.Int32,System.Int32&)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.TupleDivision::MathQuotient(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.TupleDivision::MathWrongQuotient(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
@@ -1170,6 +1172,8 @@ Examples:System.Void Examples.TailCalls::Store(System.Int32&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Tally::.ctor(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Throws::ThrowDivideByZero()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Throws::ThrowNull()	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.TileArrays::Relane(Examples.Tiles,System.Runtime.Intrinsics.Vector128`1<System.UInt64>[])	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Tiles::.ctor()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.TypedCopy::Packet(Examples.Packet&,Examples.Packet&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.TypedCopy::Record(Examples.Record&,Examples.Record&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.TypedCopy::Vector128(System.Runtime.Intrinsics.Vector128`1<System.UInt64>&,System.Runtime.Intrinsics.Vector128`1<System.UInt64>&)	A	A	A	A	A	A	A	A

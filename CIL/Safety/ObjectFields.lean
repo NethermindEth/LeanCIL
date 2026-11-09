@@ -951,6 +951,9 @@ def accessedBy (field : ArrayField element) : CIL.Op → Bool
     owner == field.owner && offset == field.offset && held == element
   | _ => false
 
+/-- The element of the arrays the field holds, so a statement can name it through the field. -/
+@[reducible] def elementType (_ : ArrayField element) : CIL.ArrayElement := element
+
 @[simp] theorem address_allocation (field : ArrayField element) (object : Reference) :
     (field.address object).allocation = object.allocation := rfl
 

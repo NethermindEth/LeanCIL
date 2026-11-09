@@ -445,10 +445,11 @@ stores a string a field holds into one, deciding covariance by the string's own 
 [TagLoad](../Examples/Proofs/TagLoad.lean) loads one into a field, as `ReferenceField.Forms`
 and `Owned.store_formed` take it.
 
-A field holding an array of integers, Booleans, chars or enums is an `ArrayField element`
-whose slot keeps the whole array's origin. `WholeArray memory element array length` says `array`
-starts a live heap array of exactly `length` elements whose view validates. A readable field
-holding one loads it (`readable.facts held whole`, or `load_whole`), one holding null loads the
+A field holding a single-dimensional array of a value type, an integer, Boolean, char, enum,
+struct or integer vector, is an `ArrayField element` whose slot keeps the whole array's origin;
+`field.elementType` names its element in a statement. `WholeArray memory element array length`
+says `array` starts a live heap array of exactly `length` elements whose view validates. A
+readable field holding one loads it (`readable.facts held whole`, or `load_whole`), one holding null loads the
 null array (`load_null`), and `owned.store_whole whole` and `owned.store_null` store into an
 owned field, confined to its slot; `frame` keeps the field across a confined call.
 `step_arrayField_eq` and `step_setArrayField_eq` step `ldfld` and `stfld`, and
@@ -457,7 +458,9 @@ view validates (`whole.valid`), while `step_memory_arrayLength_null_eq` throws o
 [SampleValues](../Examples/Proofs/SampleValues.lean) returns the array a field holds, and the
 null array for a null field, [SampleCount](../Examples/Proofs/SampleCount.lean) returns its
 length, and [SampleRefill](../Examples/Proofs/SampleRefill.lean) replaces it under a contract
-whose footprint is the field's slot.
+whose footprint is the field's slot. [TilePairs](../Examples/Proofs/TilePairs.lean) and
+[TilePairCount](../Examples/Proofs/TilePairCount.lean) do the same for an array of 16-byte
+structs, and [TileRelane](../Examples/Proofs/TileRelane.lean) stores an array of vectors.
 
 ## Construct structs through contracts
 

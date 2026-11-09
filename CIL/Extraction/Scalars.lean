@@ -428,14 +428,19 @@ private def referenceFieldType : TypeExpr → Bool
   | .object _ _ | .array (.object _ _) => true
   | _ => false
 
-/-- The element of a class instance field typed as an array of integers, Booleans, chars or
-    enums; arrays of structs and vectors need layouts the field token does not carry. -/
+/-- The element of a class instance field typed as an array of a value type, as the evaluation
+    stack records it: a struct element by its identity alone. -/
 private def valueArrayFieldElement (type : TypeExpr) : Option ArrayElement :=
   match type with
-  | .array element => match arrayElementType element with
-    | some (.aggregate ..) | some (.vector ..) => none
-    | element => element
+  | .array element => arrayElementType element
   | _ => none
+
+/-- An emitted field element is the declared one; a struct element's width is the layout's,
+    which `MethodLayoutsValid` checks at the layout use naming the field access. -/
+private def fieldElementMatches (declared emitted : ArrayElement) : Bool :=
+  match declared, emitted with
+  | .aggregate identity _, .aggregate actual _ => identity == actual
+  | declared, emitted => declared == emitted
 
 /-- `ldfld` and `stfld` of a class instance field emit the checked field operation for that
     owner, at the field's model offset: with its width and extension for a scalar field, as a
@@ -464,11 +469,13 @@ private def objectFieldMatches (instruction : RawInstruction) (stack : List Scal
       offset == objectFieldOffset index
   | 123, .field (.object scope name) index type false, receiver :: _,
       .memory (.arrayField owner offset element) =>
-    valueArrayFieldElement type == some element && receiver ∈ [.object, .nullObject] &&
+    (valueArrayFieldElement type).any (fieldElementMatches · element) &&
+      receiver ∈ [.object, .nullObject] &&
       owner == .object scope name && offset == objectFieldOffset index
   | 125, .field (.object scope name) index type false, value :: receiver :: _,
       .memory (.setArrayField owner offset element) =>
-    valueArrayFieldElement type == some element && value == .array element &&
+    (valueArrayFieldElement type).any (fun declared =>
+      fieldElementMatches declared element && value == .array declared) &&
       receiver ∈ [.object, .nullObject] && owner == .object scope name &&
       offset == objectFieldOffset index
   | _, _, _, _ => false

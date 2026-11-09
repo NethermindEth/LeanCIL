@@ -181,6 +181,11 @@ internal sealed class LayoutEvidence
                 var access = instruction.OpCode.Code switch { Code.Ldfld => "load", Code.Stfld => "store", _ => "address" };
                 uses.Add($".field {pc} {Index(owner)} {fieldIndex} .{access}");
             }
+            // A class field holding an array of structs takes its element width from the struct's layout.
+            else if (instruction.OpCode.Code is Code.Ldfld or Code.Stfld &&
+                instruction.Operand is FieldReference { FieldType: ArrayType { IsVector: true } fieldArray } &&
+                MetadataValidation.IsAggregate(fieldArray.ElementType, method.Module))
+                uses.Add($".size {pc} {Index(fieldArray.ElementType)} .arrayElement");
             else if (instruction.OpCode.Code == Code.Initobj &&
                 instruction.Operand is GenericInstanceType span && Spans.Is(span) &&
                 MetadataValidation.IsAggregate(span.GenericArguments[0], method.Module))
