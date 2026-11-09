@@ -83,8 +83,9 @@ An array argument `.array values` is an `ArrayView` whose bytes are the span `va
 its elements are stated as `SpanContents memory values.storage width elements`, beside
 `values.validate memory = .ok ()` and its `elementType`. A null array has no elements, so an
 index below `elements.length` is in bounds of a non-null array.
-[`contents.array_load valid scalar bound`](../CIL/Safety/ArrayContents.lean) gives the element's
-address `arrayElement memory values index width = .ok item` and its load, the element's value.
+[`SpanContents.array_load`](../CIL/Safety/ArrayContents.lean), applied as
+contents.array_load valid scalar bound, gives the element's address
+`arrayElement memory values index width = .ok item` and its load, the element's value.
 `step_arrayLoad_of_element` steps `ldelem` from those two facts and `step_arrayAddress_of_element`
 steps `ldelema` from the address; `arrayElement_formed` forms that address, so a helper may return
 it. An index outside the array throws, which a precondition bounding the index rules out.
