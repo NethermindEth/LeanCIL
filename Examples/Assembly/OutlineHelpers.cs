@@ -27,4 +27,15 @@ public sealed class Gauge
         for (var index = 0; index < readings.Length; index++) total += readings[index];
         return total;
     }
+
+    static int Within(int value, int limit) =>
+        value > limit ? throw new System.InvalidOperationException() : value;
+
+    /// <summary>A word no greater than the limit, through a helper that throws beyond it.</summary>
+    public static int Bounded(int value, int limit) => Within(value, limit);
+
+    static int Doubled(int value) => unchecked(value + value);
+
+    /// <summary>Twice a word, wrapping at 32 bits, through a helper that only computes.</summary>
+    public static int Twice(int value) => Doubled(value);
 }

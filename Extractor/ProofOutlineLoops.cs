@@ -620,8 +620,8 @@ internal static partial class ProofOutline
                 }
                 else if (op.StartsWith(".throw ", StringComparison.Ordinal))
                 {
-                    lean.Line($"{indent}-- `{callee.Name}` throws at {ProofOutline.Location(callee, pc)}{Where()}, " +
-                        "which its precondition must rule out");
+                    lean.Comment($"{indent}-- ", $"{indent}-- ", $"`{callee.Name}` throws at " +
+                        $"{ProofOutline.Location(callee, pc)}{Where()}, which its precondition must rule out");
                     lean.Line($"{indent}exfalso");
                     lean.Line($"{indent}cil_loop_obligation [{name}Contract]");
                     return;

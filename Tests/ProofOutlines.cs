@@ -60,6 +60,9 @@ var catalog = new (string Name, string Selector, string Group)[]
     ("HelperResult", "Gauge::Current()", "objects"),
     ("HelperStore", "Gauge::Settle()", "objects"),
     ("HelperWords", "Gauge::Smaller(int,int)", "control"),
+    // A helper that throws on one side of its test, and one that only computes, each from a caller over words.
+    ("HelperThrows", "Gauge::Bounded(int,int)", "control"),
+    ("HelperComputes", "Gauge::Twice(int)", "control"),
     ("DownThenUp", "Loops::DownThenUp(uint)", "control"),
     ("CheckedAdd", "CheckedArithmetic::Add(uint,uint)", "control"),
     ("Log64", "Bits::Log64(ulong)", "control"),
@@ -404,6 +407,11 @@ const string storedHole = "sorry -- Postcondition of the returned value, with `h
     """, "      omega"),
     ($"    sorry -- `saturateContract.pre` at the call at OutlineHelpers.cs:{line}, from `assumed`", "    trivial")];
 const string smallerLevel = "min (Gauge.Level.of initial gauge).toInt (Gauge.Limit.of initial gauge).toInt";
+const string helperHole = """
+      -- Postcondition of the returned value, from `assumed` and `post1`, the helper's `post` of
+      -- `output1`
+      sorry
+    """;
 foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] Fills)[]
 {
     // The caller learns of the helper's result only what the contract's `post` states, `post1`.
@@ -414,11 +422,7 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
         ("def Postcondition (gauge : Reference) (initial final : Memory) (result : W32) : Prop := sorry",
             "def Postcondition (gauge : Reference) (initial final : Memory) (result : W32) : Prop :=\n" +
             $"  result.toInt = {smallerLevel}"),
-        ("""
-          -- Postcondition of the returned value, from `assumed` and `post1`, the helper's `post` of
-          -- `output1`
-          sorry
-        """, "  exact post1")]),
+        (helperHole, "  exact post1")]),
     // The helper keeps the memory, so the store after it starts from the caller's own field facts.
     ("HelperStore", [
         .. SaturateStub(18),
@@ -439,11 +443,34 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
             "def Precondition (value limit : W32) : Prop := True"),
         ("def Postcondition (value limit result : W32) : Prop := sorry",
             "def Postcondition (value limit result : W32) : Prop := result.toInt = min value.toInt limit.toInt"),
+        (helperHole, "  exact post1")]),
+    // The helper's `pre` rules out the side where it throws, and the caller proves it from its own precondition.
+    ("HelperThrows", [
+        ("  pre := fun (value, limit) memory => sorry",
+            "  pre := fun (value, limit) memory => value.toInt ≤ limit.toInt"),
+        ("final = initial ∧ sorry", "final = initial ∧ result = value"),
         ("""
-          -- Postcondition of the returned value, from `assumed` and `post1`, the helper's `post` of
-          -- `output1`
-          sorry
-        """, "  exact post1")]),
+              -- what `withinContract.post` states of the returned value where not `limit.toInt <
+              -- value.toInt`, from `permitted`, its `pre`
+              sorry
+        """, "      rfl"),
+        ("def Precondition (value limit : W32) : Prop := sorry",
+            "def Precondition (value limit : W32) : Prop := value.toInt ≤ limit.toInt"),
+        ("def Postcondition (value limit result : W32) : Prop := sorry",
+            "def Postcondition (value limit result : W32) : Prop := result = value"),
+        ("    sorry -- `withinContract.pre` at the call at OutlineHelpers.cs:35, from `assumed`", "    exact assumed"),
+        (helperHole, "  exact post1")]),
+    // A helper that only computes is stepped in one run, leaving what its `post` states of the result.
+    ("HelperComputes", [
+        ("  pre := fun value memory => sorry", "  pre := fun value memory => True"),
+        ("final = initial ∧ sorry", "final = initial ∧ result = value + value"),
+        ("    sorry -- what `doubledContract.post` states of the returned value, from `permitted`, its `pre`",
+            "    rfl"),
+        ("def Precondition (value : W32) : Prop := sorry", "def Precondition (value : W32) : Prop := True"),
+        ("def Postcondition (value result : W32) : Prop := sorry",
+            "def Postcondition (value result : W32) : Prop := result = value + value"),
+        ("    sorry -- `doubledContract.pre` at the call at OutlineHelpers.cs:40, from `assumed`", "    trivial"),
+        (helperHole, "  exact post1")]),
     ("Deposit", [
         ("def Precondition (account : Reference) (amount : W64) (initial : Memory) : Prop := sorry",
             "def Precondition (_ : Reference) (_ : W64) (_ : Memory) : Prop := True"),
@@ -1732,6 +1759,21 @@ if (Selected("HelperResult"))
     }
     Console.WriteLine("PASS a helper's contract stub is proved: a post its body does not meet and a postcondition " +
         "its post does not give are both rejected");
+}
+
+if (Selected("HelperThrows"))
+{
+    // A `pre` that admits the side where the helper throws leaves that side unproved: an error, never a hole.
+    var open = Path.Combine(outlineRoot, "HelperThrows", "Open.lean");
+    File.WriteAllText(open, File.ReadAllText(Path.Combine(outlineRoot, "HelperThrows", "Filled.lean"))
+        .Replace("memory => value.toInt ≤ limit.toInt", "memory => True", StringComparison.Ordinal)
+        .Replace("    exact assumed", "    trivial", StringComparison.Ordinal));
+    var admitsThrow = Execute(Cli("verify", OutlineExtraction("HelperThrows"), "--proof", open));
+    if (admitsThrow.Code == 0 || !admitsThrow.Output.Contains("Stage: proof checking") ||
+        !admitsThrow.Output.Contains("cil_loop_obligation could not prove"))
+        throw new InvalidOperationException("verify accepted a helper precondition that admits its throw:\n" +
+            admitsThrow.Output);
+    Console.WriteLine("PASS a helper precondition that admits the side where it throws is rejected in its proof");
 }
 
 // One hole left, an obligation or a path the outline could not step, keeps an outline from certifying:
