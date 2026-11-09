@@ -82,7 +82,8 @@ baseline omits, and an admitted method that no longer exists each fail the scan,
 baseline stops guarding the methods it leaves out. Review the difference, then record it with
 `dotnet run --file Tests/SelfAdmission.cs -- --update` in the PR that causes it. Counts, the
 difference and the most widely reached blockers are reported in
-`artifacts/SelfAdmission/summary.md` and the CI job summary. A compiler-generated name, such as
-a lambda's, can be renumbered by an unrelated edit, which reports an admitted method as removed
-and gained rather than as lost. Any change to a source compiled into the extractor, or to the
+`artifacts/SelfAdmission/summary.md` and the CI job summary. The baseline names a compiler-generated method (a closure, lambda, local
+function or state machine) by the source method it was generated for, one line per admitted method,
+since the compiler numbers it by positions that unrelated edits shift. Gaining or losing one
+still changes its source method's count and fails the gate. Any change to a source compiled into the extractor, or to the
 baseline, selects the suite.

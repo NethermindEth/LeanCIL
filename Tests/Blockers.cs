@@ -316,7 +316,9 @@ const string selfAdmission = "Tests/SelfAdmission.cs";
 Run(["dotnet", "run", "--file", selfAdmission], streamOutput: true, progress: "Self-admission");
 var selfReport = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(At("artifacts/SelfAdmission/blockers.json")))
     .GetProperty("entries").EnumerateArray().ToArray();
-string? Existing(string status) => selfReport.FirstOrDefault(e => e.GetProperty("status").GetString() == status)
+// Source-named methods, so the gate's stable names equal the report's.
+string? Existing(string status) => selfReport.FirstOrDefault(e => e.GetProperty("status").GetString() == status &&
+    !e.GetProperty("signature").GetString()!.Contains('<'))
     is { ValueKind: JsonValueKind.Object } entry ? entry.GetProperty("signature").GetString() : null;
 (int Code, string Output) Gate(params string[] lines)
 {
@@ -331,6 +333,13 @@ var admittedMethods = selfReport.Where(e => e.GetProperty("status").GetString() 
 var exact = Gate(admittedMethods);
 Require(exact.Code == 0 && exact.Output.Contains("matching the baseline"),
     "The scan's own admitted set failed the gate:\n" + exact.Output);
+// Adding a member or a lambda renumbers the closures and lambdas after it; that alone must not fail the gate.
+var renumbered = Gate([.. admittedMethods.Select(method =>
+    method.Replace("<>c__DisplayClass", "<>c__DisplayClass9", StringComparison.Ordinal)
+        .Replace(">b__", ">b__9", StringComparison.Ordinal))]);
+Require(admittedMethods.Any(method => method.Contains("<>c__DisplayClass", StringComparison.Ordinal)) &&
+    renumbered.Code == 0 && renumbered.Output.Contains("matching the baseline"),
+    "Renumbered closures failed the gate:\n" + renumbered.Output);
 var blockedMethod = Existing("blocked")!;
 var lostAdmission = Gate([.. admittedMethods, blockedMethod]);
 Require(lostAdmission.Code != 0 && lostAdmission.Output.Contains("no longer admitted") &&
@@ -342,9 +351,10 @@ Require(removedMethod.Code != 0 && removedMethod.Output.Contains("is stale") &&
     "A removed admitted method passed the gate:\n" + removedMethod.Output);
 if (admittedMethods.Length != 0)
 {
-    var gained = Gate(admittedMethods[1..]);
+    var unrecorded = Existing("admitted")!;
+    var gained = Gate([.. admittedMethods.Where(method => method != unrecorded)]);
     Require(gained.Code != 0 && gained.Output.Contains("is stale") &&
-        gained.Output.Contains("Gained admissions") && gained.Output.Contains(admittedMethods[0]),
+        gained.Output.Contains("Gained admissions") && gained.Output.Contains(unrecorded),
         "An unrecorded admission passed the gate:\n" + gained.Output);
 }
 Console.WriteLine($"PASS {checks} admission report checks");

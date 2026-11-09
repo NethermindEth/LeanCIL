@@ -5,6 +5,7 @@
 
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Mono.Cecil;
 
 // Admission of LeanCIL's own assembly under the scalar profile against its baseline of admitted methods.
@@ -53,15 +54,26 @@ foreach (var entry in document.RootElement.GetProperty("entries").EnumerateArray
     };
 if (current.Count != signatures.Length)
     throw new InvalidDataException($"Report has {current.Count} entries for {signatures.Length} methods.");
-// The baseline lists admitted methods only; whether a non-admitted method is new does not matter.
-var admitted = current.Where(pair => pair.Value == 'A').Select(pair => pair.Key).ToArray();
-if (update) File.WriteAllText(baselinePath, string.Concat(admitted.Select(method => method + "\n")));
-var baseline = File.ReadAllLines(baselinePath).Where(line => line.Length != 0)
-    .ToHashSet(StringComparer.Ordinal);
-var lost = baseline.Where(method => current.TryGetValue(method, out var status) && status != 'A')
+// The baseline lists admitted methods only; whether a non-admitted method is new does not matter. A
+// generated method counts toward its source method, so renumbering by unrelated edits changes nothing.
+var admitted = current.Where(pair => pair.Value == 'A').Select(pair => StableNames.Of(pair.Key))
     .Order(StringComparer.Ordinal).ToArray();
-var removed = baseline.Where(method => !current.ContainsKey(method)).Order(StringComparer.Ordinal).ToArray();
-var gained = admitted.Where(method => !baseline.Contains(method)).ToArray();
+if (update) File.WriteAllText(baselinePath, string.Concat(admitted.Select(method => method + "\n")));
+var baseline = StableNames.Counts(File.ReadAllLines(baselinePath).Where(line => line.Length != 0)
+    .Select(StableNames.Of));
+var admittedCounts = StableNames.Counts(admitted);
+var presentCounts = StableNames.Counts(current.Keys.Select(StableNames.Of));
+int CountIn(Dictionary<string, int> counts, string name) => counts.GetValueOrDefault(name);
+// A name shared by several methods counts each one, so losing or gaining one of them still shows.
+var lost = baseline.SelectMany(pair => Enumerable.Repeat(pair.Key, Math.Max(0,
+        Math.Min(pair.Value, CountIn(presentCounts, pair.Key)) - CountIn(admittedCounts, pair.Key))))
+    .Order(StringComparer.Ordinal).ToArray();
+var removed = baseline.SelectMany(pair => Enumerable.Repeat(pair.Key,
+        Math.Max(0, pair.Value - CountIn(presentCounts, pair.Key))))
+    .Order(StringComparer.Ordinal).ToArray();
+var gained = admittedCounts.SelectMany(pair => Enumerable.Repeat(pair.Key,
+        Math.Max(0, pair.Value - CountIn(baseline, pair.Key))))
+    .Order(StringComparer.Ordinal).ToArray();
 
 int Count(char status) => current.Values.Count(value => value == status);
 var blockers = document.RootElement.GetProperty("blockers").EnumerateArray().ToArray();
@@ -106,3 +118,46 @@ if (gained.Length != 0 || removed.Length != 0)
         $"{removed.Length} admitted methods removed. Review them, then record the scan with " +
         "`dotnet run --file Tests/SelfAdmission.cs -- --update`.");
 Console.WriteLine($"PASS self-admission: {Count('A')} of {current.Count} methods admitted, matching the baseline");
+
+/// <summary>
+/// The baseline's names: a method written in source, or the source method a generated one belongs to.
+/// </summary>
+static partial class StableNames
+{
+    /// <summary>
+    /// <paramref name="signature"/> itself for a method written in source. A compiler-generated method
+    /// (closure, lambda, local function, iterator or async state machine) is named by the source method
+    /// it was generated for, since the compiler numbers it by positions that shift with unrelated edits.
+    /// Generated top-level types share one name, as their numbers count across the assembly.
+    /// </summary>
+    internal static string Of(string signature)
+    {
+        if (signature.EndsWith(Generated, StringComparison.Ordinal)) return signature;
+        var member = signature[(signature.IndexOf(' ', StringComparison.Ordinal) + 1)..];
+        var separator = member.IndexOf("::", StringComparison.Ordinal);
+        var declaring = member[..separator];
+        if (declaring.StartsWith('<')) return GeneratedTypes;
+        var nested = declaring.IndexOf("/<", StringComparison.Ordinal);
+        var method = member[(separator + 2)..];
+        if (nested < 0 && !method.StartsWith('<')) return signature;
+        var outer = nested < 0 ? declaring : declaring[..nested];
+        var source = SourceName().Match((nested < 0 ? "" : declaring[nested..]) + "::" + method).Groups["name"].Value;
+        return source.Length == 0 ? $"{outer} closure classes{Generated}" : $"{outer}::{source}{Generated}";
+    }
+
+    /// <summary>The suffix of every name that stands for compiler-generated methods.</summary>
+    const string Generated = " (compiler-generated)";
+
+    /// <summary>The one name of every method of a compiler-generated top-level type.</summary>
+    const string GeneratedTypes = "top-level types" + Generated;
+
+    /// <summary>How many times each name occurs.</summary>
+    internal static Dictionary<string, int> Counts(IEnumerable<string> names) =>
+        names.GroupBy(name => name, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+
+    // The first nonempty bracketed name, which the compiler sets to the method it generated code for;
+    // a closure class's own constructor has none and counts toward its outer type's closure classes.
+    [GeneratedRegex(@"<(?<name>[^<>]+)>")]
+    private static partial Regex SourceName();
+}
