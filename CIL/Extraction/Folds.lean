@@ -159,7 +159,7 @@ private def stringExceptionConstructor (name : String) (count : Nat) : Bool :=
 
 /-- Exact framework signatures whose literal/null arguments cannot change the raised type. -/
 def exceptionConstructor (name : String) (parameters : List TypeExpr) : Bool :=
-  let string := TypeExpr.atom runtimeScope "System.String"
+  let string := TypeExpr.object runtimeScope "System.String"
   let exception := TypeExpr.atom runtimeScope "System.Exception"
   (parameters.all (· == string) && stringExceptionConstructor name parameters.length) ||
     (parameters == [string, exception] && name ∈ ["System.Exception",
@@ -178,10 +178,10 @@ private def raisedType (count : Nat) (arguments : List RawInstruction)
       if scope == runtimeScope && exceptionConstructor name site.parameterTypes &&
         site.parameterTypes.length == count && arguments.length == count &&
         (arguments.zip site.parameterTypes).all (fun (argument, parameter) =>
-          parameter == .atom runtimeScope "System.String" || argument.opcode == 20) &&
+          parameter == .object runtimeScope "System.String" || argument.opcode == 20) &&
         signature == runtimeScope ++ "::System.Void " ++ name ++ "::.ctor(" ++
           ",".intercalate (site.parameterTypes.map fun type =>
-            match type with | .atom _ name => name | _ => "") ++ ")" &&
+            match type with | .atom _ name | .object _ name => name | _ => "") ++ ")" &&
         site.name == ".ctor" && site.hasThis && !site.returnsValue &&
         site.returnType == .void && site.typeArguments.isEmpty &&
         site.parameterCount == count then some name else none

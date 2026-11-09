@@ -93,7 +93,7 @@ inductive FixedStepFamily where
 def fixedStepFamily : CIL.Op → FixedStepFamily
   | .local .. | .localAddr _ | .setLocal .. | .vectorLocal _ | .vectorLocalAddr _
   | .setVectorLocal _ | .initializeSpanLocal .. | .stackAlloc _ | .newArray _ | .newVector256 ..
-  | .newAggregate .. | .newObject .. | .memory _ => .excluded
+  | .newAggregate .. | .newObject .. | .newReferenceArray _ | .memory _ => .excluded
   | .sub => .reference
   | .ltu | .gtu | .eq => .reference
   | .bltu _ | .bgeu _ | .bgtu _ | .bleu _ => .reference
@@ -101,7 +101,7 @@ def fixedStepFamily : CIL.Op → FixedStepFamily
   | .intrinsic .. | .nativeBinary _ | .checkedConvert .. | .checkedArithmetic ..
   | .divide .. => .numeric
   | .managed _ | .arg .. | .vectorArg _ | .vectorArgAddr _ | .call .. | .callInstance ..
-  | .tailCall ..
+  | .callVirtual .. | .objectTest .. | .tailCall ..
   | .throw _ | .ret _ => .boundary
   | _ => .other
 
@@ -213,7 +213,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
       metadata.returnsValue]
     all_goals try exact (related.stepFallback frames formed operation pc sourceBody.profile
       stack bounds observable)
-    case h_82 =>
+    case h_85 =>
       first
       | (have boundary : fixedStepFamily operation = .boundary := family
          have noManaged : ∀ op, operation = .managed op → False := by assumption

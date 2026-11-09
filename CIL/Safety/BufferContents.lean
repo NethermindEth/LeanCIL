@@ -195,6 +195,23 @@ theorem add_element {m : Memory} {base : Reference} {width index : Nat} {writing
     BitVec.toNat_ofNat, Nat.mod_eq_of_lt bound]
   exact access_reference_valid _ _ _ _ _ target
 
+/-- Offsetting a formed base by `offset` bytes, as a struct field access through a reference
+    does, reaches that address whenever `width` bytes there are accessible. -/
+theorem add_field {m : Memory} {base : Reference} {offset width : Nat} {writing : Bool}
+    (formed : m.WellFormed) (valid : form m base = .ok base)
+    (target : access m (base.element 1 offset) width 1 writing = .ok ()) :
+    add m base 1 (BitVec.ofNat 64 offset) = .ok (base.element 1 offset) := by
+  obtain ⟨allocation, ready⟩ := access_requirements target
+  have native := (formed.allocations _ _ ready.present).2.1
+  have extent := ready.extent
+  have bound : base.offset + 1 * offset < 2^64 := by
+    change allocation.layout.size < 2^64 at native
+    simp only [Reference.element_offset] at extent
+    omega
+  simp only [add, valid, Bind.bind, Except.bind, BitVec.ofNat_mul_ofNat, BitVec.ofNat_add_ofNat,
+    BitVec.toNat_ofNat, Nat.mod_eq_of_lt bound]
+  exact access_reference_valid _ _ _ _ _ target
+
 /-- Each element of `xs` reads back at its position with the byte alignment scalar loads
     use; grants no write authority. -/
 def Contents (m : Memory) (base : Reference) (width : Nat) (xs : List (BitVec (8 * width))) :
@@ -674,6 +691,7 @@ theorem Contents.transform {m : Memory} {base : Reference} {width : Nat}
 #print axioms byteNumber_elementBytes_four
 #print axioms Reference.element_apart
 #print axioms add_element
+#print axioms add_field
 #print axioms Contents.singleton
 #print axioms Contents.load_word
 #print axioms Contents.load

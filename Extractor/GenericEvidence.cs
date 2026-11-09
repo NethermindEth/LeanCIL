@@ -55,7 +55,9 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             return $".parameter {parameter.Position +
                 (parameter.Type == GenericParameterType.Method ? 0 : methodParameterCount)}";
         if (type is ByReferenceType byRef) return $".byref ({Type(byRef.ElementType)})";
-        if (type is ArrayType { IsVector: true } array) return $".array ({Type(array.ElementType)})";
+        // An element class outside the model is named as an object, as the array's reference slots hold it.
+        if (type is ArrayType { IsVector: true } array)
+            return $".array ({(ReferenceArrays.Is(array) ? ObjectType(array.ElementType) : Type(array.ElementType))})";
         if (type is PointerType pointer) return $".pointer ({Type(pointer.ElementType)})";
         if (ValueTuples.Is(type) && layouts.Index(type) is >= 0 and var tuple)
             return $".aggregate {Quote(LayoutEvidence.Identity(type))} {tuple}";
@@ -73,7 +75,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             var underlying = type.Resolve().Fields.Single(field => !field.IsStatic).FieldType;
             return $".enum {Quote(LayoutEvidence.Identity(type))} ({Type(underlying)})";
         }
-        if (ObjectTypes.Is(type)) return ObjectType(type);
+        if (ObjectTypes.Reference(type)) return ObjectType(type);
         var index = layouts.Index(type);
         if (index >= 0 && !layouts.Metadata.IsImported(type))
             return $".aggregate {Quote(LayoutEvidence.Identity(type))} {index}";
@@ -154,6 +156,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 if (argument < 0) throw new InvalidDataException("Invalid raw argument index");
                 return $".argument {argument}";
             case VariableDefinition local: return $".local {local.Index}";
+            case TypeReference type when instruction.OpCode.Code == Code.Newarr && ReferenceArrays.Element(type):
+                return $".type ({ObjectType(type)})";
             case TypeReference type: return $".type ({Type(type)})";
             case MethodReference callee: return $".call {Call(callee, admittedInstruction, reachable)}";
             case Mono.Cecil.CallSite site when instruction.OpCode.Code == Code.Calli:
@@ -182,7 +186,10 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                     if (index < 0) throw new InvalidDataException("Unresolved tuple field: " + field.FullName);
                     fieldType = fields[index].Type;
                 }
-                return $".field ({Type(field.DeclaringType)}) {index} ({Type(fieldType)}) {Bool(isStatic)}";
+                // A class field of a type outside the model holds an object reference like an admitted one.
+                var heldType = !isStatic && ObjectTypes.Is(field.DeclaringType) && ObjectTypes.Opaque(fieldType)
+                    ? ObjectType(fieldType) : Type(fieldType);
+                return $".field ({Type(field.DeclaringType)}) {index} ({heldType}) {Bool(isStatic)}";
             case string text: return $".text {Quote(text)}";
             case float number: return $".text {Quote("float:" + BitConverter.SingleToInt32Bits(number).ToString(CultureInfo.InvariantCulture))}";
             case double number: return $".text {Quote("double:" + BitConverter.DoubleToInt64Bits(number).ToString(CultureInfo.InvariantCulture))}";
@@ -285,11 +292,19 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             .Where(type => ConstrainedCalls.Extracted(type.Resolve().Module, method.Module)).ToArray();
         // Each receiver's interfaces are cataloged from whichever extracted assembly declares them, as resolution
         // requires; an interface outside them is left out, so Lean cannot select an interface-level body past it.
+        // A virtual call's catalog holds every class deriving from the slot's class, so Lean can check that
+        // the table resolves each one and omits none.
+        var hierarchies = method.Body.Instructions.Where(VirtualDispatch.Is)
+            .SelectMany(instruction => VirtualDispatch.Hierarchy((MethodReference)instruction.Operand));
+        // A type test's class is cataloged so Lean can check it is a pinned class, not an interface.
+        var tested = method.Body.Instructions.Where(ObjectTypes.Testable)
+            .Select(instruction => (TypeReference)instruction.Operand);
         var types = receivers.Concat(receivers.SelectMany(type => type.Resolve().Interfaces
                 .Select(implementation => GenericStructs.Substitute(implementation.InterfaceType,
                     type as GenericInstanceType))
                 .Where(implementation => implementation.Resolve() is { } declared &&
                     ConstrainedCalls.Extracted(declared.Module, method.Module))))
+            .Concat(hierarchies).Concat(tested)
             .DistinctBy(LayoutEvidence.Identity).OrderBy(LayoutEvidence.Identity, StringComparer.Ordinal);
         return List(types.Select(type =>
         {
@@ -306,8 +321,18 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 $"interfaces := {List(original.Interfaces.Select(implementation =>
                     Type(GenericStructs.Substitute(implementation.InterfaceType, owner))))}, " +
                 $"methods := {List(original.Methods.Select(member => DispatchMethod(member, owner)))}, " +
-                $"assembly := {{ identity := {Quote(PinIdentity(module))} }} }}";
+                $"assembly := {{ identity := {Quote(PinIdentity(module))} }}" + ClassEvidence(original) + " }";
         }));
+    }
+
+    // An admitted class's base, when that is an admitted class, and whether it is abstract; virtual dispatch walks
+    // these, and other catalog entries keep the defaults.
+    static string ClassEvidence(TypeDefinition type)
+    {
+        if (!ObjectTypes.Is(type)) return "";
+        var parent = type.BaseType is { } baseType && ObjectTypes.Is(baseType)
+            ? $", base := {ObjectType(baseType)}" : "";
+        return parent + (type.IsAbstract ? ", abstractType := true" : "");
     }
 
     // The pin whose metadata supplied a catalog entry; Lean requires it to scope the entry's type.

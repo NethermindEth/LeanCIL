@@ -66,7 +66,8 @@ theorem Memory.Renamed.allocate {mapping : AllocationRenaming} {scopes : Nat →
   refine ⟨sourceAfter, targetAfter, ?_, ?_, ?_⟩
   · simp [CIL.Safety.allocate, valid, sourceFormed.fresh, sourceAfter]
   · simp [CIL.Safety.allocate, ← descriptors.valid, valid, targetFormed.fresh, targetAfter]
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, related.stackLimit, related.heapBudget, ?_⟩
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, related.stackLimit, related.heapBudget, ?_, ?_,
+    fun binding member => Nat.lt_succ_of_lt (related.literalsIssued binding member)⟩
   · simp only [AllocationRenaming.allocate, sourceAfter, related.sourceLimit]
   · simp only [AllocationRenaming.allocate, targetAfter, related.targetLimit]
   · intro identity bound
@@ -144,6 +145,12 @@ theorem Memory.Renamed.allocate {mapping : AllocationRenaming} {scopes : Nat →
       subst identity
       simp [sourceAfter, targetAfter, related.sourceLimit, freshImage,
         AllocationRenaming.managedReference]
+  · change target.literals = source.literals.map _
+    rw [related.literals]
+    apply List.map_congr_left
+    intro binding member
+    exact congrArg (fun reference => (binding.1, reference))
+      (mapping.allocate_extends.reference binding.2 (related.literalsIssued binding member)).symm
 #print axioms Memory.Renamed.allocate
 /-- A private target-only allocation leaves every source observation unchanged. -/
 theorem Memory.Renamed.skipTarget {mapping : AllocationRenaming} {scopes : Nat → Nat → Prop}
@@ -160,7 +167,8 @@ theorem Memory.Renamed.skipTarget {mapping : AllocationRenaming} {scopes : Nat �
       else target.slots identity offset
     nextIdentity := target.nextIdentity + 1 }
   refine ⟨targetAfter, ?_, related.sourceLimit, ?_, ?_, ?_, related.permissions,
-    related.staticBindings, related.stackLimit, related.heapBudget, ?_⟩
+    related.staticBindings, related.stackLimit, related.heapBudget, ?_, related.literals,
+    related.literalsIssued⟩
   · simp [CIL.Safety.allocate, valid, formed.fresh, targetAfter]
   · simp only [AllocationRenaming.skipTarget, targetAfter, related.targetLimit]
   · intro identity bound

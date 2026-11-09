@@ -263,6 +263,28 @@ rechecks that exact target wherever `.pop` stands for a call. No frame owns
 an instance, so leaving the method that created it never expires it: an instance lives as long
 as a reference can observe it, which is the reachability the collector maintains.
 
+Memory a caller passes may record any runtime type, so `Memory.WellFormed` alone does not stop
+one allocation from claiming two unrelated classes, and fields of two such classes may then
+alias. A proof that needs instances of unrelated classes to be different objects states
+`Memory.ClassesConsistent (declaredClasses Extracted.methodEvidence) memory` as a premise
+([class catalog](../CIL/Safety/ClassCatalog.lean)): each cataloged class in an object's lineage
+brings its whole base chain as the lineage's tail, which single inheritance makes true of every
+CLR object. The catalog lists the class and admitted bases that each object-receiver method's
+metadata records (`RawMethod.owner`, `RawMethod.objectBases`); these are metadata the extractor
+decodes, and each extraction's translation certificate covers the evidence that holds them.
+Under the premise, `Memory.ClassesConsistent.allocation_ne` separates objects located as
+instances of two unrelated cataloged classes.
+
+A caller states the premise once, for its entry memory, and execution keeps it
+([execution classes](../CIL/Safety/ExecutionClasses.lean)). Only `newobj` and `newarr` of a class
+create instances: `newobj` of the class and bases it records, `newarr` an array of its element
+type. Frame homes, statics, value arrays and expiry create none. `ObjectSitesConsistent catalog
+program` checks every such site of the program text against the catalog, once per extraction by `decide`. Given it, `step_preserves_classes`,
+`run_preserves_classes` and `invoke_preserves_classes` keep the premise through every step,
+nested call and frame exit. Formed calls and constructions hand their continuation the same
+fact for the callee's final memory (`ClassesPreserved`, part of `FrameInvariants`). Nothing is
+assumed about memory the program cannot produce: the entry premise stays the caller's.
+
 References held by fields are kept apart from bytes: `Memory.slots` records, by allocation and
 field offset, the object reference a field holds, and fresh storage holds null. No byte encodes
 a reference, so no byte access can forge or observe one. `Memory.WellFormed` requires every
@@ -281,8 +303,29 @@ object, not that its class is the field's type: that is the verifier's typing, a
 and an object of another class read back through the field fails its next field access with
 the owner check rather than reading another class's fields.
 
-A non-virtual instance method of an admitted class is an entry whose receiver `this` is an
-object reference, not a byref: the raw method records the class receiver (`objectReceiver`),
+A field whose type is a class outside the model, such as `string`, an interface, a delegate or a
+generic or library class, holds its reference in a slot through the same operations
+([OpaqueTag](../Examples/Proofs/OpaqueTag.lean)). Its value is opaque: the reference can be
+loaded, stored into another such field, compared for identity and tested against null, but no
+admitted operation takes its type as a field owner, call receiver, argument, local or result, so
+nothing reads through it. Its referent is an object allocation like any other, whose recorded
+runtime type the model never inspects. Fields of generic parameter type or a modified type stay
+rejected, as do fields holding arrays of structs or vectors, whose element width comes from a
+layout the field token does not carry.
+
+`System.String` of `System.Runtime`, matched exactly, is the one such class that is also admitted
+as the type of an argument, a local and a result ([StringValues](../Examples/Proofs/StringValues.lean),
+[StringLabel](../Examples/Proofs/StringLabel.lean)). A string is an object reference on the stack
+and in a root, typed `.object` with its exact scope and name, so it is passed, returned, stored in
+an opaque field, compared for identity and tested against null like any object reference, and
+an argument must form like one: null or a live object allocation. No string method is admitted
+as a call, so nothing reads its length or characters, and a string root has no address: `ldarga`,
+`ldloca` and `string&` are rejected by name, as for class instances. A modified string type stays
+rejected.
+
+An instance method of an admitted class, virtual or not, is an entry whose receiver `this` is an
+object reference, not a byref. A theorem about a virtual method is about that body, which a `call`
+(a base call, or a direct call into it) runs exactly. The raw method records the class receiver (`objectReceiver`),
 from which Lean derives the receiver's storage and scalar kind. Lean rejects the address of
 the receiver and of any class-typed local or argument, so no byref can stand in for an object
 receiver.
@@ -294,15 +337,37 @@ target, so it is a call (`callInstance`) that first checks its receiver: a null 
 (ECMA-335 III.3.19), and a receiver that is no object reference is ill-typed. Lean admits a
 `callInstance` only at `callvirt`, only into a method whose receiver is an object, counting the
 receiver among its arguments, and rejects a plain `call` emitted for `callvirt`, which would skip
-the check. That the target is not virtual is metadata the extractor decodes and checks, as it
-decodes `hasThis`.
+the check. It also rejects a `callInstance` into a method whose metadata attributes mark it
+virtual, since `callvirt` selects such a body by runtime type; the attributes are metadata the
+extractor decodes, as it decodes `hasThis`.
+
+`callvirt` of a virtual method of an admitted class is a `callVirtual` whose table names the body
+for each class of the extraction's assemblies that derives from the slot's class
+([virtual dispatch](SOUNDNESS-EXECUTION.md#virtual-dispatch)). It checks the receiver for null
+like `callInstance`, then enters the body listed for the receiver's runtime type, which the
+allocation records. Lean admits a `callVirtual` only at `callvirt` and only into virtual methods
+with the slot's signature and an object receiver
+([AnimalLegs](../Examples/Proofs/AnimalLegs.lean)).
+
+`castclass` and `isinst` of an admitted class other than `System.Object` are an `objectTest` of
+that class. It keeps a reference whose runtime type, its own class or one of the admitted bases
+the allocation records, is the class, passes null through, and otherwise gives null (`isinst`)
+or throws `System.InvalidCastException` (`castclass`) (ECMA-335 III.4.3, III.4.6). Those classes
+are the instance's whole lineage below `System.Object`, so the test is exact. For an instance
+the method does not construct, the runtime type, class and bases alike, is the theorem's
+hypothesis, as for field access and dispatch; one it constructs records its constructor's bases. Lean admits an
+`objectTest` only at `castclass` or `isinst` of the same class, on an object reference, and only
+against a pinned catalog class that is no interface
+([DogTest](../Examples/Proofs/DogTest.lean), [DogCast](../Examples/Proofs/DogCast.lean)).
 
 Interface, generic, explicit-layout and finalizable classes, classes deriving from a class that is
 not admitted, `newobj` of an abstract class, byrefs to class
-instances, field addresses on class instances, class fields holding anything but integers or
-admitted class instances (strings, arrays, interfaces, other classes),
-virtual class methods, `callvirt` of a virtual method and the address of a class receiver, local
-or argument are each
+instances, field addresses on class instances, element addresses and typed element accesses
+on arrays of class references, class fields of struct-array, vector-array, generic parameter,
+modified or non-integer value types,
+interface calls, virtual calls whose hierarchy the table cannot close or resolve, type tests
+against interfaces, `System.Object` or classes that are not admitted, and the address
+of a class receiver, local or argument are each
 rejected by name during extraction.
 
 An instance of a class with no fields is an allocation of size zero: it costs no heap budget,
@@ -315,6 +380,133 @@ never change, so distinct object references are distinct allocations and their f
 share a byte; [object framing](PROOFS-CONTRACTS.md#frame-class-instances) states this for
 proofs.
 
+## Arrays of class references
+
+An array of a class `E` is itself a class instance: `.newReferenceArray E` allocates,
+through `allocateObject`, an allocation of kind `.object` whose runtime type is `E[]`
+(`referenceArrayType`) with no bases, one 8-byte slot per element and nothing else, so its
+length is its size over the slot width. Its elements are references held in
+`Memory.slots`, as class-typed fields are, and fresh elements are null. The array is charged
+to `Memory.heapBudget` like any instance, without the CoreCLR header and length word the model
+does not lay out, and a short budget is the model's `allocationFailure`. The length decodes as
+`newarr` decodes it for value arrays: a negative `int32` or native length throws
+`System.OverflowException`, and one above `0x7fffffc7` is unsupported.
+
+`ldlen`, `ldelem.ref` and `stelem.ref` on such an array (`.referenceArrayLength`,
+`.referenceArrayLoad`, `.referenceArrayStore`) locate it with `referenceArrayOf`: a null array
+throws `NullReferenceException`, and a reference to anything but offset 0 of a live array of
+class references is an ill-typed state. An index read unsigned at or past the length then
+throws `IndexOutOfRangeException` (`referenceArraySlot`), so a negative int32 index is out of
+range, as in CoreCLR. A load pushes what the element's slot holds through `loadSlot`, as a
+class-typed field load does. A store first checks covariance (`storableIn`): null is always
+storable, and an instance of a class, admitted or opaque, is storable exactly when the array's
+element class is in its lineage, which records every base up to `System.Object`, so a `Square`
+stored into a `Shape[]` that is really a `Circle[]` throws `ArrayTypeMismatchException`. That is
+the CLR's rule only because the array's element type is a class: an instance is never assignable
+to a class outside its base chain, while an interface element would also admit the instances
+implementing it, which the lineage does not record. Any other stored value, such as an array, is
+unsupported rather than an exception: the model does not record the interfaces or array
+covariance the CLR would consult for it. The store itself is
+`storeSlot`, so it changes only that slot. The checks run in CoreCLR's order: null array,
+index, then type.
+
+## Value-array fields
+
+A class field typed as an array of a value element `E` (`.arrayField`, `.setArrayField`) holds
+the array's reference in the object's slot for that field, as a class-typed field does; the
+array's bytes stay in their own allocation. The field is located like any other, so a null
+receiver throws `NullReferenceException`, and the slot needs read or write authority. A store
+(`storeArraySlot`) keeps null for the null array, and otherwise the array's origin, which must
+be offset 0 of a live heap allocation exactly `length * width E` bytes long, with element type
+`E`; anything else, such as a slice, a caller buffer or an array of another element, is an
+ill-typed state. A load (`loadArraySlot`) rebuilds the array from the slot: null gives the null
+array, and an origin gives the whole allocation as an array of `E`, its length the allocation's
+size over the element width, validated like any array before it is pushed. A load of what a
+store kept therefore returns the stored array exactly. The caller assumes the same of memory it
+supplies: a value-array field slot holding a reference at entry names offset 0 of a heap
+allocation that is the whole runtime array of the field's element type, the relation to the
+runtime array a supplied array argument already requires. The allocation records no element type,
+so the field's declared element is what the load trusts.
+
+The extractor emits these operations for a field typed as a single-dimensional array of an
+integer, Boolean, char or integer-backed enum, and Lean rechecks the emitted element against the
+raw field token, and a stored value against an array of that element on the evaluation stack.
+
+The extractor admits a single-dimensional array of an admitted class, or of a non-generic class
+outside the model other than `System.Object`, such as `string`, as a parameter, local, return or
+`newarr` type, typed as an object on the evaluation stack. An array of such a static type holds
+elements of a class derived from it at run time, so its element type is a class, as the
+covariance check needs; an array typed by an interface or `object` may be an interface array and
+is rejected. An element of an array of a class outside the model is an opaque reference, which
+is loaded, stored, compared and tested for null but never read through. The extractor names the
+element class as an object in the raw array type, and Lean rechecks each
+`newarr`, `ldlen`, `ldelem.ref` and `stelem.ref` against its raw opcode and operand kinds. An
+element address (`ldelema`) or a typed `ldelem`/`stelem` on such an array is rejected by name,
+since a byref to a reference slot is outside the model, as is the address of an argument or
+local holding such an array. A class field typed as such an array holds the array's reference
+in its slot and is read and written as a class-typed field is, the raw field type rechecked as
+an array of a class. Multi-dimensional arrays, arrays of interfaces, `object`, generic
+instantiations or value types other than the admitted value arrays are rejected.
+
+## String literals
+
+`ldstr` pushes the object `Memory.literals` binds to its text; the model never allocates one
+([StringLiterals](../Examples/Proofs/StringLiterals.lean),
+[StringDefault](../Examples/Proofs/StringDefault.lean)). Execution never changes the bindings
+(`invoke_literals`),
+so within a run one text always loads one object, and two loads of it are identical. That is
+ECMA-335 III.4.16. Roslyn marks assemblies `CompilationRelaxations(NoStringInterning)`, which
+lets a runtime drop that guarantee, so the claim rests on CoreCLR: in .NET 10,
+`StringLiteralMap::GetStringLiteral` (`src/coreclr/vm/stringliteralmap.cpp`) resolves every
+literal through the one `SystemDomain::GetGlobalStringLiteralMap()`, collectible modules
+included, and never consults the relaxation.
+
+The model claims nothing further. Distinct texts may bind one object, and a literal may be the
+same object as a caller's string, as interning that string at run time makes it. The bound object must form as a
+live object; an unbound text stops as unsupported rather than loading null, since a literal is
+never null. A literal is an opaque string like any other, so nothing reads its length or
+characters. Each bound literal must name an issued identity (`Memory.LiteralsBounded`) for a
+contract to transfer across [allocation renaming](PROOFS-BINDING.md), since a literal names the
+caller's object and not one the method allocates. The extractor rejects a text containing a
+surrogate, backspace or form feed, which a Lean string literal cannot carry exactly.
+
+## Argument guards
+
+`ArgumentNullException.ThrowIfNull(object, string)` and the integer instances of
+`ArgumentOutOfRangeException`'s `ThrowIfZero`, `ThrowIfNegative`, `ThrowIfNegativeOrZero`,
+`ThrowIfEqual`, `ThrowIfNotEqual`, `ThrowIfGreaterThan`, `ThrowIfGreaterThanOrEqual`,
+`ThrowIfLessThan` and `ThrowIfLessThanOrEqual` run as checked operations
+([CIL/ArgumentGuards.lean](../CIL/ArgumentGuards.lean)). Each ends in the named outcome
+`.thrown "System.ArgumentNullException"` or `.thrown "System.ArgumentOutOfRangeException"` exactly
+when its condition holds, and otherwise pops its operands and leaves memory unchanged
+([GuardCount](../Examples/Proofs/GuardCount.lean), [GuardIndex](../Examples/Proofs/GuardIndex.lean),
+[GuardRequired](../Examples/Proofs/GuardRequired.lean)). The contracts follow the .NET 10 sources:
+
+- `src/libraries/System.Private.CoreLib/src/System/ArgumentNullException.cs`: `ThrowIfNull` throws
+  `new ArgumentNullException(paramName)` when `argument is null` and returns otherwise.
+- `src/libraries/System.Private.CoreLib/src/System/ArgumentOutOfRangeException.cs`: `ThrowIfZero`,
+  `ThrowIfNegative` and `ThrowIfNegativeOrZero` test `T.IsZero` and `T.IsNegative`
+  (`INumberBase<T>`); `ThrowIfEqual` and `ThrowIfNotEqual` use
+  `EqualityComparer<T>.Default.Equals`; the four ordering guards compare `value.CompareTo(other)`
+  with zero (`IComparable<T>`). Every throw goes through a `[DoesNotReturn]` helper that throws a
+  new `ArgumentOutOfRangeException`.
+
+On `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `nint` and `nuint` these
+members are the mathematical tests on the integer the type denotes, which is what
+`ZeroGuard.throws` and `ComparisonGuard.throws` state over `guardOperand`: a narrow value takes
+the low bits of its `int32` stack slot, unsigned values are never negative, and the native
+integers take the 64-bit target. Only the exception type is claimed. Its message, `ParamName` and
+`ActualValue` are not modeled, and the outcome allocates nothing, as with any `.thrown` outcome.
+The `paramName` argument, a compiler-supplied literal, is popped unread, so a proof binds that
+literal like any other.
+
+The extractor maps each exact signature (`Extractor/ArgumentGuards.cs`) and Lean decodes each
+emitted guard again from the raw call's owner, name, type argument, parameter types and external
+identity (`CIL.Extraction.guardCallMatches`); no other instruction may emit a guard. Other
+instantiations, among them `char`, floating-point and `decimal`, the `void*` overload of
+`ThrowIfNull`, and the string guards such as `ThrowIfNullOrEmpty`, which read characters, remain
+rejected calls. `ThrowIfNull` on a value array or any other operand that is not a class instance or
+null is rejected by name, since the model tests only object references.
 ## Sequential struct layout
 
 Admitted layouts are reference-free and bounded by 65,536 bytes. Sequential fields include supported

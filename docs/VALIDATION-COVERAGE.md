@@ -483,14 +483,10 @@ an invalid theorem in a separate module. Both joint replay and its external-chec
 reject that declaration; checking only the aggregate is insufficient. The cache fixture runs this
 regression alongside the authentication tests.
 
-The runner accepts `--suite <name>` after `--`, with names `core`, `cli`, `integer`, `narrow`,
-`primitive`, `division`, `checked`, `conversions`, `native`, `arguments`, `layout`, `copy`, `bits`,
-`enums`, `nested`, `instance`, `constructors`, `fsharp`, `math`, `divrem`, `unsafe`, `blocks`,
-`generics`, `loops`, `contracts`, `evidence`, `dispatch`, `scaling`, `excluded`, `identity`,
-`labels`, `names`, `symbols`, `workspace`, `templates`, `callers`, `construction`, `outcomes` and
-`audit`. These partitions cover the same check groups as the full command and can run concurrently
-in separate checkouts. Each partition builds its own prerequisites (in CI, one job builds the
-extractor and example assembly with `--build-tools` and suite jobs set
+The runner accepts `--suite <name>` after `--`, with the names in the
+[suite table](VALIDATION.md#suites). These partitions cover the same check groups as the full
+command and can run concurrently in separate checkouts. Each partition builds its own
+prerequisites (in CI, one job builds the extractor and example assembly with `--build-tools` and suite jobs set
 `LEANCIL_PREBUILT_TOOLS=true` to use them), retains fresh Lean proof checking and writes
 `artifacts/test-results-<suite>.json`; running without arguments checks everything and writes
 `artifacts/test-results.json`.
@@ -498,7 +494,7 @@ extractor and example assembly with `--build-tools` and suite jobs set
 | Coverage | Result |
 | --- | --- |
 | Profile-parametric templates | Compiled AVX2/SSE4.2 dispatch helper, one generated template proof on three profiles, renumbered managed callees, exact per-pc equations, independent kernel replay, and wrong flag/callee/branch/equation, stale source and metadata rejection |
-| Cyclic control flow and termination | Universal checked countdown proof for every `uint`, including zero and maximum value; a counted loop proved through its helper's contract, unchanged for a reimplemented helper and rejecting a discarded result or double count; a loop that returns or raises its helper's exception after earlier calls, proved for every pair of `uint`s from the helper's outcome contract, unchanged for a reimplemented helper and rejecting another exception type, a nondecreasing measure, a non-inductive invariant and a wrong specified exception; a buffer fill loop proved to write exactly `count` words for every nonnegative count, with four runtime comparisons and shifted or skipping stores rejected; 17 runtime comparisons; incorrect implementation rejected under the unchanged contract; infinite loop proved to exhaust every fuel budget; backward switch, native arithmetic and fixed-feature loops checked; eight malformed or unsupported fixtures rejected; `new-proof` outlines of nine loop examples and four straight-line methods with `bool` and narrow parameters and a `bool` result elaborate with only `sorry` warnings and are byte-identical across runs, and the countdown outline is refused for `sorryAx` and verifies once only its holes are filled |
+| Cyclic control flow and termination | Universal checked countdown proof for every `uint`, including zero and maximum value; a counted loop proved through its helper's contract, unchanged for a reimplemented helper and rejecting a discarded result or double count; a loop that returns or raises its helper's exception after earlier calls, proved for every pair of `uint`s from the helper's outcome contract, unchanged for a reimplemented helper and rejecting another exception type, a nondecreasing measure, a non-inductive invariant and a wrong specified exception; a buffer fill loop proved to write exactly `count` words for every nonnegative count, with four runtime comparisons and shifted or skipping stores rejected; 17 runtime comparisons; incorrect implementation rejected under the unchanged contract; infinite loop proved to exhaust every fuel budget; backward switch, native arithmetic and fixed-feature loops checked; eight malformed or unsupported fixtures rejected; `new-proof` outlines of eleven loop examples (one with two loops in sequence and one searching a free list through an object local), nine straight-line methods with `bool` and narrow parameters, a `bool` result, unsigned and signed checked adds, a bit count and splits on unsigned and signed word tests, 29 straight-line methods over class instances, string fields and arrays of class references, including element facts carried across element and field stores and an array the method allocates, and two struct instance methods storing a field at offsets 0 and 8 elaborate with only `sorry` warnings and are byte-identical across runs; the countdown outline is refused for `sorryAx` and verifies once only its holes are filled, as do 33 other filled outlines |
 | Generic method specialization | 125 C#/F# runtime comparisons, six universal identity proofs, six reference checks, twelve metadata/recursion rejections, wrong-implementation rejection and provenance tamper detection |
 | Block memory and alignment prefixes | 251 checks; ten malformed-prefix/type cases rejected; universal out-of-bounds fill rejection |
 | Layout-based Unsafe helpers | 418 checks across 19 element types and all three managed offset overloads; ten malformed generic calls rejected |

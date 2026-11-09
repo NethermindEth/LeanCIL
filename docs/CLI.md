@@ -232,18 +232,62 @@ comment saying which obligation it is:
   theorem assumes the precondition and promises the postcondition of the returned value, and for
   a method that takes references or spans also of the caller's memory before and after.
 - A method without a loop is stepped by `cil_checked_steps` when its body is arithmetic on 32- and
-  64-bit arguments, leaving only the postcondition.
-- A method with one loop gets its loop state, the cutpoint at the loop's back-edge test (found by
+  64-bit arguments or a total bit count (`Log2`, `PopCount`, `LeadingZeroCount`,
+  `TrailingZeroCount`), leaving only the postcondition. A signed or unsigned checked `+`, `-` or
+  `*` is split with `by_cases fitsN` on whether its integer result fits: the side where it fits
+  steps with `checkedValues_add_unsigned_i32`, `checkedValues_add_signed_i32` or their siblings,
+  and the overflowing side, which throws, is closed from the precondition by
+  `cil_loop_obligation`. A conditional branch on words the body computes from its arguments, signed
+  or unsigned, is split with `by_cases branchN` on the condition it tests, and each side steps on
+  to its own return and leaves its own postcondition, commented with the side it is on; a body
+  splits into at most eight returns. When it also takes up to three `bool`
+  arguments and tests nothing else, it is split with `cases` on each, and every side steps to its
+  own return and leaves its own postcondition, commented with the values it is for.
+- A method with a loop gets its loop state, the cutpoint at the loop's back-edge test (found by
   instruction, never by pc), and `invariant` and `measure` definitions to replace. A method that
   takes a reference also gets a `footprint` to replace: the caller memory the loop may write, which
   the loop state carries. The proof applies `invoke_loop_satisfies`, steps the entry to the first
   loop head, splits the iteration where the body branches, and leaves the obligations the loop
   tactics tag: `invariant` and `measure` where an iteration continues, `postcondition` where it
-  returns, and `precondition` at a call.
+  returns, and `precondition` at a call. An object local, such as a list walk's `node`, is a
+  `ManagedReference` of the loop state, and the cutpoint's frame names its slot from the state. A
+  null test of it splits the proof with `cases node`, leaving a hole for the liveness of the
+  instance it holds, and an identity test against another object splits it with
+  `by_cases branch1 : ...`; a load of a reference field into it is a `not outlined:` hole. A test
+  of a 1- or 2-byte struct field splits on the word its load zero-extends, such as
+  `(scanStopped.setWidth 8).setWidth 32 = 0`. A 4- or 8-byte store through `Unsafe.Add` of a
+  reference argument by an `int` index, before any other store of the iteration, is stepped from
+  write authority over that element at the iteration's memory, the index below `2 ^ 31` and the
+  element within `footprint`. `cil_loop_obligation` proves each from the invariant, precondition
+  and footprint the author writes, by `omega` over their conjuncts or from a `Filled` or `Writable`
+  fact covering the element; it is a hole while any of those is `sorry`, and an error at the write
+  once they are written and do not imply it.
+- Loops in sequence are bound in pc order (`loop`, `loop2`, ...), each with its own cutpoint,
+  `invariant` and `measure` (`header2`, `invariant2`, `measure2`, ...). The path leaving one loop
+  for the next loop's test enters that loop through `loop_terminates_then`, leaving its invariant at
+  its first head, and that loop's iteration follows. A loop nested in another is refused.
 - A call in the loop gets a `MethodContract` for the callee, with `pre` and `post` to replace, and a
-  `Holds` theorem that steps the callee when it is arithmetic on its arguments. A callee over
+  `Holds` theorem that steps the callee when it is arithmetic on its arguments. A callee of words
+  that tests them and returns or throws on each side is split with `by_cases` on each test: each
+  returning side is stepped and leaves `post`, and each throwing side is closed from `pre` by
+  `cil_loop_obligation`. A call whose callee returns a value is crossed with
+  `cil_loop_call keeping`, so the next loop state names its result `output` whatever `post`
+  states. A callee that only stores a word argument through a reference argument gets the
+  contract its body meets, proved: write authority over that word before, its contents after. When
+  the loop passes it `Unsafe.Add` of a reference argument by an `int` index, the element is named
+  with the same three side conditions as a store, its authority stated at the caller's memory, and
+  they close the call's precondition. A callee over
   objects whose body a straight-line outline steps (see below) gets the contract read from its body
   instead, proved, leaving only its precondition at each call.
+- A struct instance method binds `this`, a reference to the caller's struct, as a `Reference` named
+  for the struct, such as `counter`. A straight-line body over its 64-bit fields and word
+  arguments is stepped: each field it reads first gets a binder for its value on entry, such as
+  `counterValue`, with `Contents` of the field's address (`counter`, or `counter.element 1 8` at
+  offset 8) in the statement, and the one field it may store gets `Writable` authority there and
+  `Confined` to it; a second store, or a load of another field after the store, is a
+  `not outlined:` hole. The postcondition is left
+  with `held1`, the stored field's `Contents` in the final memory. A struct method with a loop is
+  refused.
 - An instance of an admitted class is a `Reference`, and an instance method binds `this` under its
   class's name in lower case, such as `account`, or as `receiver` for a compiler-generated class.
   A parameter named like a hypothesis or memory the proof introduces, such as `held` or `stored1`,
@@ -259,6 +303,32 @@ comment saying which obligation it is:
   words it names, such as a field value against an argument, splits the proof with
   `by_cases branch1 : ...`, and each side steps on to its own return and leaves its own
   postcondition, commented with the side it is on.
+- A field holding a class outside the model, such as `string`, loads as the reference it holds,
+  `Tagged.Tag.of initial item`, never read through. The statement adds `Tagged.Tag.Forms initial
+  item`, that the reference forms, and the body may store it into such a field, compare it and test
+  it for null, which splits the proof like a test of words. Any reference field may also be set to
+  null, through `Owned.store_formed`. A `bool` result leaves
+  `case result` for the `Bool` the returned word encodes and `case encoded` for the encoding.
+- An array argument of class references, such as `nodes : Node[]`, binds `nodesElement`, the
+  element class its allocation records, which covariance may make a class derived from the
+  static one, and `nodesLength`. The statement assumes `ReferenceArray.Readable` of each element
+  the body loads and `ReferenceArray.Owned` of each it stores, numbered `nodesSlot1`, ..., or
+  `ReferenceArray.Live` when it only reads the length. A loaded element is the reference
+  `ReferenceArray.of initial nodes index.toNat`, with the premise `ReferenceArray.Forms` that it
+  forms, and a stored object adds the premise that it passes the covariance check,
+  `storableIn initial nodesElement (.address node) = .ok ()`, which the caller discharges from the
+  object's class. The footprint lists `ReferenceArray.entry` of each stored element. Each element
+  fact is carried across the stores before it as `ReferenceArray.Holds` or `ReferenceArray.Reads`
+  of what the element holds, so a load after a store reads back the stored reference, and field
+  facts cross element stores, since no array has fields. An access after a store into another
+  array, or into the same array at an index that is not a different literal, is a
+  `not outlined:` hole, since the two may be one element; so is a reference outside the model used
+  after a call that writes. A `newarr` of class references of a literal length, the body's first
+  write, adds the premise `CIL.objectFieldSlot * 2 ≤ initial.heapBudget` for its slots and a
+  `fresh1Element` def naming its element class; its elements start as owned nulls, the array is
+  `fresh1` with `fresh1Identity` dating it after every caller allocation, and the footprint
+  forgets its elements through `Confined.forget_fresh`. An index into it that is not a literal
+  below its length is a `not outlined:` hole, as is a method with a loop.
 - A call in a body over objects to a method that loads its fields, stores at most one word field of
   an object argument and returns a value it names gets a generated `MethodContract` read from that
   body, with a `Holds` theorem proved by the same stepping; `cil_contract_steps` composes the call

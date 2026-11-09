@@ -57,7 +57,7 @@ public sealed class Counter
 
 public static class Signatures
 {
-    public static int Measure(string text, int x) => new decimal[x].Length;
+    public static int Measure(object text, int x) => new decimal[x].Length;
 }
 
 public struct Point
@@ -108,7 +108,7 @@ File.WriteAllText(manifest, JsonSerializer.Serialize(new
         new { signature = "Fixture::Size()", profile = "scalar", typeArguments = new[] { "System.String" } },
         new { signature = "Fixture::Size()", profile = "scalar", typeArguments = "Pair" },
         new { signature = "Counter::Add(int)", profile = "scalar" },
-        new { signature = "Signatures::Measure(string,int)", profile = "scalar" },
+        new { signature = "Signatures::Measure(object,int)", profile = "scalar" },
         new { signature = "Point::set_X(int)", profile = "scalar" },
         new { signature = "Cell`1::Twice(int)", profile = "scalar" },
         new { signature = "Seeded::.cctor()", profile = "scalar" },
@@ -160,7 +160,7 @@ Require(blockers.Select(b => b.GetProperty("construct").GetString()).Order(Strin
         "Unsupported static field store: stsfld System.Int32 Seeded::Seed",
         "Unsupported static field store: stsfld System.Int32 Views::value",
         "Unsupported static initialisation: static constructors are never extracted",
-        "Unsupported type: System.String"]),
+        "Unsupported type: System.Object"]),
     "Expected one blocker per unsupported construct");
 var allocation = Blocker("Unsupported instruction: newarr System.Single");
 var generation = Blocker("Rejected external call: System.Int32 System.GC::GetGeneration(System.Object)");
@@ -224,9 +224,9 @@ string[] Constructs(int index) => Ids(index).Select(id => blockers.Single(b => I
     .GetProperty("construct").GetString()!).ToArray();
 var decimals = Blocker("Unsupported instruction: newarr System.Decimal");
 Require(Constructs(12).Order(StringComparer.Ordinal).SequenceEqual(
-    ["Unsupported instruction: newarr System.Decimal", "Unsupported type: System.String"]) &&
+    ["Unsupported instruction: newarr System.Decimal", "Unsupported type: System.Object"]) &&
     decimals.GetProperty("sites").EnumerateArray().Any(s =>
-        s.GetProperty("method").GetString() == "System.Int32 Signatures::Measure(System.String,System.Int32)"),
+        s.GetProperty("method").GetString() == "System.Int32 Signatures::Measure(System.Object,System.Int32)"),
     "Rejected signature hid the body's blockers: " + string.Join("; ", Constructs(12)));
 // A non-virtual method of an admitted class is blocked only by its body.
 Require(Constructs(11).SequenceEqual(["Unsupported instruction: newarr System.Decimal"]),
@@ -316,7 +316,9 @@ const string selfAdmission = "Tests/SelfAdmission.cs";
 Run(["dotnet", "run", "--file", selfAdmission], streamOutput: true, progress: "Self-admission");
 var selfReport = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(At("artifacts/SelfAdmission/blockers.json")))
     .GetProperty("entries").EnumerateArray().ToArray();
-string? Existing(string status) => selfReport.FirstOrDefault(e => e.GetProperty("status").GetString() == status)
+// Source-named methods, so the gate's stable names equal the report's.
+string? Existing(string status) => selfReport.FirstOrDefault(e => e.GetProperty("status").GetString() == status &&
+    !e.GetProperty("signature").GetString()!.Contains('<'))
     is { ValueKind: JsonValueKind.Object } entry ? entry.GetProperty("signature").GetString() : null;
 (int Code, string Output) Gate(params string[] lines)
 {
@@ -325,18 +327,34 @@ string? Existing(string status) => selfReport.FirstOrDefault(e => e.GetProperty(
     var result = Execute(["dotnet", "run", "--file", selfAdmission, "--", "--baseline", path, "--reuse-report"]);
     return (result.Code, result.Output);
 }
-// Losing an admission that still exists is the only failure.
+// The exact admitted set passes; a lost admission, a removed method or an unrecorded gain each fail.
+var admittedMethods = selfReport.Where(e => e.GetProperty("status").GetString() == "admitted")
+    .Select(e => e.GetProperty("signature").GetString()!).ToArray();
+var exact = Gate(admittedMethods);
+Require(exact.Code == 0 && exact.Output.Contains("matching the baseline"),
+    "The scan's own admitted set failed the gate:\n" + exact.Output);
+// Adding a member or a lambda renumbers the closures and lambdas after it; that alone must not fail the gate.
+var renumbered = Gate([.. admittedMethods.Select(method =>
+    method.Replace("<>c__DisplayClass", "<>c__DisplayClass9", StringComparison.Ordinal)
+        .Replace(">b__", ">b__9", StringComparison.Ordinal))]);
+Require(admittedMethods.Any(method => method.Contains("<>c__DisplayClass", StringComparison.Ordinal)) &&
+    renumbered.Code == 0 && renumbered.Output.Contains("matching the baseline"),
+    "Renumbered closures failed the gate:\n" + renumbered.Output);
 var blockedMethod = Existing("blocked")!;
-var lostAdmission = Gate(blockedMethod);
+var lostAdmission = Gate([.. admittedMethods, blockedMethod]);
 Require(lostAdmission.Code != 0 && lostAdmission.Output.Contains("no longer admitted") &&
     lostAdmission.Output.Contains(blockedMethod), "Lost admission passed the gate:\n" + lostAdmission.Output);
-// Removed methods and gained admissions are reported, since the tool's own method set changes every PR.
 const string gone = "System.Int32 Gone::Removed()";
-var admittedMethod = Existing("admitted");
-var reported = Gate(gone);
-Require(reported.Code == 0 && !reported.Output.Contains("Lost admissions") &&
-    reported.Output.Contains("Removed admitted methods:") && reported.Output.Contains(gone) &&
-    (admittedMethod is null || reported.Output.Contains("Gained admissions") &&
-        reported.Output.Contains(admittedMethod)),
-    "Removed or gained methods misreported:\n" + reported.Output);
+var removedMethod = Gate([.. admittedMethods, gone]);
+Require(removedMethod.Code != 0 && removedMethod.Output.Contains("is stale") &&
+    removedMethod.Output.Contains("Removed admitted methods:") && removedMethod.Output.Contains(gone),
+    "A removed admitted method passed the gate:\n" + removedMethod.Output);
+if (admittedMethods.Length != 0)
+{
+    var unrecorded = Existing("admitted")!;
+    var gained = Gate([.. admittedMethods.Where(method => method != unrecorded)]);
+    Require(gained.Code != 0 && gained.Output.Contains("is stale") &&
+        gained.Output.Contains("Gained admissions") && gained.Output.Contains(unrecorded),
+        "An unrecorded admission passed the gate:\n" + gained.Output);
+}
 Console.WriteLine($"PASS {checks} admission report checks");

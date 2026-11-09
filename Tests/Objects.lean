@@ -1,5 +1,7 @@
 import CIL.Safety.ObjectSteps
 import CIL.Safety.ObjectFields
+import CIL.Safety.ReferenceSegments
+import CIL.Safety.ClassCatalog
 import CIL.Safety.SymbolicExecution
 import CIL.Observe
 
@@ -289,5 +291,96 @@ theorem narrow_field_loads_extend_by_sign {memory : CIL.Safety.Memory} {object :
     simp only [located, signedLoad, unsignedLoad, Bind.bind, Except.bind, Pure.pure,
       Except.pure] <;> rfl
 #print axioms narrow_field_loads_extend_by_sign
+
+/-- The return check forms an object the method created, or any other object its frame does
+    not own, in memory after the frame is left. -/
+theorem unowned_object_returns (memory : CIL.Safety.Memory) (object : Reference) (frame : Frame)
+    (formed : formObject memory (.address object) = .ok (.object (.address object)))
+    (notOwned : object.allocation ∉ frame.owned) :
+    [Value.object (.address object)].mapM (checkedValue (leaveFrame frame memory)) =
+      .ok [.object (.address object)] := by
+  cil_checked_side [formed, notOwned]
+#print axioms unowned_object_returns
+
+/-- A method record with no code, owned by `owner`, with the given receiver kind and bases. -/
+private def classMethod (owner : String) (receiver : Bool) (bases : List CIL.Extraction.TypeExpr) :
+    CIL.Extraction.RawMethod :=
+  { token := 0, owner, hasThis := true, explicitThis := false, callingConvention := 0,
+    attributes := 0, implementation := 0, returnType := .void, parameters := [], locals := [],
+    initLocals := false, maxStack := 0, genericParameters := [], code := [],
+    objectReceiver := receiver, objectBases := bases }
+
+/-- A class method's owner `scope::name` declares that class with its bases; an owner without
+    exactly one `::`, or a method without an object receiver, declares none. -/
+theorem declared_class_read :
+    declaredClass (classMethod "Examples::Examples.Circle" true [shape]) = some circle ∧
+    declaredClass (classMethod "Examples.Circle" true []) = none ∧
+    declaredClass (classMethod "Examples::Outer::Circle" true []) = none ∧
+    declaredClass (classMethod "Examples::Examples.Circle" false []) = none := by
+  decide +kernel
+#print axioms declared_class_read
+
+/-- A derived instance and an instance of its base agree with a catalog naming both. -/
+theorem shapes_consistent : shapes.ClassesConsistent [⟨shape, []⟩, circle] := by
+  intro id allocation type present kind
+  match id, present with
+  | 0, present => cases present; cases kind; unfold RuntimeType.ConsistentWith; decide
+  | 1, present => cases present; cases kind; unfold RuntimeType.ConsistentWith; decide
+#print axioms shapes_consistent
+
+private def order : RuntimeType := ⟨.object "Examples" "Examples.Order", []⟩
+private def customer : RuntimeType := ⟨.object "Examples" "Examples.Customer", []⟩
+
+/-- Allocation 0 claims two unrelated classes in one lineage, as no CLR object can. -/
+private def confused : CIL.Safety.Memory :=
+  { allocations := fun identity => match identity with
+      | 0 => some ⟨.object ⟨order.identity, [customer.identity]⟩, ⟨16, 8, []⟩, true, [16]⟩
+      | _ => none
+    cells := fun _ _ => ⟨0, true⟩, views := [], nextIdentity := 1 }
+
+/-- Memory may hold an object located as an instance of two unrelated classes, so their objects
+    are distinct only under the catalog premise, which rejects that lineage. -/
+theorem unrelated_classes_need_catalog :
+    objectFieldAddress confused (.address ⟨0, 0⟩) order.identity 0 = .ok ⟨0, 0⟩ ∧
+    objectFieldAddress confused (.address ⟨0, 0⟩) customer.identity 8 = .ok ⟨0, 8⟩ ∧
+    ¬ confused.ClassesConsistent [order, customer] := by
+  refine ⟨rfl, rfl, fun consistent => ?_⟩
+  have tail := consistent 0 _ _ rfl rfl order (by decide) (by decide)
+  exact absurd tail (by decide)
+#print axioms unrelated_classes_need_catalog
+
+/-- A one-method program whose only `newobj` creates an instance of `type`. -/
+private def createsOne (type : RuntimeType) : CIL.Program :=
+  [{ returnsValue := true, locals := [],
+     code := [.newObject 1 0 type.identity type.bases 16, .ret] }]
+
+/-- The site check accepts a program creating a cataloged class with its own chain, and rejects
+    one whose `newobj` records the lineage no CLR object can have, so execution of it is not
+    covered by `run_preserves_classes`. -/
+theorem object_sites_checked :
+    ObjectSitesConsistent [order, customer] (createsOne order) ∧
+    ¬ ObjectSitesConsistent [order, customer]
+      (createsOne ⟨order.identity, [customer.identity]⟩) := by
+  decide
+#print axioms object_sites_checked
+
+/-- A node linked to itself heads no segment to null, whatever nodes it names: a segment is a
+    finite path, so a walk that would never reach null cannot claim a termination measure. -/
+theorem self_linked_no_segment {field : ReferenceField} {linked : CIL.Safety.Memory}
+    {node : Reference}
+    (looped : field.of linked node = .address node) (nodes : List Reference) :
+    ¬ field.Segment linked (.address node) .null nodes := by
+  induction nodes with
+  | nil =>
+    intro segment
+    obtain ⟨_, same, -⟩ := segment.next
+    cases same
+  | cons _ tail shorter =>
+    intro segment
+    obtain ⟨rest, same, -, next⟩ := segment.next
+    cases same
+    rw [looped] at next
+    exact shorter next
+#print axioms self_linked_no_segment
 
 end Tests.Objects

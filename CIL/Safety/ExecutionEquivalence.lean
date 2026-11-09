@@ -126,7 +126,7 @@ theorem Memory.Equivalent.allocateArray {m n : Memory} (same : m.Equivalent n)
                if other == identity then ⟨0, true⟩ else target.cells other offset } :=
          ⟨equivalent.allocations, by simp only [equivalent.cells], equivalent.permissions,
            equivalent.nextIdentity, equivalent.staticBindings,
-               equivalent.stackLimit, equivalent.heapBudget, equivalent.slots⟩
+               equivalent.stackLimit, equivalent.heapBudget, equivalent.slots, equivalent.literals⟩
        exact initialized.prependView _)
     | unfold checkedAt
     | split
@@ -137,7 +137,7 @@ theorem Memory.Equivalent.withHeapBudget {m n : Memory} (same : m.Equivalent n)
     (budget : Nat) :
     Memory.Equivalent { m with heapBudget := budget } { n with heapBudget := budget } :=
   ⟨same.allocations, same.cells, same.permissions, same.nextIdentity, same.staticBindings,
-    same.stackLimit, rfl, same.slots⟩
+    same.stackLimit, rfl, same.slots, same.literals⟩
 #print axioms Memory.Equivalent.withHeapBudget
 
 /-- Object allocation charges equal budgets and grants the same fresh zeroed storage. -/
@@ -165,7 +165,7 @@ theorem Memory.Equivalent.allocateObject {m n : Memory} (same : m.Equivalent n)
                if other == identity then ⟨0, true⟩ else target.cells other offset } :=
          ⟨equivalent.allocations, by simp only [equivalent.cells], equivalent.permissions,
            equivalent.nextIdentity, equivalent.staticBindings,
-               equivalent.stackLimit, equivalent.heapBudget, equivalent.slots⟩
+               equivalent.stackLimit, equivalent.heapBudget, equivalent.slots, equivalent.literals⟩
        exact (initialized.prependView _).withHeapBudget _)
     | unfold checkedAt
     | split
@@ -183,6 +183,36 @@ theorem Memory.Equivalent.newArray {m n : Memory} (same : m.Equivalent n)
     | split
 #print axioms Memory.Equivalent.newArray
 
+/-- Virtual dispatch reads only allocation metadata, which equivalent memories share. -/
+theorem Memory.Equivalent.virtualTarget {m n : Memory} (same : m.Equivalent n)
+    (targets : List (CIL.Extraction.TypeExpr × Nat)) (receiver : Reference) :
+    CIL.Safety.virtualTarget m targets receiver = CIL.Safety.virtualTarget n targets receiver := by
+  simp only [CIL.Safety.virtualTarget, runtimeTypeOf, liveAllocation, same.allocations]
+#print axioms Memory.Equivalent.virtualTarget
+
+/-- A type test reads only allocation metadata, which equivalent memories share. -/
+theorem Memory.Equivalent.objectTest {m n : Memory} (same : m.Equivalent n)
+    (type : CIL.Extraction.TypeExpr) (throwing : Bool) (reference : ManagedReference) :
+    CIL.Safety.objectTest m type throwing reference =
+      CIL.Safety.objectTest n type throwing reference := by
+  simp only [CIL.Safety.objectTest, runtimeTypeOf, liveAllocation, same.allocations,
+    same.formObject]
+#print axioms Memory.Equivalent.objectTest
+
+/-- Reference array length decoding and allocation preserve exact outcomes over equivalent
+    memories. -/
+theorem Memory.Equivalent.newReferenceArray {m n : Memory} (same : m.Equivalent n)
+    (element : CIL.Extraction.TypeExpr) (length : CIL.Value) :
+    ResultEquivalent MemoryLastEquivalent (newReferenceArray m element length)
+      (newReferenceArray n element length) := by
+  cases length <;> simp only [CIL.Safety.newReferenceArray, Bind.bind, Except.bind, Pure.pure,
+    Except.pure]
+  all_goals repeat first
+    | exact .error _
+    | exact same.allocateObject _ _
+    | split
+#print axioms Memory.Equivalent.newReferenceArray
+
 theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) :
@@ -193,13 +223,19 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
   split <;> try simp only [same.checkedValue, same.checkedValues, same.loadLocal, same.localAddress,
     same.referenceNonNull, same.referenceEqual, same.referenceDifference,
     same.referenceLess, same.referenceSubtract, same.objectNonNull, same.objectEqual,
-    same.objectAboveNull]
+    same.objectAboveNull, same.virtualTarget, same.objectTest]
   all_goals repeat' first
     | exact same.managedStep _ _ _ _
     | (apply ResultEquivalent.bind (same.newArray _ _)
        intro left right related
        obtain ⟨view, memory⟩ := left
        obtain ⟨otherView, otherMemory⟩ := right
+       obtain ⟨rfl, equivalent⟩ := related
+       exact .ok (.next equivalent _ _ _))
+    | (apply ResultEquivalent.bind (same.newReferenceArray _ _)
+       intro left right related
+       obtain ⟨array, memory⟩ := left
+       obtain ⟨otherArray, otherMemory⟩ := right
        obtain ⟨rfl, equivalent⟩ := related
        exact .ok (.next equivalent _ _ _))
     | (apply ResultEquivalent.bind (same.allocateObject _ _)

@@ -100,6 +100,7 @@ theorem Memory.Equivalent.writeSnapshot {m n : Memory} (same : m.Equivalent n)
   intro left right related
   apply ResultEquivalent.ok
   exact ⟨related.allocations, by simp only [same.cells], related.permissions,
-    related.nextIdentity, related.staticBindings, related.stackLimit, related.heapBudget, related.slots⟩
+    related.nextIdentity, related.staticBindings, related.stackLimit, related.heapBudget,
+    related.slots, related.literals⟩
 
 end CIL.Safety

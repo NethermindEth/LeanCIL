@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -65,6 +66,10 @@ internal static class InstructionTranslation
             return ".nop";
         }
         if (i.Previous?.OpCode.Code == Code.Readonly) Arrays.ValidateReadOnly(instructions, i.Previous);
+        var referenceArray = i.OpCode.Code == Code.Ldlen &&
+            nativeOperands.Incoming.TryGetValue(i, out var lengthStack) &&
+            lengthStack.LastOrDefault().Kind == NativeOperands.Kind.Object;
+        if (ReferenceArrays.Translate(i, referenceArray) is { } referenceOperation) return referenceOperation;
         if (Arrays.Translate(i, profile.Architecture) is { } arrayOperation) return arrayOperation;
         parameterHomes ??= ParameterStorage.IndexHomes(ParameterStorage.Analyze(m, reachable!));
         var translated = TranslateCore(i, m, methods, methodIndex, instructions, profile, parameterHomes,
@@ -163,6 +168,18 @@ internal static class InstructionTranslation
             SpanReferences.ValidateCopy(m, i, instructions);
             return ".nop";
         }
+        if (VirtualDispatch.Is(i))
+        {
+            var slot = (MethodReference)i.Operand;
+            var entries = VirtualDispatch.Table(slot).Select(entry =>
+            {
+                var index = methods.GetValueOrDefault(entry.Body, -1);
+                if (index <= methodIndex)
+                    throw new InvalidDataException("Unresolved virtual implementation: " + entry.Body.FullName);
+                return $"({GenericEvidence.ObjectType(entry.Class)}, {index})";
+            });
+            return $".callVirtual [{string.Join(", ", entries)}] {slot.Parameters.Count + 1}";
+        }
         if (i.OpCode.Code is Code.Call or Code.Newobj || receiverCall)
         {
             var r = (MethodReference)i.Operand;
@@ -194,7 +211,7 @@ internal static class InstructionTranslation
             Code.Ldarga or Code.Ldarga_S when m.HasThis && i.Operand == m.Body.ThisParameter &&
                 ObjectTypes.Candidate(m.DeclaringType) =>
                 throw new InvalidDataException("Unsupported address of a class instance receiver: " + m.FullName),
-            Code.Ldarga or Code.Ldarga_S when ObjectTypes.Candidate(((ParameterDefinition)i.Operand).ParameterType) =>
+            Code.Ldarga or Code.Ldarga_S when ObjectTypes.Rooted(((ParameterDefinition)i.Operand).ParameterType) =>
                 throw new InvalidDataException("Unsupported address of a class instance argument: " + m.FullName),
             Code.Ldarga or Code.Ldarga_S => Parameter(
                 !Spans.Is(((ParameterDefinition)i.Operand).ParameterType) ? "localAddr" : "local"),
@@ -226,6 +243,8 @@ internal static class InstructionTranslation
             Code.Conv_I1 => ".convI1", Code.Conv_I2 => ".convI2", Code.Conv_U2 => ".convU2",
             Code.Neg => ".neg",
             Code.Ldnull => ".memory .nullObject",
+            Code.Castclass or Code.Isinst => ObjectTypes.Test(i),
+            Code.Ldstr => StringLiteral((string)i.Operand),
             Code.Cgt => ".gt",
             Code.Bgt or Code.Bgt_S => $".bgt {Target()}",
             Code.Ble or Code.Ble_S => $".ble {Target()}",
@@ -257,7 +276,8 @@ internal static class InstructionTranslation
             Code.Ldarg or Code.Ldarg_S => Arg(MethodArguments.Index(m, (ParameterDefinition)i.Operand)),
             Code.Ldloc_0 => LocalOp("local", 0), Code.Ldloc_1 => LocalOp("local", 1), Code.Ldloc_2 => LocalOp("local", 2), Code.Ldloc_3 => LocalOp("local", 3),
             Code.Ldloc or Code.Ldloc_S => LocalOp("local", Local()),
-            Code.Ldloca or Code.Ldloca_S when ObjectTypes.Candidate(((VariableDefinition)i.Operand).VariableType) =>
+            Code.Ldloca or Code.Ldloca_S when ObjectTypes.Rooted(((VariableDefinition)i.Operand).VariableType) ||
+                ReferenceArrays.Is(((VariableDefinition)i.Operand).VariableType) =>
                 throw new InvalidDataException("Unsupported address of a class instance local: " + m.FullName),
             Code.Ldloca or Code.Ldloca_S => LocalOp(
                 !Spans.Is(((VariableDefinition)i.Operand).VariableType) ? "localAddr" : "local", Local()),
@@ -296,4 +316,13 @@ internal static class InstructionTranslation
         MetadataValidation.LayoutContext? layouts) => MetadataValidation.IsAggregate(type, module)
         ? layouts?.Size(type) ?? MetadataValidation.Layout(type, module, architecture)
         : MetadataValidation.IntegerVectorWidth(type) ?? MetadataValidation.PrimitiveWidth(type);
+
+    // Lean reads a surrogate escape as NUL, which would give distinct literals one key, and has no \b or \f.
+    static string StringLiteral(string text)
+    {
+        var unrepresentable = text.Any(c => char.IsSurrogate(c) || c is '\b' or '\f');
+        if (unrepresentable)
+            throw new InvalidDataException("Unsupported string literal: a surrogate, backspace or form feed");
+        return $".memory (.stringLiteral {JsonSerializer.Serialize(text)})";
+    }
 }

@@ -153,6 +153,14 @@ Object `ldnull` has a distinct scalar-flow kind. Its bounded truth/equality test
 object storage, parameters/results or comparisons with managed references. The raw literal,
 comparison operation and branch target remain exactly checked.
 
+Each `ldstr` emits the string literal of exactly its own text, typed as an object; no other raw
+opcode emits a literal, and inside a folded `throw` the load emits nothing.
+
+Each argument guard operation is decoded again from its raw `call`: the owner, method name, integer
+type argument, parameter types and external identity fix the guard, its width and its signedness
+(`CIL.Extraction.guardCallMatches`). No other instruction emits a guard, and a `ThrowIfNull`
+argument is typed as an object reference.
+
 ## Exception documentation lint
 
 `lint-exceptions` reports structural potential sites. XML prose is untrusted and not independently

@@ -89,6 +89,7 @@ On failure `verify` exits nonzero, prints `Invalid:` with the Lean errors, and w
 - Editor checks (`lake build`, `leancil workspace`) are not verification. Only `leancil verify`
   produces a result to report.
 - A theorem about fixed argument values is a test, not a contract; say so.
-- Unsupported features (class allocation, virtual dispatch, recursion, exception handlers,
-  floating point, arbitrary external calls) fail at `extract` with the rejected item named;
+- Unsupported features (classes outside the README's admitted subset, interface calls, type
+  tests against interfaces, `System.Object` or value types, recursion, exception handlers, floating point, reading a string's length or characters,
+  arbitrary external calls) fail at `extract` with the rejected item named;
   report it rather than rewriting the user's code without asking.

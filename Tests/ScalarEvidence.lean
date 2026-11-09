@@ -197,7 +197,11 @@ example : ¬ ScalarFlowValid #[] (floatRaw 107) floatFeatures (floatStates.set 2
 example : ¬ ScalarFlowValid #[] (floatRaw 108) floatFeatures (floatStates.set 2 (some [.other])) floatMethod.code := by decide
 example : scalarTransfer addRaw (i 80) [.reference] = some [.other] := by decide
 example : scalarTransfer addRaw (i 150) [.word32, .reference] = none := by decide
-example : scalarTransfer addRaw (i 154) [.word32, .reference] = some [.other] := by decide
+-- `ldelem.ref` and `stelem.ref` are covered: only an object or null array of class references.
+example : scalarTransfer addRaw (i 154) [.word32, .reference] = none := by decide
+example : scalarTransfer addRaw (i 154) [.word32, .object] = some [.object] := by decide
+example : scalarTransfer addRaw (i 162) [.nullObject, .native, .object] = some [] := by decide
+example : scalarTransfer addRaw (i 162) [.word32, .word32, .object] = none := by decide
 
 example : scalarTransfer { addRaw with locals := [intType] } (i 10) [.other] = none := by decide
 example : scalarTransfer { addRaw with locals := [intType] } (i 10) [.word64] = none := by decide
@@ -621,7 +625,102 @@ example : scalarEmissionMatches #[] none (i 125 nextField) [.object, .object]
     (.memory (.setObjectField node 8 8)) = false := by decide
 example : scalarEmissionMatches #[] none (i 125 (.field node 0 word false)) [.word64, .object]
     (.memory (.setObjectReferenceField node 0)) = false := by decide
+-- A field typed as an array of a class holds the array's reference in its slot; a value array
+-- field is never a reference slot.
+private def itemsField : RawOperand := .field node 1 (.array node) false
+example : scalarEmissionMatches #[] none (i 123 itemsField) [.object]
+    (.memory (.objectReferenceField node 8)) = true := by decide
+example : scalarEmissionMatches #[] none (i 125 itemsField) [.nullObject, .object]
+    (.memory (.setObjectReferenceField node 8)) = true := by decide
+example : scalarEmissionMatches #[] none (i 123 (.field node 1 (.array word) false)) [.object]
+    (.memory (.objectReferenceField node 8)) = false := by decide
+example : scalarEmissionMatches #[] none (i 125 (.field node 1 (.array word) false))
+    [.object, .object] (.memory (.setObjectReferenceField node 8)) = false := by decide
+-- A value-array field is an array slot of the field's element type; it stores only an array
+-- of that element, and a class-array field is never one.
+private def samplesField : RawOperand := .field node 1 (.array word) false
+example : scalarEmissionMatches #[] none (i 123 samplesField) [.object]
+    (.memory (.arrayField node 8 .unsigned64)) = true := by decide
+example : scalarEmissionMatches #[] none (i 123 samplesField) [.object]
+    (.memory (.arrayField node 8 .signed64)) = false := by decide
+example : scalarEmissionMatches #[] none (i 123 samplesField) [.object]
+    (.memory (.arrayField node 0 .unsigned64)) = false := by decide
+example : scalarEmissionMatches #[] none (i 123 itemsField) [.object]
+    (.memory (.arrayField node 8 .unsigned64)) = false := by decide
+example : scalarEmissionMatches #[] none (i 125 samplesField) [.array .unsigned64, .object]
+    (.memory (.setArrayField node 8 .unsigned64)) = true := by decide
+example : scalarEmissionMatches #[] none (i 125 samplesField) [.array .signed32, .object]
+    (.memory (.setArrayField node 8 .unsigned64)) = false := by decide
+example : scalarEmissionMatches #[] none (i 125 samplesField) [.object, .object]
+    (.memory (.setArrayField node 8 .unsigned64)) = false := by decide
 
+-- `ldstr` loads exactly its own text, nothing else loads a literal, and a folded throw's
+-- message emits nothing.
+example : scalarEmissionMatches #[] none (i 114 (.text "a")) []
+    (.memory (.stringLiteral "a")) = true := by decide
+example : scalarEmissionMatches #[] none (i 114 (.text "a")) []
+    (.memory (.stringLiteral "b")) = false := by decide
+example : scalarEmissionMatches #[] none (i 0) [] (.memory (.stringLiteral "a")) = false := by
+  decide
+example : scalarEmissionMatches #[] (some .interior) (i 114 (.text "a")) []
+    (.memory (.stringLiteral "a")) = false := by decide
+example : scalarEmissionMatches #[] none (i 114 (.text "a")) [] .nop = false := by decide
+
+-- A guard emission comes only from its exact call: the type argument fixes width and signedness,
+-- and another owner, overload or type argument emits nothing.
+private def guardSite (owner methodName suffix : String) (arguments parameters : List TypeExpr) :
+    RawInstruction :=
+  ⟨0, 40, .call
+    { declaringType := .atom runtimeScope owner, name := methodName,
+      target := .external (runtimeScope ++ "::System.Void " ++ owner ++ "::" ++ suffix),
+      typeArguments := arguments, ownerArgumentCount := 0, parameterCount := parameters.length,
+      hasThis := false, returnsValue := false, returnType := .void,
+      parameterTypes := parameters }⟩
+
+private def parameterName : TypeExpr := .object runtimeScope "System.String"
+private def uint32 : TypeExpr := .atom runtimeScope "System.UInt32"
+private def negative (argument : TypeExpr) : RawInstruction :=
+  guardSite "System.ArgumentOutOfRangeException" "ThrowIfNegative"
+    "ThrowIfNegative(!!0,System.String)" [argument] [argument, parameterName]
+
+example : guardCallMatches (negative uint32) (.memory (.zeroGuard .negative 32 false)) = true := by
+  decide +kernel
+example : guardCallMatches (negative uint32) (.memory (.zeroGuard .negative 32 true)) = false := by
+  decide +kernel
+example : guardCallMatches (negative uint32)
+    (.memory (.zeroGuard .negativeOrZero 32 false)) = false := by decide +kernel
+example : guardCallMatches (negative uint32) .nop = false := by decide +kernel
+example : guardCallMatches (negative (.atom runtimeScope "System.Double"))
+    (.memory (.zeroGuard .negative 64 true)) = false := by decide +kernel
+example : guardCallMatches (negative (.atom runtimeScope "System.Char"))
+    (.memory (.zeroGuard .negative 16 false)) = false := by decide +kernel
+example : guardCallMatches
+    (guardSite "System.ArgumentException" "ThrowIfNegative" "ThrowIfNegative(!!0,System.String)"
+      [uint32] [uint32, parameterName]) (.memory (.zeroGuard .negative 32 false)) = false := by decide +kernel
+example : guardCallMatches (i 0) (.memory .throwIfNull) = false := by decide +kernel
+example : guardCallMatches
+    (guardSite "System.ArgumentNullException" "ThrowIfNull"
+      "ThrowIfNull(System.Object,System.String)" [] [.atom runtimeScope "System.Object", parameterName])
+    (.memory .throwIfNull) = true := by decide +kernel
+example : guardCallMatches
+    (guardSite "System.ArgumentNullException" "ThrowIfNull"
+      "ThrowIfNull(System.Void*,System.String)" [] [.pointer .void, parameterName])
+    (.memory .throwIfNull) = false := by decide +kernel
+-- A narrow guard reads the low bits of its stack slot with the declared signedness, and an
+-- operand of another width is ill-typed.
+example : (guardOperand 8 true (.i32 0xFF#32)).map ZeroGuard.negative.throws = some true := by
+  decide
+example : (guardOperand 8 false (.i32 0xFF#32)).map ZeroGuard.negative.throws = some false := by
+  decide
+example : guardOperand 16 true (.i32 0x00018000#32) = some (-32768) := by decide
+example : guardOperand 8 false (.i32 0x80#32) = some 128 := by decide
+example : ComparisonGuard.greaterThan.throws 128 127 = true := by decide
+example : guardOperand 8 true (.i32 0x80#32) = some (-128) := by decide
+example : ComparisonGuard.greaterThan.throws (-128) 127 = false := by decide
+example : guardOperand 64 true (.i32 0#32) = none := by decide
+example : guardOperand 32 true (.i64 0#64) = none := by decide
+example : (guardOperand 64 false (.i64 0xFFFFFFFFFFFFFFFF#64)).map ZeroGuard.negative.throws =
+    some false := by decide
 -- Size constants are the only uncovered literal producers; primitive widths are bound here.
 private def sizeRaw (instruction : RawInstruction) := raw [instruction, i 38, i 2, i 42] [word]
 private def sizeStates : ScalarCertificate := [some [], some [.word32], some [], some [.word64]]

@@ -1,3 +1,4 @@
+import CIL.ArgumentGuards
 import CIL.ArrayTypes
 import CIL.Memory
 import CIL.TypeExpr
@@ -198,6 +199,18 @@ inductive MemoryOp where
   | nullRef | isNullRef
   /-- `ldnull` pushes the null object reference, distinct from a null byref. -/
   | nullObject
+  /-- `ldstr`: the interned string object the caller bound to `text`. No operation reads its
+      characters. -/
+  | stringLiteral (text : String)
+  /-- `ArgumentNullException.ThrowIfNull(argument, paramName)`: throws for a null argument. The
+      parameter name is an opaque string nothing reads. -/
+  | throwIfNull
+  /-- An `ArgumentOutOfRangeException` guard testing a `width`-bit integer against zero. The
+      parameter name is an opaque string nothing reads. -/
+  | zeroGuard (guard : ZeroGuard) (width : Nat) (signed : Bool)
+  /-- An `ArgumentOutOfRangeException` guard comparing a `width`-bit integer with a bound. The
+      parameter name is an opaque string nothing reads. -/
+  | comparisonGuard (guard : ComparisonGuard) (width : Nat) (signed : Bool)
   /-- `ldfld` of a scalar field of a class instance of type `owner`, at its model offset. -/
   | objectField (owner : CIL.Extraction.TypeExpr) (offset width : Nat) (signed : Bool)
   /-- `stfld` of a scalar field of a class instance of type `owner`, at its model offset. -/
@@ -207,6 +220,17 @@ inductive MemoryOp where
   | objectReferenceField (owner : CIL.Extraction.TypeExpr) (offset : Nat)
   /-- `stfld` of a class-typed field of a class instance of type `owner`, at its model offset. -/
   | setObjectReferenceField (owner : CIL.Extraction.TypeExpr) (offset : Nat)
+  /-- `ldlen` of an array of class references: its element count, as a native integer. -/
+  | referenceArrayLength
+  /-- `ldelem.ref` of an array of class references: the reference its element's slot holds. -/
+  | referenceArrayLoad
+  /-- `stelem.ref` of an array of class references, after the CLR's covariance check. -/
+  | referenceArrayStore
+  /-- `ldfld` of a field of a class instance of type `owner` holding an array of `element`:
+      the whole array the reference in its slot names. -/
+  | arrayField (owner : CIL.Extraction.TypeExpr) (offset : Nat) (element : ArrayElement)
+  /-- `stfld` of a field of a class instance of type `owner` holding an array of `element`. -/
+  | setArrayField (owner : CIL.Extraction.TypeExpr) (offset : Nat) (element : ArrayElement)
   deriving Repr
 
 /-- Bytes the model reserves for each class instance field, in declaration order. The layout is
@@ -226,6 +250,8 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .arrayFill _ counted => if counted then 4 else 2
   | .marshalRead _ tryRead => if tryRead then 2 else 1
   | .marshalWrite .. => 2
+  | .throwIfNull | .zeroGuard .. => 2
+  | .comparisonGuard .. => 3
   | .pointerTransfer _ _ store => if store then 2 else 1
   | .vector128Unsafe store offset => (if store then 2 else 1) + (if offset then 1 else 0)
   | .bigMul64 _ | .divRemOut _ | .copyBlock _ | .initBlock _ => 3
@@ -236,13 +262,15 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .spanReinterpret .. | .spanReadOnly | .arrayLength => 1
   | .arrayLoad .. | .arrayAddress .. => 2
   | .arrayTransfer _ store => if store then 3 else 2
-  | .arrayStore _ => 3
+  | .arrayStore _ | .referenceArrayStore => 3
+  | .referenceArrayLoad => 2
   | .store128 | .store256 | .store512 | .add .. | .spanCreate | .spanItem _
-  | .setObjectField .. | .setObjectReferenceField .. => 2
-  | .staticAddress _ | .staticValue _ | .nullRef | .nullObject | .spanEmpty .. => 0
+  | .setObjectField .. | .setObjectReferenceField .. | .setArrayField .. => 2
+  | .staticAddress _ | .staticValue _ | .nullRef | .nullObject | .stringLiteral _
+  | .spanEmpty .. => 0
   | .load128 | .load256 | .load512 | .init256 | .asRef | .bitcast256 | .bitcastByteBool
   | .skipInit | .bitcastValue .. | .createSpan _ | .spanReference | .spanLength | .isNullRef
-  | .objectField .. | .objectReferenceField .. => 1
+  | .objectField .. | .objectReferenceField .. | .referenceArrayLength | .arrayField .. => 1
 
 /-- Signed Int32/native and unsigned native element offsets on the 64-bit target. -/
 def offsetValue (signed : Bool) (value : Value) : Option Int :=

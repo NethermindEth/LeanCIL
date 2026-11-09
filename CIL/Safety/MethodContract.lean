@@ -418,8 +418,8 @@ theorem run_call_post {program : CIL.Program} {method pc callee : Nat}
   exact ⟨fuel, result, returned, composed, satisfied⟩
 #print axioms run_call_post
 
-/-- A successful call from a well-formed memory returns a well-formed memory and keeps
-    the static world, whatever the callee's contract states. -/
+/-- A successful call from a well-formed memory returns a well-formed memory and keeps the static
+    world and catalog agreement, whatever the callee's contract states. -/
 theorem call_frame_invariants {program : CIL.Program} {method pc callee fuel : Nat}
     {body : CIL.Method} {op : CIL.Op} {args stack arguments rest values : List Value}
     {frame : Frame} {memory updated final : Memory}
@@ -436,10 +436,13 @@ theorem call_frame_invariants {program : CIL.Program} {method pc callee fuel : N
     programStep_preserves_wellFormed _ _ _ _ _ _ _ _ formed called
   exact ⟨invoke_preserves_wellFormed _ _ _ _ _ _ _ entered invoked, fun world =>
     invoke_preserves_static_world _ _ _ _ _ _ _ entered
-      (programStep_preserves_static_world called formed world) invoked⟩
+      (programStep_preserves_static_world called formed world) invoked,
+    fun _ sites consistent => invoke_preserves_classes sites
+      (programStep_preserves_classes sites consistent called) invoked⟩
 
 /-- `run_call_of_contract` from a well-formed memory: the continuation also receives the
-    callee's well-formed final memory and static-world preservation across the call. -/
+    callee's well-formed final memory, static-world preservation and catalog agreement across the
+    call. -/
 theorem run_call_of_contract_formed {Input Output : Type} {c : MethodContract Input Output}
     {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
     {args stack arguments rest : List Value}
@@ -454,6 +457,7 @@ theorem run_call_of_contract_formed {Input Output : Type} {c : MethodContract In
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
       final.WellFormed →
       StaticWorldPreserved program memory final →
+      ClassesPreserved program memory final →
       Confined (c.footprint input) updated final → c.Returns input updated final values →
       ∃ fuel result returned,
         run program fuel method (pc + 1) args frame (values ++ rest) final =
@@ -465,7 +469,7 @@ theorem run_call_of_contract_formed {Input Output : Type} {c : MethodContract In
   run_call_of_contract holds input methodFound instructionFound stepped encoded permitted
     fun final values ⟨fuel, invoked⟩ =>
       have kept := call_frame_invariants methodFound instructionFound stepped formed invoked
-      continuation final values ⟨fuel, invoked⟩ kept.1 kept.2
+      continuation final values ⟨fuel, invoked⟩ kept.formed kept.staticWorld kept.classes
 
 /-- Some fuel runs to a successful return satisfying `post` when the fetched instruction
     returns checked values that satisfy it. -/

@@ -25,8 +25,15 @@ theorem leaveFrame_expires_owned (frame : Frame) (m : Memory) (id : AllocationId
     (owned : id ∈ frame.owned) (a : Allocation) (present : m.allocations id = some a) :
     liveAllocation (leaveFrame frame m) id = .error .expiredLifetime := by
   simp [liveAllocation, leaveFrame, expireAll_allocations, owned, present]
+/-- An object the frame does not own forms after the frame is left as it did before: a method
+    may return an object it created, which outlives its activation. -/
+theorem formObject_leaveFrame (frame : Frame) (m : Memory) {object : Reference}
+    (notOwned : object.allocation ∉ frame.owned) :
+    formObject (leaveFrame frame m) (.address object) = formObject m (.address object) := by
+  simp [formObject, liveAllocation, leaveFrame, expireAll_allocations, notOwned]
 #print axioms expireAll_allocations
 #print axioms leaveFrame_expires_owned
+#print axioms formObject_leaveFrame
 
 theorem allocateHome_preserves_wellFormed {alignment : Nat} (m result : Memory)
     (activation width : Nat) (reference : Reference) (hm : m.WellFormed)

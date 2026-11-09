@@ -30,34 +30,48 @@ def FrameAction.frameAfter (action : FrameAction) (current : Frame) : Frame :=
   | .next _ _ frame _ | .construct _ _ _ frame _ _ _ => frame
   | .call _ _ _ _ | .tailCall _ _ _ | .returned _ _ => current
 
+/-- The runtime type of the instance an instruction creates: `newobj` records its class and
+    bases in the instruction itself, `newarr` of a class the array type of its element; no
+    other instruction creates an instance. -/
+def objectSiteType : CIL.Op → Option RuntimeType
+  | .newObject _ _ owner bases _ => some ⟨owner, bases⟩
+  | .newReferenceArray element => some (referenceArrayType element)
+  | _ => none
+
 /-- A step's memory and frame changes, with successful primitive operations as
-    evidence. Value-stack validity is independent of this effect classification. -/
-inductive StepEffect (body : CIL.Method) (frame : Frame) (m : Memory) :
+    evidence. Value-stack validity is independent of this effect classification. Only the
+    executed `operation` may create an instance, and only of the type it records. -/
+inductive StepEffect (body : CIL.Method) (operation : CIL.Op) (frame : Frame) (m : Memory) :
     Frame → Memory → Prop where
   | arrayAllocation {view result} (effect : ArrayAllocationEffect m view result) :
-      StepEffect body frame m frame result
-  | objectAllocation {object result} (effect : ObjectAllocationEffect m object result) :
-      StepEffect body frame m frame result
+      StepEffect body operation frame m frame result
+  | objectAllocation {type object result} (effect : ObjectAllocationEffect m type object result)
+      (site : objectSiteType operation = some type) :
+      StepEffect body operation frame m frame result
   | stackAllocation {reference final result}
       (effect : StackAllocationEffect m frame reference final result) :
-      StepEffect body frame m final result
+      StepEffect body operation frame m final result
   | memory {result} (effect : StaticInstructionEffect body m result) :
-      StepEffect body frame m frame result
+      StepEffect body operation frame m frame result
   | store {index slot final value result}
       (found : frame.locals[index]? = some slot)
       (stored : storeLocal m slot value = .ok (final, result)) :
-      StepEffect body frame m { frame with locals := frame.locals.set index final } result
+      StepEffect body operation frame m { frame with locals := frame.locals.set index final }
+        result
   | valueHome {home result r width value}
       (allocated : allocateHome m frame.activation width = .ok (r, home))
       (stored : storeValue home (.address r) value = .ok result) :
-      StepEffect body frame m { frame with owned := r.allocation :: frame.owned } result
+      StepEffect body operation frame m { frame with owned := r.allocation :: frame.owned }
+        result
   | localHome {home result r width slot final value}
       (allocated : allocateHome m frame.activation width = .ok (r, home))
       (stored : storeLocal home slot value = .ok (final, result)) :
-      StepEffect body frame m { frame with owned := r.allocation :: frame.owned } result
+      StepEffect body operation frame m { frame with owned := r.allocation :: frame.owned }
+        result
 
-theorem StepEffect.wellFormed {body : CIL.Method} {frame final : Frame} {m result : Memory}
-    (effect : StepEffect body frame m final result) (hm : m.WellFormed) : result.WellFormed := by
+theorem StepEffect.wellFormed {body : CIL.Method} {operation : CIL.Op} {frame final : Frame}
+    {m result : Memory} (effect : StepEffect body operation frame m final result)
+    (hm : m.WellFormed) : result.WellFormed := by
   cases effect with
   | arrayAllocation effect => exact effect.wellFormed hm
   | objectAllocation effect => exact effect.wellFormed hm
@@ -71,8 +85,9 @@ theorem StepEffect.wellFormed {body : CIL.Method} {frame final : Frame} {m resul
     exact storeLocal_preserves_wellFormed _ _ _ _ _
       (allocateHome_preserves_wellFormed _ _ _ _ _ hm allocated) stored
 
-theorem StepEffect.allocations {body : CIL.Method} {frame final : Frame} {m result : Memory}
-    (effect : StepEffect body frame m final result) : AllocationExtension m result := by
+theorem StepEffect.allocations {body : CIL.Method} {operation : CIL.Op} {frame final : Frame}
+    {m result : Memory} (effect : StepEffect body operation frame m final result) :
+    AllocationExtension m result := by
   cases effect with
   | arrayAllocation effect => exact effect.allocations
   | objectAllocation effect => exact effect.allocations
@@ -150,36 +165,39 @@ def FrameAction.LiveValues (action : FrameAction) : Prop :=
     ValuesValid memory args ∧ ValuesValid memory rest
 
 /-- One dispatcher proof supplies memory/frame effects and conditional value validity. -/
-structure StepContract (body : CIL.Method) (frame : Frame) (stack : List Value)
-    (m : Memory) (action : FrameAction) : Prop where
-  effect : StepEffect body frame m (action.frameAfter frame) action.memory
+structure StepContract (body : CIL.Method) (operation : CIL.Op) (frame : Frame)
+    (stack : List Value) (m : Memory) (action : FrameAction) : Prop where
+  effect : StepEffect body operation frame m (action.frameAfter frame) action.memory
   values : m.WellFormed → ValuesValid m stack → action.LiveValues
 
-theorem StepContract.of_effect {body : CIL.Method} {frame : Frame} {stack : List Value}
+theorem StepContract.of_effect {body : CIL.Method} {operation : CIL.Op} {frame : Frame}
+    {stack : List Value}
     {m : Memory} {action : FrameAction}
-    (effect : StepEffect body frame m (action.frameAfter frame) action.memory)
+    (effect : StepEffect body operation frame m (action.frameAfter frame) action.memory)
     (preserve : m.WellFormed → AllocationExtension m action.memory →
       ValuesValid action.memory stack → action.LiveValues) :
-    StepContract body frame stack m action :=
+    StepContract body operation frame stack m action :=
   ⟨effect, fun hm valid => preserve hm effect.allocations (valid.preserve hm effect.allocations)⟩
 
-theorem StepContract.instruction {body : CIL.Method} {frame : Frame} {stack values : List Value}
+theorem StepContract.instruction {body : CIL.Method} {operation : CIL.Op} {frame : Frame}
+    {stack values : List Value}
     {m result : Memory} {pc : Nat} (contract : InstructionContract m result stack values) :
-    StepContract body frame stack m (.next pc values frame result) :=
+    StepContract body operation frame stack m (.next pc values frame result) :=
   ⟨.memory (.ordinary contract.effect), contract.values⟩
 
-theorem StepContract.staticInstruction {body : CIL.Method} {frame : Frame}
+theorem StepContract.staticInstruction {body : CIL.Method} {operation : CIL.Op} {frame : Frame}
     {stack values : List Value} {m result : Memory} {pc : Nat}
     (contract : StaticInstructionContract body m result stack values) :
-    StepContract body frame stack m (.next pc values frame result) :=
+    StepContract body operation frame stack m (.next pc values frame result) :=
   ⟨.memory contract.effect, contract.values⟩
 
 /-- Dynamic allocation supplies a live reference and preserves existing memory. -/
-theorem StepContract.stackAllocation {body : CIL.Method} {frame final : Frame}
+theorem StepContract.stackAllocation {body : CIL.Method} {operation : CIL.Op} {frame final : Frame}
     {stack : List Value} {memory result : Memory} {reference : ManagedReference}
     {size pc : Nat} {initLocals : Bool}
     (success : allocateStack memory frame size initLocals = .ok (reference, final, result)) :
-    StepContract body frame stack memory (.next pc [.reference reference] final result) := by
+    StepContract body operation frame stack memory
+      (.next pc [.reference reference] final result) := by
   have effect := allocateStack_effect success
   refine ⟨.stackAllocation effect, ?_⟩
   intro valid _ value member
@@ -189,11 +207,11 @@ theorem StepContract.stackAllocation {body : CIL.Method} {frame final : Frame}
 #print axioms StepContract.stackAllocation
 
 /-- Heap arrays stay live independently of frame-owned storage. -/
-theorem StepContract.arrayAllocation {body : CIL.Method} {frame : Frame}
+theorem StepContract.arrayAllocation {body : CIL.Method} {operation : CIL.Op} {frame : Frame}
     {stack : List Value} {memory result : Memory} {view : ArrayView}
     {element : CIL.ArrayElement} {length : CIL.Value} {pc : Nat}
     (success : newArray memory element length = .ok (view, result)) :
-    StepContract body frame (.scalar length :: stack) memory
+    StepContract body operation frame (.scalar length :: stack) memory
       (.next pc (.array view :: stack) frame result) := by
   have effect := newArray_effect success
   apply StepContract.of_effect (.arrayAllocation effect)
@@ -206,20 +224,36 @@ theorem StepContract.arrayAllocation {body : CIL.Method} {frame : Frame}
     allocation, and leaves the same instance under the caller's remaining stack. -/
 theorem StepContract.objectAllocation {body : CIL.Method} {frame : Frame}
     {stack arguments : List Value} {memory result : Memory} {object : Reference}
-    {type : RuntimeType} {size callee argc : Nat}
+    {owner : CIL.Extraction.TypeExpr} {bases : List CIL.Extraction.TypeExpr}
+    {size callee argc : Nat}
     (checked : (stack.take argc).reverse.mapM (checkedValue memory) = .ok arguments)
-    (success : allocateObject memory type size = .ok (object, result)) :
-    StepContract body frame stack memory
+    (success : allocateObject memory ⟨owner, bases⟩ size = .ok (object, result)) :
+    StepContract body (.newObject callee argc owner bases size) frame stack memory
       (.call callee (.object (.address object) :: arguments)
         (.object (.address object) :: stack.drop argc) result) := by
   have effect := allocateObject_effect success
-  apply StepContract.of_effect (.objectAllocation effect)
+  apply StepContract.of_effect (.objectAllocation effect rfl)
   intro hm extension retained
   exact ⟨ValuesValid.cons effect.object_valid
       (checkedValues_preserved _ _ _ _ hm extension checked),
     ValuesValid.cons effect.object_valid (retained.drop _)⟩
 
 #print axioms StepContract.objectAllocation
+
+/-- `newarr` of a class pushes a fresh array, allocated as an instance of its array type. -/
+theorem StepContract.referenceArrayAllocation {body : CIL.Method} {frame : Frame}
+    {stack : List Value} {memory result : Memory} {array : Reference}
+    {element : CIL.Extraction.TypeExpr} {length : CIL.Value} {pc : Nat}
+    (success : newReferenceArray memory element length = .ok (array, result)) :
+    StepContract body (.newReferenceArray element) frame (.scalar length :: stack) memory
+      (.next pc (.object (.address array) :: stack) frame result) := by
+  obtain ⟨size, allocated⟩ := newReferenceArray_allocation success
+  have effect := allocateObject_effect allocated
+  apply StepContract.of_effect (.objectAllocation effect rfl)
+  intro _ _ retained
+  exact ValuesValid.cons effect.object_valid retained.tail
+
+#print axioms StepContract.referenceArrayAllocation
 
 /-- A successful pointer subtraction forms a valid result without changing its capability. -/
 theorem referenceSubtract_valid (memory : Memory) (reference result : ManagedReference)
@@ -231,7 +265,7 @@ theorem referenceSubtract_valid (memory : Memory) (reference result : ManagedRef
   · cases success
 #print axioms referenceSubtract_valid
 /-- Constructing a view and storing it changes only the destination local. -/
-theorem StepContract.initializeSpanLocal {body : CIL.Method} {frame : Frame}
+theorem StepContract.initializeSpanLocal {body : CIL.Method} {operation : CIL.Op} {frame : Frame}
     {stack rest : List Value} {memory result : Memory} {construction : Memory × List Value}
     {index pc : Nat} {slot final : LocalSlot} {value : Value}
     {constructor : CIL.SpanConstructor}
@@ -240,7 +274,7 @@ theorem StepContract.initializeSpanLocal {body : CIL.Method} {frame : Frame}
       .ok construction)
     (values : construction.2 = value :: rest)
     (stored : storeLocal construction.1 slot value = .ok (final, result)) :
-    StepContract body frame stack memory
+    StepContract body operation frame stack memory
       (.next pc rest { frame with locals := frame.locals.set index final } result) := by
   obtain ⟨constructedMemory, constructedValues⟩ := construction
   dsimp only at values stored
@@ -256,10 +290,11 @@ theorem StepContract.initializeSpanLocal {body : CIL.Method} {frame : Frame}
 #print axioms StepContract.initializeSpanLocal
 
 /-- Managed identities change no memory; dispatched arguments are checked before use. -/
-theorem managedStep_contract (body : CIL.Method) (operation : CIL.ManagedOp) (pc : Nat)
+theorem managedStep_contract {dispatched : CIL.Op} (body : CIL.Method)
+    (operation : CIL.ManagedOp) (pc : Nat)
     (frame : Frame) (stack : List Value) (memory : Memory) (action : FrameAction)
     (executed : managedStep operation pc frame stack memory = .ok action) :
-    StepContract body frame stack memory action := by
+    StepContract body dispatched frame stack memory action := by
   unfold managedStep at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
@@ -284,7 +319,7 @@ theorem managedStep_contract (body : CIL.Method) (operation : CIL.ManagedOp) (pc
 theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)
     (action : FrameAction) (h : step body operation pc args frame stack m = .ok action) :
-    StepContract body frame stack m action := by
+    StepContract body operation frame stack m action := by
   unfold step at h
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
@@ -294,6 +329,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
         all_goals assumption
     | solve | exact .stackAllocation (by assumption)
     | solve | exact .arrayAllocation (by assumption)
+    | solve | exact .referenceArrayAllocation (by assumption)
     | solve | exact .objectAllocation (by assumption) (by assumption)
     | solve |
         apply StepContract.staticInstruction
@@ -330,6 +366,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
                 · first
                   | rfl
                   | exact (checkedValue_valid _ _ _ (by assumption)).2
+                  | exact objectTest_valid (by assumption)
                   | exact (referenceSubtract_valid _ _ _ _ (by assumption)).1
                   | exact (referenceSubtract_valid _ _ _ _ (by assumption)).2
                   | apply loadLocal_result_valid; assumption
@@ -351,7 +388,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
 theorem step_effect (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)
     (action : FrameAction) (h : step body operation pc args frame stack m = .ok action) :
-    StepEffect body frame m (action.frameAfter frame) action.memory :=
+    StepEffect body operation frame m (action.frameAfter frame) action.memory :=
   (step_contract _ _ _ _ _ _ _ _ h).effect
 
 theorem step_preserves_wellFormed (body : CIL.Method) (operation : CIL.Op) (pc : Nat)

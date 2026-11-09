@@ -190,16 +190,18 @@ the continuation keeps the call goal's tag, so `case precondition =>` selects th
 `n = 0`, no instruction is executed. `cil_contract_steps [facts] until continuation` tries the
 continuation before each step, including at the initial goal. It stops when the continuation closes
 the goal or no instruction can be stepped. `cil_formed_call` (`run_call_of_contract_formed`) also
-takes the caller memory's `WellFormed` and hands the continuation the callee's `final.WellFormed`
-and static-world preservation, so contracts need not restate either; `cil_formed_outcome_call` does
-the same for `cil_outcome_call`.
+takes the caller memory's `WellFormed` and hands the continuation the callee's `final.WellFormed`,
+static-world preservation and class catalog agreement, so contracts need not restate any of them;
+`cil_formed_outcome_call` does the same for `cil_outcome_call`.
 
-`StaticWorldPreserved program before after` names static-world preservation. Use `left.trans right`
-to compose it across calls. `FrameInvariants program before after` bundles `after.WellFormed` with
-that preservation. Its `formed` and `staticWorld` projections give each fact, and `left.trans right`
-composes both invariants. `call_frame_invariants` and `construct_frame_invariants` return this
-bundle. Both names are abbreviations, so existing conjunction proofs and formed-call continuations
-keep their proof structure and argument order.
+`StaticWorldPreserved program before after` names static-world preservation, and
+`ClassesPreserved program before after` says objects that agree with a catalog keep agreeing when
+the program's object sites do (see [class instances](SOUNDNESS-RUNTIME.md#class-instances)). Use
+`left.trans right` to compose either across calls. `FrameInvariants program before after` bundles
+`after.WellFormed` with both. Its `formed`, `staticWorld` and `classes` projections give each fact,
+and `left.trans right` composes all three. `call_frame_invariants` and
+`construct_frame_invariants` return this bundle. The names are abbreviations, so conjunction
+proofs work on them directly; a formed continuation takes the three facts in that order.
 
 Store facts may name their values in source form, such as `write m r (numberBytes (a + b + c).toNat
 8) 1 = .ok m'`. Each checked step simplifies the goal with the default simp set, its interpreter
@@ -269,13 +271,17 @@ and only the class, offset and width are relied on.
 | `field.Readable memory object` | `object` is a live instance whose field loads |
 | `field.Owned memory object` | `Readable` and writable, so the field also stores |
 | `field.Holds memory object value` | `Owned` and holding `value` |
+| `field.Forms memory object` | The reference a reference field holds forms: null or any live object |
 | `LiveObject memory object` | `object` forms as an object reference older than later allocations |
 | `field.entry object` | The footprint entry of a call that may change the field |
 
 `readable.facts` is the one fact `cil_checked_steps` needs to step a load (for a reference field,
 `readable.facts held targetLive`; for a signed narrow field, `readable.signedFacts`, which pushes
 the value sign-extended), and `owned.store value` gives the write, its `Confined`
-footprint and the `Holds` after it. `frame` keeps a field and its value across a call confined
+footprint and the `Holds` after it; for a reference field, `owned.store live` stores a live object and
+`owned.store_formed formed` any reference that forms, null included. A field holding a class outside
+the model is never read through: `readable.load_forms forms` steps its load from `Forms`.
+`frame` keeps a field and its value across a call confined
 to a footprint apart from it, `after_confined` and `after_below` keep each predicate across a
 confined call and across memory that keeps old allocations, and `Owned.across` decides aliasing:
 after a call confined to the field of `written`, the same field of `object` holds the written
@@ -287,6 +293,28 @@ objects. `ReferenceField.Holds.of_agree` keeps a held caller reference under `By
 carry `LiveObject` and every field predicate across the frame's stores and across a confined call
 whose footprint is apart from the field, as they carry caller buffers.
 
+A method that creates an instance starts from `WordField.fresh_owned` and
+`ReferenceField.fresh_holds_null`, which give each field of the fresh instance before its
+constructor runs; `enterFrame_heapBudget` shows the caller's heap budget reaches the `newobj`
+unchanged by frame entry. No frame owns an instance, so `leaveFrame_memoryAt` gives `MemoryAt`
+for it when the method returns, and the `after_kept` lemmas carry its field predicates there;
+`cil_checked_steps` returns it given that its allocation is not the frame's home. Fields of two
+unrelated classes are apart under the [class catalog](SOUNDNESS-RUNTIME.md#class-instances)
+premise, through `Memory.ClassesConsistent.allocation_ne`. A caller states the premise once at
+entry: `decide` proves `ObjectSitesConsistent` for the extraction, and `invoke_preserves_classes`
+keeps the premise across any invocation, including the instances it creates.
+[PoolRent](../Examples/Proofs/PoolRent.lean) uses each of these.
+
+A list linked through a reference field, such as a free list, is described by
+`ReferenceField.Segment field memory start stop nodes`: following `field` from `start` visits the
+readable instances `nodes` and arrives at `stop`. A segment is a finite path, so one to null
+shows no cycle is reachable from `start`, and `nodes.length` is the measure of a loop that walks
+it: `Segment.next` gives the head's readable field and the one-shorter rest, and
+`Segment.formed` the reference the walk loads and compares. It is a precondition the caller
+proves of its memory; a program can link a cycle, and then no segment to null exists.
+`Segment.after_below` carries it into the entered frame.
+[PoolIdle](../Examples/Proofs/PoolIdle.lean) proves a search of the pool's free list this way.
+
 [DepositBoth](../Examples/Proofs/DepositBoth.lean) composes two `callvirt` calls of
 `Account.Deposit` through `depositContract`, whose precondition is `Account.Balance.Owned` and
 whose postcondition is `Account.Balance.Holds final account (Account.Balance.of initial account +
@@ -297,8 +325,8 @@ aliased case, and states the null receiver's `NullReferenceException` as an `Out
 `cil_loop_call`, its invariant an `Account.Balance.Holds` fact the loop tactics carry across the
 counter's store. [LinkedNodes](../Examples/Proofs/LinkedNodes.lean) composes `Link` and
 `SecondValue` through `Node.Next` and `Node.Value`, keeps the linked node's `Value` across the one
-slot `Link` writes, proves both null faults of `SecondValue` at their pcs, and shows `Link`'s
-postcondition stable under a renaming of fresh allocations.
+slot `Link` writes, proves both null faults of `SecondValue` at their pcs, and transfers `Link`'s
+contract to any program that renames its fresh allocations.
 
 The predicates are built on `CIL.Safety.ObjectFraming`, which states the same facts about the
 references `objectFieldAddress` locates and which a proof about a field no extraction names can
@@ -327,6 +355,36 @@ through the callee's contract; a null receiver steps to `NullReferenceException`
 is apart from the callee's footprint, so a fact the call may change is restated from the
 contract's postcondition.
 
+A virtual call steps the same way once the receiver's runtime type is known: pass a fact
+`runtimeTypeOf memory receiver = .ok type`, together with the definitions of `type` and its
+assembly scope, and stepping looks the class up in the call's table (`step_callVirtual_eq`,
+`virtualCall_address`) and enters the listed body
+([AnimalLegs](../Examples/Proofs/AnimalLegs.lean)). For an instance the method constructs, the
+fact is `objectMemory_runtimeTypeOf` ([FreshDogLegs](../Examples/Proofs/FreshDogLegs.lean)).
+A class the table omits steps to the model fault `outsideDispatchTable` (`virtualCall_outside`).
+
+`castclass` and `isinst` step on the same fact (`step_objectTest_eq`): with
+`RuntimeType.lineage` and the definitions of the type, its bases and their scope, stepping
+decides whether the tested class is in the lineage, so the reference passes, becomes null or
+throws `InvalidCastException` ([DogTest](../Examples/Proofs/DogTest.lean),
+[DogCast](../Examples/Proofs/DogCast.lean)).
+
+An `ldstr` steps to the object the caller bound to its text: given `bound`, that
+`memory.literals.lookup text = some literal`, and the literal's formation fact, pass
+`literalObject_of_lookup bound` and that fact to `cil_checked_steps`. With the text unbound,
+`literalObject` reduces to the `unsupported` fault. No call rebinds a literal
+(`invoke_literals`), so the same `bound` steps an `ldstr` after a call; the literal's formation
+fact crosses the call like any other object's
+([StringLiterals](../Examples/Proofs/StringLiterals.lean),
+[StringDefault](../Examples/Proofs/StringDefault.lean)).
+
+A framework argument guard steps to its named exception or past itself. `ThrowIfNull` steps on
+the argument's null test directly. An integer guard reduces through `zeroGuardOutcome` or
+`comparisonGuardOutcome`; pass those with `CIL.guardOperand`, `CIL.ZeroGuard.throws` or
+`CIL.ComparisonGuard.throws` and the case hypothesis that decides the test, and bind the
+parameter-name literal as for `ldstr`
+([GuardCount](../Examples/Proofs/GuardCount.lean), [GuardIndex](../Examples/Proofs/GuardIndex.lean)).
+
 A method that constructs an instance steps its `newobj` with `allocateObject_ok`, given
 well-formed memory and a `Memory.heapBudget` covering the instance, or `allocateObject_insufficient`
 for the `allocationFailure` fault when it does not. `objectMemory_formObject`, `objectMemory_field`
@@ -337,6 +395,62 @@ of a base class too.
 [FreshObject](../Examples/Proofs/FreshObject.lean) proves both outcomes, stepping the
 constructor's call in place, and [DerivedObject](../Examples/Proofs/DerivedObject.lean) steps a
 derived class's constructor through its base's.
+
+An [array of class references](SOUNDNESS-RUNTIME.md#arrays-of-class-references) names an
+element by its array and index. `CIL.Safety.ReferenceArrayElements` mirrors the field
+predicates in the `ReferenceArray` namespace:
+
+| Name | Meaning |
+| --- | --- |
+| `ReferenceArray.Live memory array element length` | `array` is a live `element[]` of `length` |
+| `ReferenceArray.of memory array index` | The reference element `index` holds |
+| `ReferenceArray.Readable memory array element length index` | `Live`, `index` inside, readable |
+| `ReferenceArray.Owned memory array element length index` | `Readable` and writable |
+| `ReferenceArray.Holds memory array element length index value` | `Owned` and holding `value` |
+| `ReferenceArray.Reads memory array element length index value` | `Readable` and holding `value` |
+| `ReferenceArray.entry array index` | The footprint entry of a call that may change the element |
+| `ReferenceArray.Forms memory array index` | The reference element `index` holds forms: null or any live object |
+
+`readable.facts held targetLive` and `readable.facts_null held` step `ldelem.ref`, and
+`readable.facts_forms forms` steps it whatever the element holds, never reading through it;
+`owned.store targetLive storable`, `owned.store_null` and `owned.store_formed formed storable`, for
+any reference that forms, such as a string, step `stelem.ref` and give its
+`Confined` footprint and the `Holds` after it, with `storableIn_of_lineage` deciding the
+covariance check for an instance whose class derives from the element class and
+`storableIn_mismatch` giving the `ArrayTypeMismatchException` of one that does not.
+`live.slot_outside` gives the `IndexOutOfRangeException` of an index past the length.
+`frame`, `Holds.after_confined` and `Owned.across` keep and decide elements across a confined
+call as they do fields. `Holds.across_ne` and `Reads.across_ne` keep an element across a store
+into another index of its array, `Live.field_ne` separates an array from every object with a
+located field, so `apart_single` frames elements and fields across each other's stores, and
+`reads.facts formed` steps a load of what an earlier store wrote. `storableIn_after_confined` and
+`storableIn_of_allocations` carry a covariance check, and `formObject_of_allocations` with
+`allocations_of_setSlot` a formation, across later stores; `storableIn_of_confined` carries a
+check across an allocation from well-formed memory, and `entries_young` lets
+`Confined.forget_fresh` drop the elements of an array the method allocated.
+`ReferenceArray.fresh` gives a fresh array from `newReferenceArray_ok`
+as live with every element owned and null. `step_referenceArrayLength_eq`,
+`step_referenceArrayLoad_eq` and `step_referenceArrayStore_eq` step the three instructions.
+[NodePair](../Examples/Proofs/NodePair.lean) fills a fresh array and reads it back, with its
+`allocationFailure` without budget; [ArrayElement](../Examples/Proofs/ArrayElement.lean) and
+[ArrayLength](../Examples/Proofs/ArrayLength.lean) read an element and the length, with the
+bounds and null faults; [ArrayCovariance](../Examples/Proofs/ArrayCovariance.lean) stores into
+a `Circle[]` passed as a `Shape[]`, proving the `ArrayTypeMismatchException` of a `Square`.
+A field holding such an array is a `ReferenceField` whose held reference is the array:
+[BucketItems](../Examples/Proofs/BucketItems.lean) reads an element through one, with its null
+and bounds faults, and [BucketRefill](../Examples/Proofs/BucketRefill.lean) replaces it.
+An array of `string` holds opaque references: [TagStore](../Examples/Proofs/TagStore.lean)
+stores a string a field holds into one, deciding covariance by the string's own class, and
+[TagLoad](../Examples/Proofs/TagLoad.lean) loads one into a field, as `ReferenceField.Forms`
+and `Owned.store_formed` take it.
+
+A field holding an array of integers, Booleans, chars or enums keeps the whole array's origin in
+its slot. `loadArraySlot_of_access` reads the slot of a readable field, `arrayOfSlot_whole` turns
+a slot naming offset 0 of a live heap allocation of `length` elements into that array, and
+`storeArraySlot_whole` stores such an array into a writable field; `step_arrayField_eq` and
+`step_setArrayField_eq` step `ldfld` and `stfld`.
+[SampleValues](../Examples/Proofs/SampleValues.lean) returns the array a field holds, and the
+null array for a null field, and [SampleRefill](../Examples/Proofs/SampleRefill.lean) replaces it.
 
 ## Construct structs through contracts
 
@@ -380,8 +494,8 @@ storage, and a continuation that resumes at `pc + 1` with the read-back value on
 obligations receive `ConstructStorage memory updated this size`: the storage reads back as `size`
 zero bytes, is writable at full width, is allocated at `memory.nextIdentity`, and the step kept all
 older memory. The continuation also gets the constructor's invocation, the final memory's
-`WellFormed`, static-world preservation, `Confined` and `post`. No invocation, step or `loadLocal`
-equation is stated. `ConstructStorage.confined` moves `Confined` back to the memory before `newobj`;
+`WellFormed`, static-world preservation, catalog agreement, `Confined` and `post`. No invocation,
+step or `loadLocal` equation is stated. `ConstructStorage.confined` moves `Confined` back to the memory before `newobj`;
 `Confined.forget_fresh` then drops the storage, which the caller's frame owns and expires on return.
 
 Because `newobj` zeroes the storage, a constructor that leaves a field unassigned still has a

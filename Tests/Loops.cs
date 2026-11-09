@@ -861,7 +861,32 @@ var outlined = new (string Name, string? Selector)[]
     ("DepositTimes", "Objects::DepositTimes(Examples.Account,System.UInt64,System.UInt32)"),
     ("DepositFrom", "Objects::DepositFrom(Examples.Account,Examples.Account,System.UInt32)"),
     ("Withdraw", "Objects::Withdraw(Examples.Account,System.UInt64)"),
-    ("LinkedValue", "Objects::LinkedValue(Examples.Node,Examples.Node)")
+    ("LinkedValue", "Objects::LinkedValue(Examples.Node,Examples.Node)"),
+    ("IsIdle", "ItemPool::IsIdle(Examples.PooledItem)"),
+    ("DownThenUp", "Loops::DownThenUp(uint)"),
+    ("CheckedAdd", "CheckedArithmetic::Add(uint,uint)"), ("Log64", "Bits::Log64(ulong)"),
+    ("AddSigned", "CheckedArithmetic::AddSigned(int,int)"), ("Distance", "Arithmetic::Distance(ulong,ulong)"),
+    ("Larger", "Arithmetic::Larger(int,int)"), ("CounterAdd", "Counter::Add(ulong)"),
+    ("OdometerNext", "Odometer::Next()"),
+    // A string field's reference is copied, compared, tested and cleared without being read through.
+    ("CopyTag", "Objects::CopyTag(Examples.Tagged,Examples.Tagged)"),
+    ("SameTag", "Objects::SameTag(Examples.Tagged,Examples.Tagged)"),
+    ("HasTag", "Objects::HasTag(Examples.Tagged)"),
+    ("FillTag", "Objects::FillTag(Examples.Tagged,Examples.Tagged)"),
+    ("ClearTag", "Objects::ClearTag(Examples.Tagged)"),
+    ("Detach", "Objects::Detach(Examples.Node)"),
+    // Array arguments of class references: an element load, the length and a covariance-checked store.
+    ("ArrayElement", "NodeArrays::At(Examples.Node[],System.Int32)"),
+    ("ArrayLength", "NodeArrays::Count(Examples.Node[])"),
+    ("ArrayCovariance", "NodeArrays::Put(Examples.Shape[],System.Int32,Examples.Shape)"),
+    ("TagStore", "TagArrays::Put(System.String[],System.Int32,Examples.Tagged)"),
+    ("TagLoad", "TagArrays::Take(Examples.Tagged,System.String[],System.Int32)"),
+    // Element facts carried across element and field stores: a load after them reads back what was stored.
+    ("ElementShift", "NodeArrays::Shift(Examples.Node[],Examples.Node)"),
+    ("ElementInstall", "NodeArrays::Install(Examples.Node[],System.Int32,Examples.Node,System.UInt64)"),
+    ("ElementStamp", "TagArrays::Stamp(System.String[],Examples.Tagged,System.UInt64)"),
+    // A fresh array charged to the heap budget, filled and read back, forgotten by the footprint.
+    ("FreshPair", "NodeArrays::Pair(Examples.Node,Examples.Node)")
 };
 var outlineTimer = System.Diagnostics.Stopwatch.StartNew();
 var outlineRoot = Path.Combine(root, "Outlines");
@@ -911,6 +936,23 @@ if (!depositFrom.Contains("Account.Balance.Owned initial account", StringCompari
     depositFrom.Contains("Account.Balance.Owned initial source", StringComparison.Ordinal))
     throw new InvalidOperationException("The DepositFrom outline does not ask per-object field facts:\n" + depositFrom);
 Console.WriteLine("PASS a loop outline asks Owned only of the object its callee stores and Readable of the one it reads");
+
+// An object local changes its frame slot at each store, so the head must name the slot from the loop state, and its
+// null test must split the walk rather than stop it.
+var isIdle = File.ReadAllText(Path.Combine(outlineRoot, "IsIdle", "Proof.lean"));
+if (!isIdle.Contains("locals := [.object (some state.values)]", StringComparison.Ordinal) ||
+    !isIdle.Contains("cases node with", StringComparison.Ordinal) ||
+    !isIdle.Contains("by_cases branch1 : ((.address nodeObject) : ManagedReference) = (.address item)",
+        StringComparison.Ordinal))
+    throw new InvalidOperationException("The IsIdle outline does not follow its object local:\n" + isIdle);
+Console.WriteLine("PASS a loop outline carries an object local in its head and splits on its null and identity tests");
+// A test of a `bool` struct field splits on the word its load zero-extends, and each side steps to its return.
+var copyOutline = File.ReadAllText(Path.Combine(outlineRoot, "CopyUntilZero", "Proof.lean"));
+if (!copyOutline.Contains("by_cases branch1 : (scanStopped.setWidth 8).setWidth 32 = 0", StringComparison.Ordinal) ||
+    copyOutline.Contains("narrow field", StringComparison.Ordinal))
+    throw new InvalidOperationException(
+        "The CopyUntilZero outline does not split on its narrow field:\n" + copyOutline);
+Console.WriteLine("PASS a loop outline splits on a narrow struct field's loaded word");
 
 // The audit refuses an outline for its holes, whatever the method; one loop shows it end to end.
 var countdownOutline = Path.Combine(root, "Countdown");
@@ -1048,7 +1090,701 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
         ("def Postcondition (node next : Reference) (initial final : Memory) (result : W64) : Prop := sorry",
             "def Postcondition (_ next : Reference) (initial _ : Memory) (result : W64) : Prop :=\n" +
             "  result = Node.Value.of initial next"),
-        (storedHole, "exact (nextValue.frame framed1 (apart_of_entries rfl)).2")])
+        (storedHole, "exact (nextValue.frame framed1 (apart_of_entries rfl)).2")]),
+    // Each path stores the total before it loads the span again, and the loop tactics step on with no frame lemma.
+    ("SpanSum", [
+        ("def Precondition (values1 : SpanView) (values1Elements : List W64) (initial : Memory)\n    : Prop := sorry",
+            "def Precondition (_ : SpanView) (_ : List W64) (_ : Memory) : Prop := True"),
+        ("    (result : W64) : Prop := sorry", "    (result : W64) : Prop := result = values1Elements.sum"),
+        ("{memory : Memory} {home0 : Reference} (state : State memory home0) : Prop := sorry",
+            "{memory : Memory} {home0 : Reference} (state : State memory home0) : Prop :=\n" +
+            "  state.values.1 + state.values.2.values.sum = values1Elements.sum"),
+        ("(state : State memory home0) : Nat := sorry",
+            "(state : State memory home0) : Nat := state.values.2.values.length"),
+        ("case invariant => sorry -- invariant at the first loop head", "case invariant => simp [invariant]"),
+        ("sorry -- Postcondition at the return at Loops.cs:25", "simpa [Postcondition, invariant] using holds"),
+        ("case invariant => sorry -- invariant again at the loop head",
+            "case invariant => simpa [invariant, BitVec.add_assoc] using holds"),
+        ("case measure => sorry -- measure decreases over this iteration", "case measure => simp [measure]")]),
+    // A test of a `bool` argument splits the run into one stepped side per value.
+    ("Choose", [
+        ("def Precondition (flag : Bool) (x y : W64) : Prop := sorry",
+            "def Precondition (_ : Bool) (_ _ : W64) : Prop := True"),
+        ("def Postcondition (flag : Bool) (x y result : W64) : Prop := sorry",
+            "def Postcondition (flag : Bool) (x y result : W64) : Prop := result = if flag then x else y"),
+        ("sorry -- Postcondition of the returned value where `flag` is false", "rfl"),
+        ("sorry -- Postcondition of the returned value where `flag` is true", "rfl")]),
+    // An `Unsafe.Add` store's write authority, index bound and footprint follow from the specification.
+    ("FillWords", [
+        ("""
+            def Precondition (destination : Reference) (value : W64) (count : W32) (initial : Memory)
+                : Prop := sorry
+            """,
+            """
+            def Precondition (destination : Reference) (_ : W64) (count : W32) (initial : Memory)
+                : Prop := count.toNat < 2 ^ 31 ∧ Writable initial destination 8 0 count.toNat
+            """),
+        ("""
+            def Postcondition (destination : Reference) (value : W64) (count : W32) (initial final : Memory)
+                : Prop := sorry
+            """,
+            """
+            def Postcondition (destination : Reference) (value : W64) (count : W32) (_ final : Memory)
+                : Prop := Contents final destination 8 (List.replicate count.toNat (value : BitVec (8 * 8)))
+            """),
+        ("""
+            def footprint (destination : Reference) (value : W64) (count : W32) : List (Reference × Nat) :=
+              sorry -- caller memory the loop may write
+            """,
+            """
+            def footprint (destination : Reference) (_ : W64) (count : W32) : List (Reference × Nat) :=
+              [(destination, 8 * count.toNat)]
+            """),
+        ("    (state : State memory written home0) : Prop := sorry",
+            """
+                (state : State memory written home0) : Prop :=
+              state.values.toNat ≤ count.toNat ∧ Filled state.memory destination 8
+                (List.replicate state.values.toNat (value : BitVec (8 * 8))) (count.toNat - state.values.toNat)
+            """),
+        ("def measure (destination : Reference) (value : W64) (count : W32)",
+            "def measure (_ : Reference) (_ : W64) (count : W32)"),
+        ("    (state : State memory written home0) : Nat := sorry",
+            "    (state : State memory written home0) : Nat := count.toNat - state.values.toNat"),
+        ("    case invariant => sorry -- invariant at the first loop head",
+            """
+                case invariant =>
+                  simp only [Precondition] at assumed
+                  simpa [invariant] using Filled.start (assumed.2.after_confined storedFrame.confined wellFormed)
+            """),
+        ("    case invariant => sorry -- invariant again at the loop head",
+            """
+                case invariant =>
+                  simp only [Precondition] at assumed
+                  simp only [invariant] at holds ⊢
+                  obtain ⟨-, filled⟩ := holds
+                  rw [BitVec.toInt_eq_toNat_cond, BitVec.toInt_eq_toNat_cond] at guard
+                  simp only [show 2 * i.toNat < 2 ^ 32 by omega, show 2 * count.toNat < 2 ^ 32 by omega,
+                    ↓reduceIte] at guard
+                  have lower : i.toNat < count.toNat := by omega
+                  rw [show count.toNat - i.toNat = count.toNat - (i.toNat + 1) + 1 by omega] at filled
+                  have pushed := filled.push (x := (value : BitVec (8 * 8))) (by simpa using destinationWrote)
+                  rw [toNat_succ lower, List.replicate_succ']
+                  exact ⟨by omega, pushed.after_below storedBelow (wellFormed.form_bound destinationForm)⟩
+            """),
+        ("    case measure => sorry -- measure decreases over this iteration",
+            """
+                case measure =>
+                  simp only [Precondition] at assumed
+                  simp only [invariant] at holds
+                  rw [BitVec.toInt_eq_toNat_cond, BitVec.toInt_eq_toNat_cond] at guard
+                  simp only [show 2 * i.toNat < 2 ^ 32 by omega, show 2 * count.toNat < 2 ^ 32 by omega,
+                    ↓reduceIte] at guard
+                  simp only [measure, toNat_succ (show i.toNat < count.toNat by omega)]
+                  omega
+            """),
+        ("    case postcondition => sorry -- Postcondition at the return at Loops.cs:69",
+            """
+                case postcondition =>
+                  simp only [Precondition] at assumed
+                  simp only [invariant] at holds
+                  obtain ⟨bounded, filled⟩ := holds
+                  rw [BitVec.toInt_eq_toNat_cond, BitVec.toInt_eq_toNat_cond] at guard
+                  simp only [show 2 * i.toNat < 2 ^ 32 by omega, show 2 * count.toNat < 2 ^ 32 by omega,
+                    ↓reduceIte] at guard
+                  rw [show i.toNat = count.toNat by omega] at filled
+                  exact filled.1.after_below exitBelow (wellFormed.form_bound destinationForm)
+            """)]),
+    // A callee that throws where its precondition fails is split, and the call keeps its output's name.
+    ("CountUntil", [
+        ("  pre _ _ := sorry",
+            "  pre input _ := input.1 ≠ input.2"),
+        ("  post _ _ _ _ := sorry",
+            "  post input _ _ result := result = input.1 + 1"),
+        ("    case postcondition1 => sorry",
+            "    case postcondition1 => rfl"),
+        ("def Precondition (value limit : W32) : Prop := sorry",
+            "def Precondition (value limit : W32) : Prop := value.toNat ≤ limit.toNat"),
+        ("def Postcondition (value limit result : W32) : Prop := sorry",
+            "def Postcondition (value _ result : W32) : Prop := result = value"),
+        ("""
+            def invariant (value limit : W32) {home0 home1 : Reference} (state : State home0 home1)
+                : Prop := sorry
+            """,
+            """
+            def invariant (value _ : W32) {home0 home1 : Reference} (state : State home0 home1)
+                : Prop := state.values.1.toNat + state.values.2.toNat = value.toNat
+            """),
+        ("def measure (value limit : W32) {home0 home1 : Reference} (state : State home0 home1) : Nat := sorry",
+            """
+            def measure (_ _ : W32) {home0 home1 : Reference} (state : State home0 home1) : Nat :=
+              state.values.1.toNat
+            """),
+        ("    case invariant => sorry -- invariant at the first loop head",
+            "    case invariant => simp [invariant]"),
+        ("      sorry -- Postcondition at the return at Loops.cs:145",
+            """
+                  simp only [invariant] at holds
+                  simp only [Postcondition]
+                  subst guard
+                  exact BitVec.eq_of_toNat_eq (by simpa using holds)
+            """),
+        ("    case precondition => sorry -- Bump's precondition at this call",
+            """
+                case precondition =>
+                  simp only [invariant] at holds
+                  simp only [Precondition] at assumed
+                  have positive : remaining.toNat ≠ 0 := fun zero =>
+                    guard (BitVec.eq_of_toNat_eq (by simpa using zero))
+                  intro same
+                  subst same
+                  omega
+            """),
+        ("    case invariant => sorry -- invariant again at the loop head",
+            """
+                case invariant =>
+                  simp only [invariant] at holds ⊢
+                  simp only [Precondition] at assumed
+                  subst returned
+                  have positive : remaining.toNat ≠ 0 := fun zero =>
+                    guard (BitVec.eq_of_toNat_eq (by simpa using zero))
+                  simp [BitVec.toNat_sub, BitVec.toNat_add]
+                  omega
+            """),
+        ("    case measure => sorry -- measure decreases over this iteration",
+            """
+                case measure =>
+                  have positive : remaining.toNat ≠ 0 := fun zero =>
+                    guard (BitVec.eq_of_toNat_eq (by simpa using zero))
+                  simp [measure, BitVec.toNat_sub]
+                  omega
+            """)]),
+    // A storing callee's contract is proved from its body, and the element passed to it through `Unsafe.Add`
+    // is named at the call; this specification needs its own proofs of the element's side conditions.
+    ("CopyUntilZero", [
+        ("""
+            /-- Replace with what callers must guarantee about the arguments, or `True`. -/
+            def Precondition (values1 : SpanView) (values1Elements : List W32) (argument1 : Reference)
+                (initial : Memory) : Prop := sorry
+            """,
+            """
+            /-- The words copied: those before the first zero, or all of them. -/
+            def copied (values : List W32) : List W32 := values.takeWhile (· ≠ 0)
+
+            /-- The count of copied words, with bit 31 set exactly when a zero ended the copy. -/
+            def answer (values : List W32) : W32 :=
+              let count := BitVec.ofNat 32 (copied values).length
+              if (0 : W32) ∈ values then count ||| 0x80000000 else count
+
+            /-- Copying is unaffected by a nonzero prefix. -/
+            theorem copied_append {done : List W32} (nonzero : (0 : W32) ∉ done) (rest : List W32) :
+                copied (done ++ rest) = done ++ copied rest :=
+              List.takeWhile_append_of_pos fun word mem => by
+                simpa using fun same : word = 0 => nonzero (same ▸ mem)
+
+            /-- A nonzero word after a nonzero prefix is copied. -/
+            theorem copy_bound {values done tail : List W32} {head : W32} (nonzero : (0 : W32) ∉ done)
+                (more : ¬head = 0) (split : values = done ++ head :: tail) :
+                done.length < (copied values).length := by
+              rw [split, copied_append nonzero]
+              simp -bitVecOfNat [copied, more]
+
+            /-- The output has room for the copied words, apart from the span. -/
+            def Precondition (values1 : SpanView) (values1Elements : List W32) (argument1 : Reference)
+                (initial : Memory) : Prop :=
+              Writable initial argument1 4 0 (copied values1Elements).length ∧
+                SpanApart values1 (argument1, 4 * (copied values1Elements).length)
+            """),
+        ("""
+            def Postcondition (values1 : SpanView) (values1Elements : List W32) (argument1 : Reference)
+                (initial final : Memory) (result : W32) : Prop := sorry
+            """,
+            """
+            def Postcondition (_ : SpanView) (values1Elements : List W32) (argument1 : Reference)
+                (_ final : Memory) (result : W32) : Prop :=
+              result = answer values1Elements ∧ Contents final argument1 4 (copied values1Elements)
+            """),
+        ("""
+            def footprint (values1 : SpanView) (values1Elements : List W32) (argument1 : Reference)
+                : List (Reference × Nat) :=
+              sorry -- caller memory the loop may write
+            """,
+            """
+            def footprint (_ : SpanView) (values1Elements : List W32) (argument1 : Reference)
+                : List (Reference × Nat) :=
+              [(argument1, 4 * (copied values1Elements).length)]
+            """),
+        ("    (state : State memory written home0 home1) : Prop := sorry",
+            """
+                (state : State memory written home0 home1) : Prop :=
+              ∃ done, values1Elements = done ++ state.values.2.2.2.values ∧ (0 : W32) ∉ done ∧
+                state.values.1.toNat = done.length ∧ state.values.2.1 = 0 ∧
+                Filled state.memory argument1 4 done (copied state.values.2.2.2.values).length ∧
+                SpanApart state.values.2.2.2.view (argument1, 4 * (copied values1Elements).length)
+            """),
+        ("def measure (values1 : SpanView) (values1Elements : List W32) (argument1 : Reference)",
+            "def measure (_ : SpanView) (_ : List W32) (_ : Reference)"),
+        ("    (state : State memory written home0 home1) : Nat := sorry",
+            "    (state : State memory written home0 home1) : Nat := state.values.2.2.2.values.length"),
+        ("    case invariant => sorry -- invariant at the first loop head",
+            """
+                case invariant =>
+                  simp only [Precondition] at assumed
+                  simp only [invariant]
+                  exact ⟨[], by simp, by simp, by simp, by simp,
+                    Filled.start (assumed.1.after_confined storedFrame.confined wellFormed), assumed.2⟩
+            """),
+        ("""
+                have values1Apart : ∀ entry ∈ footprint values1 values1Elements argument1,
+                    SpanApart values1View entry :=
+                    sorry -- `values1` lies apart from the memory the loop writes
+            """,
+            """
+                have values1Apart : ∀ entry ∈ footprint values1 values1Elements argument1,
+                    SpanApart values1View entry := by
+                  simp only [invariant] at holds
+                  obtain ⟨-, -, -, -, -, -, apart⟩ := holds
+                  simpa [footprint] using apart
+            """),
+        ("""
+                  have argument1Reach : Writable initial (argument1.element 4 scanCount.toNat) 4 0 1 := by
+                    cil_loop_obligation [invariant, Precondition, footprint]
+            """,
+            """
+                  have argument1Reach : Writable initial (argument1.element 4 scanCount.toNat) 4 0 1 := by
+                    simp only [invariant] at holds
+                    simp only [Precondition] at assumed
+                    obtain ⟨done, split, nonzero, counted, -, -, -⟩ := holds
+                    have := copy_bound nonzero branch2 split
+                    exact Writable.element_writable assumed.1 (by omega) (by omega)
+            """),
+        ("""
+                  have argument1Small : scanCount.toNat < 2 ^ 31 := by
+                    cil_loop_obligation [invariant, Precondition, footprint]
+            """,
+            """
+                  have argument1Small : scanCount.toNat < 2 ^ 31 := by
+                    simp only [invariant] at holds
+                    obtain ⟨done, split, -, counted, -, -, -⟩ := holds
+                    have short := values1Contents.length ▸ SpanView.length_bounded values1 initial values1Valid
+                    have lengths := congrArg List.length split
+                    simp only [List.length_append, List.length_cons] at lengths
+                    omega
+            """),
+        ("""
+                      Within (argument1.element 4 scanCount.toNat, 4) entry := by
+                    cil_loop_obligation [invariant, Precondition, footprint]
+            """,
+            """
+                      Within (argument1.element 4 scanCount.toNat, 4) entry := by
+                    simp only [invariant] at holds
+                    obtain ⟨done, split, nonzero, counted, -, -, -⟩ := holds
+                    have := copy_bound nonzero branch2 split
+                    refine ⟨_, List.mem_singleton_self _, ?_⟩
+                    simp [Within]
+                    omega
+            """),
+        ("""
+            def invariant (values1 : SpanView) (values1Elements : List W32) (argument1 : Reference)
+                {memory : Memory}
+            """,
+            """
+            def invariant (_ : SpanView) (values1Elements : List W32) (argument1 : Reference)
+                {memory : Memory}
+            """),
+        ("""
+                · -- leaves the loop at Loops.cs:129
+                  cil_loop_finish [branch1]
+                  case postcondition =>
+                    refine ⟨_, rfl, ?_⟩
+                    sorry -- Postcondition at the return at Loops.cs:129
+                · -- leaves the loop at Loops.cs:129
+                  cil_loop_finish [branch1]
+                  case postcondition =>
+                    refine ⟨_, rfl, ?_⟩
+                    sorry -- Postcondition at the return at Loops.cs:129
+            """,
+            """
+                · -- leaves the loop at Loops.cs:129
+                  cil_loop_finish [branch1]
+                  case postcondition =>
+                    refine ⟨_, rfl, ?_⟩
+                    simp only [invariant] at holds
+                    obtain ⟨done, split, nonzero, counted, stopped, filled, -⟩ := holds
+                    simp only [List.append_nil] at split
+                    subst split
+                    have whole : copied values1Elements = values1Elements := by
+                      simpa [copied] using copied_append nonzero []
+                    simp only [Postcondition]
+                    refine ⟨?_, ?_⟩
+                    · simp only [answer, whole, nonzero, ite_false, ← counted, BitVec.ofNat_toNat,
+                        BitVec.setWidth_eq]
+                    · rw [whole]
+                      exact filled.1.after_below exitBelow (wellFormed.form_bound argument1Form)
+                · -- leaves the loop at Loops.cs:129
+                  cil_loop_finish [branch1]
+                  case postcondition =>
+                    simp only [invariant] at holds
+                    obtain ⟨-, -, -, -, stopped, -, -⟩ := holds
+                    simp [stopped] at branch1
+            """),
+        ("""
+                  cil_loop_finish [branch2]
+                  case postcondition =>
+                    refine ⟨_, rfl, ?_⟩
+                    sorry -- Postcondition at the return at Loops.cs:129
+            """,
+            """
+                  cil_loop_finish [branch2]
+                  case postcondition =>
+                    refine ⟨_, rfl, ?_⟩
+                    simp only [invariant] at holds
+                    obtain ⟨done, split, nonzero, counted, stopped, filled, -⟩ := holds
+                    subst branch2
+                    have whole : copied values1Elements = done := by
+                      rw [split, copied_append nonzero]
+                      simp [copied]
+                    have old := wellFormed.form_bound argument1Form
+                    simp only [Postcondition]
+                    refine ⟨?_, ?_⟩
+                    · unfold answer
+                      rw [whole, ← counted, BitVec.ofNat_toNat, BitVec.setWidth_eq]
+                      simp [split]
+                    · rw [whole]
+                      exact ((filled.1.after_below storedBelow old).after_below storedBelow_1 old).after_below
+                        exitBelow old
+            """),
+        ("""
+                  case invariant => sorry -- invariant again at the loop head
+                  case measure => sorry -- measure decreases over this iteration
+            """,
+            """
+                  case invariant =>
+                    simp only [invariant] at holds ⊢
+                    obtain ⟨done, split, nonzero, counted, stopped, filled, apart⟩ := holds
+                    have room : (copied (values1Head :: values1Tail)).length =
+                        (copied values1Tail).length + 1 := by
+                      simp -bitVecOfNat [copied, branch2]
+                    have old := wellFormed.form_bound argument1Form
+                    have atCalled := (filled.after_below storedBelow old).after_confined confined
+                      storedFrame.wellFormed (by
+                        intro entry member
+                        simp only [List.mem_cons, List.not_mem_nil, or_false] at member
+                        subst member
+                        right; left
+                        simp [Reference.element_offset]
+                        omega)
+                    have atHead := atCalled.after_below storedBelow_1 old
+                    rw [room] at atHead
+                    refine ⟨done ++ [values1Head], by simp [split], by simpa using ⟨nonzero, Ne.symm branch2⟩,
+                      ?_, stopped, atHead.extend returned (by omega), apart.slice values1Cut⟩
+                    simp only [List.length_append, List.length_singleton, ← counted, BitVec.toNat_add]
+                    simp
+                    omega
+                  case measure => simp [measure]
+            """)]),
+    // The first loop's exit enters the second loop, whose own invariant and measure the proof writes.
+    ("DownThenUp", [
+        ("def Precondition (value : W32) : Prop := sorry",
+            "def Precondition (_ : W32) : Prop := True"),
+        ("def Postcondition (value result : W32) : Prop := sorry",
+            "def Postcondition (value result : W32) : Prop := result = value"),
+        ("def invariant (value : W32) {home0 home1 : Reference} (state : State home0 home1) : Prop := sorry",
+            "def invariant (_ : W32) {home0 home1 : Reference} (_ : State home0 home1) : Prop := True"),
+        ("def measure (value : W32) {home0 home1 : Reference} (state : State home0 home1) : Nat := sorry",
+            """
+            def measure (_ : W32) {home0 home1 : Reference} (state : State home0 home1) : Nat :=
+              state.values.1.toNat
+            """),
+        ("def invariant2 (value : W32) {home0 home1 : Reference} (state : State home0 home1) : Prop := sorry",
+            """
+            def invariant2 (value : W32) {home0 home1 : Reference} (state : State home0 home1) : Prop :=
+              state.values.2.toNat ≤ value.toNat
+            """),
+        ("def measure2 (value : W32) {home0 home1 : Reference} (state : State home0 home1) : Nat := sorry",
+            """
+            def measure2 (value : W32) {home0 home1 : Reference} (state : State home0 home1) : Nat :=
+              value.toNat - state.values.2.toNat
+            """),
+        ("    case invariant => sorry -- invariant at the first loop head",
+            "    case invariant => trivial"),
+        ("      case invariant => sorry -- invariant2 at loop 2's first head",
+            "      case invariant => simp [invariant2]"),
+        ("        sorry -- Postcondition at the return at Loops.cs:157",
+            "        simp [Postcondition]"),
+        ("""
+                  cil_loop_recurse recurse (remaining, climbed + 1) [guard]
+                  case invariant => sorry -- invariant again at the loop head
+                  case measure => sorry -- measure decreases over this iteration
+            """,
+            """
+                  cil_loop_recurse recurse (remaining, climbed + 1) [guard]
+                  case invariant =>
+                    simp only [invariant2] at holds ⊢
+                    have below : climbed.toNat < value.toNat :=
+                      Nat.lt_of_le_of_ne holds fun same => guard (BitVec.eq_of_toNat_eq same)
+                    rw [BitVec.toNat_add_of_lt (by simp; omega)]
+                    simp
+                    omega
+                  case measure =>
+                    simp only [invariant2] at holds
+                    have below : climbed.toNat < value.toNat :=
+                      Nat.lt_of_le_of_ne holds fun same => guard (BitVec.eq_of_toNat_eq same)
+                    simp only [measure2]
+                    rw [BitVec.toNat_add_of_lt (by simp; omega)]
+                    simp
+                    omega
+            """),
+        ("""
+                cil_loop_recurse recurse (remaining - 1, climbed) [guard]
+                case invariant => sorry -- invariant again at the loop head
+                case measure => sorry -- measure decreases over this iteration
+            """,
+            """
+                cil_loop_recurse recurse (remaining - 1, climbed) [guard]
+                case invariant => trivial
+                case measure =>
+                  have positive : remaining.toNat ≠ 0 := fun zero => guard (BitVec.eq_of_toNat_eq zero)
+                  simp [measure, BitVec.toNat_sub]
+                  omega
+            """)]),
+    // The overflow side is closed from the precondition, so only the fitting side is left.
+    ("CheckedAdd", [
+        ("def Precondition (x y : W32) : Prop := sorry",
+            "def Precondition (x y : W32) : Prop := x.toNat + y.toNat < 2 ^ 32"),
+        ("def Postcondition (x y result : W32) : Prop := sorry",
+            "def Postcondition (x y result : W32) : Prop := result.toNat = x.toNat + y.toNat"),
+        ("      sorry -- Postcondition of the returned value",
+            """
+                  simp only [Postcondition]
+                  rw [BitVec.toNat_add, Nat.mod_eq_of_lt fits1]
+            """)]),
+    ("Log64", [
+        ("def Precondition (value : W64) : Prop := sorry",
+            "def Precondition (_ : W64) : Prop := True"),
+        ("def Postcondition (value : W64) (result : W32) : Prop := sorry",
+            """
+            def Postcondition (value : W64) (result : W32) : Prop :=
+              result = BitVec.ofNat 32 value.toNat.log2
+            """),
+        ("    sorry -- Postcondition of the returned value",
+            "    rfl")]),
+    ("AddSigned", [
+        ("def Precondition (x y : W32) : Prop := sorry",
+            "def Precondition (x y : W32) : Prop := -2 ^ 31 ≤ x.toInt + y.toInt ∧ x.toInt + y.toInt < 2 ^ 31"),
+        ("def Postcondition (x y result : W32) : Prop := sorry",
+            "def Postcondition (x y result : W32) : Prop := result.toInt = x.toInt + y.toInt"),
+        ("      sorry -- Postcondition of the returned value",
+            """
+                  simp only [Postcondition]
+                  rw [BitVec.toInt_add_of_not_saddOverflow]
+                  simp only [BitVec.saddOverflow, Bool.or_eq_true, decide_eq_true_eq, not_or, Nat.reduceSub]
+                  omega
+            """)]),
+    ("Distance", [
+        ("def Precondition (x y : W64) : Prop := sorry", "def Precondition (_ _ : W64) : Prop := True"),
+        ("def Postcondition (x y result : W64) : Prop := sorry",
+            "def Postcondition (x y result : W64) : Prop := result = if x < y then y - x else x - y"),
+        ("      sorry -- Postcondition of the returned value where `branch1` holds",
+            "      simp [Postcondition, branch1]"),
+        ("      sorry -- Postcondition of the returned value where `branch1` fails",
+            "      simp [Postcondition, branch1]")]),
+    // A signed test splits on the words read through `toInt`.
+    ("Larger", [
+        ("def Precondition (x y : W32) : Prop := sorry", "def Precondition (_ _ : W32) : Prop := True"),
+        ("def Postcondition (x y result : W32) : Prop := sorry",
+            "def Postcondition (x y result : W32) : Prop := result = if x.toInt < y.toInt then y else x"),
+        ("      sorry -- Postcondition of the returned value where `branch1` holds",
+            "      simp [Postcondition, branch1]"),
+        ("      sorry -- Postcondition of the returned value where `branch1` fails",
+            "      simp [Postcondition, branch1]")]),
+    // A struct receiver's field store leaves its contents as `held1`, which is the postcondition.
+    ("CounterAdd", [
+        ("def Precondition (counter : Reference) (value counterValue : W64) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ _ : W64) (_ : Memory) : Prop := True"),
+        ("""
+        def Postcondition (counter : Reference) (value counterValue : W64) (initial final : Memory)
+            (result : W64) : Prop := sorry
+        """,
+            """
+            def Postcondition (counter : Reference) (value counterValue : W64) (_ final : Memory)
+                (result : W64) : Prop :=
+              result = counterValue + value ∧ Contents final counter 8 [counterValue + value]
+            """),
+        ("  case postcondition => sorry", "  case postcondition => exact ⟨rfl, held1⟩")]),
+    // Its field sits at offset 8, so the outline names it `odometer.element 1 8`.
+    ("OdometerNext", [
+        ("def Precondition (odometer : Reference) (odometerCount : W64) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : W64) (_ : Memory) : Prop := True"),
+        ("""
+        def Postcondition (odometer : Reference) (odometerCount : W64) (initial final : Memory)
+            (result : W64) : Prop := sorry
+        """,
+            """
+            def Postcondition (odometer : Reference) (odometerCount : W64) (_ final : Memory)
+                (result : W64) : Prop :=
+              result = odometerCount + 1 ∧ Contents final (odometer.element 1 8) 8 [odometerCount + 1]
+            """),
+        ("  case postcondition => sorry", "  case postcondition => exact ⟨rfl, held1⟩")]),
+    // The string the tag holds is named by the field it was loaded from, whether or not it is null.
+    ("CopyTag", [
+        ("def Precondition (target1 source : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ _ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (target1 source : Reference) (initial final : Memory) : Prop := sorry",
+            "def Postcondition (target1 source : Reference) (initial final : Memory) : Prop :=\n" +
+            "  Tagged.Tag.Holds final target1 (Tagged.Tag.of initial source)"),
+        (storedHole, "exact held1")]),
+    // A null test of the tag splits the proof; only the side where it is null stores.
+    ("FillTag", [
+        ("def Precondition (target1 source : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ _ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (target1 source : Reference) (initial final : Memory) : Prop := sorry",
+            "def Postcondition (target1 source : Reference) (initial final : Memory) : Prop :=\n" +
+            "  if Tagged.Tag.of initial target1 = .null then\n" +
+            "    Tagged.Tag.Holds final target1 (Tagged.Tag.of initial source)\n" +
+            "  else final = initial"),
+        ("-- Postcondition of the returned value where `branch1` holds, with `held1` the stored fields\n" +
+            "    sorry",
+            "simp only [Postcondition, branch1, ↓reduceIte]\n    exact held1"),
+        ("sorry -- Postcondition of the returned value where `branch1` fails",
+            "simp only [Postcondition, branch1, ↓reduceIte]\n    rfl")]),
+    // The returned word is computed from a comparison, so the proof chooses the Bool it encodes.
+    ("HasTag", [
+        ("def Precondition (item : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (item : Reference) (initial final : Memory) (result : Bool) : Prop := sorry",
+            "def Postcondition (item : Reference) (initial final : Memory) (result : Bool) : Prop :=\n" +
+            "  result = (Tagged.Tag.of initial item != .null) ∧ final = initial"),
+        ("case result => sorry -- the Bool the returned word encodes",
+            "case result => exact Tagged.Tag.of initial item != .null"),
+        ("case encoded => sorry -- the returned word is that Bool's encoding",
+            "case encoded => by_cases present : Tagged.Tag.of initial item = .null <;> simp [present]"),
+        ("sorry -- Postcondition of the returned value", "exact ⟨rfl, rfl⟩")]),
+    // A null store into a class field, after which the returned node must still form.
+    ("Detach", [
+        ("def Precondition (node : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (node : Reference) (initial final : Memory) (result : ManagedReference)\n" +
+            "    : Prop := sorry",
+            "def Postcondition (node : Reference) (initial final : Memory) (result : ManagedReference) : Prop :=\n" +
+            "  result = Node.Next.of initial node ∧ Node.Next.Holds final node .null"),
+        (storedHole, "exact ⟨nodeNextHeld.symm, held1⟩")]),
+    // The element is named by the array and index it was loaded from, null or not.
+    ("ArrayElement", [
+        ("def Precondition (nodes : Reference) (nodesElement : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
+            "    (index : W32) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : CIL.Extraction.TypeExpr) (_ : Nat) (_ : W32) (_ : Memory) :\n" +
+            "    Prop := True"),
+        ("def Postcondition (nodes : Reference) (nodesElement : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
+            "    (index : W32) (initial final : Memory) (result : ManagedReference) : Prop := sorry",
+            "def Postcondition (nodes : Reference) (_ : CIL.Extraction.TypeExpr) (_ : Nat) (index : W32)\n" +
+            "    (initial final : Memory) (result : ManagedReference) : Prop :=\n" +
+            "  result = ReferenceArray.of initial nodes index.toNat ∧ final = initial"),
+        ("sorry -- Postcondition of the returned value", "exact ⟨rfl, rfl⟩")]),
+    ("ArrayLength", [
+        ("def Precondition (nodes : Reference) (nodesElement : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
+            "    (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : CIL.Extraction.TypeExpr) (_ : Nat) (_ : Memory) : Prop :=\n" +
+            "  True"),
+        ("def Postcondition (nodes : Reference) (nodesElement : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
+            "    (initial final : Memory) (result : W32) : Prop := sorry",
+            "def Postcondition (_ : Reference) (_ : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
+            "    (initial final : Memory) (result : W32) : Prop :=\n" +
+            "  result = BitVec.ofNat 32 nodesLength ∧ final = initial"),
+        ("sorry -- Postcondition of the returned value", "exact ⟨rfl, rfl⟩")]),
+    // The statement leaves the covariance check of the stored shape as a premise, since a `Shape[]` may be an
+    // array of any class derived from `Shape`.
+    ("ArrayCovariance", [
+        ("def Precondition (shapes : Reference) (shapesElement : CIL.Extraction.TypeExpr) (shapesLength : Nat)\n" +
+            "    (index : W32) (shape : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : CIL.Extraction.TypeExpr) (_ : Nat) (_ : W32)\n" +
+            "    (_ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (shapes : Reference) (shapesElement : CIL.Extraction.TypeExpr)\n" +
+            "    (shapesLength : Nat) (index : W32) (shape : Reference) (initial final : Memory) : Prop := sorry",
+            "def Postcondition (shapes : Reference) (shapesElement : CIL.Extraction.TypeExpr)\n" +
+            "    (shapesLength : Nat) (index : W32) (shape : Reference) (_ final : Memory) : Prop :=\n" +
+            "  ReferenceArray.Holds final shapes shapesElement shapesLength index.toNat (.address shape)"),
+        (storedHole, "exact held1")]),
+    // A string moves between a field and an element as the reference it is, never read through.
+    ("TagStore", [
+        ("def Precondition (tags : Reference) (tagsElement : CIL.Extraction.TypeExpr) (tagsLength : Nat)\n" +
+            "    (index : W32) (tagged : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : CIL.Extraction.TypeExpr) (_ : Nat) (_ : W32)\n" +
+            "    (_ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (tags : Reference) (tagsElement : CIL.Extraction.TypeExpr) (tagsLength : Nat)\n" +
+            "    (index : W32) (tagged : Reference) (initial final : Memory) : Prop := sorry",
+            "def Postcondition (tags : Reference) (tagsElement : CIL.Extraction.TypeExpr) (tagsLength : Nat)\n" +
+            "    (index : W32) (tagged : Reference) (initial final : Memory) : Prop :=\n" +
+            "  ReferenceArray.Holds final tags tagsElement tagsLength index.toNat\n" +
+            "    (Tagged.Tag.of initial tagged)"),
+        (storedHole, "exact held1")]),
+    ("TagLoad", [
+        ("def Precondition (tagged tags : Reference) (tagsElement : CIL.Extraction.TypeExpr)\n" +
+            "    (tagsLength : Nat) (index : W32) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ _ : Reference) (_ : CIL.Extraction.TypeExpr) (_ : Nat) (_ : W32)\n" +
+            "    (_ : Memory) : Prop := True"),
+        ("def Postcondition (tagged tags : Reference) (tagsElement : CIL.Extraction.TypeExpr)\n" +
+            "    (tagsLength : Nat) (index : W32) (initial final : Memory) : Prop := sorry",
+            "def Postcondition (tagged tags : Reference) (_ : CIL.Extraction.TypeExpr) (_ : Nat)\n" +
+            "    (index : W32) (initial final : Memory) : Prop :=\n" +
+            "  Tagged.Tag.Holds final tagged (ReferenceArray.of initial tags index.toNat)"),
+        (storedHole, "exact held1")]),
+    // The load after two stores reads back the first element's old reference, carried across the store into
+    // the other element.
+    ("ElementShift", [
+        ("def Precondition (nodes : Reference) (nodesElement : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
+            "    (node : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : CIL.Extraction.TypeExpr) (_ : Nat) (_ : Reference)\n" +
+            "    (_ : Memory) : Prop := True"),
+        ("def Postcondition (nodes : Reference) (nodesElement : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
+            "    (node : Reference) (initial final : Memory) (result : ManagedReference) : Prop := sorry",
+            "def Postcondition (nodes : Reference) (nodesElement : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
+            "    (node : Reference) (initial final : Memory) (result : ManagedReference) : Prop :=\n" +
+            "  result = ReferenceArray.of initial nodes 0 ∧\n" +
+            "    ReferenceArray.Holds final nodes nodesElement nodesLength 0 (.address node) ∧\n" +
+            "    ReferenceArray.Holds final nodes nodesElement nodesLength 1 (ReferenceArray.of initial nodes 0)"),
+        ("sorry -- Postcondition of the returned value, with `held1`, `held2` the stored fields",
+            "exact ⟨rfl, held2, nodesSlot2At2⟩")]),
+    // The element keeps the stored node across the store into the node's own field.
+    ("ElementInstall", [
+        ("def Precondition (nodes : Reference) (nodesElement : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
+            "    (index : W32) (node : Reference) (value : W64) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : CIL.Extraction.TypeExpr) (_ : Nat) (_ : W32)\n" +
+            "    (_ : Reference) (_ : W64) (_ : Memory) : Prop := True"),
+        ("def Postcondition (nodes : Reference) (nodesElement : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
+            "    (index : W32) (node : Reference) (value : W64) (initial final : Memory)\n" +
+            "    (result : ManagedReference) : Prop := sorry",
+            "def Postcondition (nodes : Reference) (nodesElement : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
+            "    (index : W32) (node : Reference) (value : W64) (_ final : Memory)\n" +
+            "    (result : ManagedReference) : Prop :=\n" +
+            "  result = .address node ∧\n" +
+            "    ReferenceArray.Holds final nodes nodesElement nodesLength index.toNat (.address node) ∧\n" +
+            "    Node.Value.Holds final node value"),
+        ("sorry -- Postcondition of the returned value, with `held1`, `held2` the stored fields",
+            "exact ⟨rfl, nodesSlot1At2, held2⟩")]),
+    // A string element copied after a field store forms and passes the covariance check as it did before it.
+    ("ElementStamp", [
+        ("def Precondition (tags : Reference) (tagsElement : CIL.Extraction.TypeExpr) (tagsLength : Nat)\n" +
+            "    (tagged : Reference) (id : W64) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : CIL.Extraction.TypeExpr) (_ : Nat) (_ : Reference)\n" +
+            "    (_ : W64) (_ : Memory) : Prop := True"),
+        ("def Postcondition (tags : Reference) (tagsElement : CIL.Extraction.TypeExpr) (tagsLength : Nat)\n" +
+            "    (tagged : Reference) (id : W64) (initial final : Memory) : Prop := sorry",
+            "def Postcondition (tags : Reference) (tagsElement : CIL.Extraction.TypeExpr) (tagsLength : Nat)\n" +
+            "    (tagged : Reference) (id : W64) (initial final : Memory) : Prop :=\n" +
+            "  Tagged.Id.Holds final tagged id ∧\n" +
+            "    ReferenceArray.Holds final tags tagsElement tagsLength 1 (ReferenceArray.of initial tags 0)"),
+        ("sorry -- Postcondition of the returned value, with `held1`, `held2` the stored fields",
+            "exact ⟨held1.after_confined framed2 (ReferenceArray.apart_single (show\n" +
+            "      tagged.allocation ≠ tags.allocation from tagsLive1.field_ne held1.1.located rfl)), held2⟩")]),
+    // The second node comes back, and the caller's memory is confined to nothing.
+    ("FreshPair", [
+        ("def Precondition (first second : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ _ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (first second : Reference) (initial final : Memory) (result : ManagedReference)\n" +
+            "    : Prop := sorry",
+            "def Postcondition (_ second : Reference) (_ _ : Memory) (result : ManagedReference) : Prop :=\n" +
+            "  result = .address second"),
+        ("sorry -- Postcondition of the returned value, with `held2`, `held3` the stored fields", "rfl")])
 })
 {
     var source = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
@@ -1062,13 +1798,58 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
         throw new InvalidOperationException($"The {name} outline has a hole the test does not fill:\n{source}");
     var filledOutline = Path.Combine(outlineRoot, name, "Filled.lean");
     File.WriteAllText(filledOutline, source);
-    var verified = Execute(Cli("verify", Path.Combine(outlineRoot, name, "Extraction"), "--proof", filledOutline));
+    var verified = Execute(Cli("verify", OutlineExtraction(name), "--proof", filledOutline));
     if (verified.Code != 0 || !verified.Stdout.StartsWith("Verified: ExampleProof.correctness"))
         throw new InvalidOperationException($"The filled {name} outline did not verify:\n{verified.Output}");
 }
-Console.WriteLine("PASS filled object outlines verify with only their specification written: a field store, " +
+Console.WriteLine("PASS filled outlines verify with only their specification written: a field store, " +
     "two reference field stores that may alias, a null test followed through a local, two calls through a " +
-    "generated contract, a split on a field value and a call whose callee loads the node a field holds");
+    "generated contract, a split on a field value, a call whose callee loads the node a field holds, a " +
+    "span fold that stores its total before each span load, a split on a `bool` argument, a " +
+    "store through `Unsafe.Add` of a reference argument, a call to a callee that throws where its " +
+    "precondition fails, a call storing through `Unsafe.Add` of a reference argument, two loops in sequence, " +
+    "a checked add, a base-two logarithm, a signed checked add, splits on unsigned and signed tests of words, " +
+    "a field store through a struct receiver at offsets 0 and 8, a string reference copied, " +
+    "tested for null and compared, a null store before returning the node it held, an array argument's element " +
+    "load, length and covariance-checked store, element facts carried across element and field stores, and " +
+    "an array the method allocates, fills and reads back");
+
+// A written footprint that leaves out the element a loop writes is an error at the write, never an admission.
+var narrowed = Path.Combine(outlineRoot, "FillWords", "Narrowed.lean");
+File.WriteAllText(narrowed, File.ReadAllText(Path.Combine(outlineRoot, "FillWords", "Filled.lean"))
+    .Replace("  [(destination, 8 * count.toNat)]", "  []", StringComparison.Ordinal));
+var outside = Execute(Cli("verify", OutlineExtraction("FillWords"), "--proof", narrowed));
+if (outside.Code == 0 || !outside.Output.Contains("cil_loop_obligation could not prove"))
+    throw new InvalidOperationException("verify did not reject a write outside the footprint:\n" + outside.Output);
+Console.WriteLine("PASS a loop write outside its written footprint is an error at the write");
+
+// One hole left, an obligation or a path the outline could not step, keeps an outline from certifying:
+// verify refuses it for `sorryAx` and removes the report the filled proof left.
+var unfinished = new List<(string Name, string Source)>
+{
+    ("SpanSum", File.ReadAllText(Path.Combine(outlineRoot, "SpanSum", "Filled.lean"))
+        .Replace("case measure => simp [measure]", "case measure => sorry"))
+};
+var unstepped = outlined.Select(entry => entry.Name).FirstOrDefault(name => File.ReadAllText(
+    Path.Combine(outlineRoot, name, "Proof.lean")).Contains("-- not outlined:", StringComparison.Ordinal));
+if (unstepped is not null)
+    unfinished.Add((unstepped, File.ReadAllText(Path.Combine(outlineRoot, unstepped, "Proof.lean"))));
+foreach (var (name, source) in unfinished)
+{
+    var partial = Path.Combine(outlineRoot, name, "Unfinished.lean");
+    File.WriteAllText(partial, source);
+    var refused = Execute(Cli("verify", OutlineExtraction(name), "--proof", partial));
+    if (refused.Code == 0 || !refused.Output.Contains("Unapproved proof axioms: sorryAx") ||
+        refused.Output.Contains(": error") || File.Exists(Path.Combine(OutlineExtraction(name), "verified.json")))
+        throw new InvalidOperationException($"verify did not refuse the unfinished {name} outline:\n{refused.Output}");
+}
+Console.WriteLine(unstepped is null
+    ? "PASS verify refuses an outline with one obligation left; no outline leaves a path not outlined"
+    : $"PASS verify refuses an outline with one obligation left and the {unstepped} outline's path not outlined");
+
+// A loop outline reuses the extraction an earlier section left under its name.
+string OutlineExtraction(string name) => outlined.Single(entry => entry.Name == name).Selector is null
+    ? Path.Combine(root, name) : Path.Combine(outlineRoot, name, "Extraction");
 
 // LeanCIL's own closure that lays out a static word's bytes: its outline states the getter's contract
 // and steps through it, and the checked-in proof fills only the outline's holes and verifies.

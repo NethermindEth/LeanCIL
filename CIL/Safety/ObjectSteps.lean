@@ -5,11 +5,16 @@ import CIL.Safety.ObjectAllocationLemmas
 # Object step equations
 
 `cil_step` equations for the instructions that observe class instance references: identity
-comparison (`ceq`, `beq`, `bne.un`), presence (`cgt.un` against null, `brtrue`, `brfalse`) and
-`ldnull`, `ldfld`/`stfld` of scalar class fields, and `newobj` of a class, which calls the
-constructor with a fresh instance that `allocateObject_ok` or `allocateObject_insufficient`
-decides, and `callvirt` of a non-virtual method, which calls with a live receiver and throws
-`NullReferenceException` on a null one (`receiverCall`). Each states the dispatcher arm of
+comparison (`ceq`, `beq`, `bne.un`), presence (`cgt.un` against null, `brtrue`, `brfalse`),
+`isinst` and `castclass` (`objectTest`, decided by a `runtimeTypeOf` fact), `ldnull`,
+`ldstr` of a caller-bound literal (`literalObject_of_lookup`), `ldfld`/`stfld` of scalar class
+fields, and `newobj` of a class, which calls the constructor with a fresh instance that
+`allocateObject_ok` or `allocateObject_insufficient` decides, and `callvirt` of a non-virtual
+method, which calls with a live receiver and throws `NullReferenceException` on a null one
+(`receiverCall`), and `callvirt` of a virtual method, which enters the body its dispatch table
+lists for the receiver's runtime class (`virtualCall`, decided by a `runtimeTypeOf` fact),
+and the argument guards, which raise their named exception or pop their operands
+(`zeroGuardOutcome`, `comparisonGuardOutcome`). Each states the dispatcher arm of
 `CIL/Safety/Execution.lean` for object operands, so stepping never unfolds the dispatcher. The
 observations themselves unfold through `cil_checked` down to `formObject`, which a caller's
 facts or `formObject_null` decide; field accesses leave `objectFieldAddress` and the byte
@@ -24,7 +29,15 @@ namespace CIL.Safety
 
 #print axioms formObject_null
 
-attribute [cil_checked] objectNonNull objectEqual objectAboveNull
+/-- A literal bound to `reference` loads what forming that reference gives. -/
+theorem literalObject_of_lookup {memory : Memory} {text : String} {reference : Reference}
+    (bound : memory.literals.lookup text = some reference) :
+    literalObject memory text = formObject memory (.address reference) := by
+  simp only [literalObject, bound]
+
+#print axioms literalObject_of_lookup
+
+attribute [cil_checked] objectNonNull objectEqual objectAboveNull objectTest
 
 /-- A formed object reference is a checked value as it stands. -/
 @[cil_checked] theorem checkedValue_object (memory : Memory) (reference : ManagedReference)
@@ -111,6 +124,82 @@ def receiverCall (callee : Nat) (arguments rest : List Value) (memory : Memory) 
 
 #print axioms receiverCall_null
 
+/-- The call a virtual `callvirt` makes with checked `arguments`, receiver first: into the body
+    `targets` lists for a live receiver's runtime class, `NullReferenceException` for a null
+    receiver. This is the `callVirtual` arm of `step` after its argument checks. -/
+def virtualCall (targets : List (CIL.Extraction.TypeExpr × Nat)) (arguments rest : List Value)
+    (memory : Memory) : ExecutionResult FrameAction :=
+  match arguments with
+  | .object (.address receiver) :: _ => do
+    return .call (← virtualTarget memory targets receiver) arguments rest memory
+  | .object .null :: _ => .error (.thrown "System.NullReferenceException")
+  | _ => .error .invalidState
+
+/-- `callvirt` of a virtual method checks its `argc` arguments and enters the body its table
+    selects for the receiver; a null receiver throws `NullReferenceException` before the call. -/
+@[cil_step] theorem step_callVirtual_eq (targets : List (CIL.Extraction.TypeExpr × Nat))
+    (argc : Nat) (stack : List Value) :
+    step body (.callVirtual targets argc) pc args frame stack memory =
+      if unspecifiedOperands argc stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else if stack.length < argc then .error .invalidState
+      else (do
+        let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
+        virtualCall targets arguments (stack.drop argc) memory) := by
+  simp only [step, observerCount, Bool.or_false]
+  rfl
+
+#print axioms step_callVirtual_eq
+
+/-- A live receiver enters the body the table lists for its runtime class; a step fact for
+    `runtimeTypeOf` then decides the lookup. -/
+@[cil_checked] theorem virtualCall_address (targets : List (CIL.Extraction.TypeExpr × Nat))
+    (receiver : Reference) (arguments rest : List Value) :
+    virtualCall targets (.object (.address receiver) :: arguments) rest memory = (do
+      let type ← runtimeTypeOf memory receiver
+      match targets.lookup type.identity with
+      | some callee => .ok (.call callee (.object (.address receiver) :: arguments) rest memory)
+      | none => .error outsideDispatchTable) := by
+  simp only [virtualCall, virtualTarget, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cases runtimeTypeOf memory receiver with
+  | error => rfl
+  | ok type =>
+    dsimp only
+    cases targets.lookup type.identity <;> rfl
+
+#print axioms virtualCall_address
+
+/-- A live receiver of a class the table lists enters that class's body. -/
+theorem virtualCall_listed (targets : List (CIL.Extraction.TypeExpr × Nat))
+    (receiver : Reference) (type : RuntimeType) (callee : Nat) (arguments rest : List Value)
+    (typed : runtimeTypeOf memory receiver = .ok type)
+    (listed : targets.lookup type.identity = some callee) :
+    virtualCall targets (.object (.address receiver) :: arguments) rest memory =
+      .ok (.call callee (.object (.address receiver) :: arguments) rest memory) := by
+  simp [virtualCall_address, typed, listed, Bind.bind, Except.bind]
+
+#print axioms virtualCall_listed
+
+/-- A live receiver of a class the table omits is the model fault `outsideDispatchTable`, never
+    a call or a named exception. -/
+theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
+    (receiver : Reference) (type : RuntimeType) (arguments rest : List Value)
+    (typed : runtimeTypeOf memory receiver = .ok type)
+    (omitted : targets.lookup type.identity = none) :
+    virtualCall targets (.object (.address receiver) :: arguments) rest memory =
+      .error outsideDispatchTable := by
+  simp [virtualCall_address, typed, omitted, Bind.bind, Except.bind]
+
+#print axioms virtualCall_outside
+
+/-- A null receiver throws before the call. -/
+@[cil_checked] theorem virtualCall_null (targets : List (CIL.Extraction.TypeExpr × Nat))
+    (arguments rest : List Value) :
+    virtualCall targets (.object .null :: arguments) rest memory =
+      .error (.thrown "System.NullReferenceException") := rfl
+
+#print axioms virtualCall_null
+
 /-- `ceq` on two object references pushes their identity comparison. -/
 @[cil_step high] theorem step_eq_object_eq (left right : ManagedReference) (rest : List Value) :
     step body .eq pc args frame (.object right :: .object left :: rest) memory = do
@@ -157,6 +246,29 @@ def receiverCall (callee : Nat) (arguments rest : List Value) (memory : Memory) 
       return .next (if present then target else pc + 1) rest frame memory :=
   rfl
 
+/-- `isinst` and `castclass` replace an object reference by its tested form: itself when its
+    runtime lineage holds the class, else null or `InvalidCastException`. -/
+@[cil_step high] theorem step_objectTest_eq (type : CIL.Extraction.TypeExpr) (throwing : Bool)
+    (value : ManagedReference) (rest : List Value) :
+    step body (.objectTest type throwing) pc args frame (.object value :: rest) memory = do
+      let result ← objectTest memory type throwing value
+      return .next (pc + 1) (.object result :: rest) frame memory :=
+  rfl
+
+/-- `newarr` of a class with an int32 length allocates the array and pushes it. -/
+@[cil_step high] theorem step_newReferenceArray_i32_eq (element : CIL.Extraction.TypeExpr)
+    (bits : BitVec 32) (rest : List Value) :
+    step body (.newReferenceArray element) pc args frame (.scalar (.i32 bits) :: rest) memory = do
+      let (array, allocated) ← newReferenceArray memory element (.i32 bits)
+      return .next (pc + 1) (.object (.address array) :: rest) frame allocated := rfl
+
+/-- `newarr` of a class with a native length allocates the array and pushes it. -/
+@[cil_step high] theorem step_newReferenceArray_i64_eq (element : CIL.Extraction.TypeExpr)
+    (bits : BitVec 64) (rest : List Value) :
+    step body (.newReferenceArray element) pc args frame (.scalar (.i64 bits) :: rest) memory = do
+      let (array, allocated) ← newReferenceArray memory element (.i64 bits)
+      return .next (pc + 1) (.object (.address array) :: rest) frame allocated := rfl
+
 /-- `ldnull` pushes the null object reference and leaves memory unchanged. -/
 @[cil_step high] theorem step_nullObject_eq (stack : List Value) :
     step body (.memory .nullObject) pc args frame stack memory =
@@ -164,6 +276,115 @@ def receiverCall (callee : Nat) (arguments rest : List Value) (memory : Memory) 
   simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
     CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any]
   rfl
+
+/-- `ldstr` pushes the object bound to its text and leaves memory unchanged. -/
+@[cil_step high] theorem step_stringLiteral_eq (text : String) (stack : List Value) :
+    step body (.memory (.stringLiteral text)) pc args frame stack memory = do
+      let value ← literalObject memory text
+      return .next (pc + 1) (value :: stack) frame memory := by
+  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+    stringLiteralInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    List.any, Bool.false_eq_true, ite_false, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cases literalObject memory text <;> rfl
+
+/-- `ThrowIfNull` throws `ArgumentNullException` for a null argument; otherwise it pops the
+    argument and the parameter name and leaves memory unchanged. -/
+@[cil_step high] theorem step_throwIfNull_eq (name argument : ManagedReference)
+    (rest : List Value) :
+    step body (.memory .throwIfNull) pc args frame (.object name :: .object argument :: rest)
+        memory =
+      match argument with
+      | .null => .error (.thrown "System.ArgumentNullException")
+      | .address _ => .ok (.next (pc + 1) rest frame memory) := by
+  cases argument <;> rfl
+
+/-- The outcome of a zero guard on a `width`-bit value. -/
+def zeroGuardOutcome (guard : ZeroGuard) (width : Nat) (signed : Bool) (value : CIL.Value) :
+    ExecutionResult Unit :=
+  match guardOperand width signed value with
+  | some number =>
+    match guard.throws number with
+    | true => .error (.thrown "System.ArgumentOutOfRangeException")
+    | false => .ok ()
+  | none => .error .invalidState
+
+/-- The outcome of a comparison guard on a `width`-bit value and its bound. -/
+def comparisonGuardOutcome (guard : ComparisonGuard) (width : Nat) (signed : Bool)
+    (value other : CIL.Value) : ExecutionResult Unit :=
+  match guardOperand width signed value, guardOperand width signed other with
+  | some number, some bound =>
+    match guard.throws number bound with
+    | true => .error (.thrown "System.ArgumentOutOfRangeException")
+    | false => .ok ()
+  | _, _ => .error .invalidState
+
+/-- A zero guard on a 32-bit stack value throws, or pops it with the parameter name. -/
+@[cil_step high] theorem step_zeroGuard_i32_eq (guard : ZeroGuard) (width : Nat) (signed : Bool)
+    (name : ManagedReference) (bits : CIL.W32) (rest : List Value) :
+    step body (.memory (.zeroGuard guard width signed)) pc args frame
+        (.object name :: .scalar (.i32 bits) :: rest) memory = do
+      zeroGuardOutcome guard width signed (.i32 bits)
+      return .next (pc + 1) rest frame memory := by
+  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+    zeroGuardInstruction, zeroGuardOutcome, CIL.MemoryOp.argumentCount, unspecifiedOperands,
+    List.take_succ_cons, List.take_zero, List.any_cons, List.any_nil, Value.hasUnspecified,
+    CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false]
+  rcases guardOperand width signed (.i32 bits) with _ | number
+  · rfl
+  · dsimp only; cases guard.throws number <;> rfl
+
+/-- A zero guard on a 64-bit stack value throws, or pops it with the parameter name. -/
+@[cil_step high] theorem step_zeroGuard_i64_eq (guard : ZeroGuard) (width : Nat) (signed : Bool)
+    (name : ManagedReference) (bits : CIL.W64) (rest : List Value) :
+    step body (.memory (.zeroGuard guard width signed)) pc args frame
+        (.object name :: .scalar (.i64 bits) :: rest) memory = do
+      zeroGuardOutcome guard width signed (.i64 bits)
+      return .next (pc + 1) rest frame memory := by
+  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+    zeroGuardInstruction, zeroGuardOutcome, CIL.MemoryOp.argumentCount, unspecifiedOperands,
+    List.take_succ_cons, List.take_zero, List.any_cons, List.any_nil, Value.hasUnspecified,
+    CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false]
+  rcases guardOperand width signed (.i64 bits) with _ | number
+  · rfl
+  · dsimp only; cases guard.throws number <;> rfl
+
+/-- A comparison guard on 32-bit stack values throws, or pops both with the parameter name. -/
+@[cil_step high] theorem step_comparisonGuard_i32_eq (guard : ComparisonGuard) (width : Nat)
+    (signed : Bool) (name : ManagedReference) (other value : CIL.W32) (rest : List Value) :
+    step body (.memory (.comparisonGuard guard width signed)) pc args frame
+        (.object name :: .scalar (.i32 other) :: .scalar (.i32 value) :: rest) memory = do
+      comparisonGuardOutcome guard width signed (.i32 value) (.i32 other)
+      return .next (pc + 1) rest frame memory := by
+  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+    comparisonGuardInstruction, comparisonGuardOutcome, CIL.MemoryOp.argumentCount,
+    unspecifiedOperands, List.take_succ_cons, List.take_zero, List.any_cons, List.any_nil,
+    Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false]
+  rcases guardOperand width signed (.i32 value) with _ | number <;>
+    rcases guardOperand width signed (.i32 other) with _ | bound
+  all_goals try rfl
+  dsimp only; cases guard.throws number bound <;> rfl
+
+/-- A comparison guard on 64-bit stack values throws, or pops both with the parameter name. -/
+@[cil_step high] theorem step_comparisonGuard_i64_eq (guard : ComparisonGuard) (width : Nat)
+    (signed : Bool) (name : ManagedReference) (other value : CIL.W64) (rest : List Value) :
+    step body (.memory (.comparisonGuard guard width signed)) pc args frame
+        (.object name :: .scalar (.i64 other) :: .scalar (.i64 value) :: rest) memory = do
+      comparisonGuardOutcome guard width signed (.i64 value) (.i64 other)
+      return .next (pc + 1) rest frame memory := by
+  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+    comparisonGuardInstruction, comparisonGuardOutcome, CIL.MemoryOp.argumentCount,
+    unspecifiedOperands, List.take_succ_cons, List.take_zero, List.any_cons, List.any_nil,
+    Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false]
+  rcases guardOperand width signed (.i64 value) with _ | number <;>
+    rcases guardOperand width signed (.i64 other) with _ | bound
+  all_goals try rfl
+  dsimp only; cases guard.throws number bound <;> rfl
+
+#print axioms step_throwIfNull_eq
+#print axioms step_zeroGuard_i32_eq
+#print axioms step_zeroGuard_i64_eq
+#print axioms step_comparisonGuard_i32_eq
+#print axioms step_comparisonGuard_i64_eq
 
 /-- `ldfld` of a scalar field of an object loads it from the field's located address. -/
 theorem step_objectField_eq (owner : CIL.Extraction.TypeExpr)
@@ -260,6 +481,91 @@ theorem step_setObjectField_i32_eq (owner : CIL.Extraction.TypeExpr)
   dsimp only
   cases storeSlot memory address value <;> rfl
 
+/-- `ldlen` of an array of class references pushes its length as a native integer. -/
+@[cil_step high] theorem step_referenceArrayLength_eq (array : ManagedReference)
+    (rest : List Value) :
+    step body (.memory .referenceArrayLength) pc args frame (.object array :: rest) memory = do
+      let found ← referenceArrayOf memory array
+      return .next (pc + 1) (.scalar (.i64 (BitVec.ofNat 64 found.2.2)) :: rest) frame memory := by
+  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    List.any, Value.hasUnspecified, Bool.false_eq_true, ite_false, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
+  cases referenceArrayOf memory array <;> rfl
+
+/-- `ldelem.ref` with an int32 index pushes the reference its element's slot holds. -/
+@[cil_step high] theorem step_referenceArrayLoad_eq (index : BitVec 32)
+    (array : ManagedReference) (rest : List Value) :
+    step body (.memory .referenceArrayLoad) pc args frame
+        (.scalar (.i32 index) :: .object array :: rest) memory = do
+      let slot ← referenceArraySlot memory array index.toNat
+      let value ← loadSlot memory slot.1
+      return .next (pc + 1) (value :: rest) frame memory := by
+  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    List.any, Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false,
+    arrayIndex, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cases referenceArraySlot memory array index.toNat <;> try rfl
+  rename_i slot
+  dsimp only
+  cases loadSlot memory slot.1 <;> rfl
+
+/-- `stelem.ref` with an int32 index checks the stored object's class against the element
+    class, then stores it into the element's slot. -/
+@[cil_step high] theorem step_referenceArrayStore_eq (index : BitVec 32)
+    (value array : ManagedReference) (rest : List Value) :
+    step body (.memory .referenceArrayStore) pc args frame
+        (.object value :: .scalar (.i32 index) :: .object array :: rest) memory = do
+      let slot ← referenceArraySlot memory array index.toNat
+      let _ ← storableIn memory slot.2 value
+      let after ← storeSlot memory slot.1 value
+      return .next (pc + 1) rest frame after := by
+  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    List.any, Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false,
+    arrayIndex, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cases referenceArraySlot memory array index.toNat <;> try rfl
+  rename_i slot
+  dsimp only
+  cases storableIn memory slot.2 value <;> try rfl
+  dsimp only
+  cases storeSlot memory slot.1 value <;> rfl
+
+/-- `ldfld` of a value-array field pushes the whole array its located slot names. -/
+@[cil_step high] theorem step_arrayField_eq (owner : CIL.Extraction.TypeExpr) (offset : Nat)
+    (element : CIL.ArrayElement) (reference : ManagedReference) (rest : List Value) :
+    step body (.memory (.arrayField owner offset element)) pc args frame
+        (.object reference :: rest) memory = do
+      let address ← objectFieldAddress memory reference owner offset
+      let value ← loadArraySlot memory address element
+      return .next (pc + 1) (value :: rest) frame memory := by
+  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    List.any, Value.hasUnspecified, Bool.false_eq_true, ite_false, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
+  cases objectFieldAddress memory reference owner offset <;> try rfl
+  rename_i address
+  dsimp only
+  cases loadArraySlot memory address element <;> rfl
+
+/-- `stfld` of a value-array field keeps the stored array's origin in its located slot. -/
+@[cil_step high] theorem step_setArrayField_eq (owner : CIL.Extraction.TypeExpr) (offset : Nat)
+    (element : CIL.ArrayElement) (view : ArrayView) (reference : ManagedReference)
+    (rest : List Value) :
+    step body (.memory (.setArrayField owner offset element)) pc args frame
+        (.array view :: .object reference :: rest) memory = do
+      let address ← objectFieldAddress memory reference owner offset
+      let after ← storeArraySlot memory address view element
+      return .next (pc + 1) rest frame after := by
+  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    List.any, Value.hasUnspecified, Bool.false_eq_true, ite_false, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
+  cases objectFieldAddress memory reference owner offset <;> try rfl
+  rename_i address
+  dsimp only
+  cases storeArraySlot memory address view element <;> rfl
+
 /-- A readable slot loads the reference it holds, which must still form. -/
 theorem loadSlot_of_access {memory : Memory} {field : Reference}
     (readable : access memory field objectFieldSlot ordinaryAccessAlignment false = .ok ()) :
@@ -273,6 +579,40 @@ theorem storeSlot_of_access {memory : Memory} {field : Reference} {value : Manag
     storeSlot memory field value = .ok (setSlot memory field value) := by
   simp only [storeSlot, writable, formed, checkedAt, Except.mapError, Bind.bind, Except.bind,
     Pure.pure, Except.pure]
+
+/-- A readable value-array slot loads the array the reference it holds names. -/
+theorem loadArraySlot_of_access {memory : Memory} {field : Reference}
+    {element : CIL.ArrayElement}
+    (readable : access memory field objectFieldSlot ordinaryAccessAlignment false = .ok ()) :
+    loadArraySlot memory field element =
+      arrayOfSlot memory (memory.slots field.allocation field.offset) element := by
+  simp only [loadArraySlot, readable, checkedAt, Except.mapError, Bind.bind, Except.bind]
+
+/-- A reference to offset 0 of a live heap allocation of `length` elements names that whole
+    array, once its extent validates. -/
+theorem arrayOfSlot_whole {memory : Memory} {array : Reference} {allocation : Allocation}
+    {length : Nat} {element : CIL.ArrayElement}
+    (found : liveAllocation memory array.allocation = .ok allocation)
+    (heap : allocation.kind = .managedHeap) (origin : array.offset = 0)
+    (positive : 0 < element.width) (whole : allocation.layout.size = length * element.width)
+    (valid : ArrayView.validate ⟨.address array, length, element⟩ memory = .ok ()) :
+    arrayOfSlot memory (.address array) element =
+      .ok (.array ⟨.address array, length, element⟩) := by
+  simp only [arrayOfSlot, found, heap, origin, positive, whole, Nat.mul_mod_left,
+    Nat.mul_div_cancel _ positive, valid, checkedAt, Except.mapError, Bind.bind, Except.bind,
+    Pure.pure, Except.pure, and_self, ↓reduceIte]
+
+/-- A writable value-array slot stores the origin of a whole live heap array of its element. -/
+theorem storeArraySlot_whole {memory : Memory} {field array : Reference}
+    {allocation : Allocation} {length : Nat} {element : CIL.ArrayElement}
+    (writable : access memory field objectFieldSlot ordinaryAccessAlignment true = .ok ())
+    (found : liveAllocation memory array.allocation = .ok allocation)
+    (heap : allocation.kind = .managedHeap) (origin : array.offset = 0)
+    (whole : allocation.layout.size = length * element.width) :
+    storeArraySlot memory field ⟨.address array, length, element⟩ element =
+      .ok (setSlot memory field (.address array)) := by
+  simp only [storeArraySlot, arraySlotValue, writable, found, heap, origin, whole, checkedAt,
+    Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure, and_self, ↓reduceIte]
 
 /-- `ldfld` of a 1-byte object field, as `step_objectField_eq` states it. -/
 @[cil_step high] theorem step_objectField_1_eq (owner : CIL.Extraction.TypeExpr)
@@ -355,7 +695,11 @@ end ObjectEquations
 #print axioms step_gtu_object_eq
 #print axioms step_brzero_object_eq
 #print axioms step_brnonzero_object_eq
+#print axioms step_objectTest_eq
 #print axioms step_nullObject_eq
+#print axioms step_newReferenceArray_i32_eq
+#print axioms step_newReferenceArray_i64_eq
+#print axioms step_stringLiteral_eq
 #print axioms step_objectField_eq
 #print axioms step_setObjectField_i64_eq
 #print axioms step_setObjectField_i32_eq
@@ -368,6 +712,14 @@ end ObjectEquations
 #print axioms step_setObjectField_i32_4_eq
 #print axioms step_objectReferenceField_eq
 #print axioms step_setObjectReferenceField_eq
+#print axioms step_referenceArrayLength_eq
+#print axioms step_referenceArrayLoad_eq
+#print axioms step_referenceArrayStore_eq
+#print axioms step_arrayField_eq
+#print axioms step_setArrayField_eq
+#print axioms loadArraySlot_of_access
+#print axioms arrayOfSlot_whole
+#print axioms storeArraySlot_whole
 #print axioms loadSlot_of_access
 #print axioms storeSlot_of_access
 

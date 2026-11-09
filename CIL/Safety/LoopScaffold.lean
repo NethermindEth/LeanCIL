@@ -75,17 +75,24 @@ private def entrySimplifier {m : Type → Type} [Monad m] [MonadQuotation m]
     checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure,
     $[$facts:term],*]; try rfl))
 
+/-- A null object local is a slot holding null; it allocates nothing and keeps memory. -/
+theorem makeLocal_object_null (activation : Nat) (memory : Memory) :
+    makeLocal activation .object .nullRef memory = .ok (.object (some .null), [], memory) := rfl
+#print axioms makeLocal_object_null
+
 /-- Rewrite each numeric local by its allocation equation before `makeLocal` is unfolded, then
-    normalize the rest of frame setup; an unmatched equation leaves allocation unresolved. -/
+    normalize the rest of frame setup; an unmatched equation leaves allocation unresolved. Object
+    locals reduce first, so a later home's equation meets the memory it was stated over. -/
 private def allocationSimplifier {m : Type → Type} [Monad m] [MonadQuotation m]
     (definitions facts made : Array (TSyntax `term)) : m (TSyntax `tactic) := do
   let unfolded := definitions ++ facts ++ made
   let normalizer ← entrySimplifier definitions (facts ++ made)
   `(tactic| ((simp only [enterFrame, makeSelectedLocals, makeLocals, List.isEmpty, ite_true,
-    Bind.bind, Except.bind, Pure.pure, Except.pure, $[$unfolded:term],*]) <;> $normalizer:tactic))
+    makeLocal_object_null, Bind.bind, Except.bind, Pure.pure, Except.pure,
+    $[$unfolded:term],*]) <;> $normalizer:tactic))
 
-/-- A local slot's generated facts: its index and slot, typed load and store facts for span and
-    root slots, the address of a byte home, and whether the storage kind mentions binders. -/
+/-- A local slot's generated facts: its index and slot, typed load and store facts for span, root
+    and object slots, the address of a byte home, and whether the storage kind mentions binders. -/
 private abbrev SlotFacts :=
   Nat × Term × Option Term × Option Term × Option Term × Bool
 
@@ -111,6 +118,8 @@ private def frameSlots (frame : Expr) : TermElabM (Array SlotFacts) := do
       | (``LocalSlot.readOnlyRoot, _) =>
         pure (some (← `(loadLocal_readOnlyRoot)),
           some (← `(storeLocal_readOnlyRoot_readOnly)), none)
+      | (``LocalSlot.object, _) =>
+        pure (some (← `(loadLocal_object)), some (← `(storeLocal_object)), none)
       | _ => pure (none, none, none)
       let symbolic := match slotValue.getAppFnArgs with
         | (``LocalSlot.span, #[width, writable, _]) => width.hasFVar || writable.hasFVar
@@ -122,8 +131,8 @@ private def frameSlots (frame : Expr) : TermElabM (Array SlotFacts) := do
   return homes
 
 /-- Emit `homeN` for byte homes when `addresses` holds, and `slotN`, `loadN` and `storeN` for
-    span and root slots. Stepping needs no `loadN` or `storeN`: they instantiate `cil_checked`
-    lemmas. -/
+    span, root and object slots. Stepping needs no `loadN` or `storeN`: they instantiate
+    `cil_checked` lemmas. -/
 private def emitSlots (name : Ident)
     (binders : TSyntaxArray ``Lean.Parser.Term.bracketedBinder)
     (slots : Array SlotFacts) (addresses : Bool) : CommandElabM Unit := do
@@ -153,7 +162,7 @@ private structure NumericLocal where
 /-- The kinds `makeLocal` creates without allocating memory. -/
 private def unallocatedKinds : List Name :=
   [``CIL.LocalKind.span, ``CIL.LocalKind.reference, ``CIL.LocalKind.array,
-    ``CIL.LocalKind.methodPointer, ``CIL.LocalKind.methodTable]
+    ``CIL.LocalKind.methodPointer, ``CIL.LocalKind.methodTable, ``CIL.LocalKind.object]
 
 /-- Find the numeric locals of `body`. Every other local must be created without allocating, so
     each allocation of the entered frame is a numeric home. -/

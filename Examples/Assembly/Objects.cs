@@ -39,6 +39,26 @@ public sealed class Node
     public Node? Next;
 }
 
+/// <summary>A class holding an array of nodes in a field: the slot holds the array's reference.</summary>
+public sealed class Bucket
+{
+    /// <summary>The nodes of the bucket, or null.</summary>
+    public Node?[]? Items;
+}
+
+/// <summary>
+/// A class holding a string, whose class the model does not represent: the reference is copied, compared and
+/// tested for null, never read through.
+/// </summary>
+public sealed class Tagged
+{
+    /// <summary>The instance's identifier.</summary>
+    public ulong Id;
+
+    /// <summary>The tag, or null.</summary>
+    public string? Tag;
+}
+
 /// <summary>A class with no fields: its instances have identity and nothing else.</summary>
 public sealed class Marker
 {
@@ -62,6 +82,103 @@ public class Circle : Shape
 
     /// <summary>Creates a circle, chaining to the base constructor for the identifier.</summary>
     public Circle(ulong id, ulong radius) : base(id) => Radius = radius;
+}
+
+/// <summary>A second class derived from <see cref="Shape"/>: no square is a circle.</summary>
+public sealed class Square : Shape
+{
+    /// <summary>The square's side.</summary>
+    public ulong Side;
+
+    /// <summary>Creates a square, chaining to the base constructor for the identifier.</summary>
+    public Square(ulong id, ulong side) : base(id) => Side = side;
+}
+
+/// <summary>Arrays of class instances: each element is a reference, and every store is type-checked.</summary>
+public static class NodeArrays
+{
+    /// <summary>A fresh array of <paramref name="count"/> null references.</summary>
+    public static Node?[] Create(int count) => new Node?[count];
+
+    /// <summary>The number of elements of <paramref name="nodes"/>.</summary>
+    public static int Count(Node?[] nodes) => nodes.Length;
+
+    /// <summary>The element at <paramref name="index"/>.</summary>
+    public static Node? At(Node?[] nodes, int index) => nodes[index];
+
+    /// <summary>Stores <paramref name="shape"/> at <paramref name="index"/> of an array of any derived class.</summary>
+    public static void Put(Shape?[] shapes, int index, Shape? shape) => shapes[index] = shape;
+
+    /// <summary>The first element of the array <paramref name="bucket"/> holds.</summary>
+    public static Node? First(Bucket bucket) => bucket.Items![0];
+
+    /// <summary>Replaces the array <paramref name="bucket"/> holds.</summary>
+    public static void Refill(Bucket bucket, Node?[] items) => bucket.Items = items;
+
+    /// <summary>Moves the first node to the second element, puts <paramref name="node"/> first and reads the second
+    /// back.</summary>
+    public static Node? Shift(Node?[] nodes, Node node)
+    {
+        nodes[1] = nodes[0];
+        nodes[0] = node;
+        return nodes[1];
+    }
+
+    /// <summary>Stores <paramref name="node"/> at <paramref name="index"/>, sets its value and reads the element
+    /// back.</summary>
+    public static Node? Install(Node?[] nodes, int index, Node node, ulong value)
+    {
+        nodes[index] = node;
+        node.Value = value;
+        return nodes[index];
+    }
+
+    /// <summary>Holds two nodes in a fresh array and reads the second back.</summary>
+    public static Node? Pair(Node first, Node second)
+    {
+        var nodes = new Node?[2];
+        nodes[0] = first;
+        nodes[1] = second;
+        return nodes[1];
+    }
+}
+
+/// <summary>Arrays of strings, whose elements the model holds as opaque references.</summary>
+public static class TagArrays
+{
+    /// <summary>A fresh array of <paramref name="count"/> null strings.</summary>
+    public static string?[] Create(int count) => new string?[count];
+
+    /// <summary>Stores the tag of <paramref name="tagged"/> at <paramref name="index"/>.</summary>
+    public static void Put(string?[] tags, int index, Tagged tagged) => tags[index] = tagged.Tag;
+
+    /// <summary>Gives <paramref name="tagged"/> the identifier <paramref name="id"/>, then copies the first tag to
+    /// the second element.</summary>
+    public static void Stamp(string?[] tags, Tagged tagged, ulong id)
+    {
+        tagged.Id = id;
+        tags[1] = tags[0];
+    }
+
+    /// <summary>Replaces the tag of <paramref name="tagged"/> with the element at <paramref name="index"/>.</summary>
+    public static void Take(Tagged tagged, string?[] tags, int index) => tagged.Tag = tags[index];
+}
+
+/// <summary>A class holding an array of integers in a field: the slot holds the whole array.</summary>
+public sealed class Samples
+{
+    /// <summary>The samples, or null.</summary>
+    public int[]? Values;
+}
+
+/// <summary>Loads and stores of an integer array held in a class field.</summary>
+public static class SampleArrays
+{
+    /// <summary>The array of samples, or null.</summary>
+    public static int[]? ValuesOf(Samples samples) => samples.Values;
+
+    /// <summary>Replaces the samples with <paramref name="values"/>.</summary>
+    public static void Refill(Samples samples, int[] values) => samples.Values = values;
 }
 
 /// <summary>Reference identity and null tests on class instances.</summary>
@@ -189,6 +306,32 @@ public static class Objects
     {
         stored1.Next = next;
         held1.Next = next;
+    }
+
+    /// <summary>Copies the tag of <paramref name="source"/> into <paramref name="target"/>, which may be it.</summary>
+    public static void CopyTag(Tagged target, Tagged source) => target.Tag = source.Tag;
+
+    /// <summary>Whether two instances hold the same tag reference, or both hold none.</summary>
+    public static bool SameTag(Tagged left, Tagged right) => (object?)left.Tag == (object?)right.Tag;
+
+    /// <summary>Whether the instance holds a tag.</summary>
+    public static bool HasTag(Tagged item) => item.Tag is not null;
+
+    /// <summary>Gives <paramref name="target"/> the tag of <paramref name="source"/> when it holds none.</summary>
+    public static void FillTag(Tagged target, Tagged source)
+    {
+        if (target.Tag is null) target.Tag = source.Tag;
+    }
+
+    /// <summary>Removes the instance's tag.</summary>
+    public static void ClearTag(Tagged item) => item.Tag = null;
+
+    /// <summary>Unlinks the node after <paramref name="node"/> and returns it, or null at the end.</summary>
+    public static Node? Detach(Node node)
+    {
+        var next = node.Next;
+        node.Next = null;
+        return next;
     }
 
     /// <summary>Bumps two accounts through <see cref="Bump"/>; both may be the same instance.</summary>

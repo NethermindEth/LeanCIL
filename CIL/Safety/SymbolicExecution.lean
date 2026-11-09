@@ -357,14 +357,16 @@ macro "cil_checked_memory_by_equations " "[" facts:term,* "]" : tactic =>
 /-- Closes a frame-entry or return premise (checked argument or result values, the entered
     frame) by `rfl`, by `simp` with `facts`, or by also unfolding the checked-value definitions
     that `cil_checked_step_by_equations` unfolds. Facts alone come first, so a supplied
-    `checkedValue` result is used before its definition is unfolded past it. -/
+    `checkedValue` result is used before its definition is unfolded past it. A returned object
+    the frame does not own forms as it did before the frame is left. -/
 macro "cil_checked_side " "[" facts:term,* "]" : tactic =>
   `(tactic| first
     | rfl
     | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)
     | (simp [cil_checked, CIL.Safety.checkedValue, CIL.Safety.numericValue,
-         CIL.Safety.formValue, CIL.Safety.checkedAt, Except.mapError, Bind.bind, Except.bind,
-         Pure.pure, Except.pure, $[$facts:term],*] <;> (repeat constructor) <;> rfl))
+         CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.formObject_leaveFrame,
+         Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure, $[$facts:term],*] <;>
+         (repeat constructor) <;> rfl))
 
 /-- Closes a checked `step` goal for an op with no `@[cil_step]` equation by unfolding
     `CIL.Safety.step` and `CIL.step` with `facts`, unfolding the return checks only if needed. -/
@@ -782,19 +784,8 @@ elab_rules : tactic
       catch _ => saved.restore
     throwError "No child invocation evidence matches the requested fuel and state"
 
-/-- Takes a fetched call through `run_call_of_invoke`, given the lookups, stepping both the
-    callee and the caller's continuation to completion. -/
-macro "cil_checked_call_at " methodFound:term:max instructionFound:term:max
-    "[" facts:term,* "]" : tactic =>
-  `(tactic| cil_strict refine CIL.Safety.run_call_of_invoke $methodFound $instructionFound
-    (by cil_checked_step_normalized [$[$facts:term],*])
-    (by first | cil_checked_child [$[$facts:term],*]
-              | (cil_checked_steps_normalized [$[$facts:term],*]; done))
-    -- The continuation starts on `returned ++ rest`, which per-shape equations cannot match.
-    (by cil_stack_cleanup; cil_checked_steps_normalized [$[$facts:term],*]; done))
-
-/-- `cil_checked_call_at`, except that only the callee runs to its return; the caller's
-    continuation stays open as the goal. -/
+/-- Takes a fetched call through `run_call_of_invoke`, given the lookups: the callee runs to its
+    return, and the caller's continuation, on the returned values, stays open as the goal. -/
 macro "cil_checked_call_open_at " methodFound:term:max instructionFound:term:max
     "[" facts:term,* "]" : tactic =>
   `(tactic| (
@@ -856,13 +847,14 @@ elab_rules : tactic
 
 /-- Whether an opcode steps to a call action: `call`, or `callvirt` with a non-null receiver. -/
 def callsCallee (operation : Lean.Name) : Bool :=
-  operation == ``CIL.Op.call || operation == ``CIL.Op.callInstance
+  operation == ``CIL.Op.call || operation == ``CIL.Op.callInstance ||
+    operation == ``CIL.Op.callVirtual
 
 open Lean Elab Tactic Meta in
 /-- One `run` step: prove the method and instruction lookups once, then apply only the
-    composition lemma for the fetched opcode. With `openCall`, a call leaves the caller's
+    composition lemma for the fetched opcode. A call proves its callee and leaves the caller's
     continuation as the goal. Toward a stated fault, a step that raises it ends the run. -/
-def cilRunStep (facts : Array Term) (openCall : Bool) : TacticM Unit := withMainContext do
+def cilRunStep (facts : Array Term) : TacticM Unit := withMainContext do
   -- `run_fault` can close only at the pc the stated fault names; elsewhere it only costs.
   let target := (← instantiateMVars (← getMainTarget)).consumeMData
   let faulting ← match target.eq? with
@@ -880,14 +872,14 @@ def cilRunStep (facts : Array Term) (openCall : Bool) : TacticM Unit := withMain
     cilFetchedOp ``CIL.Safety.run_next (fun e => e.eq?.map (·.2.1)) 3 facts
   -- An object construction runs its constructor as a call before continuing in the caller.
   let constructs := operation == ``CIL.Op.newObject
-  -- These fault before their callee runs: a short heap budget, or a null receiver.
-  let faultsFirst := constructs || operation == ``CIL.Op.callInstance
+  -- These fault before their callee runs: a short heap budget, a null receiver, or a receiver
+  -- whose class a dispatch table omits.
+  let faultsFirst := constructs || operation == ``CIL.Op.callInstance ||
+    operation == ``CIL.Op.callVirtual
   evalTactic (← if operation == ``CIL.Op.ret then
       `(tactic| cil_checked_return_at $methodSyntax $instructionSyntax [$facts,*])
     else if callsCallee operation || constructs then
-      let call ← if openCall then
-          `(tactic| cil_checked_call_open_at $methodSyntax $instructionSyntax [$facts,*])
-        else `(tactic| cil_checked_call_at $methodSyntax $instructionSyntax [$facts,*])
+      let call ← `(tactic| cil_checked_call_open_at $methodSyntax $instructionSyntax [$facts,*])
       if faulting && faultsFirst then
         `(tactic| first
           | cil_checked_fault_at $methodSyntax $instructionSyntax [$facts,*]
@@ -900,12 +892,12 @@ def cilRunStep (facts : Array Term) (openCall : Bool) : TacticM Unit := withMain
     else
       `(tactic| cil_checked_next_at $methodSyntax $instructionSyntax [$facts,*]))
 
-/-- One `run` step of the goal, chosen by the fetched opcode; at a call it also proves the
-    caller's whole continuation. -/
+/-- One `run` step of the goal, chosen by the fetched opcode; at a call it proves the callee and
+    leaves the caller's continuation. -/
 syntax "cil_checked_run_step" "[" term,* "]" : tactic
 
 elab_rules : tactic
-  | `(tactic| cil_checked_run_step [$facts:term,*]) => cilRunStep facts.getElems false
+  | `(tactic| cil_checked_run_step [$facts:term,*]) => cilRunStep facts.getElems
 
 macro_rules
   | `(tactic| cil_checked_steps_normalized [$facts:term,*]) =>
@@ -945,7 +937,7 @@ elab_rules : tactic
       for taken in [:count.getNat] do
         if (← getGoals).isEmpty then
           throwError "cil_checked_steps {count.getNat}: the goal closed after {taken} steps"
-        cilRunStep prepared true
+        cilRunStep prepared
       -- Fold the stepped pc (`2 + 1`) so the residual matches a target stated with a numeral.
       unless (← getGoals).isEmpty do
         evalTactic (← `(tactic| try (conv => lhs; arg 4; simp only [Nat.reduceAdd])))

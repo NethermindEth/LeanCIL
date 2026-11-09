@@ -98,4 +98,19 @@ theorem expireAll_slots (ids : List AllocationId) (m : Memory) :
 
 #print axioms expireAll_slots
 
+/-- Leaving a frame keeps every allocation it does not own, such as an object the method
+    created, which outlives the activation that allocated it. -/
+theorem leaveFrame_memoryAt (frame : Frame) (m : Memory) {id : AllocationId}
+    (notOwned : id ∉ frame.owned) : MemoryAt id m (leaveFrame frame m) := by
+  have retained := expireAll_retained_fields frame.owned m
+  refine ⟨?_, ?_, ?_, ?_⟩
+  · simp [leaveFrame, expireAll_allocations, notOwned]
+  · intro offset
+    simp only [leaveFrame, retained.1]
+  · intro offset writing
+    simp only [permitted, leaveFrame, retained.2.1]
+  · intro offset
+    simp only [leaveFrame, expireAll_slots]
+#print axioms leaveFrame_memoryAt
+
 end CIL.Safety

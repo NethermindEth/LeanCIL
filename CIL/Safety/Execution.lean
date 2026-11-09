@@ -298,6 +298,9 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
   | .brnonzero target, .object value :: rest =>
     let present ← objectNonNull m value
     return .next (if present then target else pc + 1) rest frame m
+  | .objectTest type throwing, .object value :: rest =>
+    let result ← objectTest m type throwing value
+    return .next (pc + 1) (.object result :: rest) frame m
   | .stackAlloc initLocals, [.scalar size] =>
     let bytes ← match size with
       | .i32 bits => pure bits.toNat
@@ -367,6 +370,14 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
       | .object (.address _) :: _ => return .call callee arguments (stack.drop argc) m
       | .object .null :: _ => .error (.thrown "System.NullReferenceException")
       | _ => .error .invalidState
+  | .callVirtual targets argc, _ =>
+    if stack.length < argc then .error .invalidState else
+      let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
+      match arguments with
+      | .object (.address receiver) :: _ =>
+        return .call (← virtualTarget m targets receiver) arguments (stack.drop argc) m
+      | .object .null :: _ => .error (.thrown "System.NullReferenceException")
+      | _ => .error .invalidState
   | .newVector256 callee argc, _ =>
     if stack.length < argc then .error .invalidState else
       let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
@@ -405,6 +416,9 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
   | .newArray element, .scalar length :: rest =>
     let (view, memory) ← newArray m element length
     return .next (pc + 1) (.array view :: rest) frame memory
+  | .newReferenceArray element, .scalar length :: rest =>
+    let (array, memory) ← newReferenceArray m element length
+    return .next (pc + 1) (.object (.address array) :: rest) frame memory
   | _, _ =>
     match pureArity op with
     | some argc =>

@@ -80,11 +80,12 @@ def observerCount : CIL.Op → Nat
   -- Arithmetic and comparisons
   | .nativeBinary _ | .divide .. | .checkedArithmetic .. => 2
   | .checkedConvert .. | .neg | .bnot | .convI1 | .convI2 | .convU2
-  | .convI8 | .convI4 | .convU1 | .convU4 | .convU8 | .convU | .stackAlloc _ | .newArray _ => 1
+  | .convI8 | .convI4 | .convU1 | .convU4 | .convU8 | .convU | .stackAlloc _ | .newArray _
+  | .newReferenceArray _ => 1
   | .add | .sub | .mul | .band | .bor | .bxor | .shl | .shr | .shrUn
   | .lt | .ltu | .gt | .gtu | .eq | .bgt _ | .ble _ | .bleu _
   | .bltu _ | .bgeu _ | .bgtu _ | .bge _ | .blt _ | .beq _ | .bne _ => 2
-  | .brzero _ | .brnonzero _ | .switch _ => 1
+  | .brzero _ | .brnonzero _ | .switch _ | .objectTest .. => 1
   -- Memory, fields and lanes
   | .loadAggregate _ | .loadScalar .. | .fieldAt .. | .fieldAddress _ | .aggregateFieldAt ..
   | .lane _ | .laneAddress _ | .load64 | .skipInit | .asRef | .initAggregate _ => 1
@@ -92,7 +93,8 @@ def observerCount : CIL.Op → Nat
   | .setLane _ | .store64 | .copyObject _ => 2
   -- Method boundaries
   | .ret _ => 1
-  | .call _ argc | .callInstance _ argc | .tailCall _ argc | .newVector256 _ argc
+  | .call _ argc | .callInstance _ argc | .callVirtual _ argc | .tailCall _ argc
+  | .newVector256 _ argc
   | .newAggregate _ argc _ | .newObject _ argc .. => argc
   | .managed (.call signature _ _) => signature.parameters.length + 1
   | .managed (.tableElement _) | .managed (.tableAddress _) | .managed .tableOffset => 2
@@ -894,8 +896,102 @@ def storeSlot (memory : Memory) (field : Reference) (value : ManagedReference) :
   let _ ← formObject memory value
   return setSlot memory field value
 
+/-- The array of class references `array` names: its origin, element class and length, one
+    element per slot. A null array throws `NullReferenceException`, as `ldlen`, `ldelem.ref` and
+    `stelem.ref` do; a reference to anything but such an array is an ill-typed state. -/
+def referenceArrayOf (memory : Memory) (array : ManagedReference) :
+    ExecutionResult (Reference × CIL.Extraction.TypeExpr × Nat) :=
+  match array with
+  | .null => .error (.thrown "System.NullReferenceException")
+  | .address address => do
+    let allocation ← checkedAt array 0 (liveAllocation memory address.allocation)
+    match allocation.kind with
+    | .object ⟨.array element, []⟩ =>
+      if address.offset = 0 then
+        .ok (address, element, allocation.layout.size / objectFieldSlot)
+      else .error .invalidState
+    | _ => .error .invalidState
+
+/-- The slot of element `index` of `array` and the array's element class. An index at or past
+    the length throws `IndexOutOfRangeException`, after the null check. -/
+def referenceArraySlot (memory : Memory) (array : ManagedReference) (index : Nat) :
+    ExecutionResult (Reference × CIL.Extraction.TypeExpr) := do
+  let (origin, element, length) ← referenceArrayOf memory array
+  if index < length then return (⟨origin.allocation, objectFieldSlot * index⟩, element)
+  else .error (.thrown "System.IndexOutOfRangeException")
+
+/-- The covariance check of `stelem.ref` storing `value` into an array of class `element`. Null
+    is always storable; an instance of an admitted class is storable exactly when `element` is in
+    its lineage, which lists every base up to `System.Object`, and otherwise the store throws
+    `ArrayTypeMismatchException`. Any other value is outside the model, never an exception. -/
+def storableIn (memory : Memory) (element : CIL.Extraction.TypeExpr) (value : ManagedReference) :
+    ExecutionResult Unit :=
+  match value with
+  | .null => .ok ()
+  | .address address => do
+    let allocation ← checkedAt value 0 (liveAllocation memory address.allocation)
+    match allocation.kind with
+    | .object type =>
+      match type.identity, element with
+      | .object .., .object .. =>
+        if element ∈ type.lineage then .ok ()
+        else .error (.thrown "System.ArrayTypeMismatchException")
+      | _, _ => .error (.unsupported "Array store outside the admitted classes")
+    | _ => .error .invalidState
+
+/-- The value array a value-array field holds, from the reference `held` in its slot: null, or
+    the whole live array of `element` starting at offset 0 of the allocation `held` names, its
+    length the allocation's size over the element width. A slot holding anything else is an
+    ill-typed state. -/
+def arrayOfSlot (memory : Memory) (held : ManagedReference) (element : CIL.ArrayElement) :
+    ExecutionResult Value :=
+  match held with
+  | .null => do
+    let view : ArrayView := ⟨.null, 0, element⟩
+    let _ ← checkedAt held 0 (view.validate memory)
+    return .array view
+  | .address address => do
+    let allocation ← checkedAt held 0 (liveAllocation memory address.allocation)
+    if allocation.kind = .managedHeap ∧ address.offset = 0 ∧ 0 < element.width ∧
+        allocation.layout.size % element.width = 0 then
+      let view : ArrayView := ⟨held, allocation.layout.size / element.width, element⟩
+      let _ ← checkedAt held 0 (view.validate memory)
+      return .array view
+    else .error .invalidState
+
+/-- Loads the value array the value-array field at `field` holds. -/
+def loadArraySlot (memory : Memory) (field : Reference) (element : CIL.ArrayElement) :
+    ExecutionResult Value := do
+  let _ ← checkedAt (.address field) objectFieldSlot
+    (access memory field objectFieldSlot ordinaryAccessAlignment false)
+  arrayOfSlot memory (memory.slots field.allocation field.offset) element
+
+/-- The reference a value-array field keeps for the array `view`: null for a null array, and
+    otherwise its origin, which must start a whole live array of `element`. A view of anything
+    else is an ill-typed state. -/
+def arraySlotValue (memory : Memory) (view : ArrayView) (element : CIL.ArrayElement) :
+    ExecutionResult ManagedReference :=
+  match view.reference with
+  | .null => .ok .null
+  | .address address => do
+    let allocation ← checkedAt view.reference 0 (liveAllocation memory address.allocation)
+    if allocation.kind = .managedHeap ∧ address.offset = 0 ∧ view.elementType = element ∧
+        view.length * element.width = allocation.layout.size then .ok (.address address)
+    else .error .invalidState
+
+/-- Stores the array `view` into the value-array field at `field`, whose slot must be writable;
+    the slot keeps the array's origin. -/
+def storeArraySlot (memory : Memory) (field : Reference) (view : ArrayView)
+    (element : CIL.ArrayElement) : ExecutionResult Memory := do
+  let _ ← checkedAt (.address field) objectFieldSlot
+    (access memory field objectFieldSlot ordinaryAccessAlignment true)
+  let held ← arraySlotValue memory view element
+  return setSlot memory field held
+
 /-- `ldfld` and `stfld` of a field of a class instance, at the field's model offset: a scalar
-    field moves bytes, a class-typed field moves the object reference its slot holds. -/
+    field moves bytes, a class-typed field moves the object reference its slot holds. `ldlen`,
+    `ldelem.ref` and `stelem.ref` reach the slots of an array of class references the same way,
+    checking the null array, then the index, then a stored value's class, as the CLR does. -/
 def objectFieldInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) := do
   match operation, stack with
@@ -917,7 +1013,77 @@ def objectFieldInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
   | .setObjectReferenceField owner offset, .object value :: .object reference :: rest =>
     let address ← objectFieldAddress memory reference owner offset
     return (← storeSlot memory address value, rest)
+  | .referenceArrayLength, .object array :: rest =>
+    let (_, _, length) ← referenceArrayOf memory array
+    return (memory, .scalar (.i64 (BitVec.ofNat 64 length)) :: rest)
+  | .referenceArrayLoad, .scalar index :: .object array :: rest =>
+    let some index := arrayIndex index | .error .invalidState
+    let (slot, _) ← referenceArraySlot memory array index
+    return (memory, (← loadSlot memory slot) :: rest)
+  | .referenceArrayStore, .object value :: .scalar index :: .object array :: rest =>
+    let some index := arrayIndex index | .error .invalidState
+    let (slot, element) ← referenceArraySlot memory array index
+    let _ ← storableIn memory element value
+    return (← storeSlot memory slot value, rest)
+  | .arrayField owner offset element, .object reference :: rest =>
+    let address ← objectFieldAddress memory reference owner offset
+    return (memory, (← loadArraySlot memory address element) :: rest)
+  | .setArrayField owner offset element, .array view :: .object reference :: rest =>
+    let address ← objectFieldAddress memory reference owner offset
+    return (← storeArraySlot memory address view element, rest)
   | _, _ => .error .invalidState
+
+/-- The object the caller bound to the literal `text`, which must be a live object. An unbound
+    text is unsupported rather than null, since a literal is never null. -/
+def literalObject (memory : Memory) (text : String) : ExecutionResult Value := do
+  let some reference := memory.literals.lookup text |
+    .error (.unsupported "String literal is not bound by the caller")
+  formObject memory (.address reference)
+
+/-- `ldstr text` pushes the literal's bound object and leaves memory unchanged. -/
+def stringLiteralInstruction (text : String) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  return (memory, (← literalObject memory text) :: stack)
+
+/-- `ArgumentNullException.ThrowIfNull(argument, paramName)`: a null argument throws
+    `ArgumentNullException` and any other object passes, as in .NET 10. The parameter name on top
+    of the stack is popped unread. Memory is unchanged. -/
+def throwIfNullInstruction (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) :=
+  match stack with
+  | .object _ :: .object .null :: _ => .error (.thrown "System.ArgumentNullException")
+  | .object _ :: .object (.address _) :: rest => .ok (memory, rest)
+  | _ => .error .invalidState
+
+/-- An `ArgumentOutOfRangeException` guard of a `width`-bit value against zero: throws when
+    `guard` holds of the value and otherwise pops it with the parameter name, which is never read.
+    Memory is unchanged. -/
+def zeroGuardInstruction (guard : ZeroGuard) (width : Nat) (signed : Bool)
+    (stack : List Value) (memory : Memory) : ExecutionResult (Memory × List Value) :=
+  match stack with
+  | .object _ :: .scalar value :: rest =>
+    match guardOperand width signed value with
+    | some number =>
+      match guard.throws number with
+      | true => .error (.thrown "System.ArgumentOutOfRangeException")
+      | false => .ok (memory, rest)
+    | none => .error .invalidState
+  | _ => .error .invalidState
+
+/-- An `ArgumentOutOfRangeException` guard comparing a `width`-bit value with the bound above it
+    on the stack: throws when `guard` holds and otherwise pops both with the parameter name, which
+    is never read. Memory is unchanged. -/
+def comparisonGuardInstruction (guard : ComparisonGuard) (width : Nat) (signed : Bool)
+    (stack : List Value) (memory : Memory) : ExecutionResult (Memory × List Value) :=
+  match stack with
+  | .object _ :: .scalar other :: .scalar value :: rest =>
+    match guardOperand width signed value, guardOperand width signed other with
+    | some number, some bound =>
+      match guard.throws number bound with
+      | true => .error (.thrown "System.ArgumentOutOfRangeException")
+      | false => .ok (memory, rest)
+    | _, _ => .error .invalidState
+  | _ => .error .invalidState
 
 /-- Runs a `.memory` operation on the stack (top first), giving the new memory and stack.
     Operands with unspecified bits are rejected first. The static-field and span-construction
@@ -945,8 +1111,15 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .arrayFill element counted => arrayFillInstruction element counted stack memory
   | .bigMul64 _ | .divRemOut _ => wideArithmeticInstruction operation stack memory
   | .objectField .. | .setObjectField ..
-  | .objectReferenceField .. | .setObjectReferenceField .. =>
+  | .objectReferenceField .. | .setObjectReferenceField ..
+  | .referenceArrayLength | .referenceArrayLoad | .referenceArrayStore
+  | .arrayField .. | .setArrayField .. =>
     objectFieldInstruction operation stack memory
+  | .stringLiteral text => stringLiteralInstruction text stack memory
+  | .throwIfNull => throwIfNullInstruction stack memory
+  | .zeroGuard guard width signed => zeroGuardInstruction guard width signed stack memory
+  | .comparisonGuard guard width signed =>
+    comparisonGuardInstruction guard width signed stack memory
   | _ => otherMemoryInstruction operation stack memory
 
 /-- Runs an op on the stack (top first) and memory: loads, stores, typed copies, aggregate

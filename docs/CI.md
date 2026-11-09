@@ -120,6 +120,8 @@ which needs no Lean, so every PR runs it:
   regression fixtures, which users cannot import or run. A user document therefore cites no
   `Tests/` path, `Tests.*` module or excerpt of one; it cites an example, states the API in a
   checked snippet, or links the maintainers document that describes the evidence.
+- The [suite table](VALIDATION.md#suites) lists each suite `scripts/Test.cs` accepts exactly
+  once, as registered in `scripts/VerificationSuites.cs` and `scripts/ExportVerificationSuites.cs`.
 
 Every fenced Lean block is elaborated unless its info string says why not:
 

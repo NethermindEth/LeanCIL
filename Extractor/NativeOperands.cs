@@ -68,7 +68,7 @@ internal static class NativeOperands
     }
 
     static StackType PrimitiveType(TypeReference type) => type is ByReferenceType or PointerType
-        ? Kind.Reference : ObjectTypes.Is(type) ? Kind.Object : Arrays.Of(type)?.Kind ??
+        ? Kind.Reference : ObjectTypes.Reference(type) || ReferenceArrays.Is(type) ? Kind.Object : Arrays.Of(type)?.Kind ??
         EnumTypes.Storage(type).MetadataType switch
     {
         MetadataType.IntPtr or MetadataType.UIntPtr => Kind.Native,
@@ -77,6 +77,11 @@ internal static class NativeOperands
             MetadataType.Int16 or MetadataType.UInt16 or MetadataType.Int32 or MetadataType.UInt32 => Kind.Word32,
         _ => Kind.Other
     };
+
+    // An object reference whose class is outside the model; it only ever reaches a field, a test or a comparison.
+    static bool OpaqueClassField(FieldReference field) =>
+        field.Resolve() is { IsStatic: false } && ObjectTypes.Is(field.DeclaringType) &&
+        ObjectTypes.Opaque(FieldType(field));
 
     static TypeReference FieldType(FieldReference field) => field.Resolve() is { IsStatic: true }
         ? field.FieldType : MetadataValidation.InstanceFieldOf(field).Type;
@@ -215,7 +220,13 @@ internal static class NativeOperands
             else if (code is Code.Call or Code.Callvirt or Code.Newobj)
             {
                 var callee = (MethodReference)instruction.Operand;
-                for (var index = 0; index < callee.Parameters.Count + (code != Code.Newobj && callee.HasThis ? 1 : 0); index++) Pop();
+                var arguments = new List<StackType>();
+                for (var index = 0; index < callee.Parameters.Count + (code != Code.Newobj && callee.HasThis ? 1 : 0); index++)
+                    arguments.Add(Pop());
+                // The model tests a class instance or null; a value array or any other operand is not one.
+                if (ArgumentGuards.IsNullGuard(callee) && arguments[1].Kind is not (Kind.Object or Kind.NullObject))
+                    throw new InvalidDataException(
+                        $"Unsupported ThrowIfNull argument that is not a class instance: {method.FullName}");
                 if (code == Code.Newobj || InitAccessors.Return(callee.ReturnType).MetadataType != MetadataType.Void)
                     stack.Add(code == Code.Newobj ? Type(callee.DeclaringType) : CallType(callee, profile));
             }
@@ -260,8 +271,10 @@ internal static class NativeOperands
                         Code.Ldloc or Code.Ldloc_S or Code.Ldloc_0 or Code.Ldloc_1 or Code.Ldloc_2 or Code.Ldloc_3 =>
                             Slot(method.Body.Variables[FeatureConstants.Local(instruction)].VariableType,
                                 FeatureConstants.Local(instruction)),
+                        Code.Ldfld when OpaqueClassField((FieldReference)instruction.Operand) => Kind.Object,
                         Code.Ldfld or Code.Ldsfld => Type(FieldType((FieldReference)instruction.Operand)),
-                        Code.Ldobj or Code.Ldelem_Any => Type((TypeReference)instruction.Operand),
+                        Code.Ldobj or Code.Ldelem_Any or Code.Castclass or Code.Isinst =>
+                            Type((TypeReference)instruction.Operand),
                         Code.Newarr => Type(new ArrayType((TypeReference)instruction.Operand)),
                         Code.Ldloca or Code.Ldloca_S =>
                             Type(new ByReferenceType(method.Body.Variables[
@@ -275,6 +288,9 @@ internal static class NativeOperands
                             Code.Conv_Ovf_I8_Un or Code.Conv_Ovf_U8 or Code.Conv_Ovf_U8_Un => Kind.Word64,
                         Code.Ldtoken => Kind.Other,
                         Code.Ldnull => Kind.NullObject,
+                        Code.Ldelem_Ref when popped[1].Kind is Kind.Object or Kind.NullObject => Kind.Object,
+                        // A folded throw's message is never a value; any other literal is a string object.
+                        Code.Ldstr => Throws.Analyze(method).Operands.Contains(instruction) ? Kind.Other : Kind.Object,
                         Code.Neg or Code.Not => popped[0],
                         // All remaining supported pushi encodings produce int32 (constants,
                         // narrow conversions, sizeof and narrow indirect loads).

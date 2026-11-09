@@ -29,7 +29,35 @@
 - `StaticValues` loads `Word256.Zero`, `One` and `MinValue`, fixed by implicit conversions in the static constructor, proves their limbs and stores them through an out parameter; `MaxValue`, writes and stores outside the static constructor are rejected.
 - `SeededHash` mixes a value with two `static readonly ulong` seeds drawn from `RandomNumberGenerator`; `OpaqueSeeds.lean` proves the hash for every seed pair and that a fixed seed is not the contract.
 - `SpanTables` indexes `ReadOnlySpan<uint>` and `ReadOnlySpan<ulong>` tables, reads a length and the first element, and faults with `System.IndexOutOfRangeException` out of range.
+- `ItemPool.Rent` reuses the head of an intrusive free list. `PoolRent.lean` proves that it
+  returns that head, advances the list past it, clears its link, decrements the idle count and
+  marks it rented, writing no other field, and under the class catalog premise leaves the live
+  count alone; with an empty list and room under the capacity it creates an item owned by the
+  pool, numbered with the next id and marked rented; an exhausted pool throws
+  `InvalidOperationException` and a null pool `NullReferenceException`. Its object sites agree
+  with the catalog, so the premise stated at entry holds after any invocation of the program.
+- `ItemPool.IsIdle` walks the free list through an object local. `PoolIdle.lean` takes the list
+  as a `Segment` to null visiting `nodes`, whose length is the loop's measure, and proves that
+  the method answers whether the item is one of `nodes`, for a null or any live item, and writes
+  nothing.
 - `NullReferences` tests `Unsafe.NullRef<T>` with `Unsafe.IsNullRef<T>`, faults on loads, stores and field accesses through it, and selects an optional `ref` argument that is either unset or bound, as optional outputs do.
+- `VirtualCalls` calls an abstract and a defaulted virtual method of `Animal` on any animal:
+  `AnimalLegs.lean` and `AnimalLoudness.lean` prove the override or inherited body the receiver's
+  runtime class selects, the null receiver's `NullReferenceException`, and that a class outside
+  the extraction faults rather than returning; `FreshDogLegs.lean` dispatches on a constructed
+  instance.
+- `ClassTests` tests and casts an animal: `DogTest.lean` proves `animal is Dog` for a `Dog`, a
+  `Bird` and null, and `DogCast.lean` proves that `(Dog)animal` returns a `Dog` and null unchanged
+  and throws `InvalidCastException` for a `Bird`.
+- `Strings` passes, stores and returns strings as opaque references (`StringValues.lean`,
+  `StringLabel.lean`). `StringLiterals.lean` proves two loads of one literal are one object, and
+  `StringDefault.lean` proves `label ?? "none"` returns the label or the bound `"none"` object;
+  both show an unbound literal stops as unsupported rather than loading null.
+- `Guards` calls the framework argument guards. `GuardCount.lean` proves `ThrowIfNegative` raises
+  `ArgumentOutOfRangeException` exactly for a negative count, `GuardIndex.lean` proves the unsigned
+  `ThrowIfGreaterThanOrEqual` compares as unsigned, and `GuardRequired.lean` proves `ThrowIfNull`
+  raises `ArgumentNullException` exactly for null. The `guards` test shows `GuardCount.lean`
+  fails once the guard becomes `ThrowIfNegativeOrZero`.
 
 Concrete example proofs establish their displayed inputs. Only explicitly universally quantified theorems claim arbitrary-input correctness. `CheckedAdd64`, `Choose` and `GenericIdentity` quantify caller memory and prove it unchanged. `Struct` quantifies well-formed caller memory and proves `MemoryBelow` preservation of the caller's storage. Other examples fix the caller memory to `CIL.Safety.Memory.empty` or to the 8-byte `callerMemory` the file defines; argument quantification alone does not imply arbitrary caller memory. The allocating generic instance wrapper retains a separate fixed-memory check in `GenericInstance.lean`.
 

@@ -141,6 +141,46 @@ theorem write_preserves_memory_below (m result : Memory) (r : Reference) (bytes 
       rw [writeViews_permitted]
       simp [permitted, viewContains, Ne.symm different]
 
+/-- Exact preservation of one allocation's metadata, bytes, authority and field references: what
+    an operation that touches other allocations, such as leaving a frame, keeps. -/
+structure MemoryAt (id : AllocationId) (before after : Memory) : Prop where
+  allocations : after.allocations id = before.allocations id
+  cells : ∀ offset, after.cells id offset = before.cells id offset
+  permissions : ∀ offset writing,
+    permitted after writing ⟨id, offset⟩ = permitted before writing ⟨id, offset⟩
+  slots : ∀ offset, after.slots id offset = before.slots id offset
+
+/-- Memory kept below a watermark is kept at each allocation under it. -/
+theorem MemoryBelow.atAllocation {watermark : Nat} {before after : Memory}
+    (preserved : MemoryBelow watermark before after) {id : AllocationId} (old : id < watermark) :
+    MemoryAt id before after :=
+  ⟨preserved.allocations id old, preserved.cells id old, preserved.permissions id old,
+    preserved.slots id old⟩
+
+theorem MemoryAt.trans {id : AllocationId} {first middle last : Memory}
+    (left : MemoryAt id first middle) (right : MemoryAt id middle last) : MemoryAt id first last :=
+  ⟨right.allocations.trans left.allocations,
+    fun offset => (right.cells offset).trans (left.cells offset),
+    fun offset writing => (right.permissions offset writing).trans (left.permissions offset writing),
+    fun offset => (right.slots offset).trans (left.slots offset)⟩
+
+/-- Access checks in a kept allocation agree. -/
+theorem MemoryAt.access {m result : Memory} {r : Reference}
+    (preserved : MemoryAt r.allocation m result) (width alignment : Nat) (writing : Bool) :
+    access result r width alignment writing = access m r width alignment writing := by
+  simp only [CIL.Safety.access, form, liveAllocation, preserved.allocations]
+  simp only [preserved.permissions]
+
+/-- Reads from a kept allocation agree. -/
+theorem MemoryAt.read {m result : Memory} {r : Reference}
+    (preserved : MemoryAt r.allocation m result) (width alignment : Nat) :
+    read result r width alignment = read m r width alignment := by
+  simp only [CIL.Safety.read, preserved.access, preserved.cells]
+
+#print axioms MemoryBelow.atAllocation
+#print axioms MemoryAt.trans
+#print axioms MemoryAt.access
+#print axioms MemoryAt.read
 #print axioms MemoryBelow.compose
 #print axioms MemoryBelow.read
 #print axioms allocate_preserves_memory_below

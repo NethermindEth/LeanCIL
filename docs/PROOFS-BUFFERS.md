@@ -192,7 +192,8 @@ functions of the loop's values, so an invariant over a `FrameState` states only 
 footprint, with each home remembered as its initializer and every other local as `none`.
 `LoopFrame.ofEntry`, `WritableHomes.entry` and `skip`, and `LocalSnapshots.entry` and `skip` are
 the lemmas it composes. `set_local` keeps the frame when a local without a byte home is assigned,
-as the span fold slices its span; it rejects a home and a remembered local.
+as the span fold slices its span and a list walk moves its object local to the next node; it
+rejects a home and a remembered local.
 
 Each lemma proves the frame after one step. `load` and `store` read and write a remembered local;
 `write` and `write_element` keep the frame across a write inside the footprint; `after_confined`
@@ -285,6 +286,10 @@ at the caller's memory: `(span.within wellFormed frame).head` reads a caller spa
 in frame memory, with `cil_span_apart` finding each entry's `SpanApart` in context, and
 `writable.add_int wellFormed formed` gives an `int` index's `Unsafe.Add` address for every frame.
 [CopyUntilZero](../Examples/Proofs/CopyUntilZero.lean) states only these.
+`Filled.element_writable` and `Writable.element_writable` give write authority over one element
+of a run, and `cil_loop_obligation [defs]` proves an element write's authority, index bound and
+footprint membership from the hypotheses with `defs` unfolded, failing at the write when they do
+not imply it.
 
 A caller buffer is written word by word through these lemmas of
 [BufferContents](../CIL/Safety/BufferContents.lean):

@@ -247,6 +247,38 @@ static partial class Documentation
         return (failures, references, blocks);
     }
 
+    /// <summary>The document whose suite table lists every name <c>scripts/Test.cs --suite</c> accepts.</summary>
+    internal const string SuiteDocument = "docs/VALIDATION.md";
+
+    /// <summary>The heading the suite table sits under, up to the next heading.</summary>
+    internal const string SuiteHeading = "## Suites";
+
+    /// <summary>
+    /// A failure for each registered suite the table under <see cref="SuiteHeading"/> omits, and for
+    /// each row that repeats a suite or names one the runner does not accept.
+    /// </summary>
+    internal static List<string> CheckSuiteTable(string root, DocumentPage page, IReadOnlyCollection<string> suites)
+    {
+        List<string> failures = [];
+        var heading = Array.FindIndex(page.Prose, line => line.Text.TrimEnd() == SuiteHeading);
+        var document = Relative(root, page.Path);
+        if (heading < 0)
+            return [$"{document}: no `{SuiteHeading}` table lists the suites `scripts/Test.cs` accepts"];
+        HashSet<string> listed = new(StringComparer.Ordinal);
+        foreach (var line in page.Prose.Skip(heading + 1).TakeWhile(line => !Patterns.Heading().IsMatch(line.Text)))
+        {
+            if (Patterns.SuiteRow().Match(line.Text) is not { Success: true } row) continue;
+            var name = row.Groups["name"].Value;
+            if (!listed.Add(name))
+                failures.Add($"{line.Document}:{line.Line}: suite `{name}` is listed twice");
+            else if (!suites.Contains(name))
+                failures.Add($"{line.Document}:{line.Line}: `{name}` is not a suite `scripts/Test.cs` accepts");
+        }
+        failures.AddRange(suites.Where(name => !listed.Contains(name))
+            .Select(name => $"{document}: suite `{name}` is missing from the `{SuiteHeading}` table"));
+        return failures;
+    }
+
     const string MarkerForms = "use none, `excerpt <path>`, `extracted` or `illustrative`";
 
     const string UnshippedReason =
@@ -688,6 +720,9 @@ static partial class Patterns
 
     [GeneratedRegex(@"^#{1,6}[ \t]+(?<text>.*?)[ \t#]*$")]
     internal static partial Regex Heading();
+
+    [GeneratedRegex(@"^\|\s*`(?<name>[^`]+)`\s*\|")]
+    internal static partial Regex SuiteRow();
 
     [GeneratedRegex(@"[^\w\- ]")]
     internal static partial Regex AnchorPunctuation();

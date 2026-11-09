@@ -35,6 +35,8 @@ theorem ManagedTarget.find?_relocate (f : Nat → Nat) (catalog : List ManagedTa
 def Op.relocate (f : Nat → Nat) : Op → Op
   | .call method argc => .call (f method) argc
   | .callInstance method argc => .callInstance (f method) argc
+  | .callVirtual targets argc =>
+    .callVirtual (targets.map fun (type, method) => (type, f method)) argc
   | .tailCall method argc => .tailCall (f method) argc
   | .newVector256 method argc => .newVector256 (f method) argc
   | .newAggregate method argc size => .newAggregate (f method) argc size
@@ -141,6 +143,29 @@ private theorem managedStep_relocate (f : Nat → Nat) (signature : CIL.ManagedS
 
 #print axioms managedStep_relocate
 
+/-- Relocating a dispatch table renames the selected body and keeps every fault. -/
+private theorem virtualTarget_relocate (f : Nat → Nat) (memory : Memory)
+    (targets : List (CIL.Extraction.TypeExpr × Nat)) (receiver : Reference) :
+    virtualTarget memory (targets.map fun (type, method) => (type, f method)) receiver =
+      (virtualTarget memory targets receiver).map f := by
+  have lookup (identity : CIL.Extraction.TypeExpr) :
+      (targets.map fun (type, method) => (type, f method)).lookup identity =
+        (targets.lookup identity).map f := by
+    induction targets with
+    | nil => rfl
+    | cons head tail ih =>
+      obtain ⟨type, method⟩ := head
+      simp only [List.map_cons, List.lookup_cons]
+      split <;> simp_all
+  unfold virtualTarget
+  cases runtimeTypeOf memory receiver with
+  | error => rfl
+  | ok type =>
+    simp only [Bind.bind, Except.bind, lookup]
+    cases targets.lookup type.identity <;> rfl
+
+#print axioms virtualTarget_relocate
+
 /-- A relocated instruction steps exactly as the original, entering the renamed method. -/
 theorem step_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Op) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m : Memory) :
@@ -167,6 +192,20 @@ theorem step_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Op) (pc : 
         split
         · rfl
         · exact managedStep_relocate f signature catalog tail pc frame stack m
+    case callVirtual targets argc =>
+      simp only [step, CIL.Op.relocate, observerCount, Bool.or_false, virtualTarget_relocate]
+      split
+      · rfl
+      split
+      · rfl
+      cases (stack.take argc).reverse.mapM (checkedValue m) with
+      | error => rfl
+      | ok arguments =>
+        simp only [Bind.bind, Except.bind]
+        split
+        · rename_i receiver _
+          cases virtualTarget m targets receiver <;> rfl
+        all_goals rfl
     all_goals
       unfold step
       simp only [CIL.Op.relocate, observerCount, Bool.or_false,

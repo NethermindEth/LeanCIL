@@ -143,6 +143,33 @@ theorem formObject_result_valid {m : Memory} {reference : ManagedReference} {val
   | null => exact True.intro
   | address r => exact formed
 
+/-- A type test leaves a valid object reference: its formed operand, or null. -/
+theorem objectTest_valid {m : Memory} {type : CIL.Extraction.TypeExpr} {throwing : Bool}
+    {reference result : ManagedReference}
+    (tested : objectTest m type throwing reference = .ok result) :
+    (Value.object result).Valid m := by
+  unfold objectTest at tested
+  cases formed : formObject m reference with
+  | error fault => simp [formed, Bind.bind, Except.bind] at tested
+  | ok value =>
+    simp only [formed, Bind.bind, Except.bind] at tested
+    cases reference with
+    | null => cases tested; exact True.intro
+    | address object =>
+      simp only at tested
+      cases typed : runtimeTypeOf m object with
+      | error fault => simp [typed] at tested
+      | ok runtime =>
+        simp only [typed] at tested
+        have valid := formObject_result_valid formed
+        rw [formObject_returns_input formed] at valid
+        split at tested
+        · cases tested; exact valid
+        · split at tested
+          · cases tested
+          · cases tested; exact True.intro
+#print axioms objectTest_valid
+
 /-- Object formation needs only the allocation table entry, which extension keeps. -/
 theorem formObject_preserved {m result : Memory} {reference : ManagedReference}
     (formed : formObject m reference = .ok (.object reference)) (wellFormed : m.WellFormed)
@@ -213,6 +240,85 @@ theorem loadSlot_valid {m : Memory} {field : Reference} {value : Value}
 #print axioms loadSlot_valid
 #print axioms storeSlot_ok
 #print axioms storeSlot_preserves_wellFormed
+
+/-- An array whose extent was checked in `memory` is a valid stack value there. -/
+theorem checkedArray_valid (view : ArrayView) (memory : Memory) (reference : ManagedReference)
+    (width : Nat) (done : Unit)
+    (formed : checkedAt reference width (view.validate memory) = .ok done) :
+    (Value.array view).Valid memory := by
+  cases done
+  exact checkedAt_ok formed
+
+/-- The array a value-array field holds was validated before it was pushed. -/
+theorem arrayOfSlot_valid {m : Memory} {held : ManagedReference} {element : CIL.ArrayElement}
+    {value : Value} (loaded : arrayOfSlot m held element = .ok value) : value.Valid m := by
+  unfold arrayOfSlot at loaded
+  repeat' first
+    | solve | cases loaded; apply checkedArray_valid; assumption
+    | cases loaded
+    | split at loaded
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at loaded
+
+/-- A loaded value-array field is a valid stack value. -/
+theorem loadArraySlot_valid {m : Memory} {field : Reference} {element : CIL.ArrayElement}
+    {value : Value} (loaded : loadArraySlot m field element = .ok value) : value.Valid m := by
+  unfold loadArraySlot at loaded
+  cases accessed : access m field objectFieldSlot ordinaryAccessAlignment false <;>
+    simp only [accessed, checkedAt, Except.mapError, Bind.bind, Except.bind] at loaded
+  · cases loaded
+  · exact arrayOfSlot_valid loaded
+
+/-- A non-null reference kept for an array names an allocation, so its identity was issued. -/
+theorem arraySlotValue_issued {m : Memory} {view : ArrayView} {element : CIL.ArrayElement}
+    {reference : Reference} (valued : arraySlotValue m view element = .ok (.address reference))
+    (wellFormed : m.WellFormed) : reference.allocation < m.nextIdentity := by
+  unfold arraySlotValue at valued
+  split at valued
+  · cases valued
+  · rename_i address _
+    cases found : m.allocations address.allocation with
+    | none =>
+      simp [liveAllocation, found, checkedAt, Except.mapError, Bind.bind, Except.bind] at valued
+    | some allocation =>
+      have issued := (wellFormed.allocations _ _ found).1
+      simp only [liveAllocation, found, checkedAt, Except.mapError, Bind.bind, Except.bind,
+        Pure.pure, Except.pure] at valued
+      repeat' first
+        | solve | cases valued; exact issued
+        | cases valued
+        | split at valued
+
+/-- A successful value-array field store checked the slot's write authority and the array, and
+    changed only that slot. -/
+theorem storeArraySlot_ok {m result : Memory} {field : Reference} {view : ArrayView}
+    {element : CIL.ArrayElement} (stored : storeArraySlot m field view element = .ok result) :
+    access m field objectFieldSlot ordinaryAccessAlignment true = .ok () ∧
+      ∃ held, arraySlotValue m view element = .ok held ∧ result = setSlot m field held := by
+  unfold storeArraySlot at stored
+  cases accessed : access m field objectFieldSlot ordinaryAccessAlignment true <;>
+    simp only [accessed, checkedAt, Except.mapError, Bind.bind, Except.bind] at stored
+  · cases stored
+  · cases valued : arraySlotValue m view element with
+    | error => simp only [valued] at stored; cases stored
+    | ok held =>
+      simp only [valued, Pure.pure, Except.pure, Except.ok.injEq] at stored
+      exact ⟨rfl, held, rfl, stored.symm⟩
+
+/-- A value-array field store keeps memory well formed: the kept reference names an allocation. -/
+theorem storeArraySlot_preserves_wellFormed {m result : Memory} {field : Reference}
+    {view : ArrayView} {element : CIL.ArrayElement} (hm : m.WellFormed)
+    (stored : storeArraySlot m field view element = .ok result) : result.WellFormed := by
+  obtain ⟨-, held, valued, rfl⟩ := storeArraySlot_ok stored
+  exact setSlot_preserves_wellFormed hm fun reference same => by
+    subst same
+    exact arraySlotValue_issued valued hm
+
+#print axioms checkedArray_valid
+#print axioms arrayOfSlot_valid
+#print axioms loadArraySlot_valid
+#print axioms arraySlotValue_issued
+#print axioms storeArraySlot_ok
+#print axioms storeArraySlot_preserves_wellFormed
 
 theorem formValue_result_valid (m : Memory) (r : ManagedReference) (value : Value)
     (h : formValue m r = .ok value) : value.Valid m := by
@@ -425,6 +531,8 @@ inductive InstructionEffect : Memory → Memory → Prop where
       InstructionEffect m result
   | slot {m result field value} (h : storeSlot m field value = .ok result) :
       InstructionEffect m result
+  | arraySlot {m result field view element}
+      (h : storeArraySlot m field view element = .ok result) : InstructionEffect m result
 
 theorem InstructionEffect.wellFormed {m result : Memory} (effect : InstructionEffect m result)
     (hm : m.WellFormed) : result.WellFormed := by
@@ -433,6 +541,7 @@ theorem InstructionEffect.wellFormed {m result : Memory} (effect : InstructionEf
   | write h => exact write_preserves_wellFormed _ _ _ _ _ hm h
   | snapshot h => exact writeSnapshot_preserves_wellFormed _ _ _ _ _ hm h
   | slot h => exact storeSlot_preserves_wellFormed hm h
+  | arraySlot h => exact storeArraySlot_preserves_wellFormed hm h
 
 theorem InstructionEffect.allocations {m result : Memory} (effect : InstructionEffect m result) :
     AllocationExtension m result := by
@@ -442,6 +551,9 @@ theorem InstructionEffect.allocations {m result : Memory} (effect : InstructionE
   | snapshot h => exact writeSnapshot_extends_allocations _ _ _ _ _ h
   | slot h =>
     obtain ⟨-, -, rfl⟩ := storeSlot_ok h
+    exact ⟨Nat.le_refl _, fun _ _ => rfl⟩
+  | arraySlot h =>
+    obtain ⟨-, -, -, rfl⟩ := storeArraySlot_ok h
     exact ⟨Nat.le_refl _, fun _ _ => rfl⟩
 
 theorem storeValue_effect (m result : Memory) (reference : ManagedReference) (value : CIL.Value)
@@ -588,6 +700,7 @@ macro "instruction_contract_close" : tactic => `(tactic| (
     | exact .write (checkedAt_ok (by assumption))
     | exact .snapshot (checkedAt_ok (by assumption))
     | exact .slot (by assumption)
+    | exact .arraySlot (by assumption)
     | apply storeValue_effect; assumption
     | exact spanFill_effect _ _ _ _ (checkedAt_ok (by assumption))
     | exact spanFillSnapshot_effect _ _ _ _ (checkedAt_ok (by assumption))
@@ -613,6 +726,7 @@ macro "instruction_contract_close" : tactic => `(tactic| (
             | apply formValue_result_valid; assumption
             | apply formValue_readOnly_valid; assumption
             | apply loadSlot_valid; assumption
+            | apply loadArraySlot_valid; assumption
             | split <;> first
                 | apply formValue_result_valid; assumption
                 | apply formValue_readOnly_valid; assumption
@@ -737,6 +851,58 @@ theorem objectFieldInstruction_contract (operation : CIL.MemoryOp)
     | cases executed
     | split at executed
 #print axioms objectFieldInstruction_contract
+
+/-- A string literal leaves memory unchanged and pushes a formed object reference. -/
+theorem stringLiteralInstruction_contract (text : String)
+    (stack values : List Value) (memory result : Memory)
+    (executed : stringLiteralInstruction text stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold stringLiteralInstruction literalObject at executed
+  cases bound : memory.literals.lookup text with
+  | none => simp only [bound, Bind.bind, Except.bind] at executed; cases executed
+  | some reference =>
+    cases formed : formObject memory (.address reference) with
+    | error fault => simp only [bound, formed, Bind.bind, Except.bind] at executed; cases executed
+    | ok value =>
+      simp only [bound, formed, Bind.bind, Except.bind, Pure.pure, Except.pure, Except.ok.injEq,
+        Prod.mk.injEq] at executed
+      obtain ⟨rfl, rfl⟩ := executed
+      exact InstructionContract.of_effect (.unchanged _)
+        (fun retained => ValuesValid.cons (formObject_result_valid formed) retained)
+#print axioms stringLiteralInstruction_contract
+
+/-- A null guard leaves memory unchanged and pops its argument and parameter name. -/
+theorem throwIfNullInstruction_contract (stack values : List Value) (memory result : Memory)
+    (executed : throwIfNullInstruction stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold throwIfNullInstruction at executed
+  split at executed
+  all_goals cases executed
+  exact InstructionContract.of_effect (.unchanged _) (fun retained => retained.tail.tail)
+#print axioms throwIfNullInstruction_contract
+
+/-- A zero guard leaves memory unchanged and pops its value and parameter name. -/
+theorem zeroGuardInstruction_contract (guard : ZeroGuard) (width : Nat) (signed : Bool)
+    (stack values : List Value) (memory result : Memory)
+    (executed : zeroGuardInstruction guard width signed stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold zeroGuardInstruction at executed
+  repeat' split at executed
+  all_goals cases executed
+  exact InstructionContract.of_effect (.unchanged _) (fun retained => retained.tail.tail)
+#print axioms zeroGuardInstruction_contract
+
+/-- A comparison guard leaves memory unchanged and pops its operands and parameter name. -/
+theorem comparisonGuardInstruction_contract (guard : ComparisonGuard) (width : Nat)
+    (signed : Bool) (stack values : List Value) (memory result : Memory)
+    (executed :
+      comparisonGuardInstruction guard width signed stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold comparisonGuardInstruction at executed
+  repeat' split at executed
+  all_goals cases executed
+  exact InstructionContract.of_effect (.unchanged _) (fun retained => retained.tail.tail.tail)
+#print axioms comparisonGuardInstruction_contract
 
 set_option maxHeartbeats 800000 in
 /-- The remaining memory operations preserve their checked effects and stack validity. -/
@@ -920,6 +1086,15 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
     · exact objectFieldInstruction_contract _ _ _ _ _ h
     · exact objectFieldInstruction_contract _ _ _ _ _ h
     · exact objectFieldInstruction_contract _ _ _ _ _ h
+    · exact objectFieldInstruction_contract _ _ _ _ _ h
+    · exact objectFieldInstruction_contract _ _ _ _ _ h
+    · exact objectFieldInstruction_contract _ _ _ _ _ h
+    · exact objectFieldInstruction_contract _ _ _ _ _ h
+    · exact objectFieldInstruction_contract _ _ _ _ _ h
+    · exact stringLiteralInstruction_contract _ _ _ _ _ h
+    · exact throwIfNullInstruction_contract _ _ _ _ h
+    · exact zeroGuardInstruction_contract _ _ _ _ _ _ _ h
+    · exact comparisonGuardInstruction_contract _ _ _ _ _ _ _ h
     · exact otherMemoryInstruction_contract _ _ _ _ _ h
 
 set_option maxHeartbeats 800000 in

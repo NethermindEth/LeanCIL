@@ -380,6 +380,102 @@ theorem Memory.Renamed.objectFieldAddress {mapping : AllocationRenaming}
                all_goals first | exact .error _ | (simp only [origin] at moved; exact moved))
 #print axioms Memory.Renamed.objectFieldAddress
 
+/-- Locating an array of class references maps its origin and keeps its element class, its
+    length, and every check and fault. -/
+theorem Memory.Renamed.referenceArrayOf {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (array : ManagedReference)
+    (bound : array.Below mapping.sourceLimit) :
+    ResultRenamed mapping (fun left right => right = (mapping.reference left.1, left.2))
+      (CIL.Safety.referenceArrayOf source array)
+      (CIL.Safety.referenceArrayOf target (mapping.managedReference array)) := by
+  cases array with
+  | null => exact .error _
+  | address address =>
+    have found := related.liveAllocation address.allocation bound
+    simp only [CIL.Safety.referenceArrayOf, AllocationRenaming.managedReference,
+      AllocationRenaming.reference, checkedAt, Except.mapError, Bind.bind, Except.bind]
+    revert found
+    generalize CIL.Safety.liveAllocation source address.allocation = sourceFound
+    generalize CIL.Safety.liveAllocation target (mapping.image address.allocation) =
+      targetFound
+    intro found
+    cases found with
+    | error fault => exact .error (.memory fault (.address address) 0)
+    | @ok sourceDescriptor targetDescriptor descriptors =>
+      obtain ⟨kinds, layouts, -, -⟩ := descriptors
+      dsimp only
+      rw [← layouts]
+      revert kinds
+      generalize sourceDescriptor.kind = sourceKind
+      generalize targetDescriptor.kind = targetKind
+      intro kinds
+      cases kinds with
+      | frame => exact .error .invalidState
+      | same =>
+        split
+        · by_cases origin : address.offset = 0
+          · simp only [origin, ite_true]
+            exact .ok (by simp only [origin])
+          · simp only [origin, ite_false]
+            exact .error .invalidState
+        · exact .error .invalidState
+#print axioms Memory.Renamed.referenceArrayOf
+
+/-- Locating an element slot maps the array's allocation and keeps every check and fault. -/
+theorem Memory.Renamed.referenceArraySlot {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (array : ManagedReference)
+    (bound : array.Below mapping.sourceLimit) (index : Nat) :
+    ResultRenamed mapping (fun left right => right = (mapping.reference left.1, left.2))
+      (CIL.Safety.referenceArraySlot source array index)
+      (CIL.Safety.referenceArraySlot target (mapping.managedReference array) index) := by
+  unfold CIL.Safety.referenceArraySlot
+  apply (related.referenceArrayOf array bound).bind
+  intro left right same
+  subst same
+  by_cases inside : index < left.2.2 <;> simp only [inside, ite_true, ite_false]
+  · exact .ok rfl
+  · exact .error _
+#print axioms Memory.Renamed.referenceArraySlot
+
+/-- The covariance check gives the same answer for the mapped value: related allocations keep
+    their runtime type. -/
+theorem Memory.Renamed.storableIn {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (element : CIL.Extraction.TypeExpr)
+    (value : ManagedReference) (bound : value.Below mapping.sourceLimit) :
+    ResultRenamed mapping Eq (CIL.Safety.storableIn source element value)
+      (CIL.Safety.storableIn target element (mapping.managedReference value)) := by
+  cases value with
+  | null => exact .ok rfl
+  | address address =>
+    have found := related.liveAllocation address.allocation bound
+    simp only [CIL.Safety.storableIn, AllocationRenaming.managedReference,
+      AllocationRenaming.reference, checkedAt, Except.mapError, Bind.bind, Except.bind]
+    revert found
+    generalize CIL.Safety.liveAllocation source address.allocation = sourceFound
+    generalize CIL.Safety.liveAllocation target (mapping.image address.allocation) =
+      targetFound
+    intro found
+    cases found with
+    | error fault => exact .error (.memory fault (.address address) 0)
+    | @ok sourceDescriptor targetDescriptor descriptors =>
+      obtain ⟨kinds, -, -, -⟩ := descriptors
+      dsimp only
+      revert kinds
+      generalize sourceDescriptor.kind = sourceKind
+      generalize targetDescriptor.kind = targetKind
+      intro kinds
+      cases kinds with
+      | frame => exact .error .invalidState
+      | same =>
+        repeat first
+          | exact .ok rfl
+          | exact .error _
+          | split
+#print axioms Memory.Renamed.storableIn
+
 /-- Changing the mapped field to the mapped reference keeps the memories related. -/
 theorem Memory.Renamed.setSlot {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -443,6 +539,147 @@ theorem Memory.Renamed.storeSlot {mapping : AllocationRenaming}
   exact .ok (related.setSlot field bound value)
 #print axioms Memory.Renamed.storeSlot
 
+/-- The array a value-array field holds maps to the array of the mapped reference, with the
+    same length and the same faults. -/
+theorem Memory.Renamed.arrayOfSlot {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (held : ManagedReference)
+    (bound : held.Below mapping.sourceLimit) (element : CIL.ArrayElement) :
+    ResultRenamed mapping (fun left right => right = mapping.value left)
+      (CIL.Safety.arrayOfSlot source held element)
+      (CIL.Safety.arrayOfSlot target (mapping.managedReference held) element) := by
+  cases held with
+  | null =>
+    have validated : ArrayView.validate ⟨.null, 0, element⟩ target =
+        ArrayView.validate ⟨.null, 0, element⟩ source :=
+      related.arrayValidate ⟨.null, 0, element⟩ trivial
+    simp only [CIL.Safety.arrayOfSlot, AllocationRenaming.managedReference, validated]
+    generalize ArrayView.validate ⟨.null, 0, element⟩ source = checked
+    cases checked <;> simp only [checkedAt, Except.mapError, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
+    · exact .error _
+    · exact .ok rfl
+  | address address =>
+    have found := related.liveAllocation address.allocation bound
+    have validated := fun length =>
+      related.arrayValidate ⟨.address address, length, element⟩ bound
+    simp only [AllocationRenaming.arrayView, AllocationRenaming.managedReference,
+      AllocationRenaming.reference] at validated
+    simp only [CIL.Safety.arrayOfSlot, AllocationRenaming.managedReference,
+      AllocationRenaming.reference, checkedAt, Except.mapError, Bind.bind, Except.bind]
+    revert found
+    generalize CIL.Safety.liveAllocation source address.allocation = sourceFound
+    generalize CIL.Safety.liveAllocation target (mapping.image address.allocation) =
+      targetFound
+    intro found
+    cases found with
+    | error fault => exact .error (.memory fault (.address address) 0)
+    | @ok sourceDescriptor targetDescriptor descriptors =>
+      obtain ⟨kinds, layouts, -, -⟩ := descriptors
+      dsimp only
+      rw [← layouts]
+      revert kinds
+      generalize sourceDescriptor.kind = sourceKind
+      generalize targetDescriptor.kind = targetKind
+      intro kinds
+      cases kinds with
+      | frame => simp only [reduceCtorEq, false_and, ite_false]; exact .error .invalidState
+      | same =>
+        split
+        · rw [validated]
+          generalize ArrayView.validate _ source = checked
+          cases checked <;> simp only [Pure.pure, Except.pure]
+          · exact .error _
+          · exact .ok rfl
+        · exact .error .invalidState
+#print axioms Memory.Renamed.arrayOfSlot
+
+/-- Loading the mapped value-array field yields the mapped array, or the same fault. -/
+theorem Memory.Renamed.loadArraySlot {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (formed : source.WellFormed)
+    (field : Reference) (bound : field.allocation < mapping.sourceLimit)
+    (element : CIL.ArrayElement) :
+    ResultRenamed mapping (fun left right => right = mapping.value left)
+      (CIL.Safety.loadArraySlot source field element)
+      (CIL.Safety.loadArraySlot target (mapping.reference field) element) := by
+  unfold CIL.Safety.loadArraySlot
+  rw [related.access field bound]
+  have held : target.slots (mapping.reference field).allocation
+      (mapping.reference field).offset =
+      mapping.managedReference (source.slots field.allocation field.offset) :=
+    related.slots field.allocation bound field.offset
+  rw [held]
+  apply ((ResultEquivalent.eq_refl _).checkedAt (.address field) objectFieldSlot).bind
+  intro _ _ _
+  apply related.arrayOfSlot
+  cases stored : source.slots field.allocation field.offset with
+  | null => trivial
+  | address reference =>
+    rw [related.sourceLimit]
+    exact formed.slots _ _ _ stored
+#print axioms Memory.Renamed.loadArraySlot
+
+/-- The reference kept for the mapped array is the mapped reference, with the same faults. -/
+theorem Memory.Renamed.arraySlotValue {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (view : ArrayView)
+    (bound : view.reference.Below mapping.sourceLimit) (element : CIL.ArrayElement) :
+    ResultRenamed mapping (fun left right => right = mapping.managedReference left)
+      (CIL.Safety.arraySlotValue source view element)
+      (CIL.Safety.arraySlotValue target (mapping.arrayView view) element) := by
+  rcases view with ⟨held, length, elementType⟩
+  cases held with
+  | null => exact .ok rfl
+  | address address =>
+    have found := related.liveAllocation address.allocation bound
+    simp only [CIL.Safety.arraySlotValue, AllocationRenaming.arrayView,
+      AllocationRenaming.managedReference, AllocationRenaming.reference, checkedAt,
+      Except.mapError, Bind.bind, Except.bind]
+    revert found
+    generalize CIL.Safety.liveAllocation source address.allocation = sourceFound
+    generalize CIL.Safety.liveAllocation target (mapping.image address.allocation) =
+      targetFound
+    intro found
+    cases found with
+    | error fault => exact .error (.memory fault (.address address) 0)
+    | @ok sourceDescriptor targetDescriptor descriptors =>
+      obtain ⟨kinds, layouts, -, -⟩ := descriptors
+      dsimp only
+      rw [← layouts]
+      revert kinds
+      generalize sourceDescriptor.kind = sourceKind
+      generalize targetDescriptor.kind = targetKind
+      intro kinds
+      cases kinds with
+      | frame => simp only [reduceCtorEq, false_and, ite_false]; exact .error .invalidState
+      | same =>
+        split <;> rename_i checks <;> simp only [checks, ↓reduceIte]
+        · exact .ok (by simp only [checks])
+        · exact .error .invalidState
+#print axioms Memory.Renamed.arraySlotValue
+
+/-- Storing the mapped array into the mapped value-array field relates the memories, or faults
+    alike. -/
+theorem Memory.Renamed.storeArraySlot {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (field : Reference)
+    (bound : field.allocation < mapping.sourceLimit) (view : ArrayView)
+    (viewBound : view.reference.Below mapping.sourceLimit) (element : CIL.ArrayElement) :
+    ResultRenamed mapping (Memory.Renamed mapping scopes)
+      (CIL.Safety.storeArraySlot source field view element)
+      (CIL.Safety.storeArraySlot target (mapping.reference field) (mapping.arrayView view)
+        element) := by
+  unfold CIL.Safety.storeArraySlot
+  rw [related.access field bound]
+  apply ((ResultEquivalent.eq_refl _).checkedAt (.address field) objectFieldSlot).bind
+  intro _ _ _
+  apply (related.arraySlotValue view viewBound element).bind
+  intro left right same
+  subst same
+  exact .ok (related.setSlot field bound left)
+#print axioms Memory.Renamed.storeArraySlot
+
 /-- Object field loads and stores touch the mapped field and relate their memories. -/
 private theorem Memory.Renamed.objectFieldInstructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -480,12 +717,145 @@ private theorem Memory.Renamed.objectFieldInstructionResult {mapping : Allocatio
        intro first second same
        subst second
        exact .ok ⟨related, rfl⟩)
+    | (apply (related.referenceArrayOf _ (by assumption)).bind
+       intro first second same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply (related.referenceArraySlot _ (by assumption) _).bindWithSuccess
+       intro first second sourceStep same
+       have slotBound := referenceArraySlot_below (by assumption) sourceStep
+       subst second)
+    | (apply (related.storableIn _ _ (by assumption)).bind
+       intro first second same
+       subst second)
     | (apply (related.storeSlot _ (by assumption) _ (by assumption)).bind
+       intro first second memoryRelated
+       exact .ok ⟨memoryRelated, rfl⟩)
+    | (apply (related.loadArraySlot formed _ (by assumption) _).bind
+       intro first second same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply (related.storeArraySlot _ (by assumption) _ (by assumption) _).bind
        intro first second memoryRelated
        exact .ok ⟨memoryRelated, rfl⟩)
     | (split <;> try simp only [*, AllocationRenaming.managedReference, Bind.bind, Except.bind])
 #print axioms Memory.Renamed.objectFieldInstructionResult
 
+/-- Looking up a renamed literal table gives the renamed binding. -/
+theorem lookup_renamedLiterals (bindings : List (String × Reference))
+    (mapping : AllocationRenaming) (text : String) :
+    (bindings.map (fun binding => (binding.1, mapping.reference binding.2))).lookup text =
+      (bindings.lookup text).map mapping.reference := by
+  induction bindings with
+  | nil => rfl
+  | cons binding rest previous =>
+    simp only [List.map_cons, List.lookup]
+    split <;> simp_all
+#print axioms lookup_renamedLiterals
+
+/-- An observable formation of an address cannot fail. -/
+private theorem formObject_observable {memory : Memory} {reference : Reference}
+    (observable : SuccessOrThrow (formObject memory (.address reference))) :
+    ∃ value, formObject memory (.address reference) = .ok value := by
+  revert observable
+  simp only [formObject, checkedAt, Except.mapError, Bind.bind, Except.bind]
+  cases liveAllocation memory reference.allocation with
+  | error fault => intro observable; cases observable
+  | ok allocation =>
+    dsimp only
+    split
+    · split
+      · exact fun _ => ⟨_, rfl⟩
+      · intro observable; cases observable
+    · intro observable; cases observable
+#print axioms formObject_observable
+
+/-- A string literal loads the renamed binding of its text, formed alike. -/
+private theorem Memory.Renamed.stringLiteralInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (formed : source.WellFormed)
+    (text : String) (stack : List Value)
+    (observable : SuccessOrThrow (stringLiteralInstruction text stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (stringLiteralInstruction text stack source)
+      (stringLiteralInstruction text (stack.map mapping.value) target) := by
+  unfold stringLiteralInstruction literalObject at observable ⊢
+  rw [related.literals, lookup_renamedLiterals]
+  cases bound : source.literals.lookup text with
+  | none => simp only [bound] at observable; cases observable
+  | some reference =>
+    simp only [bound, Option.map_some] at observable ⊢
+    obtain ⟨value, sourceFormed⟩ := formObject_observable (SuccessOrThrow.bind_left observable)
+    have issued : reference.allocation < mapping.sourceLimit := by
+      rw [related.sourceLimit]
+      exact formObject_issued sourceFormed formed
+    apply (related.formObject (.address reference) issued).bind
+    intro first second same
+    subst second
+    exact .ok ⟨related, rfl⟩
+#print axioms Memory.Renamed.stringLiteralInstructionResult
+
+/-- Renaming keeps null and non-null objects apart, so a null guard decides alike. -/
+private theorem Memory.Renamed.throwIfNullInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (stack : List Value)
+    (observable : SuccessOrThrow (throwIfNullInstruction stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (throwIfNullInstruction stack source)
+      (throwIfNullInstruction (stack.map mapping.value) target) := by
+  unfold CIL.Safety.throwIfNullInstruction at observable ⊢
+  split at observable
+  all_goals try simp only [List.map, AllocationRenaming.value, AllocationRenaming.managedReference]
+  · exact .error _
+  · exact .ok ⟨related, rfl⟩
+  · cases observable
+#print axioms Memory.Renamed.throwIfNullInstructionResult
+
+/-- Renaming keeps scalars, so a zero guard decides alike. -/
+private theorem Memory.Renamed.zeroGuardInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (guard : ZeroGuard)
+    (width : Nat) (signed : Bool) (stack : List Value)
+    (observable : SuccessOrThrow (zeroGuardInstruction guard width signed stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (zeroGuardInstruction guard width signed stack source)
+      (zeroGuardInstruction guard width signed (stack.map mapping.value) target) := by
+  unfold CIL.Safety.zeroGuardInstruction at observable ⊢
+  split at observable
+  all_goals try simp only [List.map, AllocationRenaming.value]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨related, rfl⟩
+    | cases observable
+    | split
+#print axioms Memory.Renamed.zeroGuardInstructionResult
+
+/-- Renaming keeps scalars, so a comparison guard decides alike. -/
+private theorem Memory.Renamed.comparisonGuardInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (guard : ComparisonGuard)
+    (width : Nat) (signed : Bool) (stack : List Value)
+    (observable : SuccessOrThrow (comparisonGuardInstruction guard width signed stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (comparisonGuardInstruction guard width signed stack source)
+      (comparisonGuardInstruction guard width signed (stack.map mapping.value) target) := by
+  unfold CIL.Safety.comparisonGuardInstruction at observable ⊢
+  split at observable
+  all_goals try simp only [List.map, AllocationRenaming.value]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨related, rfl⟩
+    | cases observable
+    | split
+#print axioms Memory.Renamed.comparisonGuardInstructionResult
 /-- Ordinary memory effects transport independently of the whole-span dispatch families. -/
 private theorem Memory.Renamed.otherMemoryInstructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -835,6 +1205,15 @@ theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
     · exact related.objectFieldInstructionResult _ formed _ bounds observable
     · exact related.objectFieldInstructionResult _ formed _ bounds observable
     · exact related.objectFieldInstructionResult _ formed _ bounds observable
+    · exact related.objectFieldInstructionResult _ formed _ bounds observable
+    · exact related.objectFieldInstructionResult _ formed _ bounds observable
+    · exact related.objectFieldInstructionResult _ formed _ bounds observable
+    · exact related.objectFieldInstructionResult _ formed _ bounds observable
+    · exact related.objectFieldInstructionResult _ formed _ bounds observable
+    · exact related.stringLiteralInstructionResult formed _ _ observable
+    · exact related.throwIfNullInstructionResult _ observable
+    · exact related.zeroGuardInstructionResult _ _ _ _ observable
+    · exact related.comparisonGuardInstructionResult _ _ _ _ observable
     · exact related.otherMemoryInstructionResult _ formed _ bounds observable
 
 #print axioms Memory.Renamed.memoryInstructionResult

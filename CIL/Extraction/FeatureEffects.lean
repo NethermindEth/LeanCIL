@@ -37,9 +37,13 @@ private def memoryFeatureEffect : MemoryOp → Nat × Nat
   | .copyBlock _ | .initBlock _ => (3, 0)
   | .store128 | .store256 | .store512 => (2, 0)
   | .init256 | .skipInit => (1, 0)
-  | .staticAddress _ | .staticValue _ | .nullRef | .nullObject => (0, 1)
-  | .objectField .. | .objectReferenceField .. => (1, 1)
-  | .setObjectField .. | .setObjectReferenceField .. => (2, 0)
+  | .staticAddress _ | .staticValue _ | .nullRef | .nullObject | .stringLiteral _ => (0, 1)
+  | .objectField .. | .objectReferenceField .. | .referenceArrayLength | .arrayField .. => (1, 1)
+  | .setObjectField .. | .setObjectReferenceField .. | .setArrayField .. => (2, 0)
+  | .referenceArrayLoad => (2, 1)
+  | .referenceArrayStore => (3, 0)
+  | .throwIfNull | .zeroGuard .. => (2, 0)
+  | .comparisonGuard .. => (3, 0)
   | .add .. | .spanCreate | .spanItem _ => (2, 1)
   | .load128 | .load256 | .load512 | .asRef | .bitcast256 | .bitcastByteBool | .bitcastValue ..
   | .createSpan _ | .spanReference | .spanLength | .isNullRef => (1, 1)
@@ -54,14 +58,14 @@ def emittedFeatureEffect (op : Op) (returnsValue : Bool) : Option (Nat × Nat) :
   | .managed (.tableElement _) | .managed (.tableAddress _) | .managed .tableOffset => some (2, 1)
   | .managed (.call signature _ _) =>
     some (signature.parameters.length + 1, if signature.result == .void then 0 else 1)
-  | .stackAlloc _ | .newArray _ => some (1, 1)
+  | .stackAlloc _ | .newArray _ | .newReferenceArray _ => some (1, 1)
   -- Pushes and one-operand operations.
   | .nop => some (0, 0)
   | .const32 _ | .const64 _ | .arg .. | .vectorArg _ | .local .. | .vectorLocal _ => some (0, 1)
   | .neg | .bnot | .convI1 | .convI2 | .convU2 | .convI8 | .convI4 | .convU1
   | .convU4 | .convU8 | .convU | .checkedConvert ..
   | .loadAggregate _ | .loadScalar .. | .load64 | .fieldAt .. | .fieldAddress _
-  | .aggregateFieldAt .. | .lane _ | .laneAddress _ | .asRef => some (1, 1)
+  | .aggregateFieldAt .. | .lane _ | .laneAddress _ | .asRef | .objectTest .. => some (1, 1)
   -- Two-operand arithmetic and comparisons, plain or with a widened native operand.
   | .add | .sub | .mul | .band | .bor | .bxor | .shl | .shr | .shrUn
   | .lt | .ltu | .gt | .gtu | .eq | .divide .. | .checkedArithmetic .. => some (2, 1)
@@ -75,7 +79,7 @@ def emittedFeatureEffect (op : Op) (returnsValue : Bool) : Option (Nat × Nat) :
   | .initAggregate _ | .skipInit | .pop => some (1, 0)
   | .dup => some (1, 2)
   -- Calls, construction, intrinsics and memory operations.
-  | .call _ count | .callInstance _ count | .tailCall _ count =>
+  | .call _ count | .callInstance _ count | .callVirtual _ count | .tailCall _ count =>
     some (count, if returnsValue then 1 else 0)
   | .newAggregate _ count _ | .newVector256 _ count | .newObject _ count .. => some (count, 1)
   | .intrinsic _ count => some (count, 1)

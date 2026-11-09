@@ -4,6 +4,7 @@ import CIL.Extraction.UnsafeTransfers
 import CIL.Extraction.SpanCalls
 import CIL.Extraction.ViewObservations
 import CIL.Extraction.ObjectConstruction
+import CIL.Extraction.GuardCalls
 
 /-!
 # Scalar flow
@@ -45,6 +46,7 @@ def scalarType : TypeExpr → ScalarKind
       | .enumSpan identity writable _ => .enumSpan identity writable true
       | _ => .reference
   | .pointer _ => .reference
+  | .array (.object ..) => .object
   | .array element => match managedSignature element with
     | some signature => .methodTable signature
     | none => (arrayElementType element).map ScalarKind.array |>.getD .other
@@ -102,10 +104,10 @@ private def compareBranch (opcode : Nat) : Bool :=
 private def unsignedBranch (opcode : Nat) : Bool :=
   (51 <= opcode && opcode <= 55) || (64 <= opcode && opcode <= 68)
 
-/-- Raw array opcodes in the supported integer and element-address subset. -/
+/-- Raw array opcodes in the supported integer, element-address and class reference subset. -/
 private def arrayCovered (opcode : Nat) : Bool :=
   (142 ≤ opcode && opcode ≤ 151) ||
-    (155 ≤ opcode && opcode ≤ 159) || opcode ∈ [163, 164]
+    (155 ≤ opcode && opcode ≤ 159) || opcode ∈ [154, 162, 163, 164]
 
 /-- Null is a permitted array operand, but arbitrary opaque/reference values are not. -/
 private def arrayOperand : ScalarKind → Option (Option ArrayElement)
@@ -113,9 +115,27 @@ private def arrayOperand : ScalarKind → Option (Option ArrayElement)
   | .nullObject => some none
   | _ => none
 
+/-- `ldlen`, `ldelem.ref` and `stelem.ref` on an array of class references, which is an object;
+    a null array reaches the same operations, which throw for it. -/
+private def referenceArrayStep (instruction : RawInstruction) (stack : List ScalarKind) :
+    Option (MemoryOp × List ScalarKind) :=
+  if instruction.operand != .none then none else
+  match instruction.opcode, stack with
+  | 142, .object :: tail => some (.referenceArrayLength, .native :: tail)
+  | 154, index :: array :: tail =>
+    if index ∈ [.word32, .native] && array ∈ [.object, .nullObject] then
+      some (.referenceArrayLoad, .object :: tail)
+    else none
+  | 162, value :: index :: array :: tail =>
+    if value ∈ [.object, .nullObject] && index ∈ [.word32, .native] &&
+        array ∈ [.object, .nullObject] then some (.referenceArrayStore, tail)
+    else none
+  | _, _ => none
+
 /-- Exact array instruction and stack transition, including primitive tokens and element types. -/
 private def arrayStep (instruction : RawInstruction) (stack : List ScalarKind) :
     Option (MemoryOp × List ScalarKind) := do
+  if let some step := referenceArrayStep instruction stack then return step
   let opcode := instruction.opcode
   if opcode == 142 then
     let array :: tail := stack | none
@@ -168,10 +188,12 @@ private def arrayStep (instruction : RawInstruction) (stack : List ScalarKind) :
 
 /-- Array operations cannot be introduced through an unrelated stack-effect-only encoding. -/
 private def arrayEmission : Op → Bool
-  | .newArray _ => true
+  | .newArray _ | .newReferenceArray _ => true
   | .memory .arrayLength | .memory (.arrayLoad ..) | .memory (.arrayStore _)
   | .memory (.arrayAddress ..) => true
   | .memory (.arrayTransfer ..) => true
+  | .memory .referenceArrayLength | .memory .referenceArrayLoad
+  | .memory .referenceArrayStore => true
   | _ => false
 
 /-- The emitted array operation agrees exactly with its independently decoded raw opcode. -/
@@ -182,6 +204,8 @@ private def arrayMatches (instruction : RawInstruction) (stack : List ScalarKind
     | .type token, length :: _, .newArray element =>
       length ∈ [.word32, .native] && element.allocationSupported &&
         arrayElementType token == some element.metadata
+    | .type token@(.object ..), length :: _, .newReferenceArray element =>
+      length ∈ [.word32, .native] && token == element
     | _, _, _ => false
   else
   match arrayStep instruction stack, emitted with
@@ -193,6 +217,9 @@ private def arrayMatches (instruction : RawInstruction) (stack : List ScalarKind
     element == actual.metadata
   | some (.arrayTransfer element store, _), .memory (.arrayTransfer actual actualStore) =>
     element == actual.metadata && store == actualStore
+  | some (.referenceArrayLength, _), .memory .referenceArrayLength
+  | some (.referenceArrayLoad, _), .memory .referenceArrayLoad
+  | some (.referenceArrayStore, _), .memory .referenceArrayStore => true
   | _, _ => false
 /-- Opcodes whose emitted encoding the scalar check fixes: integer constants, arithmetic,
     shifts, `neg`, `not`, conversions and compare-branches. -/
@@ -391,13 +418,30 @@ private def objectFieldSite (instruction : RawInstruction) (emitted : Op) : Bool
     | _ => false) ||
   match emitted with
   | .memory (.objectField ..) | .memory (.setObjectField ..)
-  | .memory (.objectReferenceField ..) | .memory (.setObjectReferenceField ..) => true
+  | .memory (.objectReferenceField ..) | .memory (.setObjectReferenceField ..)
+  | .memory (.arrayField ..) | .memory (.setArrayField ..) => true
   | _ => false
+
+/-- A class instance field whose slot holds an object reference: one typed as an admitted class
+    or as an array of one, which is itself an object on the heap. -/
+private def referenceFieldType : TypeExpr → Bool
+  | .object _ _ | .array (.object _ _) => true
+  | _ => false
+
+/-- The element of a class instance field typed as an array of integers, Booleans, chars or
+    enums; arrays of structs and vectors need layouts the field token does not carry. -/
+private def valueArrayFieldElement (type : TypeExpr) : Option ArrayElement :=
+  match type with
+  | .array element => match arrayElementType element with
+    | some (.aggregate ..) | some (.vector ..) => none
+    | element => element
+  | _ => none
 
 /-- `ldfld` and `stfld` of a class instance field emit the checked field operation for that
     owner, at the field's model offset: with its width and extension for a scalar field, as a
-    reference slot for a class-typed one, whose stored value must be an object or null. `ldflda`
-    never does. -/
+    reference slot for a class-typed or class-array-typed one, whose stored value must be an
+    object or null, and as an array slot for a value-array-typed one, whose stored value must
+    be an array of that element. `ldflda` never does. -/
 private def objectFieldMatches (instruction : RawInstruction) (stack : List ScalarKind)
     (emitted : Op) : Bool :=
   match instruction.opcode, instruction.operand, stack, emitted with
@@ -409,17 +453,36 @@ private def objectFieldMatches (instruction : RawInstruction) (stack : List Scal
       .memory (.setObjectField owner offset width) =>
     receiver ∈ [.object, .nullObject] && owner == .object scope name &&
       offset == objectFieldOffset index && (objectFieldShape type).map (·.1) == some width
-  | 123, .field (.object scope name) index (.object _ _) false, receiver :: _,
+  | 123, .field (.object scope name) index type false, receiver :: _,
       .memory (.objectReferenceField owner offset) =>
-    receiver ∈ [.object, .nullObject] && owner == .object scope name &&
-      offset == objectFieldOffset index
-  | 125, .field (.object scope name) index (.object _ _) false, value :: receiver :: _,
-      .memory (.setObjectReferenceField owner offset) =>
-    value ∈ [.object, .nullObject] && receiver ∈ [.object, .nullObject] &&
+    referenceFieldType type && receiver ∈ [.object, .nullObject] &&
       owner == .object scope name && offset == objectFieldOffset index
+  | 125, .field (.object scope name) index type false, value :: receiver :: _,
+      .memory (.setObjectReferenceField owner offset) =>
+    referenceFieldType type && value ∈ [.object, .nullObject] &&
+      receiver ∈ [.object, .nullObject] && owner == .object scope name &&
+      offset == objectFieldOffset index
+  | 123, .field (.object scope name) index type false, receiver :: _,
+      .memory (.arrayField owner offset element) =>
+    valueArrayFieldElement type == some element && receiver ∈ [.object, .nullObject] &&
+      owner == .object scope name && offset == objectFieldOffset index
+  | 125, .field (.object scope name) index type false, value :: receiver :: _,
+      .memory (.setArrayField owner offset element) =>
+    valueArrayFieldElement type == some element && value == .array element &&
+      receiver ∈ [.object, .nullObject] && owner == .object scope name &&
+      offset == objectFieldOffset index
   | _, _, _, _ => false
 
-/-- Covered opcodes emit exactly their encoding. Elsewhere only a decided type test's word,
+/-- Only `ldstr` loads a literal, and only its own text; inside a folded throw it emits nothing. -/
+private def stringLiteralMatches (role : Option FoldRole) (instruction : RawInstruction)
+    (emitted : Op) : Bool :=
+  match instruction.opcode, instruction.operand, emitted with
+  | 114, .text _, .nop => role ∈ [some .head, some .interior]
+  | 114, .text text, .memory (.stringLiteral actual) => role == none && text == actual
+  | _, _, _ => false
+
+/-- Covered opcodes emit exactly their encoding, and a class type test only from `castclass`
+    (throwing) or `isinst` on an object. Elsewhere only a decided type test's word,
     a size constant or an exact runtime query may emit a scalar operation. -/
 def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
     (instruction : RawInstruction)
@@ -427,6 +490,12 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
   if let some (.typeBranch taken) := role then typeBranchMatches instruction taken emitted
   else if let some (.result value) := role then
     match emitted with | .const32 bits => bits == if value then 1 else 0 | _ => false
+  else if let .objectTest type throwing := emitted then
+    match instruction.operand, stack with
+    | .type target, value :: _ =>
+      instruction.opcode ∈ [116, 117] && throwing == (instruction.opcode == 116) &&
+        type == target && value ∈ [.object, .nullObject]
+    | _, _ => false
   else if (match instruction.operand with
     | .call site => referenceContentQuery site | _ => false) then
     match instruction.operand, emitted with
@@ -462,6 +531,9 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
     | _, _ => false
   else if let some helper := unsafeReferenceHelper instruction then helper.matches emitted
   else if arrayEmission emitted then arrayMatches instruction stack emitted
+  else if instruction.opcode == 114 ||
+      (match emitted with | .memory (.stringLiteral _) => true | _ => false) then
+    stringLiteralMatches role instruction emitted
   else if instruction.opcode == 20 && role ∈ [some .head, some .interior] then
     instruction.operand == .none && match emitted with | .nop => true | _ => false
   else if objectFieldSite instruction emitted then objectFieldMatches instruction stack emitted
@@ -749,6 +821,10 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
   if role matches some (.result _) then
     let _ :: _ :: tail := stack | none
     return .word32 :: tail
+  -- A literal outside a folded throw is an object; a folded throw's message is never a value.
+  if opcode == 114 && role == none then
+    let .text _ := instruction.operand | none
+    return .object :: stack
   if opcode == 65030 then
     let .call site := instruction.operand | none
     let signature : ManagedSignature :=
@@ -782,11 +858,19 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
         return .methodPointer signature :: rest
   if opcode == 141 then
     let .type token := instruction.operand | none
-    let element ← arrayElementType token
     let length :: tail := stack | none
     if length ∉ [.word32, .native] then none else
-      return .array element :: tail
+    -- An array of class references is itself an object reference.
+    if token matches .object .. then return .object :: tail else
+    let element ← arrayElementType token
+    return .array element :: tail
   if arrayCovered opcode then return (← arrayStep instruction stack).2
+  -- `castclass` and `isinst` of a class leave an object reference.
+  if opcode == 116 || opcode == 117 then
+    match instruction.operand, stack with
+    | .type (.object ..), value :: tail =>
+      if value ∈ [.object, .nullObject] then return .object :: tail
+    | _, _ => pure ()
   if opcode == 20 then
     if instruction.operand == .none then return .nullObject :: stack else none
   if opcode ∈ [44, 45, 57, 58] then
@@ -844,15 +928,21 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
         (if read then [] else [scalarType type]) ++ [.reference] else
       if unsafeReferenceHelper instruction == some .asRef then [.reference] else
       if objectConstructorCall instruction then [.object] else
+      if nullGuardCall instruction then [.object, .object] else
       if unsafePointerOffset instruction then [.word32, .reference] else
       if (opcode == 115 || opcode == 40) && (spanConstructor 115 site).isSome
       then [.word32, .reference] ++
         (if opcode == 40 then [scalarType (.byref site.declaringType)] else []) else
       site.parameterTypes.reverse.map scalarType ++
         (if opcode != 115 && site.hasThis then [receiverKind site.declaringType] else [])
-    let inputs := if opcode == 115 && role == some .interior then
+    -- A folded throw's literal or null message arguments are never values on the stack.
+    let folded := opcode == 115 && role == some .interior
+    let inputs := if folded then
         stack.map (fun kind => if kind == .nullObject then .other else kind)
       else stack
+    let expected := if folded then
+        expected.map (fun kind => if kind == .object then .other else kind)
+      else expected
     let pops := expected.length
     if !callParametersMatch site || pops > stack.length || !((inputs.take pops).zip expected).all (fun (value, home) =>
         value == home || (value == .nullObject &&

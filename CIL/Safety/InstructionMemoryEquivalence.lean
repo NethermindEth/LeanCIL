@@ -151,12 +151,33 @@ theorem Memory.Equivalent.objectFieldAddress {m n : Memory} (same : m.Equivalent
     simp only [CIL.Safety.objectFieldAddress, liveAllocation, same.allocations, same.add]
 #print axioms Memory.Equivalent.objectFieldAddress
 
+/-- Locating an array of class references reads only allocation metadata. -/
+theorem Memory.Equivalent.referenceArrayOf {m n : Memory} (same : m.Equivalent n)
+    (array : ManagedReference) :
+    CIL.Safety.referenceArrayOf m array = CIL.Safety.referenceArrayOf n array := by
+  cases array <;> simp only [CIL.Safety.referenceArrayOf, liveAllocation, same.allocations]
+#print axioms Memory.Equivalent.referenceArrayOf
+
+/-- Locating an element slot of an array of class references reads only allocation metadata. -/
+theorem Memory.Equivalent.referenceArraySlot {m n : Memory} (same : m.Equivalent n)
+    (array : ManagedReference) (index : Nat) :
+    CIL.Safety.referenceArraySlot m array index = CIL.Safety.referenceArraySlot n array index :=
+  by simp only [CIL.Safety.referenceArraySlot, same.referenceArrayOf]
+#print axioms Memory.Equivalent.referenceArraySlot
+
+/-- The covariance check reads only the stored object's runtime type. -/
+theorem Memory.Equivalent.storableIn {m n : Memory} (same : m.Equivalent n)
+    (element : CIL.Extraction.TypeExpr) (value : ManagedReference) :
+    CIL.Safety.storableIn m element value = CIL.Safety.storableIn n element value := by
+  cases value <;> simp only [CIL.Safety.storableIn, liveAllocation, same.allocations]
+#print axioms Memory.Equivalent.storableIn
+
 /-- Equivalent memories hold the same field references and stay equivalent after one changes. -/
 theorem Memory.Equivalent.setSlot {m n : Memory} (same : m.Equivalent n) (field : Reference)
     (value : ManagedReference) :
     (CIL.Safety.setSlot m field value).Equivalent (CIL.Safety.setSlot n field value) :=
   ⟨same.allocations, same.cells, same.permissions, same.nextIdentity, same.staticBindings,
-    same.stackLimit, same.heapBudget, by simp only [CIL.Safety.setSlot, same.slots]⟩
+    same.stackLimit, same.heapBudget, by simp only [CIL.Safety.setSlot, same.slots], same.literals⟩
 #print axioms Memory.Equivalent.setSlot
 
 /-- A field reference load reads the slot, authority and metadata equivalent memories share. -/
@@ -177,6 +198,38 @@ theorem Memory.Equivalent.storeSlot {m n : Memory} (same : m.Equivalent n) (fiel
   intro
   exact .ok (same.setSlot field value)
 #print axioms Memory.Equivalent.storeSlot
+
+/-- The array a value-array field holds reads only allocation metadata and the view's bounds. -/
+theorem Memory.Equivalent.arrayOfSlot {m n : Memory} (same : m.Equivalent n)
+    (held : ManagedReference) (element : CIL.ArrayElement) :
+    CIL.Safety.arrayOfSlot m held element = CIL.Safety.arrayOfSlot n held element := by
+  cases held <;> simp only [CIL.Safety.arrayOfSlot, liveAllocation, same.allocations,
+    same.arrayValidate]
+#print axioms Memory.Equivalent.arrayOfSlot
+
+/-- A value-array field load reads the slot, authority and metadata equivalent memories share. -/
+theorem Memory.Equivalent.loadArraySlot {m n : Memory} (same : m.Equivalent n)
+    (field : Reference) (element : CIL.ArrayElement) :
+    CIL.Safety.loadArraySlot m field element = CIL.Safety.loadArraySlot n field element := by
+  simp only [CIL.Safety.loadArraySlot, same.access, same.arrayOfSlot, same.slots]
+#print axioms Memory.Equivalent.loadArraySlot
+
+/-- A value-array field store makes the same checks and slot change in equivalent memories. -/
+theorem Memory.Equivalent.storeArraySlot {m n : Memory} (same : m.Equivalent n)
+    (field : Reference) (view : ArrayView) (element : CIL.ArrayElement) :
+    ResultEquivalent Memory.Equivalent (CIL.Safety.storeArraySlot m field view element)
+      (CIL.Safety.storeArraySlot n field view element) := by
+  have held : CIL.Safety.arraySlotValue m view element =
+      CIL.Safety.arraySlotValue n view element := by
+    unfold CIL.Safety.arraySlotValue
+    split <;> simp only [liveAllocation, same.allocations]
+  simp only [CIL.Safety.storeArraySlot, same.access, held]
+  apply ResultEquivalent.bind_same
+  intro
+  apply ResultEquivalent.bind_same
+  intro held
+  exact .ok (same.setSlot field held)
+#print axioms Memory.Equivalent.storeArraySlot
 
 /-- Non-fill memory operations preserve equivalent memories and identical values. -/
 private theorem Memory.Equivalent.otherMemoryInstruction {m n : Memory} (same : m.Equivalent n)
@@ -236,7 +289,8 @@ private theorem Memory.Equivalent.objectFieldInstruction {m n : Memory} (same : 
     ResultEquivalent MemoryFirstEquivalent (objectFieldInstruction operation stack m)
       (objectFieldInstruction operation stack n) := by
   unfold CIL.Safety.objectFieldInstruction
-  split <;> try simp only [same.objectFieldAddress, same.loadValue, same.loadSlot]
+  split <;> try simp only [same.objectFieldAddress, same.loadValue, same.loadSlot,
+    same.referenceArrayOf, same.referenceArraySlot, same.storableIn, same.loadArraySlot]
   all_goals repeat first
     | exact .error _
     | exact .ok ⟨same, rfl⟩
@@ -247,8 +301,56 @@ private theorem Memory.Equivalent.objectFieldInstruction {m n : Memory} (same : 
     | (apply ResultEquivalent.bind (same.storeSlot _ _)
        intro left right related
        exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind (same.storeArraySlot _ _ _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
     | split
 #print axioms Memory.Equivalent.objectFieldInstruction
+
+/-- A string literal loads the same bound object from equivalent memories. -/
+private theorem Memory.Equivalent.stringLiteralInstruction {m n : Memory} (same : m.Equivalent n)
+    (text : String) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (stringLiteralInstruction text stack m)
+      (stringLiteralInstruction text stack n) := by
+  unfold CIL.Safety.stringLiteralInstruction CIL.Safety.literalObject
+  rw [same.literals]
+  split
+  all_goals first
+    | exact .error _
+    | (rw [same.formObject]
+       apply ResultEquivalent.bind_same
+       intro
+       exact .ok ⟨same, rfl⟩)
+#print axioms Memory.Equivalent.stringLiteralInstruction
+
+/-- A null guard reads only the stack, so equivalent memories give the same outcome. -/
+private theorem Memory.Equivalent.throwIfNullInstruction {m n : Memory} (same : m.Equivalent n)
+    (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (throwIfNullInstruction stack m)
+      (throwIfNullInstruction stack n) := by
+  unfold CIL.Safety.throwIfNullInstruction
+  split
+  all_goals first | exact .error _ | exact .ok ⟨same, rfl⟩
+#print axioms Memory.Equivalent.throwIfNullInstruction
+
+/-- A zero guard reads only the stack, so equivalent memories give the same outcome. -/
+private theorem Memory.Equivalent.zeroGuardInstruction {m n : Memory} (same : m.Equivalent n)
+    (guard : ZeroGuard) (width : Nat) (signed : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (zeroGuardInstruction guard width signed stack m)
+      (zeroGuardInstruction guard width signed stack n) := by
+  unfold CIL.Safety.zeroGuardInstruction
+  repeat first | exact .error _ | exact .ok ⟨same, rfl⟩ | split
+#print axioms Memory.Equivalent.zeroGuardInstruction
+
+/-- A comparison guard reads only the stack, so equivalent memories give the same outcome. -/
+private theorem Memory.Equivalent.comparisonGuardInstruction {m n : Memory}
+    (same : m.Equivalent n) (guard : ComparisonGuard) (width : Nat) (signed : Bool)
+    (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (comparisonGuardInstruction guard width signed stack m)
+      (comparisonGuardInstruction guard width signed stack n) := by
+  unfold CIL.Safety.comparisonGuardInstruction
+  repeat first | exact .error _ | exact .ok ⟨same, rfl⟩ | split
+#print axioms Memory.Equivalent.comparisonGuardInstruction
 
 /-- Observations depend only on allocation metadata and preserve equivalent memories. -/
 theorem Memory.Equivalent.viewObservationInstruction {m n : Memory} (same : m.Equivalent n)
@@ -376,6 +478,15 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     · exact same.objectFieldInstruction _ _
     · exact same.objectFieldInstruction _ _
     · exact same.objectFieldInstruction _ _
+    · exact same.objectFieldInstruction _ _
+    · exact same.objectFieldInstruction _ _
+    · exact same.objectFieldInstruction _ _
+    · exact same.objectFieldInstruction _ _
+    · exact same.objectFieldInstruction _ _
+    · exact same.stringLiteralInstruction _ _
+    · exact same.throwIfNullInstruction _
+    · exact same.zeroGuardInstruction _ _ _ _
+    · exact same.comparisonGuardInstruction _ _ _ _
     · exact same.otherMemoryInstruction _ _
 
 theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)

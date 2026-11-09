@@ -70,4 +70,6 @@ internal static class Arithmetic
     public static int Unsupported(int x) => new double[x].Length;
     // Direct typeof reference comparison branches retain scoped type identity.
     public static ulong TypeCheck(ulong x) => ReferenceEquals(typeof(ulong), typeof(uint)) ? x : unchecked(x + 1);
+    public static ulong Distance(ulong x, ulong y) => x < y ? y - x : x - y;
+    public static int Larger(int x, int y) => x < y ? y : x;
 }

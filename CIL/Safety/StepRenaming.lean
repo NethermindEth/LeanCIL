@@ -21,6 +21,7 @@ private theorem fixedOperation (indices : LocalIndexMap) (operation : CIL.Op)
   all_goals exact False.elim (fixed rfl)
 #print axioms fixedOperation
 
+set_option maxHeartbeats 400000 in
 /-- Every observable checked instruction transports its frame and allocation correspondence. -/
 theorem stepTransport : StepTransport := by
   intro indices mapping scopes sourceBody targetBody operation pc arguments stack sourceFrame
@@ -47,6 +48,9 @@ theorem stepTransport : StepTransport := by
     cases operation <;> try cases family
     case newArray.refl element =>
       exact memories.stepNewArray frames sourceFormed targetFormed staticBounds
+        sourceBody targetBody element pc arguments stack bounds observable
+    case newReferenceArray.refl element =>
+      exact memories.stepNewReferenceArray frames sourceFormed targetFormed staticBounds
         sourceBody targetBody element pc arguments stack bounds observable
     case newObject.refl callee argc owner bases size =>
       exact memories.stepNewObject sourceFormed targetFormed staticBounds sourceBody targetBody

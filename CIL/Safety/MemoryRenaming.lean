@@ -29,11 +29,20 @@ structure Memory.Renamed (mapping : AllocationRenaming) (scopes : Nat → Nat �
   slots : ∀ identity, identity < mapping.sourceLimit → ∀ offset,
     target.slots (mapping.image identity) offset =
       mapping.managedReference (source.slots identity offset)
+  literals : target.literals = source.literals.map
+    (fun binding => (binding.1, mapping.reference binding.2))
+  /-- Literals name caller objects, so a later allocation never changes where one maps. -/
+  literalsIssued : ∀ binding ∈ source.literals, binding.2.allocation < mapping.sourceLimit
+
+/-- Every string literal the caller binds names an identity already issued. -/
+def Memory.LiteralsBounded (memory : Memory) : Prop :=
+  ∀ binding ∈ memory.literals, binding.2.allocation < memory.nextIdentity
 
 /-- Identical caller memory is related by the initial identity map. -/
-theorem Memory.Renamed.refl (memory : Memory) (scopes : Nat → Nat → Prop) :
+theorem Memory.Renamed.refl (memory : Memory) (scopes : Nat → Nat → Prop)
+    (literals : memory.LiteralsBounded) :
     Memory.Renamed (.identity memory.nextIdentity) scopes memory memory := by
-  refine ⟨rfl, rfl, ?_, fun _ _ _ => rfl, fun _ _ _ => rfl, ?_, rfl, rfl, ?_⟩
+  refine ⟨rfl, rfl, ?_, fun _ _ _ => rfl, fun _ _ _ => rfl, ?_, rfl, rfl, ?_, ?_, literals⟩
   · intro identity _
     change Option.Rel (Allocation.Related scopes) (memory.allocations identity)
       (memory.allocations identity)
@@ -45,6 +54,7 @@ theorem Memory.Renamed.refl (memory : Memory) (scopes : Nat → Nat → Prop) :
     cases held : memory.slots identity offset <;>
       simp [held, AllocationRenaming.managedReference, AllocationRenaming.reference,
         AllocationRenaming.identity]
+  · simp [AllocationRenaming.reference, AllocationRenaming.identity]
 #print axioms Memory.Renamed.refl
 
 /-- Reference formation preserves its result after mapping an allocated identity. -/
@@ -128,7 +138,8 @@ theorem Memory.Renamed.extendScopes {mapping : AllocationRenaming}
     (extension : ∀ left right, before left right → after left right) :
     Memory.Renamed mapping after source target := by
   refine ⟨related.sourceLimit, related.targetLimit, ?_, related.cells, related.permissions,
-    related.staticBindings, related.stackLimit, related.heapBudget, related.slots⟩
+    related.staticBindings, related.stackLimit, related.heapBudget, related.slots,
+    related.literals, related.literalsIssued⟩
   intro identity bound
   have lift : ∀ left right, Option.Rel (Allocation.Related before) left right →
       Option.Rel (Allocation.Related after) left right := by

@@ -139,7 +139,10 @@ The frame-entry and return premises (checked arguments, frame setup and checked 
 outcome and loop tactics share this closer, `cil_checked_side`. Pass only the facts a step needs,
 such as `form memory r = .ok r` or a `loadValue` result; these definitions, and the `cil_guard`
 names `observerCount`, `unspecifiedOperands`, `hasUnspecified` and `argumentCount`, need not be
-listed. A closed call steps its caller's continuation from the cleaned `returned ++ rest` stack.
+listed. At a call, including `callvirt` and the constructor call of `newobj`, the tactic proves the
+callee by stepping it or from an invocation fact in context, then keeps stepping the caller from
+the cleaned `returned ++ rest` stack; one `cil_checked_steps` crosses any number of calls, and
+`cil_checked_steps n` counts each call as one step.
 Over symbolic caller memory, frame setup of a method with numeric locals is not a closed term;
 `bind_entry ... allocating` supplies its setup equation and home facts instead (see [loop
 scaffolding](PROOFS-BINDING.md#generate-loop-entry-and-cutpoint-scaffolding)).
@@ -330,7 +333,10 @@ Its result is the `∃ fuel final, invoke ... = .ok (final, values) ∧ kept fin
 `invoke_loop_results`.
 [`invoke_loop_satisfies`](../CIL/Safety/LoopContract.lean) takes the same arguments for any
 postcondition on the final memory and results, so it closes a `CIL.Safety.Ensures` goal once its
-premises are introduced; the outlines `leancil new-proof` writes start from it.
+premises are introduced; the outlines `leancil new-proof` writes start from it. A later loop in
+sequence is entered with [`loop_terminates_then`](../CIL/Safety/LoopContract.lean): given that
+loop's configuration, invariant and measure, it leaves the path to that loop's first head, which may
+assume every invariant head of it terminates, and that loop's iteration.
 
 The tactics of [LoopFrameSteps](../CIL/Safety/LoopFrameSteps.lean), which
 `CIL.Safety.LoopScaffold` imports, walk these goals while keeping the loop's `LoopFrame` current:
@@ -347,7 +353,7 @@ The tactics of [LoopFrameSteps](../CIL/Safety/LoopFrameSteps.lean), which
   the `bind_call` site or, without `at site`, at the fetched call. It leaves the precondition,
   tagged `precondition.<callee>`, unless `trivial` or a hypothesis proves it, then continues: it
   names the returned memory, unfolds the contract, substitutes an output its postcondition states
-  as an equation, names the callee's `WellFormed` (`calledFormed`) and proves the frame at the
+  as an equation (unless `cil_loop_call keeping`, which keeps it as `output`), names the callee's `WellFormed` (`calledFormed`) and proves the frame at the
   returned memory (`calledFrame`, through `LoopFrame.after_confined`), and carries the
   caller-buffer facts across the call: write authority always, contents when `omega` shows them
   apart from the callee's footprint. It fails naming the pc and instruction when the goal is not at a call, the argument
@@ -359,9 +365,9 @@ The tactics of [LoopFrameSteps](../CIL/Safety/LoopFrameSteps.lean), which
   takes each struct zeroing, field store and numeric local store on the way through
   `LoopFrame.zero_aggregate`, `store_field` and `store`, naming the memory each produces, and
   applies `hypothesis` at the head state with loop values `values`, the reached memory and its
-  frame, through `LoopFrame.set_local` when a span or reference slot changed. The invariant and
-  the decrease are left as goals tagged `invariant` and `measure`; a state that is not the
-  head's at `values` fails, showing the reached state.
+  frame, through `LoopFrame.set_local` when a span, reference or object slot changed. The
+  invariant and the decrease are left as goals tagged `invariant` and `measure`; a state that is
+  not the head's at `values` fails, showing the reached state.
 
 #### Obligation tags
 
@@ -429,8 +435,8 @@ Each store names its memory, step and frame (`stored`, `storing`, `storedFrame`,
 the stored-over memory, or about the caller's, at the new one under the same name, so an
 invariant reads them at the memory it is stated at. All gather facts as the other loop tactics
 do, so the lists are optional.
-`loop_terminates_call_formed` gives the continuation `WellFormed` and the static world when a
-proof composes the call by hand. The [counted-loop
+`loop_terminates_call_formed` gives the continuation `WellFormed`, the static world and catalog
+agreement when a proof composes the call by hand. The [counted-loop
 proof](../Examples/Proofs/CountCalls.lean) never unfolds the helper or names its fuel; the loop
 suite reuses it unedited for a reimplemented helper and requires it to reject a discarded helper
 result and a broken count. On the correct build, a nondecreasing measure and an invariant that holds
@@ -512,7 +518,8 @@ postcondition, and from the method arguments only when the program reads one wit
 right side of each kept equation then extends it. A derived fact must be about variables reached
 without an equation. A fact about a memory that no state of the goal holds and no kept equation
 produces, such as the caller's memory once the frame has stored, is dropped; a frame fact at a
-memory that a kept store or call produces is kept. Derived facts are added as hygienic
+memory that a kept store or call produces is kept, and so are the caller facts that frame
+carries, such as a span's validity, so a span local loads after a word local's store. Derived facts are added as hygienic
 hypotheses, so the stepper looks them up by name instead of elaborating a proof term at every
 step, and a statement already gathered is not added again. `SpanSum` names no fact but its
 invariant equation.

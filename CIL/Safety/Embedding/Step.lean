@@ -384,6 +384,24 @@ theorem step_relabel_callInstance (callee argc : Nat) :
 
 #print axioms step_relabel_callInstance
 
+/-- A virtual call relocates no pc; its body is selected from memory, which relabeling keeps. -/
+theorem step_relabel_callVirtual (targets : List (CIL.Extraction.TypeExpr × Nat)) (argc : Nat) :
+    StepRelabel (.callVirtual targets argc) := by
+  plain_cases
+  by_cases short : stack.length < argc
+  · simp [short] at h
+  · simp only [short, ↓reduceIte] at h ⊢
+    obtain ⟨arguments, found, h⟩ := except_bind_ok h
+    simp only [found, ok_bind_eq]
+    split at h
+    · obtain ⟨callee, selected, h⟩ := except_bind_ok h
+      simp only [selected, ok_bind_eq]
+      cases h
+      rfl
+    all_goals cases h
+
+#print axioms step_relabel_callVirtual
+
 /-- A tail transfer has no continuation pc to relocate. -/
 theorem step_relabel_tailCall (callee argc : Nat) : StepRelabel (.tailCall callee argc) := by
   plain_cases
@@ -531,6 +549,20 @@ theorem step_relabel_brnonzero (target : Nat) : StepRelabel (.brnonzero target) 
 
 #print axioms step_relabel_brnonzero
 
+/-- A type test continues at the next pc with the tested reference or null. -/
+theorem step_relabel_objectTest (type : CIL.Extraction.TypeExpr) (throwing : Bool) :
+    StepRelabel (.objectTest type throwing) := by
+  stack_cases =>
+    first
+        | exact fallback_relabel (profile := expected.profile) _ rfl
+            (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
+            context.next h
+        | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+           cases h
+           simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+
+#print axioms step_relabel_objectTest
+
 /-- Relabel scalar or reference observations while preserving their result. -/
 theorem step_relabel_beq (target : Nat) : StepRelabel (.beq target) := by
   stack_cases =>
@@ -656,7 +688,7 @@ theorem step_relabel (op : CIL.Op) : StepRelabel op := by
       | cases h
       | (split at h <;> try simp only [*, Bool.false_eq_true, Bool.true_eq, ite_true, ite_false,
           Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
-  case stackAlloc | newArray =>
+  case stackAlloc | newArray | newReferenceArray =>
     stack_cases =>
       first
       | fallback_vacuous
@@ -685,6 +717,7 @@ theorem step_relabel (op : CIL.Op) : StepRelabel op := by
   case setLocal index narrow => exact step_relabel_setLocal index narrow
   case call method argc => exact step_relabel_call method argc
   case callInstance method argc => exact step_relabel_callInstance method argc
+  case callVirtual targets argc => exact step_relabel_callVirtual targets argc
   case tailCall method argc => exact step_relabel_tailCall method argc
   case newVector256 constructor argc => exact step_relabel_newVector256 constructor argc
   case newAggregate constructor argc size => exact step_relabel_newAggregate constructor argc size
@@ -705,6 +738,7 @@ theorem step_relabel (op : CIL.Op) : StepRelabel op := by
   case eq => exact step_relabel_eq
   case brzero target => exact step_relabel_brzero target
   case brnonzero target => exact step_relabel_brnonzero target
+  case objectTest type throwing => exact step_relabel_objectTest type throwing
   case beq target => exact step_relabel_beq target
   case bne target => exact step_relabel_bne target
   case nop | neg | gt | bgt | ble | convI1 | convI2 | convU2 | convI8 | convI4 | convU1
@@ -955,6 +989,17 @@ theorem step_raise_callInstance (callee argc : Nat) : StepRaise (.callInstance c
 
 #print axioms step_raise_callInstance
 
+/-- A null receiver raises the same exception at the relocated pc. -/
+theorem step_raise_callVirtual (targets : List (CIL.Extraction.TypeExpr × Nat)) (argc : Nat) :
+    StepRaise (.callVirtual targets argc) := by
+  plain_cases
+  by_cases short : stack.length < argc
+  · simp [short] at h
+  · simp only [short, ↓reduceIte] at h ⊢
+    raise_lockstep
+
+#print axioms step_raise_callVirtual
+
 /-- Tail-transfer faults retain their original location under pc relocation. -/
 theorem step_raise_tailCall (callee argc : Nat) : StepRaise (.tailCall callee argc) := by
   plain_cases
@@ -1063,6 +1108,17 @@ theorem step_raise_brnonzero (target : Nat) : StepRaise (.brnonzero target) := b
         | raise_lockstep
 
 #print axioms step_raise_brnonzero
+
+/-- A failed cast raises `InvalidCastException` at the same relabelled location. -/
+theorem step_raise_objectTest (type : CIL.Extraction.TypeExpr) (throwing : Bool) :
+    StepRaise (.objectTest type throwing) := by
+  stack_cases =>
+    first
+        | exact fallback_raise (profile := expected.profile) _ rfl
+            (fun absent => absurd rfl absent) (fun _ ran => ran) context.next h
+        | raise_lockstep
+
+#print axioms step_raise_objectTest
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
 theorem step_raise_beq (target : Nat) : StepRaise (.beq target) := by
@@ -1191,7 +1247,7 @@ theorem step_raise (op : CIL.Op) : StepRaise op := by
       | cases h
       | (split at h <;> try simp only [*, Bool.false_eq_true, Bool.true_eq, ite_true, ite_false,
           Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
-  case stackAlloc | newArray =>
+  case stackAlloc | newArray | newReferenceArray =>
     stack_cases =>
       first
         | fallback_raise_vacuous
@@ -1229,6 +1285,7 @@ theorem step_raise (op : CIL.Op) : StepRaise op := by
     · cases h
   case call callee argc => exact step_raise_call callee argc
   case callInstance callee argc => exact step_raise_callInstance callee argc
+  case callVirtual targets argc => exact step_raise_callVirtual targets argc
   case tailCall callee argc => exact step_raise_tailCall callee argc
   case newVector256 callee argc => exact step_raise_newVector256 callee argc
   case newAggregate callee argc size => exact step_raise_newAggregate callee argc size
@@ -1256,6 +1313,7 @@ theorem step_raise (op : CIL.Op) : StepRaise op := by
   case eq => exact step_raise_eq
   case brzero target => exact step_raise_brzero target
   case brnonzero target => exact step_raise_brnonzero target
+  case objectTest type throwing => exact step_raise_objectTest type throwing
   case beq target => exact step_raise_beq target
   case bne target => exact step_raise_bne target
   case nop | neg | gt | bgt | ble | convI1 | convI2 | convU2 | convI8 | convI4 | convU1

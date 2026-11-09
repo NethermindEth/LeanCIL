@@ -7,10 +7,12 @@
 
 using Mono.Cecil;
 using Mono.Cecil.Cil;
+using System.Text.RegularExpressions;
 
-// Class instances on the checked heap: proofs about identity, presence, scalar and class-typed fields,
-// instance receivers, calls framed across objects, construction against the heap budget and fields of base
-// classes, and the named rejection of every class shape or access the model does not represent.
+// Class instances on the checked heap: proofs about identity, presence, scalar, class-typed and opaque fields,
+// instance receivers, calls framed across objects, construction against the heap budget, fields of base
+// classes, arrays of class references and value-array fields, and the named rejection of every class shape or
+// access the model does not represent.
 using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Objects");
@@ -32,8 +34,24 @@ foreach (var (proof, entry) in new[]
     ("DepositTimes", "Objects::DepositTimes(Examples.Account,System.UInt64,System.UInt32)"),
     ("TwoMarkers", "Objects::TwoMarkers()"),
     ("LinkedNodes", "Objects::LinkedValue(Examples.Node,Examples.Node)"),
+    ("OpaqueTag", "Objects::CopyTag(Examples.Tagged,Examples.Tagged)"),
     ("BaseField", "Objects::IdOf(Examples.Shape)"),
-    ("DerivedObject", "Objects::Describe(System.UInt64,System.UInt64)")
+    ("DerivedObject", "Objects::Describe(System.UInt64,System.UInt64)"),
+    ("AnimalLegs", "VirtualCalls::LegsOf(Examples.Animal)"),
+    ("AnimalLoudness", "VirtualCalls::LoudnessOf(Examples.Animal)"),
+    ("FreshDogLegs", "VirtualCalls::DogLegs()"),
+    ("DogTest", "ClassTests::IsDog(Examples.Animal)"),
+    ("DogCast", "ClassTests::AsDog(Examples.Animal)"),
+    ("NodePair", "NodeArrays::Pair(Examples.Node,Examples.Node)"),
+    ("ArrayElement", "NodeArrays::At(Examples.Node[],System.Int32)"),
+    ("ArrayLength", "NodeArrays::Count(Examples.Node[])"),
+    ("ArrayCovariance", "NodeArrays::Put(Examples.Shape[],System.Int32,Examples.Shape)"),
+    ("BucketItems", "NodeArrays::First(Examples.Bucket)"),
+    ("BucketRefill", "NodeArrays::Refill(Examples.Bucket,Examples.Node[])"),
+    ("TagStore", "TagArrays::Put(System.String[],System.Int32,Examples.Tagged)"),
+    ("TagLoad", "TagArrays::Take(Examples.Tagged,System.String[],System.Int32)"),
+    ("SampleValues", "SampleArrays::ValuesOf(Examples.Samples)"),
+    ("SampleRefill", "SampleArrays::Refill(Examples.Samples,System.Int32[])")
 })
 {
     verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));
@@ -60,6 +78,44 @@ foreach (var (name, view, forged, marker) in new[]
     File.WriteAllText(path, linked.Replace(view, forged, StringComparison.Ordinal));
     forgedViews.Add(path, $"PASS forged field view rejected: {name}", marker);
 }
+// Lean re-resolves every dispatch table entry from the catalog and requires every concrete class
+// deriving from the slot's class, so a table that swaps bodies or omits a class fails its check.
+var dispatched = File.ReadAllText(Path.Combine(root, "AnimalLegs", "Extracted.lean"));
+const string animalScope = "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null";
+var birdEntry = $"(.object \"{animalScope}\" \"Examples.Bird\", ";
+var dogEntry = $"(.object \"{animalScope}\" \"Examples.Dog\", ";
+var table = Regex.Match(dispatched, @"\.callVirtual \[\(.*?\)\] 1").Value;
+var entries = Regex.Matches(table, @"(\(\.object [^)]*?, )(\d+)\)").Select(entry => entry.Groups).ToArray();
+if (entries.Length != 2 || !table.Contains(birdEntry + entries[0][2].Value, StringComparison.Ordinal) ||
+    !table.Contains(dogEntry + entries[1][2].Value, StringComparison.Ordinal))
+    throw new InvalidOperationException("The extraction does not list Bird and Dog in its dispatch table: " + table);
+foreach (var (name, forged) in new[]
+{
+    ("swapped", $".callVirtual [{birdEntry}{entries[1][2].Value}), {dogEntry}{entries[0][2].Value})] 1"),
+    ("omitted", $".callVirtual [{dogEntry}{entries[1][2].Value})] 1")
+})
+{
+    var path = Path.Combine(root, $"ForgedTable-{name}.lean");
+    File.WriteAllText(path, dispatched.Replace(table, forged, StringComparison.Ordinal));
+    forgedViews.Add(path, $"PASS forged dispatch table rejected: {name}",
+        "Extraction.ConstrainedCallsValid method0DispatchTypes");
+}
+// Lean binds a type test to its raw opcode and class, so an emitted test of another class or with
+// the other outcome for a failed cast fails the scalar flow check.
+var cast = File.ReadAllText(Path.Combine(root, "DogCast", "Extracted.lean"));
+var castTest = $".objectTest ({dogEntry.TrimStart('(').TrimEnd(',', ' ')}) true";
+if (!cast.Contains(castTest, StringComparison.Ordinal))
+    throw new InvalidOperationException("The extraction does not test the cast against Dog: " + castTest);
+foreach (var (name, forged) in new[]
+{
+    ("class", castTest.Replace("Examples.Dog", "Examples.Bird", StringComparison.Ordinal)),
+    ("outcome", castTest[..^" true".Length] + " false")
+})
+{
+    var path = Path.Combine(root, $"ForgedCast-{name}.lean");
+    File.WriteAllText(path, cast.Replace(castTest, forged, StringComparison.Ordinal));
+    forgedViews.Add(path, $"PASS forged type test rejected: {name}", "Extraction.ScalarFlowValid");
+}
 forgedViews.Check();
 
 // The entry's call proof simplifies with the constructor's closed body; without it the proof
@@ -77,7 +133,8 @@ Console.WriteLine("PASS construction call proof names the constructor");
 foreach (var mutation in new[]
 {
     "abstract", "base", "baseRejected", "explicit", "finalizer", "interface", "byref", "address", "reference",
-    "fieldType", "virtual", "virtualCall", "receiverAddress"
+    "fieldType", "receiverAddress", "opaqueRead", "elementAddress", "arrayAddress", "objectArray",
+    "interfaceArray", "objectArrayParameter", "structArrayField"
 })
 {
     var output = Path.Combine(root, "Reject-" + mutation);
@@ -89,6 +146,10 @@ foreach (var mutation in new[]
         var account = module.GetType("Examples.Account");
         var method = module.GetType("Examples.Objects").Methods.Single(candidate => candidate.Name == "IsNull");
         var getter = account.Methods.Single(candidate => candidate.Name == "get_Headroom");
+        var arrays = module.GetType("Examples.NodeArrays");
+        var tags = module.GetType("Examples.TagArrays");
+        var create = tags.Methods.Single(candidate => candidate.Name == "Create");
+        var allocation = create.Body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Newarr);
         var runtime = module.TypeSystem.Object.Scope;
         switch (mutation)
         {
@@ -126,10 +187,21 @@ foreach (var mutation in new[]
                 processor.Replace(method.Body.Instructions[3], processor.Create(OpCodes.Ldc_I4_0));
                 break;
             case "reference":
-                var owner = new FieldDefinition("Owner", FieldAttributes.Public, module.TypeSystem.String);
+                var owner = new FieldDefinition("Owner", FieldAttributes.Public,
+                    new OptionalModifierType(module.TypeSystem.Object, module.TypeSystem.String));
                 account.Fields.Add(owner);
                 method.Body.GetILProcessor().InsertAfter(method.Body.Instructions[0],
                     Instruction.Create(OpCodes.Ldfld, owner));
+                break;
+            case "opaqueRead":
+                var tagged = module.GetType("Examples.Objects").Methods.Single(candidate => candidate.Name == "HasTag");
+                var load = tagged.Body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Ldfld);
+                var reads = tagged.Body.GetILProcessor();
+                var length = new MethodReference("get_Length", module.TypeSystem.Int32, module.TypeSystem.String)
+                    { HasThis = true };
+                reads.InsertAfter(load, reads.Create(OpCodes.Pop));
+                reads.InsertAfter(load, reads.Create(OpCodes.Callvirt, length));
+                reads.InsertAfter(load, reads.Create(OpCodes.Dup));
                 break;
             case "fieldType":
                 var rate = new FieldDefinition("Rate", FieldAttributes.Public, module.TypeSystem.Double);
@@ -140,24 +212,38 @@ foreach (var mutation in new[]
                 editor.InsertAfter(first, editor.Create(OpCodes.Pop));
                 editor.InsertAfter(first, editor.Create(OpCodes.Ldfld, rate));
                 break;
-            case "virtual":
-                getter.IsVirtual = true;
-                getter.IsNewSlot = true;
-                break;
-            case "virtualCall":
-                getter.IsVirtual = true;
-                getter.IsNewSlot = true;
-                var start = method.Body.Instructions[0];
-                var calls = method.Body.GetILProcessor();
-                calls.InsertAfter(start, calls.Create(OpCodes.Ldarg_0));
-                calls.InsertAfter(start, calls.Create(OpCodes.Pop));
-                calls.InsertAfter(start, calls.Create(OpCodes.Callvirt, getter));
-                break;
             case "receiverAddress":
                 var body = getter.Body.GetILProcessor();
                 body.InsertBefore(getter.Body.Instructions[0], body.Create(OpCodes.Pop));
                 body.InsertBefore(getter.Body.Instructions[0],
                     body.Create(OpCodes.Ldarga_S, getter.Body.ThisParameter));
+                break;
+            case "elementAddress":
+                var at = arrays.Methods.Single(candidate => candidate.Name == "At");
+                var element = at.Body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Ldelem_Ref);
+                var elements = at.Body.GetILProcessor();
+                elements.InsertAfter(element, elements.Create(OpCodes.Ldind_Ref));
+                elements.Replace(element, elements.Create(OpCodes.Ldelema, module.GetType("Examples.Node")));
+                break;
+            // An object or interface array may hold an interface array at run time, whose covariance check
+            // the model cannot decide, so neither is an array of class references.
+            case "objectArray": allocation.Operand = module.TypeSystem.Object; break;
+            case "interfaceArray": allocation.Operand = module.GetType("Examples.ICounterValue"); break;
+            case "objectArrayParameter":
+                tags.Methods.Single(candidate => candidate.Name == "Put").Parameters[0].ParameterType =
+                    new ArrayType(module.TypeSystem.Object);
+                break;
+            // A struct element's width comes from a layout the field token does not carry.
+            case "structArrayField":
+                module.GetType("Examples.Samples").Fields.Single().FieldType =
+                    new ArrayType(module.GetType("Examples.AggregateArrays/Pair"));
+                break;
+            case "arrayAddress":
+                var count = arrays.Methods.Single(candidate => candidate.Name == "Count");
+                var argument = count.Body.Instructions[0];
+                var counter = count.Body.GetILProcessor();
+                counter.InsertAfter(argument, counter.Create(OpCodes.Ldind_Ref));
+                counter.Replace(argument, counter.Create(OpCodes.Ldarga_S, count.Parameters[0]));
                 break;
         }
         expected = mutation switch
@@ -173,13 +259,25 @@ foreach (var mutation in new[]
             "interface" => "Unsupported class instance type: Examples.ICounterValue\n  Interface-typed values",
             "byref" => "Unsupported by-reference class instance: Examples.Account&",
             "address" => "Unsupported field address on a class instance: System.UInt32 Examples.Account::Limit",
-            "reference" => "Unsupported reference-typed field: System.String Examples.Account::Owner\n" +
-                "  Only fields holding instances of admitted classes are modelled; System.String is not one.",
+            "reference" => "Unsupported reference-typed field: System.String modopt(System.Object) " +
+                "Examples.Account::Owner\n  Only fields holding class instances, arrays of classes or arrays of " +
+                "integers, Booleans, chars or enums are modelled",
+            "structArrayField" => "Unsupported reference-typed field: Examples.AggregateArrays/Pair[] " +
+                "Examples.Samples::Values\n" +
+                "  Only fields holding class instances, arrays of classes or arrays of integers, Booleans, chars " +
+                "or enums are modelled; Examples.AggregateArrays/Pair[] is another array",
+            "opaqueRead" => "callvirt requires an adjacent concrete constrained receiver",
+            "objectArray" => "Unsupported instruction: IL_0001: newarr System.Object",
+            "interfaceArray" => "Unsupported instruction: IL_0001: newarr Examples.ICounterValue",
+            "objectArrayParameter" => "Unsupported array shape or element type: System.Object[]",
             "fieldType" => "Unsupported class instance field type: System.Double Examples.Account::Rate",
-            "virtual" => "Unsupported virtual instance method\n  Dispatch on class instances",
-            "virtualCall" => "Unsupported virtual call: System.UInt64 Examples.Account::get_Headroom()",
             "receiverAddress" =>
                 "Unsupported address of a class instance receiver: System.UInt64 Examples.Account::get_Headroom()",
+            "elementAddress" =>
+                "Unsupported typed element access on an array of class references: ldelema Examples.Node",
+            "arrayAddress" =>
+                "Address of managed-reference or array-root argument is unsupported\n" +
+                "  Method: System.Int32 Examples.NodeArrays::Count(Examples.Node[])",
             _ => throw new InvalidOperationException("Unknown class rejection fixture: " + mutation)
         };
         module.Write(dll);
@@ -189,7 +287,13 @@ foreach (var mutation in new[]
         "abstract" => "Objects::Fresh(System.UInt32)",
         "interface" => "Objects::IsNull(Examples.ICounterValue)",
         "byref" => "Objects::IsNull(Examples.Account&)",
-        "virtual" or "receiverAddress" => "Account::get_Headroom()",
+        "receiverAddress" => "Account::get_Headroom()",
+        "opaqueRead" => "Objects::HasTag(Examples.Tagged)",
+        "objectArray" or "interfaceArray" => "TagArrays::Create(System.Int32)",
+        "objectArrayParameter" => "TagArrays::Put(System.Object[],System.Int32,Examples.Tagged)",
+        "elementAddress" => "NodeArrays::At(Examples.Node[],System.Int32)",
+        "arrayAddress" => "NodeArrays::Count(Examples.Node[])",
+        "structArrayField" => "SampleArrays::ValuesOf(Examples.Samples)",
         _ => "Objects::IsNull(Examples.Account)"
     };
     var result = Execute(["dotnet", ExtractorPath, "extract", dll, selector, output]);
@@ -198,6 +302,125 @@ foreach (var mutation in new[]
         throw new InvalidOperationException($"Incorrect class rejection: {mutation}\n{result.Output}");
     Console.WriteLine($"PASS class rejection: {mutation}");
 }
+// A dispatch table must cover every class whose instances can reach the call, with the body the runtime selects;
+// each hierarchy the extraction cannot close or resolve is rejected by name.
+foreach (var mutation in new[] { "librarySlot", "unadmittedSubclass", "newSlotHiding", "reabstraction", "explicit" })
+{
+    var output = Path.Combine(root, "RejectDispatch-" + mutation);
+    Directory.CreateDirectory(output);
+    var dll = Path.Combine(output, "Examples.dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        var animal = module.GetType("Examples.Animal");
+        var birdLegs = module.GetType("Examples.Bird").Methods.Single(candidate => candidate.Name == "Legs");
+        switch (mutation)
+        {
+            case "librarySlot":
+                var legsOf = module.GetType("Examples.VirtualCalls").Methods.Single(candidate =>
+                    candidate.Name == "LegsOf");
+                var editor = legsOf.Body.GetILProcessor();
+                var call = legsOf.Body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Callvirt);
+                editor.InsertAfter(call, editor.Create(OpCodes.Conv_U8));
+                editor.Replace(call, editor.Create(OpCodes.Callvirt,
+                    module.ImportReference(typeof(object).GetMethod("GetHashCode"))));
+                break;
+            case "unadmittedSubclass":
+                module.Types.Add(new TypeDefinition("Examples", "Fish",
+                    TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.ExplicitLayout, animal));
+                break;
+            case "newSlotHiding": birdLegs.IsNewSlot = true; break;
+            case "reabstraction":
+                birdLegs.IsAbstract = true;
+                birdLegs.Body = null;
+                break;
+            case "explicit":
+                module.GetType("Examples.Dog").Methods.Single(candidate => candidate.Name == "Legs").Overrides
+                    .Add(animal.Methods.Single(candidate => candidate.Name == "Legs"));
+                break;
+        }
+        module.Write(dll);
+    }
+    var expected = mutation switch
+    {
+        "librarySlot" => "Unsupported virtual call: System.Int32 System.Object::GetHashCode()\n" +
+            "  Caller: System.UInt64 Examples.VirtualCalls::LegsOf(Examples.Animal) at IL_0001\n" +
+            "  The slot is declared outside the extracted assemblies",
+        "unadmittedSubclass" => "Examples.Fish derives from Examples.Animal but is not an admitted class",
+        "newSlotHiding" => "System.UInt64 Examples.Bird::Legs() hides the slot with a new virtual method",
+        "reabstraction" => "System.UInt64 Examples.Bird::Legs() re-abstracts the slot for Examples.Bird.",
+        "explicit" => "System.UInt64 Examples.Dog::Legs() overrides by an explicit MethodImpl",
+        _ => throw new InvalidOperationException("Unknown dispatch rejection fixture: " + mutation)
+    };
+    if (mutation != "librarySlot")
+        expected = "Unsupported virtual call: System.UInt64 Examples.Animal::Legs()\n" +
+            "  Caller: System.UInt64 Examples.VirtualCalls::LegsOf(Examples.Animal) at IL_0001\n  " + expected;
+    var result = Execute(["dotnet", ExtractorPath, "extract", dll, "VirtualCalls::LegsOf(Examples.Animal)", output]);
+    if (result.Code != 1 || File.Exists(Path.Combine(output, "Extracted.lean")) ||
+        !result.Output.Replace("\r\n", "\n").Contains(expected, StringComparison.Ordinal))
+        throw new InvalidOperationException($"Incorrect dispatch rejection: {mutation}\n{result.Output}");
+    Console.WriteLine($"PASS dispatch rejection: {mutation}");
+}
+
+// An instance records only its own and its admitted base classes, so a type test against anything
+// else is rejected by name.
+foreach (var mutation in new[] { "interface", "root", "library", "unadmitted" })
+{
+    var output = Path.Combine(root, "RejectCast-" + mutation);
+    Directory.CreateDirectory(output);
+    var dll = Path.Combine(output, "Examples.dll");
+    string target;
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        var test = module.GetType("Examples.ClassTests").Methods.Single(candidate => candidate.Name == "AsDog")
+            .Body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Castclass);
+        TypeReference replaced;
+        switch (mutation)
+        {
+            case "interface": replaced = module.GetType("Examples.ICounterValue"); break;
+            case "root": replaced = module.TypeSystem.Object; break;
+            case "library": replaced = module.TypeSystem.String; break;
+            default:
+                var fish = new TypeDefinition("Examples", "Fish", TypeAttributes.Public | TypeAttributes.Sealed |
+                    TypeAttributes.ExplicitLayout, module.GetType("Examples.Animal"));
+                module.Types.Add(fish);
+                replaced = fish;
+                break;
+        }
+        test.Operand = replaced;
+        target = replaced.FullName;
+        module.Write(dll);
+    }
+    var expected = $"Unsupported type test: castclass {target}\n  " + mutation switch
+    {
+        "interface" => "Interface type tests need the interfaces an instance implements",
+        "root" => "Every instance is a System.Object, which the model does not record.",
+        "library" => "Only classes of the pinned assemblies are tested",
+        _ => "Unsupported class instance type: Examples.Fish\n    Explicit class layout"
+    };
+    var result = Execute(["dotnet", ExtractorPath, "extract", dll, "ClassTests::AsDog(Examples.Animal)", output]);
+    if (result.Code != 1 || File.Exists(Path.Combine(output, "Extracted.lean")) ||
+        !result.Output.Replace("\r\n", "\n").Contains(expected, StringComparison.Ordinal))
+        throw new InvalidOperationException($"Incorrect type test rejection: {mutation}\n{result.Output}");
+    Console.WriteLine($"PASS type test rejection: {mutation}");
+}
+
+// A virtual method's own body is an entry like any instance method: the theorem is about that body,
+// whichever call reaches it.
+var virtualOutput = Path.Combine(root, "VirtualBody");
+Directory.CreateDirectory(virtualOutput);
+var virtualDll = Path.Combine(virtualOutput, "Examples.dll");
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var getter = module.GetType("Examples.Account").Methods.Single(candidate => candidate.Name == "get_Headroom");
+    getter.IsVirtual = true;
+    getter.IsNewSlot = true;
+    module.Write(virtualDll);
+}
+verification.Verify(virtualDll, "Examples", "Account::get_Headroom()", At("Examples/Proofs/HeadroomReceiver.lean"),
+    Path.Combine(virtualOutput, "Proof"));
+Console.WriteLine("PASS virtual method body proved as an entry");
+
 Console.WriteLine("PASS objects: identity, presence, scalar and reference field, receiver, framed call " +
-    "construction and base class field proofs, " +
-    "and named rejection of unmodelled class shapes, field accesses and calls");
+    "construction, base class field, class reference array, value-array field, virtual dispatch and type " +
+    "test proofs, and named rejection of unmodelled class shapes, field and element accesses, calls, " +
+    "dispatch tables and type tests");

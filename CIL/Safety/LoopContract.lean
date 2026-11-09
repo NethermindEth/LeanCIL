@@ -50,8 +50,8 @@ theorem loop_terminates_call {Input Output : Type} {c : MethodContract Input Out
   run_call_of_contract holds input methodFound instructionFound stepped encoded permitted
     continuation
 
-/-- `loop_terminates_call` that also hands the continuation the callee's `WellFormed` and
-    static world. -/
+/-- `loop_terminates_call` that also hands the continuation the callee's `WellFormed`, static
+    world and catalog agreement. -/
 theorem loop_terminates_call_formed {Input Output : Type} {c : MethodContract Input Output}
     {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
@@ -66,6 +66,7 @@ theorem loop_terminates_call_formed {Input Output : Type} {c : MethodContract In
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
       final.WellFormed →
       StaticWorldPreserved program memory final →
+      ClassesPreserved program memory final →
       Confined (c.footprint input) updated final → c.Returns input updated final values →
       LoopTerminates program method args post ⟨pc + 1, frame, values ++ rest, final⟩) :
     LoopTerminates program method args post ⟨pc, frame, stack, memory⟩ :=
@@ -127,6 +128,25 @@ theorem invoke_loop_satisfies {α : Type} {program : CIL.Program} {method : Nat}
       progress)
   exact ⟨fuel, final, values, invoke_of_run found checked setup executed, satisfied⟩
 #print axioms invoke_loop_satisfies
+
+/-- A later loop, entered from `state`: once every invariant head of that loop terminates, which
+    an iteration of smaller measure from each invariant state gives, the path from `state` need
+    only reach one of those heads. A method's loops in sequence chain through it from the exit of
+    each into the next. -/
+theorem loop_terminates_then {α : Type} {program : CIL.Program} {method : Nat}
+    {args : List Value} {post : Memory → List Value → Prop} {state : LoopState}
+    (configuration : α → LoopState) (invariant : α → Prop) (measure : α → Nat)
+    (reach : (∀ start, invariant start →
+        LoopTerminates program method args post (configuration start)) →
+      LoopTerminates program method args post state)
+    (progress : ∀ current, invariant current →
+      (∀ next, invariant next → measure next < measure current →
+        LoopTerminates program method args post (configuration next)) →
+      LoopTerminates program method args post (configuration current)) :
+    LoopTerminates program method args post state :=
+  reach (loop_terminates_induction program method args configuration invariant measure post
+    progress)
+#print axioms loop_terminates_then
 #print axioms loop_terminates_call
 #print axioms loop_terminates_call_formed
 

@@ -226,6 +226,17 @@ theorem step_appendLocals_newArray (element : CIL.ArrayElement) :
 
 #print axioms step_appendLocals_newArray
 
+/-- Reference array allocation does not inspect or change a frame's local slots. -/
+theorem step_appendLocals_newReferenceArray (element : CIL.Extraction.TypeExpr) :
+    StepAppendLocals (.newReferenceArray element) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  simp only [step, bind_map_left]
+  frame_natural
+
+#print axioms step_appendLocals_newReferenceArray
+
 /-- `nop` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_nop :
     StepAppendLocals .nop := by
@@ -1026,6 +1037,19 @@ theorem step_appendLocals_brnonzero (target : Nat) :
 
 #print axioms step_appendLocals_brnonzero
 
+/-- `objectTest` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_objectTest (type : CIL.Extraction.TypeExpr) (throwing : Bool) :
+    StepAppendLocals (.objectTest type throwing) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  apply observed_appendLocals
+  append_stack_cases using
+    fallback_appendLocals body.profile (.objectTest type throwing) pc _ frame extra memory
+
+#print axioms step_appendLocals_objectTest
+
 /-- `bltu` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_bltu (target : Nat) :
     StepAppendLocals (.bltu target) := by
@@ -1136,6 +1160,17 @@ theorem step_appendLocals_callInstance (method : Nat) (argc : Nat) :
   frame_natural
 
 #print axioms step_appendLocals_callInstance
+
+/-- `callVirtual` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_callVirtual (targets : List (CIL.Extraction.TypeExpr × Nat))
+    (argc : Nat) : StepAppendLocals (.callVirtual targets argc) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  frame_natural
+
+#print axioms step_appendLocals_callVirtual
 
 /-- `tailCall` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_tailCall (method : Nat) (argc : Nat) :
@@ -1313,6 +1348,7 @@ theorem step_appendLocals (body : Method) (op : Op) (pc : Nat) (args : List Valu
     case stackAlloc initLocals =>
       exact step_appendLocals_stackAlloc initLocals
     case newArray element => exact step_appendLocals_newArray element
+    case newReferenceArray element => exact step_appendLocals_newReferenceArray element
     case nop =>
       exact step_appendLocals_nop
     case neg =>
@@ -1439,6 +1475,8 @@ theorem step_appendLocals (body : Method) (op : Op) (pc : Nat) (args : List Valu
       exact step_appendLocals_brzero target
     case brnonzero target =>
       exact step_appendLocals_brnonzero target
+    case objectTest type throwing =>
+      exact step_appendLocals_objectTest type throwing
     case bltu target =>
       exact step_appendLocals_bltu target
     case bgeu target =>
@@ -1457,6 +1495,8 @@ theorem step_appendLocals (body : Method) (op : Op) (pc : Nat) (args : List Valu
       exact step_appendLocals_call method argc
     case callInstance method argc =>
       exact step_appendLocals_callInstance method argc
+    case callVirtual targets argc =>
+      exact step_appendLocals_callVirtual targets argc
     case tailCall method argc =>
       exact step_appendLocals_tailCall method argc
     case newVector256 constructor argc =>

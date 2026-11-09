@@ -94,8 +94,11 @@ import CIL.Safety.ImmutableMemory
 import CIL.Safety.InstructionMemory
 import CIL.Safety.HeapObjects
 import CIL.Safety.HeapObjectFacts
+import CIL.Safety.ClassCatalog
 import CIL.Safety.ObjectFraming
 import CIL.Safety.ObjectFields
+import CIL.Safety.ReferenceSegments
+import CIL.Safety.ReferenceArrayElements
 import CIL.Safety.InstructionMemoryLemmas
 import CIL.Safety.InstructionReferences
 import CIL.Safety.LiveState
@@ -174,6 +177,7 @@ import CIL.Safety.MissingFacts
 import CIL.Safety.LoopAutomation
 import CIL.Safety.LoopContract
 import CIL.Safety.LoopOutcome
+import CIL.Safety.LoopObligations
 import CIL.Types
 import CIL.VectorMemory
 import CIL.VectorMemoryLemmas

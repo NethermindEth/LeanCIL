@@ -98,9 +98,39 @@ internal static class ObjectTypes
     }
 
     /// <summary>
-    /// The checked operation for <c>ldfld</c> or <c>stfld</c> of an integer or admitted-class field of a
-    /// class instance, at the model offset of its slot. A class-typed field holds an object reference in its
-    /// slot, never in bytes.
+    /// The exact <c>System.String</c> of <c>System.Runtime</c>: a value of it is an object reference the model can
+    /// pass, store, compare and test for null, never read through, since no admitted operation reads characters.
+    /// </summary>
+    internal static bool IsString(TypeReference type) =>
+        type is not TypeSpecification && type.FullName == "System.String" &&
+        RuntimeModels.ExactScope(type.Scope, "System.Runtime");
+
+    /// <summary>
+    /// A type whose values are object references on the stack and in argument and local roots: an admitted class,
+    /// or <c>string</c>, which is opaque.
+    /// </summary>
+    internal static bool Reference(TypeReference type) => Is(type) || IsString(type);
+
+    /// <summary>
+    /// A candidate class or <c>string</c>: its values live in roots without byte storage, so neither an argument,
+    /// a local nor a by-reference type may address one.
+    /// </summary>
+    internal static bool Rooted(TypeReference type) => Candidate(type) || IsString(type);
+
+    /// <summary>
+    /// A class, interface or delegate type outside the model, such as <c>string</c>, a generic or library class:
+    /// a field of this type holds a reference the model can copy, compare and test for null but never dereference,
+    /// since no admitted operation accepts the type as an owner, receiver, argument, local or result.
+    /// </summary>
+    internal static bool Opaque(TypeReference type) =>
+        !type.IsValueType && type is GenericInstanceType or not (TypeSpecification or GenericParameter) &&
+        !Is(type);
+
+    /// <summary>
+    /// The checked operation for <c>ldfld</c> or <c>stfld</c> of an integer, class-typed, class-array or
+    /// value-array field of a class instance, at the model offset of its slot. A class-typed field, admitted or
+    /// opaque, or a field holding an array of a class holds an object reference in its slot, never in bytes; a
+    /// value-array field holds the origin of a whole array of its element type there.
     /// </summary>
     internal static string FieldOperation(FieldReference field, FieldDefinition resolved, bool store, bool address)
     {
@@ -111,11 +141,18 @@ internal static class ObjectTypes
                 "\n  Class field offsets are chosen by the model, so no address may observe them.");
         var type = resolved.FieldType;
         var holdsReference = !type.IsValueType && type is not PointerType and not FunctionPointerType;
-        if (holdsReference && !Is(type))
+        // Struct and vector elements need layouts Lean cannot recheck from the field token.
+        var valueArray = Arrays.Of(type) is { Kind: not NativeOperands.Kind.ArrayComposite } element ? element : null;
+        if (holdsReference && !Is(type) && !Opaque(type) && !ReferenceArrays.Is(type) && valueArray is null)
             throw new InvalidDataException("Unsupported reference-typed field: " + field.FullName +
-                "\n  Only fields holding instances of admitted classes are modelled; " + type.FullName +
-                " is not one.");
+                "\n  Only fields holding class instances, arrays of classes or arrays of integers, Booleans, chars " +
+                "or enums are modelled; " + type.FullName +
+                " is another array, a generic parameter or a modified type.");
         var offset = FieldSlot * FieldIndex(owner, resolved);
+        if (valueArray is not null)
+            return store
+                ? $".memory (.setArrayField ({GenericEvidence.ObjectType(owner)}) {offset} {valueArray.Expression})"
+                : $".memory (.arrayField ({GenericEvidence.ObjectType(owner)}) {offset} {valueArray.Expression})";
         if (holdsReference)
             return store ? $".memory (.setObjectReferenceField ({GenericEvidence.ObjectType(owner)}) {offset})"
                 : $".memory (.objectReferenceField ({GenericEvidence.ObjectType(owner)}) {offset})";
@@ -150,6 +187,42 @@ internal static class ObjectTypes
         var size = FieldSlot * Fields(owner).Length;
         return $".newObject {index} {constructor.Parameters.Count} ({GenericEvidence.ObjectType(owner)}) " +
             $"{BaseList(owner)} {size}";
+    }
+
+    /// <summary>
+    /// A castclass or isinst of an admitted class other than System.Object, which an instance's recorded lineage
+    /// decides.
+    /// </summary>
+    internal static bool Testable(Instruction instruction) =>
+        instruction is { OpCode.Code: Code.Castclass or Code.Isinst, Operand: TypeReference target } &&
+        target.FullName != "System.Object" && Is(target);
+
+    /// <summary>
+    /// The checked type test for castclass (throwing InvalidCastException) or isinst (giving null) of an admitted
+    /// class. An instance records only its own and its admitted base classes, so a test against an interface or
+    /// System.Object is rejected, naming why.
+    /// </summary>
+    internal static string Test(Instruction instruction)
+    {
+        var target = (TypeReference)instruction.Operand;
+        var site = $"Unsupported type test: {instruction.OpCode.Name} {target.FullName}\n  ";
+        if (target.FullName == "System.Object")
+            throw new InvalidDataException(site +
+                "Every instance is a System.Object, which the model does not record.");
+        if (target.Resolve() is { IsInterface: true })
+            throw new InvalidDataException(site +
+                "Interface type tests need the interfaces an instance implements, which the model does not record.");
+        if (!Candidate(target))
+            throw new InvalidDataException(site +
+                "Only classes of the pinned assemblies are tested; their instances record their class lineage.");
+        try { Validate(target); }
+        catch (InvalidDataException error)
+        {
+            throw new InvalidDataException(
+                site + error.Message.Replace("\n", "\n  ", StringComparison.Ordinal), error);
+        }
+        var throwing = instruction.OpCode.Code == Code.Castclass ? "true" : "false";
+        return $".objectTest ({GenericEvidence.ObjectType(target)}) {throwing}";
     }
 
     // Matches `CIL.objectFieldSlot`, which Lean uses to recheck every emitted offset.

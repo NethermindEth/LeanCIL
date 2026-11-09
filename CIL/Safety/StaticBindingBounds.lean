@@ -63,6 +63,9 @@ theorem InstructionEffect.staticBindingsBounded {source target : Memory}
   | slot success =>
     obtain ⟨-, -, rfl⟩ := storeSlot_ok success
     rfl
+  | arraySlot success =>
+    obtain ⟨-, -, -, rfl⟩ := storeArraySlot_ok success
+    rfl
 #print axioms InstructionEffect.staticBindingsBounded
 
 /-- Frame-local storage preserves existing registry bounds. -/
@@ -136,8 +139,9 @@ theorem StackAllocationEffect.staticBindingsBounded {source target : Memory}
 #print axioms StackAllocationEffect.staticBindingsBounded
 
 /-- Every checked dispatcher effect preserves static allocation bounds. -/
-theorem StepEffect.staticBindingsBounded {body : CIL.Method} {source target : Memory}
-    {frame final : Frame} (effect : StepEffect body frame source final target)
+theorem StepEffect.staticBindingsBounded {body : CIL.Method} {operation : CIL.Op}
+    {source target : Memory} {frame final : Frame}
+    (effect : StepEffect body operation frame source final target)
     (bounded : source.StaticBindingsBounded) : target.StaticBindingsBounded := by
   cases effect with
   | arrayAllocation effect => exact bounded.preserve effect.registry effect.allocations.next

@@ -469,29 +469,36 @@ elab_rules : tactic
 
 /-- The tactic that proves a frame side condition after a call: that each callee footprint entry
     lies inside the frame's footprint, or below the caller's watermark, from the `unfold`
-    definitions, `facts`, arithmetic and `form` facts of the caller's memory. -/
+    definitions, `facts`, arithmetic and `form` facts of the caller's memory, or a hypothesis
+    placing a single entry in the frame's footprint. -/
 def loopCallSide (unfold : Array Ident) (facts : Array Term) : TacticM Unit := do
-  evalTactic (← `(tactic| (
-    simp only [$[$unfold:ident],*, List.forall_mem_cons, List.not_mem_nil, false_implies,
-      implies_true, and_true, List.mem_cons, exists_eq_or_imp, exists_eq_left, forall_eq_or_imp,
-      forall_eq, Within, WordField.entry, WordField.address_allocation, WordField.address_offset,
-      ReferenceField.entry, ReferenceField.address_allocation, ReferenceField.address_offset,
-      Reference.element_allocation, Reference.element_offset, true_and, or_false, $[$facts:term],*]
-    all_goals first
-      | done
-      | (and_intros <;> omega)
-      | omega
-      | exact CIL.Safety.Memory.WellFormed.form_bound (by with_reducible assumption)
-          (by with_reducible assumption)
-      | cil_caller_allocation)))
+  evalTactic (← `(tactic| first
+    | (intro _ member
+       simp only [List.mem_cons, List.not_mem_nil, or_false] at member
+       subst member
+       with_reducible assumption)
+    | (simp only [$[$unfold:ident],*, List.forall_mem_cons, List.not_mem_nil, false_implies,
+        implies_true, and_true, List.mem_cons, exists_eq_or_imp, exists_eq_left, forall_eq_or_imp,
+        forall_eq, Within, WordField.entry, WordField.address_allocation, WordField.address_offset,
+        ReferenceField.entry, ReferenceField.address_allocation, ReferenceField.address_offset,
+        Reference.element_allocation, Reference.element_offset, true_and, or_false,
+        $[$facts:term],*]
+       all_goals first
+         | done
+         | (and_intros <;> omega)
+         | omega
+         | exact CIL.Safety.Memory.WellFormed.form_bound (by with_reducible assumption)
+             (by with_reducible assumption)
+         | cil_caller_allocation)))
 
 /-- Continue a call's `LoopTerminates` continuation with its results and the frame after it:
-    names the returned memory, the contract's output, the callee's `WellFormed` (`calledFormed`)
-    and, when the call's memory has a frame fact, the frame at the returned memory
+    names the returned memory, the contract's output (substituted where the postcondition states
+    it, unless `keep`), the callee's `WellFormed` (`calledFormed`) and, when the call's memory
+    has a frame fact, the frame at the returned memory
     (`calledFrame`), carrying the caller-buffer facts across the call. Fails naming the side
     condition when the callee's footprint is not shown inside the frame's. -/
-def loopCallContinue (contract : Expr) (memory : Expr) (facts : Array Term) :
-    TacticM Unit := withMainContext do
+def loopCallContinue (contract : Expr) (memory : Expr) (facts : Array Term)
+    (keep : Bool := false) : TacticM Unit := withMainContext do
   let called ← loopFreshName `called
   let results ← loopFreshName `results
   let invoked ← loopFreshName `invoked
@@ -509,7 +516,7 @@ def loopCallContinue (contract : Expr) (memory : Expr) (facts : Array Term) :
   unless unfold.isEmpty do
     evalTactic (← `(tactic|
       try dsimp only [$[$unfold:ident],*] at $returned:ident $confined:ident ⊢))
-  evalTactic (← `(tactic| try subst $output:ident))
+  unless keep do evalTactic (← `(tactic| try subst $output:ident))
   let some (proof, _) ← loopFrameAt? memory | return
   let frame ← Term.exprToSyntax proof
   let formed ← loopFreshName `calledFormed
@@ -543,8 +550,10 @@ def loopCallContinue (contract : Expr) (memory : Expr) (facts : Array Term) :
     follows the call with its results and the frame after it, as `loopCallContinue` names them.
     Fails naming the pc and instruction when the goal is not at a call, the fact an argument
     check needs when the call does not step, the contract's arguments and the stack when they
-    differ, and the side condition when the frame after the call cannot be proved. -/
-syntax "cil_loop_call" term:max term:max (" at " ident)? (" [" term,* "]")? : tactic
+    differ, and the side condition when the frame after the call cannot be proved. With
+    `keeping`, the output stays a named variable even when the postcondition states it as an
+    equation, so a later term may name it `output`. -/
+syntax "cil_loop_call" (&" keeping")? term:max term:max (" at " ident)? (" [" term,* "]")? : tactic
 
 /-- The contract a `MethodContract.Holds` proof's type names, and the tag of its callee's
     precondition (`preconditionTag`). -/
@@ -594,7 +603,8 @@ def loopCallFailure (holds input : Term) (facts : Array Term) (position : Nat)
     and the stack holds{indentExpr (loopLiteralSums stack)}"
 
 elab_rules : tactic
-  | `(tactic| cil_loop_call $holds $input $[at $site:ident]? $[[$facts:term,*]]?) =>
+  | `(tactic| cil_loop_call $[keeping%$keeping]? $holds $input $[at $site:ident]?
+      $[[$facts:term,*]]?) =>
     keepingTag do
     let explicit := facts.map (·.getElems) |>.getD #[]
     let groups ← gatherLoopFactGroups explicit
@@ -624,7 +634,7 @@ elab_rules : tactic
     let [permitted, continuation] ← getGoals
       | throwError "cil_loop_call: expected the precondition and the continuation"
     setGoals [continuation]
-    loopCallContinue contract parts[3]! explicit
+    loopCallContinue contract parts[3]! explicit keeping.isSome
     let remaining ← getGoals
     let unfold : Array Ident := match contract.getAppFn.constName? with
       | some name => #[mkIdent (`_root_ ++ name)]

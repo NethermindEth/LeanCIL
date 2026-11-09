@@ -173,7 +173,7 @@ theorem root_holds (pairHolds : pairContract.Holds Extracted.program pair)
   cil_contract_construct pairHolds pair_constructs (fun this => ⟨this, x, y⟩) []
   case wellFormed => exact formed
   case precondition => exact fun _ _ storage => ⟨storage.formed, storage.writable⟩
-  intro t1 m1 final1 _ storage1 _ formed1 _ framed1 _
+  intro t1 m1 final1 _ storage1 _ formed1 _ _ framed1 _
   have length : ∀ n, (numberBytes n 8).length = 8 := by simp [numberBytes]
   have size1 : (pairBytes ⟨t1, x, y⟩).length = 16 := by simp [pairBytes, length]
   have high1 : ((pairBytes ⟨t1, x, y⟩).drop 8).take 8 = numberBytes y.toNat 8 := by
@@ -182,7 +182,7 @@ theorem root_holds (pairHolds : pairContract.Holds Extracted.program pair)
   cil_contract_construct wordHolds word_constructs (fun this => ⟨this, y, 1#64, 2#64, x⟩) []
   · exact formed1
   · exact fun _ _ storage => ⟨storage.formed, storage.writable⟩
-  intro t2 m2 final2 _ storage2 _ formed2 _ framed2 _
+  intro t2 m2 final2 _ storage2 _ formed2 _ _ framed2 _
   have size2 : (wordBytes ⟨t2, y, 1#64, 2#64, x⟩).length = 32 := by simp [wordBytes, length]
   have top2 : ((wordBytes ⟨t2, y, 1#64, 2#64, x⟩).drop 24).take 8 = numberBytes x.toNat 8 := by
     simp only [wordBytes, List.append_assoc]
@@ -261,7 +261,7 @@ theorem caller_holds (lowHolds : lowContract.Holds program 1) : callerContract.H
   cil_contract_construct lowHolds low_constructs (fun this => ⟨this, x⟩) []
   · exact formed
   · exact fun _ _ storage => ⟨storage.formed, storage.writable, storage.zeroed⟩
-  intro t m1 final _ storage _ _ _ framed _
+  intro t m1 final _ storage _ _ _ _ framed _
   have size : (lowBytes ⟨t, x⟩).length = 16 := by simp [lowBytes, numberBytes]
   have high : ((lowBytes ⟨t, x⟩).drop 8).take 8 = List.replicate 8 0 := by
     simp [lowBytes, numberBytes, List.take_of_length_le]

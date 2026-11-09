@@ -13,6 +13,7 @@ namespace CIL
 /-- Every method index an instruction calls or constructs with. -/
 def Op.callees : Op → List Nat
   | .managed (.call _ catalog _) => catalog.map ManagedTarget.method
+  | .callVirtual targets _ => targets.map Prod.snd
   | .call method _ | .callInstance method _ | .tailCall method _ | .newVector256 method _
   | .newAggregate method _ _ | .newObject method .. => [method]
   | _ => []
@@ -44,13 +45,37 @@ theorem managedStep_callee {operation : CIL.ManagedOp} {pc : Nat} {frame : Frame
     | split at executed
 #print axioms managedStep_callee
 
+/-- A virtual call enters only a body its table lists. -/
+theorem step_callVirtual_callee {body : CIL.Method}
+    {targets : List (CIL.Extraction.TypeExpr × Nat)} {argc pc : Nat} {args : List Value}
+    {frame : Frame} {stack : List Value} {memory : Memory} {action : FrameAction} {callee : Nat}
+    (executed : step body (.callVirtual targets argc) pc args frame stack memory = .ok action)
+    (enters : action.callee = some callee) :
+    callee ∈ (CIL.Op.callVirtual targets argc).callees := by
+  simp only [step, observerCount, Bool.or_false] at executed
+  split at executed
+  · cases executed
+  split at executed
+  · cases executed
+  obtain ⟨arguments, _, executed⟩ := except_bind_ok executed
+  split at executed
+  · obtain ⟨selectedCallee, selected, executed⟩ := except_bind_ok executed
+    cases executed
+    simp only [FrameAction.callee, Option.some.injEq] at enters
+    subst callee
+    exact virtualTarget_mem selected
+  all_goals cases executed
+#print axioms step_callVirtual_callee
+
 set_option maxHeartbeats 800000 in
 /-- A successful call or construction enters a method listed by its instruction. -/
 theorem step_callee {body : CIL.Method} {op : CIL.Op} {pc : Nat} {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction} {callee : Nat}
     (h : step body op pc args frame stack m = .ok action)
     (enters : action.callee = some callee) : callee ∈ op.callees := by
-  cases op <;> unfold step at h
+  cases op
+  case callVirtual targets argc => exact step_callVirtual_callee h enters
+  all_goals unfold step at h
   all_goals dsimp only at h
   all_goals split at h
   all_goals repeat' first

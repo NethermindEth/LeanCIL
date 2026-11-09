@@ -50,6 +50,39 @@ theorem objectFieldAddress_below {limit : Nat} {memory : Memory} {reference : Ma
       | split at located
 #print axioms objectFieldAddress_below
 
+/-- A located array of class references is the reference that named it. -/
+theorem referenceArrayOf_origin {memory : Memory} {array : ManagedReference}
+    {found : Reference × CIL.Extraction.TypeExpr × Nat}
+    (located : referenceArrayOf memory array = .ok found) : array = .address found.1 := by
+  cases array with
+  | null => cases located
+  | address source =>
+    unfold referenceArrayOf at located
+    simp only [Bind.bind, Except.bind, checkedAt, Except.mapError] at located
+    repeat' first
+      | contradiction
+      | (cases located; rfl)
+      | split at located
+#print axioms referenceArrayOf_origin
+
+/-- An element slot of an array of class references lies in the array's own allocation. -/
+theorem referenceArraySlot_below {limit : Nat} {memory : Memory} {array : ManagedReference}
+    {index : Nat} {slot : Reference × CIL.Extraction.TypeExpr} (bound : array.Below limit)
+    (located : referenceArraySlot memory array index = .ok slot) :
+    slot.1.allocation < limit := by
+  unfold referenceArraySlot at located
+  cases found : referenceArrayOf memory array with
+  | error => simp only [found, Bind.bind, Except.bind, reduceCtorEq] at located
+  | ok result =>
+    have origin := referenceArrayOf_origin found
+    subst origin
+    simp only [found, Bind.bind, Except.bind] at located
+    split at located
+    · cases located
+      exact bound
+    · cases located
+#print axioms referenceArraySlot_below
+
 /-- Valid spans carry null or an address in the allocated prefix. -/
 theorem Memory.WellFormed.span_below {memory : Memory} (formed : memory.WellFormed)
     (view : SpanView) (valid : view.validate memory = .ok ()) :

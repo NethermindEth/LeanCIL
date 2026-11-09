@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:include VerificationSelection.cs
 #:include ExportVerificationSuites.cs
+#:include VerificationSuites.cs
 
 using System.Diagnostics;
 using System.Text.RegularExpressions;
@@ -143,13 +144,11 @@ Test("multiple changes and deleted paths", () =>
 });
 Test("every registered suite has its entry point", () =>
 {
-    string runner = File.ReadAllText(Path.Combine(root, "scripts/Test.cs"));
-    string accepted = Regex.Match(runner, """\["--suite", ("all" .*?)\] =>""",
-        RegexOptions.Singleline).Groups[1].Value;
-    IEnumerable<string> names = Regex.Matches(accepted, @"""([a-z]+)""").Select(match => match.Groups[1].Value)
-        .Where(name => name != "all").Concat(ExportVerificationSuites.Plan().Select(entry => entry.Name))
-        .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal);
-    Equal(names, All());
+    Equal(VerificationSuites.Names().Order(StringComparer.Ordinal), All());
+    Require(VerificationSuites.Names().Distinct(StringComparer.Ordinal).Count() == VerificationSuites.Names().Length,
+        "A suite name is registered twice");
+    foreach (IndependentSuite suite in VerificationSuites.Independent)
+        Require(File.Exists(Path.Combine(root, suite.Script)), "No entry point: " + suite.Name);
     foreach (var (suite, inputs) in VerificationSelection.SuiteInputs())
         Require(inputs.Count > 0, "No entry point: " + suite);
 });
@@ -325,6 +324,7 @@ Test("export leaf selection, strict files and shared inputs", () =>
     foreach (ExportSuite entry in ExportVerificationSuites.FullPlan())
         Require(Selects("Tests/FullImportVerification.cs", entry.Name), "Full change lost " + entry.Name);
     Equal(VerificationSelection.Select(["scripts/ExportVerificationSuites.cs"]), All());
+    Equal(VerificationSelection.Select(["scripts/VerificationSuites.cs"]), All());
     Equal(VerificationSelection.Select(["Tests/ModularStaticExports.cs"]).Order(StringComparer.Ordinal),
         ["exportsfullstatics", "exportsstatics"]);
     Equal(VerificationSelection.Select(["Tests/TransitiveImports.cs"]), ["exportstransitive"]);
@@ -376,11 +376,9 @@ Test("export leaf selection, strict files and shared inputs", () =>
 Test("a missing registered export fixture fails selection", () =>
 {
     string isolated = Path.Combine(root, "artifacts", "MissingExportFixture-" + Guid.NewGuid().ToString("N"));
-    Directory.CreateDirectory(Path.Combine(isolated, "scripts"));
     Directory.CreateDirectory(Path.Combine(isolated, "Tests"));
     try
     {
-        File.Copy(Path.Combine(root, "scripts/Test.cs"), Path.Combine(isolated, "scripts/Test.cs"));
         File.WriteAllText(Path.Combine(isolated, "Tests/ContractExport.cs"), "");
         // Each fixture in registration order must be reported missing before the next one is checked.
         (string Fixture, string Kind)[] fixtures =

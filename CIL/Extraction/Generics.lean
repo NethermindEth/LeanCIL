@@ -151,6 +151,8 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
     let .field kind ← typeStorage layouts underlying | none
     if enumField kind then return .field kind else none
   | .byref _ => some .reference
+  -- An array of class references is itself an object on the heap.
+  | .array (.object _ _) => some .object
   | .array (.aggregate identity index) => do
     let metadata ← layouts[index]?
     if metadata.identity == identity && !metadata.byRefLike then
@@ -531,10 +533,18 @@ def constructedOwnerMatches (site : CallSite) (callee : RawMethod) : Op → Bool
     match owner with | .object .. => true | _ => false
   | _ => true
 
+/-- The `Virtual` flag of a method's metadata attributes (ECMA-335 II.23.1.10). -/
+def virtualMethodAttribute : Nat := 0x40
+
+/-- Whether a method's metadata marks it virtual, so `callvirt` selects its body by runtime type. -/
+def RawMethod.isVirtual (method : RawMethod) : Bool :=
+  method.attributes &&& virtualMethodAttribute != 0
+
 /-- A receiver-checked call enters a non-virtual method of an admitted class, whose receiver is an
-    object reference; no other managed call checks its receiver. -/
+    object reference; no other managed call checks its receiver. A virtual callee would need
+    dispatch, which one fixed target does not perform. -/
 def checkedReceiverMatches (callee : RawMethod) : Op → Bool
-  | .callInstance .. => callee.objectReceiver
+  | .callInstance .. => callee.objectReceiver && !callee.isVirtual
   | _ => true
 
 /-- Legacy slots accept only primitive signatures; new families require exact typed metadata. -/
@@ -634,6 +644,19 @@ def validateManagedCallWith (methodCount : Nat)
   match emitted with
   | .managed (.address target signature) => managedAddressMatches methods raw target signature
   | .managed (.call signature catalog _) => managedIndirectMatches methods raw signature catalog
+  -- Each listed body is a virtual instance method of a class with the slot's signature; which
+  -- body each class selects is checked against the dispatch catalog.
+  | .callVirtual targets count => match raw.operand with
+    | .call site => raw.opcode == 111 && site.hasThis && !targets.isEmpty &&
+      (match site.target with | .managed _ => true | .external _ => false) &&
+      count == site.parameterCount + 1 &&
+      targets.all fun (_, index) => match methods index with
+        | some callee => callee.arguments.isEmpty && callee.closed.objectReceiver &&
+          callee.closed.hasThis && callee.closed.isVirtual &&
+          callee.closed.parameters == site.parameterTypes &&
+          callee.closed.returnType == site.returnType
+        | none => false
+    | _ => false
   | _ =>
   match raw.operand with
   | .call site => match site.target with

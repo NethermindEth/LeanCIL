@@ -167,14 +167,16 @@ theorem transferred_return : ∃ final,
     invoke (targetProgram returningCode) fuel 0 [] initial =
       .ok (final, [.scalar (.i32 16)]) ∧ MemoryBelow 1 initial final :=
   (programs_related returningCode).invoke_confined initial_formed
-    (by intro binding member; cases member) (values := [.i32 16]) source_returns source_confined
+    (by intro binding member; cases member) (by intro binding member; cases member)
+    (values := [.i32 16]) source_returns source_confined
 #print axioms transferred_return
 
 /-- The checked public exception transfer covers a throw after nested and dynamic allocation. -/
 theorem transferred_exception :
     Raises (targetProgram throwingCode) 0 [] initial "AfterNestedAllocation" :=
   (programs_related throwingCode).raises initial_formed
-    (by intro binding member; cases member) (by intro value member; cases member)
+    (by intro binding member; cases member) (by intro binding member; cases member)
+    (by intro value member; cases member)
     ⟨fuel, _, source_throws, rfl⟩
 #print axioms transferred_exception
 
@@ -203,8 +205,9 @@ theorem transferred_contract : scalarContract.Holds (targetProgram returningCode
   · intro input memory permitted
     change memory = initial at permitted
     subst memory
-    exact ⟨initial_formed, by intro binding member; cases member⟩
-  · intro output
+    exact ⟨initial_formed, (by intro binding member; cases member),
+      (by intro binding member; cases member)⟩
+  · intro _ _ _ output _ _
     exact ⟨[.i32 output], rfl⟩
   · intro input before sourceFinal targetFinal output permitted related agree _ post
     change before = initial at permitted
@@ -277,10 +280,11 @@ theorem inserted_related (kind : CIL.LocalKind) (initial : CIL.Value)
     No initializer value is observed by the constant-returning method. -/
 theorem inserted_preserves_caller (kind : CIL.LocalKind) (initial : CIL.Value)
     (fits : InitializerFits kind initial)
-    (memory : Memory) (formed : memory.WellFormed) (statics : memory.StaticBindingsBounded) :
+    (memory : Memory) (formed : memory.WellFormed) (statics : memory.StaticBindingsBounded)
+    (literals : memory.LiteralsBounded) :
     ∃ final, invoke [inserted kind initial] 3 0 [] memory =
       .ok (final, [.scalar (.i32 7)]) ∧ MemoryBelow memory.nextIdentity memory final := by
-  exact (inserted_related kind initial fits).invoke_confined formed statics
+  exact (inserted_related kind initial fits).invoke_confined formed statics literals
     (values := [.i32 7]) (compact_returns memory) (.refl _ _)
 #print axioms inserted_preserves_caller
 

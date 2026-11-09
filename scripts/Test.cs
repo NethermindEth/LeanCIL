@@ -6,6 +6,7 @@
 #:include BatchVerification.cs
 #:include CoreExamples.cs
 #:include ExportVerificationSuites.cs
+#:include VerificationSuites.cs
 
 using System.Text.Json;
 
@@ -25,19 +26,9 @@ string suite = args switch
 {
     [] => "all",
     ["--build-tools"] => "tools",
-    ["--suite", string name] when ExportVerificationSuites.Plan().Any(entry => entry.Name == name) => name,
-    ["--suite", "all" or "core" or "contracts" or "cli" or "failures" or "integer" or "narrow" or "primitive"
-        or "division" or "checked" or "conversions" or "native" or "arguments" or "layout" or "copy" or "bits"
-        or "enums" or "nested" or "instance" or "constructors" or "fsharp" or "math" or "unsafe" or "blocks"
-        or "generics" or "loops" or "evidence" or "dispatch" or "identity" or "labels" or "names" or "symbols"
-        or "callers" or "construction" or "outcomes" or "scaling" or "excluded" or "blockers" or "divrem"
-        or "imports" or "exports" or "exceptionlint" or "intrinsics" or "audit" or "workspace" or "templates"
-        or "assemblies" or "docs"] => args[1],
-    _ => throw new ArgumentException("Usage: dotnet run --file scripts/Test.cs -- [--suite all|core|contracts|" +
-        "cli|failures|integer|narrow|primitive|division|checked|conversions|native|arguments|layout|copy|bits|" +
-        "enums|nested|instance|constructors|fsharp|math|unsafe|blocks|generics|loops|evidence|dispatch|" +
-        "identity|labels|names|symbols|callers|construction|outcomes|scaling|excluded|blockers|divrem|imports|" +
-        "exports|exceptionlint|intrinsics|audit|workspace|templates|assemblies|docs]")
+    ["--suite", string name] when name == "all" || VerificationSuites.Names().Contains(name) => name,
+    _ => throw new ArgumentException(
+        $"Usage: dotnet run --file scripts/Test.cs -- [--suite all|{string.Join('|', VerificationSuites.Names())}]")
 };
 
 using var verification = new Program();
@@ -50,63 +41,8 @@ void RunFixture(string script, string[] arguments, bool streamOutput = false, st
         streamOutput: streamOutput, progress: progress);
 }
 
-var independentSuites = new Dictionary<string, (string Script, string Description)>
-{
-    ["templates"] = ("Tests/ProfileTemplates.cs",
-        "shared profile templates, exact instruction equations and checked bindings"),
-    ["workspace"] = ("Tests/ProofWorkspace.cs",
-        "per-method editor extractions, watch refresh and ordinary fresh certification"),
-    ["imports"] = ("Tests/ContractImports.cs", "implementation-bound contract imports and conditional caller verification"),
-    ["exceptionlint"] = ("Tests/ExceptionLint.cs", "diagnostic XML exception drift without proof claims"),
-    ["contracts"] = ("Tests/UniversalContracts.cs", "universal checked contracts, caller memory preservation and incorrect implementations"),
-    ["evidence"] = ("Tests/ExtractionEvidence.cs", "independent extraction certificates and malformed evidence rejection"),
-    // Split from evidence so neither job approaches the CI timeout.
-    ["dispatch"] = ("Tests/DispatchEvidence.cs",
-        "constrained and managed dispatch, constant calls, stack allocation and pinned compiler coverage"),
-    ["loops"] = ("Tests/Loops.cs", "cyclic control-flow validation, universal termination and negative contracts"),
-    ["generics"] = ("Tests/GenericMethods.cs", "C# and F# generic method specialization, provenance and rejection proofs"),
-    ["blocks"] = ("Tests/Blocks.cs", "block memory, alignment prefixes, runtime comparisons and safety faults"),
-    ["unsafe"] = ("Tests/UnsafeLayouts.cs", "layout-based Unsafe sizes, reference offsets and metadata validation"),
-    ["math"] = ("Tests/IntegerMath.cs", "integer Math helpers, BigMul, runtime faults and universal minimum"),
-    ["intrinsics"] = ("Tests/ExactIntrinsics.cs", "exact SIMD call signatures, byte shuffles, AES rounds, unspecified lanes, opaque locals and profile rejection"),
-    ["divrem"] = ("Tests/TupleDivision.cs",
-        "X86Base.X64.DivRem and Math.DivRem through ValueTuple fields, divide faults and layout rejection"),
-    ["fsharp"] = ("Tests/FSharp.cs", "F# arithmetic, branches, calls, references and struct construction"),
-    ["constructors"] = ("Tests/Constructors.cs", "struct construction, initialized temporaries and constructor faults"),
-    ["instance"] = ("Tests/StructMethods.cs", "struct instance calls, managed this and constructor calls"),
-    ["nested"] = ("Tests/NestedStructs.cs", "nested struct layout, snapshots, copies and metadata validation"),
-    ["enums"] = ("Tests/Enums.cs", "integer enum storage, flags, runtime comparisons and metadata validation"),
-    ["cli"] = ("Tests/CliVerification.cs", "CLI proof verification and incorrect implementation rejection"),
-    ["failures"] = ("Tests/FailureReporting.cs", "failure reports that classify and locate each failed obligation"),
-    ["integer"] = ("Tests/IntegerOpcodes.cs", "integer opcode encodings, boundary cases and universal negation proofs"),
-    ["narrow"] = ("Tests/NarrowIntegers.cs", "narrow integer conversions, storage, method boundaries and rejection proofs"),
-    ["primitive"] = ("Tests/PrimitiveOperations.cs", "primitive memory, switch, sizeof and rejection proofs"),
-    ["division"] = ("Tests/Division.cs", "integer division and remainder runtime comparisons and proofs"),
-    ["checked"] = ("Tests/CheckedArithmetic.cs", "checked integer arithmetic runtime comparisons and proofs"),
-    ["conversions"] = ("Tests/CheckedConversions.cs", "checked integer conversions runtime comparisons and proofs"),
-    ["layout"] = ("Tests/SequentialLayout.cs", "sequential struct layout, runtime offsets and metadata validation"),
-    ["bits"] = ("Tests/RuntimeBits.cs", "portable bit operations, endian reversal and runtime signature validation"),
-    ["copy"] = ("Tests/TypedCopy.cs", "typed copies, aliases, byte snapshots and rejection proofs"),
-    ["arguments"] = ("Tests/Arguments.cs", "argument assignment, addressing, aliases and lifetime proofs"),
-    ["native"] = ("Tests/NativeIntegers.cs", "native integer storage, arithmetic and runtime comparisons"),
-    ["identity"] = ("Tests/MethodIdentity.cs", "methods bound by signature or call shape that survive renumbering and renaming"),
-    ["labels"] = ("Tests/StructuralLabels.cs", "loop-head and call-site labels that survive inserted statements"),
-    ["names"] = ("Tests/DebugNames.cs", "PDB local names and source locations that never change extraction"),
-    ["symbols"] = ("Tests/ConsumerSymbols.cs", "consumer proofs naming PDB locals through helper modules, bound only where imported"),
-    ["callers"] = ("Tests/MethodContract.cs", "caller proofs that survive reimplemented helpers through their contracts"),
-    ["construction"] = ("Tests/ConstructContract.cs", "caller proofs that survive reimplemented constructors through their contracts"),
-    ["outcomes"] = ("Tests/OutcomeContract.cs", "outcome contracts that name exactly when each exception is thrown"),
-    // Split from evidence: each fixture alone runs for minutes, so they take separate runners.
-    ["scaling"] = ("Tests/TranslationScaling.cs", "compositional certificate for a six-method call graph and its consumer replay"),
-    ["excluded"] = ("Tests/ExcludedBranchScaling.cs", "hundreds of excluded and live sites at the default heartbeat budget"),
-    ["assemblies"] = ("Tests/MultiAssembly.cs",
-        "bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and " +
-        "substitution rejection"),
-    ["blockers"] = ("Tests/Blockers.cs", "admission reports with deduplicated blockers, call chains, " +
-        "profile-excluded branches and self-admission"),
-    ["audit"] = ("Tests/OleanAudit.cs", "theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts cannot forge"),
-    ["docs"] = ("Tests/DocSnippets.cs", "documentation Lean snippets and cited library names against the current library")
-};
+var independentSuites = VerificationSuites.Independent.ToDictionary(entry => entry.Name,
+    entry => (entry.Script, entry.Description), StringComparer.Ordinal);
 foreach (ExportSuite entry in ExportVerificationSuites.Plan())
     independentSuites.Add(entry.Name, (entry.Script, entry.Description));
 
@@ -171,7 +107,7 @@ if (suite is "all" or "core")
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/MemorySpans.cs", "Tests/ReferenceInstructions.cs", "Tests/PointerOperations.cs",
         "Tests/PrimitiveArrays.cs", "Tests/ArrayElementReferences.cs", "Tests/ReadOnlyArrayReferences.cs",
-        "Tests/Objects.cs"]);
+        "Tests/Objects.cs", "Tests/Strings.cs", "Tests/Guards.cs"]);
 if (suite is "all" or "dispatch")
     projects.AddRange(["Tests/ConstrainedResolution.cs", "Tests/ConstrainedCalls.cs", "Tests/ManagedDispatch.cs",
         "Tests/NativeManagedDispatch.cs", "Tests/StackAllocation.cs", "Tests/CompilerCoverage.cs",

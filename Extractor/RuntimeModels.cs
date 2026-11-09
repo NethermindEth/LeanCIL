@@ -321,7 +321,7 @@ internal static class RuntimeModels
         $"System.Void {Unsafe}::InitBlockUnaligned(System.Void*,System.Byte,System.UInt32)" => ".memory (.initBlock 1)",
         $"!!1 {Unsafe}::BitCast<System.Byte,System.Boolean>(!!0)" => ".memory .bitcastByteBool",
         "System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,System.Int32)" => ".memory .spanCreate",
-        _ => Span(signature)
+        _ => ArgumentGuards.Translate(signature) ?? Span(signature)
     };
 
     private static readonly Dictionary<string, string> SpanOperations = BuildSpanOperations();

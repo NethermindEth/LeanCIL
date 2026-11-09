@@ -101,8 +101,8 @@ theorem loop_outcome_call {Input Output : Type} {c : OutcomeContract Input Outpu
     exact run_call_of_outcome holds input methodFound instructionFound stepped encoded permitted
       normal continuation
 
-/-- `loop_outcome_call` that also hands the continuation the callee's `WellFormed` and static
-    world. -/
+/-- `loop_outcome_call` that also hands the continuation the callee's `WellFormed`, static
+    world and catalog agreement. -/
 theorem loop_outcome_call_formed {Input Output : Type} {c : OutcomeContract Input Output}
     {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
@@ -117,13 +117,14 @@ theorem loop_outcome_call_formed {Input Output : Type} {c : OutcomeContract Inpu
       (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
       final.WellFormed →
       StaticWorldPreserved program memory final →
+      ClassesPreserved program memory final →
       Confined (c.footprint input) updated final → c.Returns input updated final values →
       LoopOutcome program method args post raises ⟨pc + 1, frame, values ++ rest, final⟩) :
     LoopOutcome program method args post raises ⟨pc, frame, stack, memory⟩ :=
   loop_outcome_call holds input methodFound instructionFound stepped encoded permitted normal
     fun final values ⟨fuel, invoked⟩ =>
       have kept := call_frame_invariants methodFound instructionFound stepped formed invoked
-      continuation final values ⟨fuel, invoked⟩ kept.1 kept.2
+      continuation final values ⟨fuel, invoked⟩ kept.formed kept.staticWorld kept.classes
 
 /-- Exit a loop with the exception a callee's contract names; no invariant or measure is
     needed. -/

@@ -110,6 +110,8 @@ inductive Op where
   | stackAlloc (initLocals : Bool)
   /-- Fresh zero-initialized primitive heap storage, assuming runtime allocation availability. -/
   | newArray (element : ArrayElement)
+  /-- `newarr` of class `element`: a fresh array of null references on the heap budget. -/
+  | newReferenceArray (element : Extraction.TypeExpr)
   | nop | neg | gt
   -- Signed and unsigned compare-and-branch; more follow `switch` below.
   | bgt (target : Nat)
@@ -169,12 +171,20 @@ inductive Op where
   /-- `callvirt` of a non-virtual instance method of a class: a null receiver, the first of the
       `argc` arguments, throws `System.NullReferenceException` before the call. -/
   | callInstance (method : Nat) (argc : Nat)
+  /-- `callvirt` of a virtual method of a class: the receiver, the first of the `argc` arguments,
+      enters the body `targets` lists for its exact runtime class. A null receiver throws
+      `System.NullReferenceException`; a class `targets` omits is a model fault, not a call. -/
+  | callVirtual (targets : List (Extraction.TypeExpr × Nat)) (argc : Nat)
   | newVector256 (constructor : Nat) (argc : Nat)
   | newAggregate (constructor : Nat) (argc : Nat) (size : Fin (2^64))
   /-- A fresh zeroed instance of class `owner` with `size` bytes of fields, passed to
       `constructor` as its receiver ahead of `argc` arguments and pushed once it returns. -/
   | newObject (constructor : Nat) (argc : Nat) (owner : Extraction.TypeExpr)
       (bases : List Extraction.TypeExpr) (size : Nat)
+  /-- `castclass` (`throwing`) or `isinst` of class `type`: an object whose runtime class or one
+      of its bases is `type` stays on the stack, as does null; any other object becomes null,
+      or throws `System.InvalidCastException` for `castclass`. -/
+  | objectTest (type : Extraction.TypeExpr) (throwing : Bool)
   | skipInit | asRef
   /-- Pushes `1` when the method's feature profile has the feature, else `0`. -/
   | feature (id : Feature)

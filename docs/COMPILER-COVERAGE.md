@@ -48,8 +48,8 @@ Lean certification. `--whole-only` checks the pinned whole-corpus baseline alone
 Neither scan establishes coverage over arbitrary programs or future compiler releases.
 
 Run `dotnet run --file Tests/RuntimeModelInventory.cs` to check the production runtime-call translator against the pinned reference metadata.
-The checked-in [catalog](../Tests/RuntimeModelInventory.txt) contains 463 admitted method definitions in 41 API-owner groups.
-The fixed primitive domain produces 1,907 admitted closed instances; these are reported separately to avoid counting each generic instantiation as a new definition.
+The checked-in [catalog](../Tests/RuntimeModelInventory.txt) contains 473 admitted method definitions in 43 API-owner groups.
+The fixed primitive domain produces 1,998 admitted closed instances; these are reported separately to avoid counting each generic instantiation as a new definition.
 The artifact `artifacts/RuntimeModelInventory/inventory.json` records the complete inventory and counts by API owner.
 Additions and removals fail with a diff; after reviewing the model and its assumptions, update the catalog with `--update`.
 
@@ -76,12 +76,14 @@ the extractor's own `Nethermind.LeanCIL.dll`, a realistic program that changes w
 metadata and compares the report with the checked-in
 [baseline](../Tests/SelfAdmissionBaseline.txt), the list of admitted methods. It needs no Lean.
 
-The gate is admission, not blocker totals. The scan fails only when a method that the baseline
-admits still exists and is no longer admitted. Admitted methods removed since the baseline,
-admissions gained, counts and the most widely reached blockers are reported in
-`artifacts/SelfAdmission/summary.md` and the CI job summary, but never fail it. An unrelated PR
-therefore needs no baseline change; a PR that gains an admission records it with
-`dotnet run --file Tests/SelfAdmission.cs -- --update`. A compiler-generated name, such as a
-lambda's, can be renumbered by an unrelated edit, which reports an admitted method as removed and
-gained rather than as lost. Any change to a source compiled into the extractor, or to the
+The gate is admission, not blocker totals, and it requires the admitted set to match the
+baseline exactly. A method the baseline admits that is no longer admitted, an admission the
+baseline omits, and an admitted method that no longer exists each fail the scan, since a stale
+baseline stops guarding the methods it leaves out. Review the difference, then record it with
+`dotnet run --file Tests/SelfAdmission.cs -- --update` in the PR that causes it. Counts, the
+difference and the most widely reached blockers are reported in
+`artifacts/SelfAdmission/summary.md` and the CI job summary. The baseline names a compiler-generated method (a closure, lambda, local
+function or state machine) by the source method it was generated for, one line per admitted method,
+since the compiler numbers it by positions that unrelated edits shift. Gaining or losing one
+still changes its source method's count and fails the gate. Any change to a source compiled into the extractor, or to the
 baseline, selects the suite.

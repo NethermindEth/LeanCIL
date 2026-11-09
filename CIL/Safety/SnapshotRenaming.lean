@@ -25,7 +25,7 @@ theorem Memory.Renamed.writeSnapshot {mapping : AllocationRenaming}
   apply ResultEquivalent.ok
   refine ⟨written.sourceLimit, written.targetLimit, written.allocations, ?_,
     written.permissions, written.staticBindings, written.stackLimit, written.heapBudget,
-    written.slots⟩
+    written.slots, written.literals, written.literalsIssued⟩
   intro identity identityBound offset
   have identities : mapping.image identity = mapping.image reference.allocation ↔
       identity = reference.allocation :=
