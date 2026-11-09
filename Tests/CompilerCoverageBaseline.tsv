@@ -77,6 +77,7 @@ Examples:Examples.StaticPair`1<System.UInt32> Examples.StaticValues::Pair32()	B	
 Examples:Examples.StaticPair`1<System.UInt64> Examples.StaticValues::Pair64()	B	B	B	B	B	B	B	B
 Examples:Examples.StaticSigned Examples.StaticScalars::ReadSignedEnum()	B	B	B	B	B	B	B	B
 Examples:Examples.StaticUnsigned Examples.StaticScalars::ReadUnsignedEnum()	B	B	B	B	B	B	B	B
+Examples:Examples.Tiles Examples.TileArrays::Hold(Examples.AggregateArrays/Pair[],System.Runtime.Intrinsics.Vector128`1<System.UInt64>[])	A	A	A	A	A	A	A	A
 Examples:Examples.Unsigned16 Examples.Enums::IdentityU16(Examples.Unsigned16)	A	A	A	A	A	A	A	A
 Examples:Examples.Unsigned16[] Examples.PrimitiveArrays::AllocateUnsigned16(System.Int32)	A	A	A	A	A	A	A	A
 Examples:Examples.Unsigned32 Examples.Enums::IdentityU32(Examples.Unsigned32)	A	A	A	A	A	A	A	A
@@ -381,6 +382,7 @@ Examples:System.Int32 Examples.PrimitiveOperations::Choose(System.Int32)	A	A	A	A
 Examples:System.Int32 Examples.PrimitiveOperations::PacketSize()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.PrimitiveOperations::ReadWrite(System.Int32&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SampleArrays::Count(Examples.Samples)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SampleArrays::CountAfterRefill(Examples.Samples,Examples.Samples,System.Int32[])	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Sequential::PackedSize()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Sequential::RecordSize()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SpanConstructors::AggregateLocal(Examples.AggregateSpans/Words&)	A	A	A	A	A	A	A	A

@@ -719,6 +719,26 @@ def cilContractChild (methodFound instructionFound : Term) (facts : Array Term) 
     catch _ => saved.restore
   throwError "Call requires a proved contract or matching child invocation"
 
+open Lean Meta in
+/-- A fresh contract input whose single constructor, and the pair constructor of each pair inside
+    it, is applied to fresh fields, so the encoded call arguments determine every field. -/
+partial def cilContractInput (inputType : Expr) : MetaM Expr := do
+  let fresh ← mkFreshExprMVar inputType
+  let some name := (← whnf inputType).getAppFn.constName? | return fresh
+  let .inductInfo info ← getConstInfo name | return fresh
+  unless info.ctors.length == 1 do return fresh
+  let constructor ← mkConstWithFreshMVarLevels info.ctors.head!
+  let (arguments, _, result) ← forallMetaTelescopeReducing (← inferType constructor)
+  unless ← isDefEq result inputType do return fresh
+  let mut fields := #[]
+  for index in [:arguments.size] do
+    let argument := arguments[index]!
+    let type ← instantiateMVars (← inferType argument)
+    if index ≥ info.numParams && (← whnf type).isAppOfArity ``Prod 2 then
+      fields := fields.push (← cilContractInput type)
+    else fields := fields.push argument
+  return mkAppN constructor fields
+
 open Lean Elab Tactic Meta in
 /-- Apply a matching contract and expose its postcondition to the caller continuation. -/
 def cilContractApply (methodFound instructionFound : Term) (facts : Array Term) : TacticM Unit := do
@@ -736,15 +756,7 @@ def cilContractApply (methodFound instructionFound : Term) (facts : Array Term) 
       let type ← instantiateMVars type
       unless type.isAppOfArity ``CIL.Safety.MethodContract.Holds 5 do
         throwError "Not a method contract"
-      let inputType := type.getAppArgs[0]!
-      let mut input ← mkFreshExprMVar inputType
-      if let some name := (← whnf inputType).getAppFn.constName? then
-        if let .inductInfo info ← getConstInfo name then
-          if info.ctors.length == 1 then
-            let constructor ← mkConstWithFreshMVarLevels info.ctors.head!
-            let (arguments, _, result) ← forallMetaTelescopeReducing (← inferType constructor)
-            if ← isDefEq result inputType then
-              input := mkAppN constructor arguments
+      let input ← cilContractInput type.getAppArgs[0]!
       let inputSyntax ← Term.exprToSyntax input
       let proofSyntax ← Term.exprToSyntax (mkAppN proof parameters)
       let siblings := (← getGoals).tail!

@@ -53,4 +53,8 @@ internal static class TileArrays
 
     /// <summary>Replaces the lanes with <paramref name="lanes"/>.</summary>
     public static void Relane(Tiles tiles, Vector128<ulong>[] lanes) => tiles.Lanes = lanes;
+
+    /// <summary>A new holder of <paramref name="pairs"/> and <paramref name="lanes"/>.</summary>
+    public static Tiles Hold(AggregateArrays.Pair[] pairs, Vector128<ulong>[] lanes) =>
+        new() { Pairs = pairs, Lanes = lanes };
 }

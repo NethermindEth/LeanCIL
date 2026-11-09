@@ -55,7 +55,10 @@ foreach (var (proof, entry) in new[]
     ("SampleCount", "SampleArrays::Count(Examples.Samples)"),
     ("TilePairs", "TileArrays::PairsOf(Examples.Tiles)"),
     ("TilePairCount", "TileArrays::PairCount(Examples.Tiles)"),
-    ("TileRelane", "TileArrays::Relane(Examples.Tiles,System.Runtime.Intrinsics.Vector128`1<System.UInt64>[])")
+    ("TileRelane", "TileArrays::Relane(Examples.Tiles,System.Runtime.Intrinsics.Vector128`1<System.UInt64>[])"),
+    ("SampleCountAfterRefill", "SampleArrays::CountAfterRefill(Examples.Samples,Examples.Samples,System.Int32[])"),
+    ("TileHold",
+        "TileArrays::Hold(Examples.AggregateArrays/Pair[],System.Runtime.Intrinsics.Vector128`1<System.UInt64>[])")
 })
 {
     verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));

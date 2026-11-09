@@ -169,7 +169,8 @@ In the caller, `cil_contract_steps [facts]` steps an existential-fuel goal throu
 instructions and calls with supplied evidence. Mark a proved `MethodContract.Holds` theorem
 `@[cil_contract]`, or include its proof in `facts`, to apply it at a matching callee. The theorem's
 program and method binding must match the actual call; required binding premises are checked. Input
-fields are inferred from the encoded arguments. The precondition is proved from facts when possible,
+fields, each component of a tuple input included, are inferred from the encoded arguments. The
+precondition is proved from facts when possible,
 otherwise it remains a goal before the continuation. The continuation receives the result, footprint
 and postcondition. Contracts merely present in the local context are not automatically selected.
 
@@ -286,17 +287,19 @@ the model is never read through: `readable.load_forms forms` steps its load from
 to a footprint apart from it, `after_confined` and `after_below` keep each predicate across a
 confined call and across memory that keeps old allocations, and `Owned.across` decides aliasing:
 after a call confined to the field of `written`, the same field of `object` holds the written
-value when they are the same object and its old value otherwise, for word and reference fields;
-`Readable.across` does the same for a field the caller only reads. `apart_of_offsets` and
-`apart_of_objects` give `Apart` for two fields of one object and for fields of two different
-objects. `ReferenceField.Holds.of_agree` keeps a held caller reference under `BytesBelow` and
+value when they are the same object and its old value otherwise, for word, reference and
+value-array fields; `Readable.across` does the same for a field the caller only reads.
+`apart_of_offsets` and `apart_of_objects` give `Apart` for two fields of one object and for fields
+of two different objects. `ReferenceField.Holds.of_agree` and `ArrayField.Holds.of_agree` keep a
+held caller reference under `BytesBelow` and
 `SlotsAgreeBelow`, the premise `MethodContract.Holds.of_allocationRenaming` needs. The loop tactics
 carry `LiveObject` and every field predicate across the frame's stores and across a confined call
 whose footprint is apart from the field, as they carry caller buffers.
 
-A method that creates an instance starts from `WordField.fresh_owned` and
-`ReferenceField.fresh_holds_null`, which give each field of the fresh instance before its
-constructor runs; `enterFrame_heapBudget` shows the caller's heap budget reaches the `newobj`
+A method that creates an instance starts from `WordField.fresh_owned`,
+`ReferenceField.fresh_holds_null` and `ArrayField.fresh_holds_null`, which give each field of the
+fresh instance before its constructor runs; `enterFrame_heapBudget` shows the caller's heap
+budget reaches the `newobj`
 unchanged by frame entry. No frame owns an instance, so `leaveFrame_memoryAt` gives `MemoryAt`
 for it when the method returns, and the `after_kept` lemmas carry its field predicates there;
 `cil_checked_steps` returns it given that its allocation is not the frame's home. Fields of two
@@ -448,10 +451,14 @@ and `Owned.store_formed` take it.
 A field holding a single-dimensional array of a value type, an integer, Boolean, char, enum,
 struct or integer vector, is an `ArrayField element` whose slot keeps the whole array's origin;
 `field.elementType` names its element in a statement. `WholeArray memory element array length`
-says `array` starts a live heap array of exactly `length` elements whose view validates. A
-readable field holding one loads it (`readable.facts held whole`, or `load_whole`), one holding null loads the
-null array (`load_null`), and `owned.store_whole whole` and `owned.store_null` store into an
-owned field, confined to its slot; `frame` keeps the field across a confined call.
+says `array` starts a live heap array of exactly `length` elements, allocated before any later
+one, whose view validates. A readable field holding one loads it (`readable.facts held whole`, or
+`load_whole`), one holding null loads the null array (`load_null`), and `owned.store_whole whole`
+and `owned.store_null` store into an owned field, confined to its slot. The field keeps the rest
+of the field lemmas above: `frame`, `after_confined`, `after_below`, `after_kept`, `across`,
+`Holds.of_agree` and `fresh_holds_null`. `WholeArray.after_confined`, `after_below` and
+`after_kept` keep an array whole across the same changes, whatever its elements then hold, and
+`checkedValue_array` passes a whole array as a call argument.
 `step_arrayField_eq` and `step_setArrayField_eq` step `ldfld` and `stfld`, and
 `step_memory_arrayLength_address_eq` steps `ldlen` of the loaded array to its length once its
 view validates (`whole.valid`), while `step_memory_arrayLength_null_eq` throws on the null array.
@@ -461,6 +468,10 @@ length, and [SampleRefill](../Examples/Proofs/SampleRefill.lean) replaces it und
 whose footprint is the field's slot. [TilePairs](../Examples/Proofs/TilePairs.lean) and
 [TilePairCount](../Examples/Proofs/TilePairCount.lean) do the same for an array of 16-byte
 structs, and [TileRelane](../Examples/Proofs/TileRelane.lean) stores an array of vectors.
+[SampleCountAfterRefill](../Examples/Proofs/SampleCountAfterRefill.lean) counts the array a field
+holds after a call that may replace it, deciding the aliasing with `Readable.across`, and
+[TileHold](../Examples/Proofs/TileHold.lean) constructs a `Tiles` and stores an array into each
+of its fields, starting from `fresh_holds_null`.
 
 ## Construct structs through contracts
 

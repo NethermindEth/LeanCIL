@@ -28,6 +28,14 @@ namespace CIL.Safety
     Pure.pure, Except.pure]
 #print axioms checkedValue_span
 
+/-- Validating an array stack value, as a call does with each array argument, keeps the view. -/
+@[cil_checked] theorem checkedValue_array (memory : Memory) (view : ArrayView)
+    (valid : view.validate memory = .ok ()) :
+    checkedValue memory (.array view) = .ok (.array view) := by
+  simp [checkedValue, valid, checkedAt, Except.mapError, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
+#print axioms checkedValue_array
+
 /-- A formed address passes the argument check unchanged. -/
 @[cil_checked] theorem checkedValue_address (memory : Memory) (reference : Reference)
     (formed : form memory reference = .ok reference) :

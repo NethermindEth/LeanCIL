@@ -182,6 +182,16 @@ public static class SampleArrays
 
     /// <summary>The number of samples; a null array throws.</summary>
     public static int Count(Samples samples) => samples.Values!.Length;
+
+    /// <summary>
+    /// Refills <paramref name="other"/>, then counts the samples of <paramref name="samples"/>, which may be the same
+    /// holder.
+    /// </summary>
+    public static int CountAfterRefill(Samples samples, Samples other, int[] values)
+    {
+        Refill(other, values);
+        return samples.Values!.Length;
+    }
 }
 
 /// <summary>Reference identity and null tests on class instances.</summary>
