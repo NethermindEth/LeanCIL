@@ -66,8 +66,8 @@ Changing the implementation to subtraction makes the unchanged proof fail.
 
 The [getting-started walkthrough](docs/GETTING-STARTED.md) shows the expected output,
 edit/rebuild/failure/recovery sequence, and a proof that an invalid memory access cannot succeed.
-The [examples](docs/EXAMPLES.md) cover arithmetic, calls, structs, generic methods, loops,
-memory access and compiled F#.
+The [examples](docs/EXAMPLES.md) cover arithmetic, calls, structs, classes and virtual calls,
+strings, generic methods, loops, memory access and compiled F#.
 
 ## Commands
 
@@ -103,23 +103,31 @@ Lake configuration and Lean elaborators execute code, so use packages you trust.
 LeanCIL supports integer arithmetic, selected control flow and managed calls, reference-free
 structs, checked memory access, and arrays and spans of integers, enums,
 reference-free structs and supported integer vectors over supplied storage,
-reference-free array allocation, typed managed dispatch, strings as opaque references,
-including interned literals, whose characters are never read, framework argument guards, and
-selected runtime helpers and
-SIMD intrinsics. Each has restrictions
-documented in the [opcode support table](docs/OPCODES.md) and [intrinsic support tables](docs/SIMD.md).
-Unsupported instructions and signatures are rejected explicitly.
+reference-free array allocation, typed managed dispatch, and selected runtime helpers and
+SIMD intrinsics.
+
+It also supports classes deriving from `System.Object` through admitted classes, created on a
+budgeted heap, with scalar fields, reference fields holding class instances, and fields holding
+arrays of class references or arrays of integers, Booleans, chars or enums. A `callvirt` of a
+virtual method dispatches over the extracted classes on the receiver's runtime type, and
+`castclass` and `isinst` decide an admitted class from the instance's lineage. One-dimensional
+arrays of class references are allocated, loaded and stored with the runtime's covariance check.
+Strings, including interned literals, and classes outside the model are opaque references that
+are passed, stored, compared and tested against null but never read. Framework argument guards
+such as `ArgumentNullException.ThrowIfNull` are checked as runtime contracts.
+
+Each has restrictions documented in the [opcode support table](docs/OPCODES.md) and
+[intrinsic support tables](docs/SIMD.md). Unsupported instructions and signatures are rejected
+explicitly.
 
 The checked memory model tracks allocation identity, lifetime, bounds, permissions,
 initialization and alignment. `CIL.Safety.invoke` is the execution model for both functional
 correctness and memory-safety claims.
 
-Classes beyond those deriving from `System.Object` through such classes, with scalar fields and
-fields holding class instances (opaque references when the class is outside the model), arrays
-of classes or arrays of integers, Booleans, chars or enums, arrays of references other than
-one-dimensional arrays of admitted classes or of non-generic classes such as `string`, virtual
-dispatch outside the extracted classes, interface calls and type tests, ordinary recursive calls,
-exception handlers,
+Other classes and field types, arrays of references other than one-dimensional arrays of
+admitted classes or of non-generic classes such as `string`, reading a string's characters,
+virtual dispatch outside the extracted classes, interface calls, type tests against interfaces,
+`System.Object` or value types, boxing, ordinary recursive calls, exception handlers,
 floating-point arithmetic and arbitrary external calls are outside the supported subset.
 Concurrency, GC implementation correctness and equivalence to arbitrary .NET runtimes are
 outside the model's guarantees. See [soundness and limitations](docs/SOUNDNESS.md).
