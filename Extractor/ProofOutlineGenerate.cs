@@ -26,13 +26,20 @@ internal static partial class ProofOutline
 
         /// <summary>The named fields of an object argument's class.</summary>
         internal ViewField[] Fields { get; init; } = [];
+
+        /// <summary>The `ArrayElement` of an array argument, such as `.signed32`.</summary>
+        internal string Element { get; init; } = "";
+
+        /// <summary>Whether the theorem names the argument's elements: a read-only span or an array.</summary>
+        internal bool Listed => Shape == ParameterShape.WordArray || Shape == ParameterShape.Span && !Writable;
     }
 
     /// <summary>How an argument is bound; `StructReference` is `this` of a struct instance method, a reference to
     /// the caller's struct.</summary>
     /// <remarks>An `Array` is an array of class references, bound with the element class and length its
-    /// allocation records, since covariance lets it hold a class derived from its static element type.</remarks>
-    enum ParameterShape { Scalar, Boolean, Narrow, Reference, Span, Object, StructReference, Array }
+    /// allocation records, since covariance lets it hold a class derived from its static element type. A
+    /// `WordArray` is an array of 32- or 64-bit integers, bound as an `ArrayView` with its elements.</remarks>
+    enum ParameterShape { Scalar, Boolean, Narrow, Reference, Span, Object, StructReference, Array, WordArray }
 
     /// <summary>The method's return as a Lean type and value constructor, or none for `void`; a `bool`
     /// is a `Bool` the returned word encodes as 1 or 0, and an object a possibly null reference.</summary>
@@ -72,7 +79,7 @@ internal static partial class ProofOutline
         var result = DescribeResult(method);
         bool symbolic = parameters.Any(parameter => parameter.Shape is ParameterShape.Reference or
             ParameterShape.Span or ParameterShape.Object or ParameterShape.StructReference or
-            ParameterShape.Array);
+            ParameterShape.Array or ParameterShape.WordArray);
         var body = new Body(emitted.Ops);
         var lean = new Writer();
         var loops = body.Loops();
@@ -86,6 +93,10 @@ internal static partial class ProofOutline
             { } array)
             throw Unsupported($"parameter `{array.Name}` of {method.Name} is an array of class references, which " +
                 "new-proof outlines only in bodies without loops");
+        if (loops.Count > 0 && parameters.FirstOrDefault(parameter => parameter.Shape == ParameterShape.WordArray)
+            is { } words)
+            throw Unsupported($"{method.FullName} has a loop over the array `{words.Name}`; new-proof steps arrays " +
+                "in straight-line bodies only");
         var spanStore = loops.Count == 0 ? SpanStores(extraction, 0) : null;
         if (loops.Count == 0 && spanStore is null && parameters.Any(parameter => parameter.Writable))
             throw Unsupported($"{method.FullName} writes a span outside a loop other than by storing its value " +
@@ -94,6 +105,8 @@ internal static partial class ProofOutline
             source = SpanStoreLine(spec, store.Op, lean);
         else if (structReceiver)
             source = StructStraightLine(spec, body, names, lean);
+        else if (loops.Count == 0 && ArrayRead(extraction, spec, body.Ops) is { } read)
+            source = ArrayReadLine(spec, read, lean);
         else if (loops.Count == 0)
             source = StraightLine(extraction, spec, body, lean);
         // Loops in sequence chain from each exit into the next; a nested or interleaved loop has no such order.
@@ -144,6 +157,9 @@ internal static partial class ProofOutline
             ElementWidth(span.GenericArguments[0]) is { } element)
             return new(name, ParameterShape.Span, "SpanView", element)
                 { Writable = span.ElementType.FullName == "System.Span`1" };
+        if (type is ArrayType { Rank: 1 } array && WordArrayElement(array.ElementType) is { } typed)
+            return new(name, ParameterShape.WordArray, "ArrayView", ElementWidth(array.ElementType)!.Value)
+                { Element = typed };
         return type.FullName switch
         {
             "System.UInt32" or "System.Int32" => new(name, ParameterShape.Scalar, "W32", 4),
@@ -155,9 +171,17 @@ internal static partial class ProofOutline
             "System.Int16" => new(name, ParameterShape.Narrow, "BitVec 16", 2, Signed: true),
             _ => throw Unsupported($"parameter `{parameter.Name}` of {method.Name} has type {type.FullName}; " +
                 "new-proof types `bool`, integers of up to 64 bits, admitted classes, arrays of class references, " +
-                "and references to and spans of 32- and 64-bit integers")
+                "and references to, spans of and arrays of 32- and 64-bit integers")
         };
     }
+
+    /// <summary>The `ArrayElement` the extraction gives an array of 32- or 64-bit integers.</summary>
+    static string? WordArrayElement(TypeReference type) => type.FullName switch
+    {
+        "System.Int32" => ".signed32", "System.UInt32" => ".unsigned32",
+        "System.Int64" => ".signed64", "System.UInt64" => ".unsigned64",
+        _ => null
+    };
 
     static int? ElementWidth(TypeReference type) => type.FullName switch
     {
@@ -241,10 +265,10 @@ internal static partial class ProofOutline
         internal IEnumerable<(string Name, string Type)> Binders => Parameters.SelectMany(parameter =>
             parameter.Shape switch
             {
-                ParameterShape.Span when !parameter.Writable => new[]
-                    { (parameter.Name, "SpanView"), (parameter.ElementsName, $"List {WordType(parameter.Width)}") },
-                ParameterShape.Array => [(parameter.Name, parameter.Lean),
-                    (parameter.ElementName, "CIL.Extraction.TypeExpr"), (parameter.LengthName, "Nat")],
+                ParameterShape.Array => new[] { (parameter.Name, parameter.Lean),
+                    (parameter.ElementName, "CIL.Extraction.TypeExpr"), (parameter.LengthName, "Nat") },
+                _ when parameter.Listed =>
+                    [(parameter.Name, parameter.Lean), (parameter.ElementsName, $"List {WordType(parameter.Width)}")],
                 _ => [(parameter.Name, parameter.Lean)]
             });
 
@@ -258,6 +282,7 @@ internal static partial class ProofOutline
                 $".scalar (.i32 ({parameter.Name}.{(parameter.Signed ? "signExtend" : "zeroExtend")} 32))",
             ParameterShape.Reference or ParameterShape.StructReference => $".reference (.address {parameter.Name})",
             ParameterShape.Object or ParameterShape.Array => $".object (.address {parameter.Name})",
+            ParameterShape.WordArray => $".array {parameter.Name}",
             _ => $".bufferSpan {parameter.Name}"
         })) + "]";
 
@@ -279,6 +304,12 @@ internal static partial class ProofOutline
                     (parameter.Mode, parameter.ModeStatement),
                     (parameter.Name + "Contents",
                         $"SpanContents initial {parameter.Name} {parameter.Width} {parameter.ElementsName}")],
+                // An array's elements are the bytes of its storage span; a null array has none.
+                ParameterShape.WordArray => [
+                    (parameter.Name + "Valid", $"{parameter.Name}.validate initial = .ok ()"),
+                    (parameter.Name + "Type", $"{parameter.Name}.elementType = {parameter.Element}"),
+                    (parameter.Name + "Contents", $"SpanContents initial {parameter.Name}.storage {parameter.Width} " +
+                        parameter.ElementsName)],
                 ParameterShape.Object => new[] { (parameter.Name + "Live", $"LiveObject initial {parameter.Name}") }
                     .Concat(parameter.Fields.Select(named =>
                         (FieldFact(parameter, named), FieldPremise(named, "initial", parameter.Name)))),
@@ -481,6 +512,7 @@ internal static partial class ProofOutline
                 ParameterShape.Object => "an object whose fields need facts",
                 ParameterShape.StructReference => "a struct of caller memory",
                 ParameterShape.Array => "an array whose elements need facts",
+                ParameterShape.WordArray => "an array of caller memory",
                 _ => "a span of caller memory"
             };
         var pc = Array.FindIndex(ops, op => !Body.Pure(op));

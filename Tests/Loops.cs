@@ -840,7 +840,7 @@ foreach (var mutation in new[] { "stack-height", "stack-type", "local-fact", "st
 // A generated starting proof must elaborate with only its holes open, and verification must refuse it
 // until every hole is filled; otherwise an author could mistake the outline for a proof.
 // Loops reuse the checked extraction an earlier section left under their name; the straight-line
-// methods cover `bool` and narrow parameters and a `bool` result, and the object methods `this`, field
+// methods cover `bool`, narrow and array parameters and a `bool` result, and the object methods `this`, field
 // loads and stores, an object result, calls and a loop over a `callvirt`.
 var outlined = new (string Name, string? Selector)[]
 {
@@ -891,7 +891,11 @@ var outlined = new (string Name, string? Selector)[]
     // helper alone.
     ("SpanFill", "Loops::Fill(System.Span`1<System.UInt32>,uint)"),
     ("SpanFillThrough", "Loops::FillThrough(System.Span`1<System.UInt32>,uint)"),
-    ("SpanPut", "Loops::Put(System.Span`1<System.UInt32>,uint)")
+    ("SpanPut", "Loops::Put(System.Span`1<System.UInt32>,uint)"),
+    // Element reads of word arrays, directly and through a helper returning the element's address.
+    ("ArrayReadInt32", "PrimitiveArrays::ReadInt32(int[],int)"),
+    ("ArrayReadUInt64", "PrimitiveArrays::ReadUInt64(ulong[],int)"),
+    ("ArrayRead", "ArrayElementReferences::Read(int[],int)")
 };
 var outlineTimer = System.Diagnostics.Stopwatch.StartNew();
 var outlineRoot = Path.Combine(root, "Outlines");
@@ -1013,6 +1017,29 @@ if (proved.Code != 0 || !proved.Stdout.StartsWith("Verified: ExampleProof.correc
     throw new InvalidOperationException("The filled Countdown outline did not verify:\n" + proved.Output);
 Console.WriteLine("PASS verify refuses the Countdown outline until its holes are filled, then verifies it " +
     $"({outlineTimer.Elapsed.TotalSeconds:F0}s for every outline check)");
+
+// A reader returns the element its index selects; an index outside the array throws, which the precondition rules
+// out. Only a read through a helper leaves the memory as the caller's frame left it.
+(string Hole, string Filled)[] ArrayReadSpecification(string word, string memory) => [
+    ($"""
+        def Precondition (values1 : ArrayView) (values1Elements : List {word}) (index : W32) (initial : Memory)
+            : Prop := sorry
+        """,
+        $"""
+        def Precondition (_ : ArrayView) (values1Elements : List {word}) (index : W32) (_ : Memory) : Prop :=
+          index.toNat < values1Elements.length
+        """),
+    ($"""
+        def Postcondition (values1 : ArrayView) (values1Elements : List {word}) (index : W32)
+            (initial final : Memory) (result : {word}) : Prop := sorry
+        """,
+        $"""
+        def Postcondition (_ : ArrayView) (values1Elements : List {word}) (index : W32)
+            (initial final : Memory) (result : {word}) : Prop :=
+          final = initial ∧ values1Elements[index.toNat]? = some result
+        """),
+    ("      sorry -- Postcondition of `values1Elements[index.toNat]`", $"      simp [Postcondition{memory}]"),
+    ("    sorry -- Precondition excludes an index outside `values1`", "    exact values1Bound assumed")];
 
 // A span filled from the front, directly or through a helper, has one specification and loop head proof.
 (string Hole, string Filled)[] spanFillSpecification = [
@@ -1922,7 +1949,10 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
             """),
         ("    sorry -- Precondition excludes an empty `target1`",
             "    simp [Precondition, target1Count] at assumed"),
-        ("    case postcondition => sorry", "    case postcondition => exact target1Filled")])
+        ("    case postcondition => sorry", "    case postcondition => exact target1Filled")]),
+    ("ArrayReadInt32", ArrayReadSpecification("W32", "")),
+    ("ArrayReadUInt64", ArrayReadSpecification("W64", "")),
+    ("ArrayRead", ArrayReadSpecification("W32", ", leaveFrame"))
 })
 {
     var source = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
@@ -1951,7 +1981,8 @@ Console.WriteLine("PASS filled outlines verify with only their specification wri
     "tested for null and compared, a null store before returning the node it held, an array argument's element " +
     "load, length and covariance-checked store, element facts carried across element and field stores, and " +
     "an array the method allocates, fills and reads back, a fill through a writable span, and a fill through a " +
-    "helper storing the first element of the span it is lent, and that helper alone");
+    "helper storing the first element of the span it is lent, that helper alone, and element reads of `int[]` and " +
+    "`ulong[]` arrays, directly and through a helper returning the element's address");
 
 // A written footprint that leaves out the element a loop writes is an error at the write, never an admission.
 var narrowed = Path.Combine(outlineRoot, "FillWords", "Narrowed.lean");

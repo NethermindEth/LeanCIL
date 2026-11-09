@@ -230,7 +230,7 @@ comment saying which obligation it is:
 
 - `Precondition` and `Postcondition` are definitions to replace with the specification. The
   theorem assumes the precondition and promises the postcondition of the returned value, and for
-  a method that takes references or spans also of the caller's memory before and after.
+  a method that takes references, spans or arrays also of the caller's memory before and after.
 - A method without a loop is stepped by `cil_checked_steps` when its body is arithmetic on 32- and
   64-bit arguments or a total bit count (`Log2`, `PopCount`, `LeadingZeroCount`,
   `TrailingZeroCount`), leaving only the postcondition. A signed or unsigned checked `+`, `-` or
@@ -243,6 +243,16 @@ comment saying which obligation it is:
   splits into at most eight returns. When it also takes up to three `bool`
   arguments and tests nothing else, it is split with `cases` on each, and every side steps to its
   own return and leaves its own postcondition, commented with the values it is for.
+- An `int[]`, `uint[]`, `long[]` or `ulong[]` parameter is an `ArrayView` with a list of its
+  elements, and the theorem assumes the view validates, has its element type and holds those
+  elements in its storage span, `SpanContents initial values.storage`. A method returning
+  `values[index]` for an `int` argument `index`, read by `ldelem` or through a static helper whose
+  body only returns `ref values[index]`, is split with `by_cases valuesBound` on whether the index
+  is below the number of elements; a null array has none, so the bound alone excludes it. The
+  in-bound side steps through `SpanContents.array_load`, the helper's call through a contract
+  proved from its body, and leaves the postcondition; an index outside throws, a hole the
+  precondition closes. Any other body over an array is a `not outlined:` hole, and a loop over an
+  array is refused.
 - A method with a loop gets its loop state, the cutpoint at the loop's back-edge test (found by
   instruction, never by pc), and `invariant` and `measure` definitions to replace. A method that
   takes a reference also gets a `footprint` to replace: the caller memory the loop may write, which

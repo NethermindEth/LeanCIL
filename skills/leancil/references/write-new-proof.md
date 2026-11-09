@@ -21,6 +21,7 @@ expensive failure here, and LeanCIL cannot detect it.
 | Contains a loop | [Countdown](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/Countdown.lean) | [loop cutpoints](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-BINDING.md#loop-heads-and-call-sites) |
 | Walks a linked list | [PoolIdle](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/PoolIdle.lean) | [class instances](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md#frame-class-instances) |
 | Writes a buffer or span | [FillWords](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/FillWords.lean), or `leancil new-proof` for a loop writing a `Span<T>` from the front, directly or through a helper storing `target[0]`, or for that helper | [buffer predicates](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-BUFFERS.md) |
+| Reads an array element | `leancil new-proof` for `values[index]` of an `int[]`, `uint[]`, `long[]` or `ulong[]`, by `ldelem` or through a helper returning `ref values[index]` | [buffer predicates](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-BUFFERS.md#read-a-supplied-array) |
 | Can throw | [CountUntil](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/CountUntil.lean) | [outcome contracts](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md#name-exceptional-outcomes) |
 
 The full table is in [writing proofs](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS.md).
