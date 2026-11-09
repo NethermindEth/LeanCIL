@@ -20,6 +20,8 @@ internal static partial class ProofOutline
         internal string Address { get; } = offset == 0 ? receiver : $"({receiver}.element 1 {offset})";
 
         internal string? Initial { get; set; }
+        internal string? Read { get; set; }
+        internal string? Owned { get; set; }
         internal bool Stored { get; set; }
     }
 
@@ -173,6 +175,12 @@ internal static partial class ProofOutline
         var binders = StructBinders(spec, walk).ToArray();
         var arguments = string.Join(" ", binders.Select(binder => binder.Name));
         var receiver = spec.Parameters[0].Name;
+        var receiverForm = names.Claim(receiver + "Form", "receiverForm");
+        foreach (var field in walk.Fields)
+        {
+            if (field.Initial is not null) field.Read = names.Claim(field.Initial + "Read", "fieldRead");
+            if (field.Stored) field.Owned = names.Claim(receiver + Capitalized(field.Name) + "Owned", "fieldOwned");
+        }
         lean.Line("/-- Replace with what callers must guarantee about the arguments, or `True`. -/");
         lean.Wrapped("def Precondition", Grouped(binders.Append(("initial", "Memory"))), ": Prop := sorry");
         lean.Line();
@@ -189,21 +197,23 @@ internal static partial class ProofOutline
         {
             $"args = {spec.ArgumentValues}", "initial.WellFormed", $"form initial {receiver} = .ok {receiver}"
         };
-        var facts = new List<string> { receiver + "Form" };
+        var facts = new List<string> { receiverForm };
         foreach (var field in walk.Fields)
         {
             if (field.Initial is not null)
             {
                 premises.Add($"Contents initial {field.Address} {field.Width} [{field.Initial}]");
-                facts.Add(field.Initial + "Read");
+                facts.Add(field.Read!);
             }
             if (field.Stored)
             {
                 premises.Add($"Writable initial {field.Address} {field.Width} 0 1");
-                facts.Add(receiver + Capitalized(field.Name) + "Owned");
+                facts.Add(field.Owned!);
             }
         }
-        premises.Add($"Precondition {arguments} initial");
+        var precondition = new Writer();
+        precondition.Wrapped("      Precondition", arguments.Split(' '), "initial");
+        premises.Add(precondition.ToString().Trim());
         lean.Conjunction("    (fun args initial => ", premises, ")");
         var encodedResult = spec.Result?.Encode(spec.Result.Boolean ? "(if result then 1#32 else 0#32)" : "result");
         var returned = spec.Result is null ? "results = []"
@@ -223,7 +233,7 @@ internal static partial class ProofOutline
             Footer(lean);
             return lean.ToString();
         }
-        var steps = new List<string> { receiver + "Form", "CIL.NarrowKind.extend" };
+        var steps = new List<string> { receiverForm, "CIL.NarrowKind.extend" };
         foreach (var width in walk.Fields.Select(field => field.Width).Where(width => width < 4).Distinct())
         {
             lean.Line($"  have loadSigned{width} (memory : Memory) (address : Reference) (value : BitVec {8 * width})");
@@ -239,14 +249,14 @@ internal static partial class ProofOutline
         foreach (var field in walk.Fields)
         {
             var access = field.Initial is not null
-                ? $"read_access ({field.Initial}Read 0 _ rfl)"
-                : $"{receiver}{Capitalized(field.Name)}Owned 0 (by omega)";
-            FieldAddress(lean, "initial", "wellFormed", receiver + "Form", receiver, field, access,
+                ? $"read_access ({field.Read} 0 _ rfl)"
+                : $"{field.Owned} 0 (by omega)";
+            FieldAddress(lean, "initial", "wellFormed", receiverForm, receiver, field, access,
                 "added" + field.Offset);
             steps.Add("added" + field.Offset);
             if (field.Initial is not null)
             {
-                LoadStructField(lean, field, field.Initial + "Read", "loaded" + field.Offset);
+                LoadStructField(lean, field, field.Read!, "loaded" + field.Offset);
                 steps.Add("loaded" + field.Offset);
                 if (field.Width < 4) steps.Add("loaded" + field.Offset + "Signed");
             }
@@ -254,9 +264,9 @@ internal static partial class ProofOutline
         var final = "initial";
         var confined = "Confined.refl _ _";
         var contents = walk.Fields.Where(field => field.Initial is not null)
-            .ToDictionary(field => field, field => field.Initial + "Read");
+            .ToDictionary(field => field, field => field.Read!);
         var ownership = walk.Fields.Where(field => field.Stored)
-            .ToDictionary(field => field, field => receiver + Capitalized(field.Name) + "Owned");
+            .ToDictionary(field => field, field => field.Owned!);
         for (var index = 0; index < walk.Stores.Count; index++)
         {
             var written = walk.Stores[index];
@@ -279,7 +289,7 @@ internal static partial class ProofOutline
             var formed = index == 0 ? "wellFormed" : $"formed{index}";
             lean.Line($"  have formed{level} := write_preserves_wellFormed _ _ _ _ _ {formed} written{level}");
             // A write changes bytes only, so the receiver still forms.
-            var previousForm = index == 0 ? receiver + "Form" : $"form{index}";
+            var previousForm = index == 0 ? receiverForm : $"form{index}";
             lean.Line($"  have form{level} : form stored{level} {receiver} = .ok {receiver} :=");
             lean.Line($"    (form_congr (by rw [write_allocations _ _ _ _ _ written{level}])).trans {previousForm}");
             steps.AddRange([$"written{level}", $"form{level}"]);

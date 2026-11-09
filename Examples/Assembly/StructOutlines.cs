@@ -52,3 +52,16 @@ public struct NarrowTotals
         return Count;
     }
 }
+
+/// <summary>Parameter names may coincide with the proof's field facts and intermediate memories.</summary>
+public struct Aliases
+{
+    public ulong Value;
+
+    public ulong Update(ulong aliasesValueRead, ulong aliasesValueOwned, ulong aliasesForm, ulong owned1Field0)
+    {
+        Value += aliasesValueRead;
+        Value += aliasesValueOwned;
+        return Value + aliasesForm + owned1Field0;
+    }
+}

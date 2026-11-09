@@ -96,3 +96,21 @@ foreach (var (method, expected) in new[] { ("SignedLiteral", "(-1 : W64)"),
     Run(Cli("verify", literal, "--proof", proof));
 }
 Console.WriteLine("PASS signed and unsigned widening of the all-ones 32-bit constant");
+
+var aliases = Path.Combine(root, "Aliases");
+Run(Extract("extract", assembly, "Examples", "Aliases::Update(ulong,ulong,ulong,ulong)", aliases));
+var aliasesProof = Path.Combine(root, "Aliases.lean");
+File.Delete(aliasesProof);
+Run(Cli("new-proof", aliases, aliasesProof));
+var aliasesSource = File.ReadAllText(aliasesProof);
+if (aliasesSource.Contains("-- not outlined:", StringComparison.Ordinal))
+    throw new InvalidOperationException("Adversarial argument names were not outlined:\n" + aliasesSource);
+aliasesSource = Regex.Replace(aliasesSource, @"(def Precondition[\s\S]*?: Prop :=) sorry", "$1 True");
+aliasesSource = Regex.Replace(aliasesSource, @"(def Postcondition[\s\S]*?: Prop :=) sorry",
+    "$1\n  result = aliasesValue + aliasesValueRead + aliasesValueOwned + aliasesForm + argument3 ∧\n" +
+    "  Contents final aliases 8 [aliasesValue + aliasesValueRead + aliasesValueOwned]");
+aliasesSource = aliasesSource.Replace("case postcondition => sorry", "case postcondition => exact ⟨rfl, held2⟩",
+    StringComparison.Ordinal);
+File.WriteAllText(aliasesProof, aliasesSource);
+Run(Cli("verify", aliases, "--proof", aliasesProof));
+Console.WriteLine("PASS field-read, ownership, receiver-form and generated intermediate argument name collisions");
