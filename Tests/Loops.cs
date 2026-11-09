@@ -2264,7 +2264,7 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
             "def Postcondition (samples : Reference) (values1 : ArrayView) (_ : List W32) (_ final : Memory) : Prop :=\n" +
             "  Samples.Values.Holds final samples values1.reference"),
         ("sorry -- Postcondition of the returned value, with `held1` the stored fields",
-            "exact values1Reference ▸ held1")]),
+            "simpa only [Postcondition, leaveFrame, List.foldl_nil, values1Reference] using held1")]),
     // The returned view is of the array the field holds.
     ("SampleValues", [
         ("def Precondition (samples : Reference) (initial : Memory) : Prop := sorry",
