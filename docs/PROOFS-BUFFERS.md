@@ -39,7 +39,13 @@ frame's memory, returning the element's address `view.reference = .address item`
 the frame after it. The loop tactics take the guard and validity facts from a `WritableSpan` in
 context. An invariant states the written prefix from the span's original base as
 `Filled state.memory base width (List.replicate done x) state.values.remaining` and extends it
-with `Filled.push`.
+with `Filled.push`. A loop that passes the span to a callee lends it: `span.lend wellFormed frame`
+is a `WritableSpan` in the frame's memory over the view's own bytes, a callee's precondition,
+and `span.covered` and `span.below wellFormed` place those bytes in the frame's footprint and
+below the caller's watermark, which `cil_loop_call` takes for the frame after the call.
+`span.write_head x` is the store a callee writing `target[0]` makes, confined to the view's
+bytes; after the call the invariant moves the prefix with `Filled.after_confined` and extends it
+with `Filled.extend`.
 Callee frames allocate locals above the caller's memory. For well-formed caller memory,
 `SpanView.validate_below`, `SpanView.slice_below` and `SpanContents.after_below` transport validity,
 successful slices and contents to any memory related by `MemoryBelow memory.nextIdentity`, such as

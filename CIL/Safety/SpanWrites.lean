@@ -9,6 +9,9 @@ the view, and the view's bytes inside the footprint the method may write. It is 
 caller's memory and survives slicing (`SpanWritable.slice`) and every frame memory
 (`SpanWritable.within`), so a loop state carries it once, in `WritableSuffix`.
 `LoopFrame.write_span_head` performs the store of the first element and keeps the frame facts.
+A loop that passes the span to a callee instead lends it (`WritableSpan.lend`) to a contract
+whose footprint is the view's bytes, which `WritableSpan.write_head` meets for a callee storing
+the first element.
 -/
 
 namespace CIL.Safety
@@ -153,6 +156,62 @@ theorem element_head {rest : Nat} (span : WritableSpan memory footprint view wid
     refine ⟨base, rfl, ?_, writable⟩
     simp [SpanView.element, span.valid, nonempty, address, formed, Bind.bind, Except.bind]
 
+/-- The view's bytes lie inside the footprint its authority names. -/
+theorem covered (span : WritableSpan memory footprint view width count) :
+    ∀ entry ∈ view.footprint, ∃ outer ∈ footprint, Within entry outer := by
+  intro entry member
+  cases address : view.reference with
+  | null => simp [SpanView.footprint, address] at member
+  | address base =>
+    simp only [SpanView.footprint, address, List.mem_singleton] at member
+    subst member
+    exact span.authority.inside base address
+
+/-- The view's bytes are in allocations of the memory it is valid in. -/
+theorem below (span : WritableSpan memory footprint view width count)
+    (wellFormed : memory.WellFormed) :
+    ∀ entry ∈ view.footprint, entry.1.allocation < memory.nextIdentity := by
+  intro entry member
+  cases address : view.reference with
+  | null => simp [SpanView.footprint, address] at member
+  | address base =>
+    simp only [SpanView.footprint, address, List.mem_singleton] at member
+    subst member
+    exact SpanView.allocation_below span.valid wellFormed address
+
+/-- A writable span of caller memory, lent in a frame memory to a callee that may write only
+    the view's own bytes. -/
+theorem lend {caller current : Memory} {kinds : List CIL.LocalKind}
+    {slots : List LocalSlot} {known : Nat → Option CIL.Value} {written : List (Reference × Nat)}
+    (span : WritableSpan caller footprint view width count) (wellFormed : caller.WellFormed)
+    (frame : LoopFrame written caller current kinds slots known) :
+    WritableSpan current view.footprint view width count :=
+  ⟨frame.caller_valid wellFormed span.valid, span.mode, span.elementWidth, span.length,
+    SpanWritable.own (span.authority.within wellFormed frame).writable⟩
+
+/-- Storing `x` into the first element of a nonempty writable span succeeds, changes only the
+    view's bytes and leaves that element holding `x`: the contract of a callee that stores the
+    first element of the span it is passed. -/
+theorem write_head {rest : Nat} (span : WritableSpan memory footprint view width (rest + 1))
+    (x : BitVec (8 * width)) :
+    ∃ item after, view.reference = .address item ∧ view.element memory 0 = .ok item ∧
+      CIL.Safety.write memory item (numberBytes x.toNat width) 1 = .ok after ∧
+      Confined view.footprint memory after ∧
+      ∀ base, view.reference = .address base → Contents after base width [x] := by
+  obtain ⟨base, address, found, writable⟩ := span.element_head
+  obtain ⟨after, written, -, -, filled⟩ := (writable.sub (index := 0) (length := 1)
+    (Nat.zero_le _) (by omega)).write_one x
+  simp only [Reference.element_zero] at written filled
+  refine ⟨base, after, address, found, written, Confined.write_within written ?_, ?_⟩
+  · refine ⟨(base, view.width * view.length), by simp [SpanView.footprint, address], ?_⟩
+    rw [span.elementWidth, span.length]
+    simpa [numberBytes_length] using base.element_run_within width (first := 0) (count := 1)
+      (outer := 0) (total := rest + 1) (Nat.le_refl _) (by omega)
+  · intro other same
+    rw [address] at same
+    cases same
+    exact filled
+
 end WritableSpan
 
 /-- Storing `x` into the first element of a nonempty writable span of caller memory succeeds in
@@ -196,6 +255,10 @@ structure WritableSuffix (memory : Memory) (footprint : List (Reference × Nat))
 #print axioms WritableSpan.valid_within
 #print axioms WritableSpan.tail
 #print axioms WritableSpan.element_head
+#print axioms WritableSpan.covered
+#print axioms WritableSpan.below
+#print axioms WritableSpan.lend
+#print axioms WritableSpan.write_head
 #print axioms LoopFrame.write_span_head
 
 end CIL.Safety

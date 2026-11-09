@@ -359,7 +359,8 @@ The tactics of [LoopFrameSteps](../CIL/Safety/LoopFrameSteps.lean), which
   apart from the callee's footprint. It fails naming the pc and instruction when the goal is not at a call, the argument
   check and the fact it needs when the call does not step, the contract's arguments beside the
   stack when they differ, and the side condition when the callee's footprint is not shown inside
-  the frame's footprint or below the caller's watermark.
+  the frame's footprint or below the caller's watermark, from the facts or a hypothesis stating it,
+  such as `WritableSpan.covered` for a lent span.
 - `cil_loop_recurse hypothesis values [facts]` steps to the loop head of `hypothesis`, the entry
   goal's or the iteration's statement that every (smaller) invariant head state terminates. It
   takes each struct zeroing, field store and numeric local store on the way through
