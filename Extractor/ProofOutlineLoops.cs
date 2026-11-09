@@ -86,9 +86,10 @@ internal static partial class ProofOutline
     /// <summary>`Unsafe.Add` of a reference argument and a word index, scaled by `Width` bytes.</summary>
     sealed record AddedReference(string Base, string Index, int Width) : Value;
 
-    /// <summary>A span's suffix at a point of a path: its view, remaining elements and checked fact.</summary>
+    /// <summary>A span's suffix at a point of a path: its view, remaining elements and checked fact. A
+    /// Written span's remaining part is its length, and its fact a `WritableSpan`.</summary>
     sealed record SpanTerm(string View, string Remaining, string Checked, bool Caseable, string? Head = null,
-        string? Tail = null);
+        string? Tail = null, bool Written = false);
 
     /// <summary>One point of a symbolic path: where it is, its stack and loop state, and the case-split
     /// facts the tactics need, with the pc at which the proof goal currently stands.</summary>
@@ -145,8 +146,8 @@ internal static partial class ProofOutline
                 callees.Keys.Any(Branches))
                 imports.Add("CIL.Safety.LoopObligations");
             if (spec.Framed) imports.Add("CIL.Safety.ObjectFields");
-            if (spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.ReadOnlySpan))
-                imports.Add("CIL.Safety.SpanContents");
+            if (SpanParameters.Any(parameter => parameter.Writable)) imports.Add("CIL.Safety.SpanWrites");
+            else if (SpanParameters.Any()) imports.Add("CIL.Safety.SpanContents");
             Header(lean, spec, imports, "`invariant`, `measure`, `postcondition` and `precondition` (at a call)");
             foreach (var index in callees.Keys.Order()) Contract(lean, index);
             spec.Placeholders(lean);
@@ -160,7 +161,7 @@ internal static partial class ProofOutline
 
         string Memory => spec.Symbolic ? "memory" : "Memory.empty";
         string[] Homes => slots.Where(slot => slot.Home is not null).Select(slot => slot.Home!).ToArray();
-        IEnumerable<Parameter> SpanParameters => spec.Parameters.Where(p => p.Shape == ParameterShape.ReadOnlySpan);
+        IEnumerable<Parameter> SpanParameters => spec.Parameters.Where(p => p.Shape == ParameterShape.Span);
 
         string Location(int pc) => ProofOutline.Location(method, pc);
 
@@ -192,9 +193,10 @@ internal static partial class ProofOutline
             foreach (var (argument, kind) in homes)
             {
                 var parameter = spec.Parameters[argument];
-                if (parameter.Shape != ParameterShape.ReadOnlySpan || kind != $".span {parameter.Width} false")
+                if (parameter.Shape != ParameterShape.Span ||
+                    kind != $".span {parameter.Width} {(parameter.Writable ? "true" : "false")}")
                     throw Unsupported($"parameter `{parameter.Name}` is assigned or addressed in the body; new-proof " +
-                        "follows reassigned read-only span parameters only");
+                        "follows reassigned span parameters only");
                 Add(new(slots.Count, kind, null, -1,
                     [new(parameter.Name, Part.Span, parameter.Width, slots.Count, 0, parameter)]));
             }
@@ -275,7 +277,8 @@ internal static partial class ProofOutline
 
         string ValuesType => Product(components.Select(component => component.Part switch
         {
-            Part.Span => $"SpanSuffix {Memory} {component.Width} false",
+            Part.Span => component.Span!.Writable ? $"WritableSuffix {Memory} written {component.Width}"
+                : $"SpanSuffix {Memory} {component.Width} false",
             Part.Object => "ManagedReference",
             _ => WordType(component.Width)
         }));
@@ -540,7 +543,7 @@ internal static partial class ProofOutline
             {
                 (parameter.Name + "Valid", $"{parameter.Name}.validate memory = .ok ()"),
                 (parameter.Name + "Width", $"{parameter.Name}.width = {parameter.Width}"),
-                (parameter.Name + "ReadOnly", $"{parameter.Name}.writable = false")
+                (parameter.Mode, parameter.ModeStatement)
             }));
 
         void Entry(Writer lean)
@@ -552,7 +555,7 @@ internal static partial class ProofOutline
             lean.Line($"  with {spec.ArgumentValues} from {(spec.Symbolic ? "memory" : "Memory.empty")}");
             lean.Line(spec.Symbolic ? "  allocating wellFormed" : "  allocating Memory.empty_wellFormed");
             var facts = SpanParameters.SelectMany(parameter => new[]
-                { parameter.Name + "Valid", parameter.Name + "Width", parameter.Name + "ReadOnly" }).ToArray();
+                { parameter.Name + "Valid", parameter.Name + "Width", parameter.Mode }).ToArray();
             if (facts.Length > 0) lean.Line($"  simplifying [{string.Join(", ", facts)}]");
             for (var index = 0; index < loops.Count; index++)
                 lean.Line($"bind_loop loop{Suffix(index)} := Extracted.method0" +
@@ -561,7 +564,8 @@ internal static partial class ProofOutline
         }
 
         // A method handed a reference or an object may write caller memory, so its frame keeps a named footprint.
-        bool Writes => spec.Framed || spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference);
+        bool Writes => spec.Framed || spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference) ||
+            SpanParameters.Any(parameter => parameter.Writable);
         const string Footprint = "List (Reference × Nat)";
 
         string StateBinders => string.Join(" ", (spec.Symbolic ? new[] { "(memory : Memory)" } : [])
@@ -585,15 +589,16 @@ internal static partial class ProofOutline
             ? $".bytes {(slot.Kind.Contains(' ') ? $"({slot.Kind})" : slot.Kind)} {home}"
             : slot.Components[0].Part == Part.Object
             ? $".object (some {Projection(root, components.IndexOf(slot.Components[0]), components.Count)})"
-            : $".span {slot.Components[0].Width} false " +
+            : $"{slot.Kind} " +
                 $"(some {Projection(root, components.IndexOf(slot.Components[0]), components.Count)}.view)")
             .ToArray();
 
         void StateAndHeader(Writer lean)
         {
             if (Writes) spec.Footprint(lean);
-            var described = string.Join(", ", components.Select(component => component.Part == Part.Span
-                ? $"the unread suffix of `{component.Name}`" : $"`{component.Name}`"));
+            var described = string.Join(", ", components.Select(component => component.Part != Part.Span
+                ? $"`{component.Name}`"
+                : $"the {(component.Span!.Writable ? "unwritten" : "unread")} suffix of `{component.Name}`"));
             lean.Doc($"The loop's locals at its head: {described}.");
             lean.Line($"abbrev State{(StateBinders.Length > 0 ? " " + StateBinders : "")} :=");
             var project = (Component component) =>
@@ -732,24 +737,33 @@ internal static partial class ProofOutline
             // A caller object's allocation lies below the frame's watermark, which carrying its facts needs.
             foreach (var instance in spec.Objects) lean.Line($"  have {instance.Name}Old := {instance.Name}Live.old");
             foreach (var parameter in SpanParameters)
-            {
-                lean.Line($"  have {parameter.Name}Checked : CheckedSpan initial {parameter.Name} " +
-                    $"{parameter.Width} false");
-                lean.Line($"      {parameter.ElementsName} := ⟨{parameter.Name}Valid, {parameter.Name}ReadOnly, " +
-                    $"{parameter.Name}Contents⟩");
-            }
+                if (parameter.Writable)
+                {
+                    lean.Line($"  have {parameter.Name}Checked : WritableSpan initial (footprint {spec.Arguments})");
+                    lean.Line($"      {parameter.Name} {parameter.Width} {parameter.Name}.length :=");
+                    lean.Line($"    ⟨{parameter.Name}Valid, {parameter.Mode}, {parameter.Name}Width, rfl, " +
+                        $"{parameter.Name}Authority⟩");
+                }
+                else
+                {
+                    lean.Line($"  have {parameter.Name}Checked : CheckedSpan initial {parameter.Name} " +
+                        $"{parameter.Width} false");
+                    lean.Line($"      {parameter.ElementsName} := ⟨{parameter.Name}Valid, {parameter.Mode}, " +
+                        $"{parameter.Name}Contents⟩");
+                }
             var entryArguments = (spec.Symbolic ? new[] { "initial" } : []).Concat(spec.Parameters.Select(p => p.Name))
                 .Concat(spec.Symbolic ? ["wellFormed"] : [])
                 .Concat(SpanParameters.SelectMany(parameter => new[]
                 {
-                    parameter.Name + "Valid", parameter.Name + "Contents.elementWidth", parameter.Name + "ReadOnly"
+                    parameter.Name + "Valid",
+                    parameter.Name + (parameter.Writable ? "Width" : "Contents.elementWidth"), parameter.Mode
                 }));
             var pattern = Homes.Concat(["entered", "setup"]).Concat(Homes.Select(_ => "-")).Concat(["-", "entryFrame"]);
             lean.Wrapped($"  obtain ⟨{string.Join(", ", pattern)}⟩ :=", ["entry.checked", .. entryArguments], "");
             var formed = spec.Parameters.SelectMany(parameter => parameter.Shape switch
             {
                 ParameterShape.Reference => new[] { parameter.Name + "Form" },
-                ParameterShape.ReadOnlySpan => [parameter.Name + "Valid"],
+                ParameterShape.Span => [parameter.Name + "Valid"],
                 ParameterShape.Object => [parameter.Name + "Live.formed"],
                 _ => []
             });
@@ -765,8 +779,9 @@ internal static partial class ProofOutline
             {
                 Pc = 0, GoalPc = 0, State = components.Select(component => component.Part switch
                 {
-                    Part.Span => new SpanTerm(component.Span!.Name, component.Span.ElementsName,
-                        component.Span.Name + "Checked", false),
+                    Part.Span => new SpanTerm(component.Span!.Name,
+                    component.Span.Writable ? component.Span.Name + ".length" : component.Span.ElementsName,
+                        component.Span.Name + "Checked", false, Written: component.Span.Writable),
                     Part.Object => new ObjectTerm(".null"),
                     _ => (object)new Number("0", component.Width, Literal: true)
                 }).ToArray()
@@ -782,7 +797,7 @@ internal static partial class ProofOutline
             var iteration = Initial(component => component.Part switch
             {
                 Part.Span => new SpanTerm(component.Name + "View", component.Name + "Remaining",
-                    component.Name + "Span", true),
+                    component.Name + "Span", true, Written: component.Span!.Writable),
                 Part.Object => new ObjectTerm(component.Name),
                 _ => new Number(component.Name, component.Width)
             });
@@ -1008,13 +1023,26 @@ internal static partial class ProofOutline
                 var name = components[length.Component].Name;
                 var empty = Side(opName == "brzero" ? target : pc + 1, null);
                 var cons = Side(opName == "brzero" ? pc + 1 : target, null);
+                cons.Obtained.Clear();
+                lean.Line($"{indent}cases {span.Remaining} with");
+                // A written span splits on its length; its elements are never read.
+                if (span.Written)
+                {
+                    var rest = name + "Rest";
+                    empty.State[length.Component] = span with { Remaining = "0", Caseable = false };
+                    cons.State[length.Component] = span with { Remaining = $"({rest} + 1)", Caseable = false,
+                        Head = rest, Tail = rest };
+                    lean.Line($"{indent}| zero =>");
+                    Walk(lean, empty, indent + "  ");
+                    lean.Line($"{indent}| succ {rest} =>");
+                    Walk(lean, cons, indent + "  ");
+                    return;
+                }
                 var head = name + "Head";
                 var tail = name + "Tail";
-                cons.Obtained.Clear();
                 empty.State[length.Component] = span with { Remaining = "[]", Caseable = false };
                 cons.State[length.Component] = span with { Remaining = $"({head} :: {tail})", Caseable = false,
                     Head = head, Tail = tail };
-                lean.Line($"{indent}cases {span.Remaining} with");
                 lean.Line($"{indent}| nil =>");
                 Walk(lean, empty, indent + "  ");
                 lean.Line($"{indent}| cons {head} {tail} =>");
@@ -1148,7 +1176,8 @@ internal static partial class ProofOutline
                     state.State[sliced.Component] is SpanTerm { Tail: { } tail } span)
                 {
                     var name = components[sliced.Component].Name;
-                    state.State[first] = new SpanTerm(name + "Sliced", tail, name + "Next", false);
+                    state.State[first] = new SpanTerm(name + "Sliced", tail, name + "Next", false,
+                        Written: span.Written);
                 }
                 else if (slot.Components[0].Part == Part.Object && value is ObjectTerm)
                     state.State[first] = value;
@@ -1256,6 +1285,8 @@ internal static partial class ProofOutline
                 var element = (Element)Pop();
                 var span = (SpanTerm)state.State[element.Component];
                 if (state.Called) return Stop("a span read after a call");
+                if (span.Written)
+                    return Stop("a read of a span the loop writes, whose contents the frame does not carry");
                 PendingHead(state, element.Component, span);
                 stack.Add(new Number(span.Head!, components[element.Component].Width));
             }
@@ -1279,6 +1310,20 @@ internal static partial class ProofOutline
                 stack.Add(new AddedReference(reference.Name, index.Term, int.Parse(match.Groups[1].Value)));
             }
             else if (op is ".store64" or ".storeScalar 4" or ".storeScalar 8" && stack.Count >= 2 &&
+                stack[^2] is Element written && state.State[written.Component] is SpanTerm { Written: true })
+            {
+                var width = op == ".storeScalar 4" ? 4 : 8;
+                if (state.Moved || state.Called)
+                    return Stop("a span store after another store or a call of the iteration, whose memory the " +
+                        "span's checks are not carried to");
+                if (stack[^1] is not Number { Narrow: false } stored || stored.Width != width ||
+                    components[written.Component].Width != width)
+                    return Stop("a span store of a value the outline cannot name at the element's width");
+                stack.RemoveRange(stack.Count - 2, 2);
+                state.Facts.AddRange(SpanWrite(state, written.Component, stored.Term, StoreLemma(op)));
+                state.Moved = true;
+            }
+            else if (op is ".store64" or ".storeScalar 4" or ".storeScalar 8" && stack.Count >= 2 &&
                 stack[^2] is AddedReference added && !state.Moved)
             {
                 var width = op == ".storeScalar 4" ? 4 : 8;
@@ -1286,12 +1331,7 @@ internal static partial class ProofOutline
                     return Stop("a store through `Unsafe.Add` of a value the outline cannot name at the " +
                         "element's width");
                 stack.RemoveRange(stack.Count - 2, 2);
-                var lemma = op switch
-                {
-                    ".store64" => "step_store64_of_write", ".storeScalar 8" => "step_storeScalar_i64_of_write",
-                    _ => "step_storeScalar_of_write"
-                };
-                state.Facts.AddRange(ElementWrite(added, stored.Term, lemma));
+                state.Facts.AddRange(ElementWrite(added, stored.Term, StoreLemma(op)));
                 state.Moved = true;
             }
             else if (Regex.IsMatch(op, @"\A\.memory \(\.add \d+ (true|false)\)\z"))
@@ -1321,6 +1361,26 @@ internal static partial class ProofOutline
             else if (Writes) apart = $" {name}Apart";
             Pending(state, $"obtain ⟨{name}Item, -, {name}Found, {name}Element⟩ :=",
                 $"({span.Checked}.within wellFormed frame{apart}).head (by decide)");
+        }
+
+        /// <summary>The step lemma of a scalar store through an address whose write succeeds.</summary>
+        static string StoreLemma(string op) => op switch
+        {
+            ".store64" => "step_store64_of_write", ".storeScalar 8" => "step_storeScalar_i64_of_write",
+            _ => "step_storeScalar_of_write"
+        };
+
+        /// <summary>Store `value` into the first element of the written span `component`, at the iteration's
+        /// first memory; returns the facts the loop tactics step the store with.</summary>
+        string[] SpanWrite(PathState state, int component, string value, string lemma)
+        {
+            var name = components[component].Name;
+            var span = (SpanTerm)state.State[component];
+            current!.Line($"{currentIndent}obtain ⟨{name}Item, {name}After, {name}Address, {name}Found, {name}Wrote,");
+            current.Line($"{currentIndent}    {name}Frame⟩ :=");
+            current.Line($"{currentIndent}  frame.write_span_head wellFormed {span.Checked} {value}");
+            // The written memory is named so the loop tactics carry the span's checks to it.
+            return [name + "Found", name + "Wrote", $"{lemma} {name}Wrote"];
         }
 
         /// <summary>Write `value` to the element `added` names, at the iteration's first memory, leaving its

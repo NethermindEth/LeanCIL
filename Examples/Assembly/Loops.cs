@@ -156,4 +156,14 @@ public static class Loops
             climbed = unchecked(climbed + 1);
         return climbed;
     }
+
+    // Writes every element through the span, which need not have been readable before.
+    public static void Fill(Span<uint> target, uint value)
+    {
+        while (target.Length != 0)
+        {
+            target[0] = value;
+            target = target.Slice(1);
+        }
+    }
 }

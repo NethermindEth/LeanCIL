@@ -262,6 +262,14 @@ comment saying which obligation it is:
   and footprint the author writes, by `omega` over their conjuncts or from a `Filled` or `Writable`
   fact covering the element; it is a hole while any of those is `sorry`, and an error at the write
   once they are written and do not imply it.
+- A loop over a `Span<T>` of 32- or 64-bit integers that stores `span[0]` and continues with
+  `span.Slice(1)` keeps the span as a `WritableSuffix`: its `WritableSpan` holds the view's checks
+  and `SpanWritable` authority in the caller's memory, not its contents, so the caller need not
+  have initialized it. The loop splits on the remaining length with `cases`, the store, before any
+  other store of the iteration, steps through `frame.write_span_head`, which names the element's
+  address, and `Slice(1)` through `WritableSpan.tail`. The span's bytes are its `footprint`, and
+  the theorem assumes `SpanWritable` over them. A read of the written span is a `not outlined:`
+  hole.
 - Loops in sequence are bound in pc order (`loop`, `loop2`, ...), each with its own cutpoint,
   `invariant` and `measure` (`header2`, `invariant2`, `measure2`, ...). The path leaving one loop
   for the next loop's test enters that loop through `loop_terminates_then`, leaving its invariant at

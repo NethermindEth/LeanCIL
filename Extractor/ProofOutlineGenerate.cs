@@ -17,6 +17,13 @@ internal static partial class ProofOutline
         internal string ElementName => Name + "Element";
         internal string LengthName => Name + "Length";
 
+        /// <summary>A span argument the method may write through, with authority over its elements.</summary>
+        internal bool Writable { get; init; }
+
+        /// <summary>The premise naming a span's access mode, and its statement.</summary>
+        internal string Mode => Name + (Writable ? "Writable" : "ReadOnly");
+        internal string ModeStatement => $"{Name}.writable = {(Writable ? "true" : "false")}";
+
         /// <summary>The named fields of an object argument's class.</summary>
         internal ViewField[] Fields { get; init; } = [];
     }
@@ -25,7 +32,7 @@ internal static partial class ProofOutline
     /// the caller's struct.</summary>
     /// <remarks>An `Array` is an array of class references, bound with the element class and length its
     /// allocation records, since covariance lets it hold a class derived from its static element type.</remarks>
-    enum ParameterShape { Scalar, Boolean, Narrow, Reference, ReadOnlySpan, Object, StructReference, Array }
+    enum ParameterShape { Scalar, Boolean, Narrow, Reference, Span, Object, StructReference, Array }
 
     /// <summary>The method's return as a Lean type and value constructor, or none for `void`; a `bool`
     /// is a `Bool` the returned word encodes as 1 or 0, and an object a possibly null reference.</summary>
@@ -64,7 +71,7 @@ internal static partial class ProofOutline
             Describe(method, parameter, names, views))).ToArray();
         var result = DescribeResult(method);
         bool symbolic = parameters.Any(parameter => parameter.Shape is ParameterShape.Reference or
-            ParameterShape.ReadOnlySpan or ParameterShape.Object or ParameterShape.StructReference or
+            ParameterShape.Span or ParameterShape.Object or ParameterShape.StructReference or
             ParameterShape.Array);
         var body = new Body(emitted.Ops);
         var lean = new Writer();
@@ -79,6 +86,9 @@ internal static partial class ProofOutline
             { } array)
             throw Unsupported($"parameter `{array.Name}` of {method.Name} is an array of class references, which " +
                 "new-proof outlines only in bodies without loops");
+        if (loops.Count == 0 && parameters.Any(parameter => parameter.Writable))
+            throw Unsupported($"{method.FullName} writes a span outside a loop; new-proof follows a span written " +
+                "from the front by a loop");
         if (structReceiver)
             source = StructStraightLine(spec, body, names, lean);
         else if (loops.Count == 0)
@@ -127,9 +137,10 @@ internal static partial class ProofOutline
         if (type is ByReferenceType reference && ElementWidth(reference.ElementType) is { } width)
             return new(name, ParameterShape.Reference, "Reference", width);
         if (Spans.Is(type) && type is GenericInstanceType span &&
-            span.ElementType.FullName == "System.ReadOnlySpan`1" &&
+            span.ElementType.FullName is "System.ReadOnlySpan`1" or "System.Span`1" &&
             ElementWidth(span.GenericArguments[0]) is { } element)
-            return new(name, ParameterShape.ReadOnlySpan, "SpanView", element);
+            return new(name, ParameterShape.Span, "SpanView", element)
+                { Writable = span.ElementType.FullName == "System.Span`1" };
         return type.FullName switch
         {
             "System.UInt32" or "System.Int32" => new(name, ParameterShape.Scalar, "W32", 4),
@@ -141,7 +152,7 @@ internal static partial class ProofOutline
             "System.Int16" => new(name, ParameterShape.Narrow, "BitVec 16", 2, Signed: true),
             _ => throw Unsupported($"parameter `{parameter.Name}` of {method.Name} has type {type.FullName}; " +
                 "new-proof types `bool`, integers of up to 64 bits, admitted classes, arrays of class references, " +
-                "and references to and read-only spans of 32- and 64-bit integers")
+                "and references to and spans of 32- and 64-bit integers")
         };
     }
 
@@ -192,19 +203,21 @@ internal static partial class ProofOutline
         /// argument assumes a fact of each field of its class.</summary>
         internal ObjectPlan? Plan { get; set; }
 
-        /// <summary>The caller memory the method may write: the stored fields of its object arguments, or a hole
-        /// when it is handed a reference.</summary>
+        /// <summary>The caller memory the method may write: the stored fields of its object arguments and the
+        /// bytes of its writable spans, or a hole when it is handed a reference.</summary>
         internal void Footprint(Writer lean)
         {
             // Which elements of an array argument an unstepped body writes is the author's to state.
             var loop = Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference);
             var references = loop || Plan is null && Arrays.Any();
             var writer = loop ? "loop" : "method";
+            var spans = Parameters.Where(parameter => parameter.Writable).Select(parameter => parameter.Name).ToArray();
+            var parts = (Arrays.Any() ? new[] { "the fields and elements it stores of its arguments" }
+                    : Objects.Any() ? ["the fields it stores of its object arguments"] : [])
+                .Concat(spans.Length > 0 ? ["the bytes of its writable spans"] : []);
             lean.Doc(references
                 ? $"Replace with the caller memory the {writer} may write, as references with their widths in bytes."
-                : Arrays.Any()
-                ? "The caller memory the method may write: the fields and elements it stores of its arguments."
-                : "The caller memory the method may write: the fields it stores of its object arguments.");
+                : $"The caller memory the method may write: {string.Join(" and ", parts)}.");
             var entries = Plan is { } plan
                 ? plan.Entries.Select(entry => (Name: entry[(entry.LastIndexOf(' ') + 1)..], Entry: entry)).ToArray()
                 : Objects.SelectMany(parameter => parameter.Fields.Where(named => named.Stored)
@@ -212,17 +225,20 @@ internal static partial class ProofOutline
             // A binder the list does not name is `_`, so the definition elaborates without warnings.
             var binders = references ? Binders
                 : Binders.Select(binder => entries.Any(entry =>
-                    Regex.IsMatch(entry.Entry, $@"(?<![\w.]){binder.Name}(?!\w)")) ? binder : ("_", binder.Type));
+                    Regex.IsMatch(entry.Entry, $@"(?<![\w.]){binder.Name}(?!\w)")) || spans.Contains(binder.Name)
+                    ? binder : ("_", binder.Type));
             lean.Wrapped("def footprint", Grouped(binders), ": List (Reference × Nat) :=");
             if (references) lean.Line($"  sorry -- caller memory the {writer} may write");
-            else lean.Line("  [" + string.Join(", ", entries.Select(entry => entry.Entry)) + "]");
+            else lean.Line("  " + string.Join(" ++ ", (entries.Length > 0 || spans.Length == 0
+                ? ["[" + string.Join(", ", entries.Select(entry => entry.Entry)) + "]"] : Array.Empty<string>())
+                .Concat(spans.Select(span => span + ".footprint"))));
             lean.Line();
         }
 
         internal IEnumerable<(string Name, string Type)> Binders => Parameters.SelectMany(parameter =>
             parameter.Shape switch
             {
-                ParameterShape.ReadOnlySpan => new[]
+                ParameterShape.Span when !parameter.Writable => new[]
                     { (parameter.Name, "SpanView"), (parameter.ElementsName, $"List {WordType(parameter.Width)}") },
                 ParameterShape.Array => [(parameter.Name, parameter.Lean),
                     (parameter.ElementName, "CIL.Extraction.TypeExpr"), (parameter.LengthName, "Nat")],
@@ -249,9 +265,15 @@ internal static partial class ProofOutline
             {
                 ParameterShape.Reference => new[] { (parameter.Name + "Form",
                     $"form initial {parameter.Name} = .ok {parameter.Name}") },
-                ParameterShape.ReadOnlySpan => [
+                // A written span's bytes need not be readable: it needs only authority over its elements.
+                ParameterShape.Span when parameter.Writable => [
                     (parameter.Name + "Valid", $"{parameter.Name}.validate initial = .ok ()"),
-                    (parameter.Name + "ReadOnly", $"{parameter.Name}.writable = false"),
+                    (parameter.Mode, parameter.ModeStatement),
+                    (parameter.Name + "Width", $"{parameter.Name}.width = {parameter.Width}"),
+                    (parameter.Name + "Authority", $"SpanWritable initial (footprint {Arguments}) {parameter.Name}")],
+                ParameterShape.Span => [
+                    (parameter.Name + "Valid", $"{parameter.Name}.validate initial = .ok ()"),
+                    (parameter.Mode, parameter.ModeStatement),
                     (parameter.Name + "Contents",
                         $"SpanContents initial {parameter.Name} {parameter.Width} {parameter.ElementsName}")],
                 ParameterShape.Object => new[] { (parameter.Name + "Live", $"LiveObject initial {parameter.Name}") }
