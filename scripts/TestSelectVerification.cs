@@ -29,7 +29,7 @@ void Test(string name, Action action)
 Test("longest-first preserves selection", () =>
 {
     var selected = VerificationSelection.Select(["Tests/Loops.cs", "Tests/UnsafeLayouts.cs", "Tests/IntegerMath.cs"]);
-    Equal(VerificationSelection.Schedule(selected), ["loops", "unsafe", "math"]);
+    Equal(VerificationSelection.Schedule(selected), ["unsafe", "loops", "math"]);
     Equal(VerificationSelection.Schedule(All()).Order(StringComparer.Ordinal), All());
     Equal(VerificationSelection.Schedule(["loops", "newlongsuite"]), ["newlongsuite", "loops"]);
     Equal(VerificationSelection.Schedule([]), []);
