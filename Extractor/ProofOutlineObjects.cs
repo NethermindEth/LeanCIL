@@ -136,6 +136,14 @@ internal static partial class ProofOutline
         Access? Writes, int Number,
         (Reached Target, string Held)[] Found);
 
+    /// <summary>A static helper over words whose contract the author states: the outline names its inputs, steps
+    /// its body against the contract and leaves `pre` and `post` as holes.</summary>
+    sealed record Stub(int Index, string Name, MethodDefinition Method, string[] Inputs, int[] Widths, int Result);
+
+    /// <summary>A call through a stub's contract after `Stores` writes, which change no memory: `Input` is the
+    /// contract's input at the call and `Number` names its result and postcondition.</summary>
+    sealed record StubCall(Stub Stub, string Input, int Stores, int Number, string Where);
+
     /// <summary>A test of named words that splits the body: `Fact` names `Condition` on the side that holds it
     /// and its negation on the other, and each side is walked from where it continues to its own return.</summary>
     sealed record Split(string Fact, string Condition, (string Where, ObjectWalk Walk) Holds,
@@ -159,7 +167,7 @@ internal static partial class ProofOutline
     /// <remarks>A `linear` walk reads every op once in order, ignoring where branches go, to find which fields of
     /// which objects a body with loops touches; its steps are not a proof.</remarks>
     sealed class ObjectWalk(Specification spec, string[] ops, FieldViews views, Func<int, Callee?> callees,
-        bool linear = false, bool numericHomes = false)
+        bool linear = false, bool numericHomes = false, Func<int, Stub?>? stubs = null)
     {
         internal string? Stopped { get; private set; }
         internal string? Returned { get; private set; }
@@ -203,6 +211,9 @@ internal static partial class ProofOutline
 
         /// <summary>The steps on this path, from the start of the body.</summary>
         IEnumerable<object> PathSteps => previous.Concat(Steps);
+
+        /// <summary>The numbers of the stub calls on this path, whose postconditions its return may use.</summary>
+        internal IEnumerable<int> Stubbed => PathSteps.OfType<StubCall>().Select(call => call.Number);
 
         /// <summary>The steps on every path through the body, each side of a split after the steps before it.
         /// </summary>
@@ -281,8 +292,8 @@ internal static partial class ProofOutline
                     if (numericHomes) return Stop("a class frame with numeric homes and a branch");
                     var (holds, fails) = takenWhenTrue ? (target, pc + 1) : (pc + 1, target);
                     var walks = new[] { holds, fails }.Select(next => (Next: next, Walk: new ObjectWalk(spec, ops,
-                        views, callees, linear) { Objects = Objects, Arrays = Arrays, Slots = Slots, Stored = Stored,
-                        ArrayApart = ArrayApart,
+                        views, callees, linear, stubs: stubs) { Objects = Objects, Arrays = Arrays, Slots = Slots,
+                        Stored = Stored, ArrayApart = ArrayApart,
                         stores = stores,
                         calls = calls, splits = splits + 1, Fresh = Fresh, previous = [.. PathSteps] })).ToArray();
                     Steps.Add(new Split($"branch{splits + 1}", condition, (location(holds), walks[0].Walk),
@@ -584,8 +595,23 @@ internal static partial class ProofOutline
                 {
                     var index = int.Parse(match.Groups[1].Value);
                     if (callees(index) is not { } callee)
-                        return Stop("a call whose callee the outline cannot state as a contract from its body, " +
-                            "which `cil_contract_steps` composes through a contract you write");
+                    {
+                        if (linear || numericHomes || stubs?.Invoke(index) is not { } stub)
+                            return Stop($"a call to method {index} whose contract the outline cannot state from its " +
+                                "body, which `cil_contract_steps` composes through a `MethodContract` you write and " +
+                                $"prove with `Holds Extracted.program {index}`");
+                        var terms = new string[stub.Inputs.Length];
+                        for (var position = terms.Length - 1; position >= 0; position--)
+                        {
+                            if (Pop() is not Word { Term: { } term } word || word.Width != stub.Widths[position])
+                                return Stop($"a call to `{stub.Method.Name}` with a value the outline does not name");
+                            terms[position] = term;
+                        }
+                        var input = terms.Length == 1 ? Operand(terms[0]) : $"({string.Join(", ", terms)})";
+                        Steps.Add(new StubCall(stub, input, stores, ++calls, location(pc)));
+                        stack.Add(new Word($"output{calls}", stub.Result));
+                        continue;
+                    }
                     var arguments = new Item?[callee.Spec.Parameters.Length];
                     for (var position = arguments.Length - 1; position >= 0; position--) arguments[position] = Pop();
                     if (arguments.Any(argument => argument is Word { Term: null }) && !linear)
@@ -1392,6 +1418,11 @@ internal static partial class ProofOutline
                     Call(call);
                     continue;
                 }
+                if (step is StubCall stubbed)
+                {
+                    Stubbed(stubbed);
+                    continue;
+                }
                 if (step is ElementAccess element)
                 {
                     Element(element);
@@ -1703,6 +1734,33 @@ internal static partial class ProofOutline
             lean.Line($"{indent}subst called{number}");
         }
 
+        /// <summary>A call through a stub's contract: its precondition is a hole stated before the steps that
+        /// reach the call, and its postcondition is all the path learns of the result.</summary>
+        void Stubbed(StubCall call)
+        {
+            var name = call.Stub.Name;
+            var number = call.Number;
+            // A body over words alone runs from the empty memory, which its statement names outright.
+            var memory = spec.Symbolic ? ObjectWalk.Memory(call.Stores) : "Memory.empty";
+            lean.Wrapped($"{indent}have permitted{number} :",
+                $"{name}Contract.pre {call.Input} {memory}".Terms(), ":= by");
+            lean.Noted(indent + "  ", "sorry", $"`{name}Contract.pre` at the call at {call.Where}, from `assumed`");
+            Add($"permitted{number}");
+            Add($"{name}_holds");
+            Add($"{name}Contract");
+            Add(ContractEvidence.LeaveFrame);
+            lean.Wrapped($"{indent}cil_contract_steps", FactList(facts), "");
+            facts.Clear();
+            Add($"{name}Contract");
+            ContractEvidence.Called(lean, indent, number);
+            lean.Line($"{indent}dsimp only [{name}Contract] at post{number}");
+            // The contract keeps the memory, so the path's facts and names stay those before the call.
+            lean.Line($"{indent}obtain ⟨kept{number}, post{number}⟩ := post{number}");
+            lean.Line($"{indent}subst called{number}");
+            // A step that stopped at the call left the result on the stack under the contract's `results`.
+            lean.Line($"{indent}try dsimp only [{name}Contract]");
+        }
+
         /// <summary>Rewrites a callee's returned values from actual entry memory to frozen field values.</summary>
         void RewriteCallFields(CallStep call, string post)
         {
@@ -1852,7 +1910,7 @@ internal static partial class ProofOutline
             // The return leaves the method's frame, which owns no caller memory.
             // After a call the steps may already have reached the return.
             if (frame is null) Add("leaveFrame");
-            lean.Wrapped(walk.Steps.LastOrDefault() is CallStep
+            lean.Wrapped(walk.Steps.LastOrDefault() is CallStep or StubCall
                 ? $"{indent}try cil_contract_steps" : $"{indent}cil_contract_steps", FactList(facts), "");
             if (returns is not null)
             {
@@ -1863,7 +1921,7 @@ internal static partial class ProofOutline
             var boolean = spec.Result is { Boolean: true };
             lean.Wrapped(spec.Result is null ? $"{indent}refine ⟨rfl,"
                 : boolean ? $"{indent}refine ⟨?result, ?encoded," : $"{indent}refine ⟨_, rfl,",
-                Parts(","), "?_⟩");
+                spec.Framed ? Parts(",") : [], "?_⟩");
             if (boolean)
             {
                 // The returned word is computed, not named, so the author chooses the Bool it encodes.
@@ -1875,9 +1933,14 @@ internal static partial class ProofOutline
                 .Where(index => stored[index - 1] is not Allocation && !Private(index))
                 .ToArray();
             var held = string.Join(", ", stores.Select(index => $"`held{index}`"));
+            var stubbed = walk.Stubbed.ToList();
+            var posts = string.Join(", ", stubbed.Select(number => $"`post{number}`"));
             lean.Noted(indent, "sorry", "Postcondition of the returned value" +
                 (branches.Count == 0 ? "" : " where " + string.Join(" and ", branches)) +
-                (stores.Length == 0 ? "" : $", with {held} the stored fields"));
+                (stores.Length == 0 ? "" : $", with {held} the stored fields") +
+                (stubbed.Count == 0 ? ""
+                    : stubbed.Count == 1 ? $", from `assumed` and {posts}, the helper's `post` of `output{stubbed[0]}`"
+                    : $", from `assumed` and {posts}, each helper's `post` of its result"));
         }
     }
 }

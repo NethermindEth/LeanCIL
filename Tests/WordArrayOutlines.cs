@@ -29,8 +29,12 @@ partial class Program
             if (name is "RefillRead" or "ReadAfterAllocation" &&
                 source.Contains("SpanApart", StringComparison.Ordinal))
                 throw new InvalidOperationException($"The {name} outline requires unnecessary byte separation");
-            source = FillWordArrayDefinition(source, "Precondition",
-                name == "Sum" ? "values1.reference ≠ .null" : "True");
+            // The loop's outline states the null exclusion itself and leaves the rest of the precondition.
+            const string nonNull = "  values1.reference ≠ .null ∧ ";
+            if (name == "Sum" && !source.Contains(nonNull + "sorry", StringComparison.Ordinal))
+                throw new InvalidOperationException($"The Sum outline does not exclude a null array:\n{source}");
+            source = name == "Sum" ? source.Replace(nonNull + "sorry", nonNull + "True", StringComparison.Ordinal)
+                : FillWordArrayDefinition(source, "Precondition", "True");
             source = FillWordArrayDefinition(source, "Postcondition", name == "Sum"
                 ? "result = values1Elements.foldl (· + ·) 0"
                 : name == "RefillRead" ? "Samples.Values.Holds final samples values1.reference ∧ " +

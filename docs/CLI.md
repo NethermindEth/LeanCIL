@@ -231,6 +231,11 @@ comment saying which obligation it is:
 - `Precondition` and `Postcondition` are definitions to replace with the specification. The
   theorem assumes the precondition and promises the postcondition of the returned value, and for
   a method that takes references, spans or arrays also of the caller's memory before and after.
+  Each definition the author fills (`Precondition`, `Postcondition`, `invariant`, `measure`, a
+  `footprint` hole and a helper's contract stub outside a loop) is under
+  `set_option linter.unusedVariables false in`,
+  since the theorem fixes its binders and a specification rarely names them all. The header names
+  each C# parameter bound under another name, such as `values` as `values1`.
 - A method without a loop is stepped by `cil_checked_steps` when its body is arithmetic on 32- and
   64-bit arguments or a total bit count (`Log2`, `PopCount`, `LeadingZeroCount`,
   `TrailingZeroCount`), leaving only the postcondition. A signed or unsigned checked `+`, `-` or
@@ -256,9 +261,12 @@ comment saying which obligation it is:
   outside throws, a hole the precondition closes. Straight-line bodies over objects can also
   store the array in a field and read an element, as described below; unsupported combinations
   leave a `not outlined:` hole.
-- A loop over an array indexes it with an `int` local tested against `values.Length`. The proof
-  destructures the array into `valuesBase` and `valuesLength` before the loop, the precondition
-  excluding a null array, and the cutpoint takes `valuesLength`, which a valid array keeps below
+- A loop over an array indexes it with an `int` local tested against `values.Length`, which
+  throws on a null array, so `Precondition` is generated as `values.reference ≠ .null ∧ sorry`
+  under a comment saying why, leaving the `sorry` for what else callers guarantee. The proof
+  destructures the array into `valuesBase` and `valuesLength` before the loop and closes the null
+  case from `Precondition`; with the conjunct removed that case fails with `Precondition must
+  exclude null`. The cutpoint takes `valuesLength`, which a valid array keeps below
   `2 ^ 31` (`SpanView.length_bounded` of its storage span). A read of `values[index]` steps through
   `array_load` of the storage span's contents, carried into the iteration's frame, and loads
   `valuesElements[index.toNat]`. An array the loop stores into is a written one: the theorem gives
@@ -272,7 +280,9 @@ comment saying which obligation it is:
   the loop state carries. The proof applies `invoke_loop_satisfies`, steps the entry to the first
   loop head, splits the iteration where the body branches, and leaves the obligations the loop
   tactics tag: `invariant` and `measure` where an iteration continues, `postcondition` where it
-  returns, and `precondition` at a call. An object local, such as a list walk's `node`, is a
+  returns, and `precondition` at a call. A comment at the iteration names what its holes follow
+  from: `holds`, the invariant at the loop head, `assumed`, the precondition, and the fact of each
+  test taken, such as `guard`. An object local, such as a list walk's `node`, is a
   `ManagedReference` of the loop state, and the cutpoint's frame names its slot from the state. A
   null test of it splits the proof with `cases node`, leaving a hole for the liveness of the
   instance it holds, and an identity test against another object splits it with
@@ -424,12 +434,26 @@ comment saying which obligation it is:
   from a reference field and stores nothing gets a `pre` asking that some object, such as
   `nodeNextTarget`, is held there with the facts it reads, and a `post` stating the result of
   whichever object the field holds; the caller names that object by its own fact that the field
-  holds it, from a store just before the call or a target of its statement. Any other call is a
-  `not outlined:` hole naming the callee. A loop
+  holds it, from a store just before the call or a target of its statement. A loop
   carries the object facts across its iterations, and a `callvirt` in it gets a contract like any
   other call. A loop's statement assumes the same per-object facts, read from its body and callees
   in order; when that reading stops, it assumes a fact of every named field of each object, `Owned`
   where the method or a callee stores the field.
+- A call in a straight-line body to a static helper over words gets a contract stub, since what
+  the caller should learn of the result is the author's to state: in a body over objects, a helper
+  that tests its arguments or throws, and in a body over words alone, one that only computes as
+  well. The helper has 32- or 64-bit integer parameters and result and no locals, and its body
+  only computes, tests and throws. The stub is a `MethodContract` whose `pre` is `sorry` and whose
+  `post` is `final = initial ∧ sorry`, the helper storing nothing, and a `Holds` theorem against
+  the helper's method index in `Extracted.program`, split with `by_cases` on each test: each
+  returning side is stepped and leaves what `post` states of the result, and each throwing side is
+  closed from `pre` by `cil_loop_obligation`. At the call the caller states `permitted1`, the
+  helper's `pre` of the values passed, as a hole to prove from `assumed`; `cil_contract_steps`
+  composes the call through the contract, and the proof names the result `output1` and what
+  `post` states of it `post1`, which the postcondition hole's comment cites. A wrong `pre` or
+  `post` fails in the `Holds` theorem or at the caller, never silently. A caller with numeric
+  locals, and any other callee, leaves a `not outlined:` hole: in a body over objects it names the
+  callee's method index, and in a body over words the call instruction.
 
 Where the outline cannot step a path, it leaves a hole whose comment starts with `not outlined:`,
 names what it met and what that step needs, and gives the source line to continue from. The
@@ -455,9 +479,11 @@ open CIL.Safety
 open CIL (W32 W64)
 namespace ExampleProof
 
+set_option linter.unusedVariables false in
 /-- Replace with what callers must guarantee about the arguments, or `True`. -/
 def Precondition (value : W32) : Prop := sorry
 
+set_option linter.unusedVariables false in
 /-- Replace with what `Countdown` guarantees about its result. -/
 def Postcondition (value result : W32) : Prop := sorry
 
@@ -476,9 +502,11 @@ bind_cutpoint header (home0 : Reference) (state : State home0) :=
   Extracted.method0 at loop.latch matching (· matches .brnonzero _)
   with entry.frame home0, [.scalar (.i32 state.values)], state.memory
 
+set_option linter.unusedVariables false in
 /-- Replace with what holds at every loop head. -/
 def invariant (value : W32) {home0 : Reference} (state : State home0) : Prop := sorry
 
+set_option linter.unusedVariables false in
 /-- Replace with a quantity each iteration decreases. -/
 def measure (value : W32) {home0 : Reference} (state : State home0) : Nat := sorry
 
@@ -495,6 +523,8 @@ theorem correctness (value : W32) : Ensures Extracted.program 0
     cil_loop_recurse start value
     case invariant => sorry -- invariant at the first loop head
   rintro ⟨remaining, current, frame⟩ holds recurse
+  -- `holds` is the invariant at this loop head and `assumed` the Precondition; each side below
+  -- names the test it took, such as `guard`.
   by_cases guard : remaining = 0#32
   · -- leaves the loop at Loops.cs:40
     cil_loop_finish [guard]

@@ -306,6 +306,14 @@ Examples:System.Int32 Examples.ExceptionDocumentation::CheckedNarrow(System.Int6
 Examples:System.Int32 Examples.ExceptionDocumentation::Clamp(System.Int32,System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ExplicitCounterValue::Examples.ICounterValue.Read()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ExplicitGenericCounterValue`1::Examples.ICounterValue.Read()	B	B	B	B	B	B	B	B
+Examples:System.Int32 Examples.Gauge::Bounded(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Gauge::Current()	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Gauge::Doubled(System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Gauge::Saturate(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Gauge::Smaller(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Gauge::Total(System.Int32[])	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Gauge::Twice(System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Gauge::Within(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.GenericCounterValue`1::Read()	B	B	B	B	B	B	B	B
 Examples:System.Int32 Examples.GenericInterfaceCounter`1::Read()	B	B	B	B	B	B	B	B
 Examples:System.Int32 Examples.GenericLayouts::TupleSize()	A	A	A	A	A	A	A	A
@@ -1090,6 +1098,8 @@ Examples:System.Void Examples.Enums::Assign(Examples.Unsigned64&,Examples.Unsign
 Examples:System.Void Examples.ExceptionDocumentation::Reference(System.UInt64&)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ExplicitCounterValue::Examples.ICounterValue.Increment()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ExplicitGenericCounterValue`1::Examples.ICounterValue.Increment()	B	B	B	B	B	B	B	B
+Examples:System.Void Examples.Gauge::.ctor()	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Gauge::Settle()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.GenericCounterValue`1::Increment()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.GenericEnvelope`1::.ctor(T,T)	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.GenericMethods::Clear(T&)	B	B	B	B	B	B	B	B

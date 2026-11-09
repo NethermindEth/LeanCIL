@@ -181,9 +181,11 @@ internal static partial class ProofOutline
             if (field.Initial is not null) field.Read = names.Claim(field.Initial + "Read", "fieldRead");
             if (field.Stored) field.Owned = names.Claim(receiver + Capitalized(field.Name) + "Owned", "fieldOwned");
         }
+        lean.Quiet();
         lean.Line("/-- Replace with what callers must guarantee about the arguments, or `True`. -/");
         lean.Wrapped("def Precondition", Grouped(binders.Append(("initial", "Memory"))), ": Prop := sorry");
         lean.Line();
+        lean.Quiet();
         lean.Line($"/-- Replace with what `{spec.Method.Name}` guarantees about its result and the caller's " +
             "memory. -/");
         var post = binders.Concat([("initial", "Memory"), ("final", "Memory")]);
