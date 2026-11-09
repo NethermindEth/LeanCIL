@@ -51,7 +51,8 @@ foreach (var (proof, entry) in new[]
     ("TagStore", "TagArrays::Put(System.String[],System.Int32,Examples.Tagged)"),
     ("TagLoad", "TagArrays::Take(Examples.Tagged,System.String[],System.Int32)"),
     ("SampleValues", "SampleArrays::ValuesOf(Examples.Samples)"),
-    ("SampleRefill", "SampleArrays::Refill(Examples.Samples,System.Int32[])")
+    ("SampleRefill", "SampleArrays::Refill(Examples.Samples,System.Int32[])"),
+    ("SampleCount", "SampleArrays::Count(Examples.Samples)")
 })
 {
     verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));

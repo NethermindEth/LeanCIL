@@ -451,10 +451,13 @@ starts a live heap array of exactly `length` elements whose view validates. A re
 holding one loads it (`readable.facts held whole`, or `load_whole`), one holding null loads the
 null array (`load_null`), and `owned.store_whole whole` and `owned.store_null` store into an
 owned field, confined to its slot; `frame` keeps the field across a confined call.
-`step_arrayField_eq` and `step_setArrayField_eq` step `ldfld` and `stfld`.
+`step_arrayField_eq` and `step_setArrayField_eq` step `ldfld` and `stfld`, and
+`step_memory_arrayLength_address_eq` steps `ldlen` of the loaded array to its length once its
+view validates (`whole.valid`), while `step_memory_arrayLength_null_eq` throws on the null array.
 [SampleValues](../Examples/Proofs/SampleValues.lean) returns the array a field holds, and the
-null array for a null field, and [SampleRefill](../Examples/Proofs/SampleRefill.lean) replaces it
-under a contract whose footprint is the field's slot.
+null array for a null field, [SampleCount](../Examples/Proofs/SampleCount.lean) returns its
+length, and [SampleRefill](../Examples/Proofs/SampleRefill.lean) replaces it under a contract
+whose footprint is the field's slot.
 
 ## Construct structs through contracts
 

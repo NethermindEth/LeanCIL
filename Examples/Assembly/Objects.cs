@@ -179,6 +179,9 @@ public static class SampleArrays
 
     /// <summary>Replaces the samples with <paramref name="values"/>.</summary>
     public static void Refill(Samples samples, int[] values) => samples.Values = values;
+
+    /// <summary>The number of samples; a null array throws.</summary>
+    public static int Count(Samples samples) => samples.Values!.Length;
 }
 
 /// <summary>Reference identity and null tests on class instances.</summary>

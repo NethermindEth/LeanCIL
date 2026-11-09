@@ -379,6 +379,7 @@ Examples:System.Int32 Examples.PrimitiveOperations::Alias(System.Int16&,System.I
 Examples:System.Int32 Examples.PrimitiveOperations::Choose(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.PrimitiveOperations::PacketSize()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.PrimitiveOperations::ReadWrite(System.Int32&,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SampleArrays::Count(Examples.Samples)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Sequential::PackedSize()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Sequential::RecordSize()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SpanConstructors::AggregateLocal(Examples.AggregateSpans/Words&)	A	A	A	A	A	A	A	A
