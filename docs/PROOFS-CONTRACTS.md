@@ -258,10 +258,11 @@ identity bound those relations take.
 A contract for a method taking [class instances](SOUNDNESS-RUNTIME.md#class-instances) names
 fields, not offsets. For every field of an admitted class that its methods load or store, an
 extraction emits a descriptor under `Extracted.Classes`, such as `Account.Balance :
-WordField 8` or `Node.Next : ReferenceField`, carrying the class and the model offset the
-extractor validated. Each comes with a theorem, checked by `decide`, that the descriptor matches
-the operands of an instruction it names (`Account.Balance_accessed`); a field name is a label,
-and only the class, offset and width are relied on.
+WordField 8`, `Node.Next : ReferenceField` or `Samples.Values : ArrayField .signed32`, carrying
+the class and the model offset the extractor validated. Each comes with a theorem, checked by
+`decide`, that the descriptor matches the operands of an instruction it names
+(`Account.Balance_accessed`); a field name is a label, and only the class, offset and width or
+element are relied on.
 
 `CIL.Safety.ObjectFields` gives each descriptor its predicates and lemmas:
 
@@ -444,13 +445,16 @@ stores a string a field holds into one, deciding covariance by the string's own 
 [TagLoad](../Examples/Proofs/TagLoad.lean) loads one into a field, as `ReferenceField.Forms`
 and `Owned.store_formed` take it.
 
-A field holding an array of integers, Booleans, chars or enums keeps the whole array's origin in
-its slot. `loadArraySlot_of_access` reads the slot of a readable field, `arrayOfSlot_whole` turns
-a slot naming offset 0 of a live heap allocation of `length` elements into that array, and
-`storeArraySlot_whole` stores such an array into a writable field; `step_arrayField_eq` and
-`step_setArrayField_eq` step `ldfld` and `stfld`.
+A field holding an array of integers, Booleans, chars or enums is an `ArrayField element`
+whose slot keeps the whole array's origin. `WholeArray memory element array length` says `array`
+starts a live heap array of exactly `length` elements whose view validates. A readable field
+holding one loads it (`readable.facts held whole`, or `load_whole`), one holding null loads the
+null array (`load_null`), and `owned.store_whole whole` and `owned.store_null` store into an
+owned field, confined to its slot; `frame` keeps the field across a confined call.
+`step_arrayField_eq` and `step_setArrayField_eq` step `ldfld` and `stfld`.
 [SampleValues](../Examples/Proofs/SampleValues.lean) returns the array a field holds, and the
-null array for a null field, and [SampleRefill](../Examples/Proofs/SampleRefill.lean) replaces it.
+null array for a null field, and [SampleRefill](../Examples/Proofs/SampleRefill.lean) replaces it
+under a contract whose footprint is the field's slot.
 
 ## Construct structs through contracts
 

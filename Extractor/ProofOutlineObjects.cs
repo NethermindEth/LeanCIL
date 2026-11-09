@@ -22,8 +22,10 @@ internal static partial class ProofOutline
 
         internal FieldViews(Extraction extraction)
         {
+            // Outlines do not follow value arrays, so a value-array field is never a view field.
             foreach (var view in extraction.Views)
-                classes[view.FullName] = [.. view.Fields.Select(field => new ViewField(view.Path, field.Lean,
+                classes[view.FullName] = [.. view.Fields.Where(field => field.Kind != ClassViews.FieldKind.Array)
+                    .Select(field => new ViewField(view.Path, field.Lean,
                     field.Width, field.Offset, field.Storers.Length > 0, field.Loaders, field.Storers))];
         }
 
@@ -328,7 +330,7 @@ internal static partial class ProofOutline
                     if (Pop() is not Word word) return Stop($"`{op}` on a value that is not a word");
                     stack.Add(new Word(null, op.StartsWith(".conv", StringComparison.Ordinal) ? 4 : word.Width));
                 }
-                else if (ClassViews.Decode(op) is { Store: false, Reference: false } load)
+                else if (ClassViews.Decode(op) is { Store: false, Kind: ClassViews.FieldKind.Word } load)
                 {
                     if (Pop() is not Instance instance || Field(instance, load) is not { } field)
                         return Stop("a field load of an object the outline cannot name");
@@ -341,7 +343,7 @@ internal static partial class ProofOutline
                         _ => new Word(term, field.Width!.Value)
                     });
                 }
-                else if (ClassViews.Decode(op) is { Store: true, Reference: false } store)
+                else if (ClassViews.Decode(op) is { Store: true, Kind: ClassViews.FieldKind.Word } store)
                 {
                     var value = Pop();
                     if (Pop() is not Instance instance || Field(instance, store) is not { } field)
@@ -356,7 +358,7 @@ internal static partial class ProofOutline
                             "cannot name");
                     Steps.Add(new Access(instance.Object, field, AccessKind.Store, false, stores++, word.Term));
                 }
-                else if (ClassViews.Decode(op) is { Store: false, Reference: true } referenceLoad)
+                else if (ClassViews.Decode(op) is { Store: false, Kind: ClassViews.FieldKind.Reference } referenceLoad)
                 {
                     if (Pop() is not Instance instance || Field(instance, referenceLoad) is not { } field)
                         return Stop("a reference field load of an object the outline cannot name");
@@ -388,7 +390,7 @@ internal static partial class ProofOutline
                     Steps.Add(new Access(instance.Object, field, AccessKind.Load, false, stores, Target: reached));
                     stack.Add(new Instance(reached));
                 }
-                else if (ClassViews.Decode(op) is { Store: true, Reference: true } referenceStore)
+                else if (ClassViews.Decode(op) is { Store: true, Kind: ClassViews.FieldKind.Reference } referenceStore)
                 {
                     var value = Pop();
                     if (Pop() is not Instance instance || Field(instance, referenceStore) is not { } field)
