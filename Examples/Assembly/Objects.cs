@@ -174,6 +174,21 @@ public sealed class Samples
 /// <summary>Loads and stores of an integer array held in a class field.</summary>
 public static class SampleArrays
 {
+    /// <summary>Counts the supplied array after a callee writes an unrelated class field.</summary>
+    public static int CountAfterDeposit(Account account, int[] values)
+    {
+        account.Deposit(1);
+        return values.Length;
+    }
+
+    /// <summary>Counts the supplied array after allocating and writing a reference array.</summary>
+    public static int CountAfterAllocation(Node node, int[] values)
+    {
+        var nodes = new Node[1];
+        nodes[0] = node;
+        return values.Length;
+    }
+
     /// <summary>Sums an array beside a class argument.</summary>
     public static int Sum(Samples samples, int[] values)
     {

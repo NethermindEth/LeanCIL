@@ -10,10 +10,11 @@ partial class Program
         var assembly = At("Examples/Assembly/bin/Examples.dll");
         var root = At("artifacts/WordArrayOutlines");
         Directory.CreateDirectory(root);
-        foreach (var name in new[] { "Sum", "RefillRead" })
+        foreach (var name in new[] { "Sum", "RefillRead", "CountAfterDeposit", "CountAfterAllocation" })
         {
             var extraction = Path.Combine(root, name);
-            var selector = $"SampleArrays::{name}(Examples.Samples,int[]{(name == "Sum" ? "" : ",int")})";
+            var owner = name == "CountAfterDeposit" ? "Account" : name == "CountAfterAllocation" ? "Node" : "Samples";
+            var selector = $"SampleArrays::{name}(Examples.{owner},int[]{(name == "RefillRead" ? ",int" : "")})";
             Run(Extract("extract", assembly, "Examples", selector, extraction));
             var outline = Path.Combine(root, name + ".lean");
             File.Delete(outline);
@@ -25,8 +26,9 @@ partial class Program
                 name == "Sum" ? "values1.reference ≠ .null" : "True");
             source = FillWordArrayDefinition(source, "Postcondition", name == "Sum"
                 ? "result = values1Elements.foldl (· + ·) 0"
-                : "Samples.Values.Holds final samples values1.reference ∧ " +
-                    "values1Elements[index.toNat]? = some result");
+                : name == "RefillRead" ? "Samples.Values.Holds final samples values1.reference ∧ " +
+                    "values1Elements[index.toNat]? = some result"
+                : "result = BitVec.ofNat 32 values1.length");
             if (name == "Sum")
             {
                 source = FillWordArrayDefinition(source, "invariant",
@@ -64,15 +66,19 @@ partial class Program
                           exact ⟨exitConfined, rfl⟩
                     """);
             }
-            else
+            else if (name == "RefillRead")
                 source = source.Replace("sorry -- Postcondition of the returned value, with `held1` the stored fields",
                     "exact ⟨values1Reference ▸ held1, by simp [numericOfWidth, BitVec.ofNat_toNat]⟩",
                     StringComparison.Ordinal);
+            else
+                source = Regex.Replace(source, @"sorry -- Postcondition of the returned value[^\n]*",
+                    "simp [Postcondition]");
             if (Regex.IsMatch(source, @"(?<![`\w])sorry(?![`\w])"))
                 throw new InvalidOperationException($"The filled {name} proof has an unfilled obligation:\n{source}");
             var proof = Path.Combine(root, name + "Filled.lean");
             File.WriteAllText(proof, source);
             VerifyWordArrayOutline(extraction, proof, expected: true);
+            if (name.StartsWith("Count", StringComparison.Ordinal)) continue;
             if (name == "RefillRead")
             {
                 var mismatched = Path.Combine(root, name + "WrongElement.lean");

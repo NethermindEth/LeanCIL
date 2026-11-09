@@ -73,7 +73,7 @@ internal static partial class ProofOutline
 
     /// <summary>A use of an array of values after `Stores` writes that checks it is a whole live array: an
     /// argument load, a length, a store or a return.</summary>
-    sealed record ArrayUse(HeldArray Array, int Stores);
+    sealed record ArrayUse(HeldArray Array, int Stores, bool Length = false);
 
     /// <summary>A scalar element read whose contents are carried across reference-slot stores.</summary>
     sealed record WordRead(Parameter Array, string Index, int Stores, string Name);
@@ -508,7 +508,7 @@ internal static partial class ProofOutline
                 else if (op == ".memory .arrayLength")
                 {
                     if (Pop() is not Values values) return Stop("`ldlen` of an array the outline cannot name");
-                    Steps.Add(new ArrayUse(values.Array, stores));
+                    Steps.Add(new ArrayUse(values.Array, stores, Length: true));
                     stack.Add(new Word($"(BitVec.ofNat 64 {values.Array.Length})", 8));
                 }
                 else if ((match = Regex.Match(op, @"\A\.call(?:Instance)? (\d+) (\d+)\z")).Success)
@@ -845,13 +845,16 @@ internal static partial class ProofOutline
         {
             var plan = new ObjectPlan();
             var all = Touches.ToArray();
-            foreach (var array in Arrays.Where(array => array.Words is not null &&
-                all.Any(access => access.Kind == AccessKind.Store && access.Array == array)))
+            foreach (var array in Arrays.Where(array => array.Words is not null))
             {
+                var whole = all.Any(access => access.Kind == AccessKind.Store && access.Array == array);
+                var length = Flattened.OfType<ArrayUse>().Any(use => use.Array == array && use.Length);
+                if (!whole && !length) continue;
                 plan.Targets.Add((array.Name, "Reference"));
                 plan.Premises.Add((array.Words!.Name + "Reference",
                     $"{array.View}.reference = .address {array.Name}"));
-                plan.Premises.Add((array.Whole, $"WholeArray initial {array.Element} {array.Name} {array.Length}"));
+                if (whole)
+                    plan.Premises.Add((array.Whole, $"WholeArray initial {array.Element} {array.Name} {array.Length}"));
             }
             foreach (var read in Flattened.OfType<WordRead>().DistinctBy(read => read.Name))
                 plan.Premises.Add((read.Name + "Bound", $"{read.Index} < {read.Array.ElementsName}.length"));
@@ -1258,7 +1261,15 @@ internal static partial class ProofOutline
                 }
                 if (step is ArrayUse use)
                 {
-                    if (use.Array.Words is { } array) Add(WordValid(array, use.Stores));
+                    if (use.Array.Words is { } array)
+                    {
+                        Add(WordValid(array, use.Stores));
+                        if (use.Length)
+                        {
+                            Add(array.Name + "Reference");
+                            WordLength(array, use.Stores);
+                        }
+                    }
                     else Add(Whole(use.Array, use.Stores) + ".valid");
                     continue;
                 }
@@ -1272,12 +1283,32 @@ internal static partial class ProofOutline
             Return(walk);
         }
 
-        /// <summary>An array view remains valid across field writes, which keep its allocation descriptor.</summary>
-        string WordValid(Parameter array, int stores) => Carry(array.Name + "Valid", stores,
-            (previous, level) => $"(by simpa only [ArrayView.validate, SpanView.validate, " +
-                $"liveAllocation, {(stored[level - 1] is Access { Field.Kind: ClassViews.FieldKind.Word }
-                    ? Kept(level) : $"← wrote{level}, setSlot")}] using {previous} : " +
-                $"{array.Name}.validate stored{level} = .ok ())");
+        /// <summary>An array view remains valid across confined writes, calls and allocation.</summary>
+        string WordValid(Parameter array, int stores)
+        {
+            known.TryAdd(("arrayAllocations", 0), "(AllocationExtension.refl initial)");
+            string Extension(int count) => Carry("arrayAllocations", count, (previous, level) =>
+                $"{previous}.trans (show AllocationExtension {ObjectWalk.Memory(level - 1)} stored{level} " +
+                $"from ⟨framed{level}.grows, framed{level}.allocations⟩)");
+            return Carry(array.Name + "Valid", stores, (_, level) =>
+                $"{array.Name}.validate_preserved {array.Name}Valid wellFormed {Extension(level)}");
+        }
+
+        /// <summary>A non-null array's length, without changing the array view's binding.</summary>
+        void WordLength(Parameter array, int stores)
+        {
+            var name = array.Name + "LengthStep" + stores;
+            var memory = ObjectWalk.Memory(stores);
+            lean.Line($"{indent}have {name} : ∀ body pc args frame rest,");
+            lean.Line($"{indent}    step body (.memory .arrayLength) pc args frame (.array {array.Name} :: rest)");
+            lean.Line($"{indent}      {memory} = .ok (.next (pc + 1)");
+            lean.Line($"{indent}        (.scalar (.i64 (BitVec.ofNat 64 {array.Name}.length)) :: rest) frame");
+            lean.Line($"{indent}        {memory}) := by");
+            lean.Line($"{indent}  intros");
+            lean.Line($"{indent}  simp [step_memory_arrayLength_eq, {WordValid(array, stores)}, " +
+                $"{array.Name}Reference, checkedAt, Except.mapError] <;> rfl");
+            Add(name);
+        }
 
         /// <summary>A scalar read from the supplied contents after reference-slot writes.</summary>
         void WordElement(WordRead read)
@@ -1405,6 +1436,7 @@ internal static partial class ProofOutline
             Add("leaveFrame");
             lean.Wrapped($"{indent}cil_contract_steps", FactList(facts), "");
             facts.Clear();
+            Add(call.Callee.Name + "Contract");
             var number = call.Number;
             if (call.Writes is { } writes)
             {
