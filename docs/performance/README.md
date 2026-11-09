@@ -18,6 +18,7 @@ Local gains are not automatically whole-job CI gains; inclusive stage times can 
 | Generic constraint certificates | [Generic evidence](GenericEvidence.md) |
 | Typed runtime-case deduplication | [Runtime bits](RuntimeBits.md) |
 | Embedding, scalar and span proof work | [Proof work](ProofWork.md) |
+| Per-proof heartbeats and olean size against a base | [Proof cost](ProofCost.md) |
 
 ## Extraction and certificates
 

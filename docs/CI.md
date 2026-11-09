@@ -100,6 +100,76 @@ Keep this aggregate check required rather than individual matrix jobs, which may
 be absent on a PR. Run `dotnet run --file scripts/TestSelectVerification.cs` to test the
 selection rules and final gate locally.
 
+## Proof cost
+
+A tactic or library change alters the terms proofs build and the work it takes to build them, and
+a shorter proof can cost more than the one it replaces. On a pull request the `Proof cost` jobs
+measure each proof at the merge base and at the head, on one runner, and put the comparison in the
+job summary. The base is the first parent of the PR's merge commit, so main's own changes are never
+attributed to the PR, and no checked-in baseline has to be refreshed.
+
+`scripts/ProofCost.cs measure` elaborates a module one command at a time on one thread, through
+the frontend `scripts/ProofCost.lean`, and writes one row per command and one per module:
+
+| Measure | Meaning | Decides the result |
+| --- | --- | --- |
+| Heartbeats | Lean's deterministic work counter for elaborating and kernel-checking the command; `maxHeartbeats` counts thousands of them | yes |
+| Olean bytes | size of the compiled module, every part included; module rows only | yes |
+| Kernel heartbeats | the kernel alone rechecking the theorems the command declared | no |
+| Proof objects | allocated expression objects in those theorems' proof terms | no |
+| Lines | source lines of the command or module | no |
+| Elapsed ms | wall time of the command; kernel time is in the JSON report | no |
+
+Elapsed time depends on the runner's load, so it is reported and never fails a job. The frontend
+checks nothing: a proof is accepted by the verification suites, and a module that reports an error
+is listed as not measured.
+
+Each job measures one source on both trees:
+
+- `libraries` measures every test library of `lakefile.toml`, meaning each `[[lean_lib]]` table
+  that only names a library, with the checkout modules it imports. It runs when the PR changes a
+  Lean file, the lakefile, the toolchain pin or the Lake manifest.
+- A proof suite (`core`, `loops`, `outlines-control`, `outlines-objects`, `outlines-buffers`,
+  `structoutlines`, `receiveroutlines`, `wordreader`, `savedwordreader`) runs when selection chose
+  that suite. The job verifies the suite with each tree's own runner, then measures every output
+  directory the suite verified: its `Extracted.lean`, its `Symbols.lean` when present, and the proof
+  that `verified.json` names, provided the proof is unchanged since. The extraction's generated
+  instruction equations are rows too. A suite that the base does not have, or cannot pass, leaves
+  its proofs without a base, with a warning on the job.
+
+The head uses the certified library of the run. The merge base uses the same library when its
+library inputs are identical; otherwise `Prepare the merge base for proof cost` builds the base
+library with the base's own scripts, incrementally from the head's, and publishes it for the jobs.
+
+`scripts/ProofCost.cs compare` fails when a row's heartbeats grow by more than 5% and by more than
+50,000, or a module's olean grows by more than 5% and by more than 4,096 bytes. Both conditions
+must hold: 5% of a proof that costs a few thousand heartbeats is not a cost, and a large module
+may grow by a small share. Reruns of one tree differ by a few dozen heartbeats in millions and in
+no olean byte, as the [measurements](performance/ProofCost.md) record, so the threshold marks what
+deserves a reviewer's decision, not noise.
+
+A row is a declaration by its full name, or an unnamed command such as an `example` by its
+keyword and a hash of its source, so rows keep their identity when code around them moves.
+Smaller changes, improvements, and added, removed, renamed or edited-unnamed rows are reported
+only. A module's totals decide only while the module holds the same rows at the base and the
+head: a module that gained a proof grew for that reason. A proof measured at the base that cannot
+be measured at the head fails, as does a head with nothing measured.
+
+An increase that is worth its cost is accepted by adding it to `scripts/proof-cost-accepted.json`
+in the same PR. The summary prints the entry: the row, the measure, the base and head values and a
+reason to fill in. An entry applies only to that exact base value and up to that head value, so
+it cannot excuse later growth; entries that match nothing are listed for removal and never fail.
+
+The `Proof cost` jobs are separate checks and not part of `Build and verify`, so a regression
+shows as a failed check on the PR without blocking a merge the reviewer has accepted. A manual run
+of the workflow measures its own tree twice, which reports the runner's measurement noise.
+
+Another producer adds rows by writing the same JSON and passing its file as a further `--base` or
+`--head`: a row is a group, a name, a kind and named integer measures. Measures other than the
+ones above are reported in their own table and never fail. Each job uploads its measurements,
+comparison and suite logs as `proof-cost-<source>`. Run `dotnet run --file scripts/TestProofCost.cs`
+to test the comparison rules; [validation](VALIDATION.md#proof-cost) shows a local comparison.
+
 ## Documentation checks
 
 A stale document misleads as much as a missing one, so the README, `docs/` and `skills/` are
