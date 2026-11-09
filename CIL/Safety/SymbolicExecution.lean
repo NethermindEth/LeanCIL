@@ -360,12 +360,39 @@ macro_rules
     | (simp only [cil_code, Nat.reduceAdd, bne_iff_ne, ne_eq, not_false_eq_true,
         Bool.false_eq_true, ite_true, ite_false, ↓reduceIte, $[$facts:term],*]; rfl))
 
-/-- Normalises the literal `take`, `drop`, `reverse` and `++` a step leaves on the stack;
-    never fails. -/
+-- The closed literal operands every stepping tactic evaluates, so a state reads the same
+-- whichever tactic produced it. Each is a simproc that fires on numerals only.
+attribute [cil_literal_proc] BitVec.reduceSignExtend BitVec.reduceSetWidth
+  BitVec.reduceZeroExtend BitVec.reduceToNat BitVec.reduceOfInt Nat.reduceMod
+
+open Lean Elab Tactic Meta in
+/-- Evaluate the closed literal operands of the goal with the `cil_literal` set: a width
+    conversion, sign extension or `toNat` of a bit-vector numeral, and a remainder of numerals,
+    as a masked shift count is. A goal with none is left untouched, so a step pays for the
+    normalisation only when its state has such an operand; never fails. -/
+elab "cil_literal_operands" : tactic => do
+  -- A step that closed its goal leaves nothing to normalise.
+  if (← getGoals).isEmpty then return
+  withMainContext do
+  let numeral (e : Expr) : Bool := e.isRawNatLit || e.isAppOfArity ``OfNat.ofNat 3 ||
+    (e.isAppOfArity ``BitVec.ofNat 2 &&
+      (e.appArg!.isRawNatLit || e.appArg!.isAppOfArity ``OfNat.ofNat 3))
+  let closed (e : Expr) : Bool :=
+    ((e.isAppOfArity ``BitVec.signExtend 3 || e.isAppOfArity ``BitVec.setWidth 3 ||
+      e.isAppOfArity ``BitVec.zeroExtend 3 || e.isAppOfArity ``BitVec.toNat 2) &&
+      numeral e.appArg!) ||
+    (e.isAppOfArity ``HMod.hMod 6 && numeral e.appArg! && numeral e.appFn!.appArg!)
+  if ((← instantiateMVars (← getMainTarget)).find? closed).isSome then
+    evalTactic (← `(tactic| try simp only [cil_literal]))
+
+/-- Normalises the literal `take`, `drop`, `reverse` and `++` a step leaves on the stack and
+    evaluates its closed literal operands (`cil_literal_operands`); never fails. -/
 macro "cil_stack_cleanup" : tactic =>
-  `(tactic| try simp only [List.drop_succ_cons, List.drop_zero, List.drop_nil,
-    List.take_succ_cons, List.take_zero, List.take_nil, List.reverse_cons, List.reverse_nil,
-    List.nil_append, List.cons_append, List.append_nil])
+  `(tactic| (
+    try simp only [List.drop_succ_cons, List.drop_zero, List.drop_nil,
+      List.take_succ_cons, List.take_zero, List.take_nil, List.reverse_cons, List.reverse_nil,
+      List.nil_append, List.cons_append, List.append_nil]
+    cil_literal_operands))
 
 /-- Closes a checked `step` goal by rewriting with the `@[cil_step]` and
     `@[cil_instruction_step]` equations, failing if nothing rewrites, then by the checked-value
@@ -779,9 +806,8 @@ macro "cil_checked_return_at " methodFound:term:max instructionFound:term:max
       (by cil_checked_side [$[$facts:term],*])) ?_
     try simp only [CIL.Safety.leaveFrame, List.foldl_nil, List.nil_append, List.append_nil,
       CIL.NarrowKind.extend_ite_one_zero, CIL.NarrowKind.extend_ite_ofNat_one_zero,
-      List.reverse_cons, List.reverse_nil, BitVec.reduceToNat, BitVec.reduceSignExtend,
-      BitVec.reduceOfInt, BitVec.isValue,
-      Nat.reduceMod, Bool.false_eq_true, ite_true, ite_false]
+      List.reverse_cons, List.reverse_nil, cil_literal, BitVec.isValue,
+      Bool.false_eq_true, ite_true, ite_false]
     try with_reducible rfl
     try (with_reducible simp [$[$facts:term],*]; done)))
 
