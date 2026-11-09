@@ -3005,9 +3005,12 @@ partial class Program : IDisposable
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             RequireOnlyAdded(bound, built, "Proof");
             // Interface oleans were replayed above and RequireOnlyAdded kept them unchanged since.
-            // A module new to this run puts every module the audit reads into one replay, so the audit
-            // reads that replayed environment instead of importing the library a second time.
-            string[] replay = extractionPublication is null && proofRestored ? [] :
+            string[] unreplayed = [.. extractionPublication is null ? Array.Empty<string>() : ["Extracted"],
+                .. symbols && !proofRestored ? ["ExtractedSymbols"] : Array.Empty<string>(),
+                .. proofRestored ? Array.Empty<string>() : ["Proof"]];
+            // Replaying every module from the extraction to the proof lets the audit read that environment without a
+            // second import. ExtractedImports imports Extracted from outside the set, which a joint replay rejects.
+            string[] replay = unreplayed.Length == 0 || importModules.Length > 0 ? unreplayed :
                 ["Extracted", .. selected.Where(module => !SelectionModules.IsSymbols(module)),
                     .. symbols ? ["ExtractedSymbols", .. selected.Where(SelectionModules.IsSymbols)]
                         : Array.Empty<string>(),
