@@ -325,14 +325,23 @@ comment saying which obligation it is:
   objects whose body a straight-line outline steps (see below) gets the contract read from its body
   instead, proved, leaving only its precondition at each call.
 - A struct instance method binds `this`, a reference to the caller's struct, as a `Reference` named
-  for the struct, such as `counter`. A straight-line body over its 64-bit fields and word
+  for the struct, such as `counter`. A straight-line body over its scalar fields and word
   arguments is stepped: each field it reads first gets a binder for its value on entry, such as
   `counterValue`, with `Contents` of the field's address (`counter`, or `counter.element 1 8` at
-  offset 8) in the statement, and the one field it may store gets `Writable` authority there and
-  `Confined` to it; a second store, or a load of another field after the store, is a
-  `not outlined:` hole. The postcondition is left
-  with `held1`, the stored field's `Contents` in the final memory. A struct method with a loop is
-  refused.
+  offset 8) in the statement. Each written field gets `Writable` authority, and the result promises
+  `Confined` to those fields. Repeated stores and reads between stores carry the other fields'
+  contents and authority forward. Fields of 1, 2, 4 and 8 bytes use their stored width, including
+  signed extension on loads and truncation on stores. The postcondition receives the final field
+  contents. Overlapping fields are not outlined.
+- A struct receiver loop over 64-bit fields with one conditional back edge and no local homes
+  gets a `State` recording field values, contents, write authority and confinement. Its outline
+  steps each path and leaves the invariant, natural-number measure and postcondition to the author.
+  Scalar arguments and results must be 64-bit; void returns are also supported. Narrow fields and
+  frame-owned locals in receiver loops are not outlined.
+- A struct value argument binds a fixed-size byte vector, including padding, and is passed as an
+  aggregate scalar. Straight-line outlines step parameter homes and nested aggregate locals,
+  including initialization, field addresses, loads and stores. Aggregate parameter homes and
+  nested aggregate locals inside loops are not outlined.
 - An instance of an admitted class is a `Reference`, and an instance method binds `this` under its
   class's name in lower case, such as `account`, or as `receiver` for a compiler-generated class.
   A parameter named like a hypothesis or memory the proof introduces, such as `held` or `stored1`,
@@ -374,8 +383,12 @@ comment saying which obligation it is:
   `fresh1` with `fresh1Identity` dating it after every caller allocation, and the footprint
   forgets its elements through `Confined.forget_fresh`. An index into it that is not a literal
   below its length is a `not outlined:` hole, as is a method with a loop.
-- An array argument of structs or vectors, or of words beside a class instance argument or receiver,
-  such as `values : int[]`, binds `valuesLength` and is passed as `.array ⟨.address values,
+- A word array keeps its `ArrayView` and element bindings beside a class instance argument or
+  receiver, so indexed element reads and loops use the same outline as a standalone word array.
+  Storing the array into a class field also requires its `WholeArray` fact and its storage's origin
+  to match the array reference. Field-slot writes preserve the array's element contents, allowing
+  an element read after the field store.
+- An array argument of structs or vectors binds `valuesLength` and is passed as `.array ⟨.address values,
   valuesLength, element⟩`, with the premise `WholeArray initial element values valuesLength`. The
   element is the `elementType` of a field that holds such arrays, such as `Tiles.Pairs.elementType`,
   or a literal such as `.signed32`; a struct or vector element no field names is a reducible

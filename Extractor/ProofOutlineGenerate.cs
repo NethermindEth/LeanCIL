@@ -109,9 +109,6 @@ internal static partial class ProofOutline
         var spec = new Specification(method, parameters, result, symbolic, extraction.Views.Length > 0);
         string source;
         var structReceiver = parameters.Any(parameter => parameter.Shape == ParameterShape.StructReference);
-        if (structReceiver && loops.Count > 0)
-            throw Unsupported($"{method.FullName} is a struct instance method with a loop; new-proof steps the " +
-                "fields of a struct receiver in straight-line bodies only");
         if (loops.Count > 0 && parameters.FirstOrDefault(parameter => parameter.Shape == ParameterShape.Array) is
             { } array)
             throw Unsupported($"parameter `{array.Name}` of {method.Name} is an array of class references, which " +
@@ -133,6 +130,8 @@ internal static partial class ProofOutline
                 "into `target[0]`; new-proof follows a span written from the front by a loop or that one store");
         if (spanStore is { } store)
             source = SpanStoreLine(spec, store.Op, lean);
+        else if (structReceiver && loops.Count > 0)
+            source = new ReceiverLoop(spec, body, lean).Generate();
         else if (structReceiver)
             source = StructStraightLine(spec, body, names, lean);
         else if (loops.Count == 0 && ArrayRead(extraction, spec, body.Ops) is { } read)

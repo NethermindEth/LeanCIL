@@ -119,6 +119,8 @@ if (suite is "all" or "evidence")
         "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/StaticScalarValues.cs",
         "Tests/TranslationAudit.cs"]);
 if (suite is "all" or "blockers") projects.Add("Tests/SelfAdmission.cs");
+if (suite is "all" or "loops")
+    projects.AddRange(["Tests/StructOutlines.cs", "Tests/ReceiverLoopOutlines.cs"]);
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
 if (suite is "all" or "generics") projects.AddRange(["Tests/GenericOwners.cs", "Tests/GenericLayouts.cs"]);
 if (suite is "all" or "unsafe")

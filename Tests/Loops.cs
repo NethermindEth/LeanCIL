@@ -2377,6 +2377,9 @@ if (wordByteVerified.Code != 0 || !wordByteVerified.Stdout.StartsWith("Verified:
     throw new InvalidOperationException("The closure's filled outline did not verify:\n" + wordByteVerified.Output);
 Console.WriteLine("PASS the outline of LeanCIL's own byte-layout closure, filled, verifies its little-endian byte");
 
+Run(["dotnet", "run", "--file", "Tests/StructOutlines.cs"]);
+Run(["dotnet", "run", "--file", "Tests/ReceiverLoopOutlines.cs"]);
+
 delegate void FillWordsDelegate(ref ulong destination, ulong value, int count);
 delegate uint CopyUntilZeroDelegate(ReadOnlySpan<uint> values, ref uint output);
 delegate bool AllZeroDelegate(ReadOnlySpan<uint> values);
