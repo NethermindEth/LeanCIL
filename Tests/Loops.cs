@@ -2446,6 +2446,7 @@ Console.WriteLine("PASS the outline of LeanCIL's own byte-layout closure, filled
 Run(["dotnet", "run", "--file", "Tests/StructOutlines.cs"]);
 Run(["dotnet", "run", "--file", "Tests/ReceiverLoopOutlines.cs"]);
 Run(["dotnet", "run", "--file", "Tests/WordReaderOutlines.cs"]);
+Run(["dotnet", "run", "--file", "Tests/SavedWordReaderOutlines.cs"]);
 
 delegate void FillWordsDelegate(ref ulong destination, ulong value, int count);
 delegate uint CopyUntilZeroDelegate(ReadOnlySpan<uint> values, ref uint output);
