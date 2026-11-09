@@ -3,6 +3,7 @@
 
 -- Reference semantics, feature profiles, method embeddings and extraction metadata
 import CIL.AggregateMemory
+import CIL.CodeSuffix
 import CIL.ExecutionLemmas
 import CIL.Embedding.Basic
 import CIL.Embedding.BaseStep

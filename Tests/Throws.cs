@@ -38,7 +38,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     var extracted = Path.Combine(folder, "Extracted.lean");
     var source = File.ReadAllText(extracted);
     var site = Regex.Match(source,
-        @"(?m)^@\[cil_code ↓\] theorem method(\d+)_instruction(\d+) : method\d+\.code\[\d+\]\? = some \(\.throw ""([\w.]+)"" : Op\) := rfl\r?$");
+        @"(?m)^@\[cil_code ↓\] theorem method(\d+)_instruction(\d+) : method\d+\.code\[\d+\]\? = some \(\.throw ""([\w.]+)"" : Op\) := [^\r\n]*$");
     if (!site.Success) throw new InvalidOperationException($"No folded throw in {name}");
     var (method, pc, label) = (site.Groups[1].Value, site.Groups[2].Value, site.Groups[3].Value);
     if (name == "Null")
