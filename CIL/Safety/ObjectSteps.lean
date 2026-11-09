@@ -12,8 +12,9 @@ fields, and `newobj` of a class, which calls the constructor with a fresh instan
 `allocateObject_ok` or `allocateObject_insufficient` decides, and `callvirt` of a non-virtual
 method, which calls with a live receiver and throws `NullReferenceException` on a null one
 (`receiverCall`), and `callvirt` of a virtual method, which enters the body its dispatch table
-lists for the receiver's runtime class (`virtualCall`, decided by a `runtimeTypeOf` fact).
-Each states the dispatcher arm of
+lists for the receiver's runtime class (`virtualCall`, decided by a `runtimeTypeOf` fact),
+and the argument guards, which raise their named exception or pop their operands
+(`zeroGuardOutcome`, `comparisonGuardOutcome`). Each states the dispatcher arm of
 `CIL/Safety/Execution.lean` for object operands, so stepping never unfolds the dispatcher. The
 observations themselves unfold through `cil_checked` down to `formObject`, which a caller's
 facts or `formObject_null` decide; field accesses leave `objectFieldAddress` and the byte

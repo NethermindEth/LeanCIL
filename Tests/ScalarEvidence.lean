@@ -706,6 +706,21 @@ example : guardCallMatches
     (guardSite "System.ArgumentNullException" "ThrowIfNull"
       "ThrowIfNull(System.Void*,System.String)" [] [.pointer .void, parameterName])
     (.memory .throwIfNull) = false := by decide +kernel
+-- A narrow guard reads the low bits of its stack slot with the declared signedness, and an
+-- operand of another width is ill-typed.
+example : (guardOperand 8 true (.i32 0xFF#32)).map ZeroGuard.negative.throws = some true := by
+  decide
+example : (guardOperand 8 false (.i32 0xFF#32)).map ZeroGuard.negative.throws = some false := by
+  decide
+example : guardOperand 16 true (.i32 0x00018000#32) = some (-32768) := by decide
+example : guardOperand 8 false (.i32 0x80#32) = some 128 := by decide
+example : ComparisonGuard.greaterThan.throws 128 127 = true := by decide
+example : guardOperand 8 true (.i32 0x80#32) = some (-128) := by decide
+example : ComparisonGuard.greaterThan.throws (-128) 127 = false := by decide
+example : guardOperand 64 true (.i32 0#32) = none := by decide
+example : guardOperand 32 true (.i64 0#64) = none := by decide
+example : (guardOperand 64 false (.i64 0xFFFFFFFFFFFFFFFF#64)).map ZeroGuard.negative.throws =
+    some false := by decide
 -- Size constants are the only uncovered literal producers; primitive widths are bound here.
 private def sizeRaw (instruction : RawInstruction) := raw [instruction, i 38, i 2, i 42] [word]
 private def sizeStates : ScalarCertificate := [some [], some [.word32], some [], some [.word64]]
