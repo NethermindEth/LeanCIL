@@ -53,8 +53,8 @@ internal static partial class ProofOutline
     /// <remarks>An `Array` is an array of class references, bound with the element class and length its
     /// allocation records, since covariance lets it hold a class derived from its static element type. A
     /// `WordArray` is an array of 32- or 64-bit integers, bound as an `ArrayView` with its elements, and a
-    /// `ValueArray` an array of words, structs or vectors beside class instances, bound by its origin and its
-    /// length.</remarks>
+    /// `ValueArray` an array of other value elements, bound by its origin and its length. An object-field store
+    /// adds a whole-array premise to a word array without changing its element view.</remarks>
     enum ParameterShape
     {
         Scalar, Boolean, Narrow, Reference, Span, Object, StructReference, StructValue, Array, WordArray, ValueArray
@@ -134,7 +134,7 @@ internal static partial class ProofOutline
             source = new ReceiverLoop(spec, body, lean).Generate();
         else if (structReceiver)
             source = StructStraightLine(spec, body, names, lean);
-        else if (loops.Count == 0 && ArrayRead(extraction, spec, body.Ops) is { } read)
+        else if (loops.Count == 0 && !spec.Framed && ArrayRead(extraction, spec, body.Ops) is { } read)
             source = ArrayReadLine(spec, read, lean);
         else if (loops.Count == 0)
             source = StraightLine(extraction, spec, body, lean);
@@ -195,10 +195,7 @@ internal static partial class ProofOutline
         var name = names.Claim(parameter.Name, "argument" + parameter.Index);
         if (ObjectTypes.Is(type)) return Instance(name, type, views);
         if (ReferenceArrays.Is(type)) return new(name, ParameterShape.Array, "Reference", 8);
-        // Beside class instances an array is bound whole, as the fields that may hold it state it; alone, an array of
-        // words is bound as a view with its elements, which element reads and loops need.
-        if (type is ArrayType { IsVector: true } array && WordArrayElement(array.ElementType) is { } word &&
-            !BesideInstances(method))
+        if (type is ArrayType { IsVector: true } array && WordArrayElement(array.ElementType) is { } word)
             return new(name, ParameterShape.WordArray, "ArrayView", ElementWidth(array.ElementType)!.Value)
                 { ArrayElement = word };
         if (Arrays.Of(type, architecture) is { } values)
@@ -236,10 +233,6 @@ internal static partial class ProofOutline
                 "and of values, reference-free structs, and references to and spans of 32- and 64-bit integers")
         };
     }
-
-    /// <summary>Whether `method` takes or is called on a class instance.</summary>
-    static bool BesideInstances(MethodDefinition method) => method.HasThis && ObjectTypes.Is(method.DeclaringType) ||
-        method.Parameters.Any(parameter => ObjectTypes.Is(parameter.ParameterType));
 
     /// <summary>The `ArrayElement` the extraction gives an array of 32- or 64-bit integers.</summary>
     static string? WordArrayElement(TypeReference type) => type.FullName switch
@@ -558,10 +551,12 @@ internal static partial class ProofOutline
         }
         var walk = new ObjectWalk(spec, body.Ops, views, Summary);
         var stepped = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
-            ParameterShape.Object or ParameterShape.Array or ParameterShape.ValueArray) &&
+            ParameterShape.Object or ParameterShape.Array or ParameterShape.ValueArray or ParameterShape.WordArray) &&
             walk.Run(pc => Location(spec.Method, pc));
         if (stepped) spec.Plan = walk.Plan();
         string[] imports = ["CIL.Verification", "CIL.Safety.SymbolicExecution", "CIL.Safety.ObjectFields"];
+        if (spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.WordArray))
+            imports = [.. imports, "CIL.Safety.ArrayContents"];
         var fresh = stepped ? walk.Flattened.OfType<Allocation>().FirstOrDefault() : null;
         if (spec.Arrays.Any() || fresh is not null) imports = [.. imports, "CIL.Safety.ReferenceArrayElements"];
         Header(lean, spec, imports, stepped ? "`postcondition`" : null);

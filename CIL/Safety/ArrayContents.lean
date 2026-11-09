@@ -19,6 +19,20 @@ test read as unsigned.
 
 namespace CIL.Safety
 
+/-- A reference-slot store preserves the scalar contents of a span: slots and bytes are
+    separate parts of memory. -/
+theorem SpanContents.after_setSlot {memory : Memory} {view : SpanView} {width : Nat}
+    {values : List (BitVec (8 * width))} (contents : SpanContents memory view width values)
+    (field : Reference) (value : ManagedReference) :
+    SpanContents (setSlot memory field value) view width values := by
+  obtain ⟨typed, length, held⟩ := contents
+  refine ⟨typed, length, ?_⟩
+  cases address : view.reference <;> simp only [address] at held ⊢
+  · exact held
+  · exact fun index word found => held index word found
+
+#print axioms SpanContents.after_setSlot
+
 /-- An in-bound element of an array holding `values` has an address whose load is that
     element. -/
 theorem SpanContents.array_load {memory : Memory} {view : ArrayView} {width : Nat}

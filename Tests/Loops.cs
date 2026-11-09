@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include WordArrayOutlines.cs
 
 using System.Reflection;
 using System.Buffers.Binary;
@@ -12,6 +13,7 @@ using Mono.Cecil.Cil;
 
 using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
+verification.WordArrayOutlines();
 var root = At("artifacts/Loops");
 Directory.CreateDirectory(root);
 var contract = At("Examples/Proofs/Countdown.lean");
@@ -2254,14 +2256,15 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
         ("sorry -- Postcondition of the returned value", "rfl")]),
     // The field holds the array argument's origin.
     ("SampleRefill", [
-        ("def Precondition (samples values1 : Reference) (values1Length : Nat) (initial : Memory)\n" +
-            "    : Prop := sorry",
-            "def Precondition (_ _ : Reference) (_ : Nat) (_ : Memory) : Prop := True"),
-        ("def Postcondition (samples values1 : Reference) (values1Length : Nat) (initial final : Memory)\n" +
-            "    : Prop := sorry",
-            "def Postcondition (samples values1 : Reference) (_ : Nat) (_ final : Memory) : Prop :=\n" +
-            "  Samples.Values.Holds final samples (.address values1)"),
-        ("sorry -- Postcondition of the returned value, with `held1` the stored fields", "exact held1")]),
+        ("def Precondition (samples : Reference) (values1 : ArrayView) (values1Elements : List W32)\n" +
+            "    (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : ArrayView) (_ : List W32) (_ : Memory) : Prop := True"),
+        ("def Postcondition (samples : Reference) (values1 : ArrayView) (values1Elements : List W32)\n" +
+            "    (initial final : Memory) : Prop := sorry",
+            "def Postcondition (samples : Reference) (values1 : ArrayView) (_ : List W32) (_ final : Memory) : Prop :=\n" +
+            "  Samples.Values.Holds final samples values1.reference"),
+        ("sorry -- Postcondition of the returned value, with `held1` the stored fields",
+            "exact values1Reference ▸ held1")]),
     // The returned view is of the array the field holds.
     ("SampleValues", [
         ("def Precondition (samples : Reference) (initial : Memory) : Prop := sorry",

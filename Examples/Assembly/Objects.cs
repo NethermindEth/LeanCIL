@@ -174,6 +174,21 @@ public sealed class Samples
 /// <summary>Loads and stores of an integer array held in a class field.</summary>
 public static class SampleArrays
 {
+    /// <summary>Sums an array beside a class argument.</summary>
+    public static int Sum(Samples samples, int[] values)
+    {
+        var total = 0;
+        for (var index = 0; index < values.Length; index++) total += values[index];
+        return total;
+    }
+
+    /// <summary>Stores the supplied array and returns its indexed element.</summary>
+    public static int RefillRead(Samples samples, int[] values, int index)
+    {
+        samples.Values = values;
+        return values[index];
+    }
+
     /// <summary>The array of samples, or null.</summary>
     public static int[]? ValuesOf(Samples samples) => samples.Values;
 
