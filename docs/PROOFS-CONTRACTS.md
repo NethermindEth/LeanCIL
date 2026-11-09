@@ -457,8 +457,9 @@ one, whose view validates. A readable field holding one loads it (`readable.fact
 and `owned.store_null` store into an owned field, confined to its slot. The field keeps the rest
 of the field lemmas above: `frame`, `after_confined`, `after_below`, `after_kept`, `across`,
 `Holds.of_agree` and `fresh_holds_null`. `WholeArray.after_confined`, `after_below` and
-`after_kept` keep an array whole across the same changes, whatever its elements then hold, and
-`checkedValue_array` passes a whole array as a call argument.
+`after_kept` keep an array whole across the same changes, whatever its elements then hold;
+`checkedValue_array` passes a whole array as a call argument, and `storeLocal_array` and
+`loadLocal_array` move it through a local, each from its view's `valid`.
 `step_arrayField_eq` and `step_setArrayField_eq` step `ldfld` and `stfld`, and
 `step_memory_arrayLength_address_eq` steps `ldlen` of the loaded array to its length once its
 view validates (`whole.valid`), while `step_memory_arrayLength_null_eq` throws on the null array.

@@ -899,7 +899,19 @@ var outlined = new (string Name, string? Selector)[]
     ("ArrayRead", "ArrayElementReferences::Read(int[],int)"),
     ("ArraySum", "Loops::SumIndexed(ulong[])"), ("ArrayFill", "Loops::FillIndexed(uint[],uint)"),
     ("SpanLocalSum", "Loops::SumThroughLocal(System.ReadOnlySpan`1<System.UInt64>)"),
-    ("ArraySpanSum", "Loops::SumThroughSpan(ulong[])"), ("ArraySpanFill", "Loops::FillThroughSpan(uint[],uint)")
+    ("ArraySpanSum", "Loops::SumThroughSpan(ulong[])"), ("ArraySpanFill", "Loops::FillThroughSpan(uint[],uint)"),
+    // Value arrays class fields hold: measured, stored from an argument, returned, and shared through a local
+    // whose length is read after the store; struct and vector elements are named by their field.
+    ("SampleCount", "SampleArrays::Count(Examples.Samples)"),
+    ("SampleRefill", "SampleArrays::Refill(Examples.Samples,System.Int32[])"),
+    ("SampleValues", "SampleArrays::ValuesOf(Examples.Samples)"),
+    ("SampleShare", "SampleArrays::Share(Examples.Samples,Examples.Samples)"),
+    ("TilePairCount", "TileArrays::PairCount(Examples.Tiles)"),
+    ("TileRelane", "TileArrays::Relane(Examples.Tiles,System.Runtime.Intrinsics.Vector128`1<System.UInt64>[])"),
+    ("TilePairs", "TileArrays::PairsOf(Examples.Tiles)"),
+    // A struct array argument no field names: its element is a definition whose identity spans two lines.
+    ("PairLength",
+        "AggregateArrays::ConstructedLength(Examples.AggregateArrays/Pair[],System.Int32,System.Int32)")
 };
 var outlineTimer = System.Diagnostics.Stopwatch.StartNew();
 var outlineRoot = Path.Combine(root, "Outlines");
@@ -941,6 +953,17 @@ var elaborated = outlined.AsParallel().WithDegreeOfParallelism(Environment.Proce
 }).Where(failure => failure is not null).ToArray();
 if (elaborated.Length > 0) throw new InvalidOperationException(string.Join("\n", elaborated));
 Console.WriteLine($"PASS new-proof outlines {outlined.Length} methods that elaborate with only their holes open");
+
+// The element definition must read back as the extraction's own element, or the outline states another array type.
+var pairElement = Regex.Match(File.ReadAllText(Path.Combine(outlineRoot, "PairLength", "Proof.lean")),
+    @"@\[reducible\] def sourceElement : CIL\.ArrayElement :=\n  (?<term>(?:[^\n]*\\\n)+[^\n]*)\n");
+var pairExtraction = File.ReadAllText(Path.Combine(outlineRoot, "PairLength", "Extraction", "Extracted.lean"));
+if (!pairElement.Success ||
+    !pairExtraction.Contains($"({Regex.Replace(pairElement.Groups["term"].Value, @"\\\n\s*", "")})",
+        StringComparison.Ordinal))
+    throw new InvalidOperationException("The PairLength outline does not name its struct element across lines:\n" +
+        File.ReadAllText(Path.Combine(outlineRoot, "PairLength", "Proof.lean")));
+Console.WriteLine("PASS a struct element wider than a line reads back as the extraction's element");
 
 // A loop asks write authority only of the object whose field it or a callee stores; the other is only read.
 var depositFrom = File.ReadAllText(Path.Combine(outlineRoot, "DepositFrom", "Proof.lean"));
@@ -2194,7 +2217,67 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
                     omega
                   · rw [List.replicate_succ']
                     exact filled.push (by simpa using restWrote)
-            """)])
+            """)]),
+    // A length of the array a field holds leaves memory as it was.
+    ("SampleCount", [
+        ("def Precondition (samples : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (samples : Reference) (initial final : Memory) (result : W32) : Prop := sorry",
+            "def Postcondition (_ : Reference) (initial final : Memory) (_ : W32) : Prop := final = initial"),
+        ("sorry -- Postcondition of the returned value", "rfl")]),
+    // The field holds the array argument's origin.
+    ("SampleRefill", [
+        ("def Precondition (samples values1 : Reference) (values1Length : Nat) (initial : Memory)\n" +
+            "    : Prop := sorry",
+            "def Precondition (_ _ : Reference) (_ : Nat) (_ : Memory) : Prop := True"),
+        ("def Postcondition (samples values1 : Reference) (values1Length : Nat) (initial final : Memory)\n" +
+            "    : Prop := sorry",
+            "def Postcondition (samples values1 : Reference) (_ : Nat) (_ final : Memory) : Prop :=\n" +
+            "  Samples.Values.Holds final samples (.address values1)"),
+        ("sorry -- Postcondition of the returned value, with `held1` the stored fields", "exact held1")]),
+    // The returned view is of the array the field holds.
+    ("SampleValues", [
+        ("def Precondition (samples : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (samples : Reference) (initial final : Memory) (result : ArrayView)\n" +
+            "    : Prop := sorry",
+            "def Postcondition (samples : Reference) (initial final : Memory) (result : ArrayView) : Prop :=\n" +
+            "  result.reference = Samples.Values.of initial samples ∧ final = initial"),
+        ("sorry -- Postcondition of the returned value", "exact ⟨samplesValuesHeld.symm, rfl⟩")]),
+    // The target's field holds what the source's held, whose length is read after the store.
+    ("SampleShare", [
+        ("def Precondition (source target1 : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ _ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (source target1 : Reference) (initial final : Memory) (result : W32)\n" +
+            "    : Prop := sorry",
+            "def Postcondition (source target1 : Reference) (initial final : Memory) (_ : W32) : Prop :=\n" +
+            "  Samples.Values.Holds final target1 (Samples.Values.of initial source)"),
+        ("sorry -- Postcondition of the returned value, with `held1` the stored fields",
+            "exact sourceValuesHeld ▸ held1")]),
+    // A struct array's length leaves memory as it was.
+    ("TilePairCount", [
+        ("def Precondition (tiles : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (tiles : Reference) (initial final : Memory) (result : W32) : Prop := sorry",
+            "def Postcondition (_ : Reference) (initial final : Memory) (_ : W32) : Prop := final = initial"),
+        ("sorry -- Postcondition of the returned value", "rfl")]),
+    // The field holds the vector array argument's origin.
+    ("TileRelane", [
+        ("def Precondition (tiles lanes : Reference) (lanesLength : Nat) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ _ : Reference) (_ : Nat) (_ : Memory) : Prop := True"),
+        ("def Postcondition (tiles lanes : Reference) (lanesLength : Nat) (initial final : Memory)\n" +
+            "    : Prop := sorry",
+            "def Postcondition (tiles lanes : Reference) (_ : Nat) (_ final : Memory) : Prop :=\n" +
+            "  Tiles.Lanes.Holds final tiles (.address lanes)"),
+        ("sorry -- Postcondition of the returned value, with `held1` the stored fields", "exact held1")]),
+    // The returned view is of the struct array the field holds.
+    ("TilePairs", [
+        ("def Precondition (tiles : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (tiles : Reference) (initial final : Memory) (result : ArrayView) : Prop := sorry",
+            "def Postcondition (tiles : Reference) (initial final : Memory) (result : ArrayView) : Prop :=\n" +
+            "  result.reference = Tiles.Pairs.of initial tiles ∧ final = initial"),
+        ("sorry -- Postcondition of the returned value", "exact ⟨tilesPairsHeld.symm, rfl⟩")])
 })
 {
     var source = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
@@ -2221,11 +2304,12 @@ Console.WriteLine("PASS filled outlines verify with only their specification wri
     "a checked add, a base-two logarithm, a signed checked add, splits on unsigned and signed tests of words, " +
     "a field store through a struct receiver at offsets 0 and 8, a string reference copied, " +
     "tested for null and compared, a null store before returning the node it held, an array argument's element " +
-    "load, length and covariance-checked store, element facts carried across element and field stores, and " +
-    "an array the method allocates, fills and reads back, a fill through a writable span, and a fill through a " +
-    "helper storing the first element of the span it is lent, that helper alone, and element reads of `int[]` and " +
-    "`ulong[]` arrays, directly and through a helper returning the element's address, an indexed sum and fill of " +
-    "arrays, and a sum and fill through a span local over a span or an array");
+    "load, length and covariance-checked store, element facts carried across element and field stores, " +
+    "an array the method allocates, fills and reads back, value arrays of words, structs and vectors that class " +
+    "fields hold, measured, stored, returned and shared through a local, a fill through a writable span, and a fill " +
+    "through a helper storing the first element of the span it is lent, that helper alone, and element reads of " +
+    "`int[]` and `ulong[]` arrays, directly and through a helper returning the element's address, an indexed sum " +
+    "and fill of arrays, and a sum and fill through a span local over a span or an array");
 
 // A written footprint that leaves out the element a loop writes is an error at the write, never an admission.
 var narrowed = Path.Combine(outlineRoot, "FillWords", "Narrowed.lean");

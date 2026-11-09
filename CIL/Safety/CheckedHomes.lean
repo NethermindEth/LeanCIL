@@ -74,6 +74,25 @@ namespace CIL.Safety
     Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
 #print axioms storeLocal_span
 
+/-- An array home reads the matching valid view without reading its elements. -/
+@[cil_checked] theorem loadLocal_array (memory : Memory) (view : ArrayView)
+    (element : CIL.ArrayElement) (valid : view.validate memory = .ok ())
+    (elementMatches : view.elementType = element) :
+    loadLocal memory (.array element (some view)) = .ok (.array view) := by
+  simp [loadLocal, valid, elementMatches, checkedAt, Except.mapError, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
+#print axioms loadLocal_array
+
+/-- Storing a valid matching array view replaces the home, preserving all caller memory. -/
+@[cil_checked] theorem storeLocal_array (memory : Memory) (previous : Option ArrayView)
+    (view : ArrayView) (element : CIL.ArrayElement) (valid : view.validate memory = .ok ())
+    (elementMatches : view.elementType = element) :
+    storeLocal memory (.array element previous) (.array view) =
+      .ok (.array element (some view), memory) := by
+  simp [storeLocal, valid, elementMatches, Value.hasUnspecified, checkedAt, Except.mapError,
+    Bind.bind, Except.bind, Pure.pure, Except.pure]
+#print axioms storeLocal_array
+
 /-- A root home loads its formed reference without granting byte access authority. -/
 @[cil_checked] theorem loadLocal_root (memory : Memory) (reference : ManagedReference)
     (formed : formValue memory reference = .ok (.reference reference)) :

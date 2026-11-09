@@ -184,6 +184,16 @@ public static class SampleArrays
     public static int Count(Samples samples) => samples.Values!.Length;
 
     /// <summary>
+    /// Gives <paramref name="target"/> the samples of <paramref name="source"/> and counts them after the store.
+    /// </summary>
+    public static int Share(Samples source, Samples target)
+    {
+        var shared = source.Values!;
+        target.Values = shared;
+        return shared.Length;
+    }
+
+    /// <summary>
     /// Refills <paramref name="other"/>, then counts the samples of <paramref name="samples"/>, which may be the same
     /// holder.
     /// </summary>

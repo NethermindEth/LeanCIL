@@ -10,9 +10,10 @@ namespace Nethermind.LeanCIL;
 internal static partial class ProofOutline
 {
     /// <summary>A checked extraction: its methods while still loaded, their emitted operations and
-    /// the layout identities in emission order, and the checked `Extracted.lean` source.</summary>
+    /// the layout identities in emission order, the checked `Extracted.lean` source, its named class fields, and
+    /// the architecture that sizes its struct array elements.</summary>
     internal sealed record Extraction(MethodDefinition[] Methods, TemplateEmitter.Method[] Emitted,
-        string[] LayoutIdentities, string Source, ClassViews.View[] Views);
+        string[] LayoutIdentities, string Source, ClassViews.View[] Views, string Architecture);
 
     const string Usage = "Usage: leancil new-proof extraction-directory proof.lean";
 

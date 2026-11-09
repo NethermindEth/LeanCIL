@@ -32,7 +32,7 @@ internal static partial class ProofOutline
             Regex.Match(ops[2], @"\A\.call (\d+) 2\z") is not { Success: true } call)
             return null;
         var callee = int.Parse(call.Groups[1].Value, CultureInfo.InvariantCulture);
-        return ElementAddress(extraction, callee, array.Element) is { } method
+        return ElementAddress(extraction, callee, array.ArrayElement) is { } method
             ? new(array, index, new(callee, method, "")) : null;
 
         Parameter? Argument(string op) =>
@@ -117,7 +117,7 @@ internal static partial class ProofOutline
         lean.Line("  args := fun (values, index) => [.array values, .scalar (.i32 index)]");
         lean.Line("  results result := [.reference (.address result)]");
         lean.Line("  pre := fun (values, index) memory =>");
-        lean.Line($"    values.validate memory = .ok () ∧ values.elementType = {array.Element} ∧");
+        lean.Line($"    values.validate memory = .ok () ∧ values.elementType = {array.ArrayElement} ∧");
         lean.Line($"      ∃ elements : List {word}, SpanContents memory values.storage {width} elements ∧");
         lean.Line("        index.toNat < elements.length");
         lean.Line("  footprint := fun _ => []");

@@ -187,7 +187,7 @@ internal static partial class ProofOutline
 
         /// <summary>An array argument as the proof writes it once destructured: addressed, at its length.</summary>
         static string Destructured(Parameter array) =>
-            $"⟨.address {array.Name}Base, {array.Name}Length, {array.Element}⟩";
+            $"⟨.address {array.Name}Base, {array.Name}Length, {array.ArrayElement}⟩";
 
         /// <summary>The theorem's arguments as the proof names them after the arrays are destructured.</summary>
         string Arguments => string.Join(" ", spec.Binders.Select(binder =>
@@ -269,7 +269,7 @@ internal static partial class ProofOutline
             if (Regex.IsMatch(ops[store - 1], @"\A\.arg \d+\z"))
                 source = Argument(store - 1);
             else if (store >= 2 && Argument(store - 2) is { Shape: ParameterShape.WordArray } array &&
-                ops[store - 1] == $".memory (.arraySpan {array.Element} {(array.Writable ? "true" : "false")} .whole)")
+                ops[store - 1] == $".memory (.arraySpan {array.ArrayElement} {(array.Writable ? "true" : "false")} .whole)")
                 source = array;
             else throw refused;
             if (source.Shape is not (ParameterShape.Span or ParameterShape.WordArray) || kind != SpanKind(source))

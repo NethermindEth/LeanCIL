@@ -243,15 +243,16 @@ comment saying which obligation it is:
   splits into at most eight returns. When it also takes up to three `bool`
   arguments and tests nothing else, it is split with `cases` on each, and every side steps to its
   own return and leaves its own postcondition, commented with the values it is for.
-- An `int[]`, `uint[]`, `long[]` or `ulong[]` parameter is an `ArrayView` with a list of its
-  elements, and the theorem assumes the view validates, has its element type and holds those
-  elements in its storage span, `SpanContents initial values.storage`. A method returning
-  `values[index]` for an `int` argument `index`, read by `ldelem` or through a static helper whose
-  body only returns `ref values[index]`, is split with `by_cases valuesBound` on whether the index
-  is below the number of elements; a null array has none, so the bound alone excludes it. The
-  in-bound side steps through `SpanContents.array_load`, the helper's call through a contract
-  proved from its body, and leaves the postcondition; an index outside throws, a hole the
-  precondition closes. Any other straight-line body over an array is a `not outlined:` hole.
+- An `int[]`, `uint[]`, `long[]` or `ulong[]` parameter of a method that neither takes nor is called
+  on a class instance is an `ArrayView` with a list of its elements, and the theorem assumes the
+  view validates, has its element type and holds those elements in its storage span, `SpanContents
+  initial values.storage`. A method returning `values[index]` for an `int` argument `index`, read by
+  `ldelem` or through a static helper whose body only returns `ref values[index]`, is split with
+  `by_cases valuesBound` on whether the index is below the number of elements; a null array has
+  none, so the bound alone excludes it. The in-bound side steps through `SpanContents.array_load`,
+  the helper's call through a contract proved from its body, and leaves the postcondition; an index
+  outside throws, a hole the precondition closes. Any other straight-line body over an array is a
+  `not outlined:` hole.
 - A loop over an array indexes it with an `int` local tested against `values.Length`. The proof
   destructures the array into `valuesBase` and `valuesLength` before the loop, the precondition
   excluding a null array, and the cutpoint takes `valuesLength`, which a valid array keeps below
@@ -371,6 +372,19 @@ comment saying which obligation it is:
   `fresh1` with `fresh1Identity` dating it after every caller allocation, and the footprint
   forgets its elements through `Confined.forget_fresh`. An index into it that is not a literal
   below its length is a `not outlined:` hole, as is a method with a loop.
+- An array argument of structs or vectors, or of words beside a class instance argument or receiver,
+  such as `values : int[]`, binds `valuesLength` and is passed as `.array ⟨.address values,
+  valuesLength, element⟩`, with the premise `WholeArray initial element values valuesLength`. The
+  element is the `elementType` of a field that holds such arrays, such as `Tiles.Pairs.elementType`,
+  or a literal such as `.signed32`; a struct or vector element no field names is a reducible
+  `valuesElement` def. A load of a field holding a value array, before any write, binds the array
+  and its length, such as `samplesValuesArray` and `samplesValuesLength`, with premises that the
+  field holds it and that it is whole. A store into such a field of an argument or loaded array
+  steps through `Owned.store_whole`, and each `ldlen`, local, call argument and return of an array
+  is stepped with its `WholeArray` fact carried across the writes before it. A value-array result is
+  an `ArrayView`. A load of the field after a write, a store of null into it, and a call to a method
+  that takes a value array or loads a value-array field are `not outlined:` holes. A method with a
+  loop that takes or returns a value array is refused.
 - A call in a body over objects to a method that loads its fields, stores at most one word field of
   an object argument and returns a value it names gets a generated `MethodContract` read from that
   body, with a `Holds` theorem proved by the same stepping; `cil_contract_steps` composes the call

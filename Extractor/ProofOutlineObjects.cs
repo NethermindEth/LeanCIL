@@ -7,9 +7,10 @@ namespace Nethermind.LeanCIL;
 // object argument, and the straight-line walk that steps field loads and one final field store.
 internal static partial class ProofOutline
 {
-    /// <summary>A field an extraction names, as `Path.Name`; a reference field has no width.</summary>
-    sealed record ViewField(string Path, string Name, int? Width, int Offset, bool Stored, int[] Loaders,
-        int[] Storers)
+    /// <summary>A field an extraction names, as `Path.Name`: a word of `Width` bytes, an object reference, or the
+    /// origin of a whole array of `Element`, a Lean `ArrayElement` term.</summary>
+    sealed record ViewField(string Path, string Name, ClassViews.FieldKind Kind, int? Width, string? Element,
+        int Offset, bool Stored, int[] Loaders, int[] Storers)
     {
         internal string Lean => Path + "." + Name;
     }
@@ -22,12 +23,16 @@ internal static partial class ProofOutline
 
         internal FieldViews(Extraction extraction)
         {
-            // Outlines do not follow value arrays, so a value-array field is never a view field.
             foreach (var view in extraction.Views)
-                classes[view.FullName] = [.. view.Fields.Where(field => field.Kind != ClassViews.FieldKind.Array)
-                    .Select(field => new ViewField(view.Path, field.Lean,
-                    field.Width, field.Offset, field.Storers.Length > 0, field.Loaders, field.Storers))];
+                classes[view.FullName] = [.. view.Fields.Select(field => new ViewField(view.Path, field.Lean,
+                    field.Kind, field.Width, field.Element, field.Offset, field.Storers.Length > 0, field.Loaders,
+                    field.Storers))];
         }
+
+        /// <summary>The short name of an array element some named field holds arrays of, or none.</summary>
+        internal string? ElementType(string element) => classes.Values.SelectMany(fields => fields)
+            .FirstOrDefault(field => field.Kind == ClassViews.FieldKind.Array && field.Element == element) is { } named
+            ? named.Lean + ".elementType" : null;
 
         /// <summary>The named fields of an instance of `type`: its class's and its bases', nearest first.</summary>
         internal ViewField[] Of(TypeReference type) =>
@@ -43,12 +48,12 @@ internal static partial class ProofOutline
     static string FieldFact(Parameter parameter, ViewField field) =>
         parameter.Name + char.ToUpperInvariant(field.Name[0]) + field.Name[1..];
 
-    /// <summary>The objects a straight-line body reaches, the field facts its statement assumes of each and the
-    /// footprint it writes, as the walk of the body finds them.</summary>
+    /// <summary>The objects and arrays a straight-line body reaches, the facts its statement assumes of each, the
+    /// binders of those fields hold, and the footprint it writes, as the walk of the body finds them.</summary>
     sealed class ObjectPlan
     {
         internal List<(string Name, string Statement)> Premises { get; } = [];
-        internal List<string> Targets { get; } = [];
+        internal List<(string Name, string Type)> Targets { get; } = [];
         internal List<string> Entries { get; } = [];
     }
 
@@ -56,18 +61,33 @@ internal static partial class ProofOutline
     /// statement binds as a target.</summary>
     sealed record Reached(string Name, ViewField[] Fields, string? Held = null, string? Holder = null);
 
+    /// <summary>A whole array of values a body reaches, `Name` of `Length` elements of `Element` with the fact
+    /// `Whole`: an argument, or the array `Field` of `Holder` holds before any write, which the statement binds
+    /// as a target with the fact `Held`.</summary>
+    sealed record HeldArray(string Name, string Length, string Element, string Whole, string? Held = null,
+        Reached? Holder = null, ViewField? Field = null)
+    {
+        /// <summary>The array as a stack value.</summary>
+        internal string View => $"⟨.address {Name}, {Length}, {Element}⟩";
+    }
+
+    /// <summary>A use of an array of values after `Stores` writes that checks it is a whole live array: an
+    /// argument load, a length, a store or a return.</summary>
+    sealed record ArrayUse(HeldArray Array, int Stores);
+
     enum AccessKind { Load, Store, Read, Own }
 
     /// <summary>A field access in program order, after `Stores` earlier writes; `Read` and `Own` are the facts
     /// a call's contract needs of the caller's object.</summary>
     /// <remarks>A reference store of a value that is not an object the body reaches names it by `Value` and the
-    /// fact that it forms by `Formed`.</remarks>
+    /// fact that it forms by `Formed`. An array field access loads or stores `Array`.</remarks>
     sealed record Access(Reached Object, ViewField Field, AccessKind Kind, bool Signed, int Stores,
-        string? Value = null, Reached? Target = null, string? Formed = null)
+        string? Value = null, Reached? Target = null, string? Formed = null, HeldArray? Array = null)
     {
         /// <summary>A load of a reference field whose class is outside the model: its value is named, never
         /// read through.</summary>
-        internal bool Opaque => Kind == AccessKind.Load && Field.Width is null && Target is null;
+        internal bool Opaque => Kind == AccessKind.Load && Field.Kind == ClassViews.FieldKind.Reference &&
+            Target is null;
     }
 
     /// <summary>A `newarr` of `Length` elements of the class `Scope` and `Name` quote, the first write of the body,
@@ -136,6 +156,11 @@ internal static partial class ProofOutline
         sealed record Opaque(string Term, string Formed) : Item;
         /// <summary>An array of class references: an argument, or one the body allocates.</summary>
         sealed record ArrayArgument(string Name) : Item;
+        /// <summary>A whole array of values: an argument, or one a field holds.</summary>
+        sealed record Values(HeldArray Array) : Item;
+
+        /// <summary>The arrays of values the body reaches, shared by every path.</summary>
+        internal List<HeldArray> Arrays { get; private init; } = [];
 
         /// <summary>The fact naming each element of an array the body loads or stores, by array and index, shared
         /// by every path.</summary>
@@ -170,6 +195,9 @@ internal static partial class ProofOutline
         internal bool Run(Func<int, string> location)
         {
             foreach (var parameter in spec.Objects) Objects.Add(new Reached(parameter.Name, parameter.Fields));
+            foreach (var parameter in spec.ValueArrays)
+                Arrays.Add(new HeldArray(parameter.Name, parameter.LengthName, parameter.ArrayElement,
+                    parameter.WholeName));
             return Walk(0, [], new(), [], location);
         }
 
@@ -198,7 +226,8 @@ internal static partial class ProofOutline
                 {
                     var (holds, fails) = takenWhenTrue ? (target, pc + 1) : (pc + 1, target);
                     var walks = new[] { holds, fails }.Select(next => (Next: next, Walk: new ObjectWalk(spec, ops,
-                        views, callees, linear) { Objects = Objects, Slots = Slots, Stored = Stored, stores = stores,
+                        views, callees, linear) { Objects = Objects, Arrays = Arrays, Slots = Slots, Stored = Stored,
+                        stores = stores,
                         calls = calls, splits = splits + 1, Fresh = Fresh, previous = [.. PathSteps] })).ToArray();
                     Steps.Add(new Split($"branch{splits + 1}", condition, (location(holds), walks[0].Walk),
                         (location(fails), walks[1].Walk)));
@@ -219,20 +248,26 @@ internal static partial class ProofOutline
                         ParameterShape.Object => new Instance(Objects.First(reached => reached.Name == parameter.Name)),
                         ParameterShape.Scalar => new Word(parameter.Name, parameter.Width),
                         ParameterShape.Array => new ArrayArgument(parameter.Name),
+                        ParameterShape.ValueArray => new Values(Arrays.First(array => array.Name == parameter.Name)),
                         _ => null
                     };
                     if (item is null) return Stop($"the argument `{parameter.Name}`, which needs a case split");
+                    // The argument is checked again in the memory it is loaded in.
+                    if (item is Values loaded) Steps.Add(new ArrayUse(loaded.Array, stores));
                     stack.Add(item);
                 }
                 else if ((match = Regex.Match(op, @"\A\.setLocal (\d+)\z")).Success)
                 {
                     if (Pop() is not { } item) return Stop("a local store of an empty stack");
+                    // An array home checks the view it takes and the view it gives back.
+                    if (item is Values stored) Steps.Add(new ArrayUse(stored.Array, stores));
                     locals[int.Parse(match.Groups[1].Value)] = item;
                 }
                 else if ((match = Regex.Match(op, @"\A\.local (\d+)\z")).Success)
                 {
                     if (!locals.TryGetValue(int.Parse(match.Groups[1].Value), out var item))
                         return Stop("a local the body reads before it stores it");
+                    if (item is Values loaded) Steps.Add(new ArrayUse(loaded.Array, stores));
                     stack.Add(item);
                 }
                 else if (op == ".memory .nullObject") stack.Add(new Null());
@@ -413,6 +448,45 @@ internal static partial class ProofOutline
                     Steps.Add(stored);
                     stores++;
                 }
+                else if (ClassViews.Decode(op) is { Store: false, Kind: ClassViews.FieldKind.Array } arrayLoad)
+                {
+                    if (Pop() is not Instance instance || Field(instance, arrayLoad) is not { } field)
+                        return Stop("an array field load of an object the outline cannot name");
+                    if (stores > 0)
+                        return Stop($"a load of `{field.Lean}` after a store, whose array the statement names " +
+                            "in the caller's memory");
+                    // Loads of one field on any path reach one array, since no store comes before them.
+                    var name = instance.Object.Name + Capitalized(field.Name);
+                    var held = Arrays.FirstOrDefault(array => array.Name == name + "Array");
+                    if (held is null)
+                        Arrays.Add(held = new HeldArray(name + "Array", name + "Length", field.Lean + ".elementType",
+                            name + "Whole", name + "Held", instance.Object, field));
+                    Steps.Add(new Access(instance.Object, field, AccessKind.Load, false, stores, Array: held));
+                    stack.Add(new Values(held));
+                }
+                else if (ClassViews.Decode(op) is { Store: true, Kind: ClassViews.FieldKind.Array } arrayStore)
+                {
+                    var value = Pop();
+                    if (Pop() is not Instance instance || Field(instance, arrayStore) is not { } field)
+                        return Stop("an array field store into an object the outline cannot name");
+                    if (instance.Object.Holder is not null)
+                        return Stop($"a store into `{field.Lean}` of an object a field holds, which the footprint " +
+                            "cannot name");
+                    // The model's array field store takes an array view; `ldnull` pushes an object reference.
+                    if (value is Null)
+                        return Stop($"a store of null into `{field.Lean}`, which the model does not step");
+                    if (value is not Values values)
+                        return Stop($"a store into `{field.Lean}` of an array the outline cannot name");
+                    Steps.Add(new ArrayUse(values.Array, stores));
+                    Steps.Add(new Access(instance.Object, field, AccessKind.Store, false, stores++,
+                        $"(.address {values.Array.Name})", Array: values.Array));
+                }
+                else if (op == ".memory .arrayLength")
+                {
+                    if (Pop() is not Values values) return Stop("`ldlen` of an array the outline cannot name");
+                    Steps.Add(new ArrayUse(values.Array, stores));
+                    stack.Add(new Word($"(BitVec.ofNat 64 {values.Array.Length})", 8));
+                }
                 else if ((match = Regex.Match(op, @"\A\.call(?:Instance)? (\d+) (\d+)\z")).Success)
                 {
                     var index = int.Parse(match.Groups[1].Value);
@@ -521,12 +595,17 @@ internal static partial class ProofOutline
                         var result = Pop();
                         Returned = result switch
                         {
-                            Word word when !spec.Result.Boolean && !spec.Result.Object => word.Term,
+                            Word word when !spec.Result.Boolean && !spec.Result.Object && !spec.Result.Array =>
+                                word.Term,
                             Instance instance when spec.Result.Object => $"(.address {instance.Object.Name})",
                             Opaque opaque when spec.Result.Object => opaque.Term,
                             Null when spec.Result.Object => ".null",
+                            Values values when spec.Result.Array => values.Array.View,
                             _ => null
                         };
+                        // The return checks a returned array in the memory it leaves.
+                        if (result is Values returned && spec.Result.Array)
+                            Steps.Add(new ArrayUse(returned.Array, stores));
                         // A computed word the outline does not name still leaves the result to the postcondition.
                         if (Returned is null && result is not Word { Term: null })
                             return Stop("a result the outline cannot name");
@@ -725,7 +804,8 @@ internal static partial class ProofOutline
         }
 
         static ViewField? Field(Instance instance, ClassViews.FieldOperation operation) => instance.Object.Fields
-            .FirstOrDefault(field => field.Offset == operation.Offset && field.Width == operation.Width);
+            .FirstOrDefault(field => field.Offset == operation.Offset && field.Kind == operation.Kind &&
+                field.Width == operation.Width);
 
         /// <summary>The statement's facts about the reached objects: each is live, a target is what its field
         /// holds, and each field the body touches is `Owned` when it or a callee stores it and `Readable`
@@ -745,7 +825,7 @@ internal static partial class ProofOutline
             {
                 if (reached.Holder is not null)
                 {
-                    plan.Targets.Add(reached.Name);
+                    plan.Targets.Add((reached.Name, "Reference"));
                     var holder = all.First(access => access.Target == reached && access.Kind == AccessKind.Load);
                     plan.Premises.Add((reached.Held!,
                         $"{holder.Field.Lean}.of initial {holder.Object.Name} = .address {reached.Name}"));
@@ -763,6 +843,15 @@ internal static partial class ProofOutline
                         plan.Premises.Add((Fact(reached, field) + "Forms",
                             $"{field.Lean}.Forms initial {reached.Name}"));
                 }
+            }
+            // An array a field holds is bound by the statement, which assumes it whole.
+            foreach (var held in Arrays.Where(array => array.Holder is not null))
+            {
+                plan.Targets.Add((held.Name, "Reference"));
+                plan.Targets.Add((held.Length, "Nat"));
+                plan.Premises.Add((held.Held!,
+                    $"{held.Field!.Lean}.of initial {held.Holder!.Name} = .address {held.Name}"));
+                plan.Premises.Add((held.Whole, $"WholeArray initial {held.Element} {held.Name} {held.Length}"));
             }
             var elements = Flattened.OfType<ElementAccess>().ToArray();
             foreach (var array in spec.Arrays)
@@ -832,16 +921,17 @@ internal static partial class ProofOutline
             var names = new Names();
             var receiver = method.HasThis ? new[] { Receiver(method, names, views) } : [];
             var parameters = receiver.Concat(method.Parameters.Select(parameter =>
-                Describe(method, parameter, names, views))).ToArray();
+                Describe(method, parameter, names, views, extraction.Architecture))).ToArray();
             if (parameters.Any(parameter => parameter.Shape is not (ParameterShape.Object or ParameterShape.Scalar)))
                 return null;
-            var spec = new Specification(method, parameters, DescribeResult(method), true, true);
+            var spec = new Specification(method, parameters, DescribeResult(method, extraction.Architecture), true,
+                true);
             var walk = new ObjectWalk(spec, extraction.Emitted[index].Ops, views, _ => null);
             // A contract states reference stores only of objects the callee reaches, and its caller cannot give
-            // it the premise that a reference outside the model forms.
-            if (!walk.Run(_ => "") || walk.Steps.Any(step => step is CallStep or Split) ||
+            // it the premise that a reference outside the model forms; it states no array a field holds.
+            if (!walk.Run(_ => "") || walk.Steps.Any(step => step is CallStep or Split) || walk.Arrays.Count > 0 ||
                 walk.Accesses.Any(access => access.Opaque || access.Kind == AccessKind.Store &&
-                    access.Field.Width is null && access.Target is null) ||
+                    access.Field.Kind == ClassViews.FieldKind.Reference && access.Target is null) ||
                 walk.Accesses.Count(access => access.Kind == AccessKind.Store) >
                     (walk.Objects.Any(reached => reached.Holder is not null) ? 0 : 1) ||
                 (walk.Returned ?? "").Contains("stored", StringComparison.Ordinal) ||
@@ -872,7 +962,8 @@ internal static partial class ProofOutline
         Callee? Summary(int index) => summaries.TryGetValue(index, out var known) ? known
             : summaries[index] = Summarize(extraction, index, names.Claim("callee" + index, "callee" + index), views);
         var walk = new ObjectWalk(spec, body.Ops, views, Summary, linear: true);
-        if (walk.Run(pc => Location(spec.Method, pc)) && walk.Objects.All(reached => reached.Holder is null))
+        if (walk.Run(pc => Location(spec.Method, pc)) && walk.Objects.All(reached => reached.Holder is null) &&
+            walk.Arrays.Count == 0)
             spec.Plan = walk.Plan();
     }
 
@@ -903,7 +994,7 @@ internal static partial class ProofOutline
         var store = callee.Store;
         var effects = new List<string>();
         if (store is null) effects.Add("final = initial");
-        else effects.Add(store.Field.Width is null
+        else effects.Add(store.Field.Kind == ClassViews.FieldKind.Reference
             ? $"{store.Field.Lean}.Holds final {store.Object.Name} (.address {store.Target!.Name})"
             : $"{store.Field.Lean}.Holds final {store.Object.Name} {store.Value}");
         var held = targets.Select(target => premises.First(premise => premise.Name == target.Held).Statement)
@@ -980,9 +1071,12 @@ internal static partial class ProofOutline
         foreach (var array in spec.Arrays)
             known[(array.Name + "Live", 0)] = walk.ArrayFact(array.Name) is var fact && fact == array.Name + "Live"
                 ? fact : fact + ".toLive";
+        foreach (var array in walk.Arrays) known[(array.Whole, 0)] = array.Whole;
+        // Entry checks every argument in the caller's memory, a value array by its view.
         var facts = walk.Objects.Where(reached => reached.Holder is null)
             .Select(reached => reached.Name + "Live.formed")
-            .Concat(spec.Arrays.Select(array => walk.ArrayFact(array.Name) + ".formed")).ToList();
+            .Concat(spec.Arrays.Select(array => walk.ArrayFact(array.Name) + ".formed"))
+            .Concat(spec.ValueArrays.Select(array => array.WholeName + ".valid")).ToList();
         new ObjectPath(lean, spec, walk.Owns, owned, widen, returns, "  ", known, [], facts, []).Write(walk);
     }
 
@@ -1019,6 +1113,11 @@ internal static partial class ProofOutline
         string ArrayLive(string array, int stores) => Carry(array + "Live", stores, (previous, level) =>
             $"{previous}.after_confined framed{level}");
 
+        /// <summary>That an array of values is whole after `stores` writes, which keep every older allocation.
+        /// </summary>
+        string Whole(HeldArray array, int stores) => Carry(array.Whole, stores, (previous, level) =>
+            $"{previous}.after_confined framed{level}");
+
         /// <summary>What element fact `slot` of `array` holds after `stores` writes: `Holds` when the statement
         /// owns it and `Reads` otherwise. The walk lets no element fact cross a store into another array or at an
         /// index not provably different, nor a call that writes an element.</summary>
@@ -1039,7 +1138,7 @@ internal static partial class ProofOutline
 
         /// <summary>That write `level` keeps every allocation: a slot store's equation or a field write's.
         /// </summary>
-        string Kept(int level) => stored[level - 1] is Access { Field.Width: not null }
+        string Kept(int level) => stored[level - 1] is Access { Field.Kind: ClassViews.FieldKind.Word }
             ? $"(write_allocations _ _ _ _ _ written{level})" : $"(ReferenceArray.allocations_of_setSlot wrote{level})";
 
         /// <summary>`formed`, the formation of a reference in `initial`, after `stores` writes; the walk lets
@@ -1115,6 +1214,11 @@ internal static partial class ProofOutline
                 if (step is Allocation made)
                 {
                     Allocate(made, walk.SlotsOf(made.Array));
+                    continue;
+                }
+                if (step is ArrayUse use)
+                {
+                    Add(Whole(use.Array, use.Stores) + ".valid");
                     continue;
                 }
                 Access((Access)step);
@@ -1273,12 +1377,26 @@ internal static partial class ProofOutline
             }
             if (access.Kind == AccessKind.Load)
             {
-                Add(access.Field.Width is null ? $"{fact}.facts {access.Target!.Held} {access.Target.Name}Live"
-                    : access.Signed ? fact + ".signedFacts" : fact + ".facts");
+                // An element of positive width lets the load find the array's length from its size.
+                Add(access.Field.Kind switch
+                {
+                    ClassViews.FieldKind.Reference => $"{fact}.facts {access.Target!.Held} {access.Target.Name}Live",
+                    ClassViews.FieldKind.Array =>
+                        $"{fact}.facts {access.Array!.Held} {Whole(access.Array, access.Stores)} (by decide)",
+                    _ => access.Signed ? fact + ".signedFacts" : fact + ".facts"
+                });
                 return;
             }
             var stores = access.Stores + 1;
-            if (access.Field.Width is null)
+            if (access.Field.Kind == ClassViews.FieldKind.Array)
+            {
+                lean.Line($"{indent}obtain ⟨written{stores}, framed{stores}, held{stores}⟩ := " +
+                    $"{fact}.store_whole {Whole(access.Array!, access.Stores)}");
+                lean.Wrapped($"{indent}generalize wrote{stores} :", [$"setSlot {ObjectWalk.Memory(access.Stores)}",
+                    $"({access.Field.Lean}.address {access.Object.Name})", access.Value!, $"= stored{stores}"],
+                    $"at written{stores} framed{stores} held{stores}");
+            }
+            else if (access.Field.Kind == ClassViews.FieldKind.Reference)
             {
                 var target = access.Target is { } reached ? Live(reached, access.Stores) : null;
                 var value = access.Target is { } named ? $"(.address {named.Name})" : access.Value!;
