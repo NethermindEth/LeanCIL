@@ -284,18 +284,18 @@ internal static partial class ProofOutline
         void NormalizeFacts(ReceiverPath path, string condition, string indent)
         {
             if (!path.Facts.Any(fact => fact.StartsWith("written", StringComparison.Ordinal))) return;
-            foreach (var fact in path.Facts.Where(fact => fact.StartsWith("written", StringComparison.Ordinal) ||
+            foreach (var fact in path.Facts.Where(fact => fact.StartsWith("stepped", StringComparison.Ordinal) ||
                 fact.StartsWith("loaded", StringComparison.Ordinal)).ToArray())
             {
                 var normalized = "normalized" + ++names;
                 Line($"{indent}have {normalized} := {fact}");
-                Line($"{indent}simp only [{condition}] at {normalized}");
+                Line($"{indent}try simp only [{condition}] at {normalized}");
                 path.Facts.Add(normalized);
             }
         }
 
         static string SafeName(string name) => Regex.IsMatch(name,
-            @"\A(?:(?:added|loaded|memory|written|confined|held|formed|wellFormed|changed|" +
+            @"\A(?:(?:added|loaded|stepped|memory|written|confined|held|formed|wellFormed|changed|" +
             @"confinedTotal|branch|normalized)\d+|" +
             @"(?:kept|owned)\d+Field\d+)\z") ? name + "Argument" : name;
 
@@ -303,7 +303,8 @@ internal static partial class ProofOutline
         {
             var index = ++names;
             var address = field.Address(receiver);
-            Line($"{indent}have added{index} : add {path.Memory} {receiver} 1 {field.Offset} = .ok {address} := by");
+            Line($"{indent}have added{index} : add {path.Memory} {receiver} 1");
+            Line($"{indent}    (BitVec.ofNat 64 {field.Offset}) = .ok {address} := by");
             Line($"{indent}  simpa using add_field (offset := {field.Offset}) {path.WellFormed} {path.Formed}");
             Line($"{indent}    (by simpa using read_access ({path.Reads[field.Offset]} 0 _ rfl))");
             path.Facts.Add("added" + index);
@@ -316,6 +317,14 @@ internal static partial class ProofOutline
             }
             Line($"{indent}obtain ⟨memory{index}, written{index}, -, confined{index}, held{index}⟩ :=");
             Line($"{indent}  {path.Owned[field.Offset]}.write_one {value}");
+            Line($"{indent}have stepped{index} : ∀ body pc args frame rest,");
+            Line($"{indent}    step body (.setFieldAt {field.Offset} 8) pc args frame");
+            Line($"{indent}      (.scalar (.i64 {value}) :: .reference (.address {receiver}) :: rest)");
+            Line($"{indent}      {path.Memory} = .ok (.next (pc + 1) rest frame memory{index}) := by");
+            Line($"{indent}  intros");
+            Line($"{indent}  rw [step_setFieldAt_i64_eq, added{index}]");
+            Line($"{indent}  dsimp only [checkedAt, Except.mapError, bind, pure, Except.bind, Except.pure]");
+            Line($"{indent}  rw [written{index}]");
             Line($"{indent}have formed{index} : form memory{index} {receiver} = .ok {receiver} :=");
             Line($"{indent}  (form_congr (by rw [write_allocations _ _ _ _ _ written{index}])).trans {path.Formed}");
             Line($"{indent}have wellFormed{index} := write_preserves_wellFormed _ _ _ _ _ " +
@@ -347,6 +356,7 @@ internal static partial class ProofOutline
             path.Reads[field.Offset] = "held" + index;
             path.Values[field.Offset] = value;
             path.Facts.Add("written" + index);
+            path.Facts.Add("stepped" + index);
             path.Facts.Add(path.Formed);
         }
     }
