@@ -875,6 +875,7 @@ Examples:System.UInt64 Examples.IntegerMath::ClampUInt64(System.UInt64,System.UI
 Examples:System.UInt64 Examples.IntegerMath::MaxUInt64(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.IntegerMath::MinUInt64(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Loops::Sum(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Loops::SumIndexed(System.UInt64[])	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.MarshaledMemory::Read(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Measured`1::Width(System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.MostSpecificBodies::Five(System.UInt64)	A	A	A	A	A	A	A	A
@@ -1078,6 +1079,7 @@ Examples:System.Void Examples.ItemPool::Prewarm(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ItemPool::Return(Examples.PooledItem)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Labelled::.ctor()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Loops::Fill(System.Span`1<System.UInt32>,System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Loops::FillIndexed(System.UInt32[],System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Loops::FillThrough(System.Span`1<System.UInt32>,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Loops::FillWords(System.UInt64&,System.UInt64,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Loops::Put(System.Span`1<System.UInt32>,System.UInt32)	A	A	A	A	A	A	A	A

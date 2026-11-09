@@ -17,7 +17,8 @@ internal static partial class ProofOutline
         internal string ElementName => Name + "Element";
         internal string LengthName => Name + "Length";
 
-        /// <summary>A span argument the method may write through, with authority over its elements.</summary>
+        /// <summary>A span or array argument the method may write through, with authority over its
+        /// elements.</summary>
         internal bool Writable { get; init; }
 
         /// <summary>The premise naming a span's access mode, and its statement.</summary>
@@ -30,8 +31,13 @@ internal static partial class ProofOutline
         /// <summary>The `ArrayElement` of an array argument, such as `.signed32`.</summary>
         internal string Element { get; init; } = "";
 
-        /// <summary>Whether the theorem names the argument's elements: a read-only span or an array.</summary>
-        internal bool Listed => Shape == ParameterShape.WordArray || Shape == ParameterShape.Span && !Writable;
+        /// <summary>Whether the theorem names the argument's elements: a span or array the method only
+        /// reads.</summary>
+        internal bool Listed => Shape is ParameterShape.WordArray or ParameterShape.Span && !Writable;
+
+        /// <summary>The caller memory a written span or array lends the method.</summary>
+        internal string FootprintTerm => Shape == ParameterShape.WordArray ? $"{Name}.storage.footprint"
+            : $"{Name}.footprint";
     }
 
     /// <summary>How an argument is bound; `StructReference` is `this` of a struct instance method, a reference to
@@ -74,8 +80,8 @@ internal static partial class ProofOutline
         var names = new Names();
         var views = new FieldViews(extraction);
         var receiver = method.HasThis ? new[] { Receiver(method, names, views) } : [];
-        var parameters = receiver.Concat(method.Parameters.Select(parameter =>
-            Describe(method, parameter, names, views))).ToArray();
+        var parameters = WrittenArrays(method, receiver.Concat(method.Parameters.Select(parameter =>
+            Describe(method, parameter, names, views))).ToArray(), emitted.Ops, new Body(emitted.Ops).Loops().Count);
         var result = DescribeResult(method);
         bool symbolic = parameters.Any(parameter => parameter.Shape is ParameterShape.Reference or
             ParameterShape.Span or ParameterShape.Object or ParameterShape.StructReference or
@@ -93,10 +99,6 @@ internal static partial class ProofOutline
             { } array)
             throw Unsupported($"parameter `{array.Name}` of {method.Name} is an array of class references, which " +
                 "new-proof outlines only in bodies without loops");
-        if (loops.Count > 0 && parameters.FirstOrDefault(parameter => parameter.Shape == ParameterShape.WordArray)
-            is { } words)
-            throw Unsupported($"{method.FullName} has a loop over the array `{words.Name}`; new-proof steps arrays " +
-                "in straight-line bodies only");
         var spanStore = loops.Count == 0 ? SpanStores(extraction, 0) : null;
         if (loops.Count == 0 && spanStore is null && parameters.Any(parameter => parameter.Writable))
             throw Unsupported($"{method.FullName} writes a span outside a loop other than by storing its value " +
@@ -123,6 +125,20 @@ internal static partial class ProofOutline
         var holes = Regex.Matches(source, @"(?<![`\w])sorry(?![`\w])").Count;
         var paths = Regex.Matches(source, "-- " + NotOutlined).Count;
         return new(method.FullName, source, holes - paths, paths);
+    }
+
+    /// <summary>`parameters` with the array a loop stores into marked written; a loop's store is followed only
+    /// into a method's one array argument. A straight-line store stays a hole over the array's contents.</summary>
+    static Parameter[] WrittenArrays(MethodDefinition method, Parameter[] parameters, string[] ops, int loops)
+    {
+        var arrays = parameters.Where(parameter => parameter.Shape == ParameterShape.WordArray).ToArray();
+        if (loops == 0 || arrays.Length == 0 ||
+            !ops.Any(op => op.StartsWith(".memory (.arrayStore ", StringComparison.Ordinal))) return parameters;
+        if (arrays.Length > 1)
+            throw Unsupported($"{method.FullName} stores into one of {arrays.Length} array arguments in a loop; " +
+                "new-proof follows a loop's stores into a method's one array argument");
+        return parameters.Select(parameter => parameter == arrays[0] ? parameter with { Writable = true } : parameter)
+            .ToArray();
     }
 
     static NotSupportedException Unsupported(string message) =>
@@ -238,10 +254,14 @@ internal static partial class ProofOutline
             var loop = Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference);
             var references = loop || Plan is null && Arrays.Any();
             var writer = loop ? "loop" : "method";
-            var spans = Parameters.Where(parameter => parameter.Writable).Select(parameter => parameter.Name).ToArray();
+            var lent = Parameters.Where(parameter => parameter.Writable).ToArray();
+            var spans = lent.Select(parameter => parameter.Name).ToArray();
             var parts = (Arrays.Any() ? new[] { "the fields and elements it stores of its arguments" }
                     : Objects.Any() ? ["the fields it stores of its object arguments"] : [])
-                .Concat(spans.Length > 0 ? ["the bytes of its writable spans"] : []);
+                .Concat(lent.Any(parameter => parameter.Shape == ParameterShape.Span)
+                    ? ["the bytes of its writable spans"] : [])
+                .Concat(lent.Any(parameter => parameter.Shape == ParameterShape.WordArray)
+                    ? ["the elements of the array it stores into"] : []);
             lean.Doc(references
                 ? $"Replace with the caller memory the {writer} may write, as references with their widths in bytes."
                 : $"The caller memory the method may write: {string.Join(" and ", parts)}.");
@@ -258,7 +278,7 @@ internal static partial class ProofOutline
             if (references) lean.Line($"  sorry -- caller memory the {writer} may write");
             else lean.Line("  " + string.Join(" ++ ", (entries.Length > 0 || spans.Length == 0
                 ? ["[" + string.Join(", ", entries.Select(entry => entry.Entry)) + "]"] : Array.Empty<string>())
-                .Concat(spans.Select(span => span + ".footprint"))));
+                .Concat(lent.Select(parameter => parameter.FootprintTerm))));
             lean.Line();
         }
 
@@ -304,6 +324,12 @@ internal static partial class ProofOutline
                     (parameter.Mode, parameter.ModeStatement),
                     (parameter.Name + "Contents",
                         $"SpanContents initial {parameter.Name} {parameter.Width} {parameter.ElementsName}")],
+                // A stored-into array needs only authority over its storage span's elements.
+                ParameterShape.WordArray when parameter.Writable => [
+                    (parameter.Name + "Valid", $"{parameter.Name}.validate initial = .ok ()"),
+                    (parameter.Name + "Type", $"{parameter.Name}.elementType = {parameter.Element}"),
+                    (parameter.Name + "Authority",
+                        $"SpanWritable initial (footprint {Arguments}) {parameter.Name}.storage")],
                 // An array's elements are the bytes of its storage span; a null array has none.
                 ParameterShape.WordArray => [
                     (parameter.Name + "Valid", $"{parameter.Name}.validate initial = .ok ()"),

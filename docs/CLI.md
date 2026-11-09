@@ -251,8 +251,17 @@ comment saying which obligation it is:
   is below the number of elements; a null array has none, so the bound alone excludes it. The
   in-bound side steps through `SpanContents.array_load`, the helper's call through a contract
   proved from its body, and leaves the postcondition; an index outside throws, a hole the
-  precondition closes. Any other body over an array is a `not outlined:` hole, and a loop over an
-  array is refused.
+  precondition closes. Any other straight-line body over an array is a `not outlined:` hole.
+- A loop over an array indexes it with an `int` local tested against `values.Length`. The proof
+  destructures the array into `valuesBase` and `valuesLength` before the loop, the precondition
+  excluding a null array, and the cutpoint takes `valuesLength`, which a valid array keeps below
+  `2 ^ 31` (`SpanView.length_bounded` of its storage span). A read of `values[index]` steps through
+  `array_load` of the storage span's contents, carried into the iteration's frame, and loads
+  `valuesElements[index.toNat]`. An array the loop stores into is a written one: the theorem gives
+  authority over its storage span, `footprint` is that span's, and a store of `values[index]` steps
+  through `arrayElement_of_access`. Each access leaves its index bound, and a store its write
+  authority and footprint entry, to `cil_loop_obligation` from the author's definitions. A method
+  storing into one of several arrays is refused.
 - A method with a loop gets its loop state, the cutpoint at the loop's back-edge test (found by
   instruction, never by pc), and `invariant` and `measure` definitions to replace. A method that
   takes a reference also gets a `footprint` to replace: the caller memory the loop may write, which

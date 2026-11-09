@@ -179,4 +179,18 @@ public static class Loops
             target = target.Slice(1);
         }
     }
+
+    // Adds the array's elements by index; the bound test reads the array's length each iteration.
+    public static ulong SumIndexed(ulong[] values)
+    {
+        ulong total = 0;
+        for (var index = 0; index < values.Length; index++) total = unchecked(total + values[index]);
+        return total;
+    }
+
+    // Stores the value into every element of the array by index.
+    public static void FillIndexed(uint[] values, uint value)
+    {
+        for (var index = 0; index < values.Length; index++) values[index] = value;
+    }
 }

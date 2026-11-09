@@ -840,8 +840,9 @@ foreach (var mutation in new[] { "stack-height", "stack-type", "local-fact", "st
 // A generated starting proof must elaborate with only its holes open, and verification must refuse it
 // until every hole is filled; otherwise an author could mistake the outline for a proof.
 // Loops reuse the checked extraction an earlier section left under their name; the straight-line
-// methods cover `bool`, narrow and array parameters and a `bool` result, and the object methods `this`, field
-// loads and stores, an object result, calls and a loop over a `callvirt`.
+// methods cover `bool`, narrow and array parameters and a `bool` result, the indexed loops reading and storing
+// array elements, and the object methods `this`, field loads and stores, an object result, calls and a loop
+// over a `callvirt`.
 var outlined = new (string Name, string? Selector)[]
 {
     ("Countdown", null), ("FillWords", null), ("CountUntil", null), ("CountCalls", null), ("SpanDrain", null),
@@ -895,7 +896,8 @@ var outlined = new (string Name, string? Selector)[]
     // Element reads of word arrays, directly and through a helper returning the element's address.
     ("ArrayReadInt32", "PrimitiveArrays::ReadInt32(int[],int)"),
     ("ArrayReadUInt64", "PrimitiveArrays::ReadUInt64(ulong[],int)"),
-    ("ArrayRead", "ArrayElementReferences::Read(int[],int)")
+    ("ArrayRead", "ArrayElementReferences::Read(int[],int)"),
+    ("ArraySum", "Loops::SumIndexed(ulong[])"), ("ArrayFill", "Loops::FillIndexed(uint[],uint)")
 };
 var outlineTimer = System.Diagnostics.Stopwatch.StartNew();
 var outlineRoot = Path.Combine(root, "Outlines");
@@ -1952,7 +1954,147 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
         ("    case postcondition => sorry", "    case postcondition => exact target1Filled")]),
     ("ArrayReadInt32", ArrayReadSpecification("W32", "")),
     ("ArrayReadUInt64", ArrayReadSpecification("W64", "")),
-    ("ArrayRead", ArrayReadSpecification("W32", ", leaveFrame"))
+    ("ArrayRead", ArrayReadSpecification("W32", ", leaveFrame")),
+    // An indexed loop over an array reads each element from the storage span's contents; the bound test reads
+    // the array's length as a signed word, below 2^31 for a valid array.
+    ("ArraySum", [
+        ("""
+        def Precondition (values1 : ArrayView) (values1Elements : List W64) (initial : Memory)
+            : Prop := sorry
+        """,
+            """
+            def Precondition (values1 : ArrayView) (_ : List W64) (_ : Memory) : Prop :=
+              values1.reference ≠ .null
+            """),
+        ("""
+        def Postcondition (values1 : ArrayView) (values1Elements : List W64) (initial final : Memory)
+            (result : W64) : Prop := sorry
+        """,
+            """
+            def Postcondition (_ : ArrayView) (values1Elements : List W64) (_ _ : Memory)
+                (result : W64) : Prop := result = values1Elements.foldl (· + ·) 0
+            """),
+        ("""
+        def invariant (values1 : ArrayView) (values1Elements : List W64)
+            {memory : Memory} {home0 home1 : Reference} (state : State memory home0 home1) : Prop := sorry
+        """,
+            """
+            def invariant (_ : ArrayView) (values1Elements : List W64)
+                {memory : Memory} {home0 home1 : Reference} (state : State memory home0 home1) : Prop :=
+              state.values.2.toNat ≤ values1Elements.length ∧
+                state.values.1 = (values1Elements.take state.values.2.toNat).foldl (· + ·) 0
+            """),
+        ("""
+        def measure (values1 : ArrayView) (values1Elements : List W64)
+            {memory : Memory} {home0 home1 : Reference} (state : State memory home0 home1) : Nat := sorry
+        """,
+            """
+            def measure (_ : ArrayView) (values1Elements : List W64)
+                {memory : Memory} {home0 home1 : Reference} (state : State memory home0 home1) : Nat :=
+              values1Elements.length - state.values.2.toNat
+            """),
+        ("    case invariant => sorry -- invariant at the first loop head", "    case invariant => simp [invariant]"),
+        ("""
+            case invariant => sorry -- invariant again at the loop head
+            case measure => sorry -- measure decreases over this iteration
+        """,
+            """
+                case invariant =>
+                  have next : (index + 1).toNat = index.toNat + 1 := by
+                    simp [BitVec.toNat_add]
+                    omega
+                  dsimp only [invariant] at holds ⊢
+                  refine ⟨by omega, ?_⟩
+                  rw [next, List.take_add_one, List.getElem?_eq_getElem values1Bound, List.foldl_append,
+                    ← holds.2]
+                  simp
+                case measure =>
+                  have next : (index + 1).toNat = index.toNat + 1 := by
+                    simp [BitVec.toNat_add]
+                    omega
+                  simp only [measure]
+                  omega
+            """),
+        ("      sorry -- Postcondition at the return at Loops.cs:188",
+            """
+                  dsimp only [invariant] at holds
+                  simp (disch := omega) only [BitVec.toInt_eq_toNat_of_lt, toInt_ofNat_of_lt] at guard
+                  simp only [Postcondition, holds.2]
+                  rw [List.take_of_length_le (by omega)]
+            """)]),
+    // An indexed fill stores into the storage span by authority alone; the invariant states the filled prefix
+    // from the array's own address.
+    ("ArrayFill", [
+        ("def Precondition (values1 : ArrayView) (value : W32) (initial : Memory) : Prop := sorry",
+            "def Precondition (values1 : ArrayView) (_ : W32) (_ : Memory) : Prop := values1.reference ≠ .null"),
+        ("def Postcondition (values1 : ArrayView) (value : W32) (initial final : Memory) : Prop := sorry",
+            """
+            def Postcondition (values1 : ArrayView) (value : W32) (_ final : Memory) : Prop :=
+              ∀ base, values1.reference = .address base →
+                Contents final base 4 (List.replicate values1.length (value : BitVec (8 * 4)))
+            """),
+        ("    (state : State memory written home0) : Prop := sorry",
+            """
+                (state : State memory written home0) : Prop :=
+              state.values.toNat ≤ values1.length ∧ ∀ base, values1.reference = .address base →
+                Filled state.memory base 4 (List.replicate state.values.toNat (value : BitVec (8 * 4)))
+                  (values1.length - state.values.toNat)
+            """),
+        ("def measure (values1 : ArrayView) (value : W32)", "def measure (values1 : ArrayView) (_ : W32)"),
+        ("    (state : State memory written home0) : Nat := sorry",
+            "    (state : State memory written home0) : Nat := values1.length - state.values.toNat"),
+        ("    case invariant => sorry -- invariant at the first loop head",
+            """
+                case invariant =>
+                  dsimp only [invariant]
+                  refine ⟨by simp, ?_⟩
+                  intro base address
+                  simp only [ManagedReference.address.injEq] at address
+                  subst address
+                  have room := (values1Authority.writable values1Base rfl).after_confined
+                    storedFrame.confined wellFormed
+                  simpa [ArrayView.storage, CIL.ArrayElement.width] using Filled.start room
+            """),
+        ("""
+            case invariant => sorry -- invariant again at the loop head
+            case measure => sorry -- measure decreases over this iteration
+        """,
+            """
+                case invariant =>
+                  have next : (index + 1).toNat = index.toNat + 1 := by
+                    simp [BitVec.toNat_add]
+                    omega
+                  dsimp only [invariant] at holds ⊢
+                  refine ⟨by omega, ?_⟩
+                  intro base address
+                  simp only [ManagedReference.address.injEq] at address
+                  subst address
+                  have filled := holds.2 values1Base rfl
+                  rw [show values1Length - index.toNat = (values1Length - (index.toNat + 1)) + 1 by omega]
+                    at filled
+                  rw [next, List.replicate_succ']
+                  exact (filled.push (by simpa using values1Wrote)).after_below storedBelow values1Below
+                case measure =>
+                  have next : (index + 1).toNat = index.toNat + 1 := by
+                    simp [BitVec.toNat_add]
+                    omega
+                  simp only [measure]
+                  omega
+            """),
+        ("    case postcondition => sorry -- Postcondition at the return at Loops.cs:195",
+            """
+                case postcondition =>
+                  dsimp only [invariant] at holds
+                  simp only [Postcondition]
+                  intro base address
+                  simp only [ManagedReference.address.injEq] at address
+                  subst address
+                  simp (disch := omega) only [BitVec.toInt_eq_toNat_of_lt, toInt_ofNat_of_lt] at guard
+                  have done : index.toNat = values1Length := by omega
+                  have filled := holds.2 values1Base rfl
+                  rw [done, Nat.sub_self] at filled
+                  simpa using (filled.after_below exitBelow values1Below).complete
+            """)])
 })
 {
     var source = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
@@ -1982,7 +2124,8 @@ Console.WriteLine("PASS filled outlines verify with only their specification wri
     "load, length and covariance-checked store, element facts carried across element and field stores, and " +
     "an array the method allocates, fills and reads back, a fill through a writable span, and a fill through a " +
     "helper storing the first element of the span it is lent, that helper alone, and element reads of `int[]` and " +
-    "`ulong[]` arrays, directly and through a helper returning the element's address");
+    "`ulong[]` arrays, directly and through a helper returning the element's address, and an indexed sum and fill " +
+    "of arrays");
 
 // A written footprint that leaves out the element a loop writes is an error at the write, never an admission.
 var narrowed = Path.Combine(outlineRoot, "FillWords", "Narrowed.lean");
