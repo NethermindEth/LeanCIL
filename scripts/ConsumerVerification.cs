@@ -1064,8 +1064,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     /// </summary>
     sealed record ConsumerSession(string Generated, Dictionary<string, string> Copied, SourceCopies Sources);
 
-    sealed record ExtractionComponents(string InputHash, string Aggregate, Dictionary<string, string> Sources,
-        string Context);
+    sealed record ExtractionComponents(string InputHash, string Aggregate, Dictionary<string, string> Sources);
 
     [GeneratedRegex(@"(?m)^set_option maxRecDepth [0-9]+\r?$")]
     private static partial Regex ExtractionRecursionDepth();
@@ -1083,7 +1082,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         var aggregate = source.IndexOf("def specializedMethods :", StringComparison.Ordinal);
         var context = ExtractionComponentContext(source);
         if (methods.Count < 2 || aggregate <= methods[^1].Index)
-            return new(ContentKey(source), source, new(StringComparer.Ordinal), context);
+            return new(ContentKey(source), source, new(StringComparer.Ordinal));
         var localValidation = new Regex(@"(?m)^theorem method([0-9]+)_" +
             @"(?:coverage|shape|unsafe|division|opaque|vector_initializations)_validated[^\r\n]*\r?\n");
         var tail = source[aggregate..];
@@ -1119,22 +1118,23 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 declarations.Add(declaration.Groups[1].Value, modules.Count - 1);
         }
         return new(ContentKey(source), string.Join("\n", modules.Select(module => "import " + module)) +
-            "\n\n" + context + tail, sources, context);
+            "\n\n" + context + tail, sources);
     }
 
     // A unique wrapper stays in Extracted so its compilation shares the aggregate process.
     static ExtractionComponents SharedExtractionComponents(ExtractionComponents plan, HashSet<string> repeated)
     {
         if (plan.Sources.Keys.Count(repeated.Contains) < 2)
-            return new(plan.InputHash, "", new(StringComparer.Ordinal), plan.Context);
+            return new(plan.InputHash, "", new(StringComparer.Ordinal));
+        var context = ExtractionComponentContext(plan.Aggregate);
         var shared = plan.Sources.Where(pair => repeated.Contains(pair.Key)).ToDictionary(StringComparer.Ordinal);
         var bodies = plan.Sources.Where(pair => !repeated.Contains(pair.Key)).Select(pair =>
-            pair.Value[(pair.Value.IndexOf(plan.Context, StringComparison.Ordinal) +
-                plan.Context.Length)..^"\nend Extracted\n".Length]);
-        var tail = plan.Aggregate[(plan.Aggregate.IndexOf(plan.Context, StringComparison.Ordinal) +
-            plan.Context.Length)..];
+            pair.Value[(pair.Value.IndexOf(context, StringComparison.Ordinal) +
+                context.Length)..^"\nend Extracted\n".Length]);
+        var tail = plan.Aggregate[(plan.Aggregate.IndexOf(context, StringComparison.Ordinal) +
+            context.Length)..];
         return new(plan.InputHash, string.Join("\n", shared.Keys.Select(module => "import " + module)) + "\n\n" +
-            plan.Context + string.Concat(bodies) + tail, shared, plan.Context);
+            context + string.Concat(bodies) + tail, shared);
     }
 
     // Resolve source roots through Lake so library and package srcDir settings agree with imports.
