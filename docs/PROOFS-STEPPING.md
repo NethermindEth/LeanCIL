@@ -40,6 +40,18 @@ returned values. These lemmas are also available directly from
 [StepComposition](../CIL/Safety/StepComposition.lean) and
 [CallComposition](../CIL/Safety/CallComposition.lean) for manual proofs.
 
+A goal `∃ fuel, invoke program fuel method args memory = result` is opened with
+`CIL.executionBound program method` as its fuel, so a proof states none; fuel that is already a
+term is left as written. `cil_checked_steps` and `cil_contract_steps` also state the goal with the
+`args`, `results`, `pre`, `footprint` and `post` of each defined contract unfolded, at entry and in
+each call's continuation, so a contract proof needs no `dsimp only [contract]` of its goal. A
+contract variable and `Returns` stay folded.
+
+After each step the tactics evaluate the closed literal operands the state holds with the
+`cil_literal` simp set: a width conversion, sign extension or `toNat` of a bit-vector numeral, and
+a remainder of numerals, as a masked shift count is. The set fires on numerals only, so a symbolic
+operand stays as stated, and `simp only [cil_literal]` gives a hand-written step the same form.
+
 A goal stating a located fault, `invoke p fuel m args memory = .error ⟨m, pc, fault⟩`, enters
 through `invoke_of_run_fault` and steps the same way. At the stated `pc` the tactic first tries
 `run_fault`, which closes the goal when the fetched step raises exactly `fault`; other steps
@@ -71,7 +83,8 @@ comparison already decided to `1` or `0`, so a narrow Boolean return needs no un
 `NarrowKind.extend`. A follow-up `simp [leaveFrame, NarrowKind.extend]; split <;> rfl` after such
 a return fails with "no goals" and must be deleted. Other mathematical results can need a separate
 `simp` or case split. The remaining goal contains the returned values, rather than an unexecuted
-`run`. `cil_contract_steps` likewise leaves the return postcondition as a goal.
+`run`. `cil_contract_steps` likewise leaves the return postcondition as a goal, stated of the
+memory the body left when the returning frame is a literal that owns no allocation.
 
 A run-to-run goal `run p (fuel + n) m 0 .. = run p fuel m n ..` closes with `cil_checked_steps` when
 the stepped state is syntactically the target: symbolic `fuel` stops stepping there. With literal
@@ -292,8 +305,11 @@ The tactics of [LoopFrameSteps](../CIL/Safety/LoopFrameSteps.lean), which
 - `cil_loop_call holds input at site [facts]` applies the contract (`loop_terminates_call`) at
   the `bind_call` site or, without `at site`, at the fetched call. It leaves the precondition,
   tagged `precondition.<callee>`, unless `trivial` or a hypothesis proves it, then continues: it
-  names the returned memory, unfolds the contract, substitutes an output its postcondition states
-  as an equation (unless `cil_loop_call keeping`, which keeps it as `output`), names the callee's `WellFormed` (`calledFormed`) and proves the frame at the
+  names the returned memory `called`, the typed output `output` and, read by field from the call's
+  `CallResult`, its invocation `invoked`, footprint fact `confined` and postcondition `returned`,
+  unfolds the contract in them, substitutes an output its postcondition states as an equation
+  (unless `cil_loop_call keeping`, which keeps it as `output`), names the callee's `WellFormed`
+  (`calledFormed`) and proves the frame at the
   returned memory (`calledFrame`, through `LoopFrame.after_confined`), and carries the
   caller-buffer facts across the call: write authority always, contents when `omega` shows them
   apart from the callee's footprint. It fails naming the pc and instruction when the goal is not at a call, the argument
@@ -376,8 +392,8 @@ Each store names its memory, step and frame (`stored`, `storing`, `storedFrame`,
 the stored-over memory, or about the caller's, at the new one under the same name, so an
 invariant reads them at the memory it is stated at. All gather facts as the other loop tactics
 do, so the lists are optional.
-`loop_terminates_call_formed` gives the continuation `WellFormed`, the static world and catalog
-agreement when a proof composes the call by hand. The [counted-loop
+`loop_terminates_call_formed` gives the continuation, after the call's `CallResult`, its
+`FrameInvariants` (`formed`, `staticWorld` and `classes`) when a proof composes the call by hand. The [counted-loop
 proof](../Examples/Proofs/CountCalls.lean) never unfolds the helper or names its fuel; the loop
 suite reuses it unedited for a reimplemented helper and requires it to reject a discarded helper
 result and a broken count. On the correct build, a nondecreasing measure and an invariant that holds
