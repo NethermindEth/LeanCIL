@@ -557,7 +557,7 @@ internal static partial class ProofOutline
         if (stepped) spec.Plan = walk.Plan();
         string[] imports = ["CIL.Verification", "CIL.Safety.SymbolicExecution", "CIL.Safety.ObjectFields"];
         if (spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.WordArray))
-            imports = [.. imports, "CIL.Safety.ArrayContents"];
+            imports = [.. imports, "CIL.Safety.ArrayContents", "CIL.Safety.LoopCallerFacts"];
         var fresh = stepped ? walk.Flattened.OfType<Allocation>().FirstOrDefault() : null;
         if (spec.Arrays.Any() || fresh is not null) imports = [.. imports, "CIL.Safety.ReferenceArrayElements"];
         Header(lean, spec, imports, stepped ? "`postcondition`" : null);

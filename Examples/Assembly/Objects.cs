@@ -189,6 +189,24 @@ public static class SampleArrays
         return values.Length;
     }
 
+    /// <summary>Reads the first supplied word after allocating and writing a reference array.</summary>
+    public static int ReadAfterAllocation(Node node, int[] values)
+    {
+        var nodes = new Node[1];
+        nodes[0] = node;
+        return values[0];
+    }
+
+    /// <summary>Reads an index returned by a helper that records it in the account.</summary>
+    public static int ReadAfterEcho(Account account, int[] values, int index) =>
+        values[RecordIndex(account, index)];
+
+    static int RecordIndex(Account account, int index)
+    {
+        account.Limit = (uint)index;
+        return index;
+    }
+
     /// <summary>Sums an array beside a class argument.</summary>
     public static int Sum(Samples samples, int[] values)
     {

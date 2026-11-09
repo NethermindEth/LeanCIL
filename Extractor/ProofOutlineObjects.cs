@@ -77,7 +77,7 @@ internal static partial class ProofOutline
 
     /// <summary>A scalar element read and the field footprints its contents must be disjoint from.</summary>
     sealed record WordRead(Parameter Array, string Index, int Stores, string Name,
-        (Access Write, string Apart)[] Writes);
+        (Access Write, string Apart)[] Writes, bool CallerIndex);
 
     enum AccessKind { Load, Store, Read, Own }
 
@@ -203,6 +203,14 @@ internal static partial class ProofOutline
 
         internal bool Run(Func<int, string> location)
         {
+            if (!linear && spec.Method.Body.Variables.Any(variable =>
+                LeanEmitter.Narrow(variable.VariableType) is not null ||
+                EnumTypes.Storage(variable.VariableType).FullName is "System.Int32" or "System.UInt32" or
+                    "System.Int64" or "System.UInt64" or "System.IntPtr" or "System.UIntPtr"))
+            {
+                Stopped = "scalar local homes in a class method, whose frame storage the outline does not carry";
+                return false;
+            }
             foreach (var parameter in spec.Objects) Objects.Add(new Reached(parameter.Name, parameter.Fields));
             foreach (var parameter in spec.ValueArrays)
                 Arrays.Add(new HeldArray(parameter.Name, parameter.LengthName, parameter.ArrayElement,
@@ -504,9 +512,7 @@ internal static partial class ProofOutline
                         array.Width != int.Parse(match.Groups[1].Value))
                         return Stop("an array element read without a named word array and index");
                     if (linear) { stack.Add(new Word(null, array.Width)); continue; }
-                    if (Regex.IsMatch(term, @"\bstored\d+\b"))
-                        return Stop("an array index that depends on memory after a write, whose bound " +
-                            "the statement cannot name in caller memory");
+                    var callerIndex = !Regex.IsMatch(term, @"\bstored\d+\b");
                     var name = array.Name + "Read" + pc;
                     var writes = PathSteps.Select(step => step switch
                     {
@@ -520,7 +526,7 @@ internal static partial class ProofOutline
                             ArrayApart.Add(key, apart = "arrayApart" + ArrayApart.Count);
                         return (write, apart);
                     }).ToArray();
-                    Steps.Add(new WordRead(array, $"({term} : W32).toNat", stores, name, writes));
+                    Steps.Add(new WordRead(array, $"({term} : W32).toNat", stores, name, writes, callerIndex));
                     stack.Add(new Word($"{array.ElementsName}[({term} : W32).toNat]", array.Width));
                 }
                 else if (op == ".memory .arrayLength")
@@ -877,7 +883,8 @@ internal static partial class ProofOutline
                 if (whole)
                     plan.Premises.Add((array.Whole, $"WholeArray initial {array.Element} {array.Name} {array.Length}"));
             }
-            foreach (var read in Flattened.OfType<WordRead>().DistinctBy(read => read.Name))
+            foreach (var read in Flattened.OfType<WordRead>().Where(read => read.CallerIndex)
+                .DistinctBy(read => read.Name))
                 plan.Premises.Add((read.Name + "Bound", $"{read.Index} < {read.Array.ElementsName}.length"));
             foreach (var (array, write, apart) in Flattened.OfType<WordRead>()
                 .SelectMany(read => read.Writes.Select(write => (read.Array, write.Write, write.Apart)))
@@ -1343,6 +1350,12 @@ internal static partial class ProofOutline
         void WordElement(WordRead read)
         {
             var array = read.Array;
+            if (!read.CallerIndex)
+            {
+                lean.Wrapped($"{indent}have {read.Name}Bound :", [read.Index, "<", array.ElementsName + ".length"],
+                    ":= by");
+                lean.Noted(indent + "  ", "sorry", "the index in the current memory is within the supplied array");
+            }
             known.TryAdd((array.Name + "Contents", 0), array.Name + "Contents");
             var contents = Carry(array.Name + "Contents", read.Stores, (previous, level) =>
             {
@@ -1485,7 +1498,11 @@ internal static partial class ProofOutline
                 lean.Line($"{indent}rename_i stored{index} framed{index} output{number} held{index} _");
                 lean.Line($"{indent}dsimp only [{call.Callee.Name}Contract] at framed{index} held{index}");
                 if (call.Callee.Walk.Returned is not null)
-                    lean.Line($"{indent}obtain ⟨held{index}, rfl⟩ := held{index}");
+                {
+                    lean.Line($"{indent}obtain ⟨held{index}, returned{number}⟩ := held{index}");
+                    lean.Line($"{indent}subst output{number}");
+                    lean.Line($"{indent}dsimp only [{call.Callee.Name}Contract]");
+                }
                 stored.Add(writes);
                 return;
             }
