@@ -549,6 +549,12 @@ internal static partial class ProofOutline
         /// bracketed term across lines, and the deeper indent keeps it inside its tactic.</summary>
         internal void Line(string line = "")
         {
+            // Text already broken into lines, such as a string gap, is measured line by line.
+            if (line.Contains('\n'))
+            {
+                foreach (var part in line.Split('\n')) Line(part);
+                return;
+            }
             while (line.Length > Limit)
             {
                 var cut = BreakPoint(line);

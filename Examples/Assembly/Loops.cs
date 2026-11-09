@@ -166,4 +166,17 @@ public static class Loops
             target = target.Slice(1);
         }
     }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    static void Put(Span<uint> target, uint value) => target[0] = value;
+
+    // Fills the span through a helper that writes only the first element of the span it is passed.
+    public static void FillThrough(Span<uint> target, uint value)
+    {
+        while (target.Length != 0)
+        {
+            Put(target, value);
+            target = target.Slice(1);
+        }
+    }
 }

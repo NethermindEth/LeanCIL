@@ -887,8 +887,9 @@ var outlined = new (string Name, string? Selector)[]
     ("ElementStamp", "TagArrays::Stamp(System.String[],Examples.Tagged,System.UInt64)"),
     // A fresh array charged to the heap budget, filled and read back, forgotten by the footprint.
     ("FreshPair", "NodeArrays::Pair(Examples.Node,Examples.Node)"),
-    // A loop filling a writable span from the front.
-    ("SpanFill", "Loops::Fill(System.Span`1<System.UInt32>,uint)")
+    // Loops filling a writable span from the front, directly or through a helper storing its first element.
+    ("SpanFill", "Loops::Fill(System.Span`1<System.UInt32>,uint)"),
+    ("SpanFillThrough", "Loops::FillThrough(System.Span`1<System.UInt32>,uint)")
 };
 var outlineTimer = System.Diagnostics.Stopwatch.StartNew();
 var outlineRoot = Path.Combine(root, "Outlines");
@@ -1010,6 +1011,59 @@ if (proved.Code != 0 || !proved.Stdout.StartsWith("Verified: ExampleProof.correc
     throw new InvalidOperationException("The filled Countdown outline did not verify:\n" + proved.Output);
 Console.WriteLine("PASS verify refuses the Countdown outline until its holes are filled, then verifies it " +
     $"({outlineTimer.Elapsed.TotalSeconds:F0}s for every outline check)");
+
+// A span filled from the front, directly or through a helper, has one specification and loop head proof.
+(string Hole, string Filled)[] spanFillSpecification = [
+    ("def Precondition (target1 : SpanView) (value : W32) (initial : Memory) : Prop := sorry",
+        """
+        def Precondition (_ : SpanView) (_ : W32) (_ : Memory) : Prop := True
+        """),
+    ("def Postcondition (target1 : SpanView) (value : W32) (initial final : Memory) : Prop := sorry",
+        """
+        def Postcondition (target1 : SpanView) (value : W32) (_ final : Memory) : Prop :=
+          ∀ base, target1.reference = .address base →
+            Contents final base 4 (List.replicate target1.length (value : BitVec (8 * 4)))
+        """),
+    ("""
+    def invariant (target1 : SpanView) (value : W32)
+        {memory : Memory} {written : List (Reference × Nat)} (state : State memory written)
+        : Prop := sorry
+    """,
+        """
+        def invariant (target1 : SpanView) (value : W32)
+            {memory : Memory} {written : List (Reference × Nat)} (state : State memory written)
+            : Prop :=
+          ∀ base, target1.reference = .address base → ∃ done,
+            done + state.values.remaining = target1.length ∧
+            state.values.view.reference = .address (base.element 4 done) ∧
+            Filled state.memory base 4 (List.replicate done (value : BitVec (8 * 4)))
+              state.values.remaining
+        """),
+    ("""
+    def measure (target1 : SpanView) (value : W32) {memory : Memory} {written : List (Reference × Nat)}
+        (state : State memory written) : Nat := sorry
+    """,
+        """
+        def measure (_ : SpanView) (_ : W32) {memory : Memory} {written : List (Reference × Nat)}
+            (state : State memory written) : Nat := state.values.remaining
+        """),
+    ("    case invariant => sorry -- invariant at the first loop head",
+        """
+            case invariant =>
+              dsimp only [invariant]
+              intro base address
+              refine ⟨0, by simp, by simp [address], ?_⟩
+              have room := (target1Authority.writable base address).after_confined entryFrame.confined
+                wellFormed
+              rw [target1Width] at room
+              simpa using Filled.start room
+        """),
+    ("    case measure => sorry -- measure decreases over this iteration",
+        """
+            case measure =>
+              simp only [measure]
+              omega
+        """)];
 
 // Object outlines leave only their specification: once it is written, an instance method's field store, a
 // reference field store, a null test of an argument followed through a local, a split on a field value and a
@@ -1790,50 +1844,7 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
     // A written span needs authority over its elements, not readable contents; the invariant states the
     // filled prefix from the span's own address.
     ("SpanFill", [
-        ("def Precondition (target1 : SpanView) (value : W32) (initial : Memory) : Prop := sorry",
-            """
-            def Precondition (_ : SpanView) (_ : W32) (_ : Memory) : Prop := True
-            """),
-        ("def Postcondition (target1 : SpanView) (value : W32) (initial final : Memory) : Prop := sorry",
-            """
-            def Postcondition (target1 : SpanView) (value : W32) (_ final : Memory) : Prop :=
-              ∀ base, target1.reference = .address base →
-                Contents final base 4 (List.replicate target1.length (value : BitVec (8 * 4)))
-            """),
-        ("""
-        def invariant (target1 : SpanView) (value : W32)
-            {memory : Memory} {written : List (Reference × Nat)} (state : State memory written)
-            : Prop := sorry
-        """,
-            """
-            def invariant (target1 : SpanView) (value : W32)
-                {memory : Memory} {written : List (Reference × Nat)} (state : State memory written)
-                : Prop :=
-              ∀ base, target1.reference = .address base → ∃ done,
-                done + state.values.remaining = target1.length ∧
-                state.values.view.reference = .address (base.element 4 done) ∧
-                Filled state.memory base 4 (List.replicate done (value : BitVec (8 * 4)))
-                  state.values.remaining
-            """),
-        ("""
-        def measure (target1 : SpanView) (value : W32) {memory : Memory} {written : List (Reference × Nat)}
-            (state : State memory written) : Nat := sorry
-        """,
-            """
-            def measure (_ : SpanView) (_ : W32) {memory : Memory} {written : List (Reference × Nat)}
-                (state : State memory written) : Nat := state.values.remaining
-            """),
-        ("    case invariant => sorry -- invariant at the first loop head",
-            """
-                case invariant =>
-                  dsimp only [invariant]
-                  intro base address
-                  refine ⟨0, by simp, by simp [address], ?_⟩
-                  have room := (target1Authority.writable base address).after_confined entryFrame.confined
-                    wellFormed
-                  rw [target1Width] at room
-                  simpa using Filled.start room
-            """),
+        .. spanFillSpecification,
         ("    case postcondition => sorry -- Postcondition at the return at Loops.cs:168",
             """
                 case postcondition =>
@@ -1860,12 +1871,41 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
                     omega
                   · rw [List.replicate_succ']
                     exact filled.push (by simpa using target1Wrote)
-            """),
-        ("    case measure => sorry -- measure decreases over this iteration",
+            """)]),
+    // A helper writes each element; the frame after its call keeps the filled prefix, apart from the lent span.
+    ("SpanFillThrough", [
+        .. spanFillSpecification,
+        ("    case postcondition => sorry -- Postcondition at the return at Loops.cs:181",
             """
-                case measure =>
-                  simp only [measure]
-                  omega
+                case postcondition =>
+                  dsimp only [invariant] at holds
+                  intro base address
+                  obtain ⟨done, total, -, filled⟩ := holds base address
+                  rw [Nat.add_zero] at total
+                  subst total
+                  exact filled.complete.after_below exitBelow
+                    (SpanView.allocation_below target1Valid wellFormed address)
+            """),
+        ("    case invariant => sorry -- invariant again at the loop head",
+            """
+                case invariant =>
+                  dsimp only [invariant] at holds ⊢
+                  intro base address
+                  obtain ⟨done, total, place, filled⟩ := holds base address
+                  refine ⟨done + 1, by omega, ?_, ?_⟩
+                  · rw [SpanView.slice_reference _ _ _ _ _ _ place target1Cut, target1Span.elementWidth]
+                    simp only [Reference.element, ManagedReference.address.injEq, Reference.mk.injEq,
+                      true_and]
+                    omega
+                  · rw [List.replicate_succ']
+                    refine (filled.after_confined confined frame.wellFormed ?_).extend
+                      (returned _ place) (by simp)
+                    intro entry member
+                    simp only [SpanView.footprint, place, List.mem_singleton] at member
+                    subst member
+                    rw [target1Span.elementWidth, target1Span.length, List.length_replicate]
+                    simpa using base.element_run_apart 4 (first := 0) (left := done) (second := done)
+                      (right := target1Rest + 1) (Or.inl (by omega))
             """)])
 })
 {
@@ -1894,7 +1934,8 @@ Console.WriteLine("PASS filled outlines verify with only their specification wri
     "a field store through a struct receiver at offsets 0 and 8, a string reference copied, " +
     "tested for null and compared, a null store before returning the node it held, an array argument's element " +
     "load, length and covariance-checked store, element facts carried across element and field stores, and " +
-    "an array the method allocates, fills and reads back, and a fill through a writable span");
+    "an array the method allocates, fills and reads back, a fill through a writable span, and a fill through a " +
+    "helper storing the first element of the span it is lent");
 
 // A written footprint that leaves out the element a loop writes is an error at the write, never an admission.
 var narrowed = Path.Combine(outlineRoot, "FillWords", "Narrowed.lean");

@@ -1078,7 +1078,9 @@ Examples:System.Void Examples.ItemPool::Prewarm(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ItemPool::Return(Examples.PooledItem)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Labelled::.ctor()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Loops::Fill(System.Span`1<System.UInt32>,System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Loops::FillThrough(System.Span`1<System.UInt32>,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Loops::FillWords(System.UInt64&,System.UInt64,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Loops::Put(System.Span`1<System.UInt32>,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Loops::Stamp(System.UInt32&,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ManagedDispatch::Targets(method System.Int32 *(System.Int32)[])	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.Marker::.ctor()	A	A	A	A	A	A	A	A

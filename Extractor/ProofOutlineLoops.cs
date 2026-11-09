@@ -298,10 +298,13 @@ internal static partial class ProofOutline
             var inputs = declared.Select(parameter => parameter.Type switch
             {
                 ByReferenceType reference when ElementWidth(reference.ElementType) is { } width =>
-                    (Type: "Reference", Width: width, Reference: true, Object: (TypeReference?)null),
+                    (Type: "Reference", Width: width, Reference: true, Object: (TypeReference?)null, Span: false),
+                var type when WrittenSpanWidth(type) is { } width =>
+                    (Type: "SpanView", Width: width, Reference: false, Object: null, Span: true),
                 var type when ElementWidth(type) is { } width =>
-                    (Type: WordType(width), Width: width, Reference: false, Object: null),
-                var type when ObjectTypes.Is(type) => (Type: "Reference", Width: 8, Reference: false, Object: type),
+                    (Type: WordType(width), Width: width, Reference: false, Object: null, Span: false),
+                var type when ObjectTypes.Is(type) =>
+                    (Type: "Reference", Width: 8, Reference: false, Object: type, Span: false),
                 var type => throw Unsupported($"callee {callee.Name} takes {type.FullName}")
             }).ToArray();
             var output = callee.ReturnType.FullName == "System.Void" ? (int?)null : ElementWidth(callee.ReturnType)
@@ -321,10 +324,17 @@ internal static partial class ProofOutline
             var inputType = inputs.Length == 0 ? "Unit" : Product(inputs.Select(input => input.Type));
             var outputType = output is { } width ? WordType(width) : "Unit";
             var store = Stores(index);
+            var spanStore = SpanStores(index);
             if (store is not null)
             {
                 lean.Line($"/-- `{callee.Name}` stores its argument through its reference, given write authority over");
                 lean.Line("    the element, and touches nothing else: the contract its body meets. -/");
+            }
+            else if (spanStore is not null)
+            {
+                lean.Line($"/-- `{callee.Name}` stores its argument into the first element of a nonempty");
+                lean.Line("    writable span, and touches nothing outside the span's bytes: the contract its body");
+                lean.Line("    meets. -/");
             }
             else
             {
@@ -334,6 +344,7 @@ internal static partial class ProofOutline
             lean.Line($"def {name}Contract : MethodContract {inputType} {outputType} where");
             var arguments = string.Join(", ", inputs.Select((input, position) =>
                 input.Reference ? $".reference (.address {Input(position)})"
+                : input.Span ? $".bufferSpan {Input(position)}"
                 : input.Object is not null ? $".object (.address {Input(position)})"
                 : $".scalar ({ScalarConstructor(input.Width)} {Input(position)})"));
             lean.Line($"  args {(inputs.Length == 0 ? "_" : single)} := [{arguments}]");
@@ -341,20 +352,34 @@ internal static partial class ProofOutline
                 : "  results _ := []");
             lean.Line(store is { } stored
                 ? $"  pre {single} memory := Writable memory {Input(stored.Slot)} {stored.Width} 0 1"
+                : spanStore is { } lent
+                    ? $"  pre {single} memory := ∃ rest, WritableSpan memory {Input(0)}.footprint {Input(0)} " +
+                        $"{lent.Width} (rest + 1)"
                 : "  pre _ _ := sorry");
-            var footprint = string.Join(", ", inputs.SelectMany((input, position) =>
+            var entries = string.Join(", ", inputs.SelectMany((input, position) =>
                 input.Reference ? [$"({Input(position)}, {input.Width})"]
                 : input.Object is { } type ? views.Of(type).Where(field => field.Stored)
                     .Select(field => $"{field.Lean}.entry {Input(position)}")
                 : Enumerable.Empty<string>()));
+            // A span argument may be written anywhere in its bytes.
+            var footprint = (entries.Length == 0 ? [] : new[] { $"[{entries}]" }).Concat(inputs
+                .Select((input, position) => input.Span ? $"{Input(position)}.footprint" : null).OfType<string>())
+                .ToArray();
             lean.Line(footprint.Length == 0 ? "  footprint _ := []"
-                : $"  footprint {single} := [{footprint}]");
-            lean.Line(store is { } written
-                ? $"  post {single} _ final _ := Contents final {Input(written.Slot)} {written.Width} " +
-                    $"[{Input(written.Value)}]"
-                : "  post _ _ _ _ := sorry");
+                : $"  footprint {single} := {string.Join(" ++ ", footprint)}");
+            if (spanStore is { } filled)
+            {
+                lean.Line($"  post {single} _ final _ := ∀ base, {Input(0)}.reference = .address base →");
+                lean.Line($"    Contents final base {filled.Width} [{Input(1)}]");
+            }
+            else
+                lean.Line(store is { } written
+                    ? $"  post {single} _ final _ := Contents final {Input(written.Slot)} {written.Width} " +
+                        $"[{Input(written.Value)}]"
+                    : "  post _ _ _ _ := sorry");
             lean.Line();
-            var steppable = output is not null && inputs.All(input => !input.Reference && input.Object is null) &&
+            var steppable = output is not null &&
+                inputs.All(input => !input.Reference && !input.Span && input.Object is null) &&
                 extraction.Emitted[index].Metadata.Contains("locals := [],") &&
                 extraction.Emitted[index].Ops.All(Body.Pure);
             var pattern = inputs.Length switch
@@ -378,18 +403,15 @@ internal static partial class ProofOutline
             else if (store is { } body)
             {
                 var value = Variable(declared[body.Value].Name);
-                var lemma = body.Op switch
-                {
-                    ".store64" => "step_store64_of_write", ".storeScalar 8" => "step_storeScalar_i64_of_write",
-                    _ => "step_storeScalar_of_write"
-                };
                 lean.Line($"  rintro {pattern} memory writable");
                 lean.Line($"  dsimp only [{name}Contract] at writable ⊢");
                 lean.Line($"  obtain ⟨after, wrote, formed, confined, filled⟩ := writable.write_one {value}");
                 lean.Line($"  refine ⟨CIL.executionBound Extracted.program {name}, after, [], ?_, confined, (), rfl, " +
                     "filled⟩");
-                lean.Line($"  cil_checked_steps [{lemma} wrote, formed]");
+                lean.Line($"  cil_checked_steps [{StoreLemma(body.Op)} wrote, formed]");
             }
+            else if (spanStore is { } spanBody)
+                SpanStoreProof(lean, index, name, pattern, Variable(declared[1].Name), spanBody.Op);
             else if (Branches(index))
             {
                 lean.Line($"  rintro {pattern} memory permitted");
@@ -400,6 +422,7 @@ internal static partial class ProofOutline
             else
             {
                 var reason = inputs.Any(input => input.Reference) ? "it writes through a reference"
+                    : inputs.Any(input => input.Span) ? "it writes through a span"
                     : inputs.Any(input => input.Object is not null) ? "it takes an object, whose fields need facts"
                     : output is null ? "it returns nothing to state"
                     : !extraction.Emitted[index].Metadata.Contains("locals := [],") ? "it has locals"
@@ -428,6 +451,53 @@ internal static partial class ProofOutline
             var stores = width == 4 ? ops[2] == ".storeScalar 4" : ops[2] is ".store64" or ".storeScalar 8";
             return stores ? (reference, word, width, ops[2]) : null;
         }
+
+        /// <summary>The element width and store of a static callee `(Span&lt;T&gt; target, T value)` whose body only
+        /// stores `value` into `target[0]`.</summary>
+        (int Width, string Op)? SpanStores(int index)
+        {
+            var callee = extraction.Methods[index];
+            var ops = extraction.Emitted[index].Ops.Where(op => op != ".nop").ToArray();
+            if (callee.HasThis || callee.ReturnType.FullName != "System.Void" || callee.Parameters.Count != 2 ||
+                WrittenSpanWidth(callee.Parameters[0].ParameterType) is not { } width ||
+                ElementWidth(callee.Parameters[1].ParameterType) != width ||
+                !extraction.Emitted[index].Metadata.Contains("locals := [],")) return null;
+            string[] body = [".local 0", ".const32 0", $".memory (.spanItem {width})", ".arg 1"];
+            if (ops.Length != 6 || !ops.Take(4).SequenceEqual(body) || ops[5] != ".ret") return null;
+            var stores = width == 4 ? ops[4] == ".storeScalar 4" : ops[4] is ".store64" or ".storeScalar 8";
+            return stores ? (width, ops[4]) : null;
+        }
+
+        /// <summary>The contract proof of a callee that stores its value into the first element of its span: the
+        /// write `WritableSpan.write_head` performs, after entering the frame that homes the span.</summary>
+        static void SpanStoreProof(Writer lean, int index, string name, string pattern, string value, string op)
+        {
+            lean.Line($"  rintro {pattern} memory ⟨rest, span⟩");
+            lean.Line($"  dsimp only [{name}Contract] at span ⊢");
+            lean.Line($"  obtain ⟨item, after, address, found, wrote, confined, filled⟩ := span.write_head {value}");
+            lean.Line($"  refine ⟨CIL.executionBound Extracted.program {name}, after, [], ?_, confined, (), rfl, " +
+                "filled⟩");
+            lean.Line("  have valid := span.valid");
+            lean.Line("  have width := span.elementWidth");
+            lean.Line("  have mode := span.mode");
+            lean.Line("  have nonempty := span.length_cons.2.1");
+            lean.Line("  apply CIL.Safety.invoke_of_run");
+            lean.Line("  · cil_lookup []");
+            lean.Line("  · simp [checkedValue, numericValue, valid, Bind.bind, Except.bind, Pure.pure, Except.pure,");
+            lean.Line("      checkedAt, Except.mapError]");
+            // Entering the frame homes the span in a local, which the stepping tactics do not set up.
+            lean.Line($"  · simp [enterFrame, Extracted.method{index}, makeLocals, makeArgumentHomes, " +
+                "makeParameterHomes,");
+            lean.Line("      makeLocal, storeLocal, CIL.Safety.Value.hasUnspecified, width, mode, valid, checkedAt,");
+            lean.Line("      Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]");
+            lean.Line("    exact ⟨rfl, rfl⟩");
+            lean.Line($"  cil_checked_steps [found, {StoreLemma(op)} wrote, valid, width, mode, nonempty, address]");
+        }
+
+        /// <summary>The element width of a writable span of words, or null for any other type.</summary>
+        static int? WrittenSpanWidth(TypeReference type) =>
+            type is GenericInstanceType { ElementType.FullName: "System.Span`1" } span
+                ? ElementWidth(span.GenericArguments[0]) : null;
 
         /// <summary>Whether a callee of words with no locals tests its arguments and returns a word or throws on
         /// each side, so its contract proof splits on each test and steps every returning side.</summary>
@@ -958,13 +1028,23 @@ internal static partial class ProofOutline
             var arguments = state.Stack.TakeLast(count).ToArray();
             state.Stack.RemoveRange(state.Stack.Count - count, count);
             var stores = Stores(callee) is not null;
+            var spanStores = SpanStores(callee) is not null;
+            // A span is lent only from the iteration's first memory, at which `frame` holds.
+            SpanTerm? Lent(Value argument) => argument is LocalValue local && spanStores && !state.Moved &&
+                state.State[components.IndexOf(slots[local.Slot].Components[0])] is SpanTerm
+                    { Written: true, Head: not null } span ? span : null;
             bool Named(Value argument) => argument is Number { Narrow: false } or ReferenceArgument ||
-                argument is AddedReference && stores;
+                argument is AddedReference && stores || Lent(argument) is not null;
+            string Passed(Value argument) =>
+                argument is LocalValue local && slots[local.Slot].Components[0] is { Part: Part.Span } component
+                    ? $"the span `{component.Name}`, which it lends only to a callee storing the first element of " +
+                        "a nonempty written span, before any other store of the iteration"
+                    : Unnamed(argument);
             if (state.Called || !arguments.All(Named))
             {
                 Hole(lean, indent, state, state.Called
                     ? $"a second call at {Location(pc)}, whose input depends on the first call's state"
-                    : $"the call at {Location(pc)} passes " + Unnamed(arguments.First(argument => !Named(argument))));
+                    : $"the call at {Location(pc)} passes " + Passed(arguments.First(argument => !Named(argument))));
                 return false;
             }
             // An element a storing callee writes is named with its side conditions, which close its precondition.
@@ -975,10 +1055,19 @@ internal static partial class ProofOutline
                 Number number => number.Term,
                 ReferenceArgument reference => reference.Name,
                 AddedReference added => ElementSlot(added, elementFacts, caller: true),
+                LocalValue => Lent(argument)!.View,
                 _ => throw new InvalidOperationException("unnamed argument")
             }).ToArray();
             current = null;
             state.Facts.AddRange(elementFacts);
+            var lent = arguments.Where(argument => Lent(argument) is not null).Cast<LocalValue>()
+                .Select(local => (slots[local.Slot].Components[0].Name, Span: Lent(local)!)).ToArray();
+            // The lent span's bytes lie in the frame's footprint and below its watermark, the call's side conditions.
+            foreach (var (spanName, span) in lent)
+            {
+                lean.Line($"{indent}have {spanName}Covered := {span.Checked}.covered");
+                lean.Line($"{indent}have {spanName}Below := {span.Checked}.below wellFormed");
+            }
             var input = terms.Length switch { 0 => "()", 1 => terms[0]!, _ => "(" + string.Join(", ", terms) + ")" };
             if (state.GoalPc != pc) lean.Line($"{indent}cil_loop_advance{Facts(state)}");
             // The frame's footprint is a definition the call's side condition unfolds to find the callee's.
@@ -988,7 +1077,10 @@ internal static partial class ProofOutline
             // The output keeps its name, so the next loop state may name it whatever the postcondition says.
             var keeping = extraction.Methods[callee].ReturnType.FullName != "System.Void" ? "keeping " : "";
             lean.Line($"{indent}cil_loop_call {keeping}{callees[callee]}_holds {input}{facts}");
-            if (elementFacts.Count == 0)
+            if (lent.Length == 1)
+                lean.Line($"{indent}case precondition => exact ⟨{lent[0].Span.Head}, " +
+                    $"{lent[0].Span.Checked}.lend wellFormed frame⟩");
+            else if (elementFacts.Count == 0)
                 lean.Noted(indent, "case precondition => sorry",
                     $"{extraction.Methods[callee].Name}'s precondition at this call");
             if (extraction.Methods[callee].ReturnType.FullName != "System.Void")

@@ -269,7 +269,10 @@ comment saying which obligation it is:
   other store of the iteration, steps through `frame.write_span_head`, which names the element's
   address, and `Slice(1)` through `WritableSpan.tail`. The span's bytes are its `footprint`, and
   the theorem assumes `SpanWritable` over them. A read of the written span is a `not outlined:`
-  hole.
+  hole. Passing the span instead to a static `(Span<T> target, T value)` callee whose body only
+  stores `value` into `target[0]` gives the callee a proved contract over the span's bytes, lends
+  it the span through `WritableSpan.lend` and names `WritableSpan.covered` and `below` for the
+  call's footprint side conditions; the invariant then extends the prefix with `Filled.extend`.
 - Loops in sequence are bound in pc order (`loop`, `loop2`, ...), each with its own cutpoint,
   `invariant` and `measure` (`header2`, `invariant2`, `measure2`, ...). The path leaving one loop
   for the next loop's test enters that loop through `loop_terminates_then`, leaving its invariant at
