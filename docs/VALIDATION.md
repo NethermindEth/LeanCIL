@@ -140,7 +140,8 @@ tree needs its compiled library: pass `--library` with a certified library, or b
 module in the tree first, since `lake build CIL` leaves modules outside the aggregate unbuilt.
 `--libraries` measures every test library; `--module Tests.Automation` measures one module and
 the checkout modules it imports; `--artifacts artifacts` measures the proofs a suite verified in
-that tree, after running the suite there. `compare` exits nonzero on a regression and prints the
+that tree, after running the suite there. A suite binds the sources of its checkout, so keep the
+base checkout outside the head checkout and edit neither while its suite runs. `compare` exits nonzero on a regression and prints the
 table that CI puts in the job summary; [proof cost in CI](CI.md#proof-cost) defines the measures,
 the thresholds and how an increase is accepted.
 

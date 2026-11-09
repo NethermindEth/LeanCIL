@@ -51,12 +51,15 @@ Require(!Against(Proof("timed", 1_000_000, elapsedMs: 100), Proof("timed", 1_000
 var larger = Against(Module(1_000_000, 1_000_000), Module(1_000_000, 1_200_000));
 Require(larger.Regressions.Single().Measure == "oleanBytes", "a module whose olean grows by 20% fails");
 
-// An accepted increase is a reviewed entry for exact values, so it cannot excuse a later regression.
+// An accepted increase is a reviewed entry for its own values, so it cannot excuse a later regression.
 var entry = new Accepted("Tests.Sample", "slow", "heartbeats", 10_000_000, 12_000_000, "stronger statement");
 var accepted = Against(Proof("slow", 10_000_000), Proof("slow", 12_000_000), entry);
 Require(!accepted.Failed && accepted.UnusedAccepted.Count == 0 &&
     accepted.Changes.Single(change => change.Measure == "heartbeats").Status == Status.Accepted,
     "an accepted increase passes");
+// The rerun that checks an accepted entry measures a few heartbeats off the run that printed it.
+Require(!Against(Proof("slow", 10_000_006), Proof("slow", 12_000_019), entry).Failed,
+    "an accepted increase still passes when a rerun jitters");
 Require(Against(Proof("slow", 10_000_000), Proof("slow", 13_000_000), entry).Failed,
     "growth beyond the accepted value still fails");
 var stale = Against(Proof("slow", 12_000_000), Proof("slow", 14_000_000), entry);
@@ -95,6 +98,15 @@ Require(Compare(Tree("base", Proof("twice", 1), Proof("twice", 2)), Tree("head",
         .Failed,
     "a measurement that repeats a row fails");
 Require(Compare(Tree("base"), Tree("head"), []).Failed, "a head with nothing measured fails");
+// A suite the base lacks leaves nothing to compare, which must not read as a pass.
+var baseless = Compare(Tree("base"), Tree("head", Proof("new", 9_000_000)), []);
+Require(!baseless.Failed && Markdown(baseless).Contains("**Not compared:**") &&
+    !Markdown(baseless).Contains("**Passed:**"), "a base with nothing measured is reported as not compared");
+// A regression in a shared tactic reaches thousands of rows; the job summary has a size limit.
+var many = Compare(Tree("base", [.. Enumerable.Range(0, 500).Select(index => Proof($"proof{index}", 1_000_000))]),
+    Tree("head", [.. Enumerable.Range(0, 500).Select(index => Proof($"proof{index}", 2_000_000))]), []);
+Require(many.Regressions.Count() == 500 && Markdown(many).Contains("The largest 100 are listed") &&
+    Markdown(many).Length < 200_000, "a summary of many regressions stays bounded");
 
 // Other producers add rows with their own measures; they are carried and reported and never decide.
 static Row Fixture(long milliseconds) => new("stepping-scaling", "64 instructions", "fixture",

@@ -113,7 +113,7 @@ the frontend `scripts/ProofCost.lean`, and writes one row per command and one pe
 
 | Measure | Meaning | Decides the result |
 | --- | --- | --- |
-| Heartbeats | Lean's deterministic work counter for elaborating and kernel-checking the command; `maxHeartbeats` counts thousands of them | yes |
+| Heartbeats | Lean's work counter for elaborating and kernel-checking the command, the unit `maxHeartbeats` limits in thousands; reruns agree to within a few dozen | yes |
 | Olean bytes | size of the compiled module, every part included; module rows only | yes |
 | Kernel heartbeats | the kernel alone rechecking the theorems the command declared | no |
 | Proof objects | allocated expression objects in those theorems' proof terms | no |
@@ -135,10 +135,10 @@ Each job measures one source on both trees:
   directory the suite verified: its `Extracted.lean`, its `Symbols.lean` when present, and the proof
   that `verified.json` names, provided the proof is unchanged since. The extraction's generated
   instruction equations are rows too. A suite that the base does not have, or cannot pass, leaves
-  its proofs without a base, with a warning on the job.
+  its proofs without a base: the job warns and the summary says the rows were not compared.
 
 The head uses the certified library of the run. The merge base uses the same library when its
-library inputs are identical; otherwise `Prepare the merge base for proof cost` builds the base
+library inputs are identical; otherwise `Build the merge base for proof cost` builds the base
 library with the base's own scripts, incrementally from the head's, and publishes it for the jobs.
 
 `scripts/ProofCost.cs compare` fails when a row's heartbeats grow by more than 5% and by more than
@@ -157,8 +157,9 @@ be measured at the head fails, as does a head with nothing measured.
 
 An increase that is worth its cost is accepted by adding it to `scripts/proof-cost-accepted.json`
 in the same PR. The summary prints the entry: the row, the measure, the base and head values and a
-reason to fill in. An entry applies only to that exact base value and up to that head value, so
-it cannot excuse later growth; entries that match nothing are listed for removal and never fail.
+reason to fill in. An entry applies only to that base value and up to that head value, each with
+1,000 heartbeats of allowance for the difference between reruns, so it cannot excuse later growth;
+entries that match nothing are listed for removal and never fail.
 
 The `Proof cost` jobs are separate checks and not part of `Build and verify`, so a regression
 shows as a failed check on the PR without blocking a merge the reviewer has accepted. A manual run

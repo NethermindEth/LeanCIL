@@ -31,15 +31,16 @@ internal static partial class ProofCostReport
 
     internal sealed record Measurement(int Schema, string Tree, List<Row> Rows, List<Unmeasured> Unmeasured);
 
-    // A reviewed increase of one measure of one row, bound to the exact values it was accepted at.
+    // A reviewed increase of one measure of one row, bound to the values it was accepted at.
     internal sealed record Accepted(string Group, string Name, string Measure, long From, long To, string Reason);
 
     // Deciding measures are reproducible and can fail the comparison; the others are only reported.
-    internal sealed record Policy(string Measure, string Title, bool Decides, long Floor);
+    // Tolerance is how far a rerun may move the measure; an accepted increase still matches within it.
+    internal sealed record Policy(string Measure, string Title, bool Decides, long Floor, long Tolerance = 0);
 
     internal static readonly Policy[] Policies =
     [
-        new("heartbeats", "Heartbeats", Decides: true, Floor: 50_000),
+        new("heartbeats", "Heartbeats", Decides: true, Floor: 50_000, Tolerance: 1_000),
         new("oleanBytes", "Olean bytes", Decides: true, Floor: 4_096),
         new("kernelHeartbeats", "Kernel heartbeats", Decides: false, Floor: 0),
         new("proofObjects", "Proof objects", Decides: false, Floor: 0),
@@ -118,7 +119,8 @@ internal static partial class ProofCostReport
                     Exceeds(baseValue!.Value, headValue!.Value, policy.Floor, thresholdPercent))
                 {
                     var entry = accepted.FirstOrDefault(entry => entry.Group == key.Item1 && entry.Name == key.Item2 &&
-                        entry.Measure == measure && entry.From == baseValue && headValue <= entry.To);
+                        entry.Measure == measure && Math.Abs(entry.From - baseValue.Value) <= policy.Tolerance &&
+                        headValue <= entry.To + policy.Tolerance);
                     status = entry is null ? Status.Regression : Status.Accepted;
                     if (entry is not null) used.Add(entry);
                 }
@@ -162,6 +164,7 @@ internal static partial class ProofCostReport
     const int UnchangedRowLimit = 50;
     const int ChangedRowLimit = 400;
     const int NotablePercent = 1;
+    const int RegressionLimit = 100;
 
     // Heartbeats differ by a few units between runs of one tree; such changes are not worth a reader's time.
     static bool Notable(Change change) => change.Status switch
@@ -229,21 +232,33 @@ internal static partial class ProofCostReport
             "## Proof cost against the merge base", "",
             $"Base `{comparison.Base.Tree}`, head `{comparison.Head.Tree}`: {comparison.Head.Rows.Count} rows " +
             $"measured at the head, {comparison.Base.Rows.Count} at the base.", "",
-            $"A row fails when it grows in {limits}, unless `{AcceptedFile}` accepts that exact increase. " +
+            $"A row fails when it grows in {limits}, unless `{AcceptedFile}` accepts that increase. " +
             "A module's totals fail only while it holds the same rows at the base and the head. " +
             "Elapsed times, kernel heartbeats, proof objects and lines are reported and never fail.", "",
             comparison.Failed
                 ? $"**Failed:** {regressions.Count} regressions and {comparison.Failures.Count} other failures."
-                : "**Passed:** no deciding measure grew beyond its threshold."
+                : comparison.Base.Rows.Count == 0
+                    ? "**Not compared:** nothing was measured at the base, so every row is new."
+                    : "**Passed:** no deciding measure grew beyond its threshold."
         };
+        var baseGroups = comparison.Base.Rows.Select(row => row.Group).ToHashSet(StringComparer.Ordinal);
+        var headGroups = comparison.Head.Rows.Select(row => row.Group).ToHashSet(StringComparer.Ordinal);
+        var withoutBase = headGroups.Count(group => !baseGroups.Contains(group));
+        if (withoutBase > 0 && comparison.Base.Rows.Count > 0)
+            lines.AddRange(["", $"{withoutBase} of {headGroups.Count} modules at the head have no rows at the base " +
+                "and were not compared."]);
         if (regressions.Count > 0)
         {
             lines.AddRange(["", "### Regressions", "", "| Row | Measure | Base | Head | Change |",
                 "| --- | --- | ---: | ---: | ---: |"]);
-            foreach (var change in regressions.OrderByDescending(change => change.Head - change.Base))
+            var listed = regressions.OrderByDescending(change => change.Head - change.Base).Take(RegressionLimit)
+                .ToList();
+            foreach (var change in listed)
                 lines.Add($"| {Cell(change.Group)} `{Cell(change.Name)}` | {PolicyOf(change.Measure)!.Title} | " +
                     $"{Number(change.Base)} | {Number(change.Head)} | {Percent(change.Base, change.Head)} |");
-            var entries = regressions.Select(change => new Accepted(change.Group, change.Name, change.Measure,
+            if (listed.Count < regressions.Count)
+                lines.AddRange(["", $"The largest {listed.Count} are listed; all are in the JSON report."]);
+            var entries = listed.Select(change => new Accepted(change.Group, change.Name, change.Measure,
                 change.Base!.Value, change.Head!.Value, "why this increase is worth its cost"));
             lines.AddRange(["", $"To accept these increases, add the entries to `{AcceptedFile}` with the reason:",
                 "", "```json", JsonSerializer.Serialize(entries, Json), "```"]);
@@ -264,14 +279,15 @@ internal static partial class ProofCostReport
         {
             lines.AddRange(["", "### Other measures", "", "Reported only.", "",
                 "| Row | Measure | Base | Head | Change |", "| --- | --- | ---: | ---: | ---: |"]);
-            foreach (var change in other)
+            foreach (var change in other.Take(ChangedRowLimit))
                 lines.Add($"| {Cell(change.Group)} `{Cell(change.Name)}` | {Cell(change.Measure)} | " +
                     $"{Number(change.Base)} | {Number(change.Head)} | {Percent(change.Base, change.Head)} |");
         }
-        var unmeasured = comparison.Head.Unmeasured;
-        if (unmeasured.Count > 0)
+        foreach (var (side, unmeasured) in new[]
+            { ("head", comparison.Head.Unmeasured), ("base", comparison.Base.Unmeasured) })
         {
-            lines.AddRange(["", "### Not measured at the head", ""]);
+            if (unmeasured.Count == 0) continue;
+            lines.AddRange(["", $"### Not measured at the {side}", ""]);
             lines.AddRange(unmeasured.Select(lost => $"- {Cell(lost.Group)}: {Cell(lost.Reason)}"));
         }
         if (comparison.UnusedAccepted.Count > 0)

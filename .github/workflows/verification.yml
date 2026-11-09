@@ -403,7 +403,7 @@ jobs:
           retention-days: 14
 
   cost-base:
-    name: Prepare the merge base for proof cost
+    name: Build the merge base for proof cost
     needs: [select, prepare]
     # A push to main has no merge base to compare with. A manual run measures its own tree twice.
     if: github.event_name != 'push' && needs.select.outputs.has-suites == 'true'
