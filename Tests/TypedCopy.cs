@@ -63,6 +63,24 @@ byte[] ManagedBytes(object value, int size)
     return ((Func<object, byte[]>)method.CreateDelegate(typeof(Func<object, byte[]>)))(value);
 }
 
+// Reflection field stores can fault on packed ARM64 fields. Use the managed field address
+// with an explicitly unaligned store, without interop's different bool/char representation.
+void StoreField(object instance, FieldInfo field, object value)
+{
+    var method = new DynamicMethod("StoreField", typeof(void), [typeof(object), typeof(object)],
+        typeof(Program).Module, true);
+    var il = method.GetILGenerator();
+    il.Emit(System.Reflection.Emit.OpCodes.Ldarg_0);
+    il.Emit(System.Reflection.Emit.OpCodes.Unbox, field.DeclaringType!);
+    il.Emit(System.Reflection.Emit.OpCodes.Ldflda, field);
+    il.Emit(System.Reflection.Emit.OpCodes.Ldarg_1);
+    il.Emit(System.Reflection.Emit.OpCodes.Unbox_Any, field.FieldType);
+    il.Emit(System.Reflection.Emit.OpCodes.Unaligned, (byte)1);
+    il.Emit(System.Reflection.Emit.OpCodes.Stobj, field.FieldType);
+    il.Emit(System.Reflection.Emit.OpCodes.Ret);
+    ((Action<object, object>)method.CreateDelegate(typeof(Action<object, object>)))(instance, value);
+}
+
 object Value(Type type, ulong bits)
 {
     if (type == typeof(System.Runtime.Intrinsics.Vector128<ulong>))
@@ -82,7 +100,7 @@ object Value(Type type, ulong bits)
     if (type == typeof(nint)) return unchecked((nint)bits);
     if (type == typeof(nuint)) return unchecked((nuint)bits);
     var result = Activator.CreateInstance(type)!;
-    foreach (var field in type.GetFields()) field.SetValue(result, Value(field.FieldType, bits));
+    foreach (var field in type.GetFields()) StoreField(result, field, Value(field.FieldType, bits));
     return result;
 }
 
