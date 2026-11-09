@@ -222,6 +222,15 @@ theorem NumericHomes.writable {memory : Memory} {lower : Nat} {specs slots}
   | cons reference spec fresh _ writable _ tail =>
     exact .cons reference spec.kind fresh writable tail
 
+/-- Initialized numeric locals give every declared kind a writable byte home. -/
+theorem NumericHomes.complete {memory : Memory} {lower : Nat} {specs slots}
+    (homes : NumericHomes memory lower specs slots) :
+    CompleteWritableHomes memory lower (numericKinds specs) slots := by
+  induction homes with
+  | nil lower => exact .nil _ lower
+  | cons reference spec fresh _ writable _ tail =>
+    exact .cons reference spec.kind fresh writable tail
+
 /-- The values the initialized locals of `specs` load as, before any store. -/
 def numericKnown (specs : List NumericLocalSpec) : Nat → Option CIL.Value :=
   fun index => specs[index]?.map fun spec => localResult spec.kind spec.value
@@ -252,5 +261,6 @@ theorem NumericHomes.snapshots {memory : Memory} {lower : Nat} {specs slots}
 #print axioms localWords_rememberLocal
 #print axioms wordLocals_rememberWord
 #print axioms NumericHomes.writable
+#print axioms NumericHomes.complete
 #print axioms NumericHomes.snapshots
 end CIL.Safety

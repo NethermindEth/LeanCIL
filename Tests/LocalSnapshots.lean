@@ -10,6 +10,47 @@ namespace Tests.LocalSnapshots
 
 open CIL.Safety
 
+/-- A skipped slot does not acquire a byte home from numeric kind metadata alone. -/
+theorem skipped_home_is_incomplete (memory : Memory) :
+    WritableHomes memory 0 [.word64] [.root none] ∧
+      ¬ CompleteWritableHomes memory 0 [.word64] [.root none] := by
+  constructor
+  · exact .skip (by intros; simp) (.nil _)
+  · intro homes
+    obtain ⟨reference, slot⟩ := homes.complete 0 .word64 rfl
+    simp at slot
+
+/-- A frame requesting unknown scalar and vector storage. -/
+private def unknownMixedBody : CIL.Method :=
+  { locals := [.unmodeled, .unmodeled], localKinds := [.word64, .vector256],
+    code := [.ret], returnsValue := false }
+
+/-- Actual uninitialized scalar and vector allocation supplies typed private homes. -/
+theorem unknown_scalar_vector_homes (memory : Memory) (formed : memory.WellFormed) :
+    ∃ frame entered scalar vector,
+      enterFrame unknownMixedBody [] memory = .ok (frame, entered) ∧
+      frame.locals[0]? = some (.bytes .word64 scalar) ∧
+      frame.locals[1]? = some (.bytes .vector256 vector) ∧
+      access entered scalar 8 1 true = .ok () ∧
+      access entered vector 32 1 true = .ok () := by
+  obtain ⟨frame, entered, setup, homes, _, _⟩ := unknown_frame_setup unknownMixedBody rfl
+    (by simp [unknownMixedBody]) (by simp [unknownMixedBody]) (by simp [unknownMixedBody])
+    (by simp [unknownMixedBody]) (by simp [unknownMixedBody]) (by simp [unknownMixedBody])
+    rfl rfl rfl memory [] formed
+  obtain ⟨scalar, scalarSlot, _, scalarAccess⟩ := homes.home_at 0 .word64 rfl
+  obtain ⟨vector, vectorSlot, _, vectorAccess⟩ := homes.home_at 1 .vector256 rfl
+  exact ⟨frame, entered, scalar, vector, setup, scalarSlot, vectorSlot,
+    scalarAccess, vectorAccess⟩
+
+/-- Initialized numeric storage exposes the same complete-home interface. -/
+theorem initialized_homes_are_complete {memory : Memory} {lower : Nat} {specs slots}
+    (homes : NumericHomes memory lower specs slots) :
+    CompleteWritableHomes memory lower (numericKinds specs) slots := homes.complete
+
+#print axioms skipped_home_is_incomplete
+#print axioms unknown_scalar_vector_homes
+#print axioms initialized_homes_are_complete
+
 /-- A `.vector128` local followed by a `.word32` local. -/
 abbrev vectorAndInt : List CIL.LocalKind := [.vector128, .word32]
 
