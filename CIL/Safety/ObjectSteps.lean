@@ -285,6 +285,106 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
     stringLiteralInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
     List.any, Bool.false_eq_true, ite_false, Bind.bind, Except.bind, Pure.pure, Except.pure]
   cases literalObject memory text <;> rfl
+
+/-- `ThrowIfNull` throws `ArgumentNullException` for a null argument; otherwise it pops the
+    argument and the parameter name and leaves memory unchanged. -/
+@[cil_step high] theorem step_throwIfNull_eq (name argument : ManagedReference)
+    (rest : List Value) :
+    step body (.memory .throwIfNull) pc args frame (.object name :: .object argument :: rest)
+        memory =
+      match argument with
+      | .null => .error (.thrown "System.ArgumentNullException")
+      | .address _ => .ok (.next (pc + 1) rest frame memory) := by
+  cases argument <;> rfl
+
+/-- The outcome of a zero guard on a `width`-bit value. -/
+def zeroGuardOutcome (guard : ZeroGuard) (width : Nat) (signed : Bool) (value : CIL.Value) :
+    ExecutionResult Unit :=
+  match guardOperand width signed value with
+  | some number =>
+    match guard.throws number with
+    | true => .error (.thrown "System.ArgumentOutOfRangeException")
+    | false => .ok ()
+  | none => .error .invalidState
+
+/-- The outcome of a comparison guard on a `width`-bit value and its bound. -/
+def comparisonGuardOutcome (guard : ComparisonGuard) (width : Nat) (signed : Bool)
+    (value other : CIL.Value) : ExecutionResult Unit :=
+  match guardOperand width signed value, guardOperand width signed other with
+  | some number, some bound =>
+    match guard.throws number bound with
+    | true => .error (.thrown "System.ArgumentOutOfRangeException")
+    | false => .ok ()
+  | _, _ => .error .invalidState
+
+/-- A zero guard on a 32-bit stack value throws, or pops it with the parameter name. -/
+@[cil_step high] theorem step_zeroGuard_i32_eq (guard : ZeroGuard) (width : Nat) (signed : Bool)
+    (name : ManagedReference) (bits : CIL.W32) (rest : List Value) :
+    step body (.memory (.zeroGuard guard width signed)) pc args frame
+        (.object name :: .scalar (.i32 bits) :: rest) memory = do
+      zeroGuardOutcome guard width signed (.i32 bits)
+      return .next (pc + 1) rest frame memory := by
+  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+    zeroGuardInstruction, zeroGuardOutcome, CIL.MemoryOp.argumentCount, unspecifiedOperands,
+    List.take_succ_cons, List.take_zero, List.any_cons, List.any_nil, Value.hasUnspecified,
+    CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false]
+  rcases guardOperand width signed (.i32 bits) with _ | number
+  · rfl
+  · dsimp only; cases guard.throws number <;> rfl
+
+/-- A zero guard on a 64-bit stack value throws, or pops it with the parameter name. -/
+@[cil_step high] theorem step_zeroGuard_i64_eq (guard : ZeroGuard) (width : Nat) (signed : Bool)
+    (name : ManagedReference) (bits : CIL.W64) (rest : List Value) :
+    step body (.memory (.zeroGuard guard width signed)) pc args frame
+        (.object name :: .scalar (.i64 bits) :: rest) memory = do
+      zeroGuardOutcome guard width signed (.i64 bits)
+      return .next (pc + 1) rest frame memory := by
+  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+    zeroGuardInstruction, zeroGuardOutcome, CIL.MemoryOp.argumentCount, unspecifiedOperands,
+    List.take_succ_cons, List.take_zero, List.any_cons, List.any_nil, Value.hasUnspecified,
+    CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false]
+  rcases guardOperand width signed (.i64 bits) with _ | number
+  · rfl
+  · dsimp only; cases guard.throws number <;> rfl
+
+/-- A comparison guard on 32-bit stack values throws, or pops both with the parameter name. -/
+@[cil_step high] theorem step_comparisonGuard_i32_eq (guard : ComparisonGuard) (width : Nat)
+    (signed : Bool) (name : ManagedReference) (other value : CIL.W32) (rest : List Value) :
+    step body (.memory (.comparisonGuard guard width signed)) pc args frame
+        (.object name :: .scalar (.i32 other) :: .scalar (.i32 value) :: rest) memory = do
+      comparisonGuardOutcome guard width signed (.i32 value) (.i32 other)
+      return .next (pc + 1) rest frame memory := by
+  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+    comparisonGuardInstruction, comparisonGuardOutcome, CIL.MemoryOp.argumentCount,
+    unspecifiedOperands, List.take_succ_cons, List.take_zero, List.any_cons, List.any_nil,
+    Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false]
+  rcases guardOperand width signed (.i32 value) with _ | number <;>
+    rcases guardOperand width signed (.i32 other) with _ | bound
+  all_goals try rfl
+  dsimp only; cases guard.throws number bound <;> rfl
+
+/-- A comparison guard on 64-bit stack values throws, or pops both with the parameter name. -/
+@[cil_step high] theorem step_comparisonGuard_i64_eq (guard : ComparisonGuard) (width : Nat)
+    (signed : Bool) (name : ManagedReference) (other value : CIL.W64) (rest : List Value) :
+    step body (.memory (.comparisonGuard guard width signed)) pc args frame
+        (.object name :: .scalar (.i64 other) :: .scalar (.i64 value) :: rest) memory = do
+      comparisonGuardOutcome guard width signed (.i64 value) (.i64 other)
+      return .next (pc + 1) rest frame memory := by
+  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+    comparisonGuardInstruction, comparisonGuardOutcome, CIL.MemoryOp.argumentCount,
+    unspecifiedOperands, List.take_succ_cons, List.take_zero, List.any_cons, List.any_nil,
+    Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false]
+  rcases guardOperand width signed (.i64 value) with _ | number <;>
+    rcases guardOperand width signed (.i64 other) with _ | bound
+  all_goals try rfl
+  dsimp only; cases guard.throws number bound <;> rfl
+
+#print axioms step_throwIfNull_eq
+#print axioms step_zeroGuard_i32_eq
+#print axioms step_zeroGuard_i64_eq
+#print axioms step_comparisonGuard_i32_eq
+#print axioms step_comparisonGuard_i64_eq
+
 /-- `ldfld` of a scalar field of an object loads it from the field's located address. -/
 theorem step_objectField_eq (owner : CIL.Extraction.TypeExpr)
     (offset width : Nat) (signed : Bool) (fits : width ∈ [1, 2, 4, 8])

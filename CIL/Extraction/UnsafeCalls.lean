@@ -4,6 +4,7 @@ import CIL.Extraction.MarshalCalls
 import CIL.Extraction.ViewObservations
 import CIL.Extraction.BinaryTransfers
 import CIL.Extraction.ObjectConstruction
+import CIL.Extraction.GuardCalls
 
 /-!
 # Unsafe helper calls
@@ -108,6 +109,7 @@ def UnsafeCallsValid (layouts : List RawLayout) (closed : RawMethod)
       binaryTransferMatches instruction emitted &&
       unsafeElementOffsetMatches layouts instruction emitted &&
       objectConstructorMatches instruction emitted &&
+      guardCallMatches instruction emitted &&
       if unsafeReferenceRequired instruction emitted then
         match unsafeReferenceHelper instruction, instruction.operand with
         | some helper, .call site =>

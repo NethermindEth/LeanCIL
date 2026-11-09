@@ -4,6 +4,7 @@ import CIL.Extraction.UnsafeTransfers
 import CIL.Extraction.SpanCalls
 import CIL.Extraction.ViewObservations
 import CIL.Extraction.ObjectConstruction
+import CIL.Extraction.GuardCalls
 
 /-!
 # Scalar flow
@@ -927,6 +928,7 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
         (if read then [] else [scalarType type]) ++ [.reference] else
       if unsafeReferenceHelper instruction == some .asRef then [.reference] else
       if objectConstructorCall instruction then [.object] else
+      if nullGuardCall instruction then [.object, .object] else
       if unsafePointerOffset instruction then [.word32, .reference] else
       if (opcode == 115 || opcode == 40) && (spanConstructor 115 site).isSome
       then [.word32, .reference] ++

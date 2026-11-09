@@ -666,6 +666,46 @@ example : scalarEmissionMatches #[] (some .interior) (i 114 (.text "a")) []
     (.memory (.stringLiteral "a")) = false := by decide
 example : scalarEmissionMatches #[] none (i 114 (.text "a")) [] .nop = false := by decide
 
+-- A guard emission comes only from its exact call: the type argument fixes width and signedness,
+-- and another owner, overload or type argument emits nothing.
+private def guardSite (owner methodName suffix : String) (arguments parameters : List TypeExpr) :
+    RawInstruction :=
+  ⟨0, 40, .call
+    { declaringType := .atom runtimeScope owner, name := methodName,
+      target := .external (runtimeScope ++ "::System.Void " ++ owner ++ "::" ++ suffix),
+      typeArguments := arguments, ownerArgumentCount := 0, parameterCount := parameters.length,
+      hasThis := false, returnsValue := false, returnType := .void,
+      parameterTypes := parameters }⟩
+
+private def parameterName : TypeExpr := .object runtimeScope "System.String"
+private def uint32 : TypeExpr := .atom runtimeScope "System.UInt32"
+private def negative (argument : TypeExpr) : RawInstruction :=
+  guardSite "System.ArgumentOutOfRangeException" "ThrowIfNegative"
+    "ThrowIfNegative(!!0,System.String)" [argument] [argument, parameterName]
+
+example : guardCallMatches (negative uint32) (.memory (.zeroGuard .negative 32 false)) = true := by
+  decide +kernel
+example : guardCallMatches (negative uint32) (.memory (.zeroGuard .negative 32 true)) = false := by
+  decide +kernel
+example : guardCallMatches (negative uint32)
+    (.memory (.zeroGuard .negativeOrZero 32 false)) = false := by decide +kernel
+example : guardCallMatches (negative uint32) .nop = false := by decide +kernel
+example : guardCallMatches (negative (.atom runtimeScope "System.Double"))
+    (.memory (.zeroGuard .negative 64 true)) = false := by decide +kernel
+example : guardCallMatches (negative (.atom runtimeScope "System.Char"))
+    (.memory (.zeroGuard .negative 16 false)) = false := by decide +kernel
+example : guardCallMatches
+    (guardSite "System.ArgumentException" "ThrowIfNegative" "ThrowIfNegative(!!0,System.String)"
+      [uint32] [uint32, parameterName]) (.memory (.zeroGuard .negative 32 false)) = false := by decide +kernel
+example : guardCallMatches (i 0) (.memory .throwIfNull) = false := by decide +kernel
+example : guardCallMatches
+    (guardSite "System.ArgumentNullException" "ThrowIfNull"
+      "ThrowIfNull(System.Object,System.String)" [] [.atom runtimeScope "System.Object", parameterName])
+    (.memory .throwIfNull) = true := by decide +kernel
+example : guardCallMatches
+    (guardSite "System.ArgumentNullException" "ThrowIfNull"
+      "ThrowIfNull(System.Void*,System.String)" [] [.pointer .void, parameterName])
+    (.memory .throwIfNull) = false := by decide +kernel
 -- Size constants are the only uncovered literal producers; primitive widths are bound here.
 private def sizeRaw (instruction : RawInstruction) := raw [instruction, i 38, i 2, i 42] [word]
 private def sizeStates : ScalarCertificate := [some [], some [.word32], some [], some [.word64]]

@@ -470,6 +470,42 @@ contract to transfer across [allocation renaming](PROOFS-BINDING.md), since a li
 caller's object and not one the method allocates. The extractor rejects a text containing a
 surrogate, backspace or form feed, which a Lean string literal cannot carry exactly.
 
+## Argument guards
+
+`ArgumentNullException.ThrowIfNull(object, string)` and the integer instances of
+`ArgumentOutOfRangeException`'s `ThrowIfZero`, `ThrowIfNegative`, `ThrowIfNegativeOrZero`,
+`ThrowIfEqual`, `ThrowIfNotEqual`, `ThrowIfGreaterThan`, `ThrowIfGreaterThanOrEqual`,
+`ThrowIfLessThan` and `ThrowIfLessThanOrEqual` run as checked operations
+([CIL/ArgumentGuards.lean](../CIL/ArgumentGuards.lean)). Each ends in the named outcome
+`.thrown "System.ArgumentNullException"` or `.thrown "System.ArgumentOutOfRangeException"` exactly
+when its condition holds, and otherwise pops its operands and leaves memory unchanged
+([GuardCount](../Examples/Proofs/GuardCount.lean), [GuardIndex](../Examples/Proofs/GuardIndex.lean),
+[GuardRequired](../Examples/Proofs/GuardRequired.lean)). The contracts follow the .NET 10 sources:
+
+- `src/libraries/System.Private.CoreLib/src/System/ArgumentNullException.cs`: `ThrowIfNull` throws
+  `new ArgumentNullException(paramName)` when `argument is null` and returns otherwise.
+- `src/libraries/System.Private.CoreLib/src/System/ArgumentOutOfRangeException.cs`: `ThrowIfZero`,
+  `ThrowIfNegative` and `ThrowIfNegativeOrZero` test `T.IsZero` and `T.IsNegative`
+  (`INumberBase<T>`); `ThrowIfEqual` and `ThrowIfNotEqual` use
+  `EqualityComparer<T>.Default.Equals`; the four ordering guards compare `value.CompareTo(other)`
+  with zero (`IComparable<T>`). Every throw goes through a `[DoesNotReturn]` helper that throws a
+  new `ArgumentOutOfRangeException`.
+
+On `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `nint` and `nuint` these
+members are the mathematical tests on the integer the type denotes, which is what
+`ZeroGuard.throws` and `ComparisonGuard.throws` state over `guardOperand`: a narrow value takes
+the low bits of its `int32` stack slot, unsigned values are never negative, and the native
+integers take the 64-bit target. Only the exception type is claimed. Its message, `ParamName` and
+`ActualValue` are not modeled, and the outcome allocates nothing, as with any `.thrown` outcome.
+The `paramName` argument, a compiler-supplied literal, is popped unread, so a proof binds that
+literal like any other.
+
+The extractor maps each exact signature (`Extractor/ArgumentGuards.cs`) and Lean decodes each
+emitted guard again from the raw call's owner, name, type argument, parameter types and external
+identity (`CIL.Extraction.guardCallMatches`); no other instruction may emit a guard. Other
+instantiations, among them `char`, floating-point and `decimal`, the `void*` overload of
+`ThrowIfNull`, and the string guards such as `ThrowIfNullOrEmpty`, which read characters, remain
+rejected calls.
 ## Sequential struct layout
 
 Admitted layouts are reference-free and bounded by 65,536 bytes. Sequential fields include supported

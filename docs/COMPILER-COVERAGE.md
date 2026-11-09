@@ -48,8 +48,8 @@ Lean certification. `--whole-only` checks the pinned whole-corpus baseline alone
 Neither scan establishes coverage over arbitrary programs or future compiler releases.
 
 Run `dotnet run --file Tests/RuntimeModelInventory.cs` to check the production runtime-call translator against the pinned reference metadata.
-The checked-in [catalog](../Tests/RuntimeModelInventory.txt) contains 463 admitted method definitions in 41 API-owner groups.
-The fixed primitive domain produces 1,907 admitted closed instances; these are reported separately to avoid counting each generic instantiation as a new definition.
+The checked-in [catalog](../Tests/RuntimeModelInventory.txt) contains 473 admitted method definitions in 43 API-owner groups.
+The fixed primitive domain produces 1,998 admitted closed instances; these are reported separately to avoid counting each generic instantiation as a new definition.
 The artifact `artifacts/RuntimeModelInventory/inventory.json` records the complete inventory and counts by API owner.
 Additions and removals fail with a diff; after reviewing the model and its assumptions, update the catalog with `--update`.
 

@@ -21,6 +21,7 @@ private theorem fixedOperation (indices : LocalIndexMap) (operation : CIL.Op)
   all_goals exact False.elim (fixed rfl)
 #print axioms fixedOperation
 
+set_option maxHeartbeats 400000 in
 /-- Every observable checked instruction transports its frame and allocation correspondence. -/
 theorem stepTransport : StepTransport := by
   intro indices mapping scopes sourceBody targetBody operation pc arguments stack sourceFrame

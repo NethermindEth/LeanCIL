@@ -871,6 +871,39 @@ theorem stringLiteralInstruction_contract (text : String)
         (fun retained => ValuesValid.cons (formObject_result_valid formed) retained)
 #print axioms stringLiteralInstruction_contract
 
+/-- A null guard leaves memory unchanged and pops its argument and parameter name. -/
+theorem throwIfNullInstruction_contract (stack values : List Value) (memory result : Memory)
+    (executed : throwIfNullInstruction stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold throwIfNullInstruction at executed
+  split at executed
+  all_goals cases executed
+  exact InstructionContract.of_effect (.unchanged _) (fun retained => retained.tail.tail)
+#print axioms throwIfNullInstruction_contract
+
+/-- A zero guard leaves memory unchanged and pops its value and parameter name. -/
+theorem zeroGuardInstruction_contract (guard : ZeroGuard) (width : Nat) (signed : Bool)
+    (stack values : List Value) (memory result : Memory)
+    (executed : zeroGuardInstruction guard width signed stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold zeroGuardInstruction at executed
+  repeat' split at executed
+  all_goals cases executed
+  exact InstructionContract.of_effect (.unchanged _) (fun retained => retained.tail.tail)
+#print axioms zeroGuardInstruction_contract
+
+/-- A comparison guard leaves memory unchanged and pops its operands and parameter name. -/
+theorem comparisonGuardInstruction_contract (guard : ComparisonGuard) (width : Nat)
+    (signed : Bool) (stack values : List Value) (memory result : Memory)
+    (executed :
+      comparisonGuardInstruction guard width signed stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold comparisonGuardInstruction at executed
+  repeat' split at executed
+  all_goals cases executed
+  exact InstructionContract.of_effect (.unchanged _) (fun retained => retained.tail.tail.tail)
+#print axioms comparisonGuardInstruction_contract
+
 set_option maxHeartbeats 800000 in
 /-- The remaining memory operations preserve their checked effects and stack validity. -/
 private theorem otherMemoryInstruction_contract (operation : CIL.MemoryOp)
@@ -1059,6 +1092,9 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
     · exact objectFieldInstruction_contract _ _ _ _ _ h
     · exact objectFieldInstruction_contract _ _ _ _ _ h
     · exact stringLiteralInstruction_contract _ _ _ _ _ h
+    · exact throwIfNullInstruction_contract _ _ _ _ h
+    · exact zeroGuardInstruction_contract _ _ _ _ _ _ _ h
+    · exact comparisonGuardInstruction_contract _ _ _ _ _ _ _ h
     · exact otherMemoryInstruction_contract _ _ _ _ _ h
 
 set_option maxHeartbeats 800000 in

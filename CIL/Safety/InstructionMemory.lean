@@ -1045,6 +1045,46 @@ def stringLiteralInstruction (text : String) (stack : List Value) (memory : Memo
     ExecutionResult (Memory × List Value) := do
   return (memory, (← literalObject memory text) :: stack)
 
+/-- `ArgumentNullException.ThrowIfNull(argument, paramName)`: a null argument throws
+    `ArgumentNullException` and any other object passes, as in .NET 10. The parameter name on top
+    of the stack is popped unread. Memory is unchanged. -/
+def throwIfNullInstruction (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) :=
+  match stack with
+  | .object _ :: .object .null :: _ => .error (.thrown "System.ArgumentNullException")
+  | .object _ :: .object (.address _) :: rest => .ok (memory, rest)
+  | _ => .error .invalidState
+
+/-- An `ArgumentOutOfRangeException` guard of a `width`-bit value against zero: throws when
+    `guard` holds of the value and otherwise pops it with the parameter name, which is never read.
+    Memory is unchanged. -/
+def zeroGuardInstruction (guard : ZeroGuard) (width : Nat) (signed : Bool)
+    (stack : List Value) (memory : Memory) : ExecutionResult (Memory × List Value) :=
+  match stack with
+  | .object _ :: .scalar value :: rest =>
+    match guardOperand width signed value with
+    | some number =>
+      match guard.throws number with
+      | true => .error (.thrown "System.ArgumentOutOfRangeException")
+      | false => .ok (memory, rest)
+    | none => .error .invalidState
+  | _ => .error .invalidState
+
+/-- An `ArgumentOutOfRangeException` guard comparing a `width`-bit value with the bound above it
+    on the stack: throws when `guard` holds and otherwise pops both with the parameter name, which
+    is never read. Memory is unchanged. -/
+def comparisonGuardInstruction (guard : ComparisonGuard) (width : Nat) (signed : Bool)
+    (stack : List Value) (memory : Memory) : ExecutionResult (Memory × List Value) :=
+  match stack with
+  | .object _ :: .scalar other :: .scalar value :: rest =>
+    match guardOperand width signed value, guardOperand width signed other with
+    | some number, some bound =>
+      match guard.throws number bound with
+      | true => .error (.thrown "System.ArgumentOutOfRangeException")
+      | false => .ok (memory, rest)
+    | _, _ => .error .invalidState
+  | _ => .error .invalidState
+
 /-- Runs a `.memory` operation on the stack (top first), giving the new memory and stack.
     Operands with unspecified bits are rejected first. The static-field and span-construction
     operations need extracted metadata, so `staticInstruction` runs them and they are
@@ -1076,6 +1116,10 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .arrayField .. | .setArrayField .. =>
     objectFieldInstruction operation stack memory
   | .stringLiteral text => stringLiteralInstruction text stack memory
+  | .throwIfNull => throwIfNullInstruction stack memory
+  | .zeroGuard guard width signed => zeroGuardInstruction guard width signed stack memory
+  | .comparisonGuard guard width signed =>
+    comparisonGuardInstruction guard width signed stack memory
   | _ => otherMemoryInstruction operation stack memory
 
 /-- Runs an op on the stack (top first) and memory: loads, stores, typed copies, aggregate

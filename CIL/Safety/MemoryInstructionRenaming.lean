@@ -797,6 +797,65 @@ private theorem Memory.Renamed.stringLiteralInstructionResult {mapping : Allocat
     exact .ok ⟨related, rfl⟩
 #print axioms Memory.Renamed.stringLiteralInstructionResult
 
+/-- Renaming keeps null and non-null objects apart, so a null guard decides alike. -/
+private theorem Memory.Renamed.throwIfNullInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (stack : List Value)
+    (observable : SuccessOrThrow (throwIfNullInstruction stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (throwIfNullInstruction stack source)
+      (throwIfNullInstruction (stack.map mapping.value) target) := by
+  unfold CIL.Safety.throwIfNullInstruction at observable ⊢
+  split at observable
+  all_goals try simp only [List.map, AllocationRenaming.value, AllocationRenaming.managedReference]
+  · exact .error _
+  · exact .ok ⟨related, rfl⟩
+  · cases observable
+#print axioms Memory.Renamed.throwIfNullInstructionResult
+
+/-- Renaming keeps scalars, so a zero guard decides alike. -/
+private theorem Memory.Renamed.zeroGuardInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (guard : ZeroGuard)
+    (width : Nat) (signed : Bool) (stack : List Value)
+    (observable : SuccessOrThrow (zeroGuardInstruction guard width signed stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (zeroGuardInstruction guard width signed stack source)
+      (zeroGuardInstruction guard width signed (stack.map mapping.value) target) := by
+  unfold CIL.Safety.zeroGuardInstruction at observable ⊢
+  split at observable
+  all_goals try simp only [List.map, AllocationRenaming.value]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨related, rfl⟩
+    | cases observable
+    | split
+#print axioms Memory.Renamed.zeroGuardInstructionResult
+
+/-- Renaming keeps scalars, so a comparison guard decides alike. -/
+private theorem Memory.Renamed.comparisonGuardInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (guard : ComparisonGuard)
+    (width : Nat) (signed : Bool) (stack : List Value)
+    (observable : SuccessOrThrow (comparisonGuardInstruction guard width signed stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (comparisonGuardInstruction guard width signed stack source)
+      (comparisonGuardInstruction guard width signed (stack.map mapping.value) target) := by
+  unfold CIL.Safety.comparisonGuardInstruction at observable ⊢
+  split at observable
+  all_goals try simp only [List.map, AllocationRenaming.value]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨related, rfl⟩
+    | cases observable
+    | split
+#print axioms Memory.Renamed.comparisonGuardInstructionResult
 /-- Ordinary memory effects transport independently of the whole-span dispatch families. -/
 private theorem Memory.Renamed.otherMemoryInstructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -1152,6 +1211,9 @@ theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
     · exact related.objectFieldInstructionResult _ formed _ bounds observable
     · exact related.objectFieldInstructionResult _ formed _ bounds observable
     · exact related.stringLiteralInstructionResult formed _ _ observable
+    · exact related.throwIfNullInstructionResult _ observable
+    · exact related.zeroGuardInstructionResult _ _ _ _ observable
+    · exact related.comparisonGuardInstructionResult _ _ _ _ observable
     · exact related.otherMemoryInstructionResult _ formed _ bounds observable
 
 #print axioms Memory.Renamed.memoryInstructionResult

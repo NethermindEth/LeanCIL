@@ -53,6 +53,11 @@
   `StringLabel.lean`). `StringLiterals.lean` proves two loads of one literal are one object, and
   `StringDefault.lean` proves `label ?? "none"` returns the label or the bound `"none"` object;
   both show an unbound literal stops as unsupported rather than loading null.
+- `Guards` calls the framework argument guards. `GuardCount.lean` proves `ThrowIfNegative` raises
+  `ArgumentOutOfRangeException` exactly for a negative count, `GuardIndex.lean` proves the unsigned
+  `ThrowIfGreaterThanOrEqual` compares as unsigned, and `GuardRequired.lean` proves `ThrowIfNull`
+  raises `ArgumentNullException` exactly for null. The `guards` test shows `GuardCount.lean`
+  fails once the guard becomes `ThrowIfNegativeOrZero`.
 
 Concrete example proofs establish their displayed inputs. Only explicitly universally quantified theorems claim arbitrary-input correctness. `CheckedAdd64`, `Choose` and `GenericIdentity` quantify caller memory and prove it unchanged. `Struct` quantifies well-formed caller memory and proves `MemoryBelow` preservation of the caller's storage. Other examples fix the caller memory to `CIL.Safety.Memory.empty` or to the 8-byte `callerMemory` the file defines; argument quantification alone does not imply arbitrary caller memory. The allocating generic instance wrapper retains a separate fixed-memory check in `GenericInstance.lean`.
 

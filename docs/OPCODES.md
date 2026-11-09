@@ -635,6 +635,8 @@ These are exact `call` signatures, not additional CIL opcodes. They work with ev
 | `System.UInt32`, `System.UInt64`, `System.UIntPtr` | Static `Log2` | Floor base-two logarithm in the input's integer type; zero input returns zero. |
 | `System.Numerics.BitOperations` | `RoundUpToPowerOf2` on `uint`, `ulong` or `nuint` | Least power of two at least the input; zero for zero input or overflow |
 | `System.Buffers.Binary.BinaryPrimitives` | `ReverseEndianness` on `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `nint` or `nuint` | Reverse bytes within the value; preserve signed return conventions; byte/sbyte are identity operations |
+| `System.ArgumentNullException` | `ThrowIfNull(object, string)` | Raises `ArgumentNullException` for a null argument and otherwise pops both operands; the parameter name is never read |
+| `System.ArgumentOutOfRangeException` | `ThrowIfZero`, `ThrowIfNegative`, `ThrowIfNegativeOrZero`, `ThrowIfEqual`, `ThrowIfNotEqual`, `ThrowIfGreaterThan`, `ThrowIfGreaterThanOrEqual`, `ThrowIfLessThan`, `ThrowIfLessThanOrEqual` on `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `nint` or `nuint` | Raises `ArgumentOutOfRangeException` exactly when the integer test holds, comparing unsigned types as unsigned, and otherwise pops its operands; see [argument guards](SOUNDNESS-RUNTIME.md#argument-guards) |
 
 Signed 8/16-bit rotations and primitive signed `Log2` remain unsupported.
 

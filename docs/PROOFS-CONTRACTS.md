@@ -378,6 +378,13 @@ fact crosses the call like any other object's
 ([StringLiterals](../Examples/Proofs/StringLiterals.lean),
 [StringDefault](../Examples/Proofs/StringDefault.lean)).
 
+A framework argument guard steps to its named exception or past itself. `ThrowIfNull` steps on
+the argument's null test directly. An integer guard reduces through `zeroGuardOutcome` or
+`comparisonGuardOutcome`; pass those with `CIL.guardOperand`, `CIL.ZeroGuard.throws` or
+`CIL.ComparisonGuard.throws` and the case hypothesis that decides the test, and bind the
+parameter-name literal as for `ldstr`
+([GuardCount](../Examples/Proofs/GuardCount.lean), [GuardIndex](../Examples/Proofs/GuardIndex.lean)).
+
 A method that constructs an instance steps its `newobj` with `allocateObject_ok`, given
 well-formed memory and a `Memory.heapBudget` covering the instance, or `allocateObject_insufficient`
 for the `allocationFailure` fault when it does not. `objectMemory_formObject`, `objectMemory_field`

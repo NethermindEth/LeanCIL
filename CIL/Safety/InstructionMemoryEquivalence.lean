@@ -323,6 +323,35 @@ private theorem Memory.Equivalent.stringLiteralInstruction {m n : Memory} (same 
        exact .ok ⟨same, rfl⟩)
 #print axioms Memory.Equivalent.stringLiteralInstruction
 
+/-- A null guard reads only the stack, so equivalent memories give the same outcome. -/
+private theorem Memory.Equivalent.throwIfNullInstruction {m n : Memory} (same : m.Equivalent n)
+    (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (throwIfNullInstruction stack m)
+      (throwIfNullInstruction stack n) := by
+  unfold CIL.Safety.throwIfNullInstruction
+  split
+  all_goals first | exact .error _ | exact .ok ⟨same, rfl⟩
+#print axioms Memory.Equivalent.throwIfNullInstruction
+
+/-- A zero guard reads only the stack, so equivalent memories give the same outcome. -/
+private theorem Memory.Equivalent.zeroGuardInstruction {m n : Memory} (same : m.Equivalent n)
+    (guard : ZeroGuard) (width : Nat) (signed : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (zeroGuardInstruction guard width signed stack m)
+      (zeroGuardInstruction guard width signed stack n) := by
+  unfold CIL.Safety.zeroGuardInstruction
+  repeat first | exact .error _ | exact .ok ⟨same, rfl⟩ | split
+#print axioms Memory.Equivalent.zeroGuardInstruction
+
+/-- A comparison guard reads only the stack, so equivalent memories give the same outcome. -/
+private theorem Memory.Equivalent.comparisonGuardInstruction {m n : Memory}
+    (same : m.Equivalent n) (guard : ComparisonGuard) (width : Nat) (signed : Bool)
+    (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (comparisonGuardInstruction guard width signed stack m)
+      (comparisonGuardInstruction guard width signed stack n) := by
+  unfold CIL.Safety.comparisonGuardInstruction
+  repeat first | exact .error _ | exact .ok ⟨same, rfl⟩ | split
+#print axioms Memory.Equivalent.comparisonGuardInstruction
+
 /-- Observations depend only on allocation metadata and preserve equivalent memories. -/
 theorem Memory.Equivalent.viewObservationInstruction {m n : Memory} (same : m.Equivalent n)
     (observation : CIL.ViewObservation) (stack : List Value) :
@@ -455,6 +484,9 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     · exact same.objectFieldInstruction _ _
     · exact same.objectFieldInstruction _ _
     · exact same.stringLiteralInstruction _ _
+    · exact same.throwIfNullInstruction _
+    · exact same.zeroGuardInstruction _ _ _ _
+    · exact same.comparisonGuardInstruction _ _ _ _
     · exact same.otherMemoryInstruction _ _
 
 theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)

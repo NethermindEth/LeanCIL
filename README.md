@@ -104,7 +104,8 @@ LeanCIL supports integer arithmetic, selected control flow and managed calls, re
 structs, checked memory access, and arrays and spans of integers, enums,
 reference-free structs and supported integer vectors over supplied storage,
 reference-free array allocation, typed managed dispatch, strings as opaque references,
-including interned literals, whose characters are never read, and selected runtime helpers and
+including interned literals, whose characters are never read, framework argument guards, and
+selected runtime helpers and
 SIMD intrinsics. Each has restrictions
 documented in the [opcode support table](docs/OPCODES.md) and [intrinsic support tables](docs/SIMD.md).
 Unsupported instructions and signatures are rejected explicitly.

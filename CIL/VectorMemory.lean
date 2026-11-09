@@ -1,3 +1,4 @@
+import CIL.ArgumentGuards
 import CIL.ArrayTypes
 import CIL.Memory
 import CIL.TypeExpr
@@ -201,6 +202,15 @@ inductive MemoryOp where
   /-- `ldstr`: the interned string object the caller bound to `text`. No operation reads its
       characters. -/
   | stringLiteral (text : String)
+  /-- `ArgumentNullException.ThrowIfNull(argument, paramName)`: throws for a null argument. The
+      parameter name is an opaque string nothing reads. -/
+  | throwIfNull
+  /-- An `ArgumentOutOfRangeException` guard testing a `width`-bit integer against zero. The
+      parameter name is an opaque string nothing reads. -/
+  | zeroGuard (guard : ZeroGuard) (width : Nat) (signed : Bool)
+  /-- An `ArgumentOutOfRangeException` guard comparing a `width`-bit integer with a bound. The
+      parameter name is an opaque string nothing reads. -/
+  | comparisonGuard (guard : ComparisonGuard) (width : Nat) (signed : Bool)
   /-- `ldfld` of a scalar field of a class instance of type `owner`, at its model offset. -/
   | objectField (owner : CIL.Extraction.TypeExpr) (offset width : Nat) (signed : Bool)
   /-- `stfld` of a scalar field of a class instance of type `owner`, at its model offset. -/
@@ -240,6 +250,8 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .arrayFill _ counted => if counted then 4 else 2
   | .marshalRead _ tryRead => if tryRead then 2 else 1
   | .marshalWrite .. => 2
+  | .throwIfNull | .zeroGuard .. => 2
+  | .comparisonGuard .. => 3
   | .pointerTransfer _ _ store => if store then 2 else 1
   | .vector128Unsafe store offset => (if store then 2 else 1) + (if offset then 1 else 0)
   | .bigMul64 _ | .divRemOut _ | .copyBlock _ | .initBlock _ => 3
