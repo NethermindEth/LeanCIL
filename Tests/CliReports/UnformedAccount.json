@@ -12,6 +12,7 @@
   "output": "<output>",
   "axioms": null,
   "statement": null,
+  "specification": null,
   "failures": [
     {
       "kind": "elaboration-error",
@@ -89,9 +90,11 @@
       "text": "'ExampleProof.second_null_throws' depends on axioms: [propext, Classical.choice, Quot.sound]"
     }
   ],
+  "goals": null,
   "trace": null,
   "unknown": {
-    "trace": "not requested; --trace traces each step the proof takes"
+    "trace": "not requested; --trace traces each step the proof takes",
+    "goals": "not requested; --goals reports the goal at each sorry and failing tactic"
   },
   "rerun": [
     "leancil",

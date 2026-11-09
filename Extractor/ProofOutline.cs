@@ -51,8 +51,9 @@ internal static partial class ProofOutline
         var paths = outline.Paths == 1 ? "path" : "paths";
         Console.WriteLine($"  Holes: {outline.Obligations} obligations, {outline.Paths} {paths} not outlined " +
             "(each `sorry`; verify rejects the file until none remain)");
-        Console.WriteLine($"  Next: fill the holes, then run leancil verify {CliPaths.Display(directory)} " +
-            $"--proof {CliPaths.Display(proof)}");
+        var verify = $"leancil verify {CliPaths.Display(directory)} --proof {CliPaths.Display(proof)}";
+        Console.WriteLine($"  Next: {verify} --goals prints the goal at each hole; fill them, then verify " +
+            "without --goals");
     }
 
     /// <summary>A generated proof: its obligations are holes for the author's argument, its paths

@@ -299,13 +299,52 @@ void Reject(string[] arguments, string marker)
 
 var shadow = Path.Combine(package, "Client", "ExtractedSymbols.lean");
 File.WriteAllText(shadow, "def forged : Nat := 0\n");
-try { Reject(command, "reserved for the selected extractions"); }
+try { Reject(command, "reserved for the extractions leancil workspace generates"); }
 finally { File.Delete(shadow); }
 var keyedShadow = Path.Combine(package, "Extracted", key + ".lean");
 Directory.CreateDirectory(Path.GetDirectoryName(keyedShadow)!);
 File.WriteAllText(keyedShadow, "def forged : Nat := 0\n");
-try { Reject(command, "reserved for the selected extractions"); }
+try { Reject(command, "reserved for the extractions leancil workspace generates"); }
 finally { Directory.Delete(Path.GetDirectoryName(keyedShadow)!, true); }
+// The tool shows a path under the directory it runs in relative to it.
+string Shown(string path) => Path.GetRelativePath(Environment.CurrentDirectory, path).Replace('\\', '/');
+// A package that is not ready is refused with its cause and, on the `Next:` line, the fix.
+void RejectWithFix(string[] arguments, string cause, string fix)
+{
+    var result = Execute(arguments);
+    var text = result.Stderr.ReplaceLineEndings("\n");
+    var next = text.Split('\n').FirstOrDefault(line => line.StartsWith("  Next: ", StringComparison.Ordinal)) ?? "";
+    if (result.Code == 0 || !text.Split('\n')[0].Contains(cause, StringComparison.Ordinal) ||
+        !next.Contains(fix, StringComparison.Ordinal) || text.Contains("Could not find file") ||
+        text.Contains("Check the diagnostic and the input paths"))
+        throw new InvalidOperationException($"Expected `{cause}` with the fix `{fix}`:\n{result.Output}");
+}
+var nestedExtraction = Path.Combine(package, "out", "Wide");
+Run([.. cli, "extract", assembly, method, nestedExtraction, "scalar", "--assume-initialized", initializedType]);
+try
+{
+    RejectWithFix(command, $"The extraction directory {Shown(nestedExtraction)} is inside the proof package",
+        $"Extract to a directory outside {Shown(package)} and delete {Shown(nestedExtraction)}");
+}
+finally { Directory.Delete(Path.Combine(package, "out"), true); }
+foreach (var (name, lakefile, cause, fix) in new[]
+    {
+        ("Unresolved", true, "has no lake-manifest.json, so its leancil dependency is not resolved",
+            "Run `lake update` in "),
+        ("Bare", false, "is not a Lake package: it has no lakefile.toml or lakefile.lean",
+            "omit --proof-root and leancil workspace generates a package beside the proof")
+    })
+{
+    var unprepared = Path.Combine(root, name);
+    Directory.CreateDirectory(unprepared);
+    if (lakefile) File.Copy(Path.Combine(package, "lakefile.toml"), Path.Combine(unprepared, "lakefile.toml"));
+    var unpreparedProof = Path.Combine(unprepared, "Proof.lean");
+    File.WriteAllText(unpreparedProof, "import Extracted\n");
+    RejectWithFix([.. cli, "workspace", assembly, method, "--profile", "scalar", "--proof", unpreparedProof,
+        "--proof-root", unprepared, "--assume-initialized", initializedType],
+        $"The proof root {Shown(unprepared)} {cause}", fix);
+}
+CheckedProof();
 // Another profile of the same method is another extraction; it is added beside this one, not in its place.
 var wideFiles = EditorFiles();
 var wideAt = Directory.EnumerateFiles(editor, "*", SearchOption.AllDirectories)
@@ -541,6 +580,52 @@ Expect(fixedProof, "Proof.lean", "verified", rechecked: false);
 Console.WriteLine($"PASS a C# edit refreshes and rechecks exactly its method, located at TwiceProof.lean:3 " +
     $"({editedTime.TotalSeconds:F1}s edit to feedback); the other method's files are byte-identical with " +
     $"unchanged times; the fixed proof verifies ({fixTime.TotalSeconds:F1}s)");
+
+// With --goals a cycle reports the goal at each `sorry`, and reports it again while the proof is unchanged, so
+// a terminal shows what is left to prove after every save.
+File.WriteAllText(twiceProof, $"""
+import Extracted.{twiceKey}
+namespace TwiceProof
+theorem length : Extracted.method0.code.length = {changedTwice} := by
+  sorry
+#print axioms length
+end TwiceProof
+""");
+JsonElement GoalsCycle()
+{
+    var result = Execute([.. watch, "--once", "--goals"], environment: watchEnvironment);
+    var line = result.Stdout.Split('\n').LastOrDefault(text => text.StartsWith('{'))
+        ?? throw new InvalidOperationException("watch --goals printed no cycle: " + result.Output);
+    return JsonSerializer.Deserialize<JsonElement>(line);
+}
+var (withoutGoals, _) = WatchOnce(passes: false);
+if (Outcome(withoutGoals, "TwiceProof.lean").GetProperty("goals").ValueKind != JsonValueKind.Null)
+    throw new InvalidOperationException("watch without --goals reported goals: " + withoutGoals);
+foreach (var rechecked in new[] { true, false })
+{
+    var goalsCycle = GoalsCycle();
+    // A result recorded without goals does not answer a run that asks for them, so the first cycle rechecks.
+    Expect(goalsCycle, "TwiceProof.lean", "failed", rechecked);
+    Expect(goalsCycle, "Proof.lean", "verified", rechecked);
+    var open = Outcome(goalsCycle, "TwiceProof.lean").GetProperty("goals").EnumerateArray().ToArray();
+    if (open.Length != 1 || open[0].GetProperty("kind").GetString() != "sorry" ||
+        open[0].GetProperty("line").GetInt32() != 4 || open[0].GetProperty("column").GetInt32() != 2 ||
+        !open[0].GetProperty("goal").GetString()!.Contains(
+            $"⊢ Extracted.method0.code.length = {changedTwice}", StringComparison.Ordinal) ||
+        Outcome(goalsCycle, "Proof.lean").GetProperty("goals").GetArrayLength() != 0)
+        throw new InvalidOperationException($"watch --goals (rechecked {rechecked}) did not report the hole: " +
+            goalsCycle);
+}
+var goalsText = Execute([.. cli, "watch", package, "--project", project, "--once", "--goals"],
+    environment: watchEnvironment).Stdout.ReplaceLineEndings("\n");
+if (!goalsText.Contains("  FAILED (unchanged) TwiceProof.lean TwiceProof.length ", StringComparison.Ordinal) ||
+    !goalsText.Contains("TwiceProof.lean:4:2: sorry\n", StringComparison.Ordinal) ||
+    !goalsText.Contains($"      ⊢ Extracted.method0.code.length = {changedTwice}\n", StringComparison.Ordinal))
+    throw new InvalidOperationException("watch --goals did not print the hole's goal: " + goalsText);
+WriteTwiceProof(changedTwice);
+var (filled, _) = WatchOnce(passes: true);
+Expect(filled, "TwiceProof.lean", "verified", rechecked: true);
+Console.WriteLine("PASS watch --goals reports the goal at a proof's `sorry` each cycle, changed or not");
 
 // A failed build must never leave an earlier build's result green: every proof is stale and loses its certificate.
 Edit(arith, changedTwiceBody, "x + x +;");

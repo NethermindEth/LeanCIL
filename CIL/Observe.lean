@@ -9,7 +9,7 @@ import CIL.Safety.MissingFacts
 
 What each LeanCIL tactic did, read after each command from its info trees, so the tactics run
 exactly the code they run unobserved. Importing this module registers a linter that does nothing
-unless one of two options is set:
+unless one of three options is set:
 
 - `trace.CIL.step` logs, for each instruction a proof steps, its pc, instruction and source line,
   the lemma that took it, the hypotheses its step proof used, what it changed and the goals it
@@ -17,9 +17,11 @@ unless one of two options is set:
   took is logged at that tactic, and one taken outside any is logged at its tactic block.
 - `cil.diagnostics` logs a `FailureRecord` for each error a LeanCIL tactic raised and for each
   goal one left unsolved, read from the goal it failed or stopped on.
+- `cil.goals` logs the goal at each `sorry` written in the source, at each tactic that raised an
+  error and each goal a tactic block left unsolved, once each and in source order.
 
 A proof that does not import this module elaborates as if it did not exist; `leancil verify`
-imports it only for `--trace` and `--format json`.
+imports it only for `--trace`, `--goals` and `--format json`.
 -/
 
 namespace CIL.Safety
@@ -591,14 +593,150 @@ def logRecords (blocks tactics raisers : Array TacticNode) : CommandElabM Unit :
         (← analyze tactic goal node.info.goalsBefore.head? (some errorAt) true).render
       logInfoAt node.info.stx m!"{failureMarker}{line}"
 
-/-- After each command, the step trace under `trace.CIL.step` and the failure records under
-    `cil.diagnostics`; nothing when neither is set. -/
+/-! ## Open goals -/
+
+/-- Whether the observer logs the goal at each `sorry` and each failing tactic of a proof. -/
+register_option cil.goals : Bool := {
+  defValue := false
+  descr := "log the goal at each `sorry`, each failing tactic and each unsolved goal"
+}
+
+/-- The text that starts each goal the observer logs under `cil.goals`. -/
+def goalMarker : String := "[LeanCIL goal v1] "
+
+/-- Why a goal is open: a `sorry` stands for its proof, the tactic at it raised an error, or its
+    tactic block ended without proving it. The marker's line names it by these words. -/
+inductive OpenGoalKind where
+  | hole
+  | failed
+  | unsolved
+
+/-- The word naming `kind` after `goalMarker`. -/
+def OpenGoalKind.word : OpenGoalKind → String
+  | .hole => "sorry"
+  | .failed => "error"
+  | .unsolved => "unsolved"
+
+/-- A goal a command leaves open, at the source range it is reported for. -/
+structure OpenGoal where
+  /-- Where the range starts. -/
+  start : String.Pos.Raw
+  /-- Where the range stops. -/
+  stop : String.Pos.Raw
+  /-- Why the goal is open. -/
+  kind : OpenGoalKind
+  /-- The goal: its case tag, hypotheses and target, as Lean prints a goal. -/
+  text : Format
+
+/-- The syntax kinds of the tactics that close a goal with `sorry`. -/
+def sorryTacticKinds : List SyntaxNodeKind :=
+  [``Lean.Parser.Tactic.tacticSorry, ``Lean.Parser.Tactic.tacticAdmit]
+
+/-- Whether `stx` is written in the source rather than built by a macro or tactic. -/
+def writtenInSource (stx : Syntax) : Bool :=
+  match stx.getHeadInfo with
+  | .original .. => true
+  | _ => false
+
+/-- The source range of `stx`, when it has one. -/
+def sourceRange? (stx : Syntax) : Option (String.Pos.Raw × String.Pos.Raw) := do
+  let start ← stx.getPos?
+  let stop ← stx.getTailPos?
+  return (start, stop)
+
+/-- The goal of each `sorry` term and tactic written in the source of `tree`, in elaboration
+    order: the goal a tactic `sorry` closes, or the type a term `sorry` stands for under the
+    hypotheses in scope. Lean may elaborate a `sorry` more than once; each attempt is listed. -/
+def sorryGoals (tree : InfoTree) : IO (Array OpenGoal) := do
+  let nodes := tree.foldInfo (init := #[]) fun context info found => found.push (context, info)
+  let mut goals := #[]
+  for (context, info) in nodes do
+    unless writtenInSource info.stx do continue
+    let some (start, stop) := sourceRange? info.stx | continue
+    match info with
+    | .ofTacticInfo tactic =>
+      unless sorryTacticKinds.contains tactic.stx.getKind do continue
+      let some goal := tactic.goalsBefore.head? | continue
+      let text ← { context with mctx := tactic.mctxBefore }.runMetaM {} (Meta.ppGoal goal)
+      goals := goals.push { start, stop, kind := .hole, text }
+    | .ofTermInfo term =>
+      unless term.stx.getKind == ``Lean.Parser.Term.sorry do continue
+      let some type := term.expectedType? | continue
+      let text ← context.runMetaM term.lctx do
+        Meta.ppGoal (← mkFreshExprMVar (← instantiateMVars type)).mvarId!
+      goals := goals.push { start, stop, kind := .hole, text }
+    | _ => pure ()
+  return goals
+
+/-- The goals of an `unsolved goals` error, as its text lists them: one per blank-line-separated
+    part after the first line. -/
+def unsolvedGoalTexts (text : String) : List String :=
+  ((text.splitOn "\n").drop 1 |> "\n".intercalate).splitOn "\n\n"
+    |>.map (·.trimAscii.toString) |>.filter (· != "")
+
+/-- Log, under `goalMarker`, the goal at each `sorry` of `command`, the goal before each tactic
+    that raised an error and each goal a tactic block left unsolved, once each in source order. -/
+def logGoals (command : Syntax) : CommandElabM Unit := do
+  let some (commandStart, commandStop) := sourceRange? command | return
+  let within (position : String.Pos.Raw) : Bool := commandStart ≤ position && position ≤ commandStop
+  let fileMap ← getFileMap
+  let trees := (← get).infoState.trees
+  -- Keyed by where each goal starts and its index there; a later attempt replaces an earlier one.
+  let mut found : Std.HashMap (Nat × Nat) OpenGoal := {}
+  let mut tactics : Array TacticNode := #[]
+  for tree in trees do
+    for goal in ← sorryGoals tree do
+      if within goal.start then found := found.insert (goal.start.byteIdx, 0) goal
+    tactics := tactics ++ tree.foldInfo (init := #[]) fun context info nodes =>
+      match info with
+      | .ofTacticInfo tactic =>
+        if writtenInSource tactic.stx then nodes.push { context, info := tactic } else nodes
+      | _ => nodes
+  let log := (← get).messages
+  for error in log.reported.toArray ++ log.unreported.toArray do
+    unless error.severity == .error do continue
+    let start := fileMap.ofPosition error.pos
+    unless within start do continue
+    let text ← messageText error
+    if text.startsWith "unsolved goals" then
+      let stop := (error.endPos.map fileMap.ofPosition).getD start
+      for goal in unsolvedGoalTexts text, index in List.range (unsolvedGoalTexts text).length do
+        found := found.insert (start.byteIdx, index + 1)
+          { start, stop, kind := .unsolved, text := Format.text goal }
+      continue
+    -- The innermost tactic the error lies in is the one that raised it.
+    let mut raiser : Option (TacticNode × String.Pos.Raw × String.Pos.Raw) := none
+    for node in tactics do
+      let some (nodeStart, nodeStop) := sourceRange? node.info.stx | continue
+      unless nodeStart ≤ start && start ≤ nodeStop do continue
+      let inner := match raiser with
+        | some (_, outerStart, outerStop) =>
+          outerStart < nodeStart || (outerStart == nodeStart && nodeStop ≤ outerStop)
+        | none => true
+      if inner then raiser := some (node, nodeStart, nodeStop)
+    let some (node, nodeStart, nodeStop) := raiser | continue
+    if found.contains (nodeStart.byteIdx, 0) then continue
+    let some goal := node.info.goalsBefore.head? | continue
+    let text ← { node.context with mctx := node.info.mctxBefore }.runMetaM {} (Meta.ppGoal goal)
+    found := found.insert (nodeStart.byteIdx, 0)
+      { start := nodeStart, stop := nodeStop, kind := .failed, text }
+  let ordered := found.toArray.qsort fun first second =>
+    first.1.1 < second.1.1 || (first.1.1 == second.1.1 && first.1.2 < second.1.2)
+  for (_, goal) in ordered do
+    let range := Syntax.atom (.synthetic goal.start goal.stop) ""
+    logInfoAt range m!"{goalMarker}{goal.kind.word}\n{goal.text}"
+
+/-- After each command, the step trace under `trace.CIL.step`, the failure records under
+    `cil.diagnostics` and the open goals under `cil.goals`; nothing when none is set. -/
 def observer : Linter where
   name := `CIL.Safety.observer
   run := withSetOptionIn fun command => do
     let options ← getOptions
     let tracing := options.getBool `trace.CIL.step
     let recording := cil.diagnostics.get options
+    let showingGoals := cil.goals.get options
+    unless tracing || recording || showingGoals do return
+    if showingGoals then logGoals command
     unless tracing || recording do return
     let mut blocks := #[]
     let mut tactics := #[]

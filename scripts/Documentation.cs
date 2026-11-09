@@ -28,11 +28,37 @@ enum CitedKind
 /// <summary>A fenced Lean block: <c>Line</c> is the document line of its first code line.</summary>
 sealed record LeanBlock(string Document, int Line, SnippetKind Kind, string? Source, string[] Lines);
 
+/// <summary>How a fenced block takes part in a document's walkthrough, which the `docs` suite runs.</summary>
+enum WalkthroughKind
+{
+    /// <summary>`sh run`: each line is a command that is run in order and succeeds.</summary>
+    Run,
+    /// <summary>`sh run fails`: as `sh run`, except that the last command exits with a failure.</summary>
+    RunFails,
+    /// <summary>`text stdout`: the standard output of the last command run above it.</summary>
+    Stdout,
+    /// <summary>`text stderr`: lines that the standard error of that command holds, in a row.</summary>
+    Stderr,
+    /// <summary>`csharp edit PATH`: each line replaces the line of PATH declaring the same member.</summary>
+    Edit
+}
+
+/// <summary>A walkthrough block: <c>Line</c> is the document line of its first line, <c>Source</c> an edit's file.
+/// </summary>
+sealed record WalkthroughBlock(string Document, int Line, WalkthroughKind Kind, string? Source, string[] Lines);
+
+/// <summary>What a walkthrough command exited with and printed.</summary>
+sealed record CommandResult(int Code, string Stdout, string Stderr);
+
 /// <summary>A line of Markdown outside every fence.</summary>
 sealed record ProseLine(string Document, int Line, string Text);
 
-/// <summary>One parsed document: who reads it, its prose, its Lean blocks and any malformed markers.</summary>
-sealed record DocumentPage(string Path, string Audience, ProseLine[] Prose, LeanBlock[] Blocks, string[] Problems);
+/// <summary>
+/// One parsed document: who reads it, its prose, its Lean blocks, its walkthrough blocks in order and any
+/// malformed markers.
+/// </summary>
+sealed record DocumentPage(string Path, string Audience, ProseLine[] Prose, LeanBlock[] Blocks, string[] Problems,
+    WalkthroughBlock[] Walkthrough);
 
 /// <summary>Where a line of the generated snippet batch came from.</summary>
 sealed record SnippetOrigin(string Document, int Line);
@@ -105,6 +131,7 @@ static partial class Documentation
         var lines = File.ReadAllLines(path);
         List<ProseLine> prose = [];
         List<LeanBlock> blocks = [];
+        List<WalkthroughBlock> walkthrough = [];
         List<string> problems = [];
         string? audience = null;
         for (var index = 0; index < lines.Length; index++)
@@ -142,10 +169,31 @@ static partial class Documentation
                 else
                     problems.Add($"{name}:{index + 1}: unknown Lean block marker `{words}`; {MarkerForms}");
             }
+            // A marked block is checked; a misspelt marker would silently leave it unchecked.
+            else if (info.Length > 1 && info[0] is "sh" or "text" or "csharp")
+            {
+                var code = lines[first..end].Select(line => Unindent(line, indent)).ToArray();
+                if (Step(info) is { } step)
+                    walkthrough.Add(new(name, first + 1, step.Kind, step.Source, code));
+                else
+                    problems.Add($"{name}:{index + 1}: unknown `{info[0]}` block marker " +
+                        $"`{string.Join(' ', info[1..])}`; {WalkthroughForms}");
+            }
             index = end;
         }
-        return new(path, audience ?? Users, prose.ToArray(), blocks.ToArray(), problems.ToArray());
+        return new(path, audience ?? Users, prose.ToArray(), blocks.ToArray(), problems.ToArray(),
+            walkthrough.ToArray());
     }
+
+    static (WalkthroughKind Kind, string? Source)? Step(string[] info) => info switch
+    {
+        ["sh", "run"] => (WalkthroughKind.Run, null),
+        ["sh", "run", "fails"] => (WalkthroughKind.RunFails, null),
+        ["text", "stdout"] => (WalkthroughKind.Stdout, null),
+        ["text", "stderr"] => (WalkthroughKind.Stderr, null),
+        ["csharp", "edit", var source] => (WalkthroughKind.Edit, source),
+        _ => null
+    };
 
     static bool Closes(string line, string fence)
     {
@@ -243,8 +291,211 @@ static partial class Documentation
                 blocks++;
                 failures.AddRange(CheckBlock(root, block, userFacing, commands));
             }
+            failures.AddRange(CheckWalkthrough(root, page));
         }
         return (failures, references, blocks);
+    }
+
+    const string WalkthroughForms =
+        "use `sh run`, `sh run fails`, `text stdout`, `text stderr` or `csharp edit <path>`, or no marker";
+
+    /// <summary>The programs a `sh run` block may start: the tool, and the build of an example project.</summary>
+    static readonly string[] WalkthroughCommands = ["leancil ", "dotnet build Examples/"];
+
+    /// <summary>The line of an output block that stands for any run of output lines.</summary>
+    internal const string Elision = "...";
+
+    /// <summary>The commands of a `sh run` block with the document line of each.</summary>
+    internal static IEnumerable<(string Command, int Line)> CommandLines(WalkthroughBlock block) =>
+        block.Lines.Select((line, offset) => (Command: line.Trim(), Line: block.Line + offset))
+            .Where(entry => entry.Command.Length != 0);
+
+    /// <summary>
+    /// A failure for each walkthrough block that cannot be run or compared as written: a command the suite
+    /// does not run, an output block with no command above it, or an edit that names no single source line.
+    /// </summary>
+    static IEnumerable<string> CheckWalkthrough(string root, DocumentPage page)
+    {
+        var ran = false;
+        foreach (var block in page.Walkthrough)
+        {
+            var at = $"{block.Document}:{block.Line}";
+            switch (block.Kind)
+            {
+                case WalkthroughKind.Run or WalkthroughKind.RunFails:
+                    ran = true;
+                    if (!CommandLines(block).Any()) yield return $"{at}: the `sh run` block holds no command";
+                    foreach (var (command, line) in CommandLines(block))
+                        if (!WalkthroughCommands.Any(start => command.StartsWith(start, StringComparison.Ordinal)))
+                            yield return $"{block.Document}:{line}: a `sh run` block runs only `leancil` and " +
+                                "`dotnet build Examples/...` commands; leave other commands in an unmarked block";
+                    break;
+                case WalkthroughKind.Stdout or WalkthroughKind.Stderr:
+                    if (!ran) yield return $"{at}: the output block follows no `sh run` block of its document";
+                    break;
+                case WalkthroughKind.Edit:
+                    if (EditProblem(root, block) is { } problem) yield return $"{at}: {problem}";
+                    break;
+            }
+        }
+    }
+
+    // What an edit line and the source line it replaces share: the member's declaration before its body.
+    static string? Declaration(string line) =>
+        line.IndexOf("=>", StringComparison.Ordinal) is var arrow and >= 0 ? line[..arrow].Trim() : null;
+
+    static string? EditProblem(string root, WalkthroughBlock block)
+    {
+        var source = block.Source!;
+        var path = Join(root, source);
+        if (!source.StartsWith("Examples/", StringComparison.Ordinal) || !ExistsExactly(root, path) ||
+            !File.Exists(path))
+            return $"edit source `{source}` is not a file under Examples/";
+        return Edited(File.ReadAllLines(path), block, out var problem) is null ? problem : null;
+    }
+
+    /// <summary>
+    /// `source` with each line of the edit `block` in place of the one line declaring the same member, keeping
+    /// that line's indentation; null, with the reason, when a line names no member or not exactly one line.
+    /// </summary>
+    internal static string[]? Edited(string[] source, WalkthroughBlock block, out string? problem)
+    {
+        var edited = (string[])source.Clone();
+        problem = null;
+        foreach (var line in block.Lines.Where(line => line.Trim().Length != 0))
+        {
+            if (Declaration(line) is not { } declaration)
+            {
+                problem = $"edit line `{line.Trim()}` is not an expression-bodied member (`... => ...`)";
+                return null;
+            }
+            var targets = Enumerable.Range(0, source.Length)
+                .Where(index => Declaration(source[index]) == declaration).ToArray();
+            if (targets.Length != 1)
+            {
+                problem = $"`{declaration}` is declared on {targets.Length} lines of `{block.Source}`, not one";
+                return null;
+            }
+            var original = source[targets[0]];
+            edited[targets[0]] = original[..(original.Length - original.TrimStart().Length)] + line.Trim();
+        }
+        return edited;
+    }
+
+    /// <summary>
+    /// Output as the walkthrough compares it: line ends and trailing blank lines dropped, each SHA-256 and each
+    /// source `line:column` named rather than spelt, since both vary with the machine or an unrelated edit.
+    /// </summary>
+    internal static string[] NormalizedOutput(IEnumerable<string> lines)
+    {
+        var normalized = lines.Select(line => Patterns.SourcePosition().Replace(
+            Patterns.Sha256().Replace(line.TrimEnd(), "<sha256>"), "${file}:<line>:<column>")).ToList();
+        while (normalized.Count > 0 && normalized[^1].Length == 0) normalized.RemoveAt(normalized.Count - 1);
+        return [.. normalized];
+    }
+
+    /// <summary>
+    /// Runs the document's walkthrough through `run` and `edit` and returns a failure for each command that
+    /// exits otherwise than documented and each output block the command's output does not match. A
+    /// `text stdout` block is the whole standard output, where a line `...` stands for any lines; a
+    /// `text stderr` block is lines standard error holds in a row. Commands stop at the first unexpected exit.
+    /// </summary>
+    internal static List<string> RunWalkthrough(DocumentPage page, Func<string, CommandResult> run,
+        Action<WalkthroughBlock> edit)
+    {
+        List<string> failures = [];
+        CommandResult? last = null;
+        var lastCommand = "";
+        foreach (var block in page.Walkthrough)
+        {
+            switch (block.Kind)
+            {
+                case WalkthroughKind.Edit:
+                    edit(block);
+                    break;
+                case WalkthroughKind.Run or WalkthroughKind.RunFails:
+                    var commands = CommandLines(block).ToArray();
+                    foreach (var (command, line) in commands)
+                    {
+                        var fails = block.Kind == WalkthroughKind.RunFails && line == commands[^1].Line;
+                        (last, lastCommand) = (run(command), command);
+                        if (last.Code != 0 == fails) continue;
+                        failures.Add($"{block.Document}:{line}: `{command}` " + (fails
+                            ? "is documented to fail and succeeded"
+                            : $"exited with {last.Code}:\n{last.Stderr.TrimEnd()}\n{last.Stdout.TrimEnd()}"));
+                        return failures;
+                    }
+                    break;
+                case WalkthroughKind.Stdout or WalkthroughKind.Stderr when last is not null:
+                    var whole = block.Kind == WalkthroughKind.Stdout;
+                    var printed = NormalizedOutput((whole ? last.Stdout : last.Stderr).ReplaceLineEndings("\n")
+                        .Split('\n'));
+                    if (OutputProblem(block, printed, whole) is { } problem)
+                        failures.Add($"{problem}\n    of `{lastCommand}`, which printed on standard " +
+                            $"{(whole ? "output" : "error")}:\n" +
+                            string.Join('\n', printed.Select(line => "      " + line)));
+                    break;
+            }
+        }
+        return failures;
+    }
+
+    // Null when `printed` is the block's lines, with any lines for each elision; otherwise the first documented
+    // line that is not printed where the block says, at its document line.
+    static string? OutputProblem(WalkthroughBlock block, string[] printed, bool whole)
+    {
+        var documented = NormalizedOutput(block.Lines);
+        var lines = whole ? documented : [Elision, .. documented, Elision];
+        // Document line of `lines[index]`; the implied elisions of a stderr block are not in the document.
+        int LineOf(int index) =>
+            block.Line + Math.Clamp(index - (whole ? 0 : 1), 0, Math.Max(0, documented.Length - 1));
+        var position = 0;
+        for (var start = 0; start < lines.Length;)
+        {
+            var anchored = start == 0;
+            if (lines[start] == Elision)
+            {
+                start++;
+                anchored = false;
+                if (start == lines.Length) return null;
+            }
+            var end = start;
+            while (end < lines.Length && lines[end] != Elision) end++;
+            var segment = lines[start..end];
+            var last = end == lines.Length;
+            // The first segment starts the output and the last one ends it, unless an elision says otherwise.
+            int[] candidates = anchored ? [position]
+                : last ? [printed.Length - segment.Length]
+                : [.. Enumerable.Range(position, Math.Max(0, printed.Length - segment.Length - position + 1))];
+            var found = candidates.Where(candidate => candidate >= position &&
+                candidate + segment.Length <= printed.Length &&
+                printed.AsSpan(candidate, segment.Length).SequenceEqual(segment)).Cast<int?>().FirstOrDefault();
+            if (found is null)
+            {
+                // Name the first documented line that differs where the most of the segment is printed.
+                int Shared(int candidate)
+                {
+                    var shared = 0;
+                    while (shared < segment.Length && candidate + shared < printed.Length &&
+                           printed[candidate + shared] == segment[shared]) shared++;
+                    return shared;
+                }
+                var expected = candidates.Where(candidate => candidate >= position).DefaultIfEmpty(position)
+                    .MaxBy(Shared);
+                var offset = Shared(expected);
+                var instead = !anchored && !last ? "the command does not print it after the lines above"
+                    : expected + offset < printed.Length ? $"the command prints `{printed[expected + offset]}`"
+                    : "the command prints nothing more";
+                return $"{block.Document}:{LineOf(start + Math.Min(offset, segment.Length - 1))}: documented " +
+                    $"`{segment[Math.Min(offset, segment.Length - 1)]}`, but {instead}";
+            }
+            position = found.Value + segment.Length;
+            if (last && anchored && position != printed.Length)
+                return $"{block.Document}:{LineOf(end - 1)}: the command prints more after the documented " +
+                    $"lines: `{printed[position]}`";
+            start = end;
+        }
+        return null;
     }
 
     /// <summary>The document whose suite table lists every name <c>scripts/Test.cs --suite</c> accepts.</summary>
@@ -781,6 +1032,13 @@ static partial class Patterns
 
     [GeneratedRegex(@"\A[A-Za-z_][\w']*(\.[A-Za-z_][\w']*)*\z")]
     internal static partial Regex DottedName();
+
+    [GeneratedRegex(@"\b[0-9a-f]{64}\b")]
+    internal static partial Regex Sha256();
+
+    // `Proof.lean:15:0`, as Lean and the tool cite a place in a source file.
+    [GeneratedRegex(@"(?<file>\.(?:lean|cs)):\d+:\d+")]
+    internal static partial Regex SourcePosition();
 
     [GeneratedRegex(@"(?m)^[ \t]*(?:@\[[^\]\n]*\]\s*)?" +
         @"(?:(?:private|protected|noncomputable|partial|unsafe|nonrec)\s+)*" +

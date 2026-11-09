@@ -168,9 +168,34 @@ elaborate concurrently. Names are probed by these rules:
 Each diagnostic, warning or `sorryAx` is reported at the document line it came from. The suite then
 checks that a pre-`Except` `invoke` statement, a removed or renamed name, a removed tactic and a
 block using a module it does not import each fail at their own lines, while the current forms and
-names outside the library pass. Run it locally with
-`dotnet run --file scripts/Test.cs -- --suite docs`; `scripts/TestCheckDocReferences.cs` tests the
-static rules.
+names outside the library pass.
+
+Documented commands and their output are checked the same way. A block is part of its document's
+walkthrough when its info string marks it:
+
+| Info string | Check |
+| --- | --- |
+| `sh run` | The `docs` suite runs each line as a command, in document order, and each must exit with `0`. Only `leancil` and `dotnet build Examples/...` commands are run; other commands stay in an unmarked `sh` block. |
+| `sh run fails` | As `sh run`, except that the last command must exit with a failure. |
+| `text stdout` | The whole standard output of the last command run above it. A line `...` stands for any run of lines. |
+| `text stderr` | Lines that the standard error of that command holds in a row, such as the start of a diagnostic. |
+| `csharp edit PATH` | Each line replaces the one line of `PATH`, a file under `Examples/`, that declares the same expression-bodied member; the commands after it see the edit. |
+
+Any other word after `sh`, `text` or `csharp` fails, as does a command the suite does not run, an
+output block with no command above it and an edit that names no single line;
+`scripts/CheckDocReferences.cs` checks these on every PR. The suite runs each document's commands
+from a copy of the example sources they name, with `leancil` being the tool built from the
+checkout, so an edit never touches the checkout and a path prints as in the document. Before
+comparing, it replaces each SHA-256 and each `line:column` after a `.lean` or `.cs` file name on
+both sides, since those vary with the machine or an unrelated edit. A documented line the tool
+does not print, a printed line the document lacks and a command that exits otherwise than marked
+each fail at the document line. The suite then replays the getting-started walkthrough with a
+label the tool does not print, a line removed and an altered error line, and requires each to
+fail at its line. A change to a tool source or to an example file a `sh run` block names selects
+the suite.
+
+Run it locally with `dotnet run --file scripts/Test.cs -- --suite docs`;
+`scripts/TestCheckDocReferences.cs` tests the static rules and the output comparison.
 
 ## Other workflows
 

@@ -29,6 +29,18 @@ internal static class CliDiagnostics
     /// <summary>Exception data key holding the failed proof's located Lean messages.</summary>
     internal const string ProofMessagesKey = "LeanCIL.ProofMessages";
 
+    /// <summary>Exception data key holding a report line printed after `Next:`, such as an option to add.</summary>
+    internal const string HintKey = "LeanCIL.Hint";
+
+    const string NextKey = "LeanCIL.Next";
+
+    /// <summary>Gives `error` its own `Next:` line: the fix for the cause its message states.</summary>
+    internal static T WithNext<T>(T error, string next) where T : Exception
+    {
+        error.Data[NextKey] = next;
+        return error;
+    }
+
     /// <summary>
     /// Proof-authored text with control and bidirectional override characters shown as escapes, so it
     /// cannot rewrite or reorder the report lines printed around it.
@@ -61,10 +73,14 @@ internal static class CliDiagnostics
             "Lean library build" => "Ensure Lean and Lake are installed with the bundled lean-toolchain version, then address the build diagnostic below.",
             "proof checking" => "Read the Lean diagnostic below and check the implementation against the stated contract, including its preconditions.",
             "theorem audit" => "Select a proved theorem with --theorem and remove unproved or unsupported axioms from its dependencies.",
+            "open goals" => "Prove each goal listed below in place of its `sorry` or failing tactic, then rerun.",
             "proof outline" => "Write this proof by hand from a similar example, or report the shape as an issue.",
             "library audit" => "Address the kernel replay or axiom diagnostic for the listed theorems, or correct the namespace prefixes.",
             _ => "Check the diagnostic and the input paths, then retry."
         };
+
+        var raised = error is CliFailure { InnerException: { } inner } ? inner : error;
+        if (raised.Data[NextKey] is string fix) next = fix;
 
         var missingTool = error.Message.Contains("Required command not found:", StringComparison.Ordinal);
         if (missingTool)
@@ -81,6 +97,7 @@ internal static class CliDiagnostics
         Console.Error.WriteLine($"{(invalid ? "Invalid" : "Error")}: {Printable(summary)}");
         Console.Error.WriteLine($"  Stage: {stage}");
         Console.Error.WriteLine($"  Next: {next}");
+        if (error.Data[HintKey] is string hint) Console.Error.WriteLine($"  {hint}");
         if (summary != error.Message)
         {
             // Each Lean error is printed once, located in the file the developer edits rather than a session copy.

@@ -510,9 +510,16 @@ the step rewritten as far as the step equations and the result facts in scope go
 a class instance lacks `objectForm`, `objectSlot` or `objectAllocation`. A stepping goal under the
 existentials of a contract's run, as `cil_contract_steps` leaves one at a call, is read as the run
 it states. The error itself is
-unchanged. `leancil verify --trace` and `--format json` add the import to the start of the
+unchanged.
+
+With `set_option cil.goals true`, the observer logs the goal at each `sorry` written in the
+source, as a term or a tactic, the goal before each tactic that raised an error and each goal of
+an `unsolved goals` error, once each and in source order, as a message starting
+`[LeanCIL goal v1] ` and `sorry`, `error` or `unsolved`, followed by the goal as Lean prints it.
+
+`leancil verify --trace`, `--goals` and `--format json` add the import to the start of the
 proof's first import line, which moves no other line or column, set these options and report the
-steps and records apart from the proof's messages.
+steps, goals and records apart from the proof's messages.
 
 ## Read control flow off one step
 

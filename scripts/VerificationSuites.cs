@@ -104,7 +104,7 @@ internal static class VerificationSuites
             "theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts " +
             "cannot forge"),
         new("docs", "Tests/DocSnippets.cs",
-            "documentation Lean snippets and cited library names against the current library")
+            "documentation Lean snippets, cited library names and documented commands against the library and tool")
     ];
 
     /// <summary>Every suite name: core, the single-fixture suites, then the export partitions.</summary>

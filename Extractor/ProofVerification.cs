@@ -18,7 +18,7 @@ partial class Program
 
     const string VerifyUsage = "Usage: leancil verify output-directory [--proof proof.lean] [--theorem name] " +
         "[--fresh] [--rebuild-library] [--proof-root package-directory] [--force-full-verify] " +
-        "[--full-artifact Lib=directory] [--format text|json] [--trace]";
+        "[--full-artifact Lib=directory] [--format text|json] [--trace] [--goals]";
 
     /// <summary>
     /// The tool version, the LeanCIL revision and Lean toolchain its framework comes from, and the
@@ -271,6 +271,7 @@ partial class Program
         // A request for JSON gets JSON for every outcome, including a rejected option after it.
         var json = args.Zip(args.Skip(1)).Any(pair => pair is ("--format", "json"));
         var trace = false;
+        var goals = false;
         string? format = null;
         string? proof = null;
         string? theorem = null;
@@ -301,6 +302,11 @@ partial class Program
             if (option == "--trace" && !trace)
             {
                 trace = true;
+                continue;
+            }
+            if (option == "--goals" && !goals)
+            {
+                goals = true;
                 continue;
             }
             if (++index == args.Length || args[index].StartsWith("--", StringComparison.Ordinal))
@@ -340,7 +346,8 @@ partial class Program
                 theorem ?? "ExampleProof.correctness", proof ?? Path.Combine(output, "Proof.lean"), output, proofRoot);
             Console.Write(VerifyReports.Serialize(VerifyReports.Result("failed", failure, failure.theorem,
                 failure.proof, output, proofRoot, "arguments", null, null, [],
-                traceRequested: args.Contains("--trace"), proofChecked: false)));
+                traceRequested: args.Contains("--trace"), proofChecked: false,
+                goalsRequested: args.Contains("--goals"))));
             return new CliFailure("arguments", error, reported: true);
         }
 
@@ -348,6 +355,16 @@ partial class Program
         var settingsPath = Path.Combine(output, "verification.json");
         var stage = "proof selection";
         Program? verification = null;
+        // With --goals, a proof that leaves goals ends the run there: neither replay nor audit can accept it.
+        void RequireNoOpenGoals()
+        {
+            var open = goals ? Observed(verification?.ProofMessages, trace, goals).Goals : [];
+            if (open.Length == 0) return;
+            stage = OpenGoalsStage;
+            throw new InvalidOperationException(
+                $"{open.Length} goal{(open.Length == 1 ? " remains" : "s remain")} in {CliPaths.Display(proof!)}; " +
+                "the theorem was not replayed or audited.");
+        }
         try
         {
             if (File.Exists(settingsPath))
@@ -404,25 +421,38 @@ partial class Program
                 forceFullVerification = forceFull,
                 viewsStatement = true,
                 structuredFailures = json,
-                tracesSteps = trace
+                tracesSteps = trace,
+                showsGoals = goals
             };
+            // Each stage starts after the one before it ended, so the first one after the proof check sees its goals.
+            void Advance(string next)
+            {
+                RequireNoOpenGoals();
+                stage = next;
+            }
             if (forceFull) verification.fullImportAudit = (artifact, session, module, leanPath) =>
                 verification.VerifyFullImports(artifact, session, module, theorem, leanPath, fullArtifacts);
             if (forceFull) verification.PreflightFullImports(output, fullArtifacts);
             var report = proofRoot is null
                 ? verification.Verify(assembly, identity, entry, proof, output,
-                    theorem: theorem, existingArtifacts: true, settings: settingsPath, stage: value => stage = value)
-                : verification.VerifyConsumer(assembly, proof, output, theorem, proofRoot, settingsPath, value => stage = value);
+                    theorem: theorem, existingArtifacts: true, settings: settingsPath, stage: Advance)
+                : verification.VerifyConsumer(assembly, proof, output, theorem, proofRoot, settingsPath, Advance);
+            RequireNoOpenGoals();
 
             var view = verification.VerifiedStatement;
+            // The certificate records the specification the report shows, read with the statement.
+            if (view?.definitions is { } specification)
+                File.WriteAllText(reportPath,
+                    JsonSerializer.Serialize(report with { specification = specification }, Json) + "\n");
             if (json)
             {
                 var refutation = FailureReports.Refuted(report.theoremAudit, theorem, proof, output, proofRoot);
                 if (refutation is not null) FailureReports.Write(output, refutation);
-                ProofMessagesReport(Traced(verification.ProofMessages, trace).Messages, proof, output);
+                ProofMessagesReport(Observed(verification.ProofMessages, trace, goals).Messages, proof, output);
                 Console.Write(VerifyReports.Serialize(VerifyReports.Result("verified", refutation, report.theorem,
                     proof, output, proofRoot, null, report.axioms, view?.statement ?? StatementOf(report),
-                    JsonMessages(verification.ProofMessages), trace, verification.ProofMessages is not null)));
+                    JsonMessages(verification.ProofMessages), trace, verification.ProofMessages is not null,
+                    goals, Specification(view))));
                 return;
             }
             Console.WriteLine($"Verified: {report.theorem}");
@@ -468,7 +498,8 @@ partial class Program
             var statement = view?.statement ?? StatementOf(report);
             foreach (var line in statement.Split('\n'))
                 Console.WriteLine("    " + line.TrimEnd());
-            var (proofMessages, steps) = Traced(verification.ProofMessages, trace);
+            Console.Write(SpecificationReport(view));
+            var (proofMessages, steps, _) = Observed(verification.ProofMessages, trace, goals);
             Console.Write(ProofMessagesReport(proofMessages, proof, output));
             Console.Write(TraceReport(steps, proof));
         }
@@ -478,18 +509,24 @@ partial class Program
             var failed = FailureReports.Failed(stage, error, theorem ?? "ExampleProof.correctness",
                 proof ?? Path.Combine(output, "Proof.lean"), output, proofRoot);
             FailureReports.Write(output, failed);
-            var (proofMessages, steps) = Traced(verification?.ProofMessages, trace);
+            var (proofMessages, steps, openGoals) = Observed(verification?.ProofMessages, trace, goals);
+            // With --goals the terminal shows the goals alone; the proof's messages stay in their file.
             var messages = proof is null ? ""
-                : ProofMessagesReport(proofMessages, proof, output) + TraceReport(steps, proof);
+                : (goals && verification?.ProofMessages is not null ? GoalsReport(openGoals, proof) : "") +
+                    ProofMessagesReport(proofMessages, proof, output, listed: !goals) + TraceReport(steps, proof);
             if (json)
             {
                 Console.Write(VerifyReports.Serialize(VerifyReports.Result("failed", failed, failed.theorem,
                     failed.proof, output, proofRoot, stage, null, null, JsonMessages(verification?.ProofMessages),
-                    trace, verification?.ProofMessages is not null)));
+                    trace, verification?.ProofMessages is not null, goals)));
                 throw new CliFailure(stage, error, reported: true);
             }
             var failure = new CliFailure(stage, error);
             if (messages.Length > 0) failure.Data[CliDiagnostics.ProofMessagesKey] = messages;
+            // A proof Lean or the audit refused is where an author next wants the goals.
+            if (!goals && stage is "proof checking" or "theorem audit")
+                failure.Data[CliDiagnostics.HintKey] = "Goals: add --goals to print the goal at each `sorry` and " +
+                    "failing tactic.";
             throw failure;
         }
         finally
@@ -527,9 +564,60 @@ partial class Program
     /// </summary>
     static (ProofMessage[]? Messages, ProofMessage[]? Trace) Traced(ProofMessage[]? messages, bool trace)
     {
-        if (!trace || messages is null) return (messages, null);
-        return ([.. messages.Where(message => !VerifyReports.IsStep(message.text))],
-            [.. messages.Where(message => VerifyReports.IsStep(message.text))]);
+        var (own, steps, _) = Observed(messages, trace, goals: false);
+        return (own, steps);
+    }
+
+    /// <summary>The stage of a `--goals` run that ended at the goals its proof check left.</summary>
+    const string OpenGoalsStage = "open goals";
+
+    /// <summary>
+    /// The proof's messages apart from what the observer logged for the run: the step trace under `--trace`
+    /// and the open goals under `--goals`. Observer text a run did not ask for is the proof's own message.
+    /// </summary>
+    static (ProofMessage[]? Messages, ProofMessage[]? Trace, ProofMessage[] Goals) Observed(
+        ProofMessage[]? messages, bool trace, bool goals)
+    {
+        if (messages is null) return (null, null, []);
+        bool Step(ProofMessage message) => trace && VerifyReports.IsStep(message.text);
+        bool Goal(ProofMessage message) => goals && VerifyReports.Goal(message.text) is not null;
+        return ([.. messages.Where(message => !Step(message) && !Goal(message))],
+            trace ? [.. messages.Where(Step)] : null, [.. messages.Where(Goal)]);
+    }
+
+    /// <summary>
+    /// Each open goal at its place in the proof, in source order: the goal at a `sorry`, before a tactic that
+    /// raised an error, or left unsolved by a tactic block.
+    /// </summary>
+    static string GoalsReport(ProofMessage[] goals, string proof)
+    {
+        if (goals.Length == 0) return "  Goals: none; no `sorry` or failing tactic was reached\n";
+        var report = new System.Text.StringBuilder($"  Goals ({goals.Length}):\n");
+        foreach (var message in goals)
+        {
+            var (kind, goal) = VerifyReports.Goal(message.text)!.Value;
+            report.Append($"    {CliPaths.Display(proof)}:{message.line}:{message.column}: {kind}\n");
+            foreach (var line in CliDiagnostics.Printable(goal).Split('\n'))
+                report.Append(("      " + line).TrimEnd()).Append('\n');
+        }
+        return report.ToString();
+    }
+
+    static IEnumerable<(string Name, string Text)>? Specification(StatementView? view) =>
+        view?.definitions?.Select(definition => (definition.name, definition.text));
+
+    /// <summary>
+    /// The proof module's definitions the statement is stated with, such as its precondition and
+    /// postcondition, as Lean prints their elaborated bodies; nothing when it uses none.
+    /// </summary>
+    static string SpecificationReport(StatementView? view)
+    {
+        if (view?.definitions is not { Length: > 0 } definitions) return "";
+        var report = new System.Text.StringBuilder("  Specification:\n");
+        foreach (var definition in definitions)
+            foreach (var line in CliDiagnostics.Printable(definition.text).Split('\n'))
+                report.Append(("    " + line).TrimEnd()).Append('\n');
+        return report.ToString();
     }
 
     /// <summary>
@@ -554,9 +642,10 @@ partial class Program
 
     /// <summary>
     /// The proof's informational and warning messages located in its source, bounded for the terminal;
-    /// the full text is written to proof-messages.txt in the output directory.
+    /// the full text is written to proof-messages.txt in the output directory. Unless `listed`, the report
+    /// only counts them and names that file.
     /// </summary>
-    static string ProofMessagesReport(ProofMessage[]? messages, string proof, string output)
+    static string ProofMessagesReport(ProofMessage[]? messages, string proof, string output, bool listed = true)
     {
         if (messages is not { Length: > 0 }) return "";
         var full = string.Concat(messages.Select(message =>
@@ -564,6 +653,7 @@ partial class Program
             $"{CliDiagnostics.Printable(message.text)}\n"));
         var path = Path.Combine(output, ProofMessagesText);
         File.WriteAllText(path, full);
+        if (!listed) return $"  Lean messages ({messages.Length}): {CliPaths.Display(path)}\n";
         var lines = full.TrimEnd('\n').Split('\n');
         var report = new System.Text.StringBuilder($"  Lean messages ({messages.Length}):\n");
         foreach (var line in lines.Take(ProofMessageLines))

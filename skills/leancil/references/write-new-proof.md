@@ -43,6 +43,11 @@ selected method gets its own module, so several proofs can be open at once; `lea
 After changing the C#, `leancil watch --project path/to/Lib.csproj` rebuilds it, refreshes only
 the changed extractions and re-verifies the affected proofs; restart the file in the editor to
 see the new goals. Only `leancil verify` (which `watch` runs) counts.
+
+Without an editor, `leancil verify artifacts/Method --proof proofs/Method.lean --goals` prints
+the goal at each `sorry`, before each failing tactic and left unsolved, in source order, and
+`leancil watch --goals` prints them again after every save. Write `sorry` where the next step is
+unclear and read its goal rather than inserting `trace_state`.
 Details: [editor workspace](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CONSUMERS.md#proof-authoring-workspace).
 
 ## 4. Keep the proof local

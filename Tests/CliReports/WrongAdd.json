@@ -12,6 +12,7 @@
   "output": "<output>",
   "axioms": null,
   "statement": null,
+  "specification": null,
   "failures": [
     {
       "kind": "elaboration-error",
@@ -51,9 +52,11 @@
       "text": "'ExampleProof.correctness' depends on axioms: [propext, sorryAx, Quot.sound]"
     }
   ],
+  "goals": null,
   "trace": null,
   "unknown": {
-    "trace": "not requested; --trace traces each step the proof takes"
+    "trace": "not requested; --trace traces each step the proof takes",
+    "goals": "not requested; --goals reports the goal at each sorry and failing tactic"
   },
   "rerun": [
     "leancil",
