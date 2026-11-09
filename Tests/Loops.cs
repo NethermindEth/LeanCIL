@@ -887,9 +887,11 @@ var outlined = new (string Name, string? Selector)[]
     ("ElementStamp", "TagArrays::Stamp(System.String[],Examples.Tagged,System.UInt64)"),
     // A fresh array charged to the heap budget, filled and read back, forgotten by the footprint.
     ("FreshPair", "NodeArrays::Pair(Examples.Node,Examples.Node)"),
-    // Loops filling a writable span from the front, directly or through a helper storing its first element.
+    // A writable span filled from the front, directly or through a helper storing its first element, and that
+    // helper alone.
     ("SpanFill", "Loops::Fill(System.Span`1<System.UInt32>,uint)"),
-    ("SpanFillThrough", "Loops::FillThrough(System.Span`1<System.UInt32>,uint)")
+    ("SpanFillThrough", "Loops::FillThrough(System.Span`1<System.UInt32>,uint)"),
+    ("SpanPut", "Loops::Put(System.Span`1<System.UInt32>,uint)")
 };
 var outlineTimer = System.Diagnostics.Stopwatch.StartNew();
 var outlineRoot = Path.Combine(root, "Outlines");
@@ -1906,7 +1908,21 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
                     rw [target1Span.elementWidth, target1Span.length, List.length_replicate]
                     simpa using base.element_run_apart 4 (first := 0) (left := done) (second := done)
                       (right := target1Rest + 1) (Or.inl (by omega))
-            """)])
+            """)]),
+    // One store into a span outside a loop: an empty span throws, which the precondition rules out.
+    ("SpanPut", [
+        ("def Precondition (target1 : SpanView) (value : W32) (initial : Memory) : Prop := sorry",
+            """
+            def Precondition (target1 : SpanView) (_ : W32) (_ : Memory) : Prop := 0 < target1.length
+            """),
+        ("def Postcondition (target1 : SpanView) (value : W32) (initial final : Memory) : Prop := sorry",
+            """
+            def Postcondition (target1 : SpanView) (value : W32) (_ final : Memory) : Prop :=
+              ∀ base, target1.reference = .address base → Contents final base 4 [value]
+            """),
+        ("    sorry -- Precondition excludes an empty `target1`",
+            "    simp [Precondition, target1Count] at assumed"),
+        ("    case postcondition => sorry", "    case postcondition => exact target1Filled")])
 })
 {
     var source = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
@@ -1935,7 +1951,7 @@ Console.WriteLine("PASS filled outlines verify with only their specification wri
     "tested for null and compared, a null store before returning the node it held, an array argument's element " +
     "load, length and covariance-checked store, element facts carried across element and field stores, and " +
     "an array the method allocates, fills and reads back, a fill through a writable span, and a fill through a " +
-    "helper storing the first element of the span it is lent");
+    "helper storing the first element of the span it is lent, and that helper alone");
 
 // A written footprint that leaves out the element a loop writes is an error at the write, never an admission.
 var narrowed = Path.Combine(outlineRoot, "FillWords", "Narrowed.lean");

@@ -324,7 +324,7 @@ internal static partial class ProofOutline
             var inputType = inputs.Length == 0 ? "Unit" : Product(inputs.Select(input => input.Type));
             var outputType = output is { } width ? WordType(width) : "Unit";
             var store = Stores(index);
-            var spanStore = SpanStores(index);
+            var spanStore = SpanStores(extraction, index);
             if (store is not null)
             {
                 lean.Line($"/-- `{callee.Name}` stores its argument through its reference, given write authority over");
@@ -411,7 +411,7 @@ internal static partial class ProofOutline
                 lean.Line($"  cil_checked_steps [{StoreLemma(body.Op)} wrote, formed]");
             }
             else if (spanStore is { } spanBody)
-                SpanStoreProof(lean, index, name, pattern, Variable(declared[1].Name), spanBody.Op);
+                SpanStoreContract(lean, index, name, pattern, Variable(declared[1].Name), spanBody.Op);
             else if (Branches(index))
             {
                 lean.Line($"  rintro {pattern} memory permitted");
@@ -451,53 +451,6 @@ internal static partial class ProofOutline
             var stores = width == 4 ? ops[2] == ".storeScalar 4" : ops[2] is ".store64" or ".storeScalar 8";
             return stores ? (reference, word, width, ops[2]) : null;
         }
-
-        /// <summary>The element width and store of a static callee `(Span&lt;T&gt; target, T value)` whose body only
-        /// stores `value` into `target[0]`.</summary>
-        (int Width, string Op)? SpanStores(int index)
-        {
-            var callee = extraction.Methods[index];
-            var ops = extraction.Emitted[index].Ops.Where(op => op != ".nop").ToArray();
-            if (callee.HasThis || callee.ReturnType.FullName != "System.Void" || callee.Parameters.Count != 2 ||
-                WrittenSpanWidth(callee.Parameters[0].ParameterType) is not { } width ||
-                ElementWidth(callee.Parameters[1].ParameterType) != width ||
-                !extraction.Emitted[index].Metadata.Contains("locals := [],")) return null;
-            string[] body = [".local 0", ".const32 0", $".memory (.spanItem {width})", ".arg 1"];
-            if (ops.Length != 6 || !ops.Take(4).SequenceEqual(body) || ops[5] != ".ret") return null;
-            var stores = width == 4 ? ops[4] == ".storeScalar 4" : ops[4] is ".store64" or ".storeScalar 8";
-            return stores ? (width, ops[4]) : null;
-        }
-
-        /// <summary>The contract proof of a callee that stores its value into the first element of its span: the
-        /// write `WritableSpan.write_head` performs, after entering the frame that homes the span.</summary>
-        static void SpanStoreProof(Writer lean, int index, string name, string pattern, string value, string op)
-        {
-            lean.Line($"  rintro {pattern} memory ⟨rest, span⟩");
-            lean.Line($"  dsimp only [{name}Contract] at span ⊢");
-            lean.Line($"  obtain ⟨item, after, address, found, wrote, confined, filled⟩ := span.write_head {value}");
-            lean.Line($"  refine ⟨CIL.executionBound Extracted.program {name}, after, [], ?_, confined, (), rfl, " +
-                "filled⟩");
-            lean.Line("  have valid := span.valid");
-            lean.Line("  have width := span.elementWidth");
-            lean.Line("  have mode := span.mode");
-            lean.Line("  have nonempty := span.length_cons.2.1");
-            lean.Line("  apply CIL.Safety.invoke_of_run");
-            lean.Line("  · cil_lookup []");
-            lean.Line("  · simp [checkedValue, numericValue, valid, Bind.bind, Except.bind, Pure.pure, Except.pure,");
-            lean.Line("      checkedAt, Except.mapError]");
-            // Entering the frame homes the span in a local, which the stepping tactics do not set up.
-            lean.Line($"  · simp [enterFrame, Extracted.method{index}, makeLocals, makeArgumentHomes, " +
-                "makeParameterHomes,");
-            lean.Line("      makeLocal, storeLocal, CIL.Safety.Value.hasUnspecified, width, mode, valid, checkedAt,");
-            lean.Line("      Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]");
-            lean.Line("    exact ⟨rfl, rfl⟩");
-            lean.Line($"  cil_checked_steps [found, {StoreLemma(op)} wrote, valid, width, mode, nonempty, address]");
-        }
-
-        /// <summary>The element width of a writable span of words, or null for any other type.</summary>
-        static int? WrittenSpanWidth(TypeReference type) =>
-            type is GenericInstanceType { ElementType.FullName: "System.Span`1" } span
-                ? ElementWidth(span.GenericArguments[0]) : null;
 
         /// <summary>Whether a callee of words with no locals tests its arguments and returns a word or throws on
         /// each side, so its contract proof splits on each test and steps every returning side.</summary>
@@ -1028,7 +981,7 @@ internal static partial class ProofOutline
             var arguments = state.Stack.TakeLast(count).ToArray();
             state.Stack.RemoveRange(state.Stack.Count - count, count);
             var stores = Stores(callee) is not null;
-            var spanStores = SpanStores(callee) is not null;
+            var spanStores = SpanStores(extraction, callee) is not null;
             // A span is lent only from the iteration's first memory, at which `frame` holds.
             SpanTerm? Lent(Value argument) => argument is LocalValue local && spanStores && !state.Moved &&
                 state.State[components.IndexOf(slots[local.Slot].Components[0])] is SpanTerm
@@ -1455,12 +1408,6 @@ internal static partial class ProofOutline
                 $"({span.Checked}.within wellFormed frame{apart}).head (by decide)");
         }
 
-        /// <summary>The step lemma of a scalar store through an address whose write succeeds.</summary>
-        static string StoreLemma(string op) => op switch
-        {
-            ".store64" => "step_store64_of_write", ".storeScalar 8" => "step_storeScalar_i64_of_write",
-            _ => "step_storeScalar_of_write"
-        };
 
         /// <summary>Store `value` into the first element of the written span `component`, at the iteration's
         /// first memory; returns the facts the loop tactics step the store with.</summary>

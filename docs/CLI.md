@@ -273,6 +273,8 @@ comment saying which obligation it is:
   stores `value` into `target[0]` gives the callee a proved contract over the span's bytes, lends
   it the span through `WritableSpan.lend` and names `WritableSpan.covered` and `below` for the
   call's footprint side conditions; the invariant then extends the prefix with `Filled.extend`.
+  Such a callee outlined on its own is stepped through `WritableSpan.write_head`; an empty span
+  throws there, a hole the precondition closes. Any other write to a span outside a loop is refused.
 - Loops in sequence are bound in pc order (`loop`, `loop2`, ...), each with its own cutpoint,
   `invariant` and `measure` (`header2`, `invariant2`, `measure2`, ...). The path leaving one loop
   for the next loop's test enters that loop through `loop_terminates_then`, leaving its invariant at

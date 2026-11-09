@@ -86,10 +86,13 @@ internal static partial class ProofOutline
             { } array)
             throw Unsupported($"parameter `{array.Name}` of {method.Name} is an array of class references, which " +
                 "new-proof outlines only in bodies without loops");
-        if (loops.Count == 0 && parameters.Any(parameter => parameter.Writable))
-            throw Unsupported($"{method.FullName} writes a span outside a loop; new-proof follows a span written " +
-                "from the front by a loop");
-        if (structReceiver)
+        var spanStore = loops.Count == 0 ? SpanStores(extraction, 0) : null;
+        if (loops.Count == 0 && spanStore is null && parameters.Any(parameter => parameter.Writable))
+            throw Unsupported($"{method.FullName} writes a span outside a loop other than by storing its value " +
+                "into `target[0]`; new-proof follows a span written from the front by a loop or that one store");
+        if (spanStore is { } store)
+            source = SpanStoreLine(spec, store.Op, lean);
+        else if (structReceiver)
             source = StructStraightLine(spec, body, names, lean);
         else if (loops.Count == 0)
             source = StraightLine(extraction, spec, body, lean);
