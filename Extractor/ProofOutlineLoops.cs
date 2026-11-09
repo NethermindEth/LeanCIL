@@ -500,7 +500,7 @@ internal static partial class ProofOutline
             if (steppable)
             {
                 lean.Line($"  rintro {pattern} memory permitted");
-                ContractEvidence.Returns(lean, "  ", name, output!.Value, "");
+                ContractEvidence.Returns(lean, "  ", "");
                 lean.Line("  case run => cil_checked_steps");
                 lean.Noted("  ", "case postcondition => sorry", $"{name}Contract.post of the returned value");
             }
@@ -508,10 +508,9 @@ internal static partial class ProofOutline
             {
                 var value = Variable(declared[body.Value].Name);
                 lean.Line($"  rintro {pattern} memory writable");
-                lean.Line($"  dsimp only [{name}Contract] at writable ⊢");
+                lean.Line($"  dsimp only [{name}Contract] at writable");
                 lean.Line($"  obtain ⟨after, wrote, formed, confined, filled⟩ := writable.write_one {value}");
-                lean.Line($"  refine ⟨CIL.executionBound Extracted.program {name}, after, [], ?_, confined, (), rfl, " +
-                    "filled⟩");
+                lean.Line("  refine MethodContract.Holds.intro after () ?_ confined filled");
                 lean.Line($"  cil_checked_steps [{StoreLemma(body.Op)} wrote, formed]");
             }
             else if (spanStore is { } spanBody)
@@ -520,8 +519,8 @@ internal static partial class ProofOutline
             {
                 lean.Line($"  rintro {pattern} memory permitted");
                 var sides = 0;
-                BranchedCallee(lean, extraction, index, name, name,
-                    declared.Select(parameter => Variable(parameter.Name)).ToArray(), output!.Value, 0, [], [], "  ",
+                BranchedCallee(lean, extraction, index, name,
+                    declared.Select(parameter => Variable(parameter.Name)).ToArray(), 0, [], [], "  ",
                     ref sides, kept: false);
             }
             else
@@ -574,12 +573,12 @@ internal static partial class ProofOutline
         }
 
         /// <summary>The contract proof of a branching callee from `pc`: a `by_cases` on each test, each returning
-        /// side stepped with the tests' facts, and each throwing side closed from the precondition. `program`
-        /// names the callee in `Extracted.program`, and a `kept` contract's `post` first states that the memory
-        /// is as it was, which each returning side proves.</summary>
+        /// side stepped with the tests' facts, and each throwing side closed from the precondition. A `kept`
+        /// contract's `post` first states that the memory is as it was, which each returning side proves.
+        /// </summary>
         internal static void BranchedCallee(Writer lean, Extraction extraction, int index, string name,
-            string program, string[] arguments, int width, int pc, List<(string Term, int Bits)> stack,
-            List<(string Fact, string Text)> facts, string indent, ref int sides, bool kept)
+            string[] arguments, int pc, List<(string Term, int Bits)> stack, List<(string Fact, string Text)> facts,
+            string indent, ref int sides, bool kept)
         {
             var callee = extraction.Methods[index];
             var ops = extraction.Emitted[index].Ops;
@@ -611,7 +610,7 @@ internal static partial class ProofOutline
                 {
                     var suffix = (++sides).ToString(System.Globalization.CultureInfo.InvariantCulture);
                     var steps = facts.Count == 0 ? "" : $" [{string.Join(", ", facts.Select(fact => fact.Fact))}]";
-                    ContractEvidence.Returns(lean, indent, program, width, suffix);
+                    ContractEvidence.Returns(lean, indent, suffix);
                     lean.Line($"{indent}case run{suffix} => cil_checked_steps{steps}");
                     if (kept) KeptPost(lean, indent, name, suffix, Where());
                     else lean.Noted(indent, $"case postcondition{suffix} => sorry",
@@ -647,7 +646,7 @@ internal static partial class ProofOutline
                         var next = holds == takenWhenTrue ? taken : pc + 1;
                         var text = holds ? $"`{condition}`" : $"not `{condition}`";
                         lean.Line($"{indent}· -- {text}");
-                        BranchedCallee(lean, extraction, index, name, program, arguments, width, next, [.. rest],
+                        BranchedCallee(lean, extraction, index, name, arguments, next, [.. rest],
                             [.. facts, (fact, text)], indent + "  ", ref sides, kept);
                     }
                     return;

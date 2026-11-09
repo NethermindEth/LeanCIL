@@ -128,10 +128,8 @@ internal static partial class ProofOutline
         lean.Doc($"`{helper.Method.Name}` meets its contract; callers use only the contract.");
         lean.Line($"theorem {name}_holds : {name}Contract.Holds Extracted.program {method} := by");
         lean.Line("  rintro ⟨values, index⟩ initial ⟨valid, typed, elements, contents, bound⟩");
-        lean.Line($"  dsimp only [{name}Contract] at *");
         lean.Line("  obtain ⟨item, found, _⟩ := contents.array_load valid (by decide) bound");
-        lean.Line($"  refine ⟨CIL.executionBound Extracted.program {method}, initial, _, ?_, Confined.refl _ _, " +
-            "item, rfl, rfl, found⟩");
+        lean.Line("  refine MethodContract.Holds.intro initial item ?_ (Confined.refl _ _) ⟨rfl, found⟩");
         lean.Line("  cil_checked_steps [step_arrayAddress_of_element (index := .i32 index) typed rfl found, " +
             "valid,");
         lean.Line("    arrayElement_formed found, leaveFrame]");

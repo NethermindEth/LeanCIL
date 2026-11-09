@@ -451,8 +451,9 @@ comment saying which obligation it is:
   returning side is stepped and leaves what `post` states of the result, and each throwing side is
   closed from `pre` by `cil_loop_obligation`. At the call the caller states `permitted1`, the
   helper's `pre` of the values passed, as a hole to prove from `assumed`; `cil_contract_steps`
-  composes the call through the contract, and the proof names the result `output1` and what
-  `post` states of it `post1`, which the postcondition hole's comment cites. A wrong `pre` or
+  composes the call through the contract `with called1 output1 call1`, naming the memory after
+  it, the result and the call's `CallResult`, and the proof reads what `post` states of the result
+  as `post1` from `call1.post`, which the postcondition hole's comment cites. A wrong `pre` or
   `post` fails in the `Holds` theorem or at the caller, never silently. A caller with numeric
   locals, and any other callee, leaves a `not outlined:` hole: in a body over objects it names the
   callee's method index, and in a body over words the call instruction.

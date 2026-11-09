@@ -38,10 +38,12 @@ internal static partial class ProofOutline
     static void SpanStoreContract(Writer lean, int index, string name, string pattern, string value, string op)
     {
         lean.Line($"  rintro {pattern} memory ⟨rest, span⟩");
-        lean.Line($"  dsimp only [{name}Contract] at span ⊢");
+        lean.Line($"  dsimp only [{name}Contract] at span");
         lean.Line($"  obtain ⟨item, after, address, found, wrote, confined, filled⟩ := span.write_head {value}");
-        lean.Line($"  refine ⟨CIL.executionBound Extracted.program {name}, after, [], ?_, confined, (), rfl, " +
-            "filled⟩");
+        lean.Line("  refine MethodContract.Holds.intro after ()");
+        lean.Line($"    ⟨CIL.executionBound Extracted.program {name}, ?_⟩ confined filled");
+        // Frame entry below is proved by hand, so the goal names the contract's arguments outright.
+        lean.Line($"  dsimp only [{name}Contract]");
         SpanStoreRun(lean, "  ", index, "span", "found", "wrote", "address", op);
     }
 

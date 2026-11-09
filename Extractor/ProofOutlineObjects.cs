@@ -1755,15 +1755,14 @@ internal static partial class ProofOutline
             Add($"{name}Contract");
             Add(ContractEvidence.LeaveFrame);
             lean.Wrapped($"{indent}cil_contract_steps", FactList(facts), "");
+            lean.Line($"{indent}  with called{number} output{number} call{number}");
             facts.Clear();
             Add($"{name}Contract");
-            ContractEvidence.Called(lean, indent, number);
+            lean.Line($"{indent}have post{number} := call{number}.post");
             lean.Line($"{indent}dsimp only [{name}Contract] at post{number}");
             // The contract keeps the memory, so the path's facts and names stay those before the call.
             lean.Line($"{indent}obtain ⟨kept{number}, post{number}⟩ := post{number}");
             lean.Line($"{indent}subst called{number}");
-            // A step that stopped at the call left the result on the stack under the contract's `results`.
-            lean.Line($"{indent}try dsimp only [{name}Contract]");
         }
 
         /// <summary>Rewrites a callee's returned values from actual entry memory to frozen field values.</summary>

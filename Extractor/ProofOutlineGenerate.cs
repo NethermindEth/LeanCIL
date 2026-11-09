@@ -645,27 +645,21 @@ internal static partial class ProofOutline
         return lean.ToString();
     }
 
-    /// <summary>The outline text that depends on the positional shape of contract evidence: the witnesses a
-    /// `Holds` proof gives a returning run, and the names a caller gives what a contract call leaves.</summary>
+    /// <summary>The outline text that builds contract evidence by name: the final memory, output and facts a
+    /// `Holds` proof gives `MethodContract.Holds.intro` for a returning run.</summary>
     static class ContractEvidence
     {
         /// <summary>The fact that lets a step leave a callee's frame.</summary>
         internal const string LeaveFrame = "leaveFrame";
 
-        /// <summary>The witnesses of a run of method `program` that returns one word of `width` bytes and leaves
-        /// `memory` as it was, with the goals `run` and `postcondition` under `suffix` left open.</summary>
-        internal static void Returns(Writer lean, string indent, string program, int width, string suffix)
+        /// <summary>The evidence of a run that returns one word and leaves `memory` as it was, with the goals
+        /// `run` and `postcondition` under `suffix` left open and the returned word found by the run.</summary>
+        internal static void Returns(Writer lean, string indent, string suffix)
         {
-            lean.Line($"{indent}refine ⟨CIL.executionBound Extracted.program {program}, memory,");
-            lean.Line($"{indent}  [.scalar ({ScalarConstructor(width)} ?output{suffix})], ?run{suffix}, " +
-                $"Confined.refl _ memory, ?output{suffix}, rfl,");
-            lean.Line($"{indent}  ?postcondition{suffix}⟩");
+            lean.Line($"{indent}refine MethodContract.Holds.intro memory ?output{suffix} ?run{suffix} " +
+                "(Confined.refl _ memory)");
+            lean.Line($"{indent}  ?postcondition{suffix}");
         }
-
-        /// <summary>Names what the steps leave after call `number` through a contract: the memory after it, its
-        /// result and its postcondition.</summary>
-        internal static void Called(Writer lean, string indent, int number) =>
-            lean.Line($"{indent}rename_i called{number} _ output{number} post{number} _");
     }
 
     /// <summary>The static helper at `index` as a stub named `name`, when its parameters and result are 32- or
@@ -714,12 +708,12 @@ internal static partial class ProofOutline
         if (LoopOutline.Branches(extraction, stub.Index))
         {
             var sides = 0;
-            LoopOutline.BranchedCallee(lean, extraction, stub.Index, stub.Name, program, stub.Inputs, stub.Result, 0,
+            LoopOutline.BranchedCallee(lean, extraction, stub.Index, stub.Name, stub.Inputs, 0,
                 [], [], "  ", ref sides, kept: true);
         }
         else
         {
-            ContractEvidence.Returns(lean, "  ", program, stub.Result, "");
+            ContractEvidence.Returns(lean, "  ", "");
             lean.Line("  case run => cil_checked_steps");
             KeptPost(lean, "  ", stub.Name, "", "");
         }
