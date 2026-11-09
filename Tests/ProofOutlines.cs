@@ -1707,7 +1707,9 @@ if (Selected("ArraySum"))
               -- `values1` is not null: `values.Length` throws on a null array.
               values1.reference ≠ .null ∧ sorry
             """, StringComparison.Ordinal) ||
-        !sumOutline.Contains("The C# parameter `values` is bound as `values1`", StringComparison.Ordinal))
+        // The header wraps where its text falls, so the sentence is matched across line breaks.
+        !Regex.Replace(sumOutline, @"\s+", " ").Contains("The C# parameter `values` is bound as `values1`",
+            StringComparison.Ordinal))
         throw new InvalidOperationException("The ArraySum outline does not show its null exclusion or its renamed " +
             "parameter:\n" + sumOutline);
     var nullable = Path.Combine(outlineRoot, "ArraySum", "Nullable.lean");
