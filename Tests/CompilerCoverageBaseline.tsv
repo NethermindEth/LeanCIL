@@ -385,6 +385,9 @@ Examples:System.Int32 Examples.SampleArrays::Count(Examples.Samples)	A	A	A	A	A	A
 Examples:System.Int32 Examples.SampleArrays::CountAfterAllocation(Examples.Node,System.Int32[])	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SampleArrays::CountAfterDeposit(Examples.Account,System.Int32[])	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SampleArrays::CountAfterRefill(Examples.Samples,Examples.Samples,System.Int32[])	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SampleArrays::ReadAfterAllocation(Examples.Node,System.Int32[])	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SampleArrays::ReadAfterEcho(Examples.Account,System.Int32[],System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SampleArrays::RecordIndex(Examples.Account,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SampleArrays::RefillRead(Examples.Samples,System.Int32[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SampleArrays::Share(Examples.Samples,Examples.Samples)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SampleArrays::Sum(Examples.Samples,System.Int32[])	A	A	A	A	A	A	A	A
@@ -455,6 +458,8 @@ Examples:System.Int32 Examples.UnsafeLayouts::Size7()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.UnsafeLayouts::Size8()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.UnsafeLayouts::Size9()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.VectorFields::NestedSize()	B	B	B	B	B	B	B	B
+Examples:System.Int32 Examples.WordReader::Read(System.Int32[])	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.WordReader::SkipAndPeek(System.Int32[])	A	A	A	A	A	A	A	A
 Examples:System.Int32& Examples.ArrayElementReferences::Element(System.Int32[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32& Examples.UnsafeLayouts::Add6int(System.Int32&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32& Examples.UnsafeLayouts::Add6nint(System.Int32&,System.IntPtr)	A	A	A	A	A	A	A	A
@@ -1208,6 +1213,8 @@ Examples:System.Void Examples.UnalignedMemory::WriteSigned(System.Byte&,System.S
 Examples:System.Void Examples.UnalignedMemory::WriteWord(System.Byte&,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Word256::.cctor()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.Word256::.ctor(System.UInt64,System.UInt64,System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
+Examples:System.Void Examples.WordReader::.ctor()	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.WordReader::Advance()	A	A	A	A	A	A	A	A
 Examples:System.Void modreq(System.Runtime.CompilerServices.IsExternalInit) Examples.InitCounter::set_Value(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:T Examples.GenericCounterValue`1::Echo(T)	B	B	B	B	B	B	B	B
 Examples:T Examples.GenericEnvelope`1::Read()	B	B	B	B	B	B	B	B
