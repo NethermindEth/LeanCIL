@@ -66,4 +66,4 @@ from it took 242.7 s, twice the `rfl` time, since projection `pc` walks `pc` con
 
 The `lookups` suite extracts the fixture at 502 and 2,002 instructions and fails when the
 longer method costs more than 1.25 times the heartbeats per instruction of the shorter one. It
-measures 0.97 times with suffixes and 3.09 times with `rfl` proofs.
+measures 0.99 times with suffixes and 3.09 times with `rfl` proofs.
