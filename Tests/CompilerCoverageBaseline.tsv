@@ -178,6 +178,8 @@ Examples:System.Boolean Examples.StaticValues::DifferentAddresses()	B	B	B	B	B	B	
 Examples:System.Boolean Examples.StaticValues::SameAddress()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.StepOff::get_IsActive()	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.StepOn::get_IsActive()	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.Strings::SameLabel(System.String,System.String)	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.Strings::SameText()	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.UnsafeReferences::AreSame(System.Byte&,System.Byte&)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.UnsafeReferences::Greater(System.Byte&,System.Byte&)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.UnsafeReferences::Less(System.Byte&,System.Byte&)	A	A	A	A	A	A	A	A
@@ -315,6 +317,7 @@ Examples:System.Int32 Examples.GenericMethods::Size()	B	B	B	B	B	B	B	B
 Examples:System.Int32 Examples.GenericMethods::VectorSize()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.GenericMethods::WrongIdentity(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.GenericOwners::SpanCount(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Guards::Count(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.IClosedCounter`1::Read()	B	B	B	B	B	B	B	B
 Examples:System.Int32 Examples.ICounterValue::Read()	B	B	B	B	B	B	B	B
 Examples:System.Int32 Examples.IntegerMath::AbsInt32(System.Int32)	A	A	A	A	A	A	A	A
@@ -327,7 +330,7 @@ Examples:System.Int32 Examples.IntegerMath::SignInt64(System.Int64)	A	A	A	A	A	A	
 Examples:System.Int32 Examples.IntegerMath::SignInt8(System.SByte)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.IntegerMath::SignNative(System.IntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.IntegerOperations::Negate32(System.Int32)	A	A	A	A	A	A	A	A
-Examples:System.Int32 Examples.ItemPool::Trim(System.Int32)	B	B	B	B	B	B	B	B
+Examples:System.Int32 Examples.ItemPool::Trim(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ItemPool::get_Available()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ItemPool::get_Capacity()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ItemPool::get_Rented()	A	A	A	A	A	A	A	A
@@ -559,6 +562,7 @@ Examples:System.IntPtr& Examples.UnsafeLayouts::Add10int(System.IntPtr&,System.I
 Examples:System.IntPtr& Examples.UnsafeLayouts::Add10nint(System.IntPtr&,System.IntPtr)	A	A	A	A	A	A	A	A
 Examples:System.IntPtr& Examples.UnsafeLayouts::Add10nuint(System.IntPtr&,System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Object Examples.PrimitiveArrays::ReadObject(System.Object[],System.Int32)	B	B	B	B	B	B	B	B
+Examples:System.Object SelectorExamples.One.Collision::Unsupported(System.Object)	B	B	B	B	B	B	B	B
 Examples:System.ReadOnlySpan`1<Examples.AggregateArrays/Pair> Examples.AggregateArrays::ReadOnlyView(Examples.AggregateArrays/Pair[])	A	A	A	A	A	A	A	A
 Examples:System.ReadOnlySpan`1<Examples.AggregateSpans/Words> Examples.AggregateSpans::ReadOnlyFactory(Examples.AggregateSpans/Words&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.ReadOnlySpan`1<Examples.AggregateSpans/Words> Examples.AggregateSpans::WordsView(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
@@ -660,7 +664,10 @@ Examples:System.Span`1<System.IntPtr> Examples.MemorySpans::ArrayAsSpanStart(Sys
 Examples:System.Span`1<System.Runtime.Intrinsics.Vector128`1<System.UInt64>> Examples.AggregateArrays::VectorView(System.Runtime.Intrinsics.Vector128`1<System.UInt64>[])	A	A	A	A	A	A	A	A
 Examples:System.Span`1<System.UInt32> Examples.ReinterpretedSpans::Words(System.Span`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.Span`1<System.UIntPtr> Examples.MemorySpans::ArrayAsSpanRange(System.UIntPtr[],System.Int32,System.Int32)	A	A	A	A	A	A	A	A
-Examples:System.String SelectorExamples.One.Collision::Unsupported(System.String)	B	B	B	B	B	B	B	B
+Examples:System.String Examples.Guards::Required(System.String)	A	A	A	A	A	A	A	A
+Examples:System.String Examples.Strings::OrNone(System.String)	A	A	A	A	A	A	A	A
+Examples:System.String Examples.Strings::Pick(System.Boolean,System.String,System.String)	A	A	A	A	A	A	A	A
+Examples:System.String Examples.Strings::Relabel(Examples.Labelled,System.String)	A	A	A	A	A	A	A	A
 Examples:System.String[] Examples.TagArrays::Create(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt16 Examples.Bits::ReverseU16(System.UInt16)	A	A	A	A	A	A	A	A
 Examples:System.UInt16 Examples.IntegerMath::ClampUInt16(System.UInt16,System.UInt16,System.UInt16)	A	A	A	A	A	A	A	A
@@ -704,6 +711,7 @@ Examples:System.UInt32 Examples.GenericOwners::Nested(System.UInt32)	A	A	A	A	A	A
 Examples:System.UInt32 Examples.GenericOwners::NestedHelper(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.GenericOwners::Repeated(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.GenericOwners::TableFirst(method System.UInt32 *(System.UInt32)[],System.UInt32)	B	B	B	B	B	B	B	B
+Examples:System.UInt32 Examples.Guards::Index(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.IntegerMath::ClampUInt32(System.UInt32,System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.IntegerMath::MaxUInt32(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.IntegerMath::MinUInt32(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
@@ -1065,9 +1073,10 @@ Examples:System.Void Examples.InWord::Examples.IInWord<Examples.InWord>.Add(Exam
 Examples:System.Void Examples.InitializedHelper::.cctor()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.InitializedTypes::.cctor()	B	B	B	B	B	B	B	B
 Examples:System.Void Examples.InitializedValue::.cctor()	B	B	B	B	B	B	B	B
-Examples:System.Void Examples.ItemPool::.ctor(System.Int32)	B	B	B	B	B	B	B	B
-Examples:System.Void Examples.ItemPool::Prewarm(System.Int32)	B	B	B	B	B	B	B	B
-Examples:System.Void Examples.ItemPool::Return(Examples.PooledItem)	B	B	B	B	B	B	B	B
+Examples:System.Void Examples.ItemPool::.ctor(System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.ItemPool::Prewarm(System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.ItemPool::Return(Examples.PooledItem)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Labelled::.ctor()	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Loops::FillWords(System.UInt64&,System.UInt64,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Loops::Stamp(System.UInt32&,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ManagedDispatch::Targets(method System.Int32 *(System.Int32)[])	B	B	B	B	B	B	B	B
