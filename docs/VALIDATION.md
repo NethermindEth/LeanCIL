@@ -25,7 +25,7 @@ Omit `--suite` to run everything; the [suite table](#suites) lists each name.
 | Class-instance proofs over linked objects | `pool`, `evidence` |
 | Loop contracts, runtime comparisons and control-flow validation | `loops` |
 | Generated proof outlines | `outlines-control`, `outlines-objects`, `outlines-buffers`, `structoutlines`, `receiveroutlines`, `wordreader`, `savedwordreader` |
-| Shared stepping, return and contract tactics | All loop and outline suites above, examples, and `Tests.Automation`, `Tests.StoreFacts`, `Tests.MethodContract`, `Tests.CodeAt` |
+| Shared stepping, return and contract tactics | All loop and outline suites above, examples, and `Tests.Automation`, `Tests.StoreFacts`, `Tests.MethodContract`, `Tests.CodeAt`; compare [proof cost](#proof-cost) with the base |
 | CLI, artifact identity and theorem selection | `core`, `cli`, `failures`, `workspace`, `audit` |
 | Admission reports and self-admission of the extractor | `blockers`; see [self-admission](COMPILER-COVERAGE.md#self-admission) |
 | Exported interfaces and implementation checks | The affected `exports` partition in the [suite table](#suites) |
@@ -121,6 +121,29 @@ Every name `--suite` accepts, in the order a full run executes them. The names c
 | `exportsderived` | derived public contracts through DLL export and import |
 | `exportsinitialized` | scoped initialization assumptions in exported and imported contracts |
 | `exportsprofiles` | one contract family across independently checked profile extractions |
+
+## Proof cost
+
+A change to shared tactics or the library is compared with its base by what each proof costs,
+not only by whether the suites pass. Measure both checkouts on one machine and compare them:
+
+```sh
+git worktree add --detach ../base "$(git merge-base origin/main HEAD)"
+dotnet run --file scripts/ProofCost.cs -- measure --tree ../base --libraries --output artifacts/cost/base.json
+dotnet run --file scripts/ProofCost.cs -- measure --tree . --libraries --output artifacts/cost/head.json
+dotnet run --file scripts/ProofCost.cs -- compare --base artifacts/cost/base.json \
+  --head artifacts/cost/head.json --accepted scripts/proof-cost-accepted.json
+```
+
+`measure` runs from the head checkout for both trees, so the base needs no copy of the tool. Each
+tree needs its compiled library: pass `--library` with a certified library, or build every `CIL`
+module in the tree first, since `lake build CIL` leaves modules outside the aggregate unbuilt.
+`--libraries` measures every test library; `--module Tests.Automation` measures one module and
+the checkout modules it imports; `--artifacts artifacts` measures the proofs a suite verified in
+that tree, after running the suite there. A suite binds the sources of its checkout, so keep the
+base checkout outside the head checkout and edit neither while its suite runs. `compare` exits nonzero on a regression and prints the
+table that CI puts in the job summary; [proof cost in CI](CI.md#proof-cost) defines the measures,
+the thresholds and how an increase is accepted.
 
 ## What the checks cover
 

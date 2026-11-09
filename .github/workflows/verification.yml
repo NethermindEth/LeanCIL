@@ -38,6 +38,7 @@ jobs:
           dotnet run --file scripts/TestFindCertifiedLibrary.cs
           dotnet run --file scripts/TestLibraryArchive.cs -c Release
           dotnet run --file scripts/TestSummarizeVerification.cs
+          dotnet run --file scripts/TestProofCost.cs
           dotnet run --file scripts/TestLeanDiagnostics.cs
           dotnet run --file Tests/ConsumerTraceRetention.cs
           dotnet run --file Tests/FileHashing.cs
@@ -398,6 +399,242 @@ jobs:
             artifacts/**/identity.json
             artifacts/**/Extracted.lean
             artifacts/**/Batch.lean
+          if-no-files-found: ignore
+          retention-days: 14
+
+  cost-base:
+    name: Build the merge base for proof cost
+    needs: [select, prepare]
+    # A push to main has no merge base to compare with. A manual run measures its own tree twice.
+    if: github.event_name != 'push' && needs.select.outputs.has-suites == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # The head library may be an artifact of the earlier run that donated it.
+      actions: read
+    outputs:
+      sources: ${{ steps.sources.outputs.sources }}
+      manifest-sha256: ${{ steps.certify.outputs.manifest-sha256 || needs.prepare.outputs.manifest-sha256 }}
+      archive-sha256: ${{ steps.pack-library.outputs.archive-sha256 || needs.prepare.outputs.archive-sha256 }}
+      artifact-id: ${{ steps.library-artifact.outputs.artifact-id || needs.prepare.outputs.artifact-id }}
+      artifact-run-id: ${{ steps.library-artifact.outputs.artifact-id && github.run_id || needs.prepare.outputs.artifact-run-id }}
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      # The first parent of a PR's merge commit is the base it merges into.
+      BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'HEAD' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Select what the change can affect
+        id: sources
+        shell: bash
+        env:
+          MATRIX: ${{ needs.select.outputs.matrix }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            dotnet run --file scripts/ProofCost.cs -- sources --matrix "$MATRIX" --tree . --base "$BASE" \
+              --output "$GITHUB_OUTPUT"
+          else
+            dotnet run --file scripts/ProofCost.cs -- sources --matrix "$MATRIX" --output "$GITHUB_OUTPUT"
+          fi
+      # Identical library inputs let the merge base use the head's certified library as it is.
+      - name: Compare the library inputs of the merge base and the head
+        id: library
+        if: steps.sources.outputs.sources != '[]'
+        shell: bash
+        run: |
+          if git diff --quiet "$BASE" HEAD -- CIL CIL.lean lean-toolchain lake-manifest.json lakefile.toml; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Download the successful producer job's Lean toolchain
+        if: steps.library.outputs.build == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.prepare.outputs.toolchain-artifact-id }}
+          path: ${{ runner.temp }}/lean-toolchain
+      - name: Restore the authenticated Lean toolchain
+        if: steps.library.outputs.build == 'true'
+        shell: bash
+        env:
+          TOOLCHAIN_SHA256: ${{ needs.prepare.outputs.toolchain-sha256 }}
+          TOOLCHAIN_PIN_SHA256: ${{ needs.prepare.outputs.toolchain-pin-sha256 }}
+        run: |
+          archive="$RUNNER_TEMP/lean-toolchain/lean-toolchain.tar.zst"
+          echo "$TOOLCHAIN_PIN_SHA256  lean-toolchain" | sha256sum --check --status
+          echo "$TOOLCHAIN_SHA256  $archive" | sha256sum --check --status
+          tar --zstd -xf "$archive" --no-same-owner -C "$HOME"
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Download the head's certified library
+        if: steps.library.outputs.build == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.prepare.outputs.artifact-id }}
+          run-id: ${{ needs.prepare.outputs.artifact-run-id }}
+          github-token: ${{ github.token }}
+          path: artifacts/library-download
+      # The merge base's own scripts build its library, starting from the head's unchanged modules.
+      - name: Build the merge base library from the head's
+        id: certify
+        if: steps.library.outputs.build == 'true'
+        shell: bash
+        env:
+          HEAD_MANIFEST_SHA256: ${{ needs.prepare.outputs.manifest-sha256 }}
+          HEAD_ARCHIVE_SHA256: ${{ needs.prepare.outputs.archive-sha256 }}
+        run: |
+          dotnet run --file scripts/LibraryArchive.cs -c Release -- restore artifacts/library-download \
+            "$RUNNER_TEMP/head-library" "$HEAD_MANIFEST_SHA256" "$HEAD_ARCHIVE_SHA256"
+          git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
+          cd "$RUNNER_TEMP/base"
+          mkdir -p artifacts
+          if ! dotnet run --file scripts/PrepareLibrary.cs -- artifacts/certified-library \
+              --incremental "$RUNNER_TEMP/head-library" "$HEAD_MANIFEST_SHA256"; then
+            rm -rf artifacts/certified-library
+            dotnet run --file scripts/PrepareLibrary.cs -- artifacts/certified-library
+          fi
+      - name: Package the merge base library
+        id: pack-library
+        if: steps.library.outputs.build == 'true'
+        env:
+          MANIFEST_SHA256: ${{ steps.certify.outputs.manifest-sha256 }}
+        run: >-
+          dotnet run --file scripts/LibraryArchive.cs -c Release -- pack
+          "$RUNNER_TEMP/base/artifacts/certified-library" "$RUNNER_TEMP/base-library.tar.zst" "$MANIFEST_SHA256"
+      - name: Upload the merge base library for this workflow attempt
+        id: library-artifact
+        if: steps.library.outputs.build == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: proof-cost-base-library-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/base-library.tar.zst
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
+  proof-cost:
+    name: Proof cost (${{ matrix.source }})
+    needs: [select, prepare, cost-base]
+    if: needs.cost-base.outputs.sources != '' && needs.cost-base.outputs.sources != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      # Either library may be an artifact of the earlier run that donated it.
+      actions: read
+    strategy:
+      fail-fast: false
+      # GitHub validates the matrix even when the job is skipped.
+      matrix:
+        source: ${{ fromJSON(needs.cost-base.outputs.sources || '["libraries"]') }}
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      SOURCE: ${{ matrix.source }}
+      BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'HEAD' }}
+      HEAD_MANIFEST_SHA256: ${{ needs.prepare.outputs.manifest-sha256 }}
+      HEAD_ARCHIVE_SHA256: ${{ needs.prepare.outputs.archive-sha256 }}
+      BASE_MANIFEST_SHA256: ${{ needs.cost-base.outputs.manifest-sha256 }}
+      BASE_ARCHIVE_SHA256: ${{ needs.cost-base.outputs.archive-sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Consumer tests fetch each checkout as a pinned local Git dependency, which refuses shallow roots.
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Download the successful producer job's Lean toolchain
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.prepare.outputs.toolchain-artifact-id }}
+          path: ${{ runner.temp }}/lean-toolchain
+      - name: Restore the authenticated Lean toolchain
+        shell: bash
+        env:
+          TOOLCHAIN_SHA256: ${{ needs.prepare.outputs.toolchain-sha256 }}
+          TOOLCHAIN_PIN_SHA256: ${{ needs.prepare.outputs.toolchain-pin-sha256 }}
+        run: |
+          archive="$RUNNER_TEMP/lean-toolchain/lean-toolchain.tar.zst"
+          echo "$TOOLCHAIN_PIN_SHA256  lean-toolchain" | sha256sum --check --status
+          echo "$TOOLCHAIN_SHA256  $archive" | sha256sum --check --status
+          tar --zstd -xf "$archive" --no-same-owner -C "$HOME"
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Download the head's certified library
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.prepare.outputs.artifact-id }}
+          run-id: ${{ needs.prepare.outputs.artifact-run-id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/head-library-download
+      - name: Download the merge base's certified library
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.cost-base.outputs.artifact-id }}
+          run-id: ${{ needs.cost-base.outputs.artifact-run-id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/base-library-download
+      - name: Check out the merge base and restore both libraries
+        shell: bash
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
+          mkdir -p artifacts "$RUNNER_TEMP/base/artifacts" "$RUNNER_TEMP/proof-cost"
+          dotnet run --file scripts/LibraryArchive.cs -c Release -- restore "$RUNNER_TEMP/head-library-download" \
+            artifacts/certified-library "$HEAD_MANIFEST_SHA256" "$HEAD_ARCHIVE_SHA256"
+          dotnet run --file scripts/LibraryArchive.cs -c Release -- restore "$RUNNER_TEMP/base-library-download" \
+            "$RUNNER_TEMP/base/artifacts/certified-library" "$BASE_MANIFEST_SHA256" "$BASE_ARCHIVE_SHA256"
+      # Each tree's own runner verifies the suite, which leaves the extractions and proofs to measure.
+      - name: Verify the suite at the merge base and at the head
+        if: matrix.source != 'libraries'
+        shell: bash
+        run: |
+          verify() {
+            (cd "$1" && LEANCIL_CERTIFIED_LIBRARY="$1/artifacts/certified-library" \
+              LEANCIL_CERTIFIED_LIBRARY_SHA256="$2" dotnet run --file scripts/Test.cs -- --suite "$SOURCE")
+          }
+          if ! verify "$RUNNER_TEMP/base" "$BASE_MANIFEST_SHA256" > "$RUNNER_TEMP/proof-cost/base-suite.log" 2>&1; then
+            tail -n 40 "$RUNNER_TEMP/proof-cost/base-suite.log"
+            echo "::warning::The $SOURCE suite did not pass at the merge base; its proofs have no base to compare."
+          fi
+          if ! verify "$GITHUB_WORKSPACE" "$HEAD_MANIFEST_SHA256" > "$RUNNER_TEMP/proof-cost/head-suite.log" 2>&1; then
+            tail -n 40 "$RUNNER_TEMP/proof-cost/head-suite.log"
+            exit 1
+          fi
+      - name: Measure the merge base and the head
+        shell: bash
+        run: |
+          measure() {
+            tree="$1"
+            shift
+            if [ "$SOURCE" = libraries ]; then set -- "$@" --libraries; else set -- "$@" --artifacts "$tree/artifacts"; fi
+            dotnet run --file scripts/ProofCost.cs -- measure --tree "$tree" \
+              --library "$tree/artifacts/certified-library" "$@"
+          }
+          measure "$RUNNER_TEMP/base" --output "$RUNNER_TEMP/proof-cost/base.json"
+          measure "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/proof-cost/head.json"
+      - name: Compare proof cost with the merge base
+        run: >-
+          dotnet run --file scripts/ProofCost.cs -- compare
+          --base "$RUNNER_TEMP/proof-cost/base.json" --head "$RUNNER_TEMP/proof-cost/head.json"
+          --accepted scripts/proof-cost-accepted.json --markdown "$RUNNER_TEMP/proof-cost/proof-cost.md"
+          --output "$RUNNER_TEMP/proof-cost/proof-cost.json" --github-summary
+      - name: Upload proof cost measurements
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: proof-cost-${{ matrix.source }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/proof-cost/*.json
+            ${{ runner.temp }}/proof-cost/*.md
+            ${{ runner.temp }}/proof-cost/*.log
           if-no-files-found: ignore
           retention-days: 14
 
