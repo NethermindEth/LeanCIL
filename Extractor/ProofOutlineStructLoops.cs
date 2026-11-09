@@ -196,9 +196,9 @@ internal static partial class ProofOutline
                 {
                     if (path.Stack.Count != 0)
                         throw Unsupported("A receiver loop carries an operand stack at its head");
-                    lean.Wrapped(indent + "refine loop_reaches_terminates ?_", [$"({hypothesis}", State(path),
-                        "?invariant" + (iteration ? " ?measure)" : ")")], "");
-                    lean.Wrapped(indent + "· cil_loop_steps", ["[" + string.Join(", ", path.Facts) + "]"], "");
+                    lean.Wrapped(indent + "refine loop_reaches_terminates ?_",
+                        ($"({hypothesis} {State(path)} ?invariant" + (iteration ? " ?measure)" : ")")).Terms(), "");
+                    lean.Wrapped(indent + "· cil_loop_steps", ("[" + string.Join(", ", path.Facts) + "]").Terms(), "");
                     lean.Noted(indent, "case invariant => sorry", "Establish the invariant at this loop head");
                     if (iteration) lean.Noted(indent, "case measure => sorry", "The continuing iteration decreases");
                     return;
@@ -216,8 +216,14 @@ internal static partial class ProofOutline
                 Match match;
                 if ((match = Regex.Match(op, @"\A\.arg (\d+)\z")).Success)
                     path.Stack.Add(spec.Parameters[int.Parse(match.Groups[1].Value)].Name);
-                else if ((match = Regex.Match(op, @"\A\.const(?:32|64) (\d+)\z")).Success)
-                    path.Stack.Add(match.Groups[1].Value);
+                else if (StructLiteral(op) is { } literal)
+                {
+                    if (literal.Width == 8) path.Stack.Add(literal.Term);
+                    else if (pc + 1 < body.Ops.Length && body.Ops[pc + 1] is ".convU8" or ".convI8")
+                        path.Stack.Add($"({literal.Term})." +
+                            (body.Ops[++pc] == ".convI8" ? "signExtend" : "setWidth") + " 64");
+                    else throw Unsupported("A receiver loop needs 64-bit arithmetic and comparisons");
+                }
                 else if (op is ".convU8" or ".convI8" or ".nop") { }
                 else if (op == ".dup") path.Stack.Add(path.Stack[^1]);
                 else if ((match = Regex.Match(op, @"\A\.(add|sub|mul|band|bor|bxor)\z")).Success)
@@ -251,15 +257,17 @@ internal static partial class ProofOutline
                     yes.Facts.Add(fact);
                     no.Facts.Add(fact);
                     Line(indent + "·");
+                    NormalizeFacts(yes, fact, indent + "  ");
                     Walk(yes, taken ? target : pc + 1, indent + "  ", hypothesis, iteration);
                     Line(indent + "·");
+                    NormalizeFacts(no, fact, indent + "  ");
                     Walk(no, taken ? pc + 1 : target, indent + "  ", hypothesis, iteration);
                     return;
                 }
                 else if (op == ".ret")
                 {
-                    lean.Wrapped(indent + "cil_loop_finish", ["[" + string.Join(", ", path.Facts
-                        .Concat([path.Confined])) + "]"], "");
+                    lean.Wrapped(indent + "cil_loop_finish", ("[" + string.Join(", ", path.Facts
+                        .Concat([path.Confined])) + "]").Terms(), "");
                     if (spec.Result is not null)
                         Line($"{indent}refine ⟨{Pop()}, rfl, {path.Confined}, ?_⟩");
                     else Line($"{indent}all_goals try (first | rfl | exact {path.Confined})");
@@ -273,8 +281,22 @@ internal static partial class ProofOutline
         }
 
         /// <summary>A user name outside the numbered path-fact names emitted by the walk.</summary>
+        void NormalizeFacts(ReceiverPath path, string condition, string indent)
+        {
+            if (!path.Facts.Any(fact => fact.StartsWith("written", StringComparison.Ordinal))) return;
+            foreach (var fact in path.Facts.Where(fact => fact.StartsWith("written", StringComparison.Ordinal) ||
+                fact.StartsWith("loaded", StringComparison.Ordinal)).ToArray())
+            {
+                var normalized = "normalized" + ++names;
+                Line($"{indent}have {normalized} := {fact}");
+                Line($"{indent}simp only [{condition}] at {normalized}");
+                path.Facts.Add(normalized);
+            }
+        }
+
         static string SafeName(string name) => Regex.IsMatch(name,
-            @"\A(?:(?:added|loaded|memory|written|confined|held|formed|wellFormed|changed|confinedTotal|branch)\d+|" +
+            @"\A(?:(?:added|loaded|memory|written|confined|held|formed|wellFormed|changed|" +
+            @"confinedTotal|branch|normalized)\d+|" +
             @"(?:kept|owned)\d+Field\d+)\z") ? name + "Argument" : name;
 
         void Access(ReceiverPath path, ReceiverField field, string? value, string indent)

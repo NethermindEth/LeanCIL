@@ -245,16 +245,17 @@ comment saying which obligation it is:
   fact rewrites a simplified goal without restating it. When it also takes up to three `bool`
   arguments and tests nothing else, it is split with `cases` on each, and every side steps to its
   own return and leaves its own postcondition, commented with the values it is for.
-- An `int[]`, `uint[]`, `long[]` or `ulong[]` parameter of a method that neither takes nor is called
-  on a class instance is an `ArrayView` with a list of its elements, and the theorem assumes the
+- An `int[]`, `uint[]`, `long[]` or `ulong[]` parameter is an `ArrayView` with a list of its
+  elements, including beside a class instance, and the theorem assumes the
   view validates, has its element type and holds those elements in its storage span, `SpanContents
   initial values.storage`. A method returning `values[index]` for an `int` argument `index`, read by
   `ldelem` or through a static helper whose body only returns `ref values[index]`, is split with
   `by_cases valuesBound` on whether the index is below the number of elements; a null array has
   none, so the bound alone excludes it. The in-bound side steps through `SpanContents.array_load`,
   the helper's call through a contract proved from its body, and leaves the postcondition; an index
-  outside throws, a hole the precondition closes. Any other straight-line body over an array is a
-  `not outlined:` hole.
+  outside throws, a hole the precondition closes. Straight-line bodies over objects can also
+  store the array in a field and read an element, as described below; unsupported combinations
+  leave a `not outlined:` hole.
 - A loop over an array indexes it with an `int` local tested against `values.Length`. The proof
   destructures the array into `valuesBase` and `valuesLength` before the loop, the precondition
   excluding a null array, and the cutpoint takes `valuesLength`, which a valid array keeps below
@@ -265,8 +266,8 @@ comment saying which obligation it is:
   through `arrayElement_of_access`. Each access leaves its index bound, and a store its write
   authority and footprint entry, to `cil_loop_obligation` from the author's definitions. A method
   storing into one of several arrays is refused.
-- A method with a loop gets its loop state, the cutpoint at the loop's back-edge test (found by
-  instruction, never by pc), and `invariant` and `measure` definitions to replace. A method that
+- A method with a loop gets its loop state, a cutpoint derived from its control flow, and
+  `invariant` and `measure` definitions to replace. A method that
   takes a reference also gets a `footprint` to replace: the caller memory the loop may write, which
   the loop state carries. The proof applies `invoke_loop_satisfies`, steps the entry to the first
   loop head, splits the iteration where the body branches, and leaves the obligations the loop
@@ -337,7 +338,7 @@ comment saying which obligation it is:
   gets a `State` recording field values, contents, write authority and confinement. Its outline
   steps each path and leaves the invariant, natural-number measure and postcondition to the author.
   Scalar arguments and results must be 64-bit; void returns are also supported. Narrow fields and
-  frame-owned locals in receiver loops are not outlined.
+  frame-owned locals in receiver loops are refused.
 - A struct value argument binds a fixed-size byte vector, including padding, and is passed as an
   aggregate scalar. Straight-line outlines step parameter homes and nested aggregate locals,
   including initialization, field addresses, loads and stores. Aggregate parameter homes and
