@@ -509,7 +509,25 @@ partial class Program : IDisposable
         }
     }
 
-    static async Task<string> CaptureOutput(StreamReader reader, TextWriter writer, ProgressSummary? summary = null, TextWriter? transcript = null)
+    /// <summary>The latest `[done/total]` job count that a Lake build printed, for progress lines.</summary>
+    sealed partial class JobCount
+    {
+        string latest = "";
+
+        public void Add(string line)
+        {
+            if (LakeJob().Match(line) is { Success: true } job)
+                Volatile.Write(ref latest, $": {job.Groups[1].Value} of {job.Groups[2].Value} Lake jobs");
+        }
+
+        public override string ToString() => Volatile.Read(ref latest);
+
+        [GeneratedRegex(@"\A(?:\S+ )?\[([0-9]+)/([0-9]+)\] ")]
+        private static partial Regex LakeJob();
+    }
+
+    static async Task<string> CaptureOutput(StreamReader reader, TextWriter writer, ProgressSummary? summary = null,
+        TextWriter? transcript = null, JobCount? jobs = null)
     {
         var captured = new StringBuilder();
         var line = new StringBuilder();
@@ -528,18 +546,25 @@ partial class Program : IDisposable
                 await writer.WriteAsync(buffer.AsMemory(0, count));
                 await writer.FlushAsync();
             }
-            else
-                for (var i = 0; i < count; i++)
-                    if (buffer[i] == '\n')
-                    {
-                        summary.Add(line.ToString().TrimEnd('\r'), writer);
-                        line.Clear();
-                    }
-                    else line.Append(buffer[i]);
+            if (summary is null && jobs is null) continue;
+            for (var i = 0; i < count; i++)
+                if (buffer[i] == '\n')
+                {
+                    var text = line.ToString().TrimEnd('\r');
+                    summary?.Add(text, writer);
+                    jobs?.Add(text);
+                    line.Clear();
+                }
+                else line.Append(buffer[i]);
         }
         if (summary is not null && line.Length > 0) summary.Add(line.ToString(), writer);
         return captured.ToString();
     }
+
+    /// <summary>Milliseconds between progress lines of one stage on a terminal.</summary>
+    const int InteractiveProgressInterval = 10_000;
+    /// <summary>Milliseconds between progress lines when stderr is redirected; a shorter stage prints none.</summary>
+    const int RedirectedProgressInterval = 20_000;
 
     static readonly object TraceGate = new();
     // A reused process id must not append to an earlier process's trace, which a reader treats as old.
@@ -550,10 +575,15 @@ partial class Program : IDisposable
     {
         var traceStage = progress;
 #if LEANCIL_TOOL
-        // Keep stdout stable and redirected stderr quiet, but explain long interactive builds.
-        if (!Console.IsErrorRedirected && progress is not null) Console.Error.WriteLine("START " + progress);
+        // Stdout stays the report. A redirected stderr names only a stage that outlasts one interval.
+        var interactive = !Console.IsErrorRedirected;
+        var announced = interactive && progress is not null;
+        if (announced) Console.Error.WriteLine("START " + progress);
+        var jobs = progress is null ? null : new JobCount();
         progress = null;
         streamOutput = false;
+#else
+        JobCount? jobs = null;
 #endif
         // Aggregate at the suite boundary; nested build/proof phases feed this summary.
         var summary = streamOutput && progress is not null ? new ProgressSummary(progress) : null;
@@ -605,14 +635,19 @@ partial class Program : IDisposable
         if (!string.IsNullOrWhiteSpace(traceDirectory)) Directory.CreateDirectory(traceDirectory);
         using var traceWriter = string.IsNullOrWhiteSpace(traceDirectory) ? null :
             TextWriter.Synchronized(new StreamWriter(Path.Combine(traceDirectory, transcript), false, Encoding.UTF8));
-        var stdout = CaptureOutput(process.StandardOutput, streamOutput ? Console.Out : TextWriter.Null, summary, traceWriter);
-        var stderr = CaptureOutput(process.StandardError, streamOutput ? Console.Error : TextWriter.Null, summary, traceWriter);
+        var stdout = CaptureOutput(process.StandardOutput, streamOutput ? Console.Out : TextWriter.Null, summary,
+            traceWriter, jobs);
+        var stderr = CaptureOutput(process.StandardError, streamOutput ? Console.Error : TextWriter.Null, summary,
+            traceWriter, jobs);
         if (summary is null)
         {
 #if LEANCIL_TOOL
-            if (!Console.IsErrorRedirected && traceStage is not null)
-                while (!process.WaitForExit(10_000))
-                    Console.Error.WriteLine($"PROGRESS {traceStage} ({elapsed.Elapsed.TotalSeconds:F0}s)");
+            if (traceStage is not null)
+                while (!process.WaitForExit(interactive ? InteractiveProgressInterval : RedirectedProgressInterval))
+                {
+                    Console.Error.WriteLine($"PROGRESS {traceStage}{jobs} ({elapsed.Elapsed.TotalSeconds:F0}s)");
+                    announced = true;
+                }
             else
 #endif
                 process.WaitForExit();
@@ -625,7 +660,7 @@ partial class Program : IDisposable
         if (progress is not null)
             Console.WriteLine($"END {progress} (exit {process.ExitCode}, {elapsed.Elapsed.TotalSeconds:F1}s)");
 #if LEANCIL_TOOL
-        if (!Console.IsErrorRedirected && traceStage is not null)
+        if (announced)
             Console.Error.WriteLine($"END {traceStage} (exit {process.ExitCode}, {elapsed.Elapsed.TotalSeconds:F1}s)");
 #endif
         Trace(traceStage ?? string.Join(" ", args.Take(2)), startedAtUtc, start.WorkingDirectory, elapsed.Elapsed, process.ExitCode, transcript, args);
@@ -965,7 +1000,7 @@ partial class Program : IDisposable
         {
             var asset = JsonSerializer.Deserialize<CertifiedReleaseAsset>(File.ReadAllBytes(descriptor));
             if (asset is null || !ValidReleaseAsset(asset, key)) return false;
-            if (!Console.IsErrorRedirected) Console.Error.WriteLine("Downloading certified Lean verification library");
+            Console.Error.WriteLine("Downloading certified Lean verification library");
             using var client = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(3) };
             using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
             var uri = new Uri("https://github.com/NethermindEth/LeanCIL/releases/download/" +
@@ -992,9 +1027,8 @@ partial class Program : IDisposable
         catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or
             JsonException or InvalidOperationException or System.Net.Http.HttpRequestException or OperationCanceledException)
         {
-            if (!Console.IsErrorRedirected)
-                Console.Error.WriteLine("Certified library download unavailable; building from sources. " +
-                    error.Message);
+            Console.Error.WriteLine("Certified library download unavailable; building from sources. " +
+                error.Message);
             return false;
         }
         finally
@@ -1335,6 +1369,12 @@ partial class Program : IDisposable
                 // Modules outside the CIL aggregate are built here too, so importing one never builds into a shared library.
                 var frameworkModules = sources.Keys.Where(name => name.StartsWith("CIL/", StringComparison.Ordinal) &&
                     name.EndsWith(".lean", StringComparison.Ordinal)).Select(name => "+" + name[..^".lean".Length].Replace('/', '.'));
+#if LEANCIL_TOOL
+                Console.Error.WriteLine("Building the certified Lean verification library from the framework sources " +
+                    "and kernel-replaying it; this takes several minutes. " + (fresh
+                        ? "This run does not cache it."
+                        : "Later runs reuse it from " + cached + "."));
+#endif
                 Run(["lake", "build", "CIL", "leancil-audit", .. frameworkModules], library, streamOutput: true,
                     progress: "Building fresh Lean verification library");
                 // An incremental build replays donor modules too: an unchanged olean may import changed ones.
@@ -1488,6 +1528,34 @@ partial class Program : IDisposable
             $"{JsonSerializer.Serialize(root + "/.lake/build")}\n\n[[lean_lib]]\nname = \"CIL\"\n");
         WriteIfChanged(Path.Combine(directory, "lean-toolchain"), File.ReadAllText(Path.Combine(certified, "lean-toolchain")));
         return directory;
+    }
+
+    /// <summary>
+    /// Gives a framework package that has no build the certified library's compiled modules, so an editor build
+    /// compiles only its own modules and the framework is built once per machine. Lake reuses a copied module
+    /// only while its trace matches the package's source; the copy is never read back into a certificate.
+    /// </summary>
+    static void SeedFrameworkBuild(string framework)
+    {
+        var build = Path.Combine(framework, ".lake", "build");
+        if (Directory.Exists(build)) return;
+        var verification = new Program();
+        var staging = build + ".seed-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            verification.Library(Inputs(At("CIL.lean")));
+            foreach (var outputs in new[] { "lib", "ir" })
+                CopyTree(Path.Combine(verification.library!, ".lake", "build", outputs),
+                    Path.Combine(staging, outputs));
+            // A concurrent command may have built or seeded the package first; its build stands.
+            try { Directory.Move(staging, build); }
+            catch (IOException) when (Directory.Exists(build)) { }
+        }
+        finally
+        {
+            if (Directory.Exists(staging)) Directory.Delete(staging, true);
+            ((IDisposable)verification).Dispose();
+        }
     }
 
     /// <summary>The lakefile requirement of a package below owner on the certified framework.</summary>
@@ -2363,7 +2431,9 @@ partial class Program : IDisposable
     /// <summary>A verified statement as framework notation prints it, and the methods it names.</summary>
     internal sealed record StatementView(string statement, StatementSubject[] subjects);
 
-    /// <summary>Set by callers that print <see cref="VerifiedStatement"/>; printing costs one Lean run.</summary>
+    /// <summary>
+    /// Set by callers that print <see cref="VerifiedStatement"/>; printing costs one Lean run beside the audit.
+    /// </summary>
     bool viewsStatement { get; init; }
 
     /// <summary>
@@ -2926,35 +2996,57 @@ partial class Program : IDisposable
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             RequireOnlyAdded(bound, built, "Proof");
             // Interface oleans were replayed above and RequireOnlyAdded kept them unchanged since.
-            string[] replay = [.. extractionPublication is null ? Array.Empty<string>() : ["Extracted"],
-                .. symbols && !proofRestored ? ["ExtractedSymbols"] : Array.Empty<string>(), .. proofRestored ? Array.Empty<string>() : ["Proof"]];
+            // A module new to this run puts every module the audit reads into one replay, so the audit
+            // reads that replayed environment instead of importing the library a second time.
+            string[] replay = extractionPublication is null && proofRestored ? [] :
+                ["Extracted", .. selected.Where(module => !SelectionModules.IsSymbols(module)),
+                    .. symbols ? ["ExtractedSymbols", .. selected.Where(SelectionModules.IsSymbols)]
+                        : Array.Empty<string>(),
+                    "Proof"];
             string[] auditModules = ["Proof", "Extracted",
                 .. HasContractImports(extraction) ? ["ExtractedImports"] : Array.Empty<string>()];
             AuditRequest[] proofAudits =
                 [ProofTheorem(theorem, extraction), ExtractionCertificate("Extracted.translation_valid")];
             AuditedOleans? audited = null;
-            if (replay.Length > 0)
+            // The display runs beside replay and audit; it feeds no check and is read only after all of them.
+            var statementView = Path.Combine(fresh, StatementViewFile);
+            var statementCached = proofRestored && File.Exists(statementView);
+            var proofOlean = Path.Combine(fresh, "Proof.olean");
+            var viewing = viewsStatement && !statementCached
+                ? Task.Run(() => ViewStatement(fresh, proofOlean, leanPath, proofSource, theorem)) : null;
+            StatementView? viewed;
+            try
             {
-                stage?.Invoke("kernel replay");
-                RequireStagedProofSources();
-                if (Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") != "true")
+                if (replay.Length > 0)
                 {
-                    try
+                    stage?.Invoke("kernel replay");
+                    RequireStagedProofSources();
+                    if (Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") != "true")
                     {
-                        audited = AuditOleans(leanPath, auditModules, proofAudits,
-                            ImportPremise(extraction), replayTargets: replay);
+                        try
+                        {
+                            audited = AuditOleans(leanPath, auditModules, proofAudits,
+                                ImportPremise(extraction), replayTargets: replay);
+                        }
+                        catch (InvalidOperationException) { }
                     }
-                    catch (InvalidOperationException) { }
+                    // A rejected combined replay retains the original checker diagnostics.
+                    if (audited is null)
+                        ReplayCheckedModules(replay, leanPath,
+                            (proofRestored ? "Kernel replay of extraction: " : "Kernel replay: ") + entry);
                 }
-                // A rejected combined replay retains the original checker diagnostics.
-                if (audited is null)
-                    ReplayCheckedModules(replay, leanPath,
-                        (proofRestored ? "Kernel replay of extraction: " : "Kernel replay: ") + entry);
+                // The audit reads the replayed bytes; all source and artifact guards still follow it.
+                stage?.Invoke("theorem audit");
+                RequireStagedProofSources();
+                audited ??= AuditOleans(leanPath, auditModules, proofAudits, ImportPremise(extraction));
             }
-            // The audit reads the replayed bytes; all source and artifact guards still follow it.
-            stage?.Invoke("theorem audit");
-            RequireStagedProofSources();
-            audited ??= AuditOleans(leanPath, auditModules, proofAudits, ImportPremise(extraction));
+            finally
+            {
+                // The display process must exit before the artifact guard below and before its files are deleted.
+                try { viewing?.Wait(); }
+                catch (AggregateException) { }
+            }
+            viewed = viewing?.GetAwaiter().GetResult();
             RequireStagedProofSources();
             if (!Same(built, OleanHashes(fresh, session)))
                 throw new InvalidOperationException("Compiled artifacts changed during verification");
@@ -2974,11 +3066,9 @@ partial class Program : IDisposable
             RequireOriginalProofSources();
             if (!Same(before, Inputs(proof, settings)) || identityHash != Sha(Path.Combine(output, "identity.json")))
                 throw new InvalidOperationException("Inputs changed during verification");
-            // The display is read from the audited olean, after every check above, and never feeds a check.
-            var statementView = Path.Combine(fresh, StatementViewFile);
+            // The display is published only here, after every check above, and never feeds a check.
             if (viewsStatement)
-                VerifiedStatement = proofRestored && File.Exists(statementView) ? ReadStatementView(statementView)
-                    : ViewStatement(fresh, Path.Combine(fresh, "Proof.olean"), leanPath, proofSource, theorem);
+                VerifiedStatement = statementCached ? ReadStatementView(statementView) : viewed;
             if (!proofRestored)
             {
                 var publication = Path.Combine(fresh, "proof-cache");

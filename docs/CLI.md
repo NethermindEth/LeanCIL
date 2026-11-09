@@ -519,7 +519,30 @@ writing nothing; the message names the parameter, local, loop or test and what i
 
 ## Verify
 
-`verify` first checks the extraction artifacts, reuses an integrity-checked source-keyed library cache (or builds it on a cache miss), checks and kernel-replays the selected proof, and audits its transitive axioms. Use `--fresh` to bypass proof and support reuse while retaining the source-bound library cache. Use `--rebuild-library` to rebuild the library as well; CI bypasses the local library cache automatically. Interactive terminals receive build progress on stderr; stdout and redirected stderr retain their stable formats. Only `propext`, `Quot.sound` and `Classical.choice` are permitted. It checks artifact and source identity again before writing `artifacts/Add/verified.json`. Lean and Lake must be installed. The tool ships the framework's `CIL` sources only: proofs import `Extracted` (or a method's `Extracted.KEY`, see [Editor workspace](#editor-workspace)) and `CIL.*`, and `CIL.Safety.Memory.empty` is the caller memory with no allocations. LeanCIL's own example and test modules are not shipped; a proof importing one is rejected as `invalid-request`.
+`verify` first checks the extraction artifacts, reuses an integrity-checked source-keyed library cache (or builds it on a cache miss), checks and kernel-replays the selected proof, and audits its transitive axioms. Use `--fresh` to bypass proof and support reuse while retaining the source-bound library cache. Use `--rebuild-library` to rebuild the library as well; CI bypasses the local library cache automatically. Stdout carries only the report; stderr carries [stage progress](#stage-progress). Only `propext`, `Quot.sound` and `Classical.choice` are permitted. It checks artifact and source identity again before writing `artifacts/Add/verified.json`. Lean and Lake must be installed. The tool ships the framework's `CIL` sources only: proofs import `Extracted` (or a method's `Extracted.KEY`, see [Editor workspace](#editor-workspace)) and `CIL.*`, and `CIL.Safety.Memory.empty` is the caller memory with no allocations. LeanCIL's own example and test modules are not shipped; a proof importing one is rejected as `invalid-request`.
+
+### Stage progress
+
+Each Lean or Lake process `verify` and `workspace` start is a stage, and stderr reports it:
+
+- On a terminal: a `START` line, a `PROGRESS` line every 10 seconds, and an `END` line with the
+  exit code and duration.
+- When stderr is a file or a pipe: nothing for a stage shorter than 20 seconds, so a warm run
+  leaves stderr empty. A longer stage prints a `PROGRESS` line every 20 seconds and then its
+  `END` line.
+
+A `PROGRESS` line of a Lake build carries Lake's job count:
+
+```text
+PROGRESS Building fresh Lean verification library: 212 of 332 Lake jobs (240s)
+END Building fresh Lean verification library (exit 0, 501.7s)
+```
+
+A cache miss on the certified library first prints one line saying that the library is being
+built and kernel-replayed and where later runs reuse it from. The build compiles every framework
+module and replays all of them, because one library certifies every proof and proof dependency
+for that framework version; it takes several minutes. The cache is `LEANCIL_CACHE_DIR`, by
+default `<local application data>/LeanCIL/libraries`.
 
 The theorem defaults to `ExampleProof.correctness`; select another with `--theorem Namespace.theoremName`. The first invocation saves the selection in `artifacts/Add/verification.json`, independently of the generated success report:
 
@@ -728,8 +751,8 @@ certificate of the refutation, and also writes `failed.json` with kind
 ### Machine-readable verify output
 
 `leancil verify ... --format json` prints one JSON report on stdout instead of
-the text report, and nothing on stderr; the exit code is the same as without
-it. `--format text` is the default. The report has `schema` 1, `result`
+the text report, and nothing on stderr except [stage progress](#stage-progress);
+the exit code is the same as without it. `--format text` is the default. The report has `schema` 1, `result`
 (`verified` or `failed`), the `stage` that failed, the `theorem`, `method`,
 `proof` and `output`, and on success the `axioms` and `statement`. The proof's
 own Lean messages are in `messages`, and `rerun` repeats the run. `failures`
@@ -898,7 +921,12 @@ assembly name, signature, profile and initialization assumptions, so each method
 module and proofs of several methods stay open at once. After rebuilding the assembly, run it
 again to refresh the extraction in place, then restart the file in the editor. A proof outside
 any Lake package gets a package beside it that requires the bundled framework, so no
-`lake update` or `--proof-root` is needed. Verification accepts the keyed import only for the
+`lake update` or `--proof-root` is needed. A framework package that has no build yet receives a
+copy of the certified library's compiled modules, the library `verify` uses, so the framework is
+built once per machine and the editor build compiles only the extraction. On a machine without
+that library, the first `workspace` builds it, as the first `verify` would. Lake reuses a copied
+module only while it matches the package's sources, and no certificate reads the copy.
+Verification accepts the keyed import only for the
 extraction it checks and builds it as a re-export of `Extracted`. `new-proof` writes the same
 keyed import, so its outline opens in the editor as generated.
 
