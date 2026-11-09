@@ -20,7 +20,7 @@
       "module": "Proof",
       "source": {
         "file": "<proof>",
-        "line": 108,
+        "line": 107,
         "column": 2
       },
       "message": "cil_checked_steps took no step: the method or instruction lookup, or the first step, did not close; pass the lookup hypothesis, feature facts or step facts\nmemory : Memory\nsecond : Reference\namount : W64\nsecondLive : LiveObject memory second\n⊢ invoke Extracted.program 15 depositBoth\n      [Value.object ManagedReference.null, Value.object (ManagedReference.address second),\n        Value.scalar (CIL.Value.i64 amount)]\n      memory =\n    Except.error\n      { method := depositBoth, instruction := 2, fault := ExecutionFault.thrown \"System.NullReferenceException\" }",
@@ -77,7 +77,7 @@
     },
     {
       "file": "<proof>",
-      "line": 110,
+      "line": 109,
       "column": 0,
       "severity": "info",
       "text": "'ExampleProof.first_null_throws' depends on axioms: [propext, sorryAx, Quot.sound]"
