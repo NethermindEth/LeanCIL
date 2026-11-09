@@ -348,8 +348,7 @@ internal static partial class ProofOutline
             ParameterShape.Boolean => $".scalar (.i32 (if {parameter.Name} then 1 else 0))",
             ParameterShape.Narrow =>
                 $".scalar (.i32 ({parameter.Name}.{(parameter.Signed ? "signExtend" : "zeroExtend")} 32))",
-            ParameterShape.StructValue => $".scalar (.aggregate " +
-                $"(List.ofFn fun index : Fin {parameter.Width} => {parameter.Name}[index.val]))",
+            ParameterShape.StructValue => $".scalar (.aggregate (List.ofFn {parameter.Name}.get))",
             ParameterShape.Reference or ParameterShape.StructReference => $".reference (.address {parameter.Name})",
             ParameterShape.Object or ParameterShape.Array => $".object (.address {parameter.Name})",
             ParameterShape.WordArray => $".array {parameter.Name}",
