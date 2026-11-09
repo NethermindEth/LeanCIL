@@ -599,6 +599,8 @@ source/destination operands. Four unsupported/forged type-token cases were rejec
 extraction. Ten semantic tests cover initialization, permissions, lifetime, GC-sensitive storage,
 bounds, null references and partial overlap. The generic copy snapshot theorem and the full Lean
 library/semantic/automation build passed.
+Packed test inputs use explicitly unaligned stores to their managed field addresses, so constructing
+them does not require aligned reflection stores on ARM64 or interop marshaling of Boolean/char fields.
 
 Portable helper validation compares actual .NET results with extracted execution, covering
 power-of-two boundaries, zero/all-ones values, signed boundaries and negative/oversized rotation
