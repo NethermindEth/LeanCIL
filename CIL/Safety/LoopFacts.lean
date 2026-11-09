@@ -281,7 +281,8 @@ open Lean Elab Tactic Meta in
     * hypotheses `loopFactSides?` recognizes;
     * for `span : CheckedSpan`, `span.facts`, `span.length_nil` or `span.length_cons` when its
       values are `[]` or a cons, and `span.valid_within wellFormed frame` for each
-      `frame : LoopFrame` from its memory with that memory's `wellFormed` in context;
+      `frame : LoopFrame` from its memory with that memory's `wellFormed` in context; the same for
+      `span : WritableSpan` when its count is `0` or a successor;
     * for a formed reference, `Unsafe.Add` result, or span validity, element or slice equation at
       the caller memory of a `frame : LoopFrame` with that memory's `wellFormed` in context, the
       equation at the frame's memory (`LoopFrame.caller_form` and its kind), and for an `add`
@@ -387,6 +388,30 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
           candidates := candidates.push (`spanFacts,
             applied `CheckedSpan.valid_within #[fact, named formed, named frame],
             variables #[frameType.getArg! 2, arguments[1]!], #[frameType.getArg! 2], #[])
+    if type.isAppOfArity `CIL.Safety.WritableSpan 5 then
+      let subject := variables #[arguments[0]!, arguments[2]!]
+      if isLive arguments[0]! then
+        candidates := candidates.push
+          (`spanFacts, applied `WritableSpan.facts #[fact], subject, #[], #[])
+      let count := arguments[4]!.consumeMData
+      let literal (term : Expr) (value : Nat) : Bool := term.rawNatLit? == some value ||
+        (term.isAppOfArity ``OfNat.ofNat 3 && term.appFn!.appArg!.rawNatLit? == some value)
+      if count.isConstOf ``Nat.zero || literal count 0 then
+        candidates := candidates.push
+          (`spanLength, applied `WritableSpan.length_nil #[fact], subject, #[], #[])
+      else if count.isAppOfArity ``Nat.succ 1 ||
+          (count.isAppOfArity ``HAdd.hAdd 6 && literal count.appArg! 1) then
+        candidates := candidates.push
+          (`spanLength, applied `WritableSpan.length_cons #[fact], subject, #[], #[])
+      for (frame, frameType) in typed do
+        unless frameType.isAppOfArity `CIL.Safety.LoopFrame 6 &&
+          frameType.getArg! 1 == arguments[0]! do continue
+        for (formed, formedType) in typed do
+          unless formedType.isAppOfArity ``Memory.WellFormed 1 &&
+            formedType.appArg! == arguments[0]! do continue
+          candidates := candidates.push (`spanFacts,
+            applied `WritableSpan.valid_within #[fact, named formed, named frame],
+            variables #[frameType.getArg! 2, arguments[2]!], #[frameType.getArg! 2], #[])
     -- A reference check or address, or a caller fact a frame carries to its own memory. The
     -- caller's memory can be live too, since a frame's activation names its watermark.
     let hole : Term ← `(_)

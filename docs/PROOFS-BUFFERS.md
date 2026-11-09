@@ -26,6 +26,20 @@ the memory of a `LoopFrame` confined to no caller storage, and `span.tail_below`
 keeping the suffix checked in caller memory. The loop tactics take these facts from a `CheckedSpan`
 in context.
 
+A loop that writes a span from the front needs authority over its elements, not their contents.
+[`SpanWritable`](../CIL/Safety/SpanWrites.lean) `memory footprint view` is write access to every
+element of `view` with its bytes inside an entry of `footprint`; `SpanWritable.own` builds it over
+`view.footprint` from a `Writable` run, `SpanWritable.slice` keeps it for any slice and
+`SpanWritable.within` carries it into every `LoopFrame` memory.
+[`WritableSpan`](../CIL/Safety/SpanWrites.lean) `memory footprint view width count` adds the
+view's validity, mode, width and length, and `WritableSuffix` is a loop state over it.
+`span.length_nil` and `span.length_cons` decide the `Length != 0` guard, `span.tail` gives
+`Slice(1)`, and `frame.write_span_head wellFormed span x` stores `x` into the first element in the
+frame's memory, returning the element's address `view.reference = .address item`, the write and
+the frame after it. The loop tactics take the guard and validity facts from a `WritableSpan` in
+context. An invariant states the written prefix from the span's original base as
+`Filled state.memory base width (List.replicate done x) state.values.remaining` and extends it
+with `Filled.push`.
 Callee frames allocate locals above the caller's memory. For well-formed caller memory,
 `SpanView.validate_below`, `SpanView.slice_below` and `SpanContents.after_below` transport validity,
 successful slices and contents to any memory related by `MemoryBelow memory.nextIdentity`, such as
