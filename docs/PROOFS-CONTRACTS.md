@@ -425,8 +425,10 @@ into another index of its array, `Live.field_ne` separates an array from every o
 located field, so `apart_single` frames elements and fields across each other's stores, and
 `reads.facts formed` steps a load of what an earlier store wrote. `storableIn_after_confined` and
 `storableIn_of_allocations` carry a covariance check, and `formObject_of_allocations` with
-`allocations_of_setSlot` a formation, across later stores. `ReferenceArray.fresh` gives a fresh
-array from `newReferenceArray_ok`
+`allocations_of_setSlot` a formation, across later stores; `storableIn_of_confined` carries a
+check across an allocation from well-formed memory, and `entries_young` lets
+`Confined.forget_fresh` drop the elements of an array the method allocated.
+`ReferenceArray.fresh` gives a fresh array from `newReferenceArray_ok`
 as live with every element owned and null. `step_referenceArrayLength_eq`,
 `step_referenceArrayLoad_eq` and `step_referenceArrayStore_eq` step the three instructions.
 [NodePair](../Examples/Proofs/NodePair.lean) fills a fresh array and reads it back, with its

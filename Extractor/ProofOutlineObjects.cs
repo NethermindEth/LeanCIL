@@ -68,6 +68,13 @@ internal static partial class ProofOutline
         internal bool Opaque => Kind == AccessKind.Load && Field.Width is null && Target is null;
     }
 
+    /// <summary>A `newarr` of `Length` elements of the class `Scope` and `Name` quote, the first write of the body,
+    /// which binds the fresh array as `Array`.</summary>
+    sealed record Allocation(string Array, string Scope, string Name, int Length, int Stores)
+    {
+        internal string Element => Array + "Element";
+    }
+
     enum ElementKind { Length, Load, Store }
 
     /// <summary>An access of an array argument after `Stores` earlier writes: its length, or a load or store of the
@@ -125,12 +132,15 @@ internal static partial class ProofOutline
         /// <summary>A reference to an object outside the model, as the field it was loaded from names it before any
         /// write in a parenthesized `Term`, with the fact that it forms then.</summary>
         sealed record Opaque(string Term, string Formed) : Item;
-        /// <summary>An array argument of class references.</summary>
+        /// <summary>An array of class references: an argument, or one the body allocates.</summary>
         sealed record ArrayArgument(string Name) : Item;
 
-        /// <summary>The fact naming each element of an array argument the body loads or stores, by array and
-        /// index, shared by every path.</summary>
+        /// <summary>The fact naming each element of an array the body loads or stores, by array and index, shared
+        /// by every path.</summary>
         Dictionary<(string Array, string Index), string> Slots { get; init; } = [];
+
+        /// <summary>The array the body allocates, if any.</summary>
+        internal Allocation? Fresh { get; private set; }
 
         /// <summary>The value stored into each element fact, shared by every path.</summary>
         Dictionary<string, string> Stored { get; init; } = [];
@@ -187,7 +197,7 @@ internal static partial class ProofOutline
                     var (holds, fails) = takenWhenTrue ? (target, pc + 1) : (pc + 1, target);
                     var walks = new[] { holds, fails }.Select(next => (Next: next, Walk: new ObjectWalk(spec, ops,
                         views, callees, linear) { Objects = Objects, Slots = Slots, Stored = Stored, stores = stores,
-                        calls = calls, splits = splits + 1, previous = [.. PathSteps] })).ToArray();
+                        calls = calls, splits = splits + 1, Fresh = Fresh, previous = [.. PathSteps] })).ToArray();
                     Steps.Add(new Split($"branch{splits + 1}", condition, (location(holds), walks[0].Walk),
                         (location(fails), walks[1].Walk)));
                     foreach (var side in walks)
@@ -424,13 +434,28 @@ internal static partial class ProofOutline
                 {
                     if (Pop() is not ArrayArgument array) return Stop("`ldlen` of an array the outline cannot name");
                     Steps.Add(new ElementAccess(array.Name, ElementKind.Length, stores));
-                    stack.Add(new Word($"(BitVec.ofNat 64 {array.Name}Length)", 8));
+                    var length = array.Name == Fresh?.Array ? $"{Fresh.Length}" : array.Name + "Length";
+                    stack.Add(new Word($"(BitVec.ofNat 64 {length})", 8));
+                }
+                else if ((match = Regex.Match(op, @"\A\.newReferenceArray \(\.object (""[^""]*"") (""[^""]*"")\)\z"))
+                    .Success)
+                {
+                    // Facts stated of the caller's memory carry into the fresh one only across this first write.
+                    if (Pop() is not Word { Width: 4, Term: { } count } || !Numeral(count) || int.Parse(count) == 0)
+                        return Stop("`newarr` of a length that is not a positive literal");
+                    if (linear || stores > 0 || calls > 0 || Fresh is not null)
+                        return Stop("`newarr` after a write, a call or another allocation");
+                    Fresh = new Allocation("fresh1", match.Groups[1].Value, match.Groups[2].Value, int.Parse(count),
+                        stores);
+                    Steps.Add(Fresh);
+                    stores++;
+                    stack.Add(new ArrayArgument(Fresh.Array));
                 }
                 else if (op == ".memory .referenceArrayLoad")
                 {
                     if (Pop() is not Word index || Pop() is not ArrayArgument array || Index(index) is not { } at)
                         return Stop("`ldelem.ref` of an array or index the outline cannot name");
-                    if (Unseparated(array.Name, at) is { } reason) return Stop(reason);
+                    if ((Outside(array.Name, at) ?? Unseparated(array.Name, at)) is { } reason) return Stop(reason);
                     var slot = Slot(array.Name, at);
                     // The element holds what this path last stored into it, or what it held in the caller's memory.
                     if (PathSteps.OfType<ElementAccess>().LastOrDefault(access => access.Kind == ElementKind.Store &&
@@ -447,6 +472,14 @@ internal static partial class ProofOutline
                         stack.Add(reread);
                         continue;
                     }
+                    // Every element of a fresh array holds null until a store.
+                    if (array.Name == Fresh?.Array)
+                    {
+                        Steps.Add(new ElementAccess(array.Name, ElementKind.Load, stores, at, ".null", Slot: slot,
+                            Reread: true));
+                        stack.Add(new Null());
+                        continue;
+                    }
                     var held = new Opaque($"(ReferenceArray.of initial {array.Name} {at})", slot + "Forms.formed");
                     if (CallWrote) return Stop(Uncarried(held));
                     Steps.Add(new ElementAccess(array.Name, ElementKind.Load, stores, at, held.Term,
@@ -458,7 +491,7 @@ internal static partial class ProofOutline
                     var value = Pop();
                     if (Pop() is not Word index || Pop() is not ArrayArgument array || Index(index) is not { } at)
                         return Stop("`stelem.ref` into an array or at an index the outline cannot name");
-                    if (Unseparated(array.Name, at) is { } reason) return Stop(reason);
+                    if ((Outside(array.Name, at) ?? Unseparated(array.Name, at)) is { } reason) return Stop(reason);
                     if (value is Opaque late && CallWrote) return Stop(Uncarried(late));
                     var slot = Slot(array.Name, at);
                     ElementAccess? stored = value switch
@@ -580,6 +613,7 @@ internal static partial class ProofOutline
                     Access { Kind: AccessKind.Store } access => access,
                     CallStep call => call.Writes,
                     ElementAccess { Kind: ElementKind.Store } element => (object)element,
+                    Allocation allocation => allocation,
                     _ => null
                 }).OfType<object>().LastOrDefault();
                 return last is Access { Target: { } stored } access && access.Object == holder && access.Field == field
@@ -638,6 +672,16 @@ internal static partial class ProofOutline
         }
 
         static bool Numeral(string index) => Regex.IsMatch(index, @"\A\d+\z");
+
+        /// <summary>The element facts of `array`, with the index each names.</summary>
+        internal (string Slot, string Index)[] SlotsOf(string array) =>
+            [.. Slots.Where(pair => pair.Key.Array == array).Select(pair => (pair.Value, pair.Key.Index))];
+
+        /// <summary>Why element `index` of the fresh array is not one its proof names: an index that is not a
+        /// literal inside its length, which may throw.</summary>
+        string? Outside(string array, string index) =>
+            array == Fresh?.Array && !(Numeral(index) && int.Parse(index) < Fresh.Length)
+                ? $"an element `{index}` of `{array}` not provably inside its {Fresh.Length} elements" : null;
 
         /// <summary>The element number a named int32 index selects, as the CLR reads it: unsigned.</summary>
         static string? Index(Word index) => index switch
@@ -740,6 +784,15 @@ internal static partial class ProofOutline
                     if (owned) plan.Entries.Add($"ReferenceArray.entry {array.Name} {index}");
                 }
             }
+            // A fresh array is charged to the heap budget, and its elements are no memory of the caller's.
+            foreach (var made in Flattened.OfType<Allocation>().DistinctBy(made => made.Array))
+            {
+                plan.Premises.Add((made.Array + "Budget", $"CIL.objectFieldSlot * {made.Length} ≤ initial.heapBudget"));
+                foreach (var store in elements
+                    .Where(access => access.Array == made.Array && access.Storable is not null)
+                    .DistinctBy(access => access.Slot))
+                    plan.Premises.Add((store.Storable!, $"storableIn initial {made.Element} {store.Value} = .ok ()"));
+            }
             return plan;
         }
 
@@ -752,6 +805,19 @@ internal static partial class ProofOutline
     }
 
     static string Capitalized(string name) => char.ToUpperInvariant(name[0]) + name[1..];
+
+    /// <summary>A term's words, keeping each short innermost parenthesized group such as `(by decide)` whole, as
+    /// parts the writer may wrap between. A longer group splits so no part outgrows the line.</summary>
+    static string[] Terms(this string term) =>
+        [.. InnermostGroup()
+            .Replace(term, group => group.Length <= ShortGroup ? group.Value.Replace(' ', Glue) : group.Value)
+            .Split(' ').Select(part => part.Replace(Glue, ' '))];
+
+    const int ShortGroup = 40;
+    const char Glue = '\u0001';
+
+    [GeneratedRegex(@"\([^()]*\)")]
+    private static partial Regex InnermostGroup();
 
     /// <summary>The contract of a callee whose body the walk steps with no call of its own and at most one store,
     /// or reference field loads and no store: `pre` its facts, `post` its store and its result, and its proof.
@@ -903,8 +969,10 @@ internal static partial class ProofOutline
         }
         // A carried element fact also states what the element holds, starting from what it held in `initial`.
         var elements = walk.Flattened.OfType<ElementAccess>().Where(access => access.Slot is not null).ToArray();
-        var owned = elements.Where(access => access.Kind == ElementKind.Store).Select(access => access.Slot!)
-            .ToHashSet();
+        // Every element of a fresh array is owned, so its fact is a `Holds` from the allocation on.
+        var fresh = walk.Flattened.OfType<Allocation>().Select(made => made.Array).ToHashSet();
+        var owned = elements.Where(access => access.Kind == ElementKind.Store || fresh.Contains(access.Array))
+            .Select(access => access.Slot!).ToHashSet();
         foreach (var slot in elements.Select(access => access.Slot!).Distinct())
             known[(slot + "At", 0)] = owned.Contains(slot) ? $"({slot}.holds)" : $"({slot}.reads)";
         foreach (var array in spec.Arrays)
@@ -931,6 +999,7 @@ internal static partial class ProofOutline
             Carry(ObjectWalk.Fact(reached, field), stores, (previous, level) =>
             {
                 // No object with a located field is an array, so an element store is apart from every field.
+                if (stored[level - 1] is Allocation) return $"{previous}.after_confined framed{level} Nowhere";
                 if (stored[level - 1] is ElementAccess element)
                     return $"{previous}.after_confined framed{level} (ReferenceArray.apart_single (show " +
                         $"{reached.Name}.allocation ≠ {element.Array}.allocation from " +
@@ -959,8 +1028,12 @@ internal static partial class ProofOutline
                 Access store => $"{previous}.after_confined framed{level} (ReferenceArray.apart_single (show " +
                     $"{array}.allocation ≠ {store.Object.Name}.allocation from ({ArrayLive(array, level - 1)}" +
                     $".field_ne {FieldFact(store.Object, store.Field, level - 1)}.located rfl).symm))",
+                Allocation => $"{previous}.after_confined framed{level} Nowhere",
                 _ => throw new InvalidOperationException($"no carry of `{slot}` across write {level}")
             });
+
+        /// <summary>That nothing lies in the empty footprint an allocation writes.</summary>
+        const string Nowhere = "(fun _ member => nomatch member)";
 
         /// <summary>That write `level` keeps every allocation: a slot store's equation or a field write's.
         /// </summary>
@@ -974,8 +1047,10 @@ internal static partial class ProofOutline
             if (stores == 0 || formed == "rfl") return formed;
             var key = formed.EndsWith(".formed", StringComparison.Ordinal) ? formed[..^".formed".Length] : formed;
             known.TryAdd((key, 0), formed);
-            return Carry(key, stores, (previous, level) =>
-                $"(formObject_of_allocations {Kept(level)} _).trans {previous}");
+            // The allocation is the first write, so `initial`'s well-formedness dates what forms in it.
+            return Carry(key, stores, (previous, level) => stored[level - 1] is Allocation
+                ? $"formObject_of_confined framed{level} wellFormed {previous}"
+                : $"(formObject_of_allocations {Kept(level)} _).trans {previous}");
         }
 
         /// <summary>A store's covariance premise after `stores` writes: an object of the model keeps its class
@@ -985,7 +1060,9 @@ internal static partial class ProofOutline
             known.TryAdd((access.Storable!, 0), access.Storable!);
             return Carry(access.Storable!, stores, (previous, level) => access.Target is { } target
                 ? $"ReferenceArray.storableIn_after_confined {previous} framed{level} {Live(target, level - 1)}.old"
-                : $"(ReferenceArray.storableIn_of_allocations {Kept(level)} _ _).trans {previous}");
+                : stored[level - 1] is Allocation
+                    ? $"ReferenceArray.storableIn_of_confined {previous} framed{level} wellFormed {access.Formed}"
+                    : $"(ReferenceArray.storableIn_of_allocations {Kept(level)} _ _).trans {previous}");
         }
 
         string Carry(string key, int stores, Func<string, int, string> across)
@@ -995,7 +1072,7 @@ internal static partial class ProofOutline
             var previous = Carry(key, stores - 1, across);
             var carried = across(previous, stores);
             name = key + stores;
-            lean.Wrapped($"{indent}have {name} :=", carried.Split(' '), "");
+            lean.Wrapped($"{indent}have {name} :=", carried.Terms(), "");
             known[(key, stores)] = name;
             return name;
         }
@@ -1033,9 +1110,50 @@ internal static partial class ProofOutline
                     Element(element);
                     continue;
                 }
+                if (step is Allocation made)
+                {
+                    Allocate(made, walk.SlotsOf(made.Array));
+                    continue;
+                }
                 Access((Access)step);
             }
             Return(walk);
+        }
+
+        /// <summary>A `newarr` charged to the budget premise, confined to no caller memory, with a `Holds` of null
+        /// for each element the body touches; the array and memory it makes are generalized, the array with the
+        /// equation `Identity` that dates it after every caller allocation.</summary>
+        void Allocate(Allocation made, (string Slot, string Index)[] slots)
+        {
+            var number = made.Stores + 1;
+            var array = made.Array;
+            var created = $"(objectMemory initial (referenceArrayType {made.Element}) " +
+                $"(CIL.objectFieldSlot * {made.Length}))";
+            string Fresh(string index) =>
+                $"ReferenceArray.fresh initial {made.Element} (length := {made.Length}) (index := {index}) " +
+                "(by decide) (by decide)";
+            lean.Wrapped($"{indent}have {array}Allocated :=", ($"newReferenceArray_ok wellFormed {made.Element} " +
+                $"(value := .i32 {made.Length}) (length := {made.Length}) (Or.inl rfl) (by decide) (by decide) " +
+                $"{array}Budget").Terms(), "");
+            lean.Wrapped($"{indent}have {array}Created :=",
+                $"allocateObject_ok wellFormed (referenceArrayType {made.Element}) {array}Budget (by decide)".Terms(),
+                "");
+            lean.Wrapped($"{indent}have framed{number} :",
+                ($"Confined [] initial {created} := Confined.ofMemoryBelow " +
+                $"(allocateObject_effect {array}Created).below (Nat.le_refl _) (by simp [objectMemory])").Terms(), "");
+            foreach (var (slot, index) in slots) lean.Wrapped($"{indent}have {slot} :=", Fresh(index).Terms(), "");
+            var live = $"{array}Live{number}";
+            lean.Wrapped($"{indent}have {live} :=", $"({Fresh("0")}).1.toLive".Terms(), "");
+            var facts = string.Join(" ", slots.Select(slot => slot.Slot).Append(live));
+            lean.Wrapped($"{indent}generalize", $"{created} = stored{number}".Terms(),
+                $"at {array}Allocated framed{number} {facts}");
+            lean.Wrapped($"{indent}generalize {array}Identity :", ["(⟨initial.nextIdentity, 0⟩ : Reference)", "=",
+                array], $"at {array}Allocated {facts}");
+            foreach (var (slot, _) in slots) known[(slot + "At", number)] = slot;
+            known[(array + "Live", number)] = live;
+            Add(array + "Allocated");
+            Add(made.Element);
+            stored.Add(made);
         }
 
         /// <summary>An array argument's length or element access, with its facts carried across the writes
@@ -1187,6 +1305,19 @@ internal static partial class ProofOutline
                 .ToArray();
             var confined = widened.Length == 0 ? "Confined.refl _ _"
                 : widened.Skip(1).Aggregate(widened[0], (chain, next) => $"({chain}.trans {next})");
+            // Elements of a fresh array are no caller memory: the footprint forgets them.
+            if (stored.OfType<Allocation>().FirstOrDefault() is { } made)
+            {
+                var indices = stored.OfType<ElementAccess>().Where(access => access.Array == made.Array)
+                    .Select(access => access.Index!).Distinct().ToArray();
+                if (indices.Length > 0)
+                    confined = $"(Confined.forget_fresh (fresh := [{string.Join(", ", indices)}].map " +
+                        $"(ReferenceArray.entry {made.Array})) {confined} " +
+                        $"(ReferenceArray.entries_young {made.Array}Identity _))";
+            }
+            // A chain that forgets fresh entries is too long for one line, so it wraps between its terms.
+            string[] Parts(string tail) => stored.OfType<Allocation>().Any()
+                ? (confined + tail).Terms() : [confined + tail];
             // A returned object must still form in the memory the last store left.
             if (walk.Objects.FirstOrDefault(reached => $"(.address {reached.Name})" == walk.Returned) is { } result)
                 Add(Live(result, stored.Count) + ".formed");
@@ -1198,23 +1329,26 @@ internal static partial class ProofOutline
             if (returns is not null)
             {
                 lean.Wrapped(returns.Contains("?_", StringComparison.Ordinal) ? $"{indent}refine" : $"{indent}exact",
-                    [$"⟨{confined},", returns + "⟩"], "");
+                    [.. Parts(",").Select((part, index) => index == 0 ? "⟨" + part : part), returns + "⟩"], "");
                 return;
             }
             var boolean = spec.Result is { Boolean: true };
             lean.Wrapped(spec.Result is null ? $"{indent}refine ⟨rfl,"
                 : boolean ? $"{indent}refine ⟨?result, ?encoded," : $"{indent}refine ⟨_, rfl,",
-                [confined + ","], "?_⟩");
+                Parts(","), "?_⟩");
             if (boolean)
             {
                 // The returned word is computed, not named, so the author chooses the Bool it encodes.
                 lean.Noted(indent, "case result => sorry", "the Bool the returned word encodes");
                 lean.Noted(indent, "case encoded => sorry", "the returned word is that Bool's encoding");
             }
-            var held = string.Join(", ", Enumerable.Range(1, stored.Count).Select(index => $"`held{index}`"));
+            // An allocation writes nothing the caller holds, so it leaves no `held` fact.
+            var stores = Enumerable.Range(1, stored.Count).Where(index => stored[index - 1] is not Allocation)
+                .ToArray();
+            var held = string.Join(", ", stores.Select(index => $"`held{index}`"));
             lean.Noted(indent, "sorry", "Postcondition of the returned value" +
                 (branches.Count == 0 ? "" : " where " + string.Join(" and ", branches)) +
-                (stored.Count == 0 ? "" : $", with {held} the stored fields"));
+                (stores.Length == 0 ? "" : $", with {held} the stored fields"));
         }
     }
 }

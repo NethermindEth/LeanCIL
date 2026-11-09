@@ -323,7 +323,12 @@ comment saying which obligation it is:
   facts cross element stores, since no array has fields. An access after a store into another
   array, or into the same array at an index that is not a different literal, is a
   `not outlined:` hole, since the two may be one element; so is a reference outside the model used
-  after a call that writes. A method with a loop or a `newarr` is left to the author.
+  after a call that writes. A `newarr` of class references of a literal length, the body's first
+  write, adds the premise `CIL.objectFieldSlot * 2 ≤ initial.heapBudget` for its slots and a
+  `fresh1Element` def naming its element class; its elements start as owned nulls, the array is
+  `fresh1` with `fresh1Identity` dating it after every caller allocation, and the footprint
+  forgets its elements through `Confined.forget_fresh`. An index into it that is not a literal
+  below its length is a `not outlined:` hole, as is a method with a loop.
 - A call in a body over objects to a method that loads its fields, stores at most one word field of
   an object argument and returns a value it names gets a generated `MethodContract` read from that
   body, with a `Holds` theorem proved by the same stepping; `cil_contract_steps` composes the call

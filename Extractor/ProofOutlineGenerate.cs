@@ -416,11 +416,18 @@ internal static partial class ProofOutline
             ParameterShape.Object or ParameterShape.Array) && walk.Run(pc => Location(spec.Method, pc));
         if (stepped) spec.Plan = walk.Plan();
         string[] imports = ["CIL.Verification", "CIL.Safety.SymbolicExecution", "CIL.Safety.ObjectFields"];
-        if (spec.Arrays.Any()) imports = [.. imports, "CIL.Safety.ReferenceArrayElements"];
+        var fresh = stepped ? walk.Flattened.OfType<Allocation>().FirstOrDefault() : null;
+        if (spec.Arrays.Any() || fresh is not null) imports = [.. imports, "CIL.Safety.ReferenceArrayElements"];
         Header(lean, spec, imports, stepped ? "`postcondition`" : null);
         if (stepped)
             foreach (var callee in walk.Flattened.OfType<CallStep>().Select(call => call.Callee).Distinct())
                 CalleeContract(lean, callee, callee.Index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        if (fresh is not null)
+        {
+            lean.Doc($"The element class of the array `{spec.Method.Name}` allocates, as its `newarr` names it.");
+            lean.Wrapped($"def {fresh.Element} : CIL.Extraction.TypeExpr := .object", [fresh.Scope, fresh.Name], "");
+            lean.Line();
+        }
         spec.Placeholders(lean);
         spec.Footprint(lean);
         spec.Statement(lean);

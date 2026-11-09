@@ -884,7 +884,9 @@ var outlined = new (string Name, string? Selector)[]
     // Element facts carried across element and field stores: a load after them reads back what was stored.
     ("ElementShift", "NodeArrays::Shift(Examples.Node[],Examples.Node)"),
     ("ElementInstall", "NodeArrays::Install(Examples.Node[],System.Int32,Examples.Node,System.UInt64)"),
-    ("ElementStamp", "TagArrays::Stamp(System.String[],Examples.Tagged,System.UInt64)")
+    ("ElementStamp", "TagArrays::Stamp(System.String[],Examples.Tagged,System.UInt64)"),
+    // A fresh array charged to the heap budget, filled and read back, forgotten by the footprint.
+    ("FreshPair", "NodeArrays::Pair(Examples.Node,Examples.Node)")
 };
 var outlineTimer = System.Diagnostics.Stopwatch.StartNew();
 var outlineRoot = Path.Combine(root, "Outlines");
@@ -1773,7 +1775,16 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
             "    ReferenceArray.Holds final tags tagsElement tagsLength 1 (ReferenceArray.of initial tags 0)"),
         ("sorry -- Postcondition of the returned value, with `held1`, `held2` the stored fields",
             "exact ⟨held1.after_confined framed2 (ReferenceArray.apart_single (show\n" +
-            "      tagged.allocation ≠ tags.allocation from tagsLive1.field_ne held1.1.located rfl)), held2⟩")])
+            "      tagged.allocation ≠ tags.allocation from tagsLive1.field_ne held1.1.located rfl)), held2⟩")]),
+    // The second node comes back, and the caller's memory is confined to nothing.
+    ("FreshPair", [
+        ("def Precondition (first second : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (_ _ : Reference) (_ : Memory) : Prop := True"),
+        ("def Postcondition (first second : Reference) (initial final : Memory) (result : ManagedReference)\n" +
+            "    : Prop := sorry",
+            "def Postcondition (_ second : Reference) (_ _ : Memory) (result : ManagedReference) : Prop :=\n" +
+            "  result = .address second"),
+        ("sorry -- Postcondition of the returned value, with `held2`, `held3` the stored fields", "rfl")])
 })
 {
     var source = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
@@ -1800,7 +1811,8 @@ Console.WriteLine("PASS filled outlines verify with only their specification wri
     "a checked add, a base-two logarithm, a signed checked add, splits on unsigned and signed tests of words, " +
     "a field store through a struct receiver at offsets 0 and 8, a string reference copied, " +
     "tested for null and compared, a null store before returning the node it held, an array argument's element " +
-    "load, length and covariance-checked store, and element facts carried across element and field stores");
+    "load, length and covariance-checked store, element facts carried across element and field stores, and " +
+    "an array the method allocates, fills and reads back");
 
 // A written footprint that leaves out the element a loop writes is an error at the write, never an admission.
 var narrowed = Path.Combine(outlineRoot, "FillWords", "Narrowed.lean");

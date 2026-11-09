@@ -369,6 +369,31 @@ theorem storableIn_of_allocations {before after : Memory}
   cases value <;> simp only [storableIn, liveAllocation, same]
 #print axioms storableIn_of_allocations
 
+/-- A reference that forms in well-formed memory passes a covariance check after a confined call,
+    such as an allocation, as it did before: it names an allocation the call keeps. -/
+theorem storableIn_of_confined {footprint : List (Reference × Nat)} {before after : Memory}
+    {element : CIL.Extraction.TypeExpr} {value : ManagedReference}
+    (storable : storableIn before element value = .ok ())
+    (framed : Confined footprint before after) (formedMemory : before.WellFormed)
+    (formed : formObject before value = .ok (.object value)) :
+    storableIn after element value = .ok () := by
+  cases value with
+  | null => rfl
+  | address target =>
+    exact storableIn_after_confined storable framed (formedMemory.object_below formed)
+#print axioms storableIn_of_confined
+
+/-- Every element entry of an array allocated at `memory.nextIdentity` lies in an allocation
+    younger than all of `memory`'s, so a caller's footprint may forget it. -/
+theorem entries_young {memory : Memory} {array : Reference}
+    (fresh : (⟨memory.nextIdentity, 0⟩ : Reference) = array) (indices : List Nat) :
+    ∀ written ∈ indices.map (entry array), memory.nextIdentity ≤ written.1.allocation := by
+  subst fresh
+  intro written member
+  obtain ⟨_, _, rfl⟩ := List.mem_map.mp member
+  exact Nat.le_refl _
+#print axioms entries_young
+
 /-- A slot store keeps every allocation, so what reads only allocations reads alike after it. -/
 theorem allocations_of_setSlot {before after : Memory} {field : Reference}
     {value : ManagedReference} (wrote : setSlot before field value = after) :
