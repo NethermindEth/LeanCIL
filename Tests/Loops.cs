@@ -1268,25 +1268,25 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
             """,
             """
             /-- The words copied: those before the first zero, or all of them. -/
-            def copied (values : List W32) : List W32 := values.takeWhile (· ≠ 0)
+            def copied (values : List W32) : List W32 := values.takeWhile (· ≠ 0#32)
 
             /-- The count of copied words, with bit 31 set exactly when a zero ended the copy. -/
             def answer (values : List W32) : W32 :=
               let count := BitVec.ofNat 32 (copied values).length
-              if (0 : W32) ∈ values then count ||| 0x80000000 else count
+              if 0#32 ∈ values then count ||| 0x80000000 else count
 
             /-- Copying is unaffected by a nonzero prefix. -/
-            theorem copied_append {done : List W32} (nonzero : (0 : W32) ∉ done) (rest : List W32) :
+            theorem copied_append {done : List W32} (nonzero : 0#32 ∉ done) (rest : List W32) :
                 copied (done ++ rest) = done ++ copied rest :=
               List.takeWhile_append_of_pos fun word mem => by
-                simpa using fun same : word = 0 => nonzero (same ▸ mem)
+                simpa using fun same : word = 0#32 => nonzero (same ▸ mem)
 
             /-- A nonzero word after a nonzero prefix is copied. -/
-            theorem copy_bound {values done tail : List W32} {head : W32} (nonzero : (0 : W32) ∉ done)
-                (more : ¬head = 0) (split : values = done ++ head :: tail) :
+            theorem copy_bound {values done tail : List W32} {head : W32} (nonzero : 0#32 ∉ done)
+                (more : ¬head = 0#32) (split : values = done ++ head :: tail) :
                 done.length < (copied values).length := by
               rw [split, copied_append nonzero]
-              simp -bitVecOfNat [copied, more]
+              simp [copied, more]
 
             /-- The output has room for the copied words, apart from the span. -/
             def Precondition (values1 : SpanView) (values1Elements : List W32) (argument1 : Reference)
@@ -1316,7 +1316,7 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
         ("    (state : State memory written home0 home1) : Prop := sorry",
             """
                 (state : State memory written home0 home1) : Prop :=
-              ∃ done, values1Elements = done ++ state.values.2.2.2.values ∧ (0 : W32) ∉ done ∧
+              ∃ done, values1Elements = done ++ state.values.2.2.2.values ∧ 0#32 ∉ done ∧
                 state.values.1.toNat = done.length ∧ state.values.2.1 = 0 ∧
                 Filled state.memory argument1 4 done (copied state.values.2.2.2.values).length ∧
                 SpanApart state.values.2.2.2.view (argument1, 4 * (copied values1Elements).length)
@@ -1463,7 +1463,7 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
                     obtain ⟨done, split, nonzero, counted, stopped, filled, apart⟩ := holds
                     have room : (copied (values1Head :: values1Tail)).length =
                         (copied values1Tail).length + 1 := by
-                      simp -bitVecOfNat [copied, branch2]
+                      simp [copied, show values1Head ≠ 0#32 from branch2]
                     have old := wellFormed.form_bound argument1Form
                     have atCalled := (filled.after_below storedBelow old).after_confined confined
                       storedFrame.wellFormed (by
