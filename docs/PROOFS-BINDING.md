@@ -101,7 +101,8 @@ whose facts a proof selects by field:
 A proof opens it with `obtain ⟨home0, entered, enter⟩ := entry.checked ...` and reads
 `enter.setup`, `enter.frame` and the other fields by name; the loop tactics read the fields of an
 `entry.Checked` hypothesis as they read hypotheses. This form generates no
-`entry.result`, `entry.memory` or `homeN` abbreviations, while span, root and object slots stillget `slotN`, `loadN` and `storeN`. `entry.setup` is the setup equation given each home's allocation
+`entry.result`, `entry.memory` or `homeN` abbreviations, while span, root and object slots still
+get `slotN`, `loadN` and `storeN`. `entry.setup` is the setup equation given each home's allocation
 equation `madeN` and `kept`; it is the proof that derived the frame, so `entry.checked` reuses it
 instead of normalizing frame setup again. Homes are threaded through
 [`make_numeric_entry_local`](../CIL/Safety/NumericLocals.lean), and a fact `valid : view.validate

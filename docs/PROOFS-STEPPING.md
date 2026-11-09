@@ -393,9 +393,9 @@ the stored-over memory, or about the caller's, at the new one under the same nam
 invariant reads them at the memory it is stated at. All gather facts as the other loop tactics
 do, so the lists are optional.
 `loop_terminates_call_formed` gives the continuation, after the call's `CallResult`, its
-`FrameInvariants` (`formed`, `staticWorld` and `classes`) when a proof composes the call by hand. The [counted-loop
-proof](../Examples/Proofs/CountCalls.lean) never unfolds the helper or names its fuel; the loop
-suite reuses it unedited for a reimplemented helper and requires it to reject a discarded helper
+`FrameInvariants` (`formed`, `staticWorld` and `classes`) when a proof composes the call by hand.
+The [counted-loop proof](../Examples/Proofs/CountCalls.lean) never unfolds the helper or names its
+fuel; the loop suite reuses it unedited for a reimplemented helper and requires it to reject a discarded helper
 result and a broken count. On the correct build, a nondecreasing measure and an invariant that holds
 at entry and exit but is not preserved each fail at exactly that obligation.
 
