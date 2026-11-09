@@ -33,9 +33,10 @@ def refillContract : MethodContract (Reference × Reference × Nat) where
 /-- `Refill` meets its contract: one `stfld` of the field's slot. -/
 theorem correctness : refillContract.Holds Extracted.program refill := by
   rintro ⟨samples, values, length⟩ memory ⟨owned, whole⟩
-  dsimp only [refillContract] at *
   obtain ⟨stored, framed, held⟩ := owned.store_whole whole
-  refine ⟨CIL.executionBound Extracted.program refill, _, [], ?_, framed, [], rfl, rfl, held⟩
+  refine MethodContract.Holds.intro _ []
+    ⟨CIL.executionBound Extracted.program refill, ?_⟩ framed ⟨rfl, held⟩
+  dsimp only [refillContract]
   cil_checked_steps [owned.live.formed, owned.located, stored, whole.valid]
 
 #print axioms correctness

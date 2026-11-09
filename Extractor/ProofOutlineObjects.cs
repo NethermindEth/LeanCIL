@@ -1430,16 +1430,16 @@ internal static partial class ProofOutline
         void Enter(ObjectFrameEntry entered)
         {
             var homes = Enumerable.Range(0, frame!.Locals).Select(index => $"localHome{index}").ToArray();
-            var pattern = homes.Concat(["stored1", "setup"]).Concat(homes.Select(_ => "-"))
-                .Concat(["entryMemory", "entryFrames"]);
+            var pattern = homes.Concat(["stored1", "enter"]);
             lean.Wrapped($"{indent}obtain ⟨{string.Join(", ", pattern)}⟩ :=",
                 new[] { frame.Entry + ".checked", "initial" }
                     .Concat(spec.Parameters.Select(parameter => parameter.Name))
                     .Concat(["wellFormed"]).Concat(spec.Parameters
                         .Where(parameter => parameter.Shape == ParameterShape.WordArray)
                         .Select(array => array.Name + "Valid")), "");
-            lean.Line($"{indent}have frameFacts1 := entryFrames {frame.Footprint}");
-            lean.Line($"{indent}have below1 := entryMemory.kept");
+            lean.Line($"{indent}have setup := enter.setup");
+            lean.Line($"{indent}have frameFacts1 := enter.frame {frame.Footprint}");
+            lean.Line($"{indent}have below1 := enter.entryMemory.kept");
             Add("setup");
             Add(frame.Entry + ".frame");
             lean.Line($"{indent}refine invoke_exists_of_run (by cil_lookup [])");
@@ -1646,15 +1646,20 @@ internal static partial class ProofOutline
             Add($"{call.Callee.Name}Contract");
             if (frame is null) Add("leaveFrame");
             else Add($"frameFacts{call.Stores}.wellFormed");
+            var number = call.Number;
+            // The memory after the call is named for the specification: a store's, or the caller's own.
+            var after = call.Writes is { } written ? $"stored{written.Stores + 1}"
+                : call.Callee.Walk.NumericHomes ? $"stored{call.Stores + 1}" : $"called{number}";
             lean.Wrapped($"{indent}cil_contract_steps", FactList(facts), "");
+            lean.Line($"{indent}  with {after} output{number} call{number}");
             if (frame is null) facts.Clear();
             Add(call.Callee.Name + "Contract");
-            var number = call.Number;
             if (call.Writes is { } writes)
             {
                 var index = writes.Stores + 1;
-                lean.Line($"{indent}rename_i stored{index} framed{index} output{number} held{index} " +
-                    (frame is null ? "_" : $"invoked{number}"));
+                lean.Line($"{indent}have framed{index} := call{number}.framed");
+                lean.Line($"{indent}have held{index} := call{number}.post");
+                if (frame is not null) lean.Line($"{indent}have invoked{number} := call{number}.invoked");
                 lean.Line($"{indent}dsimp only [{call.Callee.Name}Contract] at framed{index} held{index}");
                 if (frame is not null)
                 {
@@ -1673,7 +1678,9 @@ internal static partial class ProofOutline
             if (call.Callee.Walk.NumericHomes)
             {
                 var index = call.Stores + 1;
-                lean.Line($"{indent}rename_i stored{index} framed{index} output{number} post{number} invoked{number}");
+                lean.Line($"{indent}have framed{index} := call{number}.framed");
+                lean.Line($"{indent}have post{number} := call{number}.post");
+                lean.Line($"{indent}have invoked{number} := call{number}.invoked");
                 lean.Line($"{indent}dsimp only [{call.Callee.Name}Contract] at framed{index} post{number}");
                 CarryCallFrame(call, index);
                 lean.Wrapped($"{indent}have below{index} :=", [$"framed{index}.nil_memoryBelow.weaken",
@@ -1687,7 +1694,7 @@ internal static partial class ProofOutline
                 stored.Add(call);
                 return;
             }
-            lean.Line($"{indent}rename_i called{number} _ output{number} post{number} _");
+            lean.Line($"{indent}have post{number} := call{number}.post");
             lean.Line($"{indent}dsimp only [{call.Callee.Name}Contract] at post{number}");
             // The memory after the call is the caller's: keep the name the specification uses.
             if (call.Callee.Walk.Returned is not null && call.Found.Length > 0)

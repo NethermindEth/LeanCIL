@@ -32,10 +32,12 @@ def bumpContract : MethodContract (Reference × W64) where
 /-- `Bump` meets its contract for every live account and amount. -/
 theorem bump_holds : bumpContract.Holds Extracted.program bump := by
   rintro ⟨account, amount⟩ memory owned
-  dsimp only [bumpContract] at *
+  dsimp only [bumpContract] at owned
   obtain ⟨after, written, framed, held⟩ :=
     owned.store (Account.Balance.of memory account + amount)
-  refine ⟨CIL.executionBound Extracted.program bump, after, [], ?_, framed, [], rfl, rfl, held⟩
+  refine MethodContract.Holds.intro after []
+    ⟨CIL.executionBound Extracted.program bump, ?_⟩ framed ⟨rfl, held⟩
+  dsimp only [bumpContract]
   cil_checked_steps [owned.facts, written]
 
 #print axioms bump_holds
@@ -63,13 +65,15 @@ theorem bumpBoth_holds (holds : bumpContract.Holds Extracted.program bump) :
   rintro ⟨first, second, amount⟩ memory ⟨firstOwned, secondOwned⟩
   dsimp only [bumpBothContract]
   cil_contract_steps [holds, bumpContract, firstOwned, firstOwned.facts, secondOwned.facts]
-  rename_i middle firstFramed values firstPost _
-  obtain ⟨rfl, firstHeld⟩ := firstPost
+    with middle values firstCall
+  obtain ⟨rfl, firstHeld⟩ := firstCall.post
+  have firstFramed := firstCall.framed
   have secondHeld := secondOwned.across firstOwned.live firstFramed firstHeld
   dsimp only [bumpContract]
   cil_contract_steps [holds, bumpContract, secondHeld.1, secondHeld.1.facts]
-  rename_i final secondFramed values secondPost _
-  obtain ⟨rfl, secondFinal⟩ := secondPost
+    with final values secondCall
+  obtain ⟨rfl, secondFinal⟩ := secondCall.post
+  have secondFramed := secondCall.framed
   dsimp only [bumpContract] at firstFramed secondFramed ⊢
   cil_contract_steps []
   change Confined _ memory final ∧

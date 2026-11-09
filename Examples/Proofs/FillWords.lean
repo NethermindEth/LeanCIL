@@ -42,13 +42,13 @@ theorem fill_words (initial : Memory) (base : Reference) (v : W64) (n : W32)
         [.reference (.address base), .scalar (.i64 v), .scalar (.i32 n)] initial = .ok (final, []) ∧
       Contents final base 8 (List.replicate n.toNat (v : BitVec (8 * 8))) ∧
       Confined [(base, 8 * n.toNat)] initial final := by
-  obtain ⟨home, entered, setup, -, entryMemory, entryFrame⟩ :=
+  obtain ⟨home, entered, enter⟩ :=
     entry.checked initial base v n formed
   have old := formed.form_bound valid
-  obtain ⟨m0, stored0, frame0, below0⟩ := (entryFrame [(base, 8 * n.toNat)]).store 0 (.i32 0) rfl
+  obtain ⟨m0, stored0, frame0, below0⟩ := (enter.frame [(base, 8 * n.toNat)]).store 0 (.i32 0) rfl
   have loaded0 := frame0.load 0
-  have room := (writable.after_below entryMemory.kept old).after_below below0 old
-  refine invoke_loop_results (by rfl) ?_ setup (header initial base home n)
+  have room := (writable.after_below enter.entryMemory.kept old).after_below below0 old
+  refine invoke_loop_results (by rfl) ?_ enter.setup (header initial base home n)
     (invariant initial base home v n) (fun s => n.toNat - s.values.toNat) ⟨0, m0, frame0⟩
     (by cil_loop_steps [entry.frame, header, guard, stored0, loaded0])
     ⟨by simpa using Filled.start room, by simp⟩ ?_

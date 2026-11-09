@@ -115,20 +115,22 @@ theorem contract_steps_until_postcondition (frame : Frame) (memory : Memory)
 
 theorem mix_holds : mixContract.Holds Extracted.program mix := by
   rintro ⟨x, y⟩ m -
+  refine MethodContract.Holds.intro m _ ⟨8, ?_⟩ (Confined.refl _ m) rfl
   dsimp only [mixContract]
-  refine ⟨8, m, _, ?_, Confined.refl _ m, _, rfl, rfl⟩
   cil_checked_steps
 
 theorem add_holds : addContract.Holds Extracted.program addTo := by
   rintro ⟨a, b, res, x, y⟩ m ⟨readA, readB, writable⟩
-  dsimp only [addContract] at *
+  dsimp only [addContract] at readA readB writable
   obtain ⟨stored, wrote, store, readback⟩ := store_word64 (x + y) writable
   have fa := access_reference_valid _ _ _ _ _ (read_access readA)
   have fb := access_reference_valid _ _ _ _ _ (read_access readB)
   have fr := access_reference_valid _ _ _ _ _ writable
   have la := load_word64_of_read readA
   have lb := load_word64_of_read readB
-  refine ⟨9, stored, [], ?_, Confined.write wrote (by simp [numberBytes]), _, rfl, rfl, readback⟩
+  refine MethodContract.Holds.intro stored _
+    ⟨9, ?_⟩ (Confined.write wrote (by simp [addContract, numberBytes])) ⟨rfl, readback⟩
+  dsimp only [addContract]
   cil_checked_steps [fa, fb, fr, la, lb, store]
 
 set_option maxHeartbeats 400000 in
@@ -146,7 +148,10 @@ theorem root_holds (mixHolds : mixContract.Holds Extracted.program mix)
   case precondition => exact ⟨readR, readB, writable⟩
   case wellFormed => exact formed
   -- The call supplies `m1.WellFormed`, which `mixContract.pre` needs; `addContract.post` does not state it.
-  rintro m1 _ - formed1 - - framed1 ⟨_, rfl, rfl, readR1⟩
+  intro m1 sum added kept
+  obtain ⟨rfl, readR1⟩ := added.post
+  have formed1 := kept.formed
+  have framed1 := added.framed
   have readB1 : read m1 b 8 1 = .ok (numberBytes y.toNat 8) :=
     (framed1.read_eq b bOld 8 1 disjoint.outside).trans readB
   have writable1 : access m1 r 8 1 true = .ok () := (framed1.access_write r rOld 8 1).trans writable
@@ -157,7 +162,9 @@ theorem root_holds (mixHolds : mixContract.Holds Extracted.program mix)
   cil_contract_steps [fr1, fb1, lr1, lb1]
   cil_contract_call mixHolds (x + y, y) at mixSite []
   case precondition => exact formed1
-  rintro m2 _ - framed2 ⟨_, rfl, rfl⟩
+  intro m2 mixed call
+  obtain rfl := call.post
+  have framed2 := call.framed
   dsimp only [mixContract]
   have writable2 : access m2 r 8 1 true = .ok () :=
     (framed2.access_write r (Nat.lt_of_lt_of_le rOld framed1.grows) 8 1).trans writable1
@@ -199,12 +206,13 @@ theorem call_keeps_caller_read (body : CIL.Method) (args : List Value) (m entere
 #print axioms root_correct
 #print axioms frame_confined
 
-example (program : CIL.Program) (before after : Memory) :
-    FrameInvariants program before after =
-      (after.WellFormed ∧ (StaticWorldValid (programStaticDescriptors program) before →
-        StaticWorldValid (programStaticDescriptors program) after) ∧
-        ∀ catalog, ObjectSitesConsistent catalog program →
-          before.ClassesConsistent catalog → after.ClassesConsistent catalog) := rfl
+example (program : CIL.Program) (before after : Memory)
+    (kept : FrameInvariants program before after) :
+    after.WellFormed ∧ (StaticWorldValid (programStaticDescriptors program) before →
+      StaticWorldValid (programStaticDescriptors program) after) ∧
+      ∀ catalog, ObjectSitesConsistent catalog program →
+        before.ClassesConsistent catalog → after.ClassesConsistent catalog :=
+  ⟨kept.formed, kept.staticWorld, kept.classes⟩
 
 example (program : CIL.Program) (memory : Memory) (formed : memory.WellFormed) :
     FrameInvariants program memory memory :=
@@ -212,12 +220,10 @@ example (program : CIL.Program) (memory : Memory) (formed : memory.WellFormed) :
 
 example (program : CIL.Program) (before after : Memory) (formed : after.WellFormed)
     (preserved : StaticWorldPreserved program before after)
-    (classes : ClassesPreserved program before after) : FrameInvariants program before after := by
-  refine ⟨formed, ?_, ?_⟩
-  · intro world
-    exact preserved world
-  · intro catalog sites consistent
-    exact classes catalog sites consistent
+    (classes : ClassesPreserved program before after) : FrameInvariants program before after where
+  formed := formed
+  staticWorld world := preserved world
+  classes catalog sites consistent := classes catalog sites consistent
 
 example {program : CIL.Program} {first middle last : Memory}
     (left : StaticWorldPreserved program first middle) (right : StaticWorldPreserved program middle last) :

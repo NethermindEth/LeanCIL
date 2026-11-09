@@ -71,8 +71,8 @@ def rootContract : MethodContract RootInput where
 /-- Proved once on the unlinked program; every linked program reuses it through `extend`. -/
 theorem mix_holds : mixContract.Holds Extracted.program mix := by
   rintro ⟨x, y⟩ m -
+  refine MethodContract.Holds.intro m _ ⟨8, ?_⟩ (Confined.refl _ m) rfl
   dsimp only [mixContract]
-  refine ⟨8, m, _, ?_, Confined.refl _ m, _, rfl, rfl⟩
   cil_checked_steps
 
 /-- The import's contract is the only assumption about `AddTo`; no body is fixed at its slot. -/
@@ -93,7 +93,10 @@ theorem root_given : HoldsGiven Extracted.program importsAdd (fun linked => root
   cil_formed_call addHolds ⟨r, b, r, x, y⟩ at addSite [fr, fb]
   · exact ⟨readR, readB, writable⟩
   · exact formed
-  rintro m1 _ - formed1 - - framed1 ⟨_, rfl, rfl, readR1⟩
+  intro m1 sum added kept
+  obtain ⟨rfl, readR1⟩ := added.post
+  have formed1 := kept.formed
+  have framed1 := added.framed
   have readB1 : read m1 b 8 1 = .ok (numberBytes y.toNat 8) :=
     (framed1.read_eq b bOld 8 1 disjoint.outside).trans readB
   have writable1 : access m1 r 8 1 true = .ok () := (framed1.access_write r rOld 8 1).trans writable
@@ -104,7 +107,9 @@ theorem root_given : HoldsGiven Extracted.program importsAdd (fun linked => root
   cil_contract_steps [fr1, fb1, lr1, lb1]
   cil_contract_call mixHolds (x + y, y) at mixSite []
   · exact formed1
-  rintro m2 _ - framed2 ⟨_, rfl, rfl⟩
+  intro m2 mixed call
+  obtain rfl := call.post
+  have framed2 := call.framed
   dsimp only [mixContract]
   generalize (x + y) * 3 + y = v
   have writable2 : access m2 r 8 1 true = .ok () :=
@@ -257,7 +262,8 @@ theorem strict_given :
       cil_outcome_call percentHolds 0 at percentSite []
       · trivial
       · simp only [percentContract, within, ite_true]
-      rintro m1 _ - - ⟨_, rfl, rfl⟩
+      intro m1 out call
+      obtain rfl := call.post
       dsimp only [percentContract]
       cil_raise_steps [CIL.truth]
     · simp only [strictContract, strictRaises, within, zero, ite_true, ite_false]
@@ -265,12 +271,13 @@ theorem strict_given :
       cil_outcome_call percentHolds v at percentSite []
       · trivial
       · simp only [percentContract, within, ite_true]
-      rintro m1 _ - confined ⟨out, rfl, same⟩
+      intro m1 out call
+      have same := call.post
       subst out
       dsimp only [percentContract]
       have truth : CIL.truth (.i64 v) = some true := by simp [CIL.truth]; exact zero
       cil_contract_steps [truth]
-      exact ⟨confined, _, rfl, rfl⟩
+      exact ⟨call.framed, _, rfl, rfl⟩
   · simp only [strictContract, strictRaises, within, ite_false]
     cil_raise_steps []
     cil_outcome_raise percentHolds v at percentSite []
@@ -295,11 +302,12 @@ theorem root_given :
     cil_outcome_call strictHolds v at strictSite []
     · trivial
     · exact raised
-    rintro m1 _ - confined ⟨out, rfl, same⟩
+    intro m1 out call
+    have same := call.post
     subst out
     dsimp only [strictContract]
     cil_contract_steps []
-    exact ⟨confined, _, rfl, rfl⟩
+    exact ⟨call.framed, _, rfl, rfl⟩
 
 @[cil_code] def percentBody : CIL.Method := { returnsValue := true, locals := [], code :=
   [.arg 0, .const32 (BitVec.ofInt 32 100), .convI8, .bleu 7, .nop, .nop,

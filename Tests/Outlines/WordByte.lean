@@ -62,7 +62,8 @@ theorem correctness (receiver : Reference) (index : W32) (receiverWordTarget : R
       receiverWord.facts receiverWordHeld receiverWordTargetLive, receiverWordTargetLive,
       receiverWordTargetLive.formed, receiverWordTargetBits, get_Bits_holds, get_BitsContract,
       leaveFrame]
-  rename_i called1 _ output1 post1 _
+    with called1 output1 call1
+  have post1 := call1.post
   dsimp only [get_BitsContract] at post1
   obtain ⟨post1, rfl⟩ := post1
   subst called1

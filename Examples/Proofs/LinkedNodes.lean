@@ -50,9 +50,10 @@ def secondValueContract : MethodContract Reference W64 where
 /-- `Link` meets its contract: one `stfld` into the `Next` slot. -/
 theorem link_holds : linkContract.Holds Extracted.program link := by
   rintro ⟨node, next⟩ memory ⟨owned, nextLive⟩
-  dsimp only [linkContract] at *
   obtain ⟨stored, framed, held⟩ := owned.store nextLive
-  refine ⟨CIL.executionBound Extracted.program link, _, [], ?_, framed, [], rfl, rfl, held⟩
+  refine MethodContract.Holds.intro _ []
+    ⟨CIL.executionBound Extracted.program link, ?_⟩ framed ⟨rfl, held⟩
+  dsimp only [linkContract]
   cil_checked_steps [owned.live.formed, owned.located, nextLive.formed, stored]
 
 #print axioms link_holds
@@ -159,16 +160,17 @@ theorem linkedValue_holds (linked : linkContract.Holds Extracted.program link)
   dsimp only [linkedValueContract]
   have nextLive := nextReadable.live
   cil_contract_steps [linked, linkContract, owned, nextLive, owned.live.formed, nextLive.formed]
-  rename_i middle linkFramed values linkPost _
-  obtain ⟨rfl, held⟩ := linkPost
+    with middle values linkCall
+  obtain ⟨rfl, held⟩ := linkCall.post
+  have linkFramed := linkCall.framed
   dsimp only [linkContract] at linkFramed
   have kept := value_after_link nextReadable linkFramed
   have linked : secondValueContract.pre node middle := ⟨held.1.toReadable, next, held.2, kept.1⟩
   cil_contract_steps [second, secondValueContract, linked, held.1.live.formed]
-  rename_i final unchanged result secondPost _
-  obtain ⟨rfl, returned⟩ := secondPost
+    with final result secondCall
+  obtain ⟨rfl, returned⟩ := secondCall.post
   change Confined _ memory final ∧ linkedValueContract.Returns _ memory final _
-  refine ⟨linkFramed.trans (unchanged.widen (by simp [secondValueContract])), result, rfl,
+  refine ⟨linkFramed.trans (secondCall.framed.widen (by simp [secondValueContract])), result, rfl,
     (returned next held.2).trans kept.2, held⟩
 
 #print axioms linkedValue_holds

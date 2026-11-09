@@ -35,10 +35,12 @@ def depositContract : MethodContract (Reference × W64) where
 /-- `Deposit` meets its contract for every live account and amount. -/
 theorem deposit_holds : depositContract.Holds Extracted.program deposit := by
   rintro ⟨account, amount⟩ memory owned
-  dsimp only [depositContract] at *
+  dsimp only [depositContract] at owned
   obtain ⟨after, written, framed, held⟩ :=
     owned.store (Account.Balance.of memory account + amount)
-  refine ⟨CIL.executionBound Extracted.program deposit, after, [], ?_, framed, [], rfl, rfl, held⟩
+  refine MethodContract.Holds.intro after []
+    ⟨CIL.executionBound Extracted.program deposit, ?_⟩ framed ⟨rfl, held⟩
+  dsimp only [depositContract]
   cil_checked_steps [owned.facts, written]
 
 #print axioms deposit_holds
@@ -66,13 +68,15 @@ theorem depositBoth_holds (holds : depositContract.Holds Extracted.program depos
   rintro ⟨first, second, amount⟩ memory ⟨firstOwned, secondOwned⟩
   dsimp only [depositBothContract]
   cil_contract_steps [holds, depositContract, firstOwned, firstOwned.facts, secondOwned.facts]
-  rename_i middle firstFramed values firstPost _
-  obtain ⟨rfl, firstHeld⟩ := firstPost
+    with middle values firstCall
+  obtain ⟨rfl, firstHeld⟩ := firstCall.post
+  have firstFramed := firstCall.framed
   have secondHeld := secondOwned.across firstOwned.live firstFramed firstHeld
   dsimp only [depositContract]
   cil_contract_steps [holds, depositContract, secondHeld.1, secondHeld.1.facts]
-  rename_i final secondFramed values secondPost _
-  obtain ⟨rfl, secondFinal⟩ := secondPost
+    with final values secondCall
+  obtain ⟨rfl, secondFinal⟩ := secondCall.post
+  have secondFramed := secondCall.framed
   dsimp only [depositContract] at firstFramed secondFramed ⊢
   cil_contract_steps []
   change Confined _ memory final ∧
@@ -124,9 +128,10 @@ theorem second_null_throws (memory : Memory) (first : Reference) (amount : W64)
         invoke Extracted.program (fuel + 6) depositBoth
             [.object (.address first), .object .null, .scalar (.i64 amount)] memory =
           .error ⟨depositBoth, 5, .thrown "System.NullReferenceException"⟩ := by
-  obtain ⟨childFuel, middle, values, invoked, framed, output, rfl, rfl, held⟩ :=
-    deposit_holds (first, amount) memory owned
-  refine ⟨childFuel, middle, invoked, framed, held, ?_⟩
+  obtain ⟨middle, values, deposited⟩ := deposit_holds.result (first, amount) owned
+  obtain ⟨rfl, held⟩ := deposited.post
+  obtain ⟨childFuel, invoked⟩ := deposited.invoked
+  refine ⟨childFuel, middle, invoked, deposited.framed, held, ?_⟩
   -- The caller reaches the call with three of its six units of fuel spent.
   have called := invoke_mono _ childFuel 3 _ _ _ (.ok (middle, [])) trivial invoked
   cil_checked_steps [owned.live.formed, called]

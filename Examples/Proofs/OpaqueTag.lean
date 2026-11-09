@@ -32,9 +32,10 @@ def copyTagContract : MethodContract (Reference × Reference) where
 /-- `CopyTag` meets its contract: one `ldfld` and one `stfld` of the tag's slot. -/
 theorem correctness : copyTagContract.Holds Extracted.program copyTag := by
   rintro ⟨target, source⟩ memory ⟨owned, readable, forms⟩
-  dsimp only [copyTagContract] at *
   obtain ⟨stored, framed, held⟩ := owned.store_formed forms.formed
-  refine ⟨CIL.executionBound Extracted.program copyTag, _, [], ?_, framed, [], rfl, rfl, held⟩
+  refine MethodContract.Holds.intro _ []
+    ⟨CIL.executionBound Extracted.program copyTag, ?_⟩ framed ⟨rfl, held⟩
+  dsimp only [copyTagContract]
   cil_checked_steps [owned.live.formed, readable.live.formed, readable.located,
     readable.load_forms forms, owned.located, stored]
 

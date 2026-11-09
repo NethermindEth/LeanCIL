@@ -19,14 +19,16 @@ theorem addLib_closed : Closed addLib.program := Closed.of_check (by decide)
 /-- Proved on the library alone: the entry steps into its own helper at index 1. -/
 theorem add_holds : addContract.Holds addProgram 0 := by
   rintro ⟨a, b, res, x, y⟩ m ⟨readA, readB, writable⟩
-  dsimp only [addContract] at *
+  dsimp only [addContract] at readA readB writable
   obtain ⟨stored, wrote, store, readback⟩ := store_word64 (x + y) writable
   have fa := access_reference_valid _ _ _ _ _ (read_access readA)
   have fb := access_reference_valid _ _ _ _ _ (read_access readB)
   have fr := access_reference_valid _ _ _ _ _ writable
   have la := load_word64_of_read readA
   have lb := load_word64_of_read readB
-  refine ⟨10, stored, [], ?_, Confined.write wrote (by simp [numberBytes]), _, rfl, rfl, readback⟩
+  refine MethodContract.Holds.intro stored _
+    ⟨10, ?_⟩ (Confined.write wrote (by simp [addContract, numberBytes])) ⟨rfl, readback⟩
+  dsimp only [addContract]
   cil_checked_steps [fa, fb, fr, la, lb, store]
 
 @[cil_code] def linked : CIL.Program := link Tests.Imports.Calls.Extracted.program [addLib]
@@ -98,10 +100,11 @@ theorem percent_holds : percentContract.Holds percentProgram 0 := by
     cil_outcome_call check_holds v at checkSite []
     · trivial
     · simp only [percentContract, within, ite_true]
-    rintro m1 _ - confined ⟨out, rfl, same⟩
+    intro m1 out call
+    have same := call.post
     subst out
     cil_contract_steps []
-    exact ⟨confined, _, rfl, rfl⟩
+    exact ⟨call.framed, _, rfl, rfl⟩
   · simp only [percentContract, within, ite_false]
     cil_raise_steps []
     cil_outcome_raise check_holds v at checkSite []

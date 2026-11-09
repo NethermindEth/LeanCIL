@@ -24,8 +24,8 @@ def decrementContract : MethodContract W32 W32 where
 
 theorem decrement_holds : decrementContract.Holds Extracted.program decrement := by
   rintro x m -
+  refine MethodContract.Holds.intro m _ ⟨8, ?_⟩ (Confined.refl _ m) rfl
   dsimp only [decrementContract]
-  refine ⟨8, m, _, ?_, Confined.refl _ m, _, rfl, rfl⟩
   cil_checked_steps
 
 bind_entry entry (x : W32) := countBody with [.scalar (.i32 x)] from Memory.empty
@@ -90,8 +90,8 @@ theorem count_calls (holds : decrementContract.Holds Extracted.program decrement
   apply ensures_of_loop
   intro args initial permitted
   obtain ⟨x, rfl, rfl⟩ := permitted
-  obtain ⟨remaining, counted, entered, setup, -, -, -, entryFrame⟩ := entry.checked x
-  obtain ⟨m1, stored0, frame1, -⟩ := (entryFrame []).store 0 (.i32 x) rfl
+  obtain ⟨remaining, counted, entered, enter⟩ := entry.checked x
+  obtain ⟨m1, stored0, frame1, -⟩ := (enter.frame []).store 0 (.i32 x) rfl
   obtain ⟨m2, stored1, frame2, -⟩ := frame1.store 1 (.i32 0) rfl
   have entryPath : LoopReaches Extracted.program countCalls [.scalar (.i32 x)]
       ⟨0, entry.frame remaining counted, [], entered⟩
@@ -99,8 +99,8 @@ theorem count_calls (holds : decrementContract.Holds Extracted.program decrement
     cil_loop_steps [entry.frame, header, stored0, stored1, frame1.load 0, frame2.load 0]
   obtain ⟨fuel, final, values, executed, satisfied⟩ := loop_reaches_terminates entryPath
     (terminates holds [.scalar (.i32 x)] x ⟨(x, 0), m2, frame2⟩ (by simp [invariant]))
-  exact ⟨countBody, entry.frame remaining counted, entered, countCalls.found, rfl, setup, fuel,
-    final, values, executed, satisfied⟩
+  exact ⟨countBody, entry.frame remaining counted, entered, countCalls.found, rfl, enter.setup,
+    fuel, final, values, executed, satisfied⟩
 
 theorem correctness : CIL.Safety.Ensures Extracted.program countCalls
     (fun args initial => ∃ x : W32, args = [.scalar (.i32 x)] ∧ initial = Memory.empty)

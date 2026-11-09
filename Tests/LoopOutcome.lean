@@ -25,10 +25,8 @@ example {Input Output : Type} {c : MethodContract Input Output}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
     (encoded : arguments = c.args input) (permitted : c.pre input updated)
-    (continuation : ∀ final values,
-      (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
-      Confined (c.footprint input) updated final → c.Returns input updated final values →
-      LoopTerminates program method args post ⟨pc + 1, frame, values ++ rest, final⟩) :
+    (continuation : ∀ final output, CallResult c program callee input updated final output →
+      LoopTerminates program method args post ⟨pc + 1, frame, c.results output ++ rest, final⟩) :
     LoopTerminates program method args post ⟨pc, frame, stack, memory⟩ :=
   loop_outcome_call (raises := none) holds.outcomes input methodFound instructionFound stepped encoded permitted rfl
     continuation

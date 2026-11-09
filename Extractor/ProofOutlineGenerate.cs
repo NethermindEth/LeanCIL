@@ -85,7 +85,7 @@ internal static partial class ProofOutline
         "for", "return", "mut", "unless", "variable", "universe", "deriving", "extends", "private",
         "protected", "partial", "mutual", "macro", "syntax", "notation", "calc", "nomatch", "nofun",
         "export", "attribute", "opaque", "axiom", "Type", "Prop", "Sort", "middle", "values", "post",
-        "confined", "target", "objectEntry", "entryMemory", "entryFrames", "exited"
+        "confined", "target", "objectEntry", "entryMemory", "entryFrames", "exited", "enter"
     };
 
     // `module` is the keyed extraction module the outline imports, ahead of the library modules its form needs.

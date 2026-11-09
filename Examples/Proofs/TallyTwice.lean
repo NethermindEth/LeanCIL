@@ -28,8 +28,8 @@ def addTwoContract : MethodContract W32 W32 where
 
 theorem addTwo_holds : addTwoContract.Holds Extracted.program addTwo := by
   rintro x m -
+  refine MethodContract.Holds.intro m _ ⟨8, ?_⟩ (Confined.refl _ m) rfl
   dsimp only [addTwoContract]
-  refine ⟨8, m, _, ?_, Confined.refl _ m, _, rfl, rfl⟩
   cil_checked_steps
 
 bind_entry entry (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) :=
@@ -52,8 +52,8 @@ theorem correctness (memory : Memory) (value : W32) (wellFormed : memory.WellFor
     ∃ fuel final, invoke Extracted.program fuel tally [.scalar (.i32 value)] memory =
       .ok (final, [.scalar (.i32 (2 * value))]) ∧
       MemoryBelow memory.nextIdentity memory final := by
-  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := entry.checked memory value wellFormed
-  refine invoke_loop_induction tally.found rfl setup (header memory value home)
+  obtain ⟨home, entered, enter⟩ := entry.checked memory value wellFormed
+  refine invoke_loop_induction tally.found rfl enter.setup (header memory value home)
     (fun state => state.values.2 = 2 * state.values.1)
     (fun state => (value - state.values.1).toNat) (fun start => ?_) ?_
   · cil_loop_recurse start (0, 0)

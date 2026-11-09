@@ -369,8 +369,48 @@ theorem MethodContract.Holds.ensures {Input Output : Type} {c : MethodContract I
   rintro args initial ⟨rfl, permitted⟩
   exact holds input initial permitted
 
+/-- What one invocation of `method` established under contract `c` at `input`: it ran from
+    `before` to `final`, returned the encoding of `output`, changed only the footprint and met
+    `post`. Proofs select these facts by name, so a fact added here changes no proof. -/
+structure CallResult {Input Output : Type} (c : MethodContract Input Output)
+    (program : CIL.Program) (method : Nat) (input : Input) (before final : Memory)
+    (output : Output) : Prop where
+  /-- Some fuel runs the method from `before` to `final`, returning the encoding of `output`. -/
+  invoked : ∃ fuel,
+    invoke program fuel method (c.args input) before = .ok (final, c.results output)
+  /-- Memory that existed in `before` changed only inside the contract's footprint. -/
+  framed : Confined (c.footprint input) before final
+  /-- The contract's postcondition for `output`. -/
+  post : c.post input before final output
+
+/-- Close the goal `Holds` leaves for one input from the final memory and output, named, with the
+    invocation, footprint and postcondition they satisfy. -/
+theorem MethodContract.Holds.intro {Input Output : Type} {c : MethodContract Input Output}
+    {program : CIL.Program} {method : Nat} {input : Input} {initial : Memory}
+    (final : Memory) (output : Output)
+    (invoked : ∃ fuel,
+      invoke program fuel method (c.args input) initial = .ok (final, c.results output))
+    (framed : Confined (c.footprint input) initial final)
+    (post : c.post input initial final output) :
+    ∃ fuel final values,
+      invoke program fuel method (c.args input) initial = .ok (final, values) ∧
+      Confined (c.footprint input) initial final ∧ c.Returns input initial final values :=
+  invoked.elim fun fuel ran => ⟨fuel, final, c.results output, ran, framed, output, rfl, post⟩
+
+/-- What a proved contract establishes for an input meeting `pre`: a final memory and output
+    with their `CallResult`. -/
+theorem MethodContract.Holds.result {Input Output : Type} {c : MethodContract Input Output}
+    {program : CIL.Program} {method : Nat} (holds : c.Holds program method) (input : Input)
+    {initial : Memory} (permitted : c.pre input initial) :
+    ∃ final output, CallResult c program method input initial final output := by
+  obtain ⟨fuel, final, _, invoked, framed, output, rfl, post⟩ := holds input initial permitted
+  exact ⟨final, output, { invoked := ⟨fuel, invoked⟩, framed, post }⟩
+
+#print axioms MethodContract.Holds.intro
+#print axioms MethodContract.Holds.result
+
 /-- Compose a fetched call through the callee's contract instead of its body. The
-    continuation receives the typed output with its encoding and the checked invocation. -/
+    continuation receives the callee's final memory and typed output with their `CallResult`. -/
 theorem run_call_of_contract {Input Output : Type} {c : MethodContract Input Output}
     {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
     {args stack arguments rest : List Value}
@@ -380,22 +420,20 @@ theorem run_call_of_contract {Input Output : Type} {c : MethodContract Input Out
     (stepped :
       step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
     (encoded : arguments = c.args input) (permitted : c.pre input updated)
-    (continuation : ∀ final values,
-      (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
-      Confined (c.footprint input) updated final → c.Returns input updated final values →
+    (continuation : ∀ final output,
+      CallResult c program callee input updated final output →
       ∃ fuel result returned,
-        run program fuel method (pc + 1) args frame (values ++ rest) final =
+        run program fuel method (pc + 1) args frame (c.results output ++ rest) final =
           .ok (result, returned) ∧
         post result returned) :
     ∃ fuel result returned,
       run program fuel method pc args frame stack memory = .ok (result, returned) ∧
         post result returned := by
   subst encoded
-  obtain ⟨childFuel, final, values, invoked, framed, satisfied⟩ := holds input updated permitted
-  obtain ⟨parentFuel, result, returned, resumed, finished⟩ :=
-    continuation final values ⟨childFuel, invoked⟩ framed satisfied
+  obtain ⟨final, output, call⟩ := holds.result input permitted
+  obtain ⟨parentFuel, result, returned, resumed, finished⟩ := continuation final output call
   obtain ⟨fuel, composed⟩ :=
-    run_call_exists methodFound instructionFound stepped ⟨childFuel, invoked⟩ ⟨parentFuel, resumed⟩
+    run_call_exists methodFound instructionFound stepped call.invoked ⟨parentFuel, resumed⟩
   exact ⟨fuel, result, returned, composed, finished⟩
 
 /-- Compose a separately proved child invocation with a caller postcondition. -/
@@ -434,15 +472,15 @@ theorem call_frame_invariants {program : CIL.Program} {method pc callee fuel : N
     ⟨body, op, methodFound, instructionFound, stepped⟩
   have entered : updated.WellFormed :=
     programStep_preserves_wellFormed _ _ _ _ _ _ _ _ formed called
-  exact ⟨invoke_preserves_wellFormed _ _ _ _ _ _ _ entered invoked, fun world =>
-    invoke_preserves_static_world _ _ _ _ _ _ _ entered
-      (programStep_preserves_static_world called formed world) invoked,
-    fun _ sites consistent => invoke_preserves_classes sites
-      (programStep_preserves_classes sites consistent called) invoked⟩
+  exact {
+    formed := invoke_preserves_wellFormed _ _ _ _ _ _ _ entered invoked
+    staticWorld := fun world => invoke_preserves_static_world _ _ _ _ _ _ _ entered
+      (programStep_preserves_static_world called formed world) invoked
+    classes := fun _ sites consistent => invoke_preserves_classes sites
+      (programStep_preserves_classes sites consistent called) invoked }
 
 /-- `run_call_of_contract` from a well-formed memory: the continuation also receives the
-    callee's well-formed final memory, static-world preservation and catalog agreement across the
-    call. -/
+    `FrameInvariants` the call keeps from the caller's memory to the callee's final memory. -/
 theorem run_call_of_contract_formed {Input Output : Type} {c : MethodContract Input Output}
     {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
     {args stack arguments rest : List Value}
@@ -453,23 +491,21 @@ theorem run_call_of_contract_formed {Input Output : Type} {c : MethodContract In
       step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
     (encoded : arguments = c.args input) (permitted : c.pre input updated)
     (formed : memory.WellFormed)
-    (continuation : ∀ final values,
-      (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
-      final.WellFormed →
-      StaticWorldPreserved program memory final →
-      ClassesPreserved program memory final →
-      Confined (c.footprint input) updated final → c.Returns input updated final values →
+    (continuation : ∀ final output,
+      CallResult c program callee input updated final output →
+      FrameInvariants program memory final →
       ∃ fuel result returned,
-        run program fuel method (pc + 1) args frame (values ++ rest) final =
+        run program fuel method (pc + 1) args frame (c.results output ++ rest) final =
           .ok (result, returned) ∧
         post result returned) :
     ∃ fuel result returned,
       run program fuel method pc args frame stack memory = .ok (result, returned) ∧
-        post result returned :=
-  run_call_of_contract holds input methodFound instructionFound stepped encoded permitted
-    fun final values ⟨fuel, invoked⟩ =>
-      have kept := call_frame_invariants methodFound instructionFound stepped formed invoked
-      continuation final values ⟨fuel, invoked⟩ kept.formed kept.staticWorld kept.classes
+        post result returned := by
+  subst encoded
+  exact run_call_of_contract holds input methodFound instructionFound stepped rfl permitted
+    fun final output call => call.invoked.elim fun _ invoked =>
+      continuation final output call
+        (call_frame_invariants methodFound instructionFound stepped formed invoked)
 
 /-- Some fuel runs to a successful return satisfying `post` when the fetched instruction
     returns checked values that satisfy it. -/
@@ -688,7 +724,8 @@ def cilInvocationEvidence (type : Expr) : Bool :=
   let type := type.consumeMData
   let invocation := fun statement : Expr =>
     statement.eq?.any fun (_, left, _) => left.isAppOf ``CIL.Safety.invoke
-  type.isAppOf `CIL.Safety.InvocationCertificate || invocation type ||
+  type.isAppOf `CIL.Safety.InvocationCertificate || type.isAppOf ``CIL.Safety.CallResult ||
+    invocation type ||
     (type.isAppOfArity ``Exists 2 && match type.appArg! with
       | .lam _ _ body _ => invocation body
       | _ => false)
@@ -709,6 +746,7 @@ def cilContractChild (methodFound instructionFound : Term) (facts : Array Term) 
       unless cilInvocationEvidence type do throwError "Not a successful invocation fact"
       let child ← if type.isAppOf `CIL.Safety.InvocationCertificate then
         `(⟨_, ($candidate).1⟩)
+        else if type.isAppOf ``CIL.Safety.CallResult then `(($candidate).invoked)
         else if type.isAppOfArity ``Exists 2 then pure candidate
         else `(⟨_, $candidate⟩)
       evalTactic (← `(tactic| (
@@ -739,8 +777,22 @@ partial def cilContractInput (inputType : Expr) : MetaM Expr := do
     else fields := fields.push argument
   return mkAppN constructor fields
 
+open Lean Meta in
+/-- The names a composed call takes for its final memory, typed output and `CallResult`:
+    `called`, `output` and `call`, or with the first suffix `_1`, `_2` that leaves all three
+    unused, so one call's names share a suffix. -/
+def cilCallNames : MetaM (Ident × Ident × Ident) := do
+  let context ← getLCtx
+  let named (index : Nat) (base : String) : Name :=
+    Name.mkSimple (if index == 0 then base else s!"{base}_{index}")
+  let mut index := 0
+  while ["called", "output", "call"].any fun base => context.usesUserName (named index base) do
+    index := index + 1
+  return (mkIdent (named index "called"), mkIdent (named index "output"),
+    mkIdent (named index "call"))
+
 open Lean Elab Tactic Meta in
-/-- Apply a matching contract and expose its postcondition to the caller continuation. -/
+/-- Apply a matching contract and expose its `CallResult` to the caller continuation. -/
 def cilContractApply (methodFound instructionFound : Term) (facts : Array Term) : TacticM Unit := do
   let mut candidates := facts
   for name in contractTheorems.getState (← getEnv) do
@@ -785,10 +837,9 @@ def cilContractApply (methodFound instructionFound : Term) (facts : Array Term) 
       if (← instantiateMVars input).hasExprMVar then
         throwError "The contract input has fields not determined by the call or precondition"
       setGoals [continuation]
+      let (called, output, call) ← continuation.withContext cilCallNames
       evalTactic (← `(tactic| (
-        intro final values invoked confined returned
-        obtain ⟨output, equal, post⟩ := returned
-        subst values
+        intro $called:ident $output:ident $call:ident
         cil_stack_cleanup)))
       let remaining ← getGoals
       setGoals ((if ← permitted.isAssigned then [] else [permitted]) ++ remaining ++ siblings)
@@ -824,17 +875,53 @@ elab_rules : tactic
         cil_stack_cleanup)))
 
 /-- Step a goal `∃ fuel result returned, run ... ∧ post` through checked instructions,
-    composing calls with registered contracts or child evidence. Unmatched calls and
-    the postcondition at each return remain explicit goals, a callee's precondition tagged
-    `precondition` and the postcondition `postcondition`. -/
+    composing calls with registered contracts or child evidence. Each composed call names its
+    final memory `called`, its typed output `output` and its `CallResult` `call`, all three
+    with the suffix `_1`, `_2` once a name is taken. Unmatched calls and the postcondition at
+    each return remain explicit goals, a callee's precondition tagged `precondition` and the
+    postcondition `postcondition`. -/
 syntax "cil_contract_steps" "[" term,* "]" : tactic
+/-- As `cil_contract_steps`, naming the first call it composes: its final memory, typed output
+    and `CallResult` take the three names given. Fails when it composes no call. -/
+syntax "cil_contract_steps" "[" term,* "]" " with " ident ident ident : tactic
 /-- As `cil_contract_steps`, but stop silently after at most `count` steps. -/
 syntax "cil_contract_steps" num "[" term,* "]" : tactic
 /-- As `cil_contract_steps`, but stop silently once `continuation` closes the goal. -/
 syntax "cil_contract_steps" "[" term,* "]" " until " term : tactic
 
+open Lean Elab Tactic Meta in
+/-- In each goal, give the earliest `CallResult` hypothesis not among `before`, and the final
+    memory and output it states when they are variables, the names `called`, `output` and
+    `call`; whether any goal had one. -/
+def cilNameCall (before : Array FVarId) (called output call : Name) : TacticM Bool := do
+  let mut found := false
+  let mut goals := #[]
+  for goal in ← getGoals do
+    let renamed ← goal.withContext do
+      for declaration in ← getLCtx do
+        if declaration.isImplementationDetail || before.contains declaration.fvarId then continue
+        let stated := (← instantiateMVars declaration.type).consumeMData
+        unless stated.isAppOf ``CIL.Safety.CallResult do continue
+        let arguments := stated.getAppArgs
+        let mut current := goal
+        if let some (.fvar final) := arguments[arguments.size - 2]? then
+          current ← current.rename final called
+        if let some (.fvar result) := arguments.back? then current ← current.rename result output
+        return some (← current.rename declaration.fvarId call)
+      return none
+    found := found || renamed.isSome
+    goals := goals.push (renamed.getD goal)
+  setGoals goals.toList
+  return found
+
 open Lean Elab Tactic in
 elab_rules : tactic
+  | `(tactic| cil_contract_steps [$facts:term,*] with $called:ident $output:ident $call:ident) =>
+    withMainContext do
+    let before := (← getLCtx).getFVarIds
+    evalTactic (← `(tactic| cil_contract_steps [$facts,*]))
+    unless ← cilNameCall before called.getId output.getId call.getId do
+      throwError "cil_contract_steps composed no call to name"
   | `(tactic| cil_contract_steps [$facts:term,*]) => do
     let config ← `(Lean.Parser.Tactic.optConfig|)
     let prepared ← normaliseStepFacts config facts.getElems
@@ -868,7 +955,7 @@ elab_rules : tactic
 
 /-- Apply a proved contract at the fetched call, optionally checked against a `bind_call`
     site: leaves the `precondition`, then the continuation over the callee's final memory,
-    values, invocation, footprint and postcondition. -/
+    typed output and `CallResult`. -/
 syntax "cil_contract_call" term:max term:max (" at " ident)? "[" term,* "]" : tactic
 
 macro_rules
@@ -888,7 +975,8 @@ macro_rules
     cil_name_obligations $holds))
 
 /-- `cil_contract_call` through `run_call_of_contract_formed`: leaves the `precondition`,
-    the caller memory's `wellFormed`, then the continuation with both invariants. -/
+    the caller memory's `wellFormed`, then the continuation, which also takes the call's
+    `FrameInvariants`. -/
 syntax "cil_formed_call" term:max term:max (" at " ident)? "[" term,* "]" : tactic
 
 macro_rules

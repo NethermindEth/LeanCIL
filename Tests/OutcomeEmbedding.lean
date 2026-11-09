@@ -63,8 +63,8 @@ def checkInRange : MethodContract W64 W64 where
 theorem check_in_range : checkInRange.Holds literal 1 := by
   rintro v m (within : v ≤ 100)
   have bound : ¬ 100#64 < v := by simpa using within
+  refine MethodContract.Holds.intro m _ ⟨10, ?_⟩ (Confined.refl _ m) rfl
   dsimp only [checkInRange]
-  refine ⟨10, m, _, ?_, Confined.refl _ m, _, rfl, rfl⟩
   cil_checked_steps [bound]
 
 -- The method contract transfers to the extraction without reading `extractedCheck`.
@@ -84,11 +84,12 @@ theorem outer_holds (checkHolds : checkContract.Holds literal 1) : outerContract
   | none =>
     cil_contract_steps []
     refine run_call_of_outcome checkHolds v rfl outer_call (by cil_checked_step []) rfl trivial raised ?_
-    rintro m1 _ - confined ⟨out, rfl, same⟩
+    intro m1 out call
+    have same := call.post
     subst out
     dsimp only [checkContract]
     cil_contract_steps []
-    exact ⟨confined, _, rfl, rfl⟩
+    exact ⟨call.framed, _, rfl, rfl⟩
 
 -- Both contracts transfer to the extraction; neither proof reads `extractedCheck`.
 theorem extracted_check : checkContract.Holds extracted 1 := check_embeds.holds (literal_set ▸ check_holds)

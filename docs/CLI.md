@@ -488,7 +488,9 @@ theorem correctness (value : W32) : Ensures Extracted.program 0
     (fun _ _ _ results => ∃ result : W32, results = [.scalar (.i32 result)] ∧
       Postcondition value result) := by
   rintro args initial ⟨rfl, rfl, assumed⟩
-  obtain ⟨home0, entered, setup, -, -, entryFrame⟩ := entry.checked value
+  obtain ⟨home0, entered, enter⟩ := entry.checked value
+  have setup := enter.setup
+  have entryFrame := enter.frame
   refine invoke_loop_satisfies Extracted.lookup0 rfl setup (header home0) (invariant value)
       (measure value) (fun start => ?_) ?_
   · have entryFrame := entryFrame []

@@ -32,9 +32,10 @@ def stampContract : MethodContract (Reference × W32) Unit where
 /-- `Stamp` meets its contract; the caller proof below never unfolds its body. -/
 theorem stamp_holds : stampContract.Holds Extracted.program stamp := by
   rintro ⟨slot, value⟩ memory writable
-  dsimp only [stampContract] at writable ⊢
+  dsimp only [stampContract] at writable
   obtain ⟨after, wrote, formed, confined, filled⟩ := writable.write_one value
-  refine ⟨8, after, [], ?_, confined, (), rfl, filled⟩
+  refine MethodContract.Holds.intro after () ⟨8, ?_⟩ confined filled
+  dsimp only [stampContract]
   cil_checked_steps [step_storeScalar_of_write wrote, formed]
 
 /-- The words copied: those before the first zero, or all of them. -/
@@ -97,9 +98,9 @@ theorem correctness (memory : Memory) (view : SpanView) (values : List W32) (out
       .ok (final, [.scalar (.i32 (result values))]) ∧
       Contents final output 4 (copied values) ∧
       Confined [(output, 4 * (copied values).length)] memory final := by
-  obtain ⟨home0, home1, entered, setup, -, -, -, entryFrame⟩ :=
+  obtain ⟨home0, home1, entered, enter⟩ :=
     entry.checked memory view output wellFormed valid contents.elementWidth readOnly
-  refine invoke_loop_induction copy.found ?_ setup
+  refine invoke_loop_induction copy.found ?_ enter.setup
     (header memory output (copied values).length home0 home1) (Invariant values output)
     (·.values.1.values.length) (fun start => ?_) ?_
   · simp [cil_checked, valid, formed]

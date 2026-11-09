@@ -87,9 +87,10 @@ internal static partial class ProofOutline
         {
             lean.Line($"    cil_contract_steps [{array.Name}Valid, {helper.Name}_holds, {helper.Name}Contract, " +
                 "leaveFrame]");
+            lean.Line("      with called1 output1 call1");
             lean.Line($"    case precondition => exact ⟨{array.Name}Valid, {array.Name}Type, {array.ElementsName}, " +
                 $"{array.Name}Contents, {bound}⟩");
-            lean.Line("    rename_i called1 _ output1 post1 _");
+            lean.Line("    have post1 := call1.post");
             lean.Line($"    dsimp only [{helper.Name}Contract] at post1 ⊢");
             // The helper returns the address of the element the caller's contents name.
             lean.Line("    obtain ⟨rfl, found1⟩ := post1");

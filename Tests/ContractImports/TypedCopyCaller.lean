@@ -23,11 +23,10 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
     (by cil_checked_step [formValue, sourceForm, destinationForm,
       TypedImportInterface.copy, Except.mapError]) rfl
     ⟨formed, readable, writable⟩ ?_
-  rintro final values _ framed returns
-  obtain ⟨output, rfl, copied⟩ := returns
+  intro final output call
   refine run_return_exists found (by rfl : Extracted.method0.code[3]? = some (.ret none))
     (by cil_checked_step []) (by rfl) ?_
-  exact ⟨framed, (), rfl, copied⟩
+  exact ⟨call.framed, (), rfl, call.post⟩
 
 #print axioms correctness
 end TypedCopyCaller

@@ -58,8 +58,7 @@ theorem run_construct_of_contract {Input Output : Type} {c : MethodContract Inpu
     (located : this input = temporary) (encoded : arguments = c.args input)
     (permitted : c.pre input updated)
     (continuation : ∀ final out,
-      (∃ fuel, invoke program fuel callee arguments updated = .ok (final, [])) →
-      Confined (c.footprint input) updated final → c.post input updated final out →
+      CallResult c program callee input updated final out →
       ∃ fuel result returned,
         run program fuel method (pc + 1) args constructedFrame
           (.scalar (.aggregate (value input out)) :: rest) final = .ok (result, returned) ∧
@@ -68,16 +67,14 @@ theorem run_construct_of_contract {Input Output : Type} {c : MethodContract Inpu
       run program fuel method pc args frame stack memory = .ok (result, returned) ∧
         post result returned := by
   subst encoded
-  obtain ⟨childFuel, final, values, invoked, framed, out, returned, satisfied⟩ :=
-    holds input updated permitted
-  rw [constructs.void out] at returned
-  subst returned
-  have readback := constructs.readback _ _ _ _ satisfied
+  obtain ⟨final, out, call⟩ := holds.result input permitted
+  have invoked := call.invoked
+  rw [constructs.void out] at invoked
+  have readback := constructs.readback _ _ _ _ call.post
   rw [located] at readback
-  obtain ⟨parentFuel, result, values, resumed, finished⟩ :=
-    continuation final out ⟨childFuel, invoked⟩ framed satisfied
+  obtain ⟨parentFuel, result, values, resumed, finished⟩ := continuation final out call
   obtain ⟨fuel, composed⟩ :=
-    run_construct_exists methodFound instructionFound stepped ⟨childFuel, invoked⟩
+    run_construct_exists methodFound instructionFound stepped invoked
       (load_local_aggregate_of_read readback) ⟨parentFuel, resumed⟩
   exact ⟨fuel, result, values, composed, finished⟩
 
@@ -98,11 +95,12 @@ theorem construct_frame_invariants {program : CIL.Program} {method pc callee fue
     ⟨body, op, methodFound, instructionFound, stepped⟩
   have entered : updated.WellFormed :=
     programStep_preserves_wellFormed _ _ _ _ _ _ _ _ formed constructed
-  exact ⟨invoke_preserves_wellFormed _ _ _ _ _ _ _ entered invoked, fun world =>
-    invoke_preserves_static_world _ _ _ _ _ _ _ entered
-      (programStep_preserves_static_world constructed formed world) invoked,
-    fun _ sites consistent => invoke_preserves_classes sites
-      (programStep_preserves_classes sites consistent constructed) invoked⟩
+  exact {
+    formed := invoke_preserves_wellFormed _ _ _ _ _ _ _ entered invoked
+    staticWorld := fun world => invoke_preserves_static_world _ _ _ _ _ _ _ entered
+      (programStep_preserves_static_world constructed formed world) invoked
+    classes := fun _ sites consistent => invoke_preserves_classes sites
+      (programStep_preserves_classes sites consistent constructed) invoked }
 
 /-- `run_construct_of_contract` from a well-formed memory: the continuation also receives the
     frame invariants. -/
@@ -119,20 +117,20 @@ theorem run_construct_of_contract_formed {Input Output : Type} {c : MethodContra
     (permitted : c.pre input updated)
     (formed : memory.WellFormed)
     (continuation : ∀ final out,
-      (∃ fuel, invoke program fuel callee arguments updated = .ok (final, [])) → final.WellFormed →
-      StaticWorldPreserved program memory final → ClassesPreserved program memory final →
-      Confined (c.footprint input) updated final → c.post input updated final out →
+      CallResult c program callee input updated final out →
+      FrameInvariants program memory final →
       ∃ fuel result returned,
         run program fuel method (pc + 1) args constructedFrame
           (.scalar (.aggregate (value input out)) :: rest) final = .ok (result, returned) ∧
         post result returned) :
     ∃ fuel result returned,
       run program fuel method pc args frame stack memory = .ok (result, returned) ∧
-        post result returned :=
-  run_construct_of_contract holds constructs input methodFound instructionFound stepped located
-    encoded permitted fun final out ⟨fuel, invoked⟩ =>
-      have kept := construct_frame_invariants methodFound instructionFound stepped formed invoked
-      continuation final out ⟨fuel, invoked⟩ kept.formed kept.staticWorld kept.classes
+        post result returned := by
+  subst encoded
+  exact run_construct_of_contract holds constructs input methodFound instructionFound stepped
+    located rfl permitted fun final out call => call.invoked.elim fun _ invoked =>
+      continuation final out call
+        (construct_frame_invariants methodFound instructionFound stepped formed invoked)
 
 /-- Construct at a fetched `newobj` from its constructor's contract alone; `input` names the
     fresh storage `newobj` zeroes. -/
@@ -153,12 +151,8 @@ theorem run_newAggregate_of_contract {Input Output : Type} {c : MethodContract I
     (permitted : ∀ temporary updated, ConstructStorage memory updated temporary size →
       c.pre (input temporary) updated)
     (continuation : ∀ temporary updated final out, ConstructStorage memory updated temporary size →
-      (∃ fuel, invoke program fuel callee (c.args (input temporary)) updated = .ok (final, [])) →
-      final.WellFormed →
-      StaticWorldPreserved program memory final →
-      ClassesPreserved program memory final →
-      Confined (c.footprint (input temporary)) updated final →
-      c.post (input temporary) updated final out →
+      CallResult c program callee (input temporary) updated final out →
+      FrameInvariants program memory final →
       ∃ fuel result returned,
         run program fuel method (pc + 1) args
           { frame with owned := temporary.allocation :: frame.owned }
@@ -186,8 +180,7 @@ theorem run_newAggregate_of_contract {Input Output : Type} {c : MethodContract I
   refine run_construct_of_contract_formed holds constructs (input temporary) methodFound
     instructionFound stepped (located temporary) (encoded temporary).symm
     (permitted temporary updated storage) formed ?_
-  intro final out invoked
-  exact continuation temporary updated final out storage (by rw [encoded temporary]; exact invoked)
+  exact fun final out => continuation temporary updated final out storage
 
 #print axioms ConstructStorage.confined
 #print axioms run_construct_of_contract

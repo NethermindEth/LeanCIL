@@ -243,8 +243,8 @@ def decrementContract : MethodContract W32 W32 where
 
 theorem decrement_holds : decrementContract.Holds Extracted.program decrement := by
   rintro x m -
+  refine MethodContract.Holds.intro m _ ⟨8, ?_⟩ (Confined.refl _ m) rfl
   dsimp only [decrementContract]
-  refine ⟨8, m, _, ?_, Confined.refl _ m, _, rfl, rfl⟩
   cil_checked_steps
 ```
 
