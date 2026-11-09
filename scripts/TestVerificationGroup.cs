@@ -16,9 +16,9 @@ if (args is ["--suite", var suite])
 }
 var directory = Path.GetFullPath(Path.Combine("artifacts", "group-test-" + Guid.NewGuid().ToString("N")));
 string[] command = ["dotnet", Assembly.GetExecutingAssembly().Location];
-var result = await VerificationGroupRunner.Run(command, ["fails", "passes"], directory);
+var result = await VerificationGroupRunner.Run(command, ["fails", "passes", "outlines-control"], directory);
 if (result != 1) throw new InvalidOperationException("A failed member must fail the group");
-foreach (var name in new[] { "fails", "passes" })
+foreach (var name in new[] { "fails", "passes", "outlines-control" })
 {
     var log = File.ReadAllText(Path.Combine(directory, "verification-" + name + ".log"));
     if (!log.Contains(name + ":" + name, StringComparison.Ordinal) ||
@@ -28,7 +28,8 @@ foreach (var name in new[] { "fails", "passes" })
 }
 if (await VerificationGroupRunner.Run(command, ["other"], directory) != 0)
     throw new InvalidOperationException("A passing group must pass");
-foreach (string[] invalid in new[] { Array.Empty<string>(), new[] { "passes", "passes" }, new[] { "../escape" } })
+foreach (string[] invalid in new[] { Array.Empty<string>(), new[] { "passes", "passes" }, new[] { "../escape" },
+    new[] { "-control" }, new[] { "control-" }, new[] { "control--objects" }, new[] { "control\n" } })
 {
     try
     {

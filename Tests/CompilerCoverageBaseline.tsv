@@ -459,6 +459,7 @@ Examples:System.Int32 Examples.UnsafeLayouts::Size8()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.UnsafeLayouts::Size9()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.VectorFields::NestedSize()	B	B	B	B	B	B	B	B
 Examples:System.Int32 Examples.WordReader::Read(System.Int32[])	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.WordReader::ReadSaved(System.Int32[])	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.WordReader::SkipAndPeek(System.Int32[])	A	A	A	A	A	A	A	A
 Examples:System.Int32& Examples.ArrayElementReferences::Element(System.Int32[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32& Examples.UnsafeLayouts::Add6int(System.Int32&,System.Int32)	A	A	A	A	A	A	A	A
@@ -758,6 +759,9 @@ Examples:System.UInt32 Examples.Throws::Inner(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Throws::Null(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Throws::Percent(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Throws::Quotient(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt32 Examples.WordReader::RangeEnd()	A	A	A	A	A	A	A	A
+Examples:System.UInt32 Examples.WordReader::ReplaceRemaining(System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt32 Examples.WordReader::Reserve()	A	A	A	A	A	A	A	A
 Examples:System.UInt32 SelectorExamples.One.Collision::Add(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32& Examples.UnsafeLayouts::Add7int(System.UInt32&,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32& Examples.UnsafeLayouts::Add7nint(System.UInt32&,System.IntPtr)	A	A	A	A	A	A	A	A
@@ -993,6 +997,7 @@ Examples:System.UInt64 Examples.VirtualCalls::LegsOf(Examples.Animal)	A	A	A	A	A	
 Examples:System.UInt64 Examples.VirtualCalls::LoudnessOf(Examples.Animal)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.WideProduct::BigMul(System.UInt64,System.UInt64,System.UInt64&)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.WideProduct::UnsignedBigMul32(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.WordReader::ReplaceRemainingWide(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.XorStep::Examples.IBinaryStep.Apply(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 SelectorExamples.One.Collision::Add(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 SelectorExamples.Two.Collision::Add(System.UInt64,System.UInt64)	A	A	A	A	A	A	A	A

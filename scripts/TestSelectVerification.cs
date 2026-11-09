@@ -29,7 +29,7 @@ void Test(string name, Action action)
 Test("longest-first preserves selection", () =>
 {
     var selected = VerificationSelection.Select(["Tests/Loops.cs", "Tests/UnsafeLayouts.cs", "Tests/IntegerMath.cs"]);
-    Equal(VerificationSelection.Schedule(selected), ["unsafe", "math", "loops"]);
+    Equal(VerificationSelection.Schedule(selected), ["unsafe", "loops", "math"]);
     Equal(VerificationSelection.Schedule(All()).Order(StringComparer.Ordinal), All());
     Equal(VerificationSelection.Schedule(["loops", "newlongsuite"]), ["newlongsuite", "loops"]);
     Equal(VerificationSelection.Schedule([]), []);
@@ -78,6 +78,13 @@ Test("main and manual always full", () =>
 Test("test entry points", () =>
 {
     Equal(VerificationSelection.Select(["Tests/Loops.cs"]), ["loops"]);
+    Equal(VerificationSelection.Select(["Tests/ProofOutlines.cs"]),
+        ["outlines-buffers", "outlines-control", "outlines-objects"]);
+    Equal(VerificationSelection.Select(["Tests/StructOutlines.cs"]), ["structoutlines"]);
+    Equal(VerificationSelection.Select(["Tests/ReceiverLoopOutlines.cs"]), ["receiveroutlines"]);
+    Equal(VerificationSelection.Select(["Tests/WordReaderOutlines.cs"]), ["wordreader"]);
+    Equal(VerificationSelection.Select(["Tests/SavedWordReaderOutlines.cs"]), ["savedwordreader"]);
+    Equal(VerificationSelection.Select(["Tests/WordReaderOutlineSupport.cs"]), ["savedwordreader", "wordreader"]);
     Equal(VerificationSelection.Select(["Tests/SkipInitialization.cs"]), ["unsafe"]);
     Equal(VerificationSelection.Select(["Tests/NullReferences.cs"]), ["unsafe"]);
     foreach (var name in new[] { "BatchVerification", "VerificationCache", "VerificationReuse" })

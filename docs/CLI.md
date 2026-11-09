@@ -396,8 +396,14 @@ comment saying which obligation it is:
   describing those changes and are outside this outline pattern. An index expressed in the caller's
   initial bindings has an entry bound premise. An index depending on memory after a write leaves a
   bound obligation at the read, where the helper and field-store postconditions are available.
-  Straight-line class methods with scalar local homes remain unsupported: their outlines need
-  private frame storage and lifetime facts as well as the class-field facts.
+  Straight-line class methods and supported helpers can use initialized 32- and 64-bit integer
+  locals. The outline carries their private storage through scalar field writes and confined
+  calls, preserves saved values and expires the homes on return. A helper that writes no caller
+  fields preserves caller memory; allocating its local homes does not preserve the entire memory
+  state by equality. Frames mixing these integers with other local kinds, narrow or native-sized
+  local homes, uninitialized homes, escaped local addresses, conditional branches and reference-field
+  or reference-array effects remain explicitly unsupported. Helper summaries allow at most one
+  field store and no nested calls.
 - An array argument of structs or vectors binds `valuesLength` and is passed as `.array ⟨.address values,
   valuesLength, element⟩`, with the premise `WholeArray initial element values valuesLength`. The
   element is the `elementType` of a field that holds such arrays, such as `Tiles.Pairs.elementType`,

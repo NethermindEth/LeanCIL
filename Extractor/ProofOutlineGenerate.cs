@@ -85,7 +85,7 @@ internal static partial class ProofOutline
         "for", "return", "mut", "unless", "variable", "universe", "deriving", "extends", "private",
         "protected", "partial", "mutual", "macro", "syntax", "notation", "calc", "nomatch", "nofun",
         "export", "attribute", "opaque", "axiom", "Type", "Prop", "Sort", "middle", "values", "post",
-        "confined", "target"
+        "confined", "target", "objectEntry", "entryMemory", "entryFrames", "exited"
     };
 
     // `module` is the keyed extraction module the outline imports, ahead of the library modules its form needs.
@@ -550,12 +550,16 @@ internal static partial class ProofOutline
             var name = names.Claim(char.ToLowerInvariant(callee.Name[0]) + callee.Name[1..], "callee" + index);
             return summaries[index] = Summarize(extraction, index, name, views);
         }
-        var walk = new ObjectWalk(spec, body.Ops, views, Summary);
+        var numericHomes = HasNumericObjectHomes(spec.Method) || body.Ops.Select(op =>
+            Regex.Match(op, @"\A\.call(?:Instance)? (\d+) (\d+)\z")).Where(match => match.Success)
+            .Any(match => Summary(int.Parse(match.Groups[1].Value))?.Walk.NumericHomes == true);
+        var walk = new ObjectWalk(spec, body.Ops, views, Summary, numericHomes: numericHomes);
         var stepped = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
             ParameterShape.Object or ParameterShape.Array or ParameterShape.ValueArray or ParameterShape.WordArray) &&
             walk.Run(pc => Location(spec.Method, pc));
         if (stepped) spec.Plan = walk.Plan();
         string[] imports = ["CIL.Verification", "CIL.Safety.SymbolicExecution", "CIL.Safety.ObjectFields"];
+        if (numericHomes) imports = [.. imports, "CIL.Safety.LoopScaffold"];
         if (spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.WordArray))
             imports = [.. imports, "CIL.Safety.ArrayContents", "CIL.Safety.LoopCallerFacts"];
         var fresh = stepped ? walk.Flattened.OfType<Allocation>().FirstOrDefault() : null;
@@ -574,6 +578,7 @@ internal static partial class ProofOutline
             ElementDefinition(lean, array);
         spec.Placeholders(lean);
         spec.Footprint(lean);
+        if (stepped && numericHomes) ObjectEntry(lean, spec, "objectEntry", "0");
         spec.Statement(lean);
         if (stepped) ObjectBody(lean, spec, walk, "simp [footprint]");
         else
@@ -685,7 +690,8 @@ internal static partial class ProofOutline
     /// <summary>The numbered hypotheses and memories an outline's proof introduces after each store, call and
     /// split.</summary>
     [GeneratedRegex(@"\A(?:(?:stored|framed|held|written|output|called|post|returned|found|branch|initial|memory|" +
-        @"encoded|changed|combined|formed|form|loadSigned|arrayApart)\d*|" +
+        @"encoded|changed|combined|formed|form|loadSigned|arrayApart|localHome|localWritten|localLoaded|" +
+        @"frameFacts|below|fuel|invoked|callFormed)\d*|held\d+Final|" +
         @"(?:owned|kept|added|loaded)\d+(?:Field\d+)?(?:Signed)?)\z")]
     private static partial Regex Generated();
 

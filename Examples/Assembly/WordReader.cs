@@ -27,4 +27,45 @@ public sealed class WordReader
         Remaining--;
         return values[Position];
     }
+
+    /// <summary>Advances the cursor and returns its previous position, wrapping at 32 bits.</summary>
+    public uint Reserve()
+    {
+        var position = Position;
+        Position = position + 1;
+        return position;
+    }
+
+    /// <summary>Consumes one word from a consistent, nonempty cursor range.</summary>
+    public int ReadSaved(int[] values)
+    {
+        var remaining = Remaining;
+        var position = Reserve();
+        Remaining = remaining - 1;
+        return values[position];
+    }
+
+    /// <summary>The end of the current range, wrapping at 32 bits.</summary>
+    public uint RangeEnd()
+    {
+        var position = Position;
+        return Remaining + position;
+    }
+
+    /// <summary>Replaces the remaining count and returns the previous range end.</summary>
+    public uint ReplaceRemaining(uint remaining)
+    {
+        var end = RangeEnd();
+        Remaining = remaining;
+        return end;
+    }
+
+    /// <summary>Replaces the remaining count and returns the previous range end without wrapping.</summary>
+    public ulong ReplaceRemainingWide(uint remaining)
+    {
+        var position = (ulong)Position;
+        var previous = Remaining;
+        Remaining = remaining;
+        return previous + position;
+    }
 }

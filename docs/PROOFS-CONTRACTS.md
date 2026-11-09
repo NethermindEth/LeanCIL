@@ -72,6 +72,13 @@ as vectors and int32s; `LocalSnapshots.after_confined` keeps them across such a 
 `after_write_apart`, `after_below` and `store` across writes, frame changes and local stores.
 `snapshots.load value specified` is a step fact for `.local`, so stepping tactics take it.
 
+`unknown_frame_setup` supplies `CompleteWritableHomes` for numeric locals with unknown initial
+contents. Its `home_at` lookup proves that every declared local has a typed writable byte home;
+it does not claim readable or initialized contents. `NumericHomes.complete` supplies the same
+interface for initialized numeric frames. Use the bundle's `writable` projection with general
+snapshot APIs. Plain `WritableHomes` also permits skipped slots, so its `home_at` requires
+separate evidence that the requested slot has a byte home.
+
 Import `CIL.Safety.LocalSnapshotSteps` to step through numeric local stores and reloads with
 `cil_checked_steps (snapshots := snapshots) [facts]`. Use it on a checked `run` equality or an
 existential result such as `∃ after, run ... = .ok (after, result)`. The local context must justify
@@ -773,4 +780,3 @@ These contracts retain their hypotheses. For example, `InstructionContract.value
 well-formed input memory and valid input values; its memory-effect field does not require those
 additional hypotheses. `RunTrace` describes successful execution; fault-preservation proofs need the
 appropriate equivalence lemmas.
-

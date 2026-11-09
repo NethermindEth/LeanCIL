@@ -8,7 +8,7 @@ internal static class VerificationGroupRunner
     {
         var invalidSuites = suites.Length == 0 ||
             suites.Distinct(StringComparer.Ordinal).Count() != suites.Length ||
-            suites.Any(suite => !Regex.IsMatch(suite, "^[a-z]+$"));
+            suites.Any(suite => !Regex.IsMatch(suite, "\\A[a-z]+(?:-[a-z]+)*\\z"));
         if (command.Length == 0 || invalidSuites)
             throw new ArgumentException("Expected a command and distinct suite names");
         artifacts = Path.GetFullPath(artifacts);

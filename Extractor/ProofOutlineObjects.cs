@@ -4,7 +4,7 @@ using Mono.Cecil;
 namespace Nethermind.LeanCIL;
 
 // Class instances in an outline: the named fields an extraction emits, the premises and footprint they give an
-// object argument, and the straight-line walk that steps field loads and one final field store.
+// object argument, and the straight-line walk that steps field loads, stores, calls and numeric locals.
 internal static partial class ProofOutline
 {
     /// <summary>A field an extraction names, as `Path.Name`: a word of `Width` bytes, an object reference, or the
@@ -75,6 +75,18 @@ internal static partial class ProofOutline
     /// argument load, a length, a store or a return.</summary>
     sealed record ArrayUse(HeldArray Array, int Stores, bool Length = false);
 
+    /// <summary>A numeric local access, with its frozen value and execution-memory revision.</summary>
+    sealed record LocalAccess(int Index, string Value, int Width, int Stores, bool Store);
+
+    /// <summary>Entry into a numeric frame; its homes lie above the caller's watermark.</summary>
+    sealed record ObjectFrameEntry;
+
+    /// <summary>Detects numeric byte homes, including kinds the outline must explicitly reject.</summary>
+    static bool HasNumericObjectHomes(MethodDefinition method) => method.Body.Variables.Any(variable =>
+        LeanEmitter.Narrow(variable.VariableType) is not null ||
+        EnumTypes.Storage(variable.VariableType).FullName is "System.Int32" or "System.UInt32" or
+            "System.Int64" or "System.UInt64" or "System.IntPtr" or "System.UIntPtr");
+
     /// <summary>A scalar element read and the field footprints its contents must be disjoint from.</summary>
     sealed record WordRead(Parameter Array, string Index, int Stores, string Name,
         (Access Write, string Apart)[] Writes, bool CallerIndex);
@@ -120,7 +132,8 @@ internal static partial class ProofOutline
     /// <summary>A call through a callee's contract: the facts its precondition needs, the field it writes as a
     /// store of the caller's object, if any, and for each object the callee loads from a reference field, the
     /// caller's object that field holds and the fact that says so.</summary>
-    sealed record CallStep(Callee Callee, int Stores, Access[] Needs, Reached[] Live, Access? Writes, int Number,
+    sealed record CallStep(Callee Callee, int Stores, int FieldMemory, Access[] Needs, Reached[] Live,
+        Access? Writes, int Number,
         (Reached Target, string Held)[] Found);
 
     /// <summary>A test of named words that splits the body: `Fact` names `Condition` on the side that holds it
@@ -146,12 +159,13 @@ internal static partial class ProofOutline
     /// <remarks>A `linear` walk reads every op once in order, ignoring where branches go, to find which fields of
     /// which objects a body with loops touches; its steps are not a proof.</remarks>
     sealed class ObjectWalk(Specification spec, string[] ops, FieldViews views, Func<int, Callee?> callees,
-        bool linear = false)
+        bool linear = false, bool numericHomes = false)
     {
         internal string? Stopped { get; private set; }
         internal string? Returned { get; private set; }
         internal List<Reached> Objects { get; private init; } = [];
         internal List<object> Steps { get; } = [];
+        internal bool NumericHomes => numericHomes;
 
         abstract record Item;
         sealed record Word(string? Term, int Width) : Item;
@@ -182,6 +196,7 @@ internal static partial class ProofOutline
         Dictionary<(Parameter Array, Reached Object, ViewField Field), string> ArrayApart { get; init; } = [];
 
         int stores;
+        int fieldMemory;
         int calls;
         int splits;
         object[] previous = [];
@@ -203,13 +218,20 @@ internal static partial class ProofOutline
 
         internal bool Run(Func<int, string> location)
         {
-            if (!linear && spec.Method.Body.Variables.Any(variable =>
-                LeanEmitter.Narrow(variable.VariableType) is not null ||
-                EnumTypes.Storage(variable.VariableType).FullName is "System.Int32" or "System.UInt32" or
-                    "System.Int64" or "System.UInt64" or "System.IntPtr" or "System.UIntPtr"))
+            if (numericHomes && spec.Method.Body.Variables.Count > 0)
             {
-                Stopped = "scalar local homes in a class method, whose frame storage the outline does not carry";
-                return false;
+                if (!spec.Method.Body.InitLocals)
+                {
+                    Stopped = "numeric local homes without supported initial values";
+                    return false;
+                }
+                if (spec.Method.Body.Variables.Any(variable =>
+                    EnumTypes.Storage(variable.VariableType).FullName is not
+                        ("System.Int32" or "System.UInt32" or "System.Int64" or "System.UInt64")))
+                {
+                    Stopped = "a class frame with mixed numeric homes and unsupported local kinds";
+                    return false;
+                }
             }
             foreach (var parameter in spec.Objects) Objects.Add(new Reached(parameter.Name, parameter.Fields));
             foreach (var parameter in spec.ValueArrays)
@@ -218,7 +240,19 @@ internal static partial class ProofOutline
             foreach (var parameter in spec.Parameters.Where(parameter => parameter.Shape == ParameterShape.WordArray))
                 Arrays.Add(new HeldArray(parameter.Name + "Origin", parameter.Name + ".length", parameter.ArrayElement,
                     parameter.WholeName, Words: parameter));
-            return Walk(0, [], new(), [], location);
+            if (numericHomes)
+            {
+                Steps.Add(new ObjectFrameEntry());
+                stores = 1;
+            }
+            if (!Walk(0, [], new(), [], location)) return false;
+            if (numericHomes && (Accesses.Any(access => access.Field.Kind != ClassViews.FieldKind.Word) ||
+                Steps.Any(step => step is Allocation or ElementAccess || step is ArrayUse { Array.Words: null })))
+            {
+                Stopped = "a numeric class frame with reference-field or reference-array effects";
+                return false;
+            }
+            return true;
         }
 
         /// <summary>Walks from `start` with the stack, locals and visited pcs of the path that reaches it.</summary>
@@ -244,6 +278,7 @@ internal static partial class ProofOutline
                 // Walks each side of a test from where it continues, with what the path holds so far.
                 bool Branch(string condition, bool takenWhenTrue, int target)
                 {
+                    if (numericHomes) return Stop("a class frame with numeric homes and a branch");
                     var (holds, fails) = takenWhenTrue ? (target, pc + 1) : (pc + 1, target);
                     var walks = new[] { holds, fails }.Select(next => (Next: next, Walk: new ObjectWalk(spec, ops,
                         views, callees, linear) { Objects = Objects, Arrays = Arrays, Slots = Slots, Stored = Stored,
@@ -283,6 +318,12 @@ internal static partial class ProofOutline
                     if (Pop() is not { } item) return Stop("a local store of an empty stack");
                     // An array home checks the view it takes and the view it gives back.
                     if (item is Values stored) Steps.Add(new ArrayUse(stored.Array, stores));
+                    if (numericHomes)
+                    {
+                        if (item is not Word { Term: { } value } word)
+                            return Stop("a numeric local store whose value the outline cannot name");
+                        Steps.Add(new LocalAccess(int.Parse(match.Groups[1].Value), value, word.Width, stores++, true));
+                    }
                     locals[int.Parse(match.Groups[1].Value)] = item;
                 }
                 else if ((match = Regex.Match(op, @"\A\.local (\d+)\z")).Success)
@@ -290,6 +331,8 @@ internal static partial class ProofOutline
                     if (!locals.TryGetValue(int.Parse(match.Groups[1].Value), out var item))
                         return Stop("a local the body reads before it stores it");
                     if (item is Values loaded) Steps.Add(new ArrayUse(loaded.Array, stores));
+                    if (numericHomes && item is Word { Term: { } value } word)
+                        Steps.Add(new LocalAccess(int.Parse(match.Groups[1].Value), value, word.Width, stores, false));
                     stack.Add(item);
                 }
                 else if (op == ".memory .nullObject") stack.Add(new Null());
@@ -394,7 +437,8 @@ internal static partial class ProofOutline
                         return Stop("a field load of an object the outline cannot name");
                     var signed = load.Signed;
                     Steps.Add(new Access(instance.Object, field, AccessKind.Load, signed, stores));
-                    var term = $"({field.Lean}.of {Memory(stores)} {instance.Object.Name})";
+                    var term = $"({field.Lean}.of {Memory(numericHomes ? fieldMemory : stores)} " +
+                        $"{instance.Object.Name})";
                     stack.Add(field.Width switch
                     {
                         < 4 => new Word($"({term}.{(signed ? "signExtend" : "setWidth")} 32)", 4),
@@ -415,6 +459,7 @@ internal static partial class ProofOutline
                         return Stop($"a store into `{field.Lean}` of an object a field holds, which the footprint " +
                             "cannot name");
                     Steps.Add(new Access(instance.Object, field, AccessKind.Store, false, stores++, word.Term));
+                    fieldMemory = stores;
                 }
                 else if (ClassViews.Decode(op) is { Store: false, Kind: ClassViews.FieldKind.Reference } referenceLoad)
                 {
@@ -549,7 +594,7 @@ internal static partial class ProofOutline
                     if (callee.Walk.Returned is { } returned)
                     {
                         var call = (CallStep)Steps[^1];
-                        stack.Add(new Word(Substitute(returned, callee, arguments, Memory(call.Stores),
+                        stack.Add(new Word(Substitute(returned, callee, arguments, Memory(call.FieldMemory),
                             call.Found), callee.Spec.Result is { Constructor: ".i64" } ? 8 : 4));
                     }
                     else if (callee.Spec.Result is not null && !linear)
@@ -725,11 +770,14 @@ internal static partial class ProofOutline
                 if (owner.Holder is not null) return $"a call to `{name}` that writes an object a field holds";
                 writes = new Access(owner, owner.Fields.First(field => field.Lean == store.Field.Lean),
                     AccessKind.Store, false, stores,
-                    store.Value is null ? null : Substitute(store.Value, callee, arguments, Memory(stores), []),
+                    store.Value is null ? null : Substitute(store.Value, callee, arguments,
+                        Memory(numericHomes ? fieldMemory : stores), []),
                     store.Target is null ? null : objects[store.Target], Called: true);
             }
-            Steps.Add(new CallStep(callee, stores, [.. needs], [.. live.Distinct()], writes, ++calls, [.. found]));
-            if (writes is not null) stores++;
+            Steps.Add(new CallStep(callee, stores, numericHomes ? fieldMemory : stores,
+                [.. needs], [.. live.Distinct()], writes, ++calls, [.. found]));
+            if (writes is not null) fieldMemory = ++stores;
+            else if (callee.Walk.NumericHomes) stores++;
             return null;
         }
 
@@ -997,7 +1045,8 @@ internal static partial class ProofOutline
                 return null;
             var spec = new Specification(method, parameters, DescribeResult(method, extraction.Architecture), true,
                 true);
-            var walk = new ObjectWalk(spec, extraction.Emitted[index].Ops, views, _ => null);
+            var walk = new ObjectWalk(spec, extraction.Emitted[index].Ops, views, _ => null,
+                numericHomes: HasNumericObjectHomes(method));
             // A contract states reference stores only of objects the callee reaches, and its caller cannot give
             // it the premise that a reference outside the model forms; it states no array a field holds.
             if (!walk.Run(_ => "") || walk.Steps.Any(step => step is CallStep or Split) || walk.Arrays.Count > 0 ||
@@ -1020,6 +1069,22 @@ internal static partial class ProofOutline
     /// <summary>A tactic's fact list as parts the writer may wrap after any comma.</summary>
     static IEnumerable<string> FactList(List<string> facts) =>
         facts.Select((fact, index) => (index == 0 ? "[" : "") + fact + (index + 1 < facts.Count ? "," : "]"));
+
+    /// <summary>Binds the actual numeric local homes and caller-relative frame facts of an object method.</summary>
+    static void ObjectEntry(Writer lean, Specification spec, string name, string method)
+    {
+        var arrays = spec.Parameters.Where(parameter => parameter.Shape == ParameterShape.WordArray).ToArray();
+        lean.Wrapped($"bind_entry {name}", new[] { "(memory : Memory)" }
+            .Concat(spec.Parameters.Select(parameter => $"({parameter.Name} : {parameter.Lean})"))
+            .Concat(["(wellFormed : memory.WellFormed)"])
+            .Concat(arrays.Select(array => $"({array.Name}Valid : {array.Name}.validate memory = .ok ())")),
+            $":= Extracted.method{method}");
+        lean.Line($"  with {spec.ArgumentValues} from memory");
+        lean.Line("  allocating wellFormed");
+        if (arrays.Length > 0)
+            lean.Line($"  simplifying [{string.Join(", ", arrays.Select(array => array.Name + "Valid"))}]");
+        lean.Line();
+    }
 
     /// <summary>Gives a body with a loop the premises of the fields it and its callees touch of each object
     /// argument, `Owned` only where one of them stores, when a linear walk reads the whole body; otherwise the
@@ -1054,7 +1119,9 @@ internal static partial class ProofOutline
         // An object a reference field holds is not an argument: `pre` asks that one exists, and `post` speaks of
         // whichever the field holds, so a caller names it by the fact that its own field holds it.
         var targets = callee.Targets;
-        var premises = callee.Plan.Premises;
+        var premises = callee.Walk.NumericHomes
+            ? new List<(string Name, string Statement)> { ("wellFormed", "initial.WellFormed") }
+                .Concat(callee.Plan.Premises).ToList() : callee.Plan.Premises;
         var bound = premises.FindIndex(premise => targets.Any(target => target.Held == premise.Name));
         string Conjunction(IEnumerable<(string Name, string Statement)> parts) => string.Join(" ∧ ",
             parts.Select(premise => Regex.Replace(premise.Statement, @"\binitial\b", "memory")));
@@ -1064,8 +1131,8 @@ internal static partial class ProofOutline
         var footprint = "[" + string.Join(", ", callee.Plan.Entries) + "]";
         var store = callee.Store;
         var effects = new List<string>();
-        if (store is null) effects.Add("final = initial");
-        else effects.Add(store.Field.Kind == ClassViews.FieldKind.Reference
+        if (store is null && !callee.Walk.NumericHomes) effects.Add("final = initial");
+        else if (store is not null) effects.Add(store.Field.Kind == ClassViews.FieldKind.Reference
             ? $"{store.Field.Lean}.Holds final {store.Object.Name} (.address {store.Target!.Name})"
             : $"{store.Field.Lean}.Holds final {store.Object.Name} {store.Value}");
         var held = targets.Select(target => premises.First(premise => premise.Name == target.Held).Statement)
@@ -1073,7 +1140,8 @@ internal static partial class ProofOutline
         if (callee.Walk.Returned is { } returned)
             effects.Add(string.Concat(targets.Select((target, position) => $"∀ {target.Name}, {held[position]} → "))
                 + $"result = {returned}");
-        var post = string.Join(" ∧ ", effects);
+        var post = effects.Count == 0 ? "True" : string.Join(" ∧ ", effects);
+        if (callee.Walk.NumericHomes) ObjectEntry(lean, spec, callee.Name + "Entry", method);
         lean.Doc($"`{spec.Method.Name}` as the outline reads its body: it needs the facts of `pre`, writes " +
             "only `footprint` and leaves `post`.");
         lean.Line($"def {callee.Name}Contract : MethodContract {inputType} {outputType} where");
@@ -1083,7 +1151,7 @@ internal static partial class ProofOutline
         static string[] Parts(string term) => term.Length + 6 <= 100 ? [term] : term.Split(' ');
         lean.Wrapped($"  pre := fun {Pattern(pre)} memory =>", Parts(pre.Length == 0 ? "True" : pre), "");
         lean.Wrapped($"  footprint := fun {Pattern(footprint)} =>", [footprint], "");
-        lean.Wrapped($"  post := fun {Pattern(post)} {Used("initial", post)} final " +
+        lean.Wrapped($"  post := fun {Pattern(post)} {Used("initial", post)} {Used("final", post)} " +
             $"{(spec.Result is null ? "_" : "result")} =>", Parts(post), "");
         lean.Line();
         lean.Doc($"`{spec.Method.Name}` meets its contract; callers use only the contract.");
@@ -1103,7 +1171,14 @@ internal static partial class ProofOutline
         var proof = store is null
             ? callee.Walk.Returned is null ? "rfl" : $"⟨rfl, {resulting}⟩"
             : callee.Walk.Returned is null ? "held1" : $"⟨held1, {resulting}⟩";
-        ObjectBody(lean, spec, callee.Walk, "simp", $"{(spec.Result is null ? "()" : "_")}, rfl, {proof}");
+        if (callee.Walk.NumericHomes)
+        {
+            var heldStore = store is null ? null : $"held{store.Stores + 1}Final";
+            proof = heldStore is null ? callee.Walk.Returned is null ? "True.intro" : resulting
+                : callee.Walk.Returned is null ? heldStore : $"⟨{heldStore}, {resulting}⟩";
+        }
+        ObjectBody(lean, spec, callee.Walk, "simp", $"{(spec.Result is null ? "()" : "_")}, rfl, {proof}",
+            callee.Name + "Entry");
         if (callee.Walk.Returned is not null && targets.Length > 0)
         {
             // The field holds one object, so each one `post` names is the one the proof obtained.
@@ -1122,7 +1197,7 @@ internal static partial class ProofOutline
     /// cases on its test, and each path's run stepped with every access's facts. An entry leaves each path's
     /// postcondition as a hole; a callee's proof closes its contract's `Returns` with `returns`.</summary>
     static void ObjectBody(Writer lean, Specification spec, ObjectWalk walk, string widen,
-        string? returns = null)
+        string? returns = null, string entry = "objectEntry")
     {
         var known = new Dictionary<(string Key, int Stores), string>();
         foreach (var reached in walk.Objects)
@@ -1154,8 +1229,13 @@ internal static partial class ProofOutline
                 .SelectMany(array => new[] { array.Name + "Valid", array.Name + "Type" }))
             .Concat(spec.Plan?.Premises.Where(fact => fact.Name.EndsWith("Reference", StringComparison.Ordinal))
                 .Select(fact => fact.Name) ?? []).ToList();
-        new ObjectPath(lean, spec, walk.Owns, owned, widen, returns, "  ", known, [], facts, []).Write(walk);
+        var frame = walk.NumericHomes ? new ObjectFrame(entry,
+            "[" + string.Join(", ", walk.Plan().Entries) + "]", spec.Method.Body.Variables.Count) : null;
+        new ObjectPath(lean, spec, walk.Owns, owned, widen, returns, "  ", known, [], facts, [], frame).Write(walk);
     }
+
+    /// <summary>The existing entry binder and caller footprint used by a numeric object's execution path.</summary>
+    sealed record ObjectFrame(string Entry, string Footprint, int Locals);
 
     /// <summary>One path of an object body's proof from where its walk starts, `indent` deep: `known` names
     /// each fact in the memory after a number of writes, `stored` holds the writes so far, `facts` those not
@@ -1163,14 +1243,33 @@ internal static partial class ProofOutline
     sealed class ObjectPath(Writer lean, Specification spec, Func<Reached, ViewField, bool> owns,
         HashSet<string> ownedSlots, string widen, string? returns, string indent,
         Dictionary<(string Key, int Stores), string> known, List<object> stored, List<string> facts,
-        List<string> branches)
+        List<string> branches, ObjectFrame? frame = null)
     {
+        int localReads;
+        readonly Dictionary<string, ViewField> fieldEqualities = [];
+
+        bool Private(int level) => stored[level - 1] is ObjectFrameEntry or LocalAccess or
+            CallStep { Writes: null };
+
         string Live(Reached reached, int stores) => Carry(reached.Name + "Live", stores, (previous, level) =>
-            $"{previous}.after_confined framed{level}");
+            Private(level)
+                ? $"{previous}.after_below below{level} {reached.Name}Live.old frameFacts{level}.confined.grows"
+                : $"{previous}.after_confined framed{level}");
 
         string FieldFact(Reached reached, ViewField field, int stores) =>
             Carry(ObjectWalk.Fact(reached, field), stores, (previous, level) =>
             {
+                if (Private(level))
+                {
+                    var readable = owns(reached, field) ? previous + ".toReadable" : previous;
+                    var equality = ObjectWalk.Fact(reached, field) + "Equal" + level;
+                    lean.Wrapped($"{indent}have {equality} :=", ($"({readable}.below below{level} " +
+                        $"{reached.Name}Live.old frameFacts{level}.confined.grows).2").Terms(), "");
+                    Add(equality);
+                    fieldEqualities.Add(equality, field);
+                    return $"{previous}.after_below below{level} {reached.Name}Live.old " +
+                        $"frameFacts{level}.confined.grows";
+                }
                 // No object with a located field is an array, so an element store is apart from every field.
                 if (stored[level - 1] is Allocation) return $"{previous}.after_confined framed{level} Nowhere";
                 if (stored[level - 1] is ElementAccess element)
@@ -1264,6 +1363,16 @@ internal static partial class ProofOutline
         {
             foreach (var step in walk.Steps)
             {
+                if (step is ObjectFrameEntry entered)
+                {
+                    Enter(entered);
+                    continue;
+                }
+                if (step is LocalAccess local)
+                {
+                    Local(local);
+                    continue;
+                }
                 if (step is Split split)
                 {
                     // Each side keeps the facts introduced before the split and adds its own after it.
@@ -1317,6 +1426,49 @@ internal static partial class ProofOutline
             Return(walk);
         }
 
+        /// <summary>Enters the extracted frame and fixes the run's actual memory before stepping.</summary>
+        void Enter(ObjectFrameEntry entered)
+        {
+            var homes = Enumerable.Range(0, frame!.Locals).Select(index => $"localHome{index}").ToArray();
+            var pattern = homes.Concat(["stored1", "setup"]).Concat(homes.Select(_ => "-"))
+                .Concat(["entryMemory", "entryFrames"]);
+            lean.Wrapped($"{indent}obtain ⟨{string.Join(", ", pattern)}⟩ :=",
+                new[] { frame.Entry + ".checked", "initial" }
+                    .Concat(spec.Parameters.Select(parameter => parameter.Name))
+                    .Concat(["wellFormed"]).Concat(spec.Parameters
+                        .Where(parameter => parameter.Shape == ParameterShape.WordArray)
+                        .Select(array => array.Name + "Valid")), "");
+            lean.Line($"{indent}have frameFacts1 := entryFrames {frame.Footprint}");
+            lean.Line($"{indent}have below1 := entryMemory.kept");
+            Add("setup");
+            Add(frame.Entry + ".frame");
+            lean.Line($"{indent}refine invoke_exists_of_run (by cil_lookup [])");
+            lean.Wrapped($"{indent}  (by cil_checked_side", FactList(facts), ") setup ?_");
+            stored.Add(entered);
+        }
+
+        /// <summary>Loads or updates a numeric home through its existing frame snapshots.</summary>
+        void Local(LocalAccess local)
+        {
+            var current = $"frameFacts{local.Stores}";
+            if (!local.Store)
+            {
+                var name = "localLoaded" + ++localReads;
+                lean.Line($"{indent}have {name} := {current}.load {local.Index}");
+                Add(name);
+                return;
+            }
+            var next = local.Stores + 1;
+            var kind = EnumTypes.Storage(spec.Method.Body.Variables[local.Index].VariableType).FullName is
+                "System.Int64" or "System.UInt64" ? "word64" : "word32";
+            lean.Wrapped($"{indent}obtain ⟨stored{next}, localWritten{next}, frameFacts{next}, below{next}⟩ :=",
+                [$"{current}.store {local.Index} ({ScalarConstructor(local.Width)} {local.Value})",
+                    $"(kind := .{kind})"], "");
+            lean.Line($"{indent}  rfl");
+            Add($"localWritten{next}");
+            stored.Add(local);
+        }
+
         /// <summary>An array view remains valid across confined writes, calls and allocation.</summary>
         string WordValid(Parameter array, int stores) => Carry(array.Name + "Valid", stores, (_, level) =>
             $"{array.Name}.validate_preserved {array.Name}Valid wellFormed {ArrayAllocations(level)}");
@@ -1324,6 +1476,9 @@ internal static partial class ProofOutline
         /// <summary>Every caller allocation remains present after the writes on this path.</summary>
         string ArrayAllocations(int stores)
         {
+            if (frame is not null && stores > 0)
+                return $"(show AllocationExtension initial stored{stores} from " +
+                    $"⟨frameFacts{stores}.confined.grows, frameFacts{stores}.confined.allocations⟩)";
             known.TryAdd(("arrayAllocations", 0), "(AllocationExtension.refl initial)");
             return Carry("arrayAllocations", stores, (previous, level) =>
                 $"{previous}.trans (show AllocationExtension {ObjectWalk.Memory(level - 1)} stored{level} " +
@@ -1359,6 +1514,8 @@ internal static partial class ProofOutline
             known.TryAdd((array.Name + "Contents", 0), array.Name + "Contents");
             var contents = Carry(array.Name + "Contents", read.Stores, (previous, level) =>
             {
+                if (Private(level))
+                    return $"{previous}.after_below_valid {array.Name}Valid wellFormed below{level}";
                 if (stored[level - 1] is Access { Called: true } or
                     Access { Field.Kind: ClassViews.FieldKind.Word } or Allocation)
                 {
@@ -1487,16 +1644,23 @@ internal static partial class ProofOutline
             foreach (var (_, held) in call.Found) Add(held);
             Add($"{call.Callee.Name}_holds");
             Add($"{call.Callee.Name}Contract");
-            Add("leaveFrame");
+            if (frame is null) Add("leaveFrame");
+            else Add($"frameFacts{call.Stores}.wellFormed");
             lean.Wrapped($"{indent}cil_contract_steps", FactList(facts), "");
-            facts.Clear();
+            if (frame is null) facts.Clear();
             Add(call.Callee.Name + "Contract");
             var number = call.Number;
             if (call.Writes is { } writes)
             {
                 var index = writes.Stores + 1;
-                lean.Line($"{indent}rename_i stored{index} framed{index} output{number} held{index} _");
+                lean.Line($"{indent}rename_i stored{index} framed{index} output{number} held{index} " +
+                    (frame is null ? "_" : $"invoked{number}"));
                 lean.Line($"{indent}dsimp only [{call.Callee.Name}Contract] at framed{index} held{index}");
+                if (frame is not null)
+                {
+                    CarryCallFrame(call, index);
+                    RewriteCallFields(call, $"held{index}");
+                }
                 if (call.Callee.Walk.Returned is not null)
                 {
                     lean.Line($"{indent}obtain ⟨held{index}, returned{number}⟩ := held{index}");
@@ -1504,6 +1668,23 @@ internal static partial class ProofOutline
                     lean.Line($"{indent}dsimp only [{call.Callee.Name}Contract]");
                 }
                 stored.Add(writes);
+                return;
+            }
+            if (call.Callee.Walk.NumericHomes)
+            {
+                var index = call.Stores + 1;
+                lean.Line($"{indent}rename_i stored{index} framed{index} output{number} post{number} invoked{number}");
+                lean.Line($"{indent}dsimp only [{call.Callee.Name}Contract] at framed{index} post{number}");
+                CarryCallFrame(call, index);
+                lean.Wrapped($"{indent}have below{index} :=", [$"framed{index}.nil_memoryBelow.weaken",
+                    $"frameFacts{call.Stores}.confined.grows"], "");
+                RewriteCallFields(call, $"post{number}");
+                if (call.Callee.Walk.Returned is not null)
+                {
+                    lean.Line($"{indent}subst output{number}");
+                    lean.Line($"{indent}dsimp only [{call.Callee.Name}Contract]");
+                }
+                stored.Add(call);
                 return;
             }
             lean.Line($"{indent}rename_i called{number} _ output{number} post{number} _");
@@ -1520,6 +1701,34 @@ internal static partial class ProofOutline
             else if (call.Callee.Walk.Returned is not null)
                 lean.Line($"{indent}obtain ⟨post{number}, rfl⟩ := post{number}");
             lean.Line($"{indent}subst called{number}");
+        }
+
+        /// <summary>Rewrites a callee's returned values from actual entry memory to frozen field values.</summary>
+        void RewriteCallFields(CallStep call, string post)
+        {
+            var terms = call.Callee.Walk.Returned + " " + call.Callee.Store?.Value;
+            var equalities = fieldEqualities.Where(pair => terms.Contains(pair.Value.Lean + ".of ",
+                StringComparison.Ordinal)).Select(pair => pair.Key).ToList();
+            if (equalities.Count > 0) lean.Wrapped($"{indent}simp only", FactList(equalities), $"at {post}");
+        }
+
+        /// <summary>A call preserves local homes when its footprint lies in the caller's older storage.</summary>
+        void CarryCallFrame(CallStep call, int index)
+        {
+            var number = call.Number;
+            lean.Line($"{indent}obtain ⟨fuel{number}, invoked{number}⟩ := invoked{number}");
+            lean.Wrapped($"{indent}have callFormed{number} := invoke_preserves_wellFormed",
+                ["_ _ _ _ _ _ _", $"frameFacts{call.Stores}.wellFormed", $"invoked{number}"], "");
+            lean.Wrapped($"{indent}have frameFacts{index} := frameFacts{call.Stores}.after_confined",
+                [$"framed{index}", $"callFormed{number}"], "");
+            if (call.Writes is { } writes)
+            {
+                lean.Line($"{indent}  (by intro entry member; simp only [List.mem_singleton] at member");
+                lean.Line($"{indent}      subst entry; exact ⟨_, by simp, Within.refl _⟩)");
+                lean.Line($"{indent}  (by intro entry member; simp only [List.mem_singleton] at member");
+                lean.Line($"{indent}      subst entry; exact {writes.Object.Name}Live.old)");
+            }
+            else lean.Line($"{indent}  (by simp) (by simp)");
         }
 
         void Access(Access access)
@@ -1585,15 +1794,45 @@ internal static partial class ProofOutline
             Add(fact + ".located");
             Add(Live(access.Object, access.Stores) + ".formed");
             Add($"written{stores}");
+            if (frame is not null)
+            {
+                lean.Wrapped($"{indent}have frameFacts{stores} := frameFacts{access.Stores}.write written{stores}",
+                    [$"⟨{access.Field.Lean}.entry {access.Object.Name}, by simp,",
+                        "by simp [WordField.entry, numberBytes_length, Within]⟩"], "");
+                lean.Line($"{indent}  {access.Object.Name}Live.old");
+            }
             stored.Add(access);
         }
 
         void Return(ObjectWalk walk)
         {
-            var widened = Enumerable.Range(1, stored.Count).Select(index => $"(framed{index}.widen (by {widen}))")
+            var widened = Enumerable.Range(1, stored.Count).Where(index => !Private(index))
+                .Select(index => $"(framed{index}.widen (by {widen}))")
                 .ToArray();
             var confined = widened.Length == 0 ? "Confined.refl _ _"
                 : widened.Skip(1).Aggregate(widened[0], (chain, next) => $"({chain}.trans {next})");
+            if (frame is not null)
+            {
+                lean.Line($"{indent}have exited := frameFacts{stored.Count}.leave setup");
+                confined = "exited.1";
+                for (var index = 1; index <= stored.Count; index++)
+                {
+                    if (stored[index - 1] is not Access access) continue;
+                    var carriedHeld = $"held{index}";
+                    for (var later = index + 1; later <= stored.Count; later++)
+                    {
+                        if (Private(later))
+                            carriedHeld = $"({carriedHeld}.after_below below{later} {access.Object.Name}Live.old " +
+                                $"frameFacts{later}.confined.grows)";
+                        else if (stored[later - 1] is Access other && other.Field != access.Field)
+                            carriedHeld = $"({carriedHeld}.after_confined framed{later} (apart_of_entries rfl))";
+                        else { carriedHeld = ""; break; }
+                    }
+                    if (carriedHeld.Length == 0) continue;
+                    lean.Wrapped($"{indent}have held{index}Final :=", ($"{carriedHeld}.after_below exited.2 " +
+                        $"{access.Object.Name}Live.old exited.1.grows").Terms(), "");
+                }
+            }
             // Elements of a fresh array are no caller memory: the footprint forgets them.
             if (stored.OfType<Allocation>().FirstOrDefault() is { } made)
             {
@@ -1612,7 +1851,7 @@ internal static partial class ProofOutline
                 Add(Live(result, stored.Count) + ".formed");
             // The return leaves the method's frame, which owns no caller memory.
             // After a call the steps may already have reached the return.
-            Add("leaveFrame");
+            if (frame is null) Add("leaveFrame");
             lean.Wrapped(walk.Steps.LastOrDefault() is CallStep
                 ? $"{indent}try cil_contract_steps" : $"{indent}cil_contract_steps", FactList(facts), "");
             if (returns is not null)
@@ -1632,7 +1871,8 @@ internal static partial class ProofOutline
                 lean.Noted(indent, "case encoded => sorry", "the returned word is that Bool's encoding");
             }
             // An allocation writes nothing the caller holds, so it leaves no `held` fact.
-            var stores = Enumerable.Range(1, stored.Count).Where(index => stored[index - 1] is not Allocation)
+            var stores = Enumerable.Range(1, stored.Count)
+                .Where(index => stored[index - 1] is not Allocation && !Private(index))
                 .ToArray();
             var held = string.Join(", ", stores.Select(index => $"`held{index}`"));
             lean.Noted(indent, "sorry", "Postcondition of the returned value" +
