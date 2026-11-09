@@ -1,3 +1,5 @@
+using Mono.Cecil;
+
 namespace Nethermind.LeanCIL;
 
 // The System.Runtime argument guards modeled as checked runtime calls; CIL.Extraction.guardCallMatches
@@ -5,6 +7,7 @@ namespace Nethermind.LeanCIL;
 internal static class ArgumentGuards
 {
     private const string OutOfRange = "System.ArgumentOutOfRangeException";
+    private const string NullGuard = "System.Void System.ArgumentNullException::ThrowIfNull(System.Object,System.String)";
 
     private static readonly (string Type, int Width, bool Signed)[] Integers =
     [
@@ -30,12 +33,15 @@ internal static class ArgumentGuards
     // Exact generic instances only: another type argument or overload is not a modeled guard.
     internal static string? Translate(string signature) => Operations.GetValueOrDefault(signature);
 
+    // The modeled ThrowIfNull, whose object argument must be a class instance or null on the stack.
+    internal static bool IsNullGuard(MethodReference callee) =>
+        callee.FullName == NullGuard && callee.DeclaringType.Scope.Name == "System.Runtime";
+
     private static Dictionary<string, string> Build()
     {
         var operations = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["System.Void System.ArgumentNullException::ThrowIfNull(System.Object,System.String)"] =
-                ".memory .throwIfNull"
+            [NullGuard] = ".memory .throwIfNull"
         };
         foreach (var (type, width, signed) in Integers)
         {

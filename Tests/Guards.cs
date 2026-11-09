@@ -58,6 +58,26 @@ foreach (var (name, method, rewrite, expected) in
         throw new InvalidOperationException($"Incorrect guard rejection: {name}\n{result.Output}");
     Console.WriteLine($"PASS guard rejection: {name}");
 }
+// ThrowIfNull's object parameter accepts any reference, but the model tests only a class instance or null.
+var arrayOutput = Path.Combine(root, "Mutant-valueArray");
+Directory.CreateDirectory(arrayOutput);
+var arrayDll = Path.Combine(arrayOutput, "Examples.dll");
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var body = module.GetType("Examples.Guards").Methods.Single(candidate => candidate.Name == "Required").Body;
+    var il = body.GetILProcessor();
+    var label = body.Instructions[0];
+    il.InsertBefore(label, il.Create(OpCodes.Ldc_I4_1));
+    il.Replace(label, il.Create(OpCodes.Newarr, module.TypeSystem.Int32));
+    module.Write(arrayDll);
+}
+var arrayResult = Execute(["dotnet", ExtractorPath, "extract", arrayDll, "Examples.Guards::Required(System.String)",
+    Path.Combine(arrayOutput, "out")]);
+if (arrayResult.Code != 1 || File.Exists(Path.Combine(arrayOutput, "out", "Extracted.lean")) ||
+    !arrayResult.Output.Contains("Unsupported ThrowIfNull argument that is not a class instance",
+        StringComparison.Ordinal))
+    throw new InvalidOperationException("Incorrect guard rejection: valueArray\n" + arrayResult.Output);
+Console.WriteLine("PASS guard rejection: valueArray");
 Console.WriteLine(
     "PASS guards: integer and null guards raise exactly their exceptions; other overloads rejected by name");
 

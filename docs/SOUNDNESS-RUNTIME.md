@@ -505,7 +505,8 @@ emitted guard again from the raw call's owner, name, type argument, parameter ty
 identity (`CIL.Extraction.guardCallMatches`); no other instruction may emit a guard. Other
 instantiations, among them `char`, floating-point and `decimal`, the `void*` overload of
 `ThrowIfNull`, and the string guards such as `ThrowIfNullOrEmpty`, which read characters, remain
-rejected calls.
+rejected calls. `ThrowIfNull` on a value array or any other operand that is not a class instance or
+null is rejected by name, since the model tests only object references.
 ## Sequential struct layout
 
 Admitted layouts are reference-free and bounded by 65,536 bytes. Sequential fields include supported

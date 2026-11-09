@@ -220,7 +220,13 @@ internal static class NativeOperands
             else if (code is Code.Call or Code.Callvirt or Code.Newobj)
             {
                 var callee = (MethodReference)instruction.Operand;
-                for (var index = 0; index < callee.Parameters.Count + (code != Code.Newobj && callee.HasThis ? 1 : 0); index++) Pop();
+                var arguments = new List<StackType>();
+                for (var index = 0; index < callee.Parameters.Count + (code != Code.Newobj && callee.HasThis ? 1 : 0); index++)
+                    arguments.Add(Pop());
+                // The model tests a class instance or null; a value array or any other operand is not one.
+                if (ArgumentGuards.IsNullGuard(callee) && arguments[1].Kind is not (Kind.Object or Kind.NullObject))
+                    throw new InvalidDataException(
+                        $"Unsupported ThrowIfNull argument that is not a class instance: {method.FullName}");
                 if (code == Code.Newobj || InitAccessors.Return(callee.ReturnType).MetadataType != MetadataType.Void)
                     stack.Add(code == Code.Newobj ? Type(callee.DeclaringType) : CallType(callee, profile));
             }
