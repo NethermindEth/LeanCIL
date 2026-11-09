@@ -33,6 +33,31 @@ theorem SpanContents.after_setSlot {memory : Memory} {view : SpanView} {width : 
 
 #print axioms SpanContents.after_setSlot
 
+/-- Contents of a view valid in caller memory survive a confined change whose footprint is
+    disjoint from the view. Only the caller memory needs to be well formed. -/
+theorem SpanContents.after_confined_valid {anchor before after : Memory} {view : SpanView}
+    {width : Nat} {values : List (BitVec (8 * width))} {footprint : List (Reference × Nat)}
+    (contents : SpanContents before view width values) (valid : view.validate anchor = .ok ())
+    (wellFormed : anchor.WellFormed) (older : anchor.nextIdentity ≤ before.nextIdentity)
+    (framed : Confined footprint before after)
+    (apart : ∀ base, view.reference = .address base →
+      ∀ entry ∈ footprint, Apart base (width * values.length) entry) :
+    SpanContents after view width values := by
+  refine ⟨contents.elementWidth, contents.length, ?_⟩
+  have shape := contents.contents
+  cases address : view.reference with
+  | null => simpa only [address] using shape
+  | address base =>
+    simp only [address] at shape ⊢
+    intro index word found
+    have bound := (List.getElem?_eq_some_iff.mp found).1
+    have old := Nat.lt_of_lt_of_le (SpanView.allocation_below valid wellFormed address) older
+    exact (framed.read_eq (base.element width index) old width 1
+      (Outside.of_apart fun entry member =>
+        (apart base address entry member).sub (element_le bound))).trans (shape index word found)
+
+#print axioms SpanContents.after_confined_valid
+
 /-- An in-bound element of an array holding `values` has an address whose load is that
     element. -/
 theorem SpanContents.array_load {memory : Memory} {view : ArrayView} {width : Nat}
