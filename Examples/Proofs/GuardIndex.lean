@@ -29,7 +29,7 @@ theorem correctness (memory : Memory) (literal : Reference) (index length : CIL.
     cil_checked_steps [literalObject_of_lookup bound, formed, comparisonGuardOutcome,
       CIL.guardOperand, CIL.ComparisonGuard.throws, BitVec.setWidth_eq, outside]
   · simp only [outside, ite_false]
-    cil_checked_steps [literalObject_of_lookup bound, formed, leaveFrame,
+    cil_checked_steps [literalObject_of_lookup bound, formed,
       comparisonGuardOutcome, CIL.guardOperand, CIL.ComparisonGuard.throws, BitVec.setWidth_eq,
       outside]
 

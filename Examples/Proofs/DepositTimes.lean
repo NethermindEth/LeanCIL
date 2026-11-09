@@ -36,10 +36,10 @@ def depositContract : MethodContract (Reference × W64) where
 /-- `Deposit` meets its contract for every live account and amount. -/
 theorem deposit_holds : depositContract.Holds Extracted.program deposit := by
   rintro ⟨account, amount⟩ memory owned
-  dsimp only [depositContract] at *
+  dsimp only [depositContract] at owned
   obtain ⟨after, written, framed, held⟩ :=
     owned.store (Account.Balance.of memory account + amount)
-  refine ⟨CIL.executionBound Extracted.program deposit, after, [], ?_, framed, [], rfl, rfl, held⟩
+  refine MethodContract.Holds.intro after [] ?_ framed ⟨rfl, held⟩
   cil_checked_steps [owned.facts, written]
 
 #print axioms deposit_holds
@@ -85,11 +85,11 @@ theorem correctness (memory : Memory) (account : Reference) (amount : W64) (time
       Account.Balance.Holds final account
         (deposited (Account.Balance.of memory account) amount times) ∧
       Confined [Account.Balance.entry account] memory final := by
-  obtain ⟨home, entered, setup, -, entryMemory, entryFrame⟩ :=
+  obtain ⟨home, entered, enter⟩ :=
     entry.checked memory account amount times wellFormed
   have old := owned.old
-  have enteredHeld := owned.holds.after_below entryMemory.kept old entryMemory.grown
-  refine invoke_loop_induction depositTimes.found ?_ setup (header memory account times home)
+  have enteredHeld := owned.holds.after_below enter.entryMemory.kept old enter.entryMemory.grown
+  refine invoke_loop_induction depositTimes.found ?_ enter.setup (header memory account times home)
     (fun state => Account.Balance.Holds state.memory account
         (deposited (Account.Balance.of memory account) amount state.values) ∧
       state.values.toNat ≤ times.toNat)

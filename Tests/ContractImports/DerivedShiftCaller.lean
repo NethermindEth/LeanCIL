@@ -35,13 +35,14 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
     refine run_next_exists _ found Extracted.method0_instruction0 (by cil_checked_step []) ?_
     refine run_call_of_outcome holds value found Extracted.method0_instruction1
       (by cil_checked_step []) rfl formed raised ?_
-    rintro final values _ framed ⟨output, rfl, bounded⟩
+    intro final output call
+    have bounded := call.post
     refine run_next_exists _ found Extracted.method0_instruction2 (by cil_checked_step []) ?_
     refine run_next_exists _ found Extracted.method0_instruction3 (by cil_checked_step []) ?_
     refine run_next_exists _ found Extracted.method0_instruction4 (by cil_checked_step []) ?_
     refine run_return_exists found Extracted.method0_instruction5 (by cil_checked_step [])
       (by rfl) ?_
-    refine ⟨framed, output + 1, rfl, ?_⟩
+    refine ⟨call.framed, output + 1, rfl, ?_⟩
     dsimp only [DerivedInterface.percentBounded] at bounded
     bv_omega
 

@@ -914,8 +914,10 @@ internal static partial class ProofOutline
                     parameter.Name + (parameter.Writable ? "Width" : "Contents.elementWidth"), parameter.Mode
                 }))
                 .Concat(WordArrays.Select(array => array.Name + "Valid"));
-            var pattern = Homes.Concat(["entered", "setup"]).Concat(Homes.Select(_ => "-")).Concat(["-", "entryFrame"]);
+            var pattern = Homes.Concat(["entered", "enter"]);
             lean.Wrapped($"  obtain ⟨{string.Join(", ", pattern)}⟩ :=", ["entry.checked", .. entryArguments], "");
+            lean.Line("  have setup := enter.setup");
+            lean.Line("  have entryFrame := enter.frame");
             foreach (var array in Indexed) Destructure(lean, array);
             var formed = spec.Parameters.SelectMany(parameter => parameter.Shape switch
             {

@@ -64,10 +64,10 @@ theorem rent_reuses (memory : Memory) (pool head : Reference) (wellFormed : memo
       PooledItem.NextFree.Holds final head .null ∧
       ItemPool._freeCount.Holds final pool (ItemPool._freeCount.of memory pool - 1) ∧
       PooledItem.IsRented.Holds final head 1 := by
-  obtain ⟨home, entered, setup, fresh, entryMemory, -⟩ :=
+  obtain ⟨home, entered, enter⟩ :=
     entry.checked memory (.address pool) wellFormed
-  have keep := entryMemory.kept
-  have grown := entryMemory.grown
+  have keep := enter.entryMemory.kept
+  have grown := enter.entryMemory.grown
   -- Frame entry allocates only the frame's own home, so every caller fact carries into it.
   have free0 := free.holds.after_below keep free.old grown
   have idle0 := idle.holds.after_below keep idle.old grown
@@ -92,7 +92,7 @@ theorem rent_reuses (memory : Memory) (pool head : Reference) (wellFormed : memo
   obtain ⟨marked, markWritten, markFramed, markHeld⟩ := rented3.store 1
   -- Leaving the frame expires only its home, which is younger than every caller object.
   have left := leaveFrame_preserves_memory_below (entry.frame memory home) marked
-    memory.nextIdentity (by simpa [entry.frame] using fresh.fresh)
+    memory.nextIdentity (by simpa [entry.frame] using enter.numeric1.fresh)
   have changed : Confined (reuseFootprint pool head) memory
       (leaveFrame (entry.frame memory home) marked) :=
     ((((Confined.ofMemoryBelow keep (Nat.le_refl _) grown).trans
@@ -107,9 +107,9 @@ theorem rent_reuses (memory : Memory) (pool head : Reference) (wellFormed : memo
   · have headMarked := rented3.live.after_confined markFramed
     -- The returned head is older than the frame's home, so leaving the frame keeps it.
     have headKept : head.allocation ≠ home.allocation :=
-      Nat.ne_of_lt (Nat.lt_of_lt_of_le link.old fresh.fresh)
-    cil_checked_steps [setup, entry.frame, free.live.formed, free0.1.live.formed, free0.1.located,
-      headLoad, headLive.formed, link0.1.located, linkLoad, freeStored,
+      Nat.ne_of_lt (Nat.lt_of_lt_of_le link.old enter.numeric1.fresh)
+    cil_checked_steps [enter.setup, entry.frame, free.live.formed, free0.1.live.formed,
+      free0.1.located, headLoad, headLive.formed, link0.1.located, linkLoad, freeStored,
       link1.live.formed, link1.located, nullStored, idleFacts, countWritten,
       rented3.live.formed, rented3.located, markWritten, headMarked.formed, headKept]
     rfl
@@ -214,10 +214,10 @@ theorem rent_creates (memory : Memory) (pool : Reference) (wellFormed : memory.W
       PooledItem.Id.Holds final item (ItemPool._nextId.of memory pool) ∧
       PooledItem.NextFree.Holds final item .null ∧
       PooledItem.IsRented.Holds final item 1 := by
-  obtain ⟨home, entered, setup, fresh, entryMemory, -⟩ :=
+  obtain ⟨home, entered, enter⟩ :=
     entry.checked memory (.address pool) wellFormed
-  have keep := entryMemory.kept
-  have grown := entryMemory.grown
+  have keep := enter.entryMemory.kept
+  have grown := enter.entryMemory.grown
   have free0 := free.below keep free.old grown
   have live0 := live.holds.after_below keep live.old grown
   have capacity0 := capacity.below keep capacity.old grown
@@ -229,10 +229,10 @@ theorem rent_creates (memory : Memory) (pool : Reference) (wellFormed : memory.W
   -- `Rent` keeps the old id in its numeric local, whose home the frame owns.
   obtain ⟨counter, idWritten, idStored, idRead⟩ := store_numeric_local .word32
     (.i32 (ItemPool._nextId.of memory pool)) (ItemPool._nextId.of memory pool).toNat
-    (by simp [localNumber, CIL.Value.hasUnspecified]) fresh.writable
+    (by simp [localNumber, CIL.Value.hasUnspecified]) enter.numeric1.writable
   have idLoaded := load_numeric_local .word32 (.i32 (ItemPool._nextId.of memory pool)) _
     (by simp [localNumber, CIL.Value.hasUnspecified]) idRead
-  have counterBelow := write_preserves_memory_below _ _ _ _ _ _ fresh.fresh idWritten
+  have counterBelow := write_preserves_memory_below _ _ _ _ _ _ enter.numeric1.fresh idWritten
   have counterNext := write_nextIdentity idWritten
   have nextId1 := nextId0.after_below counterBelow nextId.old (by omega)
   obtain ⟨numbered, nextWritten, nextFramed, nextHeld⟩ :=
@@ -240,15 +240,15 @@ theorem rent_creates (memory : Memory) (pool : Reference) (wellFormed : memory.W
   have numberedNext : numbered.nextIdentity = entered.nextIdentity :=
     (write_nextIdentity nextWritten).trans counterNext
   have homeApart : home.allocation ≠ pool.allocation :=
-    Nat.ne_of_gt (Nat.lt_of_lt_of_le nextId.old fresh.fresh)
+    Nat.ne_of_gt (Nat.lt_of_lt_of_le nextId.old enter.numeric1.fresh)
   have idRead2 := write_preserves_disjoint_read nextWritten idRead (Or.inl homeApart)
   have idLoaded2 := load_numeric_local .word32 (.i32 (ItemPool._nextId.of memory pool)) _
     (by simp [localNumber, CIL.Value.hasUnspecified]) idRead2
   have numberedFormed : numbered.WellFormed :=
     write_preserves_wellFormed _ _ _ _ _
-      (write_preserves_wellFormed _ _ _ _ _ entryMemory.wellFormed idWritten) nextWritten
+      (write_preserves_wellFormed _ _ _ _ _ enter.entryMemory.wellFormed idWritten) nextWritten
   have numberedBudget : itemSize ≤ numbered.heapBudget := by
-    rw [write_heapBudget nextWritten, write_heapBudget idWritten, enterFrame_heapBudget setup]
+    rw [write_heapBudget nextWritten, write_heapBudget idWritten, enterFrame_heapBudget enter.setup]
     exact budget
   -- `newobj` creates the item above everything the caller and the frame hold.
   have allocated := allocateObject_ok numberedFormed itemType numberedBudget
@@ -287,13 +287,13 @@ theorem rent_creates (memory : Memory) (pool : Reference) (wellFormed : memory.W
       exact Or.inl itemApart)
   obtain ⟨marked, markWritten, markFramed, markHeld⟩ := rentedOwned.store 1
   have itemHome : numbered.nextIdentity ≠ home.allocation :=
-    Nat.ne_of_gt (by rw [numberedNext]; exact fresh.bounded)
+    Nat.ne_of_gt (by rw [numberedNext]; exact enter.numeric1.bounded)
   have itemKept : numbered.nextIdentity ∉ (entry.frame memory home).owned := by
     simpa [entry.frame] using itemHome
   have young : memory.nextIdentity ≤ numbered.nextIdentity := by omega
   -- Leaving the frame expires only its home and keeps the item, which the frame does not own.
   have left := leaveFrame_preserves_memory_below (entry.frame memory home) marked
-    memory.nextIdentity (by simpa [entry.frame] using fresh.fresh)
+    memory.nextIdentity (by simpa [entry.frame] using enter.numeric1.fresh)
   have itemLeft := leaveFrame_memoryAt (entry.frame memory home) marked itemKept
   have exited : marked.nextIdentity ≤ (leaveFrame (entry.frame memory home) marked).nextIdentity :=
     Nat.le_of_eq (leaveFrame_nextIdentity _ _).symm
@@ -317,7 +317,7 @@ theorem rent_creates (memory : Memory) (pool : Reference) (wellFormed : memory.W
       (itemIdFramed.widen (by simp [itemFootprint]))).trans
       (liveFramed.widen (by simp [createFootprint]))).trans
       (markFramed.widen (by simp [itemFootprint])) |>.after_leaveFrame
-      (by simpa [entry.frame] using fresh.fresh)
+      (by simpa [entry.frame] using enter.numeric1.fresh)
   have past : memory.nextIdentity ≤
       (leaveFrame (entry.frame memory home) marked).nextIdentity := changed.grows
   refine ⟨CIL.executionBound Extracted.program rent, leaveFrame (entry.frame memory home) marked,
@@ -326,8 +326,8 @@ theorem rent_creates (memory : Memory) (pool : Reference) (wellFormed : memory.W
       simp only [itemFootprint, List.mem_cons, List.not_mem_nil, or_false] at member
       rcases member with rfl | rfl | rfl <;> exact young, ?_, ?_, ?_, ?_, ?_, ?_⟩
   · have itemMarked := rentedOwned.live.after_confined markFramed
-    cil_checked_steps [setup, entry.frame, free.live.formed, free0.1.live.formed, free0.1.located,
-      emptyLoad, liveFacts, capacityFacts, room, nextIdFacts, idStored, idLoaded,
+    cil_checked_steps [enter.setup, entry.frame, free.live.formed, free0.1.live.formed,
+      free0.1.located, emptyLoad, liveFacts, capacityFacts, room, nextIdFacts, idStored, idLoaded,
       nextId1.1.live.formed, nextId1.1.located, nextWritten, idLoaded2, allocated,
       nextHeld.1.live.formed, poolLive3.formed, created, ownerFresh.1.located, ownerStored,
       idOwned.live.formed, idOwned.located, itemIdWritten, itemType, itemSize, PooledItem.type,
@@ -363,19 +363,18 @@ theorem rent_exhausted_throws (memory : Memory) (pool : Reference)
     (full : ItemPool._live.of memory pool = ItemPool._capacity.of memory pool) :
     ∃ fuel, invoke Extracted.program fuel rent [.object (.address pool)] memory =
       .error ⟨rent, 12, .thrown "System.InvalidOperationException"⟩ := by
-  obtain ⟨home, entered, setup, -, entryMemory, -⟩ :=
+  obtain ⟨home, entered, enter⟩ :=
     entry.checked memory (.address pool) wellFormed
-  have keep := entryMemory.kept
-  have grown := entryMemory.grown
+  have keep := enter.entryMemory.kept
+  have grown := enter.entryMemory.grown
   have free0 := free.below keep free.old grown
   have live0 := live.below keep live.old grown
   have capacity0 := capacity.below keep capacity.old grown
   have emptyLoad := free0.1.load_null (free0.2.trans empty)
   have liveFacts := live0.2 ▸ live0.1.facts
   have capacityFacts := capacity0.2 ▸ capacity0.1.facts
-  refine ⟨CIL.executionBound Extracted.program rent, ?_⟩
-  cil_checked_steps [setup, entry.frame, free.live.formed, free0.1.live.formed, free0.1.located,
-    emptyLoad, liveFacts, capacityFacts, full]
+  cil_checked_steps [enter.setup, entry.frame, free.live.formed, free0.1.live.formed,
+    free0.1.located, emptyLoad, liveFacts, capacityFacts, full]
 
 #print axioms rent_exhausted_throws
 
@@ -383,9 +382,8 @@ theorem rent_exhausted_throws (memory : Memory) (pool : Reference)
 theorem rent_null_pool_throws (memory : Memory) (wellFormed : memory.WellFormed) :
     ∃ fuel, invoke Extracted.program fuel rent [.object .null] memory =
       .error ⟨rent, 1, .thrown "System.NullReferenceException"⟩ := by
-  obtain ⟨home, entered, setup, rest⟩ := entry.checked memory .null wellFormed
-  refine ⟨CIL.executionBound Extracted.program rent, ?_⟩
-  cil_checked_steps [setup]
+  obtain ⟨home, entered, enter⟩ := entry.checked memory .null wellFormed
+  cil_checked_steps [enter.setup]
 
 #print axioms rent_null_pool_throws
 

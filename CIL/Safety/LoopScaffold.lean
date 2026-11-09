@@ -39,7 +39,9 @@ theorem enterFrame_isSome (body : CIL.Method) (args : List Value) (memory : Memo
 #print axioms enterFrame_isSome
 
 /-- Derive parameterized frames, memory and numeric homes from checked allocation; an
-    allocating entry also proves the `LoopFrame` of all its homes for every footprint.
+    allocating entry also proves the `LoopFrame` of all its homes for every footprint, and
+    `name.checked` yields its home references and entered memory with their `name.Checked`
+    evidence, whose facts are selected by field.
     Entry must reduce to success or have an explicit proof; no failure receives a default.
     The frame, slot facts and a normalized entry's result and memory unfold in the loop
     tactics in this scope. A docstring before the command documents `name.checked`. -/
@@ -286,7 +288,8 @@ private def mentionedBinders (variables : Array Expr) (value : Expr) :
   return (binders, arguments)
 
 /-- Derive an entry whose numeric locals allocate homes in symbolic memory. The frame is
-    explicit in opaque home references, and the checked theorem yields them existentially. -/
+    explicit in opaque home references; the checked theorem yields them existentially with the
+    entry's `Checked` structure. -/
 private def elabAllocatingEntry (name : Ident)
     (binders : TSyntaxArray ``Lean.Parser.Term.bracketedBinder)
     (body args memory wellFormed : Term) (facts : Array Term)
@@ -377,13 +380,32 @@ private def elabAllocatingEntry (name : Ident)
     | none =>
       slotTerms := slotTerms.push slot.2.1
       remembered := remembered.push (← `(none))
-  let mut statement ← `(EntryMemory $memory $entered ∧ ∀ footprint : List (Reference × Nat),
-    LoopFrame footprint $memory $entered [$kinds,*] [$slotTerms,*]
-      (knownLocals [$remembered,*]))
-  for home in homes.reverse do
-    statement ← `(NumericEntryHome $memory $entered $(home.kind) $(home.number)
-      $(indexed "home" home.index) ∧ $statement)
-  statement ← `(enterFrame $body $args $memory = .ok ($frameApplied, $entered) ∧ $statement)
+  -- The evidence is a structure, so a proof selects a fact by name whatever else it holds.
+  let evidence := mkIdent (name.getId ++ `Checked)
+  let mut fieldNames : Array Ident := #[mkIdent `setup]
+  let mut fieldTypes : Array Term :=
+    #[← `(enterFrame $body $args $memory = .ok ($frameApplied, $entered))]
+  for home in homes do
+    fieldNames := fieldNames.push (indexed "numeric" home.index)
+    fieldTypes := fieldTypes.push (← `(NumericEntryHome $memory $entered $(home.kind)
+      $(home.number) $(indexed "home" home.index)))
+  fieldNames := fieldNames ++ #[mkIdent `entryMemory, mkIdent `frame]
+  fieldTypes := fieldTypes ++ #[← `(EntryMemory $memory $entered),
+    ← `(∀ footprint : List (Reference × Nat),
+      LoopFrame footprint $memory $entered [$kinds,*] [$slotTerms,*]
+        (knownLocals [$remembered,*]))]
+  let enteredBinder ← `(Lean.Parser.Term.bracketedBinderF| ($entered : Memory))
+  let evidenceBinders : TSyntaxArray ``Lean.Parser.Term.bracketedBinder :=
+    binders ++ (homeBinders.push enteredBinder).map (⟨·.raw⟩)
+  elabCommand (← `(
+    /-- What entering the frame establishes for its home references and entered memory: the
+        checked `setup`, each numeric home's `numericN`, the `entryMemory` relation and the
+        `frame` of all homes for every footprint. -/
+    structure $evidence $evidenceBinders* : Prop where
+      $[$fieldNames:ident : $fieldTypes:term]*))
+  -- The loop tactics read these fields as they read hypotheses.
+  modifyEnv (entryEvidence.addEntry · ((← getCurrNamespace) ++ evidence.getId))
+  let mut statement ← `(@$evidence $(parameters ++ homeNames.push entered)*)
   statement ← `(∃ $entered:ident : Memory, $statement)
   for home in homes.reverse do
     statement ← `(∃ $(indexed "home" home.index):ident : Reference, $statement)
@@ -409,14 +431,14 @@ private def elabAllocatingEntry (name : Ident)
   steps := steps.push (← `(tactic| have $setup:ident :
     enterFrame $body $args $memory = .ok ($frameApplied, $final) :=
       @$(mkCIdent setupName) $(setupArguments.push kept)*))
-  let mut witnesses : Array Term := homeNames.map (⟨·.raw⟩) ++ #[final, setup]
+  let mut fieldValues : Array Term := #[setup]
   let mut entryHomes : Array Term := #[]
   for (home, position) in homes.zipIdx do
     let mut fact : Term := indexed "numeric" home.index
     for later in homes.extract (position + 1) homes.size do
       fact ← `(NumericEntryHome.after $fact $(indexed "step" later.index))
     entryHomes := entryHomes.push fact
-  witnesses := witnesses ++ entryHomes
+  fieldValues := fieldValues ++ entryHomes
   -- Each home lies below the next, as `WritableHomes` orders them, from its allocation.
   let mut writableHomes : Term ← `(WritableHomes.nil _)
   let mut snapshots : Term ← `(LocalSnapshots.knownLocals_nil _ _)
@@ -431,9 +453,11 @@ private def elabAllocatingEntry (name : Ident)
       | _, _ => `(($fact).fresh)
     writableHomes ← `(WritableHomes.entry $fact $fresh $writableHomes)
     snapshots ← `(LocalSnapshots.entry (stored := $(home.value)) $fact rfl rfl $snapshots)
-  witnesses := witnesses.push progress
-  witnesses := witnesses.push (← `(fun footprint =>
+  fieldValues := fieldValues.push progress
+  fieldValues := fieldValues.push (← `(fun footprint =>
     LoopFrame.ofEntry footprint $progress $writableHomes $snapshots))
+  let witnesses : Array Term := homeNames.map (⟨·.raw⟩) ++ #[final,
+    ← `({ $[$fieldNames:ident := $fieldValues:term],* })]
   steps := steps.push (← `(tactic| exact ⟨$witnesses,*⟩))
   let checked := mkIdent (name.getId ++ `checked)
   elabCommand (← `($[$doc]? theorem $checked $binders* : $statement := by $steps*))

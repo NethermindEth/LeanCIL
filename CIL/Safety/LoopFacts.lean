@@ -13,6 +13,25 @@ head of their type, so a context of unrelated hypotheses adds nothing to simp.
 
 namespace CIL.Safety
 
+open Lean in
+/-- The structures `bind_entry` generates as the evidence of an allocating entry. -/
+initialize entryEvidence : SimplePersistentEnvExtension Name NameSet ←
+  registerSimplePersistentEnvExtension {
+    addEntryFn := NameSet.insert
+    addImportedFn := fun modules => modules.foldl (fun names added =>
+      added.foldl NameSet.insert names) {} }
+
+open Lean Meta in
+/-- The facts of `proof`, entry evidence stated by `type`: each field's name, proof and
+    statement. Empty for any other statement, so the loop tactics read an entry's `setup` and
+    `frame` from its evidence as they read hypotheses. -/
+def entryEvidenceFields (proof type : Expr) : MetaM (Array (Name × Expr × Expr)) := do
+  let .const name _ := type.getAppFn | return #[]
+  unless (entryEvidence.getState (← getEnv)).contains name do return #[]
+  (getStructureFields (← getEnv) name).mapM fun field => do
+    let selected ← mkAppM (name ++ field) #[proof]
+    return (field, selected, (← instantiateMVars (← inferType selected)).consumeMData)
+
 /-- Heads of the equations the loop tactics take from the context: checked steps, local and
     memory loads and stores, span element, slice, validity, width and mode checks, array validity,
     formed references and `Unsafe.Add` results. -/
@@ -317,16 +336,20 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
   for name in explicitNames do
     if let some value := ((← getEnv).find? name).bind (·.value?) then
       constants := constants ++ value.getUsedConstants
-  let mut typed : Array (LocalDecl × Expr) := #[]
+  -- Each fact by the name that proves it: a hypothesis, or a field of an entry's evidence.
+  let mut typed : Array (Lean.Name × Expr) := #[]
   for declaration in context do
     if declaration.isImplementationDetail || declaration.userName.hasMacroScopes then continue
     unless (context.findFromUserName? declaration.userName).any
       (·.fvarId == declaration.fvarId) do continue
     let type ← instantiateMVars declaration.type
-    if ← isProp type then typed := typed.push (declaration, type.consumeMData)
+    if ← isProp type then
+      typed := typed.push (declaration.userName, type.consumeMData)
+      for (field, _, stated) in ← entryEvidenceFields declaration.toExpr type.consumeMData do
+        typed := typed.push (declaration.userName ++ field, stated)
   let variables (terms : Array Expr) : Array FVarId :=
     (terms.foldl (fun found term => collectFVars found term) {}).fvarIds
-  let named (declaration : LocalDecl) : Term := mkIdent declaration.userName
+  let named (name : Lean.Name) : Term := mkIdent name
   -- Hygienic constant names make every step's simp measurably slower than `_root_` names.
   let global (name : Lean.Name) : Term := mkIdent (`_root_ ++ name)
   -- Lemmas are named canonically: they live in modules this one does not import.
@@ -355,9 +378,9 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
     saved.restore
     if let some type := type? then
       unless type.hasMVar do known := known.push type.consumeMData
-  for (declaration, type) in typed do
-    let fact := named declaration
-    if explicitNames.contains declaration.userName then
+  for (name, type) in typed do
+    let fact := named name
+    if explicitNames.contains name then
       reached := reached ++ variables #[type]
       live := live.map (· ++ asTerms (variables #[type]))
       known := known.push type
@@ -419,7 +442,7 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
     let hole : Term ← `(_)
     -- Each frame from `memory` with its well-formedness, and the frame's memory, which is kept
     -- once a state holds it or a kept step, such as a local store, produces it.
-    let carriers (memory : Expr) : Array (LocalDecl × LocalDecl × Expr) := Id.run do
+    let carriers (memory : Expr) : Array (Lean.Name × Lean.Name × Expr) := Id.run do
       let mut found := #[]
       for (frame, frameType) in typed do
         unless frameType.isAppOfArity `CIL.Safety.LoopFrame 6 && frameType.getArg! 1 == memory &&

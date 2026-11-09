@@ -26,7 +26,7 @@ theorem correctness (memory : Memory) (literal : Reference) (count : CIL.W32)
     cil_checked_steps [literalObject_of_lookup bound, formed, zeroGuardOutcome,
       CIL.guardOperand, CIL.ZeroGuard.throws, BitVec.setWidth_eq, negative]
   · simp only [negative, ite_false]
-    cil_checked_steps [literalObject_of_lookup bound, formed, leaveFrame, zeroGuardOutcome,
+    cil_checked_steps [literalObject_of_lookup bound, formed, zeroGuardOutcome,
       CIL.guardOperand, CIL.ZeroGuard.throws, BitVec.setWidth_eq, negative]
 
 #print axioms correctness

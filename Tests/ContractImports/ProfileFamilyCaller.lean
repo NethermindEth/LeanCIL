@@ -15,14 +15,14 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
   refine invoke_exists_of_run found (by rfl) (by rfl) ?_
   refine run_call_of_contract holds input found
     (by rfl : Extracted.method0.code[0]? = some (.call 1 0)) (by cil_checked_step []) rfl formed ?_
-  rintro final values _ framed returns
-  obtain ⟨output, rfl, result⟩ := returns
+  intro final values call
+  have result := call.post
   change values = [.scalar (.i32 1)] at result
   subst values
   refine run_return_exists found
     (by rfl : Extracted.method0.code[1]? = some (.ret (some .unsigned8)))
     (by cil_checked_step []) (by rfl) ?_
-  exact ⟨framed, _, rfl, rfl⟩
+  exact ⟨call.framed, _, rfl, rfl⟩
 #print axioms correctness
 
 end ExampleProof

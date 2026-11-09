@@ -63,6 +63,16 @@ theorem OutcomeContract.Holds.returning {Input Output : Type} {c : OutcomeContra
   rw [normal] at outcome
   exact outcome
 
+/-- What an outcome contract establishes for an input it names no exception for: a final
+    memory and output with their `CallResult`. -/
+theorem OutcomeContract.Holds.result {Input Output : Type} {c : OutcomeContract Input Output}
+    {program : CIL.Program} {method : Nat} {input : Input} {initial : Memory}
+    (holds : c.Holds program method) (permitted : c.pre input initial)
+    (normal : c.raises input initial = none) :
+    ∃ final output, CallResult c.toMethodContract program method input initial final output := by
+  obtain ⟨fuel, final, _, invoked, framed, output, rfl, post⟩ := holds.returning permitted normal
+  exact ⟨final, output, { invoked := ⟨fuel, invoked⟩, framed, post }⟩
+
 /-- A normal-return contract is the outcome contract that never raises. -/
 theorem MethodContract.Holds.outcomes {Input Output : Type} {c : MethodContract Input Output}
     {program : CIL.Program} {method : Nat} (holds : c.Holds program method) :
@@ -187,24 +197,20 @@ theorem run_call_of_outcome {Input Output : Type} {c : OutcomeContract Input Out
       .ok (.call callee arguments rest updated))
     (encoded : arguments = c.args input) (permitted : c.pre input updated)
     (normal : c.raises input updated = none)
-    (continuation : ∀ final values,
-      (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
-      Confined (c.footprint input) updated final → c.Returns input updated final values →
+    (continuation : ∀ final output,
+      CallResult c.toMethodContract program callee input updated final output →
       ∃ fuel result returned,
-        run program fuel method (pc + 1) args frame (values ++ rest) final =
+        run program fuel method (pc + 1) args frame (c.results output ++ rest) final =
           .ok (result, returned) ∧
         post result returned) :
     ∃ fuel result returned,
       run program fuel method pc args frame stack memory = .ok (result, returned) ∧
         post result returned := by
   subst encoded
-  obtain ⟨childFuel, final, values, invoked, confined, satisfied⟩ :=
-    holds.returning permitted normal
-  obtain ⟨parentFuel, result, returned, resumed, finished⟩ :=
-    continuation final values ⟨childFuel, invoked⟩ confined satisfied
+  obtain ⟨final, output, call⟩ := holds.result permitted normal
+  obtain ⟨parentFuel, result, returned, resumed, finished⟩ := continuation final output call
   obtain ⟨fuel, composed⟩ :=
-    run_call_exists methodFound instructionFound stepped ⟨childFuel, invoked⟩
-      ⟨parentFuel, resumed⟩
+    run_call_exists methodFound instructionFound stepped call.invoked ⟨parentFuel, resumed⟩
   exact ⟨fuel, result, returned, composed, finished⟩
 
 /-- Continue after a callee whose contract names no exception into a caller path that
@@ -219,18 +225,16 @@ theorem run_call_raises_after_outcome {Input Output : Type} {c : OutcomeContract
       .ok (.call callee arguments rest updated))
     (encoded : arguments = c.args input) (permitted : c.pre input updated)
     (normal : c.raises input updated = none)
-    (continuation : ∀ final values,
-      (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
-      Confined (c.footprint input) updated final → c.Returns input updated final values →
-      RunRaises program method (pc + 1) args frame (values ++ rest) final exception) :
+    (continuation : ∀ final output,
+      CallResult c.toMethodContract program callee input updated final output →
+      RunRaises program method (pc + 1) args frame (c.results output ++ rest) final exception) :
     RunRaises program method pc args frame stack memory exception := by
   subst encoded
-  obtain ⟨childFuel, final, values, invoked, confined, satisfied⟩ :=
-    holds.returning permitted normal
-  obtain ⟨parentFuel, fault, resumed, thrown⟩ :=
-    continuation final values ⟨childFuel, invoked⟩ confined satisfied
-  have child :=
-    invoke_mono program childFuel parentFuel callee _ updated (.ok (final, values)) trivial invoked
+  obtain ⟨final, output, call⟩ := holds.result permitted normal
+  obtain ⟨childFuel, invoked⟩ := call.invoked
+  obtain ⟨parentFuel, fault, resumed, thrown⟩ := continuation final output call
+  have child := invoke_mono program childFuel parentFuel callee _ updated
+    (.ok (final, c.results output)) trivial invoked
   have parent :=
     run_mono program parentFuel childFuel method (pc + 1) args frame _ final (.error fault)
       (by simp [Settled, thrown]) resumed
@@ -250,23 +254,21 @@ theorem run_call_of_outcome_formed {Input Output : Type} {c : OutcomeContract In
     (encoded : arguments = c.args input) (permitted : c.pre input updated)
     (formed : memory.WellFormed)
     (normal : c.raises input updated = none)
-    (continuation : ∀ final values,
-      (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
-      final.WellFormed →
-      StaticWorldPreserved program memory final →
-      ClassesPreserved program memory final →
-      Confined (c.footprint input) updated final → c.Returns input updated final values →
+    (continuation : ∀ final output,
+      CallResult c.toMethodContract program callee input updated final output →
+      FrameInvariants program memory final →
       ∃ fuel result returned,
-        run program fuel method (pc + 1) args frame (values ++ rest) final =
+        run program fuel method (pc + 1) args frame (c.results output ++ rest) final =
           .ok (result, returned) ∧
         post result returned) :
     ∃ fuel result returned,
       run program fuel method pc args frame stack memory = .ok (result, returned) ∧
-        post result returned :=
-  run_call_of_outcome holds input methodFound instructionFound stepped encoded permitted normal
-    fun final values ⟨fuel, invoked⟩ =>
-      have kept := call_frame_invariants methodFound instructionFound stepped formed invoked
-      continuation final values ⟨fuel, invoked⟩ kept.formed kept.staticWorld kept.classes
+        post result returned := by
+  subst encoded
+  exact run_call_of_outcome holds input methodFound instructionFound stepped rfl permitted normal
+    fun final output call => call.invoked.elim fun _ invoked =>
+      continuation final output call
+        (call_frame_invariants methodFound instructionFound stepped formed invoked)
 
 /-- `run_call_raises_after_outcome` from a well-formed memory, with the frame invariants
     supplied. -/
@@ -282,19 +284,17 @@ theorem run_call_raises_after_outcome_formed {Input Output : Type}
     (encoded : arguments = c.args input) (permitted : c.pre input updated)
     (formed : memory.WellFormed)
     (normal : c.raises input updated = none)
-    (continuation : ∀ final values,
-      (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
-      final.WellFormed →
-      StaticWorldPreserved program memory final →
-      ClassesPreserved program memory final →
-      Confined (c.footprint input) updated final → c.Returns input updated final values →
-      RunRaises program method (pc + 1) args frame (values ++ rest) final exception) :
-    RunRaises program method pc args frame stack memory exception :=
-  run_call_raises_after_outcome holds input methodFound instructionFound stepped encoded
+    (continuation : ∀ final output,
+      CallResult c.toMethodContract program callee input updated final output →
+      FrameInvariants program memory final →
+      RunRaises program method (pc + 1) args frame (c.results output ++ rest) final exception) :
+    RunRaises program method pc args frame stack memory exception := by
+  subst encoded
+  exact run_call_raises_after_outcome holds input methodFound instructionFound stepped rfl
     permitted normal
-    fun final values ⟨fuel, invoked⟩ =>
-      have kept := call_frame_invariants methodFound instructionFound stepped formed invoked
-      continuation final values ⟨fuel, invoked⟩ kept.formed kept.staticWorld kept.classes
+    fun final output call => call.invoked.elim fun _ invoked =>
+      continuation final output call
+        (call_frame_invariants methodFound instructionFound stepped formed invoked)
 
 /-- `exported` follows from `internal`: same encodings and outcome under a weaker pre; on
     return, covering footprint and implied post. -/
@@ -375,6 +375,7 @@ theorem OutcomeContract.Holds.weaken {Input Output : Type}
 
 #print axioms OutcomeContract.Refines.trans
 #print axioms OutcomeContract.Holds.weaken
+#print axioms OutcomeContract.Holds.result
 #print axioms run_call_of_outcome_formed
 #print axioms run_call_raises_after_outcome_formed
 #print axioms run_call_error

@@ -91,8 +91,7 @@ def echoContract : MethodContract CIL.W64 CIL.W64 where
 /-- `Echo` meets its contract, stepped through the checked interpreter. -/
 theorem echo_holds : echoContract.Holds program echoMethod := by
   rintro v memory -
-  dsimp only [echoContract]
-  refine ⟨echoFuel, memory, _, ?_, Confined.refl _ memory, v, rfl, rfl⟩
+  refine MethodContract.Holds.intro memory v ⟨echoFuel, ?_⟩ (Confined.refl _ memory) rfl
   cil_checked_steps []
 
 /-- The precondition supplies the entry premises, so the proved contract is certified. -/
@@ -144,8 +143,7 @@ def echoAnywhere : MethodContract CIL.W64 CIL.W64 :=
 /-- `Echo` meets its contract from any memory. -/
 theorem echo_anywhere : echoAnywhere.Holds program echoMethod := by
   rintro v memory -
-  dsimp only [echoAnywhere, echoContract]
-  refine ⟨echoFuel, memory, _, ?_, Confined.refl _ memory, v, rfl, rfl⟩
+  refine MethodContract.Holds.intro memory v ⟨echoFuel, ?_⟩ (Confined.refl _ memory) rfl
   cil_checked_steps []
 
 /-- Names the frame `Echo(v)` enters from `memory` and a fuel at which that frame's run
@@ -164,17 +162,18 @@ def EchoVisitsLive (memory : Memory) (v : CIL.W64) : Prop :=
 def relayContract : MethodContract CIL.W64 CIL.W64 :=
   { echoContract with post := fun v initial _ out => out = v ∧ EchoVisitsLive initial v }
 
--- Hygiene would rename the `rfl` patterns into binders instead of substitutions.
+-- Hygiene would rename the `rfl` pattern into a binder instead of a substitution.
 set_option hygiene false in
 /-- Closes a relay goal after its call: the callee's certificate supplies the run and
     visited-state clause of `EchoVisitsLive`, and `Relay` returns what `Echo` returned. -/
 macro "relay_finish" : tactic => `(tactic| (
-  rintro calleeFuel final values certificate framed ⟨out, rfl, rfl⟩
+  intro calleeFuel final out certificate call
+  obtain rfl := call.post
   obtain ⟨-, body, frame, entered, lookup, -, setup, finished, -, visits, -⟩ := certificate
   cases lookup
   cil_contract_steps []
-  -- `Relay` owns no allocation, so leaving its frame keeps all memory below its watermark.
-  exact ⟨framed.after_leaveFrame (fun _ member => nomatch member), out, rfl, rfl,
+  -- `Relay` owns no allocation, so its postcondition is stated of the memory `Echo` left.
+  exact ⟨call.framed, out, rfl, rfl,
     calleeFuel, frame, entered, final, setup, finished, visits⟩
   ))
 

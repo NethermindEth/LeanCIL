@@ -86,7 +86,8 @@ theorem strict_holds (percentHolds : percentContract.Holds Extracted.program per
       cil_outcome_call percentHolds 0 at percentSite []
       case precondition => trivial
       case raises => simp only [percentContract, within, ite_true]
-      rintro m1 _ - - ⟨_, rfl, rfl⟩
+      intro m1 out call
+      obtain rfl := call.post
       dsimp only [percentContract]
       cil_raise_steps [CIL.truth]
     · simp only [strictContract, strictRaises, within, zero, ite_true, ite_false]
@@ -94,12 +95,13 @@ theorem strict_holds (percentHolds : percentContract.Holds Extracted.program per
       cil_outcome_call percentHolds v at percentSite []
       · trivial
       · simp only [percentContract, within, ite_true]
-      rintro m1 _ - confined ⟨out, rfl, same⟩
+      intro m1 out call
+      have same := call.post
       subst out
       dsimp only [percentContract]
       have truth : CIL.truth (.i64 v) = some true := by simp [CIL.truth]; exact zero
       cil_contract_steps [truth]
-      exact ⟨confined, _, rfl, rfl⟩
+      exact ⟨call.framed, _, rfl, rfl⟩
   · simp only [strictContract, strictRaises, within, ite_false]
     cil_raise_steps []
     cil_outcome_raise percentHolds v at percentSite []
@@ -122,11 +124,12 @@ theorem root_holds (strictHolds : strictContract.Holds Extracted.program strict)
     cil_outcome_call strictHolds v at strictSite []
     · trivial
     · exact raised
-    rintro m1 _ - confined ⟨out, rfl, same⟩
+    intro m1 out call
+    have same := call.post
     subst out
     dsimp only [strictContract]
     cil_contract_steps []
-    exact ⟨confined, _, rfl, rfl⟩
+    exact ⟨call.framed, _, rfl, rfl⟩
 
 theorem root_correct : rootContract.Holds Extracted.program root := root_holds (strict_holds percent_holds)
 
@@ -157,11 +160,12 @@ theorem root_formed (strictHolds : strictContract.Holds Extracted.program strict
     case precondition => trivial
     case wellFormed => exact formed
     case raises => exact raised
-    rintro m1 _ - formed1 - - confined ⟨out, rfl, same⟩
+    intro m1 out call kept
+    have same := call.post
     subst out
     dsimp only [strictContract]
     cil_contract_steps []
-    exact ⟨confined, _, rfl, formed1, rfl⟩
+    exact ⟨call.framed, _, rfl, kept.formed, rfl⟩
 
 /-- The raising-after form: zero returns from `Percent` and then raises here. -/
 example (percentHolds : percentContract.Holds Extracted.program percent) (m : Memory) (formed : m.WellFormed) :
@@ -171,7 +175,8 @@ example (percentHolds : percentContract.Holds Extracted.program percent) (m : Me
   case precondition => trivial
   case wellFormed => exact formed
   case raises => simp only [percentContract]; decide
-  rintro m1 _ - - - - - ⟨_, rfl, rfl⟩
+  intro m1 out call _
+  obtain rfl := call.post
   dsimp only [percentContract]
   cil_raise_steps [CIL.truth]
 

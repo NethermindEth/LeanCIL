@@ -78,7 +78,6 @@ theorem square_mismatch (memory : Memory) (shapes target : Reference) (length : 
   have mismatch := ReferenceArray.storableIn_mismatch (element := circleType) found kind rfl
     rfl (by decide)
   have located := owned.slot_located owned.inside
-  refine ⟨CIL.executionBound Extracted.program put, ?_⟩
   cil_checked_steps [owned.formed, live.formed, located, mismatch]
 
 #print axioms square_mismatch
@@ -93,7 +92,6 @@ theorem index_out_of_range (memory : Memory) (shapes : Reference) (length : Nat)
         [.object (.address shapes), .scalar (.i32 index), .object shape] memory =
       .error ⟨put, 3, .thrown "System.IndexOutOfRangeException"⟩ := by
   have past := live.slot_outside outside
-  refine ⟨CIL.executionBound Extracted.program put, ?_⟩
   cil_checked_steps [live.formed, formed, past]
 
 #print axioms index_out_of_range
@@ -103,7 +101,6 @@ theorem null_array (memory : Memory) (index : BitVec 32) (shape : ManagedReferen
     (formed : formObject memory shape = .ok (.object shape)) :
     ∃ fuel, invoke Extracted.program fuel put [.object .null, .scalar (.i32 index), .object shape]
         memory = .error ⟨put, 3, .thrown "System.NullReferenceException"⟩ := by
-  refine ⟨CIL.executionBound Extracted.program put, ?_⟩
   cil_checked_steps [formed]
 
 #print axioms null_array

@@ -34,9 +34,8 @@ def relaneContract : MethodContract (Reference × Reference × Nat) where
 /-- `Relane` meets its contract: one `stfld` of the field's slot. -/
 theorem correctness : relaneContract.Holds Extracted.program relane := by
   rintro ⟨tiles, lanes, length⟩ memory ⟨owned, whole⟩
-  dsimp only [relaneContract] at *
   obtain ⟨stored, framed, held⟩ := owned.store_whole whole
-  refine ⟨CIL.executionBound Extracted.program relane, _, [], ?_, framed, [], rfl, rfl, held⟩
+  refine MethodContract.Holds.intro _ [] ?_ framed ⟨rfl, held⟩
   cil_checked_steps [owned.live.formed, owned.located, stored, whole.valid]
 
 #print axioms correctness

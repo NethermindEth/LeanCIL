@@ -24,9 +24,9 @@ theorem correctness : CIL.Safety.Ensures Extracted.program 0
     (fun args initial => ∃ x : W32, args = [.scalar (.i32 x)] ∧ initial = Memory.empty)
     (fun _ _ _ values => values = [.scalar (.i32 0)]) := by
   rintro args initial ⟨x, rfl, rfl⟩
-  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := entry.checked x
-  obtain ⟨started, stored, frame, -⟩ := (entryFrame []).store 0 (.i32 x) rfl
-  refine invoke_loop_vc Extracted.lookup0 rfl setup (header home) (fun _ => True)
+  obtain ⟨home, entered, enter⟩ := entry.checked x
+  obtain ⟨started, stored, frame, -⟩ := (enter.frame []).store 0 (.i32 x) rfl
+  refine invoke_loop_vc Extracted.lookup0 rfl enter.setup (header home) (fun _ => True)
     (fun s => s.values.toNat) ⟨x, started, frame⟩
     (by cil_loop_steps [entry.frame, header, cutpoint, stored, frame.load 0]) trivial ?_
   rintro ⟨x, m, frame⟩ -

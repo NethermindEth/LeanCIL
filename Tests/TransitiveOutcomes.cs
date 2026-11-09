@@ -80,10 +80,9 @@ const string forwardProof = """
         refine run_next_exists _ found Extracted.method0_instruction0 (by cil_checked_step []) ?_
         refine run_call_of_outcome holds value found Extracted.method0_instruction1
           (by cil_checked_step []) rfl formed raised ?_
-        rintro final values _ framed returns
-        obtain ⟨output, rfl, result⟩ := returns
+        intro final output call
         refine run_return_exists found Extracted.method0_instruction2 (by cil_checked_step []) (by rfl) ?_
-        exact ⟨framed, output, rfl, result⟩
+        exact ⟨call.framed, output, rfl, call.post⟩
     #print axioms correctness
     end Forward
     """;
