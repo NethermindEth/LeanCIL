@@ -240,7 +240,9 @@ comment saying which obligation it is:
   `cil_loop_obligation`. A conditional branch on words the body computes from its arguments, signed
   or unsigned, is split with `by_cases branchN` on the condition it tests, and each side steps on
   to its own return and leaves its own postcondition, commented with the side it is on; a body
-  splits into at most eight returns. When it also takes up to three `bool`
+  splits into at most eight returns. A literal in a split's condition is in the form default `simp`
+  leaves it, such as `count = 0#32` or, in a signed comparison, `value.toInt < (-1)`, so the split's
+  fact rewrites a simplified goal without restating it. When it also takes up to three `bool`
   arguments and tests nothing else, it is split with `cases` on each, and every side steps to its
   own return and leaves its own postcondition, commented with the values it is for.
 - An `int[]`, `uint[]`, `long[]` or `ulong[]` parameter of a method that neither takes nor is called
@@ -464,7 +466,7 @@ theorem correctness (value : W32) : Ensures Extracted.program 0
     cil_loop_recurse start value
     case invariant => sorry -- invariant at the first loop head
   rintro ⟨remaining, current, frame⟩ holds recurse
-  by_cases guard : remaining = 0
+  by_cases guard : remaining = 0#32
   · -- leaves the loop at Loops.cs:40
     cil_loop_finish [guard]
     case postcondition =>

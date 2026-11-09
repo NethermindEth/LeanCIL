@@ -326,7 +326,8 @@ internal static partial class ProofOutline
                     if (operands.Any(operand => operand?.Term is null) ||
                         operands.Any(operand => operand!.Width != operands[0]!.Width))
                         return Stop($"`{op}` on a value the outline does not name");
-                    var (condition, takenWhenTrue) = Body.Test(name, [.. operands.Select(operand => operand!.Term!)]);
+                    var (condition, takenWhenTrue) =
+                        Body.Test(name, [.. operands.Select(operand => operand!.Term!)], 8 * operands[0]!.Width);
                     return Branch(condition, takenWhenTrue, Body.Target(op)!.Value);
                 }
                 else if ((match = Regex.Match(op, @"\A\.branch (\d+)\z")).Success)

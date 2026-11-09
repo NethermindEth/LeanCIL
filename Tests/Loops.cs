@@ -988,7 +988,7 @@ if (!isIdle.Contains("locals := [.object (some state.values)]", StringComparison
 Console.WriteLine("PASS a loop outline carries an object local in its head and splits on its null and identity tests");
 // A test of a `bool` struct field splits on the word its load zero-extends, and each side steps to its return.
 var copyOutline = File.ReadAllText(Path.Combine(outlineRoot, "CopyUntilZero", "Proof.lean"));
-if (!copyOutline.Contains("by_cases branch1 : (scanStopped.setWidth 8).setWidth 32 = 0", StringComparison.Ordinal) ||
+if (!copyOutline.Contains("by_cases branch1 : (scanStopped.setWidth 8).setWidth 32 = 0#32", StringComparison.Ordinal) ||
     copyOutline.Contains("narrow field", StringComparison.Ordinal))
     throw new InvalidOperationException(
         "The CopyUntilZero outline does not split on its narrow field:\n" + copyOutline);
@@ -1597,7 +1597,7 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
                     obtain ⟨done, split, nonzero, counted, stopped, filled, apart⟩ := holds
                     have room : (copied (values1Head :: values1Tail)).length =
                         (copied values1Tail).length + 1 := by
-                      simp [copied, show values1Head ≠ 0#32 from branch2]
+                      simp [copied, branch2]
                     have old := wellFormed.form_bound argument1Form
                     have atCalled := (filled.after_below storedBelow old).after_confined confined
                       storedFrame.wellFormed (by

@@ -18,24 +18,45 @@ internal static partial class ProofOutline
 
         internal static bool Conditional(string op) => Target(op) is not null && !op.StartsWith(".branch ");
 
-        /// <summary>The proposition a conditional branch tests of its operands' terms, and whether it is taken
-        /// when the proposition holds; signed comparisons read the words through `toInt`.</summary>
-        internal static (string Condition, bool TakenWhenTrue) Test(string name, string[] terms) => name switch
+        /// <summary>The proposition a conditional branch tests of its `bits`-bit operands' terms, and whether it
+        /// is taken when the proposition holds; signed comparisons read the words through `toInt`. A literal
+        /// operand is written as default `simp` writes it, so the split's fact rewrites a simplified goal.</summary>
+        internal static (string Condition, bool TakenWhenTrue) Test(string name, string[] terms, int bits)
         {
-            "brzero" => ($"{terms[0]} = 0", true),
-            "brnonzero" => ($"{terms[0]} = 0", false),
-            "beq" => ($"{terms[0]} = {terms[1]}", true),
-            "bne" => ($"{terms[0]} = {terms[1]}", false),
-            "blt" => ($"{terms[0]}.toInt < {terms[1]}.toInt", true),
-            "ble" => ($"{terms[0]}.toInt ≤ {terms[1]}.toInt", true),
-            "bgt" => ($"{terms[1]}.toInt < {terms[0]}.toInt", true),
-            "bge" => ($"{terms[1]}.toInt ≤ {terms[0]}.toInt", true),
-            "bltu" => ($"{terms[0]} < {terms[1]}", true),
-            "bleu" => ($"{terms[0]} ≤ {terms[1]}", true),
-            "bgtu" => ($"{terms[1]} < {terms[0]}", true),
-            "bgeu" => ($"{terms[1]} ≤ {terms[0]}", true),
-            _ => throw new ArgumentException($"`{name}` is not a conditional branch", nameof(name))
-        };
+            string Word(int index) => Literal(terms[index], bits);
+            string Signed(int index) => Regex.IsMatch(terms[index], @"\A\d+\z")
+                ? SignedValue(terms[index], bits) : $"{terms[index]}.toInt";
+            return name switch
+            {
+                "brzero" => ($"{terms[0]} = {Literal("0", bits)}", true),
+                "brnonzero" => ($"{terms[0]} = {Literal("0", bits)}", false),
+                "beq" => ($"{Word(0)} = {Word(1)}", true),
+                "bne" => ($"{Word(0)} = {Word(1)}", false),
+                "blt" => ($"{Signed(0)} < {Signed(1)}", true),
+                "ble" => ($"{Signed(0)} ≤ {Signed(1)}", true),
+                "bgt" => ($"{Signed(1)} < {Signed(0)}", true),
+                "bge" => ($"{Signed(1)} ≤ {Signed(0)}", true),
+                "bltu" => ($"{Word(0)} < {Word(1)}", true),
+                "bleu" => ($"{Word(0)} ≤ {Word(1)}", true),
+                "bgtu" => ($"{Word(1)} < {Word(0)}", true),
+                "bgeu" => ($"{Word(1)} ≤ {Word(0)}", true),
+                _ => throw new ArgumentException($"`{name}` is not a conditional branch", nameof(name))
+            };
+        }
+
+        /// <summary>A decimal literal as the `bits`-bit word `simp` normalizes it to, such as `0#32`; any
+        /// other term is returned as it is.</summary>
+        internal static string Literal(string term, int bits) =>
+            Regex.IsMatch(term, @"\A\d+\z") ? $"{term}#{bits}" : term;
+
+        /// <summary>The integer a `bits`-bit decimal literal reads as through `toInt`, as `simp` writes it.</summary>
+        static string SignedValue(string term, int bits)
+        {
+            var value = System.Numerics.BigInteger.Parse(term, System.Globalization.CultureInfo.InvariantCulture) %
+                (System.Numerics.BigInteger.One << bits);
+            if (value >= System.Numerics.BigInteger.One << (bits - 1)) value -= System.Numerics.BigInteger.One << bits;
+            return value.Sign < 0 ? $"({value})" : value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
 
         /// <summary>Each loop as its head and latch, the last pc branching back to it, in head order.</summary>
         internal List<(int Head, int Latch)> Loops() => Ops.Select((op, pc) => (Target: Target(op), Pc: pc))
@@ -269,7 +290,8 @@ internal static partial class ProofOutline
             if (Regex.IsMatch(ops[store - 1], @"\A\.arg \d+\z"))
                 source = Argument(store - 1);
             else if (store >= 2 && Argument(store - 2) is { Shape: ParameterShape.WordArray } array &&
-                ops[store - 1] == $".memory (.arraySpan {array.ArrayElement} {(array.Writable ? "true" : "false")} .whole)")
+                ops[store - 1] ==
+                    $".memory (.arraySpan {array.ArrayElement} {(array.Writable ? "true" : "false")} .whole)")
                 source = array;
             else throw refused;
             if (source.Shape is not (ParameterShape.Span or ParameterShape.WordArray) || kind != SpanKind(source))
@@ -555,7 +577,8 @@ internal static partial class ProofOutline
         /// <summary>The contract proof of a branching callee from `pc`: a `by_cases` on each test, each returning
         /// side stepped with the tests' facts, and each throwing side closed from the precondition.</summary>
         void BranchedCallee(Writer lean, int index, string name, string[] arguments, int width, int pc,
-            List<string> stack, List<(string Fact, string Text)> facts, string indent, ref int sides)
+            List<(string Term, int Bits)> stack, List<(string Fact, string Text)> facts, string indent,
+            ref int sides)
         {
             var callee = extraction.Methods[index];
             var ops = extraction.Emitted[index].Ops;
@@ -565,9 +588,13 @@ internal static partial class ProofOutline
                 var op = ops[pc];
                 Match match;
                 if ((match = Regex.Match(op, @"\A\.arg (\d+)\z")).Success)
-                    stack.Add(arguments[int.Parse(match.Groups[1].Value)]);
-                else if ((match = Regex.Match(op, @"\A\.const(?:32|64) (.+)\z")).Success)
-                    stack.Add(match.Groups[1].Value);
+                {
+                    var argument = int.Parse(match.Groups[1].Value);
+                    var bits = 8 * ElementWidth(callee.Parameters[argument].ParameterType)!.Value;
+                    stack.Add((arguments[argument], bits));
+                }
+                else if ((match = Regex.Match(op, @"\A\.const(32|64) (.+)\z")).Success)
+                    stack.Add((match.Groups[2].Value, int.Parse(match.Groups[1].Value)));
                 else if ((match = Regex.Match(op, @"\A\.(add|sub|mul|band|bor|bxor)\z")).Success)
                 {
                     var right = stack[^1];
@@ -577,7 +604,7 @@ internal static partial class ProofOutline
                     {
                         "add" => "+", "sub" => "-", "mul" => "*", "band" => "&&&", "bor" => "|||", _ => "^^^"
                     };
-                    stack.Add($"({left} {symbol} {right})");
+                    stack.Add(($"({left.Term} {symbol} {right.Term})", left.Bits));
                 }
                 else if (op == ".ret")
                 {
@@ -612,7 +639,8 @@ internal static partial class ProofOutline
                     var arity = opName is "brzero" or "brnonzero" ? 1 : 2;
                     var operands = stack.TakeLast(arity).ToArray();
                     var rest = stack.Take(stack.Count - arity).ToList();
-                    var (condition, takenWhenTrue) = Body.Test(opName, operands);
+                    var (condition, takenWhenTrue) = Body.Test(opName, [.. operands.Select(operand => operand.Term)],
+                        operands[0].Bits);
                     var fact = $"branch{facts.Count + 1}";
                     lean.Line($"{indent}by_cases {fact} : {condition}");
                     foreach (var holds in new[] { true, false })
@@ -1269,7 +1297,7 @@ internal static partial class ProofOutline
             if (opName is "beq" or "bne" && identities.All(term => term is not null))
             {
                 var (identity, equalTaken) =
-                    Body.Test(opName, [$"({identities[0]} : ManagedReference)", identities[1]!]);
+                    Body.Test(opName, [$"({identities[0]} : ManagedReference)", identities[1]!], 64);
                 var same = Side(equalTaken ? target : pc + 1, fact);
                 var different = Side(equalTaken ? pc + 1 : target, fact);
                 lean.Line($"{indent}by_cases {fact} : {identity}");
@@ -1285,7 +1313,7 @@ internal static partial class ProofOutline
                 return;
             }
             var terms = operands.Select(operand => ((Number)operand).Term).ToArray();
-            var (condition, takenWhenTrue) = Body.Test(opName, terms);
+            var (condition, takenWhenTrue) = Body.Test(opName, terms, 8 * ((Number)operands[0]).Width);
             var holds = Side(takenWhenTrue ? target : pc + 1, fact);
             var fails = Side(takenWhenTrue ? pc + 1 : target, fact);
             lean.Line($"{indent}by_cases {fact} : {condition}");
