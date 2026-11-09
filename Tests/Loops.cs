@@ -869,6 +869,8 @@ var outlined = new (string Name, string? Selector)[]
     ("AddSigned", "CheckedArithmetic::AddSigned(int,int)"), ("Distance", "Arithmetic::Distance(ulong,ulong)"),
     ("Larger", "Arithmetic::Larger(int,int)"), ("CounterAdd", "Counter::Add(ulong)"),
     ("OdometerNext", "Odometer::Next()"),
+    ("PacketValue", "Arguments::Struct(Examples.Packet)"),
+    ("NestedLocal", "Nested::Sized(ulong)"),
     // A string field's reference is copied, compared, tested and cleared without being read through.
     ("CopyTag", "Objects::CopyTag(Examples.Tagged,Examples.Tagged)"),
     ("SameTag", "Objects::SameTag(Examples.Tagged,Examples.Tagged)"),
@@ -1731,6 +1733,27 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
             "      simp [Postcondition, branch1]"),
         ("      sorry -- Postcondition of the returned value where `branch1` fails",
             "      simp [Postcondition, branch1]")]),
+    // Every byte pattern of the by-value packet is accepted, including its padding and unused tag.
+    ("PacketValue", [
+        ("def Precondition (value : Vector (BitVec 8) 12) : Prop := sorry",
+            "def Precondition (_ : Vector (BitVec 8) 12) : Prop := True"),
+        ("def Postcondition (value : Vector (BitVec 8) 12) (result : W64) : Prop := sorry",
+            "def Postcondition (_ : Vector (BitVec 8) 12) (result : W64) : Prop := result = 23"),
+        ("sorry -- Postcondition of the returned value", "rfl")]),
+    // The nested struct's explicit size includes padding after the word field.
+    ("NestedLocal", [
+        ("import CIL.Safety.SymbolicExecution",
+            "import CIL.Safety.SymbolicExecution\nimport CIL.Safety.ByteRoundTrip"),
+        ("def Precondition (value : W64) : Prop := sorry", "def Precondition (_ : W64) : Prop := True"),
+        ("def Postcondition (value result : W64) : Prop := sorry",
+            "def Postcondition (value result : W64) : Prop := result = value"),
+        ("theorem correctness", "set_option maxHeartbeats 2000000 in\ntheorem correctness"),
+        ("    sorry -- Postcondition of the returned value", """
+            change BitVec.ofNat 64 (byteNumber (numberBytes value.toNat 8)) = value
+            rw [byteNumber_numberBytes]
+            apply BitVec.eq_of_toNat_eq
+            simp [Nat.mod_eq_of_lt value.isLt]
+        """)]),
     // A struct receiver's field store leaves its contents as `held1`, which is the postcondition.
     ("CounterAdd", [
         ("def Precondition (counter : Reference) (value counterValue : W64) (initial : Memory) : Prop := sorry",
@@ -2314,6 +2337,24 @@ Console.WriteLine("PASS filled outlines verify with only their specification wri
     "through a helper storing the first element of the span it is lent, that helper alone, and element reads of " +
     "`int[]` and `ulong[]` arrays, directly and through a helper returning the element's address, an indexed sum " +
     "and fill of arrays, and a sum and fill through a span local over a span or an array");
+
+// The same filled packet proof must reject a changed stored value for all initial byte patterns.
+var wrongPacket = Path.Combine(outlineRoot, "WrongPacket.dll");
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var method = module.GetType("Examples.Arguments").Methods.Single(method => method.Name == "Struct");
+    method.Body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Ldc_I4_S).Operand = (sbyte)24;
+    module.Write(wrongPacket);
+}
+var wrongPacketOutput = Path.Combine(outlineRoot, "WrongPacket");
+Run(Extract("extract", wrongPacket, "Examples", "Arguments::Struct(Examples.Packet)", wrongPacketOutput));
+var wrongPacketResult = Execute(Cli("verify", wrongPacketOutput, "--proof",
+    Path.Combine(outlineRoot, "PacketValue", "Filled.lean")));
+if (wrongPacketResult.Code == 0 || !wrongPacketResult.Output.Contains("Stage: proof checking") ||
+    File.Exists(Path.Combine(wrongPacketOutput, "verified.json")))
+    throw new InvalidOperationException("The filled packet outline accepted a wrong stored value:\n" +
+        wrongPacketResult.Output);
+Console.WriteLine("PASS the filled packet outline rejects a wrong stored value");
 
 // A written footprint that leaves out the element a loop writes is an error at the write, never an admission.
 var narrowed = Path.Combine(outlineRoot, "FillWords", "Narrowed.lean");

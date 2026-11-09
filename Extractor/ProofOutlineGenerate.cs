@@ -49,7 +49,7 @@ internal static partial class ProofOutline
     }
 
     /// <summary>How an argument is bound; `StructReference` is `this` of a struct instance method, a reference to
-    /// the caller's struct.</summary>
+    /// the caller's struct. `StructValue` binds every byte, including padding, of a private by-value copy.</summary>
     /// <remarks>An `Array` is an array of class references, bound with the element class and length its
     /// allocation records, since covariance lets it hold a class derived from its static element type. A
     /// `WordArray` is an array of 32- or 64-bit integers, bound as an `ArrayView` with its elements, and a
@@ -57,7 +57,7 @@ internal static partial class ProofOutline
     /// length.</remarks>
     enum ParameterShape
     {
-        Scalar, Boolean, Narrow, Reference, Span, Object, StructReference, Array, WordArray, ValueArray
+        Scalar, Boolean, Narrow, Reference, Span, Object, StructReference, StructValue, Array, WordArray, ValueArray
     }
 
     /// <summary>The method's return as a Lean type and value constructor, or none for `void`; a `bool`
@@ -219,6 +219,9 @@ internal static partial class ProofOutline
             ElementWidth(span.GenericArguments[0]) is { } element)
             return new(name, ParameterShape.Span, "SpanView", element)
                 { Writable = span.ElementType.FullName == "System.Span`1" };
+        if (MetadataValidation.IsAggregate(type, method.Module) && !MetadataValidation.IsByRefLike(type) &&
+            Spans.ElementWidth(type, architecture) is { } size)
+            return new(name, ParameterShape.StructValue, $"Vector (BitVec 8) {size}", size);
         return type.FullName switch
         {
             "System.UInt32" or "System.Int32" => new(name, ParameterShape.Scalar, "W32", 4),
@@ -230,7 +233,7 @@ internal static partial class ProofOutline
             "System.Int16" => new(name, ParameterShape.Narrow, "BitVec 16", 2, Signed: true),
             _ => throw Unsupported($"parameter `{parameter.Name}` of {method.Name} has type {type.FullName}; " +
                 "new-proof types `bool`, integers of up to 64 bits, admitted classes, arrays of class references " +
-                "and of values, and references to and spans of 32- and 64-bit integers")
+                "and of values, reference-free structs, and references to and spans of 32- and 64-bit integers")
         };
     }
 
@@ -352,6 +355,8 @@ internal static partial class ProofOutline
             ParameterShape.Boolean => $".scalar (.i32 (if {parameter.Name} then 1 else 0))",
             ParameterShape.Narrow =>
                 $".scalar (.i32 ({parameter.Name}.{(parameter.Signed ? "signExtend" : "zeroExtend")} 32))",
+            ParameterShape.StructValue => $".scalar (.aggregate " +
+                $"(List.ofFn fun index : Fin {parameter.Width} => {parameter.Name}[index.val]))",
             ParameterShape.Reference or ParameterShape.StructReference => $".reference (.address {parameter.Name})",
             ParameterShape.Object or ParameterShape.Array => $".object (.address {parameter.Name})",
             ParameterShape.WordArray => $".array {parameter.Name}",
@@ -468,8 +473,10 @@ internal static partial class ProofOutline
     static string StraightLine(Extraction extraction, Specification spec, Body body, Writer lean)
     {
         if (spec.Framed) return ObjectStraightLine(extraction, spec, body, lean);
-        var steppable = spec.Parameters.All(parameter => parameter.Shape == ParameterShape.Scalar) &&
-            body.Ops.All(Body.Pure);
+        var steppable = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
+            ParameterShape.StructValue) && body.Ops.All(op => Body.Pure(op) ||
+                Regex.IsMatch(op, @"\A\.(localAddr \d+|local \d+|setLocal \d+|initAggregate \d+|" +
+                    @"fieldAddress \d+|(?:setFieldAt|fieldAt|aggregateFieldAt|setAggregateFieldAt) \d+ \d+|dup)\z"));
         var split = !steppable && SplitsOnBooleans(body.Ops, spec.Parameters);
         var paths = steppable || split ? null : ScalarPaths(spec, body.Ops);
         Header(lean, spec, paths is null ? ["CIL.Verification", "CIL.Safety.SymbolicExecution"]
@@ -620,6 +627,7 @@ internal static partial class ProofOutline
                 ParameterShape.Reference => "a reference into caller memory",
                 ParameterShape.Object => "an object whose fields need facts",
                 ParameterShape.StructReference => "a struct of caller memory",
+                ParameterShape.StructValue => "a by-value struct whose fields need facts",
                 ParameterShape.Array or ParameterShape.ValueArray => "an array whose elements need facts",
                 ParameterShape.WordArray => "an array of caller memory",
                 _ => "a span of caller memory"
