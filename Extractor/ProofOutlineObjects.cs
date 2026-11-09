@@ -65,15 +65,18 @@ internal static partial class ProofOutline
     /// `Whole`: an argument, or the array `Field` of `Holder` holds before any write, which the statement binds
     /// as a target with the fact `Held`.</summary>
     sealed record HeldArray(string Name, string Length, string Element, string Whole, string? Held = null,
-        Reached? Holder = null, ViewField? Field = null)
+        Reached? Holder = null, ViewField? Field = null, Parameter? Words = null)
     {
         /// <summary>The array as a stack value.</summary>
-        internal string View => $"⟨.address {Name}, {Length}, {Element}⟩";
+        internal string View => Words?.Name ?? $"⟨.address {Name}, {Length}, {Element}⟩";
     }
 
     /// <summary>A use of an array of values after `Stores` writes that checks it is a whole live array: an
     /// argument load, a length, a store or a return.</summary>
-    sealed record ArrayUse(HeldArray Array, int Stores);
+    sealed record ArrayUse(HeldArray Array, int Stores, bool Length = false);
+
+    /// <summary>A scalar element read whose contents are carried across reference-slot stores.</summary>
+    sealed record WordRead(Parameter Array, string Index, int Stores, string Name);
 
     enum AccessKind { Load, Store, Read, Own }
 
@@ -198,6 +201,9 @@ internal static partial class ProofOutline
             foreach (var parameter in spec.ValueArrays)
                 Arrays.Add(new HeldArray(parameter.Name, parameter.LengthName, parameter.ArrayElement,
                     parameter.WholeName));
+            foreach (var parameter in spec.Parameters.Where(parameter => parameter.Shape == ParameterShape.WordArray))
+                Arrays.Add(new HeldArray(parameter.Name + "Origin", parameter.Name + ".length", parameter.ArrayElement,
+                    parameter.WholeName, Words: parameter));
             return Walk(0, [], new(), [], location);
         }
 
@@ -249,6 +255,7 @@ internal static partial class ProofOutline
                         ParameterShape.Scalar => new Word(parameter.Name, parameter.Width),
                         ParameterShape.Array => new ArrayArgument(parameter.Name),
                         ParameterShape.ValueArray => new Values(Arrays.First(array => array.Name == parameter.Name)),
+                        ParameterShape.WordArray => new Values(Arrays.First(array => array.Words == parameter)),
                         _ => null
                     };
                     if (item is null) return Stop($"the argument `{parameter.Name}`, which needs a case split");
@@ -482,10 +489,26 @@ internal static partial class ProofOutline
                     Steps.Add(new Access(instance.Object, field, AccessKind.Store, false, stores++,
                         $"(.address {values.Array.Name})", Array: values.Array));
                 }
+                else if ((match = Regex.Match(op, @"\A\.memory \(\.arrayLoad (4|8) false\)\z")).Success)
+                {
+                    var index = Pop();
+                    if (Pop() is not Values { Array.Words: { } array } ||
+                        index is not Word { Term: { } term, Width: 4 } ||
+                        array.Width != int.Parse(match.Groups[1].Value))
+                        return Stop("an array element read without a named word array and index");
+                    if (linear) { stack.Add(new Word(null, array.Width)); continue; }
+                    if (PathSteps.OfType<Access>().Any(access => access.Kind == AccessKind.Store &&
+                        access.Field.Kind == ClassViews.FieldKind.Word) ||
+                        PathSteps.Any(step => step is CallStep or Allocation))
+                        return Stop("an array element read after a write whose byte effects need a contract");
+                    var name = array.Name + "Read" + pc;
+                    Steps.Add(new WordRead(array, $"({term} : W32).toNat", stores, name));
+                    stack.Add(new Word($"{array.ElementsName}[({term} : W32).toNat]", array.Width));
+                }
                 else if (op == ".memory .arrayLength")
                 {
                     if (Pop() is not Values values) return Stop("`ldlen` of an array the outline cannot name");
-                    Steps.Add(new ArrayUse(values.Array, stores));
+                    Steps.Add(new ArrayUse(values.Array, stores, Length: true));
                     stack.Add(new Word($"(BitVec.ofNat 64 {values.Array.Length})", 8));
                 }
                 else if ((match = Regex.Match(op, @"\A\.call(?:Instance)? (\d+) (\d+)\z")).Success)
@@ -822,6 +845,19 @@ internal static partial class ProofOutline
         {
             var plan = new ObjectPlan();
             var all = Touches.ToArray();
+            foreach (var array in Arrays.Where(array => array.Words is not null))
+            {
+                var whole = all.Any(access => access.Kind == AccessKind.Store && access.Array == array);
+                var length = Flattened.OfType<ArrayUse>().Any(use => use.Array == array && use.Length);
+                if (!whole && !length) continue;
+                plan.Targets.Add((array.Name, "Reference"));
+                plan.Premises.Add((array.Words!.Name + "Reference",
+                    $"{array.View}.reference = .address {array.Name}"));
+                if (whole)
+                    plan.Premises.Add((array.Whole, $"WholeArray initial {array.Element} {array.Name} {array.Length}"));
+            }
+            foreach (var read in Flattened.OfType<WordRead>().DistinctBy(read => read.Name))
+                plan.Premises.Add((read.Name + "Bound", $"{read.Index} < {read.Array.ElementsName}.length"));
             foreach (var reached in Objects)
             {
                 if (reached.Holder is not null)
@@ -1073,11 +1109,17 @@ internal static partial class ProofOutline
             known[(array.Name + "Live", 0)] = walk.ArrayFact(array.Name) is var fact && fact == array.Name + "Live"
                 ? fact : fact + ".toLive";
         foreach (var array in walk.Arrays) known[(array.Whole, 0)] = array.Whole;
+        foreach (var array in spec.Parameters.Where(array => array.Shape == ParameterShape.WordArray))
+            known[(array.Name + "Valid", 0)] = array.Name + "Valid";
         // Entry checks every argument in the caller's memory, a value array by its view.
         var facts = walk.Objects.Where(reached => reached.Holder is null)
             .Select(reached => reached.Name + "Live.formed")
             .Concat(spec.Arrays.Select(array => walk.ArrayFact(array.Name) + ".formed"))
-            .Concat(spec.ValueArrays.Select(array => array.WholeName + ".valid")).ToList();
+            .Concat(spec.ValueArrays.Select(array => array.WholeName + ".valid"))
+            .Concat(spec.Parameters.Where(array => array.Shape == ParameterShape.WordArray)
+                .SelectMany(array => new[] { array.Name + "Valid", array.Name + "Type" }))
+            .Concat(spec.Plan?.Premises.Where(fact => fact.Name.EndsWith("Reference", StringComparison.Ordinal))
+                .Select(fact => fact.Name) ?? []).ToList();
         new ObjectPath(lean, spec, walk.Owns, owned, widen, returns, "  ", known, [], facts, []).Write(walk);
     }
 
@@ -1219,12 +1261,67 @@ internal static partial class ProofOutline
                 }
                 if (step is ArrayUse use)
                 {
-                    Add(Whole(use.Array, use.Stores) + ".valid");
+                    if (use.Array.Words is { } array)
+                    {
+                        Add(WordValid(array, use.Stores));
+                        if (use.Length)
+                        {
+                            Add(array.Name + "Reference");
+                            WordLength(array, use.Stores);
+                        }
+                    }
+                    else Add(Whole(use.Array, use.Stores) + ".valid");
+                    continue;
+                }
+                if (step is WordRead read)
+                {
+                    WordElement(read);
                     continue;
                 }
                 Access((Access)step);
             }
             Return(walk);
+        }
+
+        /// <summary>An array view remains valid across confined writes, calls and allocation.</summary>
+        string WordValid(Parameter array, int stores)
+        {
+            known.TryAdd(("arrayAllocations", 0), "(AllocationExtension.refl initial)");
+            string Extension(int count) => Carry("arrayAllocations", count, (previous, level) =>
+                $"{previous}.trans (show AllocationExtension {ObjectWalk.Memory(level - 1)} stored{level} " +
+                $"from ⟨framed{level}.grows, framed{level}.allocations⟩)");
+            return Carry(array.Name + "Valid", stores, (_, level) =>
+                $"{array.Name}.validate_preserved {array.Name}Valid wellFormed {Extension(level)}");
+        }
+
+        /// <summary>A non-null array's length, without changing the array view's binding.</summary>
+        void WordLength(Parameter array, int stores)
+        {
+            var name = array.Name + "LengthStep" + stores;
+            var memory = ObjectWalk.Memory(stores);
+            lean.Line($"{indent}have {name} : ∀ body pc args frame rest,");
+            lean.Line($"{indent}    step body (.memory .arrayLength) pc args frame (.array {array.Name} :: rest)");
+            lean.Line($"{indent}      {memory} = .ok (.next (pc + 1)");
+            lean.Line($"{indent}        (.scalar (.i64 (BitVec.ofNat 64 {array.Name}.length)) :: rest) frame");
+            lean.Line($"{indent}        {memory}) := by");
+            lean.Line($"{indent}  intros");
+            lean.Line($"{indent}  simp [step_memory_arrayLength_eq, {WordValid(array, stores)}, " +
+                $"{array.Name}Reference, checkedAt, Except.mapError] <;> rfl");
+            Add(name);
+        }
+
+        /// <summary>A scalar read from the supplied contents after reference-slot writes.</summary>
+        void WordElement(WordRead read)
+        {
+            var array = read.Array;
+            known.TryAdd((array.Name + "Contents", 0), array.Name + "Contents");
+            var contents = Carry(array.Name + "Contents", read.Stores, (previous, level) =>
+                $"(by rw [← wrote{level}]; exact {previous}.after_setSlot _ _ : " +
+                $"SpanContents stored{level} {array.Name}.storage " +
+                $"{array.Width} {array.ElementsName})");
+            lean.Wrapped($"{indent}obtain ⟨{read.Name}Reference, {read.Name}Found, {read.Name}Loaded⟩ :=",
+                $"{contents}.array_load {WordValid(array, read.Stores)} (by decide) {read.Name}Bound".Terms(), "");
+            Add($"step_arrayLoad_of_element (index := .i32 _) rfl {read.Name}Found {read.Name}Loaded");
         }
 
         /// <summary>A `newarr` charged to the budget premise, confined to no caller memory, with a `Holds` of null
@@ -1339,6 +1436,7 @@ internal static partial class ProofOutline
             Add("leaveFrame");
             lean.Wrapped($"{indent}cil_contract_steps", FactList(facts), "");
             facts.Clear();
+            Add(call.Callee.Name + "Contract");
             var number = call.Number;
             if (call.Writes is { } writes)
             {
@@ -1396,6 +1494,16 @@ internal static partial class ProofOutline
                 lean.Wrapped($"{indent}generalize wrote{stores} :", [$"setSlot {ObjectWalk.Memory(access.Stores)}",
                     $"({access.Field.Lean}.address {access.Object.Name})", access.Value!, $"= stored{stores}"],
                     $"at written{stores} framed{stores} held{stores}");
+                if (access.Array!.Words is { } words)
+                {
+                    lean.Wrapped($"{indent}have writtenArray{stores} :",
+                        ($"storeArraySlot {ObjectWalk.Memory(access.Stores)} ({access.Field.Lean}.address " +
+                        $"{access.Object.Name}) {words.Name} {words.ArrayElement} = .ok stored{stores} := by")
+                        .Terms(), "");
+                    lean.Line($"{indent}  simpa only [← {words.Name}Type, ← {words.Name}Reference] " +
+                        $"using written{stores}");
+                    Add($"writtenArray{stores}");
+                }
             }
             else if (access.Field.Kind == ClassViews.FieldKind.Reference)
             {

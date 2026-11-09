@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include WordArrayOutlines.cs
 
 using System.Reflection;
 using System.Buffers.Binary;
@@ -12,6 +13,7 @@ using Mono.Cecil.Cil;
 
 using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
+verification.WordArrayOutlines();
 var root = At("artifacts/Loops");
 Directory.CreateDirectory(root);
 var contract = At("Examples/Proofs/Countdown.lean");
@@ -869,6 +871,8 @@ var outlined = new (string Name, string? Selector)[]
     ("AddSigned", "CheckedArithmetic::AddSigned(int,int)"), ("Distance", "Arithmetic::Distance(ulong,ulong)"),
     ("Larger", "Arithmetic::Larger(int,int)"), ("CounterAdd", "Counter::Add(ulong)"),
     ("OdometerNext", "Odometer::Next()"),
+    ("PacketValue", "Arguments::Struct(Examples.Packet)"),
+    ("NestedLocal", "Nested::Sized(ulong)"),
     // A string field's reference is copied, compared, tested and cleared without being read through.
     ("CopyTag", "Objects::CopyTag(Examples.Tagged,Examples.Tagged)"),
     ("SameTag", "Objects::SameTag(Examples.Tagged,Examples.Tagged)"),
@@ -1731,6 +1735,27 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
             "      simp [Postcondition, branch1]"),
         ("      sorry -- Postcondition of the returned value where `branch1` fails",
             "      simp [Postcondition, branch1]")]),
+    // Every byte pattern of the by-value packet is accepted, including its padding and unused tag.
+    ("PacketValue", [
+        ("def Precondition (value : Vector (BitVec 8) 12) : Prop := sorry",
+            "def Precondition (_ : Vector (BitVec 8) 12) : Prop := True"),
+        ("def Postcondition (value : Vector (BitVec 8) 12) (result : W64) : Prop := sorry",
+            "def Postcondition (_ : Vector (BitVec 8) 12) (result : W64) : Prop := result = 23"),
+        ("sorry -- Postcondition of the returned value", "rfl")]),
+    // The nested struct's explicit size includes padding after the word field.
+    ("NestedLocal", [
+        ("import CIL.Safety.SymbolicExecution",
+            "import CIL.Safety.SymbolicExecution\nimport CIL.Safety.ByteRoundTrip"),
+        ("def Precondition (value : W64) : Prop := sorry", "def Precondition (_ : W64) : Prop := True"),
+        ("def Postcondition (value result : W64) : Prop := sorry",
+            "def Postcondition (value result : W64) : Prop := result = value"),
+        ("theorem correctness", "set_option maxHeartbeats 2000000 in\ntheorem correctness"),
+        ("    sorry -- Postcondition of the returned value", """
+            change BitVec.ofNat 64 (byteNumber (numberBytes value.toNat 8)) = value
+            rw [byteNumber_numberBytes]
+            apply BitVec.eq_of_toNat_eq
+            simp [Nat.mod_eq_of_lt value.isLt]
+        """)]),
     // A struct receiver's field store leaves its contents as `held1`, which is the postcondition.
     ("CounterAdd", [
         ("def Precondition (counter : Reference) (value counterValue : W64) (initial : Memory) : Prop := sorry",
@@ -2231,14 +2256,15 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
         ("sorry -- Postcondition of the returned value", "rfl")]),
     // The field holds the array argument's origin.
     ("SampleRefill", [
-        ("def Precondition (samples values1 : Reference) (values1Length : Nat) (initial : Memory)\n" +
-            "    : Prop := sorry",
-            "def Precondition (_ _ : Reference) (_ : Nat) (_ : Memory) : Prop := True"),
-        ("def Postcondition (samples values1 : Reference) (values1Length : Nat) (initial final : Memory)\n" +
-            "    : Prop := sorry",
-            "def Postcondition (samples values1 : Reference) (_ : Nat) (_ final : Memory) : Prop :=\n" +
-            "  Samples.Values.Holds final samples (.address values1)"),
-        ("sorry -- Postcondition of the returned value, with `held1` the stored fields", "exact held1")]),
+        ("def Precondition (samples : Reference) (values1 : ArrayView) (values1Elements : List W32)\n" +
+            "    (initial : Memory) : Prop := sorry",
+            "def Precondition (_ : Reference) (_ : ArrayView) (_ : List W32) (_ : Memory) : Prop := True"),
+        ("def Postcondition (samples : Reference) (values1 : ArrayView) (values1Elements : List W32)\n" +
+            "    (initial final : Memory) : Prop := sorry",
+            "def Postcondition (samples : Reference) (values1 : ArrayView) (_ : List W32) (_ final : Memory) : Prop :=\n" +
+            "  Samples.Values.Holds final samples values1.reference"),
+        ("sorry -- Postcondition of the returned value, with `held1` the stored fields",
+            "simpa only [Postcondition, leaveFrame, List.foldl_nil, values1Reference] using held1")]),
     // The returned view is of the array the field holds.
     ("SampleValues", [
         ("def Precondition (samples : Reference) (initial : Memory) : Prop := sorry",
@@ -2315,6 +2341,46 @@ Console.WriteLine("PASS filled outlines verify with only their specification wri
     "`int[]` and `ulong[]` arrays, directly and through a helper returning the element's address, an indexed sum " +
     "and fill of arrays, and a sum and fill through a span local over a span or an array");
 
+// The same filled packet proof must reject a changed stored value for all initial byte patterns.
+var wrongPacket = Path.Combine(outlineRoot, "WrongPacket.dll");
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var method = module.GetType("Examples.Arguments").Methods.Single(method => method.Name == "Struct");
+    method.Body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Ldc_I4_S).Operand = (sbyte)24;
+    module.Write(wrongPacket);
+}
+var wrongPacketOutput = Path.Combine(outlineRoot, "WrongPacket");
+Run(Extract("extract", wrongPacket, "Examples", "Arguments::Struct(Examples.Packet)", wrongPacketOutput));
+var wrongPacketResult = Execute(Cli("verify", wrongPacketOutput, "--proof",
+    Path.Combine(outlineRoot, "PacketValue", "Filled.lean")));
+if (wrongPacketResult.Code == 0 || !wrongPacketResult.Output.Contains("Stage: proof checking") ||
+    File.Exists(Path.Combine(wrongPacketOutput, "verified.json")))
+    throw new InvalidOperationException("The filled packet outline accepted a wrong stored value:\n" +
+        wrongPacketResult.Output);
+Console.WriteLine("PASS the filled packet outline rejects a wrong stored value");
+
+// A source parameter named index must remain the byte vector, not a generated byte-index binder.
+var indexedPacket = Path.Combine(outlineRoot, "IndexedPacket.dll");
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var method = module.GetType("Examples.Arguments").Methods.Single(method => method.Name == "Struct");
+    method.Parameters[0].Name = "index";
+    module.Write(indexedPacket);
+}
+var indexedPacketOutput = Path.Combine(outlineRoot, "IndexedPacket");
+Run(Extract("extract", indexedPacket, "Examples", "Arguments::Struct(Examples.Packet)", indexedPacketOutput));
+var indexedPacketProof = Path.Combine(outlineRoot, "IndexedPacket.lean");
+Run(Cli("new-proof", indexedPacketOutput, indexedPacketProof));
+var indexedPacketSource = File.ReadAllText(indexedPacketProof)
+    .Replace("def Precondition (index : Vector (BitVec 8) 12) : Prop := sorry",
+        "def Precondition (_ : Vector (BitVec 8) 12) : Prop := True", StringComparison.Ordinal)
+    .Replace("def Postcondition (index : Vector (BitVec 8) 12) (result : W64) : Prop := sorry",
+        "def Postcondition (_ : Vector (BitVec 8) 12) (result : W64) : Prop := result = 23", StringComparison.Ordinal)
+    .Replace("sorry -- Postcondition of the returned value", "rfl", StringComparison.Ordinal);
+File.WriteAllText(indexedPacketProof, indexedPacketSource);
+Run(Cli("verify", indexedPacketOutput, "--proof", indexedPacketProof));
+Console.WriteLine("PASS a struct parameter named index is bound without capture");
+
 // A written footprint that leaves out the element a loop writes is an error at the write, never an admission.
 var narrowed = Path.Combine(outlineRoot, "FillWords", "Narrowed.lean");
 File.WriteAllText(narrowed, File.ReadAllText(Path.Combine(outlineRoot, "FillWords", "Filled.lean"))
@@ -2376,6 +2442,9 @@ var wordByteVerified = Execute(Cli("verify", wordByteExtraction, "--proof", word
 if (wordByteVerified.Code != 0 || !wordByteVerified.Stdout.StartsWith("Verified: ExampleProof.correctness"))
     throw new InvalidOperationException("The closure's filled outline did not verify:\n" + wordByteVerified.Output);
 Console.WriteLine("PASS the outline of LeanCIL's own byte-layout closure, filled, verifies its little-endian byte");
+
+Run(["dotnet", "run", "--file", "Tests/StructOutlines.cs"]);
+Run(["dotnet", "run", "--file", "Tests/ReceiverLoopOutlines.cs"]);
 
 delegate void FillWordsDelegate(ref ulong destination, ulong value, int count);
 delegate uint CopyUntilZeroDelegate(ReadOnlySpan<uint> values, ref uint output);

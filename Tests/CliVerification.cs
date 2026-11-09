@@ -410,10 +410,10 @@ if (overwrite.Code == 0 || !overwrite.Stderr.Contains("already exists; new-proof
 var packet = Path.Combine(outlines, "Packet");
 Run([.. cli, "extract", demoAssembly, "Arguments::Struct(Examples.Packet)", packet]);
 var packetOutline = Path.Combine(outlines, "PacketProof.lean");
-var unsupported = Execute([.. cli, "new-proof", packet, packetOutline]);
-if (unsupported.Code == 0 || File.Exists(packetOutline) || !unsupported.Stderr.Contains("Stage: proof outline") ||
-    !unsupported.Stderr.Contains("parameter `value` of Struct has type Examples.Packet; new-proof types"))
-    throw new InvalidOperationException("new-proof did not refuse a struct parameter: " + unsupported.Output);
+var packetOutlined = Execute([.. cli, "new-proof", packet, packetOutline]);
+if (packetOutlined.Code != 0 || !File.ReadAllText(packetOutline).Contains("Vector (BitVec 8) 12") ||
+    !packetOutlined.Stdout.Contains("0 paths not outlined"))
+    throw new InvalidOperationException("new-proof did not bind a struct parameter: " + packetOutlined.Output);
 File.AppendAllText(Path.Combine(outlined, "Extracted.lean"), "\n-- edited\n");
 var staleOutline = Path.Combine(outlines, "StaleProof.lean");
 var staleOutlined = Execute([.. cli, "new-proof", outlined, staleOutline]);

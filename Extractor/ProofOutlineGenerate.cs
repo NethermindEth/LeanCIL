@@ -49,15 +49,15 @@ internal static partial class ProofOutline
     }
 
     /// <summary>How an argument is bound; `StructReference` is `this` of a struct instance method, a reference to
-    /// the caller's struct.</summary>
+    /// the caller's struct. `StructValue` binds every byte, including padding, of a private by-value copy.</summary>
     /// <remarks>An `Array` is an array of class references, bound with the element class and length its
     /// allocation records, since covariance lets it hold a class derived from its static element type. A
     /// `WordArray` is an array of 32- or 64-bit integers, bound as an `ArrayView` with its elements, and a
-    /// `ValueArray` an array of words, structs or vectors beside class instances, bound by its origin and its
-    /// length.</remarks>
+    /// `ValueArray` an array of other value elements, bound by its origin and its length. An object-field store
+    /// adds a whole-array premise to a word array without changing its element view.</remarks>
     enum ParameterShape
     {
-        Scalar, Boolean, Narrow, Reference, Span, Object, StructReference, Array, WordArray, ValueArray
+        Scalar, Boolean, Narrow, Reference, Span, Object, StructReference, StructValue, Array, WordArray, ValueArray
     }
 
     /// <summary>The method's return as a Lean type and value constructor, or none for `void`; a `bool`
@@ -109,9 +109,6 @@ internal static partial class ProofOutline
         var spec = new Specification(method, parameters, result, symbolic, extraction.Views.Length > 0);
         string source;
         var structReceiver = parameters.Any(parameter => parameter.Shape == ParameterShape.StructReference);
-        if (structReceiver && loops.Count > 0)
-            throw Unsupported($"{method.FullName} is a struct instance method with a loop; new-proof steps the " +
-                "fields of a struct receiver in straight-line bodies only");
         if (loops.Count > 0 && parameters.FirstOrDefault(parameter => parameter.Shape == ParameterShape.Array) is
             { } array)
             throw Unsupported($"parameter `{array.Name}` of {method.Name} is an array of class references, which " +
@@ -133,9 +130,11 @@ internal static partial class ProofOutline
                 "into `target[0]`; new-proof follows a span written from the front by a loop or that one store");
         if (spanStore is { } store)
             source = SpanStoreLine(spec, store.Op, lean);
+        else if (structReceiver && loops.Count > 0)
+            source = new ReceiverLoop(spec, body, lean).Generate();
         else if (structReceiver)
             source = StructStraightLine(spec, body, names, lean);
-        else if (loops.Count == 0 && ArrayRead(extraction, spec, body.Ops) is { } read)
+        else if (loops.Count == 0 && !spec.Framed && ArrayRead(extraction, spec, body.Ops) is { } read)
             source = ArrayReadLine(spec, read, lean);
         else if (loops.Count == 0)
             source = StraightLine(extraction, spec, body, lean);
@@ -196,10 +195,7 @@ internal static partial class ProofOutline
         var name = names.Claim(parameter.Name, "argument" + parameter.Index);
         if (ObjectTypes.Is(type)) return Instance(name, type, views);
         if (ReferenceArrays.Is(type)) return new(name, ParameterShape.Array, "Reference", 8);
-        // Beside class instances an array is bound whole, as the fields that may hold it state it; alone, an array of
-        // words is bound as a view with its elements, which element reads and loops need.
-        if (type is ArrayType { IsVector: true } array && WordArrayElement(array.ElementType) is { } word &&
-            !BesideInstances(method))
+        if (type is ArrayType { IsVector: true } array && WordArrayElement(array.ElementType) is { } word)
             return new(name, ParameterShape.WordArray, "ArrayView", ElementWidth(array.ElementType)!.Value)
                 { ArrayElement = word };
         if (Arrays.Of(type, architecture) is { } values)
@@ -220,6 +216,9 @@ internal static partial class ProofOutline
             ElementWidth(span.GenericArguments[0]) is { } element)
             return new(name, ParameterShape.Span, "SpanView", element)
                 { Writable = span.ElementType.FullName == "System.Span`1" };
+        if (MetadataValidation.IsAggregate(type, method.Module) && !MetadataValidation.IsByRefLike(type) &&
+            Spans.ElementWidth(type, architecture) is { } size)
+            return new(name, ParameterShape.StructValue, $"Vector (BitVec 8) {size}", size);
         return type.FullName switch
         {
             "System.UInt32" or "System.Int32" => new(name, ParameterShape.Scalar, "W32", 4),
@@ -231,13 +230,9 @@ internal static partial class ProofOutline
             "System.Int16" => new(name, ParameterShape.Narrow, "BitVec 16", 2, Signed: true),
             _ => throw Unsupported($"parameter `{parameter.Name}` of {method.Name} has type {type.FullName}; " +
                 "new-proof types `bool`, integers of up to 64 bits, admitted classes, arrays of class references " +
-                "and of values, and references to and spans of 32- and 64-bit integers")
+                "and of values, reference-free structs, and references to and spans of 32- and 64-bit integers")
         };
     }
-
-    /// <summary>Whether `method` takes or is called on a class instance.</summary>
-    static bool BesideInstances(MethodDefinition method) => method.HasThis && ObjectTypes.Is(method.DeclaringType) ||
-        method.Parameters.Any(parameter => ObjectTypes.Is(parameter.ParameterType));
 
     /// <summary>The `ArrayElement` the extraction gives an array of 32- or 64-bit integers.</summary>
     static string? WordArrayElement(TypeReference type) => type.FullName switch
@@ -353,6 +348,7 @@ internal static partial class ProofOutline
             ParameterShape.Boolean => $".scalar (.i32 (if {parameter.Name} then 1 else 0))",
             ParameterShape.Narrow =>
                 $".scalar (.i32 ({parameter.Name}.{(parameter.Signed ? "signExtend" : "zeroExtend")} 32))",
+            ParameterShape.StructValue => $".scalar (.aggregate (List.ofFn {parameter.Name}.get))",
             ParameterShape.Reference or ParameterShape.StructReference => $".reference (.address {parameter.Name})",
             ParameterShape.Object or ParameterShape.Array => $".object (.address {parameter.Name})",
             ParameterShape.WordArray => $".array {parameter.Name}",
@@ -469,8 +465,10 @@ internal static partial class ProofOutline
     static string StraightLine(Extraction extraction, Specification spec, Body body, Writer lean)
     {
         if (spec.Framed) return ObjectStraightLine(extraction, spec, body, lean);
-        var steppable = spec.Parameters.All(parameter => parameter.Shape == ParameterShape.Scalar) &&
-            body.Ops.All(Body.Pure);
+        var steppable = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
+            ParameterShape.StructValue) && body.Ops.All(op => Body.Pure(op) ||
+                Regex.IsMatch(op, @"\A\.(localAddr \d+|local \d+|setLocal \d+|initAggregate \d+|" +
+                    @"fieldAddress \d+|(?:setFieldAt|fieldAt|aggregateFieldAt|setAggregateFieldAt) \d+ \d+|dup)\z"));
         var split = !steppable && SplitsOnBooleans(body.Ops, spec.Parameters);
         var paths = steppable || split ? null : ScalarPaths(spec, body.Ops);
         Header(lean, spec, paths is null ? ["CIL.Verification", "CIL.Safety.SymbolicExecution"]
@@ -552,10 +550,12 @@ internal static partial class ProofOutline
         }
         var walk = new ObjectWalk(spec, body.Ops, views, Summary);
         var stepped = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
-            ParameterShape.Object or ParameterShape.Array or ParameterShape.ValueArray) &&
+            ParameterShape.Object or ParameterShape.Array or ParameterShape.ValueArray or ParameterShape.WordArray) &&
             walk.Run(pc => Location(spec.Method, pc));
         if (stepped) spec.Plan = walk.Plan();
         string[] imports = ["CIL.Verification", "CIL.Safety.SymbolicExecution", "CIL.Safety.ObjectFields"];
+        if (spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.WordArray))
+            imports = [.. imports, "CIL.Safety.ArrayContents"];
         var fresh = stepped ? walk.Flattened.OfType<Allocation>().FirstOrDefault() : null;
         if (spec.Arrays.Any() || fresh is not null) imports = [.. imports, "CIL.Safety.ReferenceArrayElements"];
         Header(lean, spec, imports, stepped ? "`postcondition`" : null);
@@ -621,6 +621,7 @@ internal static partial class ProofOutline
                 ParameterShape.Reference => "a reference into caller memory",
                 ParameterShape.Object => "an object whose fields need facts",
                 ParameterShape.StructReference => "a struct of caller memory",
+                ParameterShape.StructValue => "a by-value struct whose fields need facts",
                 ParameterShape.Array or ParameterShape.ValueArray => "an array whose elements need facts",
                 ParameterShape.WordArray => "an array of caller memory",
                 _ => "a span of caller memory"
@@ -681,7 +682,9 @@ internal static partial class ProofOutline
 
     /// <summary>The numbered hypotheses and memories an outline's proof introduces after each store, call and
     /// split.</summary>
-    [GeneratedRegex(@"\A(?:stored|framed|held|written|output|called|post|returned|found|branch|initial|memory)\d*\z")]
+    [GeneratedRegex(@"\A(?:(?:stored|framed|held|written|output|called|post|returned|found|branch|initial|memory|" +
+        @"encoded|changed|combined|formed|form|loadSigned)\d*|" +
+        @"(?:owned|kept|added|loaded)\d+(?:Field\d+)?(?:Signed)?)\z")]
     private static partial Regex Generated();
 
     /// <summary>Lean source with two-space indentation and lines kept under 100 characters.</summary>
