@@ -13,28 +13,43 @@ var options = new Dictionary<string, string>(StringComparer.Ordinal);
 for (var i = 0; i < args.Length; i++)
 {
     if (args[i] is not ("--repository" or "--workflow" or "--head" or "--base" or "--output" or "--event" or
-        "--pull-request") ||
+        "--pull-request" or "--proof-cost-rows") ||
         i + 1 == args.Length)
         throw new ArgumentException("Usage: FindCertifiedLibrary.cs --repository <owner/name> --workflow <file> " +
-            "--head <commit> --base <commit> --output <file> [--event <event>] [--pull-request <number>]");
+            "--output <file> (--head <commit> --base <commit> [--event <event>] [--pull-request <number>] | " +
+            "--proof-cost-rows <commit>)");
     options[args[i]] = args[++i];
 }
 string repository = options["--repository"], workflow = options["--workflow"], output = options["--output"];
 string runs = $"repos/{repository}/actions/workflows/{workflow}/runs?per_page={RunsPerCommit}&head_sha=";
 string RunPath(long run) => $"repos/{repository}/actions/runs/{run}";
+bool Reviewed(long run) => CertifiedLibraryDonor.Available("Run " + run, () =>
+    new[] { CertifiedLibraryDonor.ReviewedProducer(Api(RunPath(run)), repository,
+        path => Api($"repos/{repository}/{path}"), Warning) }, Warning).FirstOrDefault();
+string JobLog(long job) => Gh($"repos/{repository}/actions/jobs/{job}/logs", "--allow-escape-sequences");
+// Proof cost rows are a base only from the push to main of that commit, whose jobs ran main's code.
+if (options.TryGetValue("--proof-cost-rows", out var measured))
+{
+    var rows = CertifiedLibraryDonor.Find(Runs(measured, "&event=push&branch=main").Where(Reviewed),
+        (run, suffix) => Api(RunPath(run) + suffix), JobLog, DateTimeOffset.UtcNow, Warning,
+        CertifiedLibraryDonor.ProofCostRows);
+    if (rows is null) Console.WriteLine($"No published proof cost rows for {measured}; measuring it.");
+    else
+    {
+        File.AppendAllText(output, $"run-id={rows.Run}\nartifact-id={rows.Artifact}\nsha256={rows.Digest}\n");
+        Console.WriteLine($"Taking proof cost rows {rows.Artifact} from run {rows.Run} with SHA256 {rows.Digest}");
+    }
+    return;
+}
 var selected = CertifiedLibraryDonor.Find(CertifiedLibraryDonor.Candidates(() => Runs(options["--head"], ""),
         PullAncestorRuns, MergedPullRuns, () => Runs(options["--base"], "&event=push&branch=main"), RecentMainRuns),
-    (run, suffix) => Api(RunPath(run) + suffix),
-    job => Gh($"repos/{repository}/actions/jobs/{job}/logs", "--allow-escape-sequences"),
-    DateTimeOffset.UtcNow, Warning);
+    (run, suffix) => Api(RunPath(run) + suffix), JobLog, DateTimeOffset.UtcNow, Warning);
 if (selected is null)
     Console.WriteLine("No certified library to reuse; building from sources.");
 else
 {
     // Run metadata, not the donated bytes, decides whether the producer ran reviewed code.
-    var reviewed = CertifiedLibraryDonor.Available("Run " + selected.Run, () =>
-        new[] { CertifiedLibraryDonor.ReviewedProducer(Api(RunPath(selected.Run)), repository,
-            path => Api($"repos/{repository}/{path}"), Warning) }, Warning).FirstOrDefault();
+    var reviewed = Reviewed(selected.Run);
     File.AppendAllText(output,
         $"run-id={selected.Run}\nartifact-id={selected.Artifact}\nmanifest-sha256={selected.Digest}\n" +
         $"archive-sha256={selected.ArchiveDigest}\nreviewed-producer={(reviewed ? "true" : "false")}\n");

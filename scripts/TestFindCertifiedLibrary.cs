@@ -279,6 +279,35 @@ Test("archive digest belongs to the same successful producer log as its manifest
             "Packed or legacy donor digest mismatch");
     }
 });
+Test("proof cost rows come only from the publishing job, its own artifact and its logged digest", () =>
+{
+    var rows = CertifiedLibraryDonor.ProofCostRows;
+    // Run 7 published rows and a library; a library digest or artifact must never stand in for the rows'.
+    JsonElement Api(long run, string suffix) => suffix.StartsWith("/jobs", StringComparison.Ordinal)
+        ? Json("""
+            {"jobs":[{"id":9,"name":"Prepare certified Lean library","run_attempt":1,"conclusion":"success"},
+              {"id":10,"name":"Publish proof cost rows","run_attempt":1,"conclusion":"success"},
+              {"id":11,"name":"Proof cost","run_attempt":1,"conclusion":"success"}]}
+            """)
+        : Json("""
+            {"artifacts":[{"id":70,"name":"certified-library-7-1","expired":false,
+              "expires_at":"2026-11-05T00:00:00Z","workflow_run":{"id":7}},
+              {"id":71,"name":"proof-cost-rows-7-1","expired":false,
+              "expires_at":"2026-11-05T00:00:00Z","workflow_run":{"id":7}}]}
+            """);
+    JsonElement FailedJob() => Json("""
+        {"jobs":[{"id":10,"name":"Publish proof cost rows","run_attempt":1,"conclusion":"failure"}]}
+        """);
+    string Log(long job) =>
+        job == 10 ? rows.DigestLine + Other + "\n" : CertifiedLibraryDonor.DigestLine + Digest + "\n";
+    Require(CertifiedLibraryDonor.Find([7], Api, Log, now, _ => { }, rows) ==
+        new CertifiedLibraryDonor.Selection(7, 71, Other), "Published rows were not found by their own job");
+    Require(CertifiedLibraryDonor.ArtifactName(7, 1, rows) == "proof-cost-rows-7-1", "Rows artifact was renamed");
+    Require(CertifiedLibraryDonor.Find([7], Api, _ => CertifiedLibraryDonor.DigestLine + Digest, now, _ => { },
+        rows) is null, "A library digest authenticated proof cost rows");
+    Require(CertifiedLibraryDonor.Find([7], (run, suffix) => suffix.StartsWith("/jobs", StringComparison.Ordinal)
+        ? FailedJob() : Api(run, suffix), Log, now, _ => { }, rows) is null, "A failed publishing job donated rows");
+});
 JsonElement PreparedRun(long run, string conclusion) => Json($$"""
     {"jobs":[
       {"id":{{run * 100}},"name":"Prepare certified Lean library","run_attempt":1,"conclusion":"{{conclusion}}"},
