@@ -1422,10 +1422,12 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         Action<int, string>? stage, bool batch, int parallelism = 1,
         Action<int, ConsumerOutcome>? finished = null, bool checkOnly = false)
     {
+        var requestClock = System.Diagnostics.Stopwatch.StartNew();
         root = Path.GetFullPath(root);
         if (requests.Any(request => request.ExportAudit is not null) && !freshProofs && !freshLibrary)
             throw new InvalidDataException("Contract exports require fresh independent verification.");
         var outcomes = requests.Select(_ => new ConsumerOutcome()).ToArray();
+        void CompleteTiming(int index) => outcomes[index].ElapsedSeconds = requestClock.Elapsed.TotalSeconds;
         bool Live(int i) => outcomes[i].Error is null && !outcomes[i].Rejected &&
             !outcomes[i].Checked && outcomes[i].Report is null;
         int[] Pending(IEnumerable<int> members) => members.Where(Live).ToArray();
@@ -1439,7 +1441,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         }
         void Fail(IEnumerable<int> members, Exception error)
         {
-            foreach (var i in Pending(members)) outcomes[i].Error = error;
+            foreach (var i in Pending(members))
+            {
+                outcomes[i].Error = error;
+                CompleteTiming(i);
+            }
         }
         var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
         var all = Enumerable.Range(0, requests.Count).ToArray();
@@ -1626,6 +1632,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 outcomes[i].Detail = null;
                 if (last[outputs[i]] == i) File.WriteAllText(Path.Combine(outputs[i], "verified.json"), JsonSerializer.Serialize(report, Json) + "\n");
                 outcomes[i].Report = report;
+                CompleteTiming(i);
                 CacheProgress("certified consumer proof: " + requests[i].Theorem);
             }
             foreach (var i in cached.Where(i => !Live(i))) finished?.Invoke(i, outcomes[i]);
@@ -2006,6 +2013,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     outcomes[i].Detail = buildFailure!.Message;
                     if (members.Length > 1) outcomes[i].Hidden = names.Where((_, m) => members[m] != i).ToArray();
                     outcomes[i].Rejected = true;
+                    CompleteTiming(i);
                 }
             }
             var proceeding = Pending(members);
@@ -2335,6 +2343,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 PublishSuccess(proofKeys[i], receipt);
                 if (last[outputs[i]] == i) File.WriteAllText(Path.Combine(outputs[i], "verified.json"), JsonSerializer.Serialize(report, Json) + "\n");
                 outcomes[i].Report = report;
+                CompleteTiming(i);
             }
         }
 
@@ -2363,6 +2372,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 {
                     outcomes[member].Messages = LakeTraceMessages(artifact + ".trace", session, source);
                     outcomes[member].Checked = true;
+                    CompleteTiming(member);
                 }
                 else
                 {
@@ -2391,7 +2401,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
         void RunGroup(int[] members, bool first, bool share)
         {
-            var elapsed = System.Diagnostics.Stopwatch.StartNew();
             bool priorReferenceOnly = referenceOnlyAuthoring;
             referenceOnlyAuthoring = ReferenceOnlyImports(extractions[members[0]]);
             var session = Path.Combine(Path.GetTempPath(), "leancil-consumer-" + Guid.NewGuid().ToString("N"));
@@ -2402,7 +2411,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             {
                 referenceOnlyAuthoring = priorReferenceOnly;
                 Directory.Delete(session, true);
-                foreach (var member in members) outcomes[member].ElapsedSeconds = elapsed.Elapsed.TotalSeconds;
             }
             foreach (var i in members.Where(i => !Live(i))) finished?.Invoke(i, outcomes[i]);
         }

@@ -204,6 +204,22 @@ partial class Program
         var verified = JsonSerializer.Deserialize<JsonElement[]>(File.ReadAllText(results))!;
         if (verified.Any(result => result.GetProperty("status").GetString() != "verified"))
             throw new Exception("Expected certificates before checking that compile-only removes them.");
+        Run([.. cli, "verify-batch", manifest, "--check", "--results", results]);
+        var checkedValid = JsonSerializer.Deserialize<JsonElement[]>(File.ReadAllText(results))!;
+        if (checkedValid.Length != valid.Length || checkedValid.Any(result =>
+                result.GetProperty("status").GetString() != "checked") ||
+            outputs.Take(2).Any(output => File.Exists(Path.Combine(output, "verified.json"))))
+            throw new Exception("The identical requests were not checked without certificates.");
+        for (var index = 0; index < valid.Length; index++)
+        {
+            var checkedSeconds = checkedValid[index].GetProperty("elapsedSeconds").GetDouble();
+            var verifiedSeconds = verified[index].GetProperty("elapsedSeconds").GetDouble();
+            if (checkedSeconds <= 0 || verifiedSeconds <= 0)
+                throw new Exception("A completed request has no elapsed latency.");
+            Console.WriteLine($"Compile request {Path.GetFileName(valid[index].output)} " +
+                $"({Path.GetFileName(good)}): " + FormattableString.Invariant(
+                    $"check {checkedSeconds:F3}s; verify {verifiedSeconds:F3}s (batch-to-result latency)"));
+        }
         var mixed = new[] { valid[0], new { output = outputs[1], proof = bad, theorem = "ExampleProof.correctness" } };
         File.WriteAllText(manifest,
             JsonSerializer.Serialize(new { schema = 1, proofRoot = package, requests = mixed }));
@@ -227,10 +243,6 @@ partial class Program
                 stage.Contains("leancil-audit", StringComparison.OrdinalIgnoreCase) &&
                     !stage.EndsWith(" --imports", StringComparison.Ordinal)))
                 throw new Exception("Compile-only unexpectedly performed replay or audit.");
-            for (var index = 0; index < checkedResults.Length; index++)
-                Console.WriteLine($"Compile request {index}: " +
-                    $"check {checkedResults[index].GetProperty("elapsedSeconds")}s; " +
-                    $"verify {verified[index].GetProperty("elapsedSeconds")}s (shared workspace time)");
             Console.WriteLine("PASS compile-only reports both requests and leaves no certificates");
         }
         finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previous); }

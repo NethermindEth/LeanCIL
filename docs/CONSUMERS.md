@@ -56,9 +56,11 @@ remain private to the invocation. This mode skips consumer kernel replay and the
 removes existing `verified.json` files and issues no certificate. A compile check makes no trust
 claim and does not replace verification. Rejection expectations require normal verification.
 
-Batch result records include `elapsedSeconds` for each request's shared workspace. Requests in
-the same workspace share this duration; do not sum them as independent execution times. Both
-normal verification and compile checks report this field for comparisons on the same inputs.
+Batch result records include `elapsedSeconds`, the latency from entry into batch verification
+until that request's result is known. It includes shared preparation and waiting for earlier
+workspaces, but excludes subsequent workspace cleanup. Requests sharing work can finish together;
+do not sum their latencies as independent execution costs. Normal verification and compile checks
+report the same measure for comparisons on identical requests.
 
 `leancil resolve-imports` derives `--import` and `--import-implementation` from
 SDK deps/NuGet asset selection; see [resolving imports](CONTRACT-INTERFACES.md#resolving-imports-from-sdk-assets).

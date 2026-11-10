@@ -189,11 +189,11 @@ partial class Program
                 if (passed)
                     Console.WriteLine(checkOnly
                         ? $"PASS Checked {CliPaths.Display(outputs[i])} {request.theorem} " +
-                            $"({outcome.ElapsedSeconds:F3}s shared workspace)"
+                            $"({outcome.ElapsedSeconds:F3}s batch-to-result latency)"
                         : expect == "rejected"
                         ? $"PASS rejected {CliPaths.Display(outputs[i])} {request.theorem} ({outcome.Stage})"
                         : $"PASS verified {CliPaths.Display(outputs[i])} {request.theorem} " +
-                            $"({outcome.ElapsedSeconds:F3}s shared workspace)");
+                            $"({outcome.ElapsedSeconds:F3}s batch-to-result latency)");
                 else
                 {
                     var error = outcome.Located() ?? new InvalidOperationException("Verification produced no result.");
