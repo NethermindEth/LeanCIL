@@ -1433,7 +1433,7 @@ partial class Program : IDisposable
                 if (incrementalLibrary is not null)
                     StageIncrementalLibrary(library, incrementalLibrary, incrementalDigest, sources);
                 // Lake reuses a closure entry's modules by trace; every module is replayed below all the same.
-                else if (!fresh && CachedClosure(cacheRoot, libraryKey) is { } built)
+                else if (!fresh && CachedClosure(cacheRoot, libraryKey, sources) is { } built)
                     CopyTree(Path.Combine(built, ".lake", "build"), Path.Combine(library, ".lake", "build"));
                 foreach (var (name, hash) in sources)
                 {
@@ -1575,18 +1575,24 @@ partial class Program : IDisposable
     }
 
     /// <summary>
-    /// The directory of the closure entry recorded for the library `libraryKey`, when its receipt and files
-    /// still authenticate it; null otherwise.
+    /// The directory of the closure entry recorded for the library `libraryKey`, when it is one: the record
+    /// is not authenticated, so the entry's own modules must give the recorded key, its sources must be those
+    /// in `sources`, and its receipt and files must authenticate it. Null otherwise.
     /// </summary>
-    string? CachedClosure(string cacheRoot, string libraryKey)
+    string? CachedClosure(string cacheRoot, string libraryKey, SortedDictionary<string, string> sources)
     {
         try
         {
             var key = File.ReadAllText(ClosureRecord(cacheRoot, libraryKey)).Trim();
             var directory = Path.Combine(cacheRoot, key);
-            return Regex.IsMatch(key, @"\A[0-9a-f]{64}\z") && CertifiedLocalLibrary(directory, key) &&
-                ReadManifest(directory) is { } manifest && HashedCacheEntry(directory, manifest) is not null
-                ? directory : null;
+            if (!Regex.IsMatch(key, @"\A[0-9a-f]{64}\z") || !CertifiedLocalLibrary(directory, key) ||
+                ReadManifest(directory) is not { } manifest) return null;
+            const string extension = ".lean";
+            string[] modules = [.. LibrarySources(manifest).Keys
+                .Where(name => name.EndsWith(extension, StringComparison.Ordinal))
+                .Select(name => name[..^extension.Length].Replace('/', '.')).Order(StringComparer.Ordinal)];
+            return ClosureKey(libraryKey, modules) == key && ClosureManifest(manifest, sources, modules) &&
+                HashedCacheEntry(directory, manifest) is not null ? directory : null;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return null; }
     }
