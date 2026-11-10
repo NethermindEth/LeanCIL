@@ -232,7 +232,8 @@ comment saying which obligation it is:
 
 - `Precondition` and `Postcondition` are definitions to replace with the specification. The
   theorem assumes the precondition and promises the postcondition of the returned value, and for
-  a method that takes references, spans or arrays also of the caller's memory before and after.
+  a method that takes references, spans or arrays, or that calls a helper from a frame of integer
+  locals, also of the caller's memory before and after.
   Each definition the author fills (`Precondition`, `Postcondition`, `invariant`, `measure`, a
   `footprint` hole and a helper's contract stub outside a loop) is under
   `set_option linter.unusedVariables false in`,
@@ -412,10 +413,11 @@ comment saying which obligation it is:
   locals. The outline carries their private storage through scalar field writes and confined
   calls, preserves saved values and expires the homes on return. A helper that writes no caller
   fields preserves caller memory; allocating its local homes does not preserve the entire memory
-  state by equality. Frames mixing these integers with other local kinds, narrow or native-sized
-  local homes, uninitialized homes, escaped local addresses, conditional branches and reference-field
-  or reference-array effects remain explicitly unsupported. Helper summaries allow at most one
-  field store and no nested calls.
+  state by equality. A test of named words in such a frame splits the proof as it does without
+  locals, each side going on from the homes and saved values of the path so far. Frames mixing
+  these integers with other local kinds, narrow or native-sized local homes, uninitialized homes,
+  escaped local addresses and reference-field or reference-array effects remain explicitly
+  unsupported. Helper summaries allow at most one field store and no nested calls.
 - An array argument of structs or vectors binds `valuesLength` and is passed as `.array ⟨.address values,
   valuesLength, element⟩`, with the premise `WholeArray initial element values valuesLength`. The
   element is the `elementType` of a field that holds such arrays, such as `Tiles.Pairs.elementType`,
@@ -431,7 +433,8 @@ comment saying which obligation it is:
   or a method with a loop that takes a value array, or a loop that returns one, is refused.
 - A call in a body over objects to a method that loads its fields, stores at most one word field of
   an object argument and returns a value it names gets a generated `MethodContract` read from that
-  body, with a `Holds` theorem proved by the same stepping; `cil_contract_steps` composes the call
+  body, with a `Holds` theorem proved by the same stepping and closed at its return by
+  `MethodContract.Holds.returns framed post`; `cil_contract_steps` composes the call
   through it, and the callee's store counts as one of the caller's. A callee that loads an object
   from a reference field and stores nothing gets a `pre` asking that some object, such as
   `nodeNextTarget`, is held there with the facts it reads, and a `post` stating the result of
@@ -454,9 +457,26 @@ comment saying which obligation it is:
   composes the call through the contract `with called1 output1 call1`, naming the memory after
   it, the result and the call's `CallResult`, and the proof reads what `post` states of the result
   as `post1` from `call1.post`, which the postcondition hole's comment cites. A wrong `pre` or
-  `post` fails in the `Holds` theorem or at the caller, never silently. A caller with numeric
-  locals, and any other callee, leaves a `not outlined:` hole: in a body over objects it names the
-  callee's method index, and in a body over words the call instruction.
+  `post` fails in the `Holds` theorem or at the caller, never silently.
+- A helper that takes an object or keeps integer locals, tests words it names from its arguments,
+  fields and locals, and stores nothing gets the same kind of contract. Its `pre` states the facts
+  its body needs before the `sorry`: of an object, such as
+  `LiveObject memory gauge ∧ Gauge.Limit.Readable memory gauge`, or `memory.WellFormed` for a
+  frame of locals. Its `post` is `final = initial ∧ sorry`, or `sorry` alone when the helper keeps
+  locals, whose homes are allocated in the memory. Its `Holds` theorem steps each side of each
+  test and closes it with `MethodContract.Holds.returns`, leaving what `post` states of the result
+  there. At the call, `permitted1` gives those facts from the caller's own and leaves the rest of
+  `pre` as the hole.
+- A caller that keeps 32- or 64-bit integer locals composes these calls inside its frame: a
+  result stored into a local is read back as the word the helper returned, and a test after it
+  splits the proof. A body over words alone that keeps such locals beside a helper call, or calls
+  a helper that keeps its own, is stated of any well-formed `initial` memory rather than the empty
+  one, since the homes are allocated in it; its `Precondition` takes `initial` and its
+  `Postcondition` both memories. A helper over words that keeps its own locals and only computes
+  gets the contract read from its body, which names its result, instead of a stub.
+- Any other callee leaves a `not outlined:` hole, such as a helper that throws from a frame of
+  locals or after reading an object, or one that calls or stores beside a test: in a body over
+  objects the hole names the callee's method index, and in a body over words the call instruction.
 
 Where the outline cannot step a path, it leaves a hole whose comment starts with `not outlined:`,
 names what it met and what that step needs, and gives the source line to continue from. The

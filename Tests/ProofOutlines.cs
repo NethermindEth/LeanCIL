@@ -9,12 +9,16 @@ using Mono.Cecil;
 using Mono.Cecil.Cil;
 
 string? group = null;
+string[]? cases = null;
 var list = false;
 for (var index = 0; index < args.Length; index++)
 {
     if (args[index] == "--list") list = true;
     else if (args[index] == "--group" && index + 1 < args.Length) group = args[++index];
-    else throw new ArgumentException("Usage: ProofOutlines.cs --group control|objects|buffers [--list]");
+    // A focused run of the named cases of the group; the suites run each whole group.
+    else if (args[index] == "--case" && index + 1 < args.Length) cases = args[++index].Split(',');
+    else throw new ArgumentException(
+        "Usage: ProofOutlines.cs --group control|objects|buffers [--case name[,name...]] [--list]");
 }
 if (group is not (null or "control" or "objects" or "buffers") || group is null && !list)
     throw new ArgumentException("Choose --group control|objects|buffers, or --list for every group");
@@ -63,6 +67,18 @@ var catalog = new (string Name, string Selector, string Group)[]
     // A helper that throws on one side of its test, and one that only computes, each from a caller over words.
     ("HelperThrows", "Gauge::Bounded(int,int)", "control"),
     ("HelperComputes", "Gauge::Twice(int)", "control"),
+    // A helper's result kept in a numeric local, by a caller over an object and by one over words alone, whose
+    // frame makes its statement speak of any well-formed memory.
+    ("HelperLocal", "Gauge::Slack()", "objects"),
+    ("HelperWordsLocal", "Gauge::Gap(int,int)", "control"),
+    // A helper that keeps its own locals does not keep the memory, so its contract is read from its body.
+    ("HelperOwnLocals", "Gauge::Blended(int,int)", "control"),
+    // A helper that tests a field of the object it is handed gets a contract with the facts its body needs.
+    ("HelperObject", "Gauge::CappedLevel()", "objects"),
+    // A test of a helper result read back from its local splits the frame's proof, and a helper that tests a
+    // local of its own gets a contract with holes whose proof splits inside its frame.
+    ("HelperLocalTest", "Gauge::Margin()", "objects"),
+    ("HelperTestsLocal", "Gauge::Clamped(int,int,int)", "control"),
     ("DownThenUp", "Loops::DownThenUp(uint)", "control"),
     ("CheckedAdd", "CheckedArithmetic::Add(uint,uint)", "control"),
     ("Log64", "Bits::Log64(ulong)", "control"),
@@ -122,9 +138,12 @@ var catalog = new (string Name, string Selector, string Group)[]
     ("PairLength",
         "AggregateArrays::ConstructedLength(Examples.AggregateArrays/Pair[],System.Int32,System.Int32)", "buffers")
 };
-var outlined = catalog.Where(entry => group is null || entry.Group == group).ToArray();
+var outlined = catalog.Where(entry => (group is null || entry.Group == group) &&
+    (cases is null || cases.Contains(entry.Name, StringComparer.Ordinal))).ToArray();
 if (catalog.Select(entry => entry.Name).Distinct(StringComparer.Ordinal).Count() != catalog.Length)
     throw new InvalidOperationException("Outline catalog names must be unique");
+if (cases?.Except(outlined.Select(entry => entry.Name), StringComparer.Ordinal).ToArray() is { Length: > 0 } absent)
+    throw new ArgumentException($"No case of the {group} group is named {string.Join(", ", absent)}");
 if (list)
 {
     Console.WriteLine(JsonSerializer.Serialize(outlined.Select(entry =>
@@ -392,7 +411,7 @@ if (Selected("Countdown"))
 const string storedHole = "sorry -- Postcondition of the returned value, with `held1` the stored fields";
 // A helper's stub leaves its contract to the author: here it needs nothing and returns the smaller argument as a
 // signed word, which each side of its test then proves, and its caller proves `pre` at the call.
-(string Hole, string Filled)[] SaturateStub(int line) => [
+(string Hole, string Filled)[] SaturateStub(params int[] lines) => [
     ("  pre := fun (value, limit) memory => sorry", "  pre := fun (value, limit) memory => True"),
     ("final = initial ∧ sorry", "final = initial ∧ result.toInt = min value.toInt limit.toInt"),
     ("""
@@ -405,8 +424,16 @@ const string storedHole = "sorry -- Postcondition of the returned value, with `h
           -- limit.toInt`, from `permitted`, its `pre`
           sorry
     """, "      omega"),
-    ($"    sorry -- `saturateContract.pre` at the call at OutlineHelpers.cs:{line}, from `assumed`", "    trivial")];
+    .. lines.Select(line =>
+        ($"    sorry -- `saturateContract.pre` at the call at OutlineHelpers.cs:{line}, from `assumed`",
+            "    trivial"))];
 const string smallerLevel = "min (Gauge.Level.of initial gauge).toInt (Gauge.Limit.of initial gauge).toInt";
+// Two helper results, the first read back from its local: the return learns of each only its `post`.
+const string helperPairHole = """
+      -- Postcondition of the returned value, from `assumed` and `post1`, `post2`, each helper's `post`
+      -- of its result
+      sorry
+    """;
 const string helperHole = """
       -- Postcondition of the returned value, from `assumed` and `post1`, the helper's `post` of
       -- `output1`
@@ -470,6 +497,92 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
         ("def Postcondition (value result : W32) : Prop := sorry",
             "def Postcondition (value result : W32) : Prop := result = value + value"),
         ("    sorry -- `doubledContract.pre` at the call at OutlineHelpers.cs:40, from `assumed`", "    trivial"),
+        (helperHole, "  exact post1")]),
+    // The first result is stored into the frame's home and loaded back as the word the helper returned.
+    ("HelperLocal", [
+        .. SaturateStub(45, 46),
+        ("def Precondition (gauge : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (gauge : Reference) (initial : Memory) : Prop := True"),
+        ("def Postcondition (gauge : Reference) (initial final : Memory) (result : W32) : Prop := sorry",
+            "def Postcondition (gauge : Reference) (initial final : Memory) (result : W32) : Prop :=\n" +
+            $"  ∃ level limit : W32, result = limit - level ∧ level.toInt = {smallerLevel} ∧\n" +
+            "    limit.toInt = (Gauge.Limit.of initial gauge).toInt"),
+        (helperPairHole, "  exact ⟨_, _, rfl, post1, by simpa using post2⟩")]),
+    // A caller over words with a local is entered in any well-formed memory, where its home is allocated.
+    ("HelperWordsLocal", [
+        .. SaturateStub(53, 54),
+        ("def Precondition (value limit : W32) (initial : Memory) : Prop := sorry",
+            "def Precondition (value limit : W32) (initial : Memory) : Prop := True"),
+        ("def Postcondition (value limit : W32) (initial final : Memory) (result : W32) : Prop := sorry",
+            "def Postcondition (value limit : W32) (initial final : Memory) (result : W32) : Prop :=\n" +
+            "  ∃ low high : W32, result = high - low ∧ low.toInt = min value.toInt limit.toInt ∧\n" +
+            "    high.toInt = limit.toInt"),
+        (helperPairHole, "  exact ⟨_, _, rfl, post1, by simpa using post2⟩")]),
+    // The contract read from the helper's body names its result, so only the specification is left.
+    ("HelperOwnLocals", [
+        ("def Precondition (value limit : W32) (initial : Memory) : Prop := sorry",
+            "def Precondition (value limit : W32) (initial : Memory) : Prop := True"),
+        ("def Postcondition (value limit : W32) (initial final : Memory) (result : W32) : Prop := sorry",
+            "def Postcondition (value limit : W32) (initial final : Memory) (result : W32) : Prop :=\n" +
+            "  result = value * limit - (value + limit)"),
+        ("  sorry -- Postcondition of the returned value", "  rfl")]),
+    // The helper's `pre` already asks the facts its field load needs, which the caller gives from its own.
+    ("HelperObject", [
+        ("Gauge.Limit.Readable memory gauge ∧ sorry", "Gauge.Limit.Readable memory gauge ∧ True"),
+        ("final = initial ∧ sorry",
+            "final = initial ∧ result.toInt = min value.toInt (Gauge.Limit.of initial gauge).toInt"),
+        ("""
+            -- what `cappedContract.post` states of the returned value where `branch1` holds, from
+            -- `permitted`, its `pre`
+            sorry
+        """, "    omega"),
+        ("""
+            -- what `cappedContract.post` states of the returned value where `branch1` fails, from
+            -- `permitted`, its `pre`
+            sorry
+        """, "    omega"),
+        ("    sorry -- `cappedContract.pre` at the call at OutlineHelpers.cs:71, from `assumed`", "    trivial"),
+        ("def Precondition (gauge : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (gauge : Reference) (initial : Memory) : Prop := True"),
+        ("def Postcondition (gauge : Reference) (initial final : Memory) (result : W32) : Prop := sorry",
+            "def Postcondition (gauge : Reference) (initial final : Memory) (result : W32) : Prop :=\n" +
+            $"  result.toInt = {smallerLevel}"),
+        (helperHole, "  exact post1")]),
+    // Each side of the test goes on from the home the result was stored into.
+    ("HelperLocalTest", [
+        .. SaturateStub(76),
+        ("def Precondition (gauge : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (gauge : Reference) (initial : Memory) : Prop := True"),
+        ("def Postcondition (gauge : Reference) (initial final : Memory) (result : W32) : Prop := sorry",
+            "def Postcondition (gauge : Reference) (initial final : Memory) (result : W32) : Prop :=\n" +
+            $"  ∃ level : W32, level.toInt = {smallerLevel} ∧\n" +
+            "    result = if level.toInt < (Gauge.Limit.of initial gauge).toInt\n" +
+            "      then Gauge.Limit.of initial gauge - level else 0"),
+        ("""
+            -- Postcondition of the returned value where `branch1` holds, from `assumed` and `post1`, the
+            -- helper's `post` of `output1`
+            sorry
+        """, "    exact ⟨_, post1, by simp [branch1]⟩"),
+        ("""
+            -- Postcondition of the returned value where `branch1` fails, from `assumed` and `post1`, the
+            -- helper's `post` of `output1`
+            sorry
+        """, "    exact ⟨_, post1, by simp [branch1]⟩")]),
+    // The helper's frame changes the memory, so its `post` states the result alone, proved on four paths.
+    ("HelperTestsLocal", [
+        ("memory.WellFormed ∧ sorry", "memory.WellFormed ∧ True"),
+        ("  post := fun (value, low, high) initial final result => sorry",
+            "  post := fun (value, low, high) initial final result =>\n" +
+            "    result.toInt = min (max value.toInt low.toInt) high.toInt"),
+        .. new[] { ("holds", "holds"), ("holds", "fails"), ("fails", "holds"), ("fails", "fails") }.Select(side =>
+            ($"      -- what `clampContract.post` states of the returned value where `branch1` {side.Item1} and " +
+                $"`branch2`\n      -- {side.Item2}, from `permitted`, its `pre`\n      sorry", "      omega")),
+        ("    sorry -- `clampContract.pre` at the call at OutlineHelpers.cs:87, from `assumed`", "    trivial"),
+        ("def Precondition (value low high : W32) (initial : Memory) : Prop := sorry",
+            "def Precondition (value low high : W32) (initial : Memory) : Prop := True"),
+        ("def Postcondition (value low high : W32) (initial final : Memory) (result : W32) : Prop := sorry",
+            "def Postcondition (value low high : W32) (initial final : Memory) (result : W32) : Prop :=\n" +
+            "  result.toInt = min (max value.toInt low.toInt) high.toInt"),
         (helperHole, "  exact post1")]),
     ("Deposit", [
         ("def Precondition (account : Reference) (amount : W64) (initial : Memory) : Prop := sorry",
@@ -1736,31 +1849,31 @@ if (Selected("ReceiverArraySum"))
     Console.WriteLine("PASS an indexed loop over an array beside a class receiver is outlined with no path left");
 }
 
-if (Selected("HelperResult"))
+// A helper's contract is proved, never assumed: a `post` the helper's body does not meet fails in its `Holds`
+// theorem, whether that steps words alone or the fields of an object, and one the caller's postcondition does not
+// follow from fails at the caller.
+foreach (var (helper, label, stated, wrong) in new[]
 {
-    // A stub's contract is proved, never assumed: a `post` the helper's body does not meet fails in its `Holds`
-    // theorem, and one the caller's postcondition does not follow from fails at the caller.
-    var helperFilled = File.ReadAllText(Path.Combine(outlineRoot, "HelperResult", "Filled.lean"));
-    foreach (var (label, wrong) in new[]
-    {
-        ("a post its helper does not meet", helperFilled.Replace(
-            "final = initial ∧ result.toInt = min value.toInt limit.toInt",
-            "final = initial ∧ result.toInt = max value.toInt limit.toInt", StringComparison.Ordinal)),
-        ("a postcondition its helper's post does not give", helperFilled.Replace(
-            $"  result.toInt = {smallerLevel}", "  result = Gauge.Level.of initial gauge", StringComparison.Ordinal))
-    })
-    {
-        if (wrong == helperFilled)
-            throw new InvalidOperationException("The HelperResult proof lacks the text of " + label);
-        var wrongProof = Path.Combine(outlineRoot, "HelperResult", "Wrong.lean");
-        File.WriteAllText(wrongProof, wrong);
-        var rejected = Execute(Cli("verify", OutlineExtraction("HelperResult"), "--proof", wrongProof));
-        if (rejected.Code == 0 || !rejected.Output.Contains("Stage: proof checking") ||
-            File.Exists(Path.Combine(OutlineExtraction("HelperResult"), "verified.json")))
-            throw new InvalidOperationException($"verify accepted {label}:\n{rejected.Output}");
-    }
-    Console.WriteLine("PASS a helper's contract stub is proved: a post its body does not meet and a postcondition " +
-        "its post does not give are both rejected");
+    ("HelperResult", "a post its helper does not meet", "final = initial ∧ result.toInt = min value.toInt limit.toInt",
+        "final = initial ∧ result.toInt = max value.toInt limit.toInt"),
+    ("HelperResult", "a postcondition its helper's post does not give", $"  result.toInt = {smallerLevel}",
+        "  result = Gauge.Level.of initial gauge"),
+    ("HelperObject", "a post its object helper does not meet",
+        "final = initial ∧ result.toInt = min value.toInt (Gauge.Limit.of initial gauge).toInt",
+        "final = initial ∧ result.toInt = max value.toInt (Gauge.Limit.of initial gauge).toInt")
+})
+{
+    if (!Selected(helper)) continue;
+    var helperFilled = File.ReadAllText(Path.Combine(outlineRoot, helper, "Filled.lean"));
+    if (!helperFilled.Contains(stated, StringComparison.Ordinal))
+        throw new InvalidOperationException($"The {helper} proof lacks the text of {label}");
+    var wrongProof = Path.Combine(outlineRoot, helper, "Wrong.lean");
+    File.WriteAllText(wrongProof, helperFilled.Replace(stated, wrong, StringComparison.Ordinal));
+    var rejected = Execute(Cli("verify", OutlineExtraction(helper), "--proof", wrongProof));
+    if (rejected.Code == 0 || !rejected.Output.Contains("Stage: proof checking") ||
+        File.Exists(Path.Combine(OutlineExtraction(helper), "verified.json")))
+        throw new InvalidOperationException($"verify accepted {label}:\n{rejected.Output}");
+    Console.WriteLine($"PASS a helper's contract is proved: {label} is rejected");
 }
 
 if (Selected("HelperThrows"))

@@ -79,7 +79,8 @@ toolchain/library downloads without reducing coverage or increasing concurrent r
 
 The `loops` suite covers core loop contracts and class/word-array composition. Generated outline
 checks run in `outlines-control`, `outlines-objects` and `outlines-buffers`; each selects its
-cases from the shared `Tests/ProofOutlines.cs` runner with `--group`. Each partition prepares
+cases from the shared `Tests/ProofOutlines.cs` runner with `--group`; `--case name[,name...]`
+narrows a local run to the named cases of that group. Each partition prepares
 its own extractions and checks its completed proofs and rejection cases. The `structoutlines`,
 `receiveroutlines`, `wordreader` and `savedwordreader` suites run their respective focused
 fixtures independently. All partitions use the shared certified library and tool artifacts.

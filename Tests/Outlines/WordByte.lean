@@ -27,7 +27,7 @@ theorem get_Bits_holds : get_BitsContract.Holds Extracted.program 1 := by
   dsimp only [get_BitsContract] at *
   obtain ⟨wordLive, wordBits⟩ := permitted
   cil_contract_steps [wordLive.formed, wordBits.facts, leaveFrame]
-  exact ⟨Confined.refl _ _, _, rfl, ⟨rfl, rfl⟩⟩
+  exact MethodContract.Holds.returns (Confined.refl _ _) ⟨rfl, rfl⟩
 
 #print axioms get_Bits_holds
 
