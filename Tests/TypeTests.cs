@@ -8,7 +8,6 @@
 #:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
-using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
