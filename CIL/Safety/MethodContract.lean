@@ -397,6 +397,17 @@ theorem MethodContract.Holds.intro {Input Output : Type} {c : MethodContract Inp
       Confined (c.footprint input) initial final ∧ c.Returns input initial final values :=
   invoked.elim fun fuel ran => ⟨fuel, final, c.results output, ran, framed, output, rfl, post⟩
 
+/-- Close the goal a `Holds` proof reaches once stepping has run to a return, from the footprint
+    evidence and the postcondition of `output`, by name. The footprint is the one the goal
+    states, since stepping shows the contract's projections unfolded. Give `(output := ..)` where
+    the returned values do not determine it, as for a method that returns nothing. -/
+theorem MethodContract.Holds.returns {Input Output : Type} {c : MethodContract Input Output}
+    {input : Input} {initial final : Memory} {footprint : List (Reference × Nat)}
+    {output : Output} (framed : Confined footprint initial final)
+    (post : c.post input initial final output) :
+    Confined footprint initial final ∧ c.Returns input initial final (c.results output) :=
+  ⟨framed, output, rfl, post⟩
+
 /-- The conclusion `Holds` states for one input, as a final memory and output with their
     `CallResult`; the converse of `MethodContract.Holds.intro`. -/
 theorem CallResult.of_returned {Input Output : Type} {c : MethodContract Input Output}
@@ -417,6 +428,7 @@ theorem MethodContract.Holds.result {Input Output : Type} {c : MethodContract In
   CallResult.of_returned (holds input initial permitted)
 
 #print axioms MethodContract.Holds.intro
+#print axioms MethodContract.Holds.returns
 #print axioms CallResult.of_returned
 #print axioms MethodContract.Holds.result
 

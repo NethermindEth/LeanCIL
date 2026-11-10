@@ -196,7 +196,11 @@ have firstFramed := firstCall.framed
 
 A contract proof builds the conclusion of `Holds` from the same parts by name:
 `MethodContract.Holds.intro final output invoked framed post`, where `invoked` may leave its fuel
-to `cil_checked_steps`. `holds.result input permitted` gives a caller the final memory, output and
+to `cil_checked_steps`. A proof that steps to its return with `cil_contract_steps` is left the
+footprint and `Returns` of the values returned, which `MethodContract.Holds.returns framed post`
+closes by name; the returned values name the output, and `(output := ())` gives it for a method
+that returns nothing.
+`holds.result input permitted` gives a caller the final memory, output and
 `CallResult` of a proved contract outside the stepping tactics.
 
 A supplied successful child invocation, with fixed or existential fuel, or an
