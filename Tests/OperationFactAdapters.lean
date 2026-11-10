@@ -11,6 +11,19 @@ the instruction.
 namespace Tests.OperationFactAdapters
 open CIL.Safety
 
+/-- Taking a byte local's address needs formation at the current memory, not initialized bytes. -/
+theorem local_address {memory other : Memory} {reference : Reference} {kind : CIL.LocalKind}
+    {index : Nat} (body : CIL.Method) (pc : Nat) (args : List Value)
+    (frame : Frame) (rest : List Value)
+    (slot : frame.locals[index]? = some (.bytes kind reference))
+    (wrongMemory : form other reference = .ok reference)
+    (formed : form memory reference = .ok reference) :
+    step body (.localAddr index) pc args frame rest memory =
+      .ok (.next (pc + 1) (.reference (.address reference) :: rest) frame memory) := by
+  fail_if_success solve | cil_checked_step [slot, wrongMemory]
+  cil_checked_step [slot, formed]
+#print axioms local_address
+
 /-- A signed byte load extends the initialized eight-bit value to the CIL stack width. -/
 theorem signed_byte {memory : Memory} {source : Reference} {bits : BitVec 8}
     (loaded : read memory source 1 1 = .ok (numberBytes bits.toNat 1))

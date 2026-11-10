@@ -61,7 +61,8 @@ attribute [cil_side] List.mapM List.mapM.loop List.reverse_nil List.reverse_cons
   Bool.false_or Bool.or_false Bool.true_or Bool.or_true Bool.false_and Bool.and_false
   Bool.true_and Bool.and_true Bool.not_true Bool.not_false
   Bool.true_bne Bool.false_bne Bool.bne_true Bool.bne_false Bool.true_beq Bool.false_beq
-  checkedValue numericValue numericOfWidth signedOfWidth scalars checkedAt formObject_leaveFrame
+  checkedValue numericValue numericOfWidth signedOfWidth scalars checkedAt localAddress
+  formObject_leaveFrame
   referenceAt_null referenceAt_address
   Except.mapError Bind.bind Except.bind Pure.pure Except.pure
   CIL.fin_val_three CIL.fin_mk_ofNat BitVec.ofInt_ofNat BitVec.ofNat_toNat BitVec.setWidth_eq
