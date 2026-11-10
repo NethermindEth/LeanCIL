@@ -103,7 +103,7 @@ theorem percent_holds : percentContract.Holds percentProgram 0 := by
     have same := call.post
     subst out
     cil_contract_steps []
-    exact ⟨call.framed, _, rfl, rfl⟩
+    exact MethodContract.Holds.returns call.framed rfl
   · simp only [percentContract, within, ite_false]
     cil_raise_steps []
     cil_outcome_raise check_holds v at checkSite []

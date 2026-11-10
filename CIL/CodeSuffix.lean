@@ -3,9 +3,9 @@ import CIL.Instructions
 /-!
 # Code suffixes
 
-The extractor states `method{n}.code[pc]? = some op` for every pc of an extracted method.
+`cil_instruction_equations` states `body.code[pc]? = some op` for every pc of a method body.
 Checking such an equation by `rfl` walks `pc` cells of the code list, so the equations of one
-method would cost time quadratic in its length. The extractor instead names the suffix of the
+method would cost time quadratic in its length. The command instead names the suffix of the
 code at each block boundary, proves each named suffix from the one before it with `advance`,
 and proves each instruction from the suffix that starts its block with `lookup`. No proof
 then walks more than one block, and the equations cost time linear in the method's length.

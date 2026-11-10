@@ -92,7 +92,8 @@ is a stable check name. Selection still includes exactly the requested suites.
 
 The `loops` suite covers core loop contracts and class/word-array composition. Generated outline
 checks run in `outlines-control`, `outlines-objects` and `outlines-buffers`; each selects its
-cases from the shared `Tests/ProofOutlines.cs` runner with `--group`. Each partition prepares
+cases from the shared `Tests/ProofOutlines.cs` runner with `--group`; `--case name[,name...]`
+narrows a local run to the named cases of that group. Each partition prepares
 its own extractions and checks its completed proofs and rejection cases. The `structoutlines`,
 `receiveroutlines`, `wordreader` and `savedwordreader` suites run their respective focused
 fixtures independently. All partitions use the shared certified library and tool artifacts.
@@ -146,9 +147,10 @@ A source is measured on both trees:
   `structoutlines`, `receiveroutlines`, `wordreader`, `savedwordreader`) is compared when
   selection chose that suite. Its rows are every output directory the suite verified: its
   `Extracted.lean`, its `Symbols.lean` when present, and the proof that `verified.json` names,
-  provided the proof is unchanged since. The extraction's generated instruction equations are
-  rows too. A directory is measured only while it holds the report of an accepted proof, so a
-  suite that also checks rejected proofs against an extraction verifies the accepted one last.
+  provided the proof is unchanged since. Each extracted method's instruction equations are one
+  row, named for its `cil_instruction_equations` command. A directory is measured only while it
+  holds the report of an accepted proof, so a suite that also checks rejected proofs against an
+  extraction verifies the accepted one last.
 
 The head is measured where it is verified, in no job of its own. A `Verify` job that ran a proof
 suite measures that suite once it has passed. A suite's rows are the output directories it owns,
@@ -252,6 +254,14 @@ which needs no Lean, so every PR runs it:
   checked snippet, or links the maintainers document that describes the evidence.
 - The [suite table](VALIDATION.md#suites) lists each suite `scripts/Test.cs` accepts exactly
   once, as registered in `scripts/VerificationSuites.cs` and `scripts/ExportVerificationSuites.cs`.
+- No `simp`, `simp only`, `simpa`, `simp_all` or `dsimp` list of an example under
+  `Examples/Proofs`, or of a Lean block that is not an excerpt, names one of the interpreter's own
+  functions: `step`, `run`, `invoke`, `pureArity`, `scalars`, `instructionStep`,
+  `staticInstruction`, `checkedIntrinsic`, `checkedValue` or `numericValue`, by any suffix of its
+  full name. Such a proof runs the method by unfolding the interpreter; step with
+  `cil_checked_steps` and pass a fact about the operation instead. A name the block binds with
+  `have` is a hypothesis.
+- Every theorem of an example under `Examples/Proofs` has a `#print axioms` line in its file.
 
 Every fenced Lean block is elaborated unless its info string says why not:
 

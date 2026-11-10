@@ -25,8 +25,7 @@ theorem correctness (memory after : CIL.Safety.Memory) (account : CIL.Safety.Man
       memory = .ok (after, [])) ∧
     CIL.Safety.read after balanceField 8 1 = .ok balance := by
   constructor
-  · refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
-    cil_checked_steps [formed, limitLocated, written, accountType]
+  · cil_checked_steps [formed, limitLocated, written, accountType]
   · exact CIL.Safety.objectField_write_preserves_earlier balanceLocated limitLocated
       (by decide) (by decide) written balanceRead
 

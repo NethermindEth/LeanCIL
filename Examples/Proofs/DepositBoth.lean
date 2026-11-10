@@ -39,7 +39,7 @@ theorem deposit_holds : depositContract.Holds Extracted.program deposit := by
   obtain ⟨after, written, framed, held⟩ :=
     owned.store (Account.Balance.of memory account + amount)
   refine MethodContract.Holds.intro after [] ?_ framed ⟨rfl, held⟩
-  cil_checked_steps [owned.facts, written]
+  cil_checked_steps [written]
 
 #print axioms deposit_holds
 
@@ -64,20 +64,19 @@ def depositBothContract : MethodContract (Reference × Reference × W64) where
 theorem depositBoth_holds (holds : depositContract.Holds Extracted.program deposit) :
     depositBothContract.Holds Extracted.program depositBoth := by
   rintro ⟨first, second, amount⟩ memory ⟨firstOwned, secondOwned⟩
-  cil_contract_steps [holds, depositContract, firstOwned, firstOwned.facts, secondOwned.facts]
+  cil_contract_steps [holds, depositContract, firstOwned]
     with middle values firstCall
   obtain ⟨rfl, firstHeld⟩ := firstCall.post
   have firstFramed := firstCall.framed
   have secondHeld := secondOwned.across firstOwned.live firstFramed firstHeld
-  cil_contract_steps [holds, depositContract, secondHeld.1, secondHeld.1.facts]
+  cil_contract_steps [holds, depositContract, secondHeld.1]
     with final values secondCall
   obtain ⟨rfl, secondFinal⟩ := secondCall.post
   have secondFramed := secondCall.framed
   dsimp only [depositContract] at firstFramed secondFramed
   cil_contract_steps []
-  change Confined _ memory final ∧
-    depositBothContract.Returns (first, second, amount) memory final []
-  refine ⟨(firstFramed.widen (by simp)).trans (secondFramed.widen (by simp)), [], rfl, rfl, ?_⟩
+  refine MethodContract.Holds.returns
+    ((firstFramed.widen (by simp)).trans (secondFramed.widen (by simp))) ⟨rfl, ?_⟩
   split
   · rename_i same
     subst same
@@ -104,7 +103,7 @@ theorem first_null_throws (memory : Memory) (second : Reference) (amount : W64)
     ∃ fuel, invoke Extracted.program fuel depositBoth
         [.object .null, .object (.address second), .scalar (.i64 amount)] memory =
       .error ⟨depositBoth, 2, .thrown "System.NullReferenceException"⟩ := by
-  cil_checked_steps [secondLive.formed]
+  cil_checked_steps
 
 #print axioms first_null_throws
 
@@ -129,7 +128,7 @@ theorem second_null_throws (memory : Memory) (first : Reference) (amount : W64)
   refine ⟨childFuel, middle, invoked, deposited.framed, held, ?_⟩
   -- The caller reaches the call with three of its six units of fuel spent.
   have called := invoke_mono _ childFuel 3 _ _ _ (.ok (middle, [])) trivial invoked
-  cil_checked_steps [owned.live.formed, called]
+  cil_checked_steps [called]
 
 #print axioms second_null_throws
 

@@ -34,7 +34,7 @@ theorem correctness (memory : Memory) (bucket items : Reference) (length : Nat)
       Bucket.Items.Holds final bucket (.address items) := by
   obtain ⟨stored, framed, held⟩ := owned.store live.object
   refine ⟨CIL.executionBound Extracted.program refill, _, ?_, framed, held⟩
-  cil_checked_steps [owned.live.formed, owned.located, live.formed, stored]
+  cil_checked_steps [stored]
 
 #print axioms correctness
 
@@ -43,7 +43,7 @@ theorem null_bucket (memory : Memory) (items : Reference) (length : Nat)
     (live : ReferenceArray.Live memory items nodeType length) :
     ∃ fuel, invoke Extracted.program fuel refill [.object .null, .object (.address items)]
         memory = .error ⟨refill, 2, .thrown "System.NullReferenceException"⟩ := by
-  cil_checked_steps [live.formed]
+  cil_checked_steps
 
 #print axioms null_bucket
 

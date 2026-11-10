@@ -40,7 +40,7 @@ theorem deposit_holds : depositContract.Holds Extracted.program deposit := by
   obtain ⟨after, written, framed, held⟩ :=
     owned.store (Account.Balance.of memory account + amount)
   refine MethodContract.Holds.intro after [] ?_ framed ⟨rfl, held⟩
-  cil_checked_steps [owned.facts, written]
+  cil_checked_steps [written]
 
 #print axioms deposit_holds
 
@@ -94,22 +94,21 @@ theorem correctness (memory : Memory) (account : Reference) (amount : W64) (time
         (deposited (Account.Balance.of memory account) amount state.values) ∧
       state.values.toNat ≤ times.toNat)
     (fun state => times.toNat - state.values.toNat) (fun start => ?_) ?_
-  · simp [checkedValue, owned.live.formed, numericValue, Bind.bind, Except.bind,
-      Pure.pure, Except.pure, List.mapM_cons, List.mapM_nil]
+  · cil_checked_side [owned.live.formed]
   · cil_loop_recurse start 0
     exact ⟨by simpa [deposited] using enteredHeld, Nat.zero_le _⟩
   rintro ⟨count, current, frame⟩ ⟨held, bounded⟩ recurse
   dsimp only at held bounded
   by_cases done : count = times
   · subst done
-    cil_loop_finish [held.1.live.formed]
+    cil_loop_finish
   · have below : count.toNat < times.toNat := by
       have : count.toNat ≠ times.toNat := fun same => done (BitVec.eq_of_toNat_eq same)
       omega
     have more : count < times := below
-    cil_loop_advance [more, held.1.live.formed]
+    cil_loop_advance [more]
     have owned := held.1
-    cil_loop_call deposit_holds (account, amount) at depositSite [owned.live.formed]
+    cil_loop_call deposit_holds (account, amount) at depositSite
     obtain ⟨rfl, added⟩ := returned
     have held : Account.Balance.Holds called account
         (deposited (Account.Balance.of memory account) amount (count + 1)) := by

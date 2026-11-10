@@ -21,8 +21,7 @@ theorem correctness (memory : CIL.Safety.Memory) (first : Bool)
     ∃ fuel, CIL.Safety.invoke Extracted.program fuel 0
         [.scalar (.i32 (if first then 1 else 0)), .object left, .object right] memory =
       .ok (memory, [.object (if first then left else right)]) := by
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
-  cases first <;> cil_checked_steps [leftFormed, rightFormed, CIL.Safety.leaveFrame]
+  cases first <;> cil_checked_steps [leftFormed, rightFormed]
 
 #print axioms correctness
 end ExampleProof

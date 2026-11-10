@@ -88,7 +88,7 @@ theorem outer_holds (checkHolds : checkContract.Holds literal 1) : outerContract
     subst out
     dsimp only [checkContract]
     cil_contract_steps []
-    exact ⟨call.framed, _, rfl, rfl⟩
+    exact MethodContract.Holds.returns call.framed rfl
 
 -- Both contracts transfer to the extraction; neither proof reads `extractedCheck`.
 theorem extracted_check : checkContract.Holds extracted 1 := check_embeds.holds (literal_set ▸ check_holds)

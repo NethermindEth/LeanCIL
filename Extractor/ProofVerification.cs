@@ -355,6 +355,8 @@ partial class Program
         var settingsPath = Path.Combine(output, "verification.json");
         var stage = "proof selection";
         Program? verification = null;
+        // Set once the verified result is printed, after every check that can still withdraw it.
+        var reported = false;
         int OpenGoalCount() => goals ? Observed(verification?.ProofMessages, trace, goals).Goals.Length : 0;
         Exception OpenGoals(int count) => new InvalidOperationException(
             $"{count} goal{(count == 1 ? " remains" : "s remain")} in {CliPaths.Display(proof!)}.");
@@ -419,6 +421,7 @@ partial class Program
                 freshProofs = fresh || forceFull,
                 freshLibrary = rebuildLibrary,
                 forceFullVerification = forceFull,
+                importClosureFirst = proofRoot is null,
                 viewsStatement = true,
                 structuredFailures = json,
                 tracesSteps = trace,
@@ -453,6 +456,7 @@ partial class Program
                     proof, output, proofRoot, null, report.axioms, view?.statement ?? StatementOf(report),
                     JsonMessages(verification.ProofMessages), trace, verification.ProofMessages is not null,
                     goals, Specification(view))));
+                reported = true;
                 return;
             }
             Console.WriteLine($"Verified: {report.theorem}");
@@ -502,6 +506,7 @@ partial class Program
             var (proofMessages, steps, _) = Observed(verification.ProofMessages, trace, goals);
             Console.Write(ProofMessagesReport(proofMessages, proof, output));
             Console.Write(TraceReport(steps, proof));
+            reported = true;
         }
         catch (Exception error)
         {
@@ -536,6 +541,12 @@ partial class Program
         finally
         {
             ((IDisposable?)verification)?.Dispose();
+            // The certificate is written and stays; a whole library that fails to build still fails the command.
+            if (reported)
+            {
+                try { verification!.CompleteLibrary(); }
+                catch (InvalidOperationException error) { throw new CliFailure("Lean library build", error); }
+            }
         }
     }
 

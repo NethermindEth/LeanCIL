@@ -40,7 +40,7 @@ theorem refill_holds : refillContract.Holds Extracted.program refill := by
   rintro ⟨samples, values, length⟩ memory ⟨owned, whole⟩
   obtain ⟨stored, framed, held⟩ := owned.store_whole whole
   refine MethodContract.Holds.intro _ [] ?_ framed ⟨rfl, held⟩
-  cil_checked_steps [owned.live.formed, owned.located, stored, whole.valid]
+  cil_checked_steps [stored, whole.valid]
 
 #print axioms refill_holds
 
@@ -71,11 +71,10 @@ theorem count_holds (holds : refillContract.Holds Extracted.program refill) :
     countContract.Holds Extracted.program countAfterRefill := by
   rintro ⟨samples, other, values, current, length, currentLength⟩ memory
     ⟨readable, held, currentWhole, owned, valuesWhole⟩
-  cil_contract_steps [holds, refillContract, owned, valuesWhole, owned.live.formed,
-    readable.live.formed, valuesWhole.valid] with final results refilling
+  cil_contract_steps [holds, refillContract, owned, valuesWhole, valuesWhole.valid]
+    with final results refilling
   have framed := refilling.framed
   have post := refilling.post
-  dsimp only [refillContract] at framed post
   obtain ⟨rfl, refilled⟩ := post
   obtain ⟨kept, now⟩ := readable.across owned.toReadable.live framed refilled
   by_cases same : other = samples
@@ -84,13 +83,13 @@ theorem count_holds (holds : refillContract.Holds Extracted.program refill) :
       kept.facts now (valuesWhole.after_confined framed) (by decide)
     cil_contract_steps [formed, located, loaded, (valuesWhole.after_confined framed).valid]
     subst same
-    refine ⟨framed, _, rfl, ?_, refilled⟩
+    refine MethodContract.Holds.returns framed ⟨?_, refilled⟩
     simp
   · simp only [same, ite_false, held] at now ⊢
     obtain ⟨formed, located, loaded⟩ :=
       kept.facts now (currentWhole.after_confined framed) (by decide)
     cil_contract_steps [formed, located, loaded, (currentWhole.after_confined framed).valid]
-    refine ⟨framed, _, rfl, ?_, refilled⟩
+    refine MethodContract.Holds.returns framed ⟨?_, refilled⟩
     simp [same]
 
 #print axioms count_holds

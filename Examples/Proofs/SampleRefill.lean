@@ -35,7 +35,7 @@ theorem correctness : refillContract.Holds Extracted.program refill := by
   rintro ⟨samples, values, length⟩ memory ⟨owned, whole⟩
   obtain ⟨stored, framed, held⟩ := owned.store_whole whole
   refine MethodContract.Holds.intro _ [] ?_ framed ⟨rfl, held⟩
-  cil_checked_steps [owned.live.formed, owned.located, stored, whole.valid]
+  cil_checked_steps [stored, whole.valid]
 
 #print axioms correctness
 

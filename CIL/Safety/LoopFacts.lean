@@ -1,14 +1,15 @@
-import CIL.Safety.SymbolicExecution
-import CIL.Safety.NumericLocals
+import CIL.Safety.Execution
 
 /-!
 # Loop facts from the proof context
 
-The facts a loop proof's context already determines, gathered for the loop stepping tactics in
-`CIL.Safety.LoopAutomation`: the definitions `bind_entry` and `bind_cutpoint` generated in
-scope, hypotheses that state checked steps, loads, stores and span checks, and the facts that
-follow from checked spans, numeric entry homes and entry memory. Hypotheses are selected by the
-head of their type, so a context of unrelated hypotheses adds nothing to simp.
+The facts a proof's context already determines, gathered for the stepping tactics. The loop
+tactics in `CIL.Safety.LoopAutomation` take the definitions `bind_entry` and `bind_cutpoint`
+generated in scope, hypotheses that state checked steps, loads, stores and span checks, and the
+facts that follow from checked spans, numeric entry homes, entry memory and object evidence. The
+straight-line tactics in `CIL.Safety.SymbolicExecution` take the object evidence alone
+(`gatherEvidenceFacts`). Hypotheses are selected by the head of their type, so a context of
+unrelated hypotheses adds nothing to simp.
 -/
 
 namespace CIL.Safety
@@ -51,6 +52,66 @@ def loopCallerFacts : List (Lean.Name × Lean.Name) :=
     (``CIL.Safety.ArrayView.validate, `LoopFrame.caller_array_valid),
     (``CIL.Safety.SpanView.element, `LoopFrame.caller_element),
     (``CIL.Safety.SpanView.slice, `LoopFrame.caller_slice)]
+
+/-- Evidence about a class instance, a field of one or an array of them, read from the context by
+    the head of its statement. -/
+structure ObjectEvidence where
+  /-- The predicate. -/
+  head : Lean.Name
+  arity : Nat
+  /-- The position of its memory; the object or array it describes follows. -/
+  memory : Nat
+  /-- The facts a hypothesis gives with no further premise, each a path of projections. -/
+  facts : List Lean.Name
+
+/-- The evidence whose facts stepping reads: that an object forms, where a field lies in it, and
+    what a load of a scalar field pushes, the last conjunct of its `facts`. Each is a fact of its
+    own, so a step that checks an object rewrites with no load's proof. A `Holds` gives those of
+    the `Owned` it carries. -/
+def objectEvidence : List ObjectEvidence := [
+  { head := `CIL.Safety.LiveObject, arity := 2, memory := 0, facts := [`formed] },
+  { head := `CIL.Safety.WordField.Readable, arity := 4, memory := 2,
+    facts := [`live.formed, `located, `facts.right.right] },
+  { head := `CIL.Safety.WordField.Owned, arity := 4, memory := 2,
+    facts := [`live.formed, `located, `facts.right.right] },
+  { head := `CIL.Safety.WordField.Holds, arity := 5, memory := 2,
+    facts := [`left.live.formed, `left.located, `left.facts.right.right] },
+  { head := `CIL.Safety.ReferenceField.Readable, arity := 3, memory := 1,
+    facts := [`live.formed, `located] },
+  { head := `CIL.Safety.ReferenceField.Owned, arity := 3, memory := 1,
+    facts := [`live.formed, `located] },
+  { head := `CIL.Safety.ReferenceField.Holds, arity := 4, memory := 1,
+    facts := [`left.live.formed, `left.located] },
+  { head := `CIL.Safety.ArrayField.Readable, arity := 4, memory := 2,
+    facts := [`live.formed, `located] },
+  { head := `CIL.Safety.ArrayField.Owned, arity := 4, memory := 2,
+    facts := [`live.formed, `located] },
+  { head := `CIL.Safety.ArrayField.Holds, arity := 5, memory := 2,
+    facts := [`left.live.formed, `left.located] },
+  { head := `CIL.Safety.ReferenceArray.Live, arity := 4, memory := 0,
+    facts := [`formed, `located] },
+  { head := `CIL.Safety.ReferenceArray.Readable, arity := 5, memory := 0,
+    facts := [`formed, `located] },
+  { head := `CIL.Safety.ReferenceArray.Owned, arity := 5, memory := 0,
+    facts := [`formed, `located] },
+  { head := `CIL.Safety.ReferenceArray.Holds, arity := 6, memory := 0,
+    facts := [`left.formed, `left.located] }]
+
+/-- The object evidence `type` states: itself or, through conjunctions, its sides, each with the
+    path that selects it from a proof of `type` and its statement. -/
+partial def objectEvidenceIn (type : Lean.Expr) (path : Lean.Name := .anonymous) :
+    Array (Lean.Name × ObjectEvidence × Lean.Expr) :=
+  let type := type.consumeMData
+  if type.isAppOfArity ``And 2 then
+    objectEvidenceIn type.appFn!.appArg! (path ++ `left) ++
+      objectEvidenceIn type.appArg! (path ++ `right)
+  else
+    let stated := objectEvidence.find? fun evidence =>
+      type.isAppOfArity evidence.head evidence.arity
+    match stated with
+    | some evidence => #[(path, evidence, type)]
+    | none => #[]
+
 
 open Lean Meta in
 /-- For an equation `f memory ... = .ok result` with `f` among `loopCallerFacts`, the carrying
@@ -310,6 +371,10 @@ open Lean Elab Tactic Meta in
       result or an `access` check, the `form` of the reference it gives; these, and the facts of
       a span only a kept equation produces, are read only by instructions that use a reference
       or span (`loopReadsReferences`);
+    * for a hypothesis stating an entry of `objectEvidence`, or a conjunction with one, each
+      fact the entry lists, such as `live.formed` and a scalar field's load, when the goal
+      reaches the object; with `evidenceOnly`, as outside a loop, these are the only facts
+      gathered, and an explicit projection that states one is not derived again;
     * for `contents : SpanContents`, `contents.elementWidth`;
     * for `frame : LoopFrame` over `knownLocals` of a list, the load of each remembered local, with
       `localResult`;
@@ -324,12 +389,19 @@ open Lean Elab Tactic Meta in
     a derived fact only at a state's memory. Derived facts are asserted as hygienic hypotheses,
     skipping any statement already gathered. Home forms, field reads and the negative sides of
     case splits are grouped apart from the rest, for the instructions that read them. -/
-def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainContext do
+def gatherLoopFactGroups (facts : Array Term) (evidenceOnly : Bool := false) :
+    TacticM LoopFacts := withMainContext do
   let context ← getLCtx
-  let explicitNames ← facts.filterMapM fun fact => do
+  -- Most straight-line goals hold no object evidence, and step with the facts as given.
+  if evidenceOnly then
+    let stated ← context.anyM fun declaration =>
+      return !(objectEvidenceIn (← instantiateMVars declaration.type)).isEmpty
+    unless stated do return { core := facts }
+  let explicitName? (fact : Term) : TacticM (Option Lean.Name) := do
     unless fact.raw.isIdent do return none
     if (context.findFromUserName? fact.raw.getId).isSome then return some fact.raw.getId
     try return some (← resolveGlobalConstNoOverload fact.raw) catch _ => return none
+  let explicitNames ← facts.filterMapM explicitName?
   let mut gathered : Array Term := #[]
   let target ← instantiateMVars (← getMainTarget)
   let mut constants := target.getUsedConstants
@@ -368,7 +440,8 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
   let mut known : Array Expr := #[]
   -- An explicit proof term's statement is not derived again from the frames in scope.
   for fact in facts do
-    if fact.raw.isIdent then continue
+    -- Outside a loop a projection such as `owned.facts` is read too, so it is not derived again.
+    if fact.raw.isIdent && !(evidenceOnly && (← explicitName? fact).isNone) then continue
     let saved ← saveState
     let type? ← try
         let proof ← Term.withoutErrToSorry <| Term.elabTerm fact none
@@ -385,12 +458,21 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
       live := live.map (· ++ asTerms (variables #[type]))
       known := known.push type
       constants := constants ++ type.getUsedConstants
+    else if evidenceOnly then pure ()
     else if let some (subject, produced) ← loopFactSides? type then
       let memories ← loopFactMemories type
       candidates := candidates.push (.anonymous, fact, subject, memories, produced)
     else if ← isCaseDisequality type then
       candidates := candidates.push (`caseSplit, fact, variables #[type], #[], #[])
     let arguments := type.getAppArgs
+    for (side, evidence, stated) in objectEvidenceIn type do
+      -- A straight-line goal names the object but not each memory its steps pass through.
+      let memory := stated.getArg! evidence.memory
+      let subject := variables #[stated.getArg! (evidence.memory + 1)]
+      for path in evidence.facts do
+        let fact := named (name ++ side ++ path)
+        candidates := candidates.push (`objectFact, fact, subject, #[memory], #[])
+    if evidenceOnly then continue
     if type.isAppOfArity `CIL.Safety.CheckedSpan 5 then
       let subject := variables #[arguments[0]!, arguments[1]!]
       if isLive arguments[0]! then
@@ -596,7 +678,7 @@ def gatherLoopFactGroups (facts : Array Term) : TacticM LoopFacts := withMainCon
   if literalWidth then
     for name in [`CIL.Safety.numericOfWidth, ``BitVec.ofNat_toNat] do
       unless explicitNames.contains name do gathered := gathered.push (global name)
-  let unfolds ← reachableLoopUnfolds constants
+  let unfolds ← if evidenceOnly then pure #[] else reachableLoopUnfolds constants
   let unfolds := unfolds.filter (!explicitNames.contains ·)
   let core := facts ++ unfolds.map global ++ gathered
   return { core, addresses, fields, cases, references, known }
@@ -621,5 +703,11 @@ open Lean Elab Tactic in
     instruction. -/
 def gatherLoopFacts (facts : Array Term) : TacticM (Array Term) :=
   return (← gatherLoopFactGroups facts).all
+
+open Lean Elab Tactic in
+/-- `facts`, followed by the object evidence facts `gatherLoopFactGroups` finds: what a
+    stepping tactic outside a loop takes from its context. -/
+def gatherEvidenceFacts (facts : Array Term) : TacticM (Array Term) :=
+  return (← gatherLoopFactGroups facts (evidenceOnly := true)).all
 
 end CIL.Safety

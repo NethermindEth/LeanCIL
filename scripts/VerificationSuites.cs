@@ -126,7 +126,8 @@ internal static class VerificationSuites
         new("excluded", "Tests/ExcludedBranchScaling.cs",
             "hundreds of excluded and live sites at the default heartbeat budget"),
         new("lookups", "Tests/LookupScaling.cs",
-            "instruction lookup equations at a per-instruction cost that does not grow with the method"),
+            "lookup equations of extracted methods, hand-written bodies and templates at a per-instruction " +
+            "cost that does not grow with the method"),
         new("assemblies", "Tests/MultiAssembly.cs",
             "bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and " +
             "substitution rejection"),

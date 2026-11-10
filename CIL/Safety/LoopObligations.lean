@@ -91,7 +91,16 @@ elab_rules : tactic
         replaceMainGoal []
       else
         goal.withContext do
-          throwError "cil_loop_obligation could not prove{indentExpr (← goal.getType)}\n\
-            from the hypotheses with {names.toList} unfolded; replace it with a proof"
+          let type ← instantiateMVars (← goal.getType)
+          -- `False` is asked where a path must not be reached, such as a throw or a null array.
+          let missing := if type.isConstOf ``False then
+            m!"This path is reached unless the hypotheses exclude it: state what rules it out, \
+              such as the test that leads to a throw failing or an array not being null, in one \
+              of {names.toList}, or replace the tactic with a proof of the contradiction."
+          else
+            m!"State what implies it in one of {names.toList}, or replace the tactic with a \
+              proof."
+          throwError "cil_loop_obligation could not prove{indentExpr type}\n\
+            from the hypotheses with {names.toList} unfolded. {missing}"
 
 end CIL.Safety

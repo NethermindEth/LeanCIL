@@ -1,6 +1,7 @@
 import CIL.Safety.Loops
 import CIL.Safety.SymbolicExecution
 import CIL.Safety.LoopFacts
+import CIL.Safety.NumericLocals
 import CIL.Safety.Obligations
 import CIL.Safety.MissingFacts
 

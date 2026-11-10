@@ -290,6 +290,10 @@ internal static partial class ProofOutline
         /// <summary>The extraction names class fields, under `Extracted.Classes`.</summary>
         internal bool Classes { get; } = classes;
 
+        /// <summary>This specification stated of any well-formed initial memory rather than the empty one.
+        /// </summary>
+        internal Specification InMemory() => new(Method, Parameters, Result, true, Classes) { NonNull = NonNull };
+
         internal IEnumerable<Parameter> Objects =>
             Parameters.Where(parameter => parameter.Shape == ParameterShape.Object);
 
@@ -575,7 +579,8 @@ internal static partial class ProofOutline
 
     /// <summary>A straight-line body over object arguments: stepped when it loads fields and stores at most one
     /// before it returns, otherwise one hole naming where the walk stopped. With `stubsOnly`, for a body over
-    /// words, null unless the walk steps it and every call in it is through a stub contract.</summary>
+    /// words, null unless the walk steps it, each call through a stub contract or the contract of a helper that
+    /// keeps locals.</summary>
     static string? ObjectStraightLine(Extraction extraction, Specification spec, Body body, Writer lean,
         bool stubsOnly = false)
     {
@@ -592,15 +597,19 @@ internal static partial class ProofOutline
                 names.Claim(char.ToLowerInvariant(callee.Name[0]) + callee.Name[1..], "callee" + index);
         }
         Callee? Summary(int index) => summaries.TryGetValue(index, out var known) ? known
-            : summaries[index] = Summarize(extraction, index, CalleeName(index), views);
+            : summaries[index] = Summarize(extraction, index, CalleeName(index), views, splits: true);
         var stubs = new Dictionary<int, Stub?>();
         Stub? Stubbed(int index) => stubs.TryGetValue(index, out var known) ? known
             : stubs[index] = StubOf(extraction, index, CalleeName(index));
-        // A contract read from a callee's body speaks of the caller's memory, which a body over words has none of.
-        Func<int, Callee?> summarized = stubsOnly ? _ => null : Summary;
+        // A body over words reads a callee's contract from its body only where no stub states it: a helper that
+        // keeps locals, whose homes change the memory a stub's `post` keeps.
+        Func<int, Callee?> summarized = !stubsOnly ? Summary
+            : index => Stubbed(index) is null && Summary(index) is { Walk.NumericHomes: true } read ? read : null;
         var numericHomes = HasNumericObjectHomes(spec.Method) || body.Ops.Select(op =>
             Regex.Match(op, @"\A\.call(?:Instance)? (\d+) (\d+)\z")).Where(match => match.Success)
             .Any(match => summarized(int.Parse(match.Groups[1].Value))?.Walk.NumericHomes == true);
+        // Local homes lie in the memory the method is entered in, so the statement speaks of any well-formed one.
+        if (numericHomes && !spec.Symbolic) spec = spec.InMemory();
         var walk = new ObjectWalk(spec, body.Ops, views, summarized, numericHomes: numericHomes, stubs: Stubbed);
         var stepped = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
             ParameterShape.Object or ParameterShape.Array or ParameterShape.ValueArray or ParameterShape.WordArray) &&
@@ -614,12 +623,15 @@ internal static partial class ProofOutline
         var fresh = stepped ? walk.Flattened.OfType<Allocation>().FirstOrDefault() : null;
         if (spec.Arrays.Any() || fresh is not null) imports = [.. imports, "CIL.Safety.ReferenceArrayElements"];
         var stubbed = stepped ? walk.Flattened.OfType<StubCall>().Select(call => call.Stub).Distinct().ToArray() : [];
-        // A stub's proof closes each side that throws from its `pre`.
-        if (stubbed.Length > 0) imports = [.. imports, "CIL.Safety.LoopObligations"];
+        // A helper's contract proof closes each side that throws from its `pre`.
+        var thrown = stepped && walk.Flattened.OfType<CallStep>().Any(call =>
+            call.Callee.Walk.Flattened.Any(step => step is Thrown));
+        if (stubbed.Length > 0 || thrown) imports = [.. imports, "CIL.Safety.LoopObligations"];
         Header(lean, spec, imports, stepped ? "`postcondition`" : null);
         if (stepped)
             foreach (var callee in walk.Flattened.OfType<CallStep>().Select(call => call.Callee).Distinct())
-                CalleeContract(lean, callee, callee.Index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                CalleeContract(lean, callee, callee.Index.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    spec.Method.Name);
         foreach (var stub in stubbed) StubContract(lean, extraction, stub, spec.Method.Name);
         if (fresh is not null)
         {
@@ -636,8 +648,8 @@ internal static partial class ProofOutline
         if (stepped) ObjectBody(lean, spec, walk, "simp [footprint]");
         else
         {
-            lean.Line("  -- Choose a fuel bound and step the body with `cil_checked_steps [facts]`, giving each");
-            lean.Line("  -- field load its `facts` and a store its `Owned.store`.");
+            lean.Line("  -- Choose a fuel bound and step the body with `cil_checked_steps [facts]`, giving a store");
+            lean.Line("  -- its `Owned.store`; a scalar field's load is read from its fact in the context.");
             var reason = walk.Stopped ?? Unstepped(spec.Method, body.Ops, spec.Parameters);
             lean.Noted("  ", "sorry", $"{NotOutlined}the body meets {reason}; prove its run and Postcondition");
         }
@@ -657,7 +669,25 @@ internal static partial class ProofOutline
                 "(Confined.refl _ memory)");
             lean.Line($"{indent}  ?postcondition{suffix}");
         }
+
+        /// <summary>The term that closes the goal contract stepping leaves at a return, `Confined ∧ Returns`,
+        /// from the proof `confined` of the footprint and the proof of `post`, as parts the writer may wrap
+        /// between. The returned values name the output, except that of a method that returns nothing.
+        /// </summary>
+        internal static IEnumerable<string> Returned(Returning returning, IEnumerable<string> confined) =>
+            ["MethodContract.Holds.returns", .. returning.Unit ? ["(output := ())"] : Array.Empty<string>(),
+                .. confined, returning.Post];
+
+        /// <summary>The note of the hole a contract whose `post` the author states leaves at each return.
+        /// </summary>
+        internal static string PostHole(string contract, string where) =>
+            $"what `{contract}.post` states of the returned value{where}, from `permitted`, its `pre`";
     }
+
+    /// <summary>How a callee's contract proof closes each return of its body: whether its output is `Unit`, and
+    /// the proof of `post`. The `post` of an `Open` contract is a hole of what its author states, after the
+    /// memory it has `Kept`.</summary>
+    sealed record Returning(string Contract, bool Unit, string Post, bool Open = false, bool Kept = false);
 
     /// <summary>The static helper at `index` as a stub named `name`, when its parameters and result are 32- or
     /// 64-bit words and its body, without locals, only computes, tests and throws, so every returning side of
@@ -713,8 +743,7 @@ internal static partial class ProofOutline
         lean.Line($"{indent}case postcondition{suffix} =>");
         lean.Line($"{indent}  dsimp only [{name}Contract] at permitted ⊢");
         lean.Line($"{indent}  refine ⟨rfl, ?_⟩");
-        lean.Noted(indent + "  ", "sorry", $"what `{name}Contract.post` states of the returned value{where}, from " +
-            "`permitted`, its `pre`");
+        lean.Noted(indent + "  ", "sorry", ContractEvidence.PostHole(name + "Contract", where));
     }
 
     /// <summary>Names the element of a value array argument, reducible so stepping sees the element itself; a
@@ -759,7 +788,13 @@ internal static partial class ProofOutline
                 _ => "a span of caller memory"
             };
         var pc = Array.FindIndex(ops, op => !Body.Pure(op));
-        return pc < 0 ? "the body has locals" : $"`{ops[pc]}` at {Location(method, pc)} needs facts or a case split";
+        if (pc < 0) return "the body has locals";
+        // A call the outline cannot compose names the contract the author must write and prove.
+        return Regex.Match(ops[pc], @"\A\.call(?:Instance)? (\d+) \d+\z") is { Success: true } call
+            ? $"`{ops[pc]}` at {Location(method, pc)} calls method {call.Groups[1].Value}, which " +
+                "`cil_contract_steps` composes through a `MethodContract` you write and prove with " +
+                $"`Holds Extracted.program {call.Groups[1].Value}`"
+            : $"`{ops[pc]}` at {Location(method, pc)} needs facts or a case split";
     }
 
     /// <summary>The source line of the instruction at `pc`, or its IL offset without a PDB.</summary>

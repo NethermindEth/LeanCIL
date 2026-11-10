@@ -936,13 +936,10 @@ internal static partial class ProofOutline
                 ParameterShape.Object => [parameter.Name + "Live.formed"],
                 _ => []
             });
-            // An array argument is checked through `checkedValue`, which unfolds the word arguments beside it.
-            var unfolded = !WordArrays.Any() ? []
-                : spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.Scalar)
-                ? new[] { "checkedValue", "numericValue" } : ["checkedValue"];
-            var checkedArguments = spec.Symbolic
-                ? "(by simp [cil_checked" + string.Concat(unfolded.Concat(formed).Select(fact => ", " + fact)) + "])"
-                : "rfl";
+            // An array argument's check does not close by the `cil_checked` equations alone.
+            var checkedArguments = !spec.Symbolic ? "rfl"
+                : WordArrays.Any() ? $"(by cil_checked_side [{string.Join(", ", formed)}])"
+                : "(by simp [cil_checked" + string.Concat(formed.Select(fact => ", " + fact)) + "])";
             lean.Wrapped("  refine invoke_loop_satisfies", ["Extracted.lookup0", checkedArguments, "setup",
                 HeaderTerm(),
                 $"(invariant {Arguments})", $"(measure {Arguments})", "(fun start => ?_)", "?_"], "");
@@ -1015,12 +1012,10 @@ internal static partial class ProofOutline
                 Part.Object => new ObjectTerm(component.Name),
                 _ => new Number(component.Name, component.Width)
             });
-            // An object stays live through the loop; the loop tactics carry the fact across each store.
+            // An object stays live through the loop; the loop tactics read that it forms from this fact and
+            // carry it across each store.
             foreach (var instance in spec.Objects)
-            {
                 lean.Line($"{indent}have {instance.Name}Now := {instance.Name}Live.after_confined frame.confined");
-                iteration.Facts.Add(instance.Name + "Now.formed");
-            }
             Guard(iteration);
             Branch(lean, iteration, indent, "guard");
         }
@@ -1368,7 +1363,6 @@ internal static partial class ProofOutline
             }
             var instance = term + "Object";
             var live = Side(present, $"(.address {instance})");
-            live.Facts.Add(instance + "Live.formed");
             lean.Line($"{indent}cases {term} with");
             lean.Line($"{indent}| null =>");
             Walk(lean, Side(absent, ".null"), indent + "  ");

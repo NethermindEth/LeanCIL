@@ -26,8 +26,8 @@ theorem get_Bits_holds : get_BitsContract.Holds Extracted.program 1 := by
   rintro word initial permitted
   dsimp only [get_BitsContract] at *
   obtain ⟨wordLive, wordBits⟩ := permitted
-  cil_contract_steps [wordLive.formed, wordBits.facts, leaveFrame]
-  exact ⟨Confined.refl _ _, _, rfl, ⟨rfl, rfl⟩⟩
+  cil_contract_steps [leaveFrame]
+  exact MethodContract.Holds.returns (Confined.refl _ _) ⟨rfl, rfl⟩
 
 #print axioms get_Bits_holds
 
@@ -58,16 +58,15 @@ theorem correctness (receiver : Reference) (index : W32) (receiverWordTarget : R
       Postcondition receiver index initial final result) := by
   rintro args initial ⟨rfl, wellFormed, receiverLive, receiverWord, receiverWordHeld,
       receiverWordTargetLive, receiverWordTargetBits, assumed⟩
-  cil_contract_steps [receiverLive.formed,
-      receiverWord.facts receiverWordHeld receiverWordTargetLive, receiverWordTargetLive,
-      receiverWordTargetLive.formed, receiverWordTargetBits, get_Bits_holds, get_BitsContract,
-      leaveFrame]
+  cil_contract_steps [receiverWord.facts receiverWordHeld receiverWordTargetLive,
+      receiverWordTargetLive, receiverWordTargetLive.formed, receiverWordTargetBits, get_Bits_holds,
+      get_BitsContract, leaveFrame]
     with called1 output1 call1
   have post1 := call1.post
   dsimp only [get_BitsContract] at post1
   obtain ⟨post1, rfl⟩ := post1
   subst called1
-  try cil_contract_steps [leaveFrame]
+  try cil_contract_steps [get_BitsContract, leaveFrame]
   refine ⟨_, rfl, Confined.refl _ _, ?_⟩
   intro word held
   rw [receiverWordHeld] at held

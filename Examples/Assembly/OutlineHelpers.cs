@@ -38,4 +38,74 @@ public sealed class Gauge
 
     /// <summary>Twice a word, wrapping at 32 bits, through a helper that only computes.</summary>
     public static int Twice(int value) => Doubled(value);
+
+    /// <summary>How far the saturated level lies below the limit, the first helper result kept in a local.</summary>
+    public int Slack()
+    {
+        var level = Saturate(Level, Limit);
+        var limit = Saturate(Limit, Limit);
+        return unchecked(limit - level);
+    }
+
+    /// <summary>The gap between two saturated words, the first helper result kept in a local.</summary>
+    public static int Gap(int value, int limit)
+    {
+        var low = Saturate(value, limit);
+        var high = Saturate(limit, limit);
+        return unchecked(high - low);
+    }
+
+    static int Blend(int value, int limit)
+    {
+        var sum = unchecked(value + limit);
+        var product = unchecked(value * limit);
+        return unchecked(product - sum);
+    }
+
+    /// <summary>A word mixed with the limit through a helper that keeps its own locals.</summary>
+    public static int Blended(int value, int limit) => Blend(value, limit);
+
+    static int Capped(Gauge gauge, int value) => value < gauge.Limit ? value : gauge.Limit;
+
+    /// <summary>The level capped at the limit, through a helper that reads the gauge it is handed.</summary>
+    public int CappedLevel() => Capped(this, Level);
+
+    /// <summary>The room left above the saturated level, tested after the helper result is kept in a local.</summary>
+    public int Margin()
+    {
+        var level = Saturate(Level, Limit);
+        return level < Limit ? unchecked(Limit - level) : 0;
+    }
+
+    static int Clamp(int value, int low, int high)
+    {
+        var floor = value < low ? low : value;
+        return floor > high ? high : floor;
+    }
+
+    /// <summary>A word held between two bounds, through a helper that tests a local of its own.</summary>
+    public static int Clamped(int value, int low, int high) => Clamp(value, low, high);
+
+    /// <summary>The gap between two capped words, the first result of the object helper kept in a local.</summary>
+    public int CappedSlack()
+    {
+        var capped = Capped(this, Level);
+        var limit = Capped(this, Limit);
+        return unchecked(limit - capped);
+    }
+
+    static int Checked(Gauge gauge, int value) =>
+        value > gauge.Limit ? throw new System.InvalidOperationException() : value;
+
+    /// <summary>The level, through a helper that throws beyond the limit of the gauge it is handed.</summary>
+    public int CheckedLevel() => Checked(this, Level);
+
+    static int Raise(Gauge gauge, int value, int low)
+    {
+        var floor = value < low ? low : value;
+        return floor > gauge.Limit ? throw new System.InvalidOperationException() : floor;
+    }
+
+    /// <summary>The level raised to zero, through a helper that throws when its local passes the limit.</summary>
+    public int RaisedLevel() => Raise(this, Level, 0);
 }

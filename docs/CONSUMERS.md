@@ -72,14 +72,23 @@ names `Extracted.program` whichever key it imports. The command warns when the
 proof imports plain `Extracted` or another method's key and names the import to
 use.
 
-The pinned `leancil` package declares an editor library, `LeanCILEditor`, below
-its ignored `.lake/packages/leancil/.lake/leancil` directory. The command
+The editor library, `LeanCILEditor`, reads its sources from the package's
+ignored `.lake/leancil` directory. In a package that pins `leancil`, the command
+writes `.lake/package-overrides.json`, which Lake applies over the manifest: the
+`leancil` requirement then resolves to `.lake/leancil-framework`, a lakefile
+whose source and build directories are the certified library in the
+[library cache](CLI.md#stage-progress) and which brings in
+`.lake/leancil-editor`, the package that declares that library, so the package compiles no
+framework module and holds no framework build. The manifest and the pinned
+checkout are untouched, and the command refuses a package that already has
+overrides it did not write. The command
 extracts the method, writes `Extracted/KEY.lean` and `ExtractedSymbols/KEY.lean`
 there and builds them with Lake, so the import resolves in the proof and in any
 helper module of the package, and Lake rebuilds helpers that import it when that
-extraction changes. Other methods' modules are left as they are. In a LeanCIL
-checkout the root package is `leancil`, so the directory is the checkout's own
-`.lake/leancil`. No plain `Extracted` module is generated: a proof that names no
+extraction changes. Other methods' modules are left as they are. A LeanCIL
+checkout is the framework package: its lakefile declares the editor library and
+it builds its own framework modules. A package the command generates declares
+the library itself. No plain `Extracted` module is generated: a proof that names no
 method fails at its import instead of checking against whichever method was
 selected last. `ExtractedSymbols.KEY` exists only while the assembly has a
 matching portable PDB. `selections/KEY/selection.json` records the selection
@@ -153,12 +162,22 @@ leaving the editor without `LEAN_PATH`; see
 
 A proof with no `lakefile.toml` or `lakefile.lean` in its directory or above it
 needs no setup. The command makes that directory a Lake package: it writes a
-`lakefile.toml` and `lean-toolchain` beside the proof, copies the tool's bundled
-framework sources into `.lake/packages/leancil`, which the package requires by
-`path`, and runs `lake update` without network access. It creates no Git
-repository or commit, so Git settings such as `commit.gpgsign` do not apply. A
-tool with different framework sources refreshes the copy. Verification accepts
-only dependencies pinned by a Git revision, so pass such a proof to ordinary
+`lakefile.toml` that declares the editor library and a `lean-toolchain` beside
+the proof, and runs `lake update` without network access. The package requires
+`leancil` by `path` from `.lake/leancil-framework`, a lakefile whose source and
+build directories are the certified library in the
+[library cache](CLI.md#stage-progress), so the package holds no framework
+sources or build and is about 0.4 MB with one extraction. Building in the
+package, `lake env lean` and the language server leave an up-to-date library
+unwritten. Lake would rebuild a framework module it found out of date inside
+the library, so `workspace` and `watch` fail if their build changed any file
+there, and the next run checks the cache entry against its manifest and
+replaces one that no longer matches. A
+tool with different framework sources has a library under another cache key;
+the next `workspace` or `watch` rewrites `.lake/leancil-framework` to name it,
+building it first when absent. It creates no Git repository or commit, so Git
+settings such as `commit.gpgsign` do not apply. Verification accepts only
+dependencies pinned by a Git revision, so pass such a proof to ordinary
 `leancil verify <extraction> --proof <file>` without `--proof-root`; `watch` does
 that for such a package.
 

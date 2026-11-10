@@ -68,8 +68,7 @@ theorem correctness (memory : Memory) (formed : memory.WellFormed)
   -- The steps see the constructed memory spelled out, so every fact about it is too.
   simp only [tiles, tilesSize] at *
   cil_checked_steps [wholePairs.valid, wholeLanes.valid, allocated, created, pairsKept.valid,
-    lanesWhole.valid, pairsFresh.1.located, pairsStored, lanesOwned.live.formed, lanesOwned.located,
-    lanesStored, pairsFinal.1.live.formed]
+    lanesWhole.valid, pairsStored, lanesStored]
 
 #print axioms correctness
 

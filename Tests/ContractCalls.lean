@@ -96,6 +96,32 @@ theorem supplied_contract (program : Program) (memory : Safety.Memory)
   rfl
 #print axioms supplied_contract
 
+/-- A caller that passes its argument to the helper and returns the helper's result. -/
+@[cil_code] def forwarder : Method := {
+  returnsValue := true, locals := [], code := [.arg 0, .call 1 1, .ret] }
+
+/-- A helper over one word, which returns its successor. -/
+def successor : MethodContract W32 W32 where
+  args value := [.scalar (.i32 value)]
+  results value := [.scalar (.i32 value)]
+  pre _ _ := True
+  footprint _ := []
+  post value _ _ result := result = value + 1
+
+/-- A contract input that is one word is the argument as the caller wrote it in the
+    `CallResult` the continuation takes, not the word's constructor over its projection. -/
+theorem word_input (program : Program) (memory : Safety.Memory) (value : W32)
+    (found : program[0]? = some forwarder) (holds : successor.Holds program 1) :
+    ∃ fuel result returned,
+      Safety.run program fuel 0 0 [.scalar (.i32 value)] ⟨0, [], [], [], 0⟩ [] memory =
+          .ok (result, returned) ∧
+        returned = [.scalar (.i32 (value + 1))] := by
+  cil_contract_steps [found, holds, successor]
+  guard_hyp call :ₐ CallResult successor program 1 value memory called output
+  obtain rfl := call.post
+  rfl
+#print axioms word_input
+
 /-- A concrete helper used only to establish its registered public contract. -/
 @[cil_code] def helper : Method := {
   returnsValue := true, locals := [], code := [.const32 7, .ret] }

@@ -232,7 +232,8 @@ comment saying which obligation it is:
 
 - `Precondition` and `Postcondition` are definitions to replace with the specification. The
   theorem assumes the precondition and promises the postcondition of the returned value, and for
-  a method that takes references, spans or arrays also of the caller's memory before and after.
+  a method that takes references, spans or arrays, or that calls a helper from a frame of integer
+  locals, also of the caller's memory before and after.
   Each definition the author fills (`Precondition`, `Postcondition`, `invariant`, `measure`, a
   `footprint` hole and a helper's contract stub outside a loop) is under
   `set_option linter.unusedVariables false in`,
@@ -366,7 +367,11 @@ comment saying which obligation it is:
   holds it. A method that writes a field promises `Confined footprint initial final`, with
   `footprint` listing the written fields. The body is stepped through its field loads, its stores,
   locals and null tests of objects, carrying each field's fact across the stores before it, and
-  leaves the postcondition with `held1`, `held2`, ... the stored fields' `Holds` facts. A test of
+  leaves the postcondition with `held1`, `held2`, ... the stored fields' `Holds` facts. A stepping
+  call does not list that an argument object or array of references forms, where its fields lie or
+  what an unsigned scalar field of it loads, which the tactic reads from the statement's
+  hypotheses. It does list them for an object a field holds, such as `nodeNextTarget`, which the
+  goal names only once the field's load has stepped. A test of
   words it names, such as a field value against an argument, splits the proof with
   `by_cases branch1 : ...`, and each side steps on to its own return and leaves its own
   postcondition, commented with the side it is on.
@@ -412,10 +417,11 @@ comment saying which obligation it is:
   locals. The outline carries their private storage through scalar field writes and confined
   calls, preserves saved values and expires the homes on return. A helper that writes no caller
   fields preserves caller memory; allocating its local homes does not preserve the entire memory
-  state by equality. Frames mixing these integers with other local kinds, narrow or native-sized
-  local homes, uninitialized homes, escaped local addresses, conditional branches and reference-field
-  or reference-array effects remain explicitly unsupported. Helper summaries allow at most one
-  field store and no nested calls.
+  state by equality. A test of named words in such a frame splits the proof as it does without
+  locals, each side going on from the homes and saved values of the path so far. Frames mixing
+  these integers with other local kinds, narrow or native-sized local homes, uninitialized homes,
+  escaped local addresses and reference-field or reference-array effects remain explicitly
+  unsupported. Helper summaries allow at most one field store and no nested calls.
 - An array argument of structs or vectors binds `valuesLength` and is passed as `.array ⟨.address values,
   valuesLength, element⟩`, with the premise `WholeArray initial element values valuesLength`. The
   element is the `elementType` of a field that holds such arrays, such as `Tiles.Pairs.elementType`,
@@ -431,7 +437,8 @@ comment saying which obligation it is:
   or a method with a loop that takes a value array, or a loop that returns one, is refused.
 - A call in a body over objects to a method that loads its fields, stores at most one word field of
   an object argument and returns a value it names gets a generated `MethodContract` read from that
-  body, with a `Holds` theorem proved by the same stepping; `cil_contract_steps` composes the call
+  body, with a `Holds` theorem proved by the same stepping and closed at its return by
+  `MethodContract.Holds.returns framed post`; `cil_contract_steps` composes the call
   through it, and the callee's store counts as one of the caller's. A callee that loads an object
   from a reference field and stores nothing gets a `pre` asking that some object, such as
   `nodeNextTarget`, is held there with the facts it reads, and a `post` stating the result of
@@ -449,14 +456,34 @@ comment saying which obligation it is:
   `post` is `final = initial ∧ sorry`, the helper storing nothing, and a `Holds` theorem against
   the helper's method index in `Extracted.program`, split with `by_cases` on each test: each
   returning side is stepped and leaves what `post` states of the result, and each throwing side is
-  closed from `pre` by `cil_loop_obligation`. At the call the caller states `permitted1`, the
+  closed from `pre` by `cil_loop_obligation`, whose failure says that the path is reached unless
+  one of the definitions it unfolds rules it out. At the call the caller states `permitted1`, the
   helper's `pre` of the values passed, as a hole to prove from `assumed`; `cil_contract_steps`
   composes the call through the contract `with called1 output1 call1`, naming the memory after
   it, the result and the call's `CallResult`, and the proof reads what `post` states of the result
   as `post1` from `call1.post`, which the postcondition hole's comment cites. A wrong `pre` or
-  `post` fails in the `Holds` theorem or at the caller, never silently. A caller with numeric
-  locals, and any other callee, leaves a `not outlined:` hole: in a body over objects it names the
-  callee's method index, and in a body over words the call instruction.
+  `post` fails in the `Holds` theorem or at the caller, never silently.
+- A helper that takes an object or keeps integer locals, tests words it names from its arguments,
+  fields and locals, and stores nothing gets the same kind of contract. Its `pre` states the facts
+  its body needs before the `sorry`: of an object, such as
+  `LiveObject memory gauge ∧ Gauge.Limit.Readable memory gauge`, or `memory.WellFormed` for a
+  frame of locals. Its `post` is `final = initial ∧ sorry`, or `sorry` alone when the helper keeps
+  locals, whose homes are allocated in the memory. Its `Holds` theorem steps each side of each
+  test and closes it with `MethodContract.Holds.returns`, leaving what `post` states of the result
+  there; a side that throws is closed from `pre` by `cil_loop_obligation`, as in a stub. At the
+  call, `permitted1` gives those facts from the caller's own and leaves the rest of `pre` as the
+  hole. The helper's `post` reads fields in the memory at the call, which a caller with locals
+  names in `initial` by its field equations, such as `gaugeLimitEqual1`.
+- A caller that keeps 32- or 64-bit integer locals composes these calls inside its frame: a
+  result stored into a local is read back as the word the helper returned, and a test after it
+  splits the proof. A body over words alone that keeps such locals beside a helper call, or calls
+  a helper that keeps its own, is stated of any well-formed `initial` memory rather than the empty
+  one, since the homes are allocated in it; its `Precondition` takes `initial` and its
+  `Postcondition` both memories. A helper over words that keeps its own locals and only computes
+  gets the contract read from its body, which names its result, instead of a stub.
+- Any other callee leaves a `not outlined:` hole, such as a helper that calls another method or
+  stores a field beside a test: the hole names the callee's method index and the `MethodContract`
+  to write and prove with `Holds Extracted.program` at that index.
 
 Where the outline cannot step a path, it leaves a hole whose comment starts with `not outlined:`,
 names what it met and what that step needs, and gives the source line to continue from. The
@@ -573,12 +600,42 @@ PROGRESS Building fresh Lean verification library: 212 of 332 Lake jobs (240s)
 END Building fresh Lean verification library (exit 0, 501.7s)
 ```
 
-A cache miss on the certified library first prints one line saying that the library is being
-built and kernel-replayed and where later runs reuse it from. The build compiles every framework
-module and replays all of them, because one library certifies every proof and proof dependency
-for that framework version; it takes several minutes. The cache is `LEANCIL_CACHE_DIR`, by
-default `<local application data>/LeanCIL/libraries`.
+A cache miss on the certified library first prints one line saying what is being built and
+kernel-replayed and where later runs reuse it from. The whole library holds every framework
+module, each replayed, and certifies every proof and proof dependency for that framework
+version; building it takes several minutes. The cache is `LEANCIL_CACHE_DIR`, by default
+`<local application data>/LeanCIL/libraries`.
 
+With no whole library cached, `verify` of one proof without `--proof-root` first builds a
+closure entry instead: the framework modules that the proof, the extraction, its symbols and
+the statement display import, transitively, together with those of the audit executable. Every
+module of the entry is kernel-replayed. Its cache key and receipt name exactly that module list,
+and `verified.json` records that key as `libraryKey`, `closure` or `closure-cache` as
+`libraryBuild` and the list as `libraryModules`. The entry holds no other framework source, so
+a module outside it can be neither imported from it nor built into it, and `verify` reads the
+import headers of the compiled proof and extraction and refuses a framework import the entry
+does not hold. After a verified result is reported, the same command
+builds, replays and caches the whole library, which stderr announces, reusing the entry's
+compiled modules where Lake's traces allow, and removes the entry once no process reads it. If
+that build fails, the verified result and its `verified.json` stand, and the command reports
+the failure and exits nonzero. A failed proof, or one with open goals under `--goals`, leaves
+the entry for the next run. One closure entry exists per library: a proof with other imports builds
+the whole library. `--proof-root`, batch, contract-import and `--full` verification,
+`workspace`, `watch`, CI and `--rebuild-library` use the whole library only, and a
+package never requires a closure entry by path.
+
+A cache entry is read in place by verification sessions and by packages that require it by
+path after `workspace`, and Lake rebuilds a required module it finds out of date inside the
+entry. Each run therefore hashes every file of the entry against the manifest its receipt
+binds, about half a second for the whole library. An entry that does not match is named on
+stderr and replaced by a rebuilt library; on Windows the replacement fails while another
+process, such as an editor, holds the entry's files open. A library supplied through
+`LEANCIL_CERTIFIED_LIBRARY` is hashed against its manifest the same way before a package
+requires it by path, and refused when it does not match. `verify` also compares the library's
+files, by name, length and write time, with those it had when it was opened, each time it
+snapshots the library's compiled modules after a build and once more before single-file and
+batch verification write their reports; a difference fails the run. A command that finds
+another building or opening the library waits for it and says so on stderr.
 The theorem defaults to `ExampleProof.correctness`; select another with `--theorem Namespace.theoremName`. The first invocation saves the selection in `artifacts/Add/verification.json`, independently of the generated success report:
 
 ```json
@@ -774,11 +831,11 @@ failure appears at setup rather than as unresolved imports. Lake prints a variab
 as empty; counting it can overstate the size by a few bytes, never understate it.
 
 Lake adds a package's source directory to `LEAN_SRC_PATH` once for every `[[lean_lib]]`
-table in the package's lakefile, without merging repeats. The framework copy `leancil workspace` writes for
-a proof outside any package declares only the framework and editor libraries, but a consumer
-that pins the `leancil` repository gets its lakefile with one library per test module, so the
-framework directory appears about ninety times in that consumer's `LEAN_SRC_PATH`. A shorter
-checkout path and fewer `PATH` entries leave more room. Setting
+table in the package's lakefile, without merging repeats. After `leancil workspace`, a
+generated package and a package that pins `leancil` resolve the framework to packages that
+declare only the framework and editor libraries, so it adds two directories. A LeanCIL
+checkout declares one library per test module, so its directory appears about ninety times in
+its `LEAN_SRC_PATH`. A shorter checkout path and fewer `PATH` entries leave more room. Setting
 `LEANCIL_LEAN_ENVIRONMENT_LIMIT` to a byte count lowers the limit; on other systems, where
 Lean has no such buffer, it enables the check, for example to measure headroom.
 
@@ -859,18 +916,25 @@ the developer's file as in the text report:
 ```json
 {
   "kind": "elaboration-error",
-  "source": { "file": "/work/Proofs/Countdown.lean", "line": 40, "column": 4 },
-  "message": "cil_loop_steps: target state not matched at pc 8: ...",
+  "source": { "file": "/work/Proofs/SpanDrain.lean", "line": 37, "column": 54 },
+  "message": "cil_loop_steps: target state not matched at pc 7: ...",
   "tactic": "cil_loop_steps",
   "stopped": false,
-  "method": { "index": 0, "signature": "System.UInt32 Examples.Loops::Countdown(System.UInt32)" },
+  "method": {
+    "index": 0,
+    "signature": "System.Int32 Examples.Loops::Drain(System.ReadOnlySpan`1<System.Int32>)"
+  },
   "cil": {
-    "pc": 8, "ilOffset": 9, "instruction": "brtrue.s IL_0004", "leanInstruction": null,
-    "source": { "file": "Loops.cs", "line": 38, "column": 9 }
+    "pc": 7, "ilOffset": 19, "instruction": "brtrue.s IL_0002", "leanInstruction": null,
+    "source": { "file": "Loops.cs", "line": 30, "column": 9 }
   },
   "state": {
-    "reached": { "stack": "[CIL.Safety.Value.scalar (CIL.Value.i32 (x - 1#32))]" },
-    "expected": { "stack": "[CIL.Safety.Value.scalar (CIL.Value.i32 (x - 2))]" }
+    "reached": {
+      "stack": "[CIL.Safety.Value.scalar (CIL.Value.i32 (BitVec.ofNat 32 view.length))]"
+    },
+    "expected": {
+      "stack": "[CIL.Safety.Value.scalar (CIL.Value.i32 (BitVec.ofNat 32 (view.length + 1)))]"
+    }
   },
   "missing": { "shape": "targetState", "residual": [] },
   "suggestions": ["state a fact in the reached form, or state the target in it"],
@@ -1017,13 +1081,23 @@ proof file itself shows live goals. It prints the import; KEY names the method a
 assembly name, signature, profile and initialization assumptions, so each method keeps its own
 module and proofs of several methods stay open at once. After rebuilding the assembly, run it
 again to refresh the extraction in place, then restart the file in the editor. A proof outside
-any Lake package gets a package beside it that requires the bundled framework, so no
-`lake update` or `--proof-root` is needed. A framework package that has no build yet receives a
-copy of the certified library's compiled modules, the library `verify` uses, so the framework is
-built once per machine and the editor build compiles only the extraction. On a machine without
-that library, the first `workspace` builds it, as the first `verify` would. Lake reuses a copied
-module only while it matches the package's sources, and no certificate reads the copy.
-Verification accepts the keyed import only for the
+any Lake package gets a package beside it, so no `lake update` or `--proof-root` is needed. That
+package declares the `LeanCILEditor` library itself and requires the certified library, the one
+`verify` uses, by path where it is cached: it holds no framework sources and no framework build,
+and its editor build compiles only the extraction. Lake leaves an up-to-date required library
+unwritten, `workspace` and `watch` fail if their build wrote into it, and every run
+[checks the cache entry](#stage-progress) against its manifest. When the tool's framework
+changes, the next `workspace` or `watch` points the package at the library of the new key. A
+package that pins `leancil` keeps its manifest and its checkout as they are: the command writes
+`.lake/package-overrides.json`, which Lake reads in place of the manifest entry, so the
+`leancil` requirement resolves to `.lake/leancil-framework`, whose source and build directories
+are the cached certified library, and which brings in `.lake/leancil-editor`, the package that
+declares the editor library. Its editor builds compile no
+framework module either, and verification reads no `.lake` directory, so a certificate still
+rests on the pinned revision. A LeanCIL checkout is the framework package and builds its own
+modules. On a machine without the certified library, the first `workspace`
+builds it whole, as `verify --proof-root` would; for a package it is cached in CI too, where
+`verify` bypasses the cache, because the package must require a library that stays on disk.Verification accepts the keyed import only for the
 extraction it checks and builds it as a re-export of `Extracted`. `new-proof` writes the same
 keyed import, so its outline opens in the editor as generated.
 

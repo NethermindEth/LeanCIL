@@ -20,10 +20,10 @@
       "module": "Proof",
       "source": {
         "file": "<proof>",
-        "line": 38,
+        "line": 35,
         "column": 2
       },
-      "message": "unsolved goals\ncase invariant\nx✝ : W32\nhome : Reference\nentered : Memory\nenter : entry.Checked x✝ home entered\nstarted : Memory\nstored✝ :\n  storeLocal entered (LocalSlot.bytes CIL.LocalKind.word32 home) (Value.scalar (CIL.Value.i32 x✝)) =\n    Except.ok (LocalSlot.bytes CIL.LocalKind.word32 home, started)\nframe✝ :\n  LoopFrame [] Memory.empty started [CIL.LocalKind.word32] [LocalSlot.bytes CIL.LocalKind.word32 home]\n    (knownLocals [some (CIL.Value.i32 x✝)])\nx : W32\nm : Memory\nframe :\n  LoopFrame [] Memory.empty m [CIL.LocalKind.word32] [LocalSlot.bytes CIL.LocalKind.word32 home]\n    (knownLocals [some (CIL.Value.i32 x)])\nloaded : loadLocal m (LocalSlot.bytes CIL.LocalKind.word32 home) = Except.ok (Value.scalar (CIL.Value.i32 x))\nzero : ¬x = 0\nnonzero : x ≠ 0#32\nupdated : Memory\nstored :\n  storeLocal m (LocalSlot.bytes CIL.LocalKind.word32 home) (Value.scalar (CIL.Value.i32 (x - 1))) =\n    Except.ok (LocalSlot.bytes CIL.LocalKind.word32 home, updated)\nnext :\n  LoopFrame [] Memory.empty updated [CIL.LocalKind.word32] [LocalSlot.bytes CIL.LocalKind.word32 home]\n    (knownLocals [some (CIL.Value.i32 (x - 1))])\n⊢ True",
+      "message": "unsolved goals\ncase invariant\nx✝ : W32\nhome : Reference\nentered : Memory\nenter : entry.Checked x✝ home entered\nx : W32\nm : Memory\nframe :\n  LoopFrame [] Memory.empty m [CIL.LocalKind.word32] [LocalSlot.bytes CIL.LocalKind.word32 home]\n    (knownLocals [some (CIL.Value.i32 x)])\nrecurse :\n  ∀ (next : State home),\n    True →\n      BitVec.toNat next.values < BitVec.toNat { values := x, memory := m, frame := frame }.values →\n        LoopTerminates Extracted.program 0 [Value.scalar (CIL.Value.i32 x✝)]\n          ((fun x x_1 x_2 values => values = [Value.scalar (CIL.Value.i32 0)]) [Value.scalar (CIL.Value.i32 x✝)]\n            Memory.empty)\n          (header home next)\nzero : ¬x = 0#32\nhomeLoad✝⁵ : loadLocal m (LocalSlot.bytes CIL.LocalKind.word32 home) = Except.ok (Value.scalar (CIL.Value.i32 x))\nframeLeave✝³ :\n  ∀ (exited : Frame),\n    exited.owned = (entry.frame home).owned → MemoryBelow Memory.empty.nextIdentity Memory.empty (leaveFrame exited m)\nhomeLoad✝⁴ : loadLocal m (LocalSlot.bytes CIL.LocalKind.word32 home) = Except.ok (Value.scalar (CIL.Value.i32 x))\nframeLeave✝² :\n  ∀ (exited : Frame),\n    exited.owned = [home.allocation] → MemoryBelow Memory.empty.nextIdentity Memory.empty (leaveFrame exited m)\nstored : Memory\nstoring :\n  storeLocal m (LocalSlot.bytes CIL.LocalKind.word32 home) (Value.scalar (CIL.Value.i32 (x - 1#32))) =\n    Except.ok (LocalSlot.bytes CIL.LocalKind.word32 home, stored)\nstoredFrame :\n  LoopFrame [] Memory.empty stored [CIL.LocalKind.word32] [LocalSlot.bytes CIL.LocalKind.word32 home]\n    (knownLocals [some (CIL.Value.i32 (x - 1#32))])\nstoredBelow : MemoryBelow Memory.empty.nextIdentity m stored\nhomeLoad✝³ : loadLocal m (LocalSlot.bytes CIL.LocalKind.word32 home) = Except.ok (Value.scalar (CIL.Value.i32 x))\nframeLeave✝¹ :\n  ∀ (exited : Frame),\n    exited.owned = (entry.frame home).owned → MemoryBelow Memory.empty.nextIdentity Memory.empty (leaveFrame exited m)\nhomeLoad✝² :\n  loadLocal stored (LocalSlot.bytes CIL.LocalKind.word32 home) = Except.ok (Value.scalar (CIL.Value.i32 (x - 1#32)))\nstoring✝ :\n  storeLocal m (LocalSlot.bytes CIL.LocalKind.word32 home) (Value.scalar (CIL.Value.i32 (x - 1#32))) =\n    Except.ok (LocalSlot.bytes CIL.LocalKind.word32 home, stored)\nhomeLoad✝¹ : loadLocal m (LocalSlot.bytes CIL.LocalKind.word32 home) = Except.ok (Value.scalar (CIL.Value.i32 x))\nframeLeave✝ :\n  ∀ (exited : Frame),\n    exited.owned = [home.allocation] → MemoryBelow Memory.empty.nextIdentity Memory.empty (leaveFrame exited m)\nhomeLoad✝ :\n  loadLocal stored (LocalSlot.bytes CIL.LocalKind.word32 home) = Except.ok (Value.scalar (CIL.Value.i32 (x - 1#32)))\n⊢ True",
       "tactic": null,
       "stopped": null,
       "method": null,
@@ -47,21 +47,21 @@
   "messages": [
     {
       "file": "<proof>",
-      "line": 10,
+      "line": 9,
       "column": 0,
       "severity": "info",
       "text": "'ExampleProof.entry.checked' depends on axioms: [propext, Classical.choice, Quot.sound]"
     },
     {
       "file": "<proof>",
-      "line": 12,
+      "line": 17,
       "column": 0,
       "severity": "info",
-      "text": "'ExampleProof.cutpoint.checked' depends on axioms: [propext]"
+      "text": "'ExampleProof.header.checked' depends on axioms: [propext]"
     },
     {
       "file": "<proof>",
-      "line": 51,
+      "line": 46,
       "column": 0,
       "severity": "info",
       "text": "'ExampleProof.correctness' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]"
