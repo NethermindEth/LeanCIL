@@ -1808,8 +1808,8 @@ partial class Program : IDisposable
 
     /// <summary>
     /// The base library's module artifacts: recorded ones from the validated manifest, which must be the files
-    /// the library was opened with, plus any unrecorded output of a library this process owns, which Lake
-    /// builds into the base from an unrecorded source and must be replayed.
+    /// the library was opened with, plus any unrecorded output, which must be replayed: Lake builds an
+    /// unrecorded source into a library this process owns, and a library read in place may arrive with one.
     /// </summary>
     SortedDictionary<string, string> BaseModuleArtifacts()
     {
