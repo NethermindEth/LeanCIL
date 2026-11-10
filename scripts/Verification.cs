@@ -13,7 +13,8 @@ partial class Program : IDisposable
 #if LEANCIL_TOOL
     static string Root { get; } = Path.Combine(AppContext.BaseDirectory, "verification");
 #else
-    static string Root { get; } = FixtureRoot() ??
+    // Settable so a test can stand a few modules in for the framework; the tool's root is fixed.
+    static string Root { get; set; } = FixtureRoot() ??
         Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Source())!, ".."));
 
     // Only relocated binaries need the producer's source path replaced. Source-built children

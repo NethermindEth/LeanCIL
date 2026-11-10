@@ -413,13 +413,15 @@ the destination. Rebuilding an existing library requires a separate output direc
 missing producer digests, preservation of unrelated destination files, a receipted cache entry
 whose module was rewritten, restored or joined by a file its manifest lacks, and closure entries:
 their key names exactly their modules, a compiled module or source outside the closure rejects
-the entry, an import outside it fails, and one is never accepted as the whole library. It also
-builds and kernel-replays the audit executable's own closure from an empty cache, reuses it,
-refuses an import outside a closure from the compiled import header in three spellings, and
-removes an entry only when no process reads it. The `workspace` suite verifies a first proof
-from an empty cache with CI's settings cleared: an import outside the closure does not verify,
-an unfinished proof reuses the entry, the certificate names the closure's key and modules, the
-same command completes the whole library, and later runs prefer it.
+the entry, an import outside it fails, and one is never accepted as the whole library. With a
+few modules standing in for the framework and CI's settings cleared, it also builds and
+kernel-replays a closure from an empty cache, reuses it, keeps it while a process reads it,
+reports a whole library that cannot be built, completes the whole library, which replaces the
+entry and is preferred, and refuses an import outside a closure from the compiled import header
+in three spellings. The `workspace` suite checks that a full audit, contract imports and a
+package import are never offered a closure entry. Closure verification of a real extraction
+through the CLI, with its `verified.json` fields and exit code, runs in no suite: it needs the
+95 framework modules an extraction imports.
 
 Main push runs publish their validated library even after exact reuse. This keeps the main run
 eligible to donate to later PRs without following a chain of earlier runs. Suite jobs prefer the
