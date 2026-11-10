@@ -125,9 +125,10 @@ internal static class TemplateEmitter
 
     static string EmitTemplates(Template[] templates)
     {
+        var depth = LeanEmitter.RecursionDepth(templates.Max(template => template.Rows[0].Ops.Length));
         var lean = new StringBuilder("import CIL.InstructionEquations\n\n" +
             "/-! Shared bodies for the selected extraction profiles; bindings establish their CIL identity. -/\n\n" +
-            "namespace Templates\nopen CIL\n\nset_option maxRecDepth 4096\n\n");
+            $"namespace Templates\nopen CIL\n\nset_option maxRecDepth {depth}\n\n");
         for (var index = 0; index < templates.Length; index++)
         {
             var template = templates[index];
@@ -142,8 +143,9 @@ internal static class TemplateEmitter
             lean.AppendLine(string.Join(",\n", Enumerable.Range(0, template.Rows[0].Ops.Length)
                 .Select(pc => "  " + Instruction(template, template.Rows, pc))) + "] }");
             lean.AppendLine($"cil_instruction_equations method{index}");
-            for (var pc = 0; pc < template.Rows[0].Ops.Length; pc++)
-                lean.AppendLine($"#print axioms method{index}_instruction{pc}");
+            // The last equation's proof reaches every code suffix, so its axioms include every equation's.
+            if (template.Rows[0].Ops.Length is > 0 and var length)
+                lean.AppendLine($"#print axioms method{index}_instruction{length - 1}");
             lean.AppendLine();
         }
         lean.AppendLine("end Templates");

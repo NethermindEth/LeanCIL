@@ -49,31 +49,30 @@ foreach (var (name, selector, inputs) in new (string, string, int[][])[]
     var folder = Path.Combine(root, name);
     Run(Extract("extract", assembly, "Examples", selector, folder));
     var source = File.ReadAllText(Path.Combine(folder, "Extracted.lean"));
-    var site = Regex.Match(source, @"(?m)^@\[cil_code ↓\] theorem method(\d+)_instruction(\d+) : method\d+\.code\[\d+\]\? = some \(\.memory \(\.spanItem \d\) : Op\) := [^\r\n]*$");
+    var instructions = ExtractedInstructions(source);
+    var site = instructions.FirstOrDefault(instruction =>
+        Regex.IsMatch(instruction.Op, @"\A\.memory \(\.spanItem \d\)\z"));
     var claims = inputs.Select(input =>
     {
         try { return Claim(assembly, name, input, $".ok [{Scalar(runtime.GetMethod(name)!.Invoke(null, [.. input.Cast<object>()])!)}]"); }
-        catch (TargetInvocationException error) when (site.Success)
+        catch (TargetInvocationException error) when (site is not null)
         {
-            return Claim(assembly, name, input, $".error ⟨{site.Groups[1].Value}, {site.Groups[2].Value}, .thrown \"{error.InnerException!.GetType().FullName}\"⟩");
+            return Claim(assembly, name, input, $".error ⟨{site.Method}, {site.Pc}, .thrown \"{error.InnerException!.GetType().FullName}\"⟩");
         }
     }).ToList();
     // The RVA descriptor carries the declared packing Roslyn aligned the table to.
     var packing = name is "Word" or "Count" ? 4 : 8;
     if (!source.Contains($"alignment := {packing} }})", StringComparison.Ordinal))
         throw new InvalidOperationException($"{name}: missing static data alignment {packing}");
-    var folded = Regex.Match(source,
-        @"theorem method(\d+)_instruction\d+ : [^\r\n]*some \(\.nop : Op\)");
-    if (source.Contains("(.nop : Op)", StringComparison.Ordinal) && !folded.Success)
-        throw new InvalidOperationException("Missing instruction theorem for a folded span receiver");
-    var obligation = $"method{folded.Groups[1].Value}_features_validated";
-    var control = folded.Success
+    var folded = instructions.FirstOrDefault(instruction => instruction.Op == ".nop");
+    var obligation = $"method{folded?.Method}_features_validated";
+    var control = folded is not null
         ? CheckedEvidenceControl(source, NarrowEvidence(source, obligation), [obligation], 0) : "";
     Prove(assembly, selector, name + "-Verified", claims,
         () => Console.WriteLine($"PASS {name}: {claims.Count} runtime comparisons"), control);
 
     // The receiver fold is bound by the feature certificate, independently of the instruction lemmas.
-    if (!folded.Success) continue;
+    if (folded is null) continue;
     var forged = Path.Combine(root, name + "-forged.lean");
     File.WriteAllText(forged, NarrowEvidence(source.Replace(".nop", ".localAddr 0"), obligation));
     rejected.Add(forged, $"PASS {name}: forged span receiver rejected by the feature certificate",
@@ -165,12 +164,12 @@ using (var module = ModuleDefinition.ReadModule(assembly))
 }
 Run(Extract("extract", narrowDll, "Examples", "SpanTables::Word(int)", narrowFolder));
 var narrowSource = File.ReadAllText(Path.Combine(narrowFolder, "Extracted.lean"));
-var createSite = Regex.Match(narrowSource,
-    @"theorem method(\d+)_instruction(\d+) : [^\r\n]*some \(\.memory \(\.createSpan 4\) : Op\)");
-if (!createSite.Success || !narrowSource.Contains("alignment := 2 })", StringComparison.Ordinal))
+var createSite = ExtractedInstructions(narrowSource)
+    .FirstOrDefault(instruction => instruction.Op == ".memory (.createSpan 4)");
+if (createSite is null || !narrowSource.Contains("alignment := 2 })", StringComparison.Ordinal))
     throw new InvalidOperationException("Narrow packing did not reach the extracted CreateSpan site");
 Prove(narrowDll, "SpanTables::Word(int)", "Narrow-packing-Verified",
-    [Claim(narrowDll, "Word", [0], $".error ⟨{createSite.Groups[1].Value}, {createSite.Groups[2].Value}, " +
+    [Claim(narrowDll, "Word", [0], $".error ⟨{createSite.Method}, {createSite.Pc}, " +
         $".unsupported \"{misalignedSpan}\"⟩")],
     () => Console.WriteLine("PASS CreateSpan over a narrower packing is unsupported, never a success"));
 

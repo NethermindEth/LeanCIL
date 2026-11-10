@@ -5,6 +5,31 @@ using System.Text.RegularExpressions;
 
 partial class Program
 {
+    /// <summary>One instruction of an extracted method, as its definition in `Extracted.lean` writes it.</summary>
+    sealed record ExtractedInstruction(int Method, int Pc, string Op);
+
+    // `cil_instruction_equations` states each lookup equation from the definition, which lists one op per line.
+    static List<ExtractedInstruction> ExtractedInstructions(string source)
+    {
+        var instructions = new List<ExtractedInstruction>();
+        var lines = source.Split('\n');
+        for (var line = 0; line < lines.Length; line++)
+        {
+            var header = Regex.Match(lines[line], @"\Adef method(\d+) : Method := .* code := \[\r?\z");
+            if (!header.Success) continue;
+            var method = int.Parse(header.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+            // The line that closes the code list ends the definition, whatever follows it.
+            for (var (pc, last) = (0, false); !last && ++line < lines.Length; pc++)
+            {
+                var op = lines[line].Trim();
+                last = op.EndsWith("] }", StringComparison.Ordinal);
+                if (op == "] }") break;
+                instructions.Add(new(method, pc, last ? op[..^3] : op[..^1]));
+            }
+        }
+        return instructions;
+    }
+
     // Keep emitted definitions intact and select one independent validator obligation.
     // Its unchanged form must also be compiled as a positive control by the caller.
     static string NarrowEvidence(string source, string theorem)
