@@ -84,6 +84,7 @@ Their suggestions identify the unresolved checked operation and its memory, loca
 failure records retain the obligation tag and source position. A missing proof is not a proved
 violation. Access evidence alone does not identify initialized contents: after an overlapping
 write use its updated snapshot, or prove the disjointness needed to preserve an old snapshot.
+A snapshot may retain unknown bytes; a successful snapshot copy does not establish initialization.
 
 Import `CIL.Safety.LocalSnapshotSteps` to step through numeric local stores and reloads with
 `cil_checked_steps (snapshots := snapshots) [facts]`. Use it on a checked `run` equality or an

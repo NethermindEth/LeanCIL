@@ -896,6 +896,25 @@ example (contract : MethodContract Nat Nat) (input : Nat) (memory : Memory) :
   refine ?precondition.helper
   cil_loop_advance
 
+-- A missing aggregate snapshot is a content obligation even when it retains unknown bytes.
+/-- "missing":"contentSnapshot","obligation":"postcondition.snapshot" -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (memory : Memory) (home : Reference) :
+    loadSnapshot memory (.address home) (.aggregate 1) =
+      .ok (.snapshot (.aggregate 1) [(0, false)]) := by
+  refine ?postcondition.snapshot
+  cil_loop_advance
+
+-- Byte snapshots retain the exact region in the missing-content diagnosis.
+/-- "missing":"contentSnapshot","obligation":"postcondition.snapshot" -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (memory : Memory) (home : Reference) :
+    readSnapshot memory home 1 1 = .ok [(0, false)] := by
+  refine ?postcondition.snapshot
+  cil_loop_advance
+
 /-- The unresolved checked operation retains the memory, region and requested access mode. -/
 example (memory : Memory) (home : Reference) : True := by
   run_tac Lean.Elab.Tactic.withMainContext do

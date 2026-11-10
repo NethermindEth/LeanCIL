@@ -1,4 +1,4 @@
-import Lean
+import CIL.Safety.SymbolicExecution
 
 /-!
 # The fact a stuck step lacks
@@ -87,7 +87,8 @@ def MissingFact.hint : MissingFact → MessageData
   | .contentSnapshot => m!"a checked read or current content snapshot for this local or region. \
       Readable or writable access alone does not identify initialized contents. After an \
       overlapping write, use the updated snapshot; recover an unchanged snapshot only with \
-      the required disjointness or confinement evidence. The missing fact does not prove \
+      the required disjointness or confinement evidence. A snapshot may retain unknown bytes. \
+      The missing fact does not prove \
       that the value changed or that the read is invalid"
   | .helperPrecondition => m!"the helper's precondition at the call's current memory. \
       Establish its access and content premises separately; a missing proof does not \
@@ -113,9 +114,11 @@ def missingFactMentions : List (MissingFact × List Name) := [
   (.unsafeAdd, [`CIL.Safety.add]),
   (.referenceForm, [`CIL.Safety.form, `CIL.Safety.formValue]),
   (.contentSnapshot, [`CIL.Safety.loadValue, `CIL.Safety.read, `CIL.Safety.loadLocal,
+    `CIL.Safety.loadSnapshot, `CIL.Safety.readSnapshot,
     `CIL.Safety.LocalSnapshots, `CIL.Safety.WordSnapshots, `CIL.Safety.Contents,
     `CIL.Safety.Filled]),
-  (.storeStep, [`CIL.Safety.storeLocal, `CIL.Safety.storeValue, `CIL.Safety.write])]
+  (.storeStep, [`CIL.Safety.storeLocal, `CIL.Safety.storeValue, `CIL.Safety.write,
+    `CIL.Safety.writeSnapshot])]
 
 /-- The kind of fact a stuck step needs, from the residual of that step. -/
 def missingFactOf (residual : Array Expr) : MissingFact :=
@@ -142,21 +145,19 @@ def missingFactHint (residual : Array Expr) : MessageData := Id.run do
       return m!"{fact.hint}. The unresolved operation is{indentExpr operation}"
   return fact.hint
 
--- The lemma and simp set names resolve where the proof runs; this module imports none of them.
 set_option hygiene false in
 open Lean Elab Tactic Meta in
 /-- The step goal `step` rewritten as far as the step equations and `prepared` go: the goals left,
-    or `none` when nothing rewrites it, as when the proof does not import the step equations. -/
+    or `none` when rewriting cannot produce a residual. -/
 def stepResidual (step : MVarId) (prepared : Array Term) : TacticM (Option (Array Expr)) := do
   let saved ← saveState
   try
+    -- Normalization keeps the observer's unknown result open for the missing-fact diagnosis.
     let remaining ← Tactic.run step <| Term.withoutErrToSorry <| withoutRecover <|
       evalTactic (← `(tactic| (
         simp only [cil_instruction_step, cil_step, cil_guard, CIL.Safety.instructionStep,
           $[$prepared:term],*]
-        try simp [cil_guard, cil_checked, CIL.Safety.checkedValue, CIL.Safety.numericValue,
-          CIL.Safety.scalars, CIL.Safety.formValue, CIL.Safety.checkedAt, Except.mapError,
-          Bind.bind, Except.bind, Pure.pure, Except.pure, $[$prepared:term],*])))
+        cil_checked_normalize [$[$prepared:term],*])))
     let goals ← remaining.mapM fun goal => do instantiateMVars (← goal.getType)
     saved.restore
     return some goals.toArray
