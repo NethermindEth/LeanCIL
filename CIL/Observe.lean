@@ -447,22 +447,45 @@ def cilTactic? (stx : Syntax) : Option String :=
     if value.startsWith "cil_" then some value else none
   | _ => none
 
+/-- Whether `stx` is written in the source rather than built by a macro or tactic. -/
+def writtenInSource (stx : Syntax) : Bool :=
+  match stx.getHeadInfo with
+  | .original .. => true
+  | _ => false
+
+/-- The source range of `stx`, when it has one. -/
+def sourceRange? (stx : Syntax) : Option (String.Pos.Raw × String.Pos.Raw) := do
+  let start ← stx.getPos?
+  let stop ← stx.getTailPos?
+  return (start, stop)
+
+/-- Whether `position` lies in the source range of `stx`. -/
+def inSource (stx : Syntax) (position : String.Pos.Raw) : Bool :=
+  (sourceRange? stx).any fun (start, stop) => start ≤ position && position ≤ stop
+
 /-- The LeanCIL tactic `stx` written in the source runs, by its first atom: none for
     syntax a tactic built. -/
 def userTactic? (stx : Syntax) : Option String :=
-  match stx.getHeadInfo with
-  | .original .. => cilTactic? stx
-  | _ => none
+  if writtenInSource stx then cilTactic? stx else none
 
 /-- The tactic nodes of an info tree, in elaboration order. -/
 structure TacticNodes where
   /-- The outermost tactic nodes, each a tactic block. -/
   blocks : Array TacticNode := #[]
-  /-- The LeanCIL tactic nodes written in the source. -/
-  tactics : Array TacticNode := #[]
+  /-- The tactic nodes written in the source. -/
+  written : Array TacticNode := #[]
   /-- Every LeanCIL tactic node, including those another tactic's expansion built. -/
   raisers : Array TacticNode := #[]
   deriving Inhabited
+
+/-- The LeanCIL tactic nodes written in the source. -/
+def TacticNodes.tactics (nodes : TacticNodes) : Array TacticNode :=
+  nodes.written.filter fun node => (cilTactic? node.info.stx).isSome
+
+instance : Append TacticNodes where
+  append first second :=
+    { blocks := first.blocks ++ second.blocks, written := first.written ++ second.written
+      raisers := first.raisers ++ second.raisers }
 
 /-- The tactic nodes of `tree`. -/
 partial def tacticNodes (tree : InfoTree) (context : Option ContextInfo := none)
@@ -475,13 +498,10 @@ partial def tacticNodes (tree : InfoTree) (context : Option ContextInfo := none)
       | .ofTacticInfo tactic, some context =>
         let node := { context, info := tactic }
         ({ blocks := if inBlock then #[] else #[node]
-           tactics := if (userTactic? tactic.stx).isSome then #[node] else #[]
+           written := if writtenInSource tactic.stx then #[node] else #[]
            raisers := if (cilTactic? tactic.stx).isSome then #[node] else #[] }, true)
       | _, _ => ({}, inBlock)
-    children.foldl (init := found) fun found child =>
-      let more := tacticNodes child context inBlock
-      { blocks := found.blocks ++ more.blocks, tactics := found.tactics ++ more.tactics
-        raisers := found.raisers ++ more.raisers }
+    children.foldl (init := found) fun found child => found ++ tacticNodes child context inBlock
 
 /-- Run `action` in `node`'s context after the tactic ran. -/
 def TacticNode.run (node : TacticNode) (action : MetaM α) : IO α :=
@@ -544,13 +564,19 @@ def rerunExpansion (node : TacticNode) : IO (Array TacticNode) := do
 /-- The text of `message`. -/
 def messageText (message : Message) : IO String := message.data.toString
 
-/-- Log a failure record for each error a LeanCIL tactic raised, and for each goal a tactic block
-    leaves unsolved after a LeanCIL tactic left it. -/
-def logRecords (blocks tactics raisers : Array TacticNode) : CommandElabM Unit := do
-  let fileMap ← getFileMap
+/-- The errors logged so far. -/
+def loggedErrors : CommandElabM (Array Message) := do
   let log := (← get).messages
-  let errors := (log.reported.toArray ++ log.unreported.toArray).filter
-    (·.severity == .error)
+  return (log.reported.toArray ++ log.unreported.toArray).filter (·.severity == .error)
+
+/-- Whether `text` is Lean's error for the goals a tactic block leaves open. -/
+def reportsUnsolvedGoals (text : String) : Bool := text.startsWith "unsolved goals"
+
+/-- Log a failure record for each of `errors` a LeanCIL tactic raised, and for each goal a tactic
+    block leaves unsolved after a LeanCIL tactic left it. -/
+def logRecords (blocks tactics raisers : Array TacticNode) (errors : Array Message) :
+    CommandElabM Unit := do
+  let fileMap ← getFileMap
   for error in errors do
     -- A tactic's own error is reported where its syntax starts, so an error inside a term it
     -- elaborates is Lean's; a LeanCIL error names the tactic that raised it.
@@ -579,7 +605,7 @@ def logRecords (blocks tactics raisers : Array TacticNode) : CommandElabM Unit :
     if unsolved.isEmpty then continue
     -- Lean reports the goals a block leaves at the block, so the record names that error.
     let reported ← errors.filterM fun error => do
-      return (← messageText error).startsWith "unsolved goals" &&
+      return reportsUnsolvedGoals (← messageText error) &&
         match block.info.stx.getPos? with
         | some start => fileMap.ofPosition error.pos ≤ start
         | none => false
@@ -632,18 +658,6 @@ structure OpenGoal where
 def sorryTacticKinds : List SyntaxNodeKind :=
   [``Lean.Parser.Tactic.tacticSorry, ``Lean.Parser.Tactic.tacticAdmit]
 
-/-- Whether `stx` is written in the source rather than built by a macro or tactic. -/
-def writtenInSource (stx : Syntax) : Bool :=
-  match stx.getHeadInfo with
-  | .original .. => true
-  | _ => false
-
-/-- The source range of `stx`, when it has one. -/
-def sourceRange? (stx : Syntax) : Option (String.Pos.Raw × String.Pos.Raw) := do
-  let start ← stx.getPos?
-  let stop ← stx.getTailPos?
-  return (start, stop)
-
 /-- The goal of each `sorry` term and tactic written in the source of `tree`, in elaboration
     order: the goal a tactic `sorry` closes, or the type a term `sorry` stands for under the
     hypotheses in scope. Lean may elaborate a `sorry` more than once; each attempt is listed. -/
@@ -674,31 +688,23 @@ def unsolvedGoalTexts (text : String) : List String :=
   ((text.splitOn "\n").drop 1 |> "\n".intercalate).splitOn "\n\n"
     |>.map (·.trimAscii.toString) |>.filter (· != "")
 
-/-- Log, under `goalMarker`, the goal at each `sorry` of `command`, the goal before each tactic
-    that raised an error and each goal a tactic block left unsolved, once each in source order. -/
-def logGoals (command : Syntax) : CommandElabM Unit := do
-  let some (commandStart, commandStop) := sourceRange? command | return
-  let within (position : String.Pos.Raw) : Bool := commandStart ≤ position && position ≤ commandStop
+/-- Log, under `goalMarker`, the goal at each `sorry` of `command`, the goal before each of its
+    `tactics`, written in the source, that raised one of `errors`, and each goal a tactic block
+    left unsolved, once each in source order. -/
+def logGoals (command : Syntax) (tactics : Array TacticNode) (errors : Array Message) :
+    CommandElabM Unit := do
+  let within := inSource command
   let fileMap ← getFileMap
-  let trees := (← get).infoState.trees
   -- Keyed by where each goal starts and its index there; a later attempt replaces an earlier one.
   let mut found : Std.HashMap (Nat × Nat) OpenGoal := {}
-  let mut tactics : Array TacticNode := #[]
-  for tree in trees do
+  for tree in (← get).infoState.trees do
     for goal in ← sorryGoals tree do
       if within goal.start then found := found.insert (goal.start.byteIdx, 0) goal
-    tactics := tactics ++ tree.foldInfo (init := #[]) fun context info nodes =>
-      match info with
-      | .ofTacticInfo tactic =>
-        if writtenInSource tactic.stx then nodes.push { context, info := tactic } else nodes
-      | _ => nodes
-  let log := (← get).messages
-  for error in log.reported.toArray ++ log.unreported.toArray do
-    unless error.severity == .error do continue
+  for error in errors do
     let start := fileMap.ofPosition error.pos
     unless within start do continue
     let text ← messageText error
-    if text.startsWith "unsolved goals" then
+    if reportsUnsolvedGoals text then
       let stop := (error.endPos.map fileMap.ofPosition).getD start
       for goal in unsolvedGoalTexts text, index in List.range (unsolvedGoalTexts text).length do
         found := found.insert (start.byteIdx, index + 1)
@@ -736,22 +742,14 @@ def observer : Linter where
     let recording := cil.diagnostics.get options
     let showingGoals := cil.goals.get options
     unless tracing || recording || showingGoals do return
-    if showingGoals then logGoals command
-    unless tracing || recording do return
-    let mut blocks := #[]
-    let mut tactics := #[]
-    let mut raisers := #[]
-    for tree in (← get).infoState.trees do
-      let found := tacticNodes tree
-      blocks := blocks ++ found.blocks
-      tactics := tactics ++ found.tactics
-      raisers := raisers ++ found.raisers
+    let nodes := (← get).infoState.trees.foldl (init := ({} : TacticNodes)) fun found tree =>
+      found ++ tacticNodes tree
+    let errors ← loggedErrors
     -- Only the nodes of this command: a tree may hold earlier commands' nodes.
-    let inCommand (node : TacticNode) : Bool :=
-      match node.info.stx.getPos?, command.getPos?, command.getTailPos? with
-      | some point, some start, some stop => start ≤ point && point ≤ stop
-      | _, _, _ => false
-    let ownBlocks := blocks.filter inCommand
+    let inCommand (node : TacticNode) : Bool := node.info.stx.getPos?.any (inSource command)
+    if showingGoals then logGoals command (nodes.written.filter inCommand) errors
+    unless tracing || recording do return
+    let ownBlocks := nodes.blocks.filter inCommand
     -- Each node once, as the info trees may hold a node twice; with `live`, only the nodes of the
     -- elaboration Lean kept. A failed tactic's state is rolled back but its error is not, so the
     -- tactics an error may come from are not filtered by liveness.
@@ -767,9 +765,9 @@ def observer : Linter where
         seen := seen.insert key
         found := found.push node
       return found
-    let ownTactics := ran tactics
+    let ownTactics := ran nodes.tactics
     if tracing then logSteps ownBlocks ownTactics
-    if recording then logRecords ownBlocks ownTactics (ran raisers (live := false))
+    if recording then logRecords ownBlocks ownTactics (ran nodes.raisers (live := false)) errors
 
 initialize addLinter observer
 
