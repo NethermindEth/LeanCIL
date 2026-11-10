@@ -18,10 +18,13 @@ partial class Program
             var header = Regex.Match(lines[line], @"\Adef method(\d+) : Method := .* code := \[\r?\z");
             if (!header.Success) continue;
             var method = int.Parse(header.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-            for (var pc = 0; ++line < lines.Length && lines[line].StartsWith("  ", StringComparison.Ordinal); pc++)
+            // The line that closes the code list ends the definition, whatever follows it.
+            for (var (pc, last) = (0, false); !last && ++line < lines.Length; pc++)
             {
                 var op = lines[line].Trim();
-                instructions.Add(new(method, pc, op.EndsWith("] }", StringComparison.Ordinal) ? op[..^3] : op[..^1]));
+                last = op.EndsWith("] }", StringComparison.Ordinal);
+                if (op == "] }") break;
+                instructions.Add(new(method, pc, last ? op[..^3] : op[..^1]));
             }
         }
         return instructions;

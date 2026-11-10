@@ -35,7 +35,8 @@ proved by `rfl`; "written suffixes" writes out the suffix definitions and proofs
 declares; "no equations" omits the command and leaves the certificate.
 
 CPU seconds compare within one session only. The first two CPU columns come from one session and
-the last two from a later one.
+the last two from a later one, which compiled with `-DElab.async=false` and wrote no `.olean`,
+as did the CPU columns for bodies and templates below.
 
 | Instructions | By `rfl`, CPU | Written suffixes, CPU | Written suffixes, later CPU | Command, CPU |
 | ---: | ---: | ---: | ---: | ---: |
