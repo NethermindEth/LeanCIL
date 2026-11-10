@@ -84,7 +84,8 @@ theorem ValidCall.after_confined {memory result : Memory} {inputs outputs : List
   refine ⟨formed, fun input member => ?_, fun output member => ?_⟩
   · obtain ⟨bytes, loaded⟩ := valid.readable input member
     exact ⟨bytes, framed.read_apart valid.wellFormed loaded (apart input member)⟩
-  · exact (framed.access_write _ (valid.output_bound member) _ _).trans (valid.writable output member)
+  · exact (framed.access_write _ (valid.output_bound member) _ _).trans
+      (valid.writable output member)
 
 #print axioms ValidCall.input_bound
 #print axioms ValidCall.output_bound

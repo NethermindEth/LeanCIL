@@ -145,6 +145,19 @@ syntax "cil_fact_simp" Lean.Parser.Tactic.optConfig " [" term,* "]" " [" term,* 
 -- `trace.CIL.factNormalize` names each local fact that `normaliseStepFacts` normalises.
 initialize Lean.registerTraceClass `CIL.factNormalize
 
+open Lean in
+/-- Whether an expression contains a literal operand the checked state normalizer evaluates. -/
+private def hasClosedLiteralOperand (expression : Expr) : Bool :=
+  let numeral (value : Expr) := value.isRawNatLit || value.isAppOfArity ``OfNat.ofNat 3 ||
+    (value.isAppOfArity ``BitVec.ofNat 2 &&
+      (value.appArg!.isRawNatLit || value.appArg!.isAppOfArity ``OfNat.ofNat 3))
+  (expression.find? fun value =>
+    ((value.isAppOfArity ``BitVec.signExtend 3 || value.isAppOfArity ``BitVec.setWidth 3 ||
+      value.isAppOfArity ``BitVec.zeroExtend 3 || value.isAppOfArity ``BitVec.toNat 2) &&
+      numeral value.appArg!) ||
+    (value.isAppOfArity ``HMod.hMod 6 && numeral value.appArg! &&
+      numeral value.appFn!.appArg!)).isSome
+
 open Lean Elab Tactic Meta in
 /-- `proof` and, for a fact over `Fin n` (n <= 64) or over every `Feature`, its instance at
     each value: the profile fields and indexed lemmas are reached only through concrete
@@ -169,7 +182,9 @@ def factInstances (proof : Expr) : TermElabM (Array Expr) := do
   return instances
 
 open Lean Elab Tactic Meta in
-/-- `facts`, followed by new hypotheses restating them in simp-normal form. The goal's subterms
+/-- `facts`, followed by hypotheses in default simp and closed-literal normal forms.
+    The closed-literal form retains symbolic arithmetic around evaluated literal conversions.
+    The goal's subterms
     reach simp-normal form before a hypothesis can rewrite them, so a fact stated in another
     form would never fire; the originals stay in the simp set. Local facts are normalised with
     the supplied non-local facts, and a proof term, or a global theorem about `evaluate` or a
@@ -189,15 +204,25 @@ def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
       for instanceProof in ← factInstances proof do
         let type ← instantiateMVars (← inferType instanceProof)
         let (result, _) ← simp type ctx simprocs
-        if result.expr.consumeMData.isConstOf ``True then continue
-        if result.expr == type && instanceProof == proof then continue
-        let normalisedProof ← match result.proof? with
-          | some eq => mkEqMP eq instanceProof
-          | none => mkExpectedTypeHint instanceProof result.expr
-        let name ← mkFreshUserName base
-        let (_, goal) ← (← (← getMainGoal).assert name result.expr normalisedProof).intro1P
-        replaceMainGoal [goal]
-        names := names.push (mkIdent name)
+        let mut results := #[result]
+        -- Literal conversions in operation facts must match the state without distributing
+        -- symbolic arithmetic, such as the `toNat` of a sum, into the default simp form.
+        if hasClosedLiteralOperand type then
+          let { ctx := literalContext, simprocs := literalProcs, .. } ←
+            mkSimpContext (← `(tactic| simp only [cil_literal])) (eraseLocal := false)
+          let (literalResult, _) ← simp type literalContext literalProcs
+          if literalResult.expr != type && literalResult.expr != result.expr then
+            results := results.push literalResult
+        for result in results do
+          if result.expr.consumeMData.isConstOf ``True then continue
+          if result.expr == type && instanceProof == proof then continue
+          let normalisedProof ← match result.proof? with
+            | some eq => mkEqMP eq instanceProof
+            | none => mkExpectedTypeHint instanceProof result.expr
+          let name ← mkFreshUserName base
+          let (_, goal) ← (← (← getMainGoal).assert name result.expr normalisedProof).intro1P
+          replaceMainGoal [goal]
+          names := names.push (mkIdent name)
       return names
     if !locals.isEmpty then
       -- `cil_step` reduces a pushed `evaluate` and a method's profile projection, so facts
@@ -517,15 +542,7 @@ elab "cil_literal_operands" : tactic => do
   -- A step that closed its goal leaves nothing to normalise.
   if (← getGoals).isEmpty then return
   withMainContext do
-  let numeral (e : Expr) : Bool := e.isRawNatLit || e.isAppOfArity ``OfNat.ofNat 3 ||
-    (e.isAppOfArity ``BitVec.ofNat 2 &&
-      (e.appArg!.isRawNatLit || e.appArg!.isAppOfArity ``OfNat.ofNat 3))
-  let closed (e : Expr) : Bool :=
-    ((e.isAppOfArity ``BitVec.signExtend 3 || e.isAppOfArity ``BitVec.setWidth 3 ||
-      e.isAppOfArity ``BitVec.zeroExtend 3 || e.isAppOfArity ``BitVec.toNat 2) &&
-      numeral e.appArg!) ||
-    (e.isAppOfArity ``HMod.hMod 6 && numeral e.appArg! && numeral e.appFn!.appArg!)
-  if ((← instantiateMVars (← getMainTarget)).find? closed).isSome then
+  if hasClosedLiteralOperand (← instantiateMVars (← getMainTarget)) then
     evalTactic (← `(tactic| try simp only [cil_literal]))
 
 /-- Normalises the literal `take`, `drop`, `reverse` and `++` a step leaves on the stack and

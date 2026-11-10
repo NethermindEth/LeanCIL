@@ -118,4 +118,23 @@ theorem read_requires_matching_evidence {memory other after : Memory}
   cil_checked_step [loaded]
 #print axioms read_requires_matching_evidence
 
+/-- Literal sign extension in a field-write fact preserves the surrounding symbolic sum. -/
+theorem field_store_literal_conversion (left right : CIL.W64)
+    (memory other final : Memory) (reference elsewhere : Reference)
+    (added : add memory reference 1 0#64 = .ok reference)
+    (_wrongMemory : write other reference
+      (numberBytes (left + right + (1#32).signExtend 64).toNat 8) 1 = .ok final)
+    (_wrongReference : write memory elsewhere
+      (numberBytes (left + right + (1#32).signExtend 64).toNat 8) 1 = .ok final)
+    (written : write memory reference
+      (numberBytes (left + right + (1#32).signExtend 64).toNat 8) 1 = .ok final)
+    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) :
+    step body (.setFieldAt 0 8) pc args frame
+      [.scalar (.i64 (left + right + 1#64)), .reference (.address reference)] memory =
+      .ok (.next (pc + 1) [] frame final) := by
+  fail_if_success cil_checked_step [added, _wrongMemory]
+  fail_if_success cil_checked_step [added, _wrongReference]
+  cil_checked_step [added, written]
+#print axioms field_store_literal_conversion
+
 end Tests.OperationFactAdapters
