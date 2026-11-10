@@ -79,6 +79,12 @@ interface for initialized numeric frames. Use the bundle's `writable` projection
 snapshot APIs. Plain `WritableHomes` also permits skipped slots, so its `home_at` requires
 separate evidence that the requested slot has a byte home.
 
+Missing-fact diagnostics distinguish `authority`, `contentSnapshot` and `helperPrecondition`.
+Their suggestions identify the unresolved checked operation and its memory, local or region;
+failure records retain the obligation tag and source position. A missing proof is not a proved
+violation. Access evidence alone does not identify initialized contents: after an overlapping
+write use its updated snapshot, or prove the disjointness needed to preserve an old snapshot.
+
 Import `CIL.Safety.LocalSnapshotSteps` to step through numeric local stores and reloads with
 `cil_checked_steps (snapshots := snapshots) [facts]`. Use it on a checked `run` equality or an
 existential result such as `∃ after, run ... = .ok (after, result)`. The local context must justify

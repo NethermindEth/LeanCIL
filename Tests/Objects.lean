@@ -383,4 +383,53 @@ theorem self_linked_no_segment {field : ReferenceField} {linked : CIL.Safety.Mem
     exact shorter next
 #print axioms self_linked_no_segment
 
+/-- A reference load followed by a word load through the object it produced. -/
+@[cil_code] def linkedReading : CIL.Method :=
+  { returnsValue := true, locals := [], code := [.arg 0,
+      .memory (.objectReferenceField account.identity 8),
+      .memory (.objectField account.identity 0 8 false), .ret] }
+
+/-- The linked-object reader alone. -/
+@[cil_code] def linkedProgram : CIL.Program := [linkedReading]
+
+/-- The checked reference load makes its target's field evidence reachable even when the
+    goal does not name the target or its value before stepping. -/
+theorem loaded_reference_evidence (memory : CIL.Safety.Memory) (source target : Reference)
+    (frame : Frame)
+    (link : (ReferenceField.mk account.identity 8).Readable memory source)
+    (held : (ReferenceField.mk account.identity 8).of memory source = .address target)
+    (value : (WordField.mk account.identity 0 : WordField 8).Readable memory target) :
+    ∃ result, run linkedProgram 20 0 0 [.object (.address source)] frame [] memory =
+      .ok (leaveFrame frame memory, [result]) := by
+  refine ⟨?_, ?_⟩
+  case refine_2 => cil_checked_steps [link.facts held value.live]
+#print axioms loaded_reference_evidence
+
+/-- Named checked loads also expose their produced object's evidence, without collecting
+    a field of an unrelated object or a field stated at a different memory. -/
+theorem named_reference_load_evidence (memory otherMemory : CIL.Safety.Memory)
+    (source target unrelated : Reference) (frame : Frame)
+    (link : (ReferenceField.mk account.identity 8).Readable memory source)
+    (held : (ReferenceField.mk account.identity 8).of memory source = .address target)
+    (value : (WordField.mk account.identity 0 : WordField 8).Readable memory target)
+    (irrelevant : (WordField.mk account.identity 0 : WordField 8).Readable memory unrelated)
+    (stale : (WordField.mk account.identity 0 : WordField 8).Readable otherMemory target) :
+    ∃ result, run linkedProgram 20 0 0 [.object (.address source)] frame [] memory =
+      .ok (leaveFrame frame memory, [result]) := by
+  have loaded := link.load_live held value.live
+  refine ⟨?_, ?_⟩
+  case refine_2 =>
+    run_tac Lean.Elab.Tactic.withMainContext do
+      let gathered ← gatherEvidenceFacts #[]
+      let unrelated ← Lean.Elab.Tactic.getFVarId (Lean.mkIdent `unrelated)
+      let otherMemory ← Lean.Elab.Tactic.getFVarId (Lean.mkIdent `otherMemory)
+      for fact in gathered do
+        Lean.Elab.Tactic.withMainContext do
+          let proof ← Lean.Elab.Term.elabTerm fact none
+          let type ← Lean.Meta.inferType proof
+          if type.hasAnyFVar (fun id => id == unrelated || id == otherMemory) then
+            throwError "Unreachable object evidence entered the step facts"
+    cil_checked_steps
+#print axioms named_reference_load_evidence
+
 end Tests.Objects

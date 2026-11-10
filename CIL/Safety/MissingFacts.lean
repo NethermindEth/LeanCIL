@@ -32,8 +32,12 @@ inductive MissingFact where
   | unsafeAdd
   /-- That a reference forms. -/
   | referenceForm
-  /-- What a load reads. -/
-  | load
+  /-- The checked access or permission required at this memory. -/
+  | authority
+  /-- A checked value or initialized-content snapshot at this memory. -/
+  | contentSnapshot
+  /-- The premise of a checked helper contract. -/
+  | helperPrecondition
   /-- The step equation of a store. -/
   | storeStep
   /-- A local's frame fact, or a store's step equation, when the residual names neither. -/
@@ -49,7 +53,9 @@ def MissingFact.name : MissingFact → String
   | .objectSlot => "objectSlot"
   | .unsafeAdd => "unsafeAdd"
   | .referenceForm => "referenceForm"
-  | .load => "load"
+  | .authority => "authority"
+  | .contentSnapshot => "contentSnapshot"
+  | .helperPrecondition => "helperPrecondition"
   | .storeStep => "storeStep"
   | .frameOrStore => "frameOrStore"
 
@@ -75,8 +81,17 @@ def MissingFact.hint : MissingFact → MessageData
       this memory or the caller's, such as `Writable.add_int`"
   | .referenceForm => m!"that the reference forms: `form memory reference = .ok reference`, or \
       an `access` or `add` fact it follows from, at this memory or the caller's"
-  | .load => m!"what the load reads: a `loadValue` fact at this memory, such as from \
-      `(span.within wellFormed frame).head`"
+  | .authority => m!"checked access at this memory, including the required permission, bounds \
+      and alignment. A missing proof does not establish that access is forbidden; derive it \
+      from `ValidCall`, the frame's writable homes or a preserved access fact"
+  | .contentSnapshot => m!"a checked read or current content snapshot for this local or region. \
+      Readable or writable access alone does not identify initialized contents. After an \
+      overlapping write, use the updated snapshot; recover an unchanged snapshot only with \
+      the required disjointness or confinement evidence. The missing fact does not prove \
+      that the value changed or that the read is invalid"
+  | .helperPrecondition => m!"the helper's precondition at the call's current memory. \
+      Establish its access and content premises separately; a missing proof does not \
+      establish that the helper's precondition is false"
   | .storeStep => m!"the step equation of a store with this stack"
   | .frameOrStore => m!"a `LoopFrame` at this memory for a local, or the step equation of a \
       store with this stack"
@@ -86,6 +101,9 @@ def MissingFact.hint : MissingFact → MessageData
     under it, so the object kinds come first. A name here is checked against the environment
     by `Tests.LoopDiagnostics`. -/
 def missingFactMentions : List (MissingFact × List Name) := [
+  (.helperPrecondition, [`CIL.Safety.MethodContract.pre, `CIL.Safety.ValidCall]),
+  (.authority, [`CIL.Safety.access, `CIL.Safety.permitted, `CIL.Safety.Writable,
+    `CIL.Safety.WritableHomes, `CIL.Safety.CompleteWritableHomes]),
   (.spanValidity, [`CIL.Safety.SpanView.validate]),
   (.spanSlice, [`CIL.Safety.SpanView.slice]),
   (.spanElement, [`CIL.Safety.SpanView.element]),
@@ -94,7 +112,9 @@ def missingFactMentions : List (MissingFact × List Name) := [
   (.objectSlot, [`CIL.Safety.loadSlot, `CIL.Safety.storeSlot]),
   (.unsafeAdd, [`CIL.Safety.add]),
   (.referenceForm, [`CIL.Safety.form, `CIL.Safety.formValue]),
-  (.load, [`CIL.Safety.loadValue, `CIL.Safety.read]),
+  (.contentSnapshot, [`CIL.Safety.loadValue, `CIL.Safety.read, `CIL.Safety.loadLocal,
+    `CIL.Safety.LocalSnapshots, `CIL.Safety.WordSnapshots, `CIL.Safety.Contents,
+    `CIL.Safety.Filled]),
   (.storeStep, [`CIL.Safety.storeLocal, `CIL.Safety.storeValue, `CIL.Safety.write])]
 
 /-- The kind of fact a stuck step needs, from the residual of that step. -/
@@ -108,6 +128,19 @@ def missingFactOf (residual : Array Expr) : MissingFact :=
   else match missingFactMentions.find? (·.2.any mentions) with
     | some (fact, _) => fact
     | none => .frameOrStore
+
+/-- A missing fact's explanation with the unresolved checked operation, which retains its
+    memory, local or region arguments rather than inferring that any check has failed. -/
+def missingFactHint (residual : Array Expr) : MessageData := Id.run do
+  let fact := missingFactOf residual
+  let contextual := ["authority", "contentSnapshot", "helperPrecondition"].contains fact.name
+  unless contextual do return fact.hint
+  let some (_, names) := missingFactMentions.find? (·.1.name == fact.name) | return fact.hint
+  for goal in residual do
+    if let some operation := goal.find? fun term =>
+        term.isApp && term.getAppFn.constName?.any names.contains then
+      return m!"{fact.hint}. The unresolved operation is{indentExpr operation}"
+  return fact.hint
 
 -- The lemma and simp set names resolve where the proof runs; this module imports none of them.
 set_option hygiene false in

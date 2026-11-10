@@ -266,7 +266,7 @@ def LoopFacts.readBy (facts : LoopFacts) (op : Lean.Name) (references : Bool) :
 
 /-- A hint naming the fact a stuck step needs, from the residual of that step. -/
 def loopMissingHint (residual : Array Lean.Expr) : Lean.MetaM Lean.MessageData :=
-  return (missingFactOf residual).hint
+  return missingFactHint residual
 
 open Lean Elab Tactic Meta in
 /-- Fail, as `tactic`, naming why the loop goal cannot be stepped: an undecided branch, an

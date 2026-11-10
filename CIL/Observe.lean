@@ -186,7 +186,7 @@ def analyze (tactic : String) (goal : MVarId) (handed : Option MVarId) (error : 
           ("missing", "the goal is a side condition: the residual is the goal itself")
         return { record with unknown }
       | fact => return { record with
-          missing := fact.name, suggestions := #[m!"supply {fact.hint}"] }
+          missing := fact.name, suggestions := #[m!"supply {missingFactHint #[type]}"] }
   let method ← natLiteral? stepping.method
   let record := { base with method, reached := stepping.parts }
   let entered := "the goal invokes the method; no instruction of it has run"
@@ -253,7 +253,7 @@ def analyze (tactic : String) (goal : MVarId) (handed : Option MVarId) (error : 
   let missing := missingFactOf residual
   return { record with
     missing := missing.name, residual,
-    suggestions := #[m!"supply {missing.hint}"] }
+    suggestions := #[m!"supply {missingFactHint residual}"] }
 
 /-! ## The step trace -/
 
