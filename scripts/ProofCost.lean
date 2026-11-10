@@ -156,6 +156,10 @@ def measure (moduleName : Name) (sourcePath : String) :
   let inputContext := Parser.mkInputContext text sourcePath
   let (header, parserState, headerMessages) ← Parser.parseHeader inputContext
   let (headerEnv, messages) ← processHeader header singleThreaded headerMessages inputContext
+  if messages.hasErrors then
+    for message in messages.toList do
+      if message.severity == .error then IO.eprintln (← message.toString)
+    return (#[], headerEnv, true)
   let env := headerEnv.setMainModule moduleName
   let context : Frontend.Context := { inputCtx := inputContext }
   let commandState := Command.mkState env messages singleThreaded

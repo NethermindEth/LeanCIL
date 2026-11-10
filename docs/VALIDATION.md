@@ -34,6 +34,8 @@ Omit `--suite` to run everything; the [suite table](#suites) lists each name.
 `lake build` builds only `CIL`. Changes under `CIL/` require building every library target in
 `lakefile.toml` before pushing. C# changes require analyzer validation, including changed
 file-based tests. Any `sorryAx`, unexpected diagnostic or failed proof is a failure.
+Proof-cost measurement stops on import errors before elaborating diagnostic assertions; a module
+with missing imports produces no cost report or compiled output.
 
 ## Suites
 
