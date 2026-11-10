@@ -43,69 +43,60 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
   have sourceForm := access_reference_valid _ _ _ _ _ (read_access readable)
   have destinationForm := access_reference_valid _ _ _ _ _ writable
   have sourceEnteredForm := access_reference_valid _ _ _ _ _ (read_access sourceEntered)
-  have destinationEnteredForm := access_reference_valid _ _ _ _ _ destinationEntered
   have middleForm := access_reference_valid _ _ _ _ _ middleWritable
-  dsimp only [TypedImportInterface.copy, MethodContract.Returns]
-  apply WP.adequate.mpr
-  refine invoke_exists_of_run found
-    (by simp [checkedValue, formValue, checkedAt, sourceForm, destinationForm,
-      Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]) setup ?_
-  refine run_next_exists _ found (by rfl : Extracted.method0.code[0]? = some (.arg 0))
-    (by cil_checked_step [checkedValue, formValue, checkedAt, sourceEnteredForm,
-      Except.mapError]) ?_
-  refine run_next_exists _ found (by rfl : Extracted.method0.code[1]? = some (.localAddr 0))
-    (by simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
-      Bool.false_or, Bool.false_eq_true, ↓reduceIte, frame, List.getElem?_cons_zero,
-      localAddress, formValue, checkedAt, middleForm, Except.mapError, Bind.bind, Except.bind,
-      Pure.pure, Except.pure]; rfl) ?_
-  refine run_call_of_contract_formed holds (source, middle, value) found
-    (by rfl : Extracted.method0.code[2]? = some (.call 1 2))
-    (by cil_checked_step [formValue, sourceEnteredForm, middleForm,
-      TypedImportInterface.copy, Except.mapError]) rfl
-    ⟨enteredFormed, sourceEntered, middleWritable⟩ enteredFormed ?_
-  intro first _ firstCall firstKept
-  have firstFormed := firstKept.formed
-  have firstFramed := firstCall.framed
-  have copiedFirst := firstCall.post
-  have destinationFirst : access first destination 8 1 true = .ok () :=
+  obtain ⟨called, output, call⟩ := holds.result (source, middle, value)
+    ⟨enteredFormed, sourceEntered, middleWritable⟩
+  have firstFormed : called.WellFormed :=
+    call.invoked.elim fun _ invoked =>
+      invoke_preserves_wellFormed _ _ _ _ _ _ _ enteredFormed invoked
+  have firstFramed := call.framed
+  have copiedFirst := call.post
+  have destinationFirst : access called destination 8 1 true = .ok () :=
     (firstFramed.access_write destination (Nat.lt_of_lt_of_le destinationOld owned.1.next)
       8 1).trans destinationEntered
   have middleFirstForm := access_reference_valid _ _ _ _ _ (read_access copiedFirst)
   have destinationFirstForm := access_reference_valid _ _ _ _ _ destinationFirst
-  refine run_next_exists _ found (by rfl : Extracted.method0.code[3]? = some (.localAddr 0))
-    (by simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
-      Bool.false_or, Bool.false_eq_true, ↓reduceIte, List.getElem?_cons_zero,
-      localAddress, formValue, checkedAt, middleFirstForm, Except.mapError, Bind.bind,
-      Except.bind, Pure.pure, Except.pure]; rfl) ?_
-  refine run_next_exists _ found (by rfl : Extracted.method0.code[4]? = some (.arg 1))
-    (by cil_checked_step [checkedValue, formValue, checkedAt, destinationFirstForm,
-      Except.mapError]) ?_
-  refine run_call_of_contract_formed holds (middle, destination, value) found
-    (by rfl : Extracted.method0.code[5]? = some (.call 1 2))
-    (by cil_checked_step [formValue, middleFirstForm, destinationFirstForm,
-      TypedImportInterface.copy, Except.mapError]) rfl
-    ⟨firstFormed, copiedFirst, destinationFirst⟩ firstFormed ?_
-  intro last _ lastCall _
-  have lastFramed := lastCall.framed
-  have copiedLast := lastCall.post
+  obtain ⟨called_1, output_1, call_1⟩ := holds.result (middle, destination, value)
+    ⟨firstFormed, copiedFirst, destinationFirst⟩
+  have lastFramed := call_1.framed
+  have copiedLast := call_1.post
   have exitFresh : ∀ id ∈ frame.owned, memory.nextIdentity ≤ id :=
     fun id member => (owned.2 id member).1
-  have exitBelow := leaveFrame_preserves_memory_below frame last _ exitFresh
+  have exitBelow := leaveFrame_preserves_memory_below frame called_1 _ exitFresh
   -- The local's write is fresh frame storage; the destination's is the caller's footprint.
-  have framed : Confined [(middle, 8), (destination, 8)] entered last :=
+  have framed : Confined [(middle, 8), (destination, 8)] entered called_1 :=
     (firstFramed.widen (by simp [TypedImportInterface.copy])).trans
       (lastFramed.widen (by simp [TypedImportInterface.copy]))
   have confined := Confined.across_frame (footprint := [(destination, 8)]) entryBelow
-    owned.1.next framed exitBelow (Nat.le_of_eq (leaveFrame_nextIdentity frame last).symm)
+    owned.1.next framed exitBelow (Nat.le_of_eq (leaveFrame_nextIdentity frame called_1).symm)
     (by
       intro entry member
       simp only [List.mem_cons, List.not_mem_nil, or_false] at member
       rcases member with same | same <;> subst same
       · exact .inl middleFresh
       · exact .inr ⟨_, List.mem_singleton_self _, Within.refl _⟩)
-  refine run_return_exists found (by rfl : Extracted.method0.code[6]? = some (.ret none))
-    (by cil_checked_step []) (by rfl) ?_
-  exact ⟨confined, (), rfl, (exitBelow.read _ destinationOld 8 1).trans copiedLast⟩
-
+  refine MethodContract.Holds.intro (c := TypedImportInterface.copy)
+    (input := (source, destination, value)) (leaveFrame frame called_1) () ?_ confined
+    ((exitBelow.read _ destinationOld 8 1).trans copiedLast)
+  apply (WP.exact_iff (execution := Execution _)).mp
+  apply WP.enter found
+    (by simp [checkedValue, formValue, checkedAt, sourceForm, destinationForm,
+      Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]) setup
+  apply WP.step found (by rfl) (by cil_checked_step [sourceEnteredForm])
+  apply WP.step found (by rfl) (by cil_checked_step [frame, middleForm])
+  apply WP.call found (by rfl)
+    (by cil_checked_step [frame, sourceEnteredForm, middleForm, TypedImportInterface.copy])
+    ((WP.exact_iff (execution := Execution _)).mpr call.invoked)
+  intro final values same
+  obtain ⟨rfl, rfl⟩ := Prod.mk.inj same
+  apply WP.step found (by rfl) (by cil_checked_step [frame, middleFirstForm])
+  apply WP.step found (by rfl) (by cil_checked_step [destinationFirstForm])
+  apply WP.call found (by rfl)
+    (by cil_checked_step [frame, middleFirstForm, destinationFirstForm, TypedImportInterface.copy])
+    ((WP.exact_iff (execution := Execution _)).mpr call_1.invoked)
+  intro final values same
+  obtain ⟨rfl, rfl⟩ := Prod.mk.inj same
+  apply WP.returned found (by rfl) (by cil_checked_step []) (by rfl)
+  rfl
 #print axioms correctness
 end TypedChainCaller

@@ -91,7 +91,7 @@ def echoContract : MethodContract CIL.W64 CIL.W64 where
 /-- `Echo` meets its contract, stepped through the checked interpreter. -/
 theorem echo_holds : echoContract.Holds program echoMethod := by
   rintro v memory -
-  refine MethodContract.Holds.intro memory v ⟨echoFuel, ?_⟩ (Confined.refl _ memory) rfl
+  refine MethodContract.Holds.intro memory v ?_ (Confined.refl _ memory) rfl
   cil_checked_steps []
 
 /-- The precondition supplies the entry premises, so the proved contract is certified. -/
@@ -143,7 +143,7 @@ def echoAnywhere : MethodContract CIL.W64 CIL.W64 :=
 /-- `Echo` meets its contract from any memory. -/
 theorem echo_anywhere : echoAnywhere.Holds program echoMethod := by
   rintro v memory -
-  refine MethodContract.Holds.intro memory v ⟨echoFuel, ?_⟩ (Confined.refl _ memory) rfl
+  refine MethodContract.Holds.intro memory v ?_ (Confined.refl _ memory) rfl
   cil_checked_steps []
 
 /-- Names the frame `Echo(v)` enters from `memory` and a fuel at which that frame's run

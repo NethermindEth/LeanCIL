@@ -12,18 +12,13 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
   have found : linked[0]? = some Extracted.method0 := links.found Extracted.lookup0
   have holds : FamilyContract.supported.Holds linked 1 := imported
   dsimp only [FamilyContract.supported, MethodContract.Returns]
-  apply WP.adequate.mpr
-  refine invoke_exists_of_run found (by rfl) (by rfl) ?_
-  refine run_call_of_contract holds input found
-    (by rfl : Extracted.method0.code[0]? = some (.call 1 0)) (by cil_checked_step []) rfl formed ?_
-  intro final values call
-  have result := call.post
+  apply WP.enter found (by rfl) (by rfl)
+  apply WP.call found (by rfl) (by cil_checked_step []) (holds input memory formed)
+  rintro final values ⟨framed, output, rfl, result⟩
   change values = [.scalar (.i32 1)] at result
   subst values
-  refine run_return_exists found
-    (by rfl : Extracted.method0.code[1]? = some (.ret (some .unsigned8)))
-    (by cil_checked_step []) (by rfl) ?_
-  exact ⟨call.framed, _, rfl, rfl⟩
+  apply WP.returned found (by rfl) (by cil_checked_step []) (by rfl)
+  exact ⟨framed, _, rfl, rfl⟩
 #print axioms correctness
 
 end ExampleProof
