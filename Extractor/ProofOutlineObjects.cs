@@ -1568,7 +1568,8 @@ internal static partial class ProofOutline
             lean.Line($"{indent}have below1 := enter.entryMemory.kept");
             Add("setup");
             Add(frame.Entry + ".frame");
-            lean.Line($"{indent}refine invoke_exists_of_run (by cil_lookup [])");
+            if (returns is null) lean.Line($"{indent}apply WP.exists_execution");
+            lean.Line($"{indent}refine WP.enter (by cil_lookup [])");
             lean.Wrapped($"{indent}  (by cil_checked_side", FactList([.. frame.Formed, .. facts]), ") setup ?_");
             stored.Add(entered);
         }
