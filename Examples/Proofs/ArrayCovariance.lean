@@ -47,7 +47,9 @@ theorem correctness (memory : Memory) (shapes target : Reference) (length : Nat)
   have storable := ReferenceArray.storableIn_of_lineage (element := circleType) found kind rfl
     rfl (by decide)
   obtain ⟨located, checked, stored, framed, held⟩ := owned.store live storable
-  refine ⟨CIL.executionBound Extracted.program put, _, ?_, framed, held⟩
+  rw [exists_comm]
+  simp only [exists_and_right]
+  refine ⟨_, ?_, framed, held⟩
   cil_checked_steps [located, checked, stored]
 
 #print axioms correctness
@@ -60,7 +62,9 @@ theorem stores_null (memory : Memory) (shapes : Reference) (length : Nat) (index
         .ok (final, []) ∧
       ReferenceArray.Holds final shapes circleType length index.toNat .null := by
   obtain ⟨located, checked, stored, -, held⟩ := owned.store_null
-  refine ⟨CIL.executionBound Extracted.program put, _, ?_, held⟩
+  rw [exists_comm]
+  simp only [exists_and_right]
+  refine ⟨_, ?_, held⟩
   cil_checked_steps [located, checked, stored]
 
 #print axioms stores_null

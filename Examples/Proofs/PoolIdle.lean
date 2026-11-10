@@ -73,7 +73,7 @@ theorem idle_holds : idleContract.Holds Extracted.program isIdle := by
   have enteredChain :=
     chain.after_below enter.entryMemory.kept (Nat.le_refl _) enter.entryMemory.grown
   rw [← enteredFree.2] at enteredChain
-  obtain ⟨fuel, final, invoked, framed⟩ : ∃ fuel final,
+  have execution : ∃ fuel final,
       invoke Extracted.program fuel isIdle [.object (.address pool), .object item] memory =
         .ok (final, [.scalar (.i32 (if listed item nodes then 1 else 0))]) ∧
       Confined [] memory final := by
@@ -113,7 +113,10 @@ theorem idle_holds : idleContract.Holds Extracted.program isIdle := by
           rw [← answer]
           simp [listed, hit]
         case measure => simp
-  exact ⟨fuel, final, _, invoked, framed, listed item nodes, rfl, rfl⟩
+  rw [exists_comm] at execution
+  simp only [exists_and_right] at execution
+  obtain ⟨final, invoked, framed⟩ := execution
+  exact MethodContract.Holds.intro final (listed item nodes) invoked framed rfl
 
 #print axioms idle_holds
 

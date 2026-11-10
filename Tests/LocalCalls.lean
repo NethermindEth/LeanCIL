@@ -59,12 +59,15 @@ theorem multiply_updates_mixed_frame {program : CIL.Program} {callee : Nat}
       [.scalar (.i64 left), .scalar (.i64 right), .reference (.address low)] current))
       (fun (final, values) => values = [.scalar (.i64 (CIL.WideMultiply.high64 left right))] ∧
         LoopFrame [] caller final kinds slots (rememberLocal known 0 (.i64 (left * right)))) := by
-  have execution := multiply_holds found ⟨left, right, low⟩ current
-    (context.homes.writable_at slot)
-  obtain ⟨fuel, ⟨final, values⟩, invoked, confined, high, encoded, correct⟩ := execution
+  have execution := (multiply_holds found ⟨left, right, low⟩ current
+    (context.homes.writable_at slot)).frame
+    (assertion := fun result => result.1.WellFormed) (initial := (current, []))
+    context.wellFormed (fun _ _ invoked formed =>
+      invoke_preserves_wellFormed _ _ _ _ _ _ _ formed invoked)
+  apply execution.consequence
+  rintro ⟨final, values⟩ ⟨⟨confined, high, encoded, correct⟩, formed⟩
   obtain ⟨rfl, loaded⟩ := correct
-  have formed := invoke_preserves_wellFormed _ _ _ _ _ _ _ context.wellFormed invoked
-  exact ⟨fuel, (final, values), invoked, encoded,
+  exact ⟨encoded,
     context.after_local_write 0 .word64 low (.i64 (left * right)) (left * right).toNat
       slot confined formed rfl loaded⟩
 

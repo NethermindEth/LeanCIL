@@ -33,7 +33,9 @@ theorem correctness (memory : Memory) (bucket items : Reference) (length : Nat)
       Confined [Bucket.Items.entry bucket] memory final ∧
       Bucket.Items.Holds final bucket (.address items) := by
   obtain ⟨stored, framed, held⟩ := owned.store live.object
-  refine ⟨CIL.executionBound Extracted.program refill, _, ?_, framed, held⟩
+  rw [exists_comm]
+  simp only [exists_and_right]
+  refine ⟨_, ?_, framed, held⟩
   cil_checked_steps [stored]
 
 #print axioms correctness

@@ -103,7 +103,9 @@ theorem rent_reuses (memory : Memory) (pool head : Reference) (wellFormed : memo
       (Nat.le_of_eq (leaveFrame_nextIdentity _ _).symm)
   have past : memory.nextIdentity ≤ (leaveFrame (entry.frame memory home) marked).nextIdentity :=
     changed.grows
-  refine ⟨CIL.executionBound Extracted.program rent, _, ?_, changed, ?_, ?_, ?_, ?_⟩
+  rw [exists_comm]
+  simp only [exists_and_right]
+  refine ⟨_, ?_, changed, ?_, ?_, ?_, ?_⟩
   · have headMarked := rented3.live.after_confined markFramed
     -- The returned head is older than the frame's home, so leaving the frame keeps it.
     have headKept : head.allocation ≠ home.allocation :=
@@ -165,10 +167,14 @@ theorem rent_reuses_keeps_live (memory : Memory) (pool head : Reference)
         .ok (final, [.object (.address head)]) ∧
       ItemPool._live.Readable final pool ∧
       ItemPool._live.of final pool = ItemPool._live.of memory pool := by
-  obtain ⟨fuel, final, ran, changed, -⟩ :=
-    rent_reuses memory pool head wellFormed free heldFree idle link links rented
+  have execution := rent_reuses memory pool head wellFormed free heldFree idle link links rented
+  rw [exists_comm] at execution
+  simp only [exists_and_right] at execution
+  obtain ⟨final, ran, changed, -⟩ := execution
   have distinct := pool_ne_item consistent live rented.toReadable
-  refine ⟨fuel, final, ran, live.frame changed fun entry member => ?_⟩
+  rw [exists_comm]
+  simp only [exists_and_right]
+  refine ⟨final, ran, live.frame changed fun entry member => ?_⟩
   simp only [reuseFootprint, List.mem_cons, List.not_mem_nil, or_false] at member
   rcases member with rfl | rfl | rfl | rfl <;>
     first
@@ -317,8 +323,11 @@ theorem rent_creates (memory : Memory) (pool : Reference) (wellFormed : memory.W
       (by simpa [entry.frame] using enter.numeric1.fresh)
   have past : memory.nextIdentity ≤
       (leaveFrame (entry.frame memory home) marked).nextIdentity := changed.grows
-  refine ⟨CIL.executionBound Extracted.program rent, leaveFrame (entry.frame memory home) marked,
-    ⟨numbered.nextIdentity, 0⟩, ?_, young,
+  rw [exists_comm]
+  refine ⟨leaveFrame (entry.frame memory home) marked, ?_⟩
+  rw [exists_comm]
+  simp only [exists_and_right]
+  refine ⟨⟨numbered.nextIdentity, 0⟩, ?_, young,
     changed.forget_fresh fun entry member => by
       simp only [itemFootprint, List.mem_cons, List.not_mem_nil, or_false] at member
       rcases member with rfl | rfl | rfl <;> exact young, ?_, ?_, ?_, ?_, ?_, ?_⟩

@@ -85,7 +85,9 @@ theorem correctness (memory : Memory) (formed : memory.WellFormed)
     (Or.inr (Or.inl (by simp)))
   have idLoaded := load_word64_of_read idKept
   have radiusLoaded := load_word64_of_read radiusRead
-  refine ⟨CIL.executionBound Extracted.program describe, afterRadius, ?_, ?_⟩
+  rw [exists_comm]
+  simp only [exists_and_right]
+  refine ⟨afterRadius, ?_, ?_⟩
   · cil_checked_steps [allocated, created, idField, idStored, idFormed, radiusFieldAfterId,
       radiusStored, radiusFormed, idFieldAfter, radiusFieldAfter, idLoaded, radiusLoaded,
       circle, circleType, shapeType, circleSize]

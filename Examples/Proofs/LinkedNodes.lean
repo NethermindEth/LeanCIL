@@ -59,9 +59,8 @@ theorem link_holds : linkContract.Holds Extracted.program link := by
 /-- `SecondValue` meets its contract: two field loads, through the `Next` slot. -/
 theorem secondValue_holds : secondValueContract.Holds Extracted.program secondValue := by
   rintro node memory ⟨readable, next, held, valueReadable⟩
-  refine ⟨CIL.executionBound Extracted.program secondValue, memory,
-    [.scalar (.i64 (Node.Value.of memory next))], ?_, Confined.refl _ _, _, rfl, rfl,
-    fun other otherHeld => by rw [held] at otherHeld; cases otherHeld; rfl⟩
+  refine MethodContract.Holds.intro memory (Node.Value.of memory next) ?_ (Confined.refl _ _)
+    ⟨rfl, fun other otherHeld => by rw [held] at otherHeld; cases otherHeld; rfl⟩
   cil_checked_steps [readable.facts held valueReadable.live]
 
 #print axioms secondValue_holds
@@ -182,11 +181,12 @@ theorem linkedValue_self (memory : Memory) (node : Reference)
         [.object (.address node), .object (.address node)] memory =
       .ok (final, [.scalar (.i64 (Node.Value.of memory node))]) ∧
       Node.Next.of final node = .address node := by
-  obtain ⟨fuel, ⟨final, values⟩, invoked, -, result, encoded, returned, held⟩ :=
-    correctness (node, node) memory ⟨owned, readable⟩
-  dsimp only [linkedValueContract] at invoked encoded returned held
+  obtain ⟨final, result, call⟩ := correctness.result (node, node) ⟨owned, readable⟩
+  obtain ⟨returned, held⟩ := call.post
   subst returned
-  exact ⟨fuel, final, encoded ▸ invoked, held.2⟩
+  rw [exists_comm]
+  simp only [exists_and_right]
+  exact ⟨final, call.invoked, held.2⟩
 
 #print axioms linkedValue_self
 

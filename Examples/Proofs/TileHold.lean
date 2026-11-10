@@ -62,7 +62,9 @@ theorem correctness (memory : Memory) (formed : memory.WellFormed)
   have lanesWhole := lanesKept.after_confined pairsFramed
   obtain ⟨lanesStored, lanesFramed, lanesHeld⟩ := lanesOwned.store_whole lanesWhole
   have pairsFinal := pairsHeld.after_confined lanesFramed (apart_of_entries rfl)
-  refine ⟨CIL.executionBound Extracted.program hold, _, ?_, pairsFinal, lanesHeld,
+  rw [exists_comm]
+  simp only [exists_and_right]
+  refine ⟨_, ?_, pairsFinal, lanesHeld,
     constructed.trans ((ReferenceArray.setSlot_below _ (by simp) _).trans
       (ReferenceArray.setSlot_below _ (by simp) _))⟩
   -- The steps see the constructed memory spelled out, so every fact about it is too.

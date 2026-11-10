@@ -49,8 +49,8 @@ theorem correctness (memory : Memory) (formed : memory.WellFormed) :
   have distinct : memory.nextIdentity ≠ (objectMemory memory marker 0).nextIdentity := by
     simp [objectMemory]
   simp only [marker, markerType] at first second firstCreated secondCreated firstKept distinct
-  refine ⟨CIL.executionBound Extracted.program twoMarkers,
-    objectMemory (objectMemory memory marker 0) marker 0, ?_⟩
+  rw [exists_comm]
+  refine ⟨objectMemory (objectMemory memory marker 0) marker 0, ?_⟩
   simp only [marker, markerType]
   cil_checked_steps [first, second, firstCreated, secondCreated, firstKept, distinct]
 

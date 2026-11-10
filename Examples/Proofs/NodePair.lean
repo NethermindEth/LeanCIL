@@ -71,8 +71,9 @@ theorem correctness (memory : Memory) (formed : memory.WellFormed)
   have firstFormed := firstFresh.formed
   have secondFormed := (secondFresh.after_confined framed0).formed
   simp only [nodeType, formObject_setSlot] at firstFormed secondFormed
-  refine ⟨CIL.executionBound Extracted.program pair,
-    setSlot (setSlot (objectMemory memory (referenceArrayType nodeType) (objectFieldSlot * 2))
+  rw [exists_comm]
+  simp only [exists_and_right]
+  refine ⟨setSlot (setSlot (objectMemory memory (referenceArrayType nodeType) (objectFieldSlot * 2))
         (ReferenceArray.slot ⟨memory.nextIdentity, 0⟩ 0) (.address first))
       (ReferenceArray.slot ⟨memory.nextIdentity, 0⟩ 1) (.address second), ?_, ?_⟩
   · simp only [nodeType]

@@ -42,7 +42,9 @@ theorem correctness (memory : Memory) (tags tagged text : Reference) (length : N
   have storable := ReferenceArray.storableIn_of_lineage (element := textType) found kind rfl
     rfl (List.mem_cons_self ..)
   obtain ⟨located, checked, stored, framed, holds⟩ := owned.store live storable
-  refine ⟨CIL.executionBound Extracted.program put, _, ?_, framed, holds⟩
+  rw [exists_comm]
+  simp only [exists_and_right]
+  refine ⟨_, ?_, framed, holds⟩
   cil_checked_steps [readable.facts held live, located, checked, stored]
 
 #print axioms correctness
@@ -57,7 +59,9 @@ theorem stores_null (memory : Memory) (tags tagged : Reference) (length : Nat)
         .ok (final, []) ∧
       ReferenceArray.Holds final tags textType length index.toNat .null := by
   obtain ⟨located, checked, stored, -, holds⟩ := owned.store_null
-  refine ⟨CIL.executionBound Extracted.program put, _, ?_, holds⟩
+  rw [exists_comm]
+  simp only [exists_and_right]
+  refine ⟨_, ?_, holds⟩
   cil_checked_steps [readable.load_null held, located, checked, stored]
 
 #print axioms stores_null
