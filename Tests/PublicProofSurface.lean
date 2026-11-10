@@ -68,13 +68,12 @@ theorem vector_literal_rewrite (memory : Memory) (frame : Frame) (vector reverse
 /-- Snapshot map rewrites and symbolic intrinsic results remain usable after checked stepping. -/
 theorem aggregate_boolean_return (memory : Memory) (frame : Frame) (input : Reference)
     (byte : Nat → BitVec 8)
-    (loaded : ∀ rest, instruction (.loadAggregate 32) (.reference (.address input) :: rest)
-      memory = .ok (memory, .scalar (.aggregate ((List.range 32).map byte)) :: rest)) :
+    (loaded : read memory input 32 1 = .ok ((List.range 32).map byte)) :
     run [aggregateZero] 5 0 0 [] frame [.reference (.address input)] memory =
       .ok (leaveFrame frame memory,
         [.scalar (.i32 (if BitVec.ofNat 256 (byteNumber ((List.range 32).map byte)) = 0
           then 1 else 0))]) := by
-  cil_checked_steps [loaded, staticInstruction]
+  cil_checked_steps [loaded]
   simp only [Function.comp_def]
 #print axioms aggregate_boolean_return
 
