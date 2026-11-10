@@ -13,6 +13,19 @@ permission facts remain explicit premises, alongside the successful checks in `c
 
 namespace CIL.Safety
 
+open Lean Meta in
+/-- Expose the scalar constructor returned by a helper while retaining its symbolic payload. -/
+dsimproc_decl checkedScalarConstructor (Value.scalar _) := fun expression => do
+  let value := expression.appArg!
+  let reduced ← whnfD value
+  if reduced == value then return .continue
+  let some name := reduced.getAppFn.constName? | return .continue
+  let some (.ctorInfo info) := (← getEnv).find? name | return .continue
+  unless info.induct == ``CIL.Value do return .continue
+  return .done (mkApp expression.getAppFn reduced)
+
+attribute [cil_guard_proc] checkedScalarConstructor
+
 /-- A null managed reference forms without consulting memory. -/
 @[cil_side] theorem formValue_null (memory : Memory) :
     formValue memory .null = .ok (.reference .null) := rfl
@@ -26,7 +39,7 @@ namespace CIL.Safety
 #print axioms formValue_address
 
 attribute [cil_side] List.mapM List.mapM.loop List.reverse_nil List.reverse_cons
-  List.cons_append List.nil_append List.append_nil List.map_nil List.map_cons
+  List.cons_append List.nil_append List.append_nil List.map_nil List.map_cons List.map_map
   List.length_cons List.length_nil List.take_succ_cons List.take_zero List.take_nil
   List.drop_succ_cons List.drop_zero List.drop_nil List.getElem?_cons_zero
   List.getElem?_cons_succ List.getElem?_nil Option.map_some Option.map_none

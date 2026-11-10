@@ -71,6 +71,8 @@ Post-step expressions are part of this proof interface. A vector operation with 
 must remain directly rewritable by a theorem stated with that literal; a computed segment must
 compose at its stated stack and memory boundary. The `core` suite checks these forms together with
 named call continuations, overlapping byrefs, mixed local snapshots and a checked loop cutpoint.
+Intrinsic Boolean results expose their scalar constructor for checked returns while retaining the
+symbolic condition. Aggregate snapshot maps retain their composition for post-step rewriting.
 Changes to those forms require updating the documented interface and its consumer proofs together.
 Interpreter dispatch helpers and their unfolding equations are implementation details. The
 documentation checker rejects their direct use in the consumer fixture and their use in evaluator
