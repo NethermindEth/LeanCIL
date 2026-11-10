@@ -135,3 +135,30 @@ Raw measurements and receipt summaries are retained in the consumer's
 `verification/artifacts/local-step-reuse/measurement-summary.json` and
 `certificates-summary.json`. This comparison uses a different framework pin from the earlier
 table and is not added to its heartbeat or compiled-size totals.
+
+### Aggregate-return composition
+
+Consumer `bac692a3bbbf25b0f8434204cb0cf3337ed06d6a` and
+`f54f9591f0a3ace415aef70391113dab152c5900` were measured against the same compiled
+framework closure at `645e21feec8a024fb8bcc3ac2e6cd97dd114a7ff`. The binary and unary
+proofs in `UInt256.Safety.AggregateReturn` reuse `WP.enter`, `WP.of_prefix`, `WP.call`,
+`WP.step` and `WP.returned`, together with existing argument-validation and invocation
+certificate lemmas. They retain the helper's actual readback and outside-output cell
+preservation guarantees; neither proof assumes `Confined`.
+
+All 17 declaration statements are unchanged. Maintained source falls by five lines
+(45 added, 50 removed), with no generated or upstream source added by this consumer edit.
+
+| Measure for `UInt256.Safety.AggregateReturn` | Before | After |
+| --- | ---: | ---: |
+| Elaboration heartbeats | 6,086,577 | 5,954,780 |
+| Kernel recheck heartbeats | 325,505 | 219,364 |
+| Proof objects | 15,296 | 9,803 |
+| `.olean` bytes | 569,736 | 376,312 |
+
+The focused 163-job build passes with the same allowed axiom set. These measurements use
+an explicit Lake package override to the compiled framework closure. The portable manifest
+still names `c707f283` at these consumer commits, so these results are compilation and
+proof-cost evidence, not final-pin certificates. Certificate wall time was not measured.
+Raw paired reports and the command are retained under the consumer's
+`verification/artifacts/aggregate-reuse/`, including `measurement-summary.json`.
