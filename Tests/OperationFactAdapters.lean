@@ -172,4 +172,27 @@ theorem branch_narrowed_literal (index : CIL.W32) (length : Nat) (memory : Memor
   cil_checked_steps [inside]
 #print axioms branch_narrowed_literal
 
+/-- A named word value preserves the comparison result before widening it. -/
+def reportedWord (condition : Prop) [Decidable condition] : BitVec 64 :=
+  (if condition then (1 : BitVec 32) else 0).signExtend 64
+
+/-- Widening a Boolean word preserves its zero or one value. -/
+@[local simp] theorem widen_report (condition : Prop) [Decidable condition] :
+    (if condition then (1 : BitVec 32) else 0).signExtend 64 =
+      if condition then (1 : BitVec 64) else 0 := by
+  split <;> rfl
+#print axioms widen_report
+
+/-- Explicit definitions match operation facts without imposing global arithmetic normal forms. -/
+theorem named_report_write (condition : Prop) [Decidable condition]
+    {memory after : Memory} {target : Reference}
+    (written : write memory target (numberBytes (reportedWord condition).toNat 8) 1 = .ok after)
+    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
+    step body .store64 pc args frame
+        (.scalar (.i64 ((if condition then (1 : BitVec 32) else 0).signExtend 64)) ::
+          .reference (.address target) :: rest) memory =
+      .ok (.next (pc + 1) rest frame after) := by
+  cil_checked_step [written, reportedWord]
+#print axioms named_report_write
+
 end Tests.OperationFactAdapters

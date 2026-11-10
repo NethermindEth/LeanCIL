@@ -195,6 +195,14 @@ def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
       return fact.raw.isIdent && ((← getLCtx).findFromUserName? fact.raw.getId).isSome
     let locals ← facts.filterM isLocal
     let supplied ← facts.filterM fun fact => return !(← isLocal fact)
+    let mut unfoldNames : Array Name := #[]
+    let mut unfolds : Array Term := #[]
+    for fact in supplied do
+      unless fact.raw.isIdent do continue
+      if let some name ← observing? <| realizeGlobalConstNoOverloadWithInfo fact.raw then
+        if let .defnInfo _ ← getConstInfo name then
+          unfoldNames := unfoldNames.push name
+          unfolds := unfolds.push fact
     let mut normalised : Array Term := #[]
     -- Asserts each instance of `proof` in the normaliser's form; the unchanged original is
     -- already a fact.
@@ -213,6 +221,15 @@ def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
           let (literalResult, _) ← simp type literalContext literalProcs
           if literalResult.expr != type && literalResult.expr != result.expr then
             results := results.push literalResult
+        -- Explicit value definitions can expose an operation's symbolic payload without
+        -- applying unrelated arithmetic simp lemmas to that payload.
+        if (type.find? fun term => term.isConst && unfoldNames.contains term.constName!).isSome then
+          let { ctx := explicitContext, simprocs := explicitProcs, .. } ←
+            mkSimpContext (← `(tactic| simp only [cil_literal, $[$unfolds:term],*]))
+              (eraseLocal := false)
+          let (explicitResult, _) ← simp type explicitContext explicitProcs
+          if explicitResult.expr != type && !results.any (·.expr == explicitResult.expr) then
+            results := results.push explicitResult
         for result in results do
           if result.expr.consumeMData.isConstOf ``True then continue
           if result.expr == type && instanceProof == proof then continue
