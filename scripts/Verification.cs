@@ -1600,9 +1600,13 @@ partial class Program : IDisposable
             var record = ClosureRecord(cacheRoot, libraryKey);
             if (!File.Exists(record)) return;
             var key = File.ReadAllText(record).Trim();
-            if (Regex.IsMatch(key, @"\A[0-9a-f]{64}\z") && Directory.Exists(Path.Combine(cacheRoot, key)))
-                Directory.Delete(Path.Combine(cacheRoot, key), true);
             File.Delete(record);
+            var directory = Path.Combine(cacheRoot, key);
+            if (!Regex.IsMatch(key, @"\A[0-9a-f]{64}\z") || !Directory.Exists(directory)) return;
+            // Renamed first, so a delete that stops halfway leaves no entry under the key.
+            var doomed = directory + ".evicted-" + Guid.NewGuid().ToString("N");
+            Directory.Move(directory, doomed);
+            Directory.Delete(doomed, true);
         }
         // Another process may still read it; the whole library is preferred from now on regardless.
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
@@ -1806,12 +1810,13 @@ partial class Program : IDisposable
 
     /// <summary>
     /// Runs `build` in a package that requires the certified library at `library` by path, and fails unless
-    /// every file there still hashes to the library's manifest: Lake rebuilds a stale required module in place.
+    /// every file there hashes as it did before: Lake rebuilds a stale required module in place.
     /// </summary>
     static void RequireUnwritten(string library, Action build)
     {
+        var files = CacheFiles(library);
         build();
-        if (ReadManifest(library) is not { } manifest || !Same(manifest, CacheFiles(library)))
+        if (!Same(files, CacheFiles(library)))
             throw new InvalidOperationException("Lake wrote into the certified library " + library +
                 ", which this package requires by path: it found framework modules out of date there. " +
                 "The next leancil verify or workspace rehashes the library and replaces it if it changed.");

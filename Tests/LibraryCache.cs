@@ -121,8 +121,15 @@ try
     if (!verifier.CertifiedLocalLibrary(closure, closureKey) || verifier.CertifiedLocalLibrary(closure, wholeKey) ||
         Same(wholeSources, LibrarySources(ReadManifest(closure)!)))
         throw new Exception("A closure entry was accepted as the whole library");
-    Console.WriteLine("PASS a closure entry is keyed by exactly its modules, rejects an import outside them and " +
-        "is never the whole library");
+    // One closure entry exists per library: a proof with other imports gets the whole library, not a second one.
+    var closureCache = directory + "-closure-cache";
+    Directory.CreateDirectory(closureCache);
+    File.WriteAllText(ClosureRecord(closureCache, wholeKey), new string('0', 64));
+    if (verifier.ClosureLibrary(closureCache, wholeKey, LibrarySources(CommonInputs()), ["CIL.Features"]) is not null ||
+        Directory.EnumerateDirectories(closureCache).Any())
+        throw new Exception("A second closure entry was opened or built for one library");
+    Console.WriteLine("PASS a closure entry is keyed by exactly its modules, rejects an import outside them, is " +
+        "never the whole library and is the only one of its library");
     File.WriteAllText(cacheManifest, System.Text.Json.JsonSerializer.Serialize(new SortedDictionary<string, string>(StringComparer.Ordinal)));
     if (verifier.CertifiedLocalLibrary(directory, "cache-key")) throw new Exception("Replaced cache manifest accepted");
 
@@ -184,6 +191,7 @@ finally
 {
     Directory.Delete(directory, true);
     if (Directory.Exists(directory + "-closure")) Directory.Delete(directory + "-closure", true);
+    if (Directory.Exists(directory + "-closure-cache")) Directory.Delete(directory + "-closure-cache", true);
     if (Directory.Exists(prepared)) Directory.Delete(prepared, true);
     if (Directory.Exists(unrelated)) Directory.Delete(unrelated, true);
 }
