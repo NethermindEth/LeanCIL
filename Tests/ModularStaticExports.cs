@@ -183,17 +183,13 @@ theorem correctness : PublishedTable.read.Holds Extracted.program 0 := by
     rfl
   have returned : step Extracted.method0 .ret 2 [] frame [.scalar (.i64 17)] result =
       .ok (.returned [.scalar (.i64 17)] result) := rfl
-  have executed : run Extracted.program 8 0 0 [] frame [] memory = .ok (result, [.scalar (.i64 17)]) :=
-    (run_next (program := Extracted.program) (fuel := 7) (method := 0) (pc := 0)
-      (by rfl) (by rfl) first).trans
-      ((run_next (program := Extracted.program) (fuel := 6) (method := 0) (pc := 1)
-        (by rfl) (by rfl) second).trans
-        (run_return (program := Extracted.program) (fuel := 5) (method := 0) (pc := 2)
-          (by rfl) (by rfl) returned (by rfl)))
   have preserved := staticReference_preserves_static_world _ _ _ _ _ formed world (by simp) resolved
   rw [same] at preserved
-  exact ⟨8, result, [.scalar (.i64 17)], invoke_of_run (body := Extracted.method0) (by rfl) (by rfl) (by rfl) executed,
-    Confined.ofMemoryBelow (staticReference_preserves_memory_below _ _ _ _ resolved)
+  apply WP.enter (body := Extracted.method0) (by rfl) (by rfl) (by rfl)
+  apply WP.step (by rfl) (by rfl) first
+  apply WP.step (by rfl) (by rfl) second
+  apply WP.returned (by rfl) (by rfl) returned (by rfl)
+  exact ⟨Confined.ofMemoryBelow (staticReference_preserves_memory_below _ _ _ _ resolved)
       (Nat.le_refl _) (staticReference_extends_allocations _ _ _ _ resolved).next,
     17, rfl, rfl, staticReference_preserves_wellFormed _ _ _ _ formed resolved, preserved⟩
 end LibraryProof

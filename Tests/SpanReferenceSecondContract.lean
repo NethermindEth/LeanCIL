@@ -46,8 +46,9 @@ theorem second_holds : secondContract.Holds Extracted.program 0 := by
   simp only [Reference.element_zero] at formed
   have offset := add_element wellFormed formed (read_access (contents 1 input.second selected))
   have word := contents.load_word selected
-  refine ⟨7, (memory, [.scalar (.i64 input.second)]), ?_, Confined.refl _ _,
-    input.second, rfl, rfl, rfl⟩
+  refine MethodContract.Holds.intro (c := secondContract) (input := input)
+    memory input.second ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+  cil_supply_fuel
   dsimp only [secondContract]
   simp only [Safety.invoke, Extracted.lookup0]
   simp [checkedValue, valid, enterFrame, Extracted.method0, makeLocals,

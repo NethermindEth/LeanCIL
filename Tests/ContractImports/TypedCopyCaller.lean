@@ -11,6 +11,7 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
   have sourceForm := access_reference_valid _ _ _ _ _ (read_access readable)
   have destinationForm := access_reference_valid _ _ _ _ _ writable
   dsimp only [TypedImportInterface.copy, MethodContract.Returns]
+  apply WP.adequate.mpr
   refine invoke_exists_of_run found
     (by simp [checkedValue, formValue, checkedAt, sourceForm, destinationForm,
       Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]) (by rfl) ?_
