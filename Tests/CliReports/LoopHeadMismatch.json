@@ -71,7 +71,7 @@
         "line": 40,
         "column": 19
       },
-      "message": "cil_loop_finish: cannot step pc 3 (CIL.Op.memory (CIL.MemoryOp.spanSlice false)) at memory\n  memory\nThe step is\n  step Extracted.method0 (CIL.Op.memory (CIL.MemoryOp.spanSlice false)) 3 [Value.bufferSpan view✝]\n      { activation := memory.nextIdentity, locals := [LocalSlot.span 4 false (some view)], owned := [] }\n      [Value.scalar (CIL.Value.i32 1#32), Value.bufferSpan view] memory =\n    Except.ok (FrameAction.next ?_mvar.4169.9092 ?_mvar.4169.9097 ?_mvar.4169.9099 ?_mvar.4169.9101)\nWith the step equations and facts it reduces to\n  False\nSupply a `LoopFrame` at this memory for a local, or the step equation of a store with this stack.",
+      "message": "cil_loop_finish: cannot step pc 3 (CIL.Op.memory (CIL.MemoryOp.spanSlice false)) at memory\n  memory\nThe step is\n  step Extracted.method0 (CIL.Op.memory (CIL.MemoryOp.spanSlice false)) ((if ¬1#32 = 0#32 then 1 else 8) + 1 + 1)\n      [Value.bufferSpan view✝]\n      { activation := memory.nextIdentity, locals := [LocalSlot.span 4 false (some view)], owned := [] }\n      [Value.scalar (CIL.Value.i32 1), Value.bufferSpan view] memory =\n    Except.ok (FrameAction.next ?_mvar.4169.7185 ?_mvar.4169.7190 ?_mvar.4169.7192 ?_mvar.4169.7194)\nWith the step equations and facts it reduces to\n  (if 1 ≤ 0 then\n      match\n        match view.slice memory 1 (0 - 1) with\n        | Except.error err => Except.error (ExecutionFault.memory err view.reference 0)\n        | Except.ok v => Except.ok v with\n      | Except.error err => Except.error err\n      | Except.ok v =>\n        Except.ok\n          (FrameAction.next ((if ¬1#32 = 0#32 then 1 else 8) + 1 + 1 + 1) [Value.bufferSpan v]\n            { activation := memory.nextIdentity, locals := [LocalSlot.span 4 false (some view)], owned := [] } memory)\n    else Except.error (ExecutionFault.thrown \"System.ArgumentOutOfRangeException\")) =\n    Except.ok (FrameAction.next ?_mvar.4169.7185 ?_mvar.4169.7190 ?_mvar.4169.7192 ?_mvar.4169.7194)\nSupply the slice: `view.slice memory start length = .ok sliced`, such as from `CheckedSpan.tail` at the caller's memory.",
       "tactic": "cil_loop_finish",
       "stopped": false,
       "method": {
@@ -93,15 +93,15 @@
         "reached": {
           "frame": "{ activation := memory.nextIdentity, locals := [CIL.Safety.LocalSlot.span 4 false (some view)], owned := [] }",
           "memory": "memory",
-          "pc": "3",
-          "stack": "[CIL.Safety.Value.scalar (CIL.Value.i32 1#32), CIL.Safety.Value.bufferSpan view]"
+          "pc": "(if ¬1#32 = 0#32 then 1 else 8) + 1 + 1",
+          "stack": "[CIL.Safety.Value.scalar (CIL.Value.i32 1), CIL.Safety.Value.bufferSpan view]"
         },
         "expected": {}
       },
       "missing": {
         "shape": "spanSlice",
         "residual": [
-          "(if 1 ≤ view.length then\n    match\n      match view.slice memory 1 (view.length - 1) with\n      | Except.error err => Except.error (CIL.Safety.ExecutionFault.memory err view.reference 0)\n      | Except.ok v => Except.ok v with\n    | Except.error err => Except.error err\n    | Except.ok v =>\n      Except.ok\n        (CIL.Safety.FrameAction.next 4 [CIL.Safety.Value.bufferSpan v]\n          { activation := memory.nextIdentity, locals := [CIL.Safety.LocalSlot.span 4 false (some view)], owned := [] }\n          memory)\n  else Except.error (CIL.Safety.ExecutionFault.thrown \"System.ArgumentOutOfRangeException\")) =\n  ?m.326"
+          "(if 1 ≤ view.length then\n    match\n      match view.slice memory 1 (view.length - 1) with\n      | Except.error err => Except.error (CIL.Safety.ExecutionFault.memory err view.reference 0)\n      | Except.ok v => Except.ok v with\n    | Except.error err => Except.error err\n    | Except.ok v =>\n      Except.ok\n        (CIL.Safety.FrameAction.next ((if ¬1#32 = 0#32 then 1 else 8) + 1 + 1 + 1) [CIL.Safety.Value.bufferSpan v]\n          { activation := memory.nextIdentity, locals := [CIL.Safety.LocalSlot.span 4 false (some view)], owned := [] }\n          memory)\n  else Except.error (CIL.Safety.ExecutionFault.thrown \"System.ArgumentOutOfRangeException\")) =\n  ?m.233"
         ]
       },
       "suggestions": [
@@ -121,7 +121,7 @@
         "line": 44,
         "column": 4
       },
-      "message": "cil_loop_steps: the pc is not a literal, so a branch was not decided; supply a fact deciding its condition. The pc is\n  if BitVec.ofNat 32 (view.length + 1) = 0#32 then 8 else 1",
+      "message": "cil_loop_steps: the pc is not a literal, so a branch was not decided; supply a fact deciding its condition. The pc is\n  if ¬BitVec.ofNat 32 (view.length + 1) = 0#32 then 1 else 8",
       "tactic": "cil_loop_steps",
       "stopped": false,
       "method": {
@@ -133,7 +133,7 @@
         "reached": {
           "frame": "{ activation := memory.nextIdentity, locals := [CIL.Safety.LocalSlot.span 4 false (some view)], owned := [] }",
           "memory": "memory",
-          "pc": "if BitVec.ofNat 32 (view.length + 1) = 0#32 then 8 else 1",
+          "pc": "if ¬BitVec.ofNat 32 (view.length + 1) = 0#32 then 1 else 8",
           "stack": "[]"
         },
         "expected": {}
