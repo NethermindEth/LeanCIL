@@ -72,9 +72,13 @@ theorem correctness (receiver : Reference) (index : W32) (receiverWordTarget : R
   rw [receiverWordHeld] at held
   cases held
   -- C# masks the shift count to 6 bits, so `8 * index` shifts by byte `index % 8`.
-  have shift : (8 * index.toNat % 4294967296 &&& 63) % 64 = 8 * (index.toNat % 8) := by
+  have shift : (8 * index &&& 63#32).toNat % 64 = 8 * (index.toNat % 8) := by
+    rw [BitVec.toNat_and, BitVec.toNat_mul]
+    change (8 * index.toNat % 4294967296 &&& 63) % 64 = _
     rw [show (63 : Nat) = 2 ^ 6 - 1 from rfl, Nat.and_two_pow_sub_one_eq_mod]
-    omega
+    simp only [show 2 ^ 6 = 64 from rfl, Nat.mod_mod]
+    rw [Nat.mod_mod_of_dvd _ (by decide : 64 ∣ 4294967296)]
+    exact Nat.mul_mod_mul_left 8 index.toNat 8
   simp only [shift]
   generalize Word.Bits.of initial receiverWordTarget >>> (8 * (index.toNat % 8)) = shifted
   simp only [CIL.NarrowKind.extend]
