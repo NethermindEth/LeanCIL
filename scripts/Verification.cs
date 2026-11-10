@@ -1680,6 +1680,39 @@ partial class Program : IDisposable
         }
     }
 
+    /// <summary>The modules each compiled module in `modules`, by path, imports directly.</summary>
+    Dictionary<string, string[]> ConsumerModuleImports(string session, Dictionary<string, string> modules)
+    {
+        // Read Lean's compiled import headers, not a regex over source text. This
+        // also handles public/private imports and transitive package dependencies.
+        var input = Path.Combine(Path.GetTempPath(), "leancil-imports-" + Guid.NewGuid().ToString("N") + ".json");
+        var output = Path.ChangeExtension(input, ".result.json");
+        try
+        {
+            var paths = modules.Values.ToArray();
+            File.WriteAllText(input, JsonSerializer.Serialize(paths));
+            Run([CheckedAuditExecutable(), "--imports", input, output], session, environment: LeanEnvironment);
+            var imports = File.ReadAllLines(output).Select(line => JsonSerializer.Deserialize<string[]>(line)).ToArray();
+            if (imports.Length != paths.Length || imports.Any(items => items is null))
+                throw new InvalidDataException("Incomplete consumer compiled import graph.");
+            return modules.Keys.Zip(imports).ToDictionary(pair => pair.First, pair => pair.Second!);
+        }
+        finally { File.Delete(input); File.Delete(output); }
+    }
+
+    /// <summary>
+    /// Fails unless every framework module that a module compiled below `directory` imports, by its compiled
+    /// import header, is one the open closure entry holds. Source text is not consulted: Lean accepts import
+    /// spellings a pattern over it misses, and a module's absence from the entry is not what refuses it.
+    /// </summary>
+    void RequireReplayedImports(string directory, string session)
+    {
+        if (libraryModules is null) return;
+        var compiled = Directory.EnumerateFiles(directory, "*.olean", SearchOption.AllDirectories)
+            .ToDictionary(path => path, path => path, StringComparer.Ordinal);
+        RequireReplayedImports(ConsumerModuleImports(session, compiled).Values.SelectMany(imports => imports));
+    }
+
     /// <summary>
     /// Fails unless each framework module in `imports` is one the open closure entry holds, and so one that
     /// was kernel-replayed under the key the certificate names. The whole library holds every module.
@@ -3364,6 +3397,7 @@ partial class Program : IDisposable
             var built = OleanHashes(fresh, session);
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             RequireOnlyAdded(bound, built, "Proof");
+            RequireReplayedImports(fresh, session);
             // Interface oleans were replayed above and RequireOnlyAdded kept them unchanged since.
             string[] unreplayed = [.. extractionPublication is null ? Array.Empty<string>() : ["Extracted"],
                 .. symbols && !proofRestored ? ["ExtractedSymbols"] : Array.Empty<string>(),
