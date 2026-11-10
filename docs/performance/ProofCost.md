@@ -253,3 +253,71 @@ examples and `Tests.LocalCalls`, so it is not a source-size reduction. Each chan
 passes a focused check against its extracted method. The LocalCalls comparison passes
 124 measured rows; its mixed-frame proof changes from 12,298 to 10,968 kernel heartbeats
 and from 1,279 to 881 proof objects. These are focused checks, not a replacement for CI.
+
+The imported-caller migration at `4d63b371` uses existing `WP.enter`, `WP.step`, `WP.call`
+and `WP.returned` rules in eight normal-return callers. The two-call proof obtains frame
+well-formedness from the existing invocation preservation theorem. All eight statements
+and their outer binders are unchanged. Together with two inferred success budgets in
+`InvocationCertificates`, the nine-file edit adds 92 lines and removes 136. No library
+implementation changes are part of this comparison.
+
+All nine focused checks pass. The comparison measures 109 head rows against 108 baseline
+rows at the same `98afdd3f` compiled framework; all thresholds pass without waivers.
+Caller elaboration heartbeats fall by 4.7–10.4%. The two-call module's compiled size falls
+17.7%; the other caller modules grow by 2.4–4.6%. The two echo proofs' elaboration
+heartbeats rise 2.2%, while their kernel heartbeats rise 15.1% and 16.8%; removing their
+explicit budgets therefore does not improve every cost measure. Raw reports are retained
+in `artifacts/wp-callers-cost/` in the measurement checkout.
+
+### Consumer mixed snapshots and wrappers
+
+The following paired consumer measurements use the same compiled framework at
+`98afdd3fc4845101a45aa1d80739db240f181210`. They measure separate source edits and module
+sets; their totals are not summed. Each measured source passes focused elaboration with
+the allowed axiom set. These results do not certify the integrated consumer revision or
+establish a certificate wall-time improvement.
+
+| Consumer edit | Maintained source delta | Elaboration heartbeats | Kernel heartbeats | `.olean` bytes |
+| --- | ---: | ---: | ---: | ---: |
+| Mixed Multiply snapshots, `d3546a5` | −19 | 22,893,241 → 22,307,079 | 2,030,151 → 1,991,674 | 1,464,064 → 1,333,872 |
+| Add/Subtract two-home snapshots, `abff3fbf` | −11 | 143,994,446 → 143,766,178 | 14,908,188 → 14,810,876 | 11,962,200 → 11,679,704 |
+| Six wrapper modules, `797bbaa` | −17 | 14,775,691 → 14,797,046 | 683,518 → 656,750 | 1,271,272 → 1,197,744 |
+
+The mixed Multiply comparison starts at consumer `25756eb`. It replaces internal word
+and vector state bookkeeping with existing `LocalSnapshots`; all four theorem headers
+and `FullTopContract` are unchanged. Vector slots become known after their actual stores.
+No live vector crosses the later helper call in this extracted path, so this case does
+not demonstrate preservation of live vector contents across that call.
+
+The Add/Subtract comparison starts at `a49814e`, which already includes the one-line net
+compatibility prerequisite. Its net reduction includes the new 109-line consumer
+`RippleState` module. The comparison measures eight baseline modules and nine head modules,
+including the complete new shared cost.
+The helper's actual two-output footprint remains explicit; output readback follows the
+write, and unrelated snapshots require the existing footprint evidence. Four internal
+storage-prefix statements change; the exported arithmetic and caller contracts do not.
+This isolated measurement uses an explicit Lake package override to the framework above.
+
+| Add/Subtract internal theorem | Statement lines | Outer named binders | Body lines |
+| --- | ---: | ---: | ---: |
+| `vector128_sse_store_prefix` | 17 → 16 | 19 → 17 | 12 → 5 |
+| `subtract_repair_store_prefix` | 17 → 16 | 19 → 17 | 12 → 5 |
+
+Each statement retains six existential names in its execution and continuation propositions.
+The two quantified indices in the former slot/readback premises disappear, so the total
+named binder count changes from 27 to 23. These are internal storage-prefix reductions;
+they do not establish smaller full arithmetic specifications. The shared module's source
+and checking cost are included in the preceding totals.
+
+The wrapper comparison starts at `a1ba5c6`. Scalar, SSE and vector equality prefixes,
+read-only and reporting forwarders, and the binary adapter reuse the existing consumer
+helpers and WP rules. All 15 declaration headers are unchanged. The reporting helper's
+exact tail budget remains part of its existing signature. Invocation certificates and
+caller-cell preservation remain explicit; neither is promoted to `Confined`.
+
+The mixed Multiply and wrapper measurements use a normal portable Lake git dependency.
+All three consumer edits add zero upstream and generated-source lines. Their source
+reductions are separate from the upstream additions reported above. Raw reports are
+retained under consumer `verification/artifacts/mixed-snapshots/` and
+`verification/artifacts/two-home-reuse/`, including the measurement summaries and paired
+module reports.
