@@ -624,10 +624,36 @@ internal static partial class ProofCostReport
             [.. parts.SelectMany(part => part.Rows)], [.. parts.SelectMany(part => part.Unmeasured)]);
     }
 
-    // Rows are comparable only between runs of one measurer: this schema, frontend and row builder.
-    internal static string MeasurerKey() => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
-        $"{Schema}\n{Sha(Path.Combine(ScriptDirectory(), "ProofCost.lean"))}\n" +
-        $"{Sha(Path.Combine(ScriptDirectory(), "ProofCostReport.cs"))}\n")));
+    // The workflow steps that measure a tree; how they call the measurer decides the rows it writes.
+    internal static readonly string[] MeasuringSteps =
+    [
+        "Measure the proof cost of the verified outputs", "Measure the proof cost of the test libraries",
+        "Verify and measure each source at the merge base"
+    ];
+
+    // One step of the workflow: its lines from its name to the next step or job.
+    internal static string WorkflowStep(string workflow, string name)
+    {
+        static int Indent(string line) => line.Length - line.TrimStart().Length;
+        var lines = workflow.ReplaceLineEndings("\n").Split('\n');
+        var start = Array.FindIndex(lines, line => line.Trim() == "- name: " + name);
+        if (start < 0) throw new InvalidDataException("The workflow has no step named " + name);
+        var end = Array.FindIndex(lines, start + 1, line => line.Trim().Length > 0 &&
+            !line.TrimStart().StartsWith('#') && Indent(line) <= Indent(lines[start]));
+        return string.Join('\n', lines[start..(end < 0 ? lines.Length : end)]);
+    }
+
+    // Rows are comparable only between runs of one measurer: this schema, frontend and row builder,
+    // called by the same workflow steps.
+    internal static string MeasurerKey(string? workflow = null)
+    {
+        workflow ??= File.ReadAllText(Path.Combine(ScriptDirectory(), "..", ".github", "workflows",
+            "verification.yml"));
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
+            $"{Schema}\n{Sha(Path.Combine(ScriptDirectory(), "ProofCost.lean"))}\n" +
+            $"{Sha(Path.Combine(ScriptDirectory(), "ProofCostReport.cs"))}\n" +
+            string.Join('\n', MeasuringSteps.Select(step => WorkflowStep(workflow, step))))));
+    }
 
     // The rows one run measured for one commit, by source, for later runs to take as their base.
     internal sealed record Published(int Schema, string Measurer, string Commit,

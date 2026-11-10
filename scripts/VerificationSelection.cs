@@ -42,28 +42,41 @@ internal static class VerificationSelection
     // A job this short keeps most of its timeout free for another measurement.
     const double LibrariesCarrierSeconds = 600;
 
-    // Bound sequential work so grouping removes setup without creating another long tail.
+    // More members than this make a job's summary long and its name useless for finding a failure.
+    internal const int GroupMembers = 8;
+
+    // A job is filled to the second-longest suite's measured time. The longest suite then runs alone
+    // and stays the longest job, and the others fit two rounds of the runners within its shadow.
+    internal static double GroupSeconds(IReadOnlyDictionary<string, double> durations) =>
+        durations.Values.OrderByDescending(seconds => seconds).Skip(1).DefaultIfEmpty(durations.Values.Max()).First();
+
+    // A job's suites when few enough to read, else its longest suite and how many more it runs.
+    static string Name(List<string> group) => group.Count <= 3 ? string.Join("+", group)
+        : $"{group[0]}+{group.Count - 1}more";
+
+    // Each job costs setup and restores before its first suite, so suites are packed into as few jobs
+    // as the target allows, longest first into the fullest job that still has room. A suite without
+    // a measured time runs alone.
     internal static Group[] Groups(IEnumerable<string> suites, string? root = null)
     {
         var durations = ReadDurations(root);
+        var target = GroupSeconds(durations);
+        double Seconds(List<string> group) =>
+            group.Sum(name => durations.GetValueOrDefault(name, double.PositiveInfinity));
         var groups = new List<List<string>>();
         foreach (var suite in Schedule(suites.Distinct(StringComparer.Ordinal), root))
         {
             var seconds = durations.GetValueOrDefault(suite, double.PositiveInfinity);
-            var group = seconds <= 60 ? groups.Where(group => group.Count < 3 &&
-                    group.All(name => durations.GetValueOrDefault(name, double.PositiveInfinity) <= 60) &&
-                    group.Sum(name => durations[name]) + seconds <= 120)
-                .OrderByDescending(group => group.Sum(name => durations[name])).FirstOrDefault() : null;
+            var group = groups.Where(group => group.Count < GroupMembers && Seconds(group) + seconds <= target)
+                .OrderByDescending(Seconds).FirstOrDefault();
             if (group is null) groups.Add([suite]);
             else group.Add(suite);
         }
-        double Seconds(List<string> group) =>
-            group.Sum(name => durations.GetValueOrDefault(name, double.PositiveInfinity));
         var ordered = groups.OrderByDescending(Seconds).ToArray();
         // The earliest job to start that is short enough carries the libraries, else the shortest job.
         var carrier = ordered.FirstOrDefault(group => Seconds(group) <= LibrariesCarrierSeconds) ??
             ordered.LastOrDefault();
-        return ordered.Select(group => new Group(string.Join("+", group), group.ToArray(),
+        return ordered.Select(group => new Group(Name(group), group.ToArray(),
                 group.Max(name => name == "imports" ? 90 :
                     name.StartsWith("exports", StringComparison.Ordinal) ? 120 : 30),
                 group.Any(VerificationSuites.ProofSuites.Contains), group == carrier)).ToArray();

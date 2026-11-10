@@ -15,6 +15,8 @@ static void Require(bool condition, string claim)
     Console.WriteLine("PASS " + claim);
 }
 
+static string Source([System.Runtime.CompilerServices.CallerFilePath] string path = "") => path;
+
 static Row Proof(string name, long heartbeats, long elapsedMs = 100, string group = "Tests.Sample") =>
     new(group, name, "theorem", new(StringComparer.Ordinal) { ["heartbeats"] = heartbeats, ["elapsedMs"] = elapsedMs });
 
@@ -250,6 +252,20 @@ var forged = false;
 try { BaseRows(bundle, digest[..63] + (digest[63] == '0' ? '1' : '0'), "measurer", "base commit", wanted, taken); }
 catch (InvalidDataException) { forged = true; }
 Require(forged, "rows without the digest their publisher logged are refused");
+
+// Stored rows are reused only by a run that would measure them the same way, down to the workflow
+// steps that call the measurer; an edit elsewhere in the workflow keeps them.
+var workflow = File.ReadAllText(Path.Combine(Path.GetDirectoryName(Source())!, "..", ".github", "workflows",
+    "verification.yml")).ReplaceLineEndings("\n");
+var baseStep = WorkflowStep(workflow, "Verify and measure each source at the merge base");
+Require(MeasuringSteps.All(step => WorkflowStep(workflow, step).Contains("measure", StringComparison.Ordinal)) &&
+    baseStep.Contains("--suite \"$source\"", StringComparison.Ordinal) &&
+    !baseStep.Contains("Upload the merge base's rows", StringComparison.Ordinal),
+    "each measuring step of the workflow is found, whole and alone");
+Require(MeasurerKey(workflow) == MeasurerKey() &&
+    MeasurerKey(workflow.Replace("--jobs \"$(nproc)\" \"$@\"", "--jobs 1 \"$@\"")) != MeasurerKey(workflow) &&
+    MeasurerKey(workflow.Replace("name: Build and verify", "name: Build, verify")) == MeasurerKey(workflow),
+    "a change to a measuring step changes the measurer, and a change to another job does not");
 
 // A suite's rows are the directories it declares, so a suite that shares a job is measured alone. The
 // member running when a report was written must be its owner: anything else is a row that would be

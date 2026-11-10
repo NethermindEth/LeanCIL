@@ -57,19 +57,48 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
     var durations = VerificationSelection.ReadDurations();
     var groups = VerificationSelection.Groups(All());
     Equal(groups.SelectMany(group => group.Suites).Order(StringComparer.Ordinal), All());
-    Require(groups.Length < All().Length, "Short suites were not grouped");
+    // Every job repeats setup and restores, so a full run must not go back to one job per suite.
+    double Seconds(VerificationSelection.Group group) => group.Suites.Sum(suite => durations[suite]);
+    var target = VerificationSelection.GroupSeconds(durations);
+    var longest = durations.MaxBy(suite => suite.Value);
+    Require(groups.Length <= All().Length / 3, "Suites were not packed: " + groups.Length + " jobs");
+    Require(target < longest.Value && durations.Values.Count(seconds => seconds > target) == 1,
+        "The target is not the second-longest suite");
+    // The longest suite alone bounds the run; no packed job may outlast it or approach its timeout.
+    Require(groups[0].Suites is [var alone] && alone == longest.Key, "The longest suite shares its job");
     foreach (var group in groups.Where(group => group.Suites.Length > 1))
-        Require(group.Suites.Length <= 3 && group.Suites.All(suite => durations[suite] <= 60) &&
-            group.Suites.Sum(suite => durations[suite]) <= 120, "Unbounded group");
+        Require(group.Suites.Length <= VerificationSelection.GroupMembers && Seconds(group) <= target &&
+            Seconds(group) <= group.Timeout * 60 / 2, "Unbounded group: " + group.Suite);
+    // A short job at the tail would queue behind the runner cap and finish last for no reason.
+    Require(groups.Zip(groups.Skip(1)).All(pair => Seconds(pair.First) >= Seconds(pair.Second)),
+        "Jobs do not start longest first");
+    Require(groups.Select(group => group.Suite).Distinct().Count() == groups.Length &&
+        groups.All(group => group.Suite.StartsWith(group.Suites[0], StringComparison.Ordinal) &&
+            Regex.IsMatch(group.Suite, @"\A[a-z+-]+(\+\d+more)?\z")), "A job name is ambiguous or not its first suite");
+    // Eight runners, with the setup every job repeats: packing must cost neither wall time nor jobs.
+    const double setupSeconds = 52;
+    double Wall(IEnumerable<double> jobs)
+    {
+        var runners = new PriorityQueue<double, double>();
+        for (var i = 0; i < 8; i++) runners.Enqueue(0, 0);
+        foreach (var job in jobs)
+        {
+            var end = runners.Dequeue() + job + setupSeconds;
+            runners.Enqueue(end, end);
+        }
+        return runners.UnorderedItems.Max(item => item.Element);
+    }
+    var single = VerificationSelection.Schedule(All()).Select(suite => durations[suite]).ToArray();
+    Require(Wall(groups.Select(Seconds)) <= Wall(single), "Packing lengthened the simulated run");
+    Require((single.Length - groups.Length) * setupSeconds >= 30 * 60, "Packing saves under thirty job-minutes");
     // A job measures proof cost exactly when it runs a proof suite, alone or grouped with others.
     foreach (var group in groups)
         Require(group.Proof == group.Suites.Any(VerificationSuites.ProofSuites.Contains),
             "Proof cost is measured in the wrong job: " + group.Suite);
     Require(groups.Any(group => group.Proof && group.Suites.Length > 1), "No proof suite shares a job");
     // The libraries take minutes to measure; a job near its timeout would fail a suite that passed.
-    Require(groups.Single(group => group.Libraries) is var carrier &&
-        carrier.Suites.Sum(suite => durations[suite]) <= 600 &&
-        Array.IndexOf(groups, carrier) < 8, "The libraries are measured in a long or late job");
+    Require(groups.Single(group => group.Libraries) is var carrier && Seconds(carrier) <= 600,
+        "The libraries are measured in a long job");
     Require(VerificationSelection.Groups(["unsafe"]).Single().Libraries,
         "A run without a short job measures no libraries");
     Equal(VerificationSelection.Groups(["contracts", "unknown"]).SelectMany(group => group.Suites),

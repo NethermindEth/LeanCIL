@@ -16,8 +16,27 @@ if (args is ["--suite", var suite])
 }
 var directory = Path.GetFullPath(Path.Combine("artifacts", "group-test-" + Guid.NewGuid().ToString("N")));
 string[] command = ["dotnet", Assembly.GetExecutingAssembly().Location];
+var summary = Path.Combine(Path.GetTempPath(), "group-summary-" + Guid.NewGuid().ToString("N") + ".md");
+Environment.SetEnvironmentVariable("GITHUB_STEP_SUMMARY", summary);
+var console = Console.Out;
+var printed = new StringWriter();
+Console.SetOut(printed);
 var result = await VerificationGroupRunner.Run(command, ["fails", "passes", "outlines-control"], directory);
+Console.SetOut(console);
+Environment.SetEnvironmentVariable("GITHUB_STEP_SUMMARY", null);
 if (result != 1) throw new InvalidOperationException("A failed member must fail the group");
+// A job of several suites must name the one that failed, in an annotation and in its summary.
+var annotations = printed.ToString().Split('\n').Where(line => line.StartsWith("::error", StringComparison.Ordinal))
+    .ToArray();
+var rows = File.ReadAllLines(summary);
+File.Delete(summary);
+if (annotations is not [var annotation] ||
+    !annotation.StartsWith("::error title=Suite fails failed::fails exited with code 3", StringComparison.Ordinal) ||
+    !printed.ToString().Contains("::group::Running suite passes", StringComparison.Ordinal) ||
+    rows.Length != 5 || !rows[2].StartsWith("| fails | **failed** |", StringComparison.Ordinal) ||
+    !rows[3].StartsWith("| passes | passed |", StringComparison.Ordinal) ||
+    !rows[4].StartsWith("| outlines-control | passed |", StringComparison.Ordinal))
+    throw new InvalidOperationException("Each member's result must be reported on its own");
 foreach (var name in new[] { "fails", "passes", "outlines-control" })
 {
     var log = File.ReadAllText(Path.Combine(directory, "verification-" + name + ".log"));

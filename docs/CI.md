@@ -70,12 +70,23 @@ transitive source imports. Markdown under `docs/` and `skills/` and the README s
 fixture projects, build configuration,
 workflow changes, and unrecognized paths conservatively run the full matrix.
 
-Suites measured at no more than 60 seconds share a job with at most two other short suites,
-with a combined measured budget of 120 seconds. The duration table uses verification time,
-excluding setup, and unknown suites remain separate. Each member runs in its own process with
-its own cache and transcript; a failure does not skip later members, and any member failure
-fails the group. Selection still includes exactly the requested suites. This removes repeated
-toolchain/library downloads without reducing coverage or increasing concurrent runners.
+Every job spends about a minute on checkout, toolchain, library and tool restores and uploads
+before and after its suites, so suites are packed into as few jobs as a target allows. The target
+is the measured time of the second-longest suite: the longest suite then runs alone and remains
+the longest job, and the other jobs fill two rounds of the eight runners in less time than one job
+per suite takes. Suites go longest first into the fullest job that still has room, at most eight to
+a job, and jobs start longest first. The duration table `scripts/verification-durations.json` uses
+verification time, excluding setup, and a suite without a measured time runs alone.
+`dotnet run --file scripts/EstimateVerificationSchedule.cs -- --jobs` prints the jobs of a full
+run with their estimated minutes.
+
+Each member of a job runs in its own process with its own cache, transcript and trace label, in
+the checkout a full local run shares between all suites. A failure does not skip later members,
+and any member failure fails the job. The log folds each member's output under its name, a failed
+member raises an error annotation that names it, and the job summary lists every member with its
+result and time. A job is named for its suites, or for its longest suite and the number of others
+when it runs more than three, so job names change when the durations do; only `Build and verify`
+is a stable check name. Selection still includes exactly the requested suites.
 
 The `loops` suite covers core loop contracts and class/word-array composition. Generated outline
 checks run in `outlines-control`, `outlines-objects` and `outlines-buffers`; each selects its

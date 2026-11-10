@@ -39,7 +39,8 @@ internal static class VerificationGroupRunner
                         log.WriteLine(line);
                     }
             }
-            Console.WriteLine("Running suite " + suite);
+            // Each member's output folds under its own name in the job log.
+            Console.WriteLine("::group::Running suite " + suite);
             try
             {
                 using var process = Process.Start(start) ??
@@ -56,9 +57,20 @@ internal static class VerificationGroupRunner
                 Console.Error.WriteLine(error.Message);
                 failed = true;
             }
+            Console.WriteLine("::endgroup::");
+            // A job of several suites names the one that failed, as a job of one suite does by its name.
+            if (exitCode != 0)
+                Console.WriteLine($"::error title=Suite {suite} failed::{suite} " +
+                    (exitCode is { } code ? $"exited with code {code}" : "could not start") +
+                    $"; its output is under \"Running suite {suite}\" and in verification-{suite}.log.");
             // Rewritten after each member, so a later member that never returns keeps the earlier ones.
             runs.Add(new SuiteRun(suite, started, exitCode));
             File.WriteAllText(Path.Combine(artifacts, SuiteRunsFile), JsonSerializer.Serialize(runs, Json));
+            if (Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY") is { Length: > 0 } summary)
+                File.AppendAllText(summary,
+                    (runs.Count == 1 ? "| Suite | Result | Seconds |\n| --- | --- | ---: |\n" : "") +
+                    $"| {suite} | {(exitCode == 0 ? "passed" : "**failed**")} | " +
+                    $"{(DateTime.UtcNow - started).TotalSeconds:F0} |\n");
         }
         return failed ? 1 : 0;
     }
