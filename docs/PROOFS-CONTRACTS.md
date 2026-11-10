@@ -175,7 +175,8 @@ In the caller, `cil_contract_steps [facts]` steps an existential-fuel goal throu
 instructions and calls with supplied evidence. Mark a proved `MethodContract.Holds` theorem
 `@[cil_contract]`, or include its proof in `facts`, to apply it at a matching callee. The theorem's
 program and method binding must match the actual call; required binding premises are checked. Input
-fields, each component of a tuple input included, are inferred from the encoded arguments. The
+fields, each component of a tuple input included, are inferred from the encoded arguments, and an
+input that is one word or one reference is the argument as the caller wrote it. The
 precondition is proved from facts when possible,
 otherwise it remains a goal before the continuation. Contracts merely present in the local context
 are not automatically selected.
