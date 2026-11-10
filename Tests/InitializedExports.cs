@@ -63,9 +63,9 @@ open CIL.Safety
 theorem correctness : MethodContract.Holds ImportFixture.addOne Extracted.program 0 := by
   rintro value memory formed
   dsimp only [ImportFixture.addOne, MethodContract.Returns]
-  refine ⟨12, memory, [.scalar (.i64 (value + 1))], ?execution,
-    Confined.refl _ memory, value + 1, rfl, ?post⟩
-  case post => simp only [CIL.importedPost]
+  refine MethodContract.Holds.intro (c := ImportFixture.addOne) (input := value)
+    memory (value + 1) ?execution (Confined.refl _ memory) ?post
+  case post => simp only [ImportFixture.addOne, CIL.importedPost]
   case execution =>
     cil_checked_steps
     all_goals bv_omega
