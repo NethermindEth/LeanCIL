@@ -46,8 +46,8 @@ theorem check_holds : checkContract.Holds literal 1 := by
   by_cases within : v ≤ 100
   · have bound : ¬ 100#64 < v := by simpa using within
     simp only [checkContract, raisesAbove, within, ite_true]
-    refine ⟨10, m, _, ?_, Confined.refl _ m, _, rfl, rfl⟩
-    cil_checked_steps [bound]
+    cil_contract_steps [bound]
+    exact ⟨Confined.refl _ m, _, rfl, rfl⟩
   · have bound : 100#64 < v := by simpa using within
     simp only [checkContract, raisesAbove, within, ite_false]
     cil_raise_steps [bound]

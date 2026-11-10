@@ -66,8 +66,9 @@ def readTable : MethodContract Unit W64 where
 
 private theorem libBody_reads (memory : Safety.Memory) (formed : memory.WellFormed)
     (world : StaticWorldValid [libField] memory) :
-    ∃ result, invoke [libBody] 8 0 [] memory = .ok (result, [.scalar (.i64 17)]) ∧
-      Confined [] memory result ∧ result.WellFormed ∧ StaticWorldValid [libField] result := by
+    WP (Execution (fun fuel => invoke [libBody] fuel 0 [] memory))
+      (fun (result, values) => values = [.scalar (.i64 17)] ∧
+        Confined [] memory result ∧ result.WellFormed ∧ StaticWorldValid [libField] result) := by
   obtain ⟨result, reference, resolved, _, valid⟩ :=
     staticReference_valid_result libField [libField] memory formed world (by simp)
       (by simp [libField])
@@ -96,27 +97,25 @@ private theorem libBody_reads (memory : Safety.Memory) (formed : memory.WellForm
     rfl
   have returned : step libBody .ret 2 [] frame [.scalar (.i64 17)] result =
       .ok (.returned [.scalar (.i64 17)] result) := rfl
-  have executed : run [libBody] 8 0 0 [] frame [] memory = .ok (result, [.scalar (.i64 17)]) :=
-    (run_next (program := [libBody]) (fuel := 7) (method := 0) (pc := 0)
-      (by rfl) (by rfl) first).trans
-      ((run_next (program := [libBody]) (fuel := 6) (method := 0) (pc := 1)
-        (by rfl) (by rfl) second).trans
-        (run_return (program := [libBody]) (fuel := 5) (method := 0) (pc := 2)
-          (by rfl) (by rfl) returned (by rfl)))
-  refine ⟨result, invoke_of_run (body := libBody) (by rfl) (by rfl) (by rfl) executed,
+  apply WP.enter (body := libBody) rfl rfl rfl
+  apply WP.step rfl rfl first
+  apply WP.step rfl rfl second
+  apply WP.returned rfl rfl returned rfl
+  exact ⟨rfl,
     Confined.ofMemoryBelow (staticReference_preserves_memory_below _ _ _ _ resolved)
       (Nat.le_refl _) (staticReference_extends_allocations _ _ _ _ resolved).next,
     staticReference_preserves_wellFormed _ _ _ _ formed resolved,
     staticReference_preserves_static_world _ _ _ _ _ formed world (by simp) resolved⟩
 
+#print axioms libBody_reads
 
 theorem readTable_holds : readTable.Holds [libBody] 0 := by
   rintro input memory ⟨formed, registry, absent⟩
   have world : StaticWorldValid [libField] memory :=
     StaticWorldValid.of_absent _ _ (by simp [libField, numberBytes, nativeLimit])
       (by simp) registry (by simpa [libField] using absent)
-  obtain ⟨result, ran, confined, _, _⟩ := libBody_reads memory formed world
-  exact ⟨8, (result, _), ran, confined, 17, rfl, rfl⟩
+  exact (libBody_reads memory formed world).consequence
+    fun _ ⟨encoded, confined, _, _⟩ => ⟨confined, 17, encoded, rfl⟩
 
 -- A world precondition that the post re-establishes supports repeated calls; absence holds only before the first.
 def readTableRepeat : MethodContract Unit W64 where
@@ -128,18 +127,19 @@ def readTableRepeat : MethodContract Unit W64 where
 
 theorem readTableRepeat_holds : readTableRepeat.Holds [libBody] 0 := by
   rintro input memory ⟨formed, world⟩
-  obtain ⟨result, ran, confined, resultFormed, resultWorld⟩ := libBody_reads memory formed world
-  exact ⟨8, (result, _), ran, confined, 17, rfl, rfl, resultFormed, resultWorld⟩
+  exact (libBody_reads memory formed world).consequence
+    fun _ ⟨encoded, confined, resultFormed, resultWorld⟩ =>
+      ⟨confined, 17, encoded, rfl, resultFormed, resultWorld⟩
 
 example (memory : Safety.Memory) (permitted : readTableRepeat.pre () memory) :
-    ∃ fuel middle first fuel' final second, invoke [libBody] fuel 0 [] memory = .ok (middle, first) ∧
-      invoke [libBody] fuel' 0 [] middle = .ok (final, second) ∧
-      first = [.scalar (.i64 17)] ∧ second = [.scalar (.i64 17)] := by
-  obtain ⟨fuel, ⟨middle, first⟩, ran, _, out, encoded, rfl, again⟩ :=
-    readTableRepeat_holds () memory permitted
-  obtain ⟨fuel', ⟨final, second⟩, ran', _, out', encoded', rfl, _⟩ :=
-    readTableRepeat_holds () middle again
-  exact ⟨fuel, middle, first, fuel', final, second, ran, ran', encoded, encoded'⟩
+    WP (Execution (fun fuel => invoke [libBody] fuel 0 [] memory))
+      (fun (middle, first) => WP (Execution (fun fuel => invoke [libBody] fuel 0 [] middle))
+        (fun (_, second) => first = [.scalar (.i64 17)] ∧ second = [.scalar (.i64 17)])) := by
+  apply (readTableRepeat_holds () memory permitted).consequence
+  rintro ⟨middle, first⟩ ⟨_, out, encoded, rfl, again⟩
+  apply (readTableRepeat_holds () middle again).consequence
+  rintro ⟨_, _⟩ ⟨_, out', encoded', same, _⟩
+  exact ⟨encoded, same ▸ encoded'⟩
 
 -- The table is already loaded here, so only the world form admits this call.
 example : readTableRepeat.pre () afterApp := ⟨app_formed, lib_world⟩
@@ -152,11 +152,10 @@ example : readTable.pre () afterApp := ⟨app_formed, app_world.2.2.1, library_a
 
 example : ∃ fuel result values, invoke linked fuel 1 [] afterApp = .ok (result, values) ∧
     values = [.scalar (.i64 17)] := by
-  obtain ⟨fuel, ⟨result, values⟩, ran, _, output, encoded, post⟩ :=
-    linked_readTable_holds () afterApp ⟨app_formed, app_world.2.2.1, library_absent⟩
-  change output = 17 at post
-  subst output
-  exact ⟨fuel, result, values, ran, encoded⟩
+  apply WP.exists_execution
+  exact (linked_readTable_holds () afterApp
+    ⟨app_formed, app_world.2.2.1, library_absent⟩).consequence
+    fun _ ⟨_, output, encoded, same⟩ => same ▸ encoded
 
 private def collision : Library :=
   { entry := { libBody with staticSites := [(0, { libField with identity := 101 })] } }

@@ -156,8 +156,8 @@ theorem percent_exact : percentExact.Holds Extracted.program percent := by
   by_cases within : v ≤ 100
   · have bound : v ≤ 100#64 := within
     simp only [percentExact, within, ite_true]
-    refine ⟨10, m, _, ?_, Confined.refl _ m, _, rfl, rfl⟩
-    cil_checked_steps [bound]
+    cil_contract_steps [bound]
+    exact ⟨Confined.refl _ m, _, rfl, rfl⟩
   · have bound : ¬ v ≤ 100#64 := within
     simp only [percentExact, within, ite_false]
     cil_raise_steps [bound]
@@ -383,9 +383,8 @@ theorem add_flag_holds : addFlagContract.Holds Extracted.program addFlag := by
   have loadA := load_word64_of_read readA
   have loadB := load_word64_of_read readB
   have narrowed : CIL.NarrowKind.unsigned8.extend 1 = 1 := by decide
-  refine ⟨11, (stored, [.scalar (.i32 1)]), ?_, Confined.write wrote (by simp [numberBytes]),
-    true, rfl, rfl, readback⟩
-  cil_checked_steps [formedA, formedB, formedRes, loadA, loadB, store, narrowed]
+  cil_contract_steps [formedA, formedB, formedRes, loadA, loadB, store, narrowed]
+  exact ⟨Confined.write wrote (by simp [numberBytes]), true, rfl, rfl, readback⟩
 
 #print axioms add_flag_holds
 
@@ -534,10 +533,9 @@ def isZeroContract : MethodContract CIL.W64 Bool where
 /-- `IsZero` meets its contract by stepping its body. -/
 theorem is_zero_holds : isZeroContract.Holds Extracted.program isZero := by
   intro v memory _
-  refine ⟨6, (memory, isZeroContract.results (decide (v = 0))), ?_, Confined.refl _ memory,
-    decide (v = 0), rfl, rfl⟩
-  simp only [isZeroContract, decide_eq_true_eq]
-  cil_checked_steps [NarrowKind.extend_ite_ofNat_one_zero]
+  cil_contract_steps [isZeroContract, NarrowKind.extend_ite_ofNat_one_zero]
+  refine ⟨Confined.refl _ memory, decide (v = 0), ?_, rfl⟩
+  simp [isZeroContract, CIL.NarrowKind.extend_ite_ofNat_one_zero]
 
 #print axioms is_zero_holds
 
