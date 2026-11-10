@@ -252,6 +252,17 @@ theorem step_fieldAt_aggregate_8_eq (offset : Nat) (signed : Bool)
         frame memory) := by
   instruction_step_proof step_fieldAt_eq
 
+/-- A nested struct field of a struct value is the field's bytes, after a bounds check. -/
+@[cil_instruction_step high]
+theorem step_aggregateFieldAt_aggregate_eq (offset size : Nat)
+    (bytes : List (BitVec 8)) (rest : List Value) :
+    step body (.aggregateFieldAt offset size) pc args frame (.scalar (.aggregate bytes) :: rest)
+      memory =
+      if offset + size > bytes.length then .error .invalidState
+      else .ok (.next (pc + 1)
+        (.scalar (.aggregate ((bytes.drop offset).take size)) :: rest) frame memory) := by
+  instruction_step_proof step_aggregateFieldAt_eq
+
 -- Reference checks and struct initialization.
 /-- `asRef` pushes the reference once it forms. -/
 @[cil_instruction_step high]
@@ -303,6 +314,7 @@ end InstructionEquations
 #print axioms step_setFieldAt_i64_eq
 #print axioms step_fieldAt_aggregate_4_eq
 #print axioms step_fieldAt_aggregate_8_eq
+#print axioms step_aggregateFieldAt_aggregate_eq
 #print axioms step_asRef_reference_eq
 #print axioms step_skipInit_reference_eq
 #print axioms step_initAggregate_reference_eq
