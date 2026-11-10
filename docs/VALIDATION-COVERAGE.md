@@ -409,7 +409,8 @@ trusted producer, never
 by hashing the restored manifest itself. Missing or invalid reuse evidence fails without replacing
 the destination. Rebuilding an existing library requires a separate output directory.
 `Tests/LibraryCache.cs` covers substituted auditors and compiled modules with regenerated manifests,
-missing producer digests, and preservation of unrelated destination files.
+missing producer digests, preservation of unrelated destination files, and a receipted cache entry
+whose module was rewritten, restored or joined by a file its manifest lacks.
 
 Main push runs publish their validated library even after exact reuse. This keeps the main run
 eligible to donate to later PRs without following a chain of earlier runs. Suite jobs prefer the

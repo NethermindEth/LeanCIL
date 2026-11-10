@@ -567,9 +567,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         finally { File.Delete(runner); File.Delete(targetsPath); }
     }
 
-    /// <summary>A Lake dependency of a consumer package; `Url` is null for the bundled framework copied into a
-    /// generated scratch package, which has no git checkout.</summary>
-    sealed record ConsumerDependency(string Name, string Directory, string Source, string Revision, string? Url);
+    /// <summary>A Lake dependency of a consumer package: a git checkout pinned by a full revision.</summary>
+    sealed record ConsumerDependency(string Name, string Directory, string Source, string Revision, string Url);
     ConsumerDependency[]? fullBundleDependencies { get; init; }
 
     static string Within(string root, string relative)
@@ -598,15 +597,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         }
     }
 
-    /// <summary>Relative directory of the framework copy that a generated scratch package requires by path.</summary>
-    const string BundledFrameworkDirectory = ".lake/packages/leancil";
-
-    /// <summary>
-    /// The package's dependencies from lake-manifest.json: git packages pinned by a full revision. Only editor
-    /// workspaces of a generated scratch package pass `bundledFramework`, which also admits its path-required
-    /// framework copy; verification never does.
-    /// </summary>
-    static ConsumerDependency[] ConsumerDependencies(string root, bool bundledFramework = false)
+    /// <summary>The package's dependencies from lake-manifest.json: git packages pinned by a full revision.</summary>
+    static ConsumerDependency[] ConsumerDependencies(string root)
     {
         var manifest = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(root, "lake-manifest.json")));
         if (manifest.GetProperty("packagesDir").GetString() != ".lake/packages" ||
@@ -615,13 +607,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return manifest.GetProperty("packages").EnumerateArray().Select(package =>
         {
             var name = package.GetProperty("name").GetString()!;
-            if (bundledFramework && name == "leancil" && package.GetProperty("type").GetString() == "path" &&
-                package.GetProperty("dir").GetString() == BundledFrameworkDirectory)
-            {
-                // Its sources are hashed and compared with the bundled framework like any dependency's.
-                var copy = Within(root, BundledFrameworkDirectory);
-                return new ConsumerDependency(name, copy, copy, "bundled", null);
-            }
             var revision = package.TryGetProperty("rev", out var rev) ? rev.GetString() ?? "" : "";
             if (package.GetProperty("type").GetString() != "git" ||
                 !Regex.IsMatch(name, @"\A[A-Za-z_][A-Za-z0-9_-]*\z") || !Regex.IsMatch(revision, @"\A[0-9a-fA-F]{40}\z"))
@@ -1230,7 +1215,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         {
             var destination = Within(session, Path.GetRelativePath(root, dependency.Directory));
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            if (fullBundleDependencies is null && dependency.Url is not null)
+            if (fullBundleDependencies is null)
             {
                 Run(["git", "clone", "--no-hardlinks", "--no-checkout", dependency.Directory, destination]);
                 Run(["git", "remote", "set-url", "origin", dependency.Url], destination);

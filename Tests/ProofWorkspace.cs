@@ -426,18 +426,43 @@ try
         """);
     if (Directory.EnumerateDirectories(standalone, ".git", SearchOption.AllDirectories).Any())
         throw new InvalidOperationException("A standalone workspace created a git repository.");
+    // The package requires the certified library where it is, so a second framework build on disk, or a copy
+    // of its sources, would show up as package files.
+    var certified = Regex.Match(File.ReadAllText(Path.Combine(standalone, ".lake", "leancil-framework",
+        "lakefile.toml")), "^srcDir = \"([^\"]+)\"$", RegexOptions.Multiline).Groups[1].Value;
+    var packageFiles = Directory.EnumerateFiles(standalone, "*", SearchOption.AllDirectories).ToArray();
+    const long largestScratchPackage = 16 * 1024 * 1024;
+    if (!File.Exists(Path.Combine(certified, ".lake", "build", "lib", "lean", "CIL.olean")) ||
+        packageFiles.Any(path => Path.GetRelativePath(standalone, path).Split('/', '\\').Contains("CIL")) ||
+        packageFiles.Sum(path => new FileInfo(path).Length) > largestScratchPackage)
+        throw new InvalidOperationException("A standalone package holds framework sources or a framework build " +
+            "instead of requiring the certified library at " + certified);
+    // Lake rebuilds a required module it finds stale in place; a certified library is never written.
+    var certifiedFiles = CacheFiles(certified);
+    var certifiedStamps = FileStamps(certified);
+    void RequireCertifiedUnwritten(string after)
+    {
+        if (!Same(certifiedStamps, FileStamps(certified)) || !Same(certifiedFiles, CacheFiles(certified)))
+            throw new InvalidOperationException("The certified library changed after " + after + ": " + certified);
+    }
     // Lake lists a source directory once per library, so test libraries would crowd LEAN_SRC_PATH toward
-    // Lean's Windows environment limit; the copy declares only the framework and editor libraries.
-    var bundled = Path.GetFullPath(Path.Combine(standalone, ".lake", "packages", "leancil"));
+    // Lean's Windows environment limit; the package adds one each for CIL and the editor library.
     var sourcePath = Run(["lake", "env"], standalone).Split('\n', StringSplitOptions.TrimEntries)
         .Single(line => line.StartsWith("LEAN_SRC_PATH=", StringComparison.Ordinal))["LEAN_SRC_PATH=".Length..];
-    var frameworkEntries = sourcePath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-        .Count(entry => Path.GetFullPath(entry).StartsWith(bundled, StringComparison.OrdinalIgnoreCase));
-    if (frameworkEntries != 2)
-        throw new InvalidOperationException($"The bundled framework adds {frameworkEntries} source directories " +
+    string[] expectedSources = [Path.GetFullPath(certified),
+        Path.GetFullPath(Path.Combine(standalone, ".lake", "leancil"))];
+    var packageSources = sourcePath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+        .Select(Path.GetFullPath).Where(entry => expectedSources.Any(expected =>
+            entry.StartsWith(expected, StringComparison.OrdinalIgnoreCase))).ToArray();
+    if (packageSources.Length != 2)
+        throw new InvalidOperationException($"The package adds {packageSources.Length} source directories " +
             "to LEAN_SRC_PATH instead of one each for CIL and the editor library: " + sourcePath);
     Run(["lake", "lean", scratchProof], standalone);
-    // The framework copy is required by path, which certification never accepts in place of a pinned revision.
+    // What an editor does on opening the file and what a user may run in the package.
+    Run(["lake", "setup-file", scratchProof], standalone);
+    Run(["lake", "build"], standalone);
+    RequireCertifiedUnwritten("checking the proof in the package");
+    // The library is required by path, which certification never accepts in place of a pinned revision.
     var unpinned = Execute([.. cli, "verify", output, "--proof", scratchProof, "--proof-root", standalone,
         "--theorem", "scratch"]);
     if (unpinned.Code == 0 || !unpinned.Output.Contains("must be git packages pinned", StringComparison.Ordinal))
@@ -455,14 +480,16 @@ try
     if (reopened.Contains("Created a Lake package", StringComparison.Ordinal))
         throw new InvalidOperationException("Re-running regenerated the standalone package: " + reopened);
     Run(["lake", "lean", scratchProof], standalone);
+    RequireCertifiedUnwritten("verifying and refreshing the package");
 }
 finally
 {
     Environment.SetEnvironmentVariable("GIT_CONFIG_GLOBAL", globalConfig);
     Directory.Delete(standalone, true);
 }
-Console.WriteLine("PASS a standalone proof gets a package beside it without git commits or a pinned framework, " +
-    "verifies as a single file and refreshes on re-run");
+Console.WriteLine("PASS a standalone proof gets a package beside it without git commits, a pinned framework or a " +
+    "framework build of its own, leaves the certified library unwritten, verifies as a single file and " +
+    "refreshes on re-run");
 
 Console.WriteLine("Watching two proofs of two methods in one package");
 var twiceProof = Path.Combine(package, "TwiceProof.lean");

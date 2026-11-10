@@ -579,6 +579,14 @@ module and replays all of them, because one library certifies every proof and pr
 for that framework version; it takes several minutes. The cache is `LEANCIL_CACHE_DIR`, by
 default `<local application data>/LeanCIL/libraries`.
 
+A cache entry is read in place by verification sessions and by the packages `workspace`
+generates, which require it by path, and Lake rebuilds a required module it finds out of date
+inside the entry. Each run therefore compares the length and write time of every file of the
+entry with those recorded in `<key>.stamps` beside it when its files last hashed to the
+manifest its receipt binds. Any difference hashes every file again: an entry that still matches
+is recorded anew, and one that does not is named on stderr, discarded and rebuilt. `verify`
+also fails when a file of the library it reads in place changes while it runs.
+
 The theorem defaults to `ExampleProof.correctness`; select another with `--theorem Namespace.theoremName`. The first invocation saves the selection in `artifacts/Add/verification.json`, independently of the generated success report:
 
 ```json
@@ -1017,13 +1025,18 @@ proof file itself shows live goals. It prints the import; KEY names the method a
 assembly name, signature, profile and initialization assumptions, so each method keeps its own
 module and proofs of several methods stay open at once. After rebuilding the assembly, run it
 again to refresh the extraction in place, then restart the file in the editor. A proof outside
-any Lake package gets a package beside it that requires the bundled framework, so no
-`lake update` or `--proof-root` is needed. A framework package that has no build yet receives a
-copy of the certified library's compiled modules, the library `verify` uses, so the framework is
-built once per machine and the editor build compiles only the extraction. On a machine without
-that library, the first `workspace` builds it, as the first `verify` would. Lake reuses a copied
-module only while it matches the package's sources, and no certificate reads the copy.
-Verification accepts the keyed import only for the
+any Lake package gets a package beside it, so no `lake update` or `--proof-root` is needed. That
+package declares the `LeanCILEditor` library itself and requires the certified library, the one
+`verify` uses, by path where it is cached: it holds no framework sources and no framework build,
+and its editor build compiles only the extraction. Lake leaves an up-to-date required library
+unwritten, `workspace` and `watch` fail if their build wrote into it, and every run
+[checks the cache entry](#stage-progress) against its manifest. When the tool's framework
+changes, the next `workspace` or `watch` points the package at the library of the new key. A
+package that pins `leancil` keeps its own checkout of the framework: one that has no build yet
+receives a copy of the certified library's compiled modules, so the framework is built once per
+machine. Lake reuses a copied module only while it matches the package's sources, and no
+certificate reads the copy. On a machine without the certified library, the first `workspace`
+builds it, as the first `verify` would. Verification accepts the keyed import only for the
 extraction it checks and builds it as a re-export of `Extracted`. `new-proof` writes the same
 keyed import, so its outline opens in the editor as generated.
 

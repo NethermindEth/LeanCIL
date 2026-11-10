@@ -34,6 +34,10 @@ partial class Program : IDisposable
     /// <summary>The certified library, read in place; deleted on disposal only when this process built it.</summary>
     string? library;
     bool ownsLibrary;
+    /// <summary>The cache entry this process published from the library it built, which outlives the process.</summary>
+    string? publishedLibrary;
+    /// <summary>Length and write time of each file of a library read in place, as it was when opened.</summary>
+    SortedDictionary<string, string>? libraryStamps;
     /// <summary>This process's writable package, which requires <see cref="library"/> by path.</summary>
     string? session;
     /// <summary>The base library's compiled module artifacts, taken from its validated manifest.</summary>
@@ -910,15 +914,7 @@ partial class Program : IDisposable
     /// The lakefile the certified library is built from: the checkout's, without blank lines, comments,
     /// the editor library, or any plain <c>[[lean_lib]]</c> table that declares only a library outside CIL.
     /// </summary>
-    static string LibraryLakefile(string lakefile) => FrameworkLakefile(lakefile, editor: false);
-
-    /// <summary>
-    /// The lakefile of the framework copy an editor workspace requires: the certified library's, with the
-    /// editor library kept, so Lake lists the framework's sources once per library a consumer needs.
-    /// </summary>
-    static string EditorFrameworkLakefile(string lakefile) => FrameworkLakefile(lakefile, editor: true);
-
-    static string FrameworkLakefile(string lakefile, bool editor)
+    static string LibraryLakefile(string lakefile)
     {
         var lines = lakefile.ReplaceLineEndings("\n").Split('\n');
         // A multi-line string can hold header-like lines, so such a file is kept whole.
@@ -938,7 +934,7 @@ partial class Program : IDisposable
         // A certificate must never resolve Extracted to the editor's sources.
         static bool EditorLibrary(List<string> table) =>
             table is ["[[lean_lib]]", var declaration, ..] && declaration == $"name = \"{EditorLibraryName}\"";
-        if (!editor) tables.RemoveAll(EditorLibrary);
+        tables.RemoveAll(EditorLibrary);
         var named = string.Join("\n", tables.Where(table => OtherLibrary(table) is null).SelectMany(table => table));
         // A library that a kept table names, such as a default target, stays declared.
         return string.Concat(tables.Where(table => OtherLibrary(table) is not { } name ||
@@ -976,6 +972,8 @@ partial class Program : IDisposable
         left.Count == right.Count && left.All(p => right.TryGetValue(p.Key, out var value) && value == p.Value);
 
     bool freshLibrary { get; init; }
+    /// <summary>An editor's library is no certificate input, so it is cached where certification never is.</summary>
+    bool editorLibrary { get; init; }
     bool freshProofs { get; init; }
     string? incrementalLibrary { get; init; }
     string? incrementalDigest { get; init; }
@@ -1108,6 +1106,73 @@ partial class Program : IDisposable
                 File.ReadAllBytes(Path.Combine(directory, "cache-receipt.hmac")));
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return false; }
+    }
+
+    /// <summary>The length and write time of every file <see cref="CacheFiles"/> hashes, by the same names.</summary>
+    static SortedDictionary<string, string> FileStamps(string directory) =>
+        new(new DirectoryInfo(directory).EnumerateFiles("*", SearchOption.AllDirectories)
+            .Where(file => file.Name is not ("cache-manifest.json" or "cache-receipt.hmac"))
+            .ToDictionary(file => Path.GetRelativePath(directory, file.FullName).Replace('\\', '/'), FileStamp),
+            StringComparer.Ordinal);
+
+    static string FileStamp(FileInfo file) => string.Create(System.Globalization.CultureInfo.InvariantCulture,
+        $"{file.Length}:{file.LastWriteTimeUtc.Ticks}");
+
+    /// <summary>Key, in a cache entry's recorded stamps, of the digest of the manifest they were checked by.</summary>
+    const string StampedManifest = "cache-manifest.json";
+
+    /// <summary>
+    /// Whether the cache entry's files are still the bytes its manifest records, with their stamps. A package
+    /// that requires the entry by path lets Lake rebuild a module it finds stale into the entry, so the stamps
+    /// are compared with those recorded beside the entry when its files last hashed to the manifest, and any
+    /// difference rehashes every file. An entry that no longer matches is rejected, and so rebuilt.
+    /// </summary>
+    static bool UnchangedCacheEntry(string cached, SortedDictionary<string, string> manifest,
+        out SortedDictionary<string, string>? stamps)
+    {
+        stamps = null;
+        var recordedPath = cached + ".stamps";
+        try
+        {
+            var current = FileStamps(cached);
+            var recorded = new SortedDictionary<string, string>(current, StringComparer.Ordinal)
+            {
+                [StampedManifest] = Sha(Path.Combine(cached, "cache-manifest.json"))
+            };
+            if (!File.Exists(recordedPath) || JsonSerializer.Deserialize<SortedDictionary<string, string>>(
+                    File.ReadAllBytes(recordedPath)) is not { } known || !Same(known, recorded))
+            {
+                // Stamps taken before hashing and found again after it describe the bytes that were hashed.
+                if (!Same(manifest, CacheFiles(cached)) || !Same(current, FileStamps(cached)))
+                    throw new InvalidDataException("its files no longer match the manifest it was certified with");
+                WriteIfChanged(recordedPath, JsonSerializer.Serialize(recorded));
+            }
+            stamps = current;
+            return true;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or
+            InvalidDataException)
+        {
+            Console.Error.WriteLine("The cached certified library " + cached + " is not used and is replaced: " +
+                error.Message);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Fails if any file of the library this process reads in place differs, by length or write time, from when
+    /// the library was opened: a build that wrote into it would otherwise pass for the certified bytes.
+    /// </summary>
+    void RequireUnchangedLibrary()
+    {
+        if (libraryStamps is null) return;
+        foreach (var (name, stamp) in libraryStamps)
+        {
+            var file = new FileInfo(Path.Combine(library!, name));
+            if (!file.Exists || FileStamp(file) != stamp)
+                throw new InvalidOperationException("The certified library changed on disk during verification: " +
+                    file.FullName);
+        }
     }
 
     // The pinned manifest binds the source snapshot before copying. Hash exactly the bytes
@@ -1311,9 +1376,9 @@ partial class Program : IDisposable
         }
 
         (libraryKey, var sources) = LibraryIdentity(common);
-        var fresh = freshLibrary ||
-            string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"), "true", StringComparison.OrdinalIgnoreCase);
+        static bool Set(string variable) => string.Equals(Environment.GetEnvironmentVariable(variable), "true",
+            StringComparison.OrdinalIgnoreCase);
+        var fresh = freshLibrary || !editorLibrary && (Set("CI") || Set("GITHUB_ACTIONS"));
         var cacheRoot = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR") ??
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LeanCIL", "libraries");
         var cached = Path.Combine(cacheRoot, libraryKey);
@@ -1347,9 +1412,10 @@ partial class Program : IDisposable
                 Trace("Opening certified Lean verification library", openStarted, library, openElapsed.Elapsed, 0, "", [library]);
             }
             else if (!fresh && CertifiedLocalLibrary(cached, libraryKey) &&
-                ReadManifest(cached) is { } cachedManifest && Same(sources, LibrarySources(cachedManifest)))
+                ReadManifest(cached) is { } cachedManifest && Same(sources, LibrarySources(cachedManifest)) &&
+                UnchangedCacheEntry(cached, cachedManifest, out libraryStamps))
             {
-                // The receipt binds this manifest, which was hashed when the entry was published.
+                // The receipt binds this manifest, and the entry's files still hash to it.
                 library = cached;
                 manifest = cachedManifest;
                 libraryBuild = "cache";
@@ -1404,6 +1470,7 @@ partial class Program : IDisposable
                         CopyTree(library, staging);
                         if (Directory.Exists(cached)) Directory.Delete(cached, true);
                         Directory.Move(staging, cached);
+                        publishedLibrary = cached;
                     }
                     finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
                 }
@@ -1427,6 +1494,8 @@ partial class Program : IDisposable
             Trace(incomplete ? "Copying incomplete certified Lean verification library" : "Copying certified Lean verification library",
                 started, copy, elapsed.Elapsed, 0, "", [copy]);
         }
+        // Lake rebuilds a module it finds stale into the library; no build of this process may have done so.
+        libraryStamps = ownsLibrary ? null : libraryStamps ?? FileStamps(library);
         baseModules = new(manifest.Where(pair => pair.Key.StartsWith(compiledPrefix, StringComparison.Ordinal) &&
                 Path.GetFileName(pair.Key).Contains(".olean", StringComparison.Ordinal))
             .ToDictionary(pair => pair.Key[compiledPrefix.Length..], pair => pair.Value), StringComparer.Ordinal);
@@ -1495,11 +1564,13 @@ partial class Program : IDisposable
     }
 
     /// <summary>
-    /// The base library's module artifacts: recorded ones from the validated manifest, plus any
-    /// unrecorded output, which Lake builds into the base from an unrecorded source and must be replayed.
+    /// The base library's module artifacts: recorded ones from the validated manifest, which must be the files
+    /// the library was opened with, plus any unrecorded output, which Lake builds into the base from an
+    /// unrecorded source and must be replayed.
     /// </summary>
     SortedDictionary<string, string> BaseModuleArtifacts()
     {
+        RequireUnchangedLibrary();
         var result = new SortedDictionary<string, string>(baseModules!, StringComparer.Ordinal);
         var compiled = Path.Combine(library!, ".lake/build/lib/lean");
         foreach (var path in Directory.EnumerateFiles(compiled, "*", SearchOption.AllDirectories))
@@ -1565,6 +1636,39 @@ partial class Program : IDisposable
             if (Directory.Exists(staging)) Directory.Delete(staging, true);
             ((IDisposable)verification).Dispose();
         }
+    }
+
+    /// <summary>
+    /// The certified library a package that outlives this process may require by path: the machine's cache
+    /// entry, built and published first when absent, or a supplied library. Never a directory a process deletes.
+    /// </summary>
+    static string EditorLibrary()
+    {
+        if (editorLibraryDirectory is not null) return editorLibraryDirectory;
+        using var verification = new Program { editorLibrary = true };
+        verification.Library(Inputs(At("CIL.lean")));
+        return editorLibraryDirectory = !verification.ownsLibrary ? verification.library!
+            : verification.publishedLibrary ?? throw new InvalidOperationException(
+                "The supplied certified library holds framework sources it has not compiled, so an editor " +
+                "package cannot require it in place. Unset LEANCIL_CERTIFIED_LIBRARY to use this machine's " +
+                "library cache.");
+    }
+
+    /// <summary>The directory <see cref="EditorLibrary"/> resolved, once per process.</summary>
+    static string? editorLibraryDirectory;
+
+    /// <summary>
+    /// Runs `build` in a package that requires the certified library at `library` by path, and fails if any
+    /// file there was written, added or removed: Lake rebuilds a required module it finds stale in place.
+    /// </summary>
+    static void RequireUnwritten(string library, Action build)
+    {
+        var stamps = FileStamps(library);
+        build();
+        if (!Same(stamps, FileStamps(library)))
+            throw new InvalidOperationException("Lake wrote into the certified library " + library +
+                ", which this package requires by path: it found framework modules out of date there. " +
+                "The next leancil verify or workspace rehashes the library and replaces it if it changed.");
     }
 
     /// <summary>The lakefile requirement of a package below owner on the certified framework.</summary>
