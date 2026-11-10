@@ -586,6 +586,8 @@ example (sse42 avx2 : Bool) (callee : Nat) (wide : avx2 = true) :
 ```
 
 A body whose code length depends on a parameter, such as an `if` around a whole block, is rejected
-with the first pc that is not determined. Only the kernel checks the equations: 100 instructions
-take about 0.1 s, 400 take 2.4 s and 1,500 take 32 s, growing with the square of the length like the
-extractor's own equations, and about eight times faster than writing each `:= rfl` by hand.
+with the first pc that is not determined. Only the kernel checks the equations. The command also
+declares `body_suffix{start}`, the code from every 16th pc on, and `body_suffix{start}_placed`, and
+proves each equation from the suffix that starts its block, as the extractor does, so the equations
+cost time linear in the body's length: about 6,400 heartbeats each from 250 to 4,000 instructions,
+as [instruction lookups](performance/InstructionLookups.md) records.

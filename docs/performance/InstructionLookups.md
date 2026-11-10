@@ -10,6 +10,12 @@ with. The extractor names the suffix of the code list at every 16th instruction
 `CIL.CodeSuffix.lookup`. No proof walks more than 16 cells of the code list, so the equations of
 a method cost time linear in its length. The equations depend on `propext` alone.
 
+`cil_instruction_equations`, which a hand-written body calls and the template emitter writes
+after each generated template, declares the same suffixes and proofs for its body:
+`body_suffix{start}`, `body_suffix{start}_placed` and `body_instruction{pc}`, each over the
+body's parameters. It builds the proof terms directly, so an equation costs it about 6,400
+heartbeats where the extractor's written equation costs 58,000 to elaborate.
+
 Proving each equation by `rfl` against the whole list walks `pc` cells of it. At 1,002
 instructions Lean's profiler attributes 41.6 s of elaboration, 14.5 s of type checking and 31.5 s
 of attribute application to equations proved that way.
@@ -58,12 +64,57 @@ Small extractions keep their cost:
 | `StaticVirtualDefaults::SpendRefunding` and its four callees | 37 | 109,674,829 | 109,829,219 |
 | `BinarySpans::TryReadBig` | 126 | 120,008,174 | 102,907,340 |
 
+## The command and generated templates
+
+The body is the fixture method's code as a definition followed by `cil_instruction_equations`;
+the template is `leancil templates` over the scalar and `x64-v3` extractions of the method,
+compiled as emitted. "By `rfl`" is the command proving each equation by `Eq.refl` against the
+whole list, and for the template also one `#print axioms` per equation; those template rows at
+2,002 and 4,002 instructions needed `maxRecDepth` raised by hand. "Per equation" subtracts the
+same file without the command.
+
+| Instructions | Body by `rfl`, CPU | Body, CPU | Template by `rfl`, CPU | Template, CPU |
+| ---: | ---: | ---: | ---: | ---: |
+| 250 | 3.6 s | 2.6 s | 3.9 s | 2.5 s |
+| 502 | 5.9 s | 2.7 s | 6.0 s | 2.8 s |
+| 1,002 | 13.4 s | 3.1 s | 14.3 s | 3.0 s |
+| 2,002 | 45.7 s | 3.5 s | 47.0 s | 3.7 s |
+| 4,002 | 160.0 s | 5.1 s | 157.3 s | 5.1 s |
+
+| Instructions | Body by `rfl`, heartbeats | Body, heartbeats | Per equation by `rfl` | Per equation |
+| ---: | ---: | ---: | ---: | ---: |
+| 250 | 18,539,930 | 7,826,637 | 49,236 | 6,382 |
+| 502 | 56,039,171 | 10,942,760 | 96,243 | 6,409 |
+| 1,002 | 200,637,321 | 17,166,259 | 189,527 | 6,422 |
+| 2,002 | 769,775,815 | 29,736,979 | 376,095 | 6,445 |
+| 4,002 | 3,027,594,441 | 55,088,087 | 749,218 | 6,462 |
+
+| Instructions | Template by `rfl`, heartbeats | Template, heartbeats | Per equation by `rfl` | Per equation |
+| ---: | ---: | ---: | ---: | ---: |
+| 250 | 19,053,923 | 7,819,437 | 51,626 | 6,687 |
+| 502 | 57,538,797 | 11,018,590 | 99,378 | 6,708 |
+| 1,002 | 205,190,961 | 17,408,327 | 194,128 | 6,719 |
+| 2,002 | 784,830,234 | 30,313,695 | 383,625 | 6,744 |
+| 4,002 | 3,081,237,144 | 56,321,127 | 762,609 | 6,758 |
+
+A template reports the axioms of its last equation alone. That proof reaches every named suffix
+and so every instruction, and each report walks all it reaches: one report per equation costs
+399 million heartbeats at 4,002 instructions, where the template's 4,002 equations cost
+27 million.
+
+## Other shapes
+
 Two other proof shapes were measured on the 1,002-instruction file and not kept. A balanced tree
 of the instructions with a logarithmic lookup compiled in the same time and size as the suffixes
 (10.5 s against 10.1 s for the method and its equations alone) and needs a new inductive type
 with its own correctness proof. One checked table of all lookups with each equation projected
 from it took 242.7 s, twice the `rfl` time, since projection `pc` walks `pc` conjuncts.
 
-The `lookups` suite extracts the fixture at 502 and 2,002 instructions and fails when the
-longer method costs more than 1.25 times the heartbeats per instruction of the shorter one. It
-measures 0.99 times with suffixes and 3.09 times with `rfl` proofs.
+## The `lookups` suite
+
+The `lookups` suite extracts the fixture at 502 and 2,002 instructions and compiles three files
+at each length: the extraction, its code as a body with a parameter under
+`cil_instruction_equations`, and its generated template. It fails when the longer file of a
+pair costs more than 1.25 times the heartbeats per instruction of the shorter one. It measures
+0.99 times for the extraction and 1.01 times for the body and the template; `rfl` proofs
+measure 3.09 times for the extraction, and the body's `rfl` rows above come to 3.7 times.

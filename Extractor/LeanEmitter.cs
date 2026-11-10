@@ -147,8 +147,8 @@ internal static class LeanEmitter
     const int RecursionDepthPerInstruction = 16;
 
     // Lean compares and compiles a code list one nested cell per instruction, so the depth follows the longest body.
-    static int RecursionDepth(MethodDefinition[] methods) => Math.Max(BaseRecursionDepth,
-        RecursionDepthPerInstruction * methods.Max(method => method.Body.Instructions.Count));
+    internal static int RecursionDepth(int longestBody) =>
+        Math.Max(BaseRecursionDepth, RecursionDepthPerInstruction * longestBody);
 
     /// <summary>Instructions per named code suffix; no instruction equation walks more cells than this.</summary>
     const int SuffixBlock = 16;
@@ -198,7 +198,7 @@ internal static class LeanEmitter
             namespace Extracted
             open CIL
 
-            set_option maxRecDepth {RecursionDepth(methods)}
+            set_option maxRecDepth {RecursionDepth(methods.Max(method => method.Body.Instructions.Count))}
 
 
             """.ReplaceLineEndings("\n"));
