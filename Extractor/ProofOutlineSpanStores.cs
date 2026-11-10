@@ -59,9 +59,7 @@ internal static partial class ProofOutline
         lean.Line($"{indent}have nonempty := {span}.length_cons.2.1");
         lean.Line($"{indent}apply CIL.Safety.invoke_of_run");
         lean.Line($"{indent}· cil_lookup []");
-        lean.Line($"{indent}· simp [checkedValue, numericValue, valid, Bind.bind, Except.bind, Pure.pure, " +
-            "Except.pure,");
-        lean.Line($"{indent}    checkedAt, Except.mapError]");
+        lean.Line($"{indent}· cil_checked_side [valid]");
         // Entering the frame homes the span in a local, which the stepping tactics do not set up.
         lean.Line($"{indent}· simp [enterFrame, Extracted.method{index}, makeLocals, makeArgumentHomes, " +
             "makeParameterHomes,");

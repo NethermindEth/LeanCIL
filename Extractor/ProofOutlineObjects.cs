@@ -1325,22 +1325,24 @@ internal static partial class ProofOutline
         foreach (var array in walk.Arrays) known[(array.Whole, 0)] = array.Whole;
         foreach (var array in spec.Parameters.Where(array => array.Shape == ParameterShape.WordArray))
             known[(array.Name + "Valid", 0)] = array.Name + "Valid";
-        // Entry checks every argument in the caller's memory, a value array by its view.
-        var facts = walk.Objects.Where(reached => reached.Holder is null)
-            .Select(reached => reached.Name + "Live.formed")
-            .Concat(spec.Arrays.Select(array => walk.ArrayFact(array.Name) + ".formed"))
-            .Concat(spec.ValueArrays.Select(array => array.WholeName + ".valid"))
+        // Entry checks every argument in the caller's memory, a value array by its view; that an object or an
+        // array of references forms there is read from its fact in the context.
+        var facts = spec.ValueArrays.Select(array => array.WholeName + ".valid")
             .Concat(spec.Parameters.Where(array => array.Shape == ParameterShape.WordArray)
                 .SelectMany(array => new[] { array.Name + "Valid", array.Name + "Type" }))
             .Concat(spec.Plan?.Premises.Where(fact => fact.Name.EndsWith("Reference", StringComparison.Ordinal))
                 .Select(fact => fact.Name) ?? []).ToList();
+        // A frame's entry is checked by `cil_checked_side`, which is given that each argument forms.
+        string[] formed = [.. walk.Objects.Where(ObjectPath.Gathered).Select(reached => reached.Name + "Live.formed"),
+            .. spec.Arrays.Select(array => walk.ArrayFact(array.Name) + ".formed")];
         var frame = walk.NumericHomes ? new ObjectFrame(entry,
-            "[" + string.Join(", ", walk.Plan().Entries) + "]", spec.Method.Body.Variables.Count) : null;
+            "[" + string.Join(", ", walk.Plan().Entries) + "]", spec.Method.Body.Variables.Count, formed) : null;
         new ObjectPath(lean, spec, walk.Owns, owned, widen, returns, "  ", known, [], facts, [], frame).Write(walk);
     }
 
-    /// <summary>The existing entry binder and caller footprint used by a numeric object's execution path.</summary>
-    sealed record ObjectFrame(string Entry, string Footprint, int Locals);
+    /// <summary>The existing entry binder and caller footprint used by a numeric object's execution path, and
+    /// the facts that each object and reference array argument forms in the caller's memory.</summary>
+    sealed record ObjectFrame(string Entry, string Footprint, int Locals, string[] Formed);
 
     /// <summary>One path of an object body's proof from where its walk starts, `indent` deep: `known` names
     /// each fact in the memory after a number of writes, `stored` holds the writes so far, `facts` those not
@@ -1355,6 +1357,11 @@ internal static partial class ProofOutline
 
         bool Private(int level) => stored[level - 1] is ObjectFrameEntry or LocalAccess or
             CallStep { Writes: null };
+
+        /// <summary>Whether the steps read the facts of `reached` from the context. They gather for the objects
+        /// the goal names when stepping starts, so the facts of an object a field holds are given to them.
+        /// </summary>
+        internal static bool Gathered(Reached reached) => reached.Holder is null;
 
         string Live(Reached reached, int stores) => Carry(reached.Name + "Live", stores, (previous, level) =>
             Private(level)
@@ -1566,7 +1573,7 @@ internal static partial class ProofOutline
             Add("setup");
             Add(frame.Entry + ".frame");
             lean.Line($"{indent}refine invoke_exists_of_run (by cil_lookup [])");
-            lean.Wrapped($"{indent}  (by cil_checked_side", FactList(facts), ") setup ?_");
+            lean.Wrapped($"{indent}  (by cil_checked_side", FactList([.. frame.Formed, .. facts]), ") setup ?_");
             stored.Add(entered);
         }
 
@@ -1700,13 +1707,10 @@ internal static partial class ProofOutline
         {
             var slot = access.Slot!;
             var level = access.Stores;
-            // The array argument is pushed again in the memory the access runs in.
-            if (level > 0) Add(ArrayLive(access.Array, level) + ".formed");
-            if (access.Kind == ElementKind.Length)
-            {
-                Add(ArrayLive(access.Array, level) + ".located");
-                return;
-            }
+            // The array argument is pushed again in the memory the access runs in, where its carried fact
+            // must be in the context for the steps to read that it forms and where its length lies.
+            _ = ArrayLive(access.Array, level);
+            if (access.Kind == ElementKind.Length) return;
             // What the access pushes or stores must form in the memory it runs in.
             var formed = access switch
             {
@@ -1728,7 +1732,7 @@ internal static partial class ProofOutline
                     Add($"({reads}.facts {formed}).1");
                     Add($"({reads}.facts {formed}).2");
                 }
-                Add(formed);
+                if (access.Target is null || !Gathered(access.Target)) Add(formed);
                 return;
             }
             var number = level + 1;
@@ -1744,7 +1748,7 @@ internal static partial class ProofOutline
             lean.Wrapped($"{indent}generalize wrote{number} :",
                 [$"setSlot {ObjectWalk.Memory(level)}", $"(ReferenceArray.slot {access.Array} {access.Index})",
                     access.Value!, $"= stored{number}"], $"at written{number} framed{number} held{number}");
-            if (access.Value != ".null") Add(formed);
+            if (access.Value != ".null" && (access.Target is null || !Gathered(access.Target))) Add(formed);
             Add($"located{number}");
             Add($"checked{number}");
             Add($"written{number}");
@@ -1756,7 +1760,7 @@ internal static partial class ProofOutline
             foreach (var reached in call.Live)
             {
                 Add(Live(reached, call.Stores));
-                Add(Live(reached, call.Stores) + ".formed");
+                if (!Gathered(reached)) Add(Live(reached, call.Stores) + ".formed");
             }
             foreach (var need in call.Needs)
             {
@@ -1928,21 +1932,21 @@ internal static partial class ProofOutline
             {
                 // The load pushes the reference as it is, so later tests and stores need it to form.
                 var forms = fact + "Forms";
-                Add(fact + ".located");
+                if (!Gathered(access.Object)) Add(fact + ".located");
                 Add($"{fact}.load_forms {forms}");
                 Add(forms + ".formed");
                 return;
             }
             if (access.Kind == AccessKind.Load)
             {
-                // An element of positive width lets the load find the array's length from its size.
-                Add(access.Field.Kind switch
-                {
-                    ClassViews.FieldKind.Reference => $"{fact}.facts {access.Target!.Held} {access.Target.Name}Live",
-                    ClassViews.FieldKind.Array =>
-                        $"{fact}.facts {access.Array!.Held} {Whole(access.Array, access.Stores)} (by decide)",
-                    _ => access.Signed ? fact + ".signedFacts" : fact + ".facts"
-                });
+                // An element of positive width lets the load find the array's length from its size. The load
+                // of an unsigned word field is read from the field's fact in the context.
+                if (access.Field.Kind == ClassViews.FieldKind.Reference)
+                    Add($"{fact}.facts {access.Target!.Held} {access.Target.Name}Live");
+                else if (access.Field.Kind == ClassViews.FieldKind.Array)
+                    Add($"{fact}.facts {access.Array!.Held} {Whole(access.Array, access.Stores)} (by decide)");
+                else if (access.Signed) Add(fact + ".signedFacts");
+                else if (!Gathered(access.Object)) Add(fact + ".facts");
                 return;
             }
             var stores = access.Stores + 1;
@@ -1976,13 +1980,18 @@ internal static partial class ProofOutline
                     $"({access.Field.Lean}.address {access.Object.Name})", value, $"= stored{stores}"],
                     $"at written{stores} framed{stores} held{stores}");
                 // The store checks the stored reference is formed in the memory it writes.
-                if (target is not null) Add(target + ".formed");
-                else if (formed != "rfl") Add(formed!);
+                if (target is not null && !Gathered(access.Target!)) Add(target + ".formed");
+                else if (target is null && formed != "rfl") Add(formed!);
             }
             else lean.Wrapped($"{indent}obtain ⟨stored{stores}, written{stores}, framed{stores}, held{stores}⟩ :=",
                 [$"{fact}.store {access.Value}"], "");
-            Add(fact + ".located");
-            Add(Live(access.Object, access.Stores) + ".formed");
+            // The object's fact is carried to this memory, where the steps read that it forms.
+            if (Gathered(access.Object)) _ = Live(access.Object, access.Stores);
+            else
+            {
+                Add(fact + ".located");
+                Add(Live(access.Object, access.Stores) + ".formed");
+            }
             Add($"written{stores}");
             if (frame is not null)
             {
@@ -2036,9 +2045,12 @@ internal static partial class ProofOutline
             // A chain that forgets fresh entries is too long for one line, so it wraps between its terms.
             string[] Parts(string tail) => stored.OfType<Allocation>().Any()
                 ? (confined + tail).Terms() : [confined + tail];
-            // A returned object must still form in the memory the last store left.
+            // A returned object must still form in the memory the last store left, as its carried fact says.
             if (walk.Objects.FirstOrDefault(reached => $"(.address {reached.Name})" == walk.Returned) is { } result)
-                Add(Live(result, stored.Count) + ".formed");
+            {
+                var live = Live(result, stored.Count);
+                if (!Gathered(result)) Add(live + ".formed");
+            }
             // The return leaves the method's frame, which owns no caller memory.
             // After a call the steps may already have reached the return.
             if (frame is null) Add("leaveFrame");

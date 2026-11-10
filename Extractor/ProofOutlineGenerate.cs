@@ -648,8 +648,8 @@ internal static partial class ProofOutline
         if (stepped) ObjectBody(lean, spec, walk, "simp [footprint]");
         else
         {
-            lean.Line("  -- Choose a fuel bound and step the body with `cil_checked_steps [facts]`, giving each");
-            lean.Line("  -- field load its `facts` and a store its `Owned.store`.");
+            lean.Line("  -- Choose a fuel bound and step the body with `cil_checked_steps [facts]`, giving a store");
+            lean.Line("  -- its `Owned.store`; a scalar field's load is read from its fact in the context.");
             var reason = walk.Stopped ?? Unstepped(spec.Method, body.Ops, spec.Parameters);
             lean.Noted("  ", "sorry", $"{NotOutlined}the body meets {reason}; prove its run and Postcondition");
         }
