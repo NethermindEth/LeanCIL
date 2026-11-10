@@ -873,12 +873,26 @@ elab_rules : tactic
             ([``CIL.Op.brzero, ``CIL.Op.brnonzero, ``CIL.Op.beq, ``CIL.Op.bne,
               ``CIL.Op.blt, ``CIL.Op.bltu, ``CIL.Op.ble, ``CIL.Op.bleu, ``CIL.Op.bgt,
               ``CIL.Op.bgtu, ``CIL.Op.bge, ``CIL.Op.bgeu].contains ·) then
+        -- A matching truth equation must rewrite before its definition can erase that head.
+        let mut truthDefinitions : Array Term := #[← `(term| CIL.truth)]
+        if pending.getAppArgs[1]!.getAppFn.constName?.any
+            ([``CIL.Op.brzero, ``CIL.Op.brnonzero].contains ·) then
+          let stack ← whnfD pending.getAppArgs[5]!
+          if stack.isAppOfArity ``List.cons 3 then
+            let value := stack.getAppArgs[1]!
+            if value.isAppOfArity ``Value.scalar 1 then
+              let wanted ← mkAppM ``CIL.truth #[value.appArg!]
+              for fact in facts.getElems do
+                if ← suppliedFactSatisfies fact (dispatchFactMatches wanted ``CIL.truth) then
+                  truthDefinitions := #[]
+                  break
+        let branchFacts := truthDefinitions ++ facts.getElems
         -- Decide a branch before reflexivity can assign its unknown next pc a conditional.
         -- Numerals use the same spelling as the normalized branch facts.
         evalTactic (← `(tactic| cil_strict (
           simp only [cil_code, Nat.reduceAdd, cil_step, cil_guard, cil_checked, cil_side,
-            CIL.truth, BitVec.ofNat_eq_ofNat, BitVec.setWidth_ofNat_of_le, Nat.reduceLeDiff,
-            $[$facts:term],*]
+            BitVec.ofNat_eq_ofNat, BitVec.setWidth_ofNat_of_le, Nat.reduceLeDiff,
+            $[$branchFacts:term],*]
           all_goals ((repeat constructor) <;> rfl))))
         return
     evalTactic (← `(tactic| try simp only [cil_code, Nat.reduceAdd]))

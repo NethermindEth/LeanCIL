@@ -158,6 +158,24 @@ theorem branch_zero_literal (word : CIL.W32) (memory : Memory) (zero : word = 0#
   cil_checked_steps [zero]
 #print axioms branch_zero_literal
 
+/-- A supplied truth equation retains priority over unfolding the same condition. -/
+theorem branch_truth_fact (word unrelated : CIL.W32) (memory : Memory)
+    (_unrelated : CIL.truth (.i32 unrelated) = some false)
+    (truth : CIL.truth (.i32 word) = some false) :
+    invoke [truthBranchBody (.brzero 4)] 5 0 [.scalar (.i32 word)] memory =
+      .ok (memory, [.scalar (.i64 2)]) := by
+  fail_if_success (cil_checked_steps [_unrelated]; done)
+  cil_checked_steps [truth]
+#print axioms branch_truth_fact
+
+/-- An unrelated truth equation does not prevent a matching zero comparison from deciding. -/
+theorem branch_truth_fact_fallback (word unrelated : CIL.W64) (memory : Memory)
+    (_unrelated : CIL.truth (.i64 unrelated) = some false) (nonzero : word ≠ 0#64) :
+    invoke [truthBranchBody (.brnonzero 4)] 5 0 [.scalar (.i64 word)] memory =
+      .ok (memory, [.scalar (.i64 2)]) := by
+  cil_checked_steps [_unrelated, nonzero]
+#print axioms branch_truth_fact_fallback
+
 /-- A closed zero operand decides the negative branch condition without a supplied guard. -/
 theorem branch_closed_zero (memory : Memory) :
     invoke [truthBranchBody (.brnonzero 4)] 5 0 [.scalar (.i32 0)] memory =
