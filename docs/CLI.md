@@ -452,7 +452,8 @@ comment saying which obligation it is:
   `post` is `final = initial ∧ sorry`, the helper storing nothing, and a `Holds` theorem against
   the helper's method index in `Extracted.program`, split with `by_cases` on each test: each
   returning side is stepped and leaves what `post` states of the result, and each throwing side is
-  closed from `pre` by `cil_loop_obligation`. At the call the caller states `permitted1`, the
+  closed from `pre` by `cil_loop_obligation`, whose failure says that the path is reached unless
+  one of the definitions it unfolds rules it out. At the call the caller states `permitted1`, the
   helper's `pre` of the values passed, as a hole to prove from `assumed`; `cil_contract_steps`
   composes the call through the contract `with called1 output1 call1`, naming the memory after
   it, the result and the call's `CallResult`, and the proof reads what `post` states of the result
@@ -465,8 +466,10 @@ comment saying which obligation it is:
   frame of locals. Its `post` is `final = initial ∧ sorry`, or `sorry` alone when the helper keeps
   locals, whose homes are allocated in the memory. Its `Holds` theorem steps each side of each
   test and closes it with `MethodContract.Holds.returns`, leaving what `post` states of the result
-  there. At the call, `permitted1` gives those facts from the caller's own and leaves the rest of
-  `pre` as the hole.
+  there; a side that throws is closed from `pre` by `cil_loop_obligation`, as in a stub. At the
+  call, `permitted1` gives those facts from the caller's own and leaves the rest of `pre` as the
+  hole. The helper's `post` reads fields in the memory at the call, which a caller with locals
+  names in `initial` by its field equations, such as `gaugeLimitEqual1`.
 - A caller that keeps 32- or 64-bit integer locals composes these calls inside its frame: a
   result stored into a local is read back as the word the helper returned, and a test after it
   splits the proof. A body over words alone that keeps such locals beside a helper call, or calls
@@ -474,9 +477,9 @@ comment saying which obligation it is:
   one, since the homes are allocated in it; its `Precondition` takes `initial` and its
   `Postcondition` both memories. A helper over words that keeps its own locals and only computes
   gets the contract read from its body, which names its result, instead of a stub.
-- Any other callee leaves a `not outlined:` hole, such as a helper that throws from a frame of
-  locals or after reading an object, or one that calls or stores beside a test: in a body over
-  objects the hole names the callee's method index, and in a body over words the call instruction.
+- Any other callee leaves a `not outlined:` hole, such as a helper that calls another method or
+  stores a field beside a test: the hole names the callee's method index and the `MethodContract`
+  to write and prove with `Holds Extracted.program` at that index.
 
 Where the outline cannot step a path, it leaves a hole whose comment starts with `not outlined:`,
 names what it met and what that step needs, and gives the source line to continue from. The

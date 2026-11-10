@@ -150,6 +150,10 @@ internal static partial class ProofOutline
     /// contract's input at the call and `Number` names its result and postcondition.</summary>
     sealed record StubCall(Stub Stub, string Input, int Stores, int Number, string Where);
 
+    /// <summary>The end of a callee's path that throws at `Where`; its contract's `pre` must exclude the path.
+    /// </summary>
+    sealed record Thrown(string Where);
+
     /// <summary>A test of named words that splits the body: `Fact` names `Condition` on the side that holds it
     /// and its negation on the other, and each side is walked from where it continues to its own return.</summary>
     sealed record Split(string Fact, string Condition, (string Where, ObjectWalk Walk) Holds,
@@ -176,8 +180,10 @@ internal static partial class ProofOutline
     /// through; null with the reason when it does more.</summary>
     /// <remarks>A `linear` walk reads every op once in order, ignoring where branches go, to find which fields of
     /// which objects a body with loops touches; its steps are not a proof.</remarks>
+    /// <remarks>With `throws`, for a callee, a path may end in a throw, which its contract's `pre` must exclude.
+    /// </remarks>
     sealed class ObjectWalk(Specification spec, string[] ops, FieldViews views, Func<int, Callee?> callees,
-        bool linear = false, bool numericHomes = false, Func<int, Stub?>? stubs = null)
+        bool linear = false, bool numericHomes = false, Func<int, Stub?>? stubs = null, bool throws = false)
     {
         internal string? Stopped { get; private set; }
         internal string? Returned { get; private set; }
@@ -306,7 +312,7 @@ internal static partial class ProofOutline
                 {
                     var (holds, fails) = takenWhenTrue ? (target, pc + 1) : (pc + 1, target);
                     var walks = new[] { holds, fails }.Select(next => (Next: next, Walk: new ObjectWalk(spec, ops,
-                        views, callees, linear, numericHomes, stubs) { Objects = Objects, Arrays = Arrays,
+                        views, callees, linear, numericHomes, stubs, throws) { Objects = Objects, Arrays = Arrays,
                         Slots = Slots, Stored = Stored, ArrayApart = ArrayApart,
                         stores = stores, fieldMemory = fieldMemory,
                         calls = calls, splits = splits + 1, Fresh = Fresh, previous = [.. PathSteps] })).ToArray();
@@ -746,6 +752,11 @@ internal static partial class ProofOutline
                     stores++;
                 }
                 else if (op == ".nop") { }
+                else if (throws && !linear && op.StartsWith(".throw ", StringComparison.Ordinal))
+                {
+                    Steps.Add(new Thrown(location(pc)));
+                    return true;
+                }
                 else if (op == ".ret" || op.StartsWith(".ret (some ", StringComparison.Ordinal))
                 {
                     if (spec.Result is not null)
@@ -1109,7 +1120,7 @@ internal static partial class ProofOutline
             var spec = new Specification(method, parameters, DescribeResult(method, extraction.Architecture), true,
                 true);
             var walk = new ObjectWalk(spec, extraction.Emitted[index].Ops, views, _ => null,
-                numericHomes: HasNumericObjectHomes(method));
+                numericHomes: HasNumericObjectHomes(method), throws: splits);
             // A contract states reference stores only of objects the callee reaches, and its caller cannot give
             // it the premise that a reference outside the model forms; it states no array a field holds.
             if (!walk.Run(pc => Location(method, pc)) || walk.Flattened.Any(step => step is CallStep) ||
@@ -1482,6 +1493,16 @@ internal static partial class ProofOutline
                         foreach (var (equality, field) in fieldEqualities) path.fieldEqualities.Add(equality, field);
                         path.Write(side);
                     }
+                    return;
+                }
+                if (step is Thrown thrown)
+                {
+                    // Nothing has stepped to the throw, so the facts so far must already contradict.
+                    lean.Comment($"{indent}-- ", $"{indent}-- ", $"`{spec.Method.Name}` throws at {thrown.Where}" +
+                        (branches.Count == 0 ? "" : " where " + string.Join(" and ", branches)) +
+                        ", which its precondition must rule out");
+                    lean.Line($"{indent}exfalso");
+                    lean.Line($"{indent}cil_loop_obligation [{returns!.Contract}]");
                     return;
                 }
                 if (step is CallStep call)

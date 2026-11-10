@@ -79,6 +79,11 @@ var catalog = new (string Name, string Selector, string Group)[]
     // local of its own gets a contract with holes whose proof splits inside its frame.
     ("HelperLocalTest", "Gauge::Margin()", "objects"),
     ("HelperTestsLocal", "Gauge::Clamped(int,int,int)", "control"),
+    // An object helper called from a frame, whose facts are carried to each call; one that throws beyond a
+    // field, and one that throws from a frame of its own, each side that throws closed from its `pre`.
+    ("HelperObjectLocal", "Gauge::CappedSlack()", "objects"),
+    ("HelperObjectThrows", "Gauge::CheckedLevel()", "objects"),
+    ("HelperFrameThrows", "Gauge::RaisedLevel()", "objects"),
     ("DownThenUp", "Loops::DownThenUp(uint)", "control"),
     ("CheckedAdd", "CheckedArithmetic::Add(uint,uint)", "control"),
     ("Log64", "Bits::Log64(ulong)", "control"),
@@ -584,6 +589,67 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
             "def Postcondition (value low high : W32) (initial final : Memory) (result : W32) : Prop :=\n" +
             "  result.toInt = min (max value.toInt low.toInt) high.toInt"),
         (helperHole, "  exact post1")]),
+    // Each call's `post` reads the limit in the frame's memory, which the frame's equations name in `initial`.
+    ("HelperObjectLocal", [
+        ("Gauge.Limit.Readable memory gauge ∧ sorry", "Gauge.Limit.Readable memory gauge ∧ True"),
+        ("final = initial ∧ sorry",
+            "final = initial ∧ result.toInt = min value.toInt (Gauge.Limit.of initial gauge).toInt"),
+        .. new[] { "holds", "fails" }.Select(side =>
+            ($"    -- what `cappedContract.post` states of the returned value where `branch1` {side}, from\n" +
+                "    -- `permitted`, its `pre`\n    sorry", "    omega")),
+        .. new[] { 92, 93 }.Select(line =>
+            ($"    sorry -- `cappedContract.pre` at the call at OutlineHelpers.cs:{line}, from `assumed`",
+                "    trivial")),
+        ("def Precondition (gauge : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (gauge : Reference) (initial : Memory) : Prop := True"),
+        ("def Postcondition (gauge : Reference) (initial final : Memory) (result : W32) : Prop := sorry",
+            "def Postcondition (gauge : Reference) (initial final : Memory) (result : W32) : Prop :=\n" +
+            $"  ∃ capped limit : W32, result = limit - capped ∧ capped.toInt = {smallerLevel} ∧\n" +
+            "    limit.toInt = (Gauge.Limit.of initial gauge).toInt"),
+        (helperPairHole, """
+              simp only [gaugeLimitEqual1, gaugeLimitEqual2] at post1 post2
+              exact ⟨_, _, rfl, post1, by simpa using post2⟩
+            """)]),
+    // The helper's `pre` excludes the side that throws, which its caller proves from its own precondition.
+    ("HelperObjectThrows", [
+        ("Gauge.Limit.Readable memory gauge ∧ sorry",
+            "Gauge.Limit.Readable memory gauge ∧ value.toInt ≤ (Gauge.Limit.of memory gauge).toInt"),
+        ("final = initial ∧ sorry", "final = initial ∧ result = value"),
+        ("""
+            -- what `checkedContract.post` states of the returned value where `branch1` fails, from
+            -- `permitted`, its `pre`
+            sorry
+        """, "    rfl"),
+        ("    sorry -- `checkedContract.pre` at the call at OutlineHelpers.cs:101, from `assumed`",
+            "    exact assumed"),
+        ("def Precondition (gauge : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (gauge : Reference) (initial : Memory) : Prop :=\n" +
+            "  (Gauge.Level.of initial gauge).toInt ≤ (Gauge.Limit.of initial gauge).toInt"),
+        ("def Postcondition (gauge : Reference) (initial final : Memory) (result : W32) : Prop := sorry",
+            "def Postcondition (gauge : Reference) (initial final : Memory) (result : W32) : Prop :=\n" +
+            "  result = Gauge.Level.of initial gauge"),
+        (helperHole, "  exact post1")]),
+    // Both sides that throw compare the helper's local with the limit, which its `pre` bounds.
+    ("HelperFrameThrows", [
+        ("Gauge.Limit.Readable memory gauge ∧ sorry",
+            "Gauge.Limit.Readable memory gauge ∧\n      value.toInt ≤ (Gauge.Limit.of memory gauge).toInt ∧ " +
+            "low.toInt ≤ (Gauge.Limit.of memory gauge).toInt"),
+        ("  post := fun (gauge, value, low) initial final result => sorry",
+            "  post := fun (gauge, value, low) initial final result =>\n" +
+            "    result.toInt = max value.toInt low.toInt"),
+        .. new[] { "holds", "fails" }.Select(side =>
+            ($"      -- what `raiseContract.post` states of the returned value where `branch1` {side} and " +
+                "`branch2`\n      -- fails, from `permitted`, its `pre`\n      sorry", "      omega")),
+        ("    sorry -- `raiseContract.pre` at the call at OutlineHelpers.cs:110, from `assumed`",
+            "    simpa [Precondition, gaugeLimitEqual1] using assumed"),
+        ("def Precondition (gauge : Reference) (initial : Memory) : Prop := sorry",
+            "def Precondition (gauge : Reference) (initial : Memory) : Prop :=\n" +
+            "  (Gauge.Level.of initial gauge).toInt ≤ (Gauge.Limit.of initial gauge).toInt ∧\n" +
+            "    0 ≤ (Gauge.Limit.of initial gauge).toInt"),
+        ("def Postcondition (gauge : Reference) (initial final : Memory) (result : W32) : Prop := sorry",
+            "def Postcondition (gauge : Reference) (initial final : Memory) (result : W32) : Prop :=\n" +
+            "  result.toInt = max (Gauge.Level.of initial gauge).toInt 0"),
+        (helperHole, "  simpa [Postcondition] using post1")]),
     ("Deposit", [
         ("def Precondition (account : Reference) (amount : W64) (initial : Memory) : Prop := sorry",
             "def Precondition (_ : Reference) (_ : W64) (_ : Memory) : Prop := True"),
@@ -1876,19 +1942,28 @@ foreach (var (helper, label, stated, wrong) in new[]
     Console.WriteLine($"PASS a helper's contract is proved: {label} is rejected");
 }
 
-if (Selected("HelperThrows"))
+// A `pre` that admits the side where the helper throws leaves that side unproved: an error that says the path
+// must be ruled out, never a hole, whether the helper is over words or reads an object.
+foreach (var (helper, bound, admitting) in new[]
 {
-    // A `pre` that admits the side where the helper throws leaves that side unproved: an error, never a hole.
-    var open = Path.Combine(outlineRoot, "HelperThrows", "Open.lean");
-    File.WriteAllText(open, File.ReadAllText(Path.Combine(outlineRoot, "HelperThrows", "Filled.lean"))
-        .Replace("memory => value.toInt ≤ limit.toInt", "memory => True", StringComparison.Ordinal)
+    ("HelperThrows", "memory => value.toInt ≤ limit.toInt", "memory => True"),
+    ("HelperObjectThrows", "gauge ∧ value.toInt ≤ (Gauge.Limit.of memory gauge).toInt", "gauge ∧ True")
+})
+{
+    if (!Selected(helper)) continue;
+    var filledThrow = File.ReadAllText(Path.Combine(outlineRoot, helper, "Filled.lean"));
+    if (!filledThrow.Contains(bound, StringComparison.Ordinal))
+        throw new InvalidOperationException($"The {helper} proof lacks the precondition that excludes its throw");
+    var open = Path.Combine(outlineRoot, helper, "Open.lean");
+    File.WriteAllText(open, filledThrow.Replace(bound, admitting, StringComparison.Ordinal)
         .Replace("    exact assumed", "    trivial", StringComparison.Ordinal));
-    var admitsThrow = Execute(Cli("verify", OutlineExtraction("HelperThrows"), "--proof", open));
+    var admitsThrow = Execute(Cli("verify", OutlineExtraction(helper), "--proof", open));
     if (admitsThrow.Code == 0 || !admitsThrow.Output.Contains("Stage: proof checking") ||
-        !admitsThrow.Output.Contains("cil_loop_obligation could not prove"))
-        throw new InvalidOperationException("verify accepted a helper precondition that admits its throw:\n" +
+        !admitsThrow.Output.Contains("cil_loop_obligation could not prove") ||
+        !admitsThrow.Output.Contains("state what rules it out"))
+        throw new InvalidOperationException($"verify accepted a {helper} precondition that admits its throw:\n" +
             admitsThrow.Output);
-    Console.WriteLine("PASS a helper precondition that admits the side where it throws is rejected in its proof");
+    Console.WriteLine($"PASS a {helper} precondition that admits the side where it throws is rejected in its proof");
 }
 
 // One hole left, an obligation or a path the outline could not step, keeps an outline from certifying:

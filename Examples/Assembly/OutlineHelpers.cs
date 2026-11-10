@@ -85,4 +85,27 @@ public sealed class Gauge
 
     /// <summary>A word held between two bounds, through a helper that tests a local of its own.</summary>
     public static int Clamped(int value, int low, int high) => Clamp(value, low, high);
+
+    /// <summary>The gap between two capped words, the first result of the object helper kept in a local.</summary>
+    public int CappedSlack()
+    {
+        var capped = Capped(this, Level);
+        var limit = Capped(this, Limit);
+        return unchecked(limit - capped);
+    }
+
+    static int Checked(Gauge gauge, int value) =>
+        value > gauge.Limit ? throw new System.InvalidOperationException() : value;
+
+    /// <summary>The level, through a helper that throws beyond the limit of the gauge it is handed.</summary>
+    public int CheckedLevel() => Checked(this, Level);
+
+    static int Raise(Gauge gauge, int value, int low)
+    {
+        var floor = value < low ? low : value;
+        return floor > gauge.Limit ? throw new System.InvalidOperationException() : floor;
+    }
+
+    /// <summary>The level raised to zero, through a helper that throws when its local passes the limit.</summary>
+    public int RaisedLevel() => Raise(this, Level, 0);
 }

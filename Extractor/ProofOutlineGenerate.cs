@@ -623,8 +623,10 @@ internal static partial class ProofOutline
         var fresh = stepped ? walk.Flattened.OfType<Allocation>().FirstOrDefault() : null;
         if (spec.Arrays.Any() || fresh is not null) imports = [.. imports, "CIL.Safety.ReferenceArrayElements"];
         var stubbed = stepped ? walk.Flattened.OfType<StubCall>().Select(call => call.Stub).Distinct().ToArray() : [];
-        // A stub's proof closes each side that throws from its `pre`.
-        if (stubbed.Length > 0) imports = [.. imports, "CIL.Safety.LoopObligations"];
+        // A helper's contract proof closes each side that throws from its `pre`.
+        var thrown = stepped && walk.Flattened.OfType<CallStep>().Any(call =>
+            call.Callee.Walk.Flattened.Any(step => step is Thrown));
+        if (stubbed.Length > 0 || thrown) imports = [.. imports, "CIL.Safety.LoopObligations"];
         Header(lean, spec, imports, stepped ? "`postcondition`" : null);
         if (stepped)
             foreach (var callee in walk.Flattened.OfType<CallStep>().Select(call => call.Callee).Distinct())
@@ -786,7 +788,13 @@ internal static partial class ProofOutline
                 _ => "a span of caller memory"
             };
         var pc = Array.FindIndex(ops, op => !Body.Pure(op));
-        return pc < 0 ? "the body has locals" : $"`{ops[pc]}` at {Location(method, pc)} needs facts or a case split";
+        if (pc < 0) return "the body has locals";
+        // A call the outline cannot compose names the contract the author must write and prove.
+        return Regex.Match(ops[pc], @"\A\.call(?:Instance)? (\d+) \d+\z") is { Success: true } call
+            ? $"`{ops[pc]}` at {Location(method, pc)} calls method {call.Groups[1].Value}, which " +
+                "`cil_contract_steps` composes through a `MethodContract` you write and prove with " +
+                $"`Holds Extracted.program {call.Groups[1].Value}`"
+            : $"`{ops[pc]}` at {Location(method, pc)} needs facts or a case split";
     }
 
     /// <summary>The source line of the instruction at `pc`, or its IL offset without a PDB.</summary>
