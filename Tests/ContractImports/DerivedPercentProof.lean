@@ -28,9 +28,8 @@ theorem percent_exact : percentExact.Holds Extracted.program 0 := by
   by_cases within : value ≤ 100
   · have bound : value ≤ 100#64 := within
     simp only [percentExact, within, ite_true]
-    refine ⟨CIL.executionBound Extracted.program 0, memory, _, ?_, Confined.refl _ memory, _,
-      rfl, rfl⟩
-    cil_checked_steps [bound]
+    cil_contract_steps [bound]
+    exact ⟨Confined.refl _ memory, _, rfl, rfl⟩
   · have bound : ¬ value ≤ 100#64 := within
     simp only [percentExact, within, ite_false]
     cil_raise_steps [bound]
