@@ -300,8 +300,8 @@ This isolated measurement uses an explicit Lake package override to the framewor
 
 | Add/Subtract internal theorem | Statement lines | Outer named binders | Body lines |
 | --- | ---: | ---: | ---: |
-| `vector128_sse_store_prefix` | 17 → 16 | 19 → 17 | 12 → 5 |
-| `subtract_repair_store_prefix` | 17 → 16 | 19 → 17 | 12 → 5 |
+| `UInt256Proof.Add.Safety.vector128_sse_store_prefix` | 17 → 16 | 19 → 17 | 12 → 5 |
+| `UInt256Proof.Subtract.Profile.subtract_repair_store_prefix` | 17 → 16 | 19 → 17 | 12 → 5 |
 
 Each statement retains six existential names in its execution and continuation propositions.
 The two quantified indices in the former slot/readback premises disappear, so the total
