@@ -108,11 +108,8 @@ theorem rent_reuses (memory : Memory) (pool head : Reference) (wellFormed : memo
     -- The returned head is older than the frame's home, so leaving the frame keeps it.
     have headKept : head.allocation ≠ home.allocation :=
       Nat.ne_of_lt (Nat.lt_of_lt_of_le link.old enter.numeric1.fresh)
-    cil_checked_steps [enter.setup, entry.frame, free.live.formed, free0.1.live.formed,
-      free0.1.located, headLoad, headLive.formed, link0.1.located, linkLoad, freeStored,
-      link1.live.formed, link1.located, nullStored, idleFacts, countWritten,
-      rented3.live.formed, rented3.located, markWritten, headMarked.formed, headKept]
-    rfl
+    cil_checked_steps [enter.setup, entry.frame, headLoad, linkLoad, freeStored, nullStored,
+      idleFacts, countWritten, markWritten, headKept]
   · exact (((freeHeld.after_confined nullFramed (apart_of_entries rfl)).after_confined countFramed
       (apart_of_entries rfl)).after_confined markFramed (apart_of_entries rfl)).after_below left
       free.old past
@@ -326,14 +323,10 @@ theorem rent_creates (memory : Memory) (pool : Reference) (wellFormed : memory.W
       simp only [itemFootprint, List.mem_cons, List.not_mem_nil, or_false] at member
       rcases member with rfl | rfl | rfl <;> exact young, ?_, ?_, ?_, ?_, ?_, ?_⟩
   · have itemMarked := rentedOwned.live.after_confined markFramed
-    cil_checked_steps [enter.setup, entry.frame, free.live.formed, free0.1.live.formed,
-      free0.1.located, emptyLoad, liveFacts, capacityFacts, room, nextIdFacts, idStored, idLoaded,
-      nextId1.1.live.formed, nextId1.1.located, nextWritten, idLoaded2, allocated,
-      nextHeld.1.live.formed, poolLive3.formed, created, ownerFresh.1.located, ownerStored,
-      idOwned.live.formed, idOwned.located, itemIdWritten, itemType, itemSize, PooledItem.type,
-      itemIdHeld.1.live.formed, liveFacts5, liveWritten, rentedOwned.live.formed,
-      rentedOwned.located, markWritten, itemMarked.formed, itemHome]
-    rfl
+    cil_checked_steps [enter.setup, entry.frame, emptyLoad, liveFacts, capacityFacts, room,
+      nextIdFacts, idStored, idLoaded, nextWritten, idLoaded2, allocated, created, ownerStored,
+      itemIdWritten, itemType, itemSize, PooledItem.type, liveFacts5, liveWritten, markWritten,
+      itemHome]
   · exact ((((nextHeld.after_below poolKept nextHeld.1.old allocatedNext).after_confined
       ownerFramed (apart_of_entries rfl)).after_confined itemIdFramed (apart_of_entries rfl))
       |>.after_confined liveFramed (apart_of_entries rfl)).after_confined markFramed
@@ -373,8 +366,7 @@ theorem rent_exhausted_throws (memory : Memory) (pool : Reference)
   have emptyLoad := free0.1.load_null (free0.2.trans empty)
   have liveFacts := live0.2 ▸ live0.1.facts
   have capacityFacts := capacity0.2 ▸ capacity0.1.facts
-  cil_checked_steps [enter.setup, entry.frame, free.live.formed, free0.1.live.formed,
-    free0.1.located, emptyLoad, liveFacts, capacityFacts, full]
+  cil_checked_steps [enter.setup, entry.frame, emptyLoad, liveFacts, capacityFacts, full]
 
 #print axioms rent_exhausted_throws
 

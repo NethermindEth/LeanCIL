@@ -68,8 +68,8 @@ def MissingFact.hint : MissingFact → MessageData
   | .objectSlot => m!"the reference field's slot: `readable.facts held targetLive` or \
       `readable.load_null held` of a named `ReferenceField.Readable`, `owned.store targetLive` of \
       an `Owned` one, or a `loadSlot` or `storeSlot` fact"
-  | .objectForm => m!"that the object is live: `live.formed` of `live : LiveObject memory \
-      object`, or `readable.facts` of a field the extraction names, such as \
+  | .objectForm => m!"that the object is live at this memory: a hypothesis `live : LiveObject \
+      memory object`, or the `Readable` of a field the extraction names, such as \
       `Account.Balance.Readable memory object`, which also locates the field"
   | .unsafeAdd => m!"the `Unsafe.Add` result: `add memory base width offset = .ok reference` at \
       this memory or the caller's, such as `Writable.add_int`"

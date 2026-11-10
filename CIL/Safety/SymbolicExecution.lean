@@ -9,6 +9,7 @@ import CIL.Safety.InstructionSteps
 import CIL.Safety.CallComposition
 import CIL.Safety.CodeAt
 import CIL.Safety.CheckedHomes
+import CIL.Safety.LoopFacts
 
 /-!
 # Checked symbolic execution
@@ -791,6 +792,12 @@ elab_rules : tactic
     let prepared ← normaliseStepFacts config facts.getElems
     withMainContext <| evalTactic (← `(tactic| cil_checked_step_normalized [$[$prepared:term],*]))
 
+open Lean Elab Tactic in
+/-- What a stepping tactic outside a loop steps with: `facts` and the object evidence facts its
+    context gives (`gatherEvidenceFacts`), each normalised once. -/
+def prepareStepFacts (facts : Array Term) : TacticM (Array Term) := do
+  normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|)) (← gatherEvidenceFacts facts)
+
 /-- `cil_checked_steps` with facts already normalised: enters an `invoke` goal through
     `cil_checked_entry`, then takes checked `run` steps until the goal closes or a step fails,
     leaving that goal. Fails if it takes no step. -/
@@ -1005,18 +1012,18 @@ macro_rules
       cil_checked_run_step [$[$facts:term],*]))
 
 /-- Proves an `invoke` or `run` goal, returning or stating a located fault, by checked
-    stepping with `facts`, normalised once at entry. A goal `∃ fuel, invoke ..` takes the
-    execution bound of its method as the fuel, and the projections of a defined contract are
-    unfolded. Stops at the first step it cannot take, leaving that goal; fails if it takes
-    none. -/
+    stepping with `facts` and the object evidence facts of the context, such as `live.formed` of
+    a `LiveObject` and `owned.facts` of a scalar field, normalised once at entry. A goal
+    `∃ fuel, invoke ..` takes the execution bound of its method as the fuel, and the projections
+    of a defined contract are unfolded. Stops at the first step it cannot take, leaving that
+    goal; fails if it takes none. -/
 syntax "cil_checked_steps" "[" term,* "]" : tactic
 
 open Lean Elab Tactic in
 elab_rules : tactic
   | `(tactic| cil_checked_steps [$facts:term,*]) => do
     evalTactic (← `(tactic| (cil_supply_fuel; cil_unfold_contracts)))
-    let config ← `(Lean.Parser.Tactic.optConfig|)
-    let prepared ← normaliseStepFacts config facts.getElems
+    let prepared ← prepareStepFacts facts.getElems
     withMainContext <| evalTactic (← `(tactic| cil_checked_steps_normalized [$[$prepared:term],*]))
 
 /-- `cil_checked_steps` with no facts. -/
@@ -1030,7 +1037,7 @@ syntax "cil_checked_steps " num " [" term,* "]" : tactic
 open Lean Elab Tactic in
 elab_rules : tactic
   | `(tactic| cil_checked_steps $count:num [$facts:term,*]) => do
-    let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|)) facts.getElems
+    let prepared ← prepareStepFacts facts.getElems
     -- Focus the original goal: an early close must error, not step into an unrelated pending goal.
     focus do
       for taken in [:count.getNat] do

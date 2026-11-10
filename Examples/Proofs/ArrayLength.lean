@@ -24,7 +24,7 @@ theorem correctness (memory : Memory) (nodes : Reference) (length : Nat)
     (live : ReferenceArray.Live memory nodes nodeType length) :
     ∃ fuel, invoke Extracted.program fuel count [.object (.address nodes)] memory =
       .ok (memory, [.scalar (.i32 ((BitVec.ofNat 64 length).setWidth 32))]) := by
-  cil_checked_steps [live.formed, live.located]
+  cil_checked_steps
 
 #print axioms correctness
 
@@ -32,7 +32,7 @@ theorem correctness (memory : Memory) (nodes : Reference) (length : Nat)
 theorem null_array (memory : Memory) :
     ∃ fuel, invoke Extracted.program fuel count [.object .null] memory =
       .error ⟨count, 1, .thrown "System.NullReferenceException"⟩ := by
-  cil_checked_steps []
+  cil_checked_steps
 
 #print axioms null_array
 

@@ -36,7 +36,7 @@ theorem bump_holds : bumpContract.Holds Extracted.program bump := by
   obtain ⟨after, written, framed, held⟩ :=
     owned.store (Account.Balance.of memory account + amount)
   refine MethodContract.Holds.intro after [] ?_ framed ⟨rfl, held⟩
-  cil_checked_steps [owned.facts, written]
+  cil_checked_steps [written]
 
 #print axioms bump_holds
 
@@ -61,12 +61,12 @@ def bumpBothContract : MethodContract (Reference × Reference × W64) where
 theorem bumpBoth_holds (holds : bumpContract.Holds Extracted.program bump) :
     bumpBothContract.Holds Extracted.program bumpBoth := by
   rintro ⟨first, second, amount⟩ memory ⟨firstOwned, secondOwned⟩
-  cil_contract_steps [holds, bumpContract, firstOwned, firstOwned.facts, secondOwned.facts]
+  cil_contract_steps [holds, bumpContract, firstOwned]
     with middle values firstCall
   obtain ⟨rfl, firstHeld⟩ := firstCall.post
   have firstFramed := firstCall.framed
   have secondHeld := secondOwned.across firstOwned.live firstFramed firstHeld
-  cil_contract_steps [holds, bumpContract, secondHeld.1, secondHeld.1.facts]
+  cil_contract_steps [holds, bumpContract, secondHeld.1]
     with final values secondCall
   obtain ⟨rfl, secondFinal⟩ := secondCall.post
   have secondFramed := secondCall.framed
@@ -97,7 +97,7 @@ theorem correctness : bumpBothContract.Holds Extracted.program bumpBoth :=
 theorem bump_null_throws (memory : Memory) (amount : W64) :
     ∃ fuel, invoke Extracted.program fuel bump [.object .null, .scalar (.i64 amount)] memory =
       .error ⟨bump, 2, .thrown "System.NullReferenceException"⟩ := by
-  cil_checked_steps []
+  cil_checked_steps
 
 #print axioms bump_null_throws
 

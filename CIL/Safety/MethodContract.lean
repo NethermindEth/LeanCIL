@@ -953,16 +953,14 @@ elab_rules : tactic
     unless ← cilNameCall before called.getId output.getId call.getId do
       throwError "cil_contract_steps composed no call to name"
   | `(tactic| cil_contract_steps [$facts:term,*]) => do
-    let config ← `(Lean.Parser.Tactic.optConfig|)
-    let prepared ← normaliseStepFacts config facts.getElems
+    let prepared ← prepareStepFacts facts.getElems
     withMainContext <| evalTactic (← `(tactic| (
       cil_contract_prepare [$[$prepared:term],*]
       cil_steps_from "cil_contract_steps took no step: the method or instruction lookup, or the \
         first step, did not close; pass the lookup hypothesis, feature facts or step facts"
         cil_contract_step [$[$prepared:term],*])))
   | `(tactic| cil_contract_steps $count:num [$facts:term,*]) => do
-    let config ← `(Lean.Parser.Tactic.optConfig|)
-    let prepared ← normaliseStepFacts config facts.getElems
+    let prepared ← prepareStepFacts facts.getElems
     withMainContext <| evalTactic (← `(tactic| cil_contract_prepare [$[$prepared:term],*]))
     let next ← `(tactic| cil_contract_step [$[$prepared:term],*])
     for _ in [:count.getNat] do
@@ -973,8 +971,7 @@ elab_rules : tactic
         saved.restore
         break
   | `(tactic| cil_contract_steps [$facts:term,*] until $continuation) => do
-    let config ← `(Lean.Parser.Tactic.optConfig|)
-    let prepared ← normaliseStepFacts config facts.getElems
+    let prepared ← prepareStepFacts facts.getElems
     withMainContext <| evalTactic (← `(tactic| (first
       | (cil_strict exact $continuation)
       | (

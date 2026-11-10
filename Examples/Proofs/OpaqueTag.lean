@@ -34,8 +34,7 @@ theorem correctness : copyTagContract.Holds Extracted.program copyTag := by
   rintro ⟨target, source⟩ memory ⟨owned, readable, forms⟩
   obtain ⟨stored, framed, held⟩ := owned.store_formed forms.formed
   refine MethodContract.Holds.intro _ [] ?_ framed ⟨rfl, held⟩
-  cil_checked_steps [owned.live.formed, readable.live.formed, readable.located,
-    readable.load_forms forms, owned.located, stored]
+  cil_checked_steps [readable.load_forms forms, stored]
 
 #print axioms correctness
 
@@ -44,7 +43,7 @@ theorem copyTag_null_source_throws (memory : Memory) (target : Reference)
     (live : LiveObject memory target) :
     ∃ fuel, invoke Extracted.program fuel copyTag [.object (.address target), .object .null]
       memory = .error ⟨copyTag, 2, .thrown "System.NullReferenceException"⟩ := by
-  cil_checked_steps [live.formed]
+  cil_checked_steps
 
 #print axioms copyTag_null_source_throws
 
@@ -54,7 +53,7 @@ theorem copyTag_null_target_throws (memory : Memory) (source : Reference)
     (readable : Tagged.Tag.Readable memory source) (forms : Tagged.Tag.Forms memory source) :
     ∃ fuel, invoke Extracted.program fuel copyTag [.object .null, .object (.address source)]
       memory = .error ⟨copyTag, 3, .thrown "System.NullReferenceException"⟩ := by
-  cil_checked_steps [readable.live.formed, readable.located, readable.load_forms forms]
+  cil_checked_steps [readable.load_forms forms]
 
 #print axioms copyTag_null_target_throws
 

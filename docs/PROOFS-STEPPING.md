@@ -47,6 +47,21 @@ term is left as written. `cil_checked_steps` and `cil_contract_steps` also state
 each call's continuation, so a goal they step needs no `dsimp only [contract]` first. A contract
 variable and `Returns` stay folded, as does a goal a proof enters by hand.
 
+The stepping tactics read object evidence from the context, so a fact list does not repeat it. A
+hypothesis is recognized by the head of its statement, also as one side of a conjunction, when the
+goal names its object:
+
+| Hypothesis | Facts read |
+| --- | --- |
+| `live : LiveObject memory object` | `live.formed` |
+| `Readable`, `Owned` or `Holds` of a scalar field | `readable.facts`: the object forms, the field is located and an unsigned load pushes its value |
+| `Readable`, `Owned` or `Holds` of a reference or array field | `readable.live.formed` and `readable.located` |
+| `ReferenceArray.Live`, `Readable`, `Owned` or `Holds` | `live.formed` and `live.located` |
+
+A fact that takes a further premise is still passed: `readable.facts held targetLive` for the
+load of a reference field, `readable.signedFacts` for a signed narrow load, and the equation a
+store returns. A fact passed explicitly is used as given and not read again.
+
 After each step the tactics evaluate the closed literal operands the state holds with the
 `cil_literal` simp set: a width conversion, sign extension or `toNat` of a bit-vector numeral, and
 a remainder of numerals, as a masked shift count is. The set fires on numerals only, so a symbolic
@@ -456,6 +471,8 @@ an unrelated context adds nothing to simp:
   `form` fact of the reference it gives. These, and the facts of a span only a kept equation
   such as a slice produces, are read only by instructions that use a reference or span, so a
   step over scalars and locals does not carry them;
+- the [object evidence](#compose-instructions) the straight-line tactics read, at a memory a state
+  of the goal holds;
 - `elementWidth` of a `SpanContents`;
 - for a [`LoopFrame`](../CIL/Safety/LoopFrames.lean) over `knownLocals` of a list, and for the
   entry frame `bind_entry ... allocating` proves for every footprint, the `form` of each home

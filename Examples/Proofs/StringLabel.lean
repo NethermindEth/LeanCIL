@@ -28,8 +28,7 @@ theorem correctness (memory : Memory) (item : Reference) (label : ManagedReferen
   have returned : formObject (setSlot memory (Labelled.Label.address item) label)
       (Labelled.Label.of memory item) = .ok (.object (Labelled.Label.of memory item)) := heldFormed
   refine ⟨CIL.executionBound Extracted.program 0, _, ?_, framed, held⟩
-  cil_checked_steps [owned.live.formed, owned.located, owned.load.trans heldFormed, labelFormed,
-    stored, returned]
+  cil_checked_steps [owned.load.trans heldFormed, labelFormed, stored, returned]
 
 #print axioms correctness
 
