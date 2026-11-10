@@ -236,6 +236,7 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
   have found : linked[0]? = some Extracted.method0 := links.found Extracted.lookup0
   have holds : PublishedTable.read.Holds linked 1 := imported
   dsimp only [PublishedTable.read, MethodContract.Returns]
+  apply WP.adequate.mpr
   refine invoke_exists_of_run found (by rfl) (by rfl) ?_
   refine run_call_of_contract holds input found
     (by rfl : Extracted.method0.code[0]? = some (.call 1 0)) (by cil_checked_step []) rfl permitted ?_
