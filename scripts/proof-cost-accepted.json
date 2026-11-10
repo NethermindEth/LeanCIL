@@ -1,1 +1,58 @@
-[]
+[
+  {
+    "group": "Tests.Imports",
+    "name": "Tests.Imports.Calls.root_given",
+    "measure": "heartbeats",
+    "from": 7539671,
+    "to": 8023262,
+    "reason": "Two composed calls now hand the continuation a CallResult and FrameInvariants whose facts the proof selects by name, in place of positional conjunctions"
+  },
+  {
+    "group": "Tests.MethodContract",
+    "name": "Tests.MethodContract.root_holds",
+    "measure": "heartbeats",
+    "from": 7198747,
+    "to": 7614374,
+    "reason": "Two composed calls now hand the continuation a CallResult and FrameInvariants whose facts the proof selects by name, in place of positional conjunctions"
+  },
+  {
+    "group": "Tests.LoopFrames",
+    "name": "/-- spanSumEntry",
+    "measure": "heartbeats",
+    "from": 1062920,
+    "to": 1122092,
+    "reason": "bind_entry also declares the entry's Checked evidence structure, one field for each fact of the allocating entry"
+  },
+  {
+    "group": "Tests.LoopFrames",
+    "name": "bind_entry entry #3",
+    "measure": "heartbeats",
+    "from": 1057798,
+    "to": 1116555,
+    "reason": "bind_entry also declares the entry's Checked evidence structure, one field for each fact of the allocating entry"
+  },
+  {
+    "group": "Tests.LoopScaffold",
+    "name": "bind_entry entry #8",
+    "measure": "heartbeats",
+    "from": 1006853,
+    "to": 1064964,
+    "reason": "bind_entry also declares the entry's Checked evidence structure, one field for each fact of the allocating entry"
+  },
+  {
+    "group": "Loops/CopyUntilZero/Proof",
+    "name": "bind_entry entry",
+    "measure": "heartbeats",
+    "from": 1289775,
+    "to": 1356913,
+    "reason": "bind_entry also declares the entry's Checked evidence structure, one field for each fact of the allocating entry"
+  },
+  {
+    "group": "Loops/SpanSum/Proof",
+    "name": "bind_entry entry",
+    "measure": "heartbeats",
+    "from": 960418,
+    "to": 1016037,
+    "reason": "bind_entry also declares the entry's Checked evidence structure, one field for each fact of the allocating entry"
+  }
+]
