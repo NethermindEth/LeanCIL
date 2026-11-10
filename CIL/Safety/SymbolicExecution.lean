@@ -453,14 +453,15 @@ macro "cil_checked_memory_by_equations " "[" facts:term,* "]" : tactic =>
     frame) by `rfl`, by `simp` with `facts`, or by also unfolding the checked-value definitions
     that `cil_checked_step_by_equations` unfolds. Facts alone come first, so a supplied
     `checkedValue` result is used before its definition is unfolded past it. A returned object
-    the frame does not own forms as it did before the frame is left. -/
+    the frame does not own forms as it did before the frame is left, and a literal frame that
+    owns nothing is left through `cil_frame_exit`. -/
 macro "cil_checked_side " "[" facts:term,* "]" : tactic =>
   `(tactic| first
     | rfl
-    | (simp [CIL.Safety.leaveFrame_unowned, $[$facts:term],*] <;> (repeat constructor) <;> rfl)
-    | (simp [cil_checked, CIL.Safety.checkedValue, CIL.Safety.numericValue,
+    | (cil_frame_exit; simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)
+    | (cil_frame_exit
+       simp [cil_checked, CIL.Safety.checkedValue, CIL.Safety.numericValue,
          CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.formObject_leaveFrame,
-         CIL.Safety.leaveFrame_unowned,
          Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure, $[$facts:term],*] <;>
          (repeat constructor) <;> rfl))
 
