@@ -117,6 +117,9 @@ name = "Tests.StoreFacts"
 name = "Tests.SimdLanes"
 
 [[lean_lib]]
+name = "Tests.SimdCarryCalls"
+
+[[lean_lib]]
 name = "Tests.MulScalarFixture"
 
 [[lean_lib]]
