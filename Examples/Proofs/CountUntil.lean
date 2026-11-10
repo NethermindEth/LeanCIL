@@ -156,5 +156,8 @@ theorem correctness : EnsuresOutcome Extracted.program countUntil
     (fun args _ _ values => values = args.take 1) untilOutcome :=
   count_until bump_holds
 
+#print axioms bump_holds
+#print axioms outcome
+#print axioms count_until
 #print axioms correctness
 end ExampleProof

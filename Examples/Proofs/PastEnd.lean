@@ -21,5 +21,6 @@ theorem witness : invoke Extracted.program 16 0 [callerReference] callerMemory =
 theorem correctness (fuel : Nat) (result : Memory × List Value) :
     invoke Extracted.program fuel 0 [callerReference] callerMemory ≠ .ok result :=
   invoke_fault_refutes_success _ 16 _ _ _ fault (by decide) witness fuel result
+#print axioms witness
 #print axioms correctness
 end ExampleProof

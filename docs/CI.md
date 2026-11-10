@@ -207,6 +207,14 @@ which needs no Lean, so every PR runs it:
   checked snippet, or links the maintainers document that describes the evidence.
 - The [suite table](VALIDATION.md#suites) lists each suite `scripts/Test.cs` accepts exactly
   once, as registered in `scripts/VerificationSuites.cs` and `scripts/ExportVerificationSuites.cs`.
+- No `simp`, `simp only`, `simpa`, `simp_all` or `dsimp` list of an example under
+  `Examples/Proofs`, or of a Lean block that is not an excerpt, names one of the interpreter's own
+  functions: `step`, `run`, `invoke`, `pureArity`, `scalars`, `instructionStep`,
+  `staticInstruction`, `checkedIntrinsic`, `checkedValue` or `numericValue`, by any suffix of its
+  full name. Such a proof runs the method by unfolding the interpreter; step with
+  `cil_checked_steps` and pass a fact about the operation instead. A name the block binds with
+  `have` is a hypothesis.
+- Every theorem of an example under `Examples/Proofs` has a `#print axioms` line in its file.
 
 Every fenced Lean block is elaborated unless its info string says why not:
 

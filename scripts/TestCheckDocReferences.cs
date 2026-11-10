@@ -206,6 +206,29 @@ try
     Passes("an excerpt of a wrapped source line",
         $"```lean excerpt Examples/Proofs/Sample.lean\n{WrappedSource}\n```");
 
+    // A proof that unfolds the interpreter in a simp list breaks when its dispatch changes, in a
+    // document as in an example; a hypothesis of the same name, and the name outside a simp list, pass.
+    const string Internal = "is an evaluator internal";
+    Fails("a documentation simp list naming the step function",
+        "```lean extracted\nexample : True := by\n  simp [CIL.Safety.step, h]\n```",
+        "`CIL.Safety.step`, which " + Internal);
+    Fails("a simp only list naming an internal by its last component",
+        "```lean illustrative\n  simp only [calculation,\n    checkedValue] at h\n```",
+        "`checkedValue`, which " + Internal);
+    Passes("a simp list naming a hypothesis called step",
+        "```lean illustrative\n  have step : a = b := rfl\n  simp [step]\n```");
+    Passes("an internal named outside a simp list",
+        "```lean illustrative\n  have ran : CIL.Safety.run program 3 0 0 args frame [] memory = result := by\n" +
+        "    rw [fact]\n```");
+    ExampleFails("an example simp list naming the run function",
+        "theorem ran : True := by\n  simpa [run, Extracted.program] using trivial\n#print axioms ran\n", Internal);
+    ExampleFails("an example theorem whose axioms are not printed",
+        "theorem first : True := trivial\ntheorem second : True := trivial\n#print axioms first\n",
+        "theorem `second` has no `#print axioms` line");
+    ExamplePasses("an example printing each theorem's axioms and naming only facts in its simp lists",
+        "theorem first : True := by\n  rw [fact]\n\n#print axioms first\n" +
+        "private theorem second : True := by\n  simp [fact, Nat.add_comm]\n#print axioms second\n");
+
     // A suite the runner gained without a row would be invisible to anyone choosing what to run.
     const string Table = "## Suites\n\n| Suite | Checks |\n| --- | --- |\n";
     SuitesPass("a suite table listing every suite", Table + "| `core` | runner checks |\n| `loops` | loops |");
@@ -293,6 +316,35 @@ void SuitesPass(string name, string text)
 void SuitesFail(string name, string text, string reason)
 {
     var failures = SuiteCheck(text);
+    if (!failures.Any(failure => failure.Contains(reason, StringComparison.Ordinal)))
+        throw new InvalidOperationException($"{name} did not fail with `{reason}`:\n{string.Join('\n', failures)}");
+    checks++;
+    Console.WriteLine($"PASS {name} fails");
+}
+
+// The failures of one example proof beside the fixtures; the others print their axioms.
+List<string> ExampleCheck(string text)
+{
+    Write($"{Documentation.ExampleProofs}/Linted.lean", text);
+    var failures = Documentation.CheckExamples(root)
+        .Where(failure => failure.StartsWith($"{Documentation.ExampleProofs}/Linted.lean:", StringComparison.Ordinal))
+        .ToList();
+    File.Delete(Path.Combine(root, Documentation.ExampleProofs, "Linted.lean"));
+    return failures;
+}
+
+void ExamplePasses(string name, string text)
+{
+    var failures = ExampleCheck(text);
+    if (failures.Count != 0)
+        throw new InvalidOperationException($"{name} was rejected:\n{string.Join('\n', failures)}");
+    checks++;
+    Console.WriteLine($"PASS {name}");
+}
+
+void ExampleFails(string name, string text, string reason)
+{
+    var failures = ExampleCheck(text);
     if (!failures.Any(failure => failure.Contains(reason, StringComparison.Ordinal)))
         throw new InvalidOperationException($"{name} did not fail with `{reason}`:\n{string.Join('\n', failures)}");
     checks++;

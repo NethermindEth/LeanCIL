@@ -537,6 +537,73 @@ static partial class Documentation
 
     const string NotCommand = "is not a LeanCIL command, tactic or attribute";
 
+    /// <summary>The proofs users copy from, relative to the repository root.</summary>
+    internal const string ExampleProofs = "Examples/Proofs";
+
+    /// <summary>
+    /// The interpreter's own functions, by full name: the instruction dispatchers, the run and invocation
+    /// loops, and the checks of arguments and results. The stepping tactics rewrite past them, so a proof
+    /// whose simp list names one runs the method by unfolding the interpreter and breaks when it changes.
+    /// </summary>
+    static readonly string[] EvaluatorInternals =
+    [
+        "CIL.step", "CIL.Safety.step", "CIL.Safety.run", "CIL.Safety.invoke", "CIL.Safety.pureArity",
+        "CIL.Safety.scalars", "CIL.Safety.instructionStep", "CIL.Safety.staticInstruction",
+        "CIL.Safety.checkedIntrinsic", "CIL.Safety.checkedValue", "CIL.Safety.numericValue"
+    ];
+
+    const string InternalReason =
+        "is an evaluator internal; step with `cil_checked_steps` and pass a fact about the operation instead";
+
+    /// <summary>
+    /// A failure for each evaluator internal a simp list of the lines names, by any suffix of its full name;
+    /// a name the lines bind with `have` is a hypothesis.
+    /// </summary>
+    internal static IEnumerable<string> SimpListProblems(string document, int firstLine, string[] lines)
+    {
+        var text = string.Join('\n', lines.Select(StripComment));
+        var bound = Patterns.Have().Matches(text).Select(match => match.Groups["name"].Value).ToHashSet();
+        foreach (Match call in Patterns.SimpList().Matches(text))
+        {
+            var start = call.Index + call.Length;
+            var depth = 1;
+            var end = start;
+            for (; end < text.Length && depth > 0; end++)
+                depth += text[end] switch { '[' => 1, ']' => -1, _ => 0 };
+            var line = firstLine + text[..call.Index].Count(character => character == '\n');
+            foreach (var name in Patterns.SimpName().Matches(text[start..Math.Max(start, end - 1)])
+                         .Select(match => match.Value).Distinct())
+                if (!bound.Contains(name) && EvaluatorInternals.Any(full =>
+                        full == name || full.EndsWith("." + name, StringComparison.Ordinal)))
+                    yield return $"{document}:{line}: the simp list names `{name}`, which {InternalReason}";
+        }
+    }
+
+    /// <summary>
+    /// A failure for each example proof whose simp list names an evaluator internal, and for each of its
+    /// theorems whose axioms the file does not print.
+    /// </summary>
+    internal static List<string> CheckExamples(string root)
+    {
+        List<string> failures = [];
+        var folder = Path.Combine(root, ExampleProofs);
+        if (!Directory.Exists(folder)) return failures;
+        foreach (var path in Directory.EnumerateFiles(folder, "*.lean").Order(StringComparer.Ordinal))
+        {
+            var document = Relative(root, path);
+            var lines = File.ReadAllLines(path);
+            failures.AddRange(SimpListProblems(document, 1, lines));
+            var printed = lines.Select(line => Patterns.PrintAxioms().Match(line)).Where(match => match.Success)
+                .Select(match => match.Groups["name"].Value.Split('.')[^1]).ToHashSet(StringComparer.Ordinal);
+            for (var index = 0; index < lines.Length; index++)
+                if (Patterns.Theorem().Match(lines[index]) is { Success: true } theorem &&
+                    !printed.Contains(theorem.Groups["name"].Value.Split('.')[^1]))
+                    failures.Add($"{document}:{index + 1}: theorem `{theorem.Groups["name"].Value}` has no " +
+                        "`#print axioms` line; print its axioms after it");
+        }
+        return failures;
+    }
+
     /// <summary>The longest Lean line the repository's style allows, in or out of the documentation.</summary>
     const int LeanLineLimit = 100;
 
@@ -599,6 +666,7 @@ static partial class Documentation
             foreach (Match command in Patterns.Command().Matches(StripComment(block.Lines[offset])))
                 if (!commands.Contains(command.Value))
                     yield return $"{block.Document}:{block.Line + offset}: `{command.Value}` {NotCommand}";
+        foreach (var problem in SimpListProblems(block.Document, block.Line, block.Lines)) yield return problem;
     }
 
     static string StripComment(string line) => line.Split("--")[0];
@@ -1025,6 +1093,19 @@ static partial class Patterns
 
     [GeneratedRegex(@"\bhave\s+(?<name>[A-Za-z_][\w']*)\s*:")]
     internal static partial Regex Have();
+
+    // The opening bracket of a simp-family lemma list, after any `only` and configuration.
+    [GeneratedRegex(@"(?<![\w.'])(?:simp|simpa|simp_all|dsimp)(?:[ \t]+only)?(?:[ \t]+\([^)\n]*\))*[ \t]*\[")]
+    internal static partial Regex SimpList();
+
+    [GeneratedRegex(@"(?<![\w.'])[A-Za-z_][\w']*(?:\.[A-Za-z_][\w']*)*")]
+    internal static partial Regex SimpName();
+
+    [GeneratedRegex(@"^[ \t]*(?:(?:private|protected)\s+)*(?:theorem|lemma)\s+(?<name>[\w'.]*[\w'])")]
+    internal static partial Regex Theorem();
+
+    [GeneratedRegex(@"^#print axioms\s+(?<name>[\w'.]*[\w'])\s*$")]
+    internal static partial Regex PrintAxioms();
 
     [GeneratedRegex(
         @"^(?<path>.+?):(?<line>\d+):(?<column>\d+): (?<severity>error|warning|info)(?:\([^)]*\))?: ?(?<message>.*)$")]

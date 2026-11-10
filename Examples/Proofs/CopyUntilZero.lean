@@ -150,6 +150,8 @@ theorem correctness (memory : Memory) (view : SpanView) (values : List W32) (out
         simp
         omega
       case measure => simp
+#print axioms stamp_holds
+#print axioms copied_append
 #print axioms correctness
 
 end ExampleProof
