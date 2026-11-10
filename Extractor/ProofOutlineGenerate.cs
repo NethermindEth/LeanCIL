@@ -13,6 +13,10 @@ internal static partial class ProofOutline
     {
         internal string ElementsName => Name + "Elements";
 
+        /// <summary>The C# name of a parameter the outline binds under another name, or null when they agree.
+        /// </summary>
+        internal string? Source { get; init; }
+
         /// <summary>The element class and length binders of an array argument.</summary>
         internal string ElementName => Name + "Element";
         internal string LengthName => Name + "Length";
@@ -85,7 +89,7 @@ internal static partial class ProofOutline
         "for", "return", "mut", "unless", "variable", "universe", "deriving", "extends", "private",
         "protected", "partial", "mutual", "macro", "syntax", "notation", "calc", "nomatch", "nofun",
         "export", "attribute", "opaque", "axiom", "Type", "Prop", "Sort", "middle", "values", "post",
-        "confined", "target", "objectEntry", "entryMemory", "entryFrames", "exited"
+        "confined", "target", "objectEntry", "entryMemory", "entryFrames", "exited", "enter"
     };
 
     // `module` is the keyed extraction module the outline imports, ahead of the library modules its form needs.
@@ -191,8 +195,17 @@ internal static partial class ProofOutline
     static Parameter Describe(MethodDefinition method, ParameterDefinition parameter, Names names, FieldViews views,
         string architecture)
     {
-        var type = parameter.ParameterType;
         var name = names.Claim(parameter.Name, "argument" + parameter.Index);
+        var bound = Bind(method, parameter, name, views, architecture);
+        return name == parameter.Name || string.IsNullOrEmpty(parameter.Name) ? bound
+            : bound with { Source = parameter.Name };
+    }
+
+    /// <summary>The binder `name` of `parameter`, shaped by its type.</summary>
+    static Parameter Bind(MethodDefinition method, ParameterDefinition parameter, string name, FieldViews views,
+        string architecture)
+    {
+        var type = parameter.ParameterType;
         if (ObjectTypes.Is(type)) return Instance(name, type, views);
         if (ReferenceArrays.Is(type)) return new(name, ParameterShape.Array, "Reference", 8);
         if (type is ArrayType { IsVector: true } array && WordArrayElement(array.ElementType) is { } word)
@@ -277,6 +290,10 @@ internal static partial class ProofOutline
         /// <summary>The extraction names class fields, under `Extracted.Classes`.</summary>
         internal bool Classes { get; } = classes;
 
+        /// <summary>This specification stated of any well-formed initial memory rather than the empty one.
+        /// </summary>
+        internal Specification InMemory() => new(Method, Parameters, Result, true, Classes) { NonNull = NonNull };
+
         internal IEnumerable<Parameter> Objects =>
             Parameters.Where(parameter => parameter.Shape == ParameterShape.Object);
 
@@ -309,6 +326,7 @@ internal static partial class ProofOutline
                     ? ["the bytes of its writable spans"] : [])
                 .Concat(lent.Any(parameter => parameter.Shape == ParameterShape.WordArray)
                     ? ["the elements of the array it stores into"] : []);
+            if (references) lean.Quiet();
             lean.Doc(references
                 ? $"Replace with the caller memory the {writer} may write, as references with their widths in bytes."
                 : $"The caller memory the method may write: {string.Join(" and ", parts)}.");
@@ -399,17 +417,35 @@ internal static partial class ProofOutline
 
         internal string MemoryArguments(string initial, string final) => Symbolic ? $" {initial} {final}" : "";
 
+        /// <summary>The array arguments whose null the proof excludes from `Precondition`, since the body reads
+        /// their length before any element.</summary>
+        internal Parameter[] NonNull { get; set; } = [];
+
         internal void Placeholders(Writer lean)
         {
-            lean.Line("/-- Replace with what callers must guarantee about the arguments, or `True`. -/");
-            lean.Wrapped("def Precondition", Grouped(Binders.Concat(Symbolic ? [("initial", "Memory")] : [])),
-                ": Prop := sorry");
+            lean.Quiet();
+            var binders = Grouped(Binders.Concat(Symbolic ? [("initial", "Memory")] : []));
+            if (NonNull.Length == 0)
+            {
+                lean.Line("/-- Replace with what callers must guarantee about the arguments, or `True`. -/");
+                lean.Wrapped("def Precondition", binders, ": Prop := sorry");
+            }
+            else
+            {
+                lean.Doc("Replace `sorry` with what else callers must guarantee about the arguments, or `True`.");
+                lean.Wrapped("def Precondition", binders, ": Prop :=");
+                foreach (var array in NonNull)
+                    lean.Comment("  -- ", "  -- ", $"`{array.Name}` is not null: " +
+                        $"`{array.Source ?? array.Name}.Length` throws on a null array.");
+                lean.Conjunction("  ", NonNull.Select(array => $"{array.Name}.reference ≠ .null").Append("sorry"), "");
+            }
             lean.Line();
             var subject = Symbolic ? "its result and the caller's memory" : "its result";
+            lean.Quiet();
             lean.Line($"/-- Replace with what `{Method.Name}` guarantees about {subject}. -/");
-            var binders = Binders.Concat(Symbolic ? [("initial", "Memory"), ("final", "Memory")] : []);
-            if (Result is not null) binders = binders.Append(("result", Result.Lean));
-            lean.Wrapped("def Postcondition", Grouped(binders), ": Prop := sorry");
+            var results = Binders.Concat(Symbolic ? [("initial", "Memory"), ("final", "Memory")] : []);
+            if (Result is not null) results = results.Append(("result", Result.Lean));
+            lean.Wrapped("def Postcondition", Grouped(results), ": Prop := sorry");
             lean.Line();
         }
 
@@ -466,13 +502,19 @@ internal static partial class ProofOutline
 
     static string StraightLine(Extraction extraction, Specification spec, Body body, Writer lean)
     {
-        if (spec.Framed) return ObjectStraightLine(extraction, spec, body, lean);
+        if (spec.Framed) return ObjectStraightLine(extraction, spec, body, lean)!;
         var steppable = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
             ParameterShape.StructValue) && body.Ops.All(op => Body.Pure(op) ||
                 Regex.IsMatch(op, @"\A\.(localAddr \d+|local \d+|setLocal \d+|initAggregate \d+|" +
                     @"fieldAddress \d+|(?:setFieldAt|fieldAt|aggregateFieldAt|setAggregateFieldAt) \d+ \d+|dup)\z"));
         var split = !steppable && SplitsOnBooleans(body.Ops, spec.Parameters);
         var paths = steppable || split ? null : ScalarPaths(spec, body.Ops);
+        // A body over words that calls helpers composes them through stub contracts, as a body over objects does.
+        if (!steppable && !split && paths is null &&
+            spec.Parameters.All(parameter => parameter.Shape == ParameterShape.Scalar) &&
+            body.Ops.Any(op => op.StartsWith(".call ", StringComparison.Ordinal)) &&
+            ObjectStraightLine(extraction, spec, body, lean, stubsOnly: true) is { } composed)
+            return composed;
         Header(lean, spec, paths is null ? ["CIL.Verification", "CIL.Safety.SymbolicExecution"]
                 : ["CIL.Verification", "CIL.Safety.SymbolicExecution", "CIL.Safety.LoopObligations"],
             steppable || split || paths is not null ? "`postcondition`" : null);
@@ -536,27 +578,43 @@ internal static partial class ProofOutline
     }
 
     /// <summary>A straight-line body over object arguments: stepped when it loads fields and stores at most one
-    /// before it returns, otherwise one hole naming where the walk stopped.</summary>
-    static string ObjectStraightLine(Extraction extraction, Specification spec, Body body, Writer lean)
+    /// before it returns, otherwise one hole naming where the walk stopped. With `stubsOnly`, for a body over
+    /// words, null unless the walk steps it, each call through a stub contract or the contract of a helper that
+    /// keeps locals.</summary>
+    static string? ObjectStraightLine(Extraction extraction, Specification spec, Body body, Writer lean,
+        bool stubsOnly = false)
     {
         var views = new FieldViews(extraction);
         var names = new Names();
         foreach (var parameter in spec.Parameters) names.Claim(parameter.Name, parameter.Name);
         var summaries = new Dictionary<int, Callee?>();
-        Callee? Summary(int index)
+        var calleeNames = new Dictionary<int, string>();
+        string CalleeName(int index)
         {
-            if (summaries.TryGetValue(index, out var known)) return known;
+            if (calleeNames.TryGetValue(index, out var claimed)) return claimed;
             var callee = extraction.Methods[index];
-            var name = names.Claim(char.ToLowerInvariant(callee.Name[0]) + callee.Name[1..], "callee" + index);
-            return summaries[index] = Summarize(extraction, index, name, views);
+            return calleeNames[index] =
+                names.Claim(char.ToLowerInvariant(callee.Name[0]) + callee.Name[1..], "callee" + index);
         }
+        Callee? Summary(int index) => summaries.TryGetValue(index, out var known) ? known
+            : summaries[index] = Summarize(extraction, index, CalleeName(index), views, splits: true);
+        var stubs = new Dictionary<int, Stub?>();
+        Stub? Stubbed(int index) => stubs.TryGetValue(index, out var known) ? known
+            : stubs[index] = StubOf(extraction, index, CalleeName(index));
+        // A body over words reads a callee's contract from its body only where no stub states it: a helper that
+        // keeps locals, whose homes change the memory a stub's `post` keeps.
+        Func<int, Callee?> summarized = !stubsOnly ? Summary
+            : index => Stubbed(index) is null && Summary(index) is { Walk.NumericHomes: true } read ? read : null;
         var numericHomes = HasNumericObjectHomes(spec.Method) || body.Ops.Select(op =>
             Regex.Match(op, @"\A\.call(?:Instance)? (\d+) (\d+)\z")).Where(match => match.Success)
-            .Any(match => Summary(int.Parse(match.Groups[1].Value))?.Walk.NumericHomes == true);
-        var walk = new ObjectWalk(spec, body.Ops, views, Summary, numericHomes: numericHomes);
+            .Any(match => summarized(int.Parse(match.Groups[1].Value))?.Walk.NumericHomes == true);
+        // Local homes lie in the memory the method is entered in, so the statement speaks of any well-formed one.
+        if (numericHomes && !spec.Symbolic) spec = spec.InMemory();
+        var walk = new ObjectWalk(spec, body.Ops, views, summarized, numericHomes: numericHomes, stubs: Stubbed);
         var stepped = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
             ParameterShape.Object or ParameterShape.Array or ParameterShape.ValueArray or ParameterShape.WordArray) &&
             walk.Run(pc => Location(spec.Method, pc));
+        if (stubsOnly && !stepped) return null;
         if (stepped) spec.Plan = walk.Plan();
         string[] imports = ["CIL.Verification", "CIL.Safety.SymbolicExecution", "CIL.Safety.ObjectFields"];
         if (numericHomes) imports = [.. imports, "CIL.Safety.LoopScaffold"];
@@ -564,10 +622,17 @@ internal static partial class ProofOutline
             imports = [.. imports, "CIL.Safety.ArrayContents", "CIL.Safety.LoopCallerFacts"];
         var fresh = stepped ? walk.Flattened.OfType<Allocation>().FirstOrDefault() : null;
         if (spec.Arrays.Any() || fresh is not null) imports = [.. imports, "CIL.Safety.ReferenceArrayElements"];
+        var stubbed = stepped ? walk.Flattened.OfType<StubCall>().Select(call => call.Stub).Distinct().ToArray() : [];
+        // A helper's contract proof closes each side that throws from its `pre`.
+        var thrown = stepped && walk.Flattened.OfType<CallStep>().Any(call =>
+            call.Callee.Walk.Flattened.Any(step => step is Thrown));
+        if (stubbed.Length > 0 || thrown) imports = [.. imports, "CIL.Safety.LoopObligations"];
         Header(lean, spec, imports, stepped ? "`postcondition`" : null);
         if (stepped)
             foreach (var callee in walk.Flattened.OfType<CallStep>().Select(call => call.Callee).Distinct())
-                CalleeContract(lean, callee, callee.Index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                CalleeContract(lean, callee, callee.Index.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    spec.Method.Name);
+        foreach (var stub in stubbed) StubContract(lean, extraction, stub, spec.Method.Name);
         if (fresh is not null)
         {
             lean.Doc($"The element class of the array `{spec.Method.Name}` allocates, as its `newarr` names it.");
@@ -577,19 +642,108 @@ internal static partial class ProofOutline
         foreach (var array in spec.ValueArrays.Where(array => array.ElementDefinition is not null))
             ElementDefinition(lean, array);
         spec.Placeholders(lean);
-        spec.Footprint(lean);
+        if (spec.Framed) spec.Footprint(lean);
         if (stepped && numericHomes) ObjectEntry(lean, spec, "objectEntry", "0");
         spec.Statement(lean);
         if (stepped) ObjectBody(lean, spec, walk, "simp [footprint]");
         else
         {
-            lean.Line("  -- Choose a fuel bound and step the body with `cil_checked_steps [facts]`, giving each");
-            lean.Line("  -- field load its `facts` and a store its `Owned.store`.");
+            lean.Line("  -- Choose a fuel bound and step the body with `cil_checked_steps [facts]`, giving a store");
+            lean.Line("  -- its `Owned.store`; a scalar field's load is read from its fact in the context.");
             var reason = walk.Stopped ?? Unstepped(spec.Method, body.Ops, spec.Parameters);
             lean.Noted("  ", "sorry", $"{NotOutlined}the body meets {reason}; prove its run and Postcondition");
         }
         Footer(lean);
         return lean.ToString();
+    }
+
+    /// <summary>The outline text that builds contract evidence by name: the final memory, output and facts a
+    /// `Holds` proof gives `MethodContract.Holds.intro` for a returning run.</summary>
+    static class ContractEvidence
+    {
+        /// <summary>The evidence of a run that returns one word and leaves `memory` as it was, with the goals
+        /// `run` and `postcondition` under `suffix` left open and the returned word found by the run.</summary>
+        internal static void Returns(Writer lean, string indent, string suffix)
+        {
+            lean.Line($"{indent}refine MethodContract.Holds.intro memory ?output{suffix} ?run{suffix} " +
+                "(Confined.refl _ memory)");
+            lean.Line($"{indent}  ?postcondition{suffix}");
+        }
+
+        /// <summary>The term that closes the goal contract stepping leaves at a return, `Confined ∧ Returns`,
+        /// from the proof `confined` of the footprint and the proof of `post`, as parts the writer may wrap
+        /// between. The returned values name the output, except that of a method that returns nothing.
+        /// </summary>
+        internal static IEnumerable<string> Returned(Returning returning, IEnumerable<string> confined) =>
+            ["MethodContract.Holds.returns", .. returning.Unit ? ["(output := ())"] : Array.Empty<string>(),
+                .. confined, returning.Post];
+
+        /// <summary>The note of the hole a contract whose `post` the author states leaves at each return.
+        /// </summary>
+        internal static string PostHole(string contract, string where) =>
+            $"what `{contract}.post` states of the returned value{where}, from `permitted`, its `pre`";
+    }
+
+    /// <summary>How a callee's contract proof closes each return of its body: whether its output is `Unit`, and
+    /// the proof of `post`. The `post` of an `Open` contract is a hole of what its author states, after the
+    /// memory it has `Kept`.</summary>
+    sealed record Returning(string Contract, bool Unit, string Post, bool Open = false, bool Kept = false);
+
+    /// <summary>The static helper at `index` as a stub named `name`, when its parameters and result are 32- or
+    /// 64-bit words and its body, without locals, only computes, tests and throws, so every returning side of
+    /// its contract proof steps; null for any other callee.</summary>
+    static Stub? StubOf(Extraction extraction, int index, string name)
+    {
+        var method = extraction.Methods[index];
+        if (method.HasThis || method.Parameters.Count == 0 || ElementWidth(method.ReturnType) is not { } result ||
+            method.Parameters.Any(parameter => ElementWidth(parameter.ParameterType) is null) ||
+            !(LoopOutline.Computes(extraction, index) || LoopOutline.Branches(extraction, index)))
+            return null;
+        var names = new Names();
+        return new Stub(index, name, method,
+            [.. method.Parameters.Select(parameter => names.Claim(parameter.Name, "argument" + parameter.Index))],
+            [.. method.Parameters.Select(parameter => ElementWidth(parameter.ParameterType)!.Value)], result);
+    }
+
+    /// <summary>Writes a stub's contract, with `pre` and `post` left to the author, and the proof that the
+    /// helper's body meets it, stepped along every returning side.</summary>
+    static void StubContract(Writer lean, Extraction extraction, Stub stub, string caller)
+    {
+        var program = stub.Index.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var single = stub.Inputs.Length == 1;
+        var pattern = single ? stub.Inputs[0] : $"({string.Join(", ", stub.Inputs)})";
+        var inputType = single ? WordType(stub.Widths[0])
+            : $"({string.Join(" × ", stub.Widths.Select(WordType))})";
+        var arguments = string.Join(", ", stub.Inputs.Select((input, position) =>
+            $".scalar ({ScalarConstructor(stub.Widths[position])} {input})"));
+        lean.Quiet();
+        lean.Doc($"`{stub.Method.Name}`, method {program} of the extraction, as `{caller}` calls it: replace the " +
+            "`sorry` of `pre` with what the caller must guarantee, or `True`, and the `sorry` of `post` with what " +
+            "the caller learns of `result`. The helper stores nothing, so `post` keeps the memory.");
+        lean.Line($"def {stub.Name}Contract : MethodContract {inputType} {WordType(stub.Result)} where");
+        lean.Line($"  args := fun {pattern} => [{arguments}]");
+        lean.Line($"  results result := [.scalar ({ScalarConstructor(stub.Result)} result)]");
+        lean.Line($"  pre := fun {pattern} memory => sorry");
+        lean.Line("  footprint _ := []");
+        lean.Line($"  post := fun {pattern} initial final result => final = initial ∧ sorry");
+        lean.Line();
+        lean.Doc($"`{stub.Method.Name}` meets its contract; the proof of `{caller}` uses only the contract.");
+        lean.Line($"theorem {stub.Name}_holds : {stub.Name}Contract.Holds Extracted.program {program} := by");
+        LoopOutline.WordCalleeProof(lean, extraction, stub.Index, stub.Name,
+            single ? pattern : $"⟨{string.Join(", ", stub.Inputs)}⟩", stub.Inputs, kept: true);
+        lean.Line();
+        lean.Line($"#print axioms {stub.Name}_holds");
+        lean.Line();
+    }
+
+    /// <summary>The postcondition of a returning side of a stub's contract proof: the memory is as it was, and
+    /// what `post` states of the result is a hole.</summary>
+    static void KeptPost(Writer lean, string indent, string name, string suffix, string where)
+    {
+        lean.Line($"{indent}case postcondition{suffix} =>");
+        lean.Line($"{indent}  dsimp only [{name}Contract] at permitted ⊢");
+        lean.Line($"{indent}  refine ⟨rfl, ?_⟩");
+        lean.Noted(indent + "  ", "sorry", ContractEvidence.PostHole(name + "Contract", where));
     }
 
     /// <summary>Names the element of a value array argument, reducible so stepping sees the element itself; a
@@ -634,7 +788,13 @@ internal static partial class ProofOutline
                 _ => "a span of caller memory"
             };
         var pc = Array.FindIndex(ops, op => !Body.Pure(op));
-        return pc < 0 ? "the body has locals" : $"`{ops[pc]}` at {Location(method, pc)} needs facts or a case split";
+        if (pc < 0) return "the body has locals";
+        // A call the outline cannot compose names the contract the author must write and prove.
+        return Regex.Match(ops[pc], @"\A\.call(?:Instance)? (\d+) \d+\z") is { Success: true } call
+            ? $"`{ops[pc]}` at {Location(method, pc)} calls method {call.Groups[1].Value}, which " +
+                "`cil_contract_steps` composes through a `MethodContract` you write and prove with " +
+                $"`Holds Extracted.program {call.Groups[1].Value}`"
+            : $"`{ops[pc]}` at {Location(method, pc)} needs facts or a case split";
     }
 
     /// <summary>The source line of the instruction at `pc`, or its IL offset without a PDB.</summary>
@@ -653,15 +813,27 @@ internal static partial class ProofOutline
         var selected = tags is null ? ""
             : $" The tactics leave obligations tagged {tags}, which the holes select with `case`.";
         lean.Comment("/-! ", "    ", $"A starting proof of `{spec.Method.Name}`, generated by " +
-            "`leancil new-proof` from its extraction. Each `sorry` is a hole, and `leancil verify` rejects " +
+            "`leancil new-proof` from its extraction. Each `sorry` is a hole: `leancil verify --goals` prints " +
+            "the goal at each, and `leancil verify` rejects " +
             $"the file until none remains. A hole commented `{NotOutlined.TrimEnd()}` marks a path the " +
-            $"outline could not step.{selected} -/");
+            $"outline could not step.{selected}{Renamed(spec)} -/");
         lean.Line();
         lean.Line("open CIL.Safety");
         lean.Line("open CIL (W32 W64)");
         if (spec.Classes) lean.Line("open Extracted.Classes");
         lean.Line("namespace ExampleProof");
         lean.Line();
+    }
+
+    /// <summary>The header's note of each parameter bound under another name than its C# one, which the proof
+    /// reserves or another binder has.</summary>
+    static string Renamed(Specification spec)
+    {
+        var renamed = spec.Parameters.Where(parameter => parameter.Source is not null)
+            .Select(parameter => $"`{parameter.Source}` is bound as `{parameter.Name}`").ToArray();
+        return renamed.Length == 0 ? ""
+            : $" The C# parameter {string.Join(" and ", renamed)}, " +
+                $"{(renamed.Length == 1 ? "a name" : "names")} clear of the proof's own.";
     }
 
     static void Footer(Writer lean)
@@ -691,7 +863,7 @@ internal static partial class ProofOutline
     /// split.</summary>
     [GeneratedRegex(@"\A(?:(?:stored|framed|held|written|output|called|post|returned|found|branch|initial|memory|" +
         @"encoded|changed|combined|formed|form|loadSigned|arrayApart|localHome|localWritten|localLoaded|" +
-        @"frameFacts|below|fuel|invoked|callFormed)\d*|held\d+Final|" +
+        @"frameFacts|below|fuel|invoked|callFormed|permitted)\d*|held\d+Final|" +
         @"(?:owned|kept|added|loaded)\d+(?:Field\d+)?(?:Signed)?)\z")]
     private static partial Regex Generated();
 
@@ -735,6 +907,10 @@ internal static partial class ProofOutline
             return best;
         }
 
+
+        /// <summary>Keeps the next definition, whose binders its users fix, from an unused-variable warning for
+        /// each binder the author's body leaves out.</summary>
+        internal void Quiet() => Line("set_option linter.unusedVariables false in");
 
         /// <summary>A doc comment wrapped at word boundaries.</summary>
         internal void Doc(string text) => Words("/-- ", "    ", text + " -/");

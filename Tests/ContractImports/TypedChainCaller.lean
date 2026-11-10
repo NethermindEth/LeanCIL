@@ -62,7 +62,10 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
     (by cil_checked_step [formValue, sourceEnteredForm, middleForm,
       TypedImportInterface.copy, Except.mapError]) rfl
     ⟨enteredFormed, sourceEntered, middleWritable⟩ enteredFormed ?_
-  rintro first _ _ firstFormed _ _ firstFramed ⟨_, rfl, copiedFirst⟩
+  intro first _ firstCall firstKept
+  have firstFormed := firstKept.formed
+  have firstFramed := firstCall.framed
+  have copiedFirst := firstCall.post
   have destinationFirst : access first destination 8 1 true = .ok () :=
     (firstFramed.access_write destination (Nat.lt_of_lt_of_le destinationOld owned.1.next)
       8 1).trans destinationEntered
@@ -81,7 +84,9 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
     (by cil_checked_step [formValue, middleFirstForm, destinationFirstForm,
       TypedImportInterface.copy, Except.mapError]) rfl
     ⟨firstFormed, copiedFirst, destinationFirst⟩ firstFormed ?_
-  rintro last _ _ _ _ _ lastFramed ⟨_, rfl, copiedLast⟩
+  intro last _ lastCall _
+  have lastFramed := lastCall.framed
+  have copiedLast := lastCall.post
   have exitFresh : ∀ id ∈ frame.owned, memory.nextIdentity ≤ id :=
     fun id member => (owned.2 id member).1
   have exitBelow := leaveFrame_preserves_memory_below frame last _ exitFresh

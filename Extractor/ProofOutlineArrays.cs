@@ -87,9 +87,10 @@ internal static partial class ProofOutline
         {
             lean.Line($"    cil_contract_steps [{array.Name}Valid, {helper.Name}_holds, {helper.Name}Contract, " +
                 "leaveFrame]");
+            lean.Line("      with called1 output1 call1");
             lean.Line($"    case precondition => exact ⟨{array.Name}Valid, {array.Name}Type, {array.ElementsName}, " +
                 $"{array.Name}Contents, {bound}⟩");
-            lean.Line("    rename_i called1 _ output1 post1 _");
+            lean.Line("    have post1 := call1.post");
             lean.Line($"    dsimp only [{helper.Name}Contract] at post1 ⊢");
             // The helper returns the address of the element the caller's contents name.
             lean.Line("    obtain ⟨rfl, found1⟩ := post1");
@@ -127,10 +128,8 @@ internal static partial class ProofOutline
         lean.Doc($"`{helper.Method.Name}` meets its contract; callers use only the contract.");
         lean.Line($"theorem {name}_holds : {name}Contract.Holds Extracted.program {method} := by");
         lean.Line("  rintro ⟨values, index⟩ initial ⟨valid, typed, elements, contents, bound⟩");
-        lean.Line($"  dsimp only [{name}Contract] at *");
         lean.Line("  obtain ⟨item, found, _⟩ := contents.array_load valid (by decide) bound");
-        lean.Line($"  refine ⟨CIL.executionBound Extracted.program {method}, initial, _, ?_, Confined.refl _ _, " +
-            "item, rfl, rfl, found⟩");
+        lean.Line("  refine MethodContract.Holds.intro initial item ?_ (Confined.refl _ _) ⟨rfl, found⟩");
         lean.Line("  cil_checked_steps [step_arrayAddress_of_element (index := .i32 index) typed rfl found, " +
             "valid,");
         lean.Line("    arrayElement_formed found, leaveFrame]");

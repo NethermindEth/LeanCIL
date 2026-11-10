@@ -15,10 +15,9 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
     (by cil_checked_step []) ?_
   refine run_call_of_contract holds input found
     (by rfl : Extracted.method0.code[1]? = some (.call 1 1)) (by cil_checked_step []) rfl formed ?_
-  rintro final values _ framed returns
-  obtain ⟨output, rfl, result⟩ := returns
+  intro final output call
   refine run_return_exists found (by rfl : Extracted.method0.code[2]? = some (.ret none))
     (by cil_checked_step []) (by rfl) ?_
-  exact ⟨framed, output, rfl, result⟩
+  exact ⟨call.framed, output, rfl, call.post⟩
 
 end ExampleProof

@@ -106,8 +106,8 @@ theorem slice_read_composes (program : Program)
       sourceReadonly, valid, sliced, startBound, lengthBound, ReadInput.view]
     cil_contract_call helper input [caller, args, ReadInput.view, sourceValid, valid]
     · exact permitted
-    · intro final values invoked confined returned
-      obtain ⟨value, rfl, rfl, rfl⟩ := returned
+    · intro final value call
+      obtain ⟨rfl, rfl⟩ := call.post
       cil_contract_steps [caller, args, loadLocal, valid, ReadInput.view]
       exact ⟨rfl, rfl⟩
   obtain ⟨fuel, final, returned, ran, result⟩ := execution

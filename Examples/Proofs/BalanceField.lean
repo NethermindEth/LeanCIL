@@ -17,7 +17,6 @@ theorem correctness (memory : CIL.Safety.Memory) (account : CIL.Safety.ManagedRe
     (loaded : CIL.Safety.loadValue memory (.address field) 8 = .ok (.i64 balance)) :
     ∃ fuel, CIL.Safety.invoke Extracted.program fuel 0 [.object account] memory =
       .ok (memory, [.scalar (.i64 balance)]) := by
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
   cil_checked_steps [formed, located, loaded, accountType]
 
 #print axioms correctness
@@ -27,7 +26,6 @@ theorem correctness (memory : CIL.Safety.Memory) (account : CIL.Safety.ManagedRe
 theorem null_throws (memory : CIL.Safety.Memory) :
     ∃ fuel, CIL.Safety.invoke Extracted.program fuel 0 [.object .null] memory =
       .error ⟨0, 1, .thrown "System.NullReferenceException"⟩ := by
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
   cil_checked_steps [CIL.Safety.objectFieldAddress]
 
 #print axioms null_throws

@@ -33,10 +33,11 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
     (by cil_checked_step [formValue, leftForm, rightForm, sumForm, DerivedInterface.addPublic,
       DerivedInterface.addArguments, Except.mapError]) rfl
     ⟨formed, readLeft, readRight, writable, apart, within⟩ ?_
-  rintro final values _ framed ⟨output, rfl, rfl, stored, kept⟩
+  intro final values call
+  obtain ⟨rfl, stored, kept⟩ := call.post
   refine run_return_exists found Extracted.method0_instruction4 (by cil_checked_step [])
     (by rfl) ?_
-  exact ⟨framed, [], rfl, rfl, stored, kept⟩
+  exact ⟨call.framed, [], rfl, rfl, stored, kept⟩
 
 #print axioms correctness
 

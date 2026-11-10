@@ -41,10 +41,8 @@ Install **Lean 4.35.0** through elan and **.NET SDK 10.0.403**, as pinned in
 [lean-toolchain](lean-toolchain) and [global.json](global.json). From this checkout:
 
 ```sh
-lake build
 dotnet pack Extractor -c Release -o artifacts/packages
 dotnet tool update --global Nethermind.LeanCIL --add-source artifacts/packages --prerelease
-dotnet build Examples/Assembly -c Release
 ```
 
 The example assembly contains:
@@ -53,9 +51,10 @@ The example assembly contains:
 public static ulong Add(ulong x, ulong y) => unchecked(x + y);
 ```
 
-Extract its compiled instructions and check the supplied universal addition proof:
+Build it, extract its compiled instructions and check the supplied universal addition proof:
 
-```sh
+```sh run
+dotnet build Examples/Assembly -c Release
 leancil extract Examples/Assembly/bin/Examples.dll "Arithmetic::Add(ulong,ulong)" artifacts/Add
 leancil verify artifacts/Add --proof Examples/Proofs/Add.lean
 ```
@@ -82,7 +81,8 @@ strings, generic methods, loops, memory access and compiled F#.
 | `leancil watch` | Rebuild C# on change, refresh the changed extractions and verify the affected proofs |
 | `leancil verify-batch` | Verify multiple requests against one consumer snapshot |
 
-`check` validates extraction consistency; `verify` establishes the selected theorem.
+`check` validates extraction consistency; `verify` establishes the selected theorem, and
+`verify --goals` prints the goal at each `sorry` and failing tactic of an unfinished proof.
 Failures return a nonzero exit code. See the [CLI reference](docs/CLI.md) for all commands,
 profiles, saved settings and diagnostics.
 

@@ -84,6 +84,14 @@ partial class Program
         var changedCall = SplitExtractionComponents(original.Replace(".call 1 1", ".call 0 1", StringComparison.Ordinal));
         if (changedCall.Sources.Keys.Intersect(first.Sources.Keys).Count() != 2 || changedCall.InputHash == first.InputHash)
             throw new Exception("A changed callee connection retained the caller component or input identity.");
+        // A long method raises the emitted recursion depth; a component at another depth would not compile it.
+        const string deepOption = "\nset_option maxRecDepth 8192\n";
+        var deepened = SplitExtractionComponents(original.Replace("\nset_option maxRecDepth 4096\n", deepOption,
+            StringComparison.Ordinal));
+        var deepShared = SharedExtractionComponents(deepened, deepened.Sources.Keys.ToHashSet(StringComparer.Ordinal));
+        if (deepened.Sources.Values.Append(deepened.Aggregate).Append(deepShared.Aggregate)
+            .Any(text => !text.Contains(deepOption, StringComparison.Ordinal)))
+            throw new Exception("A component lost the extraction's recursion depth.");
         var saved = new[] { "LEANCIL_DISABLE_SUCCESS_CACHE", "LEANCIL_TRACE_DIRECTORY", "LEANCIL_CACHE_DIR" }
             .ToDictionary(name => name, Environment.GetEnvironmentVariable);
         try

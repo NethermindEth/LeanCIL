@@ -35,9 +35,7 @@ theorem correctness (memory : Memory) (bucket items target : Reference) (length 
     ∃ fuel, invoke Extracted.program fuel first [.object (.address bucket)] memory =
       .ok (memory, [.object (.address target)]) := by
   have loaded := element.facts held live
-  refine ⟨CIL.executionBound Extracted.program first, ?_⟩
-  cil_checked_steps [readable.facts array element.object, readable.live.formed, live.formed,
-    loaded.1, loaded.2, leaveFrame]
+  cil_checked_steps [readable.facts array element.object, loaded.1, loaded.2]
 
 #print axioms correctness
 
@@ -48,8 +46,7 @@ theorem null_items (memory : Memory) (bucket : Reference)
     (array : Bucket.Items.of memory bucket = .null) :
     ∃ fuel, invoke Extracted.program fuel first [.object (.address bucket)] memory =
       .error ⟨first, 3, .thrown "System.NullReferenceException"⟩ := by
-  refine ⟨CIL.executionBound Extracted.program first, ?_⟩
-  cil_checked_steps [readable.live.formed, readable.located, readable.load_null array]
+  cil_checked_steps [readable.load_null array]
 
 #print axioms null_items
 
@@ -60,8 +57,7 @@ theorem empty_items (memory : Memory) (bucket items : Reference)
     (live : ReferenceArray.Live memory items nodeType 0) :
     ∃ fuel, invoke Extracted.program fuel first [.object (.address bucket)] memory =
       .error ⟨first, 3, .thrown "System.IndexOutOfRangeException"⟩ := by
-  refine ⟨CIL.executionBound Extracted.program first, ?_⟩
-  cil_checked_steps [readable.facts array live.object, readable.live.formed,
+  cil_checked_steps [readable.facts array live.object,
     live.slot_outside (index := 0) (Nat.le_refl _)]
 
 #print axioms empty_items

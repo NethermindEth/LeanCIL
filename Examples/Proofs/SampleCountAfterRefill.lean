@@ -38,10 +38,9 @@ def refillContract : MethodContract (Reference × Reference × Nat) where
 /-- `Refill` meets its contract: one `stfld` of the field's slot. -/
 theorem refill_holds : refillContract.Holds Extracted.program refill := by
   rintro ⟨samples, values, length⟩ memory ⟨owned, whole⟩
-  dsimp only [refillContract] at *
   obtain ⟨stored, framed, held⟩ := owned.store_whole whole
-  refine ⟨CIL.executionBound Extracted.program refill, _, [], ?_, framed, [], rfl, rfl, held⟩
-  cil_checked_steps [owned.live.formed, owned.located, stored, whole.valid]
+  refine MethodContract.Holds.intro _ [] ?_ framed ⟨rfl, held⟩
+  cil_checked_steps [stored, whole.valid]
 
 #print axioms refill_holds
 
@@ -72,28 +71,25 @@ theorem count_holds (holds : refillContract.Holds Extracted.program refill) :
     countContract.Holds Extracted.program countAfterRefill := by
   rintro ⟨samples, other, values, current, length, currentLength⟩ memory
     ⟨readable, held, currentWhole, owned, valuesWhole⟩
-  dsimp only [countContract]
-  cil_contract_steps [holds, refillContract, owned, valuesWhole, owned.live.formed,
-    readable.live.formed, valuesWhole.valid]
-  rename_i final framed results post _
-  dsimp only [refillContract] at framed post
+  cil_contract_steps [holds, refillContract, owned, valuesWhole, valuesWhole.valid]
+    with final results refilling
+  have framed := refilling.framed
+  have post := refilling.post
   obtain ⟨rfl, refilled⟩ := post
   obtain ⟨kept, now⟩ := readable.across owned.toReadable.live framed refilled
   by_cases same : other = samples
   · simp only [same, ite_true] at now ⊢
     obtain ⟨formed, located, loaded⟩ :=
       kept.facts now (valuesWhole.after_confined framed) (by decide)
-    cil_contract_steps [formed, located, loaded, (valuesWhole.after_confined framed).valid,
-      leaveFrame]
+    cil_contract_steps [formed, located, loaded, (valuesWhole.after_confined framed).valid]
     subst same
-    refine ⟨framed, _, rfl, ?_, refilled⟩
+    refine MethodContract.Holds.returns framed ⟨?_, refilled⟩
     simp
   · simp only [same, ite_false, held] at now ⊢
     obtain ⟨formed, located, loaded⟩ :=
       kept.facts now (currentWhole.after_confined framed) (by decide)
-    cil_contract_steps [formed, located, loaded, (currentWhole.after_confined framed).valid,
-      leaveFrame]
-    refine ⟨framed, _, rfl, ?_, refilled⟩
+    cil_contract_steps [formed, located, loaded, (currentWhole.after_confined framed).valid]
+    refine MethodContract.Holds.returns framed ⟨?_, refilled⟩
     simp [same]
 
 #print axioms count_holds

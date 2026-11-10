@@ -43,32 +43,26 @@ theorem ClassesPreserved.trans {program : CIL.Program} {first middle last : Memo
     ClassesPreserved program first last :=
   fun catalog sites consistent => right catalog sites (left catalog sites consistent)
 
-/-- `after` is well formed, preserves the static world of `before` and keeps its objects'
-    agreement with any catalog the program's object sites agree with. -/
-abbrev FrameInvariants (program : CIL.Program) (before after : Memory) : Prop :=
-  after.WellFormed ∧ StaticWorldPreserved program before after ∧
-    ClassesPreserved program before after
-
-theorem FrameInvariants.formed {program : CIL.Program} {before after : Memory}
-    (kept : FrameInvariants program before after) : after.WellFormed :=
-  kept.1
-
-theorem FrameInvariants.staticWorld {program : CIL.Program} {before after : Memory}
-    (kept : FrameInvariants program before after) : StaticWorldPreserved program before after :=
-  kept.2.1
-
-theorem FrameInvariants.classes {program : CIL.Program} {before after : Memory}
-    (kept : FrameInvariants program before after) : ClassesPreserved program before after :=
-  kept.2.2
+/-- What every successful call or construction keeps of the memory it ran in, as named evidence
+    that proofs select by field. -/
+structure FrameInvariants (program : CIL.Program) (before after : Memory) : Prop where
+  /-- `after` is well formed. -/
+  formed : after.WellFormed
+  /-- `after` preserves the static world of `before`. -/
+  staticWorld : StaticWorldPreserved program before after
+  /-- The objects of `after` keep their agreement with any catalog the program's object sites
+      agree with. -/
+  classes : ClassesPreserved program before after
 
 theorem FrameInvariants.refl (program : CIL.Program) {memory : Memory}
     (formed : memory.WellFormed) :
     FrameInvariants program memory memory :=
-  ⟨formed, StaticWorldPreserved.refl program memory, ClassesPreserved.refl program memory⟩
+  { formed, staticWorld := .refl program memory, classes := .refl program memory }
 
 theorem FrameInvariants.trans {program : CIL.Program} {first middle last : Memory}
     (left : FrameInvariants program first middle) (right : FrameInvariants program middle last) :
     FrameInvariants program first last :=
-  ⟨right.formed, left.staticWorld.trans right.staticWorld, left.classes.trans right.classes⟩
+  { formed := right.formed, staticWorld := left.staticWorld.trans right.staticWorld,
+    classes := left.classes.trans right.classes }
 
 end CIL.Safety

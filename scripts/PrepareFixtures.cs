@@ -11,7 +11,7 @@ Directory.CreateDirectory(output);
 var fixtures = new Dictionary<string, PreparedFixture>(StringComparer.Ordinal);
 foreach (var script in new[] { "scripts/Test.cs", "Tests/ContractExport.cs", "Tests/FullImportVerification.cs",
     "Tests/ModularStaticExports.cs", "Tests/ProofOutlines.cs", "scripts/LibraryArchive.cs",
-    "scripts/RunVerificationGroup.cs" })
+    "scripts/RunVerificationGroup.cs", "scripts/ProofCost.cs" })
 {
     var inputs = FixtureInputs(script);
     var name = Path.GetFileNameWithoutExtension(script);

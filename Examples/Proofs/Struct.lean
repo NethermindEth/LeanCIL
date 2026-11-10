@@ -20,11 +20,12 @@ bind_entry entry (memory : Memory) (x : CIL.W64) (wellFormed : memory.WellFormed
 theorem correctness (memory : Memory) (x : CIL.W64) (wellFormed : memory.WellFormed) :
     ∃ fuel result, invoke Extracted.program fuel 0 [.scalar (.i64 x)] memory =
       .ok (result, [.scalar (.i64 x)]) ∧ MemoryBelow memory.nextIdentity memory result := by
-  obtain ⟨reference, entered, setup, home, -, frame⟩ := entry.checked memory x wellFormed
+  obtain ⟨reference, entered, enter⟩ := entry.checked memory x wellFormed
+  have frame := enter.frame
   have homes := (frame []).homes
   have slot : [LocalSlot.bytes (.aggregate 12) reference][0]? = _ := rfl
   obtain ⟨zeroed, zeroStep, zeroSnapshots, zeroFormed, zeroBelow, zeroReady, zeroForm, -⟩ :=
-    (frame []).snapshots.zero_aggregate homes (frame []).wellFormed slot home.writable
+    (frame []).snapshots.zero_aggregate homes (frame []).wellFormed slot enter.numeric0.writable
   obtain ⟨payload, storePayload, payloadSnapshots, payloadFormed, payloadBelow, payloadReady,
     payloadForm, payloadValues, -⟩ := zeroSnapshots.store_field homes zeroFormed slot rfl zeroReady
       Extracted.layout0_valid (by decide) rfl rfl (fieldIndex := 0) rfl (.i64 x) rfl
@@ -34,10 +35,11 @@ theorem correctness (memory : Memory) (x : CIL.W64) (wellFormed : memory.WellFor
   have loaded := tagSnapshots.load_field tagFormed slot rfl Extracted.layout0_valid rfl tagValues
     (fieldIndex := 0) rfl rfl
   refine ⟨CIL.executionBound Extracted.program 0, leaveFrame (entry.frame memory reference) tagged,
-    ?_, MemoryBelow.frame_round_trip setup (zeroBelow.trans (payloadBelow.trans tagBelow))⟩
-  apply invoke_of_run (by simp only [cil_code] <;> rfl) rfl setup
+    ?_, MemoryBelow.frame_round_trip enter.setup (zeroBelow.trans (payloadBelow.trans tagBelow))⟩
+  apply invoke_of_run (by simp only [cil_code] <;> rfl) rfl enter.setup
   cil_checked_steps [zeroStep, storePayload, storeTag, loaded, localAddress, entry.frame,
-    access_reference_valid _ _ _ _ _ home.writable, zeroForm, payloadForm, tagForm, numericOfWidth]
+    access_reference_valid _ _ _ _ _ enter.numeric0.writable, zeroForm, payloadForm, tagForm,
+    numericOfWidth]
 
 #print axioms correctness
 end ExampleProof

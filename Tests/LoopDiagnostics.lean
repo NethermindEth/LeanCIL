@@ -41,8 +41,7 @@ def addTwoContract : MethodContract W32 W32 where
 
 theorem addTwo_holds : addTwoContract.Holds program 1 := by
   rintro x memory -
-  dsimp only [addTwoContract]
-  refine ⟨8, memory, _, ?_, Confined.refl _ memory, _, rfl, rfl⟩
+  refine MethodContract.Holds.intro memory _ ⟨8, ?_⟩ (Confined.refl _ memory) rfl
   cil_checked_steps
 #print axioms addTwo_holds
 
@@ -68,12 +67,12 @@ theorem doubles (memory : Memory) (value : W32) (wellFormed : memory.WellFormed)
     ∃ fuel final, invoke program fuel 0 [.scalar (.i32 value)] memory =
       .ok (final, [.scalar (.i32 (2 * value))]) ∧
       MemoryBelow memory.nextIdentity memory final := by
-  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := entry.checked memory value wellFormed
-  refine invoke_loop_induction (by rfl) rfl setup (header memory value home)
+  obtain ⟨home, entered, enter⟩ := entry.checked memory value wellFormed
+  refine invoke_loop_induction (by rfl) rfl enter.setup (header memory value home)
     (fun state => state.values.2 = 2 * state.values.1)
     (fun state => (value - state.values.1).toNat) (fun start => ?_) ?_
   · obtain ⟨zeroed, zeroing, frame, -⟩ :=
-      (entryFrame []).zero_aggregate 0 layout [.i32 0, .i32 0]
+      (enter.frame []).zero_aggregate 0 layout [.i32 0, .i32 0]
     exact loop_reaches_terminates (target := header memory value home ⟨(0, 0), zeroed, frame⟩)
       (by cil_loop_steps) (start _ rfl)
   rintro ⟨⟨count, sum⟩, current, frame⟩ doubled recurse
@@ -89,7 +88,10 @@ theorem doubles (memory : Memory) (value : W32) (wellFormed : memory.WellFormed)
     · cil_checked_step []
     · rfl
     · trivial
-    rintro final _ ⟨_, invoked⟩ framed ⟨_, rfl, rfl⟩
+    intro final out call
+    obtain rfl := call.post
+    obtain ⟨_, invoked⟩ := call.invoked
+    have framed := call.framed
     dsimp only [addTwoContract] at framed ⊢
     have called := frame.after_confined framed
       (invoke_preserves_wellFormed _ _ _ _ _ _ _ frame.wellFormed invoked) (by simp) (by simp)
@@ -114,8 +116,8 @@ theorem doubles_by_default (memory : Memory) (value : W32) (wellFormed : memory.
     ∃ fuel final, invoke program fuel 0 [.scalar (.i32 value)] memory =
       .ok (final, [.scalar (.i32 (2 * value))]) ∧
       MemoryBelow memory.nextIdentity memory final := by
-  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := entry.checked memory value wellFormed
-  refine invoke_loop_induction (by rfl) rfl setup (header memory value home)
+  obtain ⟨home, entered, enter⟩ := entry.checked memory value wellFormed
+  refine invoke_loop_induction (by rfl) rfl enter.setup (header memory value home)
     (fun state => state.values.2 = 2 * state.values.1)
     (fun state => (value - state.values.1).toNat) (fun start => ?_) ?_
   · cil_loop_recurse start (0, 0)
@@ -198,8 +200,8 @@ example (memory : Memory) (value sum : W32) (home : Reference) (final : Memory) 
 /-- error: cil_loop_steps: target state not matched at pc 17: -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True := by
-  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := entry.checked memory value wellFormed
-  obtain ⟨zeroed, zeroing, frame, -⟩ := (entryFrame []).zero_aggregate 0 layout [.i32 0, .i32 0]
+  obtain ⟨home, entered, enter⟩ := entry.checked memory value wellFormed
+  obtain ⟨zeroed, zeroing, frame, -⟩ := (enter.frame []).zero_aggregate 0 layout [.i32 0, .i32 0]
   have : LoopReaches program 0 [.scalar (.i32 value)] ⟨0, entry.frame memory home, [], entered⟩
       (header memory (value + 1) home ⟨(0, 0), zeroed, frame⟩) := by
     cil_loop_steps
@@ -272,8 +274,8 @@ bind_cutpoint flaggedHeader (memory : Memory) (home : Reference) (state : Flagge
 theorem flagged_returns_zero (memory : Memory) (wellFormed : memory.WellFormed) :
     ∃ fuel final, invoke flaggedProgram fuel 0 [] memory = .ok (final, [.scalar (.i32 0)]) ∧
       MemoryBelow memory.nextIdentity memory final := by
-  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := flaggedEntry.checked memory wellFormed
-  refine invoke_loop_induction (by rfl) rfl setup (flaggedHeader memory home)
+  obtain ⟨home, entered, enter⟩ := flaggedEntry.checked memory wellFormed
+  refine invoke_loop_induction (by rfl) rfl enter.setup (flaggedHeader memory home)
     (fun state => state.values = 0 ∨ state.values = 1)
     (fun state => if state.values = 0 then 1 else 0) (fun start => ?_) ?_
   · cil_loop_recurse start 0
@@ -358,8 +360,8 @@ bind_cutpoint markedHeader (memory : Memory) (value : W32) (home : Reference)
 theorem marked_returns_one (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) :
     ∃ fuel final, invoke markedProgram fuel 0 [.scalar (.i32 value)] memory =
       .ok (final, [.scalar (.i32 1)]) ∧ MemoryBelow memory.nextIdentity memory final := by
-  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := markedEntry.checked memory value wellFormed
-  refine invoke_loop_induction (by rfl) rfl setup (markedHeader memory value home)
+  obtain ⟨home, entered, enter⟩ := markedEntry.checked memory value wellFormed
+  refine invoke_loop_induction (by rfl) rfl enter.setup (markedHeader memory value home)
     (fun _ => True) (fun state => (value - state.values).toNat) (fun start => ?_) ?_
   · cil_loop_recurse start 0
     trivial
@@ -382,8 +384,8 @@ theorem marked_advances_to_return (memory : Memory) (value : W32)
     (wellFormed : memory.WellFormed) :
     ∃ fuel final, invoke markedProgram fuel 0 [.scalar (.i32 value)] memory =
       .ok (final, [.scalar (.i32 1)]) ∧ MemoryBelow memory.nextIdentity memory final := by
-  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := markedEntry.checked memory value wellFormed
-  refine invoke_loop_induction (by rfl) rfl setup (markedHeader memory value home)
+  obtain ⟨home, entered, enter⟩ := markedEntry.checked memory value wellFormed
+  refine invoke_loop_induction (by rfl) rfl enter.setup (markedHeader memory value home)
     (fun _ => True) (fun state => (value - state.values).toNat) (fun start => ?_) ?_
   · cil_loop_recurse start 0
     trivial
@@ -450,9 +452,9 @@ def stampContract : MethodContract (Reference × W32) Unit where
 /-- `stamp` meets its contract, through the width-generic store and write lemmas. -/
 theorem stamp_holds : stampContract.Holds stampsProgram 1 := by
   rintro ⟨slot, value⟩ memory writable
-  dsimp only [stampContract] at writable ⊢
+  dsimp only [stampContract] at writable
   obtain ⟨after, wrote, formed, confined, filled⟩ := writable.write_one value
-  refine ⟨8, after, [], ?_, confined, (), rfl, filled⟩
+  refine MethodContract.Holds.intro after () ⟨8, ?_⟩ confined filled
   cil_checked_steps [step_storeScalar_of_write wrote, formed]
 /-- info: 'Tests.LoopDiagnostics.stamp_holds' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
@@ -492,9 +494,9 @@ theorem stamps_returns_count (memory : Memory) (count : W32) (buffer : Reference
         [.scalar (.i32 count), .reference (.address buffer)] memory =
       .ok (final, [.scalar (.i32 count)]) ∧
       Confined [(buffer, 4 * count.toNat)] memory final := by
-  obtain ⟨home, entered, setup, -, -, entryFrame⟩ :=
+  obtain ⟨home, entered, enter⟩ :=
     stampsEntry.checked memory count buffer wellFormed
-  refine invoke_loop_induction (by rfl) ?_ setup (stampsHeader memory count buffer home)
+  refine invoke_loop_induction (by rfl) ?_ enter.setup (stampsHeader memory count buffer home)
     (StampingInvariant count buffer) (fun state => count.toNat - state.values.toNat)
     (fun start => ?_) ?_
   · simp [cil_checked, formed]
@@ -752,9 +754,9 @@ The observer of `CIL.Observe`, silent without its options, traces each step unde
 set_option hygiene false in
 /-- The walk from the entry to the loop head, through the struct's zeroing and the branch. -/
 macro "walk_to_head" : tactic => `(tactic| (
-  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := entry.checked memory value wellFormed
+  obtain ⟨home, entered, enter⟩ := entry.checked memory value wellFormed
   obtain ⟨zeroed, zeroing, frame, -⟩ :=
-    (entryFrame []).zero_aggregate 0 layout [.i32 0, .i32 0]
+    (enter.frame []).zero_aggregate 0 layout [.i32 0, .i32 0]
   have : LoopReaches program 0 [.scalar (.i32 value)] ⟨0, entry.frame memory home, [], entered⟩
       (header memory value home ⟨(0, 0), zeroed, frame⟩) := by
     cil_loop_steps
@@ -792,8 +794,7 @@ example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True 
 set_option trace.CIL.step true in
 example : addTwoContract.Holds program 1 := by
   rintro x memory -
-  dsimp only [addTwoContract]
-  refine ⟨8, memory, _, ?_, Confined.refl _ memory, _, rfl, rfl⟩
+  refine MethodContract.Holds.intro memory _ ⟨8, ?_⟩ (Confined.refl _ memory) rfl
   cil_checked_steps
 
 -- A step taken by hand, outside any LeanCIL tactic, is traced at its tactic block.

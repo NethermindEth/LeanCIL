@@ -259,10 +259,11 @@ theorem homes (memory : Memory) (view : SpanView) (wellFormed : memory.WellForme
       read entered second 4 1 = .ok (numberBytes 5 4) ∧
       memory.nextIdentity ≤ first.allocation ∧ second.allocation < entered.nextIdentity ∧
       MemoryBelow memory.nextIdentity memory entered ∧ entered.WellFormed := by
-  obtain ⟨first, second, entered, setup, firstHome, secondHome, entryMemory, -⟩ :=
+  obtain ⟨first, second, entered, enter⟩ :=
     entry.checked memory view wellFormed valid width readOnly
-  exact ⟨first, second, entered, setup, rfl, firstHome.loaded, secondHome.loaded,
-    firstHome.fresh, secondHome.bounded, entryMemory.kept, entryMemory.wellFormed⟩
+  exact ⟨first, second, entered, enter.setup, rfl, enter.numeric0.loaded, enter.numeric1.loaded,
+    enter.numeric0.fresh, enter.numeric1.bounded, enter.entryMemory.kept,
+    enter.entryMemory.wellFormed⟩
 #print axioms homes
 
 /-- An uninitialized numeric local allocates without a checked initializer. -/
@@ -308,9 +309,9 @@ theorem countdown_returns_zero (memory : Memory) (input : CIL.W32)
     (wellFormed : memory.WellFormed) :
     ∃ fuel final, invoke program fuel 0 [.scalar (.i32 input)] memory =
       .ok (final, [.scalar (.i32 0)]) ∧ MemoryBelow memory.nextIdentity memory final := by
-  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := entry.checked memory input wellFormed
-  obtain ⟨started, stored, frame, -⟩ := (entryFrame []).store 0 (.i32 input) rfl
-  refine invoke_loop_results (by rfl) (by rfl) setup (header memory home) (fun _ => True)
+  obtain ⟨home, entered, enter⟩ := entry.checked memory input wellFormed
+  obtain ⟨started, stored, frame, -⟩ := (enter.frame []).store 0 (.i32 input) rfl
+  refine invoke_loop_results (by rfl) (by rfl) enter.setup (header memory home) (fun _ => True)
     (·.values.toNat) ⟨input, started, frame⟩
     (by cil_loop_steps) trivial ?_
   rintro ⟨remaining, current, frame⟩ -
@@ -337,9 +338,9 @@ is false -/
 theorem constant_measure (memory : Memory) (input : CIL.W32) (wellFormed : memory.WellFormed) :
     ∃ fuel final, invoke program fuel 0 [.scalar (.i32 input)] memory =
       .ok (final, [.scalar (.i32 0)]) ∧ MemoryBelow memory.nextIdentity memory final := by
-  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := entry.checked memory input wellFormed
-  obtain ⟨started, stored, frame, -⟩ := (entryFrame []).store 0 (.i32 input) rfl
-  refine invoke_loop_results (by rfl) (by rfl) setup (header memory home) (fun _ => True)
+  obtain ⟨home, entered, enter⟩ := entry.checked memory input wellFormed
+  obtain ⟨started, stored, frame, -⟩ := (enter.frame []).store 0 (.i32 input) rfl
+  refine invoke_loop_results (by rfl) (by rfl) enter.setup (header memory home) (fun _ => True)
     (fun _ => 0) ⟨input, started, frame⟩
     (by cil_loop_steps) trivial ?_
   rintro ⟨remaining, current, frame⟩ -
@@ -361,9 +362,9 @@ is false -/
 theorem stale_invariant (memory : Memory) (wellFormed : memory.WellFormed) :
     ∃ fuel final, invoke program fuel 0 [.scalar (.i32 2)] memory =
       .ok (final, [.scalar (.i32 0)]) ∧ MemoryBelow memory.nextIdentity memory final := by
-  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := entry.checked memory 2 wellFormed
-  obtain ⟨started, stored, frame, -⟩ := (entryFrame []).store 0 (.i32 2) rfl
-  refine invoke_loop_results (by rfl) (by rfl) setup (header memory home)
+  obtain ⟨home, entered, enter⟩ := entry.checked memory 2 wellFormed
+  obtain ⟨started, stored, frame, -⟩ := (enter.frame []).store 0 (.i32 2) rfl
+  refine invoke_loop_results (by rfl) (by rfl) enter.setup (header memory home)
     (fun state => state.values = 2) (·.values.toNat) ⟨2, started, frame⟩
     (by cil_loop_steps) rfl ?_
   rintro ⟨remaining, current, frame⟩ (invariant : remaining = 2)
@@ -419,10 +420,10 @@ theorem sum_returns (memory : Memory) (view : SpanView) (values : List CIL.W64)
     (wellFormed : memory.WellFormed) (span : CheckedSpan memory view 8 false values) :
     ∃ fuel final, invoke program fuel 0 [.bufferSpan view] memory =
       .ok (final, [.scalar (.i64 values.sum)]) ∧ MemoryBelow memory.nextIdentity memory final := by
-  obtain ⟨home, entered, setup, -, -, entryFrame⟩ :=
+  obtain ⟨home, entered, enter⟩ :=
     entry.checked memory view wellFormed span.valid span.elementWidth span.mode
-  obtain ⟨started, stored, frame, -⟩ := (entryFrame []).store 0 (.i64 0) rfl
-  refine invoke_loop_results (by rfl) (by simp [cil_checked, span.valid]) setup
+  obtain ⟨started, stored, frame, -⟩ := (enter.frame []).store 0 (.i64 0) rfl
+  refine invoke_loop_results (by rfl) (by simp [cil_checked, span.valid]) enter.setup
     (header memory home) (fun state => state.values.2 + state.values.1.values.sum = values.sum)
     (·.values.1.values.length) ⟨(⟨view, values, span⟩, 0), started, frame⟩
     (by cil_loop_steps) (by simp) ?_
@@ -452,10 +453,10 @@ theorem zero_total (memory : Memory) (view : SpanView) (values : List CIL.W64)
     (wellFormed : memory.WellFormed) (span : CheckedSpan memory view 8 false values) :
     ∃ fuel final, invoke program fuel 0 [.bufferSpan view] memory =
       .ok (final, [.scalar (.i64 values.sum)]) ∧ MemoryBelow memory.nextIdentity memory final := by
-  obtain ⟨home, entered, setup, -, -, entryFrame⟩ :=
+  obtain ⟨home, entered, enter⟩ :=
     entry.checked memory view wellFormed span.valid span.elementWidth span.mode
-  obtain ⟨started, stored, frame, -⟩ := (entryFrame []).store 0 (.i64 0) rfl
-  refine invoke_loop_results (by rfl) (by simp [cil_checked, span.valid]) setup
+  obtain ⟨started, stored, frame, -⟩ := (enter.frame []).store 0 (.i64 0) rfl
+  refine invoke_loop_results (by rfl) (by simp [cil_checked, span.valid]) enter.setup
     (header memory home)
     (fun state => state.values.2 + state.values.1.values.sum = values.sum ∧ state.values.2 = 0)
     (·.values.1.values.length) ⟨(⟨view, values, span⟩, 0), started, frame⟩
@@ -485,10 +486,10 @@ theorem constant_measure (memory : Memory) (view : SpanView) (values : List CIL.
     (wellFormed : memory.WellFormed) (span : CheckedSpan memory view 8 false values) :
     ∃ fuel final, invoke program fuel 0 [.bufferSpan view] memory =
       .ok (final, [.scalar (.i64 values.sum)]) ∧ MemoryBelow memory.nextIdentity memory final := by
-  obtain ⟨home, entered, setup, -, -, entryFrame⟩ :=
+  obtain ⟨home, entered, enter⟩ :=
     entry.checked memory view wellFormed span.valid span.elementWidth span.mode
-  obtain ⟨started, stored, frame, -⟩ := (entryFrame []).store 0 (.i64 0) rfl
-  refine invoke_loop_results (by rfl) (by simp [cil_checked, span.valid]) setup
+  obtain ⟨started, stored, frame, -⟩ := (enter.frame []).store 0 (.i64 0) rfl
+  refine invoke_loop_results (by rfl) (by simp [cil_checked, span.valid]) enter.setup
     (header memory home) (fun state => state.values.2 + state.values.1.values.sum = values.sum)
     (fun _ => 0) ⟨(⟨view, values, span⟩, 0), started, frame⟩
     (by cil_loop_steps) (by simp) ?_

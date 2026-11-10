@@ -21,8 +21,10 @@ namespace CIL.Safety
 
 open Lean Elab Tactic Meta
 
+
 /-- The frame facts in scope, latest first, each as its proof and its `LoopFrame` type; an entry
-    frame proved for every footprint is taken at `footprint`. -/
+    frame proved for every footprint, as a hypothesis or as the `frame` field of an entry's
+    evidence, is taken at `footprint`. -/
 def loopFrameFacts (footprint : Expr) : TacticM (Array (Expr × Expr)) := withMainContext do
   let context ← getLCtx
   let mut found : Array (Expr × Expr) := #[]
@@ -30,13 +32,16 @@ def loopFrameFacts (footprint : Expr) : TacticM (Array (Expr × Expr)) := withMa
     if declaration.isImplementationDetail || declaration.userName.hasMacroScopes then continue
     unless (context.findFromUserName? declaration.userName).any
       (·.fvarId == declaration.fvarId) do continue
-    let type := (← instantiateMVars declaration.type).consumeMData
+    let stated := (← instantiateMVars declaration.type).consumeMData
+    let fields ← entryEvidenceFields declaration.toExpr stated
+    let (proof, type) := ((fields.find? (·.1 == `frame)).map (·.2)).getD
+      (declaration.toExpr, stated)
     if type.isAppOfArity ``LoopFrame 6 then
-      found := found.push (declaration.toExpr, type)
+      found := found.push (proof, type)
     else if let .forallE _ domain body _ := type then
       unless body.isAppOfArity ``LoopFrame 6 do continue
       unless ← isDefEq domain (← inferType footprint) do continue
-      found := found.push (mkApp declaration.toExpr footprint, body.instantiate1 footprint)
+      found := found.push (mkApp proof footprint, body.instantiate1 footprint)
   return found.reverse
 
 /-- The frame fact at `memory` whose byte slot holds `home`: its proof, type and the slot's
@@ -303,14 +308,16 @@ def loopFrameAt? (memory : Expr) : TacticM (Option (Expr × Expr)) := withMainCo
     withNewMCtxDepth (isDefEq type.getAppArgs[2]! memory)
   found.mapM fun (proof, type) => return (← instantiateMVars proof, ← instantiateMVars type)
 
-/-- The entry's `setup` equation for frames entered from `caller`, in scope by any name. -/
+/-- The entry's `setup` equation for frames entered from `caller`, in scope by any name or as a
+    field of the entry's evidence. -/
 def loopEntrySetup? (caller : Expr) : TacticM (Option Expr) := withMainContext do
   for declaration in ← getLCtx do
     if declaration.isImplementationDetail then continue
-    let type ← instantiateMVars declaration.type
-    let some (_, entry, _) := type.consumeMData.eq? | continue
-    if entry.isAppOfArity ``enterFrame 3 && entry.appArg! == caller then
-      return some declaration.toExpr
+    let type := (← instantiateMVars declaration.type).consumeMData
+    let fields ← entryEvidenceFields declaration.toExpr type
+    for (proof, stated) in #[(declaration.toExpr, type)] ++ fields.map (·.2) do
+      let some (_, entry, _) := stated.eq? | continue
+      if entry.isAppOfArity ``enterFrame 3 && entry.appArg! == caller then return some proof
   return none
 
 /-- The conjuncts of `goal`, a conjunction split as its `And`s nest, in order. -/
@@ -502,16 +509,17 @@ def loopCallSide (unfold : Array Ident) (facts : Array Term) : TacticM Unit := d
 def loopCallContinue (contract : Expr) (memory : Expr) (facts : Array Term)
     (keep : Bool := false) : TacticM Unit := withMainContext do
   let called ← loopFreshName `called
-  let results ← loopFreshName `results
   let invoked ← loopFreshName `invoked
   let confined ← loopFreshName `confined
   let output ← loopFreshName `output
   let returned ← loopFreshName `returned
-  -- A hygienic `rfl` would bind a name instead of substituting the results.
-  let substitute := mkIdent `rfl
-  evalTactic (← `(tactic|
-    rintro $called:ident $results:ident ⟨_, $invoked:ident⟩ $confined:ident
-      ⟨$output:ident, $substitute:ident, $returned:ident⟩))
+  -- The call's facts are selected from its `CallResult` by name and stated under their own.
+  evalTactic (← `(tactic| (
+    intro $called:ident $output:ident call
+    obtain ⟨_, $invoked:ident⟩ := CIL.Safety.CallResult.invoked call
+    have $confined:ident := CIL.Safety.CallResult.framed call
+    have $returned:ident := CIL.Safety.CallResult.post call
+    clear call)))
   let unfold : Array Ident := match contract.getAppFn.constName? with
     | some name => #[mkIdent (`_root_ ++ name)]
     | none => #[]
@@ -728,7 +736,8 @@ elab_rules : tactic
       let some parts ← loopStateParts? source
         | throwError "cil_loop_recurse: the reached state is not a literal state"
       return (reached, parts[3]!)
-    let mismatch (error : Exception) : TacticM Unit :=
+    -- The reached state names memories the walk introduced, so it is printed in the goal's context.
+    let mismatch (error : Exception) : TacticM Unit := withMainContext do
       throwError "cil_loop_recurse: the reached state is not the head of {hypothesis} at \
         {values}:{indentExpr (loopLiteralSums reached)}\n{error.toMessageData}"
     let saved ← saveState

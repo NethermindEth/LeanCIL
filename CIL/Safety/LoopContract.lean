@@ -42,10 +42,9 @@ theorem loop_terminates_call {Input Output : Type} {c : MethodContract Input Out
     (stepped :
       step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
     (encoded : arguments = c.args input) (permitted : c.pre input updated)
-    (continuation : ∀ final values,
-      (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
-      Confined (c.footprint input) updated final → c.Returns input updated final values →
-      LoopTerminates program method args post ⟨pc + 1, frame, values ++ rest, final⟩) :
+    (continuation : ∀ final output,
+      CallResult c program callee input updated final output →
+      LoopTerminates program method args post ⟨pc + 1, frame, c.results output ++ rest, final⟩) :
     LoopTerminates program method args post ⟨pc, frame, stack, memory⟩ :=
   run_call_of_contract holds input methodFound instructionFound stepped encoded permitted
     continuation
@@ -62,13 +61,10 @@ theorem loop_terminates_call_formed {Input Output : Type} {c : MethodContract In
       step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
     (encoded : arguments = c.args input) (permitted : c.pre input updated)
     (formed : memory.WellFormed)
-    (continuation : ∀ final values,
-      (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
-      final.WellFormed →
-      StaticWorldPreserved program memory final →
-      ClassesPreserved program memory final →
-      Confined (c.footprint input) updated final → c.Returns input updated final values →
-      LoopTerminates program method args post ⟨pc + 1, frame, values ++ rest, final⟩) :
+    (continuation : ∀ final output,
+      CallResult c program callee input updated final output →
+      FrameInvariants program memory final →
+      LoopTerminates program method args post ⟨pc + 1, frame, c.results output ++ rest, final⟩) :
     LoopTerminates program method args post ⟨pc, frame, stack, memory⟩ :=
   run_call_of_contract_formed holds input methodFound instructionFound stepped encoded permitted
     formed continuation

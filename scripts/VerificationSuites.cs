@@ -1,4 +1,4 @@
-/// <summary>A suite that runs one fixture script, in its own CI job and its own checkout.</summary>
+/// <summary>A suite that runs one fixture script, in its own process and with its own cache.</summary>
 internal sealed record IndependentSuite(string Name, string Script, string Description, string[]? Arguments = null);
 
 /// <summary>
@@ -9,6 +9,39 @@ internal static class VerificationSuites
 {
     /// <summary>The runner's own in-process checks, which also run when no suite is named.</summary>
     internal const string Core = "core";
+
+    /// <summary>
+    /// The suites whose verified outputs are proofs about extracted methods: examples and generated
+    /// outlines. Proof cost measures each one's outputs, in the CI job that verified them.
+    /// </summary>
+    internal static readonly string[] ProofSuites =
+    [
+        Core, "loops", "outlines-control", "outlines-objects", "outlines-buffers", "structoutlines",
+        "receiveroutlines", "wordreader", "savedwordreader"
+    ];
+
+    /// <summary>
+    /// The directories under <c>artifacts</c> where each proof suite leaves its verified outputs. A
+    /// name also covers the directory a run suffixes with a hexadecimal identifier. Proof cost takes a
+    /// suite's rows from these alone and fails when a proof suite verifies an output outside them.
+    /// </summary>
+    internal static readonly Dictionary<string, string[]> ProofOutputs = new(StringComparer.Ordinal)
+    {
+        [Core] =
+        [
+            "Add", "AddModel", "Alias", "Calls", "Choose", "ConsumerBatchA", "ConsumerBatchB",
+            "ConsumerSupportUnion", "Escape", "Hardware", "InitializedTypes", "LargeStruct", "PastEnd",
+            "StaticData", "Struct", "StructCopy", "VerificationReuse", "WrongAdd"
+        ],
+        ["loops"] = ["Loops", "WordArrayOutlines"],
+        ["outlines-control"] = ["ProofOutlines/control"],
+        ["outlines-objects"] = ["ProofOutlines/objects"],
+        ["outlines-buffers"] = ["ProofOutlines/buffers"],
+        ["structoutlines"] = ["StructOutlines"],
+        ["receiveroutlines"] = ["ReceiverLoopOutlines"],
+        ["wordreader"] = ["WordReaderOutlines"],
+        ["savedwordreader"] = ["SavedWordReaderOutlines"]
+    };
 
     /// <summary>The single-fixture suites in the order a full run executes them.</summary>
     internal static readonly IndependentSuite[] Independent =
@@ -92,6 +125,9 @@ internal static class VerificationSuites
             "compositional certificate for a six-method call graph and its consumer replay"),
         new("excluded", "Tests/ExcludedBranchScaling.cs",
             "hundreds of excluded and live sites at the default heartbeat budget"),
+        new("lookups", "Tests/LookupScaling.cs",
+            "lookup equations of extracted methods, hand-written bodies and templates at a per-instruction " +
+            "cost that does not grow with the method"),
         new("assemblies", "Tests/MultiAssembly.cs",
             "bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and " +
             "substitution rejection"),
@@ -104,7 +140,7 @@ internal static class VerificationSuites
             "theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts " +
             "cannot forge"),
         new("docs", "Tests/DocSnippets.cs",
-            "documentation Lean snippets and cited library names against the current library")
+            "documentation Lean snippets, cited library names and documented commands against the library and tool")
     ];
 
     /// <summary>Every suite name: core, the single-fixture suites, then the export partitions.</summary>

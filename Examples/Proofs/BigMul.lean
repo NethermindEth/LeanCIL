@@ -19,4 +19,5 @@ theorem correctness (memory result : Memory) (reference : Reference) (left right
       Bind.bind, Except.bind]
   cil_checked_steps [formed, wrote]
 
+#print axioms correctness
 end ExampleProof

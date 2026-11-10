@@ -92,8 +92,35 @@ theorem supplied_contract (program : Program) (memory : Safety.Memory)
       Safety.run program fuel 0 0 [] ⟨0, [], [], [], 0⟩ [] memory = .ok (result, returned) ∧
         returned = [.scalar (.i32 7)] := by
   cil_contract_steps [found, holds, seven]
-  simp_all [seven]
+  obtain rfl := call.post
+  rfl
 #print axioms supplied_contract
+
+/-- A caller that passes its argument to the helper and returns the helper's result. -/
+@[cil_code] def forwarder : Method := {
+  returnsValue := true, locals := [], code := [.arg 0, .call 1 1, .ret] }
+
+/-- A helper over one word, which returns its successor. -/
+def successor : MethodContract W32 W32 where
+  args value := [.scalar (.i32 value)]
+  results value := [.scalar (.i32 value)]
+  pre _ _ := True
+  footprint _ := []
+  post value _ _ result := result = value + 1
+
+/-- A contract input that is one word is the argument as the caller wrote it in the
+    `CallResult` the continuation takes, not the word's constructor over its projection. -/
+theorem word_input (program : Program) (memory : Safety.Memory) (value : W32)
+    (found : program[0]? = some forwarder) (holds : successor.Holds program 1) :
+    ∃ fuel result returned,
+      Safety.run program fuel 0 0 [.scalar (.i32 value)] ⟨0, [], [], [], 0⟩ [] memory =
+          .ok (result, returned) ∧
+        returned = [.scalar (.i32 (value + 1))] := by
+  cil_contract_steps [found, holds, successor]
+  guard_hyp call :ₐ CallResult successor program 1 value memory called output
+  obtain rfl := call.post
+  rfl
+#print axioms word_input
 
 /-- A concrete helper used only to establish its registered public contract. -/
 @[cil_code] def helper : Method := {
@@ -105,9 +132,65 @@ theorem supplied_contract (program : Program) (memory : Safety.Memory)
 /-- Registration retains a checked theorem, not an unchecked interface adapter. -/
 @[cil_contract] theorem registered_seven : seven.Holds boundProgram 1 := by
   intro input memory _
-  refine ⟨3, memory, [.scalar (.i32 7)], ?_, Confined.refl _ memory, 7, rfl, rfl⟩
+  refine MethodContract.Holds.intro memory 7 ⟨3, ?_⟩ (Confined.refl _ memory) rfl
   cil_checked_steps [seven]
 #print axioms registered_seven
+
+/-- The stepper opens `∃ fuel, invoke ..` with the method's execution bound and unfolds the
+    contract it proves, so the proof states neither. -/
+theorem supplied_fuel : seven.Holds boundProgram 1 := by
+  intro input memory _
+  refine MethodContract.Holds.intro memory 7 ?_ (Confined.refl _ memory) rfl
+  cil_checked_steps []
+#print axioms supplied_fuel
+
+/-- The supplied fuel is the execution bound; an author's own witness is left as written. -/
+example (memory : Safety.Memory) :
+    ∃ fuel, Safety.invoke boundProgram fuel 1 [] memory = .ok (memory, [.scalar (.i32 7)]) := by
+  cil_supply_fuel
+  show Safety.invoke boundProgram (CIL.executionBound boundProgram 1) 1 [] memory = _
+  cil_checked_steps []
+
+example (memory : Safety.Memory) :
+    ∃ fuel, Safety.invoke boundProgram fuel 1 [] memory = .ok (memory, [.scalar (.i32 7)]) := by
+  refine ⟨3, ?_⟩
+  cil_supply_fuel
+  show Safety.invoke boundProgram 3 1 [] memory = _
+  cil_checked_steps []
+
+/-- A fuel too small for the method is not replaced: the proof fails as it did. -/
+example (memory : Safety.Memory) (rest : Safety.invoke boundProgram 1 1 [] memory =
+    .ok (memory, [.scalar (.i32 7)])) :
+    Safety.invoke boundProgram 1 1 [] memory = .ok (memory, [.scalar (.i32 7)]) := by
+  fail_if_success (cil_checked_steps []; done)
+  exact rest
+
+/-- Only projections of a defined contract unfold: one over a contract variable stays folded,
+    as does `Returns`. -/
+example {Input Output : Type} (c : MethodContract Input Output) (input : Input)
+    (memory : Safety.Memory) (holds : c.pre input memory ∧ seven.pre () memory) :
+    c.pre input memory ∧ True := by
+  cil_unfold_contracts
+  exact ⟨holds.1, trivial⟩
+
+example (memory final : Safety.Memory) (returned : seven.Returns () memory final []) :
+    seven.Returns () memory final [] ∧ seven.footprint () = [] := by
+  cil_unfold_contracts
+  show seven.Returns () memory final [] ∧ ([] : List (Safety.Reference × Nat)) = []
+  exact ⟨returned, rfl⟩
+
+/-- Leaving a literal frame that owns nothing is stated as the memory it left; a frame that
+    owns an allocation, or is a variable, keeps `leaveFrame`. -/
+example (memory : Safety.Memory) (frame : Safety.Frame)
+    (kept : memory.WellFormed ∧ (Safety.leaveFrame ⟨0, [], [3], [], 0⟩ memory).WellFormed ∧
+      (Safety.leaveFrame frame memory).WellFormed) :
+    (Safety.leaveFrame ⟨0, [], [], [], 0⟩ memory).WellFormed ∧
+      (Safety.leaveFrame ⟨0, [], [3], [], 0⟩ memory).WellFormed ∧
+      (Safety.leaveFrame frame memory).WellFormed := by
+  cil_frame_exit
+  show memory.WellFormed ∧ (Safety.leaveFrame ⟨0, [], [3], [], 0⟩ memory).WellFormed ∧
+    (Safety.leaveFrame frame memory).WellFormed
+  exact kept
 
 /-- Registration supplies the callee contract without an explicit holds fact. -/
 theorem registered_caller (memory : Safety.Memory) :
@@ -115,7 +198,8 @@ theorem registered_caller (memory : Safety.Memory) :
       Safety.run boundProgram fuel 0 0 [] ⟨0, [], [], [], 0⟩ [] memory =
         .ok (result, returned) ∧ returned = [.scalar (.i32 7)] := by
   cil_contract_steps [seven]
-  simp_all [seven]
+  obtain rfl := call.post
+  rfl
 #print axioms registered_caller
 
 /-- A child fact about a concrete program closes the call; the helper body, which returns 7,
@@ -148,7 +232,8 @@ theorem tuple_input (program : Program) (memory : Safety.Memory) (left right : W
         ⟨0, [], [], [], 0⟩ [] memory = .ok (result, returned) ∧
         returned = [.scalar (.i32 (left + right))] := by
   cil_contract_steps [found, holds, orderedPair, ordered]
-  simp_all [orderedPair]
+  obtain rfl := call.post
+  rfl
 #print axioms tuple_input
 
 /-- A missing precondition stays an obligation before the already-prepared continuation. -/
@@ -164,14 +249,16 @@ theorem explicit_precondition (program : Program) (memory : Safety.Memory) (left
     change left < right
     exact later ()
   cil_contract_steps [found, orderedPair]
-  case postcondition => simp_all [orderedPair]
+  case postcondition =>
+    obtain rfl := call.post
+    rfl
 #print axioms explicit_precondition
 
 /-- A registered interface may depend on an explicitly checked method binding. -/
 @[cil_contract] theorem bound_seven (program : Program)
     (found : program[1]? = some helper) : seven.Holds program 1 := by
   intro input memory _
-  refine ⟨3, memory, [.scalar (.i32 7)], ?_, Confined.refl _ memory, 7, rfl, rfl⟩
+  refine MethodContract.Holds.intro memory 7 ⟨3, ?_⟩ (Confined.refl _ memory) rfl
   cil_checked_steps [found, seven]
 #print axioms bound_seven
 
@@ -182,7 +269,8 @@ theorem parameterized_registration (program : Program) (memory : Safety.Memory)
       Safety.run program fuel 0 0 [] ⟨0, [], [], [], 0⟩ [] memory =
         .ok (result, returned) ∧ returned = [.scalar (.i32 7)] := by
   cil_contract_steps [found, helperFound, seven]
-  simp_all [seven]
+  obtain rfl := call.post
+  rfl
 #print axioms parameterized_registration
 
 /-- Automatic call composition preserves an unrelated sibling obligation. -/
@@ -192,7 +280,8 @@ theorem sibling_goal (memory : Safety.Memory) :
         .ok (result, returned) ∧ returned = [.scalar (.i32 7)]) ∧ (7 : Nat) = 7 := by
   constructor
   cil_contract_steps [seven]
-  · simp_all [seven]
+  · obtain rfl := call.post
+    rfl
   · rfl
 #print axioms sibling_goal
 

@@ -12,6 +12,7 @@
   "output": "<output>",
   "axioms": null,
   "statement": null,
+  "specification": null,
   "failures": [
     {
       "kind": "elaboration-error",
@@ -19,10 +20,10 @@
       "module": "Proof",
       "source": {
         "file": "<proof>",
-        "line": 108,
+        "line": 105,
         "column": 2
       },
-      "message": "cil_checked_steps took no step: the method or instruction lookup, or the first step, did not close; pass the lookup hypothesis, feature facts or step facts\nmemory : Memory\nsecond : Reference\namount : W64\nsecondLive : LiveObject memory second\n⊢ invoke Extracted.program 15 depositBoth\n      [Value.object ManagedReference.null, Value.object (ManagedReference.address second),\n        Value.scalar (CIL.Value.i64 amount)]\n      memory =\n    Except.error\n      { method := depositBoth, instruction := 2, fault := ExecutionFault.thrown \"System.NullReferenceException\" }",
+      "message": "cil_checked_steps took no step: the method or instruction lookup, or the first step, did not close; pass the lookup hypothesis, feature facts or step facts\nmemory : Memory\nsecond : Reference\namount : W64\n⊢ invoke Extracted.program 15 depositBoth\n      [Value.object ManagedReference.null, Value.object (ManagedReference.address second),\n        Value.scalar (CIL.Value.i64 amount)]\n      memory =\n    Except.error\n      { method := depositBoth, instruction := 2, fault := ExecutionFault.thrown \"System.NullReferenceException\" }",
       "tactic": "cil_checked_run_step",
       "stopped": false,
       "method": {
@@ -43,7 +44,7 @@
         ]
       },
       "suggestions": [
-        "supply, for each object argument, that the object is live: `live.formed` of `live : LiveObject memory object`, or `readable.facts` of a field the extraction names, such as `Account.Balance.Readable memory object`, which also locates the field"
+        "supply, for each object argument, that the object is live at this memory: a hypothesis `live : LiveObject memory object`, or the `Readable` of a field the extraction names, such as `Account.Balance.Readable memory object`, which also locates the field"
       ],
       "obligations": [],
       "unknown": {
@@ -62,36 +63,38 @@
     },
     {
       "file": "<proof>",
-      "line": 91,
+      "line": 90,
       "column": 0,
       "severity": "info",
       "text": "'ExampleProof.depositBoth_holds' depends on axioms: [propext, Classical.choice, Quot.sound]"
     },
     {
       "file": "<proof>",
-      "line": 97,
+      "line": 96,
       "column": 0,
       "severity": "info",
       "text": "'ExampleProof.correctness' depends on axioms: [propext, Classical.choice, Quot.sound]"
     },
     {
       "file": "<proof>",
-      "line": 110,
+      "line": 107,
       "column": 0,
       "severity": "info",
       "text": "'ExampleProof.first_null_throws' depends on axioms: [propext, sorryAx, Quot.sound]"
     },
     {
       "file": "<proof>",
-      "line": 134,
+      "line": 132,
       "column": 0,
       "severity": "info",
       "text": "'ExampleProof.second_null_throws' depends on axioms: [propext, Classical.choice, Quot.sound]"
     }
   ],
+  "goals": null,
   "trace": null,
   "unknown": {
-    "trace": "not requested; --trace traces each step the proof takes"
+    "trace": "not requested; --trace traces each step the proof takes",
+    "goals": "not requested; --goals reports the goal at each sorry and failing tactic"
   },
   "rerun": [
     "leancil",

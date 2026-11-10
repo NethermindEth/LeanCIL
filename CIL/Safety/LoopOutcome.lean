@@ -88,10 +88,10 @@ theorem loop_outcome_call {Input Output : Type} {c : OutcomeContract Input Outpu
       step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
     (encoded : arguments = c.args input) (permitted : c.pre input updated)
     (normal : c.raises input updated = none)
-    (continuation : ∀ final values,
-      (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
-      Confined (c.footprint input) updated final → c.Returns input updated final values →
-      LoopOutcome program method args post raises ⟨pc + 1, frame, values ++ rest, final⟩) :
+    (continuation : ∀ final output,
+      CallResult c.toMethodContract program callee input updated final output →
+      LoopOutcome program method args post raises
+        ⟨pc + 1, frame, c.results output ++ rest, final⟩) :
     LoopOutcome program method args post raises ⟨pc, frame, stack, memory⟩ := by
   cases raises with
   | some exception =>
@@ -113,18 +113,16 @@ theorem loop_outcome_call_formed {Input Output : Type} {c : OutcomeContract Inpu
       step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
     (encoded : arguments = c.args input) (permitted : c.pre input updated)
     (formed : memory.WellFormed) (normal : c.raises input updated = none)
-    (continuation : ∀ final values,
-      (∃ fuel, invoke program fuel callee arguments updated = .ok (final, values)) →
-      final.WellFormed →
-      StaticWorldPreserved program memory final →
-      ClassesPreserved program memory final →
-      Confined (c.footprint input) updated final → c.Returns input updated final values →
-      LoopOutcome program method args post raises ⟨pc + 1, frame, values ++ rest, final⟩) :
-    LoopOutcome program method args post raises ⟨pc, frame, stack, memory⟩ :=
-  loop_outcome_call holds input methodFound instructionFound stepped encoded permitted normal
-    fun final values ⟨fuel, invoked⟩ =>
-      have kept := call_frame_invariants methodFound instructionFound stepped formed invoked
-      continuation final values ⟨fuel, invoked⟩ kept.formed kept.staticWorld kept.classes
+    (continuation : ∀ final output,
+      CallResult c.toMethodContract program callee input updated final output →
+      FrameInvariants program memory final →
+      LoopOutcome program method args post raises
+        ⟨pc + 1, frame, c.results output ++ rest, final⟩) :
+    LoopOutcome program method args post raises ⟨pc, frame, stack, memory⟩ := by
+  subst encoded
+  exact loop_outcome_call holds input methodFound instructionFound stepped rfl permitted normal
+    fun final output call => continuation final output call
+      (call.frame_invariants methodFound instructionFound stepped formed)
 
 /-- Exit a loop with the exception a callee's contract names; no invariant or measure is
     needed. -/

@@ -187,6 +187,8 @@ partial class Program
                     contractDependencies: DeploymentDependencies(extraction),
                     initializationAssumptions: InitializationAssumptions(extraction));
             }
+            // A package may require the same library by path and have built into it since the last snapshot.
+            RequireUnchangedLibrary();
             // Nothing is published until every fixture, certificate and replay passes.
             for (var i = 0; i < requests.Count; i++)
             {

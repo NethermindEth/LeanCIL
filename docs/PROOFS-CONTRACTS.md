@@ -175,10 +175,34 @@ In the caller, `cil_contract_steps [facts]` steps an existential-fuel goal throu
 instructions and calls with supplied evidence. Mark a proved `MethodContract.Holds` theorem
 `@[cil_contract]`, or include its proof in `facts`, to apply it at a matching callee. The theorem's
 program and method binding must match the actual call; required binding premises are checked. Input
-fields, each component of a tuple input included, are inferred from the encoded arguments. The
+fields, each component of a tuple input included, are inferred from the encoded arguments, and an
+input that is one word or one reference is the argument as the caller wrote it. The
 precondition is proved from facts when possible,
-otherwise it remains a goal before the continuation. The continuation receives the result, footprint
-and postcondition. Contracts merely present in the local context are not automatically selected.
+otherwise it remains a goal before the continuation. Contracts merely present in the local context
+are not automatically selected.
+
+Each composed call leaves three names in the context: the callee's final memory `called`, its
+typed output `output` and its [`CallResult`](../CIL/Safety/MethodContract.lean) `call`, all three
+with the suffix `_1`, `_2` once a name is taken. `CallResult` is a structure, so a proof selects
+`call.invoked` (the invocation), `call.framed` (`Confined` to the footprint) and `call.post` (the
+postcondition of `output`) by field. `cil_contract_steps [facts] with memory result evidence`
+gives the first call it composes those three names instead, and fails when it composes no call:
+
+```lean excerpt Examples/Proofs/DepositBoth.lean
+cil_contract_steps [holds, depositContract, firstOwned]
+  with middle values firstCall
+obtain ⟨rfl, firstHeld⟩ := firstCall.post
+have firstFramed := firstCall.framed
+```
+
+A contract proof builds the conclusion of `Holds` from the same parts by name:
+`MethodContract.Holds.intro final output invoked framed post`, where `invoked` may leave its fuel
+to `cil_checked_steps`. A proof that steps to its return with `cil_contract_steps` is left the
+footprint and `Returns` of the values returned, which `MethodContract.Holds.returns framed post`
+closes by name; the returned values name the output, and `(output := ())` gives it for a method
+that returns nothing.
+`holds.result input permitted` gives a caller the final memory, output and
+`CallResult` of a proved contract outside the stepping tactics.
 
 A supplied successful child invocation, with fixed or existential fuel, or an
 `InvocationCertificate`, also composes without unfolding the helper body. Fixed-fuel
@@ -188,27 +212,32 @@ use `cil_contract_steps`, whose fuel remains existential.
 
 Without matching evidence, the contract stepper stops at the call. `cil_contract_call holds input at
 site [facts]` explicitly applies the contract at a `bind_call` site (or the fetched call without
-`at`), leaving the precondition and then a continuation over the callee's final memory, values,
-invocation, frame and `Returns`. The precondition is tagged `precondition.<callee>`, the other
-goals these tactics leave as their [obligation tags](PROOFS-STEPPING.md#obligation-tags) say, and
-the continuation keeps the call goal's tag, so `case precondition =>` selects the precondition. Destructure `Returns` as `⟨out, rfl, post⟩` and unfold the contract
-(`dsimp only [mixContract]`) so the stack holds the encoded output. Use `cil_contract_steps n
+`at`), leaving the precondition and then a continuation over the callee's final memory, typed
+output and `CallResult`. The precondition is tagged `precondition.<callee>`, the other goals these
+tactics leave as their [obligation tags](PROOFS-STEPPING.md#obligation-tags) say, and the
+continuation keeps the call goal's tag, so `case precondition =>` selects the precondition.
+Introduce the continuation's three binders and read the call's facts by field, as after
+`cil_contract_steps`. The stepping tactics state the goal with the `args`, `results`, `pre`,
+`footprint` and `post` of each defined contract unfolded, at entry and in each call's continuation,
+so the stack holds the encoded output; a fact read from `call.post` keeps the contract folded
+until `dsimp only [mixContract] at` it. Use `cil_contract_steps n
 [facts]` to take at most `n` instruction steps and leave the remaining goal for a continuation. With
 `n = 0`, no instruction is executed. `cil_contract_steps [facts] until continuation` tries the
 continuation before each step, including at the initial goal. It stops when the continuation closes
 the goal or no instruction can be stepped. `cil_formed_call` (`run_call_of_contract_formed`) also
-takes the caller memory's `WellFormed` and hands the continuation the callee's `final.WellFormed`,
-static-world preservation and class catalog agreement, so contracts need not restate any of them;
+takes the caller memory's `WellFormed` and hands the continuation, after the `CallResult`, the
+call's `FrameInvariants` from the caller's memory to the callee's final memory, so contracts need
+not restate well-formedness, static-world preservation or class catalog agreement;
 `cil_formed_outcome_call` does the same for `cil_outcome_call`.
 
 `StaticWorldPreserved program before after` names static-world preservation, and
 `ClassesPreserved program before after` says objects that agree with a catalog keep agreeing when
 the program's object sites do (see [class instances](SOUNDNESS-RUNTIME.md#class-instances)). Use
-`left.trans right` to compose either across calls. `FrameInvariants program before after` bundles
-`after.WellFormed` with both. Its `formed`, `staticWorld` and `classes` projections give each fact,
-and `left.trans right` composes all three. `call_frame_invariants` and
-`construct_frame_invariants` return this bundle. The names are abbreviations, so conjunction
-proofs work on them directly; a formed continuation takes the three facts in that order.
+`left.trans right` to compose either across calls. `FrameInvariants program before after` is a
+structure holding `after.WellFormed` with both: its fields `formed`, `staticWorld` and `classes`
+give each fact, and `left.trans right` composes all three. `call_frame_invariants` and
+`construct_frame_invariants` return it, and a formed continuation takes it whole. The two
+preservation names are abbreviations, so a function proves either directly.
 
 Store facts may name their values in source form, such as `write m r (numberBytes (a + b + c).toNat
 8) 1 = .ok m'`. Each checked step simplifies the goal with the default simp set, its interpreter
@@ -283,9 +312,11 @@ element are relied on.
 | `LiveObject memory object` | `object` forms as an object reference older than later allocations |
 | `field.entry object` | The footprint entry of a call that may change the field |
 
-`readable.facts` is the one fact `cil_checked_steps` needs to step a load (for a reference field,
-`readable.facts held targetLive`; for a signed narrow field, `readable.signedFacts`, which pushes
-the value sign-extended), and `owned.store value` gives the write, its `Confined`
+The stepping tactics read `readable.facts`, the one fact a load of a scalar field steps with, from
+a `Readable`, `Owned` or `Holds` hypothesis in the context, as they read `live.formed` from a
+`LiveObject` (see [composing instructions](PROOFS-STEPPING.md#compose-instructions)). A reference field's
+load takes `readable.facts held targetLive` and a signed narrow field's `readable.signedFacts`,
+which pushes the value sign-extended, and `owned.store value` gives the write, its `Confined`
 footprint and the `Holds` after it; for a reference field, `owned.store live` stores a live object and
 `owned.store_formed formed` any reference that forms, null included. A field holding a class outside
 the model is never read through: `readable.load_forms forms` steps its load from `Forms`.

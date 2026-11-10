@@ -84,17 +84,23 @@ bind_entry entry (memory : Memory) (view : SpanView) (wellFormed : memory.WellFo
 
 Each home is an opaque reference, so `entry.frame` takes the binders its layout mentions followed by
 one `homeN : Reference` per numeric local, here `entry.frame memory view home0`. `entry.checked`
-proves there exist homes and an entered memory such that `enterFrame` returns exactly that frame and
-memory, each home satisfies
-[`NumericEntryHome`](../CIL/Safety/NumericLocals.lean) `memory entered kind number home` (allocated
-at or above `memory.nextIdentity` and below `entered.nextIdentity`, holding its initializer's
-bytes, writable), [`EntryMemory`](../CIL/Safety/NumericLocals.lean) `memory entered` holds
-(caller memory kept below its watermark, identities grown, well formed), and for every footprint
-the entered memory starts a [`LoopFrame`](../CIL/Safety/LoopFrames.lean) over the frame's
-locals, each home remembered as its initializer and every other local as `none`. A proof opens it
-with
-`obtain ⟨home, entered, setup, numeric, entryMemory, frame⟩ := entry.checked ...`; this form
-generates no
+proves there exist homes and an entered memory with their `entry.Checked` evidence, a structure
+whose facts a proof selects by field:
+
+- `setup`: `enterFrame` returns exactly that frame and memory;
+- `numericN`, one per home:
+  [`NumericEntryHome`](../CIL/Safety/NumericLocals.lean) `memory entered kind number home`
+  (allocated at or above `memory.nextIdentity` and below `entered.nextIdentity`, holding its
+  initializer's bytes, writable);
+- `entryMemory`: [`EntryMemory`](../CIL/Safety/NumericLocals.lean) `memory entered` (caller memory
+  kept below its watermark, identities grown, well formed);
+- `frame`: for every footprint the entered memory starts a
+  [`LoopFrame`](../CIL/Safety/LoopFrames.lean) over the frame's locals, each home remembered as its
+  initializer and every other local as `none`.
+
+A proof opens it with `obtain ⟨home0, entered, enter⟩ := entry.checked ...` and reads
+`enter.setup`, `enter.frame` and the other fields by name; the loop tactics read the fields of an
+`entry.Checked` hypothesis as they read hypotheses. This form generates no
 `entry.result`, `entry.memory` or `homeN` abbreviations, while span, root and object slots still
 get `slotN`, `loadN` and `storeN`. `entry.setup` is the setup equation given each home's allocation
 equation `madeN` and `kept`; it is the proof that derived the frame, so `entry.checked` reuses it
@@ -243,8 +249,7 @@ def decrementContract : MethodContract W32 W32 where
 
 theorem decrement_holds : decrementContract.Holds Extracted.program decrement := by
   rintro x m -
-  dsimp only [decrementContract]
-  refine ⟨8, m, _, ?_, Confined.refl _ m, _, rfl, rfl⟩
+  refine MethodContract.Holds.intro m _ ?_ (Confined.refl _ m) rfl
   cil_checked_steps
 ```
 
@@ -554,8 +559,8 @@ A body written once for every profile takes its feature flags and callee indices
 keeps each feature-dependent instruction as an `if`, padding the other profile's side with
 `.unsupported` so every profile has the same pcs. `cil_instruction_equations` (from
 `CIL.InstructionEquations`) states one `@[cil_code ↓]` equation per pc for such a body, the same
-`code[pc]? = some op` equations the extractor emits for its own methods, so a lookup rewrites by one
-equation instead of unfolding the body:
+`code[pc]? = some op` equations it states for each method of an extraction, so a lookup rewrites by
+one equation instead of unfolding the body:
 
 ```lean
 import CIL.InstructionEquations
@@ -581,6 +586,8 @@ example (sse42 avx2 : Bool) (callee : Nat) (wide : avx2 = true) :
 ```
 
 A body whose code length depends on a parameter, such as an `if` around a whole block, is rejected
-with the first pc that is not determined. Only the kernel checks the equations: 100 instructions
-take about 0.1 s, 400 take 2.4 s and 1,500 take 32 s, growing with the square of the length like the
-extractor's own equations, and about eight times faster than writing each `:= rfl` by hand.
+with the first pc that is not determined. Only the kernel checks the equations. The command also
+declares `body_suffix{start}`, the code from every 16th pc on, and `body_suffix{start}_placed`, and
+proves each equation from the suffix that starts its block, so the equations cost time linear in
+the body's length: about 6,400 heartbeats each from 250 to 4,000 instructions, as
+[instruction lookups](performance/InstructionLookups.md) records.

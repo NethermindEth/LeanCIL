@@ -21,6 +21,7 @@ jobs:
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
       has-suites: ${{ steps.select.outputs.has-suites }}
+      cost-sources: ${{ steps.cost.outputs.sources }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -38,6 +39,7 @@ jobs:
           dotnet run --file scripts/TestFindCertifiedLibrary.cs
           dotnet run --file scripts/TestLibraryArchive.cs -c Release
           dotnet run --file scripts/TestSummarizeVerification.cs
+          dotnet run --file scripts/TestProofCost.cs
           dotnet run --file scripts/TestLeanDiagnostics.cs
           dotnet run --file Tests/ConsumerTraceRetention.cs
           dotnet run --file Tests/FileHashing.cs
@@ -53,6 +55,21 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: dotnet run --file scripts/SelectVerification.cs -- --event "$EVENT" --base "$BASE" --head "$HEAD" --output "$GITHUB_OUTPUT"
+      # A pull request compares what its change can affect with the first parent of its merge commit.
+      # Other runs measure every source: a push to main for later pull requests to compare with.
+      - name: Select what proof cost measures
+        id: cost
+        if: steps.select.outputs.has-suites == 'true'
+        shell: bash
+        env:
+          MATRIX: ${{ steps.select.outputs.matrix }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            dotnet run --file scripts/ProofCost.cs -- sources --matrix "$MATRIX" --tree . --base HEAD^1 \
+              --output "$GITHUB_OUTPUT"
+          else
+            dotnet run --file scripts/ProofCost.cs -- sources --matrix "$MATRIX" --output "$GITHUB_OUTPUT"
+          fi
 
   prepare:
     name: Prepare certified Lean library
@@ -379,6 +396,40 @@ jobs:
           set -o pipefail
           dotnet artifacts/verification-fixtures/RunVerificationGroup/RunVerificationGroup.dll 2>&1 | tee artifacts/verification.log
 
+      # Proof cost is no part of the suite's result: a measurement that fails leaves no rows, which
+      # fails the comparison and not this job.
+      # Each proof suite of the job that passed is measured over the directories it owns. An output
+      # that its owner did not write, or that a proof suite wrote without owning it, stops the step.
+      - name: Measure the proof cost of the verified outputs
+        if: ${{ !cancelled() && matrix.proof }}
+        continue-on-error: true
+        timeout-minutes: 10
+        shell: bash
+        run: >-
+          dotnet artifacts/verification-fixtures/ProofCost/ProofCost.dll measure-suites --tree .
+          --library artifacts/certified-library --artifacts artifacts
+          --runs artifacts/verification-suites.json --jobs "$(nproc)" --output-rows "$RUNNER_TEMP/proof-cost"
+      # The test libraries need only the certified library; selection marks the shortest job for them.
+      - name: Measure the proof cost of the test libraries
+        if: >-
+          ${{ !cancelled() && matrix.libraries &&
+          contains(fromJSON(needs.select.outputs.cost-sources || '[]'), 'libraries') }}
+        continue-on-error: true
+        timeout-minutes: 8
+        shell: bash
+        run: >-
+          dotnet artifacts/verification-fixtures/ProofCost/ProofCost.dll measure --tree .
+          --library artifacts/certified-library --libraries --jobs "$(nproc)"
+          --output "$RUNNER_TEMP/proof-cost/libraries.json"
+      - name: Upload the measured proof cost rows
+        if: ${{ !cancelled() && (matrix.proof || matrix.libraries) }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: proof-cost-head-rows-${{ matrix.suite }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/proof-cost/*.json
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Summarize verification timings
         if: always()
         run: dotnet run --file scripts/SummarizeVerification.cs -- --root artifacts/verification-traces --output artifacts/stage-timings.json --markdown artifacts/stage-timings.md --github-summary
@@ -391,14 +442,108 @@ jobs:
           path: |
             artifacts/verification.log
             artifacts/verification-*.log
+            artifacts/verification-suites.json
             artifacts/verification-traces/
             artifacts/stage-timings.*
             artifacts/test-results-*.json
             artifacts/**/verified.json
             artifacts/**/identity.json
-            artifacts/**/Extracted.lean
-            artifacts/**/Batch.lean
+            artifacts/**/*.lean
+            !artifacts/certified-library/**
+            !artifacts/suite-caches/**
           if-no-files-found: ignore
+          retention-days: 14
+
+  # The one proof cost job: it measures nothing. A pull request compares its head's rows with the rows
+  # main published for its merge base; a push to main publishes its rows, and later runs find this
+  # job by its name.
+  proof-cost:
+    name: Proof cost
+    needs: [select, suites]
+    if: >-
+      ${{ !cancelled() && needs.select.outputs.cost-sources != '' && needs.select.outputs.cost-sources != '[]' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # Reads the jobs, logs and rows of main's run of the merge base.
+      actions: read
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      SOURCES: ${{ needs.select.outputs.cost-sources }}
+      # The first parent of a PR's merge commit is the base it merges into.
+      BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'HEAD' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Download the head's rows
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: proof-cost-head-rows-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/head-rows
+      # The push to main of the merge base measured these rows with main's code and logged their
+      # digest. No other run supplies a base, and this run never measures one.
+      - name: Find the rows main published for the merge base
+        id: published
+        if: github.event_name != 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          dotnet run --file scripts/FindCertifiedLibrary.cs -- --repository "$GITHUB_REPOSITORY"
+          --workflow verification.yml --proof-cost-rows "$(git rev-parse "$BASE")" --output "$GITHUB_OUTPUT"
+      - name: Download the published rows
+        if: steps.published.outputs.artifact-id != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ steps.published.outputs.artifact-id }}
+          run-id: ${{ steps.published.outputs.run-id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/published-rows
+      # Every source is reported before the job fails for any of them. A source without published
+      # rows is reported as not compared and does not fail.
+      - name: Compare proof cost with the merge base
+        if: github.event_name != 'push'
+        shell: bash
+        env:
+          PUBLISHED_SHA256: ${{ steps.published.outputs.sha256 }}
+        run: |
+          published=()
+          if [ -n "$PUBLISHED_SHA256" ]; then
+            published=(--published "$RUNNER_TEMP/published-rows/proof-cost-rows.json" --sha256 "$PUBLISHED_SHA256")
+          fi
+          dotnet run --file scripts/ProofCost.cs -- report --sources "$SOURCES" \
+            --merge-base "$(git rev-parse "$BASE")" "${published[@]}" --head-rows "$RUNNER_TEMP/head-rows" \
+            --accepted scripts/proof-cost-accepted.json --output "$RUNNER_TEMP/proof-cost" --github-summary
+      - name: Upload proof cost measurements
+        if: always() && github.event_name != 'push'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: proof-cost-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/proof-cost/
+            ${{ runner.temp }}/published-rows/
+            ${{ runner.temp }}/head-rows/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Gather the rows and log their digest
+        if: github.event_name == 'push'
+        run: >-
+          dotnet run --file scripts/ProofCost.cs -- publish --rows "$RUNNER_TEMP/head-rows"
+          --commit "$GITHUB_SHA" --output "$RUNNER_TEMP/published/proof-cost-rows.json"
+      - name: Upload the rows for later pull requests
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: proof-cost-rows-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/published/proof-cost-rows.json
+          if-no-files-found: error
           retention-days: 14
 
   verify:

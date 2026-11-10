@@ -43,8 +43,7 @@ theorem correctness (memory : Memory) (tags tagged text : Reference) (length : N
     rfl (List.mem_cons_self ..)
   obtain ⟨located, checked, stored, framed, holds⟩ := owned.store live storable
   refine ⟨CIL.executionBound Extracted.program put, _, ?_, framed, holds⟩
-  cil_checked_steps [owned.formed, readable.live.formed, readable.facts held live, live.formed,
-    located, checked, stored]
+  cil_checked_steps [readable.facts held live, located, checked, stored]
 
 #print axioms correctness
 
@@ -59,8 +58,7 @@ theorem stores_null (memory : Memory) (tags tagged : Reference) (length : Nat)
       ReferenceArray.Holds final tags textType length index.toNat .null := by
   obtain ⟨located, checked, stored, -, holds⟩ := owned.store_null
   refine ⟨CIL.executionBound Extracted.program put, _, ?_, holds⟩
-  cil_checked_steps [owned.formed, readable.live.formed, readable.located,
-    readable.load_null held, located, checked, stored]
+  cil_checked_steps [readable.load_null held, located, checked, stored]
 
 #print axioms stores_null
 
@@ -73,9 +71,7 @@ theorem index_out_of_range (memory : Memory) (tags tagged : Reference) (length :
     ∃ fuel, invoke Extracted.program fuel put
         [.object (.address tags), .scalar (.i32 index), .object (.address tagged)] memory =
       .error ⟨put, 4, .thrown "System.IndexOutOfRangeException"⟩ := by
-  refine ⟨CIL.executionBound Extracted.program put, ?_⟩
-  cil_checked_steps [live.formed, readable.live.formed, readable.located,
-    readable.load_forms forms, live.slot_outside outside]
+  cil_checked_steps [readable.load_forms forms, live.slot_outside outside]
 
 #print axioms index_out_of_range
 
@@ -85,8 +81,7 @@ theorem null_array (memory : Memory) (tagged : Reference) (index : BitVec 32)
     ∃ fuel, invoke Extracted.program fuel put
         [.object .null, .scalar (.i32 index), .object (.address tagged)] memory =
       .error ⟨put, 4, .thrown "System.NullReferenceException"⟩ := by
-  refine ⟨CIL.executionBound Extracted.program put, ?_⟩
-  cil_checked_steps [readable.live.formed, readable.located, readable.load_forms forms]
+  cil_checked_steps [readable.load_forms forms]
 
 #print axioms null_array
 

@@ -72,21 +72,23 @@ theorem run_call_of_certified {Input Output : Type} {c : MethodContract Input Ou
     (stepped :
       step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
     (encoded : arguments = c.args input) (permitted : c.pre input updated)
-    (continuation : ∀ calleeFuel final values,
-      InvocationCertificate program callee arguments updated calleeFuel final values →
-      Confined (c.footprint input) updated final → c.Returns input updated final values →
+    (continuation : ∀ calleeFuel final output,
+      InvocationCertificate program callee (c.args input) updated calleeFuel final
+        (c.results output) →
+      CallResult c program callee input updated final output →
       ∃ fuel result returned,
-        run program fuel method (pc + 1) args frame (values ++ rest) final =
+        run program fuel method (pc + 1) args frame (c.results output ++ rest) final =
           .ok (result, returned) ∧
         post result returned) :
     ∃ fuel result returned,
       run program fuel method pc args frame stack memory = .ok (result, returned) ∧
         post result returned := by
   subst encoded
-  obtain ⟨calleeFuel, final, values, certificate, framed, satisfied⟩ :=
+  obtain ⟨calleeFuel, final, _, certificate, framed, output, rfl, post⟩ :=
     certified input updated permitted
   obtain ⟨parentFuel, result, returned, resumed, finished⟩ :=
-    continuation calleeFuel final values certificate framed satisfied
+    continuation calleeFuel final output certificate
+      { invoked := ⟨calleeFuel, certificate.1⟩, framed, post }
   obtain ⟨fuel, composed⟩ := run_call_exists methodFound instructionFound stepped
     ⟨calleeFuel, certificate.1⟩ ⟨parentFuel, resumed⟩
   exact ⟨fuel, result, returned, composed, finished⟩
@@ -106,26 +108,28 @@ theorem run_call_of_contract_certified {Input Output : Type} {c : MethodContract
     (encoded : arguments = c.args input) (permitted : c.pre input updated)
     (formed : memory.WellFormed)
     (world : StaticWorldValid (programStaticDescriptors program) memory)
-    (continuation : ∀ calleeFuel final values,
-      InvocationCertificate program callee arguments updated calleeFuel final values →
-      Confined (c.footprint input) updated final → c.Returns input updated final values →
+    (continuation : ∀ calleeFuel final output,
+      InvocationCertificate program callee (c.args input) updated calleeFuel final
+        (c.results output) →
+      CallResult c program callee input updated final output →
       ∃ fuel result returned,
-        run program fuel method (pc + 1) args frame (values ++ rest) final =
+        run program fuel method (pc + 1) args frame (c.results output ++ rest) final =
           .ok (result, returned) ∧
         post result returned) :
     ∃ fuel result returned,
       run program fuel method pc args frame stack memory = .ok (result, returned) ∧
-        post result returned :=
+        post result returned := by
+  subst encoded
   have called : ProgramStep program method pc args frame stack memory
-      (.call callee arguments rest updated) :=
+      (.call callee (c.args input) rest updated) :=
     ⟨body, op, methodFound, instructionFound, stepped⟩
   have entered : updated.WellFormed :=
     programStep_preserves_wellFormed _ _ _ _ _ _ _ _ formed called
   have enteredWorld : StaticWorldValid (programStaticDescriptors program) updated :=
     programStep_preserves_static_world called formed world
-  run_call_of_contract holds input methodFound instructionFound stepped encoded permitted
-    fun final values ⟨calleeFuel, invoked⟩ =>
-      continuation calleeFuel final values (.of_invoke entered enteredWorld invoked)
+  exact run_call_of_contract holds input methodFound instructionFound stepped rfl permitted
+    fun final output call => call.invoked.elim fun calleeFuel invoked =>
+      continuation calleeFuel final output (.of_invoke entered enteredWorld invoked) call
 
 #print axioms MethodContract.Certified.holds
 #print axioms MethodContract.Holds.certified
@@ -134,7 +138,7 @@ theorem run_call_of_contract_certified {Input Output : Type} {c : MethodContract
 #print axioms run_call_of_contract_certified
 
 /-- `cil_contract_call` through `run_call_of_certified`: leaves the `precondition`, then the
-    continuation over the callee's certificate, footprint and output. -/
+    continuation over the callee's fuel, final memory, output, certificate and `CallResult`. -/
 syntax "cil_certified_call" term:max term:max (" at " ident)? "[" term,* "]" : tactic
 
 macro_rules
@@ -154,7 +158,7 @@ macro_rules
 
 /-- `cil_contract_call` through `run_call_of_contract_certified`: leaves the `precondition`,
     the caller memory's `wellFormed` and `staticWorld`, then the continuation over the
-    callee's certificate, footprint and output. -/
+    callee's fuel, final memory, output, certificate and `CallResult`. -/
 syntax "cil_contract_certified_call" term:max term:max (" at " ident)? "[" term,* "]" : tactic
 
 macro_rules

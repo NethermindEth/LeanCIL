@@ -13,7 +13,8 @@ partial class Program : IDisposable
 #if LEANCIL_TOOL
     static string Root { get; } = Path.Combine(AppContext.BaseDirectory, "verification");
 #else
-    static string Root { get; } = FixtureRoot() ??
+    // Settable so a test can stand a few modules in for the framework; the tool's root is fixed.
+    static string Root { get; set; } = FixtureRoot() ??
         Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Source())!, ".."));
 
     // Only relocated binaries need the producer's source path replaced. Source-built children
@@ -34,6 +35,19 @@ partial class Program : IDisposable
     /// <summary>The certified library, read in place; deleted on disposal only when this process built it.</summary>
     string? library;
     bool ownsLibrary;
+    /// <summary>The cache entry this process published from the library it built, which outlives the process.</summary>
+    string? publishedLibrary;
+    /// <summary>Length and write time of each file of a library read in place, as it was when opened.</summary>
+    SortedDictionary<string, string>? libraryStamps;
+    /// <summary>
+    /// Every module of the open library when it is a closure entry, which holds only those; null for the
+    /// whole library. <see cref="libraryKey"/> then names exactly this list.
+    /// </summary>
+    string[]? libraryModules;
+    /// <summary>A report was written against a closure entry, so the whole library is still to be built.</summary>
+    bool completesLibrary;
+    /// <summary>Open while this process reads a closure entry in place, so no other process removes it.</summary>
+    FileStream? closureUse;
     /// <summary>This process's writable package, which requires <see cref="library"/> by path.</summary>
     string? session;
     /// <summary>The base library's compiled module artifacts, taken from its validated manifest.</summary>
@@ -509,7 +523,25 @@ partial class Program : IDisposable
         }
     }
 
-    static async Task<string> CaptureOutput(StreamReader reader, TextWriter writer, ProgressSummary? summary = null, TextWriter? transcript = null)
+    /// <summary>The latest `[done/total]` job count that a Lake build printed, for progress lines.</summary>
+    sealed partial class JobCount
+    {
+        string latest = "";
+
+        public void Add(string line)
+        {
+            if (LakeJob().Match(line) is { Success: true } job)
+                Volatile.Write(ref latest, $": {job.Groups[1].Value} of {job.Groups[2].Value} Lake jobs");
+        }
+
+        public override string ToString() => Volatile.Read(ref latest);
+
+        [GeneratedRegex(@"\A(?:\S+ )?\[([0-9]+)/([0-9]+)\] ")]
+        private static partial Regex LakeJob();
+    }
+
+    static async Task<string> CaptureOutput(StreamReader reader, TextWriter writer, ProgressSummary? summary = null,
+        TextWriter? transcript = null, JobCount? jobs = null)
     {
         var captured = new StringBuilder();
         var line = new StringBuilder();
@@ -528,18 +560,34 @@ partial class Program : IDisposable
                 await writer.WriteAsync(buffer.AsMemory(0, count));
                 await writer.FlushAsync();
             }
-            else
-                for (var i = 0; i < count; i++)
-                    if (buffer[i] == '\n')
-                    {
-                        summary.Add(line.ToString().TrimEnd('\r'), writer);
-                        line.Clear();
-                    }
-                    else line.Append(buffer[i]);
+            if (summary is null && jobs is null) continue;
+            for (var i = 0; i < count; i++)
+                if (buffer[i] == '\n')
+                {
+                    var text = line.ToString().TrimEnd('\r');
+                    summary?.Add(text, writer);
+                    jobs?.Add(text);
+                    line.Clear();
+                }
+                else line.Append(buffer[i]);
         }
         if (summary is not null && line.Length > 0) summary.Add(line.ToString(), writer);
         return captured.ToString();
     }
+
+    /// <summary>Milliseconds between progress lines of one stage on a terminal.</summary>
+    const int InteractiveProgressInterval = 10_000;
+    /// <summary>Milliseconds between progress lines when stderr is redirected; a shorter stage prints none.</summary>
+    const int RedirectedProgressInterval = 20_000;
+
+    /// <summary>
+    /// Stderr without stage progress lines, which a run prints for any stage that outlasts an interval:
+    /// what remains is the command's own diagnostics.
+    /// </summary>
+    internal static string WithoutStageProgress(string stderr) => StageProgressLine().Replace(stderr, "");
+
+    [GeneratedRegex(@"^(?:START|PROGRESS|END) [^\n]*(?:\n|\z)", RegexOptions.Multiline)]
+    private static partial Regex StageProgressLine();
 
     static readonly object TraceGate = new();
     // A reused process id must not append to an earlier process's trace, which a reader treats as old.
@@ -550,10 +598,15 @@ partial class Program : IDisposable
     {
         var traceStage = progress;
 #if LEANCIL_TOOL
-        // Keep stdout stable and redirected stderr quiet, but explain long interactive builds.
-        if (!Console.IsErrorRedirected && progress is not null) Console.Error.WriteLine("START " + progress);
+        // Stdout stays the report. A redirected stderr names only a stage that outlasts one interval.
+        var interactive = !Console.IsErrorRedirected;
+        var announced = interactive && progress is not null;
+        if (announced) Console.Error.WriteLine("START " + progress);
+        var jobs = progress is null ? null : new JobCount();
         progress = null;
         streamOutput = false;
+#else
+        JobCount? jobs = null;
 #endif
         // Aggregate at the suite boundary; nested build/proof phases feed this summary.
         var summary = streamOutput && progress is not null ? new ProgressSummary(progress) : null;
@@ -605,14 +658,19 @@ partial class Program : IDisposable
         if (!string.IsNullOrWhiteSpace(traceDirectory)) Directory.CreateDirectory(traceDirectory);
         using var traceWriter = string.IsNullOrWhiteSpace(traceDirectory) ? null :
             TextWriter.Synchronized(new StreamWriter(Path.Combine(traceDirectory, transcript), false, Encoding.UTF8));
-        var stdout = CaptureOutput(process.StandardOutput, streamOutput ? Console.Out : TextWriter.Null, summary, traceWriter);
-        var stderr = CaptureOutput(process.StandardError, streamOutput ? Console.Error : TextWriter.Null, summary, traceWriter);
+        var stdout = CaptureOutput(process.StandardOutput, streamOutput ? Console.Out : TextWriter.Null, summary,
+            traceWriter, jobs);
+        var stderr = CaptureOutput(process.StandardError, streamOutput ? Console.Error : TextWriter.Null, summary,
+            traceWriter, jobs);
         if (summary is null)
         {
 #if LEANCIL_TOOL
-            if (!Console.IsErrorRedirected && traceStage is not null)
-                while (!process.WaitForExit(10_000))
-                    Console.Error.WriteLine($"PROGRESS {traceStage} ({elapsed.Elapsed.TotalSeconds:F0}s)");
+            if (traceStage is not null)
+                while (!process.WaitForExit(interactive ? InteractiveProgressInterval : RedirectedProgressInterval))
+                {
+                    Console.Error.WriteLine($"PROGRESS {traceStage}{jobs} ({elapsed.Elapsed.TotalSeconds:F0}s)");
+                    announced = true;
+                }
             else
 #endif
                 process.WaitForExit();
@@ -625,7 +683,7 @@ partial class Program : IDisposable
         if (progress is not null)
             Console.WriteLine($"END {progress} (exit {process.ExitCode}, {elapsed.Elapsed.TotalSeconds:F1}s)");
 #if LEANCIL_TOOL
-        if (!Console.IsErrorRedirected && traceStage is not null)
+        if (announced)
             Console.Error.WriteLine($"END {traceStage} (exit {process.ExitCode}, {elapsed.Elapsed.TotalSeconds:F1}s)");
 #endif
         Trace(traceStage ?? string.Join(" ", args.Take(2)), startedAtUtc, start.WorkingDirectory, elapsed.Elapsed, process.ExitCode, transcript, args);
@@ -866,15 +924,7 @@ partial class Program : IDisposable
     /// The lakefile the certified library is built from: the checkout's, without blank lines, comments,
     /// the editor library, or any plain <c>[[lean_lib]]</c> table that declares only a library outside CIL.
     /// </summary>
-    static string LibraryLakefile(string lakefile) => FrameworkLakefile(lakefile, editor: false);
-
-    /// <summary>
-    /// The lakefile of the framework copy an editor workspace requires: the certified library's, with the
-    /// editor library kept, so Lake lists the framework's sources once per library a consumer needs.
-    /// </summary>
-    static string EditorFrameworkLakefile(string lakefile) => FrameworkLakefile(lakefile, editor: true);
-
-    static string FrameworkLakefile(string lakefile, bool editor)
+    static string LibraryLakefile(string lakefile)
     {
         var lines = lakefile.ReplaceLineEndings("\n").Split('\n');
         // A multi-line string can hold header-like lines, so such a file is kept whole.
@@ -894,7 +944,7 @@ partial class Program : IDisposable
         // A certificate must never resolve Extracted to the editor's sources.
         static bool EditorLibrary(List<string> table) =>
             table is ["[[lean_lib]]", var declaration, ..] && declaration == $"name = \"{EditorLibraryName}\"";
-        if (!editor) tables.RemoveAll(EditorLibrary);
+        tables.RemoveAll(EditorLibrary);
         var named = string.Join("\n", tables.Where(table => OtherLibrary(table) is null).SelectMany(table => table));
         // A library that a kept table names, such as a default target, stays declared.
         return string.Concat(tables.Where(table => OtherLibrary(table) is not { } name ||
@@ -932,6 +982,13 @@ partial class Program : IDisposable
         left.Count == right.Count && left.All(p => right.TryGetValue(p.Key, out var value) && value == p.Value);
 
     bool freshLibrary { get; init; }
+    /// <summary>An editor's library is no certificate input, so it is cached where certification never is.</summary>
+    bool editorLibrary { get; init; }
+    /// <summary>
+    /// With no whole library cached, verify one proof against a closure entry of the modules it imports and
+    /// build the whole library after reporting. Only for a process that verifies a single proof.
+    /// </summary>
+    bool importClosureFirst { get; init; }
     bool freshProofs { get; init; }
     string? incrementalLibrary { get; init; }
     string? incrementalDigest { get; init; }
@@ -965,7 +1022,7 @@ partial class Program : IDisposable
         {
             var asset = JsonSerializer.Deserialize<CertifiedReleaseAsset>(File.ReadAllBytes(descriptor));
             if (asset is null || !ValidReleaseAsset(asset, key)) return false;
-            if (!Console.IsErrorRedirected) Console.Error.WriteLine("Downloading certified Lean verification library");
+            Console.Error.WriteLine("Downloading certified Lean verification library");
             using var client = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(3) };
             using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
             var uri = new Uri("https://github.com/NethermindEth/LeanCIL/releases/download/" +
@@ -992,9 +1049,8 @@ partial class Program : IDisposable
         catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or
             JsonException or InvalidOperationException or System.Net.Http.HttpRequestException or OperationCanceledException)
         {
-            if (!Console.IsErrorRedirected)
-                Console.Error.WriteLine("Certified library download unavailable; building from sources. " +
-                    error.Message);
+            Console.Error.WriteLine("Certified library download unavailable; building from sources. " +
+                error.Message);
             return false;
         }
         finally
@@ -1065,6 +1121,50 @@ partial class Program : IDisposable
                 File.ReadAllBytes(Path.Combine(directory, "cache-receipt.hmac")));
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return false; }
+    }
+
+    /// <summary>The length and write time of every file <see cref="CacheFiles"/> hashes, by the same names.</summary>
+    static SortedDictionary<string, string> FileStamps(string directory) =>
+        new(new DirectoryInfo(directory).EnumerateFiles("*", SearchOption.AllDirectories)
+            .Where(file => file.Name is not ("cache-manifest.json" or "cache-receipt.hmac"))
+            .ToDictionary(file => Path.GetRelativePath(directory, file.FullName).Replace('\\', '/'), FileStamp),
+            StringComparer.Ordinal);
+
+    static string FileStamp(FileInfo file) => string.Create(System.Globalization.CultureInfo.InvariantCulture,
+        $"{file.Length}:{file.LastWriteTimeUtc.Ticks}");
+
+    /// <summary>
+    /// The stamps of a cache entry whose files all hash to `manifest`; null, naming the entry on stderr, when
+    /// they do not. A package that requires an entry by path lets Lake rebuild a module it finds stale into the
+    /// entry, so every run hashes every file. Stamps equal before and after hashing describe the hashed bytes.
+    /// </summary>
+    static SortedDictionary<string, string>? HashedCacheEntry(string cached,
+        SortedDictionary<string, string> manifest)
+    {
+        string reason;
+        try
+        {
+            var stamps = FileStamps(cached);
+            if (Same(manifest, CacheFiles(cached)) && Same(stamps, FileStamps(cached))) return stamps;
+            reason = "its files no longer match the manifest it was certified with";
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { reason = error.Message; }
+        Console.Error.WriteLine("The cached certified library " + cached + " is not used and is replaced: " + reason);
+        return null;
+    }
+
+    /// <summary>
+    /// Fails if the library this process reads in place gained or lost a file, or any file differs by length or
+    /// write time, since it was opened: a build that wrote into it would otherwise pass for the certified bytes.
+    /// </summary>
+    void RequireUnchangedLibrary()
+    {
+        if (libraryStamps is null) return;
+        var current = FileStamps(library!);
+        if (libraryStamps.Keys.Union(current.Keys).FirstOrDefault(name =>
+                libraryStamps.GetValueOrDefault(name) != current.GetValueOrDefault(name)) is { } changed)
+            throw new InvalidOperationException("The certified library changed on disk during verification: " +
+                Path.Combine(library!, changed));
     }
 
     // The pinned manifest binds the source snapshot before copying. Hash exactly the bytes
@@ -1256,7 +1356,8 @@ partial class Program : IDisposable
     /// as a path dependency, so support and proof builds write only their own modules. A caller
     /// that writes into the library itself passes <paramref name="writes"/> and gets a private copy.
     /// </summary>
-    string Library(SortedDictionary<string, string> snapshot, bool writes = false)
+    string Library(SortedDictionary<string, string> snapshot, bool writes = false,
+        IReadOnlyCollection<string>? closureRoots = null)
     {
         var common = new SortedDictionary<string, string>(snapshot.Where(p =>
             !p.Key.StartsWith("proof:", StringComparison.Ordinal) && !p.Key.StartsWith("settings:", StringComparison.Ordinal)).ToDictionary(), StringComparer.Ordinal);
@@ -1268,9 +1369,9 @@ partial class Program : IDisposable
         }
 
         (libraryKey, var sources) = LibraryIdentity(common);
-        var fresh = freshLibrary ||
-            string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"), "true", StringComparison.OrdinalIgnoreCase);
+        static bool Set(string variable) => string.Equals(Environment.GetEnvironmentVariable(variable), "true",
+            StringComparison.OrdinalIgnoreCase);
+        var fresh = freshLibrary || !editorLibrary && (Set("CI") || Set("GITHUB_ACTIONS"));
         var cacheRoot = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR") ??
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LeanCIL", "libraries");
         var cached = Path.Combine(cacheRoot, libraryKey);
@@ -1281,12 +1382,23 @@ partial class Program : IDisposable
             if (!fresh)
             {
                 Directory.CreateDirectory(cacheRoot);
-                // Serialize same-key builders. A lock is released even after a crashed process.
-                var deadline = Stopwatch.StartNew();
+                // Serialize same-key builders. A lock is released even after a crashed process, and a build
+                // may outlast any fixed wait, so a waiter waits for as long as the lock file is held.
+                var waiting = Stopwatch.StartNew();
+                var announced = false;
                 while (cacheLock is null)
                 {
                     try { cacheLock = new FileStream(cached + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
-                    catch (IOException) when (deadline.Elapsed < TimeSpan.FromMinutes(10)) { Thread.Sleep(100); }
+                    catch (IOException) when (File.Exists(cached + ".lock"))
+                    {
+                        if (!announced && waiting.Elapsed > TimeSpan.FromSeconds(10))
+                        {
+                            announced = true;
+                            Console.Error.WriteLine("Waiting for another leancil process that is building or " +
+                                "opening the certified library in " + cacheRoot + ".");
+                        }
+                        Thread.Sleep(100);
+                    }
                 }
             }
             var supplied = Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY");
@@ -1304,9 +1416,11 @@ partial class Program : IDisposable
                 Trace("Opening certified Lean verification library", openStarted, library, openElapsed.Elapsed, 0, "", [library]);
             }
             else if (!fresh && CertifiedLocalLibrary(cached, libraryKey) &&
-                ReadManifest(cached) is { } cachedManifest && Same(sources, LibrarySources(cachedManifest)))
+                ReadManifest(cached) is { } cachedManifest && Same(sources, LibrarySources(cachedManifest)) &&
+                (libraryStamps = HashedCacheEntry(cached, cachedManifest)) is not null)
             {
-                // The receipt binds this manifest, which was hashed when the entry was published.
+                // The receipt binds this manifest, and the entry's files still hash to it.
+                RemoveClosure(cacheRoot, libraryKey);
                 library = cached;
                 manifest = cachedManifest;
                 libraryBuild = "cache";
@@ -1317,6 +1431,18 @@ partial class Program : IDisposable
                 manifest = ReadManifest(cached) ?? throw new InvalidDataException("Missing downloaded library manifest");
                 libraryBuild = "release";
             }
+            else if (!fresh && closureRoots is not null &&
+                ClosureLibrary(cacheRoot, libraryKey, sources, closureRoots) is { } closure)
+            {
+                // The certificate names the closure's own key, which states exactly the modules replayed.
+                (library, manifest, libraryKey, libraryModules) =
+                    (closure.Directory, closure.Manifest, closure.Key, closure.Modules);
+                libraryStamps = closure.Stamps;
+                libraryBuild = closure.Built ? "closure" : "closure-cache";
+                // Held under the library's lock, which a remover also holds, until this process is done.
+                closureUse = new FileStream(ClosureUse(closure.Directory), FileMode.OpenOrCreate, FileAccess.Read,
+                    FileShare.Read);
+            }
             else
             {
                 library = Path.Combine(Path.GetTempPath(), "leancil-library-" + Guid.NewGuid().ToString("N"));
@@ -1324,6 +1450,9 @@ partial class Program : IDisposable
                 Directory.CreateDirectory(library);
                 if (incrementalLibrary is not null)
                     StageIncrementalLibrary(library, incrementalLibrary, incrementalDigest, sources);
+                // Lake reuses a closure entry's modules by trace; every module is replayed below all the same.
+                else if (!fresh && CachedClosure(cacheRoot, libraryKey, sources) is { } built)
+                    CopyTree(Path.Combine(built, ".lake", "build"), Path.Combine(library, ".lake", "build"));
                 foreach (var (name, hash) in sources)
                 {
                     var destination = Path.Combine(library, name);
@@ -1335,6 +1464,12 @@ partial class Program : IDisposable
                 // Modules outside the CIL aggregate are built here too, so importing one never builds into a shared library.
                 var frameworkModules = sources.Keys.Where(name => name.StartsWith("CIL/", StringComparison.Ordinal) &&
                     name.EndsWith(".lean", StringComparison.Ordinal)).Select(name => "+" + name[..^".lean".Length].Replace('/', '.'));
+#if LEANCIL_TOOL
+                Console.Error.WriteLine("Building the certified Lean verification library from the framework sources " +
+                    "and kernel-replaying it; this takes several minutes. " + (fresh
+                        ? "This run does not cache it."
+                        : "Later runs reuse it from " + cached + "."));
+#endif
                 Run(["lake", "build", "CIL", "leancil-audit", .. frameworkModules], library, streamOutput: true,
                     progress: "Building fresh Lean verification library");
                 // An incremental build replays donor modules too: an unchanged olean may import changed ones.
@@ -1355,6 +1490,8 @@ partial class Program : IDisposable
                         CopyTree(library, staging);
                         if (Directory.Exists(cached)) Directory.Delete(cached, true);
                         Directory.Move(staging, cached);
+                        publishedLibrary = cached;
+                        RemoveClosure(cacheRoot, libraryKey);
                     }
                     finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
                 }
@@ -1378,6 +1515,8 @@ partial class Program : IDisposable
             Trace(incomplete ? "Copying incomplete certified Lean verification library" : "Copying certified Lean verification library",
                 started, copy, elapsed.Elapsed, 0, "", [copy]);
         }
+        // Lake rebuilds a module it finds stale into the library; no build of this process may have done so.
+        libraryStamps = ownsLibrary ? null : libraryStamps ?? FileStamps(library);
         baseModules = new(manifest.Where(pair => pair.Key.StartsWith(compiledPrefix, StringComparison.Ordinal) &&
                 Path.GetFileName(pair.Key).Contains(".olean", StringComparison.Ordinal))
             .ToDictionary(pair => pair.Key[compiledPrefix.Length..], pair => pair.Value), StringComparer.Ordinal);
@@ -1392,6 +1531,228 @@ partial class Program : IDisposable
         session = CreateSession(library, common.Keys.Where(name =>
             name.EndsWith(".lean", StringComparison.Ordinal) && !sources.ContainsKey(name)));
         return session;
+    }
+
+    /// <summary>A certified cache entry that holds only `Modules`, under the `Key` that names them.</summary>
+    sealed record ClosureEntry(string Directory, string Key, string[] Modules,
+        SortedDictionary<string, string> Manifest, SortedDictionary<string, string> Stamps, bool Built);
+
+    /// <summary>Whether `module` is a framework module: the `CIL` aggregate or a module below it.</summary>
+    static bool IsFrameworkModule(string module) =>
+        module == "CIL" || module.StartsWith("CIL.", StringComparison.Ordinal);
+
+    /// <summary>The build configuration every library entry holds beside its sources.</summary>
+    static readonly string[] LibraryConfiguration = ["lakefile.toml", "lake-manifest.json", "lean-toolchain"];
+
+    /// <summary>The module that the audit executable is built from; every library entry holds its imports.</summary>
+    const string AuditModule = "CIL.OleanAudit";
+
+    static string ModuleSource(string module) => module.Replace('.', '/') + ".lean";
+
+    /// <summary>
+    /// The framework modules that `roots` and the audit executable import, transitively, in order; null when
+    /// one of them is not a framework source, or when they include the `CIL` aggregate and so every module.
+    /// </summary>
+    static string[]? ImportClosure(SortedDictionary<string, string> sources, IEnumerable<string> roots,
+        Func<string, string> read)
+    {
+        var closure = new SortedSet<string>(StringComparer.Ordinal);
+        var pending = new Queue<string>(roots.Where(IsFrameworkModule).Append(AuditModule));
+        while (pending.TryDequeue(out var module))
+        {
+            if (!closure.Add(module)) continue;
+            if (module == "CIL" || !sources.ContainsKey(ModuleSource(module))) return null;
+            foreach (Match import in SourceImport().Matches(read(ModuleSource(module))))
+                if (IsFrameworkModule(import.Groups[1].Value)) pending.Enqueue(import.Groups[1].Value);
+        }
+        return [.. closure];
+    }
+
+    /// <summary>The key of the closure entry of the library `libraryKey` that holds exactly `modules`.</summary>
+    static string ClosureKey(string libraryKey, string[] modules) => ContentKey(
+        "leancil-library-closure-v1-these-modules-kernel-replayed\n" + libraryKey + "\n" + string.Join("\n", modules));
+
+    /// <summary>Beside a library's cache entry: the key of the one closure entry built before the whole.</summary>
+    static string ClosureRecord(string cacheRoot, string libraryKey) =>
+        Path.Combine(cacheRoot, libraryKey + ".closure");
+
+    /// <summary>
+    /// Whether `manifest` describes a closure entry of exactly `modules`: their sources and the build
+    /// configuration as in `sources`, no other framework source, and compiled modules for those and no other.
+    /// </summary>
+    static bool ClosureManifest(SortedDictionary<string, string> manifest, SortedDictionary<string, string> sources,
+        string[] modules)
+    {
+        const string compiledPrefix = ".lake/build/lib/lean/";
+        var expected = modules.Select(ModuleSource).Concat(LibraryConfiguration).ToHashSet(StringComparer.Ordinal);
+        var compiled = manifest.Keys.Where(name => name.StartsWith(compiledPrefix, StringComparison.Ordinal) &&
+                Path.GetFileName(name).Contains(".olean", StringComparison.Ordinal))
+            .Select(name => ModuleName(name[compiledPrefix.Length..])).ToHashSet(StringComparer.Ordinal);
+        return expected.SetEquals(LibrarySources(manifest).Keys) && compiled.SetEquals(modules) &&
+            expected.All(name => sources.TryGetValue(name, out var hash) && manifest[name] == hash);
+    }
+
+    /// <summary>
+    /// The directory of the closure entry recorded for the library `libraryKey`, when it is one: the record
+    /// is not authenticated, so the entry's own modules must give the recorded key, its sources must be those
+    /// in `sources`, and its receipt and files must authenticate it. Null otherwise.
+    /// </summary>
+    string? CachedClosure(string cacheRoot, string libraryKey, SortedDictionary<string, string> sources)
+    {
+        try
+        {
+            var key = File.ReadAllText(ClosureRecord(cacheRoot, libraryKey)).Trim();
+            var directory = Path.Combine(cacheRoot, key);
+            if (!Regex.IsMatch(key, @"\A[0-9a-f]{64}\z") || !CertifiedLocalLibrary(directory, key) ||
+                ReadManifest(directory) is not { } manifest) return null;
+            const string extension = ".lean";
+            string[] modules = [.. LibrarySources(manifest).Keys
+                .Where(name => name.EndsWith(extension, StringComparison.Ordinal))
+                .Select(name => name[..^extension.Length].Replace('/', '.')).Order(StringComparer.Ordinal)];
+            return ClosureKey(libraryKey, modules) == key && ClosureManifest(manifest, sources, modules) &&
+                HashedCacheEntry(directory, manifest) is not null ? directory : null;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    /// <summary>Beside a closure entry: a file every process reading the entry in place holds open.</summary>
+    static string ClosureUse(string directory) => directory + ".use";
+
+    /// <summary>
+    /// Removes the closure entry recorded for a library whose whole entry is published, unless a process still
+    /// reads it; a later run then removes it. The entry is renamed away before its record goes, so a failure
+    /// leaves either both or neither.
+    /// </summary>
+    static void RemoveClosure(string cacheRoot, string libraryKey)
+    {
+        try
+        {
+            var record = ClosureRecord(cacheRoot, libraryKey);
+            if (!File.Exists(record)) return;
+            var key = File.ReadAllText(record).Trim();
+            var directory = Path.Combine(cacheRoot, key);
+            if (Regex.IsMatch(key, @"\A[0-9a-f]{64}\z") && Directory.Exists(directory))
+            {
+                var doomed = directory + ".evicted-" + Guid.NewGuid().ToString("N");
+                using (new FileStream(ClosureUse(directory), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+                    Directory.Move(directory, doomed);
+                File.Delete(ClosureUse(directory));
+                File.Delete(record);
+                Directory.Delete(doomed, true);
+            }
+            else File.Delete(record);
+        }
+        // A reader holds the entry, or its files; the whole library is preferred from now on regardless.
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+    }
+    /// <summary>
+    /// A certified entry holding only the import closure of `roots`: its sources, their compiled modules, each
+    /// kernel-replayed, and the audit executable. Its key and receipt name exactly those modules, and it holds
+    /// no source without a compiled module, so neither Lean nor Lake can take any other module from it. Null
+    /// when the closure is the whole library, or when another closure of this library was built: the whole
+    /// library is built then.
+    /// </summary>
+    ClosureEntry? ClosureLibrary(string cacheRoot, string libraryKey, SortedDictionary<string, string> sources,
+        IReadOnlyCollection<string> roots)
+    {
+        if (ImportClosure(sources, roots, name => File.ReadAllText(At(name))) is not { } modules) return null;
+        var key = ClosureKey(libraryKey, modules);
+        var record = ClosureRecord(cacheRoot, libraryKey);
+        var directory = Path.Combine(cacheRoot, key);
+        if (File.Exists(record))
+        {
+            if (File.ReadAllText(record).Trim() != key) return null;
+            if (CertifiedLocalLibrary(directory, key) && ReadManifest(directory) is { } cached &&
+                ClosureManifest(cached, sources, modules) && HashedCacheEntry(directory, cached) is { } stamps)
+                return new(directory, key, modules, cached, stamps, Built: false);
+        }
+        var build = Path.Combine(Path.GetTempPath(), "leancil-library-" + Guid.NewGuid().ToString("N"));
+        var staging = directory + "." + Guid.NewGuid().ToString("N");
+        try
+        {
+            foreach (var name in modules.Select(ModuleSource).Concat(LibraryConfiguration))
+            {
+                var destination = Path.Combine(build, name);
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                CopyLibrarySource(name, destination);
+                if (Sha(destination) != sources[name])
+                    throw new InvalidOperationException("Library source changed while copying: " + name);
+            }
+            Console.Error.WriteLine($"Building and kernel-replaying the {modules.Length} framework modules this " +
+                "proof imports. The whole certified library is built after a verified result is reported.");
+            Run(["lake", "build", "leancil-audit", .. modules.Select(module => "+" + module)], build,
+                streamOutput: true, progress: "Building the framework modules the proof imports");
+            if (!ModuleArtifacts(build).Keys.Select(ModuleName).ToHashSet(StringComparer.Ordinal).SetEquals(modules))
+                throw new InvalidOperationException("Lake built other modules than the import closure it was given.");
+            ReplayLibrary(build, "the framework modules the proof imports");
+            var manifest = CacheFiles(build);
+            if (!ClosureManifest(manifest, LibrarySources(CommonInputs()), modules))
+                throw new InvalidDataException("Library sources changed during preparation");
+            File.WriteAllText(Path.Combine(build, "cache-manifest.json"), JsonSerializer.Serialize(manifest, Json));
+            var manifestBytes = File.ReadAllBytes(Path.Combine(build, "cache-manifest.json"));
+            File.WriteAllBytes(Path.Combine(build, "cache-receipt.hmac"), HMACSHA256.HashData(ReceiptKey,
+                Encoding.UTF8.GetBytes(key).Concat(manifestBytes).ToArray()));
+            CopyTree(build, staging);
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+            Directory.Move(staging, directory);
+            File.WriteAllText(record, key);
+            // The published copy, not the build, is what the session reads.
+            var published = HashedCacheEntry(directory, manifest)
+                ?? throw new InvalidOperationException("Certified cache changed while copying");
+            return new(directory, key, modules, manifest, published, Built: true);
+        }
+        finally
+        {
+            if (Directory.Exists(staging)) Directory.Delete(staging, true);
+            if (Directory.Exists(build)) Directory.Delete(build, true);
+        }
+    }
+
+    /// <summary>The modules each compiled module in `modules`, by path, imports directly.</summary>
+    Dictionary<string, string[]> ConsumerModuleImports(string session, Dictionary<string, string> modules)
+    {
+        // Read Lean's compiled import headers, not a regex over source text. This
+        // also handles public/private imports and transitive package dependencies.
+        var input = Path.Combine(Path.GetTempPath(), "leancil-imports-" + Guid.NewGuid().ToString("N") + ".json");
+        var output = Path.ChangeExtension(input, ".result.json");
+        try
+        {
+            var paths = modules.Values.ToArray();
+            File.WriteAllText(input, JsonSerializer.Serialize(paths));
+            Run([CheckedAuditExecutable(), "--imports", input, output], session, environment: LeanEnvironment);
+            var imports = File.ReadAllLines(output).Select(line => JsonSerializer.Deserialize<string[]>(line)).ToArray();
+            if (imports.Length != paths.Length || imports.Any(items => items is null))
+                throw new InvalidDataException("Incomplete consumer compiled import graph.");
+            return modules.Keys.Zip(imports).ToDictionary(pair => pair.First, pair => pair.Second!);
+        }
+        finally { File.Delete(input); File.Delete(output); }
+    }
+
+    /// <summary>
+    /// Fails unless every framework module that a module compiled below `directory` imports, by its compiled
+    /// import header, is one the open closure entry holds. Source text is not consulted: Lean accepts import
+    /// spellings a pattern over it misses, and a module's absence from the entry is not what refuses it.
+    /// </summary>
+    void RequireReplayedImports(string directory, string session)
+    {
+        if (libraryModules is null) return;
+        var compiled = Directory.EnumerateFiles(directory, "*.olean", SearchOption.AllDirectories)
+            .ToDictionary(path => path, path => path, StringComparer.Ordinal);
+        RequireReplayedImports(ConsumerModuleImports(session, compiled).Values.SelectMany(imports => imports));
+    }
+
+    /// <summary>
+    /// Fails unless each framework module in `imports` is one the open closure entry holds, and so one that
+    /// was kernel-replayed under the key the certificate names. The whole library holds every module.
+    /// </summary>
+    void RequireReplayedImports(IEnumerable<string> imports)
+    {
+        if (libraryModules is null) return;
+        foreach (var module in imports.Where(IsFrameworkModule))
+            if (!libraryModules.Contains(module, StringComparer.Ordinal) ||
+                !baseModules!.ContainsKey(module.Replace('.', '/') + ".olean"))
+                throw new InvalidOperationException("The proof imports " + module + ", which the certified library " +
+                    "entry " + libraryKey + " does not hold: it was not kernel-replayed under that key.");
     }
 
     /// <summary>
@@ -1446,11 +1807,13 @@ partial class Program : IDisposable
     }
 
     /// <summary>
-    /// The base library's module artifacts: recorded ones from the validated manifest, plus any
-    /// unrecorded output, which Lake builds into the base from an unrecorded source and must be replayed.
+    /// The base library's module artifacts: recorded ones from the validated manifest, which must be the files
+    /// the library was opened with, plus any unrecorded output, which must be replayed: Lake builds an
+    /// unrecorded source into a library this process owns, and a library read in place may arrive with one.
     /// </summary>
     SortedDictionary<string, string> BaseModuleArtifacts()
     {
+        RequireUnchangedLibrary();
         var result = new SortedDictionary<string, string>(baseModules!, StringComparer.Ordinal);
         var compiled = Path.Combine(library!, ".lake/build/lib/lean");
         foreach (var path in Directory.EnumerateFiles(compiled, "*", SearchOption.AllDirectories))
@@ -1477,17 +1840,60 @@ partial class Program : IDisposable
     /// <summary>
     /// A package named leancil whose only library is CIL, read in place from the certified library,
     /// so no other target of the certified lakefile can claim a requiring package's own modules.
+    /// `requirements` are further lakefile tables, such as a package this one brings into the workspace.
     /// </summary>
-    static string FrameworkPackage(string owner, string certified)
+    // Lake's module traces name the package, so under another name it rebuilds every module into the library.
+    static string FrameworkPackage(string owner, string certified, string requirements = "")
     {
         var directory = Path.Combine(owner, ".lake", "leancil-framework");
         Directory.CreateDirectory(directory);
         var root = Path.GetFullPath(certified).Replace('\\', '/');
         WriteIfChanged(Path.Combine(directory, "lakefile.toml"),
             $"name = \"leancil\"\nsrcDir = {JsonSerializer.Serialize(root)}\nbuildDir = " +
-            $"{JsonSerializer.Serialize(root + "/.lake/build")}\n\n[[lean_lib]]\nname = \"CIL\"\n");
+            $"{JsonSerializer.Serialize(root + "/.lake/build")}\n\n[[lean_lib]]\nname = \"CIL\"\n" + requirements);
         WriteIfChanged(Path.Combine(directory, "lean-toolchain"), File.ReadAllText(Path.Combine(certified, "lean-toolchain")));
         return directory;
+    }
+
+    /// <summary>
+    /// The certified library a package that outlives this process may require by path: the machine's cache
+    /// entry, built and published first when absent, or a supplied library, either one with every file hashed
+    /// against its manifest. Never a directory a process deletes.
+    /// </summary>
+    static string EditorLibrary()
+    {
+        if (editorLibraryDirectory is not null) return editorLibraryDirectory;
+        using var verification = new Program { editorLibrary = true };
+        verification.Library(Inputs(At("CIL.lean")));
+        // A cache entry was hashed when it was opened; a supplied library is not, and Lake may write into either.
+        if (!verification.ownsLibrary && verification.libraryBuild == "certified-artifact" &&
+            (ReadManifest(verification.library!) is not { } manifest ||
+                !Same(manifest, CacheFiles(verification.library!))))
+            throw new InvalidOperationException("The files of the supplied certified library " +
+                verification.library + " do not match its manifest, so an editor package cannot require it in place.");
+        return editorLibraryDirectory = !verification.ownsLibrary ? verification.library!
+            : verification.publishedLibrary ?? throw new InvalidOperationException(
+                "The supplied certified library holds framework sources it has not compiled, so an editor " +
+                "package cannot require it in place. Unset LEANCIL_CERTIFIED_LIBRARY to use this machine's " +
+                "library cache.");
+    }
+
+    /// <summary>The directory <see cref="EditorLibrary"/> resolved, once per process.</summary>
+    static string? editorLibraryDirectory;
+
+    /// <summary>
+    /// Runs `build` in a package that requires the certified library at `library` by path, and fails unless
+    /// every file there hashes as it did before: Lake rebuilds a stale required module in place.
+    /// </summary>
+    static void RequireUnwritten(string library, Action build)
+    {
+        var files = CacheFiles(library);
+        build();
+        if (!Same(files, CacheFiles(library)))
+            throw new InvalidOperationException("Lake wrote into the certified library " + library +
+                ", which this package requires by path: it found framework modules out of date there. " +
+                "A cache entry is rehashed, and replaced if it changed, by the next leancil verify or workspace; " +
+                "a supplied library is rehashed, and refused if it changed, by the next leancil workspace.");
     }
 
     /// <summary>The lakefile requirement of a package below owner on the certified framework.</summary>
@@ -2360,10 +2766,19 @@ partial class Program : IDisposable
     /// <summary>A method that a verified statement names through a framework predicate.</summary>
     internal sealed record StatementSubject(string role, string head, bool extracted, int? method, string? signature);
 
-    /// <summary>A verified statement as framework notation prints it, and the methods it names.</summary>
-    internal sealed record StatementView(string statement, StatementSubject[] subjects);
+    /// <summary>A definition of the proof module as Lean prints it: `def name binders : type := body`.</summary>
+    internal sealed record StatementDefinition(string name, string text);
 
-    /// <summary>Set by callers that print <see cref="VerifiedStatement"/>; printing costs one Lean run.</summary>
+    /// <summary>
+    /// A verified statement as framework notation prints it, the methods it names and the proof module's
+    /// definitions it is stated with, each before the ones its body uses; null when they were not read.
+    /// </summary>
+    internal sealed record StatementView(string statement, StatementSubject[] subjects,
+        StatementDefinition[]? definitions = null);
+
+    /// <summary>
+    /// Set by callers that print <see cref="VerifiedStatement"/>; printing costs one Lean run beside the audit.
+    /// </summary>
     bool viewsStatement { get; init; }
 
     /// <summary>
@@ -2391,12 +2806,27 @@ partial class Program : IDisposable
     /// <summary>The start of a message of the `CIL.step` trace class.</summary>
     internal const string TraceHeader = "[CIL.step]";
 
-    /// <summary>Whether the proof is checked as <see cref="ObservedProof"/>, as records and a trace need.</summary>
-    bool ObservesProof => structuredFailures || tracesSteps;
+    /// <summary>
+    /// Set by callers that print open goals: the proof is checked as <see cref="ObservedProof"/> with
+    /// <see cref="GoalsOption"/>, so the goal at each `sorry` and failing tactic is logged after
+    /// <see cref="GoalMarker"/>.
+    /// </summary>
+    bool showsGoals { get; init; }
 
-    /// <summary>The options the proof module is checked with: none unless asked for records or a trace.</summary>
+    /// <summary>The Lean option `cil.goals`, which `CIL.Observe` reads.</summary>
+    internal const string GoalsOption = "-Dweak.cil.goals=true";
+
+    /// <summary>`CIL.Safety.goalMarker`, which starts each open goal the observer logs.</summary>
+    internal const string GoalMarker = "[LeanCIL goal v1] ";
+
+    /// <summary>Whether the proof is checked as <see cref="ObservedProof"/>: records, a trace and goals need it.
+    /// </summary>
+    bool ObservesProof => structuredFailures || tracesSteps || showsGoals;
+
+    /// <summary>The options the proof module is checked with: none unless asked for records, a trace or goals.
+    /// </summary>
     string[] ProofOptions => [.. structuredFailures ? [DiagnosticsOption] : Array.Empty<string>(),
-        .. tracesSteps ? [TraceOption] : Array.Empty<string>()];
+        .. tracesSteps ? [TraceOption] : Array.Empty<string>(), .. showsGoals ? [GoalsOption] : Array.Empty<string>()];
 
     /// <summary>The bytes the proof module is checked from: the developer's, or <see cref="ObservedProof"/>.</summary>
     byte[] CheckedProofBytes(byte[] source) => ObservesProof ? ObservedProof.Insert(source).Bytes : source;
@@ -2506,7 +2936,7 @@ partial class Program : IDisposable
     StatementView? ViewStatement(string directory, string olean, string leanPath, string proofSource, string theorem)
     {
         var imports = SourceImport().Matches(proofSource).Select(import => import.Groups[1].Value)
-            .Concat(["Lean", "Extracted", "CIL.MethodIdentity"]).Distinct(StringComparer.Ordinal);
+            .Concat(["Lean", "Extracted", StatementModule]).Distinct(StringComparer.Ordinal);
         var source = Path.Combine(directory, "LeanCILStatement.lean");
         var result = Path.Combine(directory, StatementViewFile);
         File.WriteAllText(source, string.Concat(imports.Select(module => "import " + module + "\n")) + $$"""
@@ -2551,6 +2981,45 @@ partial class Program : IDisposable
                   ("method", toJson index), ("signature", toJson signature)]))
               found.get
 
+            /-- How many leading binders of `type` a printed signature names before its colon. -/
+            def LeanCILStatement.namedBinders : Expr -> Nat
+              | .forallE name _ body info =>
+                if name.hasMacroScopes && !info.isInstImplicit then 0
+                else LeanCILStatement.namedBinders body + 1
+              | _ => 0
+
+            /-- Whether `value` only projects a field of its argument, as a structure's accessor does. -/
+            def LeanCILStatement.projects : Expr -> Bool
+              | .lam _ _ body _ => LeanCILStatement.projects body
+              | .proj .. => true
+              | _ => false
+
+            /-- The proof's definitions that `root` is stated with, each before those its body uses,
+                printed as `def name binders : type := body` from its elaborated value. A structure's
+                accessors are not listed: the statement names the structure and its fields. -/
+            partial def LeanCILStatement.definitions (root : Expr) (proof : NameSet) :
+                MetaM (Array Json) := do
+              let seen <- IO.mkRef ({} : NameSet)
+              let found <- IO.mkRef (#[] : Array Json)
+              let rec visit (expression : Expr) : MetaM Unit := do
+                for name in expression.getUsedConstants do
+                  unless proof.contains name && !(<- seen.get).contains name do continue
+                  seen.modify (fun names => names.insert name)
+                  let some (.defnInfo definition) := (<- getEnv).find? name | continue
+                  if name.isInternalDetail || LeanCILStatement.projects definition.value then continue
+                  let named := LeanCILStatement.namedBinders definition.type
+                  let signature <- PrettyPrinter.ppSignature name
+                  let printed <- lambdaBoundedTelescope definition.value named fun binders body => do
+                    if binders.size == named then
+                      return f!"def {signature.fmt} :=" ++ Format.nest 2 (Format.line ++ (<- ppExpr body))
+                    return f!"def {name} : {<- ppExpr definition.type} :=" ++
+                      Format.nest 2 (Format.line ++ (<- ppExpr definition.value))
+                  found.modify (fun entries => entries.push (Json.mkObj
+                    [("name", toJson name.toString), ("text", toJson (toString printed.group))]))
+                  visit definition.value
+              visit root
+              found.get
+
             #eval show CommandElabM Unit from do
               let (data, _) <- readModuleData {{LeanString(olean.Replace('\\', '/'))}}
               let mut env <- getEnv
@@ -2574,7 +3043,8 @@ partial class Program : IDisposable
                       (<- LeanCILStatement.methods "premise" (<- inferType binder) table proof)
                   subjects := subjects ++ (<- LeanCILStatement.methods "conclusion" body table proof)
                   return Json.mkObj [("statement", toJson (toString statement.fmt)),
-                    ("subjects", toJson subjects)]
+                    ("subjects", toJson subjects),
+                    ("definitions", toJson (<- LeanCILStatement.definitions info.type proof))]
               IO.FS.writeFile {{LeanString(result.Replace('\\', '/'))}} result.compress
 
             """);
@@ -2619,7 +3089,8 @@ partial class Program : IDisposable
         string? batchSourceSha256 = null, string? batchTheorem = null, string? consumerSupportSha256 = null,
         string[]? staticValues = null, string[]? contractImports = null, PublishedImport[]? imports = null,
         DeploymentDependency[]? contractDependencies = null, string? compositionTheorem = null, string? compositionAudit = null,
-        JsonElement[]? initializationAssumptions = null, string[]? opaqueStaticValues = null);
+        JsonElement[]? initializationAssumptions = null, string[]? opaqueStaticValues = null,
+        StatementDefinition[]? specification = null, string[]? libraryModules = null);
 
     static JsonElement[] InitializationAssumptions(JsonElement extraction) =>
         extraction.TryGetProperty("initializationAssumptions", out var assumptions)
@@ -2631,6 +3102,33 @@ partial class Program : IDisposable
     // Fields the theorem reads from the caller's static bindings instead of a computed constant.
     static string[] OpaqueStaticValues(JsonElement extraction) =>
         extraction.TryGetProperty("opaqueStaticValues", out var values) ? values.Deserialize<string[]>() ?? [] : [];
+
+    /// <summary>The module the statement display imports beside the proof's own imports.</summary>
+    const string StatementModule = "CIL.MethodIdentity";
+
+    /// <summary>
+    /// Every module that single-file verification of this proof compiles against or loads: the imports of the
+    /// proof, of the extraction and of its symbols, the statement display's, and the observer, which the proof
+    /// is checked against under `--goals`, so the closure is the same with it. Null when the proof needs the
+    /// whole library: contract imports, a full-import audit, or an import that is neither the extraction nor
+    /// a framework module.
+    /// </summary>
+    string[]? ClosureRoots(string proofSource, string output, string? symbolsSource, ExtractionIdentity extraction)
+    {
+        if (!importClosureFirst || fullImportAudit is not null || forceFullVerification ||
+            extraction.Sources.Count > 0 || HasContractImports(extraction)) return null;
+        static IEnumerable<string> Imports(string source) =>
+            SourceImport().Matches(source).Select(import => import.Groups[1].Value);
+        var proofImports = Imports(proofSource).ToArray();
+        static bool Generated(string module) =>
+            module is "Extracted" or "ExtractedSymbols" || SelectionModules.Is(module);
+        if (proofImports.Any(module => !Generated(module) && !IsFrameworkModule(module) &&
+                module.Split('.')[0] is not ("Init" or "Lean" or "Std")))
+            return null;
+        return [.. proofImports.Concat(Imports(File.ReadAllText(Path.Combine(output, "Extracted.lean"))))
+            .Concat(symbolsSource is null ? [] : Imports(File.ReadAllText(symbolsSource)))
+            .Concat([StatementModule, ObservedProof.Module]).Where(IsFrameworkModule).Distinct(StringComparer.Ordinal)];
+    }
 
     Report Verify(string assembly, string identity, string entry, string proof, string output,
         string profile = "scalar", string theorem = "ExampleProof.correctness", bool check = false, bool existingArtifacts = false,
@@ -2701,7 +3199,9 @@ partial class Program : IDisposable
 
         // Use a source-bound build; CI and --rebuild-library bypass the local library cache.
         stage?.Invoke("Lean library build");
-        var session = Library(before);
+        var closureRoots = ClosureRoots(proofSource, output, symbolsSource, extraction);
+        var session = Library(before, closureRoots: closureRoots);
+        RequireReplayedImports(closureRoots ?? []);
         HashSet<string> importSourceNames = extraction.Sources.Keys.ToHashSet(StringComparer.Ordinal);
         var support = Regex.Matches(proofSource, @"^import\s+([A-Za-z_][A-Za-z0-9_.]*)", RegexOptions.Multiline)
             .Select(m => m.Groups[1].Value)
@@ -2925,36 +3425,64 @@ partial class Program : IDisposable
             var built = OleanHashes(fresh, session);
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             RequireOnlyAdded(bound, built, "Proof");
+            RequireReplayedImports(fresh, session);
             // Interface oleans were replayed above and RequireOnlyAdded kept them unchanged since.
-            string[] replay = [.. extractionPublication is null ? Array.Empty<string>() : ["Extracted"],
-                .. symbols && !proofRestored ? ["ExtractedSymbols"] : Array.Empty<string>(), .. proofRestored ? Array.Empty<string>() : ["Proof"]];
+            string[] unreplayed = [.. extractionPublication is null ? Array.Empty<string>() : ["Extracted"],
+                .. symbols && !proofRestored ? ["ExtractedSymbols"] : Array.Empty<string>(),
+                .. proofRestored ? Array.Empty<string>() : ["Proof"]];
+            // Replaying every module from the extraction to the proof lets the audit read that environment without a
+            // second import. ExtractedImports imports Extracted from outside the set, which a joint replay rejects.
+            string[] replay = unreplayed.Length == 0 || importModules.Length > 0 ? unreplayed :
+                ["Extracted", .. selected.Where(module => !SelectionModules.IsSymbols(module)),
+                    .. symbols ? ["ExtractedSymbols", .. selected.Where(SelectionModules.IsSymbols)]
+                        : Array.Empty<string>(),
+                    "Proof"];
             string[] auditModules = ["Proof", "Extracted",
                 .. HasContractImports(extraction) ? ["ExtractedImports"] : Array.Empty<string>()];
             AuditRequest[] proofAudits =
                 [ProofTheorem(theorem, extraction), ExtractionCertificate("Extracted.translation_valid")];
             AuditedOleans? audited = null;
-            if (replay.Length > 0)
+            // A caller that ends the run at the stage after the proof check must do so before the display starts.
+            var replays = replay.Length > 0;
+            stage?.Invoke(replays ? "kernel replay" : "theorem audit");
+            // The display runs beside replay and audit; it feeds no check and is read only after all of them.
+            var statementView = Path.Combine(fresh, StatementViewFile);
+            var statementCached = proofRestored && File.Exists(statementView);
+            var proofOlean = Path.Combine(fresh, "Proof.olean");
+            var viewing = viewsStatement && !statementCached
+                ? Task.Run(() => ViewStatement(fresh, proofOlean, leanPath, proofSource, theorem)) : null;
+            StatementView? viewed;
+            try
             {
-                stage?.Invoke("kernel replay");
-                RequireStagedProofSources();
-                if (Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") != "true")
+                if (replays)
                 {
-                    try
+                    RequireStagedProofSources();
+                    if (Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY") != "true")
                     {
-                        audited = AuditOleans(leanPath, auditModules, proofAudits,
-                            ImportPremise(extraction), replayTargets: replay);
+                        try
+                        {
+                            audited = AuditOleans(leanPath, auditModules, proofAudits,
+                                ImportPremise(extraction), replayTargets: replay);
+                        }
+                        catch (InvalidOperationException) { }
                     }
-                    catch (InvalidOperationException) { }
+                    // A rejected combined replay retains the original checker diagnostics.
+                    if (audited is null)
+                        ReplayCheckedModules(replay, leanPath,
+                            (proofRestored ? "Kernel replay of extraction: " : "Kernel replay: ") + entry);
+                    stage?.Invoke("theorem audit");
                 }
-                // A rejected combined replay retains the original checker diagnostics.
-                if (audited is null)
-                    ReplayCheckedModules(replay, leanPath,
-                        (proofRestored ? "Kernel replay of extraction: " : "Kernel replay: ") + entry);
+                // The audit reads the replayed bytes; all source and artifact guards still follow it.
+                RequireStagedProofSources();
+                audited ??= AuditOleans(leanPath, auditModules, proofAudits, ImportPremise(extraction));
             }
-            // The audit reads the replayed bytes; all source and artifact guards still follow it.
-            stage?.Invoke("theorem audit");
-            RequireStagedProofSources();
-            audited ??= AuditOleans(leanPath, auditModules, proofAudits, ImportPremise(extraction));
+            finally
+            {
+                // The display process must exit before the artifact guard below and before its files are deleted.
+                try { viewing?.Wait(); }
+                catch (AggregateException) { }
+            }
+            viewed = viewing?.GetAwaiter().GetResult();
             RequireStagedProofSources();
             if (!Same(built, OleanHashes(fresh, session)))
                 throw new InvalidOperationException("Compiled artifacts changed during verification");
@@ -2974,11 +3502,9 @@ partial class Program : IDisposable
             RequireOriginalProofSources();
             if (!Same(before, Inputs(proof, settings)) || identityHash != Sha(Path.Combine(output, "identity.json")))
                 throw new InvalidOperationException("Inputs changed during verification");
-            // The display is read from the audited olean, after every check above, and never feeds a check.
-            var statementView = Path.Combine(fresh, StatementViewFile);
+            // The display is published only here, after every check above, and never feeds a check.
             if (viewsStatement)
-                VerifiedStatement = proofRestored && File.Exists(statementView) ? ReadStatementView(statementView)
-                    : ViewStatement(fresh, Path.Combine(fresh, "Proof.olean"), leanPath, proofSource, theorem);
+                VerifiedStatement = statementCached ? ReadStatementView(statementView) : viewed;
             if (!proofRestored)
             {
                 var publication = Path.Combine(fresh, "proof-cache");
@@ -3005,6 +3531,8 @@ partial class Program : IDisposable
             RequireOriginalProofSources();
             if (!Same(before, Inputs(proof, settings)) || identityHash != Sha(Path.Combine(output, "identity.json")))
                 throw new InvalidOperationException("Inputs changed during verification");
+            // An editor package requires the same library by path and may have built into it meanwhile.
+            RequireUnchangedLibrary();
 
             var initializedTypes = extraction.Root.TryGetProperty("initializedTypes", out var assumptions)
                 ? assumptions.Deserialize<string[]>() : [];
@@ -3016,9 +3544,10 @@ partial class Program : IDisposable
                 imports: fullResult?.Imports ?? PublishedImports(extraction.Root),
                 contractDependencies: fullResult?.Dependencies ?? DeploymentDependencies(extraction.Root),
                 compositionTheorem: fullResult?.Theorem, compositionAudit: fullResult?.Audit,
-                initializationAssumptions: InitializationAssumptions(extraction.Root));
+                initializationAssumptions: InitializationAssumptions(extraction.Root), libraryModules: libraryModules);
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
+            completesLibrary = libraryModules is not null;
 
             return report;
         }
@@ -3039,9 +3568,34 @@ partial class Program : IDisposable
             Directory.Delete(session, true);
         if (ownsLibrary && library is not null && Directory.Exists(library))
             Directory.Delete(library, true);
+        closureUse?.Dispose();
+    }
+
+    /// <summary>
+    /// After a result checked against a closure entry was reported and stands: builds, kernel-replays and
+    /// caches the whole library, so later runs and editor packages use it. Does nothing otherwise. A failure
+    /// leaves the reported result and its certificate standing and is thrown for the command to report.
+    /// </summary>
+    internal void CompleteLibrary()
+    {
+        if (!completesLibrary) return;
+        completesLibrary = false;
+        Console.Out.Flush();
+        Console.Error.WriteLine($"The result above was checked against the {libraryModules!.Length} framework " +
+            "modules the proof imports. Building the whole certified library for later runs.");
+        try
+        {
+            using var whole = new Program();
+            whole.Library(Inputs(At("CIL.lean")));
+        }
+        // Whatever stopped the build, the caller reports it; nothing may escape as an unhandled error here.
+        catch (Exception error)
+        {
+            throw new InvalidOperationException("The verified result above stands and its certificate is " +
+                "written, but the whole certified library was not built: " + error.Message, error);
+        }
     }
 }
-
 /// <summary>
 /// The developer's files a verification session copied, by the path of each copy, so diagnostics cite the file
 /// the developer edits. Only byte-identical copies are recorded, so a copy's lines and columns are the original's.
@@ -3191,8 +3745,10 @@ internal sealed partial class SourceCopies(string directory)
 /// </summary>
 internal static partial class ObservedProof
 {
-    /// <summary>The text inserted, which imports `CIL.Observe` ahead of the proof's own imports.</summary>
-    internal const string Import = "import CIL.Observe ";
+    /// <summary>The observer module, which a proof asked for records, a trace or goals is checked against.</summary>
+    internal const string Module = "CIL.Observe";
+    /// <summary>The text inserted, which imports the observer ahead of the proof's own imports.</summary>
+    internal const string Import = "import " + Module + " ";
 
     // An import command, plain or with module-system modifiers, at the start of a line.
     [GeneratedRegex(@"^[ \t]*(?:(?:public|private|meta)[ \t]+)*import\b", RegexOptions.Multiline)]

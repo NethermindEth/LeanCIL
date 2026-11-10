@@ -25,8 +25,7 @@ theorem correctness (memory : Memory) (samples values : Reference) (length : Nat
     ∃ fuel, invoke Extracted.program fuel count [.object (.address samples)] memory =
       .ok (memory, [.scalar (.i32 (BitVec.ofNat 32 length))]) := by
   obtain ⟨formed, located, loaded⟩ := readable.facts held whole (by decide)
-  refine ⟨CIL.executionBound Extracted.program count, ?_⟩
-  cil_checked_steps [formed, located, loaded, whole.valid, leaveFrame]
+  cil_checked_steps [formed, located, loaded, whole.valid]
 
 #print axioms correctness
 
@@ -36,8 +35,7 @@ theorem null_values (memory : Memory) (samples : Reference)
     (held : Samples.Values.of memory samples = .null) :
     ∃ fuel, invoke Extracted.program fuel count [.object (.address samples)] memory =
       .error ⟨count, 2, .thrown "System.NullReferenceException"⟩ := by
-  refine ⟨CIL.executionBound Extracted.program count, ?_⟩
-  cil_checked_steps [readable.live.formed, readable.located, readable.load_null held rfl]
+  cil_checked_steps [readable.load_null held rfl]
 
 #print axioms null_values
 

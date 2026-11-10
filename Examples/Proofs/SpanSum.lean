@@ -39,11 +39,11 @@ theorem correctness (memory : Memory) (view : SpanView) (values : List W64)
     (readOnly : view.writable = false) (contents : SpanContents memory view 8 values) :
     ∃ fuel final, invoke Extracted.program fuel 0 [.bufferSpan view] memory =
       .ok (final, [.scalar (.i64 values.sum)]) ∧ MemoryBelow memory.nextIdentity memory final := by
-  obtain ⟨home, entered, setup, -, -, entryFrame⟩ :=
+  obtain ⟨home, entered, enter⟩ :=
     entry.checked memory view wellFormed valid contents.elementWidth readOnly
-  obtain ⟨started, stored, frame, -⟩ := (entryFrame []).store 0 (.i64 0) rfl
+  obtain ⟨started, stored, frame, -⟩ := (enter.frame []).store 0 (.i64 0) rfl
   have span : CheckedSpan memory view 8 false values := ⟨valid, readOnly, contents⟩
-  refine invoke_loop_results Extracted.lookup0 (by simp [cil_checked, valid]) setup
+  refine invoke_loop_results Extracted.lookup0 (by simp [cil_checked, valid]) enter.setup
     (header memory home) (fun state => state.values.2 + state.values.1.values.sum = values.sum)
     (·.values.1.values.length) ⟨(⟨view, values, span⟩, 0), started, frame⟩
     (by cil_loop_steps) (by simp) ?_

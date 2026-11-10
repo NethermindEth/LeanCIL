@@ -32,7 +32,6 @@ theorem dog_loud (memory : CIL.Safety.Memory) (animal : Reference)
     (typed : runtimeTypeOf memory animal = .ok dog) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object (.address animal)] memory =
       .ok (memory, [.scalar (.i64 10)]) := by
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
   cil_checked_steps [formed, typed, dog, scope]
 
 #print axioms dog_loud
@@ -43,7 +42,6 @@ theorem bird_quiet (memory : CIL.Safety.Memory) (animal : Reference)
     (typed : runtimeTypeOf memory animal = .ok bird) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object (.address animal)] memory =
       .ok (memory, [.scalar (.i64 1)]) := by
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
   cil_checked_steps [formed, typed, bird, scope]
 
 #print axioms bird_quiet

@@ -58,7 +58,9 @@ theorem write_holds : writeContract.Holds Extracted.program 2 := by
     simp [enterFrame, Extracted.method2, writeContract, makeLocals, makeArgumentHomes,
       makeParameterHomes, makeLocal, storeLocal, Safety.Value.hasUnspecified, WriteInput.view,
       checked, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
-  refine ⟨10, final, [], ?_, Confined.write written (by simp [writeContract]), (), rfl, updated⟩
+  refine MethodContract.Holds.intro final ()
+    ⟨10, ?_⟩ (Confined.write written (by simp [writeContract])) updated
+  dsimp only [writeContract]
   simp only [Safety.invoke, Extracted.lookup2]
   simp [writeContract, checkedValue, numericValue, valid, checkedAt, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure] at entered ⊢
@@ -166,8 +168,9 @@ theorem slice_write_composes (program : Program)
       sourceWritable, valid, sliced, startBound, lengthBound, WriteInput.view]
     cil_contract_call writer input [caller, args, WriteInput.view, sourceValid, valid]
     · exact permitted
-    · intro updated values invoked confined returned
-      obtain ⟨result, rfl, contents⟩ := returned
+    · intro updated result call
+      have contents := call.post
+      have confined := call.framed
       have validUpdated : input.view.validate updated = .ok () := by
         simpa only [SpanView.validate, WriteInput.view, liveAllocation,
           confined.allocations _ backingAllocation] using valid
@@ -191,8 +194,8 @@ theorem slice_write_composes (program : Program)
         (by cil_checked_step [caller, args, SpanView.asReadOnly, readonlyValid])
         (by simp [readContract, readInput, ReadInput.view]) ?_ ?_
       · exact readPermitted
-      · intro final values invoked confined returned
-        obtain ⟨value, rfl, rfl, rfl⟩ := returned
+      · intro final value call
+        obtain ⟨rfl, rfl⟩ := call.post
         cil_contract_steps [caller, args, readContract, readInput]
         exact ⟨contents, rfl⟩
   obtain ⟨fuel, final, returned, ran, result⟩ := execution

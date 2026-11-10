@@ -131,7 +131,8 @@ theorem store_second_keeps_first (memory : Memory) (wellFormed : memory.WellForm
     ∃ first second updated : _,
       loadLocal updated (.bytes .word64 first) = .ok (.scalar (.i64 7)) ∧
       loadLocal updated (.bytes .word32 second) = .ok (.scalar (.i32 9)) := by
-  obtain ⟨first, second, entered, -, -, -, -, frame⟩ := entry.checked memory wellFormed
+  obtain ⟨first, second, entered, enter⟩ := entry.checked memory wellFormed
+  have frame := enter.frame
   obtain ⟨updated, -, next, -⟩ := (frame []).store 1 (.i32 9) rfl
   -- A store written by hand lists the remembered locals literally, as the loop tactics' do.
   guard_hyp next : LoopFrame [] memory updated _ _ (knownLocals [some (.i64 7), some (.i32 9)])
@@ -228,9 +229,9 @@ theorem down_returns_zero (input : CIL.W32) :
     ∃ fuel final, invoke Extracted.program fuel down [.scalar (.i32 input)] Memory.empty =
       .ok (final, [.scalar (.i32 0)]) ∧
         MemoryBelow Memory.empty.nextIdentity Memory.empty final := by
-  obtain ⟨home, entered, setup, -, -, entryFrame⟩ := entry.checked input
-  obtain ⟨started, stored, frame, -⟩ := (entryFrame []).store 0 (.i32 input) rfl
-  refine invoke_loop_results down.found (by rfl) setup (header home) (fun _ => True)
+  obtain ⟨home, entered, enter⟩ := entry.checked input
+  obtain ⟨started, stored, frame, -⟩ := (enter.frame []).store 0 (.i32 input) rfl
+  refine invoke_loop_results down.found (by rfl) enter.setup (header home) (fun _ => True)
     (·.values.toNat) ⟨input, started, frame⟩ (by cil_loop_steps [header]) trivial ?_
   rintro ⟨remaining, current, frame⟩ -
   by_cases zero : remaining = 0
@@ -277,8 +278,9 @@ theorem store_then_load (memory : Memory) (view : SpanView) (wellFormed : memory
       step body (.local 0) pc args (entry.frame memory view home) stack after =
         .ok (.next (pc + 1) (.scalar (.i64 word) :: stack) (entry.frame memory view home)
           after) := by
-  obtain ⟨home, entered, -, -, -, frame⟩ :=
+  obtain ⟨home, entered, enter⟩ :=
     entry.checked memory view wellFormed valid width readOnly
+  have frame := enter.frame
   have started := frame []
   obtain ⟨after, stepped, known, -⟩ :=
     started.snapshots.store (frame := entry.frame memory view home) (index := 0) started.homes
@@ -293,8 +295,9 @@ theorem span_not_home (memory : Memory) (view : SpanView) (wellFormed : memory.W
     (readOnly : view.writable = false) :
     ∃ home : Reference, ∀ kind reference,
       (entry.frame memory view home).locals[1]? ≠ some (.bytes kind reference) := by
-  obtain ⟨home, entered, -, -, -, frame⟩ :=
+  obtain ⟨home, entered, enter⟩ :=
     entry.checked memory view wellFormed valid width readOnly
+  have frame := enter.frame
   fail_if_success have := (frame []).load 1
   fail_if_success have := (frame []).set_local 0 (.root none)
   exact ⟨home, fun kind reference same => by cases same⟩
@@ -431,12 +434,12 @@ theorem span_sum_by_default (view : SpanView) (values : List W64) : Ensures span
     (fun _ _ _ results => results = [.scalar (.i64 values.sum)]) := by
   rintro args initial ⟨rfl, wellFormed, valid, readOnly, contents⟩
   have checked : CheckedSpan initial view 8 false values := ⟨valid, readOnly, contents⟩
-  obtain ⟨home, entered, setup, -, -, entryFrame⟩ :=
+  obtain ⟨home, entered, enter⟩ :=
     spanSumEntry.checked initial view wellFormed valid contents.elementWidth readOnly
-  refine invoke_loop_satisfies (by rfl) (by simp [cil_checked, valid]) setup
+  refine invoke_loop_satisfies (by rfl) (by simp [cil_checked, valid]) enter.setup
     (spanSumHeader initial home) (fun state => state.values.1 + state.values.2.values.sum =
       values.sum) (fun state => state.values.2.values.length) (fun start => ?_) ?_
-  · have entryFrame := entryFrame []
+  · have entryFrame := enter.frame []
     cil_loop_recurse start (0, ⟨view, values, checked⟩)
     case invariant => simp
   rintro ⟨⟨total, ⟨remainingView, remaining, remainingSpan⟩⟩, current, frame⟩ holds recurse

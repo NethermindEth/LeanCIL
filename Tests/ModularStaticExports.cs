@@ -243,11 +243,10 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
   refine invoke_exists_of_run found (by rfl) (by rfl) ?_
   refine run_call_of_contract holds input found
     (by rfl : Extracted.method0.code[0]? = some (.call 1 0)) (by cil_checked_step []) rfl permitted ?_
-  rintro final values _ framed returns
-  obtain ⟨output, rfl, result⟩ := returns
+  intro final output call
   refine run_return_exists found (by rfl : Extracted.method0.code[1]? = some (.ret none))
     (by cil_checked_step []) (by rfl) ?_
-  exact ⟨framed, output, rfl, result⟩
+  exact ⟨call.framed, output, rfl, call.post⟩
 end ExampleProof
 """);
 string[] ExtractApp(string output) => [.. cli, "extract", app, "StaticFixture.Application::Entry()", output,

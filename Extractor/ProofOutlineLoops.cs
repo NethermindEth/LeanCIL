@@ -178,7 +178,7 @@ internal static partial class ProofOutline
             imports.Add("CIL.Safety.LoopScaffold");
             if (body.Ops.Any(op => op.StartsWith(".memory (.add ", StringComparison.Ordinal)) &&
                 spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference) ||
-                callees.Keys.Any(Branches) || Indexed.Any())
+                callees.Keys.Any(index => Branches(extraction, index)) || Indexed.Any())
                 imports.Add("CIL.Safety.LoopObligations");
             if (spec.Framed) imports.Add("CIL.Safety.ObjectFields");
             if (spec.Parameters.Any(parameter => parameter.Writable)) imports.Add("CIL.Safety.SpanWrites");
@@ -186,6 +186,7 @@ internal static partial class ProofOutline
             if (WordArrays.Any()) imports.Add("CIL.Safety.ArrayContents");
             Header(lean, spec, imports, "`invariant`, `measure`, `postcondition` and `precondition` (at a call)");
             foreach (var index in callees.Keys.Order()) Contract(lean, index);
+            spec.NonNull = [.. Indexed];
             spec.Placeholders(lean);
             Entry(lean);
             StateAndHeader(lean);
@@ -486,8 +487,7 @@ internal static partial class ProofOutline
             lean.Line();
             var steppable = output is not null &&
                 inputs.All(input => !input.Reference && !input.Span && input.Object is null) &&
-                extraction.Emitted[index].Metadata.Contains("locals := [],") &&
-                extraction.Emitted[index].Ops.All(Body.Pure);
+                Computes(extraction, index);
             var pattern = inputs.Length switch
             {
                 0 => "-",
@@ -496,35 +496,20 @@ internal static partial class ProofOutline
             };
             lean.Line($"/-- `{callee.Name}` meets its contract; the loop proof uses only the contract. -/");
             lean.Line($"theorem {name}_holds : {name}Contract.Holds Extracted.program {name} := by");
-            if (steppable)
-            {
-                lean.Line($"  rintro {pattern} memory permitted");
-                lean.Line($"  refine ⟨CIL.executionBound Extracted.program {name}, memory,");
-                lean.Line($"    [.scalar ({ScalarConstructor(output!.Value)} ?output)], ?run, " +
-                    "Confined.refl _ memory, ?output, rfl,");
-                lean.Line("    ?postcondition⟩");
-                lean.Line("  case run => cil_checked_steps");
-                lean.Noted("  ", "case postcondition => sorry", $"{name}Contract.post of the returned value");
-            }
+            if (steppable || Branches(extraction, index))
+                WordCalleeProof(lean, extraction, index, name, pattern,
+                    declared.Select(parameter => Variable(parameter.Name)).ToArray(), kept: false);
             else if (store is { } body)
             {
                 var value = Variable(declared[body.Value].Name);
                 lean.Line($"  rintro {pattern} memory writable");
-                lean.Line($"  dsimp only [{name}Contract] at writable ⊢");
+                lean.Line($"  dsimp only [{name}Contract] at writable");
                 lean.Line($"  obtain ⟨after, wrote, formed, confined, filled⟩ := writable.write_one {value}");
-                lean.Line($"  refine ⟨CIL.executionBound Extracted.program {name}, after, [], ?_, confined, (), rfl, " +
-                    "filled⟩");
+                lean.Line("  refine MethodContract.Holds.intro after () ?_ confined filled");
                 lean.Line($"  cil_checked_steps [{StoreLemma(body.Op)} wrote, formed]");
             }
             else if (spanStore is { } spanBody)
                 SpanStoreContract(lean, index, name, pattern, Variable(declared[1].Name), spanBody.Op);
-            else if (Branches(index))
-            {
-                lean.Line($"  rintro {pattern} memory permitted");
-                var sides = 0;
-                BranchedCallee(lean, index, name, declared.Select(parameter => Variable(parameter.Name)).ToArray(),
-                    output!.Value, 0, [], [], "  ", ref sides);
-            }
             else
             {
                 var reason = inputs.Any(input => input.Reference) ? "it writes through a reference"
@@ -558,9 +543,33 @@ internal static partial class ProofOutline
             return stores ? (reference, word, width, ops[2]) : null;
         }
 
+        /// <summary>Whether a callee without locals only computes, so one checked run steps its body.</summary>
+        internal static bool Computes(Extraction extraction, int index) =>
+            extraction.Emitted[index].Metadata.Contains("locals := [],") &&
+            extraction.Emitted[index].Ops.All(Body.Pure);
+
+        /// <summary>The `Holds` proof of a callee of words that `Computes` or `Branches`, its inputs bound by
+        /// `pattern` and named `arguments`: one stepped run, or a split on each test. A `kept` contract's
+        /// `post` first states that the memory is as it was.</summary>
+        internal static void WordCalleeProof(Writer lean, Extraction extraction, int index, string name,
+            string pattern, string[] arguments, bool kept)
+        {
+            lean.Line($"  rintro {pattern} memory permitted");
+            if (Branches(extraction, index))
+            {
+                var sides = 0;
+                BranchedCallee(lean, extraction, index, name, arguments, 0, [], [], "  ", ref sides, kept);
+                return;
+            }
+            ContractEvidence.Returns(lean, "  ", "");
+            lean.Line("  case run => cil_checked_steps");
+            if (kept) KeptPost(lean, "  ", name, "", "");
+            else lean.Noted("  ", "case postcondition => sorry", $"{name}Contract.post of the returned value");
+        }
+
         /// <summary>Whether a callee of words with no locals tests its arguments and returns a word or throws on
         /// each side, so its contract proof splits on each test and steps every returning side.</summary>
-        bool Branches(int index)
+        internal static bool Branches(Extraction extraction, int index)
         {
             var callee = extraction.Methods[index];
             var ops = extraction.Emitted[index].Ops;
@@ -575,10 +584,12 @@ internal static partial class ProofOutline
         }
 
         /// <summary>The contract proof of a branching callee from `pc`: a `by_cases` on each test, each returning
-        /// side stepped with the tests' facts, and each throwing side closed from the precondition.</summary>
-        void BranchedCallee(Writer lean, int index, string name, string[] arguments, int width, int pc,
-            List<(string Term, int Bits)> stack, List<(string Fact, string Text)> facts, string indent,
-            ref int sides)
+        /// side stepped with the tests' facts, and each throwing side closed from the precondition. A `kept`
+        /// contract's `post` first states that the memory is as it was, which each returning side proves.
+        /// </summary>
+        internal static void BranchedCallee(Writer lean, Extraction extraction, int index, string name,
+            string[] arguments, int pc, List<(string Term, int Bits)> stack, List<(string Fact, string Text)> facts,
+            string indent, ref int sides, bool kept)
         {
             var callee = extraction.Methods[index];
             var ops = extraction.Emitted[index].Ops;
@@ -610,19 +621,17 @@ internal static partial class ProofOutline
                 {
                     var suffix = (++sides).ToString(System.Globalization.CultureInfo.InvariantCulture);
                     var steps = facts.Count == 0 ? "" : $" [{string.Join(", ", facts.Select(fact => fact.Fact))}]";
-                    lean.Line($"{indent}refine ⟨CIL.executionBound Extracted.program {name}, memory,");
-                    lean.Line($"{indent}  [.scalar ({ScalarConstructor(width)} ?output{suffix})], ?run{suffix}, " +
-                        $"Confined.refl _ memory, ?output{suffix}, rfl,");
-                    lean.Line($"{indent}  ?postcondition{suffix}⟩");
+                    ContractEvidence.Returns(lean, indent, suffix);
                     lean.Line($"{indent}case run{suffix} => cil_checked_steps{steps}");
-                    lean.Noted(indent, $"case postcondition{suffix} => sorry",
+                    if (kept) KeptPost(lean, indent, name, suffix, Where());
+                    else lean.Noted(indent, $"case postcondition{suffix} => sorry",
                         $"{name}Contract.post of the returned value{Where()}");
                     return;
                 }
                 else if (op.StartsWith(".throw ", StringComparison.Ordinal))
                 {
-                    lean.Line($"{indent}-- `{callee.Name}` throws at {ProofOutline.Location(callee, pc)}{Where()}, " +
-                        "which its precondition must rule out");
+                    lean.Comment($"{indent}-- ", $"{indent}-- ", $"`{callee.Name}` throws at " +
+                        $"{ProofOutline.Location(callee, pc)}{Where()}, which its precondition must rule out");
                     lean.Line($"{indent}exfalso");
                     lean.Line($"{indent}cil_loop_obligation [{name}Contract]");
                     return;
@@ -648,8 +657,8 @@ internal static partial class ProofOutline
                         var next = holds == takenWhenTrue ? taken : pc + 1;
                         var text = holds ? $"`{condition}`" : $"not `{condition}`";
                         lean.Line($"{indent}· -- {text}");
-                        BranchedCallee(lean, index, name, arguments, width, next, [.. rest],
-                            [.. facts, (fact, text)], indent + "  ", ref sides);
+                        BranchedCallee(lean, extraction, index, name, arguments, next, [.. rest],
+                            [.. facts, (fact, text)], indent + "  ", ref sides, kept);
                     }
                     return;
                 }
@@ -817,10 +826,12 @@ internal static partial class ProofOutline
             if (implicitBinders.Length > 0) explicitBinders.Add(implicitBinders);
             explicitBinders.Add($"(state : {StateType("memory")})");
             var ordinal = active + 1;
+            lean.Quiet();
             lean.Line(loops.Count == 1 ? "/-- Replace with what holds at every loop head. -/"
                 : $"/-- Replace with what holds at every head of loop {ordinal}, tested at {Location(loop.Latch)}. -/");
             lean.Wrapped($"def invariant{suffix}", explicitBinders, ": Prop := sorry");
             lean.Line();
+            lean.Quiet();
             lean.Line(loops.Count == 1 ? "/-- Replace with a quantity each iteration decreases. -/"
                 : $"/-- Replace with a quantity each iteration of loop {ordinal} decreases. -/");
             lean.Wrapped($"def measure{suffix}", explicitBinders, ": Nat := sorry");
@@ -913,8 +924,10 @@ internal static partial class ProofOutline
                     parameter.Name + (parameter.Writable ? "Width" : "Contents.elementWidth"), parameter.Mode
                 }))
                 .Concat(WordArrays.Select(array => array.Name + "Valid"));
-            var pattern = Homes.Concat(["entered", "setup"]).Concat(Homes.Select(_ => "-")).Concat(["-", "entryFrame"]);
+            var pattern = Homes.Concat(["entered", "enter"]);
             lean.Wrapped($"  obtain ⟨{string.Join(", ", pattern)}⟩ :=", ["entry.checked", .. entryArguments], "");
+            lean.Line("  have setup := enter.setup");
+            lean.Line("  have entryFrame := enter.frame");
             foreach (var array in Indexed) Destructure(lean, array);
             var formed = spec.Parameters.SelectMany(parameter => parameter.Shape switch
             {
@@ -923,13 +936,10 @@ internal static partial class ProofOutline
                 ParameterShape.Object => [parameter.Name + "Live.formed"],
                 _ => []
             });
-            // An array argument is checked through `checkedValue`, which unfolds the word arguments beside it.
-            var unfolded = !WordArrays.Any() ? []
-                : spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.Scalar)
-                ? new[] { "checkedValue", "numericValue" } : ["checkedValue"];
-            var checkedArguments = spec.Symbolic
-                ? "(by simp [cil_checked" + string.Concat(unfolded.Concat(formed).Select(fact => ", " + fact)) + "])"
-                : "rfl";
+            // An array argument's check does not close by the `cil_checked` equations alone.
+            var checkedArguments = !spec.Symbolic ? "rfl"
+                : WordArrays.Any() ? $"(by cil_checked_side [{string.Join(", ", formed)}])"
+                : "(by simp [cil_checked" + string.Concat(formed.Select(fact => ", " + fact)) + "])";
             lean.Wrapped("  refine invoke_loop_satisfies", ["Extracted.lookup0", checkedArguments, "setup",
                 HeaderTerm(),
                 $"(invariant {Arguments})", $"(measure {Arguments})", "(fun start => ?_)", "?_"], "");
@@ -967,8 +977,11 @@ internal static partial class ProofOutline
             var name = array.Name;
             var storage = $"(ArrayView.storage {Destructured(array)})";
             lean.Line($"  rcases {name} with ⟨_ | {name}Base, {name}Length, {name}ElementType⟩");
-            lean.Line("  · exfalso");
-            lean.Line("    cil_loop_obligation [Precondition]");
+            lean.Line($"  · -- a null `{name}` throws at its length, which Precondition rules out");
+            lean.Line("    exfalso");
+            lean.Line("    first");
+            lean.Line("    | cil_loop_obligation [Precondition]");
+            lean.Line($"    | fail \"Precondition must exclude null: `{name}.reference ≠ .null`\"");
             lean.Line($"  simp only at {name}Type");
             lean.Line($"  subst {name}Type");
             // A valid array is shorter than `2 ^ 31`, so its signed bound test reads as unsigned.
@@ -990,6 +1003,8 @@ internal static partial class ProofOutline
         void Iteration(Writer lean, string indent)
         {
             lean.Line($"{indent}rintro ⟨{Pattern()}, current, frame⟩ holds recurse");
+            lean.Comment($"{indent}-- ", $"{indent}-- ", "`holds` is the invariant at this loop head and `assumed` " +
+                "the Precondition; each side below names the test it took, such as `guard`.");
             var iteration = Initial(component => component.Part switch
             {
                 Part.Span => new SpanTerm(component.Name + "View", component.Name + "Remaining",
@@ -997,12 +1012,10 @@ internal static partial class ProofOutline
                 Part.Object => new ObjectTerm(component.Name),
                 _ => new Number(component.Name, component.Width)
             });
-            // An object stays live through the loop; the loop tactics carry the fact across each store.
+            // An object stays live through the loop; the loop tactics read that it forms from this fact and
+            // carry it across each store.
             foreach (var instance in spec.Objects)
-            {
                 lean.Line($"{indent}have {instance.Name}Now := {instance.Name}Live.after_confined frame.confined");
-                iteration.Facts.Add(instance.Name + "Now.formed");
-            }
             Guard(iteration);
             Branch(lean, iteration, indent, "guard");
         }
@@ -1350,7 +1363,6 @@ internal static partial class ProofOutline
             }
             var instance = term + "Object";
             var live = Side(present, $"(.address {instance})");
-            live.Facts.Add(instance + "Live.formed");
             lean.Line($"{indent}cases {term} with");
             lean.Line($"{indent}| null =>");
             Walk(lean, Side(absent, ".null"), indent + "  ");

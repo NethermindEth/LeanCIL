@@ -17,8 +17,7 @@ theorem keeps_label (memory : Memory) (label : Reference)
     (formed : formObject memory (.address label) = .ok (.object (.address label))) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object (.address label)] memory =
       .ok (memory, [.object (.address label)]) := by
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
-  cil_checked_steps [formed, leaveFrame]
+  cil_checked_steps [formed]
 
 #print axioms keeps_label
 
@@ -28,8 +27,7 @@ theorem null_is_none (memory : Memory) (literal : Reference)
     (formed : formObject memory (.address literal) = .ok (.object (.address literal))) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object .null] memory =
       .ok (memory, [.object (.address literal)]) := by
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
-  cil_checked_steps [literalObject_of_lookup bound, formed, leaveFrame]
+  cil_checked_steps [literalObject_of_lookup bound, formed]
 
 #print axioms null_is_none
 
@@ -55,7 +53,6 @@ theorem unbound_unsupported (memory : Memory) (unbound : memory.literals.lookup 
   have missing : literalObject memory "none" =
       .error (.unsupported "String literal is not bound by the caller") := by
     simp only [literalObject, unbound]
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
   cil_checked_steps [missing]
 
 #print axioms unbound_unsupported

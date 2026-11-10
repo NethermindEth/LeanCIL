@@ -62,9 +62,9 @@ for (var attempt = 0; attempt < 2; attempt++)
     catch (InvalidOperationException error) when (error.Message.Contains("while replaying declaration")) { }
     if (File.Exists(Path.Combine(output, "verified.json"))) throw new Exception("Failed proof retained a successful report");
 }
-// A newly imported module must report dependency-check failures as kernel replay,
-// even when the base library has already been certified in this session. The library is
-// read in place, so plant the module in a private copy rather than the shared one.
+// A module planted in a certified library read in place is never certified, even after the
+// library was certified in this session: building it writes into the library, which is rejected
+// as changed, and a later session that finds it already built reports its kernel replay failure.
 var plantedLibrary = Path.Combine(Path.GetTempPath(), "leancil-reuse-" + Guid.NewGuid().ToString("N"));
 CopyTree(verifier.library!, plantedLibrary);
 var suppliedLibrary = Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY");
@@ -73,25 +73,40 @@ Environment.SetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY", plantedLibrary);
 Environment.SetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY_SHA256", Sha(Path.Combine(plantedLibrary, "cache-manifest.json")));
 try
 {
-    using var planted = new Program();
-    File.WriteAllText(proof, baseline);
-    planted.Verify(assembly, "Examples", entry, proof, output);
-    File.WriteAllText(Path.Combine(planted.library!, "CIL", "ReuseForged.lean"), """
-        import Lean
-        set_option debug.skipKernelTC true
-        run_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {
-          name := `ReuseForged.helper
-          levelParams := []
-          type := Lean.mkConst ``False
-          value := Lean.mkConst ``True.intro
-        })
-        """);
-    File.WriteAllText(proof, "import Extracted\nimport CIL.ReuseForged\ntheorem ExampleProof.correctness : False := ReuseForged.helper\n");
+    const string forgedProof =
+        "import Extracted\nimport CIL.ReuseForged\ntheorem ExampleProof.correctness : False := ReuseForged.helper\n";
+    using (var planted = new Program())
+    {
+        File.WriteAllText(proof, baseline);
+        planted.Verify(assembly, "Examples", entry, proof, output);
+        File.WriteAllText(Path.Combine(planted.library!, "CIL", "ReuseForged.lean"), """
+            import Lean
+            set_option debug.skipKernelTC true
+            run_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {
+              name := `ReuseForged.helper
+              levelParams := []
+              type := Lean.mkConst ``False
+              value := Lean.mkConst ``True.intro
+            })
+            """);
+        File.WriteAllText(proof, forgedProof);
+        try
+        {
+            planted.Verify(assembly, "Examples", entry, proof, output);
+            throw new Exception("Unchecked imported helper was accepted");
+        }
+        catch (InvalidOperationException error) when (error.Message.Contains("changed on disk during verification") &&
+            error.Message.Contains("ReuseForged")) { }
+        if (File.Exists(Path.Combine(output, "verified.json")))
+            throw new Exception("Failed dependency retained a successful report");
+    }
+    // The library now holds the forged module's outputs, which its manifest does not record.
+    using var reopened = new Program();
     var dependencyStage = "";
     try
     {
-        planted.Verify(assembly, "Examples", entry, proof, output, stage: value => dependencyStage = value);
-        throw new Exception("Unchecked imported helper was accepted");
+        reopened.Verify(assembly, "Examples", entry, proof, output, stage: value => dependencyStage = value);
+        throw new Exception("Unchecked imported helper already built into the library was accepted");
     }
     catch (InvalidOperationException error) when (error.Message.Contains("while replaying declaration") &&
         error.Message.Contains("ReuseForged.helper") && dependencyStage == "kernel replay") { }
@@ -103,7 +118,7 @@ finally
     Environment.SetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY_SHA256", suppliedDigest);
     Directory.Delete(plantedLibrary, true);
 }
-Console.WriteLine("PASS imported helper rejection reports kernel replay stage");
+Console.WriteLine("PASS imported helper built into the library is rejected, and replayed once it is there");
 File.WriteAllText(proof, baseline);
 using var second = new Program();
 timer.Restart();

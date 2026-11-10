@@ -1,32 +1,31 @@
 import Extracted
 import CIL.Verification
+import CIL.StructuralLabels
 import CIL.Safety.LoopScaffold
-import CIL.Safety.LoopFrames
 
 /-! `FillWords` writes `count` words through a caller reference. The loop invariant states only
-    the filled prefix; the loop state carries the frame facts, proved at each step. -/
+    the filled prefix; the loop state carries the frame facts, which the loop tactics keep. -/
 
 open CIL.Safety
 open CIL (W32 W64)
 namespace ExampleProof
 
-/-- The loop guard compares the index, below the count, against the count. -/
-private def guard : Nat := instructionLocation Extracted.method0 fun op =>
-  match op with | .blt _ => true | _ => false
-
 bind_entry entry (initial : Memory) (base : Reference) (v : W64) (n : W32)
     (formed : initial.WellFormed) := Extracted.method0
   with [.reference (.address base), .scalar (.i64 v), .scalar (.i32 n)] from initial
   allocating formed
+bind_loop loop := Extracted.method0
 
 /-- The index, held by the frame's only local, with the frame facts for the words written. -/
 private abbrev State (initial : Memory) (base home : Reference) (n : W32) :=
   FrameState [(base, 8 * n.toNat)] initial [.word32] W32 (fun _ => [.bytes .word32 home])
     fun k => [some (.i32 k)]
 
-private def header (initial : Memory) (base home : Reference) (n : W32)
-    (state : State initial base home n) : LoopState :=
-  ⟨guard, entry.frame initial home, [.scalar (.i32 n), .scalar (.i32 state.values)], state.memory⟩
+/-- The loop test, which compares the index, below the count, against the count. -/
+bind_cutpoint header (initial : Memory) (base home : Reference) (n : W32)
+    (state : State initial base home n) :=
+  Extracted.method0 at loop.latch matching (· matches .blt _)
+  with entry.frame initial home, [.scalar (.i32 n), .scalar (.i32 state.values)], state.memory
 
 /-- The first `k` words are filled and the rest stay writable. -/
 private def invariant (initial : Memory) (base home : Reference) (v : W64) (n : W32)
@@ -42,40 +41,30 @@ theorem fill_words (initial : Memory) (base : Reference) (v : W64) (n : W32)
         [.reference (.address base), .scalar (.i64 v), .scalar (.i32 n)] initial = .ok (final, []) ∧
       Contents final base 8 (List.replicate n.toNat (v : BitVec (8 * 8))) ∧
       Confined [(base, 8 * n.toNat)] initial final := by
-  obtain ⟨home, entered, setup, -, entryMemory, entryFrame⟩ :=
-    entry.checked initial base v n formed
+  obtain ⟨home, entered, enter⟩ := entry.checked initial base v n formed
   have old := formed.form_bound valid
-  obtain ⟨m0, stored0, frame0, below0⟩ := (entryFrame [(base, 8 * n.toNat)]).store 0 (.i32 0) rfl
-  have loaded0 := frame0.load 0
-  have room := (writable.after_below entryMemory.kept old).after_below below0 old
-  refine invoke_loop_results (by rfl) ?_ setup (header initial base home n)
-    (invariant initial base home v n) (fun s => n.toNat - s.values.toNat) ⟨0, m0, frame0⟩
-    (by cil_loop_steps [entry.frame, header, guard, stored0, loaded0])
-    ⟨by simpa using Filled.start room, by simp⟩ ?_
-  · simp [checkedValue, formValue, checkedAt, valid, numericValue, Except.mapError, Bind.bind,
-      Except.bind, Pure.pure, Except.pure, List.mapM_cons, List.mapM_nil]
-  rintro ⟨k, m, frame⟩ ⟨filled, bounded⟩
+  refine invoke_loop_induction (by rfl) ?_ enter.setup (header initial base home n)
+    (invariant initial base home v n) (fun s => n.toNat - s.values.toNat) (fun start => ?_) ?_
+  · cil_checked_side [valid]
+  · cil_loop_recurse start 0
+    case invariant => exact ⟨by simpa using Filled.start writable, by simp⟩
+  rintro ⟨k, m, frame⟩ ⟨filled, bounded⟩ recurse
   dsimp only at filled bounded
-  have loaded := frame.load 0
   by_cases exit : k.toNat = n.toNat
-  · left
-    obtain rfl : k = n := BitVec.eq_of_toNat_eq exit
+  · obtain rfl : k = n := BitVec.eq_of_toNat_eq exit
     have stays : ¬ k.toInt < k.toInt := Int.lt_irrefl _
-    cil_loop_finish [entry.frame, header, guard, loaded, stays]
+    cil_loop_finish [stays]
   · have lower : k.toNat < n.toNat := by omega
     obtain ⟨m1, target, stored, pushed⟩ := filled.write_next (by omega) (v : BitVec (8 * 8))
     simp only [List.length_replicate] at target stored
     have baseForm := frame.form valid old
     have frame1 := frame.write_element stored (List.mem_singleton_self _) lower old
-    obtain ⟨m2, stored2, frame2, below2⟩ := frame1.store 0 (.i32 (k + 1)) rfl
-    cil_loop_continue ⟨k + 1, m2, frame2⟩ [header, guard, int_lt small lower, baseForm,
-      add_int_element frame.wellFormed baseForm (by omega) target, step_store64_of_write stored,
-      loaded, frame1.load 0, stored2, frame2.load 0, List.reverse_cons, List.reverse_nil,
-      List.nil_append, List.cons_append]
+    cil_loop_recurse recurse (k + 1) [int_lt small lower,
+      add_int_element frame.wellFormed baseForm (by omega) target, step_store64_of_write stored]
     all_goals simp only [invariant, toNat_succ lower]
     case invariant =>
       rw [List.replicate_succ', show n.toNat - (k.toNat + 1) = n.toNat - k.toNat - 1 by omega]
-      exact ⟨pushed.after_below below2 old, by omega⟩
+      exact ⟨pushed, by omega⟩
     case measure => omega
 
 /-- Every nonnegative count fills exactly that many words, whatever the buffer held before. -/
@@ -98,6 +87,7 @@ theorem correctness : Ensures Extracted.program 0
   obtain ⟨rfl, rfl, rfl⟩ := same
   exact ⟨contents, framed⟩
 
+#print axioms fill_words
 #print axioms correctness
 
 end ExampleProof

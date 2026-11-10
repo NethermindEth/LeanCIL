@@ -35,28 +35,56 @@ internal static class VerificationSelection
             .ThenBy(name => name, StringComparer.Ordinal).ToArray();
     }
 
-    internal sealed record Group(string Suite, string[] Suites, int Timeout);
+    // Proof marks a job that runs a proof suite, whose outputs the job then measures for proof cost.
+    // Libraries marks the one job that also measures the test libraries when a run compares them.
+    internal sealed record Group(string Suite, string[] Suites, int Timeout, bool Proof, bool Libraries);
 
-    // Bound sequential work so grouping removes setup without creating another long tail.
+    // The suite jobs that run at once, which the workflow's `max-parallel` sets.
+    internal const int Runners = 8;
+
+    // More members than this make a job's summary long and its name useless for finding a failure.
+    internal const int GroupMembers = 8;
+
+    // A job is filled to the share of all measured time that one runner takes in one round, with the
+    // fewest rounds that keep a job no longer than the longest suite. That suite then stays the
+    // longest job, and every runner finishes its last job at about the same time.
+    internal static double GroupSeconds(IReadOnlyDictionary<string, double> durations)
+    {
+        var rounds = 1;
+        while (durations.Values.Sum() / (Runners * rounds) > durations.Values.Max()) rounds++;
+        return durations.Values.Sum() / (Runners * rounds);
+    }
+
+    // A job's suites when few enough to read, else its longest suite and how many more it runs.
+    static string Name(List<string> group) => group.Count <= 3 ? string.Join("+", group)
+        : $"{group[0]}+{group.Count - 1}more";
+
+    // Each job costs setup and restores before its first suite, so suites are packed into as few jobs
+    // as the target allows, longest first into the fullest job that still has room. A suite without
+    // a measured time runs alone.
     internal static Group[] Groups(IEnumerable<string> suites, string? root = null)
     {
         var durations = ReadDurations(root);
+        var target = GroupSeconds(durations);
+        double Seconds(List<string> group) =>
+            group.Sum(name => durations.GetValueOrDefault(name, double.PositiveInfinity));
         var groups = new List<List<string>>();
         foreach (var suite in Schedule(suites.Distinct(StringComparer.Ordinal), root))
         {
             var seconds = durations.GetValueOrDefault(suite, double.PositiveInfinity);
-            var group = seconds <= 60 ? groups.Where(group => group.Count < 3 &&
-                    group.All(name => durations.GetValueOrDefault(name, double.PositiveInfinity) <= 60) &&
-                    group.Sum(name => durations[name]) + seconds <= 120)
-                .OrderByDescending(group => group.Sum(name => durations[name])).FirstOrDefault() : null;
+            var group = groups.Where(group => group.Count < GroupMembers && Seconds(group) + seconds <= target)
+                .OrderByDescending(Seconds).FirstOrDefault();
             if (group is null) groups.Add([suite]);
             else group.Add(suite);
         }
-        return groups.OrderByDescending(group => group.Sum(name =>
-                durations.GetValueOrDefault(name, double.PositiveInfinity)))
-            .Select(group => new Group(string.Join("+", group), group.ToArray(),
+        var ordered = groups.OrderByDescending(Seconds).ToArray();
+        // The shortest job carries the libraries: it starts last and has the most room before the
+        // other jobs of its round finish.
+        var carrier = ordered.LastOrDefault();
+        return ordered.Select(group => new Group(Name(group), group.ToArray(),
                 group.Max(name => name == "imports" ? 90 :
-                    name.StartsWith("exports", StringComparison.Ordinal) ? 120 : 30))).ToArray();
+                    name.StartsWith("exports", StringComparison.Ordinal) ? 120 : 30),
+                group.Any(VerificationSuites.ProofSuites.Contains), group == carrier)).ToArray();
     }
 
     internal static Dictionary<string, HashSet<string>> SuiteInputs(string? root = null)
@@ -92,6 +120,7 @@ internal static class VerificationSelection
         inputs["core"].UnionWith(new[] { "Add", "AddModel", "Choose", "Calls", "Alias", "Struct", "StructCopy",
             "LargeStruct", "PastEnd", "WrongAdd", "Escape", "Hardware", "StaticData" }.Select(name => $"Examples/Proofs/{name}.lean"));
         inputs["core"].Add("Tests/ModularStatics.lean");
+        inputs["docs"].UnionWith(WalkthroughInputs(root));
         inputs["evidence"].UnionWith(new[] { "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests",
             "Throws", "SpanTables", "StaticValues", "StaticScalarValues", "TranslationAudit" }
             .Select(name => $"Tests/{name}.cs"));
@@ -145,6 +174,13 @@ internal static class VerificationSelection
         }
         return inputs;
     }
+
+    // The docs suite runs the commands its documents mark `sh run`, so the example files they name are its inputs.
+    static IEnumerable<string> WalkthroughInputs(string root) =>
+        Documentation.Documents(root).SelectMany(path => Documentation.Read(root, path).Walkthrough)
+            .Where(block => block.Kind is WalkthroughKind.Run or WalkthroughKind.RunFails)
+            .SelectMany(block => Documentation.CommandLines(block))
+            .SelectMany(entry => Matches(entry.Command, @"(Examples/[\w./-]+\.(?:lean|cs))"));
 
     internal static string[] Select(IEnumerable<string> paths, string eventName = "pull_request", string? root = null)
     {

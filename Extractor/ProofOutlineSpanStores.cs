@@ -38,10 +38,12 @@ internal static partial class ProofOutline
     static void SpanStoreContract(Writer lean, int index, string name, string pattern, string value, string op)
     {
         lean.Line($"  rintro {pattern} memory ⟨rest, span⟩");
-        lean.Line($"  dsimp only [{name}Contract] at span ⊢");
+        lean.Line($"  dsimp only [{name}Contract] at span");
         lean.Line($"  obtain ⟨item, after, address, found, wrote, confined, filled⟩ := span.write_head {value}");
-        lean.Line($"  refine ⟨CIL.executionBound Extracted.program {name}, after, [], ?_, confined, (), rfl, " +
-            "filled⟩");
+        lean.Line("  refine MethodContract.Holds.intro after ()");
+        lean.Line($"    ⟨CIL.executionBound Extracted.program {name}, ?_⟩ confined filled");
+        // Frame entry below is proved by hand, so the goal names the contract's arguments outright.
+        lean.Line($"  dsimp only [{name}Contract]");
         SpanStoreRun(lean, "  ", index, "span", "found", "wrote", "address", op);
     }
 
@@ -57,9 +59,7 @@ internal static partial class ProofOutline
         lean.Line($"{indent}have nonempty := {span}.length_cons.2.1");
         lean.Line($"{indent}apply CIL.Safety.invoke_of_run");
         lean.Line($"{indent}· cil_lookup []");
-        lean.Line($"{indent}· simp [checkedValue, numericValue, valid, Bind.bind, Except.bind, Pure.pure, " +
-            "Except.pure,");
-        lean.Line($"{indent}    checkedAt, Except.mapError]");
+        lean.Line($"{indent}· cil_checked_side [valid]");
         // Entering the frame homes the span in a local, which the stepping tactics do not set up.
         lean.Line($"{indent}· simp [enterFrame, Extracted.method{index}, makeLocals, makeArgumentHomes, " +
             "makeParameterHomes,");

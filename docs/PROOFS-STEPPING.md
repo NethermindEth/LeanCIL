@@ -40,6 +40,37 @@ returned values. These lemmas are also available directly from
 [StepComposition](../CIL/Safety/StepComposition.lean) and
 [CallComposition](../CIL/Safety/CallComposition.lean) for manual proofs.
 
+A goal `∃ fuel, invoke program fuel method args memory = result` is opened with
+`CIL.executionBound program method` as its fuel, so a proof states none; fuel that is already a
+term is left as written. `cil_checked_steps` and `cil_contract_steps` also state the goal with the
+`args`, `results`, `pre`, `footprint` and `post` of each defined contract unfolded, at entry and in
+each call's continuation, so a goal they step needs no `dsimp only [contract]` first. A contract
+variable and `Returns` stay folded, as does a goal a proof enters by hand.
+
+The stepping tactics read object evidence from the context, so a fact list does not repeat it. A
+hypothesis is recognized by the head of its statement, also as one side of a conjunction, when the
+goal names its object:
+
+| Hypothesis | Facts read |
+| --- | --- |
+| `live : LiveObject memory object` | `live.formed` |
+| `Readable`, `Owned` or `Holds` of a scalar field | `readable.live.formed`, `readable.located` and the unsigned load of `readable.facts`, which pushes the field's value |
+| `Readable`, `Owned` or `Holds` of a reference or array field | `readable.live.formed` and `readable.located` |
+| `ReferenceArray.Live`, `Readable`, `Owned` or `Holds` | `live.formed` and `live.located` |
+
+A fact that takes a further premise is still passed: `readable.facts held targetLive` for the
+load of a reference field, `readable.signedFacts` for a signed narrow load, and the equation a
+store returns. So are the facts of an object the goal does not name when the tactic starts, such
+as the target a reference field's load pushes on the way. A fact passed explicitly is used as
+given and not read again. Each fact read is
+added to the goal as a hypothesis, as the loop tactics add theirs, so it is elaborated once and
+not at every step, and a goal the tactics leave shows it.
+
+After each step the tactics evaluate the closed literal operands the state holds with the
+`cil_literal` simp set: a width conversion, sign extension or `toNat` of a bit-vector numeral, and
+a remainder of numerals, as a masked shift count is. The set fires on numerals only, so a symbolic
+operand stays as stated, and `simp only [cil_literal]` gives a hand-written step the same form.
+
 A goal stating a located fault, `invoke p fuel m args memory = .error ⟨m, pc, fault⟩`, enters
 through `invoke_of_run_fault` and steps the same way. At the stated `pc` the tactic first tries
 `run_fault`, which closes the goal when the fetched step raises exactly `fault`; other steps
@@ -71,7 +102,8 @@ comparison already decided to `1` or `0`, so a narrow Boolean return needs no un
 `NarrowKind.extend`. A follow-up `simp [leaveFrame, NarrowKind.extend]; split <;> rfl` after such
 a return fails with "no goals" and must be deleted. Other mathematical results can need a separate
 `simp` or case split. The remaining goal contains the returned values, rather than an unexecuted
-`run`. `cil_contract_steps` likewise leaves the return postcondition as a goal.
+`run`. `cil_contract_steps` likewise leaves the return postcondition as a goal, stated of the
+memory the body left when the returning frame is a literal that owns no allocation.
 
 A run-to-run goal `run p (fuel + n) m 0 .. = run p fuel m n ..` closes with `cil_checked_steps` when
 the stepped state is syntactically the target: symbolic `fuel` stops stepping there. With literal
@@ -292,8 +324,11 @@ The tactics of [LoopFrameSteps](../CIL/Safety/LoopFrameSteps.lean), which
 - `cil_loop_call holds input at site [facts]` applies the contract (`loop_terminates_call`) at
   the `bind_call` site or, without `at site`, at the fetched call. It leaves the precondition,
   tagged `precondition.<callee>`, unless `trivial` or a hypothesis proves it, then continues: it
-  names the returned memory, unfolds the contract, substitutes an output its postcondition states
-  as an equation (unless `cil_loop_call keeping`, which keeps it as `output`), names the callee's `WellFormed` (`calledFormed`) and proves the frame at the
+  names the returned memory `called`, the typed output `output` and, read by field from the call's
+  `CallResult`, its invocation `invoked`, footprint fact `confined` and postcondition `returned`,
+  unfolds the contract in them, substitutes an output its postcondition states as an equation
+  (unless `cil_loop_call keeping`, which keeps it as `output`), names the callee's `WellFormed`
+  (`calledFormed`) and proves the frame at the
   returned memory (`calledFrame`, through `LoopFrame.after_confined`), and carries the
   caller-buffer facts across the call: write authority always, contents when `omega` shows them
   apart from the callee's footprint. It fails naming the pc and instruction when the goal is not at a call, the argument
@@ -376,10 +411,10 @@ Each store names its memory, step and frame (`stored`, `storing`, `storedFrame`,
 the stored-over memory, or about the caller's, at the new one under the same name, so an
 invariant reads them at the memory it is stated at. All gather facts as the other loop tactics
 do, so the lists are optional.
-`loop_terminates_call_formed` gives the continuation `WellFormed`, the static world and catalog
-agreement when a proof composes the call by hand. The [counted-loop
-proof](../Examples/Proofs/CountCalls.lean) never unfolds the helper or names its fuel; the loop
-suite reuses it unedited for a reimplemented helper and requires it to reject a discarded helper
+`loop_terminates_call_formed` gives the continuation, after the call's `CallResult`, its
+`FrameInvariants` (`formed`, `staticWorld` and `classes`) when a proof composes the call by hand.
+The [counted-loop proof](../Examples/Proofs/CountCalls.lean) never unfolds the helper or names its
+fuel; the loop suite reuses it unedited for a reimplemented helper and requires it to reject a discarded helper
 result and a broken count. On the correct build, a nondecreasing measure and an invariant that holds
 at entry and exit but is not preserved each fail at exactly that obligation.
 
@@ -440,6 +475,8 @@ an unrelated context adds nothing to simp:
   `form` fact of the reference it gives. These, and the facts of a span only a kept equation
   such as a slice produces, are read only by instructions that use a reference or span, so a
   step over scalars and locals does not carry them;
+- the [object evidence](#compose-instructions) the straight-line tactics read, at a memory a state
+  of the goal holds;
 - `elementWidth` of a `SpanContents`;
 - for a [`LoopFrame`](../CIL/Safety/LoopFrames.lean) over `knownLocals` of a list, and for the
   entry frame `bind_entry ... allocating` proves for every footprint, the `form` of each home
@@ -478,9 +515,9 @@ locals are a literal list, as after the loop tactics' stores, so either frame fe
 `LoopFrame.load` reads a home at a loop head, and `LoopFrame.leave_kept` `setup` is the exit's
 `MemoryBelow` fact for a frame confined to no caller storage, for any exited frame with the
 entry's owned identities, closing a postcondition such as `SpanSum`'s; the loop tactics derive
-both from the state's frame. [Countdown](../Examples/Proofs/Countdown.lean) and
-[SpanSum](../Examples/Proofs/SpanSum.lean) store through their frames this way; SpanSum's loop
-steps name no frame or span fact.
+both from the state's frame. [SpanSum](../Examples/Proofs/SpanSum.lean) stores through its frame
+this way, and its loop steps name no frame or span fact;
+[Countdown](../Examples/Proofs/Countdown.lean) leaves its stores to `cil_loop_recurse`.
 
 ### See what the tactics did
 
@@ -510,9 +547,16 @@ the step rewritten as far as the step equations and the result facts in scope go
 a class instance lacks `objectForm`, `objectSlot` or `objectAllocation`. A stepping goal under the
 existentials of a contract's run, as `cil_contract_steps` leaves one at a call, is read as the run
 it states. The error itself is
-unchanged. `leancil verify --trace` and `--format json` add the import to the start of the
+unchanged.
+
+With `set_option cil.goals true`, the observer logs the goal at each `sorry` written in the
+source, as a term or a tactic, the goal before each tactic that raised an error and each goal of
+an `unsolved goals` error, once each and in source order, as a message starting
+`[LeanCIL goal v1] ` and `sorry`, `error` or `unsolved`, followed by the goal as Lean prints it.
+
+`leancil verify --trace`, `--goals` and `--format json` add the import to the start of the
 proof's first import line, which moves no other line or column, set these options and report the
-steps and records apart from the proof's messages.
+steps, goals and records apart from the proof's messages.
 
 ## Read control flow off one step
 

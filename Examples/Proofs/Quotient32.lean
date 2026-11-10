@@ -1,4 +1,5 @@
 import Extracted
+import CIL.Safety.SymbolicExecution
 
 open CIL CIL.Safety
 namespace ExampleProof
@@ -12,11 +13,12 @@ theorem correctness (x y : W32) (nonzero : y ≠ 0) :
       .ok (.i32 (BitVec.ofNat 32 (x.toNat / y.toNat))) := by
     simp only [divideValues, divideBits, nonzero, ite_false]
     rfl
-  simp [Extracted.program, Extracted.method0, CIL.Safety.invoke, CIL.Safety.run,
-    CIL.Safety.step, checkedValue, numericValue, enterFrame, makeSelectedLocals, makeLocals,
-    observerCount, unspecifiedOperands, CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified,
-    makeArgumentHomes, makeParameterHomes, leaveFrame, calculation, List.mapM, List.mapM.loop,
-    Bind.bind, Except.bind, Except.mapError, Except.map, Pure.pure, Except.pure]
+  have ran : CIL.Safety.invoke Extracted.program 4 0 [.scalar (.i32 x), .scalar (.i32 y)]
+      Memory.empty =
+        .ok (Memory.empty, [.scalar (.i32 (BitVec.ofNat 32 (x.toNat / y.toNat)))]) := by
+    cil_checked_steps [calculation]
+  rw [ran]
+  rfl
 
 #print axioms correctness
 end ExampleProof

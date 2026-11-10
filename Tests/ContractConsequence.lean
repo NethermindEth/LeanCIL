@@ -198,10 +198,11 @@ theorem root_holds (percentHolds : percentBounded.Holds Extracted.program percen
     cil_outcome_call percentHolds v at percentSite []
     · trivial
     · exact raised
-    rintro m1 _ - confined ⟨out, rfl, bound⟩
+    intro m1 out call
     dsimp only [percentBounded, percentExact]
     cil_contract_steps []
-    refine ⟨confined, _, rfl, ?_⟩
+    refine MethodContract.Holds.returns call.framed ?_
+    have bound := call.post
     dsimp only [percentBounded] at bound ⊢
     bv_omega
 
@@ -268,15 +269,16 @@ def addPublic : MethodContract AddInput where
 
 theorem add_internal : addInternal.Holds Extracted.program addTo := by
   rintro ⟨a, b, res, region, x, y⟩ m ⟨readA, readB, writable⟩
-  dsimp only [addInternal, addArgs] at *
+  dsimp only [addInternal, addArgs] at readA readB writable
   obtain ⟨stored, wrote, store, readback⟩ := store_word64 (x + y) writable
   have fa := access_reference_valid _ _ _ _ _ (read_access readA)
   have fb := access_reference_valid _ _ _ _ _ (read_access readB)
   have fr := access_reference_valid _ _ _ _ _ writable
   have la := load_word64_of_read readA
   have lb := load_word64_of_read readB
-  refine ⟨9, stored, [], ?_, Confined.write wrote (by simp [numberBytes]), _, rfl, rfl, readback⟩
-  cil_checked_steps [fa, fb, fr, la, lb, store]
+  refine MethodContract.Holds.intro stored _
+    ⟨9, ?_⟩ (Confined.write wrote (by simp [addInternal, numberBytes])) ⟨rfl, readback⟩
+  cil_checked_steps [addArgs, fa, fb, fr, la, lb, store]
 
 /-- The frame fact comes from the internal footprint, not from re-executing `AddTo`. -/
 theorem add_public_refines : addInternal.Refines addPublic where
@@ -303,10 +305,10 @@ theorem sum_holds (addHolds : addPublic.Holds Extracted.program addTo) : sumCont
   cil_contract_steps [fa, fb, fr]
   cil_contract_call addHolds ⟨a, b, res, region, x, y⟩ at addSite [fa, fb, fr]
   · exact ⟨formed, ⟨readA, readB, writable⟩, apart, within⟩
-  rintro m1 _ - framed ⟨_, rfl, rfl, readRes, readA1⟩
+  intro m1 out call
+  obtain ⟨rfl, readRes, readA1⟩ := call.post
   cil_contract_steps []
-  simp only [leaveFrame, List.foldl_nil]
-  exact ⟨framed, _, rfl, rfl, readRes, readA1⟩
+  exact ⟨call.framed, _, rfl, rfl, readRes, readA1⟩
 
 theorem sum_correct : sumContract.Holds Extracted.program sum := sum_holds add_public
 
@@ -614,7 +616,8 @@ def isSetContract : MethodContract Bool Bool where
 /-- `IsSet` meets its contract by stepping its body. -/
 theorem is_set_holds : isSetContract.Holds Extracted.program isSet := by
   intro flag memory _
-  refine ⟨3, memory, isSetContract.results flag, ?_, Confined.refl _ memory, flag, rfl, rfl⟩
+  refine MethodContract.Holds.intro memory flag ⟨3, ?_⟩ (Confined.refl _ memory) rfl
+  dsimp only [isSetContract]
   cases flag <;> cil_checked_steps <;> rfl
 
 #print axioms is_set_holds

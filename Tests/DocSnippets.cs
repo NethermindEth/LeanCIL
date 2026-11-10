@@ -7,6 +7,7 @@ using System.Diagnostics;
 
 // Every unmarked Lean block in the documentation must elaborate with exactly its own imports, and every
 // library name the rest of the documentation cites must still exist; a stale copy must fail at its line.
+// Every `sh run` command must exit as documented and print the output documented below it.
 using var verification = new Program();
 var output = At("artifacts/DocSnippets");
 Directory.CreateDirectory(output);
@@ -132,4 +133,75 @@ foreach (var (line, what) in new[] { (LinesOf("invokeChecked")[0], "removed pros
             {string.Join('\n', rejected)}
             """);
 Console.WriteLine("PASS stale snippets, missing imports and removed names fail at their document lines");
+
+// Each document's commands run from a copy of the example sources they name, so an edit a walkthrough
+// makes never touches the checkout. The copy is at one path for every document: builds are then identical.
+verification.EnsureExtractorBuilt();
+var workspace = Path.Combine(output, "Walkthrough");
+var walkthroughs = Documentation.Documents(Root).Select(path => Documentation.Read(Root, path))
+    .Where(page => page.Walkthrough.Length != 0).ToArray();
+var commandCount = 0;
+elapsed.Restart();
+foreach (var page in walkthroughs)
+{
+    if (Directory.Exists(workspace)) DeleteTree(workspace);
+    Directory.CreateDirectory(workspace);
+    var transcript = new List<CommandResult>();
+    var problems = Documentation.RunWalkthrough(page, command =>
+    {
+        var words = Words(command);
+        foreach (var word in words) Mirror(word);
+        string[] started = words[0] == "leancil" ? ["dotnet", ExtractorPath, .. words[1..]] : words;
+        var result = Execute(started, workspace);
+        transcript.Add(new(result.Code, result.Stdout, result.Stderr));
+        return transcript[^1];
+    }, block =>
+    {
+        Mirror(block.Source!);
+        var path = Path.Combine(workspace, block.Source!);
+        File.WriteAllLines(path, Documentation.Edited(File.ReadAllLines(path), block, out var reason)
+            ?? throw new InvalidOperationException($"{block.Document}:{block.Line}: {reason}"));
+    });
+    commandCount += transcript.Count;
+    if (problems.Count == 0) continue;
+    Console.Error.WriteLine($"Documented commands that do not behave as documented ({problems.Count}):");
+    foreach (var problem in problems) Console.Error.WriteLine("  " + problem);
+    Console.Error.WriteLine("Correct the document to what the tool prints, or the tool; docs/CI.md lists the markers.");
+    return 1;
+}
+Console.WriteLine($"PASS {commandCount} documented commands of {walkthroughs.Length} documents exit and print " +
+    $"as documented ({elapsed.Elapsed.TotalSeconds:F1}s)");
+
 return 0;
+
+// The words of a documented command, without the quotes a shell would remove.
+static string[] Words(string command) => [.. DocCommands.Word().Matches(command)
+    .Select(match => match.Value.Trim('"', '\''))];
+
+// Copies the example source a command names into the workspace, once: a project directory's own sources, or
+// a file. Build outputs are not sources, and a copy the walkthrough edited is kept.
+void Mirror(string word)
+{
+    if (!word.StartsWith("Examples/", StringComparison.Ordinal) || word.Contains("/bin/") || word.Contains("/obj/"))
+        return;
+    var source = At(word);
+    string[] files = File.Exists(source) ? [source]
+        : Directory.Exists(source) ? [.. Directory.EnumerateFiles(source).Where(path =>
+            Path.GetExtension(path) is ".cs" or ".csproj" or ".lean")]
+        : [];
+    foreach (var file in files)
+    {
+        var copy = Path.Combine(workspace, Path.GetRelativePath(Root, file));
+        if (File.Exists(copy)) continue;
+        Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
+        File.Copy(file, copy);
+    }
+}
+
+static partial class DocCommands
+{
+    [System.Text.RegularExpressions.GeneratedRegex("""
+        "[^"]*"|'[^']*'|\S+
+        """, System.Text.RegularExpressions.RegexOptions.IgnorePatternWhitespace)]
+    internal static partial System.Text.RegularExpressions.Regex Word();
+}

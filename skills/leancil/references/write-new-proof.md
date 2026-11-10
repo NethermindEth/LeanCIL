@@ -17,7 +17,7 @@ expensive failure here, and LeanCIL cannot detect it.
 | Method shape | Start from | Guide |
 | --- | --- | --- |
 | Straight-line arithmetic | [Add](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/Add.lean) | [instruction composition](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-STEPPING.md#compose-instructions) |
-| Calls helper methods | [CountCalls](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/CountCalls.lean) | [contract composition](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md#compose-calls-through-contracts) |
+| Calls helper methods | [CountCalls](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/CountCalls.lean), or `leancil new-proof` for a straight-line body, with or without integer locals, calling a static helper that tests its word arguments, its locals or the fields of an object it is handed, and may throw on a side its `pre` excludes, which writes the helper's contract with `pre` and `post` holes, its `Holds` proof split on each test, and the call through it | [contract composition](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md#compose-calls-through-contracts) |
 | Contains a loop | [Countdown](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/Countdown.lean) | [loop cutpoints](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-BINDING.md#loop-heads-and-call-sites) |
 | Walks a linked list | [PoolIdle](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/PoolIdle.lean) | [class instances](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md#frame-class-instances) |
 | Writes a buffer or span | [FillWords](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/FillWords.lean), or `leancil new-proof` for a loop writing a `Span<T>` from the front, directly or through a helper storing `target[0]`, or for that helper | [buffer predicates](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-BUFFERS.md) |
@@ -37,12 +37,20 @@ Copy the closest example's structure and change the statement first.
 leancil workspace path/to/Lib.dll 'Type::Method(ulong)' --profile scalar --proof proofs/Method.lean --proof-root .
 ```
 
-The command prints the `import` line the proof needs; `new-proof` already writes it. Each
+The command prints the `import` line the proof needs; `new-proof` already writes it. The first
+`workspace` or `verify` on a machine builds the certified library for several minutes and reports
+Lake's job count on stderr; both then reuse it. A `verify` without `--proof-root` reports its
+result first, from the modules the proof imports, and builds the rest afterwards. Each
 selected method gets its own module, so several proofs can be open at once; `leancil workspace
 --remove KEY` drops one. Check a proof from a terminal with `lake lean proofs/Method.lean`.
 After changing the C#, `leancil watch --project path/to/Lib.csproj` rebuilds it, refreshes only
 the changed extractions and re-verifies the affected proofs; restart the file in the editor to
 see the new goals. Only `leancil verify` (which `watch` runs) counts.
+
+Without an editor, `leancil verify artifacts/Method --proof proofs/Method.lean --goals` prints
+the goal at each `sorry`, before each failing tactic and left unsolved, in source order, and
+`leancil watch --goals` prints them again after every save. Write `sorry` where the next step is
+unclear and read its goal rather than inserting `trace_state`.
 Details: [editor workspace](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CONSUMERS.md#proof-authoring-workspace).
 
 ## 4. Keep the proof local

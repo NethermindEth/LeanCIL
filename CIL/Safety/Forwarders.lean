@@ -235,19 +235,21 @@ theorem run_forward_call {Input Output : Type} {contract : MethodContract Input 
     exact same ▸ valid
   refine run_call_of_contract holds input found callFetched
     (step_call_loaded calleeValid known) rfl permitted ?_
-  intro final values ⟨_, called⟩ framed returns
-  have arity : values.length = if body.returnsValue then 1 else 0 := by
+  intro final out call
+  obtain ⟨_, called⟩ := call.invoked
+  have returns : contract.Returns input memory final (contract.results out) :=
+    ⟨out, rfl, call.post⟩
+  have arity : (contract.results out).length = if body.returnsValue then 1 else 0 := by
     obtain ⟨_, _, _, _, _, _, _, ran⟩ := invoke_success_setup called
     rw [returnsValue]
     exact run_return_length _ _ _ _ _ _ _ _ _ _ _ calleeFound ran
   have valid := invoke_result_valid _ _ _ _ _ _ _ called
-  obtain ⟨out, encoded, satisfied⟩ := id returns
   refine run_return_exists found returnFetched ?_
-    (checkedValues_of_valid (survives final values valid returns))
-    (continuation final values framed returns)
+    (checkedValues_of_valid (survives final _ valid returns))
+    (continuation final _ call.framed returns)
   rw [List.append_nil]
   exact step_return_unchanged arity (invoke_return_known called) (checkedValues_of_valid valid)
-    (encoded ▸ unchanged final out satisfied)
+    (unchanged final out call.post)
 
 #print axioms run_forward_call
 

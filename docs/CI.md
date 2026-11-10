@@ -70,16 +70,30 @@ transitive source imports. Markdown under `docs/` and `skills/` and the README s
 fixture projects, build configuration,
 workflow changes, and unrecognized paths conservatively run the full matrix.
 
-Suites measured at no more than 60 seconds share a job with at most two other short suites,
-with a combined measured budget of 120 seconds. The duration table uses verification time,
-excluding setup, and unknown suites remain separate. Each member runs in its own process with
-its own cache and transcript; a failure does not skip later members, and any member failure
-fails the group. Selection still includes exactly the requested suites. This removes repeated
-toolchain/library downloads without reducing coverage or increasing concurrent runners.
+Every job spends about a minute on checkout, toolchain, library and tool restores and uploads
+before and after its suites, so suites are packed into as few jobs as a target allows. The target
+is one runner's share of a round: the measured time of all suites divided by the eight runners
+and by the fewest rounds that keep a job no longer than the longest suite, two at present. The
+longest suite then remains the longest job and the runners finish together, sooner than one job
+per suite does. Suites go longest first into the fullest job that still has room, at most eight to
+a job, and jobs start longest first. The duration table `scripts/verification-durations.json` uses
+verification time, excluding setup, which a job's summary and each member's transcript report per
+suite; a suite without a measured time runs alone.
+`dotnet run --file scripts/EstimateVerificationSchedule.cs -- --jobs` prints the jobs of a full
+run with their estimated minutes.
+
+Each member of a job runs in its own process with its own cache, transcript and trace label, in
+the checkout a full local run shares between all suites. A failure does not skip later members,
+and any member failure fails the job. The log folds each member's output under its name, a failed
+member raises an error annotation that names it, and the job summary lists every member with its
+result and time. A job is named for its suites, or for its longest suite and the number of others
+when it runs more than three, so job names change when the durations do; only `Build and verify`
+is a stable check name. Selection still includes exactly the requested suites.
 
 The `loops` suite covers core loop contracts and class/word-array composition. Generated outline
 checks run in `outlines-control`, `outlines-objects` and `outlines-buffers`; each selects its
-cases from the shared `Tests/ProofOutlines.cs` runner with `--group`. Each partition prepares
+cases from the shared `Tests/ProofOutlines.cs` runner with `--group`; `--case name[,name...]`
+narrows a local run to the named cases of that group. Each partition prepares
 its own extractions and checks its completed proofs and rejection cases. The `structoutlines`,
 `receiveroutlines`, `wordreader` and `savedwordreader` suites run their respective focused
 fixtures independently. All partitions use the shared certified library and tool artifacts.
@@ -99,6 +113,103 @@ that no suites are needed. Failed or cancelled selection/tests cannot pass it.
 Keep this aggregate check required rather than individual matrix jobs, which may
 be absent on a PR. Run `dotnet run --file scripts/TestSelectVerification.cs` to test the
 selection rules and final gate locally.
+
+## Proof cost
+
+A tactic or library change alters the terms proofs build and the work it takes to build them, and
+a shorter proof can cost more than the one it replaces. On a pull request the `Proof cost` job
+compares what each proof costs at the head with what main measured at the merge base and puts one
+table per source in its summary. The base is the first parent of the PR's merge commit, so main's
+own changes are never attributed to the PR, and no checked-in baseline has to be refreshed.
+
+`scripts/ProofCost.cs measure` elaborates a module one command at a time on one thread, through
+the frontend `scripts/ProofCost.lean`, and writes one row per command and one per module:
+
+| Measure | Meaning | Decides the result |
+| --- | --- | --- |
+| Heartbeats | Lean's work counter for elaborating and kernel-checking the command, the unit `maxHeartbeats` limits in thousands; reruns agree to within a few dozen | yes |
+| Olean bytes | size of the compiled module, every part included; module rows only | yes |
+| Kernel heartbeats | the kernel alone rechecking the theorems the command declared | no |
+| Proof objects | allocated expression objects in those theorems' proof terms | no |
+| Lines | source lines of the command or module | no |
+| Elapsed ms | wall time of the command; kernel time is in the JSON report | no |
+
+Elapsed time depends on the runner's load, so it is reported and never fails a job. The frontend
+checks nothing: a proof is accepted by the verification suites, and a module that reports an error
+is listed as not measured.
+
+A source is measured on each tree by the run that verifies it:
+
+- `libraries` is every test library of `lakefile.toml`, meaning each `[[lean_lib]]` table that
+  only names a library, with the checkout modules it imports. It is compared when the PR changes
+  a Lean file, the lakefile, the toolchain pin or the Lake manifest.
+- A proof suite (`core`, `loops`, `outlines-control`, `outlines-objects`, `outlines-buffers`,
+  `structoutlines`, `receiveroutlines`, `wordreader`, `savedwordreader`) is compared when
+  selection chose that suite. Its rows are every output directory the suite verified: its
+  `Extracted.lean`, its `Symbols.lean` when present, and the proof that `verified.json` names,
+  provided the proof is unchanged since. Each extracted method's instruction equations are one
+  row, named for its `cil_instruction_equations` command. A directory is measured only while it
+  holds the report of an accepted proof, so a suite that also checks rejected proofs against an
+  extraction verifies the accepted one last.
+
+The head is measured where it is verified, in no job of its own. A `Verify` job that ran a proof
+suite measures that suite once it has passed. A suite's rows are the output directories it owns,
+which `VerificationSuites.ProofOutputs` declares, so a suite that shares its job with others is
+measured alone. Before measuring, the job checks that ownership accounts for everything it
+verified: the group runner records when each member started, and an owned directory whose report
+another member wrote, or a report a proof suite wrote outside its directories, stops the
+measurement of the suites involved. A proof suite that gains an output directory declares it there.
+The shortest `Verify` job also measures `libraries`, which needs only the certified library.
+Neither step can fail its job: a source without rows fails the comparison instead.
+
+A run measures only its own tree. A push to main measures every source, and its `Proof cost` job
+gathers those that hold rows into one artifact and logs its digest; a suite that failed on main, or
+left no rows, is not among them, and the rows of the suites that passed still are. A PR run takes
+those rows as its base when the push run of its merge base published them: the run must be a push
+of that commit on main, which is what reusing a certified library without replay requires of its
+producer, the file must have the digest that job logged, and its rows must come from the same
+measurer and from that commit. The measurer is `scripts/ProofCost.lean`,
+`scripts/ProofCostReport.cs`, the row schema and the two workflow steps that measure. No other run
+supplies a base, and no pull request run measures one.
+
+`Proof cost` waits for the suites and measures nothing: on a pull request it downloads the head's
+rows and the published rows and compares every source before it fails for any of them. A source
+main published no rows for is reported as `No rows published for merge base <commit>; not
+compared` and does not fail. That holds while the push run of the merge base is still running or
+was cancelled, when the PR changes the measurer, and for the parent branch of a stacked pull
+request. It is the only way to pass without a comparison: a source that has a published base and
+no head rows fails.
+`scripts/ProofCost.cs compare` fails when a row's heartbeats grow by more than 5% and by more than
+50,000, or a module's olean grows by more than 5% and by more than 4,096 bytes. Both conditions
+must hold: 5% of a proof that costs a few thousand heartbeats is not a cost, and a large module
+may grow by a small share. Reruns of one tree differ by a few dozen heartbeats in millions and in
+no olean byte, as the [measurements](performance/ProofCost.md) record, so the threshold marks what
+deserves a reviewer's decision, not noise.
+
+A row is a declaration by its full name, or an unnamed command such as an `example` by its
+keyword and a hash of its source, so rows keep their identity when code around them moves.
+Smaller changes, improvements, and added, removed, renamed or edited-unnamed rows are reported
+only. A module's totals decide only while the module holds the same rows at the base and the
+head: a module that gained a proof grew for that reason. A proof measured at the base that cannot
+be measured at the head fails, as does a head with nothing measured.
+
+An increase that is worth its cost is accepted by adding it to `scripts/proof-cost-accepted.json`
+in the same PR. The summary prints the entry: the row, the measure, the base and head values and a
+reason to fill in. An entry applies only to that base value and up to that head value, each with
+1,000 heartbeats of allowance for the difference between reruns, so it cannot excuse later growth;
+entries that no source of the run matched are listed for removal and never fail.
+
+`Proof cost` is a separate check and not part of `Build and verify`, so a regression shows as a
+failed check on the PR without blocking a merge the reviewer has accepted. A manual run of the
+workflow on a commit main has published compares that tree with main's rows for it, which reports
+the measurement noise between two runs.
+
+Another producer adds rows by writing the same JSON and passing its file as a further `--base` or
+`--head` of `compare`: a row is a group, a name, a kind and named integer measures. Measures other
+than the ones above are reported in their own table and never fail. The job uploads the head's
+rows, the published rows and each source's comparison as `proof-cost`. Run
+`dotnet run --file scripts/TestProofCost.cs` to test the comparison rules;
+[validation](VALIDATION.md#proof-cost) shows a local comparison.
 
 ## Documentation checks
 
@@ -131,6 +242,14 @@ which needs no Lean, so every PR runs it:
   checked snippet, or links the maintainers document that describes the evidence.
 - The [suite table](VALIDATION.md#suites) lists each suite `scripts/Test.cs` accepts exactly
   once, as registered in `scripts/VerificationSuites.cs` and `scripts/ExportVerificationSuites.cs`.
+- No `simp`, `simp only`, `simpa`, `simp_all` or `dsimp` list of an example under
+  `Examples/Proofs`, or of a Lean block that is not an excerpt, names one of the interpreter's own
+  functions: `step`, `run`, `invoke`, `pureArity`, `scalars`, `instructionStep`,
+  `staticInstruction`, `checkedIntrinsic`, `checkedValue` or `numericValue`, by any suffix of its
+  full name. Such a proof runs the method by unfolding the interpreter; step with
+  `cil_checked_steps` and pass a fact about the operation instead. A name the block binds with
+  `have` is a hypothesis.
+- Every theorem of an example under `Examples/Proofs` has a `#print axioms` line in its file.
 
 Every fenced Lean block is elaborated unless its info string says why not:
 
@@ -168,9 +287,34 @@ elaborate concurrently. Names are probed by these rules:
 Each diagnostic, warning or `sorryAx` is reported at the document line it came from. The suite then
 checks that a pre-`Except` `invoke` statement, a removed or renamed name, a removed tactic and a
 block using a module it does not import each fail at their own lines, while the current forms and
-names outside the library pass. Run it locally with
-`dotnet run --file scripts/Test.cs -- --suite docs`; `scripts/TestCheckDocReferences.cs` tests the
-static rules.
+names outside the library pass.
+
+Documented commands and their output are checked the same way. A block is part of its document's
+walkthrough when its info string marks it:
+
+| Info string | Check |
+| --- | --- |
+| `sh run` | The `docs` suite runs each line as a command, in document order, and each must exit with `0`. Only `leancil` and `dotnet build Examples/...` commands are run; other commands stay in an unmarked `sh` block. |
+| `sh run fails` | As `sh run`, except that the last command must exit with a failure. |
+| `text stdout` | The whole standard output of the last command run above it. A line `...` stands for any run of lines. |
+| `text stderr` | Lines that the standard error of that command holds in a row, such as the start of a diagnostic. |
+| `csharp edit PATH` | Each line replaces the one line of `PATH`, a file under `Examples/`, that declares the same expression-bodied member; the commands after it see the edit. |
+
+Any other word after `sh`, `text` or `csharp` fails, as does a command the suite does not run, an
+output block with no command above it and an edit that names no single line;
+`scripts/CheckDocReferences.cs` checks these on every PR. The suite runs each document's commands
+from a copy of the example sources they name, with `leancil` being the tool built from the
+checkout, so an edit never touches the checkout and a path prints as in the document. Before
+comparing, it replaces each SHA-256 and each `line:column` after a `.lean` or `.cs` file name on
+both sides, since those vary with the machine or an unrelated edit. A documented line the tool
+does not print, a printed line the document lacks and a command that exits otherwise than marked
+each fail at the document line. The suite then replays the getting-started walkthrough with a
+label the tool does not print, a line removed and an altered error line, and requires each to
+fail at its line. A change to a tool source or to an example file a `sh run` block names selects
+the suite.
+
+Run it locally with `dotnet run --file scripts/Test.cs -- --suite docs`;
+`scripts/TestCheckDocReferences.cs` tests the static rules and the output comparison.
 
 ## Other workflows
 

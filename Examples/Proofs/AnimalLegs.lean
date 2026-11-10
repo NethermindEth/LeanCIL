@@ -36,7 +36,6 @@ theorem dog_legs (memory : CIL.Safety.Memory) (animal : Reference)
     (typed : runtimeTypeOf memory animal = .ok dog) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object (.address animal)] memory =
       .ok (memory, [.scalar (.i64 4)]) := by
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
   cil_checked_steps [formed, typed, dog, scope]
 
 #print axioms dog_legs
@@ -47,7 +46,6 @@ theorem bird_legs (memory : CIL.Safety.Memory) (animal : Reference)
     (typed : runtimeTypeOf memory animal = .ok bird) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object (.address animal)] memory =
       .ok (memory, [.scalar (.i64 2)]) := by
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
   cil_checked_steps [formed, typed, bird, scope]
 
 #print axioms bird_legs
@@ -56,7 +54,6 @@ theorem bird_legs (memory : CIL.Safety.Memory) (animal : Reference)
 theorem null_throws (memory : CIL.Safety.Memory) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object .null] memory =
       .error ⟨0, 1, .thrown "System.NullReferenceException"⟩ := by
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
   cil_checked_steps
 
 #print axioms null_throws
@@ -88,7 +85,6 @@ theorem outside_faults (memory : CIL.Safety.Memory) (animal : Reference)
     (typed : runtimeTypeOf memory animal = .ok plugin) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object (.address animal)] memory =
       .error ⟨0, 1, outsideDispatchTable⟩ := by
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
   cil_checked_steps [formed, typed, plugin, scope]
 
 #print axioms outside_faults

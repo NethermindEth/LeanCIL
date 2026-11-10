@@ -10,7 +10,7 @@ using Nethermind.LeanCIL;
 partial class Program
 {
     const string WatchUsage = "Usage: leancil watch [package-directory] [--project project.csproj]... " +
-        "[--configuration name] [--once] [--format text|json]";
+        "[--configuration name] [--once] [--goals] [--format text|json]";
 
     /// <summary>The cycle's report shape; a change that removes or renames a field increments it.</summary>
     const int WatchSchema = 1;
@@ -20,30 +20,36 @@ partial class Program
     // Editors save a burst of files; a cycle starts once the inputs stop changing for this long.
     static readonly TimeSpan WatchSettleInterval = TimeSpan.FromMilliseconds(400);
 
-    sealed record WatchSettings(string Root, string[] Projects, string Configuration, bool Once, bool Json);
+    /// <summary>
+    /// A watch run: `Goals` asks each verification for the goal at every `sorry` and failing tactic.
+    /// </summary>
+    sealed record WatchSettings(string Root, string[] Projects, string Configuration, bool Once, bool Json,
+        bool Goals);
 
     /// <summary>An MSBuild error: its C# location, compiler code and message.</summary>
     sealed record BuildDiagnostic(string File, int Line, int Column, string Code, string Message);
 
     /// <summary>
     /// What the last verification of a proof checked: the extraction's modules and the proof's sources, by hash,
-    /// and its result. Equal inputs make a rerun redundant; a failed build deletes it.
+    /// and its result. Equal inputs make a rerun redundant; a failed build deletes it. `Goals` holds the open
+    /// goals of a run that asked for them, null for one that did not.
     /// </summary>
     sealed record WatchState(string Extracted, string? Symbols, SortedDictionary<string, string> Sources,
-        string Status);
+        string Status, JsonArray? Goals = null);
 
     /// <summary>
     /// One proof's outcome in a cycle: `verified` or `failed` by ordinary verification, `stale` when the build
     /// failed, `missing` when the method no longer extracts, `unverified` when it names no theorem. `Rechecked` is
-    /// false when nothing it depends on changed, so the earlier result stands.
+    /// false when nothing it depends on changed, so the earlier result stands. `Goals` is the proof's open
+    /// goals under `--goals`, also for a result that stands, and null when they were not read.
     /// </summary>
     sealed record WatchResult(string Status, bool Rechecked, string Method, string Profile, string Module,
-        string Proof, string? Theorem, string? Message, JsonNode? Report);
+        string Proof, string? Theorem, string? Message, JsonNode? Report, JsonArray? Goals = null);
 
     internal static int Watch(string[] args)
     {
         var settings = ParseWatchSettings(args);
-        var editor = Path.Combine(EditorFramework(settings.Root), EditorSourceDirectory);
+        var editor = Path.Combine(LinkedEditorPackage(settings.Root), EditorSourceDirectory);
         if (EditorSelections(editor).Count == 0)
             throw new InvalidDataException("No method extraction is recorded in " + CliPaths.Display(settings.Root) +
                 "; run leancil workspace for each proof first.");
@@ -107,6 +113,7 @@ partial class Program
         string? configuration = null;
         string? format = null;
         var once = false;
+        var goals = false;
         var projects = new List<string>();
         for (var index = 0; index < args.Length; index++)
         {
@@ -114,6 +121,11 @@ partial class Program
             if (option == "--once" && !once)
             {
                 once = true;
+                continue;
+            }
+            if (option == "--goals" && !goals)
+            {
+                goals = true;
                 continue;
             }
             if (!option.StartsWith("--", StringComparison.Ordinal) && root is null)
@@ -144,7 +156,7 @@ partial class Program
         if (!File.Exists(Path.Combine(root, "lake-manifest.json")))
             throw new InvalidDataException(CliPaths.Display(root) + " is no resolved Lake package; run lake update " +
                 "there, or pass the package directory that leancil workspace used.");
-        return new(root, [.. projects], configuration ?? "Release", once, format == "json");
+        return new(root, [.. projects], configuration ?? "Release", once, format == "json", goals);
     }
 
     /// <summary>
@@ -305,9 +317,14 @@ partial class Program
                     var statePath = Path.Combine(WatchDirectory(editor, key, proof), WatchStateFile);
                     var previous = File.Exists(statePath)
                         ? JsonSerializer.Deserialize<WatchState>(File.ReadAllText(statePath)) : null;
+                    // A result recorded without goals does not answer a run that prints them.
                     if (previous is not null && previous.Extracted == state.Extracted &&
-                        previous.Symbols == state.Symbols && Same(previous.Sources, state.Sources))
-                        results.Add(WatchOutcome(key, selection, proof, previous.Status, false, null, null));
+                        previous.Symbols == state.Symbols && Same(previous.Sources, state.Sources) &&
+                        (!settings.Goals || previous.Goals is not null))
+                        results.Add(WatchOutcome(key, selection, proof, previous.Status, false, null, null) with
+                        {
+                            Goals = settings.Goals ? previous.Goals : null
+                        });
                     else checks.Add((key, selection, proof, extraction, state));
                 }
             }
@@ -316,7 +333,8 @@ partial class Program
             {
                 var result = VerifyWatched(settings, editor, key, selection, proof, extraction);
                 File.WriteAllText(Path.Combine(WatchDirectory(editor, key, proof), WatchStateFile),
-                    JsonSerializer.Serialize(state with { Status = result.Status }, Json) + "\n");
+                    JsonSerializer.Serialize(state with { Status = result.Status, Goals = result.Goals }, Json) +
+                    "\n");
                 results.Add(result);
             }
             return PrintWatchCycle(settings, cycle, clock.Elapsed, [], refreshed, results);
@@ -352,14 +370,17 @@ partial class Program
         var proofPath = Path.GetFullPath(proof.Proof, settings.Root);
         // A generated scratch package requires the framework by path, which only single-file verification accepts.
         string[] root = IsScratchPackage(settings.Root) ? [] : ["--proof-root", settings.Root];
+        string[] goals = settings.Goals ? ["--goals"] : [];
         var verified = Execute(["dotnet", ExtractorPath, "verify", directory, "--proof", proofPath,
-            "--theorem", proof.Theorem, .. root, "--format", "json"], settings.Root);
+            "--theorem", proof.Theorem, .. root, "--format", "json", .. goals], settings.Root);
         JsonNode? report;
         try { report = JsonNode.Parse(verified.Stdout); }
         catch (JsonException) { report = null; }
         var status = verified.Code == 0 && report?["result"]?.GetValue<string>() == "verified" ? "verified" : "failed";
+        // A run that asked for goals records them, none included, so its result can stand for a later one.
+        var open = !settings.Goals ? null : report?["goals"]?.DeepClone() as JsonArray ?? [];
         return WatchOutcome(key, selection, proof, status, true,
-            report is null && status == "failed" ? verified.Output.Trim() : null, report);
+            report is null && status == "failed" ? verified.Output.Trim() : null, report) with { Goals = open };
     }
 
     /// <summary>Prints the cycle's report and returns whether every proof verified or names no theorem.</summary>
@@ -401,6 +422,10 @@ partial class Program
                     (failure?["message"]?.GetValue<string>() ?? "").Split('\n')[0] +
                     (csharp is null ? "" : $" (C# {csharp["file"]}:{csharp["line"]}:{csharp["column"]})"));
             }
+            foreach (var goal in result.Goals ?? [])
+                foreach (var line in GoalLines($"{goal?["file"]}:{goal?["line"]}:{goal?["column"]}",
+                    $"{goal?["kind"]}", goal?["goal"]?.GetValue<string>() ?? ""))
+                    Console.WriteLine(line);
         }
         Console.Out.Flush();
         return passed;

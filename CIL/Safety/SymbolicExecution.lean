@@ -9,6 +9,7 @@ import CIL.Safety.InstructionSteps
 import CIL.Safety.CallComposition
 import CIL.Safety.CodeAt
 import CIL.Safety.CheckedHomes
+import CIL.Safety.LoopFacts
 
 /-!
 # Checked symbolic execution
@@ -41,6 +42,74 @@ elab "cil_strict " tactic:tactic : tactic =>
     let earlier := errors (← Core.getMessageLog)
     evalTactic tactic
     if errors (← Core.getMessageLog) > earlier then throwError "Checked step candidate failed"
+
+/-- The projections of a method contract that stepping unfolds in a goal: its argument and
+    result encodings, precondition, footprint and postcondition. -/
+def contractProjections : List Lean.Name :=
+  [`CIL.Safety.MethodContract.args, `CIL.Safety.MethodContract.results,
+    `CIL.Safety.MethodContract.pre, `CIL.Safety.MethodContract.footprint,
+    `CIL.Safety.MethodContract.post]
+
+open Lean Meta in
+/-- `term` with each projection of a defined contract replaced by what the contract's
+    definition states for its arguments. A contract that is a variable, as in a rule stated for
+    every contract, is left folded, and so is `Returns`, which a proof may restate. -/
+def unfoldContractProjections (term : Expr) : MetaM Expr := do
+  let named (e : Expr) : Bool := e.getAppFn.constName?.any contractProjections.contains
+  -- Most goals name no contract, and are returned without being rebuilt.
+  if (term.find? named).isNone then return term
+  Meta.transform term (pre := fun e => do
+    unless named e do return .continue
+    let arguments := e.getAppArgs
+    let some contract := arguments[2]? | return .continue
+    let defined ← whnf contract
+    unless defined.isAppOf `CIL.Safety.MethodContract.mk do return .continue
+    let some info ← getProjectionFnInfo? e.getAppFn.constName! | return .continue
+    let some field := defined.getAppArgs[info.numParams + info.i]? | return .continue
+    return .visit (← whnfCore (mkAppN field (arguments.extract 3 arguments.size)).headBeta))
+
+open Lean Elab Tactic Meta in
+/-- State the goal with the projections of each defined contract unfolded, as
+    `unfoldContractProjections` gives them; a goal that names none is left as it is. -/
+elab "cil_unfold_contracts" : tactic => withMainContext do
+  let goal ← getMainGoal
+  let target ← instantiateMVars (← goal.getType)
+  let unfolded ← unfoldContractProjections target
+  unless unfolded == target do replaceMainGoal [← goal.replaceTargetDefEq unfolded]
+
+open Lean Elab Tactic Meta in
+/-- State the goal with `leaveFrame frame memory` as `memory` wherever `frame` is a literal
+    frame that owns no allocation; nothing else in the goal changes. -/
+elab "cil_frame_exit" : tactic => withMainContext do
+  let goal ← getMainGoal
+  let target ← instantiateMVars (← goal.getType)
+  let leaves (e : Expr) : Bool := e.isAppOfArity `CIL.Safety.leaveFrame 2
+  if (target.find? leaves).isNone then return
+  let exited ← Meta.transform target (pre := fun e => do
+    unless leaves e do return .continue
+    let frame ← whnfR e.appFn!.appArg!
+    unless frame.isAppOfArity `CIL.Safety.Frame.mk 5 do return .continue
+    unless (← whnfR frame.getAppArgs[2]!).isAppOfArity ``List.nil 1 do return .continue
+    return .visit e.appArg!)
+  unless exited == target do replaceMainGoal [← goal.replaceTargetDefEq exited]
+
+open Lean Elab Tactic Meta in
+/-- Open a goal `∃ fuel, invoke program fuel method .. = ..` with the execution bound of its
+    program and method as the fuel. Any other goal, such as one whose fuel is already a
+    numeral, is left as it is. -/
+elab "cil_supply_fuel" : tactic => withMainContext do
+  let target := (← instantiateMVars (← getMainTarget)).consumeMData
+  unless target.isAppOfArity ``Exists 2 do return
+  let .lam _ _ body _ := target.appArg! | return
+  let some (_, invocation, _) := body.consumeMData.eq? | return
+  unless invocation.isAppOfArity `CIL.Safety.invoke 5 do return
+  let arguments := invocation.getAppArgs
+  let program := arguments[0]!
+  let method := arguments[2]!
+  unless arguments[1]! == .bvar 0 && !program.hasLooseBVars && !method.hasLooseBVars do return
+  let bound := mkApp2 (mkConst ``CIL.executionBound) program method
+  let witness ← Term.exprToSyntax bound
+  evalTactic (← `(tactic| refine ⟨$witness, ?_⟩))
 
 /-- `cil_fact_simp (config) [lemmas] [facts]` runs `simp (config) [lemmas, facts]`, adding each
     local fact normalised by the default simp set and the non-local facts. -/
@@ -292,12 +361,39 @@ macro_rules
     | (simp only [cil_code, Nat.reduceAdd, bne_iff_ne, ne_eq, not_false_eq_true,
         Bool.false_eq_true, ite_true, ite_false, ↓reduceIte, $[$facts:term],*]; rfl))
 
-/-- Normalises the literal `take`, `drop`, `reverse` and `++` a step leaves on the stack;
-    never fails. -/
+-- The closed literal operands every stepping tactic evaluates, so a state reads the same
+-- whichever tactic produced it. Each is a simproc that fires on numerals only.
+attribute [cil_literal_proc] BitVec.reduceSignExtend BitVec.reduceSetWidth
+  BitVec.reduceZeroExtend BitVec.reduceToNat BitVec.reduceOfInt Nat.reduceMod
+
+open Lean Elab Tactic Meta in
+/-- Evaluate the closed literal operands of the goal with the `cil_literal` set: a width
+    conversion, sign extension or `toNat` of a bit-vector numeral, and a remainder of numerals,
+    as a masked shift count is. A goal with none is left untouched, so a step pays for the
+    normalisation only when its state has such an operand; never fails. -/
+elab "cil_literal_operands" : tactic => do
+  -- A step that closed its goal leaves nothing to normalise.
+  if (← getGoals).isEmpty then return
+  withMainContext do
+  let numeral (e : Expr) : Bool := e.isRawNatLit || e.isAppOfArity ``OfNat.ofNat 3 ||
+    (e.isAppOfArity ``BitVec.ofNat 2 &&
+      (e.appArg!.isRawNatLit || e.appArg!.isAppOfArity ``OfNat.ofNat 3))
+  let closed (e : Expr) : Bool :=
+    ((e.isAppOfArity ``BitVec.signExtend 3 || e.isAppOfArity ``BitVec.setWidth 3 ||
+      e.isAppOfArity ``BitVec.zeroExtend 3 || e.isAppOfArity ``BitVec.toNat 2) &&
+      numeral e.appArg!) ||
+    (e.isAppOfArity ``HMod.hMod 6 && numeral e.appArg! && numeral e.appFn!.appArg!)
+  if ((← instantiateMVars (← getMainTarget)).find? closed).isSome then
+    evalTactic (← `(tactic| try simp only [cil_literal]))
+
+/-- Normalises the literal `take`, `drop`, `reverse` and `++` a step leaves on the stack and
+    evaluates its closed literal operands (`cil_literal_operands`); never fails. -/
 macro "cil_stack_cleanup" : tactic =>
-  `(tactic| try simp only [List.drop_succ_cons, List.drop_zero, List.drop_nil,
-    List.take_succ_cons, List.take_zero, List.take_nil, List.reverse_cons, List.reverse_nil,
-    List.nil_append, List.cons_append, List.append_nil])
+  `(tactic| (
+    try simp only [List.drop_succ_cons, List.drop_zero, List.drop_nil,
+      List.take_succ_cons, List.take_zero, List.take_nil, List.reverse_cons, List.reverse_nil,
+      List.nil_append, List.cons_append, List.append_nil]
+    cil_literal_operands))
 
 /-- Closes a checked `step` goal by rewriting with the `@[cil_step]` and
     `@[cil_instruction_step]` equations, failing if nothing rewrites, then by the checked-value
@@ -358,12 +454,14 @@ macro "cil_checked_memory_by_equations " "[" facts:term,* "]" : tactic =>
     frame) by `rfl`, by `simp` with `facts`, or by also unfolding the checked-value definitions
     that `cil_checked_step_by_equations` unfolds. Facts alone come first, so a supplied
     `checkedValue` result is used before its definition is unfolded past it. A returned object
-    the frame does not own forms as it did before the frame is left. -/
+    the frame does not own forms as it did before the frame is left, and a literal frame that
+    owns nothing is left through `cil_frame_exit`. -/
 macro "cil_checked_side " "[" facts:term,* "]" : tactic =>
   `(tactic| first
     | rfl
-    | (simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)
-    | (simp [cil_checked, CIL.Safety.checkedValue, CIL.Safety.numericValue,
+    | (cil_frame_exit; simp [$[$facts:term],*] <;> (repeat constructor) <;> rfl)
+    | (cil_frame_exit
+       simp [cil_checked, CIL.Safety.checkedValue, CIL.Safety.numericValue,
          CIL.Safety.formValue, CIL.Safety.checkedAt, CIL.Safety.formObject_leaveFrame,
          Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure, $[$facts:term],*] <;>
          (repeat constructor) <;> rfl))
@@ -694,6 +792,12 @@ elab_rules : tactic
     let prepared ← normaliseStepFacts config facts.getElems
     withMainContext <| evalTactic (← `(tactic| cil_checked_step_normalized [$[$prepared:term],*]))
 
+open Lean Elab Tactic in
+/-- What a stepping tactic outside a loop steps with: `facts` and the object evidence facts its
+    context gives (`gatherEvidenceFacts`), each normalised once. -/
+def prepareStepFacts (facts : Array Term) : TacticM (Array Term) := do
+  normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|)) (← gatherEvidenceFacts facts)
+
 /-- `cil_checked_steps` with facts already normalised: enters an `invoke` goal through
     `cil_checked_entry`, then takes checked `run` steps until the goal closes or a step fails,
     leaving that goal. Fails if it takes no step. -/
@@ -710,9 +814,8 @@ macro "cil_checked_return_at " methodFound:term:max instructionFound:term:max
       (by cil_checked_side [$[$facts:term],*])) ?_
     try simp only [CIL.Safety.leaveFrame, List.foldl_nil, List.nil_append, List.append_nil,
       CIL.NarrowKind.extend_ite_one_zero, CIL.NarrowKind.extend_ite_ofNat_one_zero,
-      List.reverse_cons, List.reverse_nil, BitVec.reduceToNat, BitVec.reduceSignExtend,
-      BitVec.reduceOfInt, BitVec.isValue,
-      Nat.reduceMod, Bool.false_eq_true, ite_true, ite_false]
+      List.reverse_cons, List.reverse_nil, cil_literal, BitVec.isValue,
+      Bool.false_eq_true, ite_true, ite_false]
     try with_reducible rfl
     try (with_reducible simp [$[$facts:term],*]; done)))
 
@@ -909,15 +1012,18 @@ macro_rules
       cil_checked_run_step [$[$facts:term],*]))
 
 /-- Proves an `invoke` or `run` goal, returning or stating a located fault, by checked
-    stepping with `facts`, normalised once at entry. Stops at the first step it cannot take,
-    leaving that goal; fails if it takes none. -/
+    stepping with `facts` and the object evidence facts of the context, such as `live.formed` of
+    a `LiveObject` and the load a scalar field's `Readable` gives, normalised once at entry. A goal
+    `∃ fuel, invoke ..` takes the execution bound of its method as the fuel, and the projections
+    of a defined contract are unfolded. Stops at the first step it cannot take, leaving that
+    goal; fails if it takes none. -/
 syntax "cil_checked_steps" "[" term,* "]" : tactic
 
 open Lean Elab Tactic in
 elab_rules : tactic
   | `(tactic| cil_checked_steps [$facts:term,*]) => do
-    let config ← `(Lean.Parser.Tactic.optConfig|)
-    let prepared ← normaliseStepFacts config facts.getElems
+    evalTactic (← `(tactic| (cil_supply_fuel; cil_unfold_contracts)))
+    let prepared ← prepareStepFacts facts.getElems
     withMainContext <| evalTactic (← `(tactic| cil_checked_steps_normalized [$[$prepared:term],*]))
 
 /-- `cil_checked_steps` with no facts. -/
@@ -931,7 +1037,7 @@ syntax "cil_checked_steps " num " [" term,* "]" : tactic
 open Lean Elab Tactic in
 elab_rules : tactic
   | `(tactic| cil_checked_steps $count:num [$facts:term,*]) => do
-    let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|)) facts.getElems
+    let prepared ← prepareStepFacts facts.getElems
     -- Focus the original goal: an early close must error, not step into an unrelated pending goal.
     focus do
       for taken in [:count.getNat] do

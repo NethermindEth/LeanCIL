@@ -94,7 +94,10 @@ theorem outcome (holds : bumpContract.Holds Extracted.program bump) (value limit
     cil_loop_outcome_call holds (count, limit) at bumpSite [entry.frame]
     case precondition => trivial
     case raises => simp only [bumpContract, hit, ite_false]
-    rintro final _ ⟨_, invoked⟩ framed ⟨_, rfl, rfl⟩
+    intro final output call
+    obtain rfl := call.post
+    obtain ⟨_, invoked⟩ := call.invoked
+    have framed := call.framed
     dsimp only [bumpContract, List.nil_append, List.cons_append, Nat.reduceAdd] at framed ⊢
     -- The callee may change only its empty footprint, so both locals survive the call.
     have called := frame.after_confined framed
@@ -136,14 +139,14 @@ theorem count_until (holds : bumpContract.Holds Extracted.program bump) :
   apply ensures_outcome_of_loop
   intro args initial permitted
   obtain ⟨value, limit, rfl, rfl⟩ := permitted
-  obtain ⟨remaining, counted, entered, setup, -, -, -, entryFrame⟩ := entry.checked value limit
-  obtain ⟨m1, stored0, frame1, -⟩ := (entryFrame []).store 0 (.i32 value) rfl
+  obtain ⟨remaining, counted, entered, enter⟩ := entry.checked value limit
+  obtain ⟨m1, stored0, frame1, -⟩ := (enter.frame []).store 0 (.i32 value) rfl
   obtain ⟨m2, stored1, frame2, -⟩ := frame1.store 1 (.i32 0) rfl
   have entryPath : LoopReaches Extracted.program countUntil
       [.scalar (.i32 value), .scalar (.i32 limit)] ⟨0, entry.frame remaining counted, [], entered⟩
       (header remaining counted ⟨(value, 0), m2, frame2⟩) := by
     cil_loop_steps [entry.frame, header, stored0, stored1, frame1.load 0, frame2.load 0]
-  exact ⟨untilBody, entry.frame remaining counted, entered, countUntil.found, rfl, setup,
+  exact ⟨untilBody, entry.frame remaining counted, entered, countUntil.found, rfl, enter.setup,
     loop_reaches_outcome entryPath (outcome holds value limit ⟨(value, 0), m2, frame2⟩
       ⟨by simp, by simp⟩)⟩
 
@@ -153,5 +156,8 @@ theorem correctness : EnsuresOutcome Extracted.program countUntil
     (fun args _ _ values => values = args.take 1) untilOutcome :=
   count_until bump_holds
 
+#print axioms bump_holds
+#print axioms outcome
+#print axioms count_until
 #print axioms correctness
 end ExampleProof

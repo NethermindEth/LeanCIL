@@ -57,8 +57,7 @@ def idleContract : MethodContract (Reference × ManagedReference × List Referen
 /-- `IsIdle` meets its contract: each hop shortens the rest of the free list by one node. -/
 theorem idle_holds : idleContract.Holds Extracted.program isIdle := by
   rintro ⟨pool, item, nodes⟩ memory ⟨wellFormed, free, chain, present⟩
-  dsimp only [idleContract]
-  obtain ⟨entered, setup, entryMemory, entryFrame⟩ := entry.checked memory pool item wellFormed
+  obtain ⟨entered, enter⟩ := entry.checked memory pool item wellFormed
   have itemFormed : formObject memory item = .ok (.object item) := by
     cases item with
     | null => rfl
@@ -68,25 +67,24 @@ theorem idle_holds : idleContract.Holds Extracted.program isIdle := by
     | null => rfl
     | address object =>
       have live := present object rfl
-      exact (live.after_below entryMemory.kept live.old entryMemory.grown).formed
+      exact (live.after_below enter.entryMemory.kept live.old enter.entryMemory.grown).formed
   -- Frame entry keeps the caller's memory, so the free list and its head carry over.
-  have enteredFree := free.below entryMemory.kept free.old entryMemory.grown
-  have enteredChain := chain.after_below entryMemory.kept (Nat.le_refl _) entryMemory.grown
+  have enteredFree := free.below enter.entryMemory.kept free.old enter.entryMemory.grown
+  have enteredChain :=
+    chain.after_below enter.entryMemory.kept (Nat.le_refl _) enter.entryMemory.grown
   rw [← enteredFree.2] at enteredChain
   obtain ⟨fuel, final, invoked, framed⟩ : ∃ fuel final,
       invoke Extracted.program fuel isIdle [.object (.address pool), .object item] memory =
         .ok (final, [.scalar (.i32 (if listed item nodes then 1 else 0))]) ∧
       Confined [] memory final := by
-    refine invoke_loop_induction isIdle.found ?_ setup (header memory)
+    refine invoke_loop_induction isIdle.found ?_ enter.setup (header memory)
       (fun state => state.memory = entered ∧
         PooledItem.NextFree.Segment entered state.values.1 .null state.values.2 ∧
         listed item state.values.2 = listed item nodes)
       (fun state => state.values.2.length) (fun start => ?_) ?_
-    · simp [checkedValue, free.live.formed, itemFormed, Bind.bind, Except.bind,
-        Pure.pure, Except.pure, List.mapM_cons, List.mapM_nil]
-    · have readable := enteredFree.1
-      cil_loop_recurse start (ItemPool._free.of entered pool, nodes)
-        [readable.live.formed, readable.located, readable.load, enteredChain.formed]
+    · cil_checked_side [free.live.formed, itemFormed]
+    · cil_loop_recurse start (ItemPool._free.of entered pool, nodes)
+        [enteredFree.1.load, enteredChain.formed]
       case invariant => exact ⟨rfl, enteredChain, rfl⟩
     rintro ⟨⟨node, rest⟩, current, frame⟩ ⟨same, segment, answer⟩ recurse
     dsimp only at same segment answer recurse
@@ -104,13 +102,12 @@ theorem idle_holds : idleContract.Holds Extracted.program isIdle := by
       by_cases hit : item = .address node
       · subst hit
         rw [← answer]
-        cil_loop_finish [readable.live.formed]
+        cil_loop_finish
         simp [listed]
       · -- The local moves to the next node, one shorter list away from the end.
         have differ : ManagedReference.address node ≠ item := fun same => hit same.symm
         cil_loop_recurse recurse (PooledItem.NextFree.of current node, tail)
-          [readable.live.formed, readable.located, readable.load, rest.formed, enteredItem,
-            differ]
+          [readable.load, rest.formed, enteredItem, differ]
         case invariant =>
           refine ⟨rfl, rest, ?_⟩
           rw [← answer]

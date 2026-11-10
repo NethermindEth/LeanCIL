@@ -37,10 +37,11 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     Run(Extract("extract", assembly, "Examples", selector, folder));
     var extracted = Path.Combine(folder, "Extracted.lean");
     var source = File.ReadAllText(extracted);
-    var site = Regex.Match(source,
-        @"(?m)^@\[cil_code ↓\] theorem method(\d+)_instruction(\d+) : method\d+\.code\[\d+\]\? = some \(\.throw ""([\w.]+)"" : Op\) := rfl\r?$");
-    if (!site.Success) throw new InvalidOperationException($"No folded throw in {name}");
-    var (method, pc, label) = (site.Groups[1].Value, site.Groups[2].Value, site.Groups[3].Value);
+    var site = ExtractedInstructions(source)
+        .Select(instruction => (instruction, Throw: Regex.Match(instruction.Op, @"\A\.throw ""([\w.]+)""\z")))
+        .FirstOrDefault(candidate => candidate.Throw.Success);
+    if (site.instruction is null) throw new InvalidOperationException($"No folded throw in {name}");
+    var (method, pc, label) = (site.instruction.Method, site.instruction.Pc, site.Throw.Groups[1].Value);
     if (name == "Null")
     {
         var obligation = $"method{method}_features_validated";

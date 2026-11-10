@@ -567,9 +567,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         finally { File.Delete(runner); File.Delete(targetsPath); }
     }
 
-    /// <summary>A Lake dependency of a consumer package; `Url` is null for the bundled framework copied into a
-    /// generated scratch package, which has no git checkout.</summary>
-    sealed record ConsumerDependency(string Name, string Directory, string Source, string Revision, string? Url);
+    /// <summary>A Lake dependency of a consumer package: a git checkout pinned by a full revision.</summary>
+    sealed record ConsumerDependency(string Name, string Directory, string Source, string Revision, string Url);
     ConsumerDependency[]? fullBundleDependencies { get; init; }
 
     static string Within(string root, string relative)
@@ -598,15 +597,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         }
     }
 
-    /// <summary>Relative directory of the framework copy that a generated scratch package requires by path.</summary>
-    const string BundledFrameworkDirectory = ".lake/packages/leancil";
-
-    /// <summary>
-    /// The package's dependencies from lake-manifest.json: git packages pinned by a full revision. Only editor
-    /// workspaces of a generated scratch package pass `bundledFramework`, which also admits its path-required
-    /// framework copy; verification never does.
-    /// </summary>
-    static ConsumerDependency[] ConsumerDependencies(string root, bool bundledFramework = false)
+    /// <summary>The package's dependencies from lake-manifest.json: git packages pinned by a full revision.</summary>
+    static ConsumerDependency[] ConsumerDependencies(string root)
     {
         var manifest = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(root, "lake-manifest.json")));
         if (manifest.GetProperty("packagesDir").GetString() != ".lake/packages" ||
@@ -615,13 +607,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return manifest.GetProperty("packages").EnumerateArray().Select(package =>
         {
             var name = package.GetProperty("name").GetString()!;
-            if (bundledFramework && name == "leancil" && package.GetProperty("type").GetString() == "path" &&
-                package.GetProperty("dir").GetString() == BundledFrameworkDirectory)
-            {
-                // Its sources are hashed and compared with the bundled framework like any dependency's.
-                var copy = Within(root, BundledFrameworkDirectory);
-                return new ConsumerDependency(name, copy, copy, "bundled", null);
-            }
             var revision = package.TryGetProperty("rev", out var rev) ? rev.GetString() ?? "" : "";
             if (package.GetProperty("type").GetString() != "git" ||
                 !Regex.IsMatch(name, @"\A[A-Za-z_][A-Za-z0-9_-]*\z") || !Regex.IsMatch(revision, @"\A[0-9a-fA-F]{40}\z"))
@@ -822,25 +807,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             Sha(Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "lake.exe" : "lake")) + "\n" +
             JsonSerializer.Serialize(ConsumerCacheEnvironment()) + "\n" +
             JsonSerializer.Serialize(inputs) + "\n" + extra);
-
-    Dictionary<string, string[]> ConsumerModuleImports(string session, Dictionary<string, string> modules)
-    {
-        // Read Lean's compiled import headers, not a regex over source text. This
-        // also handles public/private imports and transitive package dependencies.
-        var input = Path.Combine(Path.GetTempPath(), "leancil-imports-" + Guid.NewGuid().ToString("N") + ".json");
-        var output = Path.ChangeExtension(input, ".result.json");
-        try
-        {
-            var paths = modules.Values.ToArray();
-            File.WriteAllText(input, JsonSerializer.Serialize(paths));
-            Run([CheckedAuditExecutable(), "--imports", input, output], session, environment: LeanEnvironment);
-            var imports = File.ReadAllLines(output).Select(line => JsonSerializer.Deserialize<string[]>(line)).ToArray();
-            if (imports.Length != paths.Length || imports.Any(items => items is null))
-                throw new InvalidDataException("Incomplete consumer compiled import graph.");
-            return modules.Keys.Zip(imports).ToDictionary(pair => pair.First, pair => pair.Second!);
-        }
-        finally { File.Delete(input); File.Delete(output); }
-    }
 
     static HashSet<string> ImportClosure(Dictionary<string, string[]> graph, IEnumerable<string> roots)
     {
@@ -1065,7 +1031,14 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     sealed record ConsumerSession(string Generated, Dictionary<string, string> Copied, SourceCopies Sources);
 
     sealed record ExtractionComponents(string InputHash, string Aggregate, Dictionary<string, string> Sources);
-    const string ExtractionComponentContext = "namespace Extracted\nopen CIL\nset_option maxRecDepth 4096\n\n";
+
+    [GeneratedRegex(@"(?m)^set_option maxRecDepth [0-9]+\r?$")]
+    private static partial Regex ExtractionRecursionDepth();
+
+    // Components keep the extraction's own recursion depth, which follows its longest method;
+    // a fixed depth would reject bodies the complete extraction compiles.
+    static string ExtractionComponentContext(string source) =>
+        "namespace Extracted\nopen CIL\n" + ExtractionRecursionDepth().Match(source).Value.TrimEnd('\r') + "\n\n";
 
     // Split only the extractor's declaration boundaries. Lean still checks every imported
     // declaration and the aggregate certificate against the complete program.
@@ -1073,6 +1046,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     {
         var methods = Regex.Matches(source, @"(?m)^def method[0-9]+Signature : String := ");
         var aggregate = source.IndexOf("def specializedMethods :", StringComparison.Ordinal);
+        var context = ExtractionComponentContext(source);
         if (methods.Count < 2 || aggregate <= methods[^1].Index)
             return new(ContentKey(source), source, new(StringComparer.Ordinal));
         var localValidation = new Regex(@"(?m)^theorem method([0-9]+)_" +
@@ -1103,14 +1077,14 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 .Where(declaration => declaration >= 0).Distinct().Order()
                 .Select(declaration => modules[declaration]).Prepend(header);
             var name = Component(string.Join("\n", imports.Select(module => "import " + module)) +
-                "\n\n" + ExtractionComponentContext + body + "\nend Extracted\n");
+                "\n\n" + context + body + "\nend Extracted\n");
             modules.Add(name);
             foreach (Match declaration in Regex.Matches(body,
                 @"(?m)^(?:@\[[^\r\n]*\]\s+)?(?:def|theorem) ([A-Za-z_][A-Za-z0-9_]*)"))
                 declarations.Add(declaration.Groups[1].Value, modules.Count - 1);
         }
         return new(ContentKey(source), string.Join("\n", modules.Select(module => "import " + module)) +
-            "\n\n" + ExtractionComponentContext + tail, sources);
+            "\n\n" + context + tail, sources);
     }
 
     // A unique wrapper stays in Extracted so its compilation shares the aggregate process.
@@ -1118,14 +1092,15 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     {
         if (plan.Sources.Keys.Count(repeated.Contains) < 2)
             return new(plan.InputHash, "", new(StringComparer.Ordinal));
+        var context = ExtractionComponentContext(plan.Aggregate);
         var shared = plan.Sources.Where(pair => repeated.Contains(pair.Key)).ToDictionary(StringComparer.Ordinal);
         var bodies = plan.Sources.Where(pair => !repeated.Contains(pair.Key)).Select(pair =>
-            pair.Value[(pair.Value.IndexOf(ExtractionComponentContext, StringComparison.Ordinal) +
-                ExtractionComponentContext.Length)..^"\nend Extracted\n".Length]);
-        var tail = plan.Aggregate[(plan.Aggregate.IndexOf(ExtractionComponentContext, StringComparison.Ordinal) +
-            ExtractionComponentContext.Length)..];
+            pair.Value[(pair.Value.IndexOf(context, StringComparison.Ordinal) +
+                context.Length)..^"\nend Extracted\n".Length]);
+        var tail = plan.Aggregate[(plan.Aggregate.IndexOf(context, StringComparison.Ordinal) +
+            context.Length)..];
         return new(plan.InputHash, string.Join("\n", shared.Keys.Select(module => "import " + module)) + "\n\n" +
-            ExtractionComponentContext + string.Concat(bodies) + tail, shared);
+            context + string.Concat(bodies) + tail, shared);
     }
 
     // Resolve source roots through Lake so library and package srcDir settings agree with imports.
@@ -1221,7 +1196,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         {
             var destination = Within(session, Path.GetRelativePath(root, dependency.Directory));
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            if (fullBundleDependencies is null && dependency.Url is not null)
+            if (fullBundleDependencies is null)
             {
                 Run(["git", "clone", "--no-hardlinks", "--no-checkout", dependency.Directory, destination]);
                 Run(["git", "remote", "set-url", "origin", dependency.Url], destination);

@@ -28,8 +28,7 @@ theorem correctness (memory : Memory) (tiles pairs : Reference) (length : Nat)
     ∃ fuel, invoke Extracted.program fuel pairsOf [.object (.address tiles)] memory =
       .ok (memory, [.array ⟨.address pairs, length, Tiles.Pairs.elementType⟩]) := by
   obtain ⟨formed, located, loaded⟩ := readable.facts held whole (by decide)
-  refine ⟨CIL.executionBound Extracted.program pairsOf, ?_⟩
-  cil_checked_steps [formed, located, loaded, whole.valid, leaveFrame]
+  cil_checked_steps [formed, located, loaded, whole.valid]
 
 #print axioms correctness
 
@@ -39,9 +38,7 @@ theorem null_pairs (memory : Memory) (tiles : Reference)
     (held : Tiles.Pairs.of memory tiles = .null) :
     ∃ fuel, invoke Extracted.program fuel pairsOf [.object (.address tiles)] memory =
       .ok (memory, [.array ⟨.null, 0, Tiles.Pairs.elementType⟩]) := by
-  refine ⟨CIL.executionBound Extracted.program pairsOf, ?_⟩
-  cil_checked_steps [readable.live.formed, readable.located, readable.load_null held rfl,
-    leaveFrame]
+  cil_checked_steps [readable.load_null held rfl]
 
 #print axioms null_pairs
 

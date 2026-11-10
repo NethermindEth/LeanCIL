@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include VerificationSelection.cs
+#:include Documentation.cs
 #:include ExportVerificationSuites.cs
 #:include VerificationSuites.cs
 
@@ -56,10 +57,59 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
     var durations = VerificationSelection.ReadDurations();
     var groups = VerificationSelection.Groups(All());
     Equal(groups.SelectMany(group => group.Suites).Order(StringComparer.Ordinal), All());
-    Require(groups.Length < All().Length, "Short suites were not grouped");
+    // Every job repeats setup and restores, so a full run must not go back to one job per suite.
+    double Seconds(VerificationSelection.Group group) => group.Suites.Sum(suite => durations[suite]);
+    var target = VerificationSelection.GroupSeconds(durations);
+    var longest = durations.MaxBy(suite => suite.Value);
+    Require(groups.Length <= All().Length / 3, "Suites were not packed: " + groups.Length + " jobs");
+    // The target is one runner's share of a round, with the fewest rounds that fit under the longest suite.
+    var rounds = durations.Values.Sum() / (VerificationSelection.Runners * target);
+    Require(target <= longest.Value && Math.Abs(rounds - Math.Round(rounds)) < 1e-9 &&
+        (rounds < 1.5 || durations.Values.Sum() / (VerificationSelection.Runners * (rounds - 1)) > longest.Value),
+        "The target is not the fewest whole rounds under the longest suite");
+    // A refreshed table moves the target; the longest suites may then swap places without unbalancing a run.
+    var refreshed = new Dictionary<string, double>(durations) { ["evidence"] = longest.Value - 100 };
+    Require(VerificationSelection.GroupSeconds(refreshed) <= longest.Value &&
+        VerificationSelection.GroupSeconds(new Dictionary<string, double> { ["only"] = 90 }) == 90.0 / 8,
+        "The target follows the measured total, not one suite");
+    // The longest suite alone bounds the run; no packed job may outlast it or approach its timeout.
+    Require(groups[0].Suites is [var alone] && alone == longest.Key, "The longest suite shares its job");
     foreach (var group in groups.Where(group => group.Suites.Length > 1))
-        Require(group.Suites.Length <= 3 && group.Suites.All(suite => durations[suite] <= 60) &&
-            group.Suites.Sum(suite => durations[suite]) <= 120, "Unbounded group");
+        Require(group.Suites.Length <= VerificationSelection.GroupMembers && Seconds(group) <= target &&
+            Seconds(group) <= group.Timeout * 60 / 2, "Unbounded group: " + group.Suite);
+    // A short job at the tail would queue behind the runner cap and finish last for no reason.
+    Require(groups.Zip(groups.Skip(1)).All(pair => Seconds(pair.First) >= Seconds(pair.Second)),
+        "Jobs do not start longest first");
+    Require(groups.Select(group => group.Suite).Distinct().Count() == groups.Length &&
+        groups.All(group => group.Suite.StartsWith(group.Suites[0], StringComparison.Ordinal) &&
+            Regex.IsMatch(group.Suite, @"\A[a-z+-]+(\+\d+more)?\z")), "A job name is ambiguous or not its first suite");
+    // Eight runners, with the setup every job repeats: packing must cost neither wall time nor jobs.
+    const double setupSeconds = 52;
+    double Wall(IEnumerable<double> jobs)
+    {
+        var runners = new PriorityQueue<double, double>();
+        for (var i = 0; i < VerificationSelection.Runners; i++) runners.Enqueue(0, 0);
+        foreach (var job in jobs)
+        {
+            var end = runners.Dequeue() + job + setupSeconds;
+            runners.Enqueue(end, end);
+        }
+        return runners.UnorderedItems.Max(item => item.Element);
+    }
+    var single = VerificationSelection.Schedule(All()).Select(suite => durations[suite]).ToArray();
+    Require(Wall(groups.Select(Seconds)) <= Wall(single), "Packing lengthened the simulated run");
+    Require((single.Length - groups.Length) * setupSeconds >= 30 * 60, "Packing saves under thirty job-minutes");
+    // A job measures proof cost exactly when it runs a proof suite, alone or grouped with others.
+    foreach (var group in groups)
+        Require(group.Proof == group.Suites.Any(VerificationSuites.ProofSuites.Contains),
+            "Proof cost is measured in the wrong job: " + group.Suite);
+    Require(groups.Any(group => group.Proof && group.Suites.Length > 1), "No proof suite shares a job");
+    // The libraries take minutes to measure; a job near its timeout would fail a suite that passed.
+    Require(groups.Single(group => group.Libraries) == groups[^1] &&
+        Seconds(groups[^1]) + 8 * 60 <= groups[^1].Timeout * 60,
+        "The libraries are not measured in the shortest job, or leave it no time");
+    Require(VerificationSelection.Groups(["unsafe"]).Single().Libraries,
+        "A run of one job measures no libraries");
     Equal(VerificationSelection.Groups(["contracts", "unknown"]).SelectMany(group => group.Suites),
         ["unknown", "contracts"]);
     Require(VerificationSelection.Groups([]).Length == 0, "Empty selection gained suites");
@@ -122,6 +172,9 @@ Test("proof and transitive imports", () =>
     Equal(VerificationSelection.Select(["Examples/Proofs/Countdown.lean"]), ["cli", "contracts", "fsharp", "loops"]);
     Equal(VerificationSelection.Select(["Tests/Support.lean"]), All());
     Equal(VerificationSelection.Select(["Tests/UnsafeCallEvidence.lean"]), ["unsafe"]);
+    // A proof a documented command verifies changes what that command prints.
+    Require(VerificationSelection.Select(["Examples/Proofs/PastEnd.lean"]).Contains("docs"),
+        "A proof the getting-started walkthrough verifies does not select the docs suite");
 });
 Test("dynamic proof paths", () =>
 {
@@ -478,6 +531,21 @@ Test("certified library binding, main republication and observability", () =>
         "REVIEWED_PRODUCER: " + dollar + "{{ steps.donor.outputs.reviewed-producer }}",
         "if [ \"" + dollar + "REVIEWED_PRODUCER\" = true ]; then producer=(--producer-replayed); fi",
         "name: verification-results-" + dollar + "{{ matrix.suite }}-" + dollar + "{{ github.run_attempt }}",
+        // A job measures its own proof suites by the group runner's record of when each started.
+        "if: " + dollar + "{{ !cancelled() && matrix.proof }}",
+        "dotnet artifacts/verification-fixtures/ProofCost/ProofCost.dll measure-suites",
+        "--runs artifacts/verification-suites.json",
+        "name: proof-cost-head-rows-" + dollar + "{{ matrix.suite }}-" + dollar + "{{ github.run_attempt }}",
+        "pattern: proof-cost-head-rows-*",
+        // A pull request compares with the rows main published for its merge base, bound to that commit.
+        "--merge-base \"" + dollar + "(git rev-parse \"" + dollar + "BASE\")\"",
+        "published=(--published \"" + dollar + "RUNNER_TEMP/published-rows/proof-cost-rows.json\" --sha256 \"" +
+            dollar + "PUBLISHED_SHA256\")",
+        "--commit \"" + dollar + "GITHUB_SHA\"",
+        // Later runs find main's rows by this job and artifact name and by the digest the job logs.
+        "    name: Proof cost\n", "needs: [select, suites]",
+        "name: proof-cost-rows-" + dollar + "{{ github.run_id }}-" + dollar + "{{ github.run_attempt }}",
+        "--proof-cost-rows \"" + dollar + "(git rev-parse \"" + dollar + "BASE\")\"",
         "archive-sha256: " + dollar + "{{ steps.pack-library.outputs.archive-sha256 || " +
             "steps.donor.outputs.archive-sha256 }}",
         "ARCHIVE_SHA256: " + dollar + "{{ needs.prepare.outputs.archive-sha256 }}",
@@ -486,11 +554,15 @@ Test("certified library binding, main republication and observability", () =>
             "steps.donor.outputs.manifest-sha256 || '' }}",
         "path: artifacts/library-download", "path: artifacts/certified-library.tar.zst",
         "dotnet run --file scripts/TestLibraryArchive.cs",
-        "max-parallel: 8", "artifacts/verification-traces/",
+        "max-parallel: " + VerificationSelection.Runners, "artifacts/verification-traces/",
+        "artifacts/verification-suites.json",
         "timeout-minutes: " + dollar + "{{ matrix.timeout }}",
         "VERIFICATION_SUITES: " + dollar + "{{ toJSON(matrix.suites) }}",
         "dotnet artifacts/verification-fixtures/LibraryArchive/LibraryArchive.dll restore" })
         Require(workflow.Contains(text, StringComparison.Ordinal), "Missing workflow binding: " + text);
+    // A run measures only its own tree: checking out and verifying a merge base cost a shared runner
+    // most of an hour.
+    Require(!workflow.Contains("git worktree", StringComparison.Ordinal), "A job checks out a second tree");
     string name = "name: certified-library-" + dollar + "{{ github.run_id }}-" + dollar + "{{ github.run_attempt }}";
     Require(workflow.Split(name, StringSplitOptions.None).Length == 2,
         "Producer artifact name must appear exactly once");

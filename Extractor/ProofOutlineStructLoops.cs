@@ -79,8 +79,10 @@ internal static partial class ProofOutline
             Header(lean, spec, ["CIL.Verification", "CIL.Safety.LoopScaffold", "CIL.Safety.BufferContents",
                 "CIL.Safety.LoopCallerFacts"], "`invariant`, `measure` and `postcondition`");
             var binders = spec.Parameters.Select(parameter => (parameter.Name, parameter.Lean)).ToArray();
+            lean.Quiet();
             Line("/-- Caller assumptions beyond the stated field access and initialization facts. -/");
             lean.Wrapped("def Precondition", Grouped(binders.Append(("initial", "Memory"))), ": Prop := sorry");
+            lean.Quiet();
             Line("/-- The required result and final caller-memory contents. -/");
             lean.Wrapped("def Postcondition", Grouped(binders.Concat([("initial", "Memory"), ("final", "Memory")])
                 .Concat(spec.Result is null ? [] : [("result", "W64")])), ": Prop := sorry");
@@ -102,9 +104,11 @@ internal static partial class ProofOutline
             Line("/-- The checked cutpoint just before the loop condition loads its fields. -/");
             Line($"def header ({receiver} : Reference) (initial : Memory) (state : {StateType}) : LoopState :=");
             Line($"  ⟨{header}, ⟨initial.nextIdentity, [], [], [], 0⟩, [], state.memory⟩");
+            lean.Quiet();
             Line("/-- The property preserved at the loop condition. -/");
             lean.Wrapped("def invariant", Grouped(binders.Concat([("initial", "Memory"), ("state", StateType)])),
                 ": Prop := sorry");
+            lean.Quiet();
             Line("/-- A natural number strictly decreasing on each continuing iteration. -/");
             lean.Wrapped("def measure", Grouped(binders.Concat([("initial", "Memory"), ("state", StateType)])),
                 ": Nat := sorry");

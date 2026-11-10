@@ -16,8 +16,27 @@ if (args is ["--suite", var suite])
 }
 var directory = Path.GetFullPath(Path.Combine("artifacts", "group-test-" + Guid.NewGuid().ToString("N")));
 string[] command = ["dotnet", Assembly.GetExecutingAssembly().Location];
+var summary = Path.Combine(Path.GetTempPath(), "group-summary-" + Guid.NewGuid().ToString("N") + ".md");
+Environment.SetEnvironmentVariable("GITHUB_STEP_SUMMARY", summary);
+var console = Console.Out;
+var printed = new StringWriter();
+Console.SetOut(printed);
 var result = await VerificationGroupRunner.Run(command, ["fails", "passes", "outlines-control"], directory);
+Console.SetOut(console);
+Environment.SetEnvironmentVariable("GITHUB_STEP_SUMMARY", null);
 if (result != 1) throw new InvalidOperationException("A failed member must fail the group");
+// A job of several suites must name the one that failed, in an annotation and in its summary.
+var annotations = printed.ToString().Split('\n').Where(line => line.StartsWith("::error", StringComparison.Ordinal))
+    .ToArray();
+var rows = File.ReadAllLines(summary);
+File.Delete(summary);
+if (annotations is not [var annotation] ||
+    !annotation.StartsWith("::error title=Suite fails failed::fails exited with code 3", StringComparison.Ordinal) ||
+    !printed.ToString().Contains("::group::Running suite passes", StringComparison.Ordinal) ||
+    rows.Length != 5 || !rows[2].StartsWith("| fails | **failed** |", StringComparison.Ordinal) ||
+    !rows[3].StartsWith("| passes | passed |", StringComparison.Ordinal) ||
+    !rows[4].StartsWith("| outlines-control | passed |", StringComparison.Ordinal))
+    throw new InvalidOperationException("Each member's result must be reported on its own");
 foreach (var name in new[] { "fails", "passes", "outlines-control" })
 {
     var log = File.ReadAllText(Path.Combine(directory, "verification-" + name + ".log"));
@@ -26,6 +45,15 @@ foreach (var name in new[] { "fails", "passes", "outlines-control" })
         File.ReadAllText(Path.Combine(directory, "suite-caches", name, "visited")) != name)
         throw new InvalidOperationException("Every member must run with its own log and cache");
 }
+// Proof cost attributes an output to the member running when it was written, so order and starts matter.
+var runs = System.Text.Json.JsonSerializer.Deserialize<VerificationGroupRunner.SuiteRun[]>(
+    File.ReadAllText(Path.Combine(directory, VerificationGroupRunner.SuiteRunsFile)), VerificationGroupRunner.Json)!;
+if (!runs.Select(run => (run.Suite, run.ExitCode)).SequenceEqual(
+        [("fails", 3), ("passes", 0), ("outlines-control", 0)]) ||
+    !runs.Zip(runs.Skip(1)).All(pair => pair.First.StartedAtUtc < pair.Second.StartedAtUtc) ||
+    File.GetLastWriteTimeUtc(Path.Combine(directory, "suite-caches", "passes", "visited")) is var written &&
+        (written < runs[1].StartedAtUtc || written >= runs[2].StartedAtUtc))
+    throw new InvalidOperationException("Each member's start must bracket what it wrote");
 if (await VerificationGroupRunner.Run(command, ["other"], directory) != 0)
     throw new InvalidOperationException("A passing group must pass");
 foreach (string[] invalid in new[] { Array.Empty<string>(), new[] { "passes", "passes" }, new[] { "../escape" },

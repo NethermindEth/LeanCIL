@@ -37,8 +37,7 @@ theorem correctness (memory : Memory) (tagged tags text : Reference) (length : N
   have loaded := readable.facts held live
   obtain ⟨stored, framed, holds⟩ := owned.store live
   refine ⟨CIL.executionBound Extracted.program take, _, ?_, framed, holds⟩
-  cil_checked_steps [owned.live.formed, readable.formed, live.formed, loaded.1, loaded.2,
-    owned.located, stored]
+  cil_checked_steps [loaded.1, loaded.2, stored]
 
 #print axioms correctness
 
@@ -54,8 +53,7 @@ theorem takes_null (memory : Memory) (tagged tags : Reference) (length : Nat)
   have loaded := readable.facts_null held
   obtain ⟨stored, -, holds⟩ := owned.store_formed (value := .null) rfl
   refine ⟨CIL.executionBound Extracted.program take, _, ?_, holds⟩
-  cil_checked_steps [owned.live.formed, readable.formed, loaded.1, loaded.2, owned.located,
-    stored]
+  cil_checked_steps [loaded.1, loaded.2, stored]
 
 #print axioms takes_null
 
@@ -66,8 +64,7 @@ theorem index_out_of_range (memory : Memory) (tagged tags : Reference) (length :
     ∃ fuel, invoke Extracted.program fuel take
         [.object (.address tagged), .object (.address tags), .scalar (.i32 index)] memory =
       .error ⟨take, 3, .thrown "System.IndexOutOfRangeException"⟩ := by
-  refine ⟨CIL.executionBound Extracted.program take, ?_⟩
-  cil_checked_steps [object.formed, live.formed, live.slot_outside outside]
+  cil_checked_steps [live.slot_outside outside]
 
 #print axioms index_out_of_range
 

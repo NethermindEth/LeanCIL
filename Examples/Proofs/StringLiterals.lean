@@ -18,8 +18,7 @@ theorem correctness (memory : CIL.Safety.Memory) (literal : Reference)
     (bound : memory.literals.lookup "x" = some literal)
     (formed : formObject memory (.address literal) = .ok (.object (.address literal))) :
     ∃ fuel, invoke Extracted.program fuel 0 [] memory = .ok (memory, [.scalar (.i32 1)]) := by
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
-  cil_checked_steps [literalObject_of_lookup bound, formed, leaveFrame]
+  cil_checked_steps [literalObject_of_lookup bound, formed]
 
 #print axioms correctness
 
@@ -31,7 +30,6 @@ theorem unbound_unsupported (memory : CIL.Safety.Memory)
   have missing : literalObject memory "x" =
       .error (.unsupported "String literal is not bound by the caller") := by
     simp only [literalObject, unbound]
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
   cil_checked_steps [missing]
 
 #print axioms unbound_unsupported

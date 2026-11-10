@@ -35,20 +35,35 @@ static class CertifiedLibraryDonor
             yield return run;
     }
 
+    /// <summary>
+    /// What one producer job publishes for later runs: the job by its name, the artifact by the prefix
+    /// of its name, and the line of the job's log that states the artifact's digest.
+    /// </summary>
+    public sealed record Producer(Func<string, bool> IsJob, string ArtifactPrefix, string DigestLine);
+
+    /// <summary>The prepare job's certified library.</summary>
+    public static readonly Producer Library = new(IsPrepareJob, "certified-library", DigestLine);
+
+    /// <summary>The proof cost rows a push to main measured, which a later PR takes as its base.</summary>
+    public static readonly Producer ProofCostRows =
+        new(name => name == "Proof cost", "proof-cost-rows", "Proof cost rows SHA256: ");
+
     /// <summary>Finds a complete authenticated candidate; failures never supply partial evidence.</summary>
     public static Selection? Find(IEnumerable<long> runs, Func<long, string, JsonElement> api,
-        Func<long, string> log, DateTimeOffset now, Action<string> warning)
+        Func<long, string> log, DateTimeOffset now, Action<string> warning, Producer? producer = null)
     {
+        producer ??= Library;
         foreach (long run in runs.Distinct())
         foreach (var (attempt, job) in Available($"Run {run} jobs",
-            () => PreparedAttempts(api(run, "/jobs?filter=all&per_page=100")), warning))
+            () => PreparedAttempts(api(run, "/jobs?filter=all&per_page=100"), producer), warning))
         {
             var selected = Available($"Run {run} attempt {attempt}", () =>
             {
-                var artifact = Artifact(api(run, "/artifacts?name=" + ArtifactName(run, attempt)), run, attempt, now);
+                var artifact = Artifact(api(run, "/artifacts?name=" + ArtifactName(run, attempt, producer)), run,
+                    attempt, now, producer);
                 if (artifact is null) return Array.Empty<Selection>();
                 var producerLog = log(job);
-                var digest = Digest(producerLog);
+                var digest = Digest(producerLog, producer);
                 var archiveDigest = ArchiveDigest(producerLog);
                 if (digest is null || (producerLog.Contains(ArchiveDigestLine, StringComparison.Ordinal) &&
                     archiveDigest is null)) return [];
@@ -170,10 +185,9 @@ static class CertifiedLibraryDonor
     /// <summary>A donated artifact must outlive every suite job that downloads it.</summary>
     public static readonly TimeSpan MinimumRemainingRetention = TimeSpan.FromDays(1);
 
-    static readonly Regex DigestPattern = new(Regex.Escape(DigestLine) + "([0-9a-f]{64})\\s*$", RegexOptions.Multiline);
-
-    /// <summary>The artifact one prepare attempt uploads.</summary>
-    public static string ArtifactName(long run, int attempt) => $"certified-library-{run}-{attempt}";
+    /// <summary>The artifact one attempt of a producer job uploads.</summary>
+    public static string ArtifactName(long run, int attempt, Producer? producer = null) =>
+        $"{(producer ?? Library).ArtifactPrefix}-{run}-{attempt}";
 
     /// <summary>Recent successful main pushes from this repository, bounded before filtering.</summary>
     public static IEnumerable<long> RecentMainRuns(JsonElement runs, string repository, int limit) =>
@@ -236,19 +250,20 @@ static class CertifiedLibraryDonor
         name.StartsWith("Prepare ", StringComparison.Ordinal) &&
         name.EndsWith("certified Lean library", StringComparison.Ordinal);
 
-    /// <summary>Successful prepare jobs of one run, newest attempt first.</summary>
-    public static IEnumerable<(int Attempt, long Job)> PreparedAttempts(JsonElement jobs) =>
+    /// <summary>Successful producer jobs of one run, newest attempt first.</summary>
+    public static IEnumerable<(int Attempt, long Job)> PreparedAttempts(JsonElement jobs, Producer? producer = null) =>
         jobs.GetProperty("jobs").EnumerateArray()
-            .Where(job => IsPrepareJob(job.GetProperty("name").GetString() ?? "") &&
+            .Where(job => (producer ?? Library).IsJob(job.GetProperty("name").GetString() ?? "") &&
                 job.GetProperty("conclusion").ValueKind == JsonValueKind.String &&
                 job.GetProperty("conclusion").GetString() == "success")
             .Select(job => (job.GetProperty("run_attempt").GetInt32(), job.GetProperty("id").GetInt64()))
             .OrderByDescending(prepared => prepared.Item1);
 
-    /// <summary>The id of the attempt's library artifact, if it exists and stays downloadable.</summary>
-    public static long? Artifact(JsonElement artifacts, long run, int attempt, DateTimeOffset now)
+    /// <summary>The id of the attempt's producer artifact, if it exists and stays downloadable.</summary>
+    public static long? Artifact(JsonElement artifacts, long run, int attempt, DateTimeOffset now,
+        Producer? producer = null)
     {
-        string name = ArtifactName(run, attempt);
+        string name = ArtifactName(run, attempt, producer);
         foreach (JsonElement artifact in artifacts.GetProperty("artifacts").EnumerateArray())
             if (artifact.GetProperty("name").GetString() == name && !artifact.GetProperty("expired").GetBoolean() &&
                 artifact.GetProperty("expires_at").GetDateTimeOffset() - now >= MinimumRemainingRetention &&
@@ -257,10 +272,11 @@ static class CertifiedLibraryDonor
         return null;
     }
 
-    /// <summary>The one digest a prepare job printed, or null when it printed none or several.</summary>
-    public static string? Digest(string log)
+    /// <summary>The one digest a producer job printed, or null when it printed none or several.</summary>
+    public static string? Digest(string log, Producer? producer = null)
     {
-        string[] digests = DigestPattern.Matches(log).Select(match => match.Groups[1].Value)
+        var pattern = Regex.Escape((producer ?? Library).DigestLine) + "([0-9a-f]{64})\\s*$";
+        string[] digests = Regex.Matches(log, pattern, RegexOptions.Multiline).Select(match => match.Groups[1].Value)
             .Distinct(StringComparer.Ordinal).ToArray();
         return digests.Length == 1 ? digests[0] : null;
     }

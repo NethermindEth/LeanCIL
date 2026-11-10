@@ -37,7 +37,6 @@ source = FillWordReaderOutline(source, skip: false);
 if (Regex.IsMatch(source, @"(?<![`\w])sorry(?![`\w])"))
     throw new InvalidOperationException("The cursor proof has unfilled obligations:\n" + source);
 File.WriteAllText(outline, source);
-VerifyWordReaderOutline(extraction, outline, expected: true);
 
 foreach (var field in new[] { "Position", "Remaining" })
 {
@@ -48,6 +47,8 @@ foreach (var field in new[] { "Position", "Remaining" })
     File.WriteAllText(missingSeparation, source.Replace(premise, "True", StringComparison.Ordinal));
     VerifyWordReaderOutline(extraction, missingSeparation, expected: false);
 }
+// Each verification replaces the extraction's report, so the accepted proof is verified last to keep it.
+VerifyWordReaderOutline(extraction, outline, expected: true);
 
 foreach (var mutation in new[]
     { "HelperDecrements", "RemainingIncreases", "WrongIndex", "CorruptElement" })
@@ -97,11 +98,11 @@ File.Delete(skipOutline);
 Run(Cli("new-proof", skipExtraction, skipOutline));
 var skipSource = FillWordReaderOutline(File.ReadAllText(skipOutline), skip: true);
 File.WriteAllText(skipOutline, skipSource);
-VerifyWordReaderOutline(skipExtraction, skipOutline, expected: true);
 var insufficient = Path.Combine(root, "InsufficientRemaining.lean");
 File.WriteAllText(insufficient, skipSource.Replace("1 < (WordReader.Remaining",
     "0 < (WordReader.Remaining", StringComparison.Ordinal));
 VerifyWordReaderOutline(skipExtraction, insufficient, expected: false);
+VerifyWordReaderOutline(skipExtraction, skipOutline, expected: true);
 
 Console.WriteLine("PASS cursor read and skip/peek consumption proofs; changed helper, bookkeeping, index, " +
     "element and insufficient bounds are rejected");

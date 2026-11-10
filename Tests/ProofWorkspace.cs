@@ -64,8 +64,9 @@ var proof = Path.Combine(package, "Proof.lean");
 File.WriteAllText(proof, "import Extracted\n#check Extracted.program\n");
 Run(["lake", "update"], package);
 var framework = Path.Combine(package, ".lake", "packages", "leancil");
-var editor = Path.Combine(framework, ".lake", "leancil");
-var compiledModules = Path.Combine(framework, ".lake", "build", "lib", "lean");
+// The editor library is the package's own; Lake resolves the pinned framework to the cached certified library.
+var editor = Path.Combine(package, ".lake", "leancil");
+var compiledModules = Path.Combine(package, ".lake", "leancil-editor", ".lake", "build", "lib", "lean");
 string[] command = [.. cli, "workspace", assembly, method, "--profile", "scalar", "--proof", proof,
     "--theorem", "WorkspaceProof.selectedMethod", "--assume-initialized", initializedType];
 
@@ -110,6 +111,9 @@ void Rebuild(string from, string to)
 string[] EditorFiles() => [.. Directory.EnumerateFiles(editor, "*", SearchOption.AllDirectories)
     .Select(path => Path.GetRelativePath(editor, path).Replace('\\', '/')).Order(StringComparer.Ordinal)];
 
+// Every package below requires the certified library by path; on a machine without it, building it here keeps
+// that build out of the lowered environment limit of the next check.
+EditorLibrary();
 Console.WriteLine("Rejecting an editor environment Lean would truncate, before writing the editor library");
 // A lowered limit stands in for Lean's Windows buffer on every OS; the editor's `lake serve` would lose LEAN_PATH.
 var crowded = Execute(command,
@@ -158,6 +162,11 @@ if (!EditorFiles().SequenceEqual(editorFiles) ||
         string.Join(", ", EditorFiles()));
 if (Run(["git", "status", "--porcelain"], framework).Length != 0)
     throw new InvalidOperationException("The editor extraction changed the framework checkout's tracked files.");
+// A framework build in the package, copied or compiled, would be a second one beside the certified library.
+if (Directory.Exists(Path.Combine(framework, ".lake")) ||
+    Directory.EnumerateFiles(Path.Combine(package, ".lake"), "*.olean", SearchOption.AllDirectories)
+        .Any(path => Path.GetRelativePath(package, path).Split('/', '\\').Any(part => part is "CIL" or "CIL.olean")))
+    throw new InvalidOperationException("The pinned package holds a framework build of its own.");
 var codeLength = CodeLength(key);
 File.AppendAllText(proof, $"""
 
@@ -299,13 +308,52 @@ void Reject(string[] arguments, string marker)
 
 var shadow = Path.Combine(package, "Client", "ExtractedSymbols.lean");
 File.WriteAllText(shadow, "def forged : Nat := 0\n");
-try { Reject(command, "reserved for the selected extractions"); }
+try { Reject(command, "reserved for the extractions leancil workspace generates"); }
 finally { File.Delete(shadow); }
 var keyedShadow = Path.Combine(package, "Extracted", key + ".lean");
 Directory.CreateDirectory(Path.GetDirectoryName(keyedShadow)!);
 File.WriteAllText(keyedShadow, "def forged : Nat := 0\n");
-try { Reject(command, "reserved for the selected extractions"); }
+try { Reject(command, "reserved for the extractions leancil workspace generates"); }
 finally { Directory.Delete(Path.GetDirectoryName(keyedShadow)!, true); }
+// The tool shows a path under the directory it runs in relative to it.
+string Shown(string path) => Path.GetRelativePath(Environment.CurrentDirectory, path).Replace('\\', '/');
+// A package that is not ready is refused with its cause and, on the `Next:` line, the fix.
+void RejectWithFix(string[] arguments, string cause, string fix)
+{
+    var result = Execute(arguments);
+    var text = result.Stderr.ReplaceLineEndings("\n");
+    var next = text.Split('\n').FirstOrDefault(line => line.StartsWith("  Next: ", StringComparison.Ordinal)) ?? "";
+    if (result.Code == 0 || !text.Split('\n')[0].Contains(cause, StringComparison.Ordinal) ||
+        !next.Contains(fix, StringComparison.Ordinal) || text.Contains("Could not find file") ||
+        text.Contains("Check the diagnostic and the input paths"))
+        throw new InvalidOperationException($"Expected `{cause}` with the fix `{fix}`:\n{result.Output}");
+}
+var nestedExtraction = Path.Combine(package, "out", "Wide");
+Run([.. cli, "extract", assembly, method, nestedExtraction, "scalar", "--assume-initialized", initializedType]);
+try
+{
+    RejectWithFix(command, $"The extraction directory {Shown(nestedExtraction)} is inside the proof package",
+        $"Extract to a directory outside {Shown(package)} and delete {Shown(nestedExtraction)}");
+}
+finally { Directory.Delete(Path.Combine(package, "out"), true); }
+foreach (var (name, lakefile, cause, fix) in new[]
+    {
+        ("Unresolved", true, "has no lake-manifest.json, so its leancil dependency is not resolved",
+            "Run `lake update` in "),
+        ("Bare", false, "is not a Lake package: it has no lakefile.toml or lakefile.lean",
+            "omit --proof-root and leancil workspace generates a package beside the proof")
+    })
+{
+    var unprepared = Path.Combine(root, name);
+    Directory.CreateDirectory(unprepared);
+    if (lakefile) File.Copy(Path.Combine(package, "lakefile.toml"), Path.Combine(unprepared, "lakefile.toml"));
+    var unpreparedProof = Path.Combine(unprepared, "Proof.lean");
+    File.WriteAllText(unpreparedProof, "import Extracted\n");
+    RejectWithFix([.. cli, "workspace", assembly, method, "--profile", "scalar", "--proof", unpreparedProof,
+        "--proof-root", unprepared, "--assume-initialized", initializedType],
+        $"The proof root {Shown(unprepared)} {cause}", fix);
+}
+CheckedProof();
 // Another profile of the same method is another extraction; it is added beside this one, not in its place.
 var wideFiles = EditorFiles();
 var wideAt = Directory.EnumerateFiles(editor, "*", SearchOption.AllDirectories)
@@ -338,6 +386,13 @@ if (!removed.Contains("Removed editor extraction " + otherKey, StringComparison.
     wideBuilt.Any(entry => File.GetLastWriteTimeUtc(entry.Key) != entry.Value))
     throw new InvalidOperationException("Removing the other selection left files behind or touched the first: " +
         removed + string.Join(", ", EditorFiles()) + removedCheck.Output);
+CheckedProof();
+// Lake applies whatever overrides a package holds; another tool's are neither merged nor replaced.
+var packageOverrides = Path.Combine(package, ".lake", "package-overrides.json");
+var writtenOverrides = File.ReadAllText(packageOverrides);
+File.WriteAllText(packageOverrides, """{"version": "1.1.0", "packages": []}""");
+Reject(command, "already holds package overrides");
+File.WriteAllText(packageOverrides, writtenOverrides);
 CheckedProof();
 var olderRevision = Run(["git", "rev-parse", "HEAD^"], framework).Trim();
 try
@@ -387,18 +442,43 @@ try
         """);
     if (Directory.EnumerateDirectories(standalone, ".git", SearchOption.AllDirectories).Any())
         throw new InvalidOperationException("A standalone workspace created a git repository.");
+    // The package requires the certified library where it is, so a second framework build on disk, or a copy
+    // of its sources, would show up as package files.
+    var certified = Regex.Match(File.ReadAllText(Path.Combine(standalone, ".lake", "leancil-framework",
+        "lakefile.toml")), "^srcDir = \"([^\"]+)\"$", RegexOptions.Multiline).Groups[1].Value;
+    var packageFiles = Directory.EnumerateFiles(standalone, "*", SearchOption.AllDirectories).ToArray();
+    const long largestScratchPackage = 16 * 1024 * 1024;
+    if (!File.Exists(Path.Combine(certified, ".lake", "build", "lib", "lean", "CIL.olean")) ||
+        packageFiles.Any(path => Path.GetRelativePath(standalone, path).Split('/', '\\').Contains("CIL")) ||
+        packageFiles.Sum(path => new FileInfo(path).Length) > largestScratchPackage)
+        throw new InvalidOperationException("A standalone package holds framework sources or a framework build " +
+            "instead of requiring the certified library at " + certified);
+    // Lake rebuilds a required module it finds stale in place; a certified library is never written.
+    var certifiedFiles = CacheFiles(certified);
+    var certifiedStamps = FileStamps(certified);
+    void RequireCertifiedUnwritten(string after)
+    {
+        if (!Same(certifiedStamps, FileStamps(certified)) || !Same(certifiedFiles, CacheFiles(certified)))
+            throw new InvalidOperationException("The certified library changed after " + after + ": " + certified);
+    }
     // Lake lists a source directory once per library, so test libraries would crowd LEAN_SRC_PATH toward
-    // Lean's Windows environment limit; the copy declares only the framework and editor libraries.
-    var bundled = Path.GetFullPath(Path.Combine(standalone, ".lake", "packages", "leancil"));
+    // Lean's Windows environment limit; the package adds one each for CIL and the editor library.
     var sourcePath = Run(["lake", "env"], standalone).Split('\n', StringSplitOptions.TrimEntries)
         .Single(line => line.StartsWith("LEAN_SRC_PATH=", StringComparison.Ordinal))["LEAN_SRC_PATH=".Length..];
-    var frameworkEntries = sourcePath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-        .Count(entry => Path.GetFullPath(entry).StartsWith(bundled, StringComparison.OrdinalIgnoreCase));
-    if (frameworkEntries != 2)
-        throw new InvalidOperationException($"The bundled framework adds {frameworkEntries} source directories " +
+    string[] expectedSources = [Path.GetFullPath(certified),
+        Path.GetFullPath(Path.Combine(standalone, ".lake", "leancil"))];
+    var packageSources = sourcePath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+        .Select(Path.GetFullPath).Where(entry => expectedSources.Any(expected =>
+            entry.StartsWith(expected, StringComparison.OrdinalIgnoreCase))).ToArray();
+    if (packageSources.Length != 2)
+        throw new InvalidOperationException($"The package adds {packageSources.Length} source directories " +
             "to LEAN_SRC_PATH instead of one each for CIL and the editor library: " + sourcePath);
     Run(["lake", "lean", scratchProof], standalone);
-    // The framework copy is required by path, which certification never accepts in place of a pinned revision.
+    // What an editor does on opening the file and what a user may run in the package.
+    Run(["lake", "setup-file", scratchProof], standalone);
+    Run(["lake", "build"], standalone);
+    RequireCertifiedUnwritten("checking the proof in the package");
+    // The library is required by path, which certification never accepts in place of a pinned revision.
     var unpinned = Execute([.. cli, "verify", output, "--proof", scratchProof, "--proof-root", standalone,
         "--theorem", "scratch"]);
     if (unpinned.Code == 0 || !unpinned.Output.Contains("must be git packages pinned", StringComparison.Ordinal))
@@ -416,15 +496,35 @@ try
     if (reopened.Contains("Created a Lake package", StringComparison.Ordinal))
         throw new InvalidOperationException("Re-running regenerated the standalone package: " + reopened);
     Run(["lake", "lean", scratchProof], standalone);
+    RequireCertifiedUnwritten("verifying and refreshing the package");
 }
 finally
 {
     Environment.SetEnvironmentVariable("GIT_CONFIG_GLOBAL", globalConfig);
     Directory.Delete(standalone, true);
 }
-Console.WriteLine("PASS a standalone proof gets a package beside it without git commits or a pinned framework, " +
-    "verifies as a single file and refreshes on re-run");
+Console.WriteLine("PASS a standalone proof gets a package beside it without git commits, a pinned framework or a " +
+    "framework build of its own, leaves the certified library unwritten, verifies as a single file and " +
+    "refreshes on re-run");
 
+// A closure entry serves one proof whose imports are the extraction and framework modules. A full audit,
+// contract imports and any other import need the whole library, and so does every caller that asks for none.
+{
+    var identity = ExtractionIdentity.Read(output);
+    string[]? Roots(Program program, string source, ExtractionIdentity extraction)
+    {
+        using (program) return program.ClosureRoots(source, output, null, extraction);
+    }
+    const string plainProof = "import Extracted\n";
+    if (Roots(new() { importClosureFirst = true }, plainProof, identity) is not { Length: > 0 } ||
+        Roots(new(), plainProof, identity) is not null ||
+        Roots(new() { importClosureFirst = true, forceFullVerification = true }, plainProof, identity) is not null ||
+        Roots(new() { importClosureFirst = true }, plainProof + "import Client.Support\n", identity) is not null ||
+        Roots(new() { importClosureFirst = true }, plainProof, identity with
+            { Sources = new(StringComparer.Ordinal) { ["Imported"] = "interface" } }) is not null)
+        throw new InvalidOperationException("A proof that needs the whole library was offered a closure entry.");
+    Console.WriteLine("PASS a full audit, contract imports and a package import are never offered a closure entry");
+}
 Console.WriteLine("Watching two proofs of two methods in one package");
 var twiceProof = Path.Combine(package, "TwiceProof.lean");
 File.WriteAllText(twiceProof, "-- written once the module name is known\n");
@@ -541,6 +641,52 @@ Expect(fixedProof, "Proof.lean", "verified", rechecked: false);
 Console.WriteLine($"PASS a C# edit refreshes and rechecks exactly its method, located at TwiceProof.lean:3 " +
     $"({editedTime.TotalSeconds:F1}s edit to feedback); the other method's files are byte-identical with " +
     $"unchanged times; the fixed proof verifies ({fixTime.TotalSeconds:F1}s)");
+
+// With --goals a cycle reports the goal at each `sorry`, and reports it again while the proof is unchanged, so
+// a terminal shows what is left to prove after every save.
+File.WriteAllText(twiceProof, $"""
+import Extracted.{twiceKey}
+namespace TwiceProof
+theorem length : Extracted.method0.code.length = {changedTwice} := by
+  sorry
+#print axioms length
+end TwiceProof
+""");
+JsonElement GoalsCycle()
+{
+    var result = Execute([.. watch, "--once", "--goals"], environment: watchEnvironment);
+    var line = result.Stdout.Split('\n').LastOrDefault(text => text.StartsWith('{'))
+        ?? throw new InvalidOperationException("watch --goals printed no cycle: " + result.Output);
+    return JsonSerializer.Deserialize<JsonElement>(line);
+}
+var (withoutGoals, _) = WatchOnce(passes: false);
+if (Outcome(withoutGoals, "TwiceProof.lean").GetProperty("goals").ValueKind != JsonValueKind.Null)
+    throw new InvalidOperationException("watch without --goals reported goals: " + withoutGoals);
+foreach (var rechecked in new[] { true, false })
+{
+    var goalsCycle = GoalsCycle();
+    // A result recorded without goals does not answer a run that asks for them, so the first cycle rechecks.
+    Expect(goalsCycle, "TwiceProof.lean", "failed", rechecked);
+    Expect(goalsCycle, "Proof.lean", "verified", rechecked);
+    var open = Outcome(goalsCycle, "TwiceProof.lean").GetProperty("goals").EnumerateArray().ToArray();
+    if (open.Length != 1 || open[0].GetProperty("kind").GetString() != "sorry" ||
+        open[0].GetProperty("line").GetInt32() != 4 || open[0].GetProperty("column").GetInt32() != 2 ||
+        !open[0].GetProperty("goal").GetString()!.Contains(
+            $"⊢ Extracted.method0.code.length = {changedTwice}", StringComparison.Ordinal) ||
+        Outcome(goalsCycle, "Proof.lean").GetProperty("goals").GetArrayLength() != 0)
+        throw new InvalidOperationException($"watch --goals (rechecked {rechecked}) did not report the hole: " +
+            goalsCycle);
+}
+var goalsText = Execute([.. cli, "watch", package, "--project", project, "--once", "--goals"],
+    environment: watchEnvironment).Stdout.ReplaceLineEndings("\n");
+if (!goalsText.Contains("  FAILED (unchanged) TwiceProof.lean TwiceProof.length ", StringComparison.Ordinal) ||
+    !goalsText.Contains("TwiceProof.lean:4:2: sorry\n", StringComparison.Ordinal) ||
+    !goalsText.Contains($"      ⊢ Extracted.method0.code.length = {changedTwice}\n", StringComparison.Ordinal))
+    throw new InvalidOperationException("watch --goals did not print the hole's goal: " + goalsText);
+WriteTwiceProof(changedTwice);
+var (filled, _) = WatchOnce(passes: true);
+Expect(filled, "TwiceProof.lean", "verified", rechecked: true);
+Console.WriteLine("PASS watch --goals reports the goal at a proof's `sorry` each cycle, changed or not");
 
 // A failed build must never leave an earlier build's result green: every proof is stale and loses its certificate.
 Edit(arith, changedTwiceBody, "x + x +;");

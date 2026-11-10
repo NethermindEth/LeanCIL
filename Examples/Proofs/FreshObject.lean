@@ -95,7 +95,6 @@ theorem insufficient_budget (memory : Memory) (short : memory.heapBudget < tally
     ∃ fuel, invoke Extracted.program fuel fresh [.scalar (.i32 step)] memory =
       .error ⟨fresh, 1, .allocationFailure tallySize memory.heapBudget⟩ := by
   have failed := allocateObject_insufficient tally short
-  refine ⟨CIL.executionBound Extracted.program fresh, ?_⟩
   cil_checked_steps [failed, tally, tallyType, tallySize]
 
 #print axioms insufficient_budget
