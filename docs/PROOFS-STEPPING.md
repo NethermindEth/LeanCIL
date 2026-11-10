@@ -54,13 +54,15 @@ goal names its object:
 | Hypothesis | Facts read |
 | --- | --- |
 | `live : LiveObject memory object` | `live.formed` |
-| `Readable`, `Owned` or `Holds` of a scalar field | `readable.facts`: the object forms, the field is located and an unsigned load pushes its value |
+| `Readable`, `Owned` or `Holds` of a scalar field | `readable.live.formed`, `readable.located` and the unsigned load of `readable.facts`, which pushes the field's value |
 | `Readable`, `Owned` or `Holds` of a reference or array field | `readable.live.formed` and `readable.located` |
 | `ReferenceArray.Live`, `Readable`, `Owned` or `Holds` | `live.formed` and `live.located` |
 
 A fact that takes a further premise is still passed: `readable.facts held targetLive` for the
 load of a reference field, `readable.signedFacts` for a signed narrow load, and the equation a
-store returns. A fact passed explicitly is used as given and not read again.
+store returns. A fact passed explicitly is used as given and not read again. Outside a loop each
+fact read is passed as its term, as an explicit one is, so a proof depends only on the facts its
+steps used; the loop tactics add theirs as hypotheses.
 
 After each step the tactics evaluate the closed literal operands the state holds with the
 `cil_literal` simp set: a width conversion, sign extension or `toNat` of a bit-vector numeral, and

@@ -110,6 +110,7 @@ theorem rent_reuses (memory : Memory) (pool head : Reference) (wellFormed : memo
       Nat.ne_of_lt (Nat.lt_of_lt_of_le link.old enter.numeric1.fresh)
     cil_checked_steps [enter.setup, entry.frame, headLoad, linkLoad, freeStored, nullStored,
       idleFacts, countWritten, markWritten, headKept]
+    rfl
   · exact (((freeHeld.after_confined nullFramed (apart_of_entries rfl)).after_confined countFramed
       (apart_of_entries rfl)).after_confined markFramed (apart_of_entries rfl)).after_below left
       free.old past
@@ -327,6 +328,7 @@ theorem rent_creates (memory : Memory) (pool : Reference) (wellFormed : memory.W
       nextIdFacts, idStored, idLoaded, nextWritten, idLoaded2, allocated, created, ownerStored,
       itemIdWritten, itemType, itemSize, PooledItem.type, liveFacts5, liveWritten, markWritten,
       itemHome]
+    rfl
   · exact ((((nextHeld.after_below poolKept nextHeld.1.old allocatedNext).after_confined
       ownerFramed (apart_of_entries rfl)).after_confined itemIdFramed (apart_of_entries rfl))
       |>.after_confined liveFramed (apart_of_entries rfl)).after_confined markFramed

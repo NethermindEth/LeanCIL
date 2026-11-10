@@ -65,12 +65,17 @@ structure ObjectEvidence where
   facts : List Lean.Name
 
 /-- The evidence whose facts stepping reads: that an object forms, where a field lies in it, and
-    what a load of a scalar field pushes. A `Holds` gives those of the `Owned` it carries. -/
+    what a load of a scalar field pushes, the last conjunct of its `facts`. Each is a fact of its
+    own, so a step that reads one takes no axiom of another's proof. A `Holds` gives those of
+    the `Owned` it carries. -/
 def objectEvidence : List ObjectEvidence := [
   { head := `CIL.Safety.LiveObject, arity := 2, memory := 0, facts := [`formed] },
-  { head := `CIL.Safety.WordField.Readable, arity := 4, memory := 2, facts := [`facts] },
-  { head := `CIL.Safety.WordField.Owned, arity := 4, memory := 2, facts := [`facts] },
-  { head := `CIL.Safety.WordField.Holds, arity := 5, memory := 2, facts := [`left.facts] },
+  { head := `CIL.Safety.WordField.Readable, arity := 4, memory := 2,
+    facts := [`live.formed, `located, `facts.right.right] },
+  { head := `CIL.Safety.WordField.Owned, arity := 4, memory := 2,
+    facts := [`live.formed, `located, `facts.right.right] },
+  { head := `CIL.Safety.WordField.Holds, arity := 5, memory := 2,
+    facts := [`left.live.formed, `left.located, `left.facts.right.right] },
   { head := `CIL.Safety.ReferenceField.Readable, arity := 3, memory := 1,
     facts := [`live.formed, `located] },
   { head := `CIL.Safety.ReferenceField.Owned, arity := 3, memory := 1,
@@ -198,11 +203,10 @@ def reachableLoopUnfolds (seed : Array Lean.Name) : TacticM (Array Lean.Name) :=
   return registered.filter included.contains
 
 open Lean Elab Tactic Meta in
-/-- Assert the proof `fact` elaborates to as a hygienic hypothesis named after `base`, returning
-    it and its statement; nothing when it does not elaborate to a proof without metavariables or
-    states one of `known`. -/
-def assertLoopFact (base : Name) (fact : Term) (known : Array Expr) :
-    TacticM (Option (Term × Expr)) := withMainContext do
+/-- The proof `fact` elaborates to and its statement; nothing when it does not elaborate to a
+    proof without metavariables or states one of `known`. -/
+def loopFactProof? (fact : Term) (known : Array Expr) : TacticM (Option (Expr × Expr)) :=
+  withMainContext do
   let saved ← saveState
   try
     let proof ← Term.withoutErrToSorry <| Term.elabTerm fact none
@@ -212,13 +216,21 @@ def assertLoopFact (base : Name) (fact : Term) (known : Array Expr) :
     if proof.hasMVar || type.hasMVar || !(← isProp type) || known.contains type then
       saved.restore
       return none
-    let name ← mkFreshUserName base
-    let (_, goal) ← (← (← getMainGoal).assert name type proof).intro1P
-    replaceMainGoal [goal]
-    return some (mkIdent name, type)
+    return some (proof, type)
   catch _ =>
     saved.restore
     return none
+
+open Lean Elab Tactic Meta in
+/-- Assert the proof `fact` elaborates to as a hygienic hypothesis named after `base`, returning
+    it and its statement; nothing when `loopFactProof?` gives none. -/
+def assertLoopFact (base : Name) (fact : Term) (known : Array Expr) :
+    TacticM (Option (Term × Expr)) := withMainContext do
+  let some (proof, type) ← loopFactProof? fact known | return none
+  let name ← mkFreshUserName base
+  let (_, goal) ← (← (← getMainGoal).assert name type proof).intro1P
+  replaceMainGoal [goal]
+  return some (mkIdent name, type)
 
 open Lean Meta in
 /-- Whether code that `program` reaches through definitions in its own root namespace, or
@@ -654,6 +666,15 @@ def gatherLoopFactGroups (facts : Array Term) (evidenceOnly : Bool := false) :
     if base == `fieldRead then fields := fields.push fact; continue
     if base == `narrowRead then fields := fields.push fact; narrowReads := true; continue
     if base == `referenceFact then references := references.push fact; continue
+    -- Outside a loop a fact is passed as its term, as an explicit one is, so a proof holds
+    -- only the facts its steps used and depends on no axiom of the others.
+    if evidenceOnly then
+      let saved ← saveState
+      if let some (_, type) ← loopFactProof? fact known then
+        saved.restore
+        known := known.push type
+        gathered := gathered.push fact
+      continue
     if let some (asserted, type) ← assertLoopFact base fact known then
       -- A derived fact can name a frame the goal no longer does, such as the entry frame's owner.
       constants := constants ++ type.getUsedConstants
