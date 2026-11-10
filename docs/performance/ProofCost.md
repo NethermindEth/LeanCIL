@@ -162,3 +162,65 @@ still names `c707f283` at these consumer commits, so these results are compilati
 proof-cost evidence, not final-pin certificates. Certificate wall time was not measured.
 Raw paired reports and the command are retained under the consumer's
 `verification/artifacts/aggregate-reuse/`, including `measurement-summary.json`.
+
+## Relational WP and calling evidence, 10 November 2026
+
+The comparison from `e6e792cc293f9c1ca9f69bc83b52689d642bfa36` to
+`c89730f6daf54e31bfad25f20378e2185116e0f8` measures seven modules, with 466 baseline
+rows and 484 head rows. All existing thresholds pass without waivers; no module is unmeasured.
+The saved baseline measurements were reused. Elapsed times are not compared because other
+builds shared the machine. All 544 library build jobs pass at the head with clean axiom checks.
+
+| Module | Elaboration heartbeats, before → after | `.olean` bytes, before → after |
+| --- | ---: | ---: |
+| `Tests.Automation` | 79,813,703 → 79,813,837 | 2,019,840 → 2,019,840 |
+| `Tests.CodeAt` | 10,211,461 → 10,211,434 | 349,904 → 349,904 |
+| `Tests.FeatureExecution` | 2,591,708 → 2,591,681 | 108,576 → 108,576 |
+| `Tests.MethodContract` | 46,316,761 → 46,832,385 | 1,227,208 → 1,232,720 |
+| `Tests.StoreFacts` | 58,495,201 → 58,557,218 | 880,064 → 880,064 |
+| `Tests.SimdCarryCalls` | 85,486,112 → 85,876,735 | 2,027,712 → 2,039,960 |
+| `Tests.CallingFields` | 24,482,605 → 45,119,475 | 517,960 → 776,816 |
+
+`CallingFields` adds 18 measured declarations/commands, including consecutive writes, supplied
+write priority and wrapper forms. Its module totals therefore describe more proofs. The existing
+`writes_after_reads` theorem, whose body now derives the store automatically, changes from
+10,518,951 to 10,939,446 heartbeats (+4.0%). Its arbitrary-overlap contract is unchanged.
+
+The SIMD fixture shares each proof between Add (`subtract = false`) and Subtract
+(`subtract = true`). `caller_holds` retains five statement lines and five outer binders;
+`stored_holds` retains three statement lines and one outer binder. Both counts are unchanged.
+The statements keep the same preconditions, read-before-write ordering, arbitrary overlap and
+confinement guarantees. This interface migration claims no statement-size reduction for them.
+
+| Shared Add/Subtract proof | Elaboration heartbeats, before → after | Kernel heartbeats, before → after |
+| --- | ---: | ---: |
+| `caller_holds` | 4,029,114 → 4,163,083 | 147,475 → 148,744 |
+| `stored_holds` | 4,969,202 → 5,055,840 | 124,586 → 126,212 |
+
+The compiled-size measurement is the complete SIMD module in the preceding table; it is not
+attributed separately to Add and Subtract. Negative helper, lane, overlap and alias controls
+remain in that module. These may-alias fixtures require checked snapshots and write authority,
+without imposing separation between inputs and outputs.
+
+### Upstream source accounting
+
+The upstream diff from merge base `13740081296a751b03344238ae0123fd8dfcbd0b` to
+`c89730f6daf54e31bfad25f20378e2185116e0f8` covers 144 files. Counts are physical lines,
+including declarations and comments, from `git diff --numstat`. This report itself is later
+than that snapshot. Maintained examples are grouped with tests.
+
+| Upstream category | Added | Removed | Net |
+| --- | ---: | ---: | ---: |
+| CIL production | 2,247 | 521 | +1,726 |
+| C# production | 193 | 37 | +156 |
+| Tests and proof examples | 3,143 | 158 | +2,985 |
+| Documentation | 487 | 51 | +436 |
+| Tooling, CI and build configuration | 500 | 43 | +457 |
+| Generated/golden data | 68 | 12 | +56 |
+| **Total** | **6,638** | **822** | **+5,816** |
+
+The data category contains CLI JSON goldens, the self-admission baseline and scheduling
+durations. No generated Lean or C# binding source changes. These upstream additions are
+separate from the consumer pilots above; they do not establish a system-wide source reduction.
+Raw reports are retained in `artifacts/int256/final-store-cost.json`,
+`final-store-cost-comparison.json` and `final-source-accounting.json`.
