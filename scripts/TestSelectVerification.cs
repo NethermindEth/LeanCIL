@@ -61,6 +61,11 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
     foreach (var group in groups.Where(group => group.Suites.Length > 1))
         Require(group.Suites.Length <= 3 && group.Suites.All(suite => durations[suite] <= 60) &&
             group.Suites.Sum(suite => durations[suite]) <= 120, "Unbounded group");
+    // Proof cost reads a proof suite's head outputs from its job's upload, which must hold nothing else.
+    Require(VerificationSuites.ProofSuites.Any(suite => durations[suite] <= 60), "No proof suite is short");
+    foreach (var suite in VerificationSuites.ProofSuites)
+        Require(groups.Any(group => group.Suite == suite && group.Suites is [var only] && only == suite),
+            "Proof suite shares a job: " + suite);
     Equal(VerificationSelection.Groups(["contracts", "unknown"]).SelectMany(group => group.Suites),
         ["unknown", "contracts"]);
     Require(VerificationSelection.Groups([]).Length == 0, "Empty selection gained suites");
@@ -482,6 +487,8 @@ Test("certified library binding, main republication and observability", () =>
         "REVIEWED_PRODUCER: " + dollar + "{{ steps.donor.outputs.reviewed-producer }}",
         "if [ \"" + dollar + "REVIEWED_PRODUCER\" = true ]; then producer=(--producer-replayed); fi",
         "name: verification-results-" + dollar + "{{ matrix.suite }}-" + dollar + "{{ github.run_attempt }}",
+        // A proof suite's job is named for it alone, so its upload is found by the suite's name.
+        "pattern: verification-results-" + dollar + "{{ matrix.source }}-*",
         "archive-sha256: " + dollar + "{{ steps.pack-library.outputs.archive-sha256 || " +
             "steps.donor.outputs.archive-sha256 }}",
         "ARCHIVE_SHA256: " + dollar + "{{ needs.prepare.outputs.archive-sha256 }}",

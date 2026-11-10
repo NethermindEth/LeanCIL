@@ -545,13 +545,6 @@ internal static partial class ProofCostReport
 
     internal const string LibrariesSource = "libraries";
 
-    // The suites whose verified outputs are proofs about extracted methods: examples and generated outlines.
-    internal static readonly string[] ProofSuites =
-    [
-        "core", "loops", "outlines-control", "outlines-objects", "outlines-buffers", "structoutlines",
-        "receiveroutlines", "wordreader", "savedwordreader"
-    ];
-
     static readonly string[] LibraryInputs = ["lakefile.toml", "lean-toolchain", "lake-manifest.json"];
 
     // What a change needs measured: the test libraries when Lean inputs changed, and each selected proof suite.
@@ -563,7 +556,8 @@ internal static partial class ProofCostReport
             .ToHashSet(StringComparer.Ordinal);
         var lean = changedPaths.Any(path => path.EndsWith(".lean", StringComparison.Ordinal) ||
             LibraryInputs.Contains(path));
-        return [.. lean ? [LibrariesSource] : Array.Empty<string>(), .. ProofSuites.Where(selected.Contains)];
+        return [.. lean ? [LibrariesSource] : Array.Empty<string>(),
+            .. VerificationSuites.ProofSuites.Where(selected.Contains)];
     }
 
     internal static Measurement Read(IEnumerable<string> paths)

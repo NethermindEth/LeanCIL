@@ -38,15 +38,17 @@ internal static class VerificationSelection
     internal sealed record Group(string Suite, string[] Suites, int Timeout);
 
     // Bound sequential work so grouping removes setup without creating another long tail.
+    // A proof suite never shares a job: proof cost measures the job's upload as that suite's outputs.
     internal static Group[] Groups(IEnumerable<string> suites, string? root = null)
     {
         var durations = ReadDurations(root);
+        bool Shares(string name) => durations.GetValueOrDefault(name, double.PositiveInfinity) <= 60 &&
+            !VerificationSuites.ProofSuites.Contains(name);
         var groups = new List<List<string>>();
         foreach (var suite in Schedule(suites.Distinct(StringComparer.Ordinal), root))
         {
             var seconds = durations.GetValueOrDefault(suite, double.PositiveInfinity);
-            var group = seconds <= 60 ? groups.Where(group => group.Count < 3 &&
-                    group.All(name => durations.GetValueOrDefault(name, double.PositiveInfinity) <= 60) &&
+            var group = Shares(suite) ? groups.Where(group => group.Count < 3 && group.All(Shares) &&
                     group.Sum(name => durations[name]) + seconds <= 120)
                 .OrderByDescending(group => group.Sum(name => durations[name])).FirstOrDefault() : null;
             if (group is null) groups.Add([suite]);

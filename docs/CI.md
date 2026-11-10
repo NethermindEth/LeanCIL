@@ -72,8 +72,8 @@ workflow changes, and unrecognized paths conservatively run the full matrix.
 
 Suites measured at no more than 60 seconds share a job with at most two other short suites,
 with a combined measured budget of 120 seconds. The duration table uses verification time,
-excluding setup, and unknown suites remain separate. Each member runs in its own process with
-its own cache and transcript; a failure does not skip later members, and any member failure
+excluding setup; unknown suites and the [proof suites](#proof-cost) remain separate. Each
+member runs in its own process with its own cache and transcript; a failure does not skip later members, and any member failure
 fails the group. Selection still includes exactly the requested suites. This removes repeated
 toolchain/library downloads without reducing coverage or increasing concurrent runners.
 
@@ -138,8 +138,10 @@ Each job measures one source on both trees:
   `verified.json` names, provided the proof is unchanged since. The extraction's generated
   instruction equations are rows too. A suite that the base does not have, or cannot pass, leaves
   its proofs without a base: the job warns and the summary says the rows were not compared. A
-  short suite that ran in one `Verify` job with others shares that job's upload, so their outputs
-  are head rows without a base as well.
+  proof suite always runs in a `Verify` job of its own, so that job's upload holds the outputs
+  of that suite alone and the head measures the directories the base does. A directory is
+  measured only while it holds the report of an accepted proof, so a suite that also checks
+  rejected proofs against an extraction verifies the accepted one last.
 
 The head uses the certified library of the run. The merge base uses the same library when its
 library inputs are identical; otherwise `Build the merge base for proof cost` builds the base

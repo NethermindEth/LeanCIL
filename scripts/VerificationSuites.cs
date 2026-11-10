@@ -10,6 +10,16 @@ internal static class VerificationSuites
     /// <summary>The runner's own in-process checks, which also run when no suite is named.</summary>
     internal const string Core = "core";
 
+    /// <summary>
+    /// The suites whose verified outputs are proofs about extracted methods: examples and generated
+    /// outlines. Proof cost measures each one's outputs, so each runs in a CI job of its own.
+    /// </summary>
+    internal static readonly string[] ProofSuites =
+    [
+        Core, "loops", "outlines-control", "outlines-objects", "outlines-buffers", "structoutlines",
+        "receiveroutlines", "wordreader", "savedwordreader"
+    ];
+
     /// <summary>The single-fixture suites in the order a full run executes them.</summary>
     internal static readonly IndependentSuite[] Independent =
     [
