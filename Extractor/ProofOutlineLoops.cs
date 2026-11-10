@@ -487,8 +487,7 @@ internal static partial class ProofOutline
             lean.Line();
             var steppable = output is not null &&
                 inputs.All(input => !input.Reference && !input.Span && input.Object is null) &&
-                extraction.Emitted[index].Metadata.Contains("locals := [],") &&
-                extraction.Emitted[index].Ops.All(Body.Pure);
+                Computes(extraction, index);
             var pattern = inputs.Length switch
             {
                 0 => "-",
@@ -497,13 +496,9 @@ internal static partial class ProofOutline
             };
             lean.Line($"/-- `{callee.Name}` meets its contract; the loop proof uses only the contract. -/");
             lean.Line($"theorem {name}_holds : {name}Contract.Holds Extracted.program {name} := by");
-            if (steppable)
-            {
-                lean.Line($"  rintro {pattern} memory permitted");
-                ContractEvidence.Returns(lean, "  ", "");
-                lean.Line("  case run => cil_checked_steps");
-                lean.Noted("  ", "case postcondition => sorry", $"{name}Contract.post of the returned value");
-            }
+            if (steppable || Branches(extraction, index))
+                WordCalleeProof(lean, extraction, index, name, pattern,
+                    declared.Select(parameter => Variable(parameter.Name)).ToArray(), kept: false);
             else if (store is { } body)
             {
                 var value = Variable(declared[body.Value].Name);
@@ -515,14 +510,6 @@ internal static partial class ProofOutline
             }
             else if (spanStore is { } spanBody)
                 SpanStoreContract(lean, index, name, pattern, Variable(declared[1].Name), spanBody.Op);
-            else if (Branches(extraction, index))
-            {
-                lean.Line($"  rintro {pattern} memory permitted");
-                var sides = 0;
-                BranchedCallee(lean, extraction, index, name,
-                    declared.Select(parameter => Variable(parameter.Name)).ToArray(), 0, [], [], "  ",
-                    ref sides, kept: false);
-            }
             else
             {
                 var reason = inputs.Any(input => input.Reference) ? "it writes through a reference"
@@ -554,6 +541,30 @@ internal static partial class ProofOutline
                 ElementWidth(callee.Parameters[word].ParameterType) != width) return null;
             var stores = width == 4 ? ops[2] == ".storeScalar 4" : ops[2] is ".store64" or ".storeScalar 8";
             return stores ? (reference, word, width, ops[2]) : null;
+        }
+
+        /// <summary>Whether a callee without locals only computes, so one checked run steps its body.</summary>
+        internal static bool Computes(Extraction extraction, int index) =>
+            extraction.Emitted[index].Metadata.Contains("locals := [],") &&
+            extraction.Emitted[index].Ops.All(Body.Pure);
+
+        /// <summary>The `Holds` proof of a callee of words that `Computes` or `Branches`, its inputs bound by
+        /// `pattern` and named `arguments`: one stepped run, or a split on each test. A `kept` contract's
+        /// `post` first states that the memory is as it was.</summary>
+        internal static void WordCalleeProof(Writer lean, Extraction extraction, int index, string name,
+            string pattern, string[] arguments, bool kept)
+        {
+            lean.Line($"  rintro {pattern} memory permitted");
+            if (Branches(extraction, index))
+            {
+                var sides = 0;
+                BranchedCallee(lean, extraction, index, name, arguments, 0, [], [], "  ", ref sides, kept);
+                return;
+            }
+            ContractEvidence.Returns(lean, "  ", "");
+            lean.Line("  case run => cil_checked_steps");
+            if (kept) KeptPost(lean, "  ", name, "", "");
+            else lean.Noted("  ", "case postcondition => sorry", $"{name}Contract.post of the returned value");
         }
 
         /// <summary>Whether a callee of words with no locals tests its arguments and returns a word or throws on

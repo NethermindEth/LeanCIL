@@ -668,11 +668,9 @@ internal static partial class ProofOutline
     static Stub? StubOf(Extraction extraction, int index, string name)
     {
         var method = extraction.Methods[index];
-        var emitted = extraction.Emitted[index];
         if (method.HasThis || method.Parameters.Count == 0 || ElementWidth(method.ReturnType) is not { } result ||
             method.Parameters.Any(parameter => ElementWidth(parameter.ParameterType) is null) ||
-            !emitted.Metadata.Contains("locals := [],", StringComparison.Ordinal) ||
-            !(emitted.Ops.All(Body.Pure) || LoopOutline.Branches(extraction, index)))
+            !(LoopOutline.Computes(extraction, index) || LoopOutline.Branches(extraction, index)))
             return null;
         var names = new Names();
         return new Stub(index, name, method,
@@ -704,19 +702,8 @@ internal static partial class ProofOutline
         lean.Line();
         lean.Doc($"`{stub.Method.Name}` meets its contract; the proof of `{caller}` uses only the contract.");
         lean.Line($"theorem {stub.Name}_holds : {stub.Name}Contract.Holds Extracted.program {program} := by");
-        lean.Line($"  rintro {(single ? pattern : $"⟨{string.Join(", ", stub.Inputs)}⟩")} memory permitted");
-        if (LoopOutline.Branches(extraction, stub.Index))
-        {
-            var sides = 0;
-            LoopOutline.BranchedCallee(lean, extraction, stub.Index, stub.Name, stub.Inputs, 0,
-                [], [], "  ", ref sides, kept: true);
-        }
-        else
-        {
-            ContractEvidence.Returns(lean, "  ", "");
-            lean.Line("  case run => cil_checked_steps");
-            KeptPost(lean, "  ", stub.Name, "", "");
-        }
+        LoopOutline.WordCalleeProof(lean, extraction, stub.Index, stub.Name,
+            single ? pattern : $"⟨{string.Join(", ", stub.Inputs)}⟩", stub.Inputs, kept: true);
         lean.Line();
         lean.Line($"#print axioms {stub.Name}_holds");
         lean.Line();
