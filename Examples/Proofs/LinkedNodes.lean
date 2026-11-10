@@ -182,7 +182,7 @@ theorem linkedValue_self (memory : Memory) (node : Reference)
         [.object (.address node), .object (.address node)] memory =
       .ok (final, [.scalar (.i64 (Node.Value.of memory node))]) ∧
       Node.Next.of final node = .address node := by
-  obtain ⟨fuel, final, values, invoked, -, result, encoded, returned, held⟩ :=
+  obtain ⟨fuel, ⟨final, values⟩, invoked, -, result, encoded, returned, held⟩ :=
     correctness (node, node) memory ⟨owned, readable⟩
   dsimp only [linkedValueContract] at invoked encoded returned held
   subst returned

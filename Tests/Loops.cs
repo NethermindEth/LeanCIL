@@ -248,7 +248,7 @@ const string ReplacedHelper = """
 theorem decrement_holds : decrementContract.Holds Extracted.program decrement := by
   rintro x m -
   dsimp only [decrementContract]
-  refine ⟨8, m, _, ?_, Confined.refl _ m, x + 4294967295#32, rfl, by bv_omega⟩
+  refine ⟨8, (m, _), ?_, Confined.refl _ m, x + 4294967295#32, rfl, by bv_omega⟩
   cil_checked_steps
 
 

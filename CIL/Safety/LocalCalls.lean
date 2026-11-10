@@ -109,7 +109,7 @@ theorem WP.local_call {Input Output : Type} {contract : MethodContract Input Out
     {operation : CIL.Op} {args stack rest : List Value} {frame : Frame}
     {footprint : List (Reference × Nat)} {caller current : Memory}
     {kinds : List CIL.LocalKind} {known : Nat → Option CIL.Value}
-    {post : Memory → List Value → Prop}
+    {post : (Memory × List Value) → Prop}
     (context : LoopFrame footprint caller current kinds frame.locals known)
     (holds : contract.Holds program callee) (input : Input)
     (found : program[method]? = some body) (fetched : body.code[pc]? = some operation)
@@ -126,13 +126,16 @@ theorem WP.local_call {Input Output : Type} {contract : MethodContract Input Out
     (suffix : ∀ final output, CallResult contract program callee input current final output →
       LoopFrame footprint caller final kinds frame.locals
         (rememberLocal known index (localResult kind (stored output))) →
-      WP (fun fuel => run program fuel method (pc + 1) args frame
-        (contract.results output ++ rest) final) post) :
-    WP (fun fuel => run program fuel method pc args frame stack current) post := by
+      WP (Execution (fun fuel => run program fuel method (pc + 1) args frame
+        (contract.results output ++ rest) final)) post) :
+    WP (Execution (fun fuel => run program fuel method pc args frame stack current))
+      post := by
+  apply WP.adequate.mpr
   apply run_call_of_contract holds input found fetched stepped rfl permitted
   intro final output result
   have invariants := result.frame_invariants found fetched stepped context.wellFormed
   have confined : Confined [(home, localWidth kind)] current final := writes ▸ result.framed
+  apply WP.adequate.mp
   exact suffix final output result
     (context.after_local_write index kind home (stored output) (number output) slot confined
       invariants.formed (fits output) (readback final output result.post))

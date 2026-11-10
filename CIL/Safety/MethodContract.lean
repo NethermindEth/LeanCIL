@@ -357,8 +357,8 @@ def MethodContract.Returns {Input Output : Type} (c : MethodContract Input Outpu
 def MethodContract.Holds {Input Output : Type} (c : MethodContract Input Output)
     (program : CIL.Program) (method : Nat) : Prop :=
   ∀ input initial, c.pre input initial →
-    WP (fun fuel => invoke program fuel method (c.args input) initial)
-      (fun final values =>
+    WP (Execution (fun fuel => invoke program fuel method (c.args input) initial))
+      (fun (final, values) =>
         Confined (c.footprint input) initial final ∧ c.Returns input initial final values)
 
 /-- A located semantic fault on an input meeting the precondition refutes the contract at
@@ -370,7 +370,7 @@ theorem MethodContract.not_holds_of_fault {Input Output : Type}
     (failed : invoke program observed method (contract.args input) initial = .error fault) :
     ¬ contract.Holds program method := by
   intro holds
-  obtain ⟨fuel, final, values, invoked, _⟩ := holds input initial permitted
+  obtain ⟨fuel, ⟨final, values⟩, invoked, _⟩ := holds input initial permitted
   exact invoke_fault_refutes_success program observed method (contract.args input) initial
     fault semantic failed fuel (final, values) invoked
 
@@ -383,7 +383,7 @@ theorem MethodContract.Holds.ensures {Input Output : Type} {c : MethodContract I
       (fun _ initial final values =>
         Confined (c.footprint input) initial final ∧ c.Returns input initial final values) := by
   rintro args initial ⟨rfl, permitted⟩
-  exact holds input initial permitted
+  exact WP.adequate.mp (holds input initial permitted)
 
 /-- What one invocation of `method` established under contract `c` at `input`: it ran from
     `before` to `final`, returned the encoding of `output`, changed only the footprint and met
@@ -408,10 +408,10 @@ theorem MethodContract.Holds.intro {Input Output : Type} {c : MethodContract Inp
       invoke program fuel method (c.args input) initial = .ok (final, c.results output))
     (framed : Confined (c.footprint input) initial final)
     (post : c.post input initial final output) :
-    ∃ fuel final values,
-      invoke program fuel method (c.args input) initial = .ok (final, values) ∧
-      Confined (c.footprint input) initial final ∧ c.Returns input initial final values :=
-  invoked.elim fun fuel ran => ⟨fuel, final, c.results output, ran, framed, output, rfl, post⟩
+    WP (Execution (fun fuel => invoke program fuel method (c.args input) initial))
+      (fun result => Confined (c.footprint input) initial result.1 ∧
+        c.Returns input initial result.1 result.2) :=
+  invoked.elim fun fuel ran => ⟨fuel, (final, c.results output), ran, framed, output, rfl, post⟩
 
 /-- Close the goal a `Holds` proof reaches once stepping has run to a return, from the footprint
     evidence and the postcondition of `output`, by name. The footprint is the one the goal
@@ -428,11 +428,11 @@ theorem MethodContract.Holds.returns {Input Output : Type} {c : MethodContract I
     `CallResult`; the converse of `MethodContract.Holds.intro`. -/
 theorem CallResult.of_returned {Input Output : Type} {c : MethodContract Input Output}
     {program : CIL.Program} {method : Nat} {input : Input} {initial : Memory}
-    (returned : ∃ fuel final values,
-      invoke program fuel method (c.args input) initial = .ok (final, values) ∧
-      Confined (c.footprint input) initial final ∧ c.Returns input initial final values) :
+    (returned : WP (Execution (fun fuel => invoke program fuel method (c.args input) initial))
+      (fun result => Confined (c.footprint input) initial result.1 ∧
+        c.Returns input initial result.1 result.2)) :
     ∃ final output, CallResult c program method input initial final output := by
-  obtain ⟨fuel, final, _, invoked, framed, output, rfl, post⟩ := returned
+  obtain ⟨fuel, ⟨final, _⟩, invoked, framed, output, rfl, post⟩ := returned
   exact ⟨final, output, { invoked := ⟨fuel, invoked⟩, framed, post }⟩
 
 /-- What a proved contract establishes for an input meeting `pre`: a final memory and output
@@ -656,9 +656,9 @@ theorem MethodContract.Holds.weaken {Input Output : Type}
     {program : CIL.Program} {method : Nat} (holds : internal.Holds program method)
     (refines : internal.Refines exported) : exported.Holds program method := by
   intro input initial permitted
-  obtain ⟨fuel, final, values, invoked, framed, out, encoded, satisfied⟩ :=
+  obtain ⟨fuel, ⟨final, values⟩, invoked, framed, out, encoded, satisfied⟩ :=
     holds input initial (refines.pre _ _ permitted)
-  refine ⟨fuel, final, values, ?_, framed.widen_within (refines.footprint _ _ permitted),
+  refine ⟨fuel, (final, values), ?_, framed.widen_within (refines.footprint _ _ permitted),
     out, ?_, refines.post _ _ _ _ permitted framed satisfied⟩
   · rw [refines.args]; exact invoked
   · rw [refines.results]; exact encoded
@@ -690,6 +690,7 @@ macro "cil_contract_prepare" "[" facts:term,* "]" : tactic =>
   `(tactic| (
     -- A contract continuation resumes at `pc + 1` on `results ++ rest` with projected inputs.
     cil_unfold_contracts
+    try apply CIL.Safety.WP.adequate.mpr
     try dsimp only [Nat.reduceAdd]
     cil_stack_cleanup
     try (cil_strict refine CIL.Safety.invoke_exists_of_run
@@ -971,11 +972,11 @@ elab_rules : tactic
   | `(tactic| cil_contract_steps [$facts:term,*] until $continuation) => do
     let prepared ← prepareStepFacts facts.getElems
     withMainContext <| evalTactic (← `(tactic| (first
-      | (cil_strict exact $continuation)
+      | (cil_strict first | exact $continuation | exact CIL.Safety.WP.adequate.mp $continuation)
       | (
         cil_contract_prepare [$[$prepared:term],*]
         repeat first
-        | (cil_strict exact $continuation)
+        | (cil_strict first | exact $continuation | exact CIL.Safety.WP.adequate.mp $continuation)
         | cil_contract_step [$[$prepared:term],*]))))
 
 /-- Apply a proved contract at the fetched call, optionally checked against a `bind_call`
@@ -986,6 +987,7 @@ syntax "cil_contract_call" term:max term:max (" at " ident)? "[" term,* "]" : ta
 macro_rules
   | `(tactic| cil_contract_call $holds $input [$facts:term,*]) =>
   `(tactic| (
+    try apply CIL.Safety.WP.adequate.mpr
     refine CIL.Safety.run_call_of_contract $holds $input
       (by cil_lookup [$[$facts:term],*])
       (by cil_lookup [$[$facts:term],*])
@@ -994,6 +996,7 @@ macro_rules
   | `(tactic| cil_contract_call $holds $input at $site:ident [$facts:term,*]) =>
   `(tactic| (
     -- The site fixes the body, so the lookup may close during simplification.
+    try apply CIL.Safety.WP.adequate.mpr
     refine CIL.Safety.run_call_of_contract $holds $input
       (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
       (by cil_checked_step [$[$facts:term],*]) (by rfl) ?precondition ?_
@@ -1007,6 +1010,7 @@ syntax "cil_formed_call" term:max term:max (" at " ident)? "[" term,* "]" : tact
 macro_rules
   | `(tactic| cil_formed_call $holds $input [$facts:term,*]) =>
   `(tactic| (
+    try apply CIL.Safety.WP.adequate.mpr
     refine CIL.Safety.run_call_of_contract_formed $holds $input
       (by cil_lookup [$[$facts:term],*])
       (by cil_lookup [$[$facts:term],*])
@@ -1014,6 +1018,7 @@ macro_rules
     cil_name_obligations $holds))
   | `(tactic| cil_formed_call $holds $input at $site:ident [$facts:term,*]) =>
   `(tactic| (
+    try apply CIL.Safety.WP.adequate.mpr
     refine CIL.Safety.run_call_of_contract_formed $holds $input
       (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
       (by cil_checked_step [$[$facts:term],*]) (by rfl) ?precondition ?wellFormed ?_

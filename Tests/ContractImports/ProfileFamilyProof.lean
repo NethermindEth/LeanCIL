@@ -14,7 +14,7 @@ theorem uniform : ∀ body ∈ Reference.program, body.profile = Reference.profi
 /-- The only proof that executes the extracted body. -/
 theorem reference_holds : FamilyContract.supported.Holds Reference.program 0 := by
   rintro _ memory _
-  refine ⟨10, memory, [.scalar (.i32 1)], ?_, Confined.refl _ memory, _, rfl, rfl⟩
+  refine ⟨10, (memory, [.scalar (.i32 1)]), ?_, Confined.refl _ memory, _, rfl, rfl⟩
   cil_checked_steps [Reference.program, Reference.profile]
   all_goals rfl
 #print axioms reference_holds

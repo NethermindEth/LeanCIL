@@ -70,13 +70,13 @@ theorem OutcomeContract.Holds.result {Input Output : Type} {c : OutcomeContract 
     (holds : c.Holds program method) (permitted : c.pre input initial)
     (normal : c.raises input initial = none) :
     ∃ final output, CallResult c.toMethodContract program method input initial final output :=
-  CallResult.of_returned (holds.returning permitted normal)
+  CallResult.of_returned (WP.adequate.mpr (holds.returning permitted normal))
 
 /-- A normal-return contract is the outcome contract that never raises. -/
 theorem MethodContract.Holds.outcomes {Input Output : Type} {c : MethodContract Input Output}
     {program : CIL.Program} {method : Nat} (holds : c.Holds program method) :
     ({ c with raises := fun _ _ => none } : OutcomeContract Input Output).Holds program method :=
-  holds
+  fun input initial permitted => WP.adequate.mp (holds input initial permitted)
 
 /-- An outcome contract that never raises under its precondition is a normal-return
     contract. -/
@@ -84,7 +84,8 @@ theorem OutcomeContract.Holds.normal {Input Output : Type} {c : OutcomeContract 
     {program : CIL.Program} {method : Nat} (holds : c.Holds program method)
     (never : ∀ input initial, c.pre input initial → c.raises input initial = none) :
     c.toMethodContract.Holds program method :=
-  fun input initial permitted => holds.returning permitted (never input initial permitted)
+  fun input initial permitted =>
+    WP.adequate.mpr (holds.returning permitted (never input initial permitted))
 
 /-- Successful or raised invocations agree at every fuel, so a computed run refutes a contract. -/
 theorem invoke_unique {program : CIL.Program} {method left right : Nat} {args : List Value}

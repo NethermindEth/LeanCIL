@@ -237,7 +237,7 @@ def echoOff : MethodContract CIL.W64 CIL.W64 :=
 
 /-- Only the returned values of a computed run are compared; memories never are. -/
 theorem echo_off_rejected : ¬ echoOff.Holds program echoMethod := fun holds => by
-  obtain ⟨_, _, values, invoked, -, out, encoded, wrong⟩ :=
+  obtain ⟨_, ⟨_, values⟩, invoked, -, out, encoded, wrong⟩ :=
     holds sample empty ⟨empty_formed, empty_world⟩
   have observed := invoke_ok_observation_unique Prod.snd
     (rfl : (invoke program echoFuel echoMethod (echoOff.args sample) empty).map Prod.snd =

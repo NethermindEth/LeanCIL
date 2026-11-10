@@ -65,19 +65,19 @@ bind_entry entry (memory : Memory) (left right : BitVec 256)
 /-- Allocating, calling, loading and leaving retain confinement to the caller's private homes. -/
 theorem caller_invokes (memory : Memory) (formed : memory.WellFormed)
     (left right : BitVec 256) :
-    WP (fun fuel => invoke [caller, helper] fuel 0
-      [.scalar (.v256 left), .scalar (.v256 right)] memory)
-      (fun final values => Confined [] memory final ∧
+    WP (Execution (fun fuel => invoke [caller, helper] fuel 0
+      [.scalar (.v256 left), .scalar (.v256 right)] memory))
+      (fun (final, values) => Confined [] memory final ∧
         values = [.scalar (.v256 (CIL.Vector.zip256 (· + ·) left right))]) := by
   obtain ⟨wordHome, vectorHome, entered, setup⟩ := entry.checked memory left right formed
   have context := setup.frame []
   let frame := entry.frame memory wordHome vectorHome
   have slot : frame.locals[1]? = some (.bytes .vector256 vectorHome) := rfl
   have address := context.form_home 1 slot
-  have suffix : WP (fun fuel => run [caller, helper] fuel 0 3
+  have suffix : WP (Execution (fun fuel => run [caller, helper] fuel 0 3
       [.scalar (.v256 left), .scalar (.v256 right)] frame
-      [.reference (.address vectorHome), .scalar (.v256 right), .scalar (.v256 left)] entered)
-      (fun final values => Confined [] memory final ∧
+      [.reference (.address vectorHome), .scalar (.v256 right), .scalar (.v256 left)] entered))
+      (fun (final, values) => Confined [] memory final ∧
         values = [.scalar (.v256 (CIL.Vector.zip256 (· + ·) left right))]) := by
     apply WP.local_call context (helper_holds (callee := 1) (by rfl)) ⟨left, right, vectorHome⟩
       (by rfl) (by rfl) (by cil_checked_step [address]) (context.homes.writable_at slot)

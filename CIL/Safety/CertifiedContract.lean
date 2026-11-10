@@ -32,7 +32,7 @@ theorem MethodContract.Certified.holds {Input Output : Type} {c : MethodContract
   intro input initial permitted
   obtain ⟨fuel, final, values, certificate, framed, returns⟩ :=
     certified input initial permitted
-  exact ⟨fuel, final, values, certificate.1, framed, returns⟩
+  exact ⟨fuel, (final, values), certificate.1, framed, returns⟩
 
 /-- A proved contract is certified when its precondition implies well-formed memory and a
     valid static world, the premises checked frame entry needs. -/
@@ -42,7 +42,7 @@ theorem MethodContract.Holds.certified {Input Output : Type} {c : MethodContract
       initial.WellFormed ∧ StaticWorldValid (programStaticDescriptors program) initial) :
     c.Certified program method := by
   intro input initial permitted
-  obtain ⟨fuel, final, values, invoked, framed, returns⟩ := holds input initial permitted
+  obtain ⟨fuel, ⟨final, values⟩, invoked, framed, returns⟩ := holds input initial permitted
   obtain ⟨formed, world⟩ := entry input initial permitted
   exact ⟨fuel, final, values, .of_invoke formed world invoked, framed, returns⟩
 
@@ -144,6 +144,7 @@ syntax "cil_certified_call" term:max term:max (" at " ident)? "[" term,* "]" : t
 macro_rules
   | `(tactic| cil_certified_call $certified $input [$facts:term,*]) =>
   `(tactic| (
+    try apply CIL.Safety.WP.adequate.mpr
     refine CIL.Safety.run_call_of_certified $certified $input
       (by cil_lookup [$[$facts:term],*])
       (by cil_lookup [$[$facts:term],*])
@@ -151,6 +152,7 @@ macro_rules
     cil_name_obligations $certified))
   | `(tactic| cil_certified_call $certified $input at $site:ident [$facts:term,*]) =>
   `(tactic| (
+    try apply CIL.Safety.WP.adequate.mpr
     refine CIL.Safety.run_call_of_certified $certified $input
       (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
       (by cil_checked_step [$[$facts:term],*]) (by rfl) ?precondition ?_
@@ -164,6 +166,7 @@ syntax "cil_contract_certified_call" term:max term:max (" at " ident)? "[" term,
 macro_rules
   | `(tactic| cil_contract_certified_call $holds $input [$facts:term,*]) =>
   `(tactic| (
+    try apply CIL.Safety.WP.adequate.mpr
     refine CIL.Safety.run_call_of_contract_certified $holds $input
       (by cil_lookup [$[$facts:term],*])
       (by cil_lookup [$[$facts:term],*])
@@ -171,6 +174,7 @@ macro_rules
     cil_name_obligations $holds))
   | `(tactic| cil_contract_certified_call $holds $input at $site:ident [$facts:term,*]) =>
   `(tactic| (
+    try apply CIL.Safety.WP.adequate.mpr
     refine CIL.Safety.run_call_of_contract_certified $holds $input
       (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
       (by cil_checked_step [$[$facts:term],*]) (by rfl) ?precondition ?wellFormed ?staticWorld ?_

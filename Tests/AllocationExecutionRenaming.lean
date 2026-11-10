@@ -193,7 +193,7 @@ theorem source_contract : scalarContract.Holds (sourceProgram returningCode) 0 :
   intro input memory permitted
   change memory = initial at permitted
   subst memory
-  exact ⟨fuel, sourceFinal, [.scalar (.i32 16)], source_returns,
+  exact ⟨fuel, (sourceFinal, [.scalar (.i32 16)]), source_returns,
     Confined.ofMemoryBelow source_confined (by decide)
       (invoke_preserves_caller_allocations _ _ _ _ _ _ _ source_returns).next,
     16, rfl, rfl, source_confined⟩

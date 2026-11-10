@@ -26,11 +26,13 @@ def successor : MethodContract CIL.W32 CIL.W32 where
 theorem named_call_continuation (program : CIL.Program) (memory : Memory) (value : CIL.W32)
     (found : program[0]? = some forwarding) (holds : successor.Holds program 1)
     (formed : memory.WellFormed) :
-    WP (fun fuel => run program fuel 0 0 [] { activation := 0, locals := [], owned := [] }
-      [.scalar (.i32 value)] memory)
-      (fun final values => final.WellFormed ∧ values = [.scalar (.i32 (value + 1))]) := by
-  apply run_call_of_contract_formed holds value found (by rfl)
-    (by cil_checked_step [successor]) rfl trivial formed
+    WP (Execution (fun fuel => run program fuel 0 0 []
+      { activation := 0, locals := [], owned := [] }
+      [.scalar (.i32 value)] memory))
+      (fun (final, values) => final.WellFormed ∧ values = [.scalar (.i32 (value + 1))]) := by
+  cil_formed_call holds value [found, successor]
+  case precondition => trivial
+  case wellFormed => exact formed
   intro final output result preserved
   guard_hyp result :ₐ CallResult successor program 1 value memory final output
   guard_hyp preserved :ₐ FrameInvariants program memory final
@@ -110,10 +112,10 @@ def pairView (reference : Reference) : ArgumentView := ⟨reference, 16⟩
 /-- Named call validity supplies field reads even when output aliases an entire input. -/
 theorem overlapping_fields (memory : Memory) (left right : Reference)
     (call : ValidCall memory [pairView left, pairView right] [pairView left]) :
-    WP (fun fuel => invoke [readPair] fuel 0
+    WP (Execution (fun fuel => invoke [readPair] fuel 0
       [.reference (.address left), .reference (.address right), .reference (.address left)]
-      memory)
-      (fun final values => final = memory ∧ values = [.scalar (.i64
+      memory))
+      (fun (final, values) => final = memory ∧ values = [.scalar (.i64
         ((pairView left).word memory 0 + (pairView right).word memory 8))]) := by
   cil_contract_steps []
   exact ⟨rfl, rfl⟩

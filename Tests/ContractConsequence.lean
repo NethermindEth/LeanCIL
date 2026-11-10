@@ -383,7 +383,7 @@ theorem add_flag_holds : addFlagContract.Holds Extracted.program addFlag := by
   have loadA := load_word64_of_read readA
   have loadB := load_word64_of_read readB
   have narrowed : CIL.NarrowKind.unsigned8.extend 1 = 1 := by decide
-  refine ⟨11, stored, [.scalar (.i32 1)], ?_, Confined.write wrote (by simp [numberBytes]),
+  refine ⟨11, (stored, [.scalar (.i32 1)]), ?_, Confined.write wrote (by simp [numberBytes]),
     true, rfl, rfl, readback⟩
   cil_checked_steps [formedA, formedB, formedRes, loadA, loadB, store, narrowed]
 
@@ -534,7 +534,7 @@ def isZeroContract : MethodContract CIL.W64 Bool where
 /-- `IsZero` meets its contract by stepping its body. -/
 theorem is_zero_holds : isZeroContract.Holds Extracted.program isZero := by
   intro v memory _
-  refine ⟨6, memory, isZeroContract.results (decide (v = 0)), ?_, Confined.refl _ memory,
+  refine ⟨6, (memory, isZeroContract.results (decide (v = 0))), ?_, Confined.refl _ memory,
     decide (v = 0), rfl, rfl⟩
   simp only [isZeroContract, decide_eq_true_eq]
   cil_checked_steps [NarrowKind.extend_ite_ofNat_one_zero]
@@ -722,7 +722,7 @@ theorem weaker_pre_not_refines : ¬ percentInRange.Refines percentUnguarded := f
   exact absurd bound (by decide)
 
 theorem weaker_pre_rejected : ¬ percentUnguarded.Holds Extracted.program percent := fun holds => by
-  obtain ⟨fuel, final, values, invoked, -⟩ := holds 101 sample trivial
+  obtain ⟨fuel, ⟨final, values⟩, invoked, -⟩ := holds 101 sample trivial
   exact raises_not_returns (percent_exact.raising (input := 101) (exception := "System.ArgumentOutOfRangeException") trivial (by decide)) invoked
 
 /-- A smaller footprint: `AddTo` changes `res`, which an empty footprint keeps. -/
@@ -733,8 +733,9 @@ theorem smaller_footprint_not_refines : ¬ addInternal.Refines addUnframed := fu
   exact nomatch member
 
 theorem smaller_footprint_rejected : ¬ addUnframed.Holds Extracted.program addTo := fun holds => by
-  obtain ⟨_, final, values, invoked, framed, -⟩ := holds sampleInput sample sample_pre
-  obtain ⟨_, final', values', invoked', -, _, rfl, -, readback⟩ := add_internal sampleInput sample sample_pre
+  obtain ⟨_, ⟨final, values⟩, invoked, framed, -⟩ := holds sampleInput sample sample_pre
+  obtain ⟨_, ⟨final', values'⟩, invoked', -, _, rfl, -, readback⟩ :=
+    add_internal sampleInput sample sample_pre
   have same := congrArg Prod.fst (invoke_ok_unique invoked invoked')
   dsimp only at same
   subst same
@@ -771,8 +772,8 @@ theorem first_not_forwarded :
 /-- What loading argument 0 would derive is false: `IsZeroSecond(0, 7)` returns `false`. -/
 theorem first_selection_rejected :
     ¬ (firstZero.withArgs pairArgs).Holds Extracted.program isZeroSecond := fun holds => by
-  obtain ⟨_, _, _, invoked, -, zero, rfl, decided⟩ := holds (0, 7) sample trivial
-  obtain ⟨_, _, _, invoked', -, zero', rfl, decided'⟩ :=
+  obtain ⟨_, ⟨_, _⟩, invoked, -, zero, rfl, decided⟩ := holds (0, 7) sample trivial
+  obtain ⟨_, ⟨_, _⟩, invoked', -, zero', rfl, decided'⟩ :=
     is_zero_second_forwards (0, 7) sample trivial
   have same := congrArg Prod.snd (invoke_ok_unique invoked invoked')
   simp only [firstZero, secondZero, MethodContract.withArgs] at decided decided' same
@@ -788,7 +789,7 @@ def danglingArgs (v : CIL.W64) : List Value :=
 theorem dangling_rejected :
     ¬ (isZeroContract.withArgs danglingArgs).Holds Extracted.program isZeroIgnoring :=
   fun holds => by
-    obtain ⟨_, _, _, invoked, -⟩ := holds 0 sample trivial
+    obtain ⟨_, _, invoked, -⟩ := holds 0 sample trivial
     obtain ⟨_, _, _, _, -, checked, -, -⟩ := invoke_success_setup invoked
     obtain ⟨same, valid⟩ := checkedValues_valid _ _ _ checked
     subst same

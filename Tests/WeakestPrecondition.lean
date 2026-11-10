@@ -21,8 +21,9 @@ open CIL.Safety
 
 /-- Addition terminates with wrapping arithmetic and exactly preserves caller memory. -/
 theorem add (memory : Memory) (left right : CIL.W64) :
-    WP (fun fuel => invoke [addBody] fuel 0 [.scalar (.i64 left), .scalar (.i64 right)] memory)
-      (fun final values => final = memory ∧ values = [.scalar (.i64 (left + right))]) := by
+    WP (Execution (fun fuel => invoke [addBody] fuel 0
+      [.scalar (.i64 left), .scalar (.i64 right)] memory))
+      (fun (final, values) => final = memory ∧ values = [.scalar (.i64 (left + right))]) := by
   cil_contract_steps []
   exact ⟨rfl, rfl⟩
 
@@ -30,8 +31,9 @@ theorem add (memory : Memory) (left right : CIL.W64) :
 
 /-- Subtraction terminates with wrapping arithmetic and exactly preserves caller memory. -/
 theorem subtract (memory : Memory) (left right : CIL.W64) :
-    WP (fun fuel => invoke [subtractBody] fuel 0 [.scalar (.i64 left), .scalar (.i64 right)] memory)
-      (fun final values => final = memory ∧ values = [.scalar (.i64 (left - right))]) := by
+    WP (Execution (fun fuel => invoke [subtractBody] fuel 0
+      [.scalar (.i64 left), .scalar (.i64 right)] memory))
+      (fun (final, values) => final = memory ∧ values = [.scalar (.i64 (left - right))]) := by
   cil_contract_steps []
   exact ⟨rfl, rfl⟩
 
@@ -39,9 +41,10 @@ theorem subtract (memory : Memory) (left right : CIL.W64) :
 
 /-- Weakening an arithmetic guarantee does not change the execution obligation. -/
 theorem add_result (memory : Memory) (left right : CIL.W64) :
-    WP (fun fuel => invoke [addBody] fuel 0 [.scalar (.i64 left), .scalar (.i64 right)] memory)
-      (fun _ values => values = [.scalar (.i64 (left + right))]) :=
-  (add memory left right).consequence (fun _ _ result => result.2)
+    WP (Execution (fun fuel => invoke [addBody] fuel 0
+      [.scalar (.i64 left), .scalar (.i64 right)] memory))
+      (fun (_, values) => values = [.scalar (.i64 (left + right))]) :=
+  (add memory left right).consequence (fun _ result => result.2)
 
 #print axioms add_result
 
@@ -58,30 +61,54 @@ theorem abstract_run {program : CIL.Program} {method : Nat} (memory : Memory) (f
 theorem abstract_prefix {program : CIL.Program} {method : Nat} {post : Memory → List Value → Prop}
     (memory : Memory) (frame : Frame) (found : program[method]? = some addBody)
     (left right : CIL.W64)
-    (suffix : WP (fun fuel => run program fuel method 2
+    (suffix : WP (Execution (fun fuel => run program fuel method 2
       [.scalar (.i64 left), .scalar (.i64 right)] frame
-      [.scalar (.i64 right), .scalar (.i64 left)] memory) post) :
-    WP (fun fuel => run program fuel method 0
-      [.scalar (.i64 left), .scalar (.i64 right)] frame [] memory) post := by
+      [.scalar (.i64 right), .scalar (.i64 left)] memory)) (Function.uncurry post)) :
+    WP (Execution (fun fuel => run program fuel method 0
+      [.scalar (.i64 left), .scalar (.i64 right)] frame [] memory)) (Function.uncurry post) := by
   cil_contract_steps [found] until suffix
 
 #print axioms abstract_prefix
 
 /-- A computation that always faults cannot establish any total postcondition. -/
 theorem fault_rejected (fault : LocatedFault) (post : Memory → List Value → Prop) :
-    ¬ WP (fun _ => .error fault) post := by
-  rintro ⟨_, _, _, executed, _⟩
+    ¬ WP (Execution (fun _ => .error fault)) (Function.uncurry post) := by
+  rintro ⟨_, _, executed, _⟩
   cases executed
 
 #print axioms fault_rejected
 
 /-- Weakening a postcondition cannot turn a false result into a proved one. -/
 theorem false_post_rejected (execution : Nat → Except LocatedFault (Memory × List Value)) :
-    ¬ WP execution (fun _ _ => False) := by
-  rintro ⟨_, _, _, _, impossible⟩
+    ¬ WP (Execution execution) (fun _ => False) := by
+  rintro ⟨_, _, _, impossible⟩
   exact impossible
 
 #print axioms false_post_rejected
+
+/-- Budgets selected separately for each continuation do not give a uniform prefix budget. -/
+theorem uniform_budget_required :
+    (∀ fuel : Nat, ∃ cost, fuel ≤ cost) ∧
+      ¬ WP (fun cost (_ : Unit) => ∀ fuel : Nat, fuel ≤ cost) (fun _ => True) := by
+  constructor
+  · intro fuel
+    exact ⟨fuel, Nat.le_refl _⟩
+  · rintro ⟨cost, _, bounded, _⟩
+    have impossible := bounded (cost + 1)
+    omega
+
+#print axioms uniform_budget_required
+
+/-- An exact loop path preserves every located fault with its original continuation budget. -/
+theorem path_faults {program : CIL.Program} {method : Nat} {args : List Value}
+    {source target : LoopState} (path : LoopReaches program method args source target) :
+    ∃ cost, ∀ fuel fault,
+      target.run program method args fuel = .error fault →
+      source.run program method args (fuel + cost) = .error fault := by
+  obtain ⟨cost, ran⟩ := WP.exact_iff.mp path
+  exact ⟨cost, fun fuel _ failed => (ran fuel).trans failed⟩
+
+#print axioms path_faults
 
 /-- A contract with no input requirements still promises a normal checked return. -/
 def returnContract : MethodContract Unit where

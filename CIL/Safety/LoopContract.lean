@@ -46,8 +46,9 @@ theorem loop_terminates_call {Input Output : Type} {c : MethodContract Input Out
       CallResult c program callee input updated final output →
       LoopTerminates program method args post ⟨pc + 1, frame, c.results output ++ rest, final⟩) :
     LoopTerminates program method args post ⟨pc, frame, stack, memory⟩ :=
-  run_call_of_contract holds input methodFound instructionFound stepped encoded permitted
-    continuation
+  WP.adequate.mpr (run_call_of_contract holds input methodFound instructionFound stepped
+    encoded permitted (fun final output result =>
+      WP.adequate.mp (continuation final output result)))
 
 /-- `loop_terminates_call` that also hands the continuation the callee's `WellFormed`, static
     world and catalog agreement. -/
@@ -66,8 +67,9 @@ theorem loop_terminates_call_formed {Input Output : Type} {c : MethodContract In
       FrameInvariants program memory final →
       LoopTerminates program method args post ⟨pc + 1, frame, c.results output ++ rest, final⟩) :
     LoopTerminates program method args post ⟨pc, frame, stack, memory⟩ :=
-  run_call_of_contract_formed holds input methodFound instructionFound stepped encoded permitted
-    formed continuation
+  WP.adequate.mpr (run_call_of_contract_formed holds input methodFound instructionFound stepped
+    encoded permitted formed (fun final output result invariants =>
+      WP.adequate.mp (continuation final output result invariants)))
 
 #print axioms loop_terminates_induction
 
@@ -119,7 +121,7 @@ theorem invoke_loop_satisfies {α : Type} {program : CIL.Program} {method : Nat}
       LoopTerminates program method args post (configuration state)) :
     ∃ fuel final values, invoke program fuel method args memory = .ok (final, values) ∧
       post final values := by
-  obtain ⟨fuel, final, values, executed, satisfied⟩ :=
+  obtain ⟨fuel, ⟨final, values⟩, executed, satisfied⟩ :=
     entry (loop_terminates_induction program method args configuration invariant measure post
       progress)
   exact ⟨fuel, final, values, invoke_of_run found checked setup executed, satisfied⟩

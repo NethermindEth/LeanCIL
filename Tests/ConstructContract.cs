@@ -173,7 +173,7 @@ theorem storage_formed : storage.WellFormed where
 /-- This build stores `high + 1`, so `Pair(0, 0)` reads back as `Pair(0, 1)`. -/
 theorem correctness : ¬ pairContract.Holds Extracted.program pair := by
   intro holds
-  obtain ⟨_, final, values, ran, -, _, -, wrong⟩ := holds ⟨⟨0, 0⟩, 0, 0⟩ storage ⟨storage_formed, rfl⟩
+  obtain ⟨_, ⟨final, values⟩, ran, -, _, -, wrong⟩ := holds ⟨⟨0, 0⟩, 0, 0⟩ storage ⟨storage_formed, rfl⟩
   obtain ⟨rfl, rfl⟩ := Prod.mk.inj (invoke_ok_unique ran (rfl : invoke Extracted.program 16 pair
     (pairContract.args ⟨⟨0, 0⟩, 0, 0⟩) storage = .ok _))
   have observed : (Except.ok (pairBytes ⟨⟨0, 0⟩, 0, 0⟩) : Checked (List (BitVec 8))) =

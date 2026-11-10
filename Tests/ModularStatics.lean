@@ -116,7 +116,7 @@ theorem readTable_holds : readTable.Holds [libBody] 0 := by
     StaticWorldValid.of_absent _ _ (by simp [libField, numberBytes, nativeLimit])
       (by simp) registry (by simpa [libField] using absent)
   obtain ⟨result, ran, confined, _, _⟩ := libBody_reads memory formed world
-  exact ⟨8, result, _, ran, confined, 17, rfl, rfl⟩
+  exact ⟨8, (result, _), ran, confined, 17, rfl, rfl⟩
 
 -- A world precondition that the post re-establishes supports repeated calls; absence holds only before the first.
 def readTableRepeat : MethodContract Unit W64 where
@@ -129,14 +129,16 @@ def readTableRepeat : MethodContract Unit W64 where
 theorem readTableRepeat_holds : readTableRepeat.Holds [libBody] 0 := by
   rintro input memory ⟨formed, world⟩
   obtain ⟨result, ran, confined, resultFormed, resultWorld⟩ := libBody_reads memory formed world
-  exact ⟨8, result, _, ran, confined, 17, rfl, rfl, resultFormed, resultWorld⟩
+  exact ⟨8, (result, _), ran, confined, 17, rfl, rfl, resultFormed, resultWorld⟩
 
 example (memory : Safety.Memory) (permitted : readTableRepeat.pre () memory) :
     ∃ fuel middle first fuel' final second, invoke [libBody] fuel 0 [] memory = .ok (middle, first) ∧
       invoke [libBody] fuel' 0 [] middle = .ok (final, second) ∧
       first = [.scalar (.i64 17)] ∧ second = [.scalar (.i64 17)] := by
-  obtain ⟨fuel, middle, first, ran, _, out, encoded, rfl, again⟩ := readTableRepeat_holds () memory permitted
-  obtain ⟨fuel', final, second, ran', _, out', encoded', rfl, _⟩ := readTableRepeat_holds () middle again
+  obtain ⟨fuel, ⟨middle, first⟩, ran, _, out, encoded, rfl, again⟩ :=
+    readTableRepeat_holds () memory permitted
+  obtain ⟨fuel', ⟨final, second⟩, ran', _, out', encoded', rfl, _⟩ :=
+    readTableRepeat_holds () middle again
   exact ⟨fuel, middle, first, fuel', final, second, ran, ran', encoded, encoded'⟩
 
 -- The table is already loaded here, so only the world form admits this call.
@@ -150,7 +152,7 @@ example : readTable.pre () afterApp := ⟨app_formed, app_world.2.2.1, library_a
 
 example : ∃ fuel result values, invoke linked fuel 1 [] afterApp = .ok (result, values) ∧
     values = [.scalar (.i64 17)] := by
-  obtain ⟨fuel, result, values, ran, _, output, encoded, post⟩ :=
+  obtain ⟨fuel, ⟨result, values⟩, ran, _, output, encoded, post⟩ :=
     linked_readTable_holds () afterApp ⟨app_formed, app_world.2.2.1, library_absent⟩
   change output = 17 at post
   subst output

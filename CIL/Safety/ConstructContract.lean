@@ -195,6 +195,7 @@ syntax "cil_contract_construct" term:max term:max term:max "[" term,* "]" : tact
 macro_rules
   | `(tactic| cil_contract_construct $holds $constructs $input [$facts:term,*]) =>
   `(tactic| (
+    try apply CIL.Safety.WP.adequate.mpr
     refine CIL.Safety.run_newAggregate_of_contract $holds $constructs $input
       (by cil_lookup [$[$facts:term],*])
       (by cil_lookup [$[$facts:term],*])

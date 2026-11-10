@@ -26,11 +26,12 @@ def instructionLocation (body : CIL.Method) (predicate : CIL.Op → Bool) : Nat 
 /-- A finite checked path whose cost is inferred while composing its instructions. -/
 def LoopReaches (program : CIL.Program) (method : Nat) (args : List Value)
     (source target : LoopState) : Prop :=
-  ∃ cost, LoopSegment program method args source target cost
+  WP (fun cost reached => LoopSegment program method args source reached cost)
+    (fun reached => reached = target)
 
 theorem loop_reaches_refl {program : CIL.Program} {method : Nat} {args : List Value}
     {state : LoopState} : LoopReaches program method args state state :=
-  ⟨0, fun _ => rfl⟩
+  ⟨0, state, (fun _ => rfl), rfl⟩
 
 /-- Prepends one fetched non-branching step to a loop path. -/
 theorem loop_reaches_next {program : CIL.Program} {method pc next : Nat}
@@ -41,8 +42,8 @@ theorem loop_reaches_next {program : CIL.Program} {method pc next : Nat}
     (stepped : step body op pc args frame stack memory = .ok (.next next values nextFrame updated))
     (rest : LoopReaches program method args ⟨next, nextFrame, values, updated⟩ target) :
     LoopReaches program method args ⟨pc, frame, stack, memory⟩ target := by
-  obtain ⟨cost, segment⟩ := rest
-  refine ⟨cost + 1, ?_⟩
+  obtain ⟨cost, reached, segment, rfl⟩ := rest
+  refine ⟨cost + 1, reached, ?_, rfl⟩
   intro fuel
   change run program (fuel + (cost + 1)) method pc args frame stack memory = _
   rw [← Nat.add_assoc, run_next found instruction stepped]
@@ -76,8 +77,8 @@ theorem loop_reaches_terminates {program : CIL.Program} {method : Nat} {args : L
     (path : LoopReaches program method args source target)
     (finished : LoopTerminates program method args post target) :
     LoopTerminates program method args post source := by
-  obtain ⟨cost, segment⟩ := path
-  exact WP.sequence segment finished
+  obtain ⟨cost, reached, segment, rfl⟩ := path
+  exact WP.of_prefix segment finished
 
 #print axioms loop_reaches_next
 #print axioms loop_terminates_return

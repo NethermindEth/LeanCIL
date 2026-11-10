@@ -159,7 +159,8 @@ theorem word_holds : wordContract.Holds Extracted.program word := by
       write a { allocation := id, offset := offset + start } bytes 1 = .ok b → start + bytes.length ≤ 32 →
       Confined [(⟨id, offset⟩, 32)] a b :=
     fun written inside => Confined.write_within written ⟨_, List.mem_singleton_self _, rfl, by simp, by simp; omega⟩
-  refine ⟨14, m4, [], ?_, (covered (start := 0) w1 (by simp [length])).trans ((covered w2 (by simp [length])).trans
+  refine ⟨14, (m4, []), ?_, (covered (start := 0) w1 (by simp [length])).trans
+    ((covered w2 (by simp [length])).trans
     ((covered w3 (by simp [length])).trans (covered w4 (by simp [length])))), (), rfl, ?_⟩
   · cil_checked_steps [f0, f1, f2, f3, a1, a2, a3, a4, w1, w2, w3, w4]
   · simpa [wordBytes, List.append_assoc] using readback
@@ -247,7 +248,8 @@ theorem low_holds : lowContract.Holds program 1 := by
   have untouched := write_preserves_disjoint_read w1 (read_slice_bytes formed zeroed 8 8 (by decide) (by decide))
     (Or.inr (Or.inr (by simp [length])))
   have readback := read_append (left := 8) (right := 8) (ready.after_write w1).access assigned untouched
-  refine ⟨5, m1, [], ?_, Confined.write_within w1 ⟨_, List.mem_singleton_self _, rfl, by simp, by simp [length]⟩,
+  refine ⟨5, (m1, []), ?_, Confined.write_within w1
+    ⟨_, List.mem_singleton_self _, rfl, by simp, by simp [length]⟩,
     (), rfl, by simpa [lowBytes] using readback⟩
   cil_checked_steps [f0, a1, w1]
 
@@ -310,7 +312,7 @@ def unguardedContract : MethodContract PairInput Unit :=
 /-- Readable, zeroed storage is not enough: the constructor's first store faults without write authority. -/
 theorem missing_authority_rejected : ¬ unguardedContract.Holds Extracted.program pair := by
   intro holds
-  obtain ⟨fuel, final, values, ran, -⟩ := holds ⟨⟨0, 0⟩, 0, 0⟩ readOnly ⟨readOnly_formed, rfl⟩
+  obtain ⟨fuel, ⟨final, values⟩, ran, -⟩ := holds ⟨⟨0, 0⟩, 0, 0⟩ readOnly ⟨readOnly_formed, rfl⟩
   have faulted : invoke Extracted.program 8 pair (unguardedContract.args ⟨⟨0, 0⟩, 0, 0⟩) readOnly =
       .error ⟨2, 2, .memory .unwritable (.address ⟨0, 0⟩) 8⟩ := rfl
   have up := invoke_mono _ _ 8 _ _ _ (.ok (final, values)) trivial ran
@@ -350,7 +352,8 @@ theorem shared_formed : shared.WellFormed where
 /-- The write through `log` lands outside the footprint, so the contract is refuted by a concrete run. -/
 theorem stray_write_rejected : ¬ loggedContract.Holds loggedProgram 0 := by
   intro holds
-  obtain ⟨_, final, values, ran, framed, -⟩ := holds ⟨⟨0, 0⟩, ⟨0, 8⟩, 0⟩ shared ⟨shared_formed, rfl, rfl⟩
+  obtain ⟨_, ⟨final, values⟩, ran, framed, -⟩ :=
+    holds ⟨⟨0, 0⟩, ⟨0, 8⟩, 0⟩ shared ⟨shared_formed, rfl, rfl⟩
   obtain ⟨rfl, rfl⟩ := Prod.mk.inj (invoke_ok_unique ran (rfl : invoke loggedProgram 8 0
     (loggedContract.args ⟨⟨0, 0⟩, ⟨0, 8⟩, 0⟩) shared = .ok _))
   have kept := framed.cells 0 (by decide) 8 (by simp [Outside, loggedContract])

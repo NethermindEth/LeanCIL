@@ -32,8 +32,8 @@ def SegmentRun (program : CIL.Program) (method start finish cost : Nat)
 def Segment (program : CIL.Program) (method start finish : Nat)
     (pre post : List Value → SegmentState → Prop) : Prop :=
   ∀ arguments before, pre arguments before →
-    ∃ cost after, post arguments after ∧
-      SegmentRun program method start finish cost arguments before after
+    WP (fun cost after => SegmentRun program method start finish cost arguments before after)
+      (post arguments)
 
 namespace SegmentRun
 
@@ -61,6 +61,24 @@ end SegmentRun
 
 namespace Segment
 
+/-- A segment retains one cost and boundary state for every continuation fuel, including
+    exhausted and faulting continuations. Neither witness may depend on that fuel. -/
+theorem adequate {program : CIL.Program} {method start finish : Nat}
+    {pre post : List Value → SegmentState → Prop} :
+    Segment program method start finish pre post ↔
+      ∀ arguments before, pre arguments before →
+        ∃ cost after, post arguments after ∧
+          SegmentRun program method start finish cost arguments before after := by
+  constructor
+  · intro contract arguments before valid
+    obtain ⟨cost, after, executed, satisfied⟩ := contract arguments before valid
+    exact ⟨cost, after, satisfied, executed⟩
+  · intro contract arguments before valid
+    obtain ⟨cost, after, satisfied, executed⟩ := contract arguments before valid
+    exact ⟨cost, after, executed, satisfied⟩
+
+#print axioms adequate
+
 /-- A checked boundary equation yields a contract with exact input and output states. -/
 theorem ofRun {program : CIL.Program} {method start finish cost : Nat}
     {arguments : List Value} {before after : SegmentState}
@@ -68,7 +86,7 @@ theorem ofRun {program : CIL.Program} {method start finish cost : Nat}
     Segment program method start finish (before.exact arguments) (after.exact arguments) := by
   intro actual current valid
   rcases valid with ⟨rfl, rfl⟩
-  exact ⟨cost, after, ⟨rfl, rfl⟩, execution⟩
+  exact ⟨cost, after, execution, rfl, rfl⟩
 
 #print axioms ofRun
 /-- An empty segment preserves any assertion. -/
@@ -76,7 +94,7 @@ theorem refl (program : CIL.Program) (method pc : Nat)
     (predicate : List Value → SegmentState → Prop) :
     Segment program method pc pc predicate predicate := by
   intro arguments state valid
-  exact ⟨0, state, valid, SegmentRun.refl program method pc arguments state⟩
+  exact ⟨0, state, SegmentRun.refl program method pc arguments state, valid⟩
 
 #print axioms refl
 
@@ -87,9 +105,8 @@ theorem trans {program : CIL.Program} {method start middle finish : Nat}
     (second : Segment program method middle finish intermediate post) :
     Segment program method start finish pre post := by
   intro arguments before valid
-  obtain ⟨firstCost, middleState, middleValid, firstRun⟩ := first arguments before valid
-  obtain ⟨secondCost, after, afterValid, secondRun⟩ := second arguments middleState middleValid
-  exact ⟨firstCost + secondCost, after, afterValid, firstRun.trans secondRun⟩
+  exact WP.sequence (first arguments before valid) (second arguments)
+    (fun _ _ _ _ firstRun secondRun => firstRun.trans secondRun)
 
 #print axioms trans
 
@@ -101,8 +118,7 @@ theorem consequence {program : CIL.Program} {method start finish : Nat}
     (output : ∀ arguments state, post arguments state → weaker arguments state) :
     Segment program method start finish stronger weaker := by
   intro arguments before valid
-  obtain ⟨cost, after, result, execution⟩ := contract arguments before (input _ _ valid)
-  exact ⟨cost, after, output _ _ result, execution⟩
+  exact (contract arguments before (input _ _ valid)).consequence (output arguments)
 
 #print axioms consequence
 
@@ -114,12 +130,17 @@ theorem run_exists {program : CIL.Program} {method start finish : Nat}
     (arguments : List Value) (before : SegmentState) (valid : pre arguments before)
     (result : Memory → List Value → Prop)
     (continuation : ∀ after, post arguments after →
-      WP (fun fuel => run program fuel method finish arguments after.frame after.stack after.memory)
-        result) :
-    WP (fun fuel => run program fuel method start arguments before.frame before.stack before.memory)
-      result := by
-  obtain ⟨cost, after, afterValid, execution⟩ := contract arguments before valid
-  exact WP.sequence execution (continuation after afterValid)
+      WP (Execution (fun fuel =>
+        run program fuel method finish arguments after.frame after.stack after.memory))
+        (Function.uncurry result)) :
+    WP (Execution (fun fuel =>
+      run program fuel method start arguments before.frame before.stack before.memory))
+      (Function.uncurry result) := by
+  exact WP.sequence (contract arguments before valid) continuation
+    (fun firstCost secondCost after result execution continued => by
+      change run _ (firstCost + secondCost) _ _ _ _ _ _ = .ok result
+      rw [Nat.add_comm firstCost secondCost, execution secondCost]
+      exact continued)
 
 #print axioms run_exists
 end Segment

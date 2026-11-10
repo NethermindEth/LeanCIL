@@ -141,7 +141,7 @@ def emptyMemory : CIL.Safety.Memory :=
 /-- The contract really depends on AVX2: on the baseline the method returns `0`. -/
 theorem baseline_rejected : ¬ avx2Contract.Holds (reprofile program baselineProfile) 0 := by
   intro holds
-  obtain ⟨fuel, final, values, invoked, -, out, encoded, returned⟩ :=
+  obtain ⟨fuel, ⟨final, values⟩, invoked, -, out, encoded, returned⟩ :=
     holds () emptyMemory trivial
   have baselineRun :
       CIL.Safety.invoke (reprofile program baselineProfile) 10 0 [] emptyMemory =

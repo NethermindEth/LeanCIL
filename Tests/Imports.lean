@@ -139,7 +139,7 @@ theorem add_linked : importsAdd linkedProgram := by
   have fr := access_reference_valid _ _ _ _ _ writable
   have la := load_word64_of_read readA
   have lb := load_word64_of_read readB
-  refine ⟨9, stored, [], ?_, Confined.write wrote (by simp [numberBytes]), _, rfl, rfl, readback⟩
+  refine ⟨9, (stored, []), ?_, Confined.write wrote (by simp [numberBytes]), _, rfl, rfl, readback⟩
   cil_checked_steps [fa, fb, fr, la, lb, store]
 
 theorem root_linked : rootContract.Holds linkedProgram root :=
@@ -181,7 +181,7 @@ theorem root_unlinked_never_returns (input : RootInput) (m : Memory) (permitted 
 /-- So the unlinked contract holds only vacuously: no input meets its precondition. -/
 theorem root_unlinked_vacuous (holds : rootContract.Holds Extracted.program root) (input : RootInput) (m : Memory) :
     ¬ rootContract.pre input m := fun permitted =>
-  let ⟨fuel, final, values, invoked, _⟩ := holds input m permitted
+  let ⟨fuel, ⟨final, values⟩, invoked, _⟩ := holds input m permitted
   root_unlinked_never_returns input m permitted fuel (final, values) invoked
 
 #print axioms root_given

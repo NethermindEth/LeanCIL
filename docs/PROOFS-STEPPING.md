@@ -222,19 +222,26 @@ stated over an abstract `program` therefore steps exactly like one over `Extract
 `cil_checked_steps`, `cil_contract_steps` and `cil_raise_steps` fail when they cannot take a first
 step, instead of returning the goal unchanged.
 
-`WP execution post` states that a checked execution terminates successfully with a final memory
-and returned values satisfying `post`. Import `CIL.Safety.WeakestPrecondition` for the predicate
-and its structural rules. `execution` is a function from fuel to the existing checked `invoke`
-or `run`; the predicate hides the fuel witness and intermediate result. `cil_contract_steps`
-accepts this form directly. `MethodContract.Holds` and `LoopTerminates` use the same predicate.
+`WP execution post` states that one finite budget and result satisfy an execution relation and
+`post`. Import `CIL.Safety.WeakestPrecondition` for the predicate and its structural rules.
+For successful checked execution, use `WP (Execution (fun fuel => invoke ...)) post`, with
+`post : Memory × List Value → Prop`; `fun (final, values) => ...` names its two components.
+`Execution` is equality to the existing interpreter's successful result, so every fault,
+including fuel exhaustion, is rejected. `cil_contract_steps` accepts this form directly.
+`MethodContract.Holds`, `LoopTerminates`, `Segment` and `LoopReaches` all use `WP`.
 
 `WP.step` composes a fetched checked instruction, `WP.call` composes an actual helper invocation,
-and `WP.sequence` composes an exact prefix with its successful suffix. `WP.consequence` weakens
-the postcondition by an implication. `WP.frame` carries a memory assertion only when its
-preservation is proved for successful execution; it never infers content preservation from
+and `WP.sequence` composes two execution relations using their budget-composition law.
+`WP.of_prefix` transfers a successful suffix across an exact interpreter prefix.
+`WP.consequence` weakens the postcondition by an implication. `WP.frame` carries an assertion
+only when its preservation is proved for the execution relation; it never infers preservation from
 read or write permission. `WP.enter` requires actual checked arguments and frame allocation,
 and `WP.returned` requires frame exit and checked returned values. `WP.adequate` exposes the
 underlying finite execution when an assembly certificate needs the raw interpreter equation.
+`Function.uncurry post` adapts a postcondition written as `Memory → List Value → Prop`.
+Partial `cil_contract_steps` proofs leave the existing interpreter's existential execution goal.
+Use `apply WP.exists_execution` before applying a WP rule at that boundary; its postcondition is
+inferred. `cil_contract_steps [facts] until suffix` accepts a WP suffix directly.
 
 A segment theorem over an abstract body states where its code sits with `CodeAt body start segment`
 ([CodeAt](../CIL/Safety/CodeAt.lean)) instead of `body.code = leading ++ segment ++ tail` and
@@ -246,7 +253,10 @@ agree with its code. `append`, `middle`, `take` and `drop` move a placement betw
 segments, and `rfl` closes a concrete one. `Segment program method start finish pre post`
 packages a checked prefix as a composable contract. Assertions take the unchanged arguments and a `SegmentState` containing the frame, stack
 and memory. Each admitted input supplies an output state and a cost, with an exact `run (fuel +
-cost) = run fuel` equation for every continuation fuel. `Segment.trans` composes adjacent contracts
+cost) = run fuel` equation for every continuation fuel. Both witnesses precede the universal
+continuation budget; they cannot vary with it. The relation retains successful results, exhaustion
+and located faults. `Segment.adequate` states this exact equivalence. `LoopReaches` uses the same
+prefix relation with an exact-target postcondition. `Segment.trans` composes adjacent contracts
 and adds their costs; `Segment.run_exists` composes a suffix stated with `WP`. `Segment.consequence`
 changes assertions by proved implications. `SegmentState.exact` describes a known state. For these
 exact-state contracts, `cil_segment 3 [found, placed, facts]` proves the boundary using

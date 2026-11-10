@@ -160,7 +160,7 @@ theorem weaker_pre_not_refines : ¬ percentInRange.Refines percentUnguarded := f
 
 /-- No proof of the weaker pre exists for the actual extraction. -/
 theorem weaker_pre_rejected : ¬ percentUnguarded.Holds Extracted.program 0 := fun holds => by
-  obtain ⟨fuel, final, values, invoked, -⟩ := holds 101 Memory.empty trivial
+  obtain ⟨fuel, ⟨final, values⟩, invoked, -⟩ := holds 101 Memory.empty trivial
   exact raises_not_returns percent_above invoked
 
 /-- A changed exception type: `Percent(101)` throws `ArgumentOutOfRangeException`, not

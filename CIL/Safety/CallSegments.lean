@@ -19,7 +19,7 @@ def loadCallStoreCode (callee : Nat) : List CIL.Op :=
     The continuation receives the real call result and checked write, not an assumed summary. -/
 theorem WP.load_call_store {Input Output : Type} {contract : MethodContract Input Output}
     {program : CIL.Program} {method start callee : Nat} {body : CIL.Method}
-    {frame : Frame} {memory : Memory} {post : Memory → List Value → Prop}
+    {frame : Frame} {memory : Memory} {post : (Memory × List Value) → Prop}
     (holds : contract.Holds program callee) (input : Input) (decode : Output → CIL.W64)
     (left right output : Reference)
     (found : program[method]? = some body)
@@ -33,12 +33,12 @@ theorem WP.load_call_store {Input Output : Type} {contract : MethodContract Inpu
     (suffix : ∀ middle value after,
       CallResult contract program callee input memory middle value →
       write middle output (numberBytes (decode value).toNat 8) 1 = .ok after →
-      WP (fun fuel => run program fuel method (start + 7)
+      WP (Execution (fun fuel => run program fuel method (start + 7)
         [.reference (.address left), .reference (.address right), .reference (.address output)]
-        frame [] after) post) :
-    WP (fun fuel => run program fuel method start
+        frame [] after)) post) :
+    WP (Execution (fun fuel => run program fuel method start
       [.reference (.address left), .reference (.address right), .reference (.address output)]
-      frame [] memory) post := by
+      frame [] memory)) post := by
   cil_contract_steps [found, placed]
   apply run_call_of_contract holds input found
     (by cil_lookup [placed]) (by cil_checked_step []) encoded.symm permitted

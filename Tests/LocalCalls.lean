@@ -55,17 +55,16 @@ theorem multiply_updates_mixed_frame {program : CIL.Program} {callee : Nat}
     (context : LoopFrame [] caller current kinds slots known)
     (found : program[callee]? = some multiplyBody)
     (slot : slots[0]? = some (.bytes .word64 low)) (left right : CIL.W64) :
-    WP (fun fuel => invoke program fuel callee
-      [.scalar (.i64 left), .scalar (.i64 right), .reference (.address low)] current)
-      (fun final values =>
-        values = [.scalar (.i64 (CIL.WideMultiply.high64 left right))] ∧
+    WP (Execution (fun fuel => invoke program fuel callee
+      [.scalar (.i64 left), .scalar (.i64 right), .reference (.address low)] current))
+      (fun (final, values) => values = [.scalar (.i64 (CIL.WideMultiply.high64 left right))] ∧
         LoopFrame [] caller final kinds slots (rememberLocal known 0 (.i64 (left * right)))) := by
   have execution := multiply_holds found ⟨left, right, low⟩ current
     (context.homes.writable_at slot)
-  obtain ⟨fuel, final, values, invoked, confined, high, encoded, correct⟩ := execution
+  obtain ⟨fuel, ⟨final, values⟩, invoked, confined, high, encoded, correct⟩ := execution
   obtain ⟨rfl, loaded⟩ := correct
   have formed := invoke_preserves_wellFormed _ _ _ _ _ _ _ context.wellFormed invoked
-  exact ⟨fuel, final, values, invoked, encoded,
+  exact ⟨fuel, (final, values), invoked, encoded,
     context.after_local_write 0 .word64 low (.i64 (left * right)) (left * right).toNat
       slot confined formed rfl loaded⟩
 
@@ -90,10 +89,10 @@ theorem caller_loads_helper_output {caller current : Memory} {frame : Frame}
     {entered : Memory}
     (setup : enterFrame callerBody [.scalar (.i64 left), .scalar (.i64 right)] caller =
       .ok (frame, entered)) :
-    WP (fun fuel => run [callerBody, multiplyBody] fuel 0 3
+    WP (Execution (fun fuel => run [callerBody, multiplyBody] fuel 0 3
       [.scalar (.i64 left), .scalar (.i64 right)] frame
-      [.reference (.address low), .scalar (.i64 right), .scalar (.i64 left)] current)
-      (fun final values => Confined [] caller final ∧
+      [.reference (.address low), .scalar (.i64 right), .scalar (.i64 left)] current))
+      (fun (final, values) => Confined [] caller final ∧
         values = [.scalar (.i64 (left * right))]) := by
   have formed := context.form_home 0 slot
   apply WP.local_call context (multiply_holds (callee := 1) (by rfl)) ⟨left, right, low⟩
@@ -112,9 +111,9 @@ theorem caller_loads_helper_output {caller current : Memory} {frame : Frame}
 /-- The whole caller allocates an unknown word and an initialized vector, calls the checked
     helper, reloads its private output and returns after the actual frame teardown. -/
 theorem caller_invokes (memory : Memory) (formed : memory.WellFormed) (left right : CIL.W64) :
-    WP (fun fuel => invoke [callerBody, multiplyBody] fuel 0
-      [.scalar (.i64 left), .scalar (.i64 right)] memory)
-      (fun final values => Confined [] memory final ∧
+    WP (Execution (fun fuel => invoke [callerBody, multiplyBody] fuel 0
+      [.scalar (.i64 left), .scalar (.i64 right)] memory))
+      (fun (final, values) => Confined [] memory final ∧
         values = [.scalar (.i64 (left * right))]) := by
   obtain ⟨low, vector, entered, setup⟩ := callerEntry.checked memory left right formed
   have context := setup.frame []
@@ -234,14 +233,15 @@ theorem arithmetic_holds (subtract : Bool) {program : CIL.Program} {callee : Nat
 /-- Carry and borrow helpers compose with the same mixed-home caller and named frame evidence. -/
 theorem arithmetic_caller (subtract : Bool) (memory : Memory) (formed : memory.WellFormed)
     (left right : CIL.W64) :
-    WP (fun fuel => invoke [callerBody, arithmeticBody subtract] fuel 0
-      [.scalar (.i64 left), .scalar (.i64 right)] memory)
-      (fun final values => Confined [] memory final ∧
+    WP (Execution (fun fuel => invoke [callerBody, arithmeticBody subtract] fuel 0
+      [.scalar (.i64 left), .scalar (.i64 right)] memory))
+      (fun (final, values) => Confined [] memory final ∧
         values = [.scalar (.i64 (arithmeticWord subtract left right))]) := by
   obtain ⟨low, vector, entered, setup⟩ := callerEntry.checked memory left right formed
   have context := setup.frame []
   apply WP.enter (by rfl) (by rfl) setup.setup
   cil_contract_steps [callerEntry.frame]
+  apply WP.exists_execution
   apply WP.local_call context
     (arithmetic_holds subtract (program := [callerBody, arithmeticBody subtract])
       (callee := 1) rfl) ⟨left, right, low⟩
