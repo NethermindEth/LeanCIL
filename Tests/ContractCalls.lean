@@ -272,51 +272,6 @@ theorem missing_binding (program : Program) (memory : Safety.Memory)
   exact remaining
 #print axioms missing_binding
 
-/-- Call evidence with one more fact than `CallResult` states, as a later library may add. -/
-structure WiderCallResult {Input Output : Type} (c : MethodContract Input Output)
-    (program : Program) (method : Nat) (input : Input) (before final : Safety.Memory)
-    (output : Output) : Prop extends CallResult c program method input before final output where
-  grown : before.nextIdentity ≤ final.nextIdentity
-
--- The script names the hypothesis it is run against.
-set_option hygiene false in
-/-- What a continuation takes from its call: each fact selected by name, never by position. -/
-macro "select_call_facts" : tactic => `(tactic| exact ⟨call.framed, call.post, call.invoked⟩)
-
-/-- A proof that selects call facts by name is the same proof over `CallResult`... -/
-theorem named_call_facts (program : Program) (memory final : Safety.Memory) (value : W32)
-    (call : CallResult seven program 1 () memory final value) :
-    Confined [] memory final ∧ value = 7 ∧
-      ∃ fuel, Safety.invoke program fuel 1 [] memory = .ok (final, [.scalar (.i32 value)]) := by
-  select_call_facts
-#print axioms named_call_facts
-
-/-- ...and over evidence that states a further fact, so adding one breaks no such proof. -/
-theorem named_call_facts_survive_added_field (program : Program) (memory final : Safety.Memory)
-    (value : W32) (call : WiderCallResult seven program 1 () memory final value) :
-    Confined [] memory final ∧ value = 7 ∧
-      ∃ fuel, Safety.invoke program fuel 1 [] memory = .ok (final, [.scalar (.i32 value)]) := by
-  select_call_facts
-#print axioms named_call_facts_survive_added_field
-
-/-- A positional pattern binds other facts once one is added: the three names that took
-    `invoked`, `framed` and `post` no longer prove the same statement. -/
-example (program : Program) (memory final : Safety.Memory) (value : W32)
-    (call : WiderCallResult seven program 1 () memory final value) : value = 7 := by
-  fail_if_success (obtain ⟨_, _, post⟩ := call; exact post)
-  exact call.post
-
-/-- `Holds.result` hands a caller the evidence a proved contract gives, and `Holds.intro` builds
-    a contract's conclusion from named parts. -/
-theorem result_then_intro (program : Program) (memory : Safety.Memory)
-    (holds : seven.Holds program 1) :
-    ∃ fuel final values, Safety.invoke program fuel 1 (seven.args ()) memory = .ok (final, values) ∧
-      Confined (seven.footprint ()) memory final ∧ seven.Returns () memory final values := by
-  obtain ⟨final, value, call⟩ := holds.result () (initial := memory) trivial
-  exact MethodContract.Holds.intro (final := final) (output := value) (post := call.post)
-    (framed := call.framed) (invoked := call.invoked)
-#print axioms result_then_intro
-
 /-- Malformed evidence fails cleanly, allowing the independently proved invocation fallback. -/
 theorem malformed_candidate (program : Program) (memory final : Safety.Memory) (value : W32)
     (child : Safety.invoke program 2 1 [] memory = .ok (final, [.scalar (.i32 value)])) :

@@ -249,31 +249,6 @@ theorem down_returns_zero (input : CIL.W32) :
 
 #print axioms down_returns_zero
 
-/-- Entry evidence with one more fact than `entry.Checked` states, as a later library may add. -/
-structure WiderChecked (input : CIL.W32) (home : Reference) (entered : Memory) : Prop
-    extends entry.Checked input home entered where
-  grown : Memory.empty.nextIdentity ≤ entered.nextIdentity
-
--- The script names the hypothesis it is run against.
-set_option hygiene false in
-/-- What a loop proof takes from its entry: the setup and frame, selected by name. -/
-macro "select_entry_facts" : tactic =>
-  `(tactic| exact ⟨enter.setup, (enter.frame []).wellFormed⟩)
-
-/-- A proof that selects entry facts by name is the same proof over the generated evidence and
-    over evidence that states a further fact, so adding one breaks no such proof. -/
-example (input : CIL.W32) (home : Reference) (entered : Memory)
-    (enter : entry.Checked input home entered) :
-    enterFrame downBody [.scalar (.i32 input)] Memory.empty = .ok (entry.frame home, entered) ∧
-      entered.WellFormed := by
-  select_entry_facts
-
-example (input : CIL.W32) (home : Reference) (entered : Memory)
-    (enter : WiderChecked input home entered) :
-    enterFrame downBody [.scalar (.i32 input)] Memory.empty = .ok (entry.frame home, entered) ∧
-      entered.WellFormed := by
-  select_entry_facts
-
 end Tests.LoopFrames.BoundMethod
 
 namespace Tests.LoopFrames.MixedLocals

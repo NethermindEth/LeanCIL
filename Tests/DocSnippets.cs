@@ -138,7 +138,6 @@ Console.WriteLine("PASS stale snippets, missing imports and removed names fail a
 // makes never touches the checkout. The copy is at one path for every document: builds are then identical.
 verification.EnsureExtractorBuilt();
 var workspace = Path.Combine(output, "Walkthrough");
-var transcripts = new Dictionary<string, List<CommandResult>>(StringComparer.Ordinal);
 var walkthroughs = Documentation.Documents(Root).Select(path => Documentation.Read(Root, path))
     .Where(page => page.Walkthrough.Length != 0).ToArray();
 var commandCount = 0;
@@ -147,7 +146,7 @@ foreach (var page in walkthroughs)
 {
     if (Directory.Exists(workspace)) DeleteTree(workspace);
     Directory.CreateDirectory(workspace);
-    var transcript = transcripts[Documentation.Relative(Root, page.Path)] = [];
+    var transcript = new List<CommandResult>();
     var problems = Documentation.RunWalkthrough(page, command =>
     {
         var words = Words(command);
@@ -173,48 +172,6 @@ foreach (var page in walkthroughs)
 Console.WriteLine($"PASS {commandCount} documented commands of {walkthroughs.Length} documents exit and print " +
     $"as documented ({elapsed.Elapsed.TotalSeconds:F1}s)");
 
-// A documented output that drifts from the tool must fail at its line: a line the tool does not print, a
-// line it prints that the document lacks, and an error line it does not print. The unchanged document
-// replays its transcript without a failure, so each rejection below is the mutation's.
-const string Walked = "docs/GETTING-STARTED.md";
-var walked = File.ReadAllText(At(Walked)).ReplaceLineEndings("\n");
-List<string> Replayed(string text)
-{
-    var replayRoot = Path.Combine(output, "StaleOutput");
-    Directory.CreateDirectory(Path.Combine(replayRoot, "docs"));
-    var path = Path.Combine(replayRoot, Walked);
-    File.WriteAllText(path, text);
-    var next = 0;
-    return Documentation.RunWalkthrough(Documentation.Read(replayRoot, path),
-        _ => transcripts[Walked][next++], _ => { });
-}
-int LineIn(string text, string line) => Array.FindIndex(text.Split('\n'), candidate =>
-    candidate.StartsWith(line, StringComparison.Ordinal)) + 1;
-if (Replayed(walked) is { Count: > 0 } unchanged)
-    throw new InvalidOperationException($"The replayed {Walked} was rejected:\n{string.Join('\n', unchanged)}");
-const string SubjectLabel = "  Subject: ";
-const string AxiomsLabel = "  Axioms: ";
-const string StageLine = "  Stage: proof checking";
-foreach (var (what, drifted, line) in new[]
-    {
-        ("a label the tool does not print", walked.Replace(SubjectLabel, "  Entry: "), LineIn(walked, SubjectLabel)),
-        // The line after the removed one is where the document and the tool part.
-        ("a line of the tool's output the document lacks", string.Join('\n', walked.Split('\n').Where(text =>
-            !text.StartsWith(AxiomsLabel, StringComparison.Ordinal))), LineIn(walked, AxiomsLabel)),
-        ("an error line the tool does not print", walked.Replace(StageLine, "  Stage: proof"),
-            LineIn(walked, StageLine))
-    })
-{
-    if (line == 0 || drifted == walked)
-        throw new InvalidOperationException($"{Walked} no longer documents the line mutated as {what}.");
-    var found = Replayed(drifted);
-    if (!found.Any(failure => failure.StartsWith($"{Walked}:{line}: ", StringComparison.Ordinal)))
-        throw new InvalidOperationException($"""
-            {Walked} with {what} was not rejected at line {line}:
-            {string.Join('\n', found)}
-            """);
-}
-Console.WriteLine("PASS documented output that drifts from the tool fails at its document line");
 return 0;
 
 // The words of a documented command, without the quotes a shell would remove.

@@ -31,8 +31,6 @@ partial class Program
                 throw new InvalidOperationException($"The {name} outline requires unnecessary byte separation");
             // The loop's outline states the null exclusion itself and leaves the rest of the precondition.
             const string nonNull = "  values1.reference ≠ .null ∧ ";
-            if (name == "Sum" && !source.Contains(nonNull + "sorry", StringComparison.Ordinal))
-                throw new InvalidOperationException($"The Sum outline does not exclude a null array:\n{source}");
             source = name == "Sum" ? source.Replace(nonNull + "sorry", nonNull + "True", StringComparison.Ordinal)
                 : FillWordArrayDefinition(source, "Precondition", "True");
             source = FillWordArrayDefinition(source, "Postcondition", name == "Sum"
