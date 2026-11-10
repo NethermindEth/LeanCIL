@@ -159,12 +159,12 @@ the proof, and runs `lake update` without network access. The package requires
 `leancil` by `path` from `.lake/leancil-framework`, a lakefile whose source and
 build directories are the certified library in the
 [library cache](CLI.md#stage-progress), so the package holds no framework
-sources or build: about 0.4 MB with one extraction, where a copy of the
-framework build is about 1.1 GB. Building in the package, `lake env lean` and
-the language server leave an up-to-date library unwritten. Lake would rebuild a
-framework module it found out of date inside the library, so `workspace` and
-`watch` fail if their build changed any file there, and the next run checks the
-cache entry against its manifest and replaces one that no longer matches. A
+sources or build and is about 0.4 MB with one extraction. Building in the
+package, `lake env lean` and the language server leave an up-to-date library
+unwritten. Lake would rebuild a framework module it found out of date inside
+the library, so `workspace` and `watch` fail if their build changed any file
+there, and the next run checks the cache entry against its manifest and
+replaces one that no longer matches. A
 tool with different framework sources has a library under another cache key;
 the next `workspace` or `watch` rewrites `.lake/leancil-framework` to name it,
 building it first when absent. It creates no Git repository or commit, so Git

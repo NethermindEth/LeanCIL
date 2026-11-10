@@ -367,7 +367,8 @@ an isolated installation of the packaged .NET tool.
 
 The runner builds the independent assemblies and the CIL library, then prepares a source-keyed,
 kernel-replayed library for verification. CI rebuilds from sources; local runs may reuse a cache
-entry whose receipt binds its key and manifest. The library is checked by its trusted manifest
+entry whose receipt binds its key and manifest and whose files still hash to that manifest, by
+the stamps recorded beside it or by hashing them again. The library is checked by its trusted manifest
 digest and read in place: every proof still compiles and undergoes kernel replay in a new private
 session package that requires the library as a path dependency, so Lake writes only below that
 session. File-based C# apps provide the test runner, verifier and metadata fixture generator.

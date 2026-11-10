@@ -1043,7 +1043,9 @@ package that pins `leancil` keeps its own checkout of the framework: one that ha
 receives a copy of the certified library's compiled modules, so the framework is built once per
 machine. Lake reuses a copied module only while it matches the package's sources, and no
 certificate reads the copy. On a machine without the certified library, the first `workspace`
-builds it, as the first `verify` would. Verification accepts the keyed import only for the
+builds it, as the first `verify` would; for a generated package it is cached in CI too, where
+`verify` bypasses the cache, because the package must require a library that stays on disk.
+Verification accepts the keyed import only for the
 extraction it checks and builds it as a re-export of `Extracted`. `new-proof` writes the same
 keyed import, so its outline opens in the editor as generated.
 
