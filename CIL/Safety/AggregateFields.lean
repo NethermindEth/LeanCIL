@@ -271,25 +271,6 @@ theorem writeSnapshot_initialized (memory : Memory) (reference : Reference)
     split <;> try rfl
     cases bytes[position - reference.offset]? <;> rfl
 
-/-- What a signed `loadValue` of `width` bytes returns for the decoded `number`: a 1- or 2-byte
-    load sign extends to i32, and a wider one loads as unsigned. -/
-def signedOfWidth (width number : Nat) : CIL.Value :=
-  match width with
-  | 1 => .i32 ((BitVec.ofNat 8 number).signExtend 32)
-  | 2 => .i32 ((BitVec.ofNat 16 number).signExtend 32)
-  | _ => numericOfWidth width number
-
-/-- An initialized signed read at any scalar width decodes its bytes, sign extending at 1 and 2
-    bytes. -/
-theorem loadValue_signed_of_read {memory : Memory} {reference : Reference} {width : Nat}
-    {bytes : List (BitVec 8)}
-    (scalar : ScalarWidth width) (loaded : read memory reference width 1 = .ok bytes) :
-    loadValue memory (.address reference) width true =
-      .ok (signedOfWidth width (byteNumber bytes)) := by
-  rcases scalar with rfl | rfl | rfl | rfl | rfl | rfl | rfl <;>
-    simp [loadValue, dereference, loaded, checkedAt, Except.mapError, signedOfWidth,
-      numericOfWidth, Bind.bind, Except.bind, Pure.pure, Except.pure]
-
 /-- Closes a step equation through its generic `instructionStep` equation, as the stepping
     equations in `InstructionSteps` are closed. -/
 local macro "field_step_proof " generic:ident : tactic => `(tactic| (

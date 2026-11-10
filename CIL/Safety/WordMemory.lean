@@ -60,6 +60,37 @@ theorem load_scalar_of_read {memory : Memory} {reference : Reference} {width : N
   have bound : x.toNat < 256 ^ width := by have := x.isLt; rwa [Nat.pow_mul] at this
   rw [loadValue_of_read scalar loaded, byteNumber_numberBytes, Nat.mod_eq_of_lt bound]
 
+/-- What a signed `loadValue` of `width` bytes returns for the decoded `number`: a 1- or 2-byte
+    load sign extends to i32, and a wider one loads as unsigned. -/
+def signedOfWidth (width number : Nat) : CIL.Value :=
+  match width with
+  | 1 => .i32 ((BitVec.ofNat 8 number).signExtend 32)
+  | 2 => .i32 ((BitVec.ofNat 16 number).signExtend 32)
+  | _ => numericOfWidth width number
+
+/-- An initialized signed read at any scalar width decodes its bytes, sign extending at 1 and 2
+    bytes. -/
+theorem loadValue_signed_of_read {memory : Memory} {reference : Reference} {width : Nat}
+    {bytes : List (BitVec 8)}
+    (scalar : ScalarWidth width) (loaded : read memory reference width 1 = .ok bytes) :
+    loadValue memory (.address reference) width true =
+      .ok (signedOfWidth width (byteNumber bytes)) := by
+  rcases scalar with rfl | rfl | rfl | rfl | rfl | rfl | rfl <;>
+    simp [loadValue, dereference, loaded, checkedAt, Except.mapError, signedOfWidth,
+      numericOfWidth, Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+#print axioms loadValue_signed_of_read
+
+/-- An encoded scalar read sign-extends narrow values using the checked signed load. -/
+theorem load_scalar_signed_of_read {memory : Memory} {reference : Reference} {width : Nat}
+    {bits : BitVec (8 * width)} (scalar : ScalarWidth width)
+    (loaded : read memory reference width 1 = .ok (numberBytes bits.toNat width)) :
+    loadValue memory (.address reference) width true =
+      .ok (signedOfWidth width bits.toNat) := by
+  have bound : bits.toNat < 256 ^ width := by have := bits.isLt; rwa [Nat.pow_mul] at this
+  rw [loadValue_signed_of_read scalar loaded, byteNumber_numberBytes, Nat.mod_eq_of_lt bound]
+#print axioms load_scalar_signed_of_read
+
 theorem load_local_word64_of_read {memory : Memory} {reference : Reference} {word : BitVec 64}
     (loaded : read memory reference 8 1 = .ok (numberBytes word.toNat 8)) :
     loadLocal memory (.bytes .word64 reference) = .ok (.scalar (.i64 word)) := by

@@ -21,6 +21,8 @@ register_simp_attr cil_guard
 register_simp_attr cil_feature
 -- Successful checked values and typed homes normalize without expanding instruction dispatch.
 register_simp_attr cil_checked
+-- Closed normalization rules shared by checked instruction, argument and return premises.
+register_simp_attr cil_side
 -- Evaluation of the closed literal operands a step leaves in its state: width conversion, sign
 -- extension, `toNat` and the masked shift count of numerals. Symbolic operands never match.
 register_simp_attr cil_literal

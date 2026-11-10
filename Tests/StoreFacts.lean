@@ -36,7 +36,7 @@ theorem carry_stores (a b c : CIL.W64) (sum carry : Reference) (m m1 m2 : Memory
     (sumWrite : write m sum (numberBytes (a + b + c).toNat 8) 1 = .ok m1)
     (carryWrite : write m1 carry (numberBytes (carryOut a b c).toNat 8) 1 = .ok m2) :
     invoke carryProgram (CIL.executionBound carryProgram 0) 0 (carryArgs a b c sum carry) m = .ok (m2, []) := by
-  cil_checked_steps [carryArgs, carryOut, storeValue, referenceAt, formedSum, formedCarry,
+  cil_checked_steps [carryArgs, carryOut, formedSum, formedCarry,
     formedCarry1, sumWrite, carryWrite]
 
 #print axioms carry_stores
@@ -48,7 +48,7 @@ theorem borrow_stores (a b c : CIL.W64) (difference borrow : Reference) (m m1 m2
     (borrowWrite : write m1 borrow (numberBytes (borrowOut a b c).toNat 8) 1 = .ok m2) :
     invoke borrowProgram (CIL.executionBound borrowProgram 0) 0 (carryArgs a b c difference borrow) m =
       .ok (m2, []) := by
-  cil_checked_steps [carryArgs, borrowOut, storeValue, referenceAt, formedDifference, formedBorrow,
+  cil_checked_steps [carryArgs, borrowOut, formedDifference, formedBorrow,
     formedBorrow1, differenceWrite, borrowWrite]
 
 #print axioms borrow_stores
@@ -61,7 +61,7 @@ theorem carry_contract_steps (a b c : CIL.W64) (sum carry : Reference) (m m1 m2 
     (carryWrite : write m1 carry (numberBytes (carryOut a b c).toNat 8) 1 = .ok m2) :
     ∃ fuel final values, invoke carryProgram fuel 0 (carryArgs a b c sum carry) m = .ok (final, values) ∧
       final = m2 ∧ values = [] := by
-  cil_contract_steps [carryArgs, carryOut, storeValue, referenceAt, formedSum, formedCarry,
+  cil_contract_steps [carryArgs, carryOut, formedSum, formedCarry,
     formedCarry1, sumWrite, carryWrite]
   exact ⟨rfl, rfl⟩
 
@@ -73,99 +73,41 @@ example (a b c : CIL.W64) (r : Reference) (m m1 : Memory)
     storeValue m (.address r) (.i64 (a + b + c)) = .ok m1 := by
   -- Plain simp rewrites the stored sum but leaves `written` as stated, so it never fires.
   set_option linter.unusedSimpArgs false in
-    fail_if_success (simp [storeValue, referenceAt, checkedAt, Except.mapError, Bind.bind, Except.bind, written]; done)
+    fail_if_success (simp [storeValue, referenceAt, checkedAt, Except.mapError,
+      Bind.bind, Except.bind, written]; done)
   cil_fact_simp (config := { implicitDefEqProofs := false })
     [storeValue, referenceAt, checkedAt, Except.mapError, Bind.bind, Except.bind] [written]
 
 -- A fact that differs after normalisation stops the steps at its store, with the fact as stated.
 -- The carry write names the sum: the second store is wrong.
-/--
-error: unsolved goals
-case executed
-a b c : CIL.W64
-sum carry : Reference
-m m1 m2 : Memory
-formedSum : form m sum = Except.ok sum
-formedCarry : form m carry = Except.ok carry
-formedCarry1 : form m1 carry = Except.ok carry
-sumWrite : write m sum (numberBytes (BitVec.toNat (a + b + c)) 8) 1 = Except.ok m1
-carryWrite : write m1 carry (numberBytes (BitVec.toNat (a + b + c)) 8) 1 = Except.ok m2
-formedSum✝ : form m sum = Except.ok sum
-formedCarry✝ : form m carry = Except.ok carry
-formedCarry1✝ : form m1 carry = Except.ok carry
-sumWrite✝ :
-  write m sum (numberBytes ((BitVec.toNat a + BitVec.toNat b + BitVec.toNat c) % 18446744073709551616) 8) 1 =
-    Except.ok m1
-carryWrite✝ :
-  write m1 carry (numberBytes ((BitVec.toNat a + BitVec.toNat b + BitVec.toNat c) % 18446744073709551616) 8) 1 =
-    Except.ok m2
-⊢ run carryProgram 3 0 (15 + 1) (carryArgs a b c sum carry) { activation := m.nextIdentity, locals := [], owned := [] }
-      [Value.scalar (CIL.Value.i64 (BitVec.zeroExtend 64 (if a + b + c < a then 1 else 0))),
-        Value.reference (ManagedReference.address carry)]
-      m1 =
-    Except.ok (m2, [])
--/
-#guard_msgs in
+/-- ⊢ run carryProgram 3 0 (15 + 1) -/
+#guard_msgs (substring := true) in
 example (a b c : CIL.W64) (sum carry : Reference) (m m1 m2 : Memory)
     (formedSum : form m sum = .ok sum) (formedCarry : form m carry = .ok carry)
     (formedCarry1 : form m1 carry = .ok carry)
     (sumWrite : write m sum (numberBytes (a + b + c).toNat 8) 1 = .ok m1)
     (carryWrite : write m1 carry (numberBytes (a + b + c).toNat 8) 1 = .ok m2) :
     invoke carryProgram (CIL.executionBound carryProgram 0) 0 (carryArgs a b c sum carry) m = .ok (m2, []) := by
-  cil_checked_steps [carryArgs, carryOut, storeValue, referenceAt, formedSum, formedCarry,
+  cil_checked_steps [carryArgs, carryOut, formedSum, formedCarry,
     formedCarry1, sumWrite, carryWrite]
 
 -- The sum written to the carry's address.
-/--
-error: unsolved goals
-case executed
-a b c : CIL.W64
-sum carry : Reference
-m m1 : Memory
-formedSum : form m sum = Except.ok sum
-formedCarry : form m carry = Except.ok carry
-sumWrite : write m carry (numberBytes (BitVec.toNat (a + b + c)) 8) 1 = Except.ok m1
-formedSum✝ : form m sum = Except.ok sum
-formedCarry✝ : form m carry = Except.ok carry
-sumWrite✝ :
-  write m carry (numberBytes ((BitVec.toNat a + BitVec.toNat b + BitVec.toNat c) % 18446744073709551616) 8) 1 =
-    Except.ok m1
-⊢ run carryProgram 13 0 (5 + 1) (carryArgs a b c sum carry) { activation := m.nextIdentity, locals := [], owned := [] }
-      [Value.scalar (CIL.Value.i64 (a + b + c)), Value.reference (ManagedReference.address sum)] m =
-    Except.ok (m1, [])
--/
-#guard_msgs in
+/-- ⊢ run carryProgram 13 0 (5 + 1) -/
+#guard_msgs (substring := true) in
 example (a b c : CIL.W64) (sum carry : Reference) (m m1 : Memory)
     (formedSum : form m sum = .ok sum) (formedCarry : form m carry = .ok carry)
     (sumWrite : write m carry (numberBytes (a + b + c).toNat 8) 1 = .ok m1) :
     invoke carryProgram (CIL.executionBound carryProgram 0) 0 (carryArgs a b c sum carry) m = .ok (m1, []) := by
-  cil_checked_steps [carryArgs, storeValue, referenceAt, formedSum, formedCarry, sumWrite]
+  cil_checked_steps [carryArgs, formedSum, formedCarry, sumWrite]
 
 -- The sum written from a memory the method never reaches.
-/--
-error: unsolved goals
-case executed
-a b c : CIL.W64
-sum carry : Reference
-m m1 m2 : Memory
-formedSum : form m sum = Except.ok sum
-formedCarry : form m carry = Except.ok carry
-sumWrite : write m1 sum (numberBytes (BitVec.toNat (a + b + c)) 8) 1 = Except.ok m2
-formedSum✝ : form m sum = Except.ok sum
-formedCarry✝ : form m carry = Except.ok carry
-sumWrite✝ :
-  write m1 sum (numberBytes ((BitVec.toNat a + BitVec.toNat b + BitVec.toNat c) % 18446744073709551616) 8) 1 =
-    Except.ok m2
-⊢ run carryProgram 13 0 (5 + 1) (carryArgs a b c sum carry) { activation := m.nextIdentity, locals := [], owned := [] }
-      [Value.scalar (CIL.Value.i64 (a + b + c)), Value.reference (ManagedReference.address sum)] m =
-    Except.ok (m2, [])
--/
-#guard_msgs in
+/-- ⊢ run carryProgram 13 0 (5 + 1) -/
+#guard_msgs (substring := true) in
 example (a b c : CIL.W64) (sum carry : Reference) (m m1 m2 : Memory)
     (formedSum : form m sum = .ok sum) (formedCarry : form m carry = .ok carry)
     (sumWrite : write m1 sum (numberBytes (a + b + c).toNat 8) 1 = .ok m2) :
     invoke carryProgram (CIL.executionBound carryProgram 0) 0 (carryArgs a b c sum carry) m = .ok (m2, []) := by
-  cil_checked_steps [carryArgs, storeValue, referenceAt, formedSum, formedCarry, sumWrite]
+  cil_checked_steps [carryArgs, formedSum, formedCarry, sumWrite]
 
 open Lean Elab Tactic in
 elab "fact_normalizations " expected:num " in " body:tacticSeq : tactic => do

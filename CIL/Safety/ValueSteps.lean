@@ -21,18 +21,19 @@ private theorem operands_present_two (n : Nat) : (n + 1 + 1 < 2) = False := by s
     value-only op and i32/i64 operand shape (widths top of stack first), taking the op's
     parameter `p` when given. The dispatcher is evaluated once here, so a step rewrites by
     constructor and never unfolds `CIL.step` in a proof. -/
-syntax "cil_value_steps " ("(" ident " : " term ")")? " [" ident,* "] " num : command
+syntax "cil_value_steps " ("(" ident " : " term ")")* " [" ident,* "] " num : command
 
 open Lean Meta Elab Command in
 elab_rules : command
-  | `(cil_value_steps $[($paramName : $paramType)]? [$ops,*] $arity) => do
+  | `(cil_value_steps $[($paramName : $paramType)]* [$ops,*] $arity) => do
   let widths := match arity.getNat with
     | 0 => [[]]
     | 1 => [[false], [true]]
     -- Top of stack first: equal widths, and an i32 count over an i64 value for shifts.
     | _ => [[false, false], [true, true], [false, true]]
-  let params ← (paramName.toArray.zip paramType.toArray).mapM fun (name, type) =>
+  let params ← (paramName.zip paramType).mapM fun (name, type) =>
     `(Lean.Parser.Term.bracketedBinderF| ($name : $type))
+  let paramTerms : Array Term := paramName.map fun name => ⟨name.raw⟩
   let rest := mkIdent `rest
   let ns ← getCurrNamespace
   let declared ← liftTermElabM do
@@ -40,13 +41,19 @@ elab_rules : command
       names.foldlM (·.addDeclToUnfold ·) base
     let congruences ← getSimpCongrTheorems
     let simprocs := #[← Simp.getSimprocs]
-    let select ← Simp.mkContext (congrTheorems := congruences) (simpTheorems := #[← unfolding #[
+    let selectionNames := #[
       ``CIL.Safety.pureArity, ``CIL.Safety.scalars, ``CIL.Safety.numericValue,
       ``CIL.Safety.checkedValue,
       ``CIL.Safety.observerCount, ``CIL.Safety.unspecifiedOperands,
       ``CIL.Safety.Value.hasUnspecified, ``CIL.Value.hasUnspecified, ``List.any,
       ``List.take, ``List.drop, ``List.map, ``Bind.bind, ``Pure.pure, ``Except.bind, ``Except.pure,
-      ``Option.bind] {}])
+      ``Option.bind]
+    let select ← Simp.mkContext (congrTheorems := congruences)
+      (simpTheorems := #[← unfolding selectionNames {}])
+    let preserveChecks := fun name =>
+      name != ``CIL.Safety.checkedValue && name != ``CIL.Safety.numericValue
+    let checkedSelect ← Simp.mkContext (congrTheorems := congruences)
+      (simpTheorems := #[← unfolding (selectionNames.filter preserveChecks) {}])
     -- Smart unfolding discharges constructor guards before traversing the selected arm.
     let arms (e : Expr) : MetaM Expr := transform e (pre := fun e => do
       unless [``CIL.Safety.step, ``CIL.step, ``CIL.binary, ``CIL.unary].any e.isAppOf do
@@ -63,8 +70,14 @@ elab_rules : command
       (← getSimpTheorems)
     let present ← (← unfolded.addConst ``operands_present_one).addConst ``operands_present_two
     let cleanup ← Simp.mkContext (congrTheorems := congruences) (simpTheorems := #[present])
+    let checkedCleanup ← Simp.mkContext (congrTheorems := congruences)
+      (simpTheorems := #[← unfolding #[``Pure.pure, ``Except.pure, ``Functor.map,
+        ``Except.map, ``Bind.bind, ``Except.bind] (← getSimpTheorems)])
     let mut declared := #[]
     for op in ops.getElems do
+      let checked := #[`checkedArithmetic, `checkedConvert, `divide].contains op.getId
+      let select := if checked then checkedSelect else select
+      let cleanup := if checked then checkedCleanup else cleanup
       for shape in widths do
         let names := (if shape.length = 1 then [`v] else [`b, `a]).take shape.length |>.map mkIdent
         let operands ← (names.zip shape).toArray.mapM fun (name, wide) =>
@@ -74,9 +87,7 @@ elab_rules : command
           if wide then `(Value.scalar (CIL.Value.i64 $name) :: $tail)
           else `(Value.scalar (CIL.Value.i32 $name) :: $tail)
         let opName := mkIdent (`CIL.Op ++ op.getId)
-        let opTerm ← match paramName with
-          | some name => `(($opName $name))
-          | none => `($opName)
+        let opTerm ← `(($opName $paramTerms*))
         let statement ← `(∀ (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame)
             (memory : Memory) ($rest : List Value) $params* $operands*,
             step body $opTerm pc args frame $stack memory =
@@ -111,6 +122,35 @@ cil_value_steps (targets : List Nat) [switch] 1
 cil_value_steps (target : Nat) [branch] 0
 cil_value_steps [nop] 0
 cil_value_steps (id : CIL.Feature) [feature] 0
+cil_value_steps (kind : CIL.CheckedBinaryKind) (signed : Bool) [checkedArithmetic] 2
+cil_value_steps (width : Nat) (signed : Bool) (unsignedInput : Bool) [checkedConvert] 1
+cil_value_steps (signed : Bool) (remainder : Bool) [divide] 2
+
+#print axioms step_checkedArithmetic_i64_i64_eq
+#print axioms step_checkedArithmetic_i32_i32_eq
+#print axioms step_checkedArithmetic_i32_i64_eq
+#print axioms step_checkedConvert_i64_eq
+#print axioms step_checkedConvert_i32_eq
+#print axioms step_divide_i64_i64_eq
+#print axioms step_divide_i32_i32_eq
+#print axioms step_divide_i32_i64_eq
+
+/-- A proved checked arithmetic result advances the instruction without unfolding its check. -/
+theorem step_checkedArithmetic_result {kind : CIL.CheckedBinaryKind} {signed : Bool}
+    {left right value : CIL.Value} {memory : Memory}
+    (calculated : CIL.checkedValues kind signed left right = .ok value)
+    (leftKnown : left.hasUnspecified = false) (rightKnown : right.hasUnspecified = false)
+    (checked : checkedValue memory (.scalar value) = .ok (.scalar value)) :
+    ∀ body pc args frame rest,
+      step body (.checkedArithmetic kind signed) pc args frame
+        (.scalar right :: .scalar left :: rest) memory =
+        .ok (.next (pc + 1) (.scalar value :: rest) frame memory) := by
+  intro body pc args frame rest
+  simp [step, observerCount, unspecifiedOperands, Value.hasUnspecified,
+    leftKnown, rightKnown, calculated, checked, Except.mapError,
+    Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+#print axioms step_checkedArithmetic_result
 
 open Lean Meta in
 /-- `(m ..).profile` for a method definition or literal, unfolding only to the structure head;

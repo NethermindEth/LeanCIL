@@ -14,6 +14,15 @@ stepping.
 
 namespace CIL.Safety
 
+/-- Observing an unspecified operand faults before any instruction changes memory or state. -/
+theorem step_unspecified {body : CIL.Method} {operation : CIL.Op} {pc : Nat}
+    {args stack : List Value} {frame : Frame} {memory : Memory}
+    (unknown : unspecifiedOperands (observerCount operation) stack = true) :
+    step body operation pc args frame stack memory =
+      .error (.unsupported "Instruction observes unspecified vector bits") := by
+  simp only [step, unknown, Bool.true_or, ite_true]
+#print axioms step_unspecified
+
 section InstructionEquations
 
 variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (memory : Memory)
@@ -24,6 +33,23 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       let some value := args[index]? | .error .invalidState
       return FrameAction.next (pc + 1) ((← checkedValue memory value) :: stack) frame memory :=
   rfl
+
+/-- A narrowed argument load checks that the selected argument has no unspecified bits,
+    then extends an i32 according to the parameter's declared width. -/
+@[cil_step] theorem step_argument_narrow_eq (index : Nat) (kind : CIL.NarrowKind)
+    (stack : List Value) :
+    step body (.arg index (some kind)) pc args frame stack memory =
+      if (args[index]?.map Value.hasUnspecified).getD false then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else do
+        let some (.scalar (.i32 bits)) := args[index]? | .error .invalidState
+        return FrameAction.next (pc + 1)
+          ((← checkedValue memory (.scalar (.i32 (kind.extend bits)))) :: stack) frame memory := by
+  simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
+    Bool.false_or]
+  rfl
+
+#print axioms step_argument_narrow_eq
 
 /-- Expose return validation without expanding the instruction dispatcher. -/
 @[cil_step] theorem step_return_eq (stack : List Value) :

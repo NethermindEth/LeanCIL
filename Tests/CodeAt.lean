@@ -35,6 +35,24 @@ theorem computed_lookup (index : Fin 4) :
 
 #print axioms computed_lookup
 
+/-- A quantified lookup is reused without enumerating its finite index domain. -/
+theorem quantified_lookup (body : CIL.Method) (index : Fin 65)
+    (found : ∀ slot : Fin 65, body.code[slot.val]? = some .nop) :
+    body.code[index.val]? = some .nop := by
+  cil_lookup [found]
+#print axioms quantified_lookup
+
+/-- A record can carry a lookup family over a domain larger than finite enumeration permits. -/
+structure LookupWitness (body : CIL.Method) : Prop where
+  /-- Every indexed instruction is a no-op. -/
+  found : ∀ slot : Fin 65, body.code[slot.val]? = some .nop
+
+/-- Supplied record projections retain quantified lookup reuse. -/
+theorem projected_lookup (body : CIL.Method) (index : Fin 65) (witness : LookupWitness body) :
+    body.code[index.val]? = some .nop := by
+  cil_lookup [witness.found]
+#print axioms projected_lookup
+
 /-- One segment proof works at each repeated position with no explicit lookup or step fact. -/
 theorem computed_segment (index : Fin 4) (fuel : Nat) (frame : Frame) (memory : Memory)
     (left right : CIL.W64) :
