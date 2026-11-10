@@ -46,7 +46,7 @@ theorem exists_execution {execution : Nat → Except LocatedFault (Memory × Lis
 
 #print axioms exists_execution
 
-/-- An exact-result postcondition retains precisely one finite execution budget. -/
+/-- An exact-result postcondition retains a finite budget witnessing that execution. -/
 theorem exact_iff {α : Type} {execution : Nat → α → Prop} {target : α} :
     WP execution (fun result => result = target) ↔ ∃ cost, execution cost target := by
   constructor
