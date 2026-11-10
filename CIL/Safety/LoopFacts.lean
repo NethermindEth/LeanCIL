@@ -470,12 +470,14 @@ def gatherLoopFactGroups (facts : Array Term) (evidenceOnly : Bool := false) :
       unless type.hasMVar do
         known := known.push type.consumeMData
         reached := reached ++ variables #[type]
-        live := live.map (· ++ asTerms (variables #[type]))
+        let memories ← loopFactMemories type
+        live := live.map (· ++ asTerms (variables #[type]) ++ memories)
   for (name, type) in typed do
     let fact := named name
     if explicitNames.contains name then
       reached := reached ++ variables #[type]
-      live := live.map (· ++ asTerms (variables #[type]))
+      let memories ← loopFactMemories type
+      live := live.map (· ++ asTerms (variables #[type]) ++ memories)
       known := known.push type
       constants := constants ++ type.getUsedConstants
     else if evidenceOnly then
