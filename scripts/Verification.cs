@@ -1547,6 +1547,17 @@ partial class Program : IDisposable
     /// <summary>The module that the audit executable is built from; every library entry holds its imports.</summary>
     const string AuditModule = "CIL.OleanAudit";
 
+    // Resolve source roots through Lake so library and package srcDir settings agree with imports.
+    internal static string[] ConsumerSourceDirectories(string session, IEnumerable<string> packageRoots)
+    {
+        var lines = Run(["lake", "env"], session).Split('\n', StringSplitOptions.TrimEntries)
+            .Where(line => line.StartsWith("LEAN_SRC_PATH=", StringComparison.Ordinal)).ToArray();
+        if (lines.Length != 1) throw new InvalidDataException("Could not resolve consumer Lean source paths.");
+        return lines[0]["LEAN_SRC_PATH=".Length..]
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Select(path => Path.GetFullPath(path, session)).Concat(packageRoots).Distinct().ToArray();
+    }
+
     static string ModuleSource(string module) => module.Replace('.', '/') + ".lean";
 
     /// <summary>

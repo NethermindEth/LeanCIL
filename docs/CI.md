@@ -147,9 +147,12 @@ A source is measured on each tree by the run that verifies it:
   `structoutlines`, `receiveroutlines`, `wordreader`, `savedwordreader`) is compared when
   selection chose that suite. Its rows are every output directory the suite verified: its
   `Extracted.lean`, its `Symbols.lean` when present, keyed re-export modules imported by the proof,
-  and the proof that `verified.json` names,
-  provided the proof is unchanged since. Each extracted method's instruction equations are one
-  row, named for its `cil_instruction_equations` command. A directory is measured only while it
+  and the proof that `verified.json` names, provided the proof is unchanged since.
+  Package-local imports are resolved through Lake and
+  measured with the proof; their source bytes and package configuration must match its verified
+  inputs. Missing or changed support is reported as unmeasured. Each extracted method's instruction
+  equations are one row, named for its `cil_instruction_equations` command. A directory is measured
+  only while it
   holds the report of an accepted proof, so a suite that also checks rejected proofs against an
   extraction verifies the accepted one last.
 

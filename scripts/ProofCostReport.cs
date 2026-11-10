@@ -419,6 +419,7 @@ internal static partial class ProofCostReport
         readonly string shared = Path.Combine(work, "modules");
         readonly SemaphoreSlim slots = new(jobs);
         readonly ConcurrentDictionary<string, Task<string?>> modules = new(StringComparer.Ordinal);
+        readonly ConcurrentDictionary<string, Lazy<string[]>> consumerDirectories = new(StringComparer.Ordinal);
         internal readonly ConcurrentBag<Row> Rows = [];
         internal readonly ConcurrentBag<Unmeasured> Lost = [];
 
@@ -431,7 +432,8 @@ internal static partial class ProofCostReport
         async Task<string?> Compile(string group, string module, string source, string root)
         {
             foreach (var import in Imports(File.ReadAllText(source)))
-                if (TreeSource(import) is not null && await TreeModule(import) is { } reason)
+                if (!File.Exists(Path.Combine(root, import.Replace('.', Path.DirectorySeparatorChar) + ".olean")) &&
+                    TreeSource(import) is not null && await TreeModule(import) is { } reason)
                     return $"its import {import} was not measured: {reason}";
             var olean = Path.Combine(root, module.Replace('.', Path.DirectorySeparatorChar) + ".olean");
             var report = Path.ChangeExtension(olean, ".cost.json");
@@ -502,6 +504,65 @@ internal static partial class ProofCostReport
             }
             if (unusable is null) sources.Add(("Proof", proofs[0].Path));
             else Lost.Add(new Unmeasured($"{output}/Proof", unusable));
+            var consumer = inputs.ValueKind == JsonValueKind.Object
+                ? inputs.EnumerateObject().Where(input => input.Name.StartsWith("consumer:", StringComparison.Ordinal))
+                    .ToDictionary(input => Path.GetFullPath(input.Name["consumer:".Length..]),
+                        input => input.Value.GetString(), StringComparer.Ordinal)
+                : new Dictionary<string, string?>(StringComparer.Ordinal);
+            string[] directories = [];
+            string? consumerFailure = null;
+            if (unusable is null && consumer.Count > 0)
+            {
+                try
+                {
+                    var settings = inputs.EnumerateObject().Single(input =>
+                        input.Name.StartsWith("settings:", StringComparison.Ordinal));
+                    var settingsPath = settings.Name["settings:".Length..];
+                    if (Sha(settingsPath) != settings.Value.GetString())
+                        throw new InvalidDataException("verification settings changed after verification");
+                    using var configuration = JsonDocument.Parse(File.ReadAllText(settingsPath));
+                    var root = Path.GetFullPath(configuration.RootElement.GetProperty("proofRoot").GetString()!,
+                        Path.GetDirectoryName(settingsPath)!);
+                    foreach (var (path, digest) in consumer.Where(input => Path.GetFileName(input.Key) is
+                        "lakefile.toml" or "lakefile.lean" or "lake-manifest.json" or "lean-toolchain"))
+                        if (!File.Exists(path) || Sha(path) != digest)
+                            throw new InvalidDataException(
+                                "consumer configuration changed after verification: " + path);
+                    directories = consumerDirectories.GetOrAdd(root, path => new Lazy<string[]>(() =>
+                        Program.ConsumerSourceDirectories(path, [path]))).Value;
+                }
+                catch (Exception error) when (error is IOException or InvalidOperationException or ArgumentException)
+                {
+                    consumerFailure = error.Message;
+                }
+            }
+            var stagedModules = new HashSet<string>(StringComparer.Ordinal);
+            var visiting = new HashSet<string>(StringComparer.Ordinal);
+            async Task<string?> Support(string module)
+            {
+                if (stagedModules.Contains(module) || module is "CIL" or "Init" or "Lean" or "Std" ||
+                    module.StartsWith("CIL.", StringComparison.Ordinal) ||
+                    module.StartsWith("Init.", StringComparison.Ordinal) ||
+                    module.StartsWith("Lean.", StringComparison.Ordinal) ||
+                    module.StartsWith("Std.", StringComparison.Ordinal)) return null;
+                var relative = module.Replace('.', Path.DirectorySeparatorChar) + ".lean";
+                var source = directories.Select(path => Path.GetFullPath(Path.Combine(path, relative)))
+                    .FirstOrDefault(File.Exists);
+                if (source is null) return null;
+                if (!consumer.TryGetValue(source, out var digest) || Sha(source) != digest)
+                    return "consumer source is absent from verified inputs or changed: " + source;
+                if (!visiting.Add(module)) return "consumer import cycle at " + module;
+                foreach (var import in Imports(File.ReadAllText(source)))
+                    if (await Support(import) is { } reason) return reason;
+                var staged = Path.Combine(stage, relative);
+                Directory.CreateDirectory(Path.GetDirectoryName(staged)!);
+                File.Copy(source, staged, true);
+                var failure = await Compile($"{output}/{module}", module, staged, stage);
+                visiting.Remove(module);
+                if (failure is not null) Lost.Add(new Unmeasured($"{output}/{module}", failure));
+                else stagedModules.Add(module);
+                return failure;
+            }
             // Each module is its own group; one that fails takes the modules after it with it.
             string? blocked = null;
             foreach (var (module, source) in sources)
@@ -510,7 +571,15 @@ internal static partial class ProofCostReport
                 Directory.CreateDirectory(Path.GetDirectoryName(staged)!);
                 if (source is null) File.WriteAllText(staged, Program.SelectionModules.Source(module));
                 else File.Copy(source, staged, true);
-                var reason = blocked ?? await Compile($"{output}/{module}", module, staged, stage);
+                string? reason = blocked;
+                if (reason is null && module == "Proof")
+                {
+                    reason = consumerFailure;
+                    foreach (var import in Imports(File.ReadAllText(staged)))
+                        if (reason is null) reason = await Support(import);
+                }
+                reason ??= await Compile($"{output}/{module}", module, staged, stage);
+                if (reason is null) stagedModules.Add(module);
                 if (reason is null) continue;
                 Lost.Add(new Unmeasured($"{output}/{module}", reason));
                 blocked ??= $"{module} was not measured";

@@ -1111,17 +1111,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             context + string.Concat(bodies) + tail, shared);
     }
 
-    // Resolve source roots through Lake so library and package srcDir settings agree with imports.
-    static string[] ConsumerSourceDirectories(string session, IEnumerable<string> packageRoots)
-    {
-        var lines = Run(["lake", "env"], session).Split('\n', StringSplitOptions.TrimEntries)
-            .Where(line => line.StartsWith("LEAN_SRC_PATH=", StringComparison.Ordinal)).ToArray();
-        if (lines.Length != 1) throw new InvalidDataException("Could not resolve consumer Lean source paths.");
-        return lines[0]["LEAN_SRC_PATH=".Length..]
-            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-            .Select(path => Path.GetFullPath(path, session)).Concat(packageRoots).Distinct().ToArray();
-    }
-
     static void RejectContractSourceShadow(string module, IEnumerable<string> sourceDirectories)
     {
         var relative = module.Replace('.', Path.DirectorySeparatorChar) + ".lean";
