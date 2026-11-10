@@ -1,6 +1,8 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ProofCostReport.cs
+#:include ExportVerificationSuites.cs
+#:include VerificationSuites.cs
 
 using System.Text.Json;
 using static ProofCostReport;
@@ -197,7 +199,8 @@ Require(rows.Select(row => row.Name).SequenceEqual(["example", "example #2", "Te
 // Measuring costs a second verification of each suite, so only what the change can affect is measured.
 const string selection = """
     {"include":[{"suite":"core","suites":["core"],"timeout":30},
-      {"suite":"docs+wordreader","suites":["docs","wordreader"],"timeout":30}]}
+      {"suite":"wordreader","suites":["wordreader"],"timeout":30},
+      {"suite":"docs+cli","suites":["docs","cli"],"timeout":30}]}
     """;
 Require(Sources(selection, ["Tests/Loops.cs"]) is ["core", "wordreader"],
     "selected proof suites are measured and other suites are not");

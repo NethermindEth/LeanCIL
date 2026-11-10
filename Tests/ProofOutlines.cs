@@ -716,7 +716,7 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
             "    sorry",
             "simp only [Postcondition, branch1, ↓reduceIte, true_and]\n    exact held1"),
         ("sorry -- Postcondition of the returned value where `branch1` fails",
-            "simp only [Postcondition, branch1, ↓reduceIte]\n    exact ⟨rfl, rfl⟩")]),
+            "simp only [Postcondition, branch1, ↓reduceIte, and_true]\n    rfl")]),
     // The callee's contract states its result of whatever node the field holds; the caller names it by the
     // store just before the call, so the result is the value of `next`.
     ("LinkedValue", [
@@ -1302,7 +1302,7 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
             "    sorry",
             "simp only [Postcondition, branch1, ↓reduceIte]\n    exact held1"),
         ("sorry -- Postcondition of the returned value where `branch1` fails",
-            "simp only [Postcondition, branch1, ↓reduceIte]\n    rfl")]),
+            "simp only [Postcondition, branch1, ↓reduceIte]")]),
     // The returned word is computed from a comparison, so the proof chooses the Bool it encodes.
     ("HasTag", [
         ("def Precondition (item : Reference) (initial : Memory) : Prop := sorry",
@@ -1774,7 +1774,7 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
             "def Postcondition (source target1 : Reference) (initial final : Memory) (_ : W32) : Prop :=\n" +
             "  Samples.Values.Holds final target1 (Samples.Values.of initial source)"),
         ("sorry -- Postcondition of the returned value, with `held1` the stored fields",
-            "exact sourceValuesHeld ▸ held1")]),
+            "rw [Postcondition, sourceValuesHeld]\n  exact held1")]),
     // A struct array's length leaves memory as it was.
     ("TilePairCount", [
         ("def Precondition (tiles : Reference) (initial : Memory) : Prop := sorry",
