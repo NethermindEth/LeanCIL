@@ -45,5 +45,5 @@ rows of the module moved by at most 0.2%. Comparing the unchanged module with it
 One tree's 92 test libraries take about 180 to 200 seconds of wall time, and 309 seconds summed
 over the modules, of which the kernel rechecks are 55 seconds. The 54 modules of 19 verified
 output directories of the `loops` and `structoutlines` suites take 146 seconds of wall time and
-58 seconds summed. A CI job measures two trees, and a proof suite's job also verifies the suite
-on both, so the job costs about twice the suite's own time plus these measurements.
+58 seconds summed. A CI run measures only its own tree, in the jobs that verified it, so proof
+cost adds these measurements to those jobs and one job that compares.

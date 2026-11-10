@@ -536,17 +536,14 @@ Test("certified library binding, main republication and observability", () =>
         "dotnet artifacts/verification-fixtures/ProofCost/ProofCost.dll measure-suites",
         "--runs artifacts/verification-suites.json",
         "name: proof-cost-head-rows-" + dollar + "{{ matrix.suite }}-" + dollar + "{{ github.run_attempt }}",
-        "pattern: proof-cost-head-rows-*", "pattern: proof-cost-base-rows-*",
-        // One job measures the merge base, beside the suites, and only for sources without published rows.
-        "needs.prepare.outputs.cost-missing != '[]' }}",
-        "cost-missing: " + dollar + "{{ steps.cost-rows.outputs.missing || needs.select.outputs.cost-sources }}",
-        // A measured merge base is stored once, by the job and artifact name later runs look for.
-        "    name: Measure the merge base for proof cost\n", "publish --merge-base --rows",
-        "touch \"" + dollar + "RUNNER_TEMP/proof-cost/" + dollar + "source.failed\"",
-        "name: proof-cost-measured-base-" + dollar + "{{ github.run_id }}-" + dollar + "{{ github.run_attempt }}",
-        "--commit \"" + dollar + "(git rev-parse \"" + dollar + "BASE\")\"", "--commit \"" + dollar + "GITHUB_SHA\"",
+        "pattern: proof-cost-head-rows-*",
+        // A pull request compares with the rows main published for its merge base, bound to that commit.
+        "--merge-base \"" + dollar + "(git rev-parse \"" + dollar + "BASE\")\"",
+        "published=(--published \"" + dollar + "RUNNER_TEMP/published-rows/proof-cost-rows.json\" --sha256 \"" +
+            dollar + "PUBLISHED_SHA256\")",
+        "--commit \"" + dollar + "GITHUB_SHA\"",
         // Later runs find main's rows by this job and artifact name and by the digest the job logs.
-        "    name: Proof cost\n", "needs: [select, prepare, cost-base, suites]",
+        "    name: Proof cost\n", "needs: [select, suites]",
         "name: proof-cost-rows-" + dollar + "{{ github.run_id }}-" + dollar + "{{ github.run_attempt }}",
         "--proof-cost-rows \"" + dollar + "(git rev-parse \"" + dollar + "BASE\")\"",
         "archive-sha256: " + dollar + "{{ steps.pack-library.outputs.archive-sha256 || " +
@@ -563,6 +560,9 @@ Test("certified library binding, main republication and observability", () =>
         "VERIFICATION_SUITES: " + dollar + "{{ toJSON(matrix.suites) }}",
         "dotnet artifacts/verification-fixtures/LibraryArchive/LibraryArchive.dll restore" })
         Require(workflow.Contains(text, StringComparison.Ordinal), "Missing workflow binding: " + text);
+    // A run measures only its own tree: checking out and verifying a merge base cost a shared runner
+    // most of an hour.
+    Require(!workflow.Contains("git worktree", StringComparison.Ordinal), "A job checks out a second tree");
     string name = "name: certified-library-" + dollar + "{{ github.run_id }}-" + dollar + "{{ github.run_attempt }}";
     Require(workflow.Split(name, StringSplitOptions.None).Length == 2,
         "Producer artifact name must appear exactly once");

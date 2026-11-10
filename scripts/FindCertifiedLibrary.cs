@@ -27,19 +27,13 @@ bool Reviewed(long run) => CertifiedLibraryDonor.Available("Run " + run, () =>
     new[] { CertifiedLibraryDonor.ReviewedProducer(Api(RunPath(run)), repository,
         path => Api($"repos/{repository}/{path}"), Warning) }, Warning).FirstOrDefault();
 string JobLog(long job) => Gh($"repos/{repository}/actions/jobs/{job}/logs", "--allow-escape-sequences");
-// Proof cost rows for a commit come from its push to main, whose jobs ran main's code, or else from a
-// pull request run of this repository that measured the commit as its own merge base.
+// Proof cost rows are a base only from the push to main of that commit, whose jobs ran main's code.
 if (options.TryGetValue("--proof-cost-rows", out var measured))
 {
-    const int RecentPullRuns = 30;
-    CertifiedLibraryDonor.Selection? Rows(IEnumerable<long> candidates, CertifiedLibraryDonor.Producer producer) =>
-        CertifiedLibraryDonor.Find(candidates, (run, suffix) => Api(RunPath(run) + suffix), JobLog,
-            DateTimeOffset.UtcNow, Warning, producer);
-    var rows = Rows(Runs(measured, "&event=push&branch=main").Where(Reviewed), CertifiedLibraryDonor.ProofCostRows) ??
-        Rows(CertifiedLibraryDonor.Available("Pull request runs", () => CertifiedLibraryDonor.PullRunsOnBase(
-            Api($"repos/{repository}/actions/workflows/{workflow}/runs?per_page={RecentPullRuns}&event=pull_request"),
-            repository, measured, RecentPullRuns), Warning), CertifiedLibraryDonor.ProofCostBaseRows);
-    if (rows is null) Console.WriteLine($"No published proof cost rows for {measured}; measuring it.");
+    var rows = CertifiedLibraryDonor.Find(Runs(measured, "&event=push&branch=main").Where(Reviewed),
+        (run, suffix) => Api(RunPath(run) + suffix), JobLog, DateTimeOffset.UtcNow, Warning,
+        CertifiedLibraryDonor.ProofCostRows);
+    if (rows is null) Console.WriteLine($"Main published no proof cost rows for {measured}.");
     else
     {
         File.AppendAllText(output, $"run-id={rows.Run}\nartifact-id={rows.Artifact}\nsha256={rows.Digest}\n");

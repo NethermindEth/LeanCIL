@@ -214,8 +214,8 @@ Require(Sources(selection, ["CIL/Safety/Stepping.lean"]) is [LibrariesSource, "c
 Require(Sources("""{"include":[{"suite":"docs","suites":["docs"],"timeout":30}]}""", ["docs/CI.md"]) is [],
     "a documentation change measures nothing");
 
-// Main measures each source once; a pull request takes those rows as its base only when the file has
-// the digest main's job logged and the same measurer wrote it, and measures every other source itself.
+// Main measures each source once. A pull request takes those rows as its base only when the file has
+// the digest main's job logged and the same measurer wrote it for that commit; it never measures a base.
 var scratch = Directory.CreateTempSubdirectory("proof-cost-test").FullName;
 string RowsFile(string directory, string source, params Row[] rows)
 {
@@ -225,48 +225,39 @@ string RowsFile(string directory, string source, params Row[] rows)
     return Path.Combine(scratch, directory);
 }
 RowsFile("measured", "core", Proof("slow", 10_000_000));
+RowsFile("measured", "wordreader", Proof("read", 10_000_000));
+RowsFile("measured", "loops");
 var bundle = Path.Combine(scratch, "proof-cost-rows.json");
-RowsFile("measured", "loops", Proof("spin", 9_000_000));
-RowsFile("measured", "wordreader");
-var published = Publish(Path.Combine(scratch, "measured"), "measurer", "base commit", keepEmpty: false);
-Require(published.Sources.Keys.SequenceEqual(["core", "loops"]),
-    "a source measured without rows is not published, so the pull request measures that base itself");
-// A run that measured its own merge base found the suite empty there; later runs must not verify it again.
-Require(Publish(Path.Combine(scratch, "measured"), "measurer", "base commit", keepEmpty: true).Sources.Keys
-    .SequenceEqual(["core", "loops", "wordreader"]), "a merge base measured without rows is kept for reuse");
+var published = Publish(Path.Combine(scratch, "measured"), "measurer", "base commit");
+Require(published.Sources.Keys.SequenceEqual(["core", "wordreader"]),
+    "a source main measured without rows is not published as a base");
 File.WriteAllText(bundle, JsonSerializer.Serialize(published, Json));
 var digest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(bundle)));
-string[] wanted = ["libraries", "core", "loops"];
-var taken = Path.Combine(scratch, "taken");
-Require(BaseRows(bundle, digest, "measurer", "base commit", wanted, taken) is ["libraries"] &&
-    Read([Path.Combine(taken, "core.json")]).Rows.Single().Name == "slow" &&
-    File.Exists(Path.Combine(taken, "loops.json")) && !File.Exists(Path.Combine(taken, "libraries.json")),
-    "published rows are the base of the sources they hold, and the others are measured");
-Require(BaseRows(null, null, "measurer", "base commit", wanted, taken).SequenceEqual(wanted),
-    "without published rows every source is measured");
-var other = Path.Combine(scratch, "other");
-Require(BaseRows(bundle, digest, "another measurer", "base commit", wanted, other).SequenceEqual(wanted) &&
-    BaseRows(bundle, digest, "measurer", "another commit", wanted, other).SequenceEqual(wanted) &&
-    !Directory.Exists(other), "rows of another measurer or of another commit are not a base");
+var baseRows = PublishedRows(bundle, digest, "measurer", "base commit");
+Require(baseRows.Keys.Order().SequenceEqual(["core", "wordreader"]) && baseRows["core"].Rows.Single().Name == "slow",
+    "published rows are the base of the sources they hold");
+Require(PublishedRows(null, null, "measurer", "base commit").Count == 0 &&
+    PublishedRows(bundle, digest, "another measurer", "base commit").Count == 0 &&
+    PublishedRows(bundle, digest, "measurer", "another commit").Count == 0,
+    "no file, another measurer's rows and another commit's rows are no base");
 var forged = false;
-try { BaseRows(bundle, digest[..63] + (digest[63] == '0' ? '1' : '0'), "measurer", "base commit", wanted, taken); }
+try { PublishedRows(bundle, digest[..63] + (digest[63] == '0' ? '1' : '0'), "measurer", "base commit"); }
 catch (InvalidDataException) { forged = true; }
 Require(forged, "rows without the digest their publisher logged are refused");
 
-// Stored rows are reused only by a run that would measure them the same way, down to the workflow
+// Published rows are a base only for a run that measures its head the same way, down to the workflow
 // steps that call the measurer; an edit elsewhere in the workflow keeps them.
 var workflow = File.ReadAllText(Path.Combine(Path.GetDirectoryName(Source())!, "..", ".github", "workflows",
     "verification.yml")).ReplaceLineEndings("\n");
-var baseStep = WorkflowStep(workflow, "Verify and measure each source at the merge base");
+var suitesStep = WorkflowStep(workflow, MeasuringSteps[0]);
 Require(MeasuringSteps.All(step => WorkflowStep(workflow, step).Contains("measure", StringComparison.Ordinal)) &&
-    baseStep.Contains("--suite \"$source\"", StringComparison.Ordinal) &&
-    !baseStep.Contains("Upload the merge base's rows", StringComparison.Ordinal),
+    suitesStep.Contains("measure-suites", StringComparison.Ordinal) &&
+    !suitesStep.Contains("--libraries", StringComparison.Ordinal),
     "each measuring step of the workflow is found, whole and alone");
 Require(MeasurerKey(workflow) == MeasurerKey() &&
-    MeasurerKey(workflow.Replace("--jobs \"$(nproc)\" \"$@\"", "--jobs 1 \"$@\"")) != MeasurerKey(workflow) &&
+    MeasurerKey(workflow.Replace("measure-suites --tree .", "measure-suites --tree base")) != MeasurerKey(workflow) &&
     MeasurerKey(workflow.Replace("name: Build and verify", "name: Build, verify")) == MeasurerKey(workflow),
     "a change to a measuring step changes the measurer, and a change to another job does not");
-
 // A suite's rows are the directories it declares, so a suite that shares a job is measured alone. The
 // member running when a report was written must be its owner: anything else is a row that would be
 // counted for the wrong suite, or for none, and stops the measurement.
@@ -297,27 +288,22 @@ Require(Misattributed(members, [("Undeclared/Drain", noon.AddSeconds(90))]).Sing
     undeclared.Contains("verified by receiveroutlines, which does not declare it"),
     "an output a proof suite wrote outside its directories cannot be attributed and fails that suite");
 
-// One job reports every source: a base file without rows is a suite the base lacks, a missing base
-// file or missing head rows is a measurement that never happened and must fail.
-RowsFile("base", "core", Proof("slow", 10_000_000));
-RowsFile("base", "loops");
-RowsFile("base", "wordreader", Proof("read", 10_000_000));
+// One job reports every source. Without published base rows a source is not compared and cannot fail,
+// which is the only way to pass uncompared: with a base, missing head rows are a failure.
 RowsFile("head", "core", Proof("slow", 12_000_000));
 RowsFile("head", "loops", Proof("fresh", 9_000_000));
-RowsFile("head", "libraries", Proof("lemma", 9_000_000));
-var reports = Report(["core", "loops", "libraries", "wordreader"], Path.Combine(scratch, "base"),
-    Path.Combine(scratch, "head"), [], DefaultThresholdPercent)
-    .ToDictionary(report => report.Source, report => report.Comparison);
-Require(reports["core"].Regressions.Single().Name == "slow" && Markdown(reports["core"], "core")
+var reports = Report(["core", "loops", "libraries", "wordreader"], baseRows, Path.Combine(scratch, "head"), [],
+    DefaultThresholdPercent).ToDictionary(report => report.Source, report => report.Comparison);
+Require(reports["core"] is { } core && core.Regressions.Single().Name == "slow" && Markdown(core, "core")
     .StartsWith("## Proof cost of core against the merge base", StringComparison.Ordinal),
     "each source is compared with its own base and titled by its name");
-Require(!reports["loops"].Failed && Markdown(reports["loops"]).Contains("**Not compared:**"),
-    "a suite the base measured without rows is reported and not compared");
-Require(reports["libraries"].Failed && reports["libraries"].Failures.Single().Contains("no base measurement"),
-    "a source whose base was never measured fails");
-Require(reports["wordreader"].Failed &&
-    reports["wordreader"].Failures.Contains("nothing was measured at the head"),
-    "a source without head rows fails");
-Directory.Delete(scratch, true);
+Require(reports["loops"] is null && reports["libraries"] is null,
+    "a source main published no rows for is not compared, with or without head rows");
+Require(reports["wordreader"] is { Failed: true } unmeasured &&
+    unmeasured.Failures.Contains("nothing was measured at the head"),
+    "a source with a published base and no head rows fails");
+Require(Report(["core", "loops"], PublishedRows(null, null, "measurer", "base commit"),
+    Path.Combine(scratch, "head"), [], DefaultThresholdPercent).All(report => report.Comparison is null),
+    "a merge base main published nothing for compares no source");Directory.Delete(scratch, true);
 
 Console.WriteLine("All proof cost checks passed.");

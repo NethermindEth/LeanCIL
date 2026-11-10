@@ -91,8 +91,6 @@ jobs:
       toolchain-artifact-id: ${{ steps.toolchain-artifact.outputs.artifact-id }}
       toolchain-sha256: ${{ steps.pack-toolchain.outputs.sha256 }}
       toolchain-pin-sha256: ${{ steps.pack-toolchain.outputs.pin-sha256 }}
-      # Every source is measured at the merge base unless main published rows for it.
-      cost-missing: ${{ steps.cost-rows.outputs.missing || needs.select.outputs.cost-sources }}
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
@@ -244,54 +242,6 @@ jobs:
           path: artifacts/certified-library.tar.zst
           compression-level: 0
           if-no-files-found: error
-          retention-days: 14
-      # The push to main of the merge base measured these rows with main's code and logged their
-      # digest; failing that, an earlier pull request run of this repository measured the same merge
-      # base. Without either, or for a source they lack, this run measures the base itself. No step
-      # here can fail the job: a lookup that fails leaves every source to measure.
-      - name: Find the proof cost rows main published for the merge base
-        id: cost-published
-        if: >-
-          ${{ github.event_name != 'push' && needs.select.outputs.cost-sources != '' &&
-          needs.select.outputs.cost-sources != '[]' }}
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'HEAD' }}
-        run: >-
-          dotnet run --file scripts/FindCertifiedLibrary.cs -- --repository "$GITHUB_REPOSITORY"
-          --workflow verification.yml --proof-cost-rows "$(git rev-parse "$BASE")" --output "$GITHUB_OUTPUT"
-      - name: Download the published proof cost rows
-        id: cost-download
-        if: steps.cost-published.outputs.artifact-id != ''
-        continue-on-error: true
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          artifact-ids: ${{ steps.cost-published.outputs.artifact-id }}
-          run-id: ${{ steps.cost-published.outputs.run-id }}
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/published-rows
-      - name: Take the published rows of the selected sources
-        id: cost-rows
-        if: steps.cost-download.outcome == 'success'
-        continue-on-error: true
-        env:
-          SOURCES: ${{ needs.select.outputs.cost-sources }}
-          PUBLISHED_SHA256: ${{ steps.cost-published.outputs.sha256 }}
-          BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'HEAD' }}
-        run: >-
-          dotnet run --file scripts/ProofCost.cs -- base-rows --sources "$SOURCES"
-          --commit "$(git rev-parse "$BASE")" --output-rows "$RUNNER_TEMP/base-rows"
-          --published "$RUNNER_TEMP/published-rows/proof-cost-rows.json"
-          --sha256 "$PUBLISHED_SHA256" --output "$GITHUB_OUTPUT"
-      - name: Upload the published rows as this run's base
-        if: steps.cost-rows.outcome == 'success'
-        continue-on-error: true
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: proof-cost-base-rows-published-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/base-rows/*.json
-          if-no-files-found: ignore
           retention-days: 14
       - name: Summarize preparation timings
         if: always()
@@ -504,164 +454,31 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-  # Runs beside the suites, and only for sources main published no rows for.
-  cost-base:
-    name: Measure the merge base for proof cost
-    needs: [select, prepare]
-    if: >-
-      ${{ github.event_name != 'push' && needs.prepare.outputs.cost-missing != '' &&
-      needs.prepare.outputs.cost-missing != '[]' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 120
-    permissions:
-      contents: read
-      # The head library may be an artifact of the earlier run that donated it.
-      actions: read
-    env:
-      DOTNET_NOLOGO: true
-      DOTNET_CLI_TELEMETRY_OPTOUT: true
-      MISSING: ${{ needs.prepare.outputs.cost-missing }}
-      # The first parent of a PR's merge commit is the base it merges into.
-      BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'HEAD' }}
-      HEAD_MANIFEST_SHA256: ${{ needs.prepare.outputs.manifest-sha256 }}
-      HEAD_ARCHIVE_SHA256: ${{ needs.prepare.outputs.archive-sha256 }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          # Consumer tests fetch each checkout as a pinned local Git dependency, which refuses shallow roots.
-          fetch-depth: 0
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          global-json-file: global.json
-      - name: Download the successful producer job's Lean toolchain
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          artifact-ids: ${{ needs.prepare.outputs.toolchain-artifact-id }}
-          path: ${{ runner.temp }}/lean-toolchain
-      - name: Restore the authenticated Lean toolchain
-        shell: bash
-        env:
-          TOOLCHAIN_SHA256: ${{ needs.prepare.outputs.toolchain-sha256 }}
-          TOOLCHAIN_PIN_SHA256: ${{ needs.prepare.outputs.toolchain-pin-sha256 }}
-        run: |
-          archive="$RUNNER_TEMP/lean-toolchain/lean-toolchain.tar.zst"
-          echo "$TOOLCHAIN_PIN_SHA256  lean-toolchain" | sha256sum --check --status
-          echo "$TOOLCHAIN_SHA256  $archive" | sha256sum --check --status
-          tar --zstd -xf "$archive" --no-same-owner -C "$HOME"
-          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
-      - name: Download the head's certified library
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          artifact-ids: ${{ needs.prepare.outputs.artifact-id }}
-          run-id: ${{ needs.prepare.outputs.artifact-run-id }}
-          github-token: ${{ github.token }}
-          path: artifacts/library-download
-      # Identical library inputs let the merge base use the head's certified library as it is.
-      # Otherwise the merge base's own scripts build its library, starting from the head's unchanged modules.
-      - name: Check out the merge base and prepare its library
-        id: library
-        shell: bash
-        run: |
-          git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
-          mkdir -p "$RUNNER_TEMP/base/artifacts" "$RUNNER_TEMP/proof-cost"
-          library="$RUNNER_TEMP/base/artifacts/certified-library"
-          if git diff --quiet "$BASE" HEAD -- CIL CIL.lean lean-toolchain lake-manifest.json lakefile.toml; then
-            dotnet run --file scripts/LibraryArchive.cs -c Release -- restore artifacts/library-download \
-              "$library" "$HEAD_MANIFEST_SHA256" "$HEAD_ARCHIVE_SHA256"
-            echo "manifest-sha256=$HEAD_MANIFEST_SHA256" >> "$GITHUB_OUTPUT"
-          else
-            dotnet run --file scripts/LibraryArchive.cs -c Release -- restore artifacts/library-download \
-              "$RUNNER_TEMP/head-library" "$HEAD_MANIFEST_SHA256" "$HEAD_ARCHIVE_SHA256"
-            cd "$RUNNER_TEMP/base"
-            if ! dotnet run --file scripts/PrepareLibrary.cs -- artifacts/certified-library \
-                --incremental "$RUNNER_TEMP/head-library" "$HEAD_MANIFEST_SHA256"; then
-              rm -rf artifacts/certified-library
-              dotnet run --file scripts/PrepareLibrary.cs -- artifacts/certified-library
-            fi
-          fi
-      # The merge base's own runner verifies each suite, which leaves its extractions and proofs to
-      # measure; they are removed before the next suite, so each measurement holds one suite's outputs.
-      # A suite the base does not have, or cannot pass, leaves a measurement without rows.
-      - name: Verify and measure each source at the merge base
-        shell: bash
-        env:
-          BASE_MANIFEST_SHA256: ${{ steps.library.outputs.manifest-sha256 }}
-        run: |
-          base="$RUNNER_TEMP/base"
-          measure() {
-            dotnet run --file scripts/ProofCost.cs -- measure --tree "$base" \
-              --library "$base/artifacts/certified-library" --jobs "$(nproc)" "$@" ||
-              echo "::warning::The merge base was not measured for $source; its comparison fails."
-          }
-          for source in $(jq -r '.[]' <<< "$MISSING"); do
-            if [ "$source" = libraries ]; then
-              measure --libraries --output "$RUNNER_TEMP/proof-cost/libraries.json"
-              continue
-            fi
-            log="$RUNNER_TEMP/proof-cost/$source-base-suite.log"
-            if ! (cd "$base" && LEANCIL_CERTIFIED_LIBRARY="$base/artifacts/certified-library" \
-                LEANCIL_CERTIFIED_LIBRARY_SHA256="$BASE_MANIFEST_SHA256" \
-                dotnet run --file scripts/Test.cs -- --suite "$source") > "$log" 2>&1; then
-              tail -n 40 "$log"
-              echo "::warning::The $source suite did not pass at the merge base; its proofs have no base to compare."
-              touch "$RUNNER_TEMP/proof-cost/$source.failed"
-            fi
-            measure --artifacts "$base/artifacts" --output "$RUNNER_TEMP/proof-cost/$source.json"
-            find "$base/artifacts" -mindepth 1 -maxdepth 1 ! -name certified-library -exec rm -rf {} +
-          done
-      - name: Upload the merge base's rows
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: proof-cost-base-rows-measured-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/proof-cost/*.json
-            ${{ runner.temp }}/proof-cost/*.log
-          if-no-files-found: ignore
-          retention-days: 14
-      # A merge base is measured once: later runs on it, of this or another pull request of this
-      # repository, find this job by its name and take every row this run has for the base.
-      - name: Download the rows this run took for the merge base
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: proof-cost-base-rows-published-*
-          merge-multiple: true
-          path: ${{ runner.temp }}/proof-cost
-      # A suite that did not pass here is compared in this run and measured again by the next.
-      - name: Gather the merge base's rows and log their digest
-        shell: bash
-        run: |
-          for failed in "$RUNNER_TEMP"/proof-cost/*.failed; do
-            if [ -e "$failed" ]; then rm -f "${failed%.failed}.json"; fi
-          done
-          dotnet run --file scripts/ProofCost.cs -- publish --merge-base --rows "$RUNNER_TEMP/proof-cost" \
-            --commit "$(git rev-parse "$BASE")" --output "$RUNNER_TEMP/measured-base/proof-cost-rows.json"
-      - name: Upload the merge base's rows for later runs
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: proof-cost-measured-base-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/measured-base/proof-cost-rows.json
-          if-no-files-found: error
-          retention-days: 14
-
-  # The only proof cost job on a cache hit: it measures nothing. A pull request compares the rows of
-  # both trees; a push to main publishes its rows, and later runs find this job by its name.
+  # The one proof cost job: it measures nothing. A pull request compares its head's rows with the rows
+  # main published for its merge base; a push to main publishes its rows, and later runs find this
+  # job by its name.
   proof-cost:
     name: Proof cost
-    needs: [select, prepare, cost-base, suites]
+    needs: [select, suites]
     if: >-
       ${{ !cancelled() && needs.select.outputs.cost-sources != '' && needs.select.outputs.cost-sources != '[]' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: read
+      # Reads the jobs, logs and rows of main's run of the merge base.
+      actions: read
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
       SOURCES: ${{ needs.select.outputs.cost-sources }}
+      # The first parent of a PR's merge commit is the base it merges into.
+      BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'HEAD' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 2
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
@@ -671,20 +488,39 @@ jobs:
           pattern: proof-cost-head-rows-*
           merge-multiple: true
           path: ${{ runner.temp }}/head-rows
-      - name: Download the merge base's rows, published or measured in this run
+      # The push to main of the merge base measured these rows with main's code and logged their
+      # digest. No other run supplies a base, and this run never measures one.
+      - name: Find the rows main published for the merge base
+        id: published
         if: github.event_name != 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          dotnet run --file scripts/FindCertifiedLibrary.cs -- --repository "$GITHUB_REPOSITORY"
+          --workflow verification.yml --proof-cost-rows "$(git rev-parse "$BASE")" --output "$GITHUB_OUTPUT"
+      - name: Download the published rows
+        if: steps.published.outputs.artifact-id != ''
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: proof-cost-base-rows-*
-          merge-multiple: true
-          path: ${{ runner.temp }}/base-rows
-      # Every source is reported before the job fails for any of them.
+          artifact-ids: ${{ steps.published.outputs.artifact-id }}
+          run-id: ${{ steps.published.outputs.run-id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/published-rows
+      # Every source is reported before the job fails for any of them. A source without published
+      # rows is reported as not compared and does not fail.
       - name: Compare proof cost with the merge base
         if: github.event_name != 'push'
-        run: >-
-          dotnet run --file scripts/ProofCost.cs -- report --sources "$SOURCES"
-          --base-rows "$RUNNER_TEMP/base-rows" --head-rows "$RUNNER_TEMP/head-rows"
-          --accepted scripts/proof-cost-accepted.json --output "$RUNNER_TEMP/proof-cost" --github-summary
+        shell: bash
+        env:
+          PUBLISHED_SHA256: ${{ steps.published.outputs.sha256 }}
+        run: |
+          published=()
+          if [ -n "$PUBLISHED_SHA256" ]; then
+            published=(--published "$RUNNER_TEMP/published-rows/proof-cost-rows.json" --sha256 "$PUBLISHED_SHA256")
+          fi
+          dotnet run --file scripts/ProofCost.cs -- report --sources "$SOURCES" \
+            --merge-base "$(git rev-parse "$BASE")" "${published[@]}" --head-rows "$RUNNER_TEMP/head-rows" \
+            --accepted scripts/proof-cost-accepted.json --output "$RUNNER_TEMP/proof-cost" --github-summary
       - name: Upload proof cost measurements
         if: always() && github.event_name != 'push'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -692,7 +528,7 @@ jobs:
           name: proof-cost-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/proof-cost/
-            ${{ runner.temp }}/base-rows/
+            ${{ runner.temp }}/published-rows/
             ${{ runner.temp }}/head-rows/
           if-no-files-found: ignore
           retention-days: 14
