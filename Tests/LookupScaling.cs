@@ -153,6 +153,6 @@ long ComputedLookupCost(int cases)
 var fourCaseCost = ComputedLookupCost(4) / 4.0;
 var sixteenCaseCost = ComputedLookupCost(16) / 16.0;
 Console.WriteLine(FormattableString.Invariant(
-    $"Computed lookup: {fourCaseCost:F0} heartbeats/case at 4; {sixteenCaseCost:F0} at 16"));
+    $"PASS computed lookup: {fourCaseCost:F0} heartbeats/case at 4; {sixteenCaseCost:F0} at 16"));
 if (sixteenCaseCost > fourCaseCost * AllowedGrowth)
     throw new Exception("Computed lookup cost per case grows with the segment count.");
