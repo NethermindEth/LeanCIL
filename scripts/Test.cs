@@ -203,6 +203,8 @@ RunFixture("Tests/ConsumerVerification.cs", [], streamOutput: true, progress: "C
 Passed("external consumer proof package and transitive source identity");
 RunFixture("Tests/ProofBindingCatalog.cs", [], streamOutput: true, progress: "Consumer binding catalogs");
 Passed("exact binding catalogs and deterministic source materialization");
+RunFixture("Tests/ProofBindingFamilies.cs", [], streamOutput: true, progress: "Generated integer binding families");
+Passed("certified equality and bitwise binding families with rejected recipe and body mutations");
 RunFixture("Tests/MethodSelectors.cs", [], streamOutput: true, progress: "Method selector checks");
 Passed("method selector aliases, overloads and actionable diagnostics");
 

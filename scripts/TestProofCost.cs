@@ -272,6 +272,10 @@ Require(Owner("CertificateReuse-56769cb9/OtherExtraction") == "core" &&
     Misattributed([new("core", noon, 0)],
         [("CertificateReuse-56769cb9/OtherExtraction", noon.AddSeconds(30))]).Count == 0,
     "certificate reuse outputs remain owned by core so its proof cost is measured");
+Require(Owner("ProofBindingFamilies/Equal32_scalar") == "core" &&
+    Misattributed([new("core", noon, 0)],
+        [("ProofBindingFamilies/Equal32_scalar", noon.AddSeconds(30))]).Count == 0,
+    "certified binding families are included in core proof measurements");
 VerificationGroupRunner.SuiteRun[] members =
 [
     new("conversions", noon, 0), new("receiveroutlines", noon.AddMinutes(1), 0),
