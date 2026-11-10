@@ -432,4 +432,27 @@ theorem named_reference_load_evidence (memory otherMemory : CIL.Safety.Memory)
     cil_checked_steps
 #print axioms named_reference_load_evidence
 
+/-- A receiver check selects a Boolean-returning instance call or an explicit exception. -/
+@[cil_code] private def checkedReceiverProgram : CIL.Program := [
+  { returnsValue := true, locals := [], code := [
+    .arg 0, .brnonzero 3, .throw "MissingReceiver", .arg 0, .const32 1,
+    .callInstance 1 2, .ret (some .unsigned8)] },
+  { returnsValue := true, locals := [], code := [.arg 1, .ret (some .unsigned8)] }]
+
+/-- A symbolic live receiver decides the branch and passes the call's closed argument guard. -/
+theorem checked_receiver_call (memory : CIL.Safety.Memory) (receiver : Reference)
+    (frame : Frame)
+    (formed : formObject memory (.address receiver) = .ok (.object (.address receiver))) :
+    run checkedReceiverProgram 12 0 0 [.object (.address receiver)] frame [] memory =
+      .ok (leaveFrame frame memory, [.scalar (.i32 1)]) := by
+  cil_checked_steps [formed]
+#print axioms checked_receiver_call
+
+/-- A null receiver takes the explicit exception path without entering the callee. -/
+theorem checked_receiver_throws (memory : CIL.Safety.Memory) (frame : Frame) :
+    run checkedReceiverProgram 12 0 0 [.object .null] frame [] memory =
+      .error ⟨0, 2, .thrown "MissingReceiver"⟩ := by
+  cil_checked_steps
+#print axioms checked_receiver_throws
+
 end Tests.Objects

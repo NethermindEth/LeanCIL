@@ -5,7 +5,7 @@ import CIL.Safety.GuardNormalization
 # Value step equations
 
 `@[cil_step]` equations for the value-only ops (arithmetic, comparisons, conversions,
-branches, `switch`, `nop` and feature tests), one per op and i32/i64 operand shape.
+branches, `switch`, `nop`, explicit throws and feature tests), one per op and i32/i64 operand shape.
 `cil_value_steps` generates them as the library builds by evaluating the dispatcher once, so
 stepping rewrites by constructor instead of unfolding `CIL.step` in every proof. A feature
 test on a known feature is then reduced to the profile field that a caller's fact names.
@@ -121,6 +121,9 @@ cil_value_steps (target : Nat) [bgt, ble, bleu, bltu, bgeu, bgtu, bge, blt, beq,
 cil_value_steps (targets : List Nat) [switch] 1
 cil_value_steps (target : Nat) [branch] 0
 cil_value_steps [nop] 0
+cil_value_steps (exception : String) [throw] 0
+#print axioms step_throw_eq
+
 cil_value_steps (id : CIL.Feature) [feature] 0
 cil_value_steps (kind : CIL.CheckedBinaryKind) (signed : Bool) [checkedArithmetic] 2
 cil_value_steps (width : Nat) (signed : Bool) (unsignedInput : Bool) [checkedConvert] 1
