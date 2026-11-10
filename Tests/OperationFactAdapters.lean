@@ -137,4 +137,39 @@ theorem field_store_literal_conversion (left right : CIL.W64)
   cil_checked_step [added, written]
 #print axioms field_store_literal_conversion
 
+/-- A truth-tested branch selects one of two distinct scalar results. -/
+@[cil_code] def truthBranchBody (branch : CIL.Op) : CIL.Method := {
+  locals := [], returnsValue := true,
+  code := [.arg 0, branch, .const64 1, .ret, .const64 2, .ret] }
+
+/-- A negative 64-bit case fact decides the next pc before it becomes a conditional term. -/
+theorem branch_nonzero_literal (word unrelated : CIL.W64) (memory : Memory)
+    (_unrelated : unrelated ≠ 0#64) (nonzero : word ≠ 0#64) :
+    invoke [truthBranchBody (.brnonzero 4)] 5 0 [.scalar (.i64 word)] memory =
+      .ok (memory, [.scalar (.i64 2)]) := by
+  fail_if_success (cil_checked_steps [_unrelated]; done)
+  cil_checked_steps [nonzero]
+#print axioms branch_nonzero_literal
+
+/-- A positive 32-bit case fact uses the same literal spelling for a zero branch. -/
+theorem branch_zero_literal (word : CIL.W32) (memory : Memory) (zero : word = 0#32) :
+    invoke [truthBranchBody (.brzero 4)] 5 0 [.scalar (.i32 word)] memory =
+      .ok (memory, [.scalar (.i64 2)]) := by
+  cil_checked_steps [zero]
+#print axioms branch_zero_literal
+
+/-- A signed comparison follows a narrowing conversion of a symbolic natural literal. -/
+@[cil_code] def narrowedBranchBody : CIL.Method := {
+  locals := [], returnsValue := true,
+  code := [.arg 0, .arg 1, .convI4, .blt 6, .const64 1, .ret, .const64 2, .ret] }
+
+/-- Narrowed branch operands match the supplied comparison without expanding symbolic arithmetic. -/
+theorem branch_narrowed_literal (index : CIL.W32) (length : Nat) (memory : Memory)
+    (inside : index.toInt < (BitVec.ofNat 32 length).toInt) :
+    invoke [narrowedBranchBody] 7 0
+      [.scalar (.i32 index), .scalar (.i64 (BitVec.ofNat 64 length))] memory =
+      .ok (memory, [.scalar (.i64 2)]) := by
+  cil_checked_steps [inside]
+#print axioms branch_narrowed_literal
+
 end Tests.OperationFactAdapters

@@ -842,6 +842,20 @@ elab_rules : tactic
           applyUnfoldedStepFact ctx simprocs fact
           return
         catch _ => saved.restore
+    if let some (_, pending, _) := (← instantiateMVars (← getMainTarget)).consumeMData.eq? then
+      if pending.isAppOfArity ``CIL.Safety.step 7 &&
+          pending.getAppArgs[1]!.getAppFn.constName?.any
+            ([``CIL.Op.brzero, ``CIL.Op.brnonzero, ``CIL.Op.beq, ``CIL.Op.bne,
+              ``CIL.Op.blt, ``CIL.Op.bltu, ``CIL.Op.ble, ``CIL.Op.bleu, ``CIL.Op.bgt,
+              ``CIL.Op.bgtu, ``CIL.Op.bge, ``CIL.Op.bgeu].contains ·) then
+        -- Decide a branch before reflexivity can assign its unknown next pc a conditional.
+        -- Numerals use the same spelling as the normalized branch facts.
+        evalTactic (← `(tactic| cil_strict (
+          simp only [cil_code, Nat.reduceAdd, cil_step, cil_guard, cil_checked, cil_side,
+            CIL.truth, BitVec.ofNat_eq_ofNat, BitVec.setWidth_ofNat_of_le, Nat.reduceLeDiff,
+            $[$facts:term],*]
+          all_goals ((repeat constructor) <;> rfl))))
+        return
     evalTactic (← `(tactic| try simp only [cil_code, Nat.reduceAdd]))
     if (← getGoals).isEmpty then return
     -- A tactic `have` leaves the target under `mdata`, which `Expr.eq?` does not see through.
