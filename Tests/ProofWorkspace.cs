@@ -111,6 +111,9 @@ void Rebuild(string from, string to)
 string[] EditorFiles() => [.. Directory.EnumerateFiles(editor, "*", SearchOption.AllDirectories)
     .Select(path => Path.GetRelativePath(editor, path).Replace('\\', '/')).Order(StringComparer.Ordinal)];
 
+// Every package below requires the certified library by path; on a machine without it, building it here keeps
+// that build out of the lowered environment limit of the next check.
+EditorLibrary();
 Console.WriteLine("Rejecting an editor environment Lean would truncate, before writing the editor library");
 // A lowered limit stands in for Lean's Windows buffer on every OS; the editor's `lake serve` would lose LEAN_PATH.
 var crowded = Execute(command,
@@ -384,6 +387,13 @@ if (!removed.Contains("Removed editor extraction " + otherKey, StringComparison.
     throw new InvalidOperationException("Removing the other selection left files behind or touched the first: " +
         removed + string.Join(", ", EditorFiles()) + removedCheck.Output);
 CheckedProof();
+// Lake applies whatever overrides a package holds; another tool's are neither merged nor replaced.
+var packageOverrides = Path.Combine(package, ".lake", "package-overrides.json");
+var writtenOverrides = File.ReadAllText(packageOverrides);
+File.WriteAllText(packageOverrides, """{"version": "1.1.0", "packages": []}""");
+Reject(command, "already holds package overrides");
+File.WriteAllText(packageOverrides, writtenOverrides);
+CheckedProof();
 var olderRevision = Run(["git", "rev-parse", "HEAD^"], framework).Trim();
 try
 {
@@ -497,6 +507,24 @@ Console.WriteLine("PASS a standalone proof gets a package beside it without git 
     "framework build of its own, leaves the certified library unwritten, verifies as a single file and " +
     "refreshes on re-run");
 
+// A closure entry serves one proof whose imports are the extraction and framework modules. A full audit,
+// contract imports and any other import need the whole library, and so does every caller that asks for none.
+{
+    var identity = ExtractionIdentity.Read(output);
+    string[]? Roots(Program program, string source, ExtractionIdentity extraction)
+    {
+        using (program) return program.ClosureRoots(source, output, null, extraction);
+    }
+    const string plainProof = "import Extracted\n";
+    if (Roots(new() { importClosureFirst = true }, plainProof, identity) is not { Length: > 0 } ||
+        Roots(new(), plainProof, identity) is not null ||
+        Roots(new() { importClosureFirst = true, forceFullVerification = true }, plainProof, identity) is not null ||
+        Roots(new() { importClosureFirst = true }, plainProof + "import Client.Support\n", identity) is not null ||
+        Roots(new() { importClosureFirst = true }, plainProof, identity with
+            { Sources = new(StringComparer.Ordinal) { ["Imported"] = "interface" } }) is not null)
+        throw new InvalidOperationException("A proof that needs the whole library was offered a closure entry.");
+    Console.WriteLine("PASS a full audit, contract imports and a package import are never offered a closure entry");
+}
 Console.WriteLine("Watching two proofs of two methods in one package");
 var twiceProof = Path.Combine(package, "TwiceProof.lean");
 File.WriteAllText(twiceProof, "-- written once the module name is known\n");

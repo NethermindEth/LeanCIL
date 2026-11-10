@@ -808,25 +808,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             JsonSerializer.Serialize(ConsumerCacheEnvironment()) + "\n" +
             JsonSerializer.Serialize(inputs) + "\n" + extra);
 
-    Dictionary<string, string[]> ConsumerModuleImports(string session, Dictionary<string, string> modules)
-    {
-        // Read Lean's compiled import headers, not a regex over source text. This
-        // also handles public/private imports and transitive package dependencies.
-        var input = Path.Combine(Path.GetTempPath(), "leancil-imports-" + Guid.NewGuid().ToString("N") + ".json");
-        var output = Path.ChangeExtension(input, ".result.json");
-        try
-        {
-            var paths = modules.Values.ToArray();
-            File.WriteAllText(input, JsonSerializer.Serialize(paths));
-            Run([CheckedAuditExecutable(), "--imports", input, output], session, environment: LeanEnvironment);
-            var imports = File.ReadAllLines(output).Select(line => JsonSerializer.Deserialize<string[]>(line)).ToArray();
-            if (imports.Length != paths.Length || imports.Any(items => items is null))
-                throw new InvalidDataException("Incomplete consumer compiled import graph.");
-            return modules.Keys.Zip(imports).ToDictionary(pair => pair.First, pair => pair.Second!);
-        }
-        finally { File.Delete(input); File.Delete(output); }
-    }
-
     static HashSet<string> ImportClosure(Dictionary<string, string[]> graph, IEnumerable<string> roots)
     {
         var closure = new HashSet<string>(roots, StringComparer.Ordinal);
