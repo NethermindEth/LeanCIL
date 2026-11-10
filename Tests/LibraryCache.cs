@@ -48,6 +48,11 @@ try
     using (var opened = new Program { library = directory, libraryStamps = FileStamps(directory) })
     {
         opened.RequireUnchangedLibrary();
+        // A module Lake builds into the library is a new file beside unchanged ones.
+        File.WriteAllText(unrecorded, "built into the entry");
+        ExpectRejection(opened.RequireUnchangedLibrary, "changed on disk during verification");
+        File.Delete(unrecorded);
+        opened.RequireUnchangedLibrary();
         File.SetLastWriteTimeUtc(artifact, certifiedAt.AddSeconds(15));
         ExpectRejection(opened.RequireUnchangedLibrary, "changed on disk during verification");
     }

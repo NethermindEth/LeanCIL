@@ -1149,20 +1149,19 @@ partial class Program : IDisposable
         Console.Error.WriteLine("The cached certified library " + cached + " is not used and is replaced: " + reason);
         return null;
     }
+
     /// <summary>
-    /// Fails if any file of the library this process reads in place differs, by length or write time, from when
-    /// the library was opened: a build that wrote into it would otherwise pass for the certified bytes.
+    /// Fails if the library this process reads in place gained or lost a file, or any file differs by length or
+    /// write time, since it was opened: a build that wrote into it would otherwise pass for the certified bytes.
     /// </summary>
     void RequireUnchangedLibrary()
     {
         if (libraryStamps is null) return;
-        foreach (var (name, stamp) in libraryStamps)
-        {
-            var file = new FileInfo(Path.Combine(library!, name));
-            if (!file.Exists || FileStamp(file) != stamp)
-                throw new InvalidOperationException("The certified library changed on disk during verification: " +
-                    file.FullName);
-        }
+        var current = FileStamps(library!);
+        if (libraryStamps.Keys.Union(current.Keys).FirstOrDefault(name =>
+                libraryStamps.GetValueOrDefault(name) != current.GetValueOrDefault(name)) is { } changed)
+            throw new InvalidOperationException("The certified library changed on disk during verification: " +
+                Path.Combine(library!, changed));
     }
 
     // The pinned manifest binds the source snapshot before copying. Hash exactly the bytes
@@ -1742,8 +1741,8 @@ partial class Program : IDisposable
 
     /// <summary>
     /// The base library's module artifacts: recorded ones from the validated manifest, which must be the files
-    /// the library was opened with, plus any unrecorded output, which Lake builds into the base from an
-    /// unrecorded source and must be replayed.
+    /// the library was opened with, plus any unrecorded output of a library this process owns, which Lake
+    /// builds into the base from an unrecorded source and must be replayed.
     /// </summary>
     SortedDictionary<string, string> BaseModuleArtifacts()
     {
