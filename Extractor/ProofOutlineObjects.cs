@@ -132,9 +132,15 @@ internal static partial class ProofOutline
     /// <summary>A call through a callee's contract: the facts its precondition needs, the field it writes as a
     /// store of the caller's object, if any, and for each object the callee loads from a reference field, the
     /// caller's object that field holds and the fact that says so.</summary>
+    /// <remarks>A call through an `Open` contract also records each of the callee's objects with the caller's
+    /// object `Passed` for it, the contract's `Input` at the call and `Where` the call is.</remarks>
     sealed record CallStep(Callee Callee, int Stores, int FieldMemory, Access[] Needs, Reached[] Live,
         Access? Writes, int Number,
-        (Reached Target, string Held)[] Found);
+        (Reached Target, string Held)[] Found, (Reached Callee, Reached Passed)[] Passed)
+    {
+        internal string? Input { get; init; }
+        internal string? Where { get; init; }
+    }
 
     /// <summary>A static helper over words whose contract the author states: the outline names its inputs, steps
     /// its body against the contract and leaves `pre` and `post` as holes.</summary>
@@ -152,7 +158,11 @@ internal static partial class ProofOutline
     /// <summary>A callee the outline states a contract for from its own walk: the facts it needs of its
     /// objects, at most one field it writes, and its result in terms of its arguments, the objects it loads
     /// from reference fields and its initial memory.</summary>
-    sealed record Callee(int Index, string Name, Specification Spec, ObjectWalk Walk, ObjectPlan Plan)
+    /// <remarks>An `Open` callee tests what it reads, so each side returns its own word: its contract asks the
+    /// facts its body needs and leaves the rest of `pre` and `post` to the author. It stores nothing, so it
+    /// keeps the memory unless it keeps locals.</remarks>
+    sealed record Callee(int Index, string Name, Specification Spec, ObjectWalk Walk, ObjectPlan Plan,
+        bool Open = false)
     {
         internal Access? Store =>
             Walk.Steps.OfType<Access>().SingleOrDefault(access => access.Kind == AccessKind.Store);
@@ -213,7 +223,12 @@ internal static partial class ProofOutline
         IEnumerable<object> PathSteps => previous.Concat(Steps);
 
         /// <summary>The numbers of the stub calls on this path, whose postconditions its return may use.</summary>
-        internal IEnumerable<int> Stubbed => PathSteps.OfType<StubCall>().Select(call => call.Number);
+        internal IEnumerable<int> Stubbed => PathSteps.Select(step => step switch
+        {
+            StubCall call => call.Number,
+            CallStep { Callee.Open: true } call => call.Number,
+            _ => (int?)null
+        }).OfType<int>();
 
         /// <summary>The steps on every path through the body, each side of a split after the steps before it.
         /// </summary>
@@ -289,12 +304,11 @@ internal static partial class ProofOutline
                 // Walks each side of a test from where it continues, with what the path holds so far.
                 bool Branch(string condition, bool takenWhenTrue, int target)
                 {
-                    if (numericHomes) return Stop("a class frame with numeric homes and a branch");
                     var (holds, fails) = takenWhenTrue ? (target, pc + 1) : (pc + 1, target);
                     var walks = new[] { holds, fails }.Select(next => (Next: next, Walk: new ObjectWalk(spec, ops,
-                        views, callees, linear, stubs: stubs) { Objects = Objects, Arrays = Arrays, Slots = Slots,
-                        Stored = Stored, ArrayApart = ArrayApart,
-                        stores = stores,
+                        views, callees, linear, numericHomes, stubs) { Objects = Objects, Arrays = Arrays,
+                        Slots = Slots, Stored = Stored, ArrayApart = ArrayApart,
+                        stores = stores, fieldMemory = fieldMemory,
                         calls = calls, splits = splits + 1, Fresh = Fresh, previous = [.. PathSteps] })).ToArray();
                     Steps.Add(new Split($"branch{splits + 1}", condition, (location(holds), walks[0].Walk),
                         (location(fails), walks[1].Walk)));
@@ -594,12 +608,10 @@ internal static partial class ProofOutline
                 else if ((match = Regex.Match(op, @"\A\.call(?:Instance)? (\d+) (\d+)\z")).Success)
                 {
                     var index = int.Parse(match.Groups[1].Value);
-                    if (callees(index) is not { } callee)
+                    // A contract read whole from the callee's body comes first, then a stub over words.
+                    var callee = callees(index);
+                    if (callee is null or { Open: true } && !linear && stubs?.Invoke(index) is { } stub)
                     {
-                        if (linear || numericHomes || stubs?.Invoke(index) is not { } stub)
-                            return Stop($"a call to method {index} whose contract the outline cannot state from its " +
-                                "body, which `cil_contract_steps` composes through a `MethodContract` you write and " +
-                                $"prove with `Holds Extracted.program {index}`");
                         var terms = new string[stub.Inputs.Length];
                         for (var position = terms.Length - 1; position >= 0; position--)
                         {
@@ -612,12 +624,36 @@ internal static partial class ProofOutline
                         stack.Add(new Word($"output{calls}", stub.Result));
                         continue;
                     }
+                    if (callee is null)
+                        return Stop($"a call to method {index} whose contract the outline cannot state from its " +
+                            "body, which `cil_contract_steps` composes through a `MethodContract` you write and " +
+                            $"prove with `Holds Extracted.program {index}`");
                     var arguments = new Item?[callee.Spec.Parameters.Length];
                     for (var position = arguments.Length - 1; position >= 0; position--) arguments[position] = Pop();
                     if (arguments.Any(argument => argument is Word { Term: null }) && !linear)
                         return Stop($"a call to `{callee.Spec.Method.Name}` with a value the outline does not name");
                     if (Call(callee, arguments) is { } reason) return Stop(reason);
-                    if (callee.Walk.Returned is { } returned)
+                    var width = callee.Spec.Result is { Constructor: ".i64" } ? 8 : 4;
+                    if (callee.Open)
+                    {
+                        // The caller learns of the result only what the contract's `post` states.
+                        var inputs = arguments.Select(argument => argument switch
+                        {
+                            Instance instance => instance.Object.Name,
+                            Word { Term: { } term } => term,
+                            _ => null
+                        }).ToArray();
+                        if (inputs.Any(input => input is null))
+                            return Stop($"a call to `{callee.Spec.Method.Name}` with a value the outline cannot " +
+                                "name");
+                        Steps[^1] = (CallStep)Steps[^1] with
+                        {
+                            Input = inputs.Length == 1 ? Operand(inputs[0]!) : $"({string.Join(", ", inputs)})",
+                            Where = location(pc)
+                        };
+                        stack.Add(new Word($"output{calls}", width));
+                    }
+                    else if (callee.Walk.Returned is { } returned)
                     {
                         var call = (CallStep)Steps[^1];
                         stack.Add(new Word(Substitute(returned, callee, arguments, Memory(call.FieldMemory),
@@ -801,7 +837,8 @@ internal static partial class ProofOutline
                     store.Target is null ? null : objects[store.Target], Called: true);
             }
             Steps.Add(new CallStep(callee, stores, numericHomes ? fieldMemory : stores,
-                [.. needs], [.. live.Distinct()], writes, ++calls, [.. found]));
+                [.. needs], [.. live.Distinct()], writes, ++calls, [.. found],
+                [.. objects.Select(pair => (pair.Key, pair.Value))]));
             if (writes is not null) fieldMemory = ++stores;
             else if (callee.Walk.NumericHomes) stores++;
             return null;
@@ -1057,8 +1094,8 @@ internal static partial class ProofOutline
 
     /// <summary>The contract of a callee whose body the walk steps with no call of its own and at most one store,
     /// or reference field loads and no store: `pre` its facts, `post` its store and its result, and its proof.
-    /// </summary>
-    static Callee? Summarize(Extraction extraction, int index, string name, FieldViews views)
+    /// With `splits`, also the open contract of a callee that tests named words and stores nothing.</summary>
+    static Callee? Summarize(Extraction extraction, int index, string name, FieldViews views, bool splits = false)
     {
         var method = extraction.Methods[index];
         try
@@ -1075,14 +1112,22 @@ internal static partial class ProofOutline
                 numericHomes: HasNumericObjectHomes(method));
             // A contract states reference stores only of objects the callee reaches, and its caller cannot give
             // it the premise that a reference outside the model forms; it states no array a field holds.
-            if (!walk.Run(_ => "") || walk.Steps.Any(step => step is CallStep or Split) || walk.Arrays.Count > 0 ||
+            if (!walk.Run(pc => Location(method, pc)) || walk.Flattened.Any(step => step is CallStep) ||
+                walk.Arrays.Count > 0 ||
                 walk.Accesses.Any(access => access.Opaque || access.Kind == AccessKind.Store &&
                     access.Field.Kind == ClassViews.FieldKind.Reference && access.Target is null) ||
-                walk.Accesses.Count(access => access.Kind == AccessKind.Store) >
+                spec.Result is { Boolean: true } or { Object: true } or { Array: true })
+                return null;
+            // Each side of a test returns its own word, so the contract names no one result.
+            if (walk.Steps.Any(step => step is Split))
+                return splits && spec.Result is not null &&
+                    walk.Objects.All(reached => reached.Holder is null) &&
+                    walk.Accesses.All(access => access.Kind == AccessKind.Load)
+                    ? new Callee(index, name, spec, walk, walk.Plan(), Open: true) : null;
+            if (walk.Accesses.Count(access => access.Kind == AccessKind.Store) >
                     (walk.Objects.Any(reached => reached.Holder is not null) ? 0 : 1) ||
                 (walk.Returned ?? "").Contains("stored", StringComparison.Ordinal) ||
-                (spec.Result is not null && walk.Returned is null) ||
-                spec.Result is { Boolean: true } or { Object: true } or { Array: true })
+                (spec.Result is not null && walk.Returned is null))
                 return null;
             return new Callee(index, name, spec, walk, walk.Plan());
         }
@@ -1129,14 +1174,18 @@ internal static partial class ProofOutline
             spec.Plan = walk.Plan();
     }
 
-    /// <summary>Writes a callee's contract and the proof that its body meets it.</summary>
-    static void CalleeContract(Writer lean, Callee callee, string method)
+    /// <summary>Writes a callee's contract and the proof that its body meets it; an open contract, which
+    /// `caller` composes, leaves a hole in `pre`, in `post` and at each return of the proof.</summary>
+    static void CalleeContract(Writer lean, Callee callee, string method, string? caller = null)
     {
         var spec = callee.Spec;
         var inputs = spec.Parameters;
         string Pattern(string body) => inputs.Length == 1 ? Used(inputs[0].Name, body)
             : "(" + string.Join(", ", inputs.Select(input => Used(input.Name, body))) + ")";
-        string Used(string name, string body) => Regex.IsMatch(body, $@"(?<![\w.]){name}(?!\w)") ? name : "_";
+        // The author's part of an open contract may speak of every input.
+        string Used(string name, string body) =>
+            body.Contains("sorry", StringComparison.Ordinal) || Regex.IsMatch(body, $@"(?<![\w.]){name}(?!\w)")
+                ? name : "_";
         var inputType = inputs.Length == 1 ? inputs[0].Lean
             : "(" + string.Join(" × ", inputs.Select(input => input.Lean)) + ")";
         var outputType = spec.Result?.Lean ?? "Unit";
@@ -1167,9 +1216,25 @@ internal static partial class ProofOutline
             effects.Add(string.Concat(targets.Select((target, position) => $"∀ {target.Name}, {held[position]} → "))
                 + $"result = {returned}");
         var post = effects.Count == 0 ? "True" : string.Join(" ∧ ", effects);
+        if (callee.Open)
+        {
+            pre = pre.Length == 0 ? "sorry" : pre + " ∧ sorry";
+            // Local homes are allocated in the memory, so only a helper without them leaves it as it was.
+            post = callee.Walk.NumericHomes ? "sorry" : "final = initial ∧ sorry";
+        }
         if (callee.Walk.NumericHomes) ObjectEntry(lean, spec, callee.Name + "Entry", method);
-        lean.Doc($"`{spec.Method.Name}` as the outline reads its body: it needs the facts of `pre`, writes " +
-            "only `footprint` and leaves `post`.");
+        if (callee.Open)
+        {
+            lean.Quiet();
+            lean.Doc($"`{spec.Method.Name}`, method {method} of the extraction, as `{caller}` calls it: `pre` asks " +
+                "the facts its body needs; replace the `sorry` of `pre` with what else the caller " +
+                "must guarantee, or `True`, and the `sorry` of `post` with what the caller learns of `result`. " +
+                (callee.Walk.NumericHomes ? "The helper stores nothing, and its locals take homes in the memory."
+                    : "The helper stores nothing, so `post` keeps the memory."));
+        }
+        if (!callee.Open)
+            lean.Doc($"`{spec.Method.Name}` as the outline reads its body: it needs the facts of `pre`, writes " +
+                "only `footprint` and leaves `post`.");
         lean.Line($"def {callee.Name}Contract : MethodContract {inputType} {outputType} where");
         lean.Line($"  args := fun {Pattern(arguments)} => {arguments}");
         lean.Line(spec.Result is { } result ? $"  results result := [{result.Encode("result")}]" : "  results _ := []");
@@ -1185,11 +1250,13 @@ internal static partial class ProofOutline
         var names = inputs.Select(input => input.Name).ToArray();
         var obtained = premises.Select(premise => premise.Name).ToList();
         if (bound >= 0) obtained.InsertRange(bound, targets.Select(target => target.Name));
+        // What the author adds to an open `pre` stays `permitted`, after the facts the body needs.
+        if (callee.Open && obtained.Count > 0) obtained.Add("permitted");
         static string Tuple(IList<string> parts) =>
             parts.Count == 1 ? parts[0] : "⟨" + string.Join(", ", parts) + "⟩";
         lean.Line($"  rintro {Tuple(names)} initial permitted");
         lean.Line($"  dsimp only [{callee.Name}Contract] at *");
-        if (obtained.Count == 1) lean.Line($"  obtain {obtained[0]} := permitted");
+        if (obtained.Count == 1) lean.Line($"  have {obtained[0]} := permitted");
         else if (obtained.Count > 1)
             lean.Wrapped("  obtain", obtained.Select((part, index) => (index == 0 ? "⟨" : "") + part +
                 (index + 1 < obtained.Count ? "," : "⟩ :=")), "permitted");
@@ -1203,7 +1270,8 @@ internal static partial class ProofOutline
             proof = heldStore is null ? callee.Walk.Returned is null ? "True.intro" : resulting
                 : callee.Walk.Returned is null ? heldStore : $"⟨{heldStore}, {resulting}⟩";
         }
-        ObjectBody(lean, spec, callee.Walk, "simp", $"{(spec.Result is null ? "()" : "_")}, rfl, {proof}",
+        ObjectBody(lean, spec, callee.Walk, "simp", new Returning(callee.Name + "Contract",
+            spec.Result is null, callee.Open ? "?_" : proof, callee.Open, !callee.Walk.NumericHomes),
             callee.Name + "Entry");
         if (callee.Walk.Returned is not null && targets.Length > 0)
         {
@@ -1223,7 +1291,7 @@ internal static partial class ProofOutline
     /// cases on its test, and each path's run stepped with every access's facts. An entry leaves each path's
     /// postcondition as a hole; a callee's proof closes its contract's `Returns` with `returns`.</summary>
     static void ObjectBody(Writer lean, Specification spec, ObjectWalk walk, string widen,
-        string? returns = null, string entry = "objectEntry")
+        Returning? returns = null, string entry = "objectEntry")
     {
         var known = new Dictionary<(string Key, int Stores), string>();
         foreach (var reached in walk.Objects)
@@ -1267,7 +1335,7 @@ internal static partial class ProofOutline
     /// each fact in the memory after a number of writes, `stored` holds the writes so far, `facts` those not
     /// yet given to a step and `branches` the sides of the splits taken.</summary>
     sealed class ObjectPath(Writer lean, Specification spec, Func<Reached, ViewField, bool> owns,
-        HashSet<string> ownedSlots, string widen, string? returns, string indent,
+        HashSet<string> ownedSlots, string widen, Returning? returns, string indent,
         Dictionary<(string Key, int Stores), string> known, List<object> stored, List<string> facts,
         List<string> branches, ObjectFrame? frame = null)
     {
@@ -1407,9 +1475,12 @@ internal static partial class ProofOutline
                         (split.Fails.Where, split.Fails.Walk, "fails") })
                     {
                         lean.Line($"{indent}· -- `{split.Fact}` {outcome}: continues at {where}");
-                        new ObjectPath(lean, spec, owns, ownedSlots, widen, returns, indent + "  ", new(known),
-                            [.. stored], [.. facts, split.Fact], [.. branches, $"`{split.Fact}` {outcome}"])
-                            .Write(side);
+                        // A side of a framed body goes on from the homes, loads and field values of the path so far.
+                        var path = new ObjectPath(lean, spec, owns, ownedSlots, widen, returns, indent + "  ",
+                            new(known), [.. stored], [.. facts, split.Fact], [.. branches, $"`{split.Fact}` {outcome}"],
+                            frame) { localReads = localReads };
+                        foreach (var (equality, field) in fieldEqualities) path.fieldEqualities.Add(equality, field);
+                        path.Write(side);
                     }
                     return;
                 }
@@ -1673,6 +1744,29 @@ internal static partial class ProofOutline
                 Add(need.Kind == AccessKind.Read && owns(need.Object, need.Field) ? fact + ".toReadable" : fact);
             }
             foreach (var (_, held) in call.Found) Add(held);
+            if (call.Callee.Open)
+            {
+                // The facts the callee's body needs come in the order its contract's `pre` states them.
+                var given = new List<string>();
+                if (call.Callee.Walk.NumericHomes) given.Add($"frameFacts{call.Stores}.wellFormed");
+                foreach (var reached in call.Callee.Walk.Objects)
+                {
+                    var passed = call.Passed.First(pair => pair.Callee == reached).Passed;
+                    given.Add(Live(passed, call.Stores));
+                    foreach (var field in reached.Fields.Where(field => call.Callee.Walk.Accesses.Any(access =>
+                        access.Object == reached && access.Field == field)))
+                    {
+                        var held = passed.Fields.First(candidate => candidate.Lean == field.Lean);
+                        var fact = FieldFact(passed, held, call.Stores);
+                        given.Add(owns(passed, held) ? fact + ".toReadable" : fact);
+                    }
+                }
+                if (given.Count != call.Callee.Plan.Premises.Count + (call.Callee.Walk.NumericHomes ? 1 : 0))
+                    throw new InvalidOperationException($"`{call.Callee.Name}Contract.pre` states facts the call " +
+                        "does not give");
+                Permit(call.Callee.Name, call.Number, call.Input!, ObjectWalk.Memory(call.Stores), call.Where!,
+                    given);
+            }
             Add($"{call.Callee.Name}_holds");
             Add($"{call.Callee.Name}Contract");
             if (frame is null) Add("leaveFrame");
@@ -1736,7 +1830,21 @@ internal static partial class ProofOutline
             }
             else if (call.Callee.Walk.Returned is not null)
                 lean.Line($"{indent}obtain ⟨post{number}, rfl⟩ := post{number}");
+            // An open contract without locals keeps the memory and states the rest of `post` of the result.
+            else if (call.Callee.Open) lean.Line($"{indent}obtain ⟨kept{number}, post{number}⟩ := post{number}");
             lean.Line($"{indent}subst called{number}");
+        }
+
+        /// <summary>States a contract's `pre` at a call before the steps that reach it, from the `given` facts
+        /// its body needs, and leaves what its author adds as a hole.</summary>
+        void Permit(string name, int number, string input, string memory, string where, List<string> given)
+        {
+            lean.Wrapped($"{indent}have permitted{number} :", $"{name}Contract.pre {input} {memory}".Terms(), ":= by");
+            if (given.Count > 0)
+                lean.Wrapped($"{indent}  refine", [.. given.Select((fact, position) =>
+                    (position == 0 ? "⟨" : "") + fact + ","), "?_⟩"], "");
+            lean.Noted(indent + "  ", "sorry", $"`{name}Contract.pre` at the call at {where}, from `assumed`");
+            Add($"permitted{number}");
         }
 
         /// <summary>A call through a stub's contract: its precondition is a hole stated before the steps that
@@ -1747,16 +1855,15 @@ internal static partial class ProofOutline
             var number = call.Number;
             // A body over words alone runs from the empty memory, which its statement names outright.
             var memory = spec.Symbolic ? ObjectWalk.Memory(call.Stores) : "Memory.empty";
-            lean.Wrapped($"{indent}have permitted{number} :",
-                $"{name}Contract.pre {call.Input} {memory}".Terms(), ":= by");
-            lean.Noted(indent + "  ", "sorry", $"`{name}Contract.pre` at the call at {call.Where}, from `assumed`");
-            Add($"permitted{number}");
+            Permit(name, number, call.Input, memory, call.Where, []);
             Add($"{name}_holds");
             Add($"{name}Contract");
-            Add("leaveFrame");
+            if (frame is null) Add("leaveFrame");
+            else Add($"frameFacts{call.Stores}.wellFormed");
             lean.Wrapped($"{indent}cil_contract_steps", FactList(facts), "");
             lean.Line($"{indent}  with called{number} output{number} call{number}");
-            facts.Clear();
+            // A frame's entry and homes are stepped again from the start, so its facts stay.
+            if (frame is null) facts.Clear();
             Add($"{name}Contract");
             lean.Line($"{indent}have post{number} := call{number}.post");
             lean.Line($"{indent}dsimp only [{name}Contract] at post{number}");
@@ -1916,10 +2023,17 @@ internal static partial class ProofOutline
             if (frame is null) Add("leaveFrame");
             lean.Wrapped(walk.Steps.LastOrDefault() is CallStep or StubCall
                 ? $"{indent}try cil_contract_steps" : $"{indent}cil_contract_steps", FactList(facts), "");
+            var where = branches.Count == 0 ? "" : " where " + string.Join(" and ", branches);
             if (returns is not null)
             {
-                lean.Wrapped(returns.Contains("?_", StringComparison.Ordinal) ? $"{indent}refine" : $"{indent}exact",
-                    [.. Parts(",").Select((part, index) => index == 0 ? "⟨" + part : part), returns + "⟩"], "");
+                if (widened.Length == 0 && frame is null) confined = $"({confined})";
+                lean.Wrapped(returns.Post.Contains("?_", StringComparison.Ordinal) ? $"{indent}refine"
+                    : $"{indent}exact", ContractEvidence.Returned(returns, Parts("")), "");
+                if (!returns.Open) return;
+                // The open `post` is still a projection of the contract, so the hole shows what its author wrote.
+                lean.Line($"{indent}dsimp only");
+                if (returns.Kept) lean.Line($"{indent}refine ⟨rfl, ?_⟩");
+                lean.Noted(indent, "sorry", ContractEvidence.PostHole(returns.Contract, where));
                 return;
             }
             var boolean = spec.Result is { Boolean: true };
@@ -1939,8 +2053,7 @@ internal static partial class ProofOutline
             var held = string.Join(", ", stores.Select(index => $"`held{index}`"));
             var stubbed = walk.Stubbed.ToList();
             var posts = string.Join(", ", stubbed.Select(number => $"`post{number}`"));
-            lean.Noted(indent, "sorry", "Postcondition of the returned value" +
-                (branches.Count == 0 ? "" : " where " + string.Join(" and ", branches)) +
+            lean.Noted(indent, "sorry", "Postcondition of the returned value" + where +
                 (stores.Length == 0 ? "" : $", with {held} the stored fields") +
                 (stubbed.Count == 0 ? ""
                     : stubbed.Count == 1 ? $", from `assumed` and {posts}, the helper's `post` of `output{stubbed[0]}`"
