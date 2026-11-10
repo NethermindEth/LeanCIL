@@ -481,20 +481,35 @@ internal static partial class ProofCostReport
                 [var proof] when Sha(proof.Path) != proof.Sha256 => "the proof source changed after verification",
                 _ => null
             };
-            var sources = new List<(string Module, string Source)>
+            string[] selected = [];
+            if (unusable is null && Imports(File.ReadAllText(proofs[0].Path)).Any(Program.SelectionModules.Is))
+            {
+                using var identity = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "identity.json")));
+                selected = Program.SelectionModules.Selected(Imports(File.ReadAllText(proofs[0].Path)),
+                    identity.RootElement, proofs[0].Path);
+            }
+            var sources = new List<(string Module, string? Source)>
             {
                 ("Extracted", Path.Combine(directory, "Extracted.lean"))
             };
+            sources.AddRange(selected.Where(module => !Program.SelectionModules.IsSymbols(module))
+                .Select(module => (module, (string?)null)));
             if (File.Exists(Path.Combine(directory, "Symbols.lean")))
+            {
                 sources.Add(("ExtractedSymbols", Path.Combine(directory, "Symbols.lean")));
+                sources.AddRange(selected.Where(Program.SelectionModules.IsSymbols)
+                    .Select(module => (module, (string?)null)));
+            }
             if (unusable is null) sources.Add(("Proof", proofs[0].Path));
             else Lost.Add(new Unmeasured($"{output}/Proof", unusable));
             // Each module is its own group; one that fails takes the modules after it with it.
             string? blocked = null;
             foreach (var (module, source) in sources)
             {
-                var staged = Path.Combine(stage, module + ".lean");
-                File.Copy(source, staged, true);
+                var staged = Path.Combine(stage, module.Replace('.', Path.DirectorySeparatorChar) + ".lean");
+                Directory.CreateDirectory(Path.GetDirectoryName(staged)!);
+                if (source is null) File.WriteAllText(staged, Program.SelectionModules.Source(module));
+                else File.Copy(source, staged, true);
                 var reason = blocked ?? await Compile($"{output}/{module}", module, staged, stage);
                 if (reason is null) continue;
                 Lost.Add(new Unmeasured($"{output}/{module}", reason));
@@ -652,6 +667,7 @@ internal static partial class ProofCostReport
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
             $"{Schema}\n{Sha(Path.Combine(ScriptDirectory(), "ProofCost.lean"))}\n" +
             $"{Sha(Path.Combine(ScriptDirectory(), "ProofCostReport.cs"))}\n" +
+            $"{Sha(Path.Combine(ScriptDirectory(), "Verification.cs"))}\n" +
             string.Join('\n', MeasuringSteps.Select(step => WorkflowStep(workflow, step))))));
     }
 
