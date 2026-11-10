@@ -88,6 +88,42 @@ theorem store_local_word64 {memory : Memory} {reference : Reference} (word : Bit
     Bool.false_eq_true, ite_false, localNumber, localWidth, written, checkedAt, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
+/-- A successful byte write is the checked store of its encoded 64-bit word. -/
+theorem storeValue_word64_of_write {memory after : Memory} {reference : Reference}
+    {word : CIL.W64} (written :
+      write memory reference (numberBytes word.toNat 8) 1 = .ok after) :
+    storeValue memory (.address reference) (.i64 word) = .ok after := by
+  simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false, referenceAt,
+    checkedAt, written, Except.mapError, Bind.bind, Except.bind]
+#print axioms storeValue_word64_of_write
+
+/-- A successful byte write initializes the complete 128-bit vector value. -/
+theorem storeValue_vector128_of_write {memory after : Memory} {reference : Reference}
+    {bits : BitVec 128} (written :
+      write memory reference (numberBytes bits.toNat 16) 1 = .ok after) :
+    storeValue memory (.address reference) (.v128 bits) = .ok after := by
+  simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false, referenceAt,
+    checkedAt, written, Except.mapError, Bind.bind, Except.bind]
+#print axioms storeValue_vector128_of_write
+
+/-- A successful byte write initializes the complete 256-bit vector value. -/
+theorem storeValue_vector256_of_write {memory after : Memory} {reference : Reference}
+    {bits : BitVec 256} (written :
+      write memory reference (numberBytes bits.toNat 32) 1 = .ok after) :
+    storeValue memory (.address reference) (.v256 bits) = .ok after := by
+  simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false, referenceAt,
+    checkedAt, written, Except.mapError, Bind.bind, Except.bind]
+#print axioms storeValue_vector256_of_write
+
+/-- A successful byte write initializes the complete 512-bit vector value. -/
+theorem storeValue_vector512_of_write {memory after : Memory} {reference : Reference}
+    {bits : BitVec 512} (written :
+      write memory reference (numberBytes bits.toNat 64) 1 = .ok after) :
+    storeValue memory (.address reference) (.v512 bits) = .ok after := by
+  simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false, referenceAt,
+    checkedAt, written, Except.mapError, Bind.bind, Except.bind]
+#print axioms storeValue_vector512_of_write
+
 /-- A word store through a reference requires write access but no prior initialization; it
     writes the word's encoding, which reads back. The `storeValue` equation is a step fact. -/
 theorem store_word64 {memory : Memory} {reference : Reference} (word : BitVec 64)
@@ -101,9 +137,7 @@ theorem store_word64 {memory : Memory} {reference : Reference} (word : BitVec 64
     (by simpa only [length] using ready)
   have readback := write_readback _ _ _ _ _ written
   rw [length] at readback
-  refine ⟨result, written, ?_, readback⟩
-  simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false, referenceAt,
-    checkedAt, written, Except.mapError, Bind.bind, Except.bind]
+  exact ⟨result, written, storeValue_word64_of_write written, readback⟩
 
 #print axioms decode_word64
 #print axioms load_word64_of_read

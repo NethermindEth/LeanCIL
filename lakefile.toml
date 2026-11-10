@@ -30,6 +30,9 @@ name = "Tests.LiteralDisplay"
 name = "Tests.Automation"
 
 [[lean_lib]]
+name = "Tests.VectorLocalCalls"
+
+[[lean_lib]]
 name = "Tests.MethodBinding"
 
 [[lean_lib]]

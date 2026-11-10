@@ -1,6 +1,7 @@
 import CIL.Safety.LoopVC
 import CIL.Safety.ConfinedSnapshots
 import CIL.Safety.BufferContents
+import CIL.Safety.CheckedMemoryFacts
 
 /-!
 # Frame facts of loop invariants
@@ -417,49 +418,6 @@ theorem add_int_element {memory : Memory} {base : Reference} {width : Nat} {inde
   rw [int_offset small]
   exact add_element formed valid target
 
-/-- `store64` through an address whose eight-byte write succeeds steps to that write. The step
-    holds in any method and frame. -/
-theorem step_store64_of_write {memory after : Memory} {target : Reference} {word : CIL.W64}
-    (written : write memory target (numberBytes word.toNat 8) 1 = .ok after) :
-    ∀ body pc args frame rest,
-      step body .store64 pc args frame
-        (.scalar (.i64 word) :: .reference (.address target) :: rest) memory =
-        .ok (.next (pc + 1) rest frame after) := by
-  intro body pc args frame rest
-  rw [step_store64_reference_eq]
-  simp [storeValue, referenceAt, ordinaryAccessAlignment, written, checkedAt,
-    CIL.Value.hasUnspecified, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
-
-/-- A 1-, 2- or 4-byte scalar store of an int through an address whose write succeeds steps to
-    that write. The step holds in any method and frame. -/
-theorem step_storeScalar_of_write {memory after : Memory} {target : Reference} {width : Nat}
-    {bits : CIL.W32} (written : write memory target (numberBytes bits.toNat width) 1 = .ok after)
-    (narrow : width = 1 ∨ width = 2 ∨ width = 4 := by decide) :
-    ∀ body pc args frame rest,
-      step body (.storeScalar width) pc args frame
-        (.scalar (.i32 bits) :: .reference (.address target) :: rest) memory =
-        .ok (.next (pc + 1) rest frame after) := by
-  intro body pc args frame rest
-  rw [step_storeScalar_i32_eq body pc args frame memory width narrow]
-  simp [referenceAt, checkedAt, ordinaryAccessAlignment, written, Except.mapError, Bind.bind,
-    Except.bind, Pure.pure, Except.pure]
-
-/-- An eight-byte scalar store of a long through an address whose write succeeds steps to that
-    write. The step holds in any method and frame. -/
-theorem step_storeScalar_i64_of_write {memory after : Memory} {target : Reference}
-    {bits : CIL.W64} (written : write memory target (numberBytes bits.toNat 8) 1 = .ok after) :
-    ∀ body pc args frame rest,
-      step body (.storeScalar 8) pc args frame
-        (.scalar (.i64 bits) :: .reference (.address target) :: rest) memory =
-        .ok (.next (pc + 1) rest frame after) := by
-  intro body pc args frame rest
-  rw [step_storeScalar_i64_eq]
-  simp [referenceAt, checkedAt, ordinaryAccessAlignment, written, Except.mapError, Bind.bind,
-    Except.bind, Pure.pure, Except.pure]
-
-#print axioms step_store64_of_write
-#print axioms step_storeScalar_of_write
-#print axioms step_storeScalar_i64_of_write
 #print axioms int_offset
 #print axioms int_lt
 #print axioms toNat_succ
