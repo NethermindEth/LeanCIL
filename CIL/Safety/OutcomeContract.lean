@@ -69,9 +69,8 @@ theorem OutcomeContract.Holds.result {Input Output : Type} {c : OutcomeContract 
     {program : CIL.Program} {method : Nat} {input : Input} {initial : Memory}
     (holds : c.Holds program method) (permitted : c.pre input initial)
     (normal : c.raises input initial = none) :
-    ∃ final output, CallResult c.toMethodContract program method input initial final output := by
-  obtain ⟨fuel, final, _, invoked, framed, output, rfl, post⟩ := holds.returning permitted normal
-  exact ⟨final, output, { invoked := ⟨fuel, invoked⟩, framed, post }⟩
+    ∃ final output, CallResult c.toMethodContract program method input initial final output :=
+  CallResult.of_returned (holds.returning permitted normal)
 
 /-- A normal-return contract is the outcome contract that never raises. -/
 theorem MethodContract.Holds.outcomes {Input Output : Type} {c : MethodContract Input Output}
@@ -266,9 +265,8 @@ theorem run_call_of_outcome_formed {Input Output : Type} {c : OutcomeContract In
         post result returned := by
   subst encoded
   exact run_call_of_outcome holds input methodFound instructionFound stepped rfl permitted normal
-    fun final output call => call.invoked.elim fun _ invoked =>
-      continuation final output call
-        (call_frame_invariants methodFound instructionFound stepped formed invoked)
+    fun final output call => continuation final output call
+      (call.frame_invariants methodFound instructionFound stepped formed)
 
 /-- `run_call_raises_after_outcome` from a well-formed memory, with the frame invariants
     supplied. -/
@@ -292,9 +290,8 @@ theorem run_call_raises_after_outcome_formed {Input Output : Type}
   subst encoded
   exact run_call_raises_after_outcome holds input methodFound instructionFound stepped rfl
     permitted normal
-    fun final output call => call.invoked.elim fun _ invoked =>
-      continuation final output call
-        (call_frame_invariants methodFound instructionFound stepped formed invoked)
+    fun final output call => continuation final output call
+      (call.frame_invariants methodFound instructionFound stepped formed)
 
 /-- `exported` follows from `internal`: same encodings and outcome under a weaker pre; on
     return, covering footprint and implied post. -/

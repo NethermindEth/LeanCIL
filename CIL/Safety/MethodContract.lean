@@ -397,16 +397,27 @@ theorem MethodContract.Holds.intro {Input Output : Type} {c : MethodContract Inp
       Confined (c.footprint input) initial final ∧ c.Returns input initial final values :=
   invoked.elim fun fuel ran => ⟨fuel, final, c.results output, ran, framed, output, rfl, post⟩
 
+/-- The conclusion `Holds` states for one input, as a final memory and output with their
+    `CallResult`; the converse of `MethodContract.Holds.intro`. -/
+theorem CallResult.of_returned {Input Output : Type} {c : MethodContract Input Output}
+    {program : CIL.Program} {method : Nat} {input : Input} {initial : Memory}
+    (returned : ∃ fuel final values,
+      invoke program fuel method (c.args input) initial = .ok (final, values) ∧
+      Confined (c.footprint input) initial final ∧ c.Returns input initial final values) :
+    ∃ final output, CallResult c program method input initial final output := by
+  obtain ⟨fuel, final, _, invoked, framed, output, rfl, post⟩ := returned
+  exact ⟨final, output, { invoked := ⟨fuel, invoked⟩, framed, post }⟩
+
 /-- What a proved contract establishes for an input meeting `pre`: a final memory and output
     with their `CallResult`. -/
 theorem MethodContract.Holds.result {Input Output : Type} {c : MethodContract Input Output}
     {program : CIL.Program} {method : Nat} (holds : c.Holds program method) (input : Input)
     {initial : Memory} (permitted : c.pre input initial) :
-    ∃ final output, CallResult c program method input initial final output := by
-  obtain ⟨fuel, final, _, invoked, framed, output, rfl, post⟩ := holds input initial permitted
-  exact ⟨final, output, { invoked := ⟨fuel, invoked⟩, framed, post }⟩
+    ∃ final output, CallResult c program method input initial final output :=
+  CallResult.of_returned (holds input initial permitted)
 
 #print axioms MethodContract.Holds.intro
+#print axioms CallResult.of_returned
 #print axioms MethodContract.Holds.result
 
 /-- Compose a fetched call through the callee's contract instead of its body. The
@@ -479,6 +490,22 @@ theorem call_frame_invariants {program : CIL.Program} {method pc callee fuel : N
     classes := fun _ sites consistent => invoke_preserves_classes sites
       (programStep_preserves_classes sites consistent called) invoked }
 
+/-- The `FrameInvariants` a call composed through a contract keeps, from its `CallResult` and
+    the step that made the call. -/
+theorem CallResult.frame_invariants {Input Output : Type} {c : MethodContract Input Output}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {args stack rest : List Value} {frame : Frame} {memory updated final : Memory}
+    {input : Input} {output : Output}
+    (call : CallResult c program callee input updated final output)
+    (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
+    (stepped :
+      step body op pc args frame stack memory = .ok (.call callee (c.args input) rest updated))
+    (formed : memory.WellFormed) :
+    FrameInvariants program memory final :=
+  call.invoked.elim fun _ invoked =>
+    call_frame_invariants methodFound instructionFound stepped formed invoked
+#print axioms CallResult.frame_invariants
+
 /-- `run_call_of_contract` from a well-formed memory: the continuation also receives the
     `FrameInvariants` the call keeps from the caller's memory to the callee's final memory. -/
 theorem run_call_of_contract_formed {Input Output : Type} {c : MethodContract Input Output}
@@ -503,9 +530,8 @@ theorem run_call_of_contract_formed {Input Output : Type} {c : MethodContract In
         post result returned := by
   subst encoded
   exact run_call_of_contract holds input methodFound instructionFound stepped rfl permitted
-    fun final output call => call.invoked.elim fun _ invoked =>
-      continuation final output call
-        (call_frame_invariants methodFound instructionFound stepped formed invoked)
+    fun final output call => continuation final output call
+      (call.frame_invariants methodFound instructionFound stepped formed)
 
 /-- Some fuel runs to a successful return satisfying `post` when the fetched instruction
     returns checked values that satisfy it. -/

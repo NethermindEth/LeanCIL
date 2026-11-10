@@ -121,9 +121,8 @@ theorem loop_outcome_call_formed {Input Output : Type} {c : OutcomeContract Inpu
     LoopOutcome program method args post raises ⟨pc, frame, stack, memory⟩ := by
   subst encoded
   exact loop_outcome_call holds input methodFound instructionFound stepped rfl permitted normal
-    fun final output call => call.invoked.elim fun _ invoked =>
-      continuation final output call
-        (call_frame_invariants methodFound instructionFound stepped formed invoked)
+    fun final output call => continuation final output call
+      (call.frame_invariants methodFound instructionFound stepped formed)
 
 /-- Exit a loop with the exception a callee's contract names; no invariant or measure is
     needed. -/
