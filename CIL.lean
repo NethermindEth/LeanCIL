@@ -63,6 +63,7 @@ import CIL.Safety.Embedding.Suffix
 import CIL.Safety.Embedding.Step
 import CIL.Safety.Calling
 import CIL.Safety.CallingTransport
+import CIL.Safety.CallingFields
 import CIL.Safety.Certificate
 import CIL.Safety.CertifiedContract
 import CIL.Safety.CodeAt

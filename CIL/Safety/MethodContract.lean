@@ -361,6 +361,21 @@ def MethodContract.Holds {Input Output : Type} (c : MethodContract Input Output)
       (fun final values =>
         Confined (c.footprint input) initial final ∧ c.Returns input initial final values)
 
+/-- A located semantic fault on an input meeting the precondition refutes the contract at
+    every fuel budget. Exhaustion alone does not refute termination. -/
+theorem MethodContract.not_holds_of_fault {Input Output : Type}
+    (contract : MethodContract Input Output) {program : CIL.Program} {method observed : Nat}
+    {input : Input} {initial : Memory} {fault : LocatedFault}
+    (permitted : contract.pre input initial) (semantic : fault.fault ≠ .fuelExhausted)
+    (failed : invoke program observed method (contract.args input) initial = .error fault) :
+    ¬ contract.Holds program method := by
+  intro holds
+  obtain ⟨fuel, final, values, invoked, _⟩ := holds input initial permitted
+  exact invoke_fault_refutes_success program observed method (contract.args input) initial
+    fault semantic failed fuel (final, values) invoked
+
+#print axioms MethodContract.not_holds_of_fault
+
 /-- A contract is `Ensures` at each input, with the footprint as part of the postcondition. -/
 theorem MethodContract.Holds.ensures {Input Output : Type} {c : MethodContract Input Output}
     {program : CIL.Program} {method : Nat} (holds : c.Holds program method) (input : Input) :
@@ -455,30 +470,8 @@ theorem run_call_of_contract {Input Output : Type} {c : MethodContract Input Out
         post result returned := by
   subst encoded
   obtain ⟨final, output, call⟩ := holds.result input permitted
-  obtain ⟨parentFuel, result, returned, resumed, finished⟩ := continuation final output call
-  obtain ⟨fuel, composed⟩ :=
-    run_call_exists methodFound instructionFound stepped call.invoked ⟨parentFuel, resumed⟩
-  exact ⟨fuel, result, returned, composed, finished⟩
-
-/-- Compose a separately proved child invocation with a caller postcondition. -/
-theorem run_call_post {program : CIL.Program} {method pc callee : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack arguments rest values : List Value}
-    {frame : Frame} {memory updated final : Memory} {post : Memory → List Value → Prop}
-    (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
-    (stepped : step body op pc args frame stack memory =
-      .ok (.call callee arguments rest updated))
-    (child : ∃ fuel, invoke program fuel callee arguments updated = .ok (final, values))
-    (continuation : ∃ fuel result returned,
-      run program fuel method (pc + 1) args frame (values ++ rest) final =
-        .ok (result, returned) ∧ post result returned) :
-    ∃ fuel result returned,
-      run program fuel method pc args frame stack memory = .ok (result, returned) ∧
-        post result returned := by
-  obtain ⟨parentFuel, result, returned, resumed, satisfied⟩ := continuation
-  obtain ⟨fuel, composed⟩ := run_call_exists methodFound instructionFound stepped child
-    ⟨parentFuel, resumed⟩
-  exact ⟨fuel, result, returned, composed, satisfied⟩
-#print axioms run_call_post
+  exact run_call_post methodFound instructionFound stepped call.invoked
+    (continuation final output call)
 
 /-- A successful call from a well-formed memory returns a well-formed memory and keeps the static
     world and catalog agreement, whatever the callee's contract states. -/
@@ -545,36 +538,6 @@ theorem run_call_of_contract_formed {Input Output : Type} {c : MethodContract In
   exact run_call_of_contract holds input methodFound instructionFound stepped rfl permitted
     fun final output call => continuation final output call
       (call.frame_invariants methodFound instructionFound stepped formed)
-
-/-- Some fuel runs to a successful return satisfying `post` when the fetched instruction
-    returns checked values that satisfy it. -/
-theorem run_return_exists {program : CIL.Program} {method pc : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
-    {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
-    (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
-    (stepped : step body op pc args frame stack memory = .ok (.returned values updated))
-    (checked : values.mapM (checkedValue (leaveFrame frame updated)) = .ok values)
-    (satisfied : post (leaveFrame frame updated) values) :
-    ∃ fuel result returned,
-      run program fuel method pc args frame stack memory = .ok (result, returned) ∧
-        post result returned :=
-  ⟨1, _, _, run_return (fuel := 0) methodFound instructionFound stepped checked, satisfied⟩
-
-/-- Reduces an invocation goal to running the body from pc 0 in the frame `enterFrame`
-    builds for checked arguments. -/
-theorem invoke_exists_of_run {program : CIL.Program} {method : Nat} {body : CIL.Method}
-    {args : List Value} {frame : Frame} {memory entered : Memory}
-    {post : Memory → List Value → Prop}
-    (found : program[method]? = some body)
-    (checked : args.mapM (checkedValue memory) = .ok args)
-    (setup : enterFrame body args memory = .ok (frame, entered))
-    (executed : ∃ fuel result returned,
-      run program fuel method 0 args frame [] entered = .ok (result, returned) ∧
-        post result returned) :
-    ∃ fuel result returned,
-      invoke program fuel method args memory = .ok (result, returned) ∧ post result returned := by
-  obtain ⟨fuel, result, returned, ran, satisfied⟩ := executed
-  exact ⟨fuel, result, returned, invoke_of_run found checked setup ran, satisfied⟩
 
 /-- Successful invocations agree at every fuel, so a computed run refutes a contract. -/
 theorem invoke_ok_unique {program : CIL.Program} {method left right : Nat} {args : List Value}

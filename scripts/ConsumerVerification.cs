@@ -1345,6 +1345,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         public Report? Report;
         public Exception? Error;
         public bool Rejected;
+        public bool Checked;
+        public double ElapsedSeconds;
         public string? Detail;
         // Proof modules of other requests in the workspace, omitted from this request's diagnostics.
         public string[]? Hidden;
@@ -1409,13 +1411,15 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     // extraction share one Lake workspace, build and kernel replay.
     // `finished` reports each request once its outcome is final, possibly from parallel workspaces.
     ConsumerOutcome[] VerifyConsumerRequests(string root, IReadOnlyList<ConsumerRequest> requests,
-        Action<int, string>? stage, bool batch, int parallelism = 1, Action<int, ConsumerOutcome>? finished = null)
+        Action<int, string>? stage, bool batch, int parallelism = 1,
+        Action<int, ConsumerOutcome>? finished = null, bool checkOnly = false)
     {
         root = Path.GetFullPath(root);
         if (requests.Any(request => request.ExportAudit is not null) && !freshProofs && !freshLibrary)
             throw new InvalidDataException("Contract exports require fresh independent verification.");
         var outcomes = requests.Select(_ => new ConsumerOutcome()).ToArray();
-        bool Live(int i) => outcomes[i].Error is null && !outcomes[i].Rejected && outcomes[i].Report is null;
+        bool Live(int i) => outcomes[i].Error is null && !outcomes[i].Rejected &&
+            !outcomes[i].Checked && outcomes[i].Report is null;
         int[] Pending(IEnumerable<int> members) => members.Where(Live).ToArray();
         void Stage(IEnumerable<int> members, string value)
         {
@@ -1578,7 +1582,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 proofKeys[i] = ConsumerCacheKey("proof", before[i], SemanticExtractionIdentity(extractions[i]) + "\n" + requests[i].Theorem + "\n" + Sha(requests[i].Assembly) +
                     (symbols[i] is null ? "" : "\n" + symbols[i]) + (viewsStatement ? "\nstatement-view" : "") +
                     ProofOptionsKey);
-                if (requests[i].ExpectRejection || ReferenceOnlyImports(extractions[i])) continue;
+                if (checkOnly || requests[i].ExpectRejection || ReferenceOnlyImports(extractions[i])) continue;
                 var receipt = Path.Combine(Path.GetTempPath(), "leancil-consumer-receipt-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(receipt);
                 try
@@ -1657,7 +1661,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             componentPlans[index] = SharedExtractionComponents(componentPlans[index], repeatedComponents);
         }
         var sources = ConsumerSourceHashes(snapshot, root);
-        bool exporting = !forceFullVerification && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT"));
+        bool exporting = !checkOnly && !forceFullVerification &&
+            !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT"));
         var export = new ConsumerSupportExport();
         string supportKey = "";
         string[] relativeImportDirectories = [];
@@ -1704,6 +1709,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 generatedSources: generatedSources, components: components, checkRejectedProofs: checkRejectedProofs);
             var generatedPackage = prepared.Generated;
             foreach (var member in members) outcomes[member].Sources = prepared.Sources;
+            if (checkOnly)
+            {
+                CheckGroup(members, session, names, bound, first, share);
+                return;
+            }
             var generatedInputPaths = prepared.Copied.Keys.Where(path =>
                     path.StartsWith(generatedPackage + Path.DirectorySeparatorChar, StringComparison.Ordinal))
                 .Concat([Path.Combine(generatedPackage, "lakefile.toml"),
@@ -2297,15 +2307,72 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             }
         }
 
+        // Compiled support stays inside this invocation; it is never published as certified support.
+        void CheckGroup(int[] members, string session, string[] names,
+            IReadOnlyDictionary<string, string> bound, bool first, bool share)
+        {
+            if (!first)
+                foreach (var file in CacheFiles(support).Keys.Where(file => file != ConsumerSupportRecordName))
+                {
+                    var destination = Within(session, file);
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                    File.Copy(Within(support, file), destination, true);
+                }
+            Stage(members, "compile check");
+            var build = Execute(["lake", "build", .. names.Select(name => "+" + name + ":olean")],
+                session, progress: "Compile checking consumer proofs and dependencies");
+            var (directories, _) = ConsumerImportDirectories(session);
+            for (var index = 0; index < members.Length; index++)
+            {
+                var member = members[index];
+                var source = Path.Combine(session, names[index] + ".lean");
+                var artifact = directories.Select(directory => Path.Combine(directory, names[index]))
+                    .FirstOrDefault(path => File.Exists(path + ".olean") && File.Exists(path + ".trace"));
+                if (artifact is not null)
+                {
+                    outcomes[member].Messages = LakeTraceMessages(artifact + ".trace", session, source);
+                    outcomes[member].Checked = true;
+                }
+                else
+                {
+                    outcomes[member].Messages = LakeOutputMessages(build.Output, session, source);
+                    var error = new InvalidOperationException("Compile check failed:\n" + build.Output);
+                    error.Data[LeanDiagnostics.HiddenModulesKey] = names.Where((_, other) => other != index).ToArray();
+                    Fail([member], error);
+                }
+            }
+            if (!share) return;
+            var modules = directories.Where(directory => Path.GetFullPath(directory).StartsWith(
+                    session + Path.DirectorySeparatorChar, OperatingSystem.IsWindows()
+                        ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                .Where(Directory.Exists).SelectMany(directory => Directory.EnumerateFiles(
+                    directory, "*.olean", SearchOption.AllDirectories).Select(path =>
+                        (Name: ModuleName(Path.GetRelativePath(directory, path)), Path: path)))
+                .ToDictionary(pair => pair.Name, pair => pair.Path, StringComparer.Ordinal);
+            var graph = ConsumerModuleImports(session, modules);
+            var dependent = DependentModules(graph, ["Extracted", "ExtractedSymbols",
+                .. extractions[members[0]].Sources.Keys, .. names]);
+            var collected = CollectConsumerSupport(session, modules, graph, dependent, dependent, bound);
+            if (collected is null) return;
+            Directory.Delete(support, true);
+            Directory.Move(collected, support);
+        }
+
         void RunGroup(int[] members, bool first, bool share)
         {
+            var elapsed = System.Diagnostics.Stopwatch.StartNew();
             bool priorReferenceOnly = referenceOnlyAuthoring;
             referenceOnlyAuthoring = ReferenceOnlyImports(extractions[members[0]]);
             var session = Path.Combine(Path.GetTempPath(), "leancil-consumer-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(session);
             try { VerifyGroup(members, session, first, share); }
             catch (Exception error) { Fail(members, error); }
-            finally { referenceOnlyAuthoring = priorReferenceOnly; Directory.Delete(session, true); }
+            finally
+            {
+                referenceOnlyAuthoring = priorReferenceOnly;
+                Directory.Delete(session, true);
+                foreach (var member in members) outcomes[member].ElapsedSeconds = elapsed.Elapsed.TotalSeconds;
+            }
             foreach (var i in members.Where(i => !Live(i))) finished?.Invoke(i, outcomes[i]);
         }
 

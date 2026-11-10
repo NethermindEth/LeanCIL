@@ -303,3 +303,6 @@ name = "Tests.WeakestPrecondition"
 
 [[lean_lib]]
 name = "Tests.LocalCalls"
+
+[[lean_lib]]
+name = "Tests.CallingFields"

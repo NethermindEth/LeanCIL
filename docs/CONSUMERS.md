@@ -1,5 +1,16 @@
 # Consumer packages and batch verification
 
+`leancil verify-batch requests.json --check` compiles each proof and its import closure against
+the selected extraction. It reports every request as `Checked` or failed, with source locations
+for elaboration errors. Shared support is compiled once where possible; these compiled artifacts
+remain private to the invocation. This mode skips consumer kernel replay and theorem axiom audit,
+removes existing `verified.json` files and issues no certificate. A compile check makes no trust
+claim and does not replace verification. Rejection expectations require normal verification.
+
+Batch result records include `elapsedSeconds` for each request's shared workspace. Requests in
+the same workspace share this duration; do not sum them as independent execution times. Both
+normal verification and compile checks report this field for comparisons on the same inputs.
+
 `leancil resolve-imports` derives `--import` and `--import-implementation` from
 SDK deps/NuGet asset selection; see [resolving imports](CONTRACT-INTERFACES.md#resolving-imports-from-sdk-assets).
 It only locates files; verification requires pins, caller audits, kernel replay and deployment
@@ -36,6 +47,27 @@ and dependency revisions. Sources are checked again before writing the report;
 new or changed consumer and dependency modules undergo kernel replay, and
 the selected theorem's transitive axioms are audited with the same policy as
 single-file verification. `verification.json` remembers the package root.
+
+## Generated proof bindings
+
+File-based C# runners can include [ProofBindingCatalog.cs](../scripts/ProofBindingCatalog.cs)
+from their pinned LeanCIL package. A `ProofGate` names the exact method, profile, proof path
+and theorem. Each `ProofBinding` supplies the complete Lean source from an explicit,
+consumer-reviewed recipe. `ProofBindingCatalog.Sources` checks the recipe identities against
+the catalog and rejects missing or duplicate entries, changed profiles or theorem names,
+conflicting sources and unsafe output paths. Recipes cover every catalog profile of each
+method they generate; other methods may keep handwritten proofs.
+
+Call `ProofBindingCatalog.Materialize(root, catalog, recipes)` before selecting imports or
+capturing verification sources. It emits deterministic UTF-8 files with LF endings. Pass
+`check: true` to reject missing or changed bytes without writing files. Identical source shared
+by several gates is emitted once. Proof-family recipes and arithmetic specifications belong
+in the consumer; the catalog does not infer them from method names.
+
+Generated files participate in the ordinary source identity, extraction binding and kernel
+audit described above. Generation removes maintained binding text, not proof obligations.
+Use the extractor's [profile templates](PROOFS-BINDING.md#generated-profile-templates) for shared extracted
+bodies; binding recipes do not replace its reachable-helper or static-metadata checks.
 
 ## Proof-authoring workspace
 

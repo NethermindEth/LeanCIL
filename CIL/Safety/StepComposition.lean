@@ -349,4 +349,37 @@ theorem run_next_exists {program : CIL.Program} {method pc target : Nat}
     (run_next methodFound instructionFound stepped).trans finished, satisfied⟩
 
 #print axioms run_next_exists
+/-- Some fuel runs to a successful return satisfying `post` when the fetched instruction
+    returns checked values that satisfy it. -/
+theorem run_return_exists {program : CIL.Program} {method pc : Nat}
+    {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
+    {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
+    (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
+    (stepped : step body op pc args frame stack memory = .ok (.returned values updated))
+    (checked : values.mapM (checkedValue (leaveFrame frame updated)) = .ok values)
+    (satisfied : post (leaveFrame frame updated) values) :
+    ∃ fuel result returned,
+      run program fuel method pc args frame stack memory = .ok (result, returned) ∧
+        post result returned :=
+  ⟨1, _, _, run_return (fuel := 0) methodFound instructionFound stepped checked, satisfied⟩
+
+/-- Reduces an invocation goal to running the body from pc 0 in the frame `enterFrame`
+    builds for checked arguments. -/
+theorem invoke_exists_of_run {program : CIL.Program} {method : Nat} {body : CIL.Method}
+    {args : List Value} {frame : Frame} {memory entered : Memory}
+    {post : Memory → List Value → Prop}
+    (found : program[method]? = some body)
+    (checked : args.mapM (checkedValue memory) = .ok args)
+    (setup : enterFrame body args memory = .ok (frame, entered))
+    (executed : ∃ fuel result returned,
+      run program fuel method 0 args frame [] entered = .ok (result, returned) ∧
+        post result returned) :
+    ∃ fuel result returned,
+      invoke program fuel method args memory = .ok (result, returned) ∧ post result returned := by
+  obtain ⟨fuel, result, returned, ran, satisfied⟩ := executed
+  exact ⟨fuel, result, returned, invoke_of_run found checked setup ran, satisfied⟩
+
+#print axioms run_return_exists
+#print axioms invoke_exists_of_run
+
 end CIL.Safety

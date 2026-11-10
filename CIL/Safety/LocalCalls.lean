@@ -36,17 +36,10 @@ theorem LocalSnapshots.after_helper_write {before after : Memory}
       slots[other]? = some (.bytes otherKind otherHome) →
       ∀ entry ∈ footprint, Apart otherHome (localWidth otherKind) entry) :
     LocalSnapshots after slots (rememberLocal known index (localResult kind stored)) := by
-  intro other value specified
-  by_cases same : other = index
-  · subst other
-    have result : localResult kind stored = value := by simpa [rememberLocal] using specified
-    exact ⟨kind, home, stored, number, slot, fits, result, loaded⟩
-  · have previous : known other = some value := by simpa [rememberLocal, same] using specified
-    obtain ⟨otherKind, otherHome, otherStored, otherNumber, otherSlot, otherFits, result,
-      readback⟩ := snapshots other value previous
-    exact ⟨otherKind, otherHome, otherStored, otherNumber, otherSlot, otherFits, result,
-      confined.read_apart formed readback (apart other value otherKind otherHome same
-        previous otherSlot)⟩
+  apply snapshots.after_effect index kind home stored number slot fits loaded
+  intro other value otherKind otherHome _ different previous otherSlot readback
+  exact confined.read_apart formed readback
+    (apart other value otherKind otherHome different previous otherSlot)
 
 #print axioms LocalSnapshots.after_helper_write
 

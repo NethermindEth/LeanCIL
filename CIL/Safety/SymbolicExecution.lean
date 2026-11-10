@@ -94,14 +94,31 @@ elab "cil_frame_exit" : tactic => withMainContext do
   unless exited == target do replaceMainGoal [← goal.replaceTargetDefEq exited]
 
 open Lean Elab Tactic Meta in
-/-- Open a goal `∃ fuel, invoke program fuel method .. = ..` with the execution bound of its
-    program and method as the fuel. Any other goal, such as one whose fuel is already a
-    numeral, is left as it is. -/
+/-- Open an existential execution budget. Invocation uses the program's execution bound;
+    a `run` uses the remaining code of a body identified by a lookup hypothesis. Every
+    checked proof must establish that the candidate suffices. A stated fuel term stays fixed. -/
 elab "cil_supply_fuel" : tactic => withMainContext do
   let target := (← instantiateMVars (← getMainTarget)).consumeMData
   unless target.isAppOfArity ``Exists 2 do return
   let .lam _ _ body _ := target.appArg! | return
   let some (_, invocation, _) := body.consumeMData.eq? | return
+  if invocation.isAppOfArity `CIL.Safety.run 8 && invocation.getArg! 1 == .bvar 0 then
+    let program := invocation.getArg! 0
+    let method := invocation.getArg! 2
+    let pc := invocation.getArg! 3
+    if program.hasLooseBVars || method.hasLooseBVars || pc.hasLooseBVars then return
+    let programTerm ← Term.exprToSyntax program
+    let methodTerm ← Term.exprToSyntax method
+    let lookup ← Term.elabTerm (← `(term| $programTerm[$methodTerm]?)) none
+    for declaration in ← getLCtx do
+      let some (_, found, result) := declaration.type.consumeMData.eq? | continue
+      unless result.isAppOfArity ``Option.some 2 do continue
+      unless ← withNewMCtxDepth <| isDefEq lookup found do continue
+      let methodBody ← Term.exprToSyntax result.appArg!
+      let position ← Term.exprToSyntax pc
+      evalTactic (← `(tactic| refine ⟨(CIL.Method.code $methodBody).length - $position + 1, ?_⟩))
+      return
+    return
   unless invocation.isAppOfArity `CIL.Safety.invoke 5 do return
   let arguments := invocation.getAppArgs
   let program := arguments[0]!
@@ -127,7 +144,7 @@ def factInstances (proof : Expr) : TermElabM (Array Expr) := do
   if let .forallE _ domain _ _ := ← whnf (← instantiateMVars (← inferType proof)) then
     let domain ← whnf domain
     if domain.isAppOfArity ``Fin 1 then
-      if let some size ← getNatValue? domain.appArg! then
+      if let some size ← (Lean.Meta.evalNat (← reduce domain.appArg!)).run then
         if size <= 64 then
           for index in [:size] do
             let numeral : Term := ⟨Syntax.mkNumLit (toString index)⟩

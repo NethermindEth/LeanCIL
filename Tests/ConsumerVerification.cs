@@ -12,6 +12,7 @@
 #:include ConsumerComponents.cs
 #:include ConsumerFingerprintReuse.cs
 #:include CertifiedFingerprints.cs
+#:include ../scripts/ProofBindingCatalog.cs
 
 using System.Text.Json;
 
@@ -21,6 +22,7 @@ var checks = new Dictionary<string, Action<string[]>>(StringComparer.Ordinal)
     ["support-union"] = CheckConsumerSupportUnion,
     ["certificate-reuse"] = CheckConsumerCertificateReuse,
     ["components"] = CheckConsumerComponents,
+    ["compile-check"] = options => CheckConsumerComponents(["--compile-check", .. options]),
     ["fingerprints"] = CheckConsumerFingerprintReuse,
     ["certified-fingerprints"] = CheckCertifiedFingerprints
 };
@@ -72,19 +74,24 @@ end Client
 var sharedPath = Path.Combine(root, "Client", "Shared.lean");
 File.WriteAllText(sharedPath, shared);
 var proof = Path.Combine(root, "Proof.lean");
-File.WriteAllText(proof, """
+const string proofSource = """
 import Client.Shared
 namespace ExampleProof
 theorem correctness (x y : CIL.W64) (memory : CIL.Safety.Memory) :
     CIL.Safety.invoke Extracted.program 4 0 [.scalar (.i64 x), .scalar (.i64 y)] memory =
       .ok (memory, [.scalar (.i64 (x + y))]) := Client.execution x y memory
 end ExampleProof
-""");
+""";
+LeanCIL.ProofGate bindingGate = new("InitializedTypes::Add(ulong,ulong)", "scalar", "Proof.lean",
+    "ExampleProof.correctness");
+LeanCIL.ProofBinding[] bindingRecipes = [new(bindingGate, proofSource)];
+LeanCIL.ProofBindingCatalog.Materialize(root, [bindingGate], bindingRecipes);
+LeanCIL.ProofBindingCatalog.Materialize(root, [bindingGate], bindingRecipes, check: true);
 Run(["lake", "update"], root);
 var staleCache = Path.Combine(root, ".lake", "build", "lib", "lean", "Client");
 Directory.CreateDirectory(staleCache);
 File.WriteAllText(Path.Combine(staleCache, "Shared.olean"), "Not a valid compiled module; consumer caches must not be used.");
-Run([.. cli, "extract", At("Examples/Assembly/bin/Examples.dll"), "InitializedTypes::Add(ulong,ulong)", output,
+Run([.. cli, "extract", At("Examples/Assembly/bin/Examples.dll"), bindingGate.Method, output, bindingGate.Profile,
     "--assume-initialized", "Examples.InitializedTypes"]);
 
 void Verify(params string[] options)
@@ -99,7 +106,7 @@ string Reject(string marker, params string[] options)
         throw new InvalidOperationException("Expected consumer proof rejection: " + result.Output);
     return result.Output;
 }
-Verify("--proof", proof, "--proof-root", root);
+Verify("--proof", proof, "--proof-root", root, "--theorem", bindingGate.Theorem);
 var first = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
 var inputs = first.GetProperty("inputs");
 if (first.GetProperty("schema").GetInt32() != 4 ||

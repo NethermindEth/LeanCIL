@@ -30,7 +30,7 @@ internal static partial class Program
         "[--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory]... " +
         "[--format text|json] [--trace] [--goals]\n" +
         "       leancil verify-batch requests.json [--fresh] [--rebuild-library] [--parallel count] " +
-        "[--results results.json] [--format text|json] [--trace]\n" +
+        "[--results results.json] [--format text|json] [--trace] [--check]\n" +
         "       leancil audit-library --project package-directory --module M... --prefix P... [--axioms a,b,c] " +
         "[--results results.json]\n" +
         "       leancil --version";

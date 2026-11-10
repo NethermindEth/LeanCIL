@@ -394,8 +394,9 @@ def gatherLoopFactGroups (facts : Array Term) (evidenceOnly : Bool := false) :
   let context ← getLCtx
   -- Most straight-line goals hold no object evidence, and step with the facts as given.
   if evidenceOnly then
-    let stated ← context.anyM fun declaration =>
-      return !(objectEvidenceIn (← instantiateMVars declaration.type)).isEmpty
+    let stated ← context.anyM fun declaration => do
+      let type ← instantiateMVars declaration.type
+      return !(objectEvidenceIn type).isEmpty || type.isAppOfArity `CIL.Safety.ValidCall 3
     unless stated do return { core := facts }
   let explicitName? (fact : Term) : TacticM (Option Lean.Name) := do
     unless fact.raw.isIdent do return none
@@ -465,6 +466,24 @@ def gatherLoopFactGroups (facts : Array Term) (evidenceOnly : Bool := false) :
     else if ← isCaseDisequality type then
       candidates := candidates.push (`caseSplit, fact, variables #[type], #[], #[])
     let arguments := type.getAppArgs
+    if type.isAppOfArity `CIL.Safety.ValidCall 3 then
+      let memory := arguments[0]!
+      for (position, view) in ← listEntries arguments[1]! do
+        let viewTerm ← Term.exprToSyntax (← withTransparency .default <| whnf view)
+        let index : Term := ⟨Syntax.mkNumLit (toString position)⟩
+        let member ← `(List.mem_of_getElem? (i := $index) rfl)
+        let subject := variables #[view]
+        candidates := candidates.push (`argumentForm,
+          applied `ValidCall.input_formed #[fact, viewTerm, member], subject, #[memory], #[])
+        candidates := candidates.push (`argumentRead,
+          applied `ValidCall.input_word_step #[fact, viewTerm, member], subject, #[memory], #[])
+      for (position, view) in ← listEntries arguments[2]! do
+        let viewTerm ← Term.exprToSyntax (← withTransparency .default <| whnf view)
+        let index : Term := ⟨Syntax.mkNumLit (toString position)⟩
+        let member ← `(List.mem_of_getElem? (i := $index) rfl)
+        candidates := candidates.push (`argumentForm,
+          applied `ValidCall.output_formed #[fact, viewTerm, member], variables #[view],
+          #[memory], #[])
     for (side, evidence, stated) in objectEvidenceIn type do
       -- A straight-line goal names the object but not each memory its steps pass through.
       let memory := stated.getArg! evidence.memory

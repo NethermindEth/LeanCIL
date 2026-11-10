@@ -69,7 +69,7 @@ theorem step {program : CIL.Program} {method pc target : Nat}
       .ok (.next target values nextFrame updated))
     (rest : WP (fun fuel => run program fuel method target args nextFrame values updated) post) :
     WP (fun fuel => run program fuel method pc args frame stack memory) post :=
-  sequence (fun _ => run_next found fetched stepped) rest
+  run_next_exists post found fetched stepped rest
 
 #print axioms step
 
@@ -83,7 +83,7 @@ theorem returned {program : CIL.Program} {method pc : Nat}
     (checked : values.mapM (checkedValue (leaveFrame frame updated)) = .ok values)
     (satisfied : post (leaveFrame frame updated) values) :
     WP (fun fuel => run program fuel method pc args frame stack memory) post :=
-  ⟨1, leaveFrame frame updated, values, run_return found fetched stepped checked, satisfied⟩
+  run_return_exists found fetched stepped checked satisfied
 
 #print axioms returned
 
@@ -95,9 +95,8 @@ theorem enter {program : CIL.Program} {method : Nat} {body : CIL.Method}
     (checked : args.mapM (checkedValue memory) = .ok args)
     (setup : enterFrame body args memory = .ok (frame, entered))
     (bodyProof : WP (fun fuel => run program fuel method 0 args frame [] entered) post) :
-    WP (fun fuel => invoke program fuel method args memory) post := by
-  obtain ⟨fuel, final, values, executed, satisfied⟩ := bodyProof
-  exact ⟨fuel, final, values, invoke_of_run found checked setup executed, satisfied⟩
+    WP (fun fuel => invoke program fuel method args memory) post :=
+  invoke_exists_of_run found checked setup bodyProof
 
 #print axioms enter
 
@@ -114,10 +113,8 @@ theorem call {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method
       WP (fun fuel => run program fuel method (pc + 1) args frame (values ++ rest) final) post) :
     WP (fun fuel => run program fuel method pc args frame stack memory) post := by
   obtain ⟨childFuel, middle, output, invoked, helperResult⟩ := helper
-  obtain ⟨parentFuel, final, values, resumed, satisfied⟩ := suffix middle output helperResult
-  obtain ⟨fuel, executed⟩ := run_call_exists found fetched stepped
-    ⟨childFuel, invoked⟩ ⟨parentFuel, resumed⟩
-  exact ⟨fuel, final, values, executed, satisfied⟩
+  exact run_call_post found fetched stepped ⟨childFuel, invoked⟩
+    (suffix middle output helperResult)
 
 #print axioms call
 

@@ -53,6 +53,19 @@ bodies when their contracts suffice. Loop invariants must describe the state at 
 cutpoint, and continuing iterations must decrease an explicit measure. A finite successful
 sample does not establish termination for arbitrary input.
 
+`ValidCall memory inputs outputs` gives named `wellFormed`, `readable` and `writable` facts.
+Inputs may overlap each other and the outputs arbitrarily. Outputs need write access but need
+not be initialized. With `CIL.Safety.CallingFields`, the stepping tactics derive formed
+references and eight-byte field reads from this evidence, including fields indexed by a finite
+bound of at most 64. `input_snapshot` records current bytes; `output_slice` supplies write access
+to an in-range slice. `after_write` preserves call validity, but does not preserve old input
+contents when a write overlaps them. Read all needed input fields before an overlapping write,
+or prove the required contents separately.
+
+`MethodContract.not_holds_of_fault` refutes a contract from a checked located fault on an input
+meeting its precondition. It uses fuel monotonicity to rule out success at every budget;
+the witness must be a semantic fault, not fuel exhaustion.
+
 End new theorems with `#print axioms`. The normal verifier checks both the theorem and its
 extraction binding; a successful standalone elaboration is not the full verification workflow.
 See [soundness](SOUNDNESS.md) for the exact trust boundary and [validation](VALIDATION.md) for

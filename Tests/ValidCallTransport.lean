@@ -143,7 +143,7 @@ theorem revoke_confined : Confined [(source.reference, size)] sample revoked := 
 
 /-- With read authority revoked, the input can no longer be read. -/
 theorem revoked_invalid : ¬ ValidCall revoked [source] [target] := fun valid => by
-  obtain ⟨bytes, loaded⟩ := valid.2.1 source (List.mem_singleton_self _)
+  obtain ⟨bytes, loaded⟩ := valid.readable source (List.mem_singleton_self _)
   rw [show read revoked source.reference source.width 1 = .error .unreadable from rfl] at loaded
   cases loaded
 

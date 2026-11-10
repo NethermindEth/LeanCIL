@@ -11,10 +11,11 @@ partial class Program
     sealed record BatchRequest(string output, string proof, string theorem, string? expect = null);
     sealed record BatchManifest(int schema, string proofRoot, BatchRequest[] requests);
     sealed record BatchResult(string output, string proof, string theorem, string expect, string status, string stage,
-        string? error, string[]? axioms, string? libraryBuild, FailureReports.Report? failure);
+        string? error, string[]? axioms, string? libraryBuild, FailureReports.Report? failure,
+        double elapsedSeconds);
 
     const string BatchUsage = "Usage: leancil verify-batch requests.json [--fresh] [--rebuild-library] " +
-        "[--parallel count] [--results results.json] [--format text|json] [--trace]";
+        "[--parallel count] [--results results.json] [--format text|json] [--trace] [--check]";
 
     const string VerifyUsage = "Usage: leancil verify output-directory [--proof proof.lean] [--theorem name] " +
         "[--fresh] [--rebuild-library] [--proof-root package-directory] [--force-full-verify] " +
@@ -67,12 +68,18 @@ partial class Program
         var fresh = false;
         var rebuildLibrary = false;
         var trace = false;
+        var checkOnly = false;
         string? format = null;
         int? parallelism = null;
         string? resultsPath = null;
         for (var index = 1; index < args.Length; index++)
         {
             var option = args[index];
+            if (option == "--check" && !checkOnly)
+            {
+                checkOnly = true;
+                continue;
+            }
             if (option == "--trace" && !trace)
             {
                 trace = true;
@@ -119,6 +126,8 @@ partial class Program
                 request.expect is not (null or "verified" or "rejected")))
             throw new InvalidDataException("Invalid batch manifest: expected schema 1, proofRoot and requests with output, proof, theorem and optional expect (verified or rejected).");
         var proofRoot = Path.GetFullPath(manifest.proofRoot, directory);
+        if (checkOnly && manifest.requests.Any(request => request.expect == "rejected"))
+            throw new ArgumentException("--check accepts compilation requests, not rejection expectations.");
         var count = manifest.requests.Length;
         var outcomes = new ConsumerOutcome?[count];
         var requests = new List<ConsumerRequest>();
@@ -168,8 +177,9 @@ partial class Program
         bool Print(int i, ConsumerOutcome outcome)
         {
             var request = manifest.requests[i];
-            var expect = request.expect ?? "verified";
-            var passed = outcome.Error is null && (expect == "rejected" ? outcome.Rejected : outcome.Report is not null);
+            var expect = checkOnly ? "checked" : request.expect ?? "verified";
+            var passed = outcome.Error is null && (checkOnly ? outcome.Checked
+                : expect == "rejected" ? outcome.Rejected : outcome.Report is not null);
             lock (gate)
             {
                 if (printed[i]) return passed;
@@ -177,9 +187,13 @@ partial class Program
                 // The JSON document is printed whole once every request is final.
                 if (json) return passed;
                 if (passed)
-                    Console.WriteLine(expect == "rejected"
+                    Console.WriteLine(checkOnly
+                        ? $"PASS Checked {CliPaths.Display(outputs[i])} {request.theorem} " +
+                            $"({outcome.ElapsedSeconds:F3}s shared workspace)"
+                        : expect == "rejected"
                         ? $"PASS rejected {CliPaths.Display(outputs[i])} {request.theorem} ({outcome.Stage})"
-                        : $"PASS verified {CliPaths.Display(outputs[i])} {request.theorem}");
+                        : $"PASS verified {CliPaths.Display(outputs[i])} {request.theorem} " +
+                            $"({outcome.ElapsedSeconds:F3}s shared workspace)");
                 else
                 {
                     var error = outcome.Located() ?? new InvalidOperationException("Verification produced no result.");
@@ -198,7 +212,8 @@ partial class Program
         })
         {
             var verified = requests.Count == 0 ? [] : verification.VerifyConsumerRequests(proofRoot, requests, null, batch: true,
-                parallelism ?? Math.Max(1, Environment.ProcessorCount / 8), (k, outcome) => Print(indices[k], outcome));
+                parallelism ?? Math.Max(1, Environment.ProcessorCount / 8),
+                (k, outcome) => Print(indices[k], outcome), checkOnly: checkOnly);
             for (var k = 0; k < verified.Length; k++) outcomes[indices[k]] = verified[k];
         }
         // A rejected last request leaves no certificate for its output, as in sequential runs.
@@ -212,7 +227,7 @@ partial class Program
         {
             var request = manifest.requests[i];
             var outcome = outcomes[i]!;
-            var expect = request.expect ?? "verified";
+            var expect = checkOnly ? "checked" : request.expect ?? "verified";
             var passed = Print(i, outcome);
             var status = passed ? expect : "failed";
             if (!passed) failed++;
@@ -220,6 +235,7 @@ partial class Program
             var failure = outcome.Located() is { } error
                 ? FailureReports.Failed(outcome.Stage, error, request.theorem, proofs[i], outputs[i], proofRoot)
                 : outcome.Report is { } report ? FailureReports.Refuted(report.theoremAudit, request.theorem, proofs[i], outputs[i], proofRoot)
+                : outcome.Checked ? null
                 : FailureReports.Classify(outcome.Stage, outcome.Detail ?? "Verification produced no result.", outcome.Hidden,
                     request.theorem, proofs[i], outputs[i], proofRoot, outcome.Sources);
             if (lastForOutput.Contains(i))
@@ -229,7 +245,7 @@ partial class Program
             }
             results.Add(new(outputs[i], proofs[i], request.theorem, expect, status, outcome.Stage,
                 passed ? null : (outcome.Error?.Message ?? "Verification produced no result."),
-                outcome.Report?.axioms, outcome.Report?.libraryBuild, failure));
+                outcome.Report?.axioms, outcome.Report?.libraryBuild, failure, outcome.ElapsedSeconds));
             if (json) reports.Add(BatchEntry(outcome, failure, expect, status, request.theorem, proofs[i], outputs[i]));
         }
         if (resultsPath is not null)
@@ -245,13 +261,25 @@ partial class Program
                 ["failed"] = failed,
                 ["requests"] = reports,
             }));
-        else Console.WriteLine($"Batch: {count - failed} passed, {failed} failed of {count} requests.");
+        else Console.WriteLine(checkOnly
+            ? $"Compile check: {count - failed} checked, {failed} failed of {count} requests. " +
+                "No verification certificate."
+            : $"Batch: {count - failed} passed, {failed} failed of {count} requests.");
         return failed == 0 ? 0 : 1;
 
         // A request's expectation and status, with the report `verify --format json` gives for it.
         JsonObject BatchEntry(ConsumerOutcome outcome, FailureReports.Report? failure, string expect, string status,
             string theorem, string proof, string output)
         {
+            if (checkOnly)
+                return new JsonObject
+                {
+                    ["expect"] = expect, ["status"] = status, ["output"] = output,
+                    ["proof"] = proof, ["theorem"] = theorem, ["stage"] = outcome.Stage,
+                    ["elapsedSeconds"] = outcome.ElapsedSeconds,
+                    ["failure"] = failure is null ? null : JsonSerializer.SerializeToNode(failure, Json),
+                    ["messages"] = JsonSerializer.SerializeToNode(outcome.ProofMessages(proof), Json)
+                };
             var messages = outcome.ProofMessages(proof);
             var verified = outcome.Error is null && outcome.Report is not null;
             var report = VerifyReports.Result(verified ? "verified" : "failed", failure, theorem, proof, output,

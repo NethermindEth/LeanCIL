@@ -16,19 +16,23 @@ structure ArgumentView where
   width : Nat
   deriving DecidableEq, Repr
 
-/-- Ordinary entry requirements, independent of the method body or its future
-    execution. Output initialization is deliberately not required. -/
-def ValidCall (m : Memory) (inputs outputs : List ArgumentView) : Prop :=
-  m.WellFormed ∧
-    (∀ input ∈ inputs, ∃ bytes, read m input.reference input.width 1 = .ok bytes) ∧
-    ∀ output ∈ outputs, access m output.reference output.width 1 true = .ok ()
+/-- Ordinary entry requirements, independent of the method body or its future execution.
+    Inputs and outputs may overlap arbitrarily. Output initialization is not required, and
+    retained access never asserts that an input still holds its earlier contents. -/
+structure ValidCall (memory : Memory) (inputs outputs : List ArgumentView) : Prop where
+  /-- All allocations, views and reference slots obey the checked memory invariants. -/
+  wellFormed : memory.WellFormed
+  /-- Each input range is readable and initialized in this memory. -/
+  readable : ∀ input ∈ inputs, ∃ bytes, read memory input.reference input.width 1 = .ok bytes
+  /-- Each output range is writable, including initially unknown storage. -/
+  writable : ∀ output ∈ outputs, access memory output.reference output.width 1 true = .ok ()
 
 /-- Every byte of every input buffer is initialized. -/
 theorem validCall_inputs_initialized (m : Memory) (inputs outputs : List ArgumentView)
     (h : ValidCall m inputs outputs) (input : ArgumentView) (hi : input ∈ inputs) :
     ∀ i ∈ List.range input.width,
       (m.cells input.reference.allocation (input.reference.offset + i)).initialized = true := by
-  obtain ⟨bytes, hread⟩ := h.2.1 input hi
+  obtain ⟨bytes, hread⟩ := h.readable input hi
   exact read_requires_initialization _ _ _ _ _ hread
 
 /-- Every output buffer lies inside a live allocation. -/
@@ -36,6 +40,6 @@ theorem validCall_output_live (m : Memory) (inputs outputs : List ArgumentView)
     (h : ValidCall m inputs outputs) (output : ArgumentView) (ho : output ∈ outputs) :
     ∃ a, m.allocations output.reference.allocation = some a ∧ a.live = true ∧
       output.reference.offset + output.width ≤ a.layout.size := by
-  exact access_within_allocation _ _ _ _ _ (h.2.2 output ho)
+  exact access_within_allocation _ _ _ _ _ (h.writable output ho)
 
 end CIL.Safety
