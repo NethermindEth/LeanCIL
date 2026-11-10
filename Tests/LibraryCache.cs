@@ -9,6 +9,8 @@ Run(["dotnet", "run", "--file", At("Tests/LibraryRelease.cs")]);
 Run(["dotnet", "run", "--file", At("Tests/LibraryReplayCoverage.cs")]);
 var directory = Path.Combine(Path.GetTempPath(), "leancil-cache-test-" + Guid.NewGuid().ToString("N"));
 var prepared = directory + "-prepared";
+// Short, since a closure entry is built below it and Lean on Windows limits path lengths.
+var builtCache = Path.Combine(Path.GetTempPath(), "lc-" + Guid.NewGuid().ToString("N")[..8]);
 var unrelated = directory + "-unrelated";
 using var verifier = new Program { freshLibrary = true };
 try
@@ -135,6 +137,71 @@ try
         throw new Exception("A second closure entry was opened or built for one library");
     Console.WriteLine("PASS a closure entry is keyed by exactly its modules, rejects an import outside them, is " +
         "never the whole library and is the only one of its library");
+
+    // The smallest real closure, the audit executable's own modules, built and kernel-replayed from an empty
+    // cache: certification never opens a closure entry under CI, so this is where its build path runs there.
+    var (realKey, realSources) = verifier.LibraryIdentity(CommonInputs());
+    var built = verifier.ClosureLibrary(builtCache, realKey, realSources, [])
+        ?? throw new Exception("The audit executable's closure was not built");
+    var compiledClosure = Path.Combine(built.Directory, ".lake/build/lib/lean");
+    var builtAuditor = Path.Combine(built.Directory, ".lake/build/bin",
+        OperatingSystem.IsWindows() ? "leancil-audit.exe" : "leancil-audit");
+    if (!built.Built || !built.Modules.Contains(AuditModule) || built.Modules.Contains("CIL.Features") ||
+        built.Key != ClosureKey(realKey, built.Modules) || !File.Exists(builtAuditor) ||
+        !built.Modules.All(module => File.Exists(Path.Combine(compiledClosure, module.Replace('.', '/') + ".olean"))) ||
+        File.Exists(Path.Combine(built.Directory, "CIL.lean")) ||
+        verifier.CachedClosure(builtCache, realKey, realSources) != built.Directory)
+        throw new Exception("A built closure entry is not exactly its modules under its own key");
+    if (verifier.ClosureLibrary(builtCache, realKey, realSources, []) is not { Built: false } reused ||
+        reused.Key != built.Key)
+        throw new Exception("A certified closure entry was built again instead of reused");
+    // The record beside a library is not authenticated: an entry of another library must not seed this one.
+    File.WriteAllText(ClosureRecord(builtCache, "another-library"), built.Key);
+    if (verifier.CachedClosure(builtCache, "another-library", realSources) is not null)
+        throw new Exception("A closure entry of another library was accepted from an unauthenticated record");
+    Console.WriteLine($"PASS a closure of {built.Modules.Length} modules is built, replayed and reused from the cache");
+
+    // Lean accepts import spellings that a pattern over source text misses, so the boundary is read from the
+    // compiled import headers. Each proof here imports a module the pretended closure lacks.
+    const string outside = "CIL.Replay";
+    string[] spellings = [$"import Lean import {outside}\n", $"import\n  {outside}\n", "import «CIL».Replay\n"];
+    using (var session = new Program
+    {
+        library = built.Directory, libraryKey = built.Key, auditExecutable = builtAuditor,
+        auditExecutableSha = built.Manifest[Path.GetRelativePath(built.Directory, builtAuditor).Replace('\\', '/')],
+        baseModules = new(built.Modules.ToDictionary(module => module.Replace('.', '/') + ".olean", _ => "hash"),
+            StringComparer.Ordinal)
+    })
+        for (var index = 0; index < spellings.Length; index++)
+        {
+            var proofs = Path.Combine(builtCache, "proof" + index);
+            Directory.CreateDirectory(proofs);
+            File.WriteAllText(Path.Combine(proofs, "Proof.lean"),
+                spellings[index] + "theorem closureBoundary : True := True.intro\n");
+            Run([session.LeanExecutable, "-o", Path.Combine(proofs, "Proof.olean"), Path.Combine(proofs, "Proof.lean")],
+                proofs, compiledClosure);
+            session.libraryModules = built.Modules;
+            session.RequireReplayedImports(proofs, proofs);
+            session.libraryModules = [.. built.Modules.Where(module => module != outside)];
+            ExpectRejection(() => session.RequireReplayedImports(proofs, proofs), "does not hold");
+        }
+    Console.WriteLine("PASS an import outside the closure is refused from the compiled header in every spelling");
+
+    // A reader keeps the entry; once it is gone the whole library's publisher removes the entry with its record.
+    using (new FileStream(ClosureUse(built.Directory), FileMode.OpenOrCreate, FileAccess.Read, FileShare.Read))
+        RemoveClosure(builtCache, realKey);
+    if (verifier.CachedClosure(builtCache, realKey, realSources) != built.Directory)
+        throw new Exception("A closure entry was removed while a process read it");
+    // A module rewritten in the entry is neither opened nor used to seed the whole library.
+    File.AppendAllText(Path.Combine(compiledClosure, AuditModule.Replace('.', '/') + ".olean"), "rewritten");
+    if (verifier.CachedClosure(builtCache, realKey, realSources) is not null ||
+        HashedCacheEntry(built.Directory, built.Manifest) is not null)
+        throw new Exception("A closure entry with a rewritten module was accepted");
+    RemoveClosure(builtCache, realKey);
+    if (Directory.Exists(built.Directory) || File.Exists(ClosureRecord(builtCache, realKey)))
+        throw new Exception("An unread closure entry or its record was left behind");
+    Console.WriteLine("PASS a closure entry in use is kept, a rewritten one is rejected and an unread one is removed");
+
     File.WriteAllText(cacheManifest, System.Text.Json.JsonSerializer.Serialize(new SortedDictionary<string, string>(StringComparer.Ordinal)));
     if (verifier.CertifiedLocalLibrary(directory, "cache-key")) throw new Exception("Replaced cache manifest accepted");
 
@@ -197,6 +264,7 @@ finally
     Directory.Delete(directory, true);
     if (Directory.Exists(directory + "-closure")) Directory.Delete(directory + "-closure", true);
     if (Directory.Exists(directory + "-closure-cache")) Directory.Delete(directory + "-closure-cache", true);
+    if (Directory.Exists(builtCache)) Directory.Delete(builtCache, true);
     if (Directory.Exists(prepared)) Directory.Delete(prepared, true);
     if (Directory.Exists(unrelated)) Directory.Delete(unrelated, true);
 }

@@ -111,6 +111,9 @@ void Rebuild(string from, string to)
 string[] EditorFiles() => [.. Directory.EnumerateFiles(editor, "*", SearchOption.AllDirectories)
     .Select(path => Path.GetRelativePath(editor, path).Replace('\\', '/')).Order(StringComparer.Ordinal)];
 
+// Every package below requires the certified library by path; on a machine without it, building it here keeps
+// that build out of the lowered environment limit of the next check.
+EditorLibrary();
 Console.WriteLine("Rejecting an editor environment Lean would truncate, before writing the editor library");
 // A lowered limit stands in for Lean's Windows buffer on every OS; the editor's `lake serve` would lose LEAN_PATH.
 var crowded = Execute(command,
@@ -384,6 +387,13 @@ if (!removed.Contains("Removed editor extraction " + otherKey, StringComparison.
     throw new InvalidOperationException("Removing the other selection left files behind or touched the first: " +
         removed + string.Join(", ", EditorFiles()) + removedCheck.Output);
 CheckedProof();
+// Lake applies whatever overrides a package holds; another tool's are neither merged nor replaced.
+var packageOverrides = Path.Combine(package, ".lake", "package-overrides.json");
+var writtenOverrides = File.ReadAllText(packageOverrides);
+File.WriteAllText(packageOverrides, """{"version": "1.1.0", "packages": []}""");
+Reject(command, "already holds package overrides");
+File.WriteAllText(packageOverrides, writtenOverrides);
+CheckedProof();
 var olderRevision = Run(["git", "rev-parse", "HEAD^"], framework).Trim();
 try
 {
@@ -496,6 +506,109 @@ finally
 Console.WriteLine("PASS a standalone proof gets a package beside it without git commits, a pinned framework or a " +
     "framework build of its own, leaves the certified library unwritten, verifies as a single file and " +
     "refreshes on re-run");
+
+Console.WriteLine("Verifying a first proof against its import closure from an empty library cache");
+// Certification under CI never reads the cache, so this machine has none and is not CI for these commands.
+var closureCache = Path.Combine(Path.GetTempPath(), "lc-" + Guid.NewGuid().ToString("N")[..8]);
+var uncached = new Dictionary<string, string>
+{
+    ["CI"] = "", ["GITHUB_ACTIONS"] = "", ["LEANCIL_CERTIFIED_LIBRARY"] = "",
+    ["LEANCIL_CERTIFIED_LIBRARY_SHA256"] = "", ["LEANCIL_CACHE_DIR"] = closureCache
+};
+var closureOutput = Path.Combine(root, "Closure");
+var closureProof = Path.Combine(root, "ClosureProof.lean");
+const string outsideModule = "CIL.Verification";
+const string closureBuild = "framework modules this proof imports";
+const string wholeBuild = "Building the whole certified library";
+Run([.. cli, "extract", assembly, method, closureOutput, "scalar", "--assume-initialized", initializedType]);
+string[] verifyClosure = [.. cli, "verify", closureOutput, "--proof", closureProof, "--theorem", "closure"];
+string[] ClosureEntries() => [.. Directory.EnumerateDirectories(closureCache).Select(Path.GetFileName)
+    .Where(name => name != "success-v1")!];
+JsonElement ClosureReport() =>
+    JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(closureOutput, "verified.json")));
+try
+{
+    // The whole library is required for a full audit, for contract imports and for an import that is neither
+    // the extraction nor a framework module; only then is no closure considered.
+    var closureIdentity = ExtractionIdentity.Read(closureOutput);
+    string[]? Roots(Program program, string source, ExtractionIdentity identity)
+    {
+        using (program) return program.ClosureRoots(source, closureOutput, null, identity);
+    }
+    const string plainProof = "import Extracted\n";
+    if (Roots(new() { importClosureFirst = true }, plainProof, closureIdentity) is not { Length: > 0 } ||
+        Roots(new(), plainProof, closureIdentity) is not null ||
+        Roots(new() { importClosureFirst = true, forceFullVerification = true }, plainProof, closureIdentity)
+            is not null ||
+        Roots(new() { importClosureFirst = true }, plainProof + "import Client.Support\n", closureIdentity)
+            is not null ||
+        Roots(new() { importClosureFirst = true }, plainProof, closureIdentity with
+            { Sources = new(StringComparer.Ordinal) { ["Imported"] = "interface" } }) is not null)
+        throw new InvalidOperationException("A proof that needs the whole library was offered a closure entry.");
+
+    // Lean reads both imports of this line, a pattern over the source neither; the closure, built from the
+    // extraction's imports, lacks the module, and the proof must not verify.
+    File.WriteAllText(closureProof, $"import Extracted import {outsideModule}\n" +
+        "theorem closure : Extracted.program.length = 1 := rfl\n");
+    var cold = Stopwatch.StartNew();
+    var refused = Execute(verifyClosure, environment: uncached);
+    var record = Directory.EnumerateFiles(closureCache, "*.closure").Single();
+    var wholeKey = Path.GetFileNameWithoutExtension(record);
+    var closureKey = File.ReadAllText(record);
+    if (refused.Code == 0 || !refused.Stderr.Contains(closureBuild, StringComparison.Ordinal) ||
+        !refused.Output.Contains(outsideModule, StringComparison.Ordinal) ||
+        refused.Stderr.Contains(wholeBuild, StringComparison.Ordinal) ||
+        File.Exists(Path.Combine(closureOutput, "verified.json")) || !ClosureEntries().SequenceEqual([closureKey]))
+        throw new InvalidOperationException("An import outside the closure verified, or no closure entry was " +
+            "built for the proof: " + refused.Output);
+    var closureSeconds = cold.Elapsed.TotalSeconds;
+
+    // An unfinished proof reuses the entry and, having no result to report, leaves the whole library unbuilt.
+    File.WriteAllText(closureProof,
+        "import Extracted\ntheorem closure : Extracted.program.length = 1 := by\n  sorry\n");
+    var unfinished = Execute([.. verifyClosure, "--goals"], environment: uncached);
+    if (unfinished.Code == 0 || unfinished.Stderr.Contains(closureBuild, StringComparison.Ordinal) ||
+        unfinished.Stderr.Contains(wholeBuild, StringComparison.Ordinal) ||
+        !unfinished.Output.Contains("Goals (1)", StringComparison.Ordinal) ||
+        !ClosureEntries().SequenceEqual([closureKey]))
+        throw new InvalidOperationException("An unfinished proof rebuilt the closure, completed the library " +
+            "or showed no goal: " + unfinished.Output);
+
+    // The verified result names the closure's key and exactly its modules; the same command then builds the
+    // whole library, which replaces the entry.
+    File.WriteAllText(closureProof, """
+        import Extracted
+        theorem closure : Extracted.program.length = 1 := rfl
+        #print axioms closure
+        """);
+    var completing = Stopwatch.StartNew();
+    var verifiedClosure = Execute(verifyClosure, environment: uncached);
+    var closureReport = ClosureReport();
+    var replayed = closureReport.GetProperty("libraryModules").Deserialize<string[]>()!;
+    if (verifiedClosure.Code != 0 || !verifiedClosure.Stdout.Contains("Verified: closure", StringComparison.Ordinal) ||
+        !verifiedClosure.Stderr.Contains(wholeBuild, StringComparison.Ordinal) ||
+        closureReport.GetProperty("libraryBuild").GetString() != "closure-cache" ||
+        closureReport.GetProperty("libraryKey").GetString() != closureKey ||
+        !replayed.Contains("CIL.OleanAudit") || replayed.Contains(outsideModule) || replayed.Contains("CIL") ||
+        !ClosureEntries().SequenceEqual([wholeKey]) || File.Exists(record))
+        throw new InvalidOperationException("The closure certificate does not state what was replayed, or the " +
+            "whole library did not replace the entry: " + verifiedClosure.Output + "\n" + closureReport);
+    var completionSeconds = completing.Elapsed.TotalSeconds;
+
+    var whole = Execute([.. verifyClosure, "--fresh"], environment: uncached);
+    var wholeReport = ClosureReport();
+    if (whole.Code != 0 || wholeReport.GetProperty("libraryBuild").GetString() != "cache" ||
+        wholeReport.GetProperty("libraryKey").GetString() != wholeKey ||
+        wholeReport.TryGetProperty("libraryModules", out var listed) && listed.ValueKind != JsonValueKind.Null)
+        throw new InvalidOperationException("The whole library was not preferred once cached: " + whole.Output);
+    Console.WriteLine($"PASS a first proof is refused an import outside its closure of {replayed.Length} modules " +
+        $"({closureSeconds:F0}s), reuses the entry, is certified under the closure's key, and the same command " +
+        $"completes the whole library ({completionSeconds:F0}s), which later runs prefer");
+}
+finally
+{
+    if (Directory.Exists(closureCache)) Directory.Delete(closureCache, true);
+}
 
 Console.WriteLine("Watching two proofs of two methods in one package");
 var twiceProof = Path.Combine(package, "TwiceProof.lean");
