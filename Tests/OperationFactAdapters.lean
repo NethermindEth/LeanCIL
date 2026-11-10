@@ -158,6 +158,13 @@ theorem branch_zero_literal (word : CIL.W32) (memory : Memory) (zero : word = 0#
   cil_checked_steps [zero]
 #print axioms branch_zero_literal
 
+/-- A closed zero operand decides the negative branch condition without a supplied guard. -/
+theorem branch_closed_zero (memory : Memory) :
+    invoke [truthBranchBody (.brnonzero 4)] 5 0 [.scalar (.i32 0)] memory =
+      .ok (memory, [.scalar (.i64 1)]) := by
+  cil_checked_steps []
+#print axioms branch_closed_zero
+
 /-- A signed comparison follows a narrowing conversion of a symbolic natural literal. -/
 @[cil_code] def narrowedBranchBody : CIL.Method := {
   locals := [], returnsValue := true,

@@ -46,7 +46,7 @@ attribute [cil_side] List.mapM List.mapM.loop List.reverse_nil List.reverse_cons
   List.set_cons_zero List.set_cons_succ List.set_nil
   List.replicate_succ List.replicate_zero
   Option.getD_some Option.getD_none
-  Bool.false_eq_true Bool.true_eq_false not_false_eq_true ite_true ite_false
+  Bool.false_eq_true Bool.true_eq_false not_false_eq_true not_true_eq_false ite_true ite_false
   Bool.false_or Bool.or_false Bool.true_or Bool.or_true Bool.false_and Bool.and_false
   Bool.true_and Bool.and_true Bool.not_true Bool.not_false
   Bool.true_bne Bool.false_bne Bool.bne_true Bool.bne_false Bool.true_beq Bool.false_beq
