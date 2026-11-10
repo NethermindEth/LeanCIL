@@ -248,8 +248,8 @@ const string ReplacedHelper = """
 theorem decrement_holds : decrementContract.Holds Extracted.program decrement := by
   rintro x m -
   dsimp only [decrementContract]
-  refine ⟨8, (m, _), ?_, Confined.refl _ m, x + 4294967295#32, rfl, by bv_omega⟩
-  cil_checked_steps
+  cil_contract_steps []
+  exact ⟨Confined.refl _ m, x + 4294967295#32, rfl, by bv_omega⟩
 
 
 """;
@@ -374,8 +374,8 @@ theorem bump_holds : bumpContract.Holds Extracted.program bump := by
     simp only [bumpContract, ite_true]
     cil_raise_steps []
   · simp only [bumpContract, same, ite_false]
-    refine ⟨8, m, _, ?_, Confined.refl _ m, count - 4294967295#32, rfl, by bv_omega⟩
-    cil_checked_steps [same]
+    cil_contract_steps [same]
+    exact ⟨Confined.refl _ m, count - 4294967295#32, rfl, by bv_omega⟩
 
 
 """;
