@@ -811,7 +811,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     // Lake traces depend on compiled imports even when framework sources are unchanged.
     string ConsumerSupportCacheKey(SortedDictionary<string, string> snapshot,
         IEnumerable<string> importDirectories, IEnumerable<string> configuration) =>
-        ConsumerCacheKey("support", new(snapshot.Where(pair => pair.Key.StartsWith("revision:", StringComparison.Ordinal))
+        ConsumerCacheKey("support", new(snapshot.Where(pair =>
+                pair.Key.StartsWith("revision:", StringComparison.Ordinal))
                 .ToDictionary(), StringComparer.Ordinal),
             string.Join("\n", importDirectories) + "\n" + string.Join("\n", configuration) + "\n" +
             JsonSerializer.Serialize(baseModules));
