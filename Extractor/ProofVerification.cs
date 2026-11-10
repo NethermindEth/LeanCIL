@@ -419,6 +419,7 @@ partial class Program
                 freshProofs = fresh || forceFull,
                 freshLibrary = rebuildLibrary,
                 forceFullVerification = forceFull,
+                importClosureFirst = proofRoot is null,
                 viewsStatement = true,
                 structuredFailures = json,
                 tracesSteps = trace,

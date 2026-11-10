@@ -64,8 +64,9 @@ var proof = Path.Combine(package, "Proof.lean");
 File.WriteAllText(proof, "import Extracted\n#check Extracted.program\n");
 Run(["lake", "update"], package);
 var framework = Path.Combine(package, ".lake", "packages", "leancil");
-var editor = Path.Combine(framework, ".lake", "leancil");
-var compiledModules = Path.Combine(framework, ".lake", "build", "lib", "lean");
+// The editor library is the package's own; Lake resolves the pinned framework to the cached certified library.
+var editor = Path.Combine(package, ".lake", "leancil");
+var compiledModules = Path.Combine(package, ".lake", "leancil-editor", ".lake", "build", "lib", "lean");
 string[] command = [.. cli, "workspace", assembly, method, "--profile", "scalar", "--proof", proof,
     "--theorem", "WorkspaceProof.selectedMethod", "--assume-initialized", initializedType];
 
@@ -158,6 +159,11 @@ if (!EditorFiles().SequenceEqual(editorFiles) ||
         string.Join(", ", EditorFiles()));
 if (Run(["git", "status", "--porcelain"], framework).Length != 0)
     throw new InvalidOperationException("The editor extraction changed the framework checkout's tracked files.");
+// A framework build in the package, copied or compiled, would be a second one beside the certified library.
+if (Directory.Exists(Path.Combine(framework, ".lake")) ||
+    Directory.EnumerateFiles(Path.Combine(package, ".lake"), "*.olean", SearchOption.AllDirectories)
+        .Any(path => Path.GetRelativePath(package, path).Split('/', '\\').Any(part => part is "CIL" or "CIL.olean")))
+    throw new InvalidOperationException("The pinned package holds a framework build of its own.");
 var codeLength = CodeLength(key);
 File.AppendAllText(proof, $"""
 
