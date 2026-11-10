@@ -48,9 +48,8 @@ theorem unrelated_rejected (memory : CIL.Safety.Memory) (type : RuntimeType)
     (unrelated : shapeType ∉ type.lineage) (size : Nat) :
     objectFieldAddress (objectMemory memory type size) (.address ⟨memory.nextIdentity, 0⟩)
       shapeType 0 =
-        .error (.unsupported "Field owner is not the object's class or a base of it") := by
-  simp [objectFieldAddress, liveAllocation, objectMemory, checkedAt, Except.mapError, Bind.bind,
-    Except.bind, Pure.pure, Except.pure, unrelated]
+        .error (.unsupported "Field owner is not the object's class or a base of it") :=
+  objectMemory_field_unrelated memory type size 0 shapeType unrelated
 
 #print axioms unrelated_rejected
 

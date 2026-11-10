@@ -549,7 +549,12 @@ static partial class Documentation
     [
         "CIL.step", "CIL.Safety.step", "CIL.Safety.run", "CIL.Safety.invoke", "CIL.Safety.pureArity",
         "CIL.Safety.scalars", "CIL.Safety.instructionStep", "CIL.Safety.staticInstruction",
-        "CIL.Safety.checkedIntrinsic", "CIL.Safety.checkedValue", "CIL.Safety.numericValue"
+        "CIL.Safety.checkedIntrinsic", "CIL.Safety.checkedValue", "CIL.Safety.numericValue",
+        "CIL.Safety.checkedAt", "CIL.Safety.formValue", "CIL.Safety.storeValue",
+        "CIL.Safety.instruction", "CIL.Safety.memoryInstruction", "CIL.Safety.otherMemoryInstruction",
+        "CIL.Safety.observerCount", "CIL.Safety.unspecifiedOperands",
+        "CIL.Value.hasUnspecified", "CIL.Safety.Value.hasUnspecified",
+        "Except.mapError", "Bind.bind", "Except.bind", "Pure.pure", "Except.pure"
     ];
 
     const string InternalReason =

@@ -215,6 +215,15 @@ try
     Fails("a simp only list naming an internal by its last component",
         "```lean illustrative\n  simp only [calculation,\n    checkedValue] at h\n```",
         "`checkedValue`, which " + Internal);
+    Fails("a documentation simp list unfolding checked memory dispatch",
+        "```lean illustrative\n  simp only [checkedAt, storeValue, memoryInstruction]\n```",
+        "`checkedAt`, which " + Internal);
+    ExampleFails("an example simp list unfolding monad evaluation",
+        "theorem ran : True := by\n  simp only [Except.bind, Bind.bind, Pure.pure]\n#print axioms ran\n",
+        "`Except.bind`, which " + Internal);
+    ExampleFails("an example simp list unfolding unspecified-value checks",
+        "theorem known : True := by\n  simp [CIL.Value.hasUnspecified]\n#print axioms known\n",
+        "`CIL.Value.hasUnspecified`, which " + Internal);
     Passes("a simp list naming a hypothesis called step",
         "```lean illustrative\n  have step : a = b := rfl\n  simp [step]\n```");
     Passes("an internal named outside a simp list",

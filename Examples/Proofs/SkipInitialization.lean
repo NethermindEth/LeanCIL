@@ -1,4 +1,7 @@
 import Extracted
+import CIL.Safety.SymbolicExecution
+
+/-! Skipping initialization consumes a checked reference without initializing its storage. -/
 
 namespace ExampleProof
 
@@ -25,13 +28,16 @@ theorem correctness :
     invoke Extracted.program 4 0 [callerReference] uninitialized = .ok (uninitialized, []) := by
   rfl
 
-theorem instruction_preserves (memory : Memory) (reference : ManagedReference) (stack : List Value)
+/-- The checked instruction preserves every byte and initialization flag of caller memory. -/
+theorem step_preserves (body : CIL.Method) (pc : Nat) (args : List Value)
+    (frame : Frame) (memory : Memory) (reference : ManagedReference) (stack : List Value)
     (valid : ∃ value, formValue memory reference = .ok value) :
-    instruction .skipInit (.reference reference :: stack) memory = .ok (memory, stack) := by
+    step body .skipInit pc args frame (.reference reference :: stack) memory =
+      .ok (.next (pc + 1) stack frame memory) := by
   obtain ⟨value, valid⟩ := valid
-  simp [instruction, observerCount, unspecifiedOperands, CIL.Safety.Value.hasUnspecified,
-    valid, Functor.map, Except.map]
+  rw [step_skipInit_reference_eq, valid]
+  rfl
 
 #print axioms correctness
-#print axioms instruction_preserves
+#print axioms step_preserves
 end ExampleProof

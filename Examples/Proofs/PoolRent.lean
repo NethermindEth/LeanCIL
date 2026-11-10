@@ -226,9 +226,9 @@ theorem rent_creates (memory : Memory) (pool : Reference) (wellFormed : memory.W
   -- `Rent` keeps the old id in its numeric local, whose home the frame owns.
   obtain ⟨counter, idWritten, idStored, idRead⟩ := store_numeric_local .word32
     (.i32 (ItemPool._nextId.of memory pool)) (ItemPool._nextId.of memory pool).toNat
-    (by simp [localNumber, CIL.Value.hasUnspecified]) enter.numeric1.writable
+    (by rfl) enter.numeric1.writable
   have idLoaded := load_numeric_local .word32 (.i32 (ItemPool._nextId.of memory pool)) _
-    (by simp [localNumber, CIL.Value.hasUnspecified]) idRead
+    (by rfl) idRead
   have counterBelow := write_preserves_memory_below _ _ _ _ _ _ enter.numeric1.fresh idWritten
   have counterNext := write_nextIdentity idWritten
   have nextId1 := nextId0.after_below counterBelow nextId.old (by omega)
@@ -240,7 +240,7 @@ theorem rent_creates (memory : Memory) (pool : Reference) (wellFormed : memory.W
     Nat.ne_of_gt (Nat.lt_of_lt_of_le nextId.old enter.numeric1.fresh)
   have idRead2 := write_preserves_disjoint_read nextWritten idRead (Or.inl homeApart)
   have idLoaded2 := load_numeric_local .word32 (.i32 (ItemPool._nextId.of memory pool)) _
-    (by simp [localNumber, CIL.Value.hasUnspecified]) idRead2
+    (by rfl) idRead2
   have numberedFormed : numbered.WellFormed :=
     write_preserves_wellFormed _ _ _ _ _
       (write_preserves_wellFormed _ _ _ _ _ enter.entryMemory.wellFormed idWritten) nextWritten

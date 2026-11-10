@@ -3,6 +3,7 @@ import CIL.MethodIdentity
 import CIL.Safety.SymbolicExecution
 import CIL.Safety.HeapObjectFacts
 import CIL.Safety.MemoryLemmas
+import CIL.Safety.ObjectFraming
 
 /-!
 # Instances of a class with no fields
@@ -41,8 +42,9 @@ theorem correctness (memory : Memory) (formed : memory.WellFormed) :
   have firstKept : formObject (objectMemory (objectMemory memory marker 0) marker 0)
       (.address ⟨memory.nextIdentity, 0⟩) =
         .ok (.object (.address ⟨memory.nextIdentity, 0⟩)) := by
-    simp [formObject, liveAllocation, objectMemory, checkedAt, Except.mapError, Bind.bind,
-      Except.bind, Pure.pure, Except.pure]
+    rw [formObject_of_allocation ((allocateObject_effect second).below.allocations
+      memory.nextIdentity (by simp [objectMemory]))]
+    exact firstCreated
   -- The second instance is a later allocation than the first.
   have distinct : memory.nextIdentity ≠ (objectMemory memory marker 0).nextIdentity := by
     simp [objectMemory]
