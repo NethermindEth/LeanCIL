@@ -72,15 +72,23 @@ names `Extracted.program` whichever key it imports. The command warns when the
 proof imports plain `Extracted` or another method's key and names the import to
 use.
 
-The pinned `leancil` package declares an editor library, `LeanCILEditor`, below
-its ignored `.lake/packages/leancil/.lake/leancil` directory. The command
+The editor library, `LeanCILEditor`, reads its sources from the package's
+ignored `.lake/leancil` directory. In a package that pins `leancil`, the command
+writes `.lake/package-overrides.json`, which Lake applies over the manifest: the
+`leancil` requirement then resolves to `.lake/leancil-framework`, a lakefile
+whose source and build directories are the certified library in the
+[library cache](CLI.md#stage-progress) and which brings in
+`.lake/leancil-editor`, the package that declares that library, so the package compiles no
+framework module and holds no framework build. The manifest and the pinned
+checkout are untouched, and the command refuses a package that already has
+overrides it did not write. The command
 extracts the method, writes `Extracted/KEY.lean` and `ExtractedSymbols/KEY.lean`
 there and builds them with Lake, so the import resolves in the proof and in any
 helper module of the package, and Lake rebuilds helpers that import it when that
-extraction changes. Other methods' modules are left as they are. In a LeanCIL
-checkout the root package is `leancil`, so the directory is the checkout's own
-`.lake/leancil`; a package the command generates declares the library itself, in
-its own `.lake/leancil`. No plain `Extracted` module is generated: a proof that names no
+extraction changes. Other methods' modules are left as they are. A LeanCIL
+checkout is the framework package: its lakefile declares the editor library and
+it builds its own framework modules. A package the command generates declares
+the library itself. No plain `Extracted` module is generated: a proof that names no
 method fails at its import instead of checking against whichever method was
 selected last. `ExtractedSymbols.KEY` exists only while the assembly has a
 matching portable PDB. `selections/KEY/selection.json` records the selection

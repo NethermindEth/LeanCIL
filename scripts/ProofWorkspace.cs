@@ -108,15 +108,8 @@ partial class Program
             throw new InvalidDataException("A different lean-toolchain already pins " + package +
                 "; pass --proof-root for a Lake package on the tool's toolchain.");
         // Lake reads a rewritten requirement on its next run, so pointing it at another library needs no update.
-        var lakefile = $"name = \"{ScratchPackageName}\"\n" + FrameworkRequirement(package, EditorLibrary()) + $"""
-
-            [[lean_lib]]
-            name = "{EditorLibraryName}"
-            srcDir = "{EditorSourceDirectory}"
-            roots = ["Extracted", "ExtractedSymbols"]
-            defaultFacets = []
-
-            """;
+        var lakefile = $"name = \"{ScratchPackageName}\"\n" + FrameworkRequirement(package, EditorLibrary()) +
+            EditorLibraryDeclaration(EditorSourceDirectory);
         var lakefilePath = Path.Combine(package, "lakefile.toml");
         if (File.Exists(lakefilePath) && File.ReadAllText(lakefilePath) == lakefile &&
             File.Exists(Path.Combine(package, "lake-manifest.json")))
@@ -126,6 +119,83 @@ partial class Program
         Run(["lake", "update"], package);
     }
 
+    /// <summary>The declaration of the editor library, whose sources are in `sources`.</summary>
+    static string EditorLibraryDeclaration(string sources) => $"""
+
+        [[lean_lib]]
+        name = "{EditorLibraryName}"
+        srcDir = "{sources}"
+        roots = ["Extracted", "ExtractedSymbols"]
+        defaultFacets = []
+
+        """;
+
+    /// <summary>Relative directory of the package declaring the editor library where leancil is pinned.</summary>
+    const string PinnedEditorPackage = ".lake/leancil-editor";
+    /// <summary>Lake reads these entries in place of the manifest's entries of the same names.</summary>
+    const string PackageOverrides = ".lake/package-overrides.json";
+    const string PinnedEditorPackageName = "leancil_editor";
+
+    /// <summary>Whether `root` is a LeanCIL checkout, which is the framework and builds it itself.</summary>
+    static bool IsCheckout(string root) => JsonSerializer.Deserialize<JsonElement>(
+        File.ReadAllText(Path.Combine(root, "lake-manifest.json"))).GetProperty("name").GetString() == "leancil";
+
+    /// <summary>
+    /// Makes Lake resolve the pinned leancil requirement of the package at `root` to the cached certified
+    /// library, read in place, which brings in a package below `.lake` that declares the editor library, so the
+    /// package's editor builds compile no framework module. The pinned checkout and the manifest are left as
+    /// they are, and verification reads neither this nor any `.lake` directory.
+    /// </summary>
+    static void PinnedProofPackage(string root)
+    {
+        var editorPackage = Path.Combine(root, PinnedEditorPackage);
+        Directory.CreateDirectory(editorPackage);
+        FrameworkPackage(root, EditorLibrary(),
+            $"\n[[require]]\nname = \"{PinnedEditorPackageName}\"\npath = \"../leancil-editor\"\n");
+        WriteIfChanged(Path.Combine(editorPackage, "lakefile.toml"),
+            $"name = \"{PinnedEditorPackageName}\"\n" + EditorLibraryDeclaration("../leancil"));
+        WriteIfChanged(Path.Combine(editorPackage, "lean-toolchain"), File.ReadAllText(At("lean-toolchain")));
+        static object Entry(string name, string directory, bool inherited) => new
+        {
+            type = "path", scope = "", name, manifestFile = "lake-manifest.json", inherited, dir = directory,
+            configFile = "lakefile.toml"
+        };
+        var overrides = JsonSerializer.Serialize(new
+        {
+            version = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(root,
+                "lake-manifest.json"))).GetProperty("version").GetString(),
+            packages = new[]
+            {
+                Entry("leancil", ".lake/leancil-framework", false),
+                Entry(PinnedEditorPackageName, PinnedEditorPackage, true)
+            }
+        }, Json) + "\n";
+        var path = Path.Combine(root, PackageOverrides);
+        // Lake would apply another tool's overrides too; replacing them could change what the package builds.
+        if (File.Exists(path) && !JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(path))
+                .GetProperty("packages").EnumerateArray().Select(package => package.GetProperty("name").GetString())
+                .SequenceEqual(["leancil", PinnedEditorPackageName]))
+            throw new InvalidDataException(CliPaths.Display(path) + " already holds package overrides that leancil " +
+                "workspace did not write. Remove it, then run this command again.");
+        WriteIfChanged(path, overrides);
+    }
+
+    /// <summary>
+    /// The package whose editor library serves `root`, after pointing a generated package or one that pins
+    /// leancil at the certified library the tool's framework has in the cache.
+    /// </summary>
+    static string LinkedEditorPackage(string root, bool created = false)
+    {
+        if (created || IsScratchPackage(root)) ScratchProofPackage(root);
+        var package = EditorPackage(root);
+        if (!IsScratchPackage(root) && !IsCheckout(root)) PinnedProofPackage(root);
+        return package;
+    }
+
+    /// <summary>Where Lake puts the compiled editor modules of the package at `root`.</summary>
+    static string EditorBuildDirectory(string root) => IsScratchPackage(root) || IsCheckout(root)
+        ? Path.Combine(root, ".lake", "build") : Path.Combine(root, PinnedEditorPackage, ".lake", "build");
+
     /// <summary>
     /// Writes the selected method's extraction into the editor library of the proof's package as
     /// `Extracted.KEY` (and `ExtractedSymbols.KEY`) and builds it there, so the proof resolves its own method's
@@ -134,9 +204,7 @@ partial class Program
     static void RefreshEditorExtraction(WorkspaceSettings settings)
     {
         var root = settings.ProofRoot;
-        if (settings.CreatedPackage || IsScratchPackage(root)) ScratchProofPackage(root);
-        var package = EditorPackage(root);
-        var editor = Path.Combine(package, EditorSourceDirectory);
+        var editor = Path.Combine(LinkedEditorPackage(root, settings.CreatedPackage), EditorSourceDirectory);
         // The editor's `lake serve` starts Lean the same way; an oversized environment fails here, not as imports.
         RequireLeanEnvironmentFits(["lake", "serve"], root, new System.Diagnostics.ProcessStartInfo().Environment);
         var selection = new EditorSelection(settings.Assembly, settings.Method, settings.Profile,
@@ -154,8 +222,7 @@ partial class Program
                     .OrderBy(other => other.Proof, StringComparer.Ordinal)]
             };
             var modules = ApplyEditorExtraction(editor, key, extraction, selection);
-            // A package that requires the cached library by path has no framework build to fill.
-            if (!IsScratchPackage(root)) SeedFrameworkBuild(package);
+
             BuildEditorModules(root, modules);
             PrintEditorExtraction(settings, editor, key, modules);
         }
@@ -305,7 +372,7 @@ partial class Program
         var selection = selections[key];
         RemoveEditorModules(editor, key);
         Directory.Delete(Path.Combine(editor, EditorSelectionsDirectory, key), true);
-        var build = Path.Combine(package, ".lake", "build");
+        var build = EditorBuildDirectory(root);
         if (Directory.Exists(build))
             foreach (var output in Directory.EnumerateFiles(build, key + ".*", SearchOption.AllDirectories)
                 .Where(path => Path.GetFileName(Path.GetDirectoryName(path)) is "Extracted" or "ExtractedSymbols"))
@@ -319,29 +386,26 @@ partial class Program
     }
 
     /// <summary>
-    /// Builds the editor modules in the package at `root`. A generated package requires the certified library by
-    /// path, where Lake would rebuild a framework module it found stale, so such a build must leave it unwritten.
+    /// Builds the editor modules in the package at `root`. Outside a LeanCIL checkout the package requires the
+    /// certified library by path, where Lake would rebuild a stale framework module, so the build must leave
+    /// it unwritten.
     /// </summary>
     static void BuildEditorModules(string root, IReadOnlyCollection<string> modules)
     {
         if (modules.Count == 0) return;
         void Build() => Run(["lake", "build", .. modules.Select(module => "+" + module)], root,
             progress: "Building " + string.Join(", ", modules));
-        if (IsScratchPackage(root)) RequireUnwritten(EditorLibrary(), Build);
+        if (!IsCheckout(root)) RequireUnwritten(EditorLibrary(), Build);
         else Build();
     }
 
     /// <summary>
-    /// The package whose editor library serves `root`: the root itself for a generated package or a LeanCIL
-    /// checkout, otherwise its leancil dependency, after the same framework, toolchain and reserved-module checks
-    /// as consumer verification.
+    /// The package whose editor library serves `root`, which is `root` itself, after the same framework,
+    /// toolchain and reserved-module checks as consumer verification.
     /// </summary>
     static string EditorPackage(string root)
     {
         RequireResolvedPackage(root);
-        var manifest = JsonSerializer.Deserialize<JsonElement>(
-            File.ReadAllText(Path.Combine(root, "lake-manifest.json")));
-        string framework;
         // A source that a keyed import could resolve to would shadow the generated extraction.
         void RequireNoReservedModule(string[] packages)
         {
@@ -357,29 +421,23 @@ partial class Program
             RequireNoReservedModule([root]);
             return root;
         }
-        if (manifest.GetProperty("name").GetString() == "leancil")
-        {
-            RequireBundledFramework(root, root);
-            RequireNoReservedModule([root]);
-            framework = root;
-        }
-        else
+        if (!IsCheckout(root))
         {
             var dependencies = ConsumerDependencies(root);
             // Before the snapshot, which refuses the same sources without saying which or what to do.
             RequireNoReservedModule([root, .. dependencies.Select(dependency => dependency.Directory)]);
             ConsumerSnapshot(root, null, dependencies);
-            framework = dependencies.Single(dependency => dependency.Name == "leancil").Source;
+            return root;
         }
-        var lakefile = Path.Combine(framework, "lakefile.toml");
-        if (!File.Exists(lakefile) || !File.ReadAllText(lakefile).ReplaceLineEndings("\n").Contains(
+        RequireBundledFramework(root, root);
+        RequireNoReservedModule([root]);
+        // A checkout is the framework package, so its own lakefile declares the editor library.
+        if (!File.ReadAllText(Path.Combine(root, "lakefile.toml")).ReplaceLineEndings("\n").Contains(
                 $"[[lean_lib]]\nname = \"{EditorLibraryName}\"\nsrcDir = \"{EditorSourceDirectory}\"\n",
                 StringComparison.Ordinal))
-            throw new InvalidDataException("The leancil framework at " + CliPaths.Display(framework) +
-                " declares no " + EditorLibraryName + " library, so an editor cannot resolve Extracted." +
-                (SourceRevision is { } revision
-                    ? $"\n  Pin leancil to rev \"{revision}\" (see leancil --version)." : ""));
-        return framework;
+            throw new InvalidDataException("The leancil checkout at " + CliPaths.Display(root) +
+                " declares no " + EditorLibraryName + " library, so an editor cannot resolve Extracted.");
+        return root;
     }
 
     /// <summary>

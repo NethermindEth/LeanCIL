@@ -367,8 +367,8 @@ an isolated installation of the packaged .NET tool.
 
 The runner builds the independent assemblies and the CIL library, then prepares a source-keyed,
 kernel-replayed library for verification. CI rebuilds from sources; local runs may reuse a cache
-entry whose receipt binds its key and manifest and whose files still hash to that manifest, by
-the stamps recorded beside it or by hashing them again. The library is checked by its trusted manifest
+entry whose receipt binds its key and manifest and whose files all hash to that manifest on
+each use. The library is checked by its trusted manifest
 digest and read in place: every proof still compiles and undergoes kernel replay in a new private
 session package that requires the library as a path dependency, so Lake writes only below that
 session. File-based C# apps provide the test runner, verifier and metadata fixture generator.
@@ -410,8 +410,10 @@ trusted producer, never
 by hashing the restored manifest itself. Missing or invalid reuse evidence fails without replacing
 the destination. Rebuilding an existing library requires a separate output directory.
 `Tests/LibraryCache.cs` covers substituted auditors and compiled modules with regenerated manifests,
-missing producer digests, preservation of unrelated destination files, and a receipted cache entry
-whose module was rewritten, restored or joined by a file its manifest lacks.
+missing producer digests, preservation of unrelated destination files, a receipted cache entry
+whose module was rewritten, restored or joined by a file its manifest lacks, and closure entries:
+their key names exactly their modules, a compiled module or source outside the closure rejects
+the entry, an import outside it fails, and one is never accepted as the whole library.
 
 Main push runs publish their validated library even after exact reuse. This keeps the main run
 eligible to donate to later PRs without following a chain of earlier runs. Suite jobs prefer the

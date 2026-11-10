@@ -596,27 +596,36 @@ PROGRESS Building fresh Lean verification library: 212 of 332 Lake jobs (240s)
 END Building fresh Lean verification library (exit 0, 501.7s)
 ```
 
-A cache miss on the certified library first prints one line saying that the library is being
-built and kernel-replayed and where later runs reuse it from. The build compiles every framework
-module and replays all of them, because one library certifies every proof and proof dependency
-for that framework version; it takes several minutes. A library holding only the modules one
-proof imports is not built: a certificate names the library by a key that states every module
-was replayed, single-file verification compiles the proof with `lean` against the library's
-compiled modules, where a missing one is an error and not a build, and a package that requires
-the library by path would have Lake build a missing module into it. The cache is
-`LEANCIL_CACHE_DIR`, by default `<local application data>/LeanCIL/libraries`.
+A cache miss on the certified library first prints one line saying what is being built and
+kernel-replayed and where later runs reuse it from. The whole library holds every framework
+module, each replayed, and certifies every proof and proof dependency for that framework
+version; building it takes several minutes. The cache is `LEANCIL_CACHE_DIR`, by default
+`<local application data>/LeanCIL/libraries`.
 
-A cache entry is read in place by verification sessions and by the packages `workspace`
-generates, which require it by path, and Lake rebuilds a required module it finds out of date
-inside the entry. Each run therefore compares the length and write time of every file of the
-entry with those recorded in `<key>.stamps` beside it when its files last hashed to the
-manifest its receipt binds. Any difference hashes every file again: an entry that still matches
-is recorded anew, and one that does not is named on stderr and replaced by a rebuilt library.
-On Windows the replacement fails while another process, such as an editor, holds the entry's
-files open. `verify` compares the stamps again each time it snapshots the library's compiled
-modules after a build, and single-file verification once more before it writes its report; a
-difference fails the run.
+With no whole library cached, `verify` of one proof without `--proof-root` first builds a
+closure entry instead: the framework modules that the proof, the extraction, its symbols and
+the statement display import, transitively, together with those of the audit executable. Every
+module of the entry is kernel-replayed. Its cache key and receipt name exactly that module list,
+and `verified.json` records that key as `libraryKey`, `closure` or `closure-cache` as
+`libraryBuild` and the list as `libraryModules`. The entry holds no other framework source, so
+a module outside it can be neither imported from it nor built into it, and `verify` refuses a
+proof whose imports it does not hold. After a verified result is reported, the same command
+builds, replays and caches the whole library, which stderr announces, reusing the entry's
+compiled modules where Lake's traces allow, and removes the entry. A failed proof leaves the
+entry for the next run. One closure entry exists per library: a proof with other imports builds
+the whole library. `--proof-root`, batch, contract-import and `--full` verification,
+`workspace`, `watch`, CI and `--rebuild-library` use the whole library only, and a
+package never requires a closure entry by path.
 
+A cache entry is read in place by verification sessions and by packages that require it by
+path after `workspace`, and Lake rebuilds a required module it finds out of date inside the
+entry. Each run therefore hashes every file of the entry against the manifest its receipt
+binds, about half a second for the whole library. An entry that does not match is named on
+stderr and replaced by a rebuilt library; on Windows the replacement fails while another
+process, such as an editor, holds the entry's files open. `verify` also compares each file's
+length and write time with those it had when the library was opened, each time it snapshots the
+library's compiled modules after a build and, for single-file verification, once more before it
+writes its report; a difference fails the run.
 The theorem defaults to `ExampleProof.correctness`; select another with `--theorem Namespace.theoremName`. The first invocation saves the selection in `artifacts/Add/verification.json`, independently of the generated success report:
 
 ```json
@@ -812,11 +821,11 @@ failure appears at setup rather than as unresolved imports. Lake prints a variab
 as empty; counting it can overstate the size by a few bytes, never understate it.
 
 Lake adds a package's source directory to `LEAN_SRC_PATH` once for every `[[lean_lib]]`
-table in the package's lakefile, without merging repeats. The framework copy `leancil workspace` writes for
-a proof outside any package declares only the framework and editor libraries, but a consumer
-that pins the `leancil` repository gets its lakefile with one library per test module, so the
-framework directory appears about ninety times in that consumer's `LEAN_SRC_PATH`. A shorter
-checkout path and fewer `PATH` entries leave more room. Setting
+table in the package's lakefile, without merging repeats. After `leancil workspace`, a
+generated package and a package that pins `leancil` resolve the framework to packages that
+declare only the framework and editor libraries, so it adds two directories. A LeanCIL
+checkout declares one library per test module, so its directory appears about ninety times in
+its `LEAN_SRC_PATH`. A shorter checkout path and fewer `PATH` entries leave more room. Setting
 `LEANCIL_LEAN_ENVIRONMENT_LIMIT` to a byte count lowers the limit; on other systems, where
 Lean has no such buffer, it enables the check, for example to measure headroom.
 
@@ -1069,13 +1078,16 @@ and its editor build compiles only the extraction. Lake leaves an up-to-date req
 unwritten, `workspace` and `watch` fail if their build wrote into it, and every run
 [checks the cache entry](#stage-progress) against its manifest. When the tool's framework
 changes, the next `workspace` or `watch` points the package at the library of the new key. A
-package that pins `leancil` keeps its own checkout of the framework: one that has no build yet
-receives a copy of the certified library's compiled modules, so the framework is built once per
-machine. Lake reuses a copied module only while it matches the package's sources, and no
-certificate reads the copy. On a machine without the certified library, the first `workspace`
-builds it, as the first `verify` would; for a generated package it is cached in CI too, where
-`verify` bypasses the cache, because the package must require a library that stays on disk.
-Verification accepts the keyed import only for the
+package that pins `leancil` keeps its manifest and its checkout as they are: the command writes
+`.lake/package-overrides.json`, which Lake reads in place of the manifest entry, so the
+`leancil` requirement resolves to `.lake/leancil-framework`, whose source and build directories
+are the cached certified library, and which brings in `.lake/leancil-editor`, the package that
+declares the editor library. Its editor builds compile no
+framework module either, and verification reads no `.lake` directory, so a certificate still
+rests on the pinned revision. A LeanCIL checkout is the framework package and builds its own
+modules. On a machine without the certified library, the first `workspace`
+builds it whole, as `verify --proof-root` would; for a package it is cached in CI too, where
+`verify` bypasses the cache, because the package must require a library that stays on disk.Verification accepts the keyed import only for the
 extraction it checks and builds it as a re-export of `Extracted`. `new-proof` writes the same
 keyed import, so its outline opens in the editor as generated.
 

@@ -34,6 +34,11 @@ every module, and its bytes match the manifest digest that run logged. It is rep
 GitHub metadata shows the producer ran reviewed code: a push on main, or a PR into main that left
 the workflow, scripts and build files as its base had them.
 A library built in the current run, or downloaded with a release, is replayed.
+On a machine with no whole library cached, a single-file proof may be checked against a closure
+entry instead: only the framework modules its imports reach, each replayed, under a key and
+receipt that name exactly those modules. The certificate records that key and the module list,
+the entry holds no other framework source, and nothing but single-file verification reads it;
+see [stage progress](CLI.md#stage-progress).
 
 Checked execution tracks allocation identity, lifetime, bounds, permissions, initialization and
 alignment. Its successful executions satisfy the proved preservation properties. Named runtime
