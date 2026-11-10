@@ -1796,13 +1796,20 @@ partial class Program : IDisposable
 
     /// <summary>
     /// The certified library a package that outlives this process may require by path: the machine's cache
-    /// entry, built and published first when absent, or a supplied library. Never a directory a process deletes.
+    /// entry, built and published first when absent, or a supplied library, either one with every file hashed
+    /// against its manifest. Never a directory a process deletes.
     /// </summary>
     static string EditorLibrary()
     {
         if (editorLibraryDirectory is not null) return editorLibraryDirectory;
         using var verification = new Program { editorLibrary = true };
         verification.Library(Inputs(At("CIL.lean")));
+        // A cache entry was hashed when it was opened; a supplied library is not, and Lake may write into either.
+        if (!verification.ownsLibrary && verification.libraryBuild == "certified-artifact" &&
+            (ReadManifest(verification.library!) is not { } manifest ||
+                !Same(manifest, CacheFiles(verification.library!))))
+            throw new InvalidOperationException("The files of the supplied certified library " +
+                verification.library + " do not match its manifest, so an editor package cannot require it in place.");
         return editorLibraryDirectory = !verification.ownsLibrary ? verification.library!
             : verification.publishedLibrary ?? throw new InvalidOperationException(
                 "The supplied certified library holds framework sources it has not compiled, so an editor " +
@@ -1824,7 +1831,8 @@ partial class Program : IDisposable
         if (!Same(files, CacheFiles(library)))
             throw new InvalidOperationException("Lake wrote into the certified library " + library +
                 ", which this package requires by path: it found framework modules out of date there. " +
-                "The next leancil verify or workspace rehashes the library and replaces it if it changed.");
+                "A cache entry is rehashed, and replaced if it changed, by the next leancil verify or workspace; " +
+                "a supplied library is rehashed, and refused if it changed, by the next leancil workspace.");
     }
 
     /// <summary>The lakefile requirement of a package below owner on the certified framework.</summary>
