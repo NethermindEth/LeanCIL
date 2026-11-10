@@ -541,21 +541,22 @@ internal static partial class ProofCostReport
 
     // Why the outputs of one job cannot all be attributed: one a proof suite owns that another member
     // wrote, or one written while a proof suite ran that no proof suite owns. Ownership decides the
-    // rows; the member running when the report was written only has to agree with it.
-    internal static List<string> Misattributed(IReadOnlyList<VerificationGroupRunner.SuiteRun> runs,
-        IEnumerable<(string Output, DateTime Written)> reports)
+    // rows; the member running when the report was written only has to agree with it. Each problem
+    // names the proof suite whose rows it would corrupt.
+    internal static List<(string Suite, string Problem)> Misattributed(
+        IReadOnlyList<VerificationGroupRunner.SuiteRun> runs, IEnumerable<(string Output, DateTime Written)> reports)
     {
-        var problems = new List<string>();
+        var problems = new List<(string, string)>();
         foreach (var (output, written) in reports.Where(report =>
             !JobDirectories.Contains(report.Output.Split('/')[0])).OrderBy(report => report.Output))
         {
             var writer = runs.LastOrDefault(run => run.StartedAtUtc <= written)?.Suite;
             var owner = Owner(output);
             if (owner is not null && owner != writer)
-                problems.Add($"{output} belongs to {owner} and was written while {writer ?? "no suite"} ran");
+                problems.Add((owner, $"{output} belongs to {owner} and was written while {writer ?? "no suite"} ran"));
             else if (owner is null && writer is not null && VerificationSuites.ProofSuites.Contains(writer))
-                problems.Add($"{output} was verified by {writer}, which does not declare it in " +
-                    "VerificationSuites.ProofOutputs");
+                problems.Add((writer, $"{output} was verified by {writer}, which does not declare it in " +
+                    "VerificationSuites.ProofOutputs"));
         }
         return problems;
     }
@@ -800,20 +801,21 @@ internal static partial class ProofCostReport
                 return 0;
             case "measure-suites":
             {
-                // Each proof suite that passed is measured over the directories it owns, once every
-                // output of the job is known to belong to the member that wrote it.
+                // Each proof suite that passed is measured over the directories it owns, unless an
+                // output of the job shows that its rows would not be its own.
                 var runs = JsonSerializer.Deserialize<VerificationGroupRunner.SuiteRun[]>(
                     File.ReadAllText(Required("--runs")), VerificationGroupRunner.Json) ?? [];
                 var problems = Misattributed(runs, Many("--artifacts").Select(Path.GetFullPath).SelectMany(root =>
                     VerifiedReports(root).Select(report =>
                         (OutputPath(root, report), File.GetLastWriteTimeUtc(report)))));
-                foreach (var problem in problems) Console.Error.WriteLine("::error::" + problem);
-                if (problems.Count > 0) return 1;
+                foreach (var (suite, problem) in problems)
+                    Console.WriteLine($"::error title=Proof cost of {suite} not measured::{problem}");
                 foreach (var run in runs)
-                    if (run.ExitCode == 0 && VerificationSuites.ProofSuites.Contains(run.Suite))
+                    if (run.ExitCode == 0 && VerificationSuites.ProofSuites.Contains(run.Suite) &&
+                        problems.All(problem => problem.Suite != run.Suite))
                         WriteMeasurement(SourceFile(Required("--output-rows"), run.Suite), null,
                             output => Owner(output) == run.Suite);
-                return 0;
+                return problems.Count > 0 ? 1 : 0;
             }
             case "compare":
             {

@@ -72,11 +72,13 @@ workflow changes, and unrecognized paths conservatively run the full matrix.
 
 Every job spends about a minute on checkout, toolchain, library and tool restores and uploads
 before and after its suites, so suites are packed into as few jobs as a target allows. The target
-is the measured time of the second-longest suite: the longest suite then runs alone and remains
-the longest job, and the other jobs fill two rounds of the eight runners in less time than one job
-per suite takes. Suites go longest first into the fullest job that still has room, at most eight to
+is one runner's share of a round: the measured time of all suites divided by the eight runners
+and by the fewest rounds that keep a job no longer than the longest suite, two at present. The
+longest suite then remains the longest job and the runners finish together, sooner than one job
+per suite does. Suites go longest first into the fullest job that still has room, at most eight to
 a job, and jobs start longest first. The duration table `scripts/verification-durations.json` uses
-verification time, excluding setup, and a suite without a measured time runs alone.
+verification time, excluding setup, which a job's summary and each member's transcript report per
+suite; a suite without a measured time runs alone.
 `dotnet run --file scripts/EstimateVerificationSchedule.cs -- --jobs` prints the jobs of a full
 run with their estimated minutes.
 
@@ -154,8 +156,8 @@ which `VerificationSuites.ProofOutputs` declares, so a suite that shares its job
 measured alone. Before measuring, the job checks that ownership accounts for everything it
 verified: the group runner records when each member started, and an owned directory whose report
 another member wrote, or a report a proof suite wrote outside its directories, stops the
-measurement of that job. A proof suite that gains an output directory declares it there. One short
-`Verify` job that starts early also measures `libraries`, which needs only the certified library.
+measurement of the suites involved. A proof suite that gains an output directory declares it there.
+The shortest `Verify` job also measures `libraries`, which needs only the certified library.
 Neither step can fail its job: a source without rows fails the comparison instead.
 
 The merge base is measured once per commit. A push to main measures the same sources the same

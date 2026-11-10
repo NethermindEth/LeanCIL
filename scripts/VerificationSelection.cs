@@ -39,16 +39,21 @@ internal static class VerificationSelection
     // Libraries marks the one job that also measures the test libraries when a run compares them.
     internal sealed record Group(string Suite, string[] Suites, int Timeout, bool Proof, bool Libraries);
 
-    // A job this short keeps most of its timeout free for another measurement.
-    const double LibrariesCarrierSeconds = 600;
+    // The suite jobs that run at once, which the workflow's `max-parallel` sets.
+    internal const int Runners = 8;
 
     // More members than this make a job's summary long and its name useless for finding a failure.
     internal const int GroupMembers = 8;
 
-    // A job is filled to the second-longest suite's measured time. The longest suite then runs alone
-    // and stays the longest job, and the others fit two rounds of the runners within its shadow.
-    internal static double GroupSeconds(IReadOnlyDictionary<string, double> durations) =>
-        durations.Values.OrderByDescending(seconds => seconds).Skip(1).DefaultIfEmpty(durations.Values.Max()).First();
+    // A job is filled to the share of all measured time that one runner takes in one round, with the
+    // fewest rounds that keep a job no longer than the longest suite. That suite then stays the
+    // longest job, and every runner finishes its last job at about the same time.
+    internal static double GroupSeconds(IReadOnlyDictionary<string, double> durations)
+    {
+        var rounds = 1;
+        while (durations.Values.Sum() / (Runners * rounds) > durations.Values.Max()) rounds++;
+        return durations.Values.Sum() / (Runners * rounds);
+    }
 
     // A job's suites when few enough to read, else its longest suite and how many more it runs.
     static string Name(List<string> group) => group.Count <= 3 ? string.Join("+", group)
@@ -73,9 +78,9 @@ internal static class VerificationSelection
             else group.Add(suite);
         }
         var ordered = groups.OrderByDescending(Seconds).ToArray();
-        // The earliest job to start that is short enough carries the libraries, else the shortest job.
-        var carrier = ordered.FirstOrDefault(group => Seconds(group) <= LibrariesCarrierSeconds) ??
-            ordered.LastOrDefault();
+        // The shortest job carries the libraries: it starts last and has the most room before the
+        // other jobs of its round finish.
+        var carrier = ordered.LastOrDefault();
         return ordered.Select(group => new Group(Name(group), group.ToArray(),
                 group.Max(name => name == "imports" ? 90 :
                     name.StartsWith("exports", StringComparison.Ordinal) ? 120 : 30),

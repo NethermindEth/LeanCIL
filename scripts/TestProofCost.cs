@@ -288,12 +288,14 @@ Require(Misattributed(members,
         ("ContractExport-95758c4a/Package", noon.AddMinutes(3)),
         ("suite-caches/receiveroutlines/x", noon.AddSeconds(95))
     ]).Count == 0, "a grouped job whose members wrote only their own outputs is measured");
-Require(Misattributed(members, [("ReceiverLoopOutlines/Drain", noon.AddMinutes(3))]).Single()
-    .Contains("belongs to receiveroutlines and was written while exportsprotected ran"),
-    "an output of a proof suite that another member wrote is attributed to two suites and fails");
-Require(Misattributed(members, [("Undeclared/Drain", noon.AddSeconds(90))]).Single()
-    .Contains("verified by receiveroutlines, which does not declare it"),
-    "an output a proof suite wrote outside its directories cannot be attributed and fails");
+Require(Misattributed(members, [("ReceiverLoopOutlines/Drain", noon.AddMinutes(3))]).Single() is
+    { Suite: "receiveroutlines", Problem: var twice } &&
+    twice.Contains("belongs to receiveroutlines and was written while exportsprotected ran"),
+    "an output of a proof suite that another member wrote is attributed to two suites and fails that suite");
+Require(Misattributed(members, [("Undeclared/Drain", noon.AddSeconds(90))]).Single() is
+    { Suite: "receiveroutlines", Problem: var undeclared } &&
+    undeclared.Contains("verified by receiveroutlines, which does not declare it"),
+    "an output a proof suite wrote outside its directories cannot be attributed and fails that suite");
 
 // One job reports every source: a base file without rows is a suite the base lacks, a missing base
 // file or missing head rows is a measurement that never happened and must fail.

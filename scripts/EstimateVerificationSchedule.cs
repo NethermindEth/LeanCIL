@@ -37,7 +37,7 @@ if (args.Contains("--jobs"))
 {
     // Measured across one run: checkout, toolchain, library and tool restores, and uploads of a job.
     const double setupSeconds = 52;
-    const int runners = 8;
+    const int runners = VerificationSelection.Runners;
     var jobs = VerificationSelection.Groups(alphabetical).Select(group =>
         (group.Suite, group.Suites, Seconds: group.Suites.Sum(suite => durations[suite]) + setupSeconds)).ToArray();
     string Minutes(double seconds) => (seconds / 60).ToString("F1", CultureInfo.InvariantCulture);
@@ -55,7 +55,7 @@ if (args.Contains("--jobs"))
     Console.WriteLine($"\n{jobs.Length} jobs for {durations.Count} suites: " +
         $"{Minutes(jobs.Sum(job => job.Seconds))} job-minutes, of which {Minutes(jobs.Length * setupSeconds)} " +
         $"setup; {Minutes(wall)} minutes on {runners} runners. One job per suite would spend " +
-        $"{Minutes(durations.Count * setupSeconds)} on setup.");
+        $"{Minutes(durations.Count * setupSeconds)} on setup. Proof cost measurement is not included.");
     return;
 }
 var estimates = new Dictionary<string, double> { ["alphabetical4"] = Elapsed(alphabetical, 4) };

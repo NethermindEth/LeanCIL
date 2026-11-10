@@ -459,7 +459,7 @@ jobs:
           dotnet artifacts/verification-fixtures/ProofCost/ProofCost.dll measure-suites --tree .
           --library artifacts/certified-library --artifacts artifacts
           --runs artifacts/verification-suites.json --jobs "$(nproc)" --output-rows "$RUNNER_TEMP/proof-cost"
-      # The test libraries need only the certified library; selection marks a short job that starts early.
+      # The test libraries need only the certified library; selection marks the shortest job for them.
       - name: Measure the proof cost of the test libraries
         if: >-
           ${{ !cancelled() && matrix.libraries &&
@@ -492,6 +492,7 @@ jobs:
           path: |
             artifacts/verification.log
             artifacts/verification-*.log
+            artifacts/verification-suites.json
             artifacts/verification-traces/
             artifacts/stage-timings.*
             artifacts/test-results-*.json

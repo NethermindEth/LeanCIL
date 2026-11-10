@@ -1,4 +1,4 @@
-/// <summary>A suite that runs one fixture script, in its own CI job and its own checkout.</summary>
+/// <summary>A suite that runs one fixture script, in its own process and with its own cache.</summary>
 internal sealed record IndependentSuite(string Name, string Script, string Description, string[]? Arguments = null);
 
 /// <summary>

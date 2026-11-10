@@ -62,8 +62,16 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
     var target = VerificationSelection.GroupSeconds(durations);
     var longest = durations.MaxBy(suite => suite.Value);
     Require(groups.Length <= All().Length / 3, "Suites were not packed: " + groups.Length + " jobs");
-    Require(target < longest.Value && durations.Values.Count(seconds => seconds > target) == 1,
-        "The target is not the second-longest suite");
+    // The target is one runner's share of a round, with the fewest rounds that fit under the longest suite.
+    var rounds = durations.Values.Sum() / (VerificationSelection.Runners * target);
+    Require(target <= longest.Value && Math.Abs(rounds - Math.Round(rounds)) < 1e-9 &&
+        (rounds < 1.5 || durations.Values.Sum() / (VerificationSelection.Runners * (rounds - 1)) > longest.Value),
+        "The target is not the fewest whole rounds under the longest suite");
+    // A refreshed table moves the target; the longest suites may then swap places without unbalancing a run.
+    var refreshed = new Dictionary<string, double>(durations) { ["evidence"] = longest.Value - 100 };
+    Require(VerificationSelection.GroupSeconds(refreshed) <= longest.Value &&
+        VerificationSelection.GroupSeconds(new Dictionary<string, double> { ["only"] = 90 }) == 90.0 / 8,
+        "The target follows the measured total, not one suite");
     // The longest suite alone bounds the run; no packed job may outlast it or approach its timeout.
     Require(groups[0].Suites is [var alone] && alone == longest.Key, "The longest suite shares its job");
     foreach (var group in groups.Where(group => group.Suites.Length > 1))
@@ -80,7 +88,7 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
     double Wall(IEnumerable<double> jobs)
     {
         var runners = new PriorityQueue<double, double>();
-        for (var i = 0; i < 8; i++) runners.Enqueue(0, 0);
+        for (var i = 0; i < VerificationSelection.Runners; i++) runners.Enqueue(0, 0);
         foreach (var job in jobs)
         {
             var end = runners.Dequeue() + job + setupSeconds;
@@ -97,10 +105,11 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
             "Proof cost is measured in the wrong job: " + group.Suite);
     Require(groups.Any(group => group.Proof && group.Suites.Length > 1), "No proof suite shares a job");
     // The libraries take minutes to measure; a job near its timeout would fail a suite that passed.
-    Require(groups.Single(group => group.Libraries) is var carrier && Seconds(carrier) <= 600,
-        "The libraries are measured in a long job");
+    Require(groups.Single(group => group.Libraries) == groups[^1] &&
+        Seconds(groups[^1]) + 8 * 60 <= groups[^1].Timeout * 60,
+        "The libraries are not measured in the shortest job, or leave it no time");
     Require(VerificationSelection.Groups(["unsafe"]).Single().Libraries,
-        "A run without a short job measures no libraries");
+        "A run of one job measures no libraries");
     Equal(VerificationSelection.Groups(["contracts", "unknown"]).SelectMany(group => group.Suites),
         ["unknown", "contracts"]);
     Require(VerificationSelection.Groups([]).Length == 0, "Empty selection gained suites");
@@ -548,7 +557,8 @@ Test("certified library binding, main republication and observability", () =>
             "steps.donor.outputs.manifest-sha256 || '' }}",
         "path: artifacts/library-download", "path: artifacts/certified-library.tar.zst",
         "dotnet run --file scripts/TestLibraryArchive.cs",
-        "max-parallel: 8", "artifacts/verification-traces/",
+        "max-parallel: " + VerificationSelection.Runners, "artifacts/verification-traces/",
+        "artifacts/verification-suites.json",
         "timeout-minutes: " + dollar + "{{ matrix.timeout }}",
         "VERIFICATION_SUITES: " + dollar + "{{ toJSON(matrix.suites) }}",
         "dotnet artifacts/verification-fixtures/LibraryArchive/LibraryArchive.dll restore" })
