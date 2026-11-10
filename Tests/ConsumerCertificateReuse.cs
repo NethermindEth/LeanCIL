@@ -167,8 +167,8 @@ partial class Program
             schema = 1, proofRoot = package,
             requests = new[]
             {
-                new { output, proof = "Proof.lean", theorem = "ExampleProof.correctness" },
-                new { output = other, proof = "CleanProof.lean", theorem = "ExampleProof.correctness" }
+                new { output, proof, theorem = "ExampleProof.correctness" },
+                new { output = other, proof = cleanProof, theorem = "ExampleProof.correctness" }
             }
         }, Json));
         var changed = Execute([.. cli, "verify-batch", batch, "--results", results]);
