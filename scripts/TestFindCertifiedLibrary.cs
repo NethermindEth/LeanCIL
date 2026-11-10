@@ -286,8 +286,8 @@ Test("proof cost rows come only from the publishing job, its own artifact and it
     JsonElement Api(long run, string suffix) => suffix.StartsWith("/jobs", StringComparison.Ordinal)
         ? Json("""
             {"jobs":[{"id":9,"name":"Prepare certified Lean library","run_attempt":1,"conclusion":"success"},
-              {"id":10,"name":"Publish proof cost rows","run_attempt":1,"conclusion":"success"},
-              {"id":11,"name":"Proof cost","run_attempt":1,"conclusion":"success"}]}
+              {"id":10,"name":"Proof cost","run_attempt":1,"conclusion":"success"},
+              {"id":11,"name":"Proof cost (core)","run_attempt":1,"conclusion":"success"}]}
             """)
         : Json("""
             {"artifacts":[{"id":70,"name":"certified-library-7-1","expired":false,
@@ -296,7 +296,7 @@ Test("proof cost rows come only from the publishing job, its own artifact and it
               "expires_at":"2026-11-05T00:00:00Z","workflow_run":{"id":7}}]}
             """);
     JsonElement FailedJob() => Json("""
-        {"jobs":[{"id":10,"name":"Publish proof cost rows","run_attempt":1,"conclusion":"failure"}]}
+        {"jobs":[{"id":10,"name":"Proof cost","run_attempt":1,"conclusion":"failure"}]}
         """);
     string Log(long job) =>
         job == 10 ? rows.DigestLine + Other + "\n" : CertifiedLibraryDonor.DigestLine + Digest + "\n";

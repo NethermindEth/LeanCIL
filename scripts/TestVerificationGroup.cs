@@ -26,6 +26,15 @@ foreach (var name in new[] { "fails", "passes", "outlines-control" })
         File.ReadAllText(Path.Combine(directory, "suite-caches", name, "visited")) != name)
         throw new InvalidOperationException("Every member must run with its own log and cache");
 }
+// Proof cost attributes an output to the member running when it was written, so order and starts matter.
+var runs = System.Text.Json.JsonSerializer.Deserialize<VerificationGroupRunner.SuiteRun[]>(
+    File.ReadAllText(Path.Combine(directory, VerificationGroupRunner.SuiteRunsFile)), VerificationGroupRunner.Json)!;
+if (!runs.Select(run => (run.Suite, run.ExitCode)).SequenceEqual(
+        [("fails", 3), ("passes", 0), ("outlines-control", 0)]) ||
+    !runs.Zip(runs.Skip(1)).All(pair => pair.First.StartedAtUtc < pair.Second.StartedAtUtc) ||
+    File.GetLastWriteTimeUtc(Path.Combine(directory, "suite-caches", "passes", "visited")) is var written &&
+        (written < runs[1].StartedAtUtc || written >= runs[2].StartedAtUtc))
+    throw new InvalidOperationException("Each member's start must bracket what it wrote");
 if (await VerificationGroupRunner.Run(command, ["other"], directory) != 0)
     throw new InvalidOperationException("A passing group must pass");
 foreach (string[] invalid in new[] { Array.Empty<string>(), new[] { "passes", "passes" }, new[] { "../escape" },

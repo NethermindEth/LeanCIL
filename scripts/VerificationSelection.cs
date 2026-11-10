@@ -35,21 +35,19 @@ internal static class VerificationSelection
             .ThenBy(name => name, StringComparer.Ordinal).ToArray();
     }
 
-    // Proof marks a job that runs one proof suite, whose outputs the job then measures for proof cost.
+    // Proof marks a job that runs a proof suite, whose outputs the job then measures for proof cost.
     internal sealed record Group(string Suite, string[] Suites, int Timeout, bool Proof);
 
     // Bound sequential work so grouping removes setup without creating another long tail.
-    // A proof suite never shares a job: proof cost measures the job's outputs as that suite's.
     internal static Group[] Groups(IEnumerable<string> suites, string? root = null)
     {
         var durations = ReadDurations(root);
-        bool Shares(string name) => durations.GetValueOrDefault(name, double.PositiveInfinity) <= 60 &&
-            !VerificationSuites.ProofSuites.Contains(name);
         var groups = new List<List<string>>();
         foreach (var suite in Schedule(suites.Distinct(StringComparer.Ordinal), root))
         {
             var seconds = durations.GetValueOrDefault(suite, double.PositiveInfinity);
-            var group = Shares(suite) ? groups.Where(group => group.Count < 3 && group.All(Shares) &&
+            var group = seconds <= 60 ? groups.Where(group => group.Count < 3 &&
+                    group.All(name => durations.GetValueOrDefault(name, double.PositiveInfinity) <= 60) &&
                     group.Sum(name => durations[name]) + seconds <= 120)
                 .OrderByDescending(group => group.Sum(name => durations[name])).FirstOrDefault() : null;
             if (group is null) groups.Add([suite]);

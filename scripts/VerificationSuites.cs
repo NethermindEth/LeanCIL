@@ -12,7 +12,7 @@ internal static class VerificationSuites
 
     /// <summary>
     /// The suites whose verified outputs are proofs about extracted methods: examples and generated
-    /// outlines. Proof cost measures each one's outputs, so each runs in a CI job of its own.
+    /// outlines. Proof cost measures each one's outputs, in the CI job that verified them.
     /// </summary>
     internal static readonly string[] ProofSuites =
     [

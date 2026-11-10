@@ -61,13 +61,11 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
     foreach (var group in groups.Where(group => group.Suites.Length > 1))
         Require(group.Suites.Length <= 3 && group.Suites.All(suite => durations[suite] <= 60) &&
             group.Suites.Sum(suite => durations[suite]) <= 120, "Unbounded group");
-    // A proof suite's job measures its outputs for proof cost, so they must hold nothing else.
-    Require(VerificationSuites.ProofSuites.Any(suite => durations[suite] <= 60), "No proof suite is short");
-    foreach (var suite in VerificationSuites.ProofSuites)
-        Require(groups.Any(group => group.Suite == suite && group.Suites is [var only] && only == suite &&
-            group.Proof), "Proof suite shares a job or is not measured: " + suite);
-    Require(groups.Count(group => group.Proof) == VerificationSuites.ProofSuites.Length,
-        "A job that runs no proof suite is measured");
+    // A job measures proof cost exactly when it runs a proof suite, alone or grouped with others.
+    foreach (var group in groups)
+        Require(group.Proof == group.Suites.Any(VerificationSuites.ProofSuites.Contains),
+            "Proof cost is measured in the wrong job: " + group.Suite);
+    Require(groups.Any(group => group.Proof && group.Suites.Length > 1), "No proof suite shares a job");
     Equal(VerificationSelection.Groups(["contracts", "unknown"]).SelectMany(group => group.Suites),
         ["unknown", "contracts"]);
     Require(VerificationSelection.Groups([]).Length == 0, "Empty selection gained suites");
@@ -489,16 +487,17 @@ Test("certified library binding, main republication and observability", () =>
         "REVIEWED_PRODUCER: " + dollar + "{{ steps.donor.outputs.reviewed-producer }}",
         "if [ \"" + dollar + "REVIEWED_PRODUCER\" = true ]; then producer=(--producer-replayed); fi",
         "name: verification-results-" + dollar + "{{ matrix.suite }}-" + dollar + "{{ github.run_attempt }}",
-        // A proof suite's job measures its own outputs; only the comparison waits for every suite.
-        "if: matrix.proof", "dotnet artifacts/verification-fixtures/ProofCost/ProofCost.dll measure",
+        // A job measures its own proof suites by the group runner's record of when each started.
+        "if: " + dollar + "{{ !cancelled() && matrix.proof }}",
+        "dotnet artifacts/verification-fixtures/ProofCost/ProofCost.dll measure-suites",
+        "--runs artifacts/verification-suites.json",
         "name: proof-cost-head-rows-" + dollar + "{{ matrix.suite }}-" + dollar + "{{ github.run_attempt }}",
         "pattern: proof-cost-head-rows-*", "pattern: proof-cost-base-rows-*",
-        "needs: [cost-base, cost-base-rows, cost-libraries, suites]",
-        // The merge base is measured beside the suites, and only for sources main published no rows for.
-        "needs: [prepare, cost-base]",
-        "if: needs.cost-base.outputs.missing != '' && needs.cost-base.outputs.missing != '[]'",
+        // One job measures the merge base, beside the suites, and only for sources without published rows.
+        "needs.prepare.outputs.cost-missing != '[]' }}",
+        "cost-missing: " + dollar + "{{ steps.cost-rows.outputs.missing || needs.select.outputs.cost-sources }}",
         // Later runs find main's rows by this job and artifact name and by the digest the job logs.
-        "name: Publish proof cost rows",
+        "    name: Proof cost\n", "needs: [select, prepare, cost-base, suites]",
         "name: proof-cost-rows-" + dollar + "{{ github.run_id }}-" + dollar + "{{ github.run_attempt }}",
         "--proof-cost-rows \"" + dollar + "(git rev-parse \"" + dollar + "BASE\")\"",
         "archive-sha256: " + dollar + "{{ steps.pack-library.outputs.archive-sha256 || " +
@@ -508,8 +507,6 @@ Test("certified library binding, main republication and observability", () =>
         "DONATED_SHA256: " + dollar + "{{ steps.restored.outcome == 'success' && " +
             "steps.donor.outputs.manifest-sha256 || '' }}",
         "path: artifacts/library-download", "path: artifacts/certified-library.tar.zst",
-        // The proof-cost jobs restore the merge base's archive by the same file name as the head's.
-        "path: " + dollar + "{{ runner.temp }}/base-library/certified-library.tar.zst",
         "dotnet run --file scripts/TestLibraryArchive.cs",
         "max-parallel: 8", "artifacts/verification-traces/",
         "timeout-minutes: " + dollar + "{{ matrix.timeout }}",

@@ -513,8 +513,10 @@ internal static partial class ProofCostReport
                 "; build every CIL module there or pass --library");
     }
 
+    // A suite's outputs are the reports written while it ran: from `since` and before `before`.
     internal static Measurement Measure(string tree, string? library, string work, bool libraries,
-        IReadOnlyList<string> artifacts, IReadOnlyList<string> modules, int jobs, string label)
+        IReadOnlyList<string> artifacts, IReadOnlyList<string> modules, int jobs, string label,
+        DateTime? since = null, DateTime? before = null)
     {
         tree = Path.GetFullPath(tree);
         work = Path.GetFullPath(work);
@@ -535,7 +537,9 @@ internal static partial class ProofCostReport
             if (!Directory.Exists(root)) continue;
             foreach (var report in Directory.EnumerateFiles(root, "verified.json", SearchOption.AllDirectories)
                 .Where(report => File.Exists(Path.Combine(Path.GetDirectoryName(report)!, "Extracted.lean")) &&
-                    !Path.GetFullPath(report).StartsWith(work + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                    !Path.GetFullPath(report).StartsWith(work + Path.DirectorySeparatorChar, StringComparison.Ordinal) &&
+                    File.GetLastWriteTimeUtc(report) is var written &&
+                    (since is null || written >= since) && (before is null || written < before))
                 .Order(StringComparer.Ordinal))
                 tasks.Add(measurer.Verified(root, Path.GetDirectoryName(report)!));
         }
@@ -647,6 +651,8 @@ internal static partial class ProofCostReport
           ProofCost.cs measure --tree <checkout> --output <json> [--library <compiled library>]
               [--libraries] [--module <name>]... [--artifacts <verification outputs>]...
               [--work <directory>] [--jobs <count>] [--label <name>]
+          ProofCost.cs measure-suites --tree <checkout> --runs <group runner's suite runs> --output-rows <directory>
+              --artifacts <verification outputs> [--library <compiled library>] [--jobs <count>]
           ProofCost.cs compare --base <json>... --head <json>... [--accepted <json>]
               [--threshold-percent <number>] [--markdown <file>] [--output <json>] [--github-summary]
           ProofCost.cs sources --matrix <selection json> [--tree <checkout> --base <commit>] [--output <file>]
@@ -681,6 +687,24 @@ internal static partial class ProofCostReport
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
             File.WriteAllText(path, text);
         }
+        void WriteMeasurement(string output, string? work, DateTime? since, DateTime? before)
+        {
+            var tree = Required("--tree");
+            var elapsed = Stopwatch.StartNew();
+            var measurement = Measure(tree, One("--library"),
+                work ?? Path.ChangeExtension(Path.GetFullPath(output), ".work"),
+                options.ContainsKey("--libraries"), Many("--artifacts"), Many("--module"),
+                int.Parse(One("--jobs") ?? Math.Max(1, Environment.ProcessorCount / 2).ToString(
+                    CultureInfo.InvariantCulture), CultureInfo.InvariantCulture),
+                One("--label") ?? Execute(["git", "rev-parse", "--short=12", "HEAD"], tree).Output.Trim(),
+                since, before);
+            Write(output, JsonSerializer.Serialize(measurement, Json) + "\n");
+            foreach (var lost in measurement.Unmeasured)
+                Console.Error.WriteLine($"Not measured: {lost.Group}: {lost.Reason}");
+            Console.WriteLine($"Measured {measurement.Rows.Count(row => row.Kind == ModuleKind)} modules and " +
+                $"{measurement.Rows.Count(row => row.Kind != ModuleKind)} commands in " +
+                $"{elapsed.Elapsed.TotalSeconds:F0}s; {measurement.Unmeasured.Count} not measured: {output}");
+        }
         List<Accepted> AcceptedIncreases() => One("--accepted") is { } path && File.Exists(path)
             ? JsonSerializer.Deserialize<List<Accepted>>(File.ReadAllText(path), Json) ?? [] : [];
         double Threshold() => double.Parse(One("--threshold-percent") ?? DefaultThresholdPercent.ToString(
@@ -696,22 +720,17 @@ internal static partial class ProofCostReport
         switch (args[0])
         {
             case "measure":
+                WriteMeasurement(Required("--output"), One("--work"), null, null);
+                return 0;
+            case "measure-suites":
             {
-                var output = Required("--output");
-                var tree = Required("--tree");
-                var elapsed = Stopwatch.StartNew();
-                var measurement = Measure(tree, One("--library"),
-                    One("--work") ?? Path.ChangeExtension(Path.GetFullPath(output), ".work"),
-                    options.ContainsKey("--libraries"), Many("--artifacts"), Many("--module"),
-                    int.Parse(One("--jobs") ?? Math.Max(1, Environment.ProcessorCount / 2).ToString(
-                        CultureInfo.InvariantCulture), CultureInfo.InvariantCulture),
-                    One("--label") ?? Execute(["git", "rev-parse", "--short=12", "HEAD"], tree).Output.Trim());
-                Write(output, JsonSerializer.Serialize(measurement, Json) + "\n");
-                foreach (var lost in measurement.Unmeasured)
-                    Console.Error.WriteLine($"Not measured: {lost.Group}: {lost.Reason}");
-                Console.WriteLine($"Measured {measurement.Rows.Count(row => row.Kind == ModuleKind)} modules and " +
-                    $"{measurement.Rows.Count(row => row.Kind != ModuleKind)} commands in " +
-                    $"{elapsed.Elapsed.TotalSeconds:F0}s; {measurement.Unmeasured.Count} not measured: {output}");
+                // Each proof suite that passed is measured from its own start to the next member's.
+                var runs = JsonSerializer.Deserialize<VerificationGroupRunner.SuiteRun[]>(
+                    File.ReadAllText(Required("--runs")), VerificationGroupRunner.Json) ?? [];
+                foreach (var (run, index) in runs.Select((run, index) => (run, index)))
+                    if (run.ExitCode == 0 && VerificationSuites.ProofSuites.Contains(run.Suite))
+                        WriteMeasurement(SourceFile(Required("--output-rows"), run.Suite), null, run.StartedAtUtc,
+                            index + 1 < runs.Length ? runs[index + 1].StartedAtUtc : null);
                 return 0;
             }
             case "compare":

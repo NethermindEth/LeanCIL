@@ -46,7 +46,7 @@ static class CertifiedLibraryDonor
 
     /// <summary>The proof cost rows a push to main measured, which a later PR takes as its base.</summary>
     public static readonly Producer ProofCostRows =
-        new(name => name == "Publish proof cost rows", "proof-cost-rows", "Proof cost rows SHA256: ");
+        new(name => name == "Proof cost", "proof-cost-rows", "Proof cost rows SHA256: ");
 
     /// <summary>Finds a complete authenticated candidate; failures never supply partial evidence.</summary>
     public static Selection? Find(IEnumerable<long> runs, Func<long, string, JsonElement> api,
