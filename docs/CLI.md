@@ -585,11 +585,14 @@ the statement display import, transitively, together with those of the audit exe
 module of the entry is kernel-replayed. Its cache key and receipt name exactly that module list,
 and `verified.json` records that key as `libraryKey`, `closure` or `closure-cache` as
 `libraryBuild` and the list as `libraryModules`. The entry holds no other framework source, so
-a module outside it can be neither imported from it nor built into it, and `verify` refuses a
-proof whose imports it does not hold. After a verified result is reported, the same command
+a module outside it can be neither imported from it nor built into it, and `verify` reads the
+import headers of the compiled proof and extraction and refuses a framework import the entry
+does not hold. After a verified result is reported, the same command
 builds, replays and caches the whole library, which stderr announces, reusing the entry's
-compiled modules where Lake's traces allow, and removes the entry. A failed proof leaves the
-entry for the next run. One closure entry exists per library: a proof with other imports builds
+compiled modules where Lake's traces allow, and removes the entry once no process reads it. If
+that build fails, the verified result and its `verified.json` stand, and the command reports
+the failure and exits nonzero. A failed proof, or one with open goals under `--goals`, leaves
+the entry for the next run. One closure entry exists per library: a proof with other imports builds
 the whole library. `--proof-root`, batch, contract-import and `--full` verification,
 `workspace`, `watch`, CI and `--rebuild-library` use the whole library only, and a
 package never requires a closure entry by path.
@@ -599,10 +602,13 @@ path after `workspace`, and Lake rebuilds a required module it finds out of date
 entry. Each run therefore hashes every file of the entry against the manifest its receipt
 binds, about half a second for the whole library. An entry that does not match is named on
 stderr and replaced by a rebuilt library; on Windows the replacement fails while another
-process, such as an editor, holds the entry's files open. `verify` also compares each file's
-length and write time with those it had when the library was opened, each time it snapshots the
-library's compiled modules after a build and, for single-file verification, once more before it
-writes its report; a difference fails the run.
+process, such as an editor, holds the entry's files open. A library supplied through
+`LEANCIL_CERTIFIED_LIBRARY` is hashed against its manifest the same way before a package
+requires it by path, and refused when it does not match. `verify` also compares the library's
+files, by name, length and write time, with those it had when it was opened, each time it
+snapshots the library's compiled modules after a build and once more before single-file and
+batch verification write their reports; a difference fails the run. A command that finds
+another building or opening the library waits for it and says so on stderr.
 The theorem defaults to `ExampleProof.correctness`; select another with `--theorem Namespace.theoremName`. The first invocation saves the selection in `artifacts/Add/verification.json`, independently of the generated success report:
 
 ```json

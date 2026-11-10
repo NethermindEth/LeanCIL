@@ -43,8 +43,10 @@ partial class Program : IDisposable
     /// whole library. <see cref="libraryKey"/> then names exactly this list.
     /// </summary>
     string[]? libraryModules;
-    /// <summary>A result was reported against a closure entry, so disposal builds the whole library.</summary>
+    /// <summary>A report was written against a closure entry, so the whole library is still to be built.</summary>
     bool completesLibrary;
+    /// <summary>Open while this process reads a closure entry in place, so no other process removes it.</summary>
+    FileStream? closureUse;
     /// <summary>This process's writable package, which requires <see cref="library"/> by path.</summary>
     string? session;
     /// <summary>The base library's compiled module artifacts, taken from its validated manifest.</summary>
@@ -1379,12 +1381,23 @@ partial class Program : IDisposable
             if (!fresh)
             {
                 Directory.CreateDirectory(cacheRoot);
-                // Serialize same-key builders. A lock is released even after a crashed process.
-                var deadline = Stopwatch.StartNew();
+                // Serialize same-key builders. A lock is released even after a crashed process, and a build
+                // may outlast any fixed wait, so a waiter waits for as long as the lock file is held.
+                var waiting = Stopwatch.StartNew();
+                var announced = false;
                 while (cacheLock is null)
                 {
                     try { cacheLock = new FileStream(cached + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
-                    catch (IOException) when (deadline.Elapsed < TimeSpan.FromMinutes(10)) { Thread.Sleep(100); }
+                    catch (IOException) when (File.Exists(cached + ".lock"))
+                    {
+                        if (!announced && waiting.Elapsed > TimeSpan.FromSeconds(10))
+                        {
+                            announced = true;
+                            Console.Error.WriteLine("Waiting for another leancil process that is building or " +
+                                "opening the certified library in " + cacheRoot + ".");
+                        }
+                        Thread.Sleep(100);
+                    }
                 }
             }
             var supplied = Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY");
@@ -1406,6 +1419,7 @@ partial class Program : IDisposable
                 (libraryStamps = HashedCacheEntry(cached, cachedManifest)) is not null)
             {
                 // The receipt binds this manifest, and the entry's files still hash to it.
+                RemoveClosure(cacheRoot, libraryKey);
                 library = cached;
                 manifest = cachedManifest;
                 libraryBuild = "cache";
@@ -1424,6 +1438,9 @@ partial class Program : IDisposable
                     (closure.Directory, closure.Manifest, closure.Key, closure.Modules);
                 libraryStamps = closure.Stamps;
                 libraryBuild = closure.Built ? "closure" : "closure-cache";
+                // Held under the library's lock, which a remover also holds, until this process is done.
+                closureUse = new FileStream(ClosureUse(closure.Directory), FileMode.OpenOrCreate, FileAccess.Read,
+                    FileShare.Read);
             }
             else
             {
@@ -1597,7 +1614,14 @@ partial class Program : IDisposable
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return null; }
     }
 
-    /// <summary>Removes the closure entry recorded for a library whose whole entry is published.</summary>
+    /// <summary>Beside a closure entry: a file every process reading the entry in place holds open.</summary>
+    static string ClosureUse(string directory) => directory + ".use";
+
+    /// <summary>
+    /// Removes the closure entry recorded for a library whose whole entry is published, unless a process still
+    /// reads it; a later run then removes it. The entry is renamed away before its record goes, so a failure
+    /// leaves either both or neither.
+    /// </summary>
     static void RemoveClosure(string cacheRoot, string libraryKey)
     {
         try
@@ -1605,18 +1629,21 @@ partial class Program : IDisposable
             var record = ClosureRecord(cacheRoot, libraryKey);
             if (!File.Exists(record)) return;
             var key = File.ReadAllText(record).Trim();
-            File.Delete(record);
             var directory = Path.Combine(cacheRoot, key);
-            if (!Regex.IsMatch(key, @"\A[0-9a-f]{64}\z") || !Directory.Exists(directory)) return;
-            // Renamed first, so a delete that stops halfway leaves no entry under the key.
-            var doomed = directory + ".evicted-" + Guid.NewGuid().ToString("N");
-            Directory.Move(directory, doomed);
-            Directory.Delete(doomed, true);
+            if (Regex.IsMatch(key, @"\A[0-9a-f]{64}\z") && Directory.Exists(directory))
+            {
+                var doomed = directory + ".evicted-" + Guid.NewGuid().ToString("N");
+                using (new FileStream(ClosureUse(directory), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+                    Directory.Move(directory, doomed);
+                File.Delete(ClosureUse(directory));
+                File.Delete(record);
+                Directory.Delete(doomed, true);
+            }
+            else File.Delete(record);
         }
-        // Another process may still read it; the whole library is preferred from now on regardless.
+        // A reader holds the entry, or its files; the whole library is preferred from now on regardless.
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
     }
-
     /// <summary>
     /// A certified entry holding only the import closure of `roots`: its sources, their compiled modules, each
     /// kernel-replayed, and the audit executable. Its key and receipt name exactly those modules, and it holds
@@ -3540,15 +3567,17 @@ partial class Program : IDisposable
             Directory.Delete(session, true);
         if (ownsLibrary && library is not null && Directory.Exists(library))
             Directory.Delete(library, true);
-        if (completesLibrary) CompleteLibrary();
+        closureUse?.Dispose();
     }
 
     /// <summary>
-    /// Builds, kernel-replays and caches the whole library after a result was reported against a closure
-    /// entry, so later runs and editor packages use it. A failure here leaves the reported result standing.
+    /// After a result checked against a closure entry was reported and stands: builds, kernel-replays and
+    /// caches the whole library, so later runs and editor packages use it. Does nothing otherwise. A failure
+    /// leaves the reported result and its certificate standing and is thrown for the command to report.
     /// </summary>
-    void CompleteLibrary()
+    internal void CompleteLibrary()
     {
+        if (!completesLibrary) return;
         completesLibrary = false;
         Console.Out.Flush();
         Console.Error.WriteLine($"The result above was checked against the {libraryModules!.Length} framework " +
@@ -3558,15 +3587,14 @@ partial class Program : IDisposable
             using var whole = new Program();
             whole.Library(Inputs(At("CIL.lean")));
         }
-        catch (Exception error) when (error is InvalidOperationException or InvalidDataException or IOException or
-            UnauthorizedAccessException)
+        // Whatever stopped the build, the caller reports it; nothing may escape as an unhandled error here.
+        catch (Exception error)
         {
-            Console.Error.WriteLine("The whole certified library was not built; the next run builds it. " +
-                error.Message);
+            throw new InvalidOperationException("The verified result above stands and its certificate is " +
+                "written, but the whole certified library was not built: " + error.Message, error);
         }
     }
 }
-
 /// <summary>
 /// The developer's files a verification session copied, by the path of each copy, so diagnostics cite the file
 /// the developer edits. Only byte-identical copies are recorded, so a copy's lines and columns are the original's.
