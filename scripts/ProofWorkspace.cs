@@ -172,8 +172,8 @@ partial class Program
         }, Json) + "\n";
         var path = Path.Combine(root, PackageOverrides);
         // Lake would apply another tool's overrides too; replacing them could change what the package builds.
-        if (File.Exists(path) && !JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(path)).GetProperty("packages")
-                .EnumerateArray().Select(package => package.GetProperty("name").GetString())
+        if (File.Exists(path) && !JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(path))
+                .GetProperty("packages").EnumerateArray().Select(package => package.GetProperty("name").GetString())
                 .SequenceEqual(["leancil", PinnedEditorPackageName]))
             throw new InvalidDataException(CliPaths.Display(path) + " already holds package overrides that leancil " +
                 "workspace did not write. Remove it, then run this command again.");
