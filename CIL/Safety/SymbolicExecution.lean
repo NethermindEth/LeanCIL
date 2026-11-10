@@ -1215,23 +1215,6 @@ def cilFetchedOp (lemma : Lean.Name) (select : Lean.Expr → Option Lean.Expr) (
     ← Term.exprToSyntax (← instantiateMVars instructionFound), operation)
 
 open Lean Elab Tactic Meta in
-/-- Reuse the already normalized argument facts of the current memory after an output write. -/
-def cilOutputFacts : TacticM (Array Term) := withMainContext do
-  let mut retained := #[]
-  for declaration in ← getLCtx do
-    if declaration.userName.eraseMacroScopes == `cilOutputFact then
-      retained := retained.push declaration
-  if retained.isEmpty then return #[]
-  let some execution := (← instantiateMVars (← getMainTarget)).find?
-      (·.isAppOfArity ``run 8) | return #[]
-  let memory := execution.getAppArgs[7]!
-  let mut facts := #[]
-  for declaration in retained do
-    if (← loopFactMemories declaration.type).contains memory then
-      facts := facts.push (← Term.exprToSyntax declaration.toExpr)
-  return facts
-
-open Lean Elab Tactic Meta in
 /-- Derive current argument facts once for a write's continuation, retaining old snapshots only
     at their original memory. The marker names let later steps reuse them without re-simping. -/
 private def cilRememberOutputFacts (call : Term) : TacticM Unit := withMainContext do
@@ -1241,6 +1224,50 @@ private def cilRememberOutputFacts (call : Term) : TacticM Unit := withMainConte
     (← prepareOperationFacts facts)
   for fact in prepared do
     discard <| assertLoopFact `cilOutputFact fact #[]
+
+open Lean Elab Tactic Meta in
+/-- Reuse current-memory argument facts after a write, deriving them once when its continuation
+    needs them. An empty-stack return consumes no argument evidence. -/
+def cilOutputFacts (operation : Name) : TacticM (Array Term) := withMainContext do
+  let mut retained := #[]
+  let mut calls := #[]
+  for declaration in ← getLCtx do
+    let name := declaration.userName.eraseMacroScopes
+    if name == `cilOutputFact then retained := retained.push declaration
+    if name == `cilOutputCall then calls := calls.push declaration
+  if retained.isEmpty && calls.isEmpty then return #[]
+  let some execution := (← instantiateMVars (← getMainTarget)).find?
+      (·.isAppOfArity ``run 8) | return #[]
+  let arguments := execution.getAppArgs
+  if operation == ``CIL.Op.ret && (← whnfD arguments[6]!).isAppOf ``List.nil then return #[]
+  let memory := arguments[7]!
+  let currentFacts := withMainContext do
+    let mut facts := #[]
+    for declaration in ← getLCtx do
+      if declaration.userName.eraseMacroScopes == `cilOutputFact &&
+          (← loopFactMemories declaration.type).contains memory then
+        facts := facts.push (← Term.exprToSyntax declaration.toExpr)
+    return facts
+  let facts ← currentFacts
+  unless facts.isEmpty do return facts
+  for declaration in calls do
+    let type ← instantiateMVars declaration.type
+    if type.isAppOfArity `CIL.Safety.ValidCall 3 && type.getAppArgs[0]! == memory then
+      cilRememberOutputFacts (← Term.exprToSyntax declaration.toExpr)
+      return ← currentFacts
+  return #[]
+
+open Lean Elab Tactic Meta in
+/-- Input formation and read equations supply no checked write. Any other supplied fact keeps
+    the ordinary store attempt first, including whole-step facts and custom normalization. -/
+def cilOnlyInputFacts (operation : Name) (facts : Array Term) : TacticM Bool :=
+  facts.allM fun fact => suppliedFactSatisfies fact fun type => do
+    let some (_, left, _) := type.getForallBody.consumeMData.eq? | return false
+    if left.isAppOf ``form || left.isAppOf ``read then return true
+    unless left.isAppOfArity ``step 7 do return false
+    let op := left.getAppArgs[1]!
+    -- Only known reads are excluded; a generic or custom step retains its priority.
+    return op.isAppOf ``CIL.Op.fieldAt && operation != ``CIL.Op.fieldAt
 
 open Lean Elab Tactic Meta in
 /-- Materialize a checked output-word write in the outer continuation. Only the fetched store
@@ -1306,9 +1333,15 @@ def cilPrepareOutputStore (instructionFound : Term) (operation : Name)
             ← `(by dsimp only; first | decide | omega), word]
         Term.withoutErrToSorry <| withoutRecover <| evalTactic (← `(tactic|
           obtain ⟨$after, $addressed, $written, $readback, $retained⟩ := $store))
-        cilRememberOutputFacts retained
-        let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
-          (← prepareOperationFacts #[addressed, written])
+        discard <| assertLoopFact `cilOutputCall retained #[]
+        -- Reached symbolic values already match the stepper; literal writes need its
+        -- evaluated conversions as well.
+        let prepared ← prepareOperationFacts #[addressed, written]
+        let prepared ← withMainContext do
+          let type ← inferType (← Term.elabTerm written none)
+          if hasClosedLiteralOperand type then
+            normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|)) prepared
+          else pure prepared
         return facts ++ prepared
       catch _ =>
         saved.restore

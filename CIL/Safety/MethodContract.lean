@@ -879,7 +879,7 @@ elab_rules : tactic
   | `(tactic| cil_contract_step [$facts:term,*]) => withMainContext do
     let (methodFound, instructionFound, operation) ←
       cilFetchedOp ``CIL.Safety.run_next_exists some 4 facts.getElems
-    let currentFacts := facts.getElems ++ (← cilOutputFacts)
+    let currentFacts := facts.getElems ++ (← cilOutputFacts operation)
     let facts := currentFacts
     if callsCallee operation then
       let saved ← saveState
@@ -908,6 +908,13 @@ elab_rules : tactic
       advance facts
       return
     let saved ← saveState
+    if ← cilOnlyInputFacts operation facts then
+      try
+        let prepared ← cilPrepareOutputStore instructionFound operation facts
+        if prepared.size != facts.size then
+          advance prepared
+          return
+      catch _ => saved.restore
     try advance facts
     catch error =>
       saved.restore
