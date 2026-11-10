@@ -501,6 +501,7 @@ jobs:
             rm -rf artifacts/certified-library
             dotnet run --file scripts/PrepareLibrary.cs -- artifacts/certified-library
           fi
+      # Restore reads the archive by the producer's file name, so the merge base's keeps that name.
       - name: Package the merge base library
         id: pack-library
         if: steps.library.outputs.build == 'true'
@@ -508,14 +509,15 @@ jobs:
           MANIFEST_SHA256: ${{ steps.certify.outputs.manifest-sha256 }}
         run: >-
           dotnet run --file scripts/LibraryArchive.cs -c Release -- pack
-          "$RUNNER_TEMP/base/artifacts/certified-library" "$RUNNER_TEMP/base-library.tar.zst" "$MANIFEST_SHA256"
+          "$RUNNER_TEMP/base/artifacts/certified-library"
+          "$RUNNER_TEMP/base-library/certified-library.tar.zst" "$MANIFEST_SHA256"
       - name: Upload the merge base library for this workflow attempt
         id: library-artifact
         if: steps.library.outputs.build == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: proof-cost-base-library-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/base-library.tar.zst
+          path: ${{ runner.temp }}/base-library/certified-library.tar.zst
           compression-level: 0
           if-no-files-found: error
           retention-days: 1

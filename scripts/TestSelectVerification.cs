@@ -489,6 +489,8 @@ Test("certified library binding, main republication and observability", () =>
         "DONATED_SHA256: " + dollar + "{{ steps.restored.outcome == 'success' && " +
             "steps.donor.outputs.manifest-sha256 || '' }}",
         "path: artifacts/library-download", "path: artifacts/certified-library.tar.zst",
+        // The proof-cost jobs restore the merge base's archive by the same file name as the head's.
+        "path: " + dollar + "{{ runner.temp }}/base-library/certified-library.tar.zst",
         "dotnet run --file scripts/TestLibraryArchive.cs",
         "max-parallel: 8", "artifacts/verification-traces/",
         "timeout-minutes: " + dollar + "{{ matrix.timeout }}",
