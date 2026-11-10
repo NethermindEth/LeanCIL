@@ -66,7 +66,9 @@ minutes. Stderr says so when the build starts and then reports the job count as
 [stage progress](CLI.md#stage-progress) describes. The
 library is cached in `LEANCIL_CACHE_DIR` (default `<local application data>/LeanCIL/libraries`)
 under a key of the framework sources, toolchain and platform, and both commands reuse it, so
-later runs take seconds. A release package downloads the library instead of building it.
+later runs take seconds. A package that `workspace` generates beside a proof requires the
+library there by path instead of holding a copy. A release package downloads the library
+instead of building it.
 
 Every invocation validates the request's identity and required proof evidence. Authenticated caches can reuse unchanged certified builds; source/hash checks, audits and required kernel replay still apply. Use `--fresh` to bypass proof and support reuse while retaining the source-bound library cache; add `--rebuild-library` to rebuild the library. Release packages can download a package-pinned certified library on first use, with independent integrity checks and kernel replay. A failed proof removes the previous verification report. `extract` generates definitions and `check` validates extraction consistency; `verify` establishes the selected theorem about those definitions. Its guarantee is exactly the theorem's statement, including its preconditions and quantifiers.
 

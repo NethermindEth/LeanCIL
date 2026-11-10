@@ -49,7 +49,8 @@ partial class Program
     internal static int Watch(string[] args)
     {
         var settings = ParseWatchSettings(args);
-        var editor = Path.Combine(EditorFramework(settings.Root), EditorSourceDirectory);
+        if (IsScratchPackage(settings.Root)) ScratchProofPackage(settings.Root);
+        var editor = Path.Combine(EditorPackage(settings.Root), EditorSourceDirectory);
         if (EditorSelections(editor).Count == 0)
             throw new InvalidDataException("No method extraction is recorded in " + CliPaths.Display(settings.Root) +
                 "; run leancil workspace for each proof first.");

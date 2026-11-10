@@ -16,7 +16,7 @@ partial class Program
     /// <summary>A proof of a selection, relative to its package, and the theorem that verifies it, if named.</summary>
     sealed record EditorProof(string Proof, string? Theorem);
 
-    /// <summary>Where the framework's editor library reads its sources, relative to the framework package.</summary>
+    /// <summary>Where the editor library reads its sources, relative to the package that declares it.</summary>
     const string EditorSourceDirectory = ".lake/leancil";
     /// <summary>Below the editor sources: per key, the selection and the verification outputs of its proofs.</summary>
     const string EditorSelectionsDirectory = "selections";
@@ -66,8 +66,7 @@ partial class Program
             ? Path.GetFullPath(selectedRoot) : FindProofPackage(proof);
         var created = root is null;
         // A proof outside any Lake package becomes the root of a generated one, so it is edited in place.
-        root ??= ScratchProofPackage(Path.GetDirectoryName(proof)!);
-        if (IsScratchPackage(root)) ScratchProofPackage(root);
+        root ??= Path.GetDirectoryName(proof)!;
         Within(root, Path.GetRelativePath(root, proof));
         return new(Path.GetFullPath(args[0]), args[1], profile, proof, root, options.GetValueOrDefault("--assembly"),
             [.. initialized], theorem, created);
@@ -96,69 +95,48 @@ partial class Program
             .StartsWith($"name = \"{ScratchPackageName}\"\n", StringComparison.Ordinal);
 
     /// <summary>
-    /// Makes `package` a Lake package that requires, by path, a copy of the bundled framework below its `.lake`,
-    /// refreshing the copy when the tool's framework changes. Nothing is fetched or committed, so the user's git
-    /// configuration plays no part.
+    /// Makes `package` a Lake package that declares the editor library and requires, by path, the certified
+    /// library where it is cached, so it holds no framework sources or build of its own. A changed framework
+    /// has another cache entry, which the requirement then names. Nothing is fetched or committed, so the
+    /// user's git configuration plays no part.
     /// </summary>
-    static string ScratchProofPackage(string package)
+    static void ScratchProofPackage(string package)
     {
-        var sources = LibrarySources(CommonInputs());
-        var frameworkLakefile = EditorFrameworkLakefile(File.ReadAllText(At("lakefile.toml")));
-        // The key regenerates the framework copy when the tool's framework or its lakefile view changes.
-        var key = ContentKey(JsonSerializer.Serialize(sources) + "\n" + frameworkLakefile)[..20];
-        var lakefile = $$"""
-            name = "{{ScratchPackageName}}"
-            # Bundled LeanCIL framework {{key}}
-
-            [[require]]
-            name = "leancil"
-            path = "{{BundledFrameworkDirectory}}"
-
-            """;
-        var lakefilePath = Path.Combine(package, "lakefile.toml");
         var toolchainPath = Path.Combine(package, "lean-toolchain");
-        if (File.Exists(lakefilePath) && File.ReadAllText(lakefilePath) == lakefile &&
-            File.Exists(Path.Combine(package, "lake-manifest.json")))
-            return package;
         var toolchain = File.ReadAllText(At("lean-toolchain")).Trim();
         if (File.Exists(toolchainPath) && File.ReadAllText(toolchainPath).Trim() != toolchain)
             throw new InvalidDataException("A different lean-toolchain already pins " + package +
                 "; pass --proof-root for a Lake package on the tool's toolchain.");
-        var framework = Within(package, BundledFrameworkDirectory);
-        var staging = framework + ".staging-" + Guid.NewGuid().ToString("N");
-        try
-        {
-            foreach (var name in sources.Keys)
-            {
-                var destination = Path.Combine(staging, name);
-                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                // Only the framework and editor libraries: Lake lists a source directory once per library.
-                if (name == "lakefile.toml") File.WriteAllText(destination, frameworkLakefile);
-                else File.Copy(At(name), destination);
-            }
-            if (Directory.Exists(framework)) Directory.Delete(framework, true);
-            Directory.Move(staging, framework);
-        }
-        finally
-        {
-            if (Directory.Exists(staging)) Directory.Delete(staging, true);
-        }
+        // Lake reads a rewritten requirement on its next run, so pointing it at another library needs no update.
+        var lakefile = $"name = \"{ScratchPackageName}\"\n" + FrameworkRequirement(package, EditorLibrary()) + $"""
+
+            [[lean_lib]]
+            name = "{EditorLibraryName}"
+            srcDir = "{EditorSourceDirectory}"
+            roots = ["Extracted", "ExtractedSymbols"]
+            defaultFacets = []
+
+            """;
+        var lakefilePath = Path.Combine(package, "lakefile.toml");
+        if (File.Exists(lakefilePath) && File.ReadAllText(lakefilePath) == lakefile &&
+            File.Exists(Path.Combine(package, "lake-manifest.json")))
+            return;
         File.Copy(At("lean-toolchain"), toolchainPath, true);
         File.WriteAllText(lakefilePath, lakefile);
         Run(["lake", "update"], package);
-        return package;
     }
 
     /// <summary>
-    /// Writes the selected method's extraction into the framework's editor library in the proof's package as
+    /// Writes the selected method's extraction into the editor library of the proof's package as
     /// `Extracted.KEY` (and `ExtractedSymbols.KEY`) and builds it there, so the proof resolves its own method's
     /// extraction in place beside other methods' ones. Nothing here is or yields a certificate.
     /// </summary>
     static void RefreshEditorExtraction(WorkspaceSettings settings)
     {
         var root = settings.ProofRoot;
-        var framework = EditorFramework(root);
-        var editor = Path.Combine(framework, EditorSourceDirectory);
+        if (settings.CreatedPackage || IsScratchPackage(root)) ScratchProofPackage(root);
+        var package = EditorPackage(root);
+        var editor = Path.Combine(package, EditorSourceDirectory);
         // The editor's `lake serve` starts Lean the same way; an oversized environment fails here, not as imports.
         RequireLeanEnvironmentFits(["lake", "serve"], root, new System.Diagnostics.ProcessStartInfo().Environment);
         var selection = new EditorSelection(settings.Assembly, settings.Method, settings.Profile,
@@ -176,7 +154,8 @@ partial class Program
                     .OrderBy(other => other.Proof, StringComparer.Ordinal)]
             };
             var modules = ApplyEditorExtraction(editor, key, extraction, selection);
-            SeedFrameworkBuild(framework);
+            // A package that requires the cached library by path has no framework build to fill.
+            if (!IsScratchPackage(root)) SeedFrameworkBuild(package);
             BuildEditorModules(root, modules);
             PrintEditorExtraction(settings, editor, key, modules);
         }
@@ -309,8 +288,8 @@ partial class Program
         var root = options.TryGetValue("--proof-root", out var selectedRoot) ? Path.GetFullPath(selectedRoot)
             : FindPackage(Environment.CurrentDirectory) ?? throw new InvalidDataException(
                 "No Lake package holds the current directory; pass --proof-root.");
-        var framework = EditorFramework(root);
-        var editor = Path.Combine(framework, EditorSourceDirectory);
+        var package = EditorPackage(root);
+        var editor = Path.Combine(package, EditorSourceDirectory);
         var selections = EditorSelections(editor);
         var profile = options.GetValueOrDefault("--profile");
         // The key names one selection; a method selector names each profile of it that the package recorded.
@@ -326,7 +305,7 @@ partial class Program
         var selection = selections[key];
         RemoveEditorModules(editor, key);
         Directory.Delete(Path.Combine(editor, EditorSelectionsDirectory, key), true);
-        var build = Path.Combine(framework, ".lake", "build");
+        var build = Path.Combine(package, ".lake", "build");
         if (Directory.Exists(build))
             foreach (var output in Directory.EnumerateFiles(build, key + ".*", SearchOption.AllDirectories)
                 .Where(path => Path.GetFileName(Path.GetDirectoryName(path)) is "Extracted" or "ExtractedSymbols"))
@@ -339,18 +318,25 @@ partial class Program
         Console.WriteLine("  Other methods' modules are unchanged and nothing was rebuilt.");
     }
 
+    /// <summary>
+    /// Builds the editor modules in the package at `root`. A generated package requires the certified library by
+    /// path, where Lake would rebuild a framework module it found stale, so such a build must leave it unwritten.
+    /// </summary>
     static void BuildEditorModules(string root, IReadOnlyCollection<string> modules)
     {
-        if (modules.Count > 0)
-            Run(["lake", "build", .. modules.Select(module => "+" + module)], root,
-                progress: "Building " + string.Join(", ", modules));
+        if (modules.Count == 0) return;
+        void Build() => Run(["lake", "build", .. modules.Select(module => "+" + module)], root,
+            progress: "Building " + string.Join(", ", modules));
+        if (IsScratchPackage(root)) RequireUnwritten(EditorLibrary(), Build);
+        else Build();
     }
 
     /// <summary>
-    /// The framework package whose editor library serves `root`: the root itself in a LeanCIL checkout, otherwise its
-    /// leancil dependency, after the same framework, toolchain and reserved-module checks as consumer verification.
+    /// The package whose editor library serves `root`: the root itself for a generated package or a LeanCIL
+    /// checkout, otherwise its leancil dependency, after the same framework, toolchain and reserved-module checks
+    /// as consumer verification.
     /// </summary>
-    static string EditorFramework(string root)
+    static string EditorPackage(string root)
     {
         RequireResolvedPackage(root);
         var manifest = JsonSerializer.Deserialize<JsonElement>(
@@ -365,6 +351,12 @@ partial class Program
                     .Any(directory => directory is "Extracted" or "ExtractedSymbols"))).ToArray();
             if (sources.Length > 0) throw ReservedModule(root, sources[0]);
         }
+        if (IsScratchPackage(root))
+        {
+            // Its framework is the certified library, whose sources the cache manifest binds to the tool's.
+            RequireNoReservedModule([root]);
+            return root;
+        }
         if (manifest.GetProperty("name").GetString() == "leancil")
         {
             RequireBundledFramework(root, root);
@@ -373,7 +365,7 @@ partial class Program
         }
         else
         {
-            var dependencies = ConsumerDependencies(root, IsScratchPackage(root));
+            var dependencies = ConsumerDependencies(root);
             // Before the snapshot, which refuses the same sources without saying which or what to do.
             RequireNoReservedModule([root, .. dependencies.Select(dependency => dependency.Directory)]);
             ConsumerSnapshot(root, null, dependencies);
@@ -457,7 +449,7 @@ partial class Program
                 "their modules are unchanged.");
         if (settings.CreatedPackage)
             Console.WriteLine("  Created a Lake package beside the proof (no lakefile above it): lakefile.toml, " +
-                "lean-toolchain and lake-manifest.json, with the bundled framework in " + BundledFrameworkDirectory);
+                "lean-toolchain and lake-manifest.json. It requires the cached certified library by path.");
         Console.WriteLine("  Edit the proof in place. After rebuilding the assembly, run this command again, or keep " +
             "leancil watch running, and restart the file in the editor to load the refreshed extraction.");
         Console.WriteLine("  Editor checking is not a certificate. Run ordinary leancil verify for certification.");

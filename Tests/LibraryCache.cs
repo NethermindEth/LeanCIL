@@ -25,6 +25,40 @@ try
     Receipt();
     if (!verifier.CertifiedLocalLibrary(directory, "cache-key")) throw new Exception("Receipted cache entry rejected");
     if (verifier.CertifiedLocalLibrary(directory, "other-key")) throw new Exception("Cache receipt accepted for another library key");
+    // A package may require an entry by path, where Lake rebuilds a module it finds stale. The receipt covers
+    // only the manifest, so a file whose length or write time moved is hashed against the manifest again.
+    var entryManifest = ReadManifest(directory)!;
+    bool Unchanged() => UnchangedCacheEntry(directory, entryManifest, out _);
+    if (!Unchanged() || !File.Exists(directory + ".stamps"))
+        throw new Exception("Unchanged cache entry rejected or left unstamped");
+    var certifiedAt = File.GetLastWriteTimeUtc(artifact);
+    File.WriteAllText(artifact, "rebuilt artifact!");
+    File.SetLastWriteTimeUtc(artifact, certifiedAt.AddSeconds(5));
+    if (Unchanged()) throw new Exception("A rewritten module of a cache entry was accepted");
+    File.WriteAllText(artifact, "compiled artifact");
+    File.SetLastWriteTimeUtc(artifact, certifiedAt.AddSeconds(10));
+    if (!Unchanged() || !Unchanged()) throw new Exception("An entry whose files hash to its manifest was rejected");
+    var unrecorded = Path.Combine(Path.GetDirectoryName(artifact)!, "Unrecorded.olean");
+    File.WriteAllText(unrecorded, "built into the entry");
+    if (Unchanged()) throw new Exception("A cache entry holding a file its manifest lacks was accepted");
+    File.Delete(unrecorded);
+    if (!Unchanged()) throw new Exception("A restored cache entry was rejected");
+    Console.WriteLine("PASS a cache entry is accepted only while its files hash to the receipted manifest");
+
+    // A library read in place is the one that was opened: a build that wrote into it must not pass for it.
+    using (var opened = new Program { library = directory, libraryStamps = FileStamps(directory) })
+    {
+        opened.RequireUnchangedLibrary();
+        File.SetLastWriteTimeUtc(artifact, certifiedAt.AddSeconds(15));
+        ExpectRejection(opened.RequireUnchangedLibrary, "changed on disk during verification");
+    }
+    RequireUnwritten(directory, () => File.ReadAllText(artifact));
+    ExpectRejection(() => RequireUnwritten(directory, () => File.WriteAllText(unrecorded, "built into the entry")),
+        "wrote into the certified library");
+    File.Delete(unrecorded);
+    ExpectRejection(() => RequireUnwritten(directory, () => File.AppendAllText(artifact, " rebuilt")),
+        "wrote into the certified library");
+    Console.WriteLine("PASS a library read in place fails verification or an editor build that changed its files");
     File.WriteAllText(cacheManifest, System.Text.Json.JsonSerializer.Serialize(new SortedDictionary<string, string>(StringComparer.Ordinal)));
     if (verifier.CertifiedLocalLibrary(directory, "cache-key")) throw new Exception("Replaced cache manifest accepted");
 
@@ -85,6 +119,7 @@ try
 finally
 {
     Directory.Delete(directory, true);
+    File.Delete(directory + ".stamps");
     if (Directory.Exists(prepared)) Directory.Delete(prepared, true);
     if (Directory.Exists(unrelated)) Directory.Delete(unrelated, true);
 }
