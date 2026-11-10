@@ -576,8 +576,12 @@ END Building fresh Lean verification library (exit 0, 501.7s)
 A cache miss on the certified library first prints one line saying that the library is being
 built and kernel-replayed and where later runs reuse it from. The build compiles every framework
 module and replays all of them, because one library certifies every proof and proof dependency
-for that framework version; it takes several minutes. The cache is `LEANCIL_CACHE_DIR`, by
-default `<local application data>/LeanCIL/libraries`.
+for that framework version; it takes several minutes. A library holding only the modules one
+proof imports is not built: a certificate names the library by a key that states every module
+was replayed, single-file verification compiles the proof with `lean` against the library's
+compiled modules, where a missing one is an error and not a build, and a package that requires
+the library by path would have Lake build a missing module into it. The cache is
+`LEANCIL_CACHE_DIR`, by default `<local application data>/LeanCIL/libraries`.
 
 A cache entry is read in place by verification sessions and by the packages `workspace`
 generates, which require it by path, and Lake rebuilds a required module it finds out of date
