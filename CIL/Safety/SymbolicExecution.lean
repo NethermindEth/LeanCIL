@@ -1013,7 +1013,7 @@ macro_rules
 
 /-- Proves an `invoke` or `run` goal, returning or stating a located fault, by checked
     stepping with `facts` and the object evidence facts of the context, such as `live.formed` of
-    a `LiveObject` and `owned.facts` of a scalar field, normalised once at entry. A goal
+    a `LiveObject` and the load a scalar field's `Readable` gives, normalised once at entry. A goal
     `∃ fuel, invoke ..` takes the execution bound of its method as the fuel, and the projections
     of a defined contract are unfolded. Stops at the first step it cannot take, leaving that
     goal; fails if it takes none. -/
