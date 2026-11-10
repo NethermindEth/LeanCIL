@@ -38,7 +38,7 @@ theorem null_pairs (memory : Memory) (tiles : Reference)
     (held : Tiles.Pairs.of memory tiles = .null) :
     ∃ fuel, invoke Extracted.program fuel pairsOf [.object (.address tiles)] memory =
       .ok (memory, [.array ⟨.null, 0, Tiles.Pairs.elementType⟩]) := by
-  cil_checked_steps [readable.live.formed, readable.located, readable.load_null held rfl]
+  cil_checked_steps [readable.load_null held rfl]
 
 #print axioms null_pairs
 

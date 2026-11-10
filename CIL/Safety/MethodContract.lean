@@ -797,6 +797,19 @@ def cilContractChild (methodFound instructionFound : Term) (facts : Array Term) 
   throwError "Call requires a proved contract or matching child invocation"
 
 open Lean Meta in
+/-- How a contract input of `inputType` is inferred from a call's arguments: whether it is first
+    tried as its constructor over fresh fields, and whether that form is tried after a whole
+    fresh term fails. A pair is matched field by field. Any other structure, such as a word or a
+    reference, is taken whole first, so it appears as the caller wrote it and not as its
+    constructor over projections. -/
+def cilContractInputForms (inputType : Expr) : MetaM (Bool × Bool) := do
+  let type ← whnf inputType
+  if type.isAppOfArity ``Prod 2 then return (true, false)
+  let some name := type.getAppFn.constName? | return (false, false)
+  let .inductInfo info ← getConstInfo name | return (false, false)
+  return (false, info.ctors.length == 1)
+
+open Lean Meta in
 /-- A fresh contract input whose single constructor, and the pair constructor of each pair inside
     it, is applied to fresh fields, so the encoded call arguments determine every field. -/
 partial def cilContractInput (inputType : Expr) : MetaM Expr := do
@@ -837,54 +850,63 @@ def cilContractApply (methodFound instructionFound : Term) (facts : Array Term) 
   for name in contractTheorems.getState (← getEnv) do
     candidates := candidates.push (mkIdent name)
   for candidate in candidates do
-    let saved ← saveState
-    try
-      let proof ← Term.withoutErrToSorry <| Term.withSynthesize <| Term.elabTerm candidate none
-      let proofType ← instantiateMVars (← inferType proof)
-      unless proofType.getForallBody.isAppOfArity ``CIL.Safety.MethodContract.Holds 5 do
-        throwError "Not a method contract"
-      let (parameters, _, type) ← forallMetaTelescope proofType
-      let type ← instantiateMVars type
-      unless type.isAppOfArity ``CIL.Safety.MethodContract.Holds 5 do
-        throwError "Not a method contract"
-      let input ← cilContractInput type.getAppArgs[0]!
-      let inputSyntax ← Term.exprToSyntax input
-      let proofSyntax ← Term.exprToSyntax (mkAppN proof parameters)
-      let siblings := (← getGoals).tail!
-      let tag ← (← getMainGoal).getTag
-      evalTactic (← `(tactic| (
-        cil_strict refine CIL.Safety.run_call_of_contract $proofSyntax $inputSyntax
-          $methodFound $instructionFound
-          (by cil_checked_step_normalized [$facts,*]) (by rfl) ?_ ?_)))
-      for parameter in parameters do
-        unless ← parameter.mvarId!.isAssigned do
-          let remaining ← Tactic.run parameter.mvarId! (evalTactic (← `(tactic|
-            first | assumption | cil_lookup [$facts,*])))
-          unless remaining.isEmpty do throwError "The contract binding could not be established"
-      let pending ← getGoals
-      unless pending.length == siblings.length + 2 do
-        throwError "The contract input could not be inferred from the call arguments"
-      let permitted := pending[0]!
-      let continuation := pending[1]!
-      permitted.setTag (preconditionTag type)
-      continuation.setTag tag
-      let beforePrecondition ← saveState
+    let fieldwise ← IO.mkRef false
+    for retry in [false, true] do
+      -- Only a structure that could not be taken whole is tried again, field by field.
+      if retry && !(← fieldwise.get) then break
+      let saved ← saveState
       try
-        evalTactic (← `(tactic| focus
-          first | assumption | trivial | (simp [$[$facts:term],*]; done)))
-      catch _ => beforePrecondition.restore
-      if (← instantiateMVars input).hasExprMVar then
-        throwError "The contract input has fields not determined by the call or precondition"
-      setGoals [continuation]
-      let (called, output, call) ← continuation.withContext cilCallNames
-      evalTactic (← `(tactic| (
-        intro $called:ident $output:ident $call:ident
-        cil_unfold_contracts
-        cil_stack_cleanup)))
-      let remaining ← getGoals
-      setGoals ((if ← permitted.isAssigned then [] else [permitted]) ++ remaining ++ siblings)
-      return
-    catch _ => saved.restore
+        let proof ← Term.withoutErrToSorry <| Term.withSynthesize <| Term.elabTerm candidate none
+        let proofType ← instantiateMVars (← inferType proof)
+        unless proofType.getForallBody.isAppOfArity ``CIL.Safety.MethodContract.Holds 5 do
+          throwError "Not a method contract"
+        let (parameters, _, type) ← forallMetaTelescope proofType
+        let type ← instantiateMVars type
+        unless type.isAppOfArity ``CIL.Safety.MethodContract.Holds 5 do
+          throwError "Not a method contract"
+        let inputType := type.getAppArgs[0]!
+        let (structured, thenStructured) ← cilContractInputForms inputType
+        fieldwise.set (!retry && thenStructured)
+        let input ← if structured || retry then cilContractInput inputType
+          else mkFreshExprMVar inputType
+        let inputSyntax ← Term.exprToSyntax input
+        let proofSyntax ← Term.exprToSyntax (mkAppN proof parameters)
+        let siblings := (← getGoals).tail!
+        let tag ← (← getMainGoal).getTag
+        evalTactic (← `(tactic| (
+          cil_strict refine CIL.Safety.run_call_of_contract $proofSyntax $inputSyntax
+            $methodFound $instructionFound
+            (by cil_checked_step_normalized [$facts,*]) (by rfl) ?_ ?_)))
+        for parameter in parameters do
+          unless ← parameter.mvarId!.isAssigned do
+            let remaining ← Tactic.run parameter.mvarId! (evalTactic (← `(tactic|
+              first | assumption | cil_lookup [$facts,*])))
+            unless remaining.isEmpty do
+              throwError "The contract binding could not be established"
+        let pending ← getGoals
+        unless pending.length == siblings.length + 2 do
+          throwError "The contract input could not be inferred from the call arguments"
+        let permitted := pending[0]!
+        let continuation := pending[1]!
+        permitted.setTag (preconditionTag type)
+        continuation.setTag tag
+        let beforePrecondition ← saveState
+        try
+          evalTactic (← `(tactic| focus
+            first | assumption | trivial | (simp [$[$facts:term],*]; done)))
+        catch _ => beforePrecondition.restore
+        if (← instantiateMVars input).hasExprMVar then
+          throwError "The contract input has fields not determined by the call or precondition"
+        setGoals [continuation]
+        let (called, output, call) ← continuation.withContext cilCallNames
+        evalTactic (← `(tactic| (
+          intro $called:ident $output:ident $call:ident
+          cil_unfold_contracts
+          cil_stack_cleanup)))
+        let remaining ← getGoals
+        setGoals ((if ← permitted.isAssigned then [] else [permitted]) ++ remaining ++ siblings)
+        return
+      catch _ => saved.restore
   throwError "No matching contract with an established precondition"
 
 open Lean Elab Tactic Meta in
@@ -965,16 +987,14 @@ elab_rules : tactic
     unless ← cilNameCall before called.getId output.getId call.getId do
       throwError "cil_contract_steps composed no call to name"
   | `(tactic| cil_contract_steps [$facts:term,*]) => do
-    let config ← `(Lean.Parser.Tactic.optConfig|)
-    let prepared ← normaliseStepFacts config facts.getElems
+    let prepared ← prepareStepFacts facts.getElems
     withMainContext <| evalTactic (← `(tactic| (
       cil_contract_prepare [$[$prepared:term],*]
       cil_steps_from "cil_contract_steps took no step: the method or instruction lookup, or the \
         first step, did not close; pass the lookup hypothesis, feature facts or step facts"
         cil_contract_step [$[$prepared:term],*])))
   | `(tactic| cil_contract_steps $count:num [$facts:term,*]) => do
-    let config ← `(Lean.Parser.Tactic.optConfig|)
-    let prepared ← normaliseStepFacts config facts.getElems
+    let prepared ← prepareStepFacts facts.getElems
     withMainContext <| evalTactic (← `(tactic| cil_contract_prepare [$[$prepared:term],*]))
     let next ← `(tactic| cil_contract_step [$[$prepared:term],*])
     for _ in [:count.getNat] do
@@ -985,8 +1005,7 @@ elab_rules : tactic
         saved.restore
         break
   | `(tactic| cil_contract_steps [$facts:term,*] until $continuation) => do
-    let config ← `(Lean.Parser.Tactic.optConfig|)
-    let prepared ← normaliseStepFacts config facts.getElems
+    let prepared ← prepareStepFacts facts.getElems
     withMainContext <| evalTactic (← `(tactic| (first
       | (cil_strict exact $continuation)
       | (

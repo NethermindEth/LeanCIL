@@ -140,7 +140,7 @@ syntax "cil_checked_steps" "(" &"snapshots" ":=" term ")" "[" term,* "]" : tacti
 
 elab_rules : tactic
   | `(tactic| cil_checked_steps (snapshots := $snapshot) [$facts:term,*]) => focus do
-    let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|)) facts.getElems
+    let prepared ← prepareStepFacts facts.getElems
     let mut snapshot := snapshot
     let mut progressed := false
     repeat

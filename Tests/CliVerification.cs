@@ -160,23 +160,27 @@ Console.WriteLine("PASS CLI verification settings survive failure and support re
 RequireReport(Execute([.. cli, "verify", output, "--format", "json"]), 0, "Verified.json", (output, "<output>"),
     (proof, "<proof>"));
 
-// A loop proof missing its invariant reports the open obligation by its tag, and a loop tactic that stops
-// reports the method, pc and instruction it reached and what differs, read from its failure record.
+// A loop proof missing its invariant reports the open obligation by its tag, and a path that misses its loop
+// head reports the method, pc and instruction it reached and what differs, read from its failure record.
 var loopOutput = At("artifacts/CliLoopReports");
 Run([.. cli, "extract", demoAssembly, "Examples.Loops::Countdown(uint)", loopOutput]);
 var countdown = File.ReadAllText(At("Examples/Proofs/Countdown.lean")).ReplaceLineEndings("\n");
 var noInvariant = Path.Combine(loopOutput, "NoInvariant.lean");
-File.WriteAllText(noInvariant, Edited(countdown, "    case invariant => trivial\n", ""));
+File.WriteAllText(noInvariant, Edited(countdown, "    case invariant => trivial\n    case measure =>",
+    "    case measure =>"));
 RequireReport(Execute([.. cli, "verify", loopOutput, "--proof", noInvariant, "--format", "json"]), 1,
     "MissingInvariant.json", (loopOutput, "<output>"), (noInvariant, "<proof>"));
-var wrongHead = Path.Combine(loopOutput, "WrongHead.lean");
-File.WriteAllText(wrongHead, Edited(countdown, "cil_loop_continue \u27e8x - 1, updated, next\u27e9",
-    "cil_loop_continue \u27e8x - 2, updated, next\u27e9"));
-RequireReport(Execute([.. cli, "verify", loopOutput, "--proof", wrongHead, "--format", "json"]), 1,
-    "LoopHeadMismatch.json", (loopOutput, "<output>"), (wrongHead, "<proof>"));
+// The span drain checks its entry path against a stated loop head, whose stack the edit misstates.
+var spanOutput = At("artifacts/CliSpanReports");
+Run([.. cli, "extract", demoAssembly, "Examples.Loops::Drain(System.ReadOnlySpan`1<System.Int32>)", spanOutput]);
+var wrongHead = Path.Combine(spanOutput, "WrongHead.lean");
+File.WriteAllText(wrongHead, Edited(File.ReadAllText(At("Examples/Proofs/SpanDrain.lean")).ReplaceLineEndings("\n"),
+    "(BitVec.ofNat 32 state.val.length))], memory", "(BitVec.ofNat 32 (state.val.length + 1)))], memory"));
+RequireReport(Execute([.. cli, "verify", spanOutput, "--proof", wrongHead, "--format", "json"]), 1,
+    "LoopHeadMismatch.json", (spanOutput, "<output>"), (wrongHead, "<proof>"));
 // The record is requested only by `--format json`; the default report is the error alone.
-var wrongHeadText = Execute([.. cli, "verify", loopOutput, "--proof", wrongHead]);
-if (wrongHeadText.Code != 1 || !wrongHeadText.Stderr.Contains("cil_loop_steps: target state not matched at pc 8") ||
+var wrongHeadText = Execute([.. cli, "verify", spanOutput, "--proof", wrongHead]);
+if (wrongHeadText.Code != 1 || !wrongHeadText.Stderr.Contains("cil_loop_steps: target state not matched at pc 7") ||
     wrongHeadText.Stderr.Contains("[LeanCIL failure"))
     throw new InvalidOperationException("The default report changed for a loop failure: " + wrongHeadText.Output);
 Console.WriteLine("PASS CLI --format json reports each failure with its obligation, pc and state, and success");
@@ -188,10 +192,10 @@ var traced = Execute([.. cli, "verify", loopOutput, "--proof", countdownProof, "
 var tracedText = traced.Stdout.ReplaceLineEndings("\n");
 var tracedMessages = tracedText[..Math.Max(0, tracedText.IndexOf("  Trace (", StringComparison.Ordinal))];
 if (traced.Code != 0 || !tracedText.Contains("  Trace (") || tracedText.Contains("Untraced") ||
-    !tracedText.Contains("Countdown.lean:31:8: [CIL.step] pc 0: CIL.Op.arg 0\n") ||
-    !tracedText.Contains("[CIL.step] cil_loop_steps took ") || tracedMessages.Contains("[CIL.step]") ||
-    // The tactic sits in a `refine` term Lean elaborates more than once; only the attempt it kept is traced.
-    tracedText.Split("Countdown.lean:31:8: [CIL.step] cil_loop_steps took ").Length != 2)
+    !tracedText.Contains("Countdown.lean:30:4: [CIL.step] pc 0: CIL.Op.arg 0\n") ||
+    !tracedText.Contains("[CIL.step] cil_loop_finish took ") || tracedMessages.Contains("[CIL.step]") ||
+    // Each tactic reports its step count once, at its own position.
+    tracedText.Split("Countdown.lean:30:4: [CIL.step] cil_loop_recurse took ").Length != 2)
     throw new InvalidOperationException("verify --trace did not report the steps apart: " + traced.Output);
 var tracedReport = JsonNode.Parse(Execute([.. cli, "verify", loopOutput, "--proof", countdownProof, "--trace",
     "--format", "json"]).Stdout) as JsonObject;
@@ -206,15 +210,15 @@ if (untraced.Code != 0 || untraced.Stdout.Contains("[CIL.step]") || untraced.Std
     throw new InvalidOperationException("verify without --trace printed a trace: " + untraced.Output);
 Console.WriteLine("PASS CLI --trace reports each step apart from the proof's messages, and only when asked");
 
-// A proof stuck on a class instance names the object fact it lacks: the entry of `DepositBoth` checks each
-// account argument before its `callvirt` can throw, so an account with no formation fact stops it.
+// A proof stuck on a class instance names the object evidence it lacks: the entry of `DepositBoth` checks each
+// account argument before its `callvirt` can throw, so an account the statement says nothing of stops it.
 var objectOutput = At("artifacts/CliObjectReports");
 Run([.. cli, "extract", demoAssembly, "Examples.Objects::DepositBoth(Examples.Account,Examples.Account,ulong)",
     objectOutput]);
 var depositBothProof = At("Examples/Proofs/DepositBoth.lean");
 var unformed = Path.Combine(objectOutput, "UnformedAccount.lean");
 File.WriteAllText(unformed, Edited(File.ReadAllText(depositBothProof).ReplaceLineEndings("\n"),
-    "  cil_checked_steps [secondLive.formed]\n", "  cil_checked_steps []\n"));
+    " (amount : W64)\n    (secondLive : LiveObject memory second) :\n", " (amount : W64) :\n"));
 RequireReport(Execute([.. cli, "verify", objectOutput, "--proof", unformed, "--theorem",
     "ExampleProof.first_null_throws", "--format", "json"]), 1, "UnformedAccount.json", (objectOutput, "<output>"),
     (unformed, "<proof>"));

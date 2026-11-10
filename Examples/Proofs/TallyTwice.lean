@@ -74,6 +74,7 @@ theorem correctness (memory : Memory) (value : W32) (wellFormed : memory.WellFor
       show (value - (count + 1)).toNat < (value - count).toNat
       bv_omega
 
+#print axioms addTwo_holds
 #print axioms correctness
 
 end ExampleProof

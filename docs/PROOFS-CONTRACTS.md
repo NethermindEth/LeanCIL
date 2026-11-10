@@ -175,7 +175,8 @@ In the caller, `cil_contract_steps [facts]` steps an existential-fuel goal throu
 instructions and calls with supplied evidence. Mark a proved `MethodContract.Holds` theorem
 `@[cil_contract]`, or include its proof in `facts`, to apply it at a matching callee. The theorem's
 program and method binding must match the actual call; required binding premises are checked. Input
-fields, each component of a tuple input included, are inferred from the encoded arguments. The
+fields, each component of a tuple input included, are inferred from the encoded arguments, and an
+input that is one word or one reference is the argument as the caller wrote it. The
 precondition is proved from facts when possible,
 otherwise it remains a goal before the continuation. Contracts merely present in the local context
 are not automatically selected.
@@ -188,7 +189,7 @@ postcondition of `output`) by field. `cil_contract_steps [facts] with memory res
 gives the first call it composes those three names instead, and fails when it composes no call:
 
 ```lean excerpt Examples/Proofs/DepositBoth.lean
-cil_contract_steps [holds, depositContract, firstOwned, firstOwned.facts, secondOwned.facts]
+cil_contract_steps [holds, depositContract, firstOwned]
   with middle values firstCall
 obtain ⟨rfl, firstHeld⟩ := firstCall.post
 have firstFramed := firstCall.framed
@@ -311,9 +312,11 @@ element are relied on.
 | `LiveObject memory object` | `object` forms as an object reference older than later allocations |
 | `field.entry object` | The footprint entry of a call that may change the field |
 
-`readable.facts` is the one fact `cil_checked_steps` needs to step a load (for a reference field,
-`readable.facts held targetLive`; for a signed narrow field, `readable.signedFacts`, which pushes
-the value sign-extended), and `owned.store value` gives the write, its `Confined`
+The stepping tactics read `readable.facts`, the one fact a load of a scalar field steps with, from
+a `Readable`, `Owned` or `Holds` hypothesis in the context, as they read `live.formed` from a
+`LiveObject` (see [composing instructions](PROOFS-STEPPING.md#compose-instructions)). A reference field's
+load takes `readable.facts held targetLive` and a signed narrow field's `readable.signedFacts`,
+which pushes the value sign-extended, and `owned.store value` gives the write, its `Confined`
 footprint and the `Holds` after it; for a reference field, `owned.store live` stores a live object and
 `owned.store_formed formed` any reference that forms, null included. A field holding a class outside
 the model is never read through: `readable.load_forms forms` steps its load from `Forms`.

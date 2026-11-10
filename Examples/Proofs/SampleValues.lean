@@ -38,7 +38,7 @@ theorem null_values (memory : Memory) (samples : Reference)
     (held : Samples.Values.of memory samples = .null) :
     ∃ fuel, invoke Extracted.program fuel valuesOf [.object (.address samples)] memory =
       .ok (memory, [.array ⟨.null, 0, .signed32⟩]) := by
-  cil_checked_steps [readable.live.formed, readable.located, readable.load_null held rfl]
+  cil_checked_steps [readable.load_null held rfl]
 
 #print axioms null_values
 

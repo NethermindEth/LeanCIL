@@ -424,8 +424,7 @@ syntax "cil_raise_steps" "[" term,* "]" : tactic
 open Lean Elab Tactic in
 elab_rules : tactic
   | `(tactic| cil_raise_steps [$facts:term,*]) => do
-    let config ← `(Lean.Parser.Tactic.optConfig|)
-    let prepared ← normaliseStepFacts config facts.getElems
+    let prepared ← prepareStepFacts facts.getElems
     withMainContext <|
       evalTactic (← `(tactic| cil_raise_steps_normalized [$[$prepared:term],*]))
 

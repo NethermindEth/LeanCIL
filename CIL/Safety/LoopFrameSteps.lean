@@ -736,7 +736,8 @@ elab_rules : tactic
       let some parts ← loopStateParts? source
         | throwError "cil_loop_recurse: the reached state is not a literal state"
       return (reached, parts[3]!)
-    let mismatch (error : Exception) : TacticM Unit :=
+    -- The reached state names memories the walk introduced, so it is printed in the goal's context.
+    let mismatch (error : Exception) : TacticM Unit := withMainContext do
       throwError "cil_loop_recurse: the reached state is not the head of {hypothesis} at \
         {values}:{indentExpr (loopLiteralSums reached)}\n{error.toMessageData}"
     let saved ← saveState

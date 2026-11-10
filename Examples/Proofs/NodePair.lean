@@ -77,8 +77,7 @@ theorem correctness (memory : Memory) (formed : memory.WellFormed)
       (ReferenceArray.slot ⟨memory.nextIdentity, 0⟩ 1) (.address second), ?_, ?_⟩
   · simp only [nodeType]
     cil_checked_steps [allocated, located0, checked0, stored0, located1, checked1, stored1,
-      loaded.1, loaded.2, firstLive.formed, secondLive.formed, firstFormed, secondFormed,
-      nodeType]
+      loaded.1, loaded.2, firstFormed, secondFormed, nodeType]
   · exact below.trans
       ((ReferenceArray.setSlot_below (field := ReferenceArray.slot ⟨memory.nextIdentity, 0⟩ 0) _
         (Nat.le_refl _) _).trans

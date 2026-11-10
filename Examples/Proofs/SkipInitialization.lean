@@ -32,4 +32,6 @@ theorem instruction_preserves (memory : Memory) (reference : ManagedReference) (
   simp [instruction, observerCount, unspecifiedOperands, CIL.Safety.Value.hasUnspecified,
     valid, Functor.map, Except.map]
 
+#print axioms correctness
+#print axioms instruction_preserves
 end ExampleProof

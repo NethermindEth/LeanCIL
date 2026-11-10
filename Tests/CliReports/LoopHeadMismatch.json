@@ -4,7 +4,7 @@
   "stage": "proof checking",
   "theorem": "ExampleProof.correctness",
   "method": {
-    "entry": "System.UInt32 Examples.Loops::Countdown(System.UInt32)",
+    "entry": "System.Int32 Examples.Loops::Drain(System.ReadOnlySpan`1<System.Int32>)",
     "assembly": "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
     "assemblySha256": "<sha256>"
   },
@@ -20,61 +20,33 @@
       "module": "Proof",
       "source": {
         "file": "<proof>",
-        "line": 40,
-        "column": 39
+        "line": 37,
+        "column": 54
       },
-      "message": "Application type mismatch: The argument\n  next\nhas type\n  LoopFrame [] Memory.empty updated [CIL.LocalKind.word32] [LocalSlot.bytes CIL.LocalKind.word32 home]\n    (knownLocals [some (CIL.Value.i32 (x - 1))])\nbut is expected to have type\n  LoopFrame [] Memory.empty updated [CIL.LocalKind.word32] [LocalSlot.bytes CIL.LocalKind.word32 home]\n    (knownLocals [some (CIL.Value.i32 (x - 2))])\nin the application\n  { values := x - 2, memory := updated, frame := next }",
-      "tactic": null,
-      "stopped": null,
-      "method": null,
-      "cil": null,
-      "state": null,
-      "missing": null,
-      "suggestions": [],
-      "obligations": [],
-      "unknown": {
-        "tactic": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
-        "stopped": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
-        "method": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
-        "cil": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
-        "state": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
-        "missing": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
-        "obligations": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework"
-      }
-    },
-    {
-      "kind": "elaboration-error",
-      "resource": null,
-      "module": "Proof",
-      "source": {
-        "file": "<proof>",
-        "line": 40,
-        "column": 4
-      },
-      "message": "cil_loop_steps: target state not matched at pc 8:\nstack: reached\n  [Value.scalar (CIL.Value.i32 (x - 1#32))]\nbut the target has\n  [Value.scalar (CIL.Value.i32 (x - 2))]\nState a fact in the reached form, or state the target in it.",
+      "message": "cil_loop_steps: target state not matched at pc 7:\nstack: reached\n  [Value.scalar (CIL.Value.i32 (BitVec.ofNat 32 view.length))]\nbut the target has\n  [Value.scalar (CIL.Value.i32 (BitVec.ofNat 32 (view.length + 1)))]\nState a fact in the reached form, or state the target in it.",
       "tactic": "cil_loop_steps",
       "stopped": false,
       "method": {
         "index": 0,
-        "signature": "System.UInt32 Examples.Loops::Countdown(System.UInt32)"
+        "signature": "System.Int32 Examples.Loops::Drain(System.ReadOnlySpan`1<System.Int32>)"
       },
       "cil": {
-        "pc": 8,
-        "ilOffset": 9,
-        "instruction": "brtrue.s IL_0004",
+        "pc": 7,
+        "ilOffset": 19,
+        "instruction": "brtrue.s IL_0002",
         "leanInstruction": null,
         "source": {
           "file": "Loops.cs",
-          "line": 38,
+          "line": 30,
           "column": 9
         }
       },
       "state": {
         "reached": {
-          "stack": "[CIL.Safety.Value.scalar (CIL.Value.i32 (x - 1#32))]"
+          "stack": "[CIL.Safety.Value.scalar (CIL.Value.i32 (BitVec.ofNat 32 view.length))]"
         },
         "expected": {
-          "stack": "[CIL.Safety.Value.scalar (CIL.Value.i32 (x - 2))]"
+          "stack": "[CIL.Safety.Value.scalar (CIL.Value.i32 (BitVec.ofNat 32 (view.length + 1)))]"
         }
       },
       "missing": {
@@ -96,47 +68,115 @@
       "module": "Proof",
       "source": {
         "file": "<proof>",
-        "line": 49,
-        "column": 8
+        "line": 40,
+        "column": 19
       },
-      "message": "'change' tactic failed, pattern\n  (1 : Nat) ≤ BitVec.toNat x\nis not definitionally equal to target\n  (2 : W32) ≤ x",
-      "tactic": null,
-      "stopped": null,
-      "method": null,
-      "cil": null,
-      "state": null,
-      "missing": null,
-      "suggestions": [],
+      "message": "cil_loop_finish: cannot step pc 3 (CIL.Op.memory (CIL.MemoryOp.spanSlice false)) at memory\n  memory\nThe step is\n  step Extracted.method0 (CIL.Op.memory (CIL.MemoryOp.spanSlice false)) 3 [Value.bufferSpan view✝]\n      { activation := memory.nextIdentity, locals := [LocalSlot.span 4 false (some view)], owned := [] }\n      [Value.scalar (CIL.Value.i32 1#32), Value.bufferSpan view] memory =\n    Except.ok (FrameAction.next ?_mvar.4169.9092 ?_mvar.4169.9097 ?_mvar.4169.9099 ?_mvar.4169.9101)\nWith the step equations and facts it reduces to\n  False\nSupply a `LoopFrame` at this memory for a local, or the step equation of a store with this stack.",
+      "tactic": "cil_loop_finish",
+      "stopped": false,
+      "method": {
+        "index": 0,
+        "signature": "System.Int32 Examples.Loops::Drain(System.ReadOnlySpan`1<System.Int32>)"
+      },
+      "cil": {
+        "pc": 3,
+        "ilOffset": 5,
+        "instruction": "call System.ReadOnlySpan`1<!0> System.ReadOnlySpan`1<System.Int32>::Slice(System.Int32)",
+        "leanInstruction": "CIL.Op.memory (CIL.MemoryOp.spanSlice false)",
+        "source": {
+          "file": "Loops.cs",
+          "line": 31,
+          "column": 13
+        }
+      },
+      "state": {
+        "reached": {
+          "frame": "{ activation := memory.nextIdentity, locals := [CIL.Safety.LocalSlot.span 4 false (some view)], owned := [] }",
+          "memory": "memory",
+          "pc": "3",
+          "stack": "[CIL.Safety.Value.scalar (CIL.Value.i32 1#32), CIL.Safety.Value.bufferSpan view]"
+        },
+        "expected": {}
+      },
+      "missing": {
+        "shape": "spanSlice",
+        "residual": [
+          "(if 1 ≤ view.length then\n    match\n      match view.slice memory 1 (view.length - 1) with\n      | Except.error err => Except.error (CIL.Safety.ExecutionFault.memory err view.reference 0)\n      | Except.ok v => Except.ok v with\n    | Except.error err => Except.error err\n    | Except.ok v =>\n      Except.ok\n        (CIL.Safety.FrameAction.next 4 [CIL.Safety.Value.bufferSpan v]\n          { activation := memory.nextIdentity, locals := [CIL.Safety.LocalSlot.span 4 false (some view)], owned := [] }\n          memory)\n  else Except.error (CIL.Safety.ExecutionFault.thrown \"System.ArgumentOutOfRangeException\")) =\n  ?m.326"
+        ]
+      },
+      "suggestions": [
+        "supply the slice: `view.slice memory start length = .ok sliced`, such as from `CheckedSpan.tail` at the caller's memory"
+      ],
       "obligations": [],
       "unknown": {
-        "tactic": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
-        "stopped": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
-        "method": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
-        "cil": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
-        "state": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
-        "missing": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework",
-        "obligations": "no LeanCIL tactic raised this error: it is Lean's own, or a tactic's outside the LeanCIL framework"
+        "obligations": "the goal the tactic was handed carries no obligation tag"
+      }
+    },
+    {
+      "kind": "elaboration-error",
+      "resource": null,
+      "module": "Proof",
+      "source": {
+        "file": "<proof>",
+        "line": 44,
+        "column": 4
+      },
+      "message": "cil_loop_steps: the pc is not a literal, so a branch was not decided; supply a fact deciding its condition. The pc is\n  if BitVec.ofNat 32 (view.length + 1) = 0#32 then 8 else 1",
+      "tactic": "cil_loop_steps",
+      "stopped": false,
+      "method": {
+        "index": 0,
+        "signature": "System.Int32 Examples.Loops::Drain(System.ReadOnlySpan`1<System.Int32>)"
+      },
+      "cil": null,
+      "state": {
+        "reached": {
+          "frame": "{ activation := memory.nextIdentity, locals := [CIL.Safety.LocalSlot.span 4 false (some view)], owned := [] }",
+          "memory": "memory",
+          "pc": "if BitVec.ofNat 32 (view.length + 1) = 0#32 then 8 else 1",
+          "stack": "[]"
+        },
+        "expected": {}
+      },
+      "missing": {
+        "shape": "branchCondition",
+        "residual": []
+      },
+      "suggestions": [
+        "supply a fact deciding the branch condition"
+      ],
+      "obligations": [],
+      "unknown": {
+        "obligations": "the goal the tactic was handed carries no obligation tag",
+        "cil": "the pc is not a literal: a branch was not decided"
       }
     }
   ],
   "messages": [
     {
       "file": "<proof>",
-      "line": 10,
+      "line": 13,
       "column": 0,
       "severity": "info",
-      "text": "'ExampleProof.entry.checked' depends on axioms: [propext, Classical.choice, Quot.sound]"
+      "text": "'ExampleProof.entry.checked' depends on axioms: [propext, Quot.sound]"
     },
     {
       "file": "<proof>",
-      "line": 12,
+      "line": 26,
       "column": 0,
       "severity": "info",
-      "text": "'ExampleProof.cutpoint.checked' depends on axioms: [propext]"
+      "text": "'ExampleProof.header.checked' depends on axioms: [propext]"
     },
     {
       "file": "<proof>",
-      "line": 52,
+      "line": 48,
+      "column": 0,
+      "severity": "info",
+      "text": "'ExampleProof.drain' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]"
+    },
+    {
+      "file": "<proof>",
+      "line": 58,
       "column": 0,
       "severity": "info",
       "text": "'ExampleProof.correctness' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]"
