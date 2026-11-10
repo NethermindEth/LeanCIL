@@ -60,7 +60,9 @@ goal names its object:
 
 A fact that takes a further premise is still passed: `readable.facts held targetLive` for the
 load of a reference field, `readable.signedFacts` for a signed narrow load, and the equation a
-store returns. A fact passed explicitly is used as given and not read again. Each fact read is
+store returns. So are the facts of an object the goal does not name when the tactic starts, such
+as the target a reference field's load pushes on the way. A fact passed explicitly is used as
+given and not read again. Each fact read is
 added to the goal as a hypothesis, as the loop tactics add theirs, so it is elaborated once and
 not at every step, and a goal the tactics leave shows it.
 
