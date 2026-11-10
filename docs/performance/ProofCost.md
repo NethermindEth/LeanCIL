@@ -224,3 +224,32 @@ durations. No generated Lean or C# binding source changes. These upstream additi
 separate from the consumer pilots above; they do not establish a system-wide source reduction.
 Raw reports are retained in `artifacts/int256/final-store-cost.json`,
 `final-store-cost-comparison.json` and `final-source-accounting.json`.
+
+### Positive proof composition
+
+Commit `2acbb52e` replaces chosen success budgets in seven self-contained test modules with
+existing structural rules and checked stepping. The comparison uses the same compiled
+framework at `98afdd3f` for both sides: 515 baseline rows and 516 migrated rows, with no
+unmeasured entries or threshold waivers. All seven modules pass. The additional row prints
+the axiom set of the shared static-read body proof.
+
+| Module | Elaboration heartbeats, before → after | `.olean` bytes, before → after |
+| --- | ---: | ---: |
+| `Tests.ConstructContract` | 29,031,710 → 29,409,095 | 1,131,640 → 1,123,872 |
+| `Tests.ContractConsequence` | 36,228,019 → 36,546,871 | 1,899,776 → 1,896,224 |
+| `Tests.Linking` | 15,532,447 → 15,584,488 | 444,656 → 439,728 |
+| `Tests.ModularStatics` | 8,769,010 → 8,718,827 | 337,488 → 332,848 |
+| `Tests.OutcomeContract` | 20,425,022 → 20,478,107 | 535,176 → 527,656 |
+| `Tests.OutcomeEmbedding` | 15,283,267 → 15,337,856 | 419,384 → 417,640 |
+
+`Tests.Imports.Calls.add_linked` reuses an explicit method lookup while stepping. Its
+elaboration heartbeats fall from 3,239,882 to 3,131,981 and kernel heartbeats from 93,847
+to 93,268. The seven-file migration adds 50 lines and removes 52; the public contracts
+and deliberate fault/budget tests are unchanged.
+
+The separate example migration at `761ca255` removes 18 chosen success budgets and six
+manual success-budget forwarding adapters. It adds 96 lines and removes 47 across 18
+examples and `Tests.LocalCalls`, so it is not a source-size reduction. Each changed example
+passes a focused check against its extracted method. The LocalCalls comparison passes
+124 measured rows; its mixed-frame proof changes from 12,298 to 10,968 kernel heartbeats
+and from 1,279 to 881 proof objects. These are focused checks, not a replacement for CI.
