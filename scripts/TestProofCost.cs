@@ -268,6 +268,10 @@ Require(Owner("ProofOutlines/control/Outlines/Choose") == "outlines-control" &&
     Owner("StructOutlines/Narrow") == "structoutlines" && Owner("CheckedConversions/conv_ovf_i1-32") is null &&
     Owner("Additional") is null, "an output belongs to the one suite that declares its directory");
 var noon = new DateTime(2026, 11, 10, 12, 0, 0, DateTimeKind.Utc);
+Require(Owner("CertificateReuse-56769cb9/OtherExtraction") == "core" &&
+    Misattributed([new("core", noon, 0)],
+        [("CertificateReuse-56769cb9/OtherExtraction", noon.AddSeconds(30))]).Count == 0,
+    "certificate reuse outputs remain owned by core so its proof cost is measured");
 VerificationGroupRunner.SuiteRun[] members =
 [
     new("conversions", noon, 0), new("receiveroutlines", noon.AddMinutes(1), 0),
