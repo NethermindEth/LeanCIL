@@ -44,6 +44,21 @@ try
     File.Delete(unrecorded);
     if (!Unchanged()) throw new Exception("A restored cache entry was rejected");
     Console.WriteLine("PASS a cache entry is accepted only while its files hash to the receipted manifest");
+
+    // A library read in place is the one that was opened: a build that wrote into it must not pass for it.
+    using (var opened = new Program { library = directory, libraryStamps = FileStamps(directory) })
+    {
+        opened.RequireUnchangedLibrary();
+        File.SetLastWriteTimeUtc(artifact, certifiedAt.AddSeconds(15));
+        ExpectRejection(opened.RequireUnchangedLibrary, "changed on disk during verification");
+    }
+    RequireUnwritten(directory, () => File.ReadAllText(artifact));
+    ExpectRejection(() => RequireUnwritten(directory, () => File.WriteAllText(unrecorded, "built into the entry")),
+        "wrote into the certified library");
+    File.Delete(unrecorded);
+    ExpectRejection(() => RequireUnwritten(directory, () => File.AppendAllText(artifact, " rebuilt")),
+        "wrote into the certified library");
+    Console.WriteLine("PASS a library read in place fails verification or an editor build that changed its files");
     File.WriteAllText(cacheManifest, System.Text.Json.JsonSerializer.Serialize(new SortedDictionary<string, string>(StringComparer.Ordinal)));
     if (verifier.CertifiedLocalLibrary(directory, "cache-key")) throw new Exception("Replaced cache manifest accepted");
 

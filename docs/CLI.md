@@ -584,8 +584,11 @@ generates, which require it by path, and Lake rebuilds a required module it find
 inside the entry. Each run therefore compares the length and write time of every file of the
 entry with those recorded in `<key>.stamps` beside it when its files last hashed to the
 manifest its receipt binds. Any difference hashes every file again: an entry that still matches
-is recorded anew, and one that does not is named on stderr, discarded and rebuilt. `verify`
-also fails when a file of the library it reads in place changes while it runs.
+is recorded anew, and one that does not is named on stderr and replaced by a rebuilt library.
+On Windows the replacement fails while another process, such as an editor, holds the entry's
+files open. `verify` compares the stamps again each time it snapshots the library's compiled
+modules after a build, and single-file verification once more before it writes its report; a
+difference fails the run.
 
 The theorem defaults to `ExampleProof.correctness`; select another with `--theorem Namespace.theoremName`. The first invocation saves the selection in `artifacts/Add/verification.json`, independently of the generated success report:
 

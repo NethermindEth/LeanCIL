@@ -3276,6 +3276,8 @@ partial class Program : IDisposable
             RequireOriginalProofSources();
             if (!Same(before, Inputs(proof, settings)) || identityHash != Sha(Path.Combine(output, "identity.json")))
                 throw new InvalidOperationException("Inputs changed during verification");
+            // An editor package requires the same library by path and may have built into it meanwhile.
+            RequireUnchangedLibrary();
 
             var initializedTypes = extraction.Root.TryGetProperty("initializedTypes", out var assumptions)
                 ? assumptions.Deserialize<string[]>() : [];
