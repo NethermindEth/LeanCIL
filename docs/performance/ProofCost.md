@@ -108,3 +108,30 @@ compiled outer parameter counts. These are local measurement artifacts, not publ
 These results do not establish a certificate wall-time speedup. Individual actual consumer
 certificates and mutation rejection tests were checked separately. The complete final consumer
 matrix and a merged LeanCIL dependency pin remain separate acceptance requirements.
+
+### Checked local-call steps
+
+A second local-call comparison uses consumer `3a2d31d8e981acebaf25e6b183f28b75dada6172`
+and `8dd16e2ebca83172f3b1151d78c12459913a45c7`, both against framework
+`c707f283804247932dc1907603701164019f3b06`. In module
+`UInt256.Safety.LocalCallSafety`, the proof of `UInt256Model.Safety.run_local_word_call` uses
+checked stepping for the local-address and call-step equations. Its statement and axiom set
+are unchanged.
+The source delta is ten fewer maintained lines, with no generated or upstream source added
+by this consumer change. At this pin, the local-address step still explicitly supplies
+`localAddress` alongside its slot and formation facts.
+
+| Measure for `UInt256.Safety.LocalCallSafety` | Before | After |
+| --- | ---: | ---: |
+| Elaboration heartbeats | 1,506,101 | 1,304,089 |
+| Kernel recheck heartbeats | 133,747 | 106,693 |
+| `.olean` bytes | 317,616 | 224,816 |
+
+Both sources were measured against a freshly rebuilt dependency closure with the command
+above. The six affected Multiply method/profile certificates pass at these exact consumer
+and framework pins, with verified receipts and only allowed axioms. Other production gates
+were not rerun for this support edit. There is no paired certificate-time measurement.
+Raw measurements and receipt summaries are retained in the consumer's
+`verification/artifacts/local-step-reuse/measurement-summary.json` and
+`certificates-summary.json`. This comparison uses a different framework pin from the earlier
+table and is not added to its heartbeat or compiled-size totals.
