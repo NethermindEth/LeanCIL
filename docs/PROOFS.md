@@ -54,7 +54,7 @@ renaming metatheory. There is no separate narrow proof facade or import-closure 
 
 | Purpose | Consumer interfaces |
 | --- | --- |
-| State checked execution | `step`, `run`, `invoke`, `WP`, `Ensures` |
+| State checked execution | `step`, `run`, `invoke`, `Execution`, `WP`, `Ensures` |
 | Compose instruction and segment proofs | `cil_checked_step`, `cil_checked_steps`, `CodeAt`, `Segment`, `Segment.trans`, `cil_segment` |
 | Use a proved helper | `MethodContract`, `CallResult`, `FrameInvariants`, `run_call_of_contract_formed`, `cil_contract_steps` |
 | Describe byref arguments and overlap | `ArgumentView`, `ValidCall`, the `CallingFields` lemmas |
@@ -66,6 +66,11 @@ Select call evidence by field name: `result.post` and `result.framed` from `Call
 `preserved.formed` from `FrameInvariants`. Do not destructure preservation records positionally;
 an additional preservation fact should not require rewriting the continuation. Similarly, use
 `call.wellFormed`, `call.readable` and `call.writable` for a `ValidCall`.
+
+`WP` relates a finite budget to one result. Use `Execution` for successful interpreter returns
+and `WP.adequate` at the raw `invoke` boundary. Exact segment relations retain all continuation
+budgets and faults; their budget is chosen before the continuation budget. The
+[composition guide](PROOFS-STEPPING.md) describes these forms and their structural rules.
 
 Post-step expressions are part of this proof interface. A vector operation with a literal control
 must remain directly rewritable by a theorem stated with that literal; a computed segment must
