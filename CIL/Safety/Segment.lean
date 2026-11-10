@@ -1,4 +1,5 @@
 import CIL.Safety.SymbolicExecution
+import CIL.Safety.WeakestPrecondition
 
 /-!
 # Composable instruction segments
@@ -112,15 +113,13 @@ theorem run_exists {program : CIL.Program} {method start finish : Nat}
     (contract : Segment program method start finish pre post)
     (arguments : List Value) (before : SegmentState) (valid : pre arguments before)
     (result : Memory → List Value → Prop)
-    (continuation : ∀ after, post arguments after → ∃ fuel memory returned,
-      run program fuel method finish arguments after.frame after.stack after.memory =
-        .ok (memory, returned) ∧ result memory returned) :
-    ∃ fuel memory returned,
-      run program fuel method start arguments before.frame before.stack before.memory =
-        .ok (memory, returned) ∧ result memory returned := by
+    (continuation : ∀ after, post arguments after →
+      WP (fun fuel => run program fuel method finish arguments after.frame after.stack after.memory)
+        result) :
+    WP (fun fuel => run program fuel method start arguments before.frame before.stack before.memory)
+      result := by
   obtain ⟨cost, after, afterValid, execution⟩ := contract arguments before valid
-  obtain ⟨fuel, memory, returned, finished, correct⟩ := continuation after afterValid
-  exact ⟨fuel + cost, memory, returned, (execution fuel).trans finished, correct⟩
+  exact WP.sequence execution (continuation after afterValid)
 
 #print axioms run_exists
 end Segment

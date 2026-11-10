@@ -202,6 +202,20 @@ stated over an abstract `program` therefore steps exactly like one over `Extract
 `cil_checked_steps`, `cil_contract_steps` and `cil_raise_steps` fail when they cannot take a first
 step, instead of returning the goal unchanged.
 
+`WP execution post` states that a checked execution terminates successfully with a final memory
+and returned values satisfying `post`. Import `CIL.Safety.WeakestPrecondition` for the predicate
+and its structural rules. `execution` is a function from fuel to the existing checked `invoke`
+or `run`; the predicate hides the fuel witness and intermediate result. `cil_contract_steps`
+accepts this form directly. `MethodContract.Holds` and `LoopTerminates` use the same predicate.
+
+`WP.step` composes a fetched checked instruction, `WP.call` composes an actual helper invocation,
+and `WP.sequence` composes an exact prefix with its successful suffix. `WP.consequence` weakens
+the postcondition by an implication. `WP.frame` carries a memory assertion only when its
+preservation is proved for successful execution; it never infers content preservation from
+read or write permission. `WP.enter` requires actual checked arguments and frame allocation,
+and `WP.returned` requires frame exit and checked returned values. `WP.adequate` exposes the
+underlying finite execution when an assembly certificate needs the raw interpreter equation.
+
 A segment theorem over an abstract body states where its code sits with `CodeAt body start segment`
 ([CodeAt](../CIL/Safety/CodeAt.lean)) instead of `body.code = leading ++ segment ++ tail` and
 `leading.length = start`. Pass `placed` directly to `cil_checked_steps [found, placed]`:
@@ -213,7 +227,7 @@ segments, and `rfl` closes a concrete one. `Segment program method start finish 
 packages a checked prefix as a composable contract. Assertions take the unchanged arguments and a `SegmentState` containing the frame, stack
 and memory. Each admitted input supplies an output state and a cost, with an exact `run (fuel +
 cost) = run fuel` equation for every continuation fuel. `Segment.trans` composes adjacent contracts
-and adds their costs; `Segment.run_exists` applies a successful continuation. `Segment.consequence`
+and adds their costs; `Segment.run_exists` composes a suffix stated with `WP`. `Segment.consequence`
 changes assertions by proved implications. `SegmentState.exact` describes a known state. For these
 exact-state contracts, `cil_segment 3 [found, placed, facts]` proves the boundary using
 `cil_checked_steps` and fails unless the complete equation closes. `cil_segment_steps [facts]`

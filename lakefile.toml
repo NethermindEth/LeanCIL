@@ -297,3 +297,9 @@ name = "Tests.NativeMethodTables"
 
 [[lean_lib]]
 name = "Tests.AggregateArrayStorage"
+
+[[lean_lib]]
+name = "Tests.WeakestPrecondition"
+
+[[lean_lib]]
+name = "Tests.LocalCalls"

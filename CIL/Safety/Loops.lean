@@ -1,4 +1,4 @@
-import CIL.Safety.StepComposition
+import CIL.Safety.WeakestPrecondition
 
 /-!
 # Loop termination by measure
@@ -32,8 +32,7 @@ def LoopSegment (program : CIL.Program) (method : Nat) (args : List Value)
 /-- Some fuel runs the method from `state` to a successful return satisfying `post`. -/
 def LoopTerminates (program : CIL.Program) (method : Nat) (args : List Value)
     (post : Memory → List Value → Prop) (state : LoopState) : Prop :=
-  ∃ fuel final values,
-    state.run program method args fuel = .ok (final, values) ∧ post final values
+  WP (state.run program method args) post
 
 /-- An invariant and a strictly decreasing natural measure establish a finite,
     successful checked execution. Exit obligations include the desired postcondition.

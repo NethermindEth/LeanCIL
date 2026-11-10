@@ -10,6 +10,7 @@ import CIL.Safety.AccessSlices
 import CIL.Safety.WordFootprint
 import CIL.Safety.ExecutionInvariants
 import CIL.Safety.FrameInvariants
+import CIL.Safety.WeakestPrecondition
 
 /-!
 # Method contracts
@@ -356,9 +357,9 @@ def MethodContract.Returns {Input Output : Type} (c : MethodContract Input Outpu
 def MethodContract.Holds {Input Output : Type} (c : MethodContract Input Output)
     (program : CIL.Program) (method : Nat) : Prop :=
   ∀ input initial, c.pre input initial →
-    ∃ fuel final values,
-      invoke program fuel method (c.args input) initial = .ok (final, values) ∧
-      Confined (c.footprint input) initial final ∧ c.Returns input initial final values
+    WP (fun fuel => invoke program fuel method (c.args input) initial)
+      (fun final values =>
+        Confined (c.footprint input) initial final ∧ c.Returns input initial final values)
 
 /-- A contract is `Ensures` at each input, with the footprint as part of the postcondition. -/
 theorem MethodContract.Holds.ensures {Input Output : Type} {c : MethodContract Input Output}

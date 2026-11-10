@@ -255,7 +255,24 @@ caller storage, `LoopFrame []`, has `kept` all of it and `leave_kept` gives the 
 `MemoryBelow` fact from the entry's `setup`. A local whose address is
 taken can change through that reference, so `write` and `after_confined` require every written
 allocation to be older than the frame (`allocation < caller.nextIdentity`); a write or callee that
-reaches a home does not elaborate and the snapshot stays the author's obligation.
+reaches a home requires an updated snapshot.
+
+Import `CIL.Safety.LocalCalls` for helpers that write private numeric homes, including vectors
+and writable but uninitialized locals. `LoopFrame.after_local_write` takes a helper confined
+to one home and its checked readback, replaces that home's snapshot, and preserves all other
+homes using their allocation separation. `LoopFrame.after_helper_write` also permits writes
+within the caller footprint; retaining other snapshots then requires separation from the
+complete helper footprint. These rules retain caller confinement, well-formedness and writable
+homes. Existing `leave` and `leave_kept` rules still discharge frame exit from actual allocation.
+
+`WP.local_call` composes a fetched call through a proved `MethodContract`, derives the updated
+frame, and supplies the continuation with named `CallResult` and `LoopFrame` evidence. Its
+postcondition must establish the destination's initialized readback. The typed output can
+carry another result, such as a high word returned alongside a low word written to a local.
+`CompleteWritableHomes.after_confined` keeps complete typed storage without claiming contents.
+Cell preservation or `AccessBelow` alone does not imply `Confined`; a helper using a weaker
+contract needs a proof of the additional allocation, slot and permission guarantees.
+
 `add_int_element`, `int_lt` and `toNat_succ` step a signed `int` index below `2^31` to an element
 offset and its compare. The [buffer fill proof](../Examples/Proofs/FillWords.lean) uses them with
 an invariant of only `Filled` and `k <= n`. [Countdown](../Examples/Proofs/Countdown.lean) needs

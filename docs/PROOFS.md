@@ -1,7 +1,7 @@
 # Writing checked proofs
 
 State the property independently of the emitted instructions. Use `CIL.Safety.invoke`,
-`Ensures`, `MethodContract` or `OutcomeContract` when the claim includes checked execution.
+`WP`, `Ensures`, `MethodContract` or `OutcomeContract` when the claim includes checked execution.
 Make input quantifiers, initial-memory assumptions and permitted writes explicit.
 
 ## Author workflow

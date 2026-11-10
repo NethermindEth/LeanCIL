@@ -378,6 +378,7 @@ theorem MethodContract.Holds.relocate {Input Output : Type} {c : MethodContract 
   obtain ⟨fuel, final, values, invoked, framed, returns⟩ := holds input initial permitted
   have bound := invoke_bound (outcome := .ok (final, values)) (fun _ h => nomatch h) invoked
   refine ⟨fuel, final, values, ?_, framed, returns⟩
+  dsimp only at invoked ⊢
   rw [invoke_relocate closed relocates fuel method _ initial bound, invoked]
   rfl
 

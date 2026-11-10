@@ -1,4 +1,5 @@
 import CIL.Safety.WordMemory
+import CIL.Safety.MemorySteps
 
 /-!
 # Wide multiply
@@ -10,6 +11,35 @@ no allocation. `CIL.WideMultiply.signedHigh64_decomposition` recomposes the sign
 -/
 
 namespace CIL.Safety
+
+/-- A checked low-word write is sufficient to step unsigned wide multiplication. The result
+    retains the exact high-word expression used by arithmetic proofs. -/
+theorem step_bigMul64_of_write {body : CIL.Method} {pc : Nat} {args rest : List Value}
+    {frame : Frame} {memory result : Memory} {reference : Reference} {left right : CIL.W64}
+    (stored : write memory reference (numberBytes (left * right).toNat 8) 1 = .ok result) :
+    step body (.memory (.bigMul64 false)) pc args frame
+      (.reference (.address reference) :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest)
+      memory = .ok (.next (pc + 1)
+        (.scalar (.i64 (CIL.WideMultiply.high64 left right)) :: rest) frame result) := by
+  rw [step_memory_bigMul64_eq]
+  simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false, referenceAt,
+    checkedAt, stored, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+#print axioms step_bigMul64_of_write
+
+/-- A checked low-word write steps signed wide multiplication with its exact signed high word. -/
+theorem step_bigMul64_signed_of_write {body : CIL.Method} {pc : Nat} {args rest : List Value}
+    {frame : Frame} {memory result : Memory} {reference : Reference} {left right : CIL.W64}
+    (stored : write memory reference (numberBytes (left * right).toNat 8) 1 = .ok result) :
+    step body (.memory (.bigMul64 true)) pc args frame
+      (.reference (.address reference) :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest)
+      memory = .ok (.next (pc + 1)
+        (.scalar (.i64 (CIL.WideMultiply.signedHigh64 left right)) :: rest) frame result) := by
+  rw [step_memory_bigMul64_signed_eq]
+  simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false, referenceAt,
+    checkedAt, stored, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+#print axioms step_bigMul64_signed_of_write
 
 /-- Exact unsigned 128-bit multiplication: checked low-word write and high-word return. -/
 theorem bigMul64_of_write (memory result : Memory) (reference : Reference)

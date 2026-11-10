@@ -57,7 +57,7 @@ theorem loop_terminates_next {program : CIL.Program} {method pc next : Nat}
     (stepped : step body op pc args frame stack memory = .ok (.next next values nextFrame updated))
     (rest : LoopTerminates program method args post ⟨next, nextFrame, values, updated⟩) :
     LoopTerminates program method args post ⟨pc, frame, stack, memory⟩ :=
-  run_next_exists post found instruction stepped rest
+  WP.step found instruction stepped rest
 
 /-- A fetched `ret` whose checked results satisfy `post` terminates. -/
 theorem loop_terminates_return {program : CIL.Program} {method pc : Nat}
@@ -69,7 +69,7 @@ theorem loop_terminates_return {program : CIL.Program} {method pc : Nat}
     (checked : values.mapM (checkedValue (leaveFrame frame updated)) = .ok values)
     (satisfied : post (leaveFrame frame updated) values) :
     LoopTerminates program method args post ⟨pc, frame, stack, memory⟩ :=
-  ⟨1, leaveFrame frame updated, values, run_return found instruction stepped checked, satisfied⟩
+  WP.returned found instruction stepped checked satisfied
 
 theorem loop_reaches_terminates {program : CIL.Program} {method : Nat} {args : List Value}
     {source target : LoopState} {post : Memory → List Value → Prop}
@@ -77,8 +77,7 @@ theorem loop_reaches_terminates {program : CIL.Program} {method : Nat} {args : L
     (finished : LoopTerminates program method args post target) :
     LoopTerminates program method args post source := by
   obtain ⟨cost, segment⟩ := path
-  obtain ⟨fuel, final, values, executed, satisfied⟩ := finished
-  exact ⟨fuel + cost, final, values, (segment fuel).trans executed, satisfied⟩
+  exact WP.sequence segment finished
 
 #print axioms loop_reaches_next
 #print axioms loop_terminates_return
