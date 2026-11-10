@@ -859,18 +859,25 @@ the developer's file as in the text report:
 ```json
 {
   "kind": "elaboration-error",
-  "source": { "file": "/work/Proofs/Countdown.lean", "line": 40, "column": 4 },
-  "message": "cil_loop_steps: target state not matched at pc 8: ...",
+  "source": { "file": "/work/Proofs/SpanDrain.lean", "line": 37, "column": 54 },
+  "message": "cil_loop_steps: target state not matched at pc 7: ...",
   "tactic": "cil_loop_steps",
   "stopped": false,
-  "method": { "index": 0, "signature": "System.UInt32 Examples.Loops::Countdown(System.UInt32)" },
+  "method": {
+    "index": 0,
+    "signature": "System.Int32 Examples.Loops::Drain(System.ReadOnlySpan`1<System.Int32>)"
+  },
   "cil": {
-    "pc": 8, "ilOffset": 9, "instruction": "brtrue.s IL_0004", "leanInstruction": null,
-    "source": { "file": "Loops.cs", "line": 38, "column": 9 }
+    "pc": 7, "ilOffset": 19, "instruction": "brtrue.s IL_0002", "leanInstruction": null,
+    "source": { "file": "Loops.cs", "line": 30, "column": 9 }
   },
   "state": {
-    "reached": { "stack": "[CIL.Safety.Value.scalar (CIL.Value.i32 (x - 1#32))]" },
-    "expected": { "stack": "[CIL.Safety.Value.scalar (CIL.Value.i32 (x - 2))]" }
+    "reached": {
+      "stack": "[CIL.Safety.Value.scalar (CIL.Value.i32 (BitVec.ofNat 32 view.length))]"
+    },
+    "expected": {
+      "stack": "[CIL.Safety.Value.scalar (CIL.Value.i32 (BitVec.ofNat 32 (view.length + 1)))]"
+    }
   },
   "missing": { "shape": "targetState", "residual": [] },
   "suggestions": ["state a fact in the reached form, or state the target in it"],
