@@ -580,26 +580,11 @@ macro "cil_checked_step_by_equations " "[" facts:term,* "]" : tactic =>
        try simp only [cil_guard, cil_checked, cil_side, $[$facts:term],*]
        all_goals ((repeat constructor) <;> rfl)))
 
-open Lean Elab Tactic Meta in
-/-- Succeed only on a checked `step` goal whose opcode has `@[cil_instruction_step]` equations;
-    a syntactic test, since a trial rewrite would traverse the whole goal. -/
-elab "cil_instruction_step_goal" : tactic => withMainContext do
-  let target := (← instantiateMVars (← getMainTarget)).consumeMData
-  let some (_, lhs, _) := target.eq? | throwError "Expected a checked step equality"
-  unless lhs.isAppOfArity ``CIL.Safety.step 7 do throwError "Expected a checked step equality"
-  let head := (← whnfR lhs.getAppArgs[1]!).getAppFn.constName?
-  -- The opcodes of `CIL.Safety.InstructionSteps`.
-  unless head.any (#[``CIL.Op.load64, ``CIL.Op.store64, ``CIL.Op.storeScalar, ``CIL.Op.fieldAt,
-      ``CIL.Op.fieldAddress, ``CIL.Op.setFieldAt, ``CIL.Op.asRef, ``CIL.Op.skipInit,
-      ``CIL.Op.initAggregate, ``CIL.Op.loadAggregate, ``CIL.Op.storeAggregate].contains ·) do
-    throwError "No instruction step equation for this opcode"
-
-/-- `cil_checked_step_by_equations` without the `@[cil_instruction_step]` equations, for a step
-    those equations rewrite: the step stays at `instruction`, where a supplied fact about
-    `instruction`, or `CIL.Safety.instruction` itself, applies. -/
+/-- A matching instruction fact closes a step through its generic `@[cil_step]` equation.
+    Keeping the step at `instruction` lets the supplied fact apply before a per-shape equation
+    rewrites past it; the opcode need not have a per-shape `@[cil_instruction_step]` equation. -/
 macro "cil_checked_instruction_from_fact " "[" facts:term,* "]" : tactic =>
   `(tactic| (
-       cil_instruction_step_goal
        simp only [cil_step, cil_guard, CIL.Safety.instructionStep]
        try simp only [cil_guard, cil_checked, cil_side, $[$facts:term],*]
        all_goals ((repeat constructor) <;> rfl)))
