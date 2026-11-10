@@ -80,9 +80,8 @@ internal static class TemplateEmitter
     static Template Prepare(string identity, (Variant Variant, Method Method)[] selected)
     {
         var first = selected[0].Method;
-        if (selected.Any(row => row.Method.HasStaticSites))
-            throw new InvalidDataException("Templates do not yet support static-site metadata: " + identity);
-        if (selected.Any(row => row.Method.Metadata != first.Metadata ||
+        if (selected.Any(row => row.Method.HasStaticSites != first.HasStaticSites ||
+            row.Method.Metadata != first.Metadata ||
             row.Method.Ops.Length != first.Ops.Length))
             throw new InvalidDataException("Template metadata or instruction count differs between profiles: " +
                 identity);
