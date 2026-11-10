@@ -100,6 +100,26 @@ to an in-range slice. `after_write` preserves call validity, but does not preser
 contents when a write overlaps them. Read all needed input fields before an overlapping write,
 or prove the required contents separately.
 
+Use `MethodContract` for byref wrappers, with `ValidCall memory inputs outputs` in `pre`.
+The result encoding describes returned values; `post` independently states their meaning and
+the memory guarantees, while `footprint` bounds the permitted changes.
+
+| Wrapper result | `results` encoding | Calling requirements |
+| --- | --- | --- |
+| Read-only scalar | `[.scalar (.i64 word)]` | Readable input views, no output views; empty footprint |
+| Reporting flag | `[.scalar (.i32 (if flag then 1 else 0))]` | Readable inputs and any writable output views |
+| Aggregate value | `[.scalar (.aggregate bytes)]` | Readable inputs and any writable output views |
+
+`MethodContract.withArgs` changes only the argument encoding. `MethodContract.Holds.forward`
+proves an argument-loading wrapper from the helper's checked contract, keeping its precondition,
+postcondition, footprint and exact results. A narrowed flag return also requires
+`ReturnsUnchanged`; aggregate results retain their complete byte list. See
+[forwarder composition](PROOFS-CONTRACTS.md#inherit-a-callees-contract-in-a-forwarder).
+A wrapper that allocates a private output, calls a helper and loads that output before returning
+needs the helper's actual preservation and readback evidence. It is not an exact-result forwarder:
+write permission alone proves neither initialized bytes nor their value. Compose its checked
+call, local load and return using the evidence the helper actually guarantees.
+
 For a word store through a named output, `cil_contract_steps` first uses supplied checked
 operation facts. If none establishes the store, it derives a successful write from the current
 `ValidCall` and the output bounds. This covers `store64`, eight-byte `storeScalar`, and

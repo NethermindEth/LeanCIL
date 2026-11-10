@@ -1,6 +1,7 @@
 import CIL.Safety.CallingFields
 import CIL.Safety.LoopFrames
 import CIL.Safety.CallSegments
+import CIL.Safety.Forwarders
 
 /-!
 # Checked by-reference field evidence
@@ -205,5 +206,78 @@ theorem composed_add : Composed false := composed false
 theorem composed_subtract : Composed true := composed true
 
 #print axioms composed_subtract
+
+/-- A checked helper returns its supplied result without changing the readable input. -/
+def viewResult (value : CIL.Value) : MethodContract Reference Unit where
+  args input := [.reference (.address input), .scalar value]
+  results _ := [.scalar value]
+  pre input memory := ValidCall memory [words input] []
+  footprint _ := []
+  post _ initial final _ := final = initial
+
+/-- The result helper keeps the argument's exact scalar or aggregate encoding. -/
+@[cil_code] def resultHelper : CIL.Method :=
+  { locals := [], returnsValue := true, code := [.arg 1, .ret] }
+
+/-- A wrapper forwards both arguments and the helper's checked result. -/
+@[cil_code] def resultWrapper (narrow : Option CIL.NarrowKind) : CIL.Method :=
+  { locals := [], returnsValue := true, code := forwarderCode (plainLoads [0, 1]) 1 narrow }
+
+/-- The same forwarding proof preserves the valid-call precondition and exact result encoding. -/
+theorem forwards_view_result (value : CIL.Value) (narrow : Option CIL.NarrowKind)
+    (numeric : numericValue value = true)
+    (known : value.hasUnspecified = false)
+    (unchanged : ReturnsUnchanged narrow [.scalar value]) :
+    ((viewResult value).withArgs (viewResult value).args).Holds
+      [resultWrapper narrow, resultHelper] 0 := by
+  have helperHolds : (viewResult value).Holds [resultWrapper narrow, resultHelper] 1 := by
+    intro input memory call
+    change ValidCall memory [words input] [] at call
+    have formed : form memory input = .ok input :=
+      call.input_formed (input := words input) (by simp)
+    have valid : ∀ memory, checkedValue memory (.scalar value) = .ok (.scalar value) :=
+      fun memory => by simp only [checkedValue, numeric, ↓reduceIte]
+    apply WP.enter (body := resultHelper) rfl
+      (by simp [viewResult, checkedValue, formValue, checkedAt, numeric, formed,
+        Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]) rfl
+    apply WP.step rfl rfl (step_load_unchanged (narrow := none) rfl (valid memory) trivial)
+    apply WP.returned rfl rfl
+      (step_return_unchanged (narrow := none) rfl
+        (by simpa [Value.hasUnspecified] using known)
+        (by simp [valid] <;> rfl) trivial) (by simp [valid] <;> rfl)
+    exact ⟨Confined.refl [] memory, (), rfl, rfl⟩
+  exact helperHolds.forward (loads := plainLoads [0, 1]) (narrow := narrow)
+    rfl rfl ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    (fun _ _ _ => plainLoads_unchanged _ _)
+    (fun _ _ _ _ member => .inl member)
+    (fun _ _ _ => by simpa only [viewResult, List.any_cons, List.any_nil,
+      Value.hasUnspecified, Bool.false_or, Bool.or_false] using known)
+    (fun _ _ _ _ _ => unchanged)
+
+#print axioms forwards_view_result
+
+/-- A read-only word result uses the shared forwarding proof and preserves caller memory. -/
+theorem readonly_view_forward :
+    ((viewResult (.i64 7)).withArgs (viewResult (.i64 7)).args).Holds
+      [resultWrapper none, resultHelper] 0 :=
+  forwards_view_result (.i64 7) none rfl rfl trivial
+
+#print axioms readonly_view_forward
+
+/-- A reporting flag remains unchanged by the wrapper's narrowed return. -/
+theorem flag_view_forward :
+    ((viewResult (.i32 1)).withArgs (viewResult (.i32 1)).args).Holds
+      [resultWrapper (some .unsigned8), resultHelper] 0 :=
+  forwards_view_result (.i32 1) (some .unsigned8) rfl rfl ⟨1, rfl, rfl⟩
+
+#print axioms flag_view_forward
+
+/-- An aggregate result retains its complete byte list through the same forwarding rule. -/
+theorem aggregate_view_forward (bytes : List (BitVec 8)) :
+    ((viewResult (.aggregate bytes)).withArgs (viewResult (.aggregate bytes)).args).Holds
+      [resultWrapper none, resultHelper] 0 :=
+  forwards_view_result (.aggregate bytes) none rfl rfl trivial
+
+#print axioms aggregate_view_forward
 
 end Tests.CallingFields
