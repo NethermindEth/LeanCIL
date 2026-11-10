@@ -148,18 +148,11 @@ internal static class VerificationSelection
     }
 
     // The docs suite runs the commands its documents mark `sh run`, so the example files they name are its inputs.
-    static IEnumerable<string> WalkthroughInputs(string root)
-    {
-        var documents = new[] { "docs", "skills" }.Select(folder => Path.Combine(root, folder))
-            .Where(Directory.Exists)
-            .SelectMany(folder => Directory.EnumerateFiles(folder, "*.md", SearchOption.AllDirectories))
-            .Append(Path.Combine(root, "README.md")).Where(File.Exists);
-        foreach (var document in documents)
-            foreach (var commands in Matches(File.ReadAllText(document), @"^[ \t]*```sh run[^\n]*\n(.*?)^[ \t]*```",
-                         RegexOptions.Multiline | RegexOptions.Singleline))
-                foreach (var path in Matches(commands, @"(Examples/[\w./-]+\.(?:lean|cs))"))
-                    yield return path;
-    }
+    static IEnumerable<string> WalkthroughInputs(string root) =>
+        Documentation.Documents(root).SelectMany(path => Documentation.Read(root, path).Walkthrough)
+            .Where(block => block.Kind is WalkthroughKind.Run or WalkthroughKind.RunFails)
+            .SelectMany(block => Documentation.CommandLines(block))
+            .SelectMany(entry => Matches(entry.Command, @"(Examples/[\w./-]+\.(?:lean|cs))"));
 
     internal static string[] Select(IEnumerable<string> paths, string eventName = "pull_request", string? root = null)
     {

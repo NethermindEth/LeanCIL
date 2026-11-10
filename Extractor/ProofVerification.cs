@@ -600,12 +600,16 @@ partial class Program
         foreach (var message in goals)
         {
             var (kind, goal) = VerifyReports.Goal(message.text)!.Value;
-            report.Append($"    {CliPaths.Display(proof)}:{message.line}:{message.column}: {kind}\n");
-            foreach (var line in CliDiagnostics.Printable(goal).Split('\n'))
-                report.Append(("      " + line).TrimEnd()).Append('\n');
+            foreach (var line in GoalLines($"{CliPaths.Display(proof)}:{message.line}:{message.column}", kind, goal))
+                report.Append(line).Append('\n');
         }
         return report.ToString();
     }
+
+    /// <summary>The report lines of one open goal: its place and kind, then the goal as Lean prints it.</summary>
+    static IEnumerable<string> GoalLines(string place, string kind, string goal) =>
+        CliDiagnostics.Printable(goal).Split('\n').Select(line => ("      " + line).TrimEnd())
+            .Prepend($"    {place}: {kind}");
 
     static IEnumerable<(string Name, string Text)>? Specification(StatementView? view) =>
         view?.definitions?.Select(definition => (definition.name, definition.text));

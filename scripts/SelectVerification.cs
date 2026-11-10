@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include VerificationSelection.cs
+#:include Documentation.cs
 #:include ExportVerificationSuites.cs
 #:include VerificationSuites.cs
 

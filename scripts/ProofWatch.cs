@@ -423,11 +423,9 @@ partial class Program
                     (csharp is null ? "" : $" (C# {csharp["file"]}:{csharp["line"]}:{csharp["column"]})"));
             }
             foreach (var goal in result.Goals ?? [])
-            {
-                Console.WriteLine($"    {goal?["file"]}:{goal?["line"]}:{goal?["column"]}: {goal?["kind"]}");
-                foreach (var line in (goal?["goal"]?.GetValue<string>() ?? "").Split('\n'))
-                    Console.WriteLine(("      " + line).TrimEnd());
-            }
+                foreach (var line in GoalLines($"{goal?["file"]}:{goal?["line"]}:{goal?["column"]}",
+                    $"{goal?["kind"]}", goal?["goal"]?.GetValue<string>() ?? ""))
+                    Console.WriteLine(line);
         }
         Console.Out.Flush();
         return passed;

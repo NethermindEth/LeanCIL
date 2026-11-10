@@ -62,8 +62,8 @@ extraction started from; see [reading the report](CLI.md#reading-the-report).
 
 The first `verify` or `workspace` on a machine builds the certified library: it compiles every
 framework module (about 330 Lake jobs) and kernel-replays all of them, which takes several
-minutes. Stderr says so when the build starts and then reports the job count, every 10 seconds on
-a terminal and every 20 seconds when redirected; see [stage progress](CLI.md#stage-progress). The
+minutes. Stderr says so when the build starts and then reports the job count as
+[stage progress](CLI.md#stage-progress) describes. The
 library is cached in `LEANCIL_CACHE_DIR` (default `<local application data>/LeanCIL/libraries`)
 under a key of the framework sources, toolchain and platform, and both commands reuse it, so
 later runs take seconds. A release package downloads the library instead of building it.

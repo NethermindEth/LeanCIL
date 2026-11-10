@@ -649,9 +649,6 @@ internal static partial class ProofOutline
     /// `Holds` proof gives `MethodContract.Holds.intro` for a returning run.</summary>
     static class ContractEvidence
     {
-        /// <summary>The fact that lets a step leave a callee's frame.</summary>
-        internal const string LeaveFrame = "leaveFrame";
-
         /// <summary>The evidence of a run that returns one word and leaves `memory` as it was, with the goals
         /// `run` and `postcondition` under `suffix` left open and the returned word found by the run.</summary>
         internal static void Returns(Writer lean, string indent, string suffix)

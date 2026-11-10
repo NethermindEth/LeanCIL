@@ -1753,7 +1753,7 @@ internal static partial class ProofOutline
             Add($"permitted{number}");
             Add($"{name}_holds");
             Add($"{name}Contract");
-            Add(ContractEvidence.LeaveFrame);
+            Add("leaveFrame");
             lean.Wrapped($"{indent}cil_contract_steps", FactList(facts), "");
             lean.Line($"{indent}  with called{number} output{number} call{number}");
             facts.Clear();
