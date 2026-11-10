@@ -513,10 +513,57 @@ internal static partial class ProofCostReport
                 "; build every CIL module there or pass --library");
     }
 
-    // A suite's outputs are the reports written while it ran: from `since` and before `before`.
+    static string OutputPath(string root, string report) =>
+        Path.GetRelativePath(root, Path.GetDirectoryName(report)!).Replace('\\', '/');
+
+    // The verified output directories under a root: those holding a report beside their extraction.
+    static IEnumerable<string> VerifiedReports(string root) => Directory.Exists(root)
+        ? Directory.EnumerateFiles(root, "verified.json", SearchOption.AllDirectories)
+            .Where(report => File.Exists(Path.Combine(Path.GetDirectoryName(report)!, "Extracted.lean")))
+        : [];
+
+    [GeneratedRegex("^-[0-9a-f]+$")]
+    private static partial Regex RunSuffix();
+
+    // The proof suite whose declared directory holds the output, by its path under the artifacts root.
+    internal static string? Owner(string output) => VerificationSuites.ProofOutputs
+        .Where(suite => suite.Value.Any(owned =>
+        {
+            if (!output.StartsWith(owned, StringComparison.Ordinal)) return false;
+            var rest = output[owned.Length..];
+            var name = rest.Split('/')[0];
+            return rest.Length == 0 || rest[0] == '/' || RunSuffix().IsMatch(name);
+        }))
+        .Select(suite => suite.Key).SingleOrDefault();
+
+    // Directories of a suite job that hold the job's inputs and caches, never a suite's outputs.
+    static readonly string[] JobDirectories = ["certified-library", "suite-caches", "verification-fixtures"];
+
+    // Why the outputs of one job cannot all be attributed: one a proof suite owns that another member
+    // wrote, or one written while a proof suite ran that no proof suite owns. Ownership decides the
+    // rows; the member running when the report was written only has to agree with it.
+    internal static List<string> Misattributed(IReadOnlyList<VerificationGroupRunner.SuiteRun> runs,
+        IEnumerable<(string Output, DateTime Written)> reports)
+    {
+        var problems = new List<string>();
+        foreach (var (output, written) in reports.Where(report =>
+            !JobDirectories.Contains(report.Output.Split('/')[0])).OrderBy(report => report.Output))
+        {
+            var writer = runs.LastOrDefault(run => run.StartedAtUtc <= written)?.Suite;
+            var owner = Owner(output);
+            if (owner is not null && owner != writer)
+                problems.Add($"{output} belongs to {owner} and was written while {writer ?? "no suite"} ran");
+            else if (owner is null && writer is not null && VerificationSuites.ProofSuites.Contains(writer))
+                problems.Add($"{output} was verified by {writer}, which does not declare it in " +
+                    "VerificationSuites.ProofOutputs");
+        }
+        return problems;
+    }
+
+    // `include` chooses among the verified outputs by their path under the artifacts root.
     internal static Measurement Measure(string tree, string? library, string work, bool libraries,
         IReadOnlyList<string> artifacts, IReadOnlyList<string> modules, int jobs, string label,
-        DateTime? since = null, DateTime? before = null)
+        Func<string, bool>? include = null)
     {
         tree = Path.GetFullPath(tree);
         work = Path.GetFullPath(work);
@@ -534,12 +581,9 @@ internal static partial class ProofCostReport
         foreach (var root in artifacts.Select(Path.GetFullPath))
         {
             // A suite the tree does not have leaves no outputs, which is a measurement without rows.
-            if (!Directory.Exists(root)) continue;
-            foreach (var report in Directory.EnumerateFiles(root, "verified.json", SearchOption.AllDirectories)
-                .Where(report => File.Exists(Path.Combine(Path.GetDirectoryName(report)!, "Extracted.lean")) &&
-                    !Path.GetFullPath(report).StartsWith(work + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-                .Where(report => File.GetLastWriteTimeUtc(report) is var written &&
-                    (since is null || written >= since) && (before is null || written < before))
+            foreach (var report in VerifiedReports(root)
+                .Where(report => !Path.GetFullPath(report).StartsWith(work + Path.DirectorySeparatorChar,
+                    StringComparison.Ordinal) && (include is null || include(OutputPath(root, report))))
                 .Order(StringComparer.Ordinal))
                 tasks.Add(measurer.Verified(root, Path.GetDirectoryName(report)!));
         }
@@ -585,24 +629,27 @@ internal static partial class ProofCostReport
         $"{Schema}\n{Sha(Path.Combine(ScriptDirectory(), "ProofCost.lean"))}\n" +
         $"{Sha(Path.Combine(ScriptDirectory(), "ProofCostReport.cs"))}\n")));
 
-    // The rows one run measured at its own commit, by source, for later runs to take as their base.
-    internal sealed record Published(int Schema, string Measurer, SortedDictionary<string, Measurement> Sources);
+    // The rows one run measured for one commit, by source, for later runs to take as their base.
+    internal sealed record Published(int Schema, string Measurer, string Commit,
+        SortedDictionary<string, Measurement> Sources);
 
     static string SourceFile(string directory, string source) => Path.Combine(directory, source + ".json");
 
-    // Each `<source>.json` of the directory that holds rows becomes that source's rows. A source measured
-    // without rows is left out, so a later run measures that base itself and sees why it is empty.
-    internal static Published Publish(string rows, string measurer) => new(Schema, measurer,
-        new(Directory.Exists(rows)
+    // Each `<source>.json` of the directory becomes that source's rows. Main leaves out a source it
+    // measured without rows, so a later run measures that base itself and sees why it is empty; a run
+    // that measured its own merge base keeps it, or every later run would verify that suite again.
+    internal static Published Publish(string rows, string measurer, string commit, bool keepEmpty) =>
+        new(Schema, measurer, commit, new(Directory.Exists(rows)
             ? Directory.EnumerateFiles(rows, "*.json").ToDictionary(
                 path => Path.GetFileNameWithoutExtension(path), path => Read([path]), StringComparer.Ordinal)
-                .Where(source => source.Value.Rows.Count > 0)
+                .Where(source => keepEmpty || source.Value.Rows.Count > 0)
                 .ToDictionary(source => source.Key, source => source.Value, StringComparer.Ordinal)
             : [], StringComparer.Ordinal));
 
-    // Writes the rows another measurer of the same key published for each source and returns the
-    // sources left to measure. The digest comes from the publisher's job log, never from the file.
-    internal static string[] BaseRows(string? published, string? sha256, string measurer,
+    // Writes the rows another run of the same measurer published for this commit, source by source,
+    // and returns the sources left to measure. The digest comes from the publisher's job log, never
+    // from the file.
+    internal static string[] BaseRows(string? published, string? sha256, string measurer, string commit,
         IReadOnlyList<string> sources, string output)
     {
         if (published is null) return [.. sources];
@@ -610,9 +657,9 @@ internal static partial class ProofCostReport
             throw new InvalidDataException(published + " does not have the digest its publisher logged");
         var rows = JsonSerializer.Deserialize<Published>(File.ReadAllText(published), Json)
             ?? throw new InvalidDataException(published + " is not a set of published rows");
-        if (rows.Schema != Schema || rows.Measurer != measurer)
+        if (rows.Schema != Schema || rows.Measurer != measurer || rows.Commit != commit)
         {
-            Console.WriteLine("The published rows come from another measurer; measuring the base here.");
+            Console.WriteLine("The published rows come from another measurer or commit; measuring the base here.");
             return [.. sources];
         }
         Directory.CreateDirectory(output);
@@ -659,8 +706,9 @@ internal static partial class ProofCostReport
           ProofCost.cs compare --base <json>... --head <json>... [--accepted <json>]
               [--threshold-percent <number>] [--markdown <file>] [--output <json>] [--github-summary]
           ProofCost.cs sources --matrix <selection json> [--tree <checkout> --base <commit>] [--output <file>]
-          ProofCost.cs publish --rows <directory of <source>.json> --output <json>
-          ProofCost.cs base-rows --sources <json array> --output-rows <directory>
+          ProofCost.cs publish --rows <directory of <source>.json> --commit <measured commit> --output <json>
+              [--merge-base]
+          ProofCost.cs base-rows --sources <json array> --commit <merge base> --output-rows <directory>
               [--published <json> --sha256 <digest>] [--output <file>]
           ProofCost.cs report --sources <json array> --base-rows <directory> --head-rows <directory>
               --output <directory> [--accepted <json>] [--threshold-percent <number>] [--github-summary]
@@ -679,7 +727,7 @@ internal static partial class ProofCostReport
             var name = args[index];
             if (!name.StartsWith("--", StringComparison.Ordinal)) throw new ArgumentException(Usage);
             var values = options.TryGetValue(name, out var existing) ? existing : options[name] = [];
-            if (name is not ("--libraries" or "--github-summary"))
+            if (name is not ("--libraries" or "--github-summary" or "--merge-base"))
                 values.Add(index + 1 < args.Length ? args[++index] : throw new ArgumentException(Usage));
         }
         string? One(string name) => options.TryGetValue(name, out var values) ? values[^1] : null;
@@ -690,7 +738,7 @@ internal static partial class ProofCostReport
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
             File.WriteAllText(path, text);
         }
-        void WriteMeasurement(string output, string? work, DateTime? since, DateTime? before)
+        void WriteMeasurement(string output, string? work, Func<string, bool>? include)
         {
             var tree = Required("--tree");
             var elapsed = Stopwatch.StartNew();
@@ -699,8 +747,7 @@ internal static partial class ProofCostReport
                 options.ContainsKey("--libraries"), Many("--artifacts"), Many("--module"),
                 int.Parse(One("--jobs") ?? Math.Max(1, Environment.ProcessorCount / 2).ToString(
                     CultureInfo.InvariantCulture), CultureInfo.InvariantCulture),
-                One("--label") ?? Execute(["git", "rev-parse", "--short=12", "HEAD"], tree).Output.Trim(),
-                since, before);
+                One("--label") ?? Execute(["git", "rev-parse", "--short=12", "HEAD"], tree).Output.Trim(), include);
             Write(output, JsonSerializer.Serialize(measurement, Json) + "\n");
             foreach (var lost in measurement.Unmeasured)
                 Console.Error.WriteLine($"Not measured: {lost.Group}: {lost.Reason}");
@@ -723,17 +770,23 @@ internal static partial class ProofCostReport
         switch (args[0])
         {
             case "measure":
-                WriteMeasurement(Required("--output"), One("--work"), null, null);
+                WriteMeasurement(Required("--output"), One("--work"), null);
                 return 0;
             case "measure-suites":
             {
-                // Each proof suite that passed is measured from its own start to the next member's.
+                // Each proof suite that passed is measured over the directories it owns, once every
+                // output of the job is known to belong to the member that wrote it.
                 var runs = JsonSerializer.Deserialize<VerificationGroupRunner.SuiteRun[]>(
                     File.ReadAllText(Required("--runs")), VerificationGroupRunner.Json) ?? [];
-                foreach (var (run, index) in runs.Select((run, index) => (run, index)))
+                var problems = Misattributed(runs, Many("--artifacts").Select(Path.GetFullPath).SelectMany(root =>
+                    VerifiedReports(root).Select(report =>
+                        (OutputPath(root, report), File.GetLastWriteTimeUtc(report)))));
+                foreach (var problem in problems) Console.Error.WriteLine("::error::" + problem);
+                if (problems.Count > 0) return 1;
+                foreach (var run in runs)
                     if (run.ExitCode == 0 && VerificationSuites.ProofSuites.Contains(run.Suite))
-                        WriteMeasurement(SourceFile(Required("--output-rows"), run.Suite), null, run.StartedAtUtc,
-                            index + 1 < runs.Length ? runs[index + 1].StartedAtUtc : null);
+                        WriteMeasurement(SourceFile(Required("--output-rows"), run.Suite), null,
+                            output => Owner(output) == run.Suite);
                 return 0;
             }
             case "compare":
@@ -774,15 +827,19 @@ internal static partial class ProofCostReport
             case "publish":
             {
                 var output = Required("--output");
-                Write(output, JsonSerializer.Serialize(Publish(Required("--rows"), MeasurerKey()), Json) + "\n");
-                Console.WriteLine(CertifiedLibraryDonor.ProofCostRows.DigestLine + Sha(output));
+                // A merge base measured by this run is a base for runs of this measurer and commit only.
+                var producer = options.ContainsKey("--merge-base") ? CertifiedLibraryDonor.ProofCostBaseRows
+                    : CertifiedLibraryDonor.ProofCostRows;
+                Write(output, JsonSerializer.Serialize(Publish(Required("--rows"), MeasurerKey(),
+                    Required("--commit"), keepEmpty: options.ContainsKey("--merge-base")), Json) + "\n");
+                Console.WriteLine(producer.DigestLine + Sha(output));
                 return 0;
             }
             case "base-rows":
             {
                 var sources = JsonSerializer.Deserialize<string[]>(Required("--sources")) ?? [];
                 var missing = JsonSerializer.Serialize(BaseRows(One("--published"), One("--sha256"), MeasurerKey(),
-                    sources, Required("--output-rows")));
+                    Required("--commit"), sources, Required("--output-rows")));
                 if (One("--output") is { } output) File.AppendAllText(output, $"missing={missing}\n");
                 Console.WriteLine("Measuring the base for: " + missing);
                 return 0;

@@ -246,7 +246,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       # The push to main of the merge base measured these rows with main's code and logged their
-      # digest. Without them, or for a source they lack, this run measures the base itself. No step
+      # digest; failing that, an earlier pull request run of this repository measured the same merge
+      # base. Without either, or for a source they lack, this run measures the base itself. No step
       # here can fail the job: a lookup that fails leaves every source to measure.
       - name: Find the proof cost rows main published for the merge base
         id: cost-published
@@ -277,9 +278,11 @@ jobs:
         env:
           SOURCES: ${{ needs.select.outputs.cost-sources }}
           PUBLISHED_SHA256: ${{ steps.cost-published.outputs.sha256 }}
+          BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'HEAD' }}
         run: >-
           dotnet run --file scripts/ProofCost.cs -- base-rows --sources "$SOURCES"
-          --output-rows "$RUNNER_TEMP/base-rows" --published "$RUNNER_TEMP/published-rows/proof-cost-rows.json"
+          --commit "$(git rev-parse "$BASE")" --output-rows "$RUNNER_TEMP/base-rows"
+          --published "$RUNNER_TEMP/published-rows/proof-cost-rows.json"
           --sha256 "$PUBLISHED_SHA256" --output "$GITHUB_OUTPUT"
       - name: Upload the published rows as this run's base
         if: steps.cost-rows.outcome == 'success'
@@ -445,7 +448,8 @@ jobs:
 
       # Proof cost is no part of the suite's result: a measurement that fails leaves no rows, which
       # fails the comparison and not this job.
-      # Each proof suite of the job that passed is measured over the outputs written while it ran.
+      # Each proof suite of the job that passed is measured over the directories it owns. An output
+      # that its owner did not write, or that a proof suite wrote without owning it, stops the step.
       - name: Measure the proof cost of the verified outputs
         if: ${{ !cancelled() && matrix.proof }}
         continue-on-error: true
@@ -614,6 +618,26 @@ jobs:
             ${{ runner.temp }}/proof-cost/*.log
           if-no-files-found: ignore
           retention-days: 14
+      # A merge base is measured once: later runs on it, of this or another pull request of this
+      # repository, find this job by its name and take every row this run has for the base.
+      - name: Download the rows this run took for the merge base
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: proof-cost-base-rows-published-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/proof-cost
+      - name: Gather the merge base's rows and log their digest
+        shell: bash
+        run: >-
+          dotnet run --file scripts/ProofCost.cs -- publish --merge-base --rows "$RUNNER_TEMP/proof-cost"
+          --commit "$(git rev-parse "$BASE")" --output "$RUNNER_TEMP/measured-base/proof-cost-rows.json"
+      - name: Upload the merge base's rows for later runs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: proof-cost-measured-base-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/measured-base/proof-cost-rows.json
+          if-no-files-found: error
+          retention-days: 14
 
   # The only proof cost job on a cache hit: it measures nothing. A pull request compares the rows of
   # both trees; a push to main publishes its rows, and later runs find this job by its name.
@@ -670,7 +694,7 @@ jobs:
         if: github.event_name == 'push'
         run: >-
           dotnet run --file scripts/ProofCost.cs -- publish --rows "$RUNNER_TEMP/head-rows"
-          --output "$RUNNER_TEMP/published/proof-cost-rows.json"
+          --commit "$GITHUB_SHA" --output "$RUNNER_TEMP/published/proof-cost-rows.json"
       - name: Upload the rows for later pull requests
         if: github.event_name == 'push'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

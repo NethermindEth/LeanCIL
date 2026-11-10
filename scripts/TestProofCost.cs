@@ -226,25 +226,58 @@ RowsFile("measured", "core", Proof("slow", 10_000_000));
 var bundle = Path.Combine(scratch, "proof-cost-rows.json");
 RowsFile("measured", "loops", Proof("spin", 9_000_000));
 RowsFile("measured", "wordreader");
-var published = Publish(Path.Combine(scratch, "measured"), "measurer");
+var published = Publish(Path.Combine(scratch, "measured"), "measurer", "base commit", keepEmpty: false);
 Require(published.Sources.Keys.SequenceEqual(["core", "loops"]),
     "a source measured without rows is not published, so the pull request measures that base itself");
+// A run that measured its own merge base found the suite empty there; later runs must not verify it again.
+Require(Publish(Path.Combine(scratch, "measured"), "measurer", "base commit", keepEmpty: true).Sources.Keys
+    .SequenceEqual(["core", "loops", "wordreader"]), "a merge base measured without rows is kept for reuse");
 File.WriteAllText(bundle, JsonSerializer.Serialize(published, Json));
 var digest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(bundle)));
 string[] wanted = ["libraries", "core", "loops"];
 var taken = Path.Combine(scratch, "taken");
-Require(BaseRows(bundle, digest, "measurer", wanted, taken) is ["libraries"] &&
+Require(BaseRows(bundle, digest, "measurer", "base commit", wanted, taken) is ["libraries"] &&
     Read([Path.Combine(taken, "core.json")]).Rows.Single().Name == "slow" &&
     File.Exists(Path.Combine(taken, "loops.json")) && !File.Exists(Path.Combine(taken, "libraries.json")),
     "published rows are the base of the sources they hold, and the others are measured");
-Require(BaseRows(null, null, "measurer", wanted, taken).SequenceEqual(wanted),
+Require(BaseRows(null, null, "measurer", "base commit", wanted, taken).SequenceEqual(wanted),
     "without published rows every source is measured");
-Require(BaseRows(bundle, digest, "another measurer", wanted, Path.Combine(scratch, "other")).SequenceEqual(wanted) &&
-    !Directory.Exists(Path.Combine(scratch, "other")), "rows of another measurer are not a base");
+var other = Path.Combine(scratch, "other");
+Require(BaseRows(bundle, digest, "another measurer", "base commit", wanted, other).SequenceEqual(wanted) &&
+    BaseRows(bundle, digest, "measurer", "another commit", wanted, other).SequenceEqual(wanted) &&
+    !Directory.Exists(other), "rows of another measurer or of another commit are not a base");
 var forged = false;
-try { BaseRows(bundle, digest[..63] + (digest[63] == '0' ? '1' : '0'), "measurer", wanted, taken); }
+try { BaseRows(bundle, digest[..63] + (digest[63] == '0' ? '1' : '0'), "measurer", "base commit", wanted, taken); }
 catch (InvalidDataException) { forged = true; }
 Require(forged, "rows without the digest their publisher logged are refused");
+
+// A suite's rows are the directories it declares, so a suite that shares a job is measured alone. The
+// member running when a report was written must be its owner: anything else is a row that would be
+// counted for the wrong suite, or for none, and stops the measurement.
+Require(VerificationSuites.ProofOutputs.Keys.Order().SequenceEqual(VerificationSuites.ProofSuites.Order()),
+    "every proof suite declares its output directories");
+Require(Owner("ProofOutlines/control/Outlines/Choose") == "outlines-control" &&
+    Owner("ConsumerSupportUnion-7c43a93156a9/Extraction0") == "core" && Owner("AddModel") == "core" &&
+    Owner("StructOutlines/Narrow") == "structoutlines" && Owner("CheckedConversions/conv_ovf_i1-32") is null &&
+    Owner("Additional") is null, "an output belongs to the one suite that declares its directory");
+var noon = new DateTime(2026, 11, 10, 12, 0, 0, DateTimeKind.Utc);
+VerificationGroupRunner.SuiteRun[] members =
+[
+    new("conversions", noon, 0), new("receiveroutlines", noon.AddMinutes(1), 0),
+    new("exportsprotected", noon.AddMinutes(2), 0)
+];
+Require(Misattributed(members,
+    [
+        ("CheckedConversions/conv_ovf_i1-32", noon.AddSeconds(30)), ("ReceiverLoopOutlines/Drain", noon.AddSeconds(90)),
+        ("ContractExport-95758c4a/Package", noon.AddMinutes(3)),
+        ("suite-caches/receiveroutlines/x", noon.AddSeconds(95))
+    ]).Count == 0, "a grouped job whose members wrote only their own outputs is measured");
+Require(Misattributed(members, [("ReceiverLoopOutlines/Drain", noon.AddMinutes(3))]).Single()
+    .Contains("belongs to receiveroutlines and was written while exportsprotected ran"),
+    "an output of a proof suite that another member wrote is attributed to two suites and fails");
+Require(Misattributed(members, [("Undeclared/Drain", noon.AddSeconds(90))]).Single()
+    .Contains("verified by receiveroutlines, which does not declare it"),
+    "an output a proof suite wrote outside its directories cannot be attributed and fails");
 
 // One job reports every source: a base file without rows is a suite the base lacks, a missing base
 // file or missing head rows is a measurement that never happened and must fail.

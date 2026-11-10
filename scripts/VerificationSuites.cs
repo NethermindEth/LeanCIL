@@ -20,6 +20,29 @@ internal static class VerificationSuites
         "receiveroutlines", "wordreader", "savedwordreader"
     ];
 
+    /// <summary>
+    /// The directories under <c>artifacts</c> where each proof suite leaves its verified outputs. A
+    /// name also covers the directory a run suffixes with a hexadecimal identifier. Proof cost takes a
+    /// suite's rows from these alone and fails when a proof suite verifies an output outside them.
+    /// </summary>
+    internal static readonly Dictionary<string, string[]> ProofOutputs = new(StringComparer.Ordinal)
+    {
+        [Core] =
+        [
+            "Add", "AddModel", "Alias", "Calls", "Choose", "ConsumerBatchA", "ConsumerBatchB",
+            "ConsumerSupportUnion", "Escape", "Hardware", "InitializedTypes", "LargeStruct", "PastEnd",
+            "StaticData", "Struct", "StructCopy", "VerificationReuse", "WrongAdd"
+        ],
+        ["loops"] = ["Loops", "WordArrayOutlines"],
+        ["outlines-control"] = ["ProofOutlines/control"],
+        ["outlines-objects"] = ["ProofOutlines/objects"],
+        ["outlines-buffers"] = ["ProofOutlines/buffers"],
+        ["structoutlines"] = ["StructOutlines"],
+        ["receiveroutlines"] = ["ReceiverLoopOutlines"],
+        ["wordreader"] = ["WordReaderOutlines"],
+        ["savedwordreader"] = ["SavedWordReaderOutlines"]
+    };
+
     /// <summary>The single-fixture suites in the order a full run executes them.</summary>
     internal static readonly IndependentSuite[] Independent =
     [

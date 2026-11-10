@@ -308,6 +308,43 @@ Test("proof cost rows come only from the publishing job, its own artifact and it
     Require(CertifiedLibraryDonor.Find([7], (run, suffix) => suffix.StartsWith("/jobs", StringComparison.Ordinal)
         ? FailedJob() : Api(run, suffix), Log, now, _ => { }, rows) is null, "A failed publishing job donated rows");
 });
+Test("a measured merge base is reused only from this repository's pull request runs on that base", () =>
+{
+    var merged = new string('c', 40);
+    string Run(long id, string trigger = "pull_request", string head = "owner/repo", string? on = null,
+        string branch = "main", string from = "owner/repo") => JsonSerializer.Serialize(new
+        {
+            id, @event = trigger, head_repository = new { full_name = head },
+            pull_requests = new[] { new {
+                @base = new { @ref = branch, sha = on ?? merged,
+                    repo = new { url = "https://api.github.com/repos/owner/repo" } },
+                head = new { repo = new { url = "https://api.github.com/repos/" + from } } } }
+        });
+    long[] Select(params string[] runs) => CertifiedLibraryDonor.PullRunsOnBase(
+        Json("{\"workflow_runs\":[" + string.Join(",", runs) + "]}"), "owner/repo", merged, 10).ToArray();
+    Require(Select(Run(9), Run(8)).SequenceEqual([9L, 8L]), "Runs on the same merge base were omitted");
+    // A fork, another base commit or branch, or another event never measured this base as its own.
+    foreach (var foreign in new[] { Run(9, head: "fork/repo"), Run(9, from: "fork/repo"),
+        Run(9, on: new string('d', 40)), Run(9, branch: "release"), Run(9, trigger: "workflow_dispatch") })
+        Require(Select(foreign).Length == 0, "A run that did not measure this merge base donated rows");
+    var measured = CertifiedLibraryDonor.ProofCostBaseRows;
+    JsonElement Api(long run, string suffix) => suffix.StartsWith("/jobs", StringComparison.Ordinal)
+        ? Json("""
+            {"jobs":[{"id":10,"name":"Proof cost","run_attempt":1,"conclusion":"success"},
+              {"id":12,"name":"Measure the merge base for proof cost","run_attempt":1,"conclusion":"success"}]}
+            """)
+        : Json("""
+            {"artifacts":[{"id":72,"name":"proof-cost-measured-base-7-1","expired":false,
+              "expires_at":"2026-11-05T00:00:00Z","workflow_run":{"id":7}}]}
+            """);
+    Require(CertifiedLibraryDonor.Find([7], Api, job => (job == 12 ? measured.DigestLine
+            : CertifiedLibraryDonor.ProofCostRows.DigestLine) + Digest, now, _ => { }, measured) ==
+        new CertifiedLibraryDonor.Selection(7, 72, Digest), "A measured merge base was not found by its own job");
+    // A pull request's comparison job never publishes rows: only main's is a producer of head rows.
+    Require(CertifiedLibraryDonor.Find([7], Api, _ => CertifiedLibraryDonor.ProofCostRows.DigestLine + Digest,
+        now, _ => { }, CertifiedLibraryDonor.ProofCostRows) is null,
+        "A pull request run supplied rows as if main had published them");
+});
 JsonElement PreparedRun(long run, string conclusion) => Json($$"""
     {"jobs":[
       {"id":{{run * 100}},"name":"Prepare certified Lean library","run_attempt":1,"conclusion":"{{conclusion}}"},

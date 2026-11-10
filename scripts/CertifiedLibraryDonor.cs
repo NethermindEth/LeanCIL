@@ -48,6 +48,29 @@ static class CertifiedLibraryDonor
     public static readonly Producer ProofCostRows =
         new(name => name == "Proof cost", "proof-cost-rows", "Proof cost rows SHA256: ");
 
+    /// <summary>
+    /// The rows a pull request run measured at its merge base. They are a base for later runs of the
+    /// same commit and measurer, which could have measured them themselves, and never anyone's head.
+    /// </summary>
+    public static readonly Producer ProofCostBaseRows = new(
+        name => name == "Measure the merge base for proof cost", "proof-cost-measured-base",
+        "Proof cost base rows SHA256: ");
+
+    /// <summary>
+    /// Same-repository pull request runs whose pull request merged into <paramref name="commit"/> on
+    /// main when they ran, newest first. Fork runs never qualify, whatever artifacts they uploaded.
+    /// </summary>
+    public static IEnumerable<long> PullRunsOnBase(JsonElement runs, string repository, string commit, int limit) =>
+        !IsCommit(commit) ? [] : runs.GetProperty("workflow_runs").EnumerateArray().Take(limit)
+            .Where(run => run.GetProperty("event").GetString() == "pull_request" &&
+                SameRepository(run.GetProperty("head_repository"), repository) &&
+                run.GetProperty("pull_requests").EnumerateArray().Any(pull =>
+                    pull.GetProperty("base").GetProperty("ref").GetString() == "main" &&
+                    pull.GetProperty("base").GetProperty("sha").GetString() == commit &&
+                    PullRepository(pull.GetProperty("base"), repository) &&
+                    PullRepository(pull.GetProperty("head"), repository)))
+            .Select(run => run.GetProperty("id").GetInt64()).Where(id => id > 0).Distinct();
+
     /// <summary>Finds a complete authenticated candidate; failures never supply partial evidence.</summary>
     public static Selection? Find(IEnumerable<long> runs, Func<long, string, JsonElement> api,
         Func<long, string> log, DateTimeOffset now, Action<string> warning, Producer? producer = null)

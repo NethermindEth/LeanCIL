@@ -138,30 +138,39 @@ A source is measured on both trees:
   suite that also checks rejected proofs against an extraction verifies the accepted one last.
 
 The head is measured where it is verified, in no job of its own. A `Verify` job that ran a proof
-suite measures that suite once it has passed. The group runner records when each member of the
-job started, and a suite's rows are the output directories whose report was written from its
-start to the next member's, so a suite that shares its job with others is measured alone. One
-short `Verify` job that starts early also measures `libraries`, which needs only the certified
-library.
+suite measures that suite once it has passed. A suite's rows are the output directories it owns,
+which `VerificationSuites.ProofOutputs` declares, so a suite that shares its job with others is
+measured alone. Before measuring, the job checks that ownership accounts for everything it
+verified: the group runner records when each member started, and an owned directory whose report
+another member wrote, or a report a proof suite wrote outside its directories, stops the
+measurement of that job. A proof suite that gains an output directory declares it there. One short
+`Verify` job that starts early also measures `libraries`, which needs only the certified library.
 Neither step can fail its job: a source without rows fails the comparison instead.
 
 The merge base is measured once per commit. A push to main measures the same sources the same
-way, and its `Proof cost` job gathers those that hold rows into one artifact and logs its digest. A PR run takes
-those rows as its base when the push run of its merge base published them: the run must be a push
-of that commit on main, which is what reusing a certified library without replay requires of its
-producer, the file must have the digest that job logged, and its rows must come from the same
-measurer, meaning the same `scripts/ProofCost.lean`, `scripts/ProofCostReport.cs` and row schema.
-A run of the same PR never supplies a base. `Prepare certified Lean library` makes this lookup, so
-a base that main published costs no job.
+way, and its `Proof cost` job gathers those that hold rows into one artifact and logs its digest.
+A PR run takes those rows as its base when the push run of its merge base published them: the run
+must be a push of that commit on main, which is what reusing a certified library without replay
+requires of its producer, the file must have the digest that job logged, and its rows must come
+from the same measurer, meaning the same `scripts/ProofCost.lean`, `scripts/ProofCostReport.cs`
+and row schema, and from that commit.
+`Prepare certified Lean library` makes this lookup, so a base that main published costs no job.
 
-For sources without published rows, one job, `Measure the merge base for proof cost`, runs beside
+A merge base that main did not publish is measured once. The job that measures it stores every
+base row the run has, with the commit and the measurer, and logs the digest; later runs of this or
+another pull request of this repository on the same merge base take them under the same checks.
+Such rows are only ever a base for the commit they were measured at, by a run that would have
+measured the same rows itself. A run from a fork never supplies them, and no pull request run
+supplies head rows to anyone.
+
+For sources without stored rows, one job, `Measure the merge base for proof cost`, runs beside
 the suites. It uses the head's certified library when the library inputs are identical, and
 otherwise builds the base library with the base's own scripts, incrementally from the head's. It
 then verifies each suite at the merge base with the base's own runner, measures its outputs and
 removes them before the next suite. A suite that the base does not have, or cannot pass, leaves a
 measurement without rows: the job warns and the summary says the rows were not compared. A base
-that was never measured fails the comparison. The suites run one after another, so a run that
-measures every source at the base finishes after the suites do.
+that was never measured fails the comparison. The suites run one after another, so the first run
+on a merge base without stored rows finishes after its suites do.
 
 `Proof cost` waits for the suites and measures nothing: on a pull request it downloads the rows of
 both trees and compares every source before it fails for any of them.
