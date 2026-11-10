@@ -57,15 +57,15 @@ static class CertifiedLibraryDonor
         "Proof cost base rows SHA256: ");
 
     /// <summary>
-    /// Same-repository pull request runs whose pull request merged into <paramref name="commit"/> on
-    /// main when they ran, newest first. Fork runs never qualify, whatever artifacts they uploaded.
+    /// Same-repository pull request runs whose pull request merged into <paramref name="commit"/> when
+    /// they ran, newest first; the base may be main or the parent branch of a stack. Fork runs never
+    /// qualify, whatever artifacts they uploaded.
     /// </summary>
     public static IEnumerable<long> PullRunsOnBase(JsonElement runs, string repository, string commit, int limit) =>
         !IsCommit(commit) ? [] : runs.GetProperty("workflow_runs").EnumerateArray().Take(limit)
             .Where(run => run.GetProperty("event").GetString() == "pull_request" &&
                 SameRepository(run.GetProperty("head_repository"), repository) &&
                 run.GetProperty("pull_requests").EnumerateArray().Any(pull =>
-                    pull.GetProperty("base").GetProperty("ref").GetString() == "main" &&
                     pull.GetProperty("base").GetProperty("sha").GetString() == commit &&
                     PullRepository(pull.GetProperty("base"), repository) &&
                     PullRepository(pull.GetProperty("head"), repository)))

@@ -504,6 +504,7 @@ Test("certified library binding, main republication and observability", () =>
         "cost-missing: " + dollar + "{{ steps.cost-rows.outputs.missing || needs.select.outputs.cost-sources }}",
         // A measured merge base is stored once, by the job and artifact name later runs look for.
         "    name: Measure the merge base for proof cost\n", "publish --merge-base --rows",
+        "touch \"" + dollar + "RUNNER_TEMP/proof-cost/" + dollar + "source.failed\"",
         "name: proof-cost-measured-base-" + dollar + "{{ github.run_id }}-" + dollar + "{{ github.run_attempt }}",
         "--commit \"" + dollar + "(git rev-parse \"" + dollar + "BASE\")\"", "--commit \"" + dollar + "GITHUB_SHA\"",
         // Later runs find main's rows by this job and artifact name and by the digest the job logs.

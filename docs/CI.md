@@ -156,9 +156,11 @@ from the same measurer, meaning the same `scripts/ProofCost.lean`, `scripts/Proo
 and row schema, and from that commit.
 `Prepare certified Lean library` makes this lookup, so a base that main published costs no job.
 
-A merge base that main did not publish is measured once. The job that measures it stores every
-base row the run has, with the commit and the measurer, and logs the digest; later runs of this or
-another pull request of this repository on the same merge base take them under the same checks.
+A merge base that main did not publish, such as the parent branch of a stacked pull request, is
+measured once. The job that measures it stores every base row the run has, with the commit and
+the measurer, and logs the digest; later runs of this or another pull request of this repository
+on the same merge base take them under the same checks. A suite that did not pass at the merge
+base is not stored, so the next run measures it again.
 Such rows are only ever a base for the commit they were measured at, by a run that would have
 measured the same rows itself. A run from a fork never supplies them, and no pull request run
 supplies head rows to anyone.

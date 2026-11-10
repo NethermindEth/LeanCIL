@@ -322,10 +322,12 @@ Test("a measured merge base is reused only from this repository's pull request r
         });
     long[] Select(params string[] runs) => CertifiedLibraryDonor.PullRunsOnBase(
         Json("{\"workflow_runs\":[" + string.Join(",", runs) + "]}"), "owner/repo", merged, 10).ToArray();
-    Require(Select(Run(9), Run(8)).SequenceEqual([9L, 8L]), "Runs on the same merge base were omitted");
-    // A fork, another base commit or branch, or another event never measured this base as its own.
+    // A stacked pull request merges into its parent's branch, which main never measures.
+    Require(Select(Run(9), Run(8, branch: "feat/parent")).SequenceEqual([9L, 8L]),
+        "Runs on the same merge base were omitted");
+    // A fork, another base commit or another event never measured this base as its own.
     foreach (var foreign in new[] { Run(9, head: "fork/repo"), Run(9, from: "fork/repo"),
-        Run(9, on: new string('d', 40)), Run(9, branch: "release"), Run(9, trigger: "workflow_dispatch") })
+        Run(9, on: new string('d', 40)), Run(9, trigger: "workflow_dispatch") })
         Require(Select(foreign).Length == 0, "A run that did not measure this merge base donated rows");
     var measured = CertifiedLibraryDonor.ProofCostBaseRows;
     JsonElement Api(long run, string suffix) => suffix.StartsWith("/jobs", StringComparison.Ordinal)
