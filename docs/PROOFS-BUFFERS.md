@@ -260,8 +260,8 @@ reaches a home does not elaborate and the snapshot stays the author's obligation
 offset and its compare. The [buffer fill proof](../Examples/Proofs/FillWords.lean) uses them with
 an invariant of only `Filled` and `k <= n`. [Countdown](../Examples/Proofs/Countdown.lean) needs
 no invariant beyond the frame, and [CountCalls](../Examples/Proofs/CountCalls.lean) and
-[CountUntil](../Examples/Proofs/CountUntil.lean) keep two locals across a helper call with
-`after_confined`. The [proof regressions](VALIDATION-PROOFS.md#proof-automation) list the
+[CountUntil](../Examples/Proofs/CountUntil.lean) keep two locals across a helper call, the first
+through `cil_loop_call` and the second with `after_confined`. The [proof regressions](VALIDATION-PROOFS.md#proof-automation) list the
 rejected writes, including one through the second home of a generated two-local frame.
 
 ### Caller facts in frame memory

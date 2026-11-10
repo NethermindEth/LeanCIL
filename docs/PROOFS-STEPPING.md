@@ -513,9 +513,9 @@ locals are a literal list, as after the loop tactics' stores, so either frame fe
 `LoopFrame.load` reads a home at a loop head, and `LoopFrame.leave_kept` `setup` is the exit's
 `MemoryBelow` fact for a frame confined to no caller storage, for any exited frame with the
 entry's owned identities, closing a postcondition such as `SpanSum`'s; the loop tactics derive
-both from the state's frame. [Countdown](../Examples/Proofs/Countdown.lean) and
-[SpanSum](../Examples/Proofs/SpanSum.lean) store through their frames this way; SpanSum's loop
-steps name no frame or span fact.
+both from the state's frame. [SpanSum](../Examples/Proofs/SpanSum.lean) stores through its frame
+this way, and its loop steps name no frame or span fact;
+[Countdown](../Examples/Proofs/Countdown.lean) leaves its stores to `cil_loop_recurse`.
 
 ### See what the tactics did
 
