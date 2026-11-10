@@ -808,6 +808,14 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             JsonSerializer.Serialize(ConsumerCacheEnvironment()) + "\n" +
             JsonSerializer.Serialize(inputs) + "\n" + extra);
 
+    // Lake traces depend on compiled imports even when framework sources are unchanged.
+    string ConsumerSupportCacheKey(SortedDictionary<string, string> snapshot,
+        IEnumerable<string> importDirectories, IEnumerable<string> configuration) =>
+        ConsumerCacheKey("support", new(snapshot.Where(pair => pair.Key.StartsWith("revision:", StringComparison.Ordinal))
+                .ToDictionary(), StringComparer.Ordinal),
+            string.Join("\n", importDirectories) + "\n" + string.Join("\n", configuration) + "\n" +
+            JsonSerializer.Serialize(baseModules));
+
     static HashSet<string> ImportClosure(Dictionary<string, string[]> graph, IEnumerable<string> roots)
     {
         var closure = new HashSet<string>(roots, StringComparer.Ordinal);
@@ -1744,9 +1752,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 var configuration = prepared.Copied.Where(pair => Path.GetFileName(pair.Key) is "lakefile.toml" or "lakefile.lean" or "lake-manifest.json" or "lean-toolchain")
                     .OrderBy(pair => pair.Key, StringComparer.Ordinal)
                     .Select(pair => Path.GetRelativePath(session, pair.Key).Replace('\\', '/') + ":" + pair.Value);
-                supportKey = ConsumerCacheKey("support", new(snapshot.Where(pair => pair.Key.StartsWith("revision:", StringComparison.Ordinal))
-                        .ToDictionary(), StringComparer.Ordinal),
-                    string.Join("\n", relativeImportDirectories) + "\n" + string.Join("\n", configuration));
+                supportKey = ConsumerSupportCacheKey(snapshot, relativeImportDirectories, configuration);
                 // Workspaces differ in Extracted, so only extraction-independent support is shared.
                 supportArtifacts = RestoreConsumerSupport(supportKey, bound, support, dependent: false);
             }

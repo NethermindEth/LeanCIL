@@ -301,7 +301,8 @@ across method gates.
 **Cache key.** A support generation is keyed by:
 
 - the effective Lake configuration files, ordered resolved import paths and dependency revisions;
-- the `lean`, `leanchecker` and `lake` binaries, the certified framework and the verifier;
+- the `lean`, `leanchecker` and `lake` binaries, the certified framework's source identity
+  and compiled module hashes, and the verifier;
 - the environment variables Lean, Lake and elan read: `LEAN_*` except
   `LEAN_NUM_THREADS`, `LAKE_*`, `ELAN_*` and `RESERVOIR_*`. Unrelated variables
   such as `DOTNET_HOST_PATH` do not affect reuse. If consumer elaborators read
@@ -328,6 +329,9 @@ across method gates.
 
 **Integrity.**
 
+- A rebuilt framework with different compiled bytes cannot restore support from the
+  previous build, even when its sources are identical. This includes generated extraction
+  certificates, whose Lake traces depend on those compiled imports.
 - Modified or unsigned cache files fall back to rebuilding and kernel replay.
 - Republishing the same module set from a new session is a no-op, concurrent
   verifiers publish through an atomic rename, and a corrupt entry is replaced.
