@@ -59,7 +59,6 @@ theorem link_holds : linkContract.Holds Extracted.program link := by
 /-- `SecondValue` meets its contract: two field loads, through the `Next` slot. -/
 theorem secondValue_holds : secondValueContract.Holds Extracted.program secondValue := by
   rintro node memory ⟨readable, next, held, valueReadable⟩
-  dsimp only [secondValueContract] at *
   refine ⟨CIL.executionBound Extracted.program secondValue, memory,
     [.scalar (.i64 (Node.Value.of memory next))], ?_, Confined.refl _ _, _, rfl, rfl,
     fun other otherHeld => by rw [held] at otherHeld; cases otherHeld; rfl⟩
@@ -153,13 +152,11 @@ theorem linkedValue_holds (linked : linkContract.Holds Extracted.program link)
     (second : secondValueContract.Holds Extracted.program secondValue) :
     linkedValueContract.Holds Extracted.program linkedValue := by
   rintro ⟨node, next⟩ memory ⟨owned, nextReadable⟩
-  dsimp only [linkedValueContract]
   have nextLive := nextReadable.live
   cil_contract_steps [linked, linkContract, owned, nextLive]
     with middle values linkCall
   obtain ⟨rfl, held⟩ := linkCall.post
   have linkFramed := linkCall.framed
-  dsimp only [linkContract] at linkFramed
   have kept := value_after_link nextReadable linkFramed
   have linked : secondValueContract.pre node middle := ⟨held.1.toReadable, next, held.2, kept.1⟩
   cil_contract_steps [second, secondValueContract, linked]

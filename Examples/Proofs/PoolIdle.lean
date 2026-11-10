@@ -57,7 +57,6 @@ def idleContract : MethodContract (Reference × ManagedReference × List Referen
 /-- `IsIdle` meets its contract: each hop shortens the rest of the free list by one node. -/
 theorem idle_holds : idleContract.Holds Extracted.program isIdle := by
   rintro ⟨pool, item, nodes⟩ memory ⟨wellFormed, free, chain, present⟩
-  dsimp only [idleContract]
   obtain ⟨entered, enter⟩ := entry.checked memory pool item wellFormed
   have itemFormed : formObject memory item = .ok (.object item) := by
     cases item with

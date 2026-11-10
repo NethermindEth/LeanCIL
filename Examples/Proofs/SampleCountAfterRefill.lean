@@ -75,7 +75,6 @@ theorem count_holds (holds : refillContract.Holds Extracted.program refill) :
     with final results refilling
   have framed := refilling.framed
   have post := refilling.post
-  dsimp only [refillContract] at framed post
   obtain ⟨rfl, refilled⟩ := post
   obtain ⟨kept, now⟩ := readable.across owned.toReadable.live framed refilled
   by_cases same : other = samples

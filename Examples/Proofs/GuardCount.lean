@@ -20,7 +20,6 @@ theorem correctness (memory : Memory) (literal : Reference) (count : CIL.W32)
     ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i32 count)] memory =
       if count.toInt < 0 then .error ⟨0, 2, .thrown "System.ArgumentOutOfRangeException"⟩
       else .ok (memory, [.scalar (.i32 count)]) := by
-  refine ⟨CIL.executionBound Extracted.program 0, ?_⟩
   by_cases negative : count.toInt < 0
   · simp only [negative, ite_true]
     cil_checked_steps [literalObject_of_lookup bound, formed, zeroGuardOutcome,

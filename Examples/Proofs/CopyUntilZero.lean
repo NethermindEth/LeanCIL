@@ -32,7 +32,6 @@ def stampContract : MethodContract (Reference × W32) Unit where
 /-- `Stamp` meets its contract; the caller proof below never unfolds its body. -/
 theorem stamp_holds : stampContract.Holds Extracted.program stamp := by
   rintro ⟨slot, value⟩ memory writable
-  dsimp only [stampContract] at writable
   obtain ⟨after, wrote, formed, confined, filled⟩ := writable.write_one value
   refine MethodContract.Holds.intro after () ?_ confined filled
   cil_checked_steps [step_storeScalar_of_write wrote, formed]
