@@ -61,11 +61,13 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
     foreach (var group in groups.Where(group => group.Suites.Length > 1))
         Require(group.Suites.Length <= 3 && group.Suites.All(suite => durations[suite] <= 60) &&
             group.Suites.Sum(suite => durations[suite]) <= 120, "Unbounded group");
-    // Proof cost reads a proof suite's head outputs from its job's upload, which must hold nothing else.
+    // A proof suite's job measures its outputs for proof cost, so they must hold nothing else.
     Require(VerificationSuites.ProofSuites.Any(suite => durations[suite] <= 60), "No proof suite is short");
     foreach (var suite in VerificationSuites.ProofSuites)
-        Require(groups.Any(group => group.Suite == suite && group.Suites is [var only] && only == suite),
-            "Proof suite shares a job: " + suite);
+        Require(groups.Any(group => group.Suite == suite && group.Suites is [var only] && only == suite &&
+            group.Proof), "Proof suite shares a job or is not measured: " + suite);
+    Require(groups.Count(group => group.Proof) == VerificationSuites.ProofSuites.Length,
+        "A job that runs no proof suite is measured");
     Equal(VerificationSelection.Groups(["contracts", "unknown"]).SelectMany(group => group.Suites),
         ["unknown", "contracts"]);
     Require(VerificationSelection.Groups([]).Length == 0, "Empty selection gained suites");
@@ -487,8 +489,18 @@ Test("certified library binding, main republication and observability", () =>
         "REVIEWED_PRODUCER: " + dollar + "{{ steps.donor.outputs.reviewed-producer }}",
         "if [ \"" + dollar + "REVIEWED_PRODUCER\" = true ]; then producer=(--producer-replayed); fi",
         "name: verification-results-" + dollar + "{{ matrix.suite }}-" + dollar + "{{ github.run_attempt }}",
-        // A proof suite's job is named for it alone, so its upload is found by the suite's name.
-        "pattern: verification-results-" + dollar + "{{ matrix.source }}-*",
+        // A proof suite's job measures its own outputs; only the comparison waits for every suite.
+        "if: matrix.proof", "dotnet artifacts/verification-fixtures/ProofCost/ProofCost.dll measure",
+        "name: proof-cost-head-rows-" + dollar + "{{ matrix.suite }}-" + dollar + "{{ github.run_attempt }}",
+        "pattern: proof-cost-head-rows-*", "pattern: proof-cost-base-rows-*",
+        "needs: [cost-base, cost-base-rows, cost-libraries, suites]",
+        // The merge base is measured beside the suites, and only for sources main published no rows for.
+        "needs: [prepare, cost-base]",
+        "if: needs.cost-base.outputs.missing != '' && needs.cost-base.outputs.missing != '[]'",
+        // Later runs find main's rows by this job and artifact name and by the digest the job logs.
+        "name: Publish proof cost rows",
+        "name: proof-cost-rows-" + dollar + "{{ github.run_id }}-" + dollar + "{{ github.run_attempt }}",
+        "--proof-cost-rows \"" + dollar + "(git rev-parse \"" + dollar + "BASE\")\"",
         "archive-sha256: " + dollar + "{{ steps.pack-library.outputs.archive-sha256 || " +
             "steps.donor.outputs.archive-sha256 }}",
         "ARCHIVE_SHA256: " + dollar + "{{ needs.prepare.outputs.archive-sha256 }}",

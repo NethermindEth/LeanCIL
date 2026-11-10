@@ -103,9 +103,9 @@ selection rules and final gate locally.
 ## Proof cost
 
 A tactic or library change alters the terms proofs build and the work it takes to build them, and
-a shorter proof can cost more than the one it replaces. On a pull request the `Proof cost` jobs
-measure each proof at the merge base and at the head, on one runner, and put the comparison in the
-job summary. The base is the first parent of the PR's merge commit, so main's own changes are never
+a shorter proof can cost more than the one it replaces. On a pull request the `Proof cost` job
+compares what each proof costs at the merge base and at the head and puts one table per source in
+its summary. The base is the first parent of the PR's merge commit, so main's own changes are never
 attributed to the PR, and no checked-in baseline has to be refreshed.
 
 `scripts/ProofCost.cs measure` elaborates a module one command at a time on one thread, through
@@ -124,28 +124,42 @@ Elapsed time depends on the runner's load, so it is reported and never fails a j
 checks nothing: a proof is accepted by the verification suites, and a module that reports an error
 is listed as not measured.
 
-Each job measures one source on both trees:
+A source is measured on both trees:
 
-- `libraries` measures every test library of `lakefile.toml`, meaning each `[[lean_lib]]` table
-  that only names a library, with the checkout modules it imports. It runs when the PR changes a
-  Lean file, the lakefile, the toolchain pin or the Lake manifest.
+- `libraries` is every test library of `lakefile.toml`, meaning each `[[lean_lib]]` table that
+  only names a library, with the checkout modules it imports. It is compared when the PR changes
+  a Lean file, the lakefile, the toolchain pin or the Lake manifest.
 - A proof suite (`core`, `loops`, `outlines-control`, `outlines-objects`, `outlines-buffers`,
-  `structoutlines`, `receiveroutlines`, `wordreader`, `savedwordreader`) runs when selection chose
-  that suite. The job verifies the suite at the merge base with the base's own runner and takes
-  the head's outputs from the results the suite's `Verify` job uploaded, so it starts once those
-  jobs have run and verifies nothing at the head again. It then measures every output directory
-  verified: its `Extracted.lean`, its `Symbols.lean` when present, and the proof that
-  `verified.json` names, provided the proof is unchanged since. The extraction's generated
-  instruction equations are rows too. A suite that the base does not have, or cannot pass, leaves
-  its proofs without a base: the job warns and the summary says the rows were not compared. A
-  proof suite always runs in a `Verify` job of its own, so that job's upload holds the outputs
-  of that suite alone and the head measures the directories the base does. A directory is
-  measured only while it holds the report of an accepted proof, so a suite that also checks
-  rejected proofs against an extraction verifies the accepted one last.
+  `structoutlines`, `receiveroutlines`, `wordreader`, `savedwordreader`) is compared when
+  selection chose that suite. Its rows are every output directory the suite verified: its
+  `Extracted.lean`, its `Symbols.lean` when present, and the proof that `verified.json` names,
+  provided the proof is unchanged since. The extraction's generated instruction equations are
+  rows too. A directory is measured only while it holds the report of an accepted proof, so a
+  suite that also checks rejected proofs against an extraction verifies the accepted one last.
 
-The head uses the certified library of the run. The merge base uses the same library when its
-library inputs are identical; otherwise `Build the merge base for proof cost` builds the base
-library with the base's own scripts, incrementally from the head's, and publishes it for the jobs.
+The head is measured where it is verified. A proof suite always runs in a `Verify` job of its
+own, and that job measures its outputs once the suite has passed, so the rows are those of that
+suite alone; the step cannot fail the job, and a suite without rows fails the comparison instead.
+`Measure the test libraries for proof cost` measures `libraries` beside the suites.
+
+The merge base is measured once per commit. A push to main measures the same sources the same
+way, and `Publish proof cost rows` gathers them into one artifact and logs its digest. A PR run
+takes those rows as its base when the push run of its merge base published them: the run must be
+a push of that commit on main, which is what reusing a certified library without replay requires
+of its producer, the file must have the digest that job logged, and its rows must come from the
+same measurer, meaning the same `scripts/ProofCost.lean`, `scripts/ProofCostReport.cs` and row
+schema. A run of the same PR never supplies a base.
+
+For a source without published rows, `Measure the merge base` verifies the suite at the merge
+base with the base's own runner and measures it. These jobs need only the base library, so they
+run beside the suites; `Build the merge base for proof cost` builds that library with the base's
+own scripts, incrementally from the head's, when the library inputs differ and a source is left
+to measure. A suite that the base does not have, or cannot pass, leaves a measurement without
+rows: the job warns and the summary says the rows were not compared. A base that was never
+measured fails the comparison.
+
+`Proof cost` is the only job that waits for the suites. It measures nothing: it downloads the
+rows of both trees and compares every source before it fails for any of them.
 
 `scripts/ProofCost.cs compare` fails when a row's heartbeats grow by more than 5% and by more than
 50,000, or a module's olean grows by more than 5% and by more than 4,096 bytes. Both conditions
@@ -165,16 +179,16 @@ An increase that is worth its cost is accepted by adding it to `scripts/proof-co
 in the same PR. The summary prints the entry: the row, the measure, the base and head values and a
 reason to fill in. An entry applies only to that base value and up to that head value, each with
 1,000 heartbeats of allowance for the difference between reruns, so it cannot excuse later growth;
-entries that match nothing are listed for removal and never fail.
+entries that no source of the run matched are listed for removal and never fail.
 
-The `Proof cost` jobs are separate checks and not part of `Build and verify`, so a regression
-shows as a failed check on the PR without blocking a merge the reviewer has accepted. A manual run
-of the workflow measures its own tree twice, which reports the runner's measurement noise.
+`Proof cost` is a separate check and not part of `Build and verify`, so a regression shows as a
+failed check on the PR without blocking a merge the reviewer has accepted. A manual run of the
+workflow compares its tree with itself, which reports the measurement noise between two runs.
 
 Another producer adds rows by writing the same JSON and passing its file as a further `--base` or
-`--head`: a row is a group, a name, a kind and named integer measures. Measures other than the
-ones above are reported in their own table and never fail. Each job uploads its measurements,
-comparison and the merge base's suite log as `proof-cost-<source>`. Run
+`--head` of `compare`: a row is a group, a name, a kind and named integer measures. Measures other
+than the ones above are reported in their own table and never fail. The job uploads the rows of
+both trees, each source's comparison and the merge base's suite logs as `proof-cost`. Run
 `dotnet run --file scripts/TestProofCost.cs` to test the comparison rules;
 [validation](VALIDATION.md#proof-cost) shows a local comparison.
 
