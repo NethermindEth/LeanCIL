@@ -239,9 +239,11 @@ byte home is a skipped `WritableHomes` slot and a `none` value, and so the lemma
 pairs the loop's values with a memory and its `LoopFrame`, with the slots and remembered values as
 functions of the loop's values, so an invariant over a `FrameState` states only the property.
 `bind_entry ... allocating` proves the frame of the entered locals and parameter homes for any
-footprint, with each home remembered as its initializer and every other local as `none`; a
-default span or object local holds the null span or null and allocates nothing.
-`LoopFrame.ofEntry`, `WritableHomes.entry` and `skip`, and `LocalSnapshots.entry` and `skip` are
+footprint. Initialized homes remember their initializer; `.unmodeled` homes retain storage and
+write access with a `none` snapshot. The generated `Checked` evidence exposes `storageN` for an
+unknown local and `numericN` for an initialized one. Both carry allocation freshness and bounds.
+A default span or object local holds the null span or null and allocates nothing.
+`LoopFrame.ofEntry`, `WritableHomes.cons` and `skip`, and `LocalSnapshots.entry` and `skip` are
 the lemmas it composes. `set_local` keeps the frame when a local without a byte home is assigned,
 as the span fold slices its span and a list walk moves its object local to the next node; it
 rejects a home and a remembered local.

@@ -72,6 +72,7 @@ internal static class CliDiagnostics
             "proof selection" => "Supply --proof path/to/Proof.lean, or correct the proof path and theorem in verification.json.",
             "Lean library build" => "Ensure Lean and Lake are installed with the bundled lean-toolchain version, then address the build diagnostic below.",
             "proof checking" => "Read the Lean diagnostic below and check the implementation against the stated contract, including its preconditions.",
+            "compile check" => "Fix the elaboration errors below, then rerun the compile check.",
             "theorem audit" => "Select a proved theorem with --theorem and remove unproved or unsupported axioms from its dependencies.",
             "open goals" => "Prove each goal listed below in place of its `sorry` or failing tactic, then rerun.",
             "proof outline" => "Write this proof by hand from a similar example, or report the shape as an issue.",
@@ -89,6 +90,7 @@ internal static class CliDiagnostics
         var summary = error is CliFailure && !missingTool ? stage switch
         {
             "proof checking" => "Lean could not prove the selected theorem.",
+            "compile check" => "Lean could not compile the selected proof.",
             "Lean library build" => "The Lean library or proof dependencies could not be built.",
             "theorem audit" => "The selected theorem did not pass the proof-integrity audit.",
             _ => error.Message

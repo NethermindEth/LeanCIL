@@ -47,6 +47,20 @@ term is left as written. `cil_checked_steps` and `cil_contract_steps` also state
 each call's continuation, so a goal they step needs no `dsimp only [contract]` first. A contract
 variable and `Returns` stay folded, as does a goal a proof enters by hand.
 
+An existential `run` budget can come from a method-body lookup hypothesis, or from a `CodeAt`
+placement beginning at its starting pc. The remaining code length supplies a candidate budget;
+the resulting proof must still establish that it suffices. Use `WP` and a proved suffix when
+composing code with independent call or loop budgets.
+
+`cil_lookup` and the steppers resolve computed positions such as `base + stride * index.val`
+for `index : Fin n`, with a closed bound of at most 64. Each finite case uses the same generated
+instruction equations or `CodeAt` placement as a literal lookup. Named method indices reduce
+normally. A closed position outside a concrete body reports its position and body length.
+
+A named `LoopFrame` in the context supplies local addresses and remembered values to straight-line
+stepping through the same fact-gathering rules used by loop proofs. Unknown homes provide storage
+and address facts only; a checked write or helper postcondition must establish their contents.
+
 The stepping tactics read object evidence from the context, so a fact list does not repeat it. A
 hypothesis is recognized by the head of its statement, also as one side of a conjunction, when the
 goal names its object:

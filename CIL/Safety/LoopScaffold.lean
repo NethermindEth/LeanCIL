@@ -38,7 +38,7 @@ theorem enterFrame_isSome (body : CIL.Method) (args : List Value) (memory : Memo
   rfl
 #print axioms enterFrame_isSome
 
-/-- Derive parameterized frames, memory and numeric homes from checked allocation; an
+/-- Derive parameterized frames, memory and local homes from checked allocation; an
     allocating entry also proves the `LoopFrame` of all its homes for every footprint, and
     `name.checked` yields its home references and entered memory with their `name.Checked`
     evidence, whose facts are selected by field.
@@ -91,7 +91,7 @@ theorem makeLocal_span_null (activation width : Nat) (writable : Bool) (memory :
   simp [makeLocal, positive, bounded]
 #print axioms makeLocal_span_null
 
-/-- Rewrite each numeric local by its allocation equation before `makeLocal` is unfolded, then
+/-- Rewrite each allocated local by its equation before `makeLocal` is unfolded, then
     normalize the rest of frame setup; an unmatched equation leaves allocation unresolved.
     Object and span locals reduce first, so a later home's equation meets the memory it was
     stated over. -/
@@ -163,23 +163,20 @@ private def emitSlots (name : Ident)
       elabCommand (← `(abbrev $loadedName $factBinders* := $loaded))
       elabCommand (← `(abbrev $storedName $factBinders* := $stored))
 
-/-- A numeric local of the entered method: its index, storage kind, initializer, the number
-    its home stores and the value it loads as. -/
-private structure NumericLocal where
+/-- A byte-backed local's index, kind, initializer and optional known number and load value. -/
+private structure AllocatedLocal where
   index : Nat
   kind : Term
   value : Term
-  number : Term
-  result : Term
+  known : Option (Term × Term)
 
 /-- The kinds `makeLocal` creates without allocating memory. -/
 private def unallocatedKinds : List Name :=
   [``CIL.LocalKind.span, ``CIL.LocalKind.reference, ``CIL.LocalKind.array,
     ``CIL.LocalKind.methodPointer, ``CIL.LocalKind.methodTable, ``CIL.LocalKind.object]
 
-/-- Find the numeric locals of `body`. Every other local must be created without allocating, so
-    each allocation of the entered frame is a numeric home. -/
-private def numericLocals (body : Term) : TermElabM (Array NumericLocal) := do
+/-- Find every allocating local of `body`, retaining an initializer only when it is known. -/
+private def allocatedLocals (body : Term) : TermElabM (Array AllocatedLocal) := do
   let kinds ← Term.elabTerm (← `(CIL.Method.localKinds $body)) none
   let values ← Term.elabTerm (← `(CIL.Method.locals $body)) none
   Term.synthesizeSyntheticMVarsNoPostponing
@@ -199,11 +196,14 @@ private def numericLocals (body : Term) : TermElabM (Array NumericLocal) := do
         let result ← if (← Meta.whnf kind).isAppOf ``CIL.LocalKind.narrow then
             `(localResult $kindTerm $valueTerm) else pure valueTerm
         found := found.push ⟨index, kindTerm, valueTerm,
-          ← PrettyPrinter.delab (← Meta.reduce number), result⟩
+          some (← PrettyPrinter.delab (← Meta.reduce number), result)⟩
       | _ =>
         let storage ← Meta.whnf kind
         unless unallocatedKinds.any storage.isAppOf do
-          throwError "Local {index} allocates a home without a checked numeric initializer"
+          if (← Meta.whnf value).isConstOf ``CIL.Value.unmodeled then
+            found := found.push ⟨index, ← PrettyPrinter.delab kind,
+              ← PrettyPrinter.delab value, none⟩
+          else throwError "Local {index} allocates a home without a fitting initializer"
       kinds := kindTail
       values := valueTail
       index := index + 1
@@ -228,9 +228,9 @@ private def frameKinds (body : Term) : TermElabM (Array Term) := do
     | _ => throwError "Local and parameter home kinds must reduce to a list"
   return found
 
-/-- Introduce each numeric home, the memory after it and its allocation equation, passing them
+/-- Introduce each local home, the memory after it and its allocation equation, passing them
     to `continuation` in that order, three per home. -/
-private partial def withNumericHomes {α : Type} (memory : Term) (homes : Array NumericLocal)
+private partial def withAllocatedHomes {α : Type} (memory : Term) (homes : Array AllocatedLocal)
     (position : Nat) (current : Term) (introduced : Array Expr)
     (continuation : Array Expr → Term → TermElabM α) : TermElabM α := do
   if h : position < homes.size then
@@ -244,7 +244,7 @@ private partial def withNumericHomes {α : Type} (memory : Term) (homes : Array 
           $allocated))) (some (mkSort .zero))
       Term.synthesizeSyntheticMVarsNoPostponing
       Meta.withLocalDeclD (Name.mkSimple s!"made{home.index}") (← instantiateMVars made)
-        fun madeVar => withNumericHomes memory homes (position + 1) allocated
+        fun madeVar => withAllocatedHomes memory homes (position + 1) allocated
           (introduced ++ #[referenceVar, allocatedVar, madeVar]) continuation
   else continuation introduced current
 
@@ -259,8 +259,8 @@ private def addClosedTheorem (name : Name) (context : Array Expr) (statement pro
     throwError "Entry normalization left metavariables in its setup proof"
   addDecl (.thmDecl { name, levelParams := [], type, value })
 
-/-- Introduce the numeric home references alone. -/
-private partial def withHomeReferences {α : Type} (homes : List NumericLocal)
+/-- Introduce the allocated local references alone. -/
+private partial def withHomeReferences {α : Type} (homes : List AllocatedLocal)
     (continuation : TermElabM α) : TermElabM α :=
   match homes with
   | [] => continuation
@@ -287,7 +287,7 @@ private def mentionedBinders (variables : Array Expr) (value : Expr) :
     return mkIdent (← selection.fvarId!.getDecl).userName
   return (binders, arguments)
 
-/-- Derive an entry whose numeric locals allocate homes in symbolic memory. The frame is
+/-- Derive an entry whose locals allocate homes in symbolic memory. The frame is
     explicit in opaque home references; the checked theorem yields them existentially with the
     entry's `Checked` structure. -/
 private def elabAllocatingEntry (name : Ident)
@@ -295,13 +295,17 @@ private def elabAllocatingEntry (name : Ident)
     (body args memory wellFormed : Term) (facts : Array Term)
     (doc : Option (TSyntax ``Lean.Parser.Command.docComment)) : CommandElabM Unit := do
   let indexed (base : String) (index : Nat) := mkIdent (Name.mkSimple s!"{base}{index}")
+  let evidenceName (home : AllocatedLocal) :=
+    indexed (if home.known.isSome then "numeric" else "storage") home.index
+  let storageFact (home : AllocatedLocal) (fact : Term) : CommandElabM Term :=
+    if home.known.isSome then `(($fact).storage) else pure fact
   let definitions ← bodyDefinitions body
   let kept := mkIdent `kept
   let setupName := (← getCurrNamespace) ++ name.getId ++ `setup
   let (homes, frameBinders, frameParameters, frameValue, parameters) ←
       liftTermElabM <| Term.elabBinders binders fun variables => do
-    let homes ← numericLocals body
-    withNumericHomes memory homes 0 memory #[] fun introduced final => do
+    let homes ← allocatedLocals body
+    withAllocatedHomes memory homes 0 memory #[] fun introduced final => do
       let references := (List.range homes.size).toArray.map (introduced[3 * ·]!)
       let finalValue ← Term.elabTerm final (some (mkConst ``Memory))
       let keptType ← Term.elabTerm (← `(MemoryBelow ($memory).nextIdentity $memory $final))
@@ -336,7 +340,7 @@ private def elabAllocatingEntry (name : Ident)
           | throwError "Entry facts leave the allocated frame unresolved"
         if frame.hasMVar then throwError "Entry facts leave the allocated frame unresolved"
         unless entered == (← instantiateMVars finalValue) do
-          throwError "Frame entry allocates storage other than its numeric homes"
+          throwError "Frame entry allocates storage other than its local homes"
         let homeIds := references.map Expr.fvarId!
         let userIds := variables.map Expr.fvarId!
         let mentioned := (collectFVars {} frame).fvarIds
@@ -376,7 +380,9 @@ private def elabAllocatingEntry (name : Ident)
     match homeAt index with
     | some (home, _) =>
       slotTerms := slotTerms.push (← `(LocalSlot.bytes $(home.kind) $(indexed "home" home.index)))
-      remembered := remembered.push (← `(some $(home.result)))
+      remembered := remembered.push (← match home.known with
+        | some (_, result) => `(some $result)
+        | none => `(none))
     | none =>
       slotTerms := slotTerms.push slot.2.1
       remembered := remembered.push (← `(none))
@@ -386,9 +392,11 @@ private def elabAllocatingEntry (name : Ident)
   let mut fieldTypes : Array Term :=
     #[← `(enterFrame $body $args $memory = .ok ($frameApplied, $entered))]
   for home in homes do
-    fieldNames := fieldNames.push (indexed "numeric" home.index)
-    fieldTypes := fieldTypes.push (← `(NumericEntryHome $memory $entered $(home.kind)
-      $(home.number) $(indexed "home" home.index)))
+    fieldNames := fieldNames.push (evidenceName home)
+    fieldTypes := fieldTypes.push (← match home.known with
+      | some (number, _) => `(NumericEntryHome $memory $entered $(home.kind)
+          $number $(indexed "home" home.index))
+      | none => `(EntryHome $memory $entered $(home.kind) $(indexed "home" home.index)))
   fieldNames := fieldNames ++ #[mkIdent `entryMemory, mkIdent `frame]
   fieldTypes := fieldTypes ++ #[← `(EntryMemory $memory $entered),
     ← `(∀ footprint : List (Reference × Nat),
@@ -414,11 +422,15 @@ private def elabAllocatingEntry (name : Ident)
     #[← `(tactic| have $progress:ident := EntryMemory.start $wellFormed)]
   for home in homes do
     let step := indexed "step" home.index
+    let allocation ← match home.known with
+      | some (number, _) => `(make_numeric_entry_local $progress ($memory).nextIdentity
+          $(home.kind) $(home.value) $number rfl)
+      | none => `(make_unknown_entry_local $progress ($memory).nextIdentity $(home.kind)
+          (by decide) (by intro _ _ equal; cases equal) (by intro _ equal; cases equal)
+          (by intro _ equal; cases equal) (by intro _ equal; cases equal) (by decide))
     steps := steps.push (← `(tactic| obtain ⟨$(indexed "home" home.index):ident,
       $(indexed "allocated" home.index):ident, $(indexed "made" home.index):ident,
-      $(indexed "numeric" home.index):ident, $step:ident⟩ :=
-        make_numeric_entry_local $progress ($memory).nextIdentity $(home.kind) $(home.value)
-          $(home.number) rfl))
+      $(evidenceName home):ident, $step:ident⟩ := $allocation))
     let next := indexed "entryMemory" home.index
     steps := steps.push (← `(tactic| have $next:ident := EntryMemory.trans $progress $step))
     progress := next
@@ -434,9 +446,11 @@ private def elabAllocatingEntry (name : Ident)
   let mut fieldValues : Array Term := #[setup]
   let mut entryHomes : Array Term := #[]
   for (home, position) in homes.zipIdx do
-    let mut fact : Term := indexed "numeric" home.index
+    let mut fact : Term := evidenceName home
     for later in homes.extract (position + 1) homes.size do
-      fact ← `(NumericEntryHome.after $fact $(indexed "step" later.index))
+      fact ← if home.known.isSome then
+        `(NumericEntryHome.after $fact $(indexed "step" later.index))
+      else `(EntryHome.after $fact $(indexed "step" later.index))
     entryHomes := entryHomes.push fact
   fieldValues := fieldValues ++ entryHomes
   -- Each home lies below the next, as `WritableHomes` orders them, from its allocation.
@@ -447,12 +461,16 @@ private def elabAllocatingEntry (name : Ident)
       | writableHomes ← `(WritableHomes.skip (by intro _ _ same; cases same) $writableHomes)
         snapshots ← `(LocalSnapshots.skip $snapshots)
     let fact := entryHomes[position]!
+    let storage ← storageFact home fact
     let fresh ← match position, homes[position - 1]? with
-      | _ + 1, some prior => `(NumericEntryHome.before_made
-          $(indexed "numeric" prior.index) $(indexed "made" home.index))
+      | _ + 1, some prior => `(EntryHome.before_made
+          $(← storageFact prior (evidenceName prior)) $(indexed "made" home.index))
       | _, _ => `(($fact).fresh)
-    writableHomes ← `(WritableHomes.entry $fact $fresh $writableHomes)
-    snapshots ← `(LocalSnapshots.entry (stored := $(home.value)) $fact rfl rfl $snapshots)
+    writableHomes ← `(WritableHomes.cons $(indexed "home" home.index) $(home.kind)
+      $fresh ($storage).writable $writableHomes)
+    snapshots ← match home.known with
+      | some _ => `(LocalSnapshots.entry (stored := $(home.value)) $fact rfl rfl $snapshots)
+      | none => `(LocalSnapshots.skip $snapshots)
   fieldValues := fieldValues.push progress
   fieldValues := fieldValues.push (← `(fun footprint =>
     LoopFrame.ofEntry footprint $progress $writableHomes $snapshots))

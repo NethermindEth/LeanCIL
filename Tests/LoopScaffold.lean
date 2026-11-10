@@ -270,10 +270,17 @@ theorem homes (memory : Memory) (view : SpanView) (wellFormed : memory.WellForme
 def unmodeled : CIL.Method := {
   code := [.ret], locals := [.unmodeled], returnsValue := false, localKinds := [.word32] }
 
-/-- error: Local 0 allocates a home without a checked numeric initializer -/
-#guard_msgs (error) in
-bind_entry rejected (memory : Memory) (wellFormed : memory.WellFormed) := unmodeled
+bind_entry unknownEntry (memory : Memory) (wellFormed : memory.WellFormed) := unmodeled
   with [] from memory allocating wellFormed
+
+/-- An unknown home has checked write authority without claiming initialized bytes. -/
+theorem unknown_storage (memory : Memory) (wellFormed : memory.WellFormed) :
+    ∃ home entered, enterFrame unmodeled [] memory =
+      .ok (unknownEntry.frame memory home, entered) ∧ access entered home 4 1 true = .ok () := by
+  obtain ⟨home, entered, setup⟩ := unknownEntry.checked memory wellFormed
+  exact ⟨home, entered, setup.setup, setup.storage0.writable⟩
+
+#print axioms unknown_storage
 
 end Tests.AllocatingEntry
 

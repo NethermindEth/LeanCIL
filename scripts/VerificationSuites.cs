@@ -128,6 +128,8 @@ internal static class VerificationSuites
         new("lookups", "Tests/LookupScaling.cs",
             "lookup equations of extracted methods, hand-written bodies and templates at a per-instruction " +
             "cost that does not grow with the method"),
+        new("gates", "Tests/ProofGates.cs",
+            "manifest extraction, profiles, changed-source selection and mutation expectations"),
         new("assemblies", "Tests/MultiAssembly.cs",
             "bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and " +
             "substitution rejection"),

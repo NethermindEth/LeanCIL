@@ -66,6 +66,17 @@ or prove the required contents separately.
 meeting its precondition. It uses fuel monotonicity to rule out success at every budget;
 the witness must be a semantic fault, not fuel exhaustion.
 
+`WP.of_embedded_run` transports a successful suffix through `CIL.Embeds`, reusing the checked
+embedding simulation. `CodeAt` identifies the suffix; embedding also checks instruction targets
+and method metadata, since equal instruction lists alone do not justify relocating absolute
+branches. `MethodContract.Holds.of_embeds` transports the complete contract through
+`CIL.MethodEmbeds`, including its footprint and precondition.
+
+`WP.load_call_store` composes a placed `loadCallStoreCode` segment with any proved scalar helper
+contract. Both input words are loaded before the call and output write, so the argument ranges
+may overlap. The continuation receives the helper's `CallResult` and the actual checked write.
+It retains the helper's full postcondition and footprint without unfolding the helper body.
+
 End new theorems with `#print axioms`. The normal verifier checks both the theorem and its
 extraction binding; a successful standalone elaboration is not the full verification workflow.
 See [soundness](SOUNDNESS.md) for the exact trust boundary and [validation](VALIDATION.md) for

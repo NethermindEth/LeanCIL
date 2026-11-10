@@ -1,5 +1,54 @@
 # Consumer packages and batch verification
 
+## Run a proof catalog
+
+`leancil gates gates.json` extracts and verifies an explicit catalog. Paths for assemblies,
+`proofRoot`, `outputRoot` and custom `@profile.json` files are relative to the manifest;
+proof paths are relative to `proofRoot`. Each profile gets its own extraction and result.
+
+```json
+{
+  "schema": 1,
+  "proofRoot": "verification",
+  "outputRoot": "artifacts/gates",
+  "gates": [{
+    "name": "add",
+    "assembly": "bin/Arithmetic.dll",
+    "method": "Arithmetic::Add(ulong,ulong)",
+    "profiles": ["scalar", "x64-v3"],
+    "proof": "Add.lean",
+    "theorem": "Add.correctness",
+    "variants": [{
+      "name": "commuted",
+      "assembly": "variants/Commuted.dll",
+      "expect": "certifies"
+    }, {
+      "name": "wrong-operation",
+      "assembly": "variants/Wrong.dll",
+      "expect": "rejected"
+    }]
+  }]
+}
+```
+
+Variant expectations apply the unchanged production proof to the variant assembly. `rejected`
+requires proof rejection and leaves no `verified.json`; a variant that verifies fails that
+expectation. `certifies` requires ordinary certification. Entries may also supply
+`initializedTypes` and `typeArguments`, with the same meaning as extraction options.
+
+`--method` selects a signature substring; `--profile` selects one exact profile name.
+Repeat `--changed path` for paths relative to the command's working directory. Lean changes
+select proofs whose import closure includes the file. C# changes use matching PDB locations of
+the extracted reachable methods. Missing debug information or referenced assemblies select
+conservatively; project and build-property changes select every candidate. No matching selection
+is an error. Selection makes no verification claim about omitted entries.
+
+`--parallel`, `--results`, `--format`, `--trace`, `--fresh` and `--rebuild-library` use the
+batch verifier's behavior and result format. `--check` uses compile-only behavior and cannot
+be combined with selected rejection expectations.
+
+## Check compilation
+
 `leancil verify-batch requests.json --check` compiles each proof and its import closure against
 the selected extraction. It reports every request as `Checked` or failed, with source locations
 for elaboration errors. Shared support is compiled once where possible; these compiled artifacts
@@ -355,6 +404,13 @@ extractions need separate workspaces because `Extracted` is a single module name
 The first workspace certifies the extraction-independent support and later
 workspaces reuse exactly those artifacts; `--parallel count` bounds how many
 later workspaces run at once (default: processor count / 8).
+
+If a proof build changes an extraction's compiled module, verification fails at
+`extraction integrity`. The diagnostic names each changed module part and its before/after
+SHA-256 hashes, whether preparation restored or built the certificate, the isolated package path,
+and artifact/trace modification times and trace hashes. No certificate is issued for that
+request. These details distinguish changed artifact bytes from an ordinary unproved theorem;
+a timestamp alone does not establish why Lake rebuilt a module.
 
 Each request keeps an independent certificate. It is audited in its own Lean
 process importing only its own proof module, and it fails only for build or

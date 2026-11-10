@@ -114,6 +114,14 @@ elab "cil_supply_fuel" : tactic => withMainContext do
       let some (_, found, result) := declaration.type.consumeMData.eq? | continue
       unless result.isAppOfArity ``Option.some 2 do continue
       unless ← withNewMCtxDepth <| isDefEq lookup found do continue
+      for placement in ← getLCtx do
+        let placed := placement.type.consumeMData
+        unless placed.isAppOfArity ``CodeAt 3 do continue
+        unless ← withNewMCtxDepth <| isDefEq placed.getAppArgs[0]! result.appArg! do continue
+        unless ← withNewMCtxDepth <| isDefEq placed.getAppArgs[1]! pc do continue
+        let segment ← Term.exprToSyntax placed.getAppArgs[2]!
+        evalTactic (← `(tactic| refine ⟨(List.length $segment) + 1, ?_⟩))
+        return
       let methodBody ← Term.exprToSyntax result.appArg!
       let position ← Term.exprToSyntax pc
       evalTactic (← `(tactic| refine ⟨(CIL.Method.code $methodBody).length - $position + 1, ?_⟩))
@@ -146,6 +154,8 @@ def factInstances (proof : Expr) : TermElabM (Array Expr) := do
     if domain.isAppOfArity ``Fin 1 then
       if let some size ← (Lean.Meta.evalNat (← reduce domain.appArg!)).run then
         if size <= 64 then
+          -- Concrete instances avoid simplifying dependent finite binders a second time.
+          instances := #[]
           for index in [:size] do
             let numeral : Term := ⟨Syntax.mkNumLit (toString index)⟩
             let bound : Term := ⟨Syntax.mkNumLit (toString size)⟩
@@ -242,6 +252,32 @@ macro "cil_steps_from " message:str tactic:tacticSeq : tactic =>
     hypothesis, else by rewriting feature tests in a profile-dependent body with the supplied
     facts. -/
 syntax "cil_lookup" "[" term,* "]" : tactic
+
+open Lean Elab Tactic Meta in
+/-- Reuse a generated equation directly for a named body and a closed instruction position. -/
+elab "cil_lookup_equation" : tactic => withMainContext do
+  let some (_, lookup, _) := (← instantiateMVars (← getMainTarget)).consumeMData.eq?
+    | throwError "Expected an instruction lookup"
+  unless lookup.isAppOf ``GetElem?.getElem? do throwError "Expected an indexed lookup"
+  let arguments := lookup.getAppArgs
+  let code := arguments[arguments.size - 2]!
+  unless code.isAppOfArity ``CIL.Method.code 1 do throwError "Expected a named method body"
+  let body := code.appArg!
+  let some name := body.getAppFn.constName? | throwError "Expected a named method body"
+  let some position ← getNatValue? arguments.back! | throwError "Expected a closed position"
+  let equation := name.appendAfter s!"_instruction{position}"
+  unless (← getEnv).contains equation do throwError "No generated equation at this position"
+  let proof := mkAppN (← mkConstWithFreshMVarLevels equation) body.getAppArgs
+  let type ← inferType proof
+  let some (_, _, found) := type.eq? | throwError "Expected an instruction equation"
+  unless found.isAppOfArity ``Option.some 2 do throwError "Expected a successful lookup"
+  let operation ← whnfD found.appArg!
+  let some (.ctorInfo constructor) := (← getEnv).find? operation.getAppFn.constName!
+    | throwError "Instruction needs profile facts"
+  unless constructor.induct == ``CIL.Op do throwError "Expected an instruction constructor"
+  let goals ← (← getMainGoal).apply proof
+  unless goals.isEmpty do throwError "The instruction equation left premises"
+  replaceMainGoal []
 
 /-- Close a lookup goal `lookup = result` with a hypothesis, up to reducible unfolding, trying
     only hypotheses that are equations whose left side has the goal's head; fails otherwise. -/
@@ -349,7 +385,7 @@ elab_rules : tactic
       try
         let type ← inferType placement
         let start := type.getAppArgs[1]!
-        let some (_, lookup, _) := (← getMainTarget).eq?
+        let some (_, lookup, _) := (← getMainTarget).consumeMData.eq?
           | throwError "Expected an instruction lookup"
         let position := lookup.getAppArgs.back!
         let index ← placementOffset start position
@@ -363,6 +399,56 @@ elab_rules : tactic
     original.restore
     throwError "No placed segment contains this instruction"
 
+/-- Resolve a computed lookup by checking each value of a bounded finite index. -/
+syntax "cil_lookup_finite" "[" term,* "]" : tactic
+
+open Lean Elab Tactic Meta in
+elab_rules : tactic
+  | `(tactic| cil_lookup_finite [$facts:term,*]) => withMainContext do
+    let some (_, lookup, _) := (← instantiateMVars (← getMainTarget)).consumeMData.eq?
+      | throwError "Expected a lookup equation"
+    unless lookup.isAppOf ``GetElem?.getElem? do throwError "Expected an indexed lookup"
+    let position := lookup.getAppArgs.back!
+    for declaration in ← getLCtx do
+      unless (position.find? (· == declaration.toExpr)).isSome do continue
+      let type ← whnf declaration.type
+      unless type.isAppOfArity ``Fin 1 do continue
+      let some size ← (Lean.Meta.evalNat (← reduce type.appArg!)).run | continue
+      unless size > 0 && size <= 64 do continue
+      let index ← Term.exprToSyntax declaration.toExpr
+      let value ← `(term| ($index).val)
+      let rec splitAt (offset : Nat) (remaining : Nat) : TacticM (TSyntax `tactic) := do
+        let numeral : Term := ⟨Syntax.mkNumLit (toString offset)⟩
+        let equal := mkIdent (← mkFreshUserName `positionCase)
+        let close ← `(tactic| (
+          simp only [$equal:term, Nat.reduceMul, Nat.reduceAdd]
+          all_goals first | cil_lookup_equation | cil_lookup [$[$facts:term],*]))
+        match remaining with
+        | 0 => `(tactic| (
+            have $equal : $value = $numeral := by omega
+            $close:tactic))
+        | rest + 1 =>
+          let tail ← splitAt (offset + 1) rest
+          `(tactic| (by_cases $equal : $value = $numeral
+                     · ($close:tactic)
+                     · ($tail:tactic)))
+      evalTactic (← splitAt 0 (size - 1))
+      return
+    throwError "No computed position with a finite bound of at most 64"
+
+open Lean Elab Tactic Meta in
+/-- Report a closed position outside a concrete instruction list without hiding its bounds. -/
+elab "cil_lookup_failure" : tactic => withMainContext do
+  if let some (_, lookup, _) := (← instantiateMVars (← getMainTarget)).consumeMData.eq? then
+    if lookup.isAppOf ``GetElem?.getElem? then
+      let arguments := lookup.getAppArgs
+      if let some position ← (Lean.Meta.evalNat (← reduce arguments.back!)).run then
+        let length ← mkAppM ``List.length #[arguments[arguments.size - 2]!]
+        if let some count ← (Lean.Meta.evalNat (← reduce length)).run then
+          if count <= position then
+            throwError "cil_lookup: position {position} is outside body length {count}"
+  evalTactic (← `(tactic| rfl))
+
 -- Reducible `assumption` keeps a failed candidate lookup from unfolding every hypothesis.
 -- A branch leaves `(v != 0) = true` in the pc: the negation lemmas decide it from
 -- `Not (v = 0)`, and the trailing `rfl` decides it once `v = 0` or a literal closes it.
@@ -370,13 +456,17 @@ macro_rules
   | `(tactic| cil_lookup [$facts:term,*]) =>
   `(tactic| first
     | cil_lookup_assumption
-    | (simp only [cil_code, Nat.reduceAdd]; cil_lookup_rfl [$[$facts:term],*])
+    | (simp only [cil_code, Nat.reduceAdd, Nat.reduceMul]; cil_lookup_rfl [$[$facts:term],*])
     | cil_lookup_rfl [$[$facts:term],*]
     | cil_lookup_placed [$[$facts:term],*]
     | (simp only [cil_code, Nat.reduceAdd, bne_iff_ne, ne_eq, not_false_eq_true,
         Bool.false_eq_true, ite_true, ite_false, ↓reduceIte, $[$facts:term],*]; done)
     | (simp only [cil_code, Nat.reduceAdd, bne_iff_ne, ne_eq, not_false_eq_true,
-        Bool.false_eq_true, ite_true, ite_false, ↓reduceIte, $[$facts:term],*]; rfl))
+        Bool.false_eq_true, ite_true, ite_false, ↓reduceIte, $[$facts:term],*]; rfl)
+    | cil_lookup_finite [$[$facts:term],*]
+    | (simp only [cil_code, Nat.reduceAdd, bne_iff_ne, ne_eq, not_false_eq_true,
+        Bool.false_eq_true, ite_true, ite_false, ↓reduceIte, $[$facts:term],*]
+       cil_lookup_failure))
 
 -- The closed literal operands every stepping tactic evaluates, so a state reads the same
 -- whichever tactic produced it. Each is a simproc that fires on numerals only.

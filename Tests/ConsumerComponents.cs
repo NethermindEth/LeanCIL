@@ -189,6 +189,8 @@ partial class Program
         var good = Path.Combine(package, "Good.lean");
         var bad = Path.Combine(package, "Broken.lean");
         var source = File.ReadAllText(proof);
+        File.AppendAllText(Path.Combine(package, "lakefile.toml"),
+            "\n[[lean_lib]]\nname = \"CompileSupport\"\n");
         File.WriteAllText(Path.Combine(package, "CompileSupport.lean"),
             "theorem support : True := True.intro\n#print axioms support\n");
         File.WriteAllText(good, "import CompileSupport\n" + source);
@@ -222,7 +224,8 @@ partial class Program
             var stages = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
                 .Select(line => JsonSerializer.Deserialize<JsonElement>(line).GetProperty("stage").GetString()!);
             if (stages.Any(stage => stage.Contains("replay", StringComparison.OrdinalIgnoreCase) ||
-                stage.Contains("audit", StringComparison.OrdinalIgnoreCase)))
+                stage.Contains("leancil-audit", StringComparison.OrdinalIgnoreCase) &&
+                    !stage.EndsWith(" --imports", StringComparison.Ordinal)))
                 throw new Exception("Compile-only unexpectedly performed replay or audit.");
             for (var index = 0; index < checkedResults.Length; index++)
                 Console.WriteLine($"Compile request {index}: " +

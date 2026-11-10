@@ -1,5 +1,6 @@
 import CIL.Safety.CodeAt
 import CIL.Safety.SymbolicExecution
+import CIL.InstructionEquations
 
 /-!
 # Code placement tests
@@ -13,6 +14,62 @@ and a concrete body discharges the placement by `rfl`.
 namespace Tests.CodeAt
 
 open CIL.Safety
+
+/-- A seven-instruction segment repeated at computed positions. -/
+def sevenInstructions : List CIL.Op := [.arg 0, .arg 1, .add, .nop, .nop, .nop, .nop]
+
+/-- Four identical segments preceded by one instruction. -/
+@[cil_code] def repeatedBody : CIL.Method :=
+  { locals := [], returnsValue := true,
+    code := [.nop] ++ (List.replicate 4 sevenInstructions).flatten ++ [.ret] }
+
+cil_instruction_equations repeatedBody
+
+/-- A method index definition is accepted directly by the stepping tactics. -/
+def repeatedIndex : Nat := 0
+
+/-- Computed instruction positions are resolved without hand-written finite case splits. -/
+theorem computed_lookup (index : Fin 4) :
+    repeatedBody.code[1 + 7 * index.val + 2]? = some .add := by
+  cil_lookup []
+
+#print axioms computed_lookup
+
+/-- One segment proof works at each repeated position with no explicit lookup or step fact. -/
+theorem computed_segment (index : Fin 4) (fuel : Nat) (frame : Frame) (memory : Memory)
+    (left right : CIL.W64) :
+    run [repeatedBody] (fuel + 7) repeatedIndex (1 + 7 * index.val)
+        [.scalar (.i64 left), .scalar (.i64 right)] frame [] memory =
+      run [repeatedBody] fuel repeatedIndex (1 + 7 * index.val + 7)
+        [.scalar (.i64 left), .scalar (.i64 right)] frame
+        [.scalar (.i64 (left + right))] memory := by
+  cil_checked_steps []
+
+#print axioms computed_segment
+
+/-- Finite computed positions also use placements in an otherwise abstract body. -/
+theorem computed_placement {body : CIL.Method} {start : Nat} (index : Fin 4)
+    (placed : CodeAt body start (List.replicate 4 sevenInstructions).flatten) :
+    body.code[start + 7 * index.val + 2]? = some .add := by
+  cil_lookup [placed]
+
+#print axioms computed_placement
+
+/-- error: cil_lookup: position 30 is outside body length 30 -/
+#guard_msgs in
+example : repeatedBody.code[30]? = some .ret := by cil_lookup []
+
+/-- A placement supplies the budget even when the rest of the method is abstract. -/
+theorem placed_run {program : CIL.Program} {method start : Nat} {body : CIL.Method}
+    (found : program[method]? = some body)
+    (placed : CodeAt body start [.arg 0, .arg 1, .add, .ret])
+    (returns : body.returnsValue = true) (frame : Frame) (memory : Memory)
+    (left right : CIL.W64) :
+    ∃ fuel, run program fuel method start [.scalar (.i64 left), .scalar (.i64 right)]
+        frame [] memory = .ok (leaveFrame frame memory, [.scalar (.i64 (left + right))]) := by
+  cil_checked_steps [found, placed, returns]
+
+#print axioms placed_run
 
 /-- The segment `left + right` over the first two arguments. -/
 def sumSegment : List CIL.Op := [.arg 0, .arg 1, .add]

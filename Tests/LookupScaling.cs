@@ -126,3 +126,33 @@ for (var producer = 0; producer < producers.Length; producer++)
             $"Compiling {producers[producer]} costs {measured}; the limit is {AllowedGrowth}."));
     Console.WriteLine($"PASS compiling {producers[producer]} costs {measured}");
 }
+
+// Subtract the same generated body's cost to isolate computed lookup from equation generation.
+long ComputedLookupCost(int cases)
+{
+    var header = $$"""
+        import CIL.InstructionEquations
+        import CIL.Safety.SymbolicExecution
+        open CIL.Safety
+        def segment : List CIL.Op := [.arg 0, .arg 1, .add, .nop, .nop, .nop, .nop]
+        def body : CIL.Method :=
+          { locals := [], returnsValue := true,
+            code := [.nop] ++ (List.replicate {{cases}} segment).flatten ++ [.ret] }
+        cil_instruction_equations body
+        """ + "\n";
+    var path = Path.Combine(directory, "Computed" + cases + ".lean");
+    var generated = Heartbeats(path, header, equations: false);
+    var checkedLookup = Heartbeats(path, header + $$"""
+        /-- Each repeated segment has its addition at the same relative offset. -/
+        theorem fetched (index : Fin {{cases}}) : body.code[1 + 7 * index.val + 2]? = some .add := by
+          cil_lookup []
+        #print axioms fetched
+        """ + "\n", equations: false);
+    return checkedLookup - generated;
+}
+var fourCaseCost = ComputedLookupCost(4) / 4.0;
+var sixteenCaseCost = ComputedLookupCost(16) / 16.0;
+Console.WriteLine(FormattableString.Invariant(
+    $"Computed lookup: {fourCaseCost:F0} heartbeats/case at 4; {sixteenCaseCost:F0} at 16"));
+if (sixteenCaseCost > fourCaseCost * AllowedGrowth)
+    throw new Exception("Computed lookup cost per case grows with the segment count.");

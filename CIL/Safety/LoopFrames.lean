@@ -102,7 +102,7 @@ theorem NumericEntryHome.before_made {caller current result : Memory} {kind late
     (made : makeLocal activation later value current =
       .ok (.bytes later next, [next.allocation], result)) :
     home.allocation + 1 ≤ next.allocation :=
-  Nat.le_trans holds.bounded ((makeLocal_fresh _ _ _ _ _ _ _ made).2 next.allocation (by simp)).1
+  holds.storage.before_made made
 
 /-- A numeric entry home heads the writable homes allocated after it. -/
 theorem WritableHomes.entry {caller current : Memory} {lower number : Nat}

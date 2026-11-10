@@ -724,9 +724,12 @@ def gatherLoopFacts (facts : Array Term) : TacticM (Array Term) :=
   return (← gatherLoopFactGroups facts).all
 
 open Lean Elab Tactic in
-/-- `facts`, followed by the object evidence facts `gatherLoopFactGroups` finds: what a
-    stepping tactic outside a loop takes from its context. -/
+/-- Explicit facts and the object, argument and frame evidence available to straight-line
+    stepping. A frame supplies storage and snapshots through the same rules as loop stepping. -/
 def gatherEvidenceFacts (facts : Array Term) : TacticM (Array Term) :=
-  return (← gatherLoopFactGroups facts (evidenceOnly := true)).all
+  withMainContext do
+    let framed ← (← getLCtx).anyM fun declaration => do
+      return (← instantiateMVars declaration.type).isAppOfArity `CIL.Safety.LoopFrame 6
+    return (← gatherLoopFactGroups facts (evidenceOnly := !framed)).all
 
 end CIL.Safety

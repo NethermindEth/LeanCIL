@@ -94,6 +94,7 @@ Every name `--suite` accepts, in the order a full run executes them. The names c
 | `scaling` | compositional certificate for a six-method call graph and its consumer replay |
 | `excluded` | hundreds of excluded and live sites at the default heartbeat budget |
 | `lookups` | lookup equations of extracted methods, hand-written bodies and templates at a per-instruction cost that does not grow with the method |
+| `gates` | manifest extraction, profiles, changed-source selection and mutation expectations |
 | `assemblies` | bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and substitution rejection |
 | `pool` | object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations they reject |
 | `blockers` | admission reports with deduplicated blockers, call chains, profile-excluded branches and self-admission |

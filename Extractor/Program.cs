@@ -31,6 +31,8 @@ internal static partial class Program
         "[--format text|json] [--trace] [--goals]\n" +
         "       leancil verify-batch requests.json [--fresh] [--rebuild-library] [--parallel count] " +
         "[--results results.json] [--format text|json] [--trace] [--check]\n" +
+        "       leancil gates manifest.json [--method name] [--profile name] [--changed path]... " +
+        "[--check] [--results results.json] [--format text|json]\n" +
         "       leancil audit-library --project package-directory --module M... --prefix P... [--axioms a,b,c] " +
         "[--results results.json]\n" +
         "       leancil --version";
@@ -146,6 +148,11 @@ internal static partial class Program
             {
                 stage = "proof selection";
                 return global::Program.VerifyBatch(args[1..]);
+            }
+            if (args[0] == "gates")
+            {
+                stage = "proof selection";
+                return global::Program.RunGates(args[1..]);
             }
             if (args[0] == "audit-library")
             {

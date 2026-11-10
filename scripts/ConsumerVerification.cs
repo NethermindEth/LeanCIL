@@ -1709,11 +1709,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 generatedSources: generatedSources, components: components, checkRejectedProofs: checkRejectedProofs);
             var generatedPackage = prepared.Generated;
             foreach (var member in members) outcomes[member].Sources = prepared.Sources;
-            if (checkOnly)
-            {
-                CheckGroup(members, session, names, bound, first, share);
-                return;
-            }
             var generatedInputPaths = prepared.Copied.Keys.Where(path =>
                     path.StartsWith(generatedPackage + Path.DirectorySeparatorChar, StringComparison.Ordinal))
                 .Concat([Path.Combine(generatedPackage, "lakefile.toml"),
@@ -1793,6 +1788,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 finally { Directory.Delete(own, true); }
             }
             if (supportKey.Length > 0) RestoreCertificateSupport(supportKey, dependent: true);
+            if (checkOnly)
+            {
+                CheckGroup(members, session, names, bound, first, share);
+                return;
+            }
             if (interfaceModules.Length > 0)
             {
                 Stage(members, "contract interface validation");
@@ -1856,11 +1856,36 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             Dictionary<string, SortedDictionary<string, string>> ExtractionArtifacts() => certificateModules.ToDictionary(
                 module => module, module => ConsumerModuleParts(Path.Combine(generatedPackage,
                     ".lake/build/lib/lean", module.Replace('.', '/') + ".olean")), StringComparer.Ordinal);
-            string checkedExtractionArtifacts = JsonSerializer.Serialize(ExtractionArtifacts());
+            string ExtractionBuildState(string module)
+            {
+                var path = Path.Combine(generatedPackage, ".lake/build/lib/lean", module.Replace('.', '/'));
+                var trace = path + ".trace";
+                return "artifact modified=" + File.GetLastWriteTimeUtc(path + ".olean").ToString("O") +
+                    ", trace sha256=" + (File.Exists(trace) ? Sha(trace) : "missing") +
+                    ", trace modified=" + File.GetLastWriteTimeUtc(trace).ToString("O");
+            }
+            var checkedExtractionArtifacts = ExtractionArtifacts();
+            var checkedBuildStates = certificateModules.ToDictionary(module => module, ExtractionBuildState);
             void RequireExtractionArtifacts()
             {
-                if (JsonSerializer.Serialize(ExtractionArtifacts()) != checkedExtractionArtifacts)
-                    throw new InvalidDataException("Extraction certificate artifacts changed during proof checking.");
+                var changes = new List<string>();
+                foreach (var (module, current) in ExtractionArtifacts())
+                {
+                    var accepted = checkedExtractionArtifacts[module];
+                    foreach (var part in accepted.Keys.Union(current.Keys, StringComparer.Ordinal))
+                    {
+                        var beforeHash = accepted.GetValueOrDefault(part, "missing");
+                        var afterHash = current.GetValueOrDefault(part, "missing");
+                        if (beforeHash == afterHash) continue;
+                        changes.Add($"{module}{part}: sha256 before={beforeHash}, after={afterHash}\n" +
+                            $"  before: {checkedBuildStates[module]}\n  after: {ExtractionBuildState(module)}");
+                    }
+                }
+                if (changes.Count == 0) return;
+                Stage(members, "extraction integrity");
+                throw new InvalidDataException("Extraction certificate artifacts changed during proof checking.\n" +
+                    "Preparation: " + (restoredCertificate ? "restored" : "built") +
+                    "; package: " + generatedPackage + "\n" + string.Join("\n", changes));
             }
             // Generated reference modules must be fixed before consumer configuration or proof code can run.
             SortedDictionary<string, string> GeneratedArtifacts()

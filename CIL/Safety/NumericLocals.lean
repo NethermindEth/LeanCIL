@@ -1,6 +1,7 @@
 import CIL.Safety.NumericLocalLoad
 import CIL.Safety.HomeProgress
 import CIL.Safety.FrameMemoryBelow
+import CIL.Safety.UnknownHomes
 
 /-!
 # Numeric local steps
@@ -115,6 +116,65 @@ theorem EntryMemory.trans {caller middle last : Memory} (first : EntryMemory cal
   ⟨first.kept.trans (second.kept.weaken first.grown), Nat.le_trans first.grown second.grown,
     second.wellFormed⟩
 
+/-- A local's allocated storage, independently of whether its bytes have an initial value. -/
+structure EntryHome (caller entered : Memory) (kind : CIL.LocalKind)
+    (home : Reference) : Prop where
+  fresh : caller.nextIdentity ≤ home.allocation
+  bounded : home.allocation < entered.nextIdentity
+  writable : access entered home (localWidth kind) 1 true = .ok ()
+
+/-- Later frame allocations preserve an earlier home's storage and write access. -/
+theorem EntryHome.after {caller middle last : Memory} {kind : CIL.LocalKind} {home : Reference}
+    (homeFacts : EntryHome caller middle kind home) (later : EntryMemory middle last) :
+    EntryHome caller last kind home :=
+  ⟨homeFacts.fresh, Nat.lt_of_lt_of_le homeFacts.bounded later.grown,
+    by rw [later.kept.access home homeFacts.bounded (localWidth kind) 1 true]
+       exact homeFacts.writable⟩
+
+#print axioms EntryHome.after
+
+/-- Allocation of a later home separates it from every earlier allocated home. -/
+theorem EntryHome.before_made {caller current result : Memory} {kind later : CIL.LocalKind}
+    {activation : Nat} {home next : Reference} {value : CIL.Value}
+    (holds : EntryHome caller current kind home)
+    (made : makeLocal activation later value current =
+      .ok (.bytes later next, [next.allocation], result)) :
+    home.allocation + 1 ≤ next.allocation :=
+  Nat.le_trans holds.bounded ((makeLocal_fresh _ _ _ _ _ _ _ made).2 next.allocation (by simp)).1
+
+#print axioms EntryHome.before_made
+
+/-- Actual local allocation preserves the caller memory and well-formedness required at entry. -/
+theorem EntryMemory.of_makeLocal {memory result : Memory} {activation : Nat}
+    {kind : CIL.LocalKind} {value : CIL.Value} {slot : LocalSlot} {owned : List AllocationId}
+    (formed : memory.WellFormed)
+    (made : makeLocal activation kind value memory = .ok (slot, owned, result)) :
+    EntryMemory memory result :=
+  ⟨makeLocal_preserves_caller_memory _ _ _ _ _ _ _ made,
+    (makeLocal_fresh _ _ _ _ _ _ _ made).1.next,
+    makeLocal_preserves_wellFormed _ _ _ _ _ _ _ formed made⟩
+
+#print axioms EntryMemory.of_makeLocal
+
+/-- An unknown local allocates writable storage without inventing a readable snapshot. -/
+theorem make_unknown_entry_local {caller memory : Memory} (entered : EntryMemory caller memory)
+    (activation : Nat) (kind : CIL.LocalKind) (numeric : kind ≠ .reference)
+    (notSpan : ∀ width writable, kind ≠ .span width writable)
+    (notArray : ∀ element, kind ≠ .array element)
+    (notPointer : ∀ signature, kind ≠ .methodPointer signature)
+    (notTable : ∀ signature, kind ≠ .methodTable signature) (notObject : kind ≠ .object) :
+    ∃ home result,
+      makeLocal activation kind .unmodeled memory =
+        .ok (.bytes kind home, [home.allocation], result) ∧
+      EntryHome caller result kind home ∧ EntryMemory memory result := by
+  obtain ⟨home, result, made, writable⟩ := make_unknown_local memory activation kind
+    entered.wellFormed numeric notSpan notArray notPointer notTable notObject
+  have fresh := (makeLocal_fresh _ _ _ _ _ _ _ made).2 home.allocation (by simp)
+  exact ⟨home, result, made, ⟨Nat.le_trans entered.grown fresh.1, fresh.2, writable⟩,
+    EntryMemory.of_makeLocal entered.wellFormed made⟩
+
+#print axioms make_unknown_entry_local
+
 /-- A numeric local's home in the entered memory: allocated above the caller, holding its
     initializer's bytes, and writable. -/
 structure NumericEntryHome (caller entered : Memory) (kind : CIL.LocalKind) (number : Nat)
@@ -124,14 +184,20 @@ structure NumericEntryHome (caller entered : Memory) (kind : CIL.LocalKind) (num
   loaded : read entered home (localWidth kind) 1 = .ok (numberBytes number (localWidth kind))
   writable : access entered home (localWidth kind) 1 true = .ok ()
 
+/-- An initialized numeric home also supplies storage evidence without its value assertion. -/
+theorem NumericEntryHome.storage {caller entered : Memory} {kind : CIL.LocalKind}
+    {number : Nat} {home : Reference} (numeric : NumericEntryHome caller entered kind number home) :
+    EntryHome caller entered kind home := ⟨numeric.fresh, numeric.bounded, numeric.writable⟩
+
+#print axioms NumericEntryHome.storage
+
 /-- Later frame-entry allocations keep an earlier home's bytes and authority. -/
 theorem NumericEntryHome.after {caller middle last : Memory} {kind : CIL.LocalKind}
     {number : Nat} {home : Reference} (entered : NumericEntryHome caller middle kind number home)
     (later : EntryMemory middle last) : NumericEntryHome caller last kind number home :=
   ⟨entered.fresh, Nat.lt_of_lt_of_le entered.bounded later.grown,
     by rw [later.kept.read home entered.bounded (localWidth kind) 1]; exact entered.loaded,
-    by rw [later.kept.access home entered.bounded (localWidth kind) 1 true]
-       exact entered.writable⟩
+    (entered.storage.after later).writable⟩
 
 /-- Creating a numeric local during frame entry yields its home and extends entry memory. -/
 theorem make_numeric_entry_local {caller memory : Memory} (entered : EntryMemory caller memory)
@@ -141,13 +207,12 @@ theorem make_numeric_entry_local {caller memory : Memory} (entered : EntryMemory
       makeLocal activation kind value memory =
         .ok (.bytes kind home, [home.allocation], result) ∧
       NumericEntryHome caller result kind number home ∧ EntryMemory memory result := by
-  obtain ⟨home, result, made, loaded, writable, kept⟩ :=
+  obtain ⟨home, result, made, loaded, writable, _⟩ :=
     make_numeric_local memory activation kind value number entered.wellFormed fits
   have owned := makeLocal_fresh _ _ _ _ _ _ _ made
   have fresh := owned.2 home.allocation (by simp)
   exact ⟨home, result, made, ⟨Nat.le_trans entered.grown fresh.1, fresh.2, loaded, writable⟩,
-    ⟨kept, owned.1.next,
-      makeLocal_preserves_wellFormed _ _ _ _ _ _ _ entered.wellFormed made⟩⟩
+    EntryMemory.of_makeLocal entered.wellFormed made⟩
 
 #print axioms EntryMemory.trans
 #print axioms NumericEntryHome.after

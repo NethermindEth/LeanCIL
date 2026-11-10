@@ -579,6 +579,20 @@ theorem _root_.CIL.MethodEmbeds.invoke {program : CIL.Program} {index : Nat}
   obtain ⟨_, refines⟩ := embeds.refines
   exact invoke_refines refines h
 
+/-- A checked suffix run transfers to its mapped instruction position in an embedded body.
+    The embedding checks branch relocation, metadata, static sites and callee entries. -/
+theorem _root_.CIL.Embeds.run {program : CIL.Program} {index : Nat}
+    {expected target : CIL.Method} {map : List Nat} (found : program[index]? = some target)
+    (embeds : Embeds expected target map) {fuel pc : Nat}
+    {args stack : List Value} {frame : Frame} {memory : Memory} {result : Memory × List Value}
+    (ran : run (program.set index expected) fuel index pc args frame stack memory = .ok result) :
+    run program fuel index (rename map target.code.length pc) args frame stack memory =
+      .ok result := by
+  simpa using run_refines ((ProgramRefines.refl program).set found embeds)
+    fuel index pc args frame stack memory result ran
+
+#print axioms CIL.Embeds.run
+
 /-- An expected throw is `program`'s, at the pc the map assigns in method `index` and
     unchanged elsewhere. -/
 theorem _root_.CIL.Embeds.invoke_raise {program : CIL.Program} {index : Nat}

@@ -73,8 +73,13 @@ theorem multiply_updates_mixed_frame {program : CIL.Program} {callee : Nat}
 
 /-- A caller returns its low-word local after the helper returned the high word. -/
 @[cil_code] def callerBody : CIL.Method :=
-  { locals := [.unmodeled, .unmodeled], localKinds := [.word64, .vector256],
-    returnsValue := true, code := [.call 1 3, .pop, .local 0, .ret] }
+  { locals := [.unmodeled, .v256 42], localKinds := [.word64, .vector256],
+    returnsValue := true,
+    code := [.arg 0, .arg 1, .localAddr 0, .call 1 3, .pop, .local 0, .ret] }
+
+bind_entry callerEntry (memory : Memory) (left right : CIL.W64)
+    (formed : memory.WellFormed) := callerBody
+  with [.scalar (.i64 left), .scalar (.i64 right)] from memory allocating formed
 
 /-- The checked call rule carries the low-word snapshot through the caller's load and return.
     The vector and all other known homes remain in the named frame evidence at the call boundary. -/
@@ -82,7 +87,8 @@ theorem caller_loads_helper_output {caller current : Memory} {frame : Frame}
     {known : Nat → Option CIL.Value} {low : Reference}
     (context : LoopFrame [] caller current callerBody.localKinds frame.locals known)
     (slot : frame.locals[0]? = some (.bytes .word64 low)) (left right : CIL.W64) :
-    WP (fun fuel => run [callerBody, multiplyBody] fuel 0 0 [] frame
+    WP (fun fuel => run [callerBody, multiplyBody] fuel 0 3
+      [.scalar (.i64 left), .scalar (.i64 right)] frame
       [.reference (.address low), .scalar (.i64 right), .scalar (.i64 left)] current)
       (fun _ values => values = [.scalar (.i64 (left * right))]) := by
   have formed := context.form_home 0 slot
@@ -92,11 +98,52 @@ theorem caller_loads_helper_output {caller current : Memory} {frame : Frame}
     (fun _ => rfl) (fun _ _ result => result.2)
   intro final high result updated
   have loaded := updated.snapshots.load (index := 0) (.i64 (left * right)) rfl
-    (body := callerBody) (pc := 2) (args := []) (stack := [])
+    (body := callerBody) (pc := 5)
+    (args := [.scalar (.i64 left), .scalar (.i64 right)]) (stack := [])
   cil_contract_steps [loaded]
   rfl
 
 #print axioms caller_loads_helper_output
+
+/-- The whole caller allocates an unknown word and an initialized vector, calls the checked
+    helper, reloads its private output and returns after the actual frame teardown. -/
+theorem caller_invokes (memory : Memory) (formed : memory.WellFormed) (left right : CIL.W64) :
+    WP (fun fuel => invoke [callerBody, multiplyBody] fuel 0
+      [.scalar (.i64 left), .scalar (.i64 right)] memory)
+      (fun _ values => values = [.scalar (.i64 (left * right))]) := by
+  obtain ⟨low, vector, entered, setup⟩ := callerEntry.checked memory left right formed
+  have context := setup.frame []
+  have suffix := caller_loads_helper_output
+    (frame := callerEntry.frame memory low vector) context (by rfl) left right
+  apply WP.enter (by rfl) (by rfl) setup.setup
+  cil_contract_steps [callerEntry.frame] until suffix
+
+#print axioms caller_invokes
+
+/-- Omitting the helper exposes the actual uninitialized local read, at its checked location. -/
+theorem uninitialized_output_rejected :
+    invoke [{ callerBody with code := [.local 0, .ret] }] 1 0 [] Memory.empty =
+      .error ⟨0, 0, .memory .uninitialized (.address ⟨0, 0⟩) 8⟩ := by
+  rfl
+
+#print axioms uninitialized_output_rejected
+
+/-- A returned address to a private home is checked after teardown and cannot escape. -/
+theorem escaped_home_rejected :
+    invoke [{ callerBody with code := [.localAddr 0, .ret] }] 2 0 [] Memory.empty =
+      .error ⟨0, 1, .memory .expiredLifetime (.address ⟨0, 0⟩) 0⟩ := by
+  rfl
+
+#print axioms escaped_home_rejected
+
+/-- Changing the selected helper to a missing method fails at the actual call instruction. -/
+theorem wrong_helper_rejected :
+    invoke [{ callerBody with code := callerBody.code.set 3 (.call 2 3) }, multiplyBody]
+      4 0 [.scalar (.i64 2), .scalar (.i64 3)] Memory.empty =
+      .error ⟨0, 3, .invalidState⟩ := by
+  rfl
+
+#print axioms wrong_helper_rejected
 
 /-- A vector helper output replaces its whole snapshot while retaining distinct scalar homes. -/
 theorem vector_output {caller current after : Memory} {kinds : List CIL.LocalKind}
