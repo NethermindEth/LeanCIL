@@ -5,7 +5,7 @@
     "measure": "heartbeats",
     "from": 7539671,
     "to": 8023262,
-    "reason": "Two composed calls now hand the continuation a CallResult and FrameInvariants whose facts the proof selects by name, in place of positional conjunctions"
+    "reason": "Grew when call results and frame invariants became named evidence and this proof's formed call and contract call were restated over them; the costly step of that change is not isolated"
   },
   {
     "group": "Tests.MethodContract",
@@ -13,7 +13,7 @@
     "measure": "heartbeats",
     "from": 7198747,
     "to": 7614374,
-    "reason": "Two composed calls now hand the continuation a CallResult and FrameInvariants whose facts the proof selects by name, in place of positional conjunctions"
+    "reason": "Grew when call results and frame invariants became named evidence and this proof's formed call and contract call were restated over them; the costly step of that change is not isolated"
   },
   {
     "group": "Tests.LoopFrames",
