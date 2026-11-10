@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ProofCostReport.cs
+#:include CertifiedLibraryDonor.cs
 #:include ExportVerificationSuites.cs
 #:include VerificationSuites.cs
 
@@ -209,5 +210,57 @@ Require(Sources(selection, ["CIL/Safety/Stepping.lean"]) is [LibrariesSource, "c
     "a Lean or build change also measures the test libraries");
 Require(Sources("""{"include":[{"suite":"docs","suites":["docs"],"timeout":30}]}""", ["docs/CI.md"]) is [],
     "a documentation change measures nothing");
+
+// Main measures each source once; a pull request takes those rows as its base only when the file has
+// the digest main's job logged and the same measurer wrote it, and measures every other source itself.
+var scratch = Directory.CreateTempSubdirectory("proof-cost-test").FullName;
+string RowsFile(string directory, string source, params Row[] rows)
+{
+    Directory.CreateDirectory(Path.Combine(scratch, directory));
+    var path = Path.Combine(scratch, directory, source + ".json");
+    File.WriteAllText(path, JsonSerializer.Serialize(Tree(source, rows), Json));
+    return Path.Combine(scratch, directory);
+}
+RowsFile("measured", "core", Proof("slow", 10_000_000));
+var bundle = Path.Combine(scratch, "proof-cost-rows.json");
+File.WriteAllText(bundle, JsonSerializer.Serialize(Publish(RowsFile("measured", "loops"), "measurer"), Json));
+var digest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(bundle)));
+string[] wanted = ["libraries", "core", "loops"];
+var taken = Path.Combine(scratch, "taken");
+Require(BaseRows(bundle, digest, "measurer", wanted, taken) is ["libraries"] &&
+    Read([Path.Combine(taken, "core.json")]).Rows.Single().Name == "slow" &&
+    File.Exists(Path.Combine(taken, "loops.json")) && !File.Exists(Path.Combine(taken, "libraries.json")),
+    "published rows are the base of the sources they hold, and the others are measured");
+Require(BaseRows(null, null, "measurer", wanted, taken).SequenceEqual(wanted),
+    "without published rows every source is measured");
+Require(BaseRows(bundle, digest, "another measurer", wanted, Path.Combine(scratch, "other")).SequenceEqual(wanted) &&
+    !Directory.Exists(Path.Combine(scratch, "other")), "rows of another measurer are not a base");
+var forged = false;
+try { BaseRows(bundle, digest[..63] + (digest[63] == '0' ? '1' : '0'), "measurer", wanted, taken); }
+catch (InvalidDataException) { forged = true; }
+Require(forged, "rows without the digest their publisher logged are refused");
+
+// One job reports every source: a base file without rows is a suite the base lacks, a missing base
+// file or missing head rows is a measurement that never happened and must fail.
+RowsFile("base", "core", Proof("slow", 10_000_000));
+RowsFile("base", "loops");
+RowsFile("base", "wordreader", Proof("read", 10_000_000));
+RowsFile("head", "core", Proof("slow", 12_000_000));
+RowsFile("head", "loops", Proof("fresh", 9_000_000));
+RowsFile("head", "libraries", Proof("lemma", 9_000_000));
+var reports = Report(["core", "loops", "libraries", "wordreader"], Path.Combine(scratch, "base"),
+    Path.Combine(scratch, "head"), [], DefaultThresholdPercent)
+    .ToDictionary(report => report.Source, report => report.Comparison);
+Require(reports["core"].Regressions.Single().Name == "slow" && Markdown(reports["core"], "core")
+    .StartsWith("## Proof cost of core against the merge base", StringComparison.Ordinal),
+    "each source is compared with its own base and titled by its name");
+Require(!reports["loops"].Failed && Markdown(reports["loops"]).Contains("**Not compared:**"),
+    "a suite the base measured without rows is reported and not compared");
+Require(reports["libraries"].Failed && reports["libraries"].Failures.Single().Contains("no base measurement"),
+    "a source whose base was never measured fails");
+Require(reports["wordreader"].Failed &&
+    reports["wordreader"].Failures.Contains("nothing was measured at the head"),
+    "a source without head rows fails");
+Directory.Delete(scratch, true);
 
 Console.WriteLine("All proof cost checks passed.");

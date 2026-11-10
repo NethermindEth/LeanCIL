@@ -220,7 +220,15 @@ internal static partial class ProofCostReport
             lines.AddRange(["", $"{rows.Count - shown.Count} more rows are in the JSON report."]);
     }
 
-    internal static string Markdown(Comparison comparison)
+    static List<string> UnusedLines(IReadOnlyCollection<Accepted> unused) => unused.Count == 0 ? [] :
+    [
+        "", "### Accepted increases that matched nothing", "",
+        $"These entries of `{AcceptedFile}` no longer apply and can be removed:", "",
+        .. unused.Select(entry =>
+            $"- {Cell(entry.Group)} `{Cell(entry.Name)}` {entry.Measure} {entry.From:N0} -> {entry.To:N0}")
+    ];
+
+    internal static string Markdown(Comparison comparison, string? source = null)
     {
         var deciding = Policies.Where(policy => policy.Decides).ToArray();
         var limits = string.Join(" or ", deciding.Select(policy => string.Create(CultureInfo.InvariantCulture,
@@ -229,7 +237,8 @@ internal static partial class ProofCostReport
         var regressions = comparison.Regressions.ToList();
         var lines = new List<string>
         {
-            "## Proof cost against the merge base", "",
+            source is null ? "## Proof cost against the merge base"
+                : $"## Proof cost of {Cell(source)} against the merge base", "",
             $"Base `{comparison.Base.Tree}`, head `{comparison.Head.Tree}`: {comparison.Head.Rows.Count} rows " +
             $"measured at the head, {comparison.Base.Rows.Count} at the base.", "",
             $"A row fails when it grows in {limits}, unless `{AcceptedFile}` accepts that increase. " +
@@ -290,13 +299,7 @@ internal static partial class ProofCostReport
             lines.AddRange(["", $"### Not measured at the {side}", ""]);
             lines.AddRange(unmeasured.Select(lost => $"- {Cell(lost.Group)}: {Cell(lost.Reason)}"));
         }
-        if (comparison.UnusedAccepted.Count > 0)
-        {
-            lines.AddRange(["", "### Accepted increases that matched nothing", "",
-                $"These entries of `{AcceptedFile}` no longer apply and can be removed:", ""]);
-            lines.AddRange(comparison.UnusedAccepted.Select(entry =>
-                $"- {Cell(entry.Group)} `{Cell(entry.Name)}` {entry.Measure} {entry.From:N0} -> {entry.To:N0}"));
-        }
+        lines.AddRange(UnusedLines(comparison.UnusedAccepted));
         return string.Join('\n', lines) + "\n";
     }
 
@@ -573,6 +576,72 @@ internal static partial class ProofCostReport
             [.. parts.SelectMany(part => part.Rows)], [.. parts.SelectMany(part => part.Unmeasured)]);
     }
 
+    // Rows are comparable only between runs of one measurer: this schema, frontend and row builder.
+    internal static string MeasurerKey() => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
+        $"{Schema}\n{Sha(Path.Combine(ScriptDirectory(), "ProofCost.lean"))}\n" +
+        $"{Sha(Path.Combine(ScriptDirectory(), "ProofCostReport.cs"))}\n")));
+
+    // The rows one run measured at its own commit, by source, for later runs to take as their base.
+    internal sealed record Published(int Schema, string Measurer, SortedDictionary<string, Measurement> Sources);
+
+    static string SourceFile(string directory, string source) => Path.Combine(directory, source + ".json");
+
+    // Each `<source>.json` of the directory becomes that source's rows.
+    internal static Published Publish(string rows, string measurer) => new(Schema, measurer,
+        new(Directory.Exists(rows)
+            ? Directory.EnumerateFiles(rows, "*.json").ToDictionary(
+                path => Path.GetFileNameWithoutExtension(path), path => Read([path]), StringComparer.Ordinal)
+            : [], StringComparer.Ordinal));
+
+    // Writes the rows another measurer of the same key published for each source and returns the
+    // sources left to measure. The digest comes from the publisher's job log, never from the file.
+    internal static string[] BaseRows(string? published, string? sha256, string measurer,
+        IReadOnlyList<string> sources, string output)
+    {
+        if (published is null) return [.. sources];
+        if (sha256 is null || Sha(published) != sha256)
+            throw new InvalidDataException(published + " does not have the digest its publisher logged");
+        var rows = JsonSerializer.Deserialize<Published>(File.ReadAllText(published), Json)
+            ?? throw new InvalidDataException(published + " is not a set of published rows");
+        if (rows.Schema != Schema || rows.Measurer != measurer)
+        {
+            Console.WriteLine("The published rows come from another measurer; measuring the base here.");
+            return [.. sources];
+        }
+        Directory.CreateDirectory(output);
+        foreach (var source in sources.Where(rows.Sources.ContainsKey))
+            File.WriteAllText(SourceFile(output, source), JsonSerializer.Serialize(rows.Sources[source], Json) + "\n");
+        return [.. sources.Where(source => !rows.Sources.ContainsKey(source))];
+    }
+
+    // One comparison per source. A source without head rows or without a base file fails; a base
+    // file without rows is a suite the base does not have, which is reported and not compared.
+    internal static List<(string Source, Comparison Comparison)> Report(IReadOnlyList<string> sources,
+        string baseRows, string headRows, IReadOnlyList<Accepted> accepted, double thresholdPercent)
+    {
+        var empty = new Measurement(Schema, "not measured", [], []);
+        var reports = new List<(string, Comparison)>();
+        foreach (var source in sources)
+        {
+            string before = SourceFile(baseRows, source), after = SourceFile(headRows, source);
+            var comparison = Compare(File.Exists(before) ? Read([before]) : empty,
+                File.Exists(after) ? Read([after]) : empty, accepted, thresholdPercent);
+            if (!File.Exists(before)) comparison.Failures.Add("no base measurement was produced");
+            reports.Add((source, comparison));
+        }
+        return reports;
+    }
+
+    static string ComparisonJson(Comparison comparison) => JsonSerializer.Serialize(new
+    {
+        schema = Schema, comparison.ThresholdPercent, comparison.Failed, comparison.Failures,
+        changes = comparison.Changes.Select(change => new
+        {
+            change.Group, change.Name, change.Kind, change.Measure, change.Base, change.Head,
+            status = change.Status.ToString().ToLowerInvariant()
+        })
+    }, Json) + "\n";
+
     const string Usage = """
         Usage:
           ProofCost.cs measure --tree <checkout> --output <json> [--library <compiled library>]
@@ -581,6 +650,11 @@ internal static partial class ProofCostReport
           ProofCost.cs compare --base <json>... --head <json>... [--accepted <json>]
               [--threshold-percent <number>] [--markdown <file>] [--output <json>] [--github-summary]
           ProofCost.cs sources --matrix <selection json> [--tree <checkout> --base <commit>] [--output <file>]
+          ProofCost.cs publish --rows <directory of <source>.json> --output <json>
+          ProofCost.cs base-rows --sources <json array> --output-rows <directory>
+              [--published <json> --sha256 <digest>] [--output <file>]
+          ProofCost.cs report --sources <json array> --base-rows <directory> --head-rows <directory>
+              --output <directory> [--accepted <json>] [--threshold-percent <number>] [--github-summary]
         """;
 
     internal static int Run(string[] args)
@@ -607,6 +681,17 @@ internal static partial class ProofCostReport
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
             File.WriteAllText(path, text);
         }
+        List<Accepted> AcceptedIncreases() => One("--accepted") is { } path && File.Exists(path)
+            ? JsonSerializer.Deserialize<List<Accepted>>(File.ReadAllText(path), Json) ?? [] : [];
+        double Threshold() => double.Parse(One("--threshold-percent") ?? DefaultThresholdPercent.ToString(
+            CultureInfo.InvariantCulture), CultureInfo.InvariantCulture);
+        void Summarize(string report)
+        {
+            if (options.ContainsKey("--github-summary") &&
+                Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY") is { Length: > 0 } summary)
+                File.AppendAllText(summary, report);
+            Console.Write(report);
+        }
 
         switch (args[0])
         {
@@ -631,28 +716,54 @@ internal static partial class ProofCostReport
             }
             case "compare":
             {
-                var accepted = One("--accepted") is { } path && File.Exists(path)
-                    ? JsonSerializer.Deserialize<List<Accepted>>(File.ReadAllText(path), Json) ?? [] : [];
-                var comparison = Compare(Read(Many("--base")), Read(Many("--head")), accepted,
-                    double.Parse(One("--threshold-percent") ?? DefaultThresholdPercent.ToString(
-                        CultureInfo.InvariantCulture), CultureInfo.InvariantCulture));
+                var comparison = Compare(Read(Many("--base")), Read(Many("--head")), AcceptedIncreases(),
+                    Threshold());
                 var report = Markdown(comparison);
                 if (One("--markdown") is { } markdown) Write(markdown, report);
-                if (One("--output") is { } json)
-                    Write(json, JsonSerializer.Serialize(new
-                    {
-                        schema = Schema, comparison.ThresholdPercent, comparison.Failed, comparison.Failures,
-                        changes = comparison.Changes.Select(change => new
-                        {
-                            change.Group, change.Name, change.Kind, change.Measure, change.Base, change.Head,
-                            status = change.Status.ToString().ToLowerInvariant()
-                        })
-                    }, Json) + "\n");
-                if (options.ContainsKey("--github-summary") &&
-                    Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY") is { Length: > 0 } summary)
-                    File.AppendAllText(summary, report);
-                Console.Write(report);
+                if (One("--output") is { } json) Write(json, ComparisonJson(comparison));
+                Summarize(report);
                 return comparison.Failed ? 1 : 0;
+            }
+            case "report":
+            {
+                var sources = JsonSerializer.Deserialize<string[]>(Required("--sources")) ?? [];
+                var accepted = AcceptedIncreases();
+                var reports = Report(sources, Required("--base-rows"), Required("--head-rows"), accepted,
+                    Threshold());
+                var output = Required("--output");
+                // An entry is unused only when no source of this run matched it.
+                var unused = reports.Select(report => report.Comparison.UnusedAccepted.AsEnumerable())
+                    .Aggregate(accepted.AsEnumerable(), (left, right) => left.Intersect(right)).ToList();
+                foreach (var (source, comparison) in reports)
+                {
+                    comparison.UnusedAccepted.Clear();
+                    var report = Markdown(comparison, source);
+                    Write(Path.Combine(output, source + ".md"), report);
+                    Write(SourceFile(output, source), ComparisonJson(comparison));
+                    Summarize(report);
+                }
+                if (reports.Count > 0) Summarize(string.Join('\n', UnusedLines(unused)) + "\n");
+                var failed = reports.Where(report => report.Comparison.Failed).Select(report => report.Source)
+                    .ToArray();
+                Console.WriteLine(failed.Length == 0 ? $"Proof cost passed for {reports.Count} sources."
+                    : "Proof cost failed for: " + string.Join(", ", failed));
+                return failed.Length == 0 ? 0 : 1;
+            }
+            case "publish":
+            {
+                var output = Required("--output");
+                Write(output, JsonSerializer.Serialize(Publish(Required("--rows"), MeasurerKey()), Json) + "\n");
+                Console.WriteLine(CertifiedLibraryDonor.ProofCostRows.DigestLine + Sha(output));
+                return 0;
+            }
+            case "base-rows":
+            {
+                var sources = JsonSerializer.Deserialize<string[]>(Required("--sources")) ?? [];
+                var missing = JsonSerializer.Serialize(BaseRows(One("--published"), One("--sha256"), MeasurerKey(),
+                    sources, Required("--output-rows")));
+                if (One("--output") is { } output) File.AppendAllText(output, $"missing={missing}\n");
+                Console.WriteLine("Measuring the base for: " + missing);
+                return 0;
             }
             case "sources":
             {
