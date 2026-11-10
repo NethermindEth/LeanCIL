@@ -176,7 +176,7 @@
     },
     {
       "file": "<proof>",
-      "line": 58,
+      "line": 61,
       "column": 0,
       "severity": "info",
       "text": "'ExampleProof.correctness' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]"
