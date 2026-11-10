@@ -319,6 +319,27 @@ partial def listEntries (list : Lean.Expr) (index : Nat := 0) :
   unless cell.isAppOfArity ``List.cons 3 do return #[]
   return #[(index, cell.getArg! 1)] ++ (← listEntries cell.appArg! (index + 1))
 
+open Lean Elab Tactic Meta in
+/-- Checked argument facts with their source views, shared by entry gathering and write
+    continuations. The caller retains memory and reachability filtering. -/
+def validCallArgumentFacts (call : Term) (type : Expr) :
+    TacticM (Array (Name × Term × Expr)) := do
+  unless type.isAppOfArity `CIL.Safety.ValidCall 3 do return #[]
+  let arguments := type.getAppArgs
+  let mut facts := #[]
+  for (position, view) in ← listEntries arguments[1]! do
+    let viewTerm ← Term.exprToSyntax (← withTransparency .default <| whnf view)
+    let member ← `(List.mem_of_getElem? (i := $(quote position)) rfl)
+    for (base, name) in [(`argumentForm, `CIL.Safety.ValidCall.input_formed),
+        (`argumentRead, `CIL.Safety.ValidCall.input_word_step)] do
+      facts := facts.push (base, Syntax.mkApp (mkCIdent name) #[call, viewTerm, member], view)
+  for (position, view) in ← listEntries arguments[2]! do
+    let viewTerm ← Term.exprToSyntax (← withTransparency .default <| whnf view)
+    let member ← `(List.mem_of_getElem? (i := $(quote position)) rfl)
+    facts := facts.push (`argumentForm,
+      Syntax.mkApp (mkCIdent `CIL.Safety.ValidCall.output_formed) #[call, viewTerm, member], view)
+  return facts
+
 open Lean Meta in
 /-- The layout and field values of a remembered struct, `some (.aggregate (layout.encode
     values))`, reading the entry only through reducible definitions. -/
@@ -494,22 +515,8 @@ def gatherLoopFactGroups (facts : Array Term) (evidenceOnly : Bool := false) :
     let arguments := type.getAppArgs
     if type.isAppOfArity `CIL.Safety.ValidCall 3 then
       let memory := arguments[0]!
-      for (position, view) in ← listEntries arguments[1]! do
-        let viewTerm ← Term.exprToSyntax (← withTransparency .default <| whnf view)
-        let index : Term := ⟨Syntax.mkNumLit (toString position)⟩
-        let member ← `(List.mem_of_getElem? (i := $index) rfl)
-        let subject := variables #[view]
-        candidates := candidates.push (`argumentForm,
-          applied `ValidCall.input_formed #[fact, viewTerm, member], subject, #[memory], #[])
-        candidates := candidates.push (`argumentRead,
-          applied `ValidCall.input_word_step #[fact, viewTerm, member], subject, #[memory], #[])
-      for (position, view) in ← listEntries arguments[2]! do
-        let viewTerm ← Term.exprToSyntax (← withTransparency .default <| whnf view)
-        let index : Term := ⟨Syntax.mkNumLit (toString position)⟩
-        let member ← `(List.mem_of_getElem? (i := $index) rfl)
-        candidates := candidates.push (`argumentForm,
-          applied `ValidCall.output_formed #[fact, viewTerm, member], variables #[view],
-          #[memory], #[])
+      for (base, derived, view) in ← validCallArgumentFacts fact type do
+        candidates := candidates.push (base, derived, variables #[view], #[memory], #[])
     for (side, evidence, stated) in objectEvidenceIn type do
       -- A straight-line goal names the object but not each memory its steps pass through.
       let memory := stated.getArg! evidence.memory

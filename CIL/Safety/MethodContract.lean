@@ -879,12 +879,14 @@ elab_rules : tactic
   | `(tactic| cil_contract_step [$facts:term,*]) => withMainContext do
     let (methodFound, instructionFound, operation) ←
       cilFetchedOp ``CIL.Safety.run_next_exists some 4 facts.getElems
+    let currentFacts := facts.getElems ++ (← cilOutputFacts)
+    let facts := currentFacts
     if callsCallee operation then
       let saved ← saveState
-      try cilContractApply methodFound instructionFound facts.getElems
+      try cilContractApply methodFound instructionFound facts
       catch _ =>
         saved.restore
-        cilContractChild methodFound instructionFound facts.getElems
+        cilContractChild methodFound instructionFound facts
       return
     if operation == ``CIL.Op.ret then
       evalTactic (← `(tactic| cil_strict refine CIL.Safety.run_return_exists
@@ -896,19 +898,30 @@ elab_rules : tactic
       evalTactic (← `(tactic| cil_frame_exit))
       (← getMainGoal).setTag `postcondition
       return
-    evalTactic (←
-      `(tactic| (
+    let advance (facts : Array Term) := do
+      evalTactic (← `(tactic| (
         cil_strict refine CIL.Safety.run_next_exists (post := _)
           $methodFound $instructionFound
           (by cil_checked_step_normalized [$[$facts:term],*]) ?_
         cil_stack_cleanup)))
+    unless [``CIL.Op.store64, ``CIL.Op.storeScalar, ``CIL.Op.setFieldAt].contains operation do
+      advance facts
+      return
+    let saved ← saveState
+    try advance facts
+    catch error =>
+      saved.restore
+      let prepared ← cilPrepareOutputStore instructionFound operation facts
+      if prepared.size == facts.size then throw error
+      advance prepared
 
 /-- Step a goal `∃ fuel result returned, run ... ∧ post` through checked instructions,
     composing calls with registered contracts or child evidence. Each composed call names its
     final memory `called`, its typed output `output` and its `CallResult` `call`, all three
     with the suffix `_1`, `_2` once a name is taken. Unmatched calls and the postcondition at
     each return remain explicit goals, a callee's precondition tagged `precondition` and the
-    postcondition `postcondition`. -/
+    postcondition `postcondition`. With `CallingFields`, an output-word store can obtain its
+    write and current-memory argument facts from `ValidCall`, after trying supplied facts. -/
 syntax "cil_contract_steps" "[" term,* "]" : tactic
 /-- As `cil_contract_steps`, naming the first call it composes: its final memory, typed output
     and `CallResult` take the three names given. Fails when it composes no call. -/

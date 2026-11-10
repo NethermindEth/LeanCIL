@@ -100,6 +100,16 @@ to an in-range slice. `after_write` preserves call validity, but does not preser
 contents when a write overlaps them. Read all needed input fields before an overlapping write,
 or prove the required contents separately.
 
+For a word store through a named output, `cil_contract_steps` first uses supplied checked
+operation facts. If none establishes the store, it derives a successful write from the current
+`ValidCall` and the output bounds. This covers `store64`, eight-byte `storeScalar`, and
+eight-byte `setFieldAt`. The continuation names the new memory `stored`, its address and byte
+write equations `addressed` and `written`, the initialized bytes `readback`, and the retained
+call requirements `storedCall`, with numeric suffixes when names are taken. Later argument
+loads use facts about this new memory. Earlier input snapshots remain facts about their original
+memory; no separation or initial output contents are inferred. `ValidCall.store_word` exposes
+the same write and readback evidence for explicit composition.
+
 `MethodContract.not_holds_of_fault` refutes a contract from a checked located fault on an input
 meeting its precondition. It uses fuel monotonicity to rule out success at every budget;
 the witness must be a semantic fault, not fuel exhaustion.

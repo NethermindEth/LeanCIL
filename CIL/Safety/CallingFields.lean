@@ -56,6 +56,26 @@ theorem ValidCall.output_slice {memory : Memory} {inputs outputs : List Argument
 
 #print axioms ValidCall.output_slice
 
+/-- A word write initializes an output slice and keeps all argument access, including overlap.
+    The checked address and write describe the actual new memory; no old contents are assumed. -/
+theorem ValidCall.store_word {memory : Memory} {inputs outputs : List ArgumentView}
+    (call : ValidCall memory inputs outputs) (output : ArgumentView) (member : output ∈ outputs)
+    (offset : Nat) (within : offset + 8 ≤ output.width) (word : CIL.W64) :
+    ∃ after,
+      add memory output.reference 1 (BitVec.ofNat 64 offset) =
+        .ok { output.reference with offset := output.reference.offset + offset } ∧
+      write memory { output.reference with offset := output.reference.offset + offset }
+        (numberBytes word.toNat 8) 1 = .ok after ∧
+      read after { output.reference with offset := output.reference.offset + offset } 8 1 =
+        .ok (numberBytes word.toNat 8) ∧
+      ValidCall after inputs outputs := by
+  obtain ⟨after, written, _, readback⟩ := store_word64 word
+    (call.output_slice output member offset 8 (by decide) within)
+  exact ⟨after, field_address call.wellFormed (call.writable output member) (by decide) within,
+    written, readback, call.after_write written⟩
+
+#print axioms ValidCall.store_word
+
 /-- An in-range word field loads from the current input snapshot. Both address formation and
     the read are checked; no input/output separation is assumed. -/
 theorem ValidCall.input_word_step {memory : Memory} {inputs outputs : List ArgumentView}

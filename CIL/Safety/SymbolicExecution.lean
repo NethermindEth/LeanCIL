@@ -1215,6 +1215,106 @@ def cilFetchedOp (lemma : Lean.Name) (select : Lean.Expr → Option Lean.Expr) (
     ← Term.exprToSyntax (← instantiateMVars instructionFound), operation)
 
 open Lean Elab Tactic Meta in
+/-- Reuse the already normalized argument facts of the current memory after an output write. -/
+def cilOutputFacts : TacticM (Array Term) := withMainContext do
+  let mut retained := #[]
+  for declaration in ← getLCtx do
+    if declaration.userName.eraseMacroScopes == `cilOutputFact then
+      retained := retained.push declaration
+  if retained.isEmpty then return #[]
+  let some execution := (← instantiateMVars (← getMainTarget)).find?
+      (·.isAppOfArity ``run 8) | return #[]
+  let memory := execution.getAppArgs[7]!
+  let mut facts := #[]
+  for declaration in retained do
+    if (← loopFactMemories declaration.type).contains memory then
+      facts := facts.push (← Term.exprToSyntax declaration.toExpr)
+  return facts
+
+open Lean Elab Tactic Meta in
+/-- Derive current argument facts once for a write's continuation, retaining old snapshots only
+    at their original memory. The marker names let later steps reuse them without re-simping. -/
+private def cilRememberOutputFacts (call : Term) : TacticM Unit := withMainContext do
+  let proof ← Term.elabTerm call none
+  let facts := (← validCallArgumentFacts call (← inferType proof)).map (·.2.1)
+  let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
+    (← prepareOperationFacts facts)
+  for fact in prepared do
+    discard <| assertLoopFact `cilOutputFact fact #[]
+
+open Lean Elab Tactic Meta in
+/-- Materialize a checked output-word write in the outer continuation. Only the fetched store
+    and a `ValidCall` at its current memory are considered; permissions remain real premises. -/
+def cilPrepareOutputStore (instructionFound : Term) (operation : Name)
+    (facts : Array Term) : TacticM (Array Term) := withMainContext do
+  unless [``CIL.Op.store64, ``CIL.Op.storeScalar, ``CIL.Op.setFieldAt].contains operation do
+    return facts
+  unless (← getEnv).contains `CIL.Safety.ValidCall.store_word do return facts
+  let some execution := (← instantiateMVars (← getMainTarget)).find?
+      (·.isAppOfArity ``run 8) | return facts
+  let arguments := execution.getAppArgs
+  let memory := arguments[7]!
+  let stack ← listEntries arguments[6]!
+  let some (_, value) := stack[0]? | return facts
+  let some (_, address) := stack[1]? | return facts
+  let value ← whnf value
+  let address ← whnf address
+  unless value.isAppOfArity ``Value.scalar 1 &&
+      value.appArg!.isAppOfArity ``CIL.Value.i64 1 do return facts
+  unless address.isAppOfArity ``Value.reference 1 &&
+      address.appArg!.isAppOfArity ``ManagedReference.address 1 do return facts
+  let reference := address.appArg!.appArg!
+  let word ← Term.exprToSyntax value.appArg!.appArg!
+  let instruction ← inferType (← Term.elabTerm instructionFound none)
+  let some (_, _, found) := instruction.eq? | return facts
+  let opcode ← whnf found.appArg!
+  let mut offset := mkNatLit 0
+  if operation == ``CIL.Op.storeScalar then
+    unless ← isDefEq opcode.appArg! (mkNatLit 8) do return facts
+  if operation == ``CIL.Op.setFieldAt then
+    unless ← isDefEq opcode.appArg! (mkNatLit 8) do return facts
+    offset := opcode.appFn!.appArg!
+  let offsetTerm ← Term.exprToSyntax offset
+  let declarations := (← getLCtx).decls.toArray.filterMap id
+  for declaration in declarations do
+    let type ← instantiateMVars declaration.type
+    unless type.isAppOfArity `CIL.Safety.ValidCall 3 do continue
+    unless ← withNewMCtxDepth <| isDefEq type.getAppArgs[0]! memory do continue
+    for (position, view) in ← listEntries type.getAppArgs[2]! do
+      let view ← whnf view
+      unless view.isAppOfArity `CIL.Safety.ArgumentView.mk 2 do continue
+      unless ← withNewMCtxDepth <| isDefEq view.getAppArgs[0]! reference do continue
+      let saved ← saveState
+      try
+        let call ← Term.exprToSyntax declaration.toExpr
+        let view ← Term.exprToSyntax view
+        let context ← getLCtx
+        let bases := ["stored", "addressed", "written", "readback", "storedCall"]
+        let named (index : Nat) (base : String) :=
+          Name.mkSimple (if index == 0 then base else s!"{base}_{index}")
+        let mut index := 0
+        while bases.any (fun base => context.usesUserName (named index base)) do
+          index := index + 1
+        let names := bases.toArray.map (fun base => mkIdent (named index base))
+        let after := names[0]!
+        let addressed := names[1]!
+        let written := names[2]!
+        let readback := names[3]!
+        let retained := names[4]!
+        let store := Syntax.mkApp (mkCIdent `CIL.Safety.ValidCall.store_word)
+          #[call, view, ← `(List.mem_of_getElem? (i := $(quote position)) rfl), offsetTerm,
+            ← `(by dsimp only; first | decide | omega), word]
+        Term.withoutErrToSorry <| withoutRecover <| evalTactic (← `(tactic|
+          obtain ⟨$after, $addressed, $written, $readback, $retained⟩ := $store))
+        cilRememberOutputFacts retained
+        let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
+          (← prepareOperationFacts #[addressed, written])
+        return facts ++ prepared
+      catch _ =>
+        saved.restore
+  return facts
+
+open Lean Elab Tactic Meta in
 /-- Whether the main goal is an equation whose right side is syntactically `Except.error`. -/
 def cilGoalStatesFault : TacticM Bool := withMainContext do
   return (← instantiateMVars (← getMainTarget)).consumeMData.eq?.any
