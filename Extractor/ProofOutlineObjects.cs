@@ -273,7 +273,7 @@ internal static partial class ProofOutline
             }
             if (!Walk(0, [], new(), [], location)) return false;
             if (numericHomes && (Accesses.Any(access => access.Field.Kind != ClassViews.FieldKind.Word) ||
-                Steps.Any(step => step is Allocation or ElementAccess || step is ArrayUse { Array.Words: null })))
+                Flattened.Any(step => step is Allocation or ElementAccess || step is ArrayUse { Array.Words: null })))
             {
                 Stopped = "a numeric class frame with reference-field or reference-array effects";
                 return false;
