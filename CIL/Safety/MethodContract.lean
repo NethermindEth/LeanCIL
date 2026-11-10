@@ -984,12 +984,33 @@ elab_rules : tactic
         break
   | `(tactic| cil_contract_steps [$facts:term,*] until $continuation) => do
     let prepared ← prepareStepFacts facts.getElems
+    let (direct, finish) ← withMainContext do
+      let saved ← saveState
+      try
+        unless continuation.raw.isIdent || continuation.raw.isOfKind ``Lean.Parser.Term.app do
+          throwError "The continuation requires its reached goal"
+        let proof ← Term.withoutErrToSorry <| Term.withSynthesize <|
+          Term.elabTerm continuation none
+        let proof ← instantiateMVars proof
+        if proof.hasMVar then throwError "The continuation requires its reached goal"
+        let direct ← Term.exprToSyntax proof
+        let suffix ← if (← Meta.whnfUntil (← Meta.inferType proof) ``WP).isSome then
+          let adapted ← Term.withoutErrToSorry <| Term.withSynthesize <|
+            Term.elabTerm (← `(term| CIL.Safety.WP.adequate.mp $direct)) none
+          Term.exprToSyntax adapted
+        else pure direct
+        pure (direct, ← `(tactic| exact $suffix))
+      catch _ =>
+        -- Contextual terms still receive each reached goal as their expected type.
+        saved.restore
+        pure (continuation, ← `(tactic| first
+          | exact $continuation | exact CIL.Safety.WP.adequate.mp $continuation))
     withMainContext <| evalTactic (← `(tactic| (first
-      | (cil_strict first | exact $continuation | exact CIL.Safety.WP.adequate.mp $continuation)
+      | (cil_strict exact $direct)
       | (
         cil_contract_prepare [$[$prepared:term],*]
         repeat first
-        | (cil_strict first | exact $continuation | exact CIL.Safety.WP.adequate.mp $continuation)
+        | (cil_strict $finish)
         | cil_contract_step [$[$prepared:term],*]))))
 
 /-- Apply a proved contract at the fetched call, optionally checked against a `bind_call`
