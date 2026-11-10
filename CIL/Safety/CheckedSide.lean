@@ -66,6 +66,7 @@ attribute [cil_side] List.mapM List.mapM.loop List.reverse_nil List.reverse_cons
   Except.mapError Bind.bind Except.bind Pure.pure Except.pure
   CIL.fin_val_three CIL.fin_mk_ofNat BitVec.ofInt_ofNat BitVec.ofNat_toNat BitVec.setWidth_eq
   CIL.NarrowKind.extend_one CIL.NarrowKind.extend_zero
+  BitVec.lt_irrefl
   bne_iff_ne ne_eq beq_iff_eq decide_true decide_false
 
 attribute [cil_side_proc] reduceCtorEq Nat.reduceAdd Nat.reduceMul Nat.reduceMod Nat.reduceLT
