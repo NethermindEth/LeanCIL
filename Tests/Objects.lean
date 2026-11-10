@@ -455,4 +455,20 @@ theorem checked_receiver_throws (memory : CIL.Safety.Memory) (frame : Frame) :
   cil_checked_steps
 #print axioms checked_receiver_throws
 
+/-- A narrow Boolean parameter is written through its receiver's one-byte field. -/
+@[cil_code] private def narrowStoreProgram (kind : NarrowKind) : CIL.Program := [
+  { returnsValue := false, locals := [], code := [
+    .arg 0, .arg 1 (some kind), .memory (.setObjectField account.identity 0 1), .ret] }]
+
+/-- Narrowing a literal Boolean preserves the payload of a supplied checked field write. -/
+theorem narrowed_boolean_store (kind : NarrowKind) (memory stored : CIL.Safety.Memory)
+    (receiver : Reference) (frame : Frame)
+    (formed : formObject memory (.address receiver) = .ok (.object (.address receiver)))
+    (written : memoryInstruction (.setObjectField account.identity 0 1)
+      [.scalar (.i32 1), .object (.address receiver)] memory = .ok (stored, [])) :
+    run (narrowStoreProgram kind) 5 0 0 [.object (.address receiver), .scalar (.i32 1)]
+      frame [] memory = .ok (leaveFrame frame stored, []) := by
+  cil_checked_steps [formed, written]
+#print axioms narrowed_boolean_store
+
 end Tests.Objects

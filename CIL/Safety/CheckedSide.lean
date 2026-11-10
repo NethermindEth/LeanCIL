@@ -26,6 +26,16 @@ dsimproc_decl checkedScalarConstructor (Value.scalar _) := fun expression => do
 
 attribute [cil_guard_proc] checkedScalarConstructor
 
+/-- A numeral Boolean parameter remains one after narrowing to any supported width. -/
+@[cil_side] theorem narrow_numeral_one (kind : CIL.NarrowKind) :
+    kind.extend (1 : CIL.W32) = 1#32 := CIL.NarrowKind.extend_one kind
+#print axioms narrow_numeral_one
+
+/-- A numeral Boolean parameter remains zero after narrowing to any supported width. -/
+@[cil_side] theorem narrow_numeral_zero (kind : CIL.NarrowKind) :
+    kind.extend (0 : CIL.W32) = 0#32 := CIL.NarrowKind.extend_zero kind
+#print axioms narrow_numeral_zero
+
 /-- A null managed reference forms without consulting memory. -/
 @[cil_side] theorem formValue_null (memory : Memory) :
     formValue memory .null = .ok (.reference .null) := rfl
@@ -45,6 +55,7 @@ attribute [cil_side] List.mapM List.mapM.loop List.reverse_nil List.reverse_cons
   List.getElem?_cons_succ List.getElem?_nil Option.map_some Option.map_none
   List.set_cons_zero List.set_cons_succ List.set_nil
   List.replicate_succ List.replicate_zero
+  List.mem_cons List.not_mem_nil or_false false_or
   Option.getD_some Option.getD_none
   Bool.false_eq_true Bool.true_eq_false not_false_eq_true not_true_eq_false ite_true ite_false
   Bool.false_or Bool.or_false Bool.true_or Bool.or_true Bool.false_and Bool.and_false
@@ -54,6 +65,7 @@ attribute [cil_side] List.mapM List.mapM.loop List.reverse_nil List.reverse_cons
   referenceAt_null referenceAt_address
   Except.mapError Bind.bind Except.bind Pure.pure Except.pure
   CIL.fin_val_three CIL.fin_mk_ofNat BitVec.ofInt_ofNat BitVec.ofNat_toNat BitVec.setWidth_eq
+  CIL.NarrowKind.extend_one CIL.NarrowKind.extend_zero
   bne_iff_ne ne_eq beq_iff_eq decide_true decide_false
 
 attribute [cil_side_proc] reduceCtorEq Nat.reduceAdd Nat.reduceMul Nat.reduceMod Nat.reduceLT
