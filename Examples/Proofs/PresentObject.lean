@@ -10,7 +10,6 @@ theorem correctness (memory : CIL.Safety.Memory) (account : CIL.Safety.ManagedRe
     ∃ fuel, CIL.Safety.invoke Extracted.program fuel 0 [.object account] memory =
       .ok (memory, [.scalar (.i32 (if account = .null then 0 else 1))]) := by
   cil_checked_steps [formed]
-  split <;> rfl
 
 #print axioms correctness
 end ExampleProof
