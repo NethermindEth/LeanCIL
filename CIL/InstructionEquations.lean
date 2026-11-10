@@ -3,23 +3,24 @@ import CIL.Instructions
 import CIL.SymbolicExecution
 
 /-!
-# Instruction equations for hand-written bodies
+# Instruction equations
 
-`cil_instruction_equations body` states, for a hand-written method body that may take
-parameters, one equation per pc: `body_instruction{pc} : (body xs).code[pc]? = some op`,
-tagged `@[cil_code ↓]`. These are the equations the extractor emits as
-`method{n}_instruction{pc}` for extracted bodies, so `cil_lookup` fetches from a parametric
-body, such as `def body (sse42 avx2 : Bool) (callee : Nat) : CIL.Method`, by one rewrite
-instead of unfolding the body and walking its code list. An instruction that depends on a
-parameter is stated as written, for example `if avx2 then op else .unsupported ...`, and
-`cil_lookup` decides it from the caller's facts or literal flags.
+`cil_instruction_equations body` states, for a method body that may take parameters, one
+equation per pc: `body_instruction{pc} : (body xs).code[pc]? = some op`, tagged
+`@[cil_code ↓]`. The extractor writes the command after each `method{n}`, the template emitter
+after each generated template, and a hand-written body calls it itself, so `cil_lookup` fetches
+from an extracted body and from a parametric one, such as
+`def body (sse42 avx2 : Bool) (callee : Nat) : CIL.Method`, by one rewrite instead of unfolding
+the body and walking its code list. An instruction that depends on a parameter is stated as
+written, for example `if avx2 then op else .unsupported ...`, and `cil_lookup` decides it from
+the caller's facts or literal flags.
 
-The proofs follow `CIL.CodeSuffix`, as the extractor's do: the command names the suffix of the
-code at every `suffixBlock` instructions as `body_suffix{start}`, proves
-`body_suffix{start}_placed` from the suffix before it, and proves each equation from the suffix
-that starts its block. No proof walks more than one block, so the equations of a body cost
-time linear in its length. The kernel checks every declaration, so the command proves nothing
-about the body beyond what its definition says.
+The proofs follow `CIL.CodeSuffix`: the command names the suffix of the code at every
+`suffixBlock` instructions as `body_suffix{start}`, proves `body_suffix{start}_placed` from the
+suffix before it, and proves each equation from the suffix that starts its block. No proof
+walks more than one block, so the equations of a body cost time linear in its length. The
+kernel checks every declaration, so the command proves nothing about the body beyond what its
+definition says.
 -/
 
 namespace CIL.InstructionEquations

@@ -135,8 +135,9 @@ Each job measures one source on both trees:
   the head's outputs from the results the suite's `Verify` job uploaded, so it starts once those
   jobs have run and verifies nothing at the head again. It then measures every output directory
   verified: its `Extracted.lean`, its `Symbols.lean` when present, and the proof that
-  `verified.json` names, provided the proof is unchanged since. The extraction's generated
-  instruction equations are rows too. A suite that the base does not have, or cannot pass, leaves
+  `verified.json` names, provided the proof is unchanged since. Each extracted method's
+  instruction equations are one row, named for its `cil_instruction_equations` command. A suite
+  that the base does not have, or cannot pass, leaves
   its proofs without a base: the job warns and the summary says the rows were not compared. A
   short suite that ran in one `Verify` job with others shares that job's upload, so their outputs
   are head rows without a base as well.

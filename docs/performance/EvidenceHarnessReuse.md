@@ -67,8 +67,8 @@ stand in for the intended rejection.
 The original positive certificate is still checked in full. A narrowed positive control
 retains the declarations and exact obligation type and checks them against the original
 theorem, using the same helper as generic evidence. Span controls accompany the existing
-consumer proofs and their independent kernel replay. A folded span instruction without a
-recognizable instruction theorem is an error, rather than silently dropping its mutation.
+consumer proofs and their independent kernel replay. A folded span instruction is read from the
+method's definition, so its mutation is never dropped.
 
 Complete Windows fixture runs against the same warm certified library, with proof-success
 reuse disabled, measured the following. Both variants were explicitly rebuilt before using

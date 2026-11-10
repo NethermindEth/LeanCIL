@@ -5,9 +5,9 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 
-// Each instruction equation is proved from the code suffix that starts its block. Proved against the
-// whole code list instead, it walks one cell per preceding instruction and a method's equations cost
-// quadratic time, which this fixture reports as a per-instruction cost that grows with the method.
+// `cil_instruction_equations` proves each equation from the code suffix that starts its block. Proved
+// against the whole code list instead, it walks one cell per preceding instruction and a method's equations
+// cost quadratic time, which this fixture reports as a per-instruction cost that grows with the method.
 const int ShortStatements = 125;
 const int LongStatements = 500;
 // Compiling four times the instructions may cost at most this much more per instruction.
@@ -59,29 +59,25 @@ long Checked(string path, string text, string binder, string method, string equa
         """);
 }
 
-// The three producers of lookup equations for one method: the extractor, `cil_instruction_equations` on a
+// The three places `cil_instruction_equations` states lookup equations for one method: its extraction, a
 // hand-written body with a parameter, and the shared template of the extraction.
 (int Instructions, long[] Heartbeats) Measure(string name)
 {
     var output = Path.Combine(directory, name);
     Run(Extract("extract", assembly, "Lookups", $"Lookups::{name}(ulong,ulong)", output));
     var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    var instructions = Regex.Matches(extracted, @"(?m)^@\[cil_code ↓\] theorem method0_instruction[0-9]+ : ").Count;
+    const string Header = "def method0 : Method := { profile := profile,";
+    // The definition lists one instruction per line after its header.
+    var definition = Regex.Match(extracted, @"(?m)^" + Regex.Escape(Header) + @"[^\r\n]*(\r?\n  [^\r\n]*)+");
+    var depth = Regex.Match(extracted, @"(?m)^set_option maxRecDepth [0-9]+");
+    if (!definition.Success || !depth.Success ||
+        !Regex.IsMatch(extracted, @"(?m)^cil_instruction_equations method0\r?$"))
+        throw new InvalidOperationException($"Missing the definition, equations or recursion depth of {name}.");
+    var instructions = definition.Groups[1].Captures.Count;
     var last = instructions - 1;
-    // The statement is what stepping tactics and proofs rewrite with; only its proof may differ.
-    if (!extracted.Contains(
-            $"@[cil_code ↓] theorem method0_instruction{last} : method0.code[{last}]? = some (.ret : Op) := ",
-            StringComparison.Ordinal))
-        throw new InvalidOperationException($"Missing the lookup equation of the final instruction of {name}.");
     var extraction = Checked(Path.Combine(output, "Measured.lean"),
         extracted + $"\n#print axioms Extracted.method0_instruction{last}\n",
         "", "Extracted.method0", $"Extracted.method0_instruction{last}", last);
-
-    const string Header = "def method0 : Method := { profile := profile,";
-    var definition = Regex.Match(extracted, @"(?m)^" + Regex.Escape(Header) + @"[^\r\n]*(\r?\n  [^\r\n]*)+");
-    var depth = Regex.Match(extracted, @"(?m)^set_option maxRecDepth [0-9]+");
-    if (!definition.Success || !depth.Success)
-        throw new InvalidOperationException($"Missing the definition or recursion depth of {name}.");
     const string Binder = "(profile : CIL.FeatureProfile) ";
     var body = "def method0 (profile : FeatureProfile) : Method := { profile := profile," +
         definition.Value[Header.Length..];

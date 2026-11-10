@@ -559,8 +559,8 @@ A body written once for every profile takes its feature flags and callee indices
 keeps each feature-dependent instruction as an `if`, padding the other profile's side with
 `.unsupported` so every profile has the same pcs. `cil_instruction_equations` (from
 `CIL.InstructionEquations`) states one `@[cil_code ↓]` equation per pc for such a body, the same
-`code[pc]? = some op` equations the extractor emits for its own methods, so a lookup rewrites by one
-equation instead of unfolding the body:
+`code[pc]? = some op` equations it states for each method of an extraction, so a lookup rewrites by
+one equation instead of unfolding the body:
 
 ```lean
 import CIL.InstructionEquations
@@ -588,6 +588,6 @@ example (sse42 avx2 : Bool) (callee : Nat) (wide : avx2 = true) :
 A body whose code length depends on a parameter, such as an `if` around a whole block, is rejected
 with the first pc that is not determined. Only the kernel checks the equations. The command also
 declares `body_suffix{start}`, the code from every 16th pc on, and `body_suffix{start}_placed`, and
-proves each equation from the suffix that starts its block, as the extractor does, so the equations
-cost time linear in the body's length: about 6,400 heartbeats each from 250 to 4,000 instructions,
-as [instruction lookups](performance/InstructionLookups.md) records.
+proves each equation from the suffix that starts its block, so the equations cost time linear in
+the body's length: about 6,400 heartbeats each from 250 to 4,000 instructions, as
+[instruction lookups](performance/InstructionLookups.md) records.
