@@ -202,4 +202,15 @@ theorem named_report_write (condition : Prop) [Decidable condition]
   cil_checked_step [written, reportedWord]
 #print axioms named_report_write
 
+/-- A result projection forwards the values produced by a helper contract. -/
+def forwardedResults (values : List Value) : List Value := values
+
+/-- Narrowed return equations accept a stack hidden behind a named result projection. -/
+theorem projected_return (memory : Memory) (frame : Frame) :
+    step { code := [], locals := [], returnsValue := true } (.ret (some .unsigned8))
+      1 [] frame (forwardedResults [.scalar (.i32 1)] ++ []) memory =
+      .ok (.returned [.scalar (.i32 1)] memory) := by
+  cil_checked_step []
+#print axioms projected_return
+
 end Tests.OperationFactAdapters

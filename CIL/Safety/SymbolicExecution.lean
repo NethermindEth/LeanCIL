@@ -831,6 +831,14 @@ def dispatchFacts (step : Expr) (function : Name) (facts : Array Term) :
     else mkAppM function #[operation.appArg!, arguments[5]!, arguments[6]!]
   facts.filterM (suppliedFactSatisfies · (dispatchFactMatches wanted function))
 
+open Lean Meta in
+/-- Expose a concrete stack spine without reducing the values carried by its cells. -/
+private partial def exposeStackSpine (stack : Expr) : MetaM Expr := withIncRecDepth do
+  let reduced ← whnfD stack
+  if reduced.isAppOfArity ``List.nil 1 then return reduced
+  unless reduced.isAppOfArity ``List.cons 3 do return stack
+  return mkApp reduced.appFn! (← exposeStackSpine reduced.appArg!)
+
 open Lean Elab Tactic Meta in
 elab_rules : tactic
   | `(tactic| cil_checked_step_normalized [$facts:term,*]) => withMainContext do
@@ -881,12 +889,14 @@ elab_rules : tactic
     let mut args := lhs.getAppArgs
     let mut operation := Name.anonymous
     if lhs.isAppOfArity ``CIL.Safety.step 7 then
+      -- Contract result projections may hide the stack constructor needed by a step equation.
+      args := args.set! 5 (← exposeStackSpine args[5]!)
       if let some op ← cilReducedOp? args[1]! then
         operation := op.getAppFn.constName!
-        unless op == args[1]! do
-          args := args.set! 1 op
-          target ← mkEq (mkAppN lhs.getAppFn args) rhs
-          replaceMainGoal [← (← getMainGoal).replaceTargetDefEq target]
+        args := args.set! 1 op
+      unless args == lhs.getAppArgs do
+        target ← mkEq (mkAppN lhs.getAppFn args) rhs
+        replaceMainGoal [← (← getMainGoal).replaceTargetDefEq target]
     if operation == ``CIL.Op.checkedArithmetic then
       for fact in facts.getElems do
         unless ← suppliedFactSatisfies fact (fun type => forallTelescope type fun _ conclusion => do
