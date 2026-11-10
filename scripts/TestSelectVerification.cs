@@ -128,6 +128,9 @@ Test("main and manual always full", () =>
 Test("test entry points", () =>
 {
     Equal(VerificationSelection.Select(["Tests/Loops.cs"]), ["loops"]);
+    Equal(VerificationSelection.Select(["Tests/SteppingScaling.cs"]), ["stepping"]);
+    foreach (var module in new[] { "OperationFacts", "VectorLocalCalls", "SimdCarryCalls" })
+        Equal(VerificationSelection.Select([$"Tests/{module}.lean"]), ["core"]);
     Equal(VerificationSelection.Select(["Tests/ProofOutlines.cs"]),
         ["outlines-buffers", "outlines-control", "outlines-objects"]);
     Equal(VerificationSelection.Select(["Tests/StructOutlines.cs"]), ["structoutlines"]);

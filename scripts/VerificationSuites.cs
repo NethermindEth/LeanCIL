@@ -130,6 +130,8 @@ internal static class VerificationSuites
             "cost that does not grow with the method"),
         new("gates", "Tests/ProofGates.cs",
             "manifest extraction, profiles, changed-source selection and mutation expectations"),
+        new("stepping", "Tests/SteppingScaling.cs",
+            "scalar and checked-memory stepping with per-instruction work, proof-size and latency budgets"),
         new("assemblies", "Tests/MultiAssembly.cs",
             "bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and " +
             "substitution rejection"),

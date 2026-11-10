@@ -1,5 +1,5 @@
 {
-  "source": "Latest successful verification timings from run 42657450791; standalone suites use verification-step duration excluding job setup; grouped suites use individual runner duration including startup. Unselected suites retain measurements from runs 40746599661, 40734844413 and 41600928344, with docs, lookups and pool estimates from local runs. The gates suite has an initial scheduling estimate of 180 seconds pending CI measurements.",
+  "source": "Latest successful verification timings from run 42657450791; standalone suites use verification-step duration excluding job setup; grouped suites use individual runner duration including startup. Unselected suites retain measurements from runs 40746599661, 40734844413 and 41600928344, with docs, lookups and pool estimates from local runs. The gates and stepping suites have initial scheduling estimates of 180 and 300 seconds pending CI measurements.",
   "seconds": {
     "assemblies": 303.0,
     "arguments": 87.0,
@@ -20,6 +20,7 @@
     "divrem": 114.0,
     "docs": 121.0,
     "gates": 180.0,
+    "stepping": 300.0,
     "enums": 80.0,
     "dispatch": 751.0,
     "evidence": 765.0,

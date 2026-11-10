@@ -95,6 +95,7 @@ Every name `--suite` accepts, in the order a full run executes them. The names c
 | `excluded` | hundreds of excluded and live sites at the default heartbeat budget |
 | `lookups` | lookup equations of extracted methods, hand-written bodies and templates at a per-instruction cost that does not grow with the method |
 | `gates` | manifest extraction, profiles, changed-source selection and mutation expectations |
+| `stepping` | full scalar and checked-memory bodies with per-instruction heartbeat, proof-size and latency budgets |
 | `assemblies` | bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and substitution rejection |
 | `pool` | object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations they reject |
 | `blockers` | admission reports with deduplicated blockers, call chains, profile-excluded branches and self-admission |
@@ -146,6 +147,25 @@ that tree, after running the suite there. A suite binds the sources of its check
 base checkout outside the head checkout and edit neither while its suite runs. `compare` exits nonzero on a regression and prints the
 table that CI puts in the job summary; [proof cost in CI](CI.md#proof-cost) defines the measures,
 the thresholds and how an increase is accepted.
+
+The `stepping` suite generates explicit scalar and checked-memory bodies near 16, 64 and 256
+instructions and proves each invocation end to end. The memory bodies repeat an idempotent
+checked store and reload, holding operation facts constant as the instruction count grows.
+It uses the same measuring frontend, with three sequential proof compilations per body.
+`artifacts/SteppingScaling/results.json` records revisions, toolchain, machine, cache assumptions,
+raw process-time samples and per-instruction costs. Frontend heartbeats include the initial
+kernel check; kernel columns measure a separate recheck. Compiled proof bytes subtract the
+same module containing only the body and its lookup equations.
+
+For each successive size, frontend heartbeats, kernel heartbeats and compiled proof bytes per
+instruction may grow by at most 1.35 times, and median frontend milliseconds by at most twice.
+Heartbeats and bytes must repeat exactly across the three runs. Wall times remain observations
+of the current machine load; use isolated sequential runs for latency comparisons. These
+measurements cover checked stepping, not extraction, editor feedback or certificate completion.
+
+```sh
+dotnet run --file scripts/Test.cs -- --suite stepping
+```
 
 ## What the checks cover
 
