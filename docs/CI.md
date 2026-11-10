@@ -131,11 +131,15 @@ Each job measures one source on both trees:
   Lean file, the lakefile, the toolchain pin or the Lake manifest.
 - A proof suite (`core`, `loops`, `outlines-control`, `outlines-objects`, `outlines-buffers`,
   `structoutlines`, `receiveroutlines`, `wordreader`, `savedwordreader`) runs when selection chose
-  that suite. The job verifies the suite with each tree's own runner, then measures every output
-  directory the suite verified: its `Extracted.lean`, its `Symbols.lean` when present, and the proof
-  that `verified.json` names, provided the proof is unchanged since. The extraction's generated
+  that suite. The job verifies the suite at the merge base with the base's own runner and takes
+  the head's outputs from the results the suite's `Verify` job uploaded, so it starts once those
+  jobs have run and verifies nothing at the head again. It then measures every output directory
+  verified: its `Extracted.lean`, its `Symbols.lean` when present, and the proof that
+  `verified.json` names, provided the proof is unchanged since. The extraction's generated
   instruction equations are rows too. A suite that the base does not have, or cannot pass, leaves
-  its proofs without a base: the job warns and the summary says the rows were not compared.
+  its proofs without a base: the job warns and the summary says the rows were not compared. A
+  short suite that ran in one `Verify` job with others shares that job's upload, so their outputs
+  are head rows without a base as well.
 
 The head uses the certified library of the run. The merge base uses the same library when its
 library inputs are identical; otherwise `Build the merge base for proof cost` builds the base
@@ -168,8 +172,9 @@ of the workflow measures its own tree twice, which reports the runner's measurem
 Another producer adds rows by writing the same JSON and passing its file as a further `--base` or
 `--head`: a row is a group, a name, a kind and named integer measures. Measures other than the
 ones above are reported in their own table and never fail. Each job uploads its measurements,
-comparison and suite logs as `proof-cost-<source>`. Run `dotnet run --file scripts/TestProofCost.cs`
-to test the comparison rules; [validation](VALIDATION.md#proof-cost) shows a local comparison.
+comparison and the merge base's suite log as `proof-cost-<source>`. Run
+`dotnet run --file scripts/TestProofCost.cs` to test the comparison rules;
+[validation](VALIDATION.md#proof-cost) shows a local comparison.
 
 ## Documentation checks
 

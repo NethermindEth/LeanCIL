@@ -397,8 +397,9 @@ jobs:
             artifacts/test-results-*.json
             artifacts/**/verified.json
             artifacts/**/identity.json
-            artifacts/**/Extracted.lean
-            artifacts/**/Batch.lean
+            artifacts/**/*.lean
+            !artifacts/certified-library/**
+            !artifacts/suite-caches/**
           if-no-files-found: ignore
           retention-days: 14
 
@@ -521,8 +522,10 @@ jobs:
 
   proof-cost:
     name: Proof cost (${{ matrix.source }})
-    needs: [select, prepare, cost-base]
-    if: needs.cost-base.outputs.sources != '' && needs.cost-base.outputs.sources != '[]'
+    # The head's proofs are the ones the suites job verified, so this job starts after it.
+    needs: [select, prepare, cost-base, suites]
+    if: >-
+      ${{ !cancelled() && needs.cost-base.outputs.sources != '' && needs.cost-base.outputs.sources != '[]' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     permissions:
@@ -591,23 +594,34 @@ jobs:
             artifacts/certified-library "$HEAD_MANIFEST_SHA256" "$HEAD_ARCHIVE_SHA256"
           dotnet run --file scripts/LibraryArchive.cs -c Release -- restore "$RUNNER_TEMP/base-library-download" \
             "$RUNNER_TEMP/base/artifacts/certified-library" "$BASE_MANIFEST_SHA256" "$BASE_ARCHIVE_SHA256"
-      # Each tree's own runner verifies the suite, which leaves the extractions and proofs to measure.
-      - name: Verify the suite at the merge base and at the head
+      # The merge base's own runner verifies the suite, which leaves its extractions and proofs to measure.
+      - name: Verify the suite at the merge base
         if: matrix.source != 'libraries'
         shell: bash
         run: |
-          verify() {
-            (cd "$1" && LEANCIL_CERTIFIED_LIBRARY="$1/artifacts/certified-library" \
-              LEANCIL_CERTIFIED_LIBRARY_SHA256="$2" dotnet run --file scripts/Test.cs -- --suite "$SOURCE")
-          }
-          if ! verify "$RUNNER_TEMP/base" "$BASE_MANIFEST_SHA256" > "$RUNNER_TEMP/proof-cost/base-suite.log" 2>&1; then
+          if ! (cd "$RUNNER_TEMP/base" && LEANCIL_CERTIFIED_LIBRARY="$RUNNER_TEMP/base/artifacts/certified-library" \
+              LEANCIL_CERTIFIED_LIBRARY_SHA256="$BASE_MANIFEST_SHA256" \
+              dotnet run --file scripts/Test.cs -- --suite "$SOURCE") > "$RUNNER_TEMP/proof-cost/base-suite.log" 2>&1; then
             tail -n 40 "$RUNNER_TEMP/proof-cost/base-suite.log"
             echo "::warning::The $SOURCE suite did not pass at the merge base; its proofs have no base to compare."
           fi
-          if ! verify "$GITHUB_WORKSPACE" "$HEAD_MANIFEST_SHA256" > "$RUNNER_TEMP/proof-cost/head-suite.log" 2>&1; then
-            tail -n 40 "$RUNNER_TEMP/proof-cost/head-suite.log"
-            exit 1
-          fi
+      # The suites job verified the head; its job for this suite uploaded what it verified.
+      - name: Name the head's verification results for the suite
+        id: head-results
+        if: matrix.source != 'libraries'
+        shell: bash
+        env:
+          MATRIX: ${{ needs.select.outputs.matrix }}
+        run: |
+          group="$(jq -r --arg suite "$SOURCE" '.include[] | select(.suites | index($suite)) | .suite' <<< "$MATRIX")"
+          echo "pattern=verification-results-$group-*" >> "$GITHUB_OUTPUT"
+      - name: Download the head's verified extractions and proofs
+        if: matrix.source != 'libraries'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: ${{ steps.head-results.outputs.pattern }}
+          merge-multiple: true
+          path: artifacts
       - name: Measure the merge base and the head
         shell: bash
         run: |
