@@ -161,48 +161,43 @@ theorem slice_write_composes (program : Program)
       makeParameterHomes, makeLocal, storeLocal, sourceWidth, sourceWritable, sourceValid,
       Safety.Value.hasUnspecified, checkedAt, Except.mapError, Bind.bind, Except.bind,
       Pure.pure, Except.pure]
-  have execution : ∃ fuel final returned,
-      Safety.run program fuel 0 0 args frame [] memory = .ok (final, returned) ∧
-      Contents final input.base 4 (input.values.set input.index.toNat input.replacement) ∧
-      returned = [.scalar (.i32 input.replacement)] := by
-    cil_contract_steps [caller, args, frame, loadLocal, storeLocal, sourceValid, sourceWidth,
-      sourceWritable, valid, sliced, startBound, lengthBound, WriteInput.view]
-    cil_contract_call writer input [caller, args, WriteInput.view, sourceValid, valid]
-    · exact permitted
-    · intro updated result call
-      have contents := call.post
-      have confined := call.framed
-      have validUpdated : input.view.validate updated = .ok () := by
-        simpa only [SpanView.validate, WriteInput.view, liveAllocation,
-          confined.allocations _ backingAllocation] using valid
-      let readInput : ReadInput := ⟨input.base,
-        input.values.set input.index.toNat input.replacement, input.index, input.replacement⟩
-      have readView : readInput.view = input.view.asReadOnly := by
-        simp [readInput, ReadInput.view, WriteInput.view, SpanView.asReadOnly]
-      have readValid : readInput.view.validate updated = .ok () := by
-        simpa only [readView, SpanView.validate, SpanView.asReadOnly] using validUpdated
-      have readonlyValid :
-          (⟨.address input.base, input.values.length, 4, false⟩ : SpanView).validate updated =
-            .ok () := by
-        exact validUpdated
-      have readPermitted : readContract.pre readInput updated := by
-        refine ⟨readValid, contents, ?_⟩
-        simp [readInput, bound]
-      cil_contract_steps [caller, args, writeContract, loadLocal, validUpdated, WriteInput.view,
-        staticInstruction, memoryInstruction, otherMemoryInstruction]
-      refine run_call_of_contract reader readInput
-        (by cil_lookup [caller]) (by cil_lookup [caller])
-        (by cil_checked_step [caller, args, SpanView.asReadOnly, readonlyValid])
-        (by simp [readContract, readInput, ReadInput.view]) ?_ ?_
-      · exact readPermitted
-      · intro final value call
-        obtain ⟨rfl, rfl⟩ := call.post
-        cil_contract_steps [caller, args, readContract, readInput]
-        exact ⟨contents, rfl⟩
-  obtain ⟨fuel, final, returned, ran, result⟩ := execution
-  refine ⟨fuel, final, returned, ?_, result⟩
-  simpa [Safety.invoke, caller, args, checkedValue, numericValue, sourceValid, entered,
-    checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure] using ran
-
+  apply WP.exists_execution
+  refine WP.enter caller (by
+    simp [checkedValue, numericValue, sourceValid, checkedAt, Except.mapError,
+      Bind.bind, Except.bind, Pure.pure, Except.pure]) entered ?_
+  cil_contract_steps [caller, args, frame, loadLocal, storeLocal, sourceValid, sourceWidth,
+    sourceWritable, valid, sliced, startBound, lengthBound, WriteInput.view]
+  apply WP.exists_execution
+  apply WP.call (by cil_lookup [caller]) (by cil_lookup [caller])
+    (by cil_checked_step [caller, args, WriteInput.view, sourceValid, valid])
+    (writer input memory permitted)
+  rintro updated values ⟨confined, result, rfl, contents⟩
+  have validUpdated : input.view.validate updated = .ok () := by
+    simpa only [SpanView.validate, WriteInput.view, liveAllocation,
+      confined.allocations _ backingAllocation] using valid
+  let readInput : ReadInput := ⟨input.base,
+    input.values.set input.index.toNat input.replacement, input.index, input.replacement⟩
+  have readView : readInput.view = input.view.asReadOnly := by
+    simp [readInput, ReadInput.view, WriteInput.view, SpanView.asReadOnly]
+  have readValid : readInput.view.validate updated = .ok () := by
+    simpa only [readView, SpanView.validate, SpanView.asReadOnly] using validUpdated
+  have readonlyValid :
+      (⟨.address input.base, input.values.length, 4, false⟩ : SpanView).validate updated =
+        .ok () := by
+    exact validUpdated
+  have readPermitted : readContract.pre readInput updated := by
+    refine ⟨readValid, contents, ?_⟩
+    simp [readInput, bound]
+  cil_contract_steps [caller, args, writeContract, loadLocal, validUpdated, WriteInput.view,
+    staticInstruction, memoryInstruction, otherMemoryInstruction]
+  have reading := reader readInput updated readPermitted
+  dsimp only [readContract, readInput, ReadInput.view] at reading
+  simp only [List.length_set] at reading
+  apply WP.exists_execution
+  apply WP.call (by cil_lookup [caller]) (by cil_lookup [caller])
+    (by cil_checked_step [caller, args, SpanView.asReadOnly, readonlyValid]) reading
+  rintro final values ⟨framed, output, rfl, rfl, rfl⟩
+  cil_contract_steps [caller, args, readContract, readInput]
+  exact ⟨contents, rfl⟩
 #print axioms slice_write_composes
 end Tests.MemorySpanWriteContracts
