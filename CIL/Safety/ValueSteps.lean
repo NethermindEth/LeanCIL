@@ -152,6 +152,22 @@ theorem step_checkedArithmetic_result {kind : CIL.CheckedBinaryKind} {signed : B
 
 #print axioms step_checkedArithmetic_result
 
+/-- A proved checked conversion advances the instruction without unfolding its range check. -/
+theorem step_checkedConvert_result {width : Nat} {signed unsignedInput : Bool}
+    {input value : CIL.Value} {memory : Memory}
+    (calculated : CIL.convertInteger width signed unsignedInput input = .ok value)
+    (inputKnown : input.hasUnspecified = false)
+    (checked : checkedValue memory (.scalar value) = .ok (.scalar value)) :
+    ∀ body pc args frame rest,
+      step body (.checkedConvert width signed unsignedInput) pc args frame
+        (.scalar input :: rest) memory =
+        .ok (.next (pc + 1) (.scalar value :: rest) frame memory) := by
+  intro body pc args frame rest
+  simp [step, observerCount, unspecifiedOperands, Value.hasUnspecified,
+    inputKnown, calculated, checked, Except.mapError,
+    Bind.bind, Except.bind, Pure.pure, Except.pure]
+#print axioms step_checkedConvert_result
+
 open Lean Meta in
 /-- `(m ..).profile` for a method definition or literal, unfolding only to the structure head;
     an opaque or case-split body is left for a caller's fact. -/

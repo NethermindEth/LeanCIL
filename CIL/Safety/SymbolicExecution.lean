@@ -911,15 +911,21 @@ elab_rules : tactic
       unless args == lhs.getAppArgs do
         target ← mkEq (mkAppN lhs.getAppFn args) rhs
         replaceMainGoal [← (← getMainGoal).replaceTargetDefEq target]
-    if operation == ``CIL.Op.checkedArithmetic then
+    let checkedOperation := if operation == ``CIL.Op.checkedArithmetic then
+        some (``CIL.checkedValues, ``CIL.Safety.step_checkedArithmetic_result)
+      else if operation == ``CIL.Op.checkedConvert then
+        some (``CIL.convertInteger, ``CIL.Safety.step_checkedConvert_result)
+      else none
+    if let some (function, bridge) := checkedOperation then
       for fact in facts.getElems do
         unless ← suppliedFactSatisfies fact (fun type => forallTelescope type fun _ conclusion => do
             let some (_, left, _) := conclusion.eq? | return false
-            return left.isAppOf ``CIL.checkedValues) do continue
+            return left.isAppOf function) do continue
         let saved ← saveState
         try
+          let lemma := mkIdent bridge
           evalTactic (← `(tactic| cil_strict (
-            apply step_checkedArithmetic_result $fact
+            apply $lemma $fact
             all_goals cil_checked_side [])))
           return
         catch _ => saved.restore

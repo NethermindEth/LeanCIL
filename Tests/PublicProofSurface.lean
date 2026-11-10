@@ -90,6 +90,16 @@ theorem vector_boolean_return (memory : Memory) (frame : Frame) (left right : Bi
   cil_checked_steps []
 #print axioms vector_boolean_return
 
+/-- A supplied checked conversion remains an opaque premise of a single instruction proof. -/
+theorem checked_conversion_result (body : CIL.Method) (frame : Frame) (memory : Memory)
+    (input : CIL.W64)
+    (calculated : CIL.convertInteger 32 false true (.i64 input) =
+      .ok (.i32 (BitVec.ofNat 32 input.toNat))) :
+    step body (.checkedConvert 32 false true) 0 [] frame [.scalar (.i64 input)] memory =
+      .ok (.next 1 [.scalar (.i32 (BitVec.ofNat 32 input.toNat))] frame memory) := by
+  cil_checked_step [calculated]
+#print axioms checked_conversion_result
+
 /-- A two-word aggregate argument is described independently of any callee body. -/
 def pairView (reference : Reference) : ArgumentView := ⟨reference, 16⟩
 
