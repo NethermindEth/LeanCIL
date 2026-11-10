@@ -75,9 +75,8 @@ theorem depositBoth_holds (holds : depositContract.Holds Extracted.program depos
   have secondFramed := secondCall.framed
   dsimp only [depositContract] at firstFramed secondFramed
   cil_contract_steps []
-  change Confined _ memory final ∧
-    depositBothContract.Returns (first, second, amount) memory final []
-  refine ⟨(firstFramed.widen (by simp)).trans (secondFramed.widen (by simp)), [], rfl, rfl, ?_⟩
+  refine MethodContract.Holds.returns
+    ((firstFramed.widen (by simp)).trans (secondFramed.widen (by simp))) ⟨rfl, ?_⟩
   split
   · rename_i same
     subst same

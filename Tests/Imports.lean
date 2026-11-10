@@ -275,7 +275,7 @@ theorem strict_given :
       dsimp only [percentContract]
       have truth : CIL.truth (.i64 v) = some true := by simp [CIL.truth]; exact zero
       cil_contract_steps [truth]
-      exact ⟨call.framed, _, rfl, rfl⟩
+      exact MethodContract.Holds.returns call.framed rfl
   · simp only [strictContract, strictRaises, within, ite_false]
     cil_raise_steps []
     cil_outcome_raise percentHolds v at percentSite []
@@ -305,7 +305,7 @@ theorem root_given :
     subst out
     dsimp only [strictContract]
     cil_contract_steps []
-    exact ⟨call.framed, _, rfl, rfl⟩
+    exact MethodContract.Holds.returns call.framed rfl
 
 @[cil_code] def percentBody : CIL.Method := { returnsValue := true, locals := [], code :=
   [.arg 0, .const32 (BitVec.ofInt 32 100), .convI8, .bleu 7, .nop, .nop,

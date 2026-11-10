@@ -72,9 +72,8 @@ theorem bumpBoth_holds (holds : bumpContract.Holds Extracted.program bump) :
   have secondFramed := secondCall.framed
   dsimp only [bumpContract] at firstFramed secondFramed
   cil_contract_steps []
-  change Confined _ memory final ∧
-    bumpBothContract.Returns (first, second, amount) memory final []
-  refine ⟨(firstFramed.widen (by simp)).trans (secondFramed.widen (by simp)), [], rfl, rfl, ?_⟩
+  refine MethodContract.Holds.returns
+    ((firstFramed.widen (by simp)).trans (secondFramed.widen (by simp))) ⟨rfl, ?_⟩
   split
   · rename_i same
     subst same

@@ -173,8 +173,8 @@ macro "relay_finish" : tactic => `(tactic| (
   cases lookup
   cil_contract_steps []
   -- `Relay` owns no allocation, so its postcondition is stated of the memory `Echo` left.
-  exact ⟨call.framed, out, rfl, rfl,
-    calleeFuel, frame, entered, final, setup, finished, visits⟩
+  exact MethodContract.Holds.returns call.framed
+    ⟨rfl, calleeFuel, frame, entered, final, setup, finished, visits⟩
   ))
 
 /-- The call `Relay` makes at pc 1, standing in for a `bind_call` site. -/

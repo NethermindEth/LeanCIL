@@ -101,7 +101,7 @@ theorem strict_holds (percentHolds : percentContract.Holds Extracted.program per
       dsimp only [percentContract]
       have truth : CIL.truth (.i64 v) = some true := by simp [CIL.truth]; exact zero
       cil_contract_steps [truth]
-      exact ⟨call.framed, _, rfl, rfl⟩
+      exact MethodContract.Holds.returns call.framed rfl
   · simp only [strictContract, strictRaises, within, ite_false]
     cil_raise_steps []
     cil_outcome_raise percentHolds v at percentSite []
@@ -129,7 +129,7 @@ theorem root_holds (strictHolds : strictContract.Holds Extracted.program strict)
     subst out
     dsimp only [strictContract]
     cil_contract_steps []
-    exact ⟨call.framed, _, rfl, rfl⟩
+    exact MethodContract.Holds.returns call.framed rfl
 
 theorem root_correct : rootContract.Holds Extracted.program root := root_holds (strict_holds percent_holds)
 
@@ -165,7 +165,7 @@ theorem root_formed (strictHolds : strictContract.Holds Extracted.program strict
     subst out
     dsimp only [strictContract]
     cil_contract_steps []
-    exact ⟨call.framed, _, rfl, kept.formed, rfl⟩
+    exact MethodContract.Holds.returns call.framed ⟨kept.formed, rfl⟩
 
 /-- The raising-after form: zero returns from `Percent` and then raises here. -/
 example (percentHolds : percentContract.Holds Extracted.program percent) (m : Memory) (formed : m.WellFormed) :

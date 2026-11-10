@@ -162,9 +162,9 @@ theorem linkedValue_holds (linked : linkContract.Holds Extracted.program link)
   cil_contract_steps [second, secondValueContract, linked]
     with final result secondCall
   obtain ⟨rfl, returned⟩ := secondCall.post
-  change Confined _ memory final ∧ linkedValueContract.Returns _ memory final _
-  refine ⟨linkFramed.trans (secondCall.framed.widen (by simp [secondValueContract])), result, rfl,
-    (returned next held.2).trans kept.2, held⟩
+  exact MethodContract.Holds.returns
+    (linkFramed.trans (secondCall.framed.widen (by simp [secondValueContract])))
+    ⟨(returned next held.2).trans kept.2, held⟩
 
 #print axioms linkedValue_holds
 

@@ -20,7 +20,7 @@
       "module": "Proof",
       "source": {
         "file": "<proof>",
-        "line": 106,
+        "line": 105,
         "column": 2
       },
       "message": "cil_checked_steps took no step: the method or instruction lookup, or the first step, did not close; pass the lookup hypothesis, feature facts or step facts\nmemory : Memory\nsecond : Reference\namount : W64\n⊢ invoke Extracted.program 15 depositBoth\n      [Value.object ManagedReference.null, Value.object (ManagedReference.address second),\n        Value.scalar (CIL.Value.i64 amount)]\n      memory =\n    Except.error\n      { method := depositBoth, instruction := 2, fault := ExecutionFault.thrown \"System.NullReferenceException\" }",
@@ -63,28 +63,28 @@
     },
     {
       "file": "<proof>",
-      "line": 91,
+      "line": 90,
       "column": 0,
       "severity": "info",
       "text": "'ExampleProof.depositBoth_holds' depends on axioms: [propext, Classical.choice, Quot.sound]"
     },
     {
       "file": "<proof>",
-      "line": 97,
+      "line": 96,
       "column": 0,
       "severity": "info",
       "text": "'ExampleProof.correctness' depends on axioms: [propext, Classical.choice, Quot.sound]"
     },
     {
       "file": "<proof>",
-      "line": 108,
+      "line": 107,
       "column": 0,
       "severity": "info",
       "text": "'ExampleProof.first_null_throws' depends on axioms: [propext, sorryAx, Quot.sound]"
     },
     {
       "file": "<proof>",
-      "line": 133,
+      "line": 132,
       "column": 0,
       "severity": "info",
       "text": "'ExampleProof.second_null_throws' depends on axioms: [propext, Classical.choice, Quot.sound]"

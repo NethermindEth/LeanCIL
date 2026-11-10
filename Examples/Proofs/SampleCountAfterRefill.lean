@@ -83,13 +83,13 @@ theorem count_holds (holds : refillContract.Holds Extracted.program refill) :
       kept.facts now (valuesWhole.after_confined framed) (by decide)
     cil_contract_steps [formed, located, loaded, (valuesWhole.after_confined framed).valid]
     subst same
-    refine ⟨framed, _, rfl, ?_, refilled⟩
+    refine MethodContract.Holds.returns framed ⟨?_, refilled⟩
     simp
   · simp only [same, ite_false, held] at now ⊢
     obtain ⟨formed, located, loaded⟩ :=
       kept.facts now (currentWhole.after_confined framed) (by decide)
     cil_contract_steps [formed, located, loaded, (currentWhole.after_confined framed).valid]
-    refine ⟨framed, _, rfl, ?_, refilled⟩
+    refine MethodContract.Holds.returns framed ⟨?_, refilled⟩
     simp [same]
 
 #print axioms count_holds

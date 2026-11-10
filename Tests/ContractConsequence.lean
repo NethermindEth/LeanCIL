@@ -201,7 +201,7 @@ theorem root_holds (percentHolds : percentBounded.Holds Extracted.program percen
     intro m1 out call
     dsimp only [percentBounded, percentExact]
     cil_contract_steps []
-    refine ⟨call.framed, _, rfl, ?_⟩
+    refine MethodContract.Holds.returns call.framed ?_
     have bound := call.post
     dsimp only [percentBounded] at bound ⊢
     bv_omega
