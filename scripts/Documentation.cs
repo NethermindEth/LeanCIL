@@ -540,6 +540,39 @@ static partial class Documentation
     /// <summary>The proofs users copy from, relative to the repository root.</summary>
     internal const string ExampleProofs = "Examples/Proofs";
 
+    /// <summary>The consumer fixture imports the shipped umbrella without implementation modules.</summary>
+    internal const string PublicProofFixture = "Tests/PublicProofSurface.lean";
+
+    /// <summary>Dispatch and value-check helpers are not consumer proof interfaces.</summary>
+    static readonly HashSet<string> ProofImplementationNames =
+    [
+        "pureArity", "scalars", "instructionStep", "staticInstruction", "checkedIntrinsic",
+        "checkedValue", "numericValue", "checkedAt", "instruction", "memoryInstruction",
+        "otherMemoryInstruction", "observerCount", "unspecifiedOperands"
+    ];
+
+    /// <summary>Keep the consumer fixture on the umbrella and away from evaluator implementation names.</summary>
+    internal static IEnumerable<string> PublicProofProblems(string document, string[] lines)
+    {
+        var imports = 0;
+        for (var index = 0; index < lines.Length; index++)
+        {
+            var line = StripComment(lines[index]);
+            if (line.TrimStart().StartsWith("import ", StringComparison.Ordinal))
+            {
+                imports++;
+                if (line.Trim() != "import CIL")
+                    yield return $"{document}:{index + 1}: public proof fixtures must import only `CIL`";
+            }
+            foreach (var name in Patterns.SimpName().Matches(line).Select(match => match.Value).Distinct())
+                if (ProofImplementationNames.Contains(name.Split('.')[^1]))
+                    yield return $"{document}:{index + 1}: `{name}` is an implementation helper, " +
+                        "not part of the public proof surface";
+        }
+        if (imports != 1)
+            yield return $"{document}: the public proof fixture must have exactly one `import CIL`";
+    }
+
     /// <summary>
     /// The interpreter's own functions, by full name: the instruction dispatchers, the run and invocation
     /// loops, and the checks of arguments and results. The stepping tactics rewrite past them, so a proof
@@ -592,12 +625,15 @@ static partial class Documentation
     {
         List<string> failures = [];
         var folder = Path.Combine(root, ExampleProofs);
-        if (!Directory.Exists(folder)) return failures;
-        foreach (var path in Directory.EnumerateFiles(folder, "*.lean").Order(StringComparer.Ordinal))
+        var paths = Directory.Exists(folder) ? Directory.EnumerateFiles(folder, "*.lean") : [];
+        var fixture = Path.Combine(root, PublicProofFixture);
+        if (File.Exists(fixture)) paths = paths.Append(fixture);
+        foreach (var path in paths.Order(StringComparer.Ordinal))
         {
             var document = Relative(root, path);
             var lines = File.ReadAllLines(path);
             failures.AddRange(SimpListProblems(document, 1, lines));
+            if (document == PublicProofFixture) failures.AddRange(PublicProofProblems(document, lines));
             var printed = lines.Select(line => Patterns.PrintAxioms().Match(line)).Where(match => match.Success)
                 .Select(match => match.Groups["name"].Value.Split('.')[^1]).ToHashSet(StringComparer.Ordinal);
             for (var index = 0; index < lines.Length; index++)

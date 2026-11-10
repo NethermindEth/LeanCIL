@@ -44,7 +44,7 @@ Every name `--suite` accepts, in the order a full run executes them. The names c
 
 | Suite | Checks |
 | --- | --- |
-| `core` | the runner's own checks: example proofs and their rejections, the shared Lean test libraries, method selectors, caches, batched extraction and joint kernel replay |
+| `core` | the runner's own checks: example proofs and their rejections, the shared Lean test libraries including the public proof surface, method selectors, caches, batched extraction and joint kernel replay |
 | `templates` | shared profile templates, exact instruction equations and checked bindings |
 | `workspace` | per-method editor extractions, watch refresh and ordinary fresh certification |
 | `imports` | implementation-bound contract imports and conditional caller verification |

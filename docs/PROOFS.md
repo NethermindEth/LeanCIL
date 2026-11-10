@@ -46,6 +46,36 @@ commands, then select the smallest proof interface that expresses the result:
 | Select the goals a tactic leaves by purpose | [Obligation tags](PROOFS-STEPPING.md#obligation-tags) | [TallyTwice](../Examples/Proofs/TallyTwice.lean) |
 | Import a separately proved interface | [Imported contracts](PROOFS-CONTRACTS.md#compose-through-imported-contracts) | [Interface guide](CONTRACT-INTERFACES.md) |
 
+## Public proof surface
+
+`import CIL` is the supported umbrella for a consumer proof. It exports the interfaces below;
+the guides link their definitions and worked examples. The umbrella also imports embedding and
+renaming metatheory. There is no separate narrow proof facade or import-closure size guarantee.
+
+| Purpose | Consumer interfaces |
+| --- | --- |
+| State checked execution | `step`, `run`, `invoke`, `WP`, `Ensures` |
+| Compose instruction and segment proofs | `cil_checked_step`, `cil_checked_steps`, `CodeAt`, `Segment`, `Segment.trans`, `cil_segment` |
+| Use a proved helper | `MethodContract`, `CallResult`, `FrameInvariants`, `run_call_of_contract_formed`, `cil_contract_steps` |
+| Describe byref arguments and overlap | `ArgumentView`, `ValidCall`, the `CallingFields` lemmas |
+| Preserve mixed local contents | `LocalSnapshots`, `LoopFrame`, `LoopFrame.after_local_write` |
+| Prove checked loop paths | `LoopReaches`, `LoopSpec`, `cil_loop_steps` |
+| Supply symbolic operation evidence | Checked read, write and snapshot equalities, vector operation equalities |
+
+Select call evidence by field name: `result.post` and `result.framed` from `CallResult`, and
+`preserved.formed` from `FrameInvariants`. Do not destructure preservation records positionally;
+an additional preservation fact should not require rewriting the continuation. Similarly, use
+`call.wellFormed`, `call.readable` and `call.writable` for a `ValidCall`.
+
+Post-step expressions are part of this proof interface. A vector operation with a literal control
+must remain directly rewritable by a theorem stated with that literal; a computed segment must
+compose at its stated stack and memory boundary. The `core` suite checks these forms together with
+named call continuations, overlapping byrefs, mixed local snapshots and a checked loop cutpoint.
+Changes to those forms require updating the documented interface and its consumer proofs together.
+Interpreter dispatch helpers and their unfolding equations are implementation details. The
+documentation checker rejects their direct use in the consumer fixture and their use in evaluator
+simp lists in examples and checked documentation.
+
 ## Keep proof work local
 
 Reuse checked stepping, memory readback and contract composition lemmas. Avoid unfolding helper

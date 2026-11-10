@@ -321,3 +321,6 @@ name = "Tests.LocalCalls"
 
 [[lean_lib]]
 name = "Tests.CallingFields"
+
+[[lean_lib]]
+name = "Tests.PublicProofSurface"

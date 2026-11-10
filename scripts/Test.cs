@@ -218,7 +218,7 @@ Run(["lake", "build", "Tests.Semantics", "Tests.Automation", "Tests.MethodBindin
     "Tests.ValidCallTransport", "Tests.BufferContents", "Tests.Linking",
     "Tests.ModularStatics", "Tests.StepFlow", "Tests.RegionRun", "Tests.StoreFacts",
     "Tests.ProfileContract", "Tests.InstructionEquations", "Tests.CodeAt", "Tests.Segment", "Tests.SimdLanes",
-    "Tests.LiteralDisplay"],
+    "Tests.LiteralDisplay", "Tests.PublicProofSurface"],
     verification.CheckoutPackage(), streamOutput: true, progress: "Building semantics and automation tests");
 Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, "
     + "debug name, method contract, constructor contract, outcome contract, contract import, loop outcome, footprint, "

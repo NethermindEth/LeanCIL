@@ -238,6 +238,25 @@ try
         "theorem first : True := by\n  rw [fact]\n\n#print axioms first\n" +
         "private theorem second : True := by\n  simp [fact, Nat.add_comm]\n#print axioms second\n");
 
+    PublicProofCheck("public semantic terms and named evidence",
+        "import CIL\nexample : run program fuel method pc args frame stack memory = result := by\n" +
+        "  have post := result.post\n  have formed := preserved.formed\n  exact checked\n");
+    PublicProofCheck("a direct implementation import", "import CIL.Safety.SymbolicExecution\n",
+        "must import only `CIL`");
+    PublicProofCheck("an additional internal import", "import CIL\nimport CIL.Safety.StepComposition\n",
+        "must import only `CIL`");
+    PublicProofCheck("a missing public import", "example : True := trivial\n", "exactly one `import CIL`");
+    PublicProofCheck("a dispatcher used outside a simp list",
+        "import CIL\nexample := CIL.Safety.instruction body opcode pc args frame stack memory\n",
+        "is an implementation helper");
+    PublicProofCheck("an unqualified checker dependency",
+        "import CIL\nexample := checkedValue value\n", "is an implementation helper");
+    PublicProofCheck("two imports on one line", "import CIL\nimport CIL Lean\n", "must import only `CIL`");
+    PublicProofCheck("a public fixture unfolding semantic execution",
+        "import CIL\nexample : True := by simp [run]\n", "is an evaluator internal");
+    PublicProofCheck("a public fixture missing its axiom check",
+        "import CIL\ntheorem unchecked : True := trivial\n", "has no `#print axioms`");
+
     // A suite the runner gained without a row would be invisible to anyone choosing what to run.
     const string Table = "## Suites\n\n| Suite | Checks |\n| --- | --- |\n";
     SuitesPass("a suite table listing every suite", Table + "| `core` | runner checks |\n| `loops` | loops |");
@@ -367,4 +386,20 @@ void Fails(string name, string text, string reason)
         throw new InvalidOperationException($"{name} did not fail with `{reason}`:\n{string.Join('\n', failures)}");
     checks++;
     Console.WriteLine($"PASS {name} fails");
+}
+
+// The source boundary complements elaboration, which checks the actual continuation and goal forms.
+void PublicProofCheck(string name, string source, string? reason = null)
+{
+    Write(Documentation.PublicProofFixture, source);
+    var failures = Documentation.CheckExamples(root)
+        .Where(failure => failure.StartsWith(Documentation.PublicProofFixture + ":", StringComparison.Ordinal))
+        .ToList();
+    File.Delete(Path.Combine(root, Documentation.PublicProofFixture));
+    var accepted = reason is null ? failures.Count == 0 :
+        failures.Any(failure => failure.Contains(reason, StringComparison.Ordinal));
+    if (!accepted)
+        throw new InvalidOperationException($"{name} had unexpected diagnostics:\n{string.Join('\n', failures)}");
+    checks++;
+    Console.WriteLine($"PASS {name}");
 }

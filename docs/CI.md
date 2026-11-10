@@ -250,6 +250,9 @@ which needs no Lean, so every PR runs it:
   `cil_checked_steps` and pass a fact about the operation instead. A name the block binds with
   `have` is a hypothesis.
 - Every theorem of an example under `Examples/Proofs` has a `#print axioms` line in its file.
+- The consumer proof fixture imports only `CIL`, uses no interpreter dispatch or value-check
+  implementation helpers, and prints every theorem's axioms. Its elaboration in `core` checks
+  named call evidence and the goal forms described by the [public proof surface](PROOFS.md#public-proof-surface).
 
 Every fenced Lean block is elaborated unless its info string says why not:
 
