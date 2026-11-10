@@ -224,7 +224,12 @@ string RowsFile(string directory, string source, params Row[] rows)
 }
 RowsFile("measured", "core", Proof("slow", 10_000_000));
 var bundle = Path.Combine(scratch, "proof-cost-rows.json");
-File.WriteAllText(bundle, JsonSerializer.Serialize(Publish(RowsFile("measured", "loops"), "measurer"), Json));
+RowsFile("measured", "loops", Proof("spin", 9_000_000));
+RowsFile("measured", "wordreader");
+var published = Publish(Path.Combine(scratch, "measured"), "measurer");
+Require(published.Sources.Keys.SequenceEqual(["core", "loops"]),
+    "a source measured without rows is not published, so the pull request measures that base itself");
+File.WriteAllText(bundle, JsonSerializer.Serialize(published, Json));
 var digest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(bundle)));
 string[] wanted = ["libraries", "core", "loops"];
 var taken = Path.Combine(scratch, "taken");

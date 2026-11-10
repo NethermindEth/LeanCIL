@@ -537,8 +537,8 @@ internal static partial class ProofCostReport
             if (!Directory.Exists(root)) continue;
             foreach (var report in Directory.EnumerateFiles(root, "verified.json", SearchOption.AllDirectories)
                 .Where(report => File.Exists(Path.Combine(Path.GetDirectoryName(report)!, "Extracted.lean")) &&
-                    !Path.GetFullPath(report).StartsWith(work + Path.DirectorySeparatorChar, StringComparison.Ordinal) &&
-                    File.GetLastWriteTimeUtc(report) is var written &&
+                    !Path.GetFullPath(report).StartsWith(work + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                .Where(report => File.GetLastWriteTimeUtc(report) is var written &&
                     (since is null || written >= since) && (before is null || written < before))
                 .Order(StringComparer.Ordinal))
                 tasks.Add(measurer.Verified(root, Path.GetDirectoryName(report)!));
@@ -590,11 +590,14 @@ internal static partial class ProofCostReport
 
     static string SourceFile(string directory, string source) => Path.Combine(directory, source + ".json");
 
-    // Each `<source>.json` of the directory becomes that source's rows.
+    // Each `<source>.json` of the directory that holds rows becomes that source's rows. A source measured
+    // without rows is left out, so a later run measures that base itself and sees why it is empty.
     internal static Published Publish(string rows, string measurer) => new(Schema, measurer,
         new(Directory.Exists(rows)
             ? Directory.EnumerateFiles(rows, "*.json").ToDictionary(
                 path => Path.GetFileNameWithoutExtension(path), path => Read([path]), StringComparer.Ordinal)
+                .Where(source => source.Value.Rows.Count > 0)
+                .ToDictionary(source => source.Key, source => source.Value, StringComparer.Ordinal)
             : [], StringComparer.Ordinal));
 
     // Writes the rows another measurer of the same key published for each source and returns the

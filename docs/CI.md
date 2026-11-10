@@ -140,12 +140,13 @@ A source is measured on both trees:
 The head is measured where it is verified, in no job of its own. A `Verify` job that ran a proof
 suite measures that suite once it has passed. The group runner records when each member of the
 job started, and a suite's rows are the output directories whose report was written from its
-start to the next member's, so a suite that shares its job with others is measured alone. The
-`Verify` job that starts first also measures `libraries`, which needs only the certified library.
+start to the next member's, so a suite that shares its job with others is measured alone. One
+short `Verify` job that starts early also measures `libraries`, which needs only the certified
+library.
 Neither step can fail its job: a source without rows fails the comparison instead.
 
 The merge base is measured once per commit. A push to main measures the same sources the same
-way, and its `Proof cost` job gathers them into one artifact and logs its digest. A PR run takes
+way, and its `Proof cost` job gathers those that hold rows into one artifact and logs its digest. A PR run takes
 those rows as its base when the push run of its merge base published them: the run must be a push
 of that commit on main, which is what reusing a certified library without replay requires of its
 producer, the file must have the digest that job logged, and its rows must come from the same

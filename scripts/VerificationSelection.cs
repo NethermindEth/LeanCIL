@@ -36,7 +36,11 @@ internal static class VerificationSelection
     }
 
     // Proof marks a job that runs a proof suite, whose outputs the job then measures for proof cost.
-    internal sealed record Group(string Suite, string[] Suites, int Timeout, bool Proof);
+    // Libraries marks the one job that also measures the test libraries when a run compares them.
+    internal sealed record Group(string Suite, string[] Suites, int Timeout, bool Proof, bool Libraries);
+
+    // A job this short keeps most of its timeout free for another measurement.
+    const double LibrariesCarrierSeconds = 600;
 
     // Bound sequential work so grouping removes setup without creating another long tail.
     internal static Group[] Groups(IEnumerable<string> suites, string? root = null)
@@ -53,12 +57,16 @@ internal static class VerificationSelection
             if (group is null) groups.Add([suite]);
             else group.Add(suite);
         }
-        return groups.OrderByDescending(group => group.Sum(name =>
-                durations.GetValueOrDefault(name, double.PositiveInfinity)))
-            .Select(group => new Group(string.Join("+", group), group.ToArray(),
+        double Seconds(List<string> group) =>
+            group.Sum(name => durations.GetValueOrDefault(name, double.PositiveInfinity));
+        var ordered = groups.OrderByDescending(Seconds).ToArray();
+        // The earliest job to start that is short enough carries the libraries, else the shortest job.
+        var carrier = ordered.FirstOrDefault(group => Seconds(group) <= LibrariesCarrierSeconds) ??
+            ordered.LastOrDefault();
+        return ordered.Select(group => new Group(string.Join("+", group), group.ToArray(),
                 group.Max(name => name == "imports" ? 90 :
                     name.StartsWith("exports", StringComparison.Ordinal) ? 120 : 30),
-                group.Any(VerificationSuites.ProofSuites.Contains))).ToArray();
+                group.Any(VerificationSuites.ProofSuites.Contains), group == carrier)).ToArray();
     }
 
     internal static Dictionary<string, HashSet<string>> SuiteInputs(string? root = null)

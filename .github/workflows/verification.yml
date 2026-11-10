@@ -283,6 +283,7 @@ jobs:
           --sha256 "$PUBLISHED_SHA256" --output "$GITHUB_OUTPUT"
       - name: Upload the published rows as this run's base
         if: steps.cost-rows.outcome == 'success'
+        continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: proof-cost-base-rows-published-${{ github.run_attempt }}
@@ -454,20 +455,20 @@ jobs:
           dotnet artifacts/verification-fixtures/ProofCost/ProofCost.dll measure-suites --tree .
           --library artifacts/certified-library --artifacts artifacts
           --runs artifacts/verification-suites.json --jobs "$(nproc)" --output-rows "$RUNNER_TEMP/proof-cost"
-      # The test libraries need only the certified library, so the first job to start measures them.
+      # The test libraries need only the certified library; selection marks a short job that starts early.
       - name: Measure the proof cost of the test libraries
         if: >-
-          ${{ !cancelled() && strategy.job-index == 0 &&
+          ${{ !cancelled() && matrix.libraries &&
           contains(fromJSON(needs.select.outputs.cost-sources || '[]'), 'libraries') }}
         continue-on-error: true
-        timeout-minutes: 15
+        timeout-minutes: 8
         shell: bash
         run: >-
           dotnet artifacts/verification-fixtures/ProofCost/ProofCost.dll measure --tree .
           --library artifacts/certified-library --libraries --jobs "$(nproc)"
           --output "$RUNNER_TEMP/proof-cost/libraries.json"
       - name: Upload the measured proof cost rows
-        if: ${{ !cancelled() && (matrix.proof || strategy.job-index == 0) }}
+        if: ${{ !cancelled() && (matrix.proof || matrix.libraries) }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: proof-cost-head-rows-${{ matrix.suite }}-${{ github.run_attempt }}

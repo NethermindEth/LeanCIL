@@ -66,6 +66,12 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
         Require(group.Proof == group.Suites.Any(VerificationSuites.ProofSuites.Contains),
             "Proof cost is measured in the wrong job: " + group.Suite);
     Require(groups.Any(group => group.Proof && group.Suites.Length > 1), "No proof suite shares a job");
+    // The libraries take minutes to measure; a job near its timeout would fail a suite that passed.
+    Require(groups.Single(group => group.Libraries) is var carrier &&
+        carrier.Suites.Sum(suite => durations[suite]) <= 600 &&
+        Array.IndexOf(groups, carrier) < 8, "The libraries are measured in a long or late job");
+    Require(VerificationSelection.Groups(["unsafe"]).Single().Libraries,
+        "A run without a short job measures no libraries");
     Equal(VerificationSelection.Groups(["contracts", "unknown"]).SelectMany(group => group.Suites),
         ["unknown", "contracts"]);
     Require(VerificationSelection.Groups([]).Length == 0, "Empty selection gained suites");

@@ -66,7 +66,7 @@ internal static class VerificationGroupRunner
     /// <summary>When one member started and how it exited; a member that could not start has no exit code.</summary>
     internal sealed record SuiteRun(string Suite, DateTime StartedAtUtc, int? ExitCode);
 
-    /// <summary>The members a group ran, in order. Outputs written from one start to the next are that member's.</summary>
+    /// <summary>The members a group ran, in order. What was written from one start to the next is that member's.</summary>
     internal const string SuiteRunsFile = "verification-suites.json";
 
     internal static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
