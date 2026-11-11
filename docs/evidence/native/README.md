@@ -6,7 +6,7 @@ This directory records how CoreCLR evaluates mixed native/int32 operands on x64 
 this page explains the record, the boundary the extractor enforces because of it and how to
 reproduce it. Read it before changing native/int32 widening.
 
-The record was made on 2026-10-15. The probe executes the exact CIL recorded in each manifest on
+The probe executes the exact CIL recorded in each manifest on
 isolated .NET **10.0.0** runtimes:
 
 | Runtime | Admitted cases | Mismatches | Rejected mixed unsigned branches | Rejected cases that differ from zero extension |

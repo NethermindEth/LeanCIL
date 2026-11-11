@@ -36,8 +36,8 @@ The runtime sources pin this policy to .NET 10:
 
 Fresh-process observations are checked in:
 
-- [Windows x64, .NET 10.0.14, AMD Ryzen 9 9950X, 2026-11-02](evidence/runtime-profiles/windows-x64-net10.json).
-- [macOS ARM64, .NET 10.0.14, GitHub `macos-15` runner, 2026-11-02](evidence/runtime-profiles/macos-arm64-net10.json).
+- [Windows x64, .NET 10.0.14, AMD Ryzen 9 9950X](evidence/runtime-profiles/windows-x64-net10.json).
+- [macOS ARM64, .NET 10.0.14, GitHub `macos-15` runner](evidence/runtime-profiles/macos-arm64-net10.json).
 
 Each record includes the actual runtime version, process architecture, OS, switch
 and observed flags. Reproduce with:
