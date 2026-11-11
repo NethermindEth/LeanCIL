@@ -387,7 +387,8 @@ pinnable reference is null, and readonly views return readonly references.
 `MemoryMarshal.GetReference<T>(Span<T>)` returns a writable span's start reference, including
 for an empty span. The `ReadOnlySpan<T>` overload returns a reference restricted as `readonly.`
 results are, although .NET types it `ref T`: reads and field reads through it succeed and stores
-fault as unwritable. Static data spans also accept the overload.
+fault as unwritable. An empty readonly view also yields its own validated reference, and a read
+through it is checked against the allocation. Static data spans also accept the overload.
 `MemoryMarshal.GetArrayDataReference<T>` supports all admitted array elements: an empty array
 keeps its data reference, and a null array raises `NullReferenceException`.
 
@@ -411,7 +412,8 @@ write authority. Reference-bearing, aggregate and vector elements are not suppor
 
 `Span<T>.Clear` initializes the whole view, including aggregate and vector elements. `Fill`
 repeats a captured primitive, enum, aggregate or integer-vector value; unspecified
-low-lane-only vector values are rejected. Both need write authority but not initialized or
+low-lane-only vector values are rejected. A filled aggregate or vector snapshot keeps its
+initialization mask, so unknown bytes stay uninitialized. Both need write authority but not initialized or
 readable destination bytes, access no bytes for an empty span and preserve neighbouring bytes,
 including other slices of the same allocation. Readonly views do not admit these members.
 
@@ -547,6 +549,8 @@ An integer, Boolean, Char or enum field that passes the same store checks, but w
 comes from code extraction does not evaluate (such as a hash seed drawn from
 `RandomNumberGenerator`), is admitted as fixed but unknown. Its static site has
 `opaqueValue := true`, no initializer and zero placeholder bytes that give only the width.
+`StaticValuesValid` requires exactly that shape
+([static storage](SOUNDNESS-RUNTIME.md#static-storage)).
 `ldsfld` reads the field from the caller's static binding for its identity, with the field's
 width and signedness, and faults as `unsupported` when the caller's memory has no binding. The
 placeholder is never read, so a proof about the method holds for whatever value the binding
@@ -563,6 +567,8 @@ aggregate fields whose value cannot be computed. Each such field is listed in
 SIMD and hardware features enter compiled CIL mostly through `call`, rather than dedicated SIMD
 CIL opcodes. [SIMD](SIMD.md) lists the admitted vector and hardware-intrinsic overloads with
 their element types and profile requirements, and links the extractor sources that define them.
+The portable bitwise and equality forms admit no floating-point equality and no observation of
+[unspecified lanes](SOUNDNESS-RUNTIME.md#unspecified-vector-lanes).
 Supporting one overload or CPU feature does not mean the entire API is supported.
 
 Reachable same-assembly generic methods are specialized for supported primitive, enum,
@@ -763,7 +769,8 @@ value times `2^64` plus the low word's unsigned value is the exact `Int` product
 
 `System.Math.DivRem(T, T)` returns `(T Quotient, T Remainder)` for `sbyte`, `byte`, `short`,
 `ushort`, `int`, `uint`, `long`, `ulong`, `nint` and `nuint`. The result is an aggregate with
-Item1 at offset 0 and Item2 at the element width. `Math.DivRem(int, int, out int)` and
+Item1 at offset 0 and Item2 at the element width. Extraction requires the recomputed equal-width
+`ValueTuple<T, T>` layout to match that shape. `Math.DivRem(int, int, out int)` and
 `Math.DivRem(long, long, out long)` push the quotient and store the remainder through the
 checked output reference. The quotient is the CIL `div` of the operands and the remainder is
 `left - quotient * right` with wrapping. A zero
