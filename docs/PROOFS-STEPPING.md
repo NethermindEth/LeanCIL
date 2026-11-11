@@ -160,6 +160,9 @@ counter fails with `cil_lookup: undecided branch` and is not evaluated.
 A read stated at a closed width, such as `read memory home (localWidth (.aggregate 32)) 1`,
 derives its load at the numeral width an opcode carries.
 
+`bitcastByteBool` requires its operand to be `0` or `1`. A comparison result `if c then 1 else 0`
+meets that for every `c`; any other int32 needs the fact `bits.toNat ≤ 1`.
+
 Intrinsic steps expose `checkedIntrinsic` and apply proved `@[cil_eval]` lemmas before unfolding the
 intrinsic evaluator. Register consumer lemmas in the form `CIL.evalIntrinsic operation operands =
 some result`. Nonnegative `BitVec.ofInt` literals become `BitVec.ofNat` literals so these equations

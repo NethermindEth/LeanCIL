@@ -36,6 +36,18 @@ attribute [cil_guard_proc] checkedScalarConstructor
     kind.extend (0 : CIL.W32) = 0#32 := CIL.NarrowKind.extend_zero kind
 #print axioms narrow_numeral_zero
 
+/-- A comparison result is a canonical Boolean byte, whatever its condition. -/
+@[cil_side] theorem toNat_ite_one_zero_le_one (condition : Prop) [Decidable condition] :
+    ((if condition then 1 else 0 : CIL.W32).toNat ≤ 1) = True := by
+  split <;> simp
+#print axioms toNat_ite_one_zero_le_one
+
+/-- The `1#32`/`0#32` literals a decided comparison leaves are not syntactically `1`/`0`. -/
+@[cil_side] theorem toNat_ite_ofNat_one_zero_le_one (condition : Prop) [Decidable condition] :
+    ((if condition then 1#32 else 0#32).toNat ≤ 1) = True := by
+  split <;> simp
+#print axioms toNat_ite_ofNat_one_zero_le_one
+
 /-- A null managed reference forms without consulting memory. -/
 @[cil_side] theorem formValue_null (memory : Memory) :
     formValue memory .null = .ok (.reference .null) := rfl

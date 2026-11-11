@@ -1129,4 +1129,30 @@ theorem store_from_wrapped_fact (body : CIL.Method) (args : List Value) (frame :
 
 #print axioms store_from_wrapped_fact
 
+/-- Compare two words and reinterpret the result as a Boolean. -/
+@[cil_code] def comparedBoolean : CIL.Method := {
+  code := [.arg 0, .arg 1, .eq, .memory .bitcastByteBool, .ret]
+  locals := [], returnsValue := true }
+
+open CIL.Safety in
+/-- A comparison result is a canonical Boolean whatever its condition, so the reinterpretation
+    steps without a fact; an arbitrary int32 would still need its bound. -/
+theorem compared_boolean_cast (left right : CIL.W64) (memory : Memory) :
+    invoke [comparedBoolean] 6 0 [.scalar (.i64 left), .scalar (.i64 right)] memory =
+      .ok (memory, [.scalar (.i32 (if left = right then 1 else 0))]) := by
+  cil_checked_steps []
+
+#print axioms compared_boolean_cast
+
+open CIL.Safety in
+/-- A Boolean cast of an unconstrained int32 keeps its canonical-range obligation. -/
+theorem unconstrained_boolean_cast (body : CIL.Method) (frame : Frame) (bits : CIL.W32)
+    (memory : Memory) (canonical : bits.toNat ≤ 1) :
+    step body (.memory .bitcastByteBool) 0 [] frame [.scalar (.i32 bits)] memory =
+      .ok (.next 1 [.scalar (.i32 bits)] frame memory) := by
+  fail_if_success cil_checked_step []
+  cil_checked_step [canonical]
+
+#print axioms unconstrained_boolean_cast
+
 end Tests.Automation
