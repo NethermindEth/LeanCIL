@@ -160,6 +160,10 @@ counter fails with `cil_lookup: undecided branch` and is not evaluated.
 A read stated at a closed width, such as `read memory home (localWidth (.aggregate 32)) 1`,
 derives its load at the numeral width an opcode carries.
 
+`cil_contract_step [facts]` takes one contract step. It prepares `facts` as `cil_checked_step` does,
+so a supplied `read` steps a `.loadAggregate` through a managed-reference address there as well.
+`cil_contract_step_normalized [facts]` is the same step over facts a walk has already prepared.
+
 `bitcastByteBool` requires its operand to be `0` or `1`. A comparison result `if c then 1 else 0`
 meets that for every `c`; any other int32 needs the fact `bits.toNat ≤ 1`.
 

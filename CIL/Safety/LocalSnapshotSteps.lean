@@ -592,7 +592,7 @@ elab_rules : tactic
         return updated
       let before ← snapshotRunMemory
       let ordinary ← try
-          evalTactic (← `(tactic| cil_contract_step [$[$prepared:term],*]))
+          evalTactic (← `(tactic| cil_contract_step_normalized [$[$prepared:term],*]))
           pure true
         catch _ =>
           saved.restore

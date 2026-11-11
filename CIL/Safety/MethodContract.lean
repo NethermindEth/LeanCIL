@@ -725,7 +725,12 @@ macro "cil_contract_prepare" "[" facts:term,* "]" : tactic =>
            (by cil_checked_side [$[$facts:term],*])
            (by cil_checked_side [$[$facts:term],*]) ?_)))
 
-/-- One contract step, selecting the composition rule from the fetched opcode. -/
+/-- One contract step with facts already normalised, selecting the composition rule from the
+    fetched opcode. -/
+syntax "cil_contract_step_normalized" "[" term,* "]" : tactic
+
+/-- One contract step: normalises `facts` and derives their checked load and store facts, as
+    `cil_checked_step` does, then runs `cil_contract_step_normalized`. -/
 syntax "cil_contract_step" "[" term,* "]" : tactic
 
 open Lean in
@@ -903,7 +908,11 @@ def cilContractApply (methodFound instructionFound : Term) (facts : Array Term) 
 
 open Lean Elab Tactic Meta in
 elab_rules : tactic
-  | `(tactic| cil_contract_step [$facts:term,*]) => withMainContext do
+  | `(tactic| cil_contract_step [$facts:term,*]) => do
+    let prepared ← prepareStepFacts facts.getElems
+    withMainContext <| evalTactic (← `(tactic|
+      cil_contract_step_normalized [$[$prepared:term],*]))
+  | `(tactic| cil_contract_step_normalized [$facts:term,*]) => withMainContext do
     let (methodFound, instructionFound, operation) ←
       cilFetchedOp ``CIL.Safety.run_next_exists some 4 facts.getElems
     let currentFacts := facts.getElems ++ (← cilOutputFacts operation)
@@ -1029,11 +1038,11 @@ elab_rules : tactic
       cil_contract_prepare [$[$prepared:term],*]
       cil_steps_from "cil_contract_steps took no step: the method or instruction lookup, or the \
         first step, did not close; pass the lookup hypothesis, feature facts or step facts"
-        cil_contract_step [$[$prepared:term],*])))
+        cil_contract_step_normalized [$[$prepared:term],*])))
   | `(tactic| cil_contract_steps $count:num [$facts:term,*]) => do
     let prepared ← prepareStepFacts facts.getElems
     withMainContext <| evalTactic (← `(tactic| cil_contract_prepare [$[$prepared:term],*]))
-    let next ← `(tactic| cil_contract_step [$[$prepared:term],*])
+    let next ← `(tactic| cil_contract_step_normalized [$[$prepared:term],*])
     for _ in [:count.getNat] do
       let saved ← saveState
       try
@@ -1050,7 +1059,7 @@ elab_rules : tactic
         cil_contract_prepare [$[$prepared:term],*]
         repeat first
         | (cil_strict $finish)
-        | cil_contract_step [$[$prepared:term],*]))))
+        | cil_contract_step_normalized [$[$prepared:term],*]))))
 
 /-- Apply a proved contract at the fetched call, optionally checked against a `bind_call`
     site: leaves the `precondition`, then the continuation over the callee's final memory,

@@ -1,11 +1,12 @@
 import CIL.Safety.AggregateMemorySteps
-import CIL.Safety.SymbolicExecution
+import CIL.Safety.MethodContract
 
 /-!
 # Aggregate operation facts
 
-Checked aggregate steps consume byte or snapshot operations. Unknown bytes retain their flags;
-access authority, an old snapshot and a mismatched width cannot supply the missing contents.
+Checked aggregate steps consume byte or snapshot operations, as one checked step and as one
+contract step. Unknown bytes retain their flags; access authority, an old snapshot and a mismatched
+width cannot supply the missing contents.
 -/
 
 namespace Tests.AggregateMemorySteps
@@ -38,6 +39,41 @@ theorem kind_width_load {memory : Memory} {source : Reference} {bytes : List (Bi
       memory = .ok (.next (pc + 1) (.scalar (.aggregate bytes) :: rest) frame memory) := by
   cil_checked_step [loaded]
 #print axioms kind_width_load
+
+/-- One contract step derives the aggregate load from a supplied read, as a checked step does,
+    so a walk taken one step at a time crosses a load through a managed-reference address. -/
+theorem contract_step_load {memory : Memory} {source : Reference} {bytes : List (BitVec 8)}
+    (loaded : read memory source 32 1 = .ok bytes)
+    (body : CIL.Method) (program : CIL.Program) (method : Nat)
+    (found : program[method]? = some body)
+    (instruction : body.code[0]? = some (.loadAggregate 32)) (frame : Frame) (rest : List Value)
+    (continuation : WP (Execution (fun fuel => run program fuel method 1 [] frame
+      (.scalar (.aggregate bytes) :: rest) memory)) (fun _ => True)) :
+    WP (Execution (fun fuel => run program fuel method 0 [] frame
+      (.reference (.address source) :: rest) memory)) (fun _ => True) := by
+  cil_contract_prepare []
+  -- The read is no step fact until it is prepared, so the unprepared step stops here.
+  fail_if_success cil_contract_step_normalized [found, instruction, loaded]
+  cil_contract_step [found, instruction, loaded]
+  exact WP.adequate.mp continuation
+#print axioms contract_step_load
+
+/-- The contract step also takes the read at a local kind's width, as a remembered aggregate
+    local states it. -/
+theorem contract_step_kind_width_load {memory : Memory} {source : Reference}
+    {bytes : List (BitVec 8)}
+    (loaded : read memory source (localWidth (.aggregate 32)) 1 = .ok bytes)
+    (body : CIL.Method) (program : CIL.Program) (method : Nat)
+    (found : program[method]? = some body)
+    (instruction : body.code[0]? = some (.loadAggregate 32)) (frame : Frame) (rest : List Value)
+    (continuation : WP (Execution (fun fuel => run program fuel method 1 [] frame
+      (.scalar (.aggregate bytes) :: rest) memory)) (fun _ => True)) :
+    WP (Execution (fun fuel => run program fuel method 0 [] frame
+      (.readOnlyReference (.address source) :: rest) memory)) (fun _ => True) := by
+  cil_contract_prepare []
+  cil_contract_step [found, instruction, loaded]
+  exact WP.adequate.mp continuation
+#print axioms contract_step_kind_width_load
 
 /-- An unknown byte loads as a snapshot without becoming initialized. -/
 theorem unknown_load {memory : Memory} {source : Reference}
