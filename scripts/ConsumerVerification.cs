@@ -1855,7 +1855,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             var coherentCertificate = RestoreCertificateSupport(certificateSupportKey, dependent: null,
                 requiredModules: certificateModules);
             var restoredCertificate = GeneratedModulesRestored(certificateModules, coherentCertificate);
-            var unchangedCertificate = restoredCertificate && coherentCertificate.All(pair =>
+            var restorationUnchanged = coherentCertificate.All(pair =>
                 previousRestoration.TryGetValue(pair.Key, out var hash) && hash == pair.Value);
             string extractionAudit;
             if (restoredCertificate)
@@ -1912,7 +1912,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             }
             if (generatedSources.Count > 0)
             {
-                if (unchangedCertificate && GeneratedModulesRestored(generatedSources.Keys, certificateRestoration))
+                if (restorationUnchanged && GeneratedModulesRestored(generatedSources.Keys, certificateRestoration))
                     CacheProgress("certified fixed export references");
                 else
                     Run(["lake", "build", .. generatedSources.Keys.Select(module => "+" + module + ":olean")],
