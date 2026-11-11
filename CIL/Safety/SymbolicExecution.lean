@@ -832,7 +832,8 @@ open Lean Elab Tactic Meta in
 /-- Equations selected inside quantified conjunctions retain their original binders. -/
 private partial def equationConjuncts (select : Expr → Bool) (proof : Expr) :
     MetaM (Array Expr) := do
-  forallTelescope (← inferType proof) fun variables conclusion => do
+  -- A hypothesis from `have name := term` states its type through an assigned metavariable.
+  forallTelescope (← instantiateMVars (← inferType proof)) fun variables conclusion => do
     if conclusion.isAppOfArity ``And 2 then
       let applied := mkAppN proof variables
       let left ← equationConjuncts select (← mkAppM ``And.left #[applied])
@@ -1153,7 +1154,8 @@ def prepareOperationFacts (facts : Array Term) : TacticM (Array Term) := withMai
     try
       let proof ← Term.withoutErrToSorry <| Term.withSynthesize <| Term.elabTerm fact none
       for part in ← equationConjuncts operationEquation proof do
-        let derived ← forallTelescope (← inferType part) fun variables conclusion => do
+        let stated ← instantiateMVars (← inferType part)
+        let derived ← forallTelescope stated fun variables conclusion => do
           let some (_, operation, _) := conclusion.consumeMData.eq? | return #[]
           let reading := operation.isAppOfArity ``CIL.Safety.read 4
           let snapshot := operation.isAppOfArity ``CIL.Safety.readSnapshot 4

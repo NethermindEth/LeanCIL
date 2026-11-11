@@ -1192,4 +1192,18 @@ theorem opaque_numeric_call (body : CIL.Method) (frame : Frame) (argument : CIL.
 
 #print axioms opaque_numeric_call
 
+open CIL.Safety in
+/-- A read introduced by `have name := term` states its type through an assigned
+    metavariable; its load is derived like that of a hypothesis with a written type. -/
+theorem inferred_read_load (memory : Memory) (limb : Reference) (word : CIL.W64)
+    (loaded : read memory limb 8 1 = .ok (numberBytes word.toNat 8))
+    (body : CIL.Method) (frame : Frame) :
+    step body .load64 0 [] frame [.reference (.address limb)] memory =
+      .ok (.next 1 [.scalar (.i64 word)] frame memory) := by
+  have restated := loaded
+  clear loaded
+  cil_checked_step [restated]
+
+#print axioms inferred_read_load
+
 end Tests.Automation
