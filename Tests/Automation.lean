@@ -1155,4 +1155,17 @@ theorem unconstrained_boolean_cast (body : CIL.Method) (frame : Frame) (bits : C
 
 #print axioms unconstrained_boolean_cast
 
+open CIL.Safety in
+/-- A canonical bit stays canonical through the byte and int32 widths a field load gives it,
+    so its bound steps the Boolean cast of the widened value. -/
+theorem widened_boolean_cast (body : CIL.Method) (frame : Frame) (field : CIL.W64)
+    (memory : Memory) (canonical : field.toNat ≤ 1) :
+    step body (.memory .bitcastByteBool) 0 [] frame
+        [.scalar (.i32 ((field.setWidth 8).setWidth 32))] memory =
+      .ok (.next 1 [.scalar (.i32 ((field.setWidth 8).setWidth 32))] frame memory) := by
+  fail_if_success cil_checked_step []
+  cil_checked_step [canonical]
+
+#print axioms widened_boolean_cast
+
 end Tests.Automation

@@ -48,6 +48,15 @@ attribute [cil_guard_proc] checkedScalarConstructor
   split <;> simp
 #print axioms toNat_ite_ofNat_one_zero_le_one
 
+/-- Changing the width of a canonical Boolean leaves one, so a bound on a narrower or wider
+    operand carries through each `setWidth` around it. -/
+@[cil_side] theorem toNat_setWidth_le_one {width : Nat} (target : Nat) (bits : BitVec width)
+    (canonical : bits.toNat ≤ 1) : ((bits.setWidth target).toNat ≤ 1) = True := by
+  refine eq_true (Nat.le_trans ?_ canonical)
+  rw [BitVec.toNat_setWidth]
+  exact Nat.mod_le _ _
+#print axioms toNat_setWidth_le_one
+
 /-- A null managed reference forms without consulting memory. -/
 @[cil_side] theorem formValue_null (memory : Memory) :
     formValue memory .null = .ok (.reference .null) := rfl

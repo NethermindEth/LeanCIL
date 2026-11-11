@@ -165,7 +165,8 @@ so a supplied `read` steps a `.loadAggregate` through a managed-reference addres
 `cil_contract_step_normalized [facts]` is the same step over facts a walk has already prepared.
 
 `bitcastByteBool` requires its operand to be `0` or `1`. A comparison result `if c then 1 else 0`
-meets that for every `c`; any other int32 needs the fact `bits.toNat ≤ 1`.
+meets that for every `c`; any other int32 needs the fact `bits.toNat ≤ 1`. The fact may bound a value
+inside width changes, as `field.toNat ≤ 1` does for the operand `(field.setWidth 8).setWidth 32`.
 
 Intrinsic steps expose `checkedIntrinsic` and apply proved `@[cil_eval]` lemmas before unfolding the
 intrinsic evaluator. Register consumer lemmas in the form `CIL.evalIntrinsic operation operands =
