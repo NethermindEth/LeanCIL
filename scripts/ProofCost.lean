@@ -149,6 +149,24 @@ heartbeats are counted.
 def singleThreaded : Options :=
   ({} : Options).setBool `Elab.async false
 
+/-- Parse and elaborate one command, retaining parser errors before elaboration resets its log. -/
+def processMeasuredCommand : Frontend.FrontendM (Bool × MessageLog) := do
+  Frontend.updateCmdPos
+  let state ← Frontend.getCommandState
+  let input ← Frontend.getInputContext
+  let parser ← Frontend.getParserState
+  let scope := state.scopes.head!
+  let context : Parser.ParserModuleContext := {
+    env := state.env, options := scope.opts
+    currNamespace := scope.currNamespace, openDecls := scope.openDecls }
+  let (command, parser, messages) := profileit "parsing" scope.opts fun _ =>
+    Parser.parseCommand input context parser state.messages
+  modify fun state => { state with commands := state.commands.push command }
+  Frontend.setParserState parser
+  Frontend.setMessages messages
+  Frontend.elabCommandAtFrontend command
+  return (Parser.isTerminalCommand command, messages)
+
 /-- Elaborates `sourcePath` as `moduleName`; returns each command's cost and the result. -/
 def measure (moduleName : Name) (sourcePath : String) :
     IO (Array CommandCost × Environment × Bool) := do
@@ -173,12 +191,12 @@ def measure (moduleName : Name) (sourcePath : String) :
     let currentNamespace := state.commandState.scopes.head!.currNamespace
     let startBeats ← IO.getNumHeartbeats
     let startMs ← IO.monoMsNow
-    let (isLast, next) ← (Frontend.processCommand.run context).run state
+    let ((isLast, parsed), next) ← (processMeasuredCommand.run context).run state
     let heartbeats := (← IO.getNumHeartbeats) - startBeats
     let elapsedMs := (← IO.monoMsNow) - startMs
     state := next
     -- Lean resets the immediate message log for each top-level command.
-    diagnostics := diagnostics ++ state.commandState.messages
+    diagnostics := diagnostics ++ parsed ++ state.commandState.messages
     finished := isLast
     let some command := state.commands.back? | continue
     if command.isOfKind ``Parser.Command.eoi then continue

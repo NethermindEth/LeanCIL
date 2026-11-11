@@ -42,6 +42,15 @@ var fixtures = new (string Name, string? Error, string Source)[]
         theorem subsequent : True := True.intro
         #print axioms subsequent
         """),
+    ("MalformedCostProof", "unexpected token", """
+        import Lean
+
+        theorem malformed : True := by
+          exact )
+
+        theorem subsequent : True := True.intro
+        #print axioms subsequent
+        """),
     ("TimedOutCostProof", "maximum number of heartbeats", """
         import Lean
 
