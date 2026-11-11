@@ -2,10 +2,10 @@
 
 <!-- audience: maintainers -->
 
-The format in which CI passes the certified library between jobs, and how to measure packing
-and restoring it. Read it before changing `scripts/CertifiedLibraryArchive.cs` or the library
-steps of the verification workflow. [CI operation](../CI.md) describes which runs may donate a
-library.
+This page describes the format in which CI passes the certified library between jobs, and how
+to measure packing and restoring it. Read it before changing
+`scripts/CertifiedLibraryArchive.cs` or the library steps of the verification workflow.
+[CI operation](../CI.md) describes which runs may donate a library.
 
 ## Format
 
@@ -47,7 +47,7 @@ lie outside the library. `restore` prints three lines, `Library restore authenti
 each command as a whole for figures comparable with those below, and build the file app once
 beforehand so compilation is excluded.
 
-Reference figures, for a Linux library of 2,443 files:
+The reference figures are for a Linux library of 2,443 files:
 
 | Measure | Figure |
 | --- | ---: |

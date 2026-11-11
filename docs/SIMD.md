@@ -1,6 +1,11 @@
 # Vector and hardware-intrinsic support
 
-Read this page to find whether a vector or hardware-intrinsic call in your method is extractable, which profile flag it needs and what it computes in the model. These tables list the overloads recognised by the extractor, not entire .NET API families. All families have **partial coverage**. Calls must match the runtime assembly identity, declaring type, generic arguments, parameter types and return type in [RuntimeModels.cs](../Extractor/RuntimeModels.cs). Other overloads are rejected.
+Read this page to find whether a vector or hardware-intrinsic call in your method is
+extractable, which profile flag it needs and what it computes in the model. These tables list
+the overloads recognised by the extractor, not entire .NET API families. Coverage of every family
+is partial. Calls must match the runtime assembly identity, declaring type, generic arguments,
+parameter types and return type in [RuntimeModels.cs](../Extractor/RuntimeModels.cs). Other
+overloads are rejected.
 
 `V128<T>`, `V256<T>` and `V512<T>` below abbreviate `Vector128<T>`, `Vector256<T>` and `Vector512<T>`. Unqualified vector APIs belong to `System.Runtime.Intrinsics`; x86 families belong to `.X86`, and ARM families to `.Arm`. Names such as `Avx512F.VL` use C# notation for nested types.
 
@@ -24,7 +29,10 @@ An enabled CPU feature does not imply support for all of its APIs. Float/double 
 
 ## Portable vector operations
 
-Rows apply to the named widths, with matching input/output widths. The bitwise and equality operators accept Vector128, Vector256 and Vector512. These portable vector operations require no ISA flag in the extractor and can be modelled under the `scalar` profile; that is a semantics choice, not a claim about how a JIT implements them.
+Rows apply to the named widths, with matching input/output widths. The bitwise and equality
+operators accept Vector128, Vector256 and Vector512. These portable vector operations require no
+ISA flag in the extractor and can be modelled under the `scalar` profile; that choice concerns
+the model's semantics and makes no claim about how a JIT implements them.
 
 | API / operation | Accepted element types / overloads | Model |
 | --- | --- | --- |
@@ -61,7 +69,10 @@ No other element types or operators are implied. In particular, portable vector 
 | `Ssse3.AlignRight` | `V128<byte>, V128<byte>, byte` -> `V128<byte>` | `Ssse3` | Extract a 16-byte window from the concatenation, with the second operand as the low half; out-of-range bits are zero |
 | `Ssse3.Shuffle` | `V128<byte> value, V128<byte> mask` -> `V128<byte>` | `Ssse3` | `pshufb`: byte `i` is zero when bit 7 of mask byte `i` is set, else the value byte selected by its low four bits |
 
-SSE4.1 and SSE4.2 capability getters are recognised, but their instruction APIs have no mappings. There is no blanket SSE/SSE2 arithmetic, comparison or load/store support. Of the `Sse2.Multiply` overloads only the unsigned `Vector128<uint>` one is mapped; the `double` overload and the signed `Sse41.Multiply` (`pmuldq`) are not.
+SSE4.1 and SSE4.2 capability getters are recognised, but their instruction APIs have no
+mappings. There is no general SSE/SSE2 arithmetic, comparison or load/store support. Of the
+`Sse2.Multiply` overloads only the unsigned `Vector128<uint>` one is mapped; the `double`
+overload and the signed `Sse41.Multiply` (`pmuldq`) are not.
 
 ## AVX
 
@@ -93,7 +104,8 @@ All rows require `Avx2` and operate on 256-bit vectors.
 | `Avx2.ShiftLeftLogical`, `Avx2.ShiftRightLogical` | `V256<ulong>, V128<ulong>` -> `V256<ulong>` | Shift each lane by the count's lane 0; counts of 64 or more yield zero; the upper count lane is ignored |
 | `Avx2.And`, `Avx2.Or`, `Avx2.Xor`, `Avx2.AndNot` | `V256<ulong>, V256<ulong>` -> `V256<ulong>` | Bitwise operations; `AndNot(a, b)` is `~a & b` |
 
-These are the exact widths and overloads admitted. For example, accepting `Add` on `ulong` vectors does not enable `Add` on byte or 32-bit lanes.
+The rows above are the exact widths and overloads admitted. For example, accepting `Add` on
+`ulong` vectors does not enable `Add` on byte or 32-bit lanes.
 
 ## AVX512
 

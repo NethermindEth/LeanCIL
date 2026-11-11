@@ -1,18 +1,35 @@
 # CIL opcode support
 
-Read this page to find whether `leancil extract` accepts an instruction or runtime call in your method, and under which restrictions. The table below lists every opcode encoding the translator handles and describes the allocation-aware execution model used for memory-safety proofs. It is an inventory of implemented behaviour, not a claim that every listed opcode/operand combination has its own regression test, or that the model is equivalent to every .NET runtime. Opcode meanings follow ECMA-335 as amended by the augments listed in the [specification baseline](SOUNDNESS-SPEC.md).
+Read this page to find whether `leancil extract` accepts an instruction or runtime call in your
+method, and under which restrictions. The table below lists every opcode encoding the translator
+handles and describes the allocation-aware execution model used for memory-safety proofs. The
+table is an inventory of implemented behaviour. It does not claim that every listed
+opcode/operand combination has its own regression test, or that the model is equivalent to every
+.NET runtime. Opcode meanings follow ECMA-335 as amended by the augments listed in the
+[specification baseline](SOUNDNESS-SPEC.md).
 
-- **Complete within the admitted model:** the opcode's operation is implemented for its admitted operands. Ordinary stack/value validity checks still apply.
-- **Partial:** translation exists, but the row lists additional type, layout, control-flow or runtime restrictions. Unsupported operand shapes can fail during checked execution even when translation succeeds.
-- **Unsupported:** no reachable translation exists; extraction rejects the opcode. All opcodes not listed in the translated-opcode table are unsupported.
+- In a row marked "Complete within the admitted model", the opcode's operation is implemented
+  for its admitted operands. Ordinary stack/value validity checks still apply.
+- In a row marked "Partial", translation exists, but the row lists additional type, layout,
+  control-flow or runtime restrictions. Unsupported operand shapes can fail during checked
+  execution even when translation succeeds.
+- An unsupported opcode has no reachable translation, and extraction rejects it. All opcodes not
+  listed in the translated-opcode table are unsupported.
 
-Every row is subject to the common target restrictions: Release IL-only .NET 10 assemblies, 64-bit little-endian execution, admitted types, no exception handlers and validated reachable control flow. Ordinary managed calls retain an acyclic extraction order; checked tail transfers may form cycles. A translated method still requires a proof of the desired property. Exhausted fuel, invalid states and unsupported operations are failures, never implicit successes. Release configuration does not guarantee that a compiler emits only supported instructions: reachable exception handling, for example, is rejected.
+Every row is subject to the common target restrictions: Release IL-only .NET 10 assemblies,
+64-bit little-endian execution, admitted types, no exception handlers and validated reachable
+control flow. Ordinary managed calls retain an acyclic extraction order; checked tail transfers
+may form cycles. A translated method still requires a proof of the desired property. Exhausted
+fuel, invalid states and unsupported operations are failures and are never implicit successes.
+Release configuration does not guarantee that a compiler emits only supported instructions:
+reachable exception handling, for example, is rejected.
 
 ## Translated opcodes
 
 Ranges below include every numbered form between the endpoints. `.s` denotes the actual short encoding, not a different semantic operation. Native `nint`/`nuint` values use `i64` under the validated 64-bit target. For mixed native/int32 arithmetic and comparisons, extraction tracks stack types and emits an explicit widening wrapper; invalid native/int64 mixtures are rejected. Mixed native/int32 unsigned branches (`bne.un`, `blt.un`, `bgt.un`, `ble.un`, `bge.un`, including short forms) are rejected because CoreCLR widening depends on operand provenance; insert explicit `conv.i` or `conv.u` to select same-width semantics. The wrapper sign-extends the int32 operand, except that unsigned checked arithmetic zero-extends it. Scalar `clt.un`/`cgt.un` sign-extend it too, matching the admitted runtime. The wrapper preserves arithmetic faults and branch targets and cannot dispatch memory or calls. The rows below describe scalar operands after this widening; other mixed widths are unsupported.
 
-`i32` and `i64` refer to the model's 32- and 64-bit integer stack values; managed references are separate values, not integer addresses.
+`i32` and `i64` refer to the model's 32- and 64-bit integer stack values; managed references are
+separate values and are not integer addresses.
 
 Same-assembly enums backed by `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long` or `ulong` use their validated underlying integer representation throughout these operations, including fields, argument homes and typed memory instructions. Narrow enum loads sign- or zero-extend exactly like the underlying type. Unnamed values are supported; boxing, `System.Enum` methods and external enum dependencies are not.
 
@@ -128,8 +145,9 @@ until written. Checked pointer offsets, typed loads and stores, and admitted spa
 retain allocation bounds and authority. Returning a reference or span into expired stack storage
 fails. Numeric address fabrication and general pointer casts are unsupported.
 
-The quota is a deployment premise rather than a physical-stack measurement. Ordinary frame and
-call overhead are outside it; see [the soundness boundary](SOUNDNESS-EXECUTION.md#what-is-defined-and-proved).
+The quota is a deployment premise; it does not measure the physical stack. Ordinary frame and
+call overhead are outside it; see
+[the soundness boundary](SOUNDNESS-EXECUTION.md#definitions-and-proved-properties).
 
 ## Reference observations
 
@@ -137,8 +155,9 @@ Reference truth tests and equality validate lifetime and reference formation wit
 read authority or initialized bytes. Readonly references retain their write restriction.
 Equality compares offsets within one allocation and distinguishes interior addresses from
 separate allocations. Cross-allocation comparisons involving an end sentinel are rejected:
-the model does not know whether the physical end address equals a neighbouring allocation's
-start. Comparing invalid or expired references fails, even when both operands are identical.
+the model does not determine whether the physical end address equals a neighbouring
+allocation's start. Comparing invalid or expired references fails, even when both operands are
+identical.
 
 The certificate tracks an `ldnull` object separately from managed references. It cannot be
 stored or passed as a managed pointer. Existing `Unsafe.NullRef<T>` values remain managed
@@ -148,7 +167,7 @@ reference through these rules.
 The managed-reference overloads of `Unsafe.AreSame`, `IsAddressLessThan` and
 `IsAddressGreaterThan` use these checked comparisons. Ordering and
 `Unsafe.ByteOffset(origin, target)` require two live references in the same allocation;
-the latter returns the native-width byte displacement from origin to target.
+`Unsafe.ByteOffset` returns the native-width byte displacement from origin to target.
 `Unsafe.AddByteOffset` and `SubtractByteOffset` accept `nint` or `nuint` offsets.
 `Unsafe.Subtract<T>` accepts `int`, `nint` or `nuint` element offsets for admitted scalar,
 aggregate and vector storage. Scaling and subtraction wrap at the native 64-bit width;
@@ -198,7 +217,8 @@ insufficient authority remain model faults. Admitted reference-free arrays with 
 elements and reference elements outside [arrays of class
 references](SOUNDNESS-RUNTIME.md#arrays-of-class-references) are outside this subset.
 
-The table above is exhaustive for reachable translation. Notable exclusions include:
+The table above is exhaustive for reachable translation. The following table gives examples of
+what extraction rejects:
 
 | Area | Examples rejected by extraction |
 | --- | --- |
@@ -274,7 +294,8 @@ method of `T` with the slot's name and signature, else the most specific interfa
 The candidates for that last step are the slot's own body (a C# `static virtual` member) and every
 interface `MethodImpl` of the slot (a derived interface's `static R I.M(...) => ...`) on an
 interface of `T`; the winner is the candidate whose interface inherits every other candidate's,
-so a derived interface's body beats the default and the deepest one in a chain wins. It may
+so a derived interface's body is selected over the default and the deepest one in a chain is
+selected. It may
 supply the body of a base `static abstract` slot. Two unrelated interfaces that both override the
 slot leave no winner, and a winner that re-abstracts the slot leaves no body: both are rejected,
 as is an abstract slot with no implementation at all. The winner is instantiated at its own
@@ -472,8 +493,8 @@ data. Repeated accesses share one allocation; distinct fields remain distinct ev
 bytes agree. The reference can be passed to supported helpers and instance methods. Checked
 writes through it fail, including writes through `Unsafe.AsRef`.
 
-Rejected: a declaring type without the assumption; aggregate values built by other code shapes;
-a second store, a store outside the static constructor, or `ldsflda` of the field during
+Extraction rejects a declaring type without the assumption; aggregate values built by other code
+shapes; a second store, a store outside the static constructor, or `ldsflda` of the field during
 initialization; and `stsfld` in an extracted method.
 
 #### Unknown readonly values
@@ -559,7 +580,11 @@ Offsets must be int32 or native integers. A readonly reference operand yields a 
 under the same checks. Reference sums, ordinary int64 offsets and reversed reference subtraction
 are unsupported.
 
-The runtime allowlist also includes specific `Unsafe.AsRef`, `Unsafe.As`, `Unsafe.BitCast`, `MemoryMarshal.GetReference` and span constructor signatures. These are narrow translations into reference, memory or vector operations, not blanket support for those classes. CIL `add` on references supports the checked byte-offset form described above.
+The runtime allowlist also includes specific `Unsafe.AsRef`, `Unsafe.As`, `Unsafe.BitCast`,
+`MemoryMarshal.GetReference` and span constructor signatures. These signatures are narrow
+translations into reference, memory or vector operations; they do not make those classes
+supported as a whole. CIL `add` on references supports the checked byte-offset form described
+above.
 
 Managed byte-reference and pointer `Unsafe.ReadUnaligned<T>` and `WriteUnaligned<T>` support admitted
 integer, aggregate and integer-vector storage. They use the existing typed loads and stores
@@ -578,7 +603,10 @@ The checked model supports `Unsafe.BitCast<TFrom,TTo>` between equal-size valida
 
 `CIL.Safety.ValueBitCasts` supplies byte/vector round-trip lemmas and `bitcastValue_preserves_snapshot`; `CIL.Safety.SnapshotMemory` supplies checked snapshot write/readback facts. Access witnesses in `AccessAlignment` distinguish initialized reads/writes from snapshot copies, which preserve flags instead of asserting initialization.
 
-Reachability is evaluated under the chosen, validated feature profile. Instructions excluded by that analysis are emitted as explicit unsupported placeholders, not silently assigned successful semantics. If execution reaches such a placeholder it fails. Changing the profile invalidates extraction artifacts.
+Reachability is evaluated under the chosen, validated feature profile. Instructions excluded by
+that analysis are emitted as explicit unsupported placeholders and are assigned no successful
+semantics. If execution reaches such a placeholder it fails. Changing the profile invalidates
+extraction artifacts.
 
 Exact `IntPtr.Size`, `UIntPtr.Size` and `Environment.Is64BitProcess` getters produce `8`, `8`
 and `true` under every supported 64-bit profile. `ldsfld BitConverter.IsLittleEndian` produces
@@ -605,7 +633,7 @@ arrays, spans, byref/pointer arguments and unsupported storage are rejected. A v
 aggregate without reference/byref fields is admissible; its query does not grant memory or escape
 authority.
 
-## Lean-only operations and source of truth
+## Lean-only operations and implementation sources
 
 The Lean `CIL.Op` type and memory/SIMD modules contain operations that the extractor does not emit, including vector argument homes, fixed vector-lane helpers, `newVector256` and additional memory helpers. Their existence is not evidence that the corresponding arbitrary CIL or .NET API is extractable. Generic aggregate operations are implemented by the checked memory interpreter.
 
@@ -620,7 +648,8 @@ See [validation](VALIDATION.md) for the suites that test it and [soundness](SOUN
 
 ## Portable scalar runtime helpers
 
-These are exact `call` signatures, not additional CIL opcodes. They work with every admitted hardware profile.
+The helpers in the table below are exact `call` signatures and add no CIL opcodes. They work with
+every admitted hardware profile.
 
 | Runtime type | Supported methods and overloads | Semantics |
 | --- | --- | --- |

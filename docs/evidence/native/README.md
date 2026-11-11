@@ -28,8 +28,8 @@ The corpus contains 31 arithmetic/comparison/branch opcodes, both operand orders
 boundaries and five int32 boundaries, loaded from arguments and embedded as `ldc.i4` constants.
 It also exercises all five affected unsigned branches with explicit `conv.i` and `conv.u` on both
 operand sources. Zero divisors, signed division/remainder overflow, unsigned boundaries, and
-negative int32 values are included. Results are compared with a separate `BigInteger` oracle;
-this is finite runtime evidence, not a proof of CoreCLR.
+negative int32 values are included. Results are compared with a separate `BigInteger` oracle.
+The comparison is finite runtime evidence; it does not prove CoreCLR correct.
 
 Both architectures were also run with `DOTNET_TieredCompilation=0`, forcing fully optimized JIT
 compilation rather than default tiering. All 4,100 rows are identical to the default-tiering
@@ -53,7 +53,8 @@ the extractor rejects the case.
 every short form. The checked native wrapper rejects them too. The diagnostic requires explicit
 `conv.i` or `conv.u`; those same-width forms are supported and tested. Accepting argument-only
 cases would require an extra runtime assumption: inlining can expose constant actual arguments,
-and propagation can change local provenance. Neither is part of the verification contract.
+and propagation can change local provenance. Neither inlining nor propagation is part of the
+verification contract.
 
 `Tests/NativeIntegers.cs` checks that all 60 combinations of short/long opcode, operand order,
 and argument/negative-constant/local provenance are rejected. It also compares and kernel-checks
@@ -67,7 +68,7 @@ Relevant source locations are:
 
 - [Arithmetic widening](https://github.com/dotnet/runtime/blob/60629d14374c56f1cb51819049ad1fa529307f8d/src/coreclr/jit/importer.cpp#L5556-L5579): mixed native/int32 arithmetic inserts casts using the arithmetic unsigned flag. The [opcode dispatch](https://github.com/dotnet/runtime/blob/60629d14374c56f1cb51819049ad1fa529307f8d/src/coreclr/jit/importer.cpp#L7434-L7544) sets that flag for unsigned checked arithmetic; unsigned division/remainder use unsigned operators without unsigned operand widening.
 - [Scalar comparisons](https://github.com/dotnet/runtime/blob/60629d14374c56f1cb51819049ad1fa529307f8d/src/coreclr/jit/importer.cpp#L7833-L7892) use the implicit-cast helper's default, which is [false](https://github.com/dotnet/runtime/blob/60629d14374c56f1cb51819049ad1fa529307f8d/src/coreclr/jit/compiler.h#L4634), even for unsigned comparisons.
-- [Conditional branches](https://github.com/dotnet/runtime/blob/60629d14374c56f1cb51819049ad1fa529307f8d/src/coreclr/jit/importer.cpp#L7947-L7975) pass the unsigned flag. The [helper's constant path](https://github.com/dotnet/runtime/blob/60629d14374c56f1cb51819049ad1fa529307f8d/src/coreclr/jit/importer.cpp#L2459-L2485) retags constants without consulting that flag, unlike its nonconstant cast path. This explains why the result depends on operand provenance.
+- [Conditional branches](https://github.com/dotnet/runtime/blob/60629d14374c56f1cb51819049ad1fa529307f8d/src/coreclr/jit/importer.cpp#L7947-L7975) pass the unsigned flag. The [helper's constant path](https://github.com/dotnet/runtime/blob/60629d14374c56f1cb51819049ad1fa529307f8d/src/coreclr/jit/importer.cpp#L2459-L2485) retags constants without consulting that flag, unlike its nonconstant cast path. The result therefore depends on operand provenance.
 
 `provenance.json` pins source file SHA256 values and official runtime archive URLs/SHA512 values
 from Microsoft's release manifest. Both downloaded archives were checked against those SHA512

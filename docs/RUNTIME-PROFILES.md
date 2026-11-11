@@ -108,7 +108,8 @@ and uploads the observation; it runs no other suite.
 
 Evidence field `bmi2` is `Bmi2.X64.IsSupported`, `x86Base64` is
 `X86Base.X64.IsSupported`, and `armBase64` is `ArmBase.Arm64.IsSupported`.
-These are the model's 64-bit capabilities, not the corresponding base-class flags.
+These fields are the model's 64-bit capabilities; they are not the corresponding base-class
+flags.
 Evidence field `advSimd64` is `AdvSimd.Arm64.IsSupported`. Extraction answers that getter
 with the `advSimd` capability, so validation rejects an observation that lacks it or
 records a different value; it is not a separate profile field. Other nested ARM64

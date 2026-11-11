@@ -2,9 +2,9 @@
 
 <!-- audience: maintainers -->
 
-How to measure the cost of LeanCIL's proofs, library modules and CI artifacts, with reference
-figures to compare against. Read the page for the part you are changing before and after the
-change.
+These pages describe how to measure the cost of LeanCIL's proofs, library modules and CI
+artifacts, with reference figures to compare against. Read the page for the part you are
+changing before and after the change.
 
 | You are changing | Measure | Page |
 | --- | --- | --- |

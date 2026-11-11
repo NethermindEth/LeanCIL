@@ -82,9 +82,10 @@ elaborator code with verifier privileges; untrusted bundles need isolated, read-
 execution. See [full verification](FULL_VERIFICATION.md).
 
 Initialization premises are bound by assembly, type and profile, checked against extraction and
-propagated through dependencies into reports. They identify assumptions, not evidence that a CLR
-initializer ran. Constructor-derived exported field values and forced-full initialization premises
-are unsupported. Reference-only authoring checks do not issue deployment certificates.
+propagated through dependencies into reports. They identify assumptions; they are not evidence
+that a CLR initializer ran. Constructor-derived exported field values and forced-full
+initialization premises are unsupported. Reference-only authoring checks do not issue deployment
+certificates.
 
 ## Pinned referenced assemblies
 
@@ -97,7 +98,7 @@ trusted inputs on the same terms as the selected one; no other assembly can cont
 - `TranslationValid` requires `AttributionValid`: each body's owner identity is scoped by its
   own pin's colon-free identity, so a body attributed to the wrong assembly fails the kernel
   check ([tests](../Tests/AssemblyPins.lean)). Distinct pins and a complete `assemblies` list
-  are extractor output that `check` regenerates, not a Lean obligation.
+  are extractor output that `check` regenerates; they are not a Lean obligation.
 - Lean cannot hash bytes. `identity.json` records each assembly's identity, MVID and SHA-256;
   `check`, and so `verify`, rehashes the selected and every referenced DLL against it and
   regenerates the certificate, so a substituted DLL or a changed recorded hash is rejected
@@ -134,7 +135,7 @@ and signature coverage. Extraction also compares the pinned DLL metadata. These 
 verify Cecil or remove runtime assumptions. See [typed imports](TYPED-IMPORTS.md).
 
 An imported aggregate local sizes caller frame storage from the same pinned metadata that byref
-contracts already trust; it adds a consumer, not a trusted source. `ImportedLocalLayoutsBound`
+contracts already trust; it adds a consumer and no trusted source. `ImportedLocalLayoutsBound`
 requires every caller layout entry whose identity a slot publishes to equal that slot's selected
 layout, nested indices bound by identity, with the same computed layout, for every such slot.
 Extraction admits such a local only when its whole closure is published and one bound typed call

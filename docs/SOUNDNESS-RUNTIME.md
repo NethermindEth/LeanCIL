@@ -38,9 +38,10 @@ their index and identity without repeating layout computation. Runtime correspon
 | Resources | Requested modeled stack/heap storage can be supplied by the runtime | Absence of physical stack/heap exhaustion |
 
 The [native runtime evidence](evidence/native/README.md) records exact CIL, inputs, outputs, runtime
-and binary hashes on pinned x64/ARM64 binaries. It is differential evidence, not a CLR proof or a
-reproducible source-to-binary build. Small integers use i32 stack values; narrow stores truncate and
-loads/returns sign- or zero-extend by the declared type. Boolean bytes need not be canonical.
+and binary hashes on pinned x64/ARM64 binaries. It is differential evidence; it is neither a CLR
+proof nor a reproducible source-to-binary build. Small integers use i32 stack values; narrow
+stores truncate and loads/returns sign- or zero-extend by the declared type. Boolean bytes need
+not be canonical.
 
 ### Pointer element offsets
 
@@ -121,13 +122,13 @@ checked against the layout table. Resetting a local replaces its view without mo
 memory, granting authority or extending a lifetime.
 
 A readonly span reference parameter (`in` or `ref readonly`) carries the referenced view rather
-than the address of the caller's span home, as span-local addresses already do. This is sound
-only because the home cannot change during the call: the extractor rejects `starg` and `ldarga`
-of such a parameter, span `stobj`, `initobj` and `cpobj` outside the checked local reset, `ref`
-and `out` span parameters, and span references in locals, returns and fields, so no admitted
-code can rebind, address or overwrite a span home. The parameter's readonly attributes, which a
-generic specialization copies from its definition, and these rejections are trusted extractor
-decisions; the Lean validators still bind the raw argument to
+than the address of the caller's span home, as span-local addresses already do. Carrying the view
+is sound only because the home cannot change during the call: the extractor rejects `starg` and
+`ldarga` of such a parameter, span `stobj`, `initobj` and `cpobj` outside the checked local
+reset, `ref` and `out` span parameters, and span references in locals, returns and fields, so no
+admitted code can rebind, address or overwrite a span home. The parameter's readonly attributes,
+which a generic specialization copies from its definition, and these rejections are trusted
+extractor decisions; the Lean validators still bind the raw argument to
 a managed reference, reject its address and accept an empty emission for `ldobj` only at a span
 type. Loads, stores and comparisons that expect a byte reference fault on a view rather than
 reading it as an address.
@@ -173,7 +174,8 @@ are validated; correspondence to CoreCLR remains assumed.
 Native integer overloads use eight-byte transfers under the validated 64-bit deployment profile.
 Short ordinary operations raise `ArgumentOutOfRangeException`; short try-reads initialize the output
 to zero and short try-writes preserve memory. Reads capture source before writing an aliased output.
-These are runtime-helper assumptions backed by validation, not verified runtime implementations.
+These behaviors are runtime-helper assumptions backed by validation; they are not verified
+runtime implementations.
 
 ### Static storage
 
@@ -185,8 +187,8 @@ An RVA field's descriptor alignment is its packing. The extractor checks the RVA
 section's virtual address and file offset agree modulo 8; the runtime premise is that CoreCLR
 places the image at an 8-byte-aligned base. Its loader maps or copies images to page-aligned
 memory, and the bundler pads single-file assemblies to 64 bytes or more, but a flat image the host
-supplies through external assembly probing is used at the host's address, which is assumed, not
-checked, to be 8-byte aligned.
+supplies through external assembly probing is used at the host's address, which is assumed to be
+8-byte aligned and is not checked.
 
 `StaticRegistryValid` requires unique keys, distinct allocations and live immutable storage.
 `StaticWorldValid` constrains the listed descriptors. Composition requires shared keys to have equal
@@ -210,8 +212,8 @@ referenced allocation. Addresses of byref slots are unsupported. Owned homes exp
 returned references are checked after expiry. Extraction binds parameter-home indices to raw uses.
 
 The certificate permits word64/native interchange only at metadata-bound 64-bit storage/returns.
-A known i64 store into an i32/narrow home is a terminal invalid-state case, never a conversion or
-successful successor. Unknown values and mismatched homes cannot use that rule.
+A known i64 store into an i32/narrow home is a terminal invalid-state case and is never a
+conversion or successful successor. Unknown values and mismatched homes cannot use that rule.
 Null managed references are distinct from numeric zero. Access faults on null are not automatically
 named throws; only explicit outcome mappings establish a named exception.
 
@@ -230,12 +232,12 @@ compare identities; `cgt.un` and `brtrue`/`brfalse` test presence against null o
 locals and parameters are roots without bytes and have no address.
 
 `ldfld` and `stfld` of an integer, Boolean, Char or enum field of a class reach the field's
-bytes in the object's allocation (`objectFieldAddress`). The model, not CoreCLR, chooses the
-layout: one 8-byte slot per instance field, the fields of the furthest base first and each
-class's own in declaration order after its base's (`objectFieldOffset`), so a field keeps its
-offset in every derived instance. Lean rechecks the offset against each instruction's raw field
-index and type; that the raw index counts the fields of the declaring class's bases first is
-metadata the extractor decodes. This needs no
+bytes in the object's allocation (`objectFieldAddress`). The model chooses the layout
+independently of CoreCLR: one 8-byte slot per instance field, the fields of the furthest base
+first and each class's own in declaration order after its base's (`objectFieldOffset`), so a
+field keeps its offset in every derived instance. Lean rechecks the offset against each
+instruction's raw field index and type; that the raw index counts the fields of the declaring
+class's bases first is metadata the extractor decodes. The model's layout needs no
 correspondence with CoreCLR's layout because code cannot observe it: `ldflda` on a class is
 rejected, and object references have no integer form. Each access checks that the field's
 declaring class is in the allocation's lineage, so a field of a base class is reached on every
@@ -248,8 +250,8 @@ a fresh live instance (`allocateObject`): an allocation of kind `.object` with t
 bases as its runtime type, one zeroed 8-byte slot per instance field, inherited fields included,
 and authority over all of it. It charges the
 instance's size to `Memory.heapBudget`, the bytes the caller grants for objects, and fails with
-`allocationFailure` when the budget is short; that is a model resource fault, not a CLR
-exception, so no proof of an expected exception can rest on it. The budget never grows back:
+`allocationFailure` when the budget is short; that fault is a model resource fault and is not a
+CLR exception, so no proof of an expected exception can rest on it. The budget never grows back:
 it is a conservative bound that ignores collection. The constructor then runs with the
 instance as its receiver, and the instance is pushed once it returns. Lean rechecks that the
 call site's declaring class is the instance's class, that its bases are those the constructor's
@@ -326,11 +328,11 @@ as a call, so nothing reads its length or characters, and a string root has no a
 rejected.
 
 An instance method of an admitted class, virtual or not, is an entry whose receiver `this` is an
-object reference, not a byref. A theorem about a virtual method is about that body, which a `call`
-(a base call, or a direct call into it) runs exactly. The raw method records the class receiver
-(`objectReceiver`), from which Lean derives the receiver's storage and scalar kind. Lean rejects the address of
-the receiver and of any class-typed local or argument, so no byref can stand in for an object
-receiver.
+object reference and is not a byref. A theorem about a virtual method is about that body, which
+a `call` (a base call, or a direct call into it) runs exactly. The raw method records the class
+receiver (`objectReceiver`), from which Lean derives the receiver's storage and scalar kind. Lean
+rejects the address of the receiver and of any class-typed local or argument, so no byref can
+stand in for an object receiver.
 
 `callvirt` without a `constrained.` prefix, which C# emits for every instance call on a class,
 is admitted when its target is a non-virtual method of an admitted class. It has exactly one
@@ -403,12 +405,12 @@ range, as in CoreCLR. A load pushes what the element's slot holds through `loadS
 class-typed field load does. A store first checks covariance (`storableIn`): null is always
 storable, and an instance of a class, admitted or opaque, is storable exactly when the array's
 element class is in its lineage, which records every base up to `System.Object`, so a `Square`
-stored into a `Shape[]` that is really a `Circle[]` throws `ArrayTypeMismatchException`. That is
-the CLR's rule only because the array's element type is a class: an instance is never assignable
-to a class outside its base chain, while an interface element would also admit the instances
-implementing it, which the lineage does not record. Any other stored value, such as an array, is
-unsupported rather than an exception: the model does not record the interfaces or array
-covariance the CLR would consult for it. The store itself is
+stored into a `Shape[]` that is really a `Circle[]` throws `ArrayTypeMismatchException`. The
+covariance check is the CLR's rule only because the array's element type is a class: an instance
+is never assignable to a class outside its base chain, while an interface element would also
+admit the instances implementing it, which the lineage does not record. Any other stored value,
+such as an array, is unsupported rather than an exception: the model does not record the
+interfaces or array covariance the CLR would consult for it. The store itself is
 `storeSlot`, so it changes only that slot. The checks run in CoreCLR's order: null array,
 index, then type.
 
@@ -461,9 +463,10 @@ instantiations or value types other than the admitted value arrays are rejected.
 ([StringLiterals](../Examples/Proofs/StringLiterals.lean),
 [StringDefault](../Examples/Proofs/StringDefault.lean)). Execution never changes the bindings
 (`invoke_literals`),
-so within a run one text always loads one object, and two loads of it are identical. That is
-ECMA-335 III.4.16. Roslyn marks assemblies `CompilationRelaxations(NoStringInterning)`, which
-lets a runtime drop that guarantee, so the claim rests on CoreCLR: in .NET 10,
+so within a run one text always loads one object, and two loads of it are identical. ECMA-335
+III.4.16 gives this guarantee. Roslyn marks assemblies
+`CompilationRelaxations(NoStringInterning)`, which lets a runtime drop that guarantee, so the
+claim rests on CoreCLR: in .NET 10,
 `StringLiteralMap::GetStringLiteral` (`src/coreclr/vm/stringliteralmap.cpp`) resolves every
 literal through the one `SystemDomain::GetGlobalStringLiteralMap()`, collectible modules
 included, and never consults the relaxation.
@@ -526,7 +529,8 @@ truncate fields, and empty structs occupy at least one byte. Explicit overlap fo
 
 Open generic owners, explicit/auto generic layouts, reference/float fields, inline arrays and
 recursive/depth-over-128 layouts are rejected. Vector512 fields are excluded because their aggregate
-alignment is not modeled. Storage is managed layout, not interop marshalling. Correspondence to
+alignment is not modeled. Storage is managed layout and is not interop marshalling.
+Correspondence to
 [CoreCLR layout](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/vm/classlayoutinfo.cpp)
 is assumed; runtime probes and kernel layout bounds supply different kinds of evidence.
 
@@ -560,20 +564,23 @@ calls, unmanaged conventions, null table entries and mutable tables are excluded
 
 Immutable native handler tables require a faithful explicit runtime-slot binding, live static
 storage, aligned initialized readable bytes and an exact catalog signature. Targets are supplied
-identities, not decoded addresses. Each method has one supported indirect signature; table-pointer
-handler signatures are excluded. This is not arbitrary mutable raw-pointer dispatch.
+identities and are not decoded addresses. Each method has one supported indirect signature;
+table-pointer handler signatures are excluded. These handler tables are not arbitrary mutable
+raw-pointer dispatch.
 
 ## Integer enums
 
 Same-assembly non-generic enums retain identity but execute with their validated integer storage.
-All underlying bit patterns are admitted, not just named constants. Narrow extension/truncation
-follows the underlying type. Boxing, reflection, enum instance methods and external enum dependencies
-are excluded; equal byte widths do not authorize replacing one enum identity with another.
+All underlying bit patterns are admitted, including those without a named constant. Narrow
+extension/truncation follows the underlying type. Boxing, reflection, enum instance methods and
+external enum dependencies are excluded; equal byte widths do not authorize replacing one enum
+identity with another.
 
 Checked pointer parameters and locals admit these enum types and `char`, using the existing
 allocation-relative reference representation and integer loads/stores. Enum pointees retain their
 validated declaration identity and underlying storage; character pointees require the exact runtime
-type identity. This does not admit floating-point, nested-pointer or reference-bearing pointees.
+type identity. This admission does not extend to floating-point, nested-pointer or
+reference-bearing pointees.
 
 ## Portable bit helpers
 

@@ -84,8 +84,8 @@ statically resolved.
 Exported contracts can carry an explicit type-initialization premise for libraries with static
 constructors, including types containing `static readonly` struct fields. The sidecar binds each
 premise to an assembly, type and profile; importing callers retain it in their generated
-artifacts and verification reports. This is a runtime assumption, not a proof that the CLR
-initializer ran. Constructor-initialized field values are not supported for export. See
+artifacts and verification reports. The premise is a runtime assumption; it does not prove that
+the CLR initializer ran. Constructor-initialized field values are not supported for export. See
 [contract interfaces](CONTRACT-INTERFACES.md).
 
 An `export-contracts` manifest can list several profile artifacts for one method and one family

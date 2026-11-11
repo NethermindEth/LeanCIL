@@ -2,11 +2,11 @@
 
 <!-- audience: maintainers -->
 
-How far proof-cost figures move between runs of one tree, how clearly a real cost increase
-shows, and how long measuring takes. Read it when a `Proof cost` comparison reports a change and
-you need to decide whether it is noise. [CI operation](../CI.md#proof-cost) defines the measures
-and thresholds; [validation](../VALIDATION.md#proof-cost) gives the commands that compare a head
-with its base.
+This page reports how far proof-cost figures move between runs of one tree, how clearly a real
+cost increase shows, and how long measuring takes. Read it when a `Proof cost` comparison
+reports a change and you need to decide whether it is noise.
+[CI operation](../CI.md#proof-cost) defines the measures and thresholds;
+[validation](../VALIDATION.md#proof-cost) gives the commands that compare a head with its base.
 
 ## Measuring the noise of a tree
 
@@ -27,9 +27,10 @@ runner.
 
 ## Reference figures
 
-Windows, AMD Ryzen 9 9950X, Lean 4.35.0, `--libraries --jobs 16`, with other builds sharing the
-machine. The workload is the 92 test libraries of `lakefile.toml`: 4,859 rows and 2,411,059,442
-heartbeats. Row and heartbeat totals grow as tests are added.
+The figures were measured on Windows, on an AMD Ryzen 9 9950X with Lean 4.35.0 and
+`--libraries --jobs 16`, with other builds sharing the machine. The workload is the 92 test
+libraries of `lakefile.toml`: 4,859 rows and 2,411,059,442 heartbeats. Row and heartbeat totals
+grow as tests are added.
 
 | Between two runs of one tree | Figure |
 | --- | ---: |

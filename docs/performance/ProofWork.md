@@ -2,9 +2,9 @@
 
 <!-- audience: maintainers -->
 
-How to time the elaboration of one `CIL/` module, and which proof forms keep the slowest safety
-modules fast. Read it before changing a proof in `CIL/Safety/`, where one module can take a
-minute to compile. For the cost of proofs in tests and extracted output, use
+This page describes how to time the elaboration of one `CIL/` module, and which proof forms keep
+the slowest safety modules fast. Read it before changing a proof in `CIL/Safety/`, where one
+module can take a minute to compile. For the cost of proofs in tests and extracted output, use
 [proof cost](ProofCost.md) instead.
 
 ## Timing a module
@@ -36,8 +36,8 @@ are unchanged, and that the compiled module passes `leanchecker` replay.
 
 ## Reference figures
 
-Lean 4.35.0, warm imports, no concurrent benchmark. Compare only with a time taken on the same
-machine class and with the same options.
+The figures were taken with Lean 4.35.0, warm imports and no concurrent benchmark. Compare only
+with a time taken on the same machine class and with the same options.
 
 | Module | Seconds | Machine and options |
 | --- | ---: | --- |
@@ -50,7 +50,7 @@ machine class and with the same options.
 
 In the `Step.lean` run the cumulative `simp` counter is 12.7 s and `dsimp` 14.8 s.
 
-## Proof forms that keep these modules fast
+## Faster proof forms
 
 Each instruction-family proof in these modules traverses the full instruction dispatcher, so a
 redundant traversal is paid once per family. The figures are the cost of the slower form on the

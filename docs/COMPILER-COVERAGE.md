@@ -36,7 +36,8 @@ including constructors and open generic methods. The checked-in
 blocked (`B`) or not checked (`N`) in each column. A missing method is `-`. Any difference
 requires review; use `--update` to record an intentional change. Per-method comparison catches
 losses even when gains elsewhere leave the accepted count unchanged. Reports include counts
-and detailed blocker diagnostics. Admission is extraction coverage, not a correctness proof.
+and detailed blocker diagnostics. Admission is extraction coverage; it is not a correctness
+proof.
 Each compiler/language directory also contains `not-checked.tsv`, listing the method and
 selection failure for every `N` entry; console output groups these entries by reason.
 An open generic definition is not an entry `extract` accepts, so it is `B`, with that shape as
@@ -83,10 +84,10 @@ the extractor's own `Nethermind.LeanCIL.dll`, a realistic program that changes w
 metadata and compares the report with the checked-in
 [baseline](../Tests/SelfAdmissionBaseline.txt), the list of admitted methods. It needs no Lean.
 
-The gate is admission, not blocker totals, and it requires the admitted set to match the
+The gate checks admission and ignores blocker totals: it requires the admitted set to match the
 baseline exactly. A method the baseline admits that is no longer admitted, an admission the
-baseline omits, and an admitted method that no longer exists each fail the scan, since a stale
-baseline stops guarding the methods it leaves out. Review the difference, then record it with
+baseline omits, and an admitted method that no longer exists each fail the scan, since the scan
+checks no method that a stale baseline leaves out. Review the difference, then record it with
 `dotnet run --file Tests/SelfAdmission.cs -- --update` in the PR that causes it. Counts, the
 difference and the most widely reached blockers are reported in
 `artifacts/SelfAdmission/summary.md` and the CI job summary. The baseline names a

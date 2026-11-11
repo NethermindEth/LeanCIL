@@ -2,11 +2,12 @@
 
 <!-- audience: maintainers -->
 
-What the lookup equations of a method cost, and how to check that the cost stays linear in the
-method's length. Read it before changing `cil_instruction_equations`, `CIL.CodeSuffix` or the
-form in which the extractor and the template emitter write a method's code.
+This page describes what the lookup equations of a method cost, and how to check that the cost
+stays linear in the method's length. Read it before changing `cil_instruction_equations`,
+`CIL.CodeSuffix` or the form in which the extractor and the template emitter write a method's
+code.
 
-## What must hold
+## Cost properties
 
 `cil_instruction_equations body` states one `@[cil_code ↓]` equation per instruction,
 `body_instruction{pc} : (body xs).code[pc]? = some op`; see
@@ -58,13 +59,14 @@ computed pc costs more than 1.25 times as much per case at 16 repeated segments 
 
 ## Reference figures
 
-Windows, 32 cores, Lean 4.35.0, one method of `word = word * y + x;` repeated at the scalar
-profile. Each file was compiled with `-DElab.async=false`, and heartbeats come from
-`IO.getNumHeartbeats` at the end of the file; they repeat to within a few hundred between runs.
+The figures were measured on Windows with 32 cores and Lean 4.35.0, on one method of
+`word = word * y + x;` repeated at the scalar profile. Each file was compiled with
+`-DElab.async=false`, and heartbeats come from `IO.getNumHeartbeats` at the end of the file;
+they repeat to within a few hundred between runs.
 CPU seconds were taken while other builds ran and compare only within one session.
 
-The extraction, `Extracted.lean` with its certificate. "Without equations" is the same file
-without the `cil_instruction_equations` command:
+The first table measures the extraction, `Extracted.lean` with its certificate. "Without
+equations" is the same file without the `cil_instruction_equations` command:
 
 | Instructions | Heartbeats | Without equations | Per equation | CPU | `.olean` bytes |
 | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -79,9 +81,9 @@ size, so the whole file is linear in heartbeats and the equations are under 3% o
 time per instruction still rises from 0.029 s at 2,002 instructions to 0.034 s at 4,002, which
 the equations do not account for.
 
-The method's code as a hand-written definition followed by the command, and the output of
-`leancil templates` over the scalar and `x64-v3` extractions, compiled as emitted. "Per
-equation" subtracts the same file without the command:
+The second table measures the method's code as a hand-written definition followed by the
+command, and the output of `leancil templates` over the scalar and `x64-v3` extractions,
+compiled as emitted. "Per equation" subtracts the same file without the command:
 
 | Instructions | Body, heartbeats | Per equation | CPU | Template, heartbeats | Per equation | CPU |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
