@@ -91,11 +91,8 @@ library and tactic regressions kernel-check the resulting proofs.
 
 ### Loops
 
-- The `loops` suite checks universal countdown termination, NOP and reordered variants, runtime
-  comparisons, rejection of incorrect and nondecreasing loops, a counted loop composed through its
-  helper's contract and reused for a reimplemented helper, a loop that returns or propagates its
-  helper's named exception, a buffer fill proved as a sequence property, feature selection,
-  infinite-loop fuel exhaustion, backward switch and malformed-input rejection.
+- [Coverage by behavior](VALIDATION-COVERAGE.md#coverage-by-behavior) lists the cases of the
+  `loops` suite.
 - `Tests.LoopOutcome` derives the normal-only loop induction, loop call and `Ensures` as the
   `none` instances of the outcome rules, and proves that unsupported execution, invalid state, fuel
   exhaustion, normal return and a different exception never satisfy an expected loop exception.
@@ -144,9 +141,8 @@ library and tactic regressions kernel-check the resulting proofs.
 
 ### Consumer stepping regressions
 
-These proofs check consumer-facing stepping and reduction behavior. They use the public tactics
-with symbolic values and memory; they do not replace the checked interpreter with
-consumer-specific execution rules.
+These proofs check consumer-facing stepping and reduction through the public tactics, with
+symbolic values and memory and the checked interpreter's own execution rules.
 
 | Case | Regression |
 | --- | --- |
@@ -161,11 +157,10 @@ consumer-specific execution rules.
 Each comparison proof has a 2,000-heartbeat budget. The widening proof handles all eight
 combinations of signed conversion, scalar position and reversed arguments in 12,000 heartbeats,
 using one `cil_contract_steps 3` invocation per case. Its arbitrary continuation preserves the
-actual widened stack and memory; it does not merely check that some execution exists. These
-budgets detect elaboration regressions independently of machine speed; they are not wall-clock
-benchmarks. `ordered_widening_returns` composes that prefix with a concrete suffix which discards
-both operands and returns zero, proving that the continuation premise is satisfiable for every
-case. The widened value is checked by the prefix theorem.
+actual widened stack and memory. The budgets detect elaboration regressions independently of
+machine speed. `ordered_widening_returns` composes that prefix with a concrete suffix which
+discards both operands and returns zero, proving that the continuation premise is satisfiable for
+every case; the prefix theorem checks the widened value.
 
 ### Contracts and composition
 
@@ -265,7 +260,7 @@ case. The widened value is checked by the prefix theorem.
 
 ### Running these checks
 
-Build the focused Lean targets and run the extracted-loop suite with:
+Build the focused Lean targets and run the extracted-loop suite:
 
 ```sh
 lake build CIL Tests.Automation Tests.MethodEmbedding Tests.RetainedNumericLocals Tests.AllocationRenaming Tests.AllocationExecutionRenaming Tests.OutcomeEmbedding Tests.AggregateSetup Tests.Semantics Tests.InterpreterEquations Tests.MethodIdentity Tests.StructuralLabels Tests.DebugNames Tests.MethodContract Tests.ConstructContract Tests.OutcomeContract Tests.Imports Tests.LoopOutcome Tests.ContractConsequence Tests.InvocationCertificates Tests.ValidCallTransport Tests.ConfinedFootprints Tests.LocalSnapshots Tests.AggregateFields Tests.LoopFrames Tests.LoopDiagnostics Tests.BufferContents Tests.Linking Tests.StoreFacts Tests.ProfileContract Tests.InstructionEquations Tests.CodeAt Tests.Segment Tests.SimdLanes

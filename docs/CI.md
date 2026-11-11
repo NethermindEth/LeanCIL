@@ -45,11 +45,10 @@ build or fixture SDK project.
 
 ## Required check
 
-The required `Build and verify` check always runs. It succeeds only when selection
-succeeds and every selected suite passes, or when selection explicitly reports
-that no suites are needed. Failed or cancelled selection/tests cannot pass it.
-Keep this aggregate check required rather than individual matrix jobs, which may
-be absent on a PR.
+The required `Build and verify` check always runs. It succeeds only when selection succeeds and
+every selected suite passes, or when selection explicitly reports that no suites are needed; a
+failed or cancelled selection or suite fails it. Keep this aggregate check required, since
+individual matrix jobs may be absent on a PR.
 
 ## Suite jobs
 
@@ -59,8 +58,8 @@ is one runner's share of a round: the measured time of all suites divided by the
 and by the fewest rounds that keep a job no longer than the longest suite, which is two rounds with
 the checked-in durations. The longest suite is then the longest job and the runners finish
 together. Suites go longest first into the fullest job that still has room, at most eight to a job,
-and jobs start longest first. The matrix runs at most eight jobs at once; the runners are shared,
-so do not raise that limit.
+and jobs start longest first. The runners are shared, so do not raise the limit of eight
+concurrent jobs.
 
 - The duration table `scripts/verification-durations.json` holds verification time, excluding
   setup, which a job's summary and each member's transcript report per suite. A suite without a
@@ -195,11 +194,10 @@ fixture identity.
 
 ## Proof cost
 
-A tactic or library change alters the terms proofs build and the work it takes to build them, and
-a shorter proof can cost more than the one it replaces. On a pull request the `Proof cost` job
-compares what each proof costs at the head with what `main` measured at the merge base and puts
-one table per source in its summary. The base is the first parent of the PR's merge commit, so
-`main`'s own changes are never attributed to the PR, and there is no checked-in baseline.
+On a pull request the `Proof cost` job compares what each proof costs at the head with what
+`main` measured at the merge base and puts one table per source in its summary. The base is the
+first parent of the PR's merge commit, so `main`'s own changes are never attributed to the PR,
+and there is no checked-in baseline.
 
 ### Measures
 
@@ -215,8 +213,8 @@ the frontend `scripts/ProofCost.lean`, and writes one row per command and one pe
 | Lines | source lines of the command or module | no |
 | Elapsed ms | wall time of the command; kernel time is in the JSON report | no |
 
-Elapsed time depends on the runner's load, so it is reported and never fails a job. The frontend
-does not certify proofs: a proof is accepted by the verification suites. An error in any command
+Elapsed time depends on the runner's load, so it is reported and never fails a job. The
+verification suites accept a proof; the frontend certifies none. An error in any command
 or nested elaboration snapshot makes the module unmeasured; later successful commands cannot
 erase it. Expected diagnostics consumed by `#guard_msgs` do not count as errors. Auxiliary
 theorems contribute to the declaring command's kernel heartbeats and proof objects.
@@ -243,9 +241,9 @@ A source is measured on each tree by the run that verifies it:
   of an accepted proof, so a suite that also checks rejected proofs against an extraction verifies
   the accepted one last.
 
-### Where rows are measured
+### Row measurement
 
-The head is measured where it is verified, in no job of its own. A `Verify` job that ran a proof
+The head is measured in the jobs that verify it. A `Verify` job that ran a proof
 suite measures that suite once it has passed. A suite's rows are the output directories it owns,
 which `VerificationSuites.ProofOutputs` declares, so a suite that shares its job with others is
 measured alone. Before measuring, the job checks that ownership accounts for everything it
@@ -280,16 +278,15 @@ rows and the published rows and compares every source before it fails for any of
 | Smaller changes, improvements, and added, removed, renamed or edited-unnamed rows | reported only |
 | `main` published no rows for the source | reported as `No rows published for merge base <commit>; not compared`; does not fail |
 
-Both conditions of a threshold must hold: 5% of a proof that costs a few thousand heartbeats is
-not a cost, and a large module may grow by a small share. Reruns of one tree differ by a few dozen
-heartbeats in millions and in no olean byte, as the [measurements](performance/ProofCost.md)
-record, so the threshold marks what deserves a reviewer's decision, not noise. A module's totals
-decide only while the module holds the same rows at the base and the head: a module that gained a
-proof grew for that reason.
+Both conditions of a threshold must hold, so a small proof that grows by 5% and a large module
+that grows by a small share both pass. The thresholds lie above rerun noise: reruns of one tree
+differ by a few dozen heartbeats in millions and in no olean byte
+([measurements](performance/ProofCost.md)). A module's totals decide only while the module holds
+the same rows at the base and the head.
 
 `main` has published no rows while the push run of the merge base is running or was cancelled,
-when the PR changes the measurer, and for the parent branch of a stacked pull request. That is the
-only way to pass without a comparison.
+when the PR changes the measurer, and for the parent branch of a stacked pull request. A source
+passes without a comparison only in those cases.
 
 `Proof cost` is a separate check and not part of `Build and verify`, so a regression shows as a
 failed check on the PR without blocking a merge the reviewer has accepted. A manual run of the

@@ -9,7 +9,7 @@ verification. Read it before changing contract export, the native auditor or an 
 ## Export suite selection
 
 `dotnet run --file Tests/ContractExport.cs` runs every export cohort once. `dotnet run --file
-scripts/Test.cs -- --suite all` runs the same export partitions once with the other suites. Each
+scripts/Test.cs -- --suite all` runs the same partitions once with the other suites. Each
 partition has a fresh SDK and proof workspace. Full verification keeps fresh extraction, source
 audit, independent kernel replay, and all report and artifact checks.
 
@@ -52,7 +52,7 @@ and their case IDs. [Suite jobs](CI.md#suite-jobs) gives their CI time limits.
   successful report.
 - The default eight-argument `Tests/FullImportVerification.cs` invocation runs resolution and all
   full cohorts once; `--cohort NAME` selects one full cohort. Unknown, missing or duplicate
-  selections fail before fixture setup. The full plan contains only its ten base cohorts; the
+  selections fail before fixture setup. The full plan holds only its ten base cohorts; the
   standalone and discovery partitions cannot enter it.
 - `exportsstatics`, `exportsfullstatics`, `exportstransitive`, `exportstransitiveoutcomes`,
   `exportstyped`, `exportsderived`, `exportsinitialized` and `exportsprofiles` run directly, with
@@ -60,9 +60,9 @@ and their case IDs. [Suite jobs](CI.md#suite-jobs) gives their CI time limits.
   base case IDs, and a standalone fixture cannot use an empty base completion ledger to claim
   coverage.
 - `exportsdiscovery` records one separate `discovery.fixture` completion after the child
-  succeeds; the child's behaviors are not counted in the 49 base cases. It builds the producer
-  library and creates real proof packages and publication. The child builds, extracts and
-  verifies its own caller, and needs no baseline caller artifact or verified report. The
+  succeeds; the child's behaviors are outside the 49 base cases. The partition builds the
+  producer library and creates real proof packages and publication. The child builds, extracts
+  and verifies its own caller and needs no baseline caller artifact or verified report. The
   partition runs no core caller verification, restrictions, callbacks or full cases.
 - `exportstyped` owns its fixture and five input proof/interface modules; shared model and proof
   dependencies keep their own owners.
@@ -81,12 +81,12 @@ Full integration results come from the CI partition jobs. The routing tests,
 ### Fixtures
 
 - `Tests/PointerOperations.cs` compares seven compiled pointer methods with .NET: int32/native
-  byte subtraction, pointer differences and four unsigned orderings. It forges subtraction as
-  addition and requires the Lean scalar certificate to reject it. The Lean fixtures cover negative
-  offsets and differences, end positions, readonly preservation, every unsigned branch, and null,
+  byte subtraction, pointer differences and four unsigned orderings. The Lean scalar certificate
+  must reject subtraction forged as addition. The Lean fixtures cover negative offsets and
+  differences, end positions, readonly preservation, every unsigned branch, and null,
   cross-allocation, invalid-position and signed-comparison rejection.
-- Managed-call proof construction is covered by `Tests/ExtractionGenerics.lean` and the 15
-  generated generic-method samples in `Tests/GenericEvidence.cs`. Direct tactic rejection checks
+- `Tests/ExtractionGenerics.lean` and the 15 generated generic-method samples in
+  `Tests/GenericEvidence.cs` cover managed-call proof construction. Direct tactic rejection checks
   cover changed signedness, assembly scope, generic arguments and argument count.
 - `Tests/GenericEvidence.cs` also checks exact external-call identity sharing, repeated emission,
   pruned-only identities and Unicode/escaped characters. Changed bytes, versions and tokens fail
@@ -95,11 +95,10 @@ Full integration results come from the CI partition jobs. The routing tests,
   raw/translated metadata rejection cases run alongside.
 - `Tests/AllocationImports.cs`, in `core`, checks that the CIL umbrella omits allocation
   refinement, builds both explicit allocation acceptance modules, and jointly replays every
-  additional imported module; these modules are checked even though ordinary consumers do not
-  import them. The compiled namespace audit checks their theorem axiom closures even on warm
-  builds and binds the audited paths and module bytes to those replayed. An isolated theorem
-  depending on `sorryAx` passes kernel replay but must fail that audit; build output is also
-  checked.
+  additional imported module, which ordinary consumers do not import. The compiled namespace
+  audit checks their theorem axiom closures even on warm builds and binds the audited paths and
+  module bytes to those replayed. An isolated theorem depending on `sorryAx` passes kernel replay
+  but must fail that audit; build output is also checked.
 - The registered constrained and import evidence suites test unreachable switch-prefix bypass,
   duplicate switch targets, short reachability, both import-table bounds, and trailing-prefix and
   extra-emitted-instruction rejection for constrained and opaque-local evidence.
@@ -112,7 +111,7 @@ equivalence theorem or property stated for each index and the regression that co
 
 | Check | Guarantee | Regression |
 | --- | --- | --- |
-| Certificate successor index | `FlowIndex.build_spec` proves prefix consumption and exact list lookup equivalence. The tree is built in one pass over the list, linear in list cells; a target lookup is logarithmic. Feature and scalar validators use the proved optional-lookup interface. The shared state-pairing proof uses explicit list-shape cases and depends only on `propext`. | `Tests.FlowIndex`: empty and singleton inputs, odd/even partitions, missing certificate states, out-of-bounds lookups and untouched suffixes |
+| Certificate successor index | `FlowIndex.build_spec` proves prefix consumption and exact list lookup equivalence. Feature and scalar validators use the proved optional-lookup interface. The shared state-pairing proof uses explicit list-shape cases and depends only on `propext`. | `Tests.FlowIndex`: empty and singleton inputs, odd/even partitions, missing certificate states, out-of-bounds lookups and untouched suffixes |
 | Region closure | Builds an ordered map of each method's minimum starting pc, visits program methods in order and checks each included body once. Absent region entries are skipped and region membership is kept for absent callees: execution validity is a separate obligation. The equivalence theorem covers the list-based specification exactly, including duplicate starts and out-of-range pcs. | `Tests.RegionRun`; `Tests/RegionScaling.lean` is a standalone workload for `leanprof elab --heartbeats` |
 | Region suffix membership | Fallthrough closure is automatic, since `lower ≤ pc` implies `lower ≤ pc + 1`, so the checker looks up only explicit branch targets and callees. Its equivalence theorem covers every instruction, including a final fallthrough beyond the body; instruction availability is a separate execution obligation. | `Tests.RegionRun` |
 | Constrained validation and lowering | Balanced instruction/reachability indexes and a set of all decoded branch destinations, including unreachable instructions and switch arms; lowering also indexes predecessor instructions. `lowerConstrainedRaw_eq_original` proves identical output for arbitrary raw bodies, including malformed prefixes. `ConstrainedCallsValid_iff_original` preserves the list-based rules. | Constrained evidence suites |
@@ -127,29 +126,27 @@ equivalence theorem or property stated for each index and the regression that co
 
 ### Extractor bookkeeping
 
-The extractor's own C# indexes are covered by these regressions:
+These regressions cover the extractor's own C# indexes:
 
 - Extraction bookkeeping indexes declaration names, imported assembly identities, imported call
-  slots, batch proof modules and aggregate layout names. Component imports keep declaration
-  order; raw layout positions and emitted layout constant positions have separate indexes.
-  `Tests/ConsumerSupportCandidates.cs` checks dependency ordering and conservative references in
-  literal text; `Tests/InstructionIndexes.cs` checks nested layout ordering and absent types.
-- Aggregate metadata validation counts module type names once per layout traversal and field
-  names once per visited type. Duplicate instance/static field names and duplicate full type names
-  are rejected; the counts are rebuilt on each public layout request, so later metadata mutations
-  are visible. `Tests/InstructionIndexes.cs` includes those rejection and mutation cases.
-- Template emission groups methods by identity once, indexes template positions and each
-  variant's method positions, and indexes template callee parameters. Output uses sorted
-  template/callee order and profile input order; duplicate identities are rejected before
-  emission. An absent callee in an excluded profile gets a zero placeholder.
-  `Tests/TemplateIndexes.cs` checks reordered methods, conditional absent callees, deterministic
-  output and duplicate rejection without compiling Lean.
+  slots, batch proof modules and aggregate layout names, and keeps component imports in
+  declaration order. `Tests/ConsumerSupportCandidates.cs` checks dependency ordering and
+  conservative references in literal text; `Tests/InstructionIndexes.cs` checks nested layout
+  ordering and absent types.
+- Aggregate metadata validation rejects duplicate instance/static field names and duplicate full
+  type names. It rebuilds its name counts on each public layout request, so later metadata
+  mutations are visible. `Tests/InstructionIndexes.cs` includes those rejection and mutation
+  cases.
+- Template emission writes templates and callees in sorted order and profiles in input order,
+  and rejects duplicate method identities before emission. An absent callee in an excluded
+  profile gets a zero placeholder. `Tests/TemplateIndexes.cs` checks reordered methods,
+  conditional absent callees, deterministic output and duplicate rejection without compiling Lean.
 - Loaded contract libraries index exports by exact identity and certifications by exact
   (identity, profile). The production reader rejects duplicates before constructing either index.
   `Tests/ImportIndexes.cs` checks case-sensitive lookup, multiple profiles and the reader's exact
   duplicate diagnostics using an otherwise accepted interface.
-- Blocker collection keeps ordered lists for sites, entries and call chains and uses indexes for
-  deduplication. Sites use record value equality; entries use exact (signature, profile) keys;
+- Blocker collection keeps ordered lists for sites, entries and call chains and deduplicates
+  through indexes. Sites use record value equality; entries use exact (signature, profile) keys;
   chains use full ordinal element equality, including element boundaries and order. Findings and
   reaches have reference identity, so assigning a finding's output ID cannot change its hash.
   `Tests/Blockers.cs` checks distinct arrays with equal contents, distinct chain splits, profile
@@ -158,55 +155,50 @@ The extractor's own C# indexes are covered by these regressions:
 
 ## Layout and dispatch indexes
 
-- **Layout contexts.** Read-only translation validation and Lean emission each own a
-  `LayoutContext`, scoped to one module and architecture. It reuses fully validated root layouts
-  and field/position snapshots through layout declarations, instruction translation and raw
-  evidence emission. Every new root runs the recursive validator with a fresh active set and
-  recursive cache, so warming a child cannot bypass the 128-level nesting check. Contexts never
-  cross metadata rewrites or extraction requests, and context-taking helpers reject
-  module/architecture mismatches. `Tests/InstructionIndexes.cs` checks nested-root reuse, field
-  identity/order, fresh-call mutation visibility, distinct x64/arm64 vector layouts and nesting
-  rejection after warming a child.
-- **Argument homes.** C# argument translation builds argument-to-home-position indexes once per
-  method in validation, emission and exception lint. The ordered home array drives evidence
-  emission. Duplicate inputs keep their first position, missing homes stay absent, and raw locals
-  are added to the home position when emitting local-slot instructions.
+- Translation validation and Lean emission each own a `LayoutContext`, scoped to one module and
+  architecture, which reuses fully validated root layouts and field/position snapshots. Every
+  new root runs the recursive validator with a fresh active set and recursive cache, so warming
+  a child cannot bypass the 128-level nesting check. Contexts never cross metadata rewrites or
+  extraction requests, and context-taking helpers reject module/architecture mismatches.
+  `Tests/InstructionIndexes.cs` checks nested-root reuse, field identity/order, fresh-call
+  mutation visibility, distinct x64/arm64 vector layouts and nesting rejection after warming a
+  child.
+- C# argument translation indexes argument home positions once per method in validation,
+  emission and exception lint. Duplicate inputs keep their first position, missing homes stay
+  absent, and raw locals are added to the home position when emitting local-slot instructions.
   `Tests/InstructionIndexes.cs` exercises loads, stores, addresses, duplicate homes and
   missing-store rejection.
-- **Interface-module merging.** An ordinal-ignore-case spelling index detects collisions while the
-  output stays in ordinal sorted order. Exact duplicate names with identical source are accepted;
+- Interface-module merging detects spelling collisions ignoring ordinal case and writes its
+  output in ordinal sorted order. Exact duplicate names with identical source are accepted;
   changed source or different casing is rejected, including Unicode ordinal case pairs.
   `Tests/ImportIndexes.cs` exercises this rule independently of interface admission.
-- **Static initializers.** Bindings use the emitter's method-identity index. Null initializers use
+- Static initializer bindings use the emitter's method-identity index. Null initializers use
   zero and missing initializers produce the `-1` sentinel. Validation shares a read-only
-  `StaticValues.Context` within one metadata validation walk: constructor indexes keep store
-  positions, the first control transfer and an ordered branch-reentry envelope; module indexes
-  keep the first stores outside a field's constructor; constructor closure address checks and
-  initializer static-access checks are shared. Specialization creates detached clones, so the
-  compiled module is unchanged. Each validation gets a fresh context; there is no module-wide
-  persistent index cache. Index construction records resolution failures, so a later failure
-  cannot replace the earlier writer diagnostic. `Tests/StaticValueIndexes.cs` checks scalar
-  copies, duplicate stores, prefix control flow, branch/switch and foreign targets, first outside
-  writer, closure address-taking, fresh contexts and resolution-error ordering, and that
-  computable scalars never resolve as unknown while random seeds do.
-- **Layout computation.** Field placements accumulate in reverse and are restored to declaration
-  order once. `computeLayout_eq_append` proves equality to the complete list-based computation for
+  `StaticValues.Context` within one metadata validation walk. Specialization creates detached
+  clones, so the
+  compiled module is unchanged. Each validation gets a fresh context, and no index persists for
+  the module. Index construction records resolution failures, so a later failure cannot replace
+  the earlier writer diagnostic. `Tests/StaticValueIndexes.cs` checks scalar copies, duplicate
+  stores, prefix control flow, branch/switch and foreign targets, first outside writer, closure
+  address-taking, fresh contexts and resolution-error ordering, and that computable scalars never
+  resolve as unknown while random seeds do.
+- Layout computation accumulates field placements in reverse and restores declaration order
+  once. `computeLayout_eq_append` proves equality to the complete list-based computation for
   arbitrary layouts, architectures and nested-layout tables. `Tests.LayoutAccumulation` covers
   order, explicit overlaps, empty layouts, missing children, packing/offset failures and vector
   architecture restrictions.
-- **Constrained dispatch.** Validation and lowering each build ordered dispatch candidate indexes
-  once per invocation and reuse them across call sites; they do not share an index across
-  invocations. The indexes support type identity, method token/name and explicit interface
-  override lookup. Candidate buckets keep duplicates, exact type checks and explicit override
-  precedence; repeated override tokens within one method contribute one candidate.
-  Arbitrary-input equivalence theorems cover indexed resolution, complete instruction validation
-  and lowering, including malformed and ambiguous metadata. The list-based `resolveConstrained` is
-  the specification those theorems use; production validation and lowering use
-  `DispatchIndex.resolve`. The helpers `constrainedSiteWindow`, `constrainedSites`,
-  `lowerConstrainedInstruction`, `lowerConstrainedCode` and their streaming equivalence theorems
-  accept a resolver function.
-- **Public layout projection.** Validation builds balanced indexes for artifact selection and
-  nested public-index expansion, and uses ordered sets for its three uniqueness checks.
+- Constrained dispatch validation and lowering each build ordered dispatch candidate indexes
+  once per invocation and reuse them across call sites, never across invocations. The indexes
+  support type identity, method token/name and explicit interface override lookup. Candidate
+  buckets keep duplicates, exact type checks and explicit override precedence; repeated override
+  tokens within one method contribute one candidate. Arbitrary-input equivalence theorems cover
+  indexed resolution, complete instruction validation and lowering, including malformed and
+  ambiguous metadata. The list-based `resolveConstrained` is the specification those theorems
+  use; production validation and lowering use `DispatchIndex.resolve`. The helpers
+  `constrainedSiteWindow`, `constrainedSites`, `lowerConstrainedInstruction`,
+  `lowerConstrainedCode` and their streaming equivalence theorems accept a resolver function.
+- Public layout projection validation indexes artifact selection and nested public-index
+  expansion, and uses ordered sets for its three uniqueness checks.
   `LayoutProjectionValid_iff_list` proves exact equivalence to all list-based conditions for
   arbitrary inputs, including malformed indices and catalogs. The unfolded proposition exposes
   `projectionDistinct ... = true` and `projectionMetadataMatches`; recover the list-based
@@ -225,10 +217,10 @@ The extractor's own C# indexes are covered by these regressions:
   its certified library.
 - Fresh consumer verification audits the extraction certificate and requested proof in one native
   import environment. Both artifacts must match their kernel-replayed module paths, and their
-  individual theorem types, premises and allowed axioms are checked. This reuses no previous proof
-  result and skips no fresh verification. `Tests/ConsumerCertificateReuse.cs` checks combined
-  certificate/theorem audits and rejects corrupted receipts, changed extraction and
-  generated-source modifications.
+  individual theorem types, premises and allowed axioms are checked. This audit reuses no
+  previous proof result and skips no fresh verification. `Tests/ConsumerCertificateReuse.cs`
+  checks combined certificate/theorem audits and rejects corrupted receipts, changed extraction
+  and generated-source modifications.
 - The native auditor parses contract source import headers with Lean's parser. It rejects
   malformed headers, keeps comments and module-system import syntax, and never elaborates source
   commands. The `imports` fixture checks those properties.
@@ -257,9 +249,9 @@ verifies each example in its own request, and `--check-existing <directory>` che
 and rejects changed proof identity or batch source.
 
 The generic-method, F# and universal-contract fixtures also batch their immutable positive proofs.
-The generic instance and other fixed-memory contracts keep their exact statements; batching does
-not turn them into arbitrary-memory specifications. Mutated assemblies and expected failures have
-isolated checks.
+The generic instance and other fixed-memory contracts keep their exact statements, so batching
+leaves them fixed-memory specifications. Mutated assemblies and expected failures have isolated
+checks.
 
 ### Native joint kernel replay
 
@@ -286,16 +278,16 @@ before executing it. Bootstrap and profiling use the toolchain frontend runner.
 An audit request may carry `replayTargets`: the auditor then keeps the kernel's checked
 environment for structural theorem and constant checks, with no second dependency import. Any
 duplicate declaration, interface/closure/namespace request, or contract refutation requiring
-source locations uses the ordinary audit import. The standalone replay duplicate rule is
-unchanged: equal theorem types can have different proof bodies, so a merged replay environment
-must not choose which body's axioms a subsequent audit sees. Byte snapshots, module-path checks
-and post-audit integrity checks bind the result. The verifier records `auditFused`, so measured
-runs distinguish shared environments from metadata or duplicate-declaration fallbacks.
+source locations uses the ordinary audit import. Standalone replay keeps its duplicate rule:
+equal theorem types can have different proof bodies, so a merged replay environment must not
+choose which body's axioms a subsequent audit sees. Byte snapshots, module-path checks and
+post-audit integrity checks bind the result. The verifier records `auditFused`, so measured runs
+distinguish shared environments from metadata or duplicate-declaration fallbacks.
 
 Single-request contract exports combine declaration replay with the complete theorem, constant and
 closure audit; source and artifact checks surround the export callback.
 
-Regressions:
+These regressions cover joint replay:
 
 - `Tests/JointReplay.cs` exercises bootstrap and native replay against import-closed targets,
   repeated equation lemmas, conflicting declarations, hidden dependencies and forged theorems;
@@ -315,10 +307,9 @@ Regressions:
 ### Evidence-suite reuse
 
 - The `evidence` runner compiles its test modules once against the authenticated CIL library,
-  without asking Lake to rebuild that library from copied build traces. Test dependencies are
-  ordered before their importers, with at most two independent compilations running together.
-  Child fixtures validate the parent's source/output hashes before reusing a completed test; a
-  standalone fixture invocation builds on its own. The `dispatch` runner prepares its modules the
+  without asking Lake to rebuild that library from copied build traces. Child fixtures validate
+  the parent's source/output hashes before reusing a completed test; a standalone fixture
+  invocation builds on its own. The `dispatch` runner prepares its modules the
   same way. Run this preparation alone with
   `dotnet run --file Tests/ExtractionEvidence.cs -- --prepare-only` or
   `Tests/DispatchEvidence.cs -- --prepare-only`.
@@ -355,7 +346,7 @@ Regressions:
   and a checked unchanged-obligation control in the replayed evidence batch. Unchanged controls
   compile first, with repeated generic controls deduplicated. Byte-backed identity definitions
   keep their UTF-8 witnesses. Evidence-list omission and reordering check the complete
-  certificate, because they test agreement between records, not an independent validator.
+  certificate, because they test agreement between records and no single validator.
 - Closed typeof comparisons cover value-producing calls, operandless `ceq` and short/long
   reference-equality branches. The branch cases check both identity outcomes in shared
   feature/scalar certificates; forged targets, wrong opcodes, forwarded scopes and branches into
@@ -364,59 +355,59 @@ Regressions:
 
 ### Full verification and publication
 
-- **Term transfer.** Full-verification term transfer encodes each structurally distinct
-  expression node once and writes a compact data table. Structural equality includes binder
-  spelling and annotations; names keep numeric and string components, and universe expressions
-  keep their full structure. Metadata is stripped. The decoder rejects missing, cyclic and forward
-  references, unknown binder annotations and malformed table data. Free variables and
-  expression/universe metavariables are not supported. Decoding constructs expressions only: each
-  transferred declaration passes `Lean.addDecl` with kernel checking explicitly enabled, followed
-  by the independent replay and exact composition audit. The generated source imports the decoder
-  from the certified `CIL.Interface.FullTransfer` module. `Tests.FullTransfer` checks exact
+- Full-verification term transfer encodes each structurally distinct expression node once and
+  writes a compact data table. Structural equality includes binder spelling and annotations;
+  names keep numeric and string components, and universe expressions keep their full structure.
+  Metadata is stripped. The decoder rejects missing, cyclic and forward references, unknown
+  binder annotations and malformed table data. Free variables and expression/universe
+  metavariables are not supported. Decoding constructs expressions only: each transferred
+  declaration passes `Lean.addDecl` with kernel checking explicitly enabled, followed by the
+  independent replay and exact composition audit. The generated source imports the decoder from
+  the certified `CIL.Interface.FullTransfer` module. `Tests.FullTransfer` checks exact
   reconstructed types and values across binders, universes, projections, local lets, string
   literals and proofs, plus malformed table rejection. The full transitive suite covers forged
   dependency, staged mutation, changed implementation, cyclic dependency and missing-bundle
   regressions.
-- **Publication.** Contract publication audits interface declarations and their requested
-  closures in one imported environment. The fresh consumer theorem audit also requests each
-  export's closure and certified statement, including independently rebuilt full-verification
-  exports. Export callbacks consume that authenticated response after the artifact and source
-  guards; they do not import the environment again. The closure digest, contract kind, theorem
-  axioms and statement checks are separate obligations. `exportsaudit` exercises source and
+- Contract publication audits interface declarations and their requested closures in one
+  imported environment. The fresh consumer theorem audit also requests each export's closure and
+  certified statement, including independently rebuilt full-verification exports. Export
+  callbacks consume that authenticated response after the artifact and source guards, without
+  importing the environment again. The closure digest, contract kind, theorem axioms and
+  statement checks are separate obligations. `exportsaudit` exercises source and
   compiled-artifact mutation after those callbacks and requires the original integrity failures.
-- **Input snapshots.** Exports whose artifacts lie outside the proof root share one consumer input
-  snapshot and the extraction-group verification machinery; each request keeps its own exact
-  export audit and checked result. Artifacts inside the proof root keep individual snapshots, so
-  their output exclusion does not hide another request's source. `exportsfullpair` checks two
-  exported methods and their independently replayed caller composition.
-- **Interface reuse.** Consumer workspaces restore authenticated, source-bound support before
-  compiling published interfaces. Identical interfaces can reuse their compiled artifacts across
-  extraction groups, while each workspace kernel-replays them and checks their canonical contract
-  closures against its own imports. Artifact integrity checks surround compilation.
+- Exports whose artifacts lie outside the proof root share one consumer input snapshot and the
+  extraction-group verification machinery; each request keeps its own exact export audit and
+  checked result. Artifacts inside the proof root keep individual snapshots, so their output
+  exclusion does not hide another request's source. `exportsfullpair` checks two exported methods
+  and their independently replayed caller composition.
+- Consumer workspaces restore authenticated, source-bound support before compiling published
+  interfaces. Identical interfaces can reuse their compiled artifacts across extraction groups,
+  while each workspace kernel-replays them and checks their canonical contract closures against
+  its own imports. Artifact integrity checks surround compilation.
   `Tests/ContractImports.cs --interface-reuse-only` checks two fresh profile groups with one
   interface compilation and independent replays.
-- **Restored generations.** Restored extraction modules and their components come from one
-  complete authenticated generation. Matching source hashes alone cannot justify mixing compiled
-  generations: different bytes for an import can make Lake rebuild its importer during proof
-  checking. A focused real-Lake fixture produces two valid compilations of identical sources,
-  reproduces that rewrite with mixed restored modules, and checks that restoring the complete
-  closure keeps the extraction fixed when the proof changes. Missing closures require certificate
-  preparation before the integrity snapshot.
-- **Artifact rewrite during proof compilation.** A two-request consumer fixture rewrites a
-  compiled extraction artifact during proof compilation, after warming both clean requests. For
-  both authenticated-restored and freshly built preparation, the changed request reports
-  extraction integrity, distinct before/after hashes and build provenance, removes its stale
-  certificate, and fails even when proof rejection was expected. The unrelated request verifies.
-- **Supplied library.** The component-reuse and support-union fixtures skip their framework-only
-  warmup verification when `LEANCIL_CERTIFIED_LIBRARY` is supplied. Their batches authenticate
-  that library and verify every request with success caching disabled.
+- Restored extraction modules and their components come from one complete authenticated
+  generation. Matching source hashes alone cannot justify mixing compiled generations: different
+  bytes for an import can make Lake rebuild its importer during proof checking. A focused
+  real-Lake fixture produces two valid compilations of identical sources, reproduces that rewrite
+  with mixed restored modules, and checks that restoring the complete closure keeps the
+  extraction fixed when the proof changes. Missing closures require certificate preparation
+  before the integrity snapshot.
+- A two-request consumer fixture rewrites a compiled extraction artifact during proof
+  compilation, after warming both clean requests. For both authenticated-restored and freshly
+  built preparation, the changed request reports extraction integrity, distinct before/after
+  hashes and build provenance, removes its stale certificate, and fails even when proof rejection
+  was expected. The unrelated request verifies.
+- The component-reuse and support-union fixtures skip their framework-only warmup verification
+  when `LEANCIL_CERTIFIED_LIBRARY` is supplied. Their batches authenticate that library and
+  verify every request with success caching disabled.
 
 ### Fold discovery
 
-Fold discovery counts decoded local references once with a balanced tree. `foldRoles_eq_filter`
-proves exact equality to the filter-based specification, including malformed operands and
-out-of-range local indexes. Methods without locals skip count construction. The positional lookup
-of local types is linear, so fold discovery as a whole is not linear.
+Fold discovery counts decoded local references once. `foldRoles_eq_filter` proves exact equality
+to the filter-based specification, including malformed operands and out-of-range local indexes.
+Methods without locals skip count construction. The positional lookup of local types is linear,
+so fold discovery as a whole is not linear.
 
 Exception folds inspect at most three message loads, since admitted constructors accept at most
 two. `throwFold_eq_takeWhile` proves equality to the unrestricted prefix scan. A long rejected

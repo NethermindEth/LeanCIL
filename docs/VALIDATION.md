@@ -137,8 +137,8 @@ partition.
 
 ## Proof cost
 
-Compare a change to shared tactics or the library with its base by what each proof costs, not only
-by whether the suites pass. Measure both checkouts on one machine and compare them:
+For a change to shared tactics or the library, also compare what each proof costs with the base.
+Measure both checkouts on one machine:
 
 ```sh
 git worktree add --detach ../base "$(git merge-base origin/main HEAD)"
@@ -161,10 +161,9 @@ module in the tree first, since `lake build CIL` leaves modules outside the aggr
 A suite binds the sources of its checkout, so keep the base checkout outside the head checkout and
 edit neither while its suite runs. Measurement stops on import errors before elaborating
 diagnostic assertions: a module with missing imports produces no cost report and no compiled
-output. `compare`
-exits nonzero on a regression and prints the table that CI puts in the job summary;
-[proof cost in CI](CI.md#proof-cost) defines the measures, the thresholds and how an increase is
-accepted.
+output. `compare` exits nonzero on a regression and prints the table that CI puts in the job
+summary; [proof cost in CI](CI.md#proof-cost) defines the measures, the thresholds and how to
+accept an increase.
 
 ### Stepping scaling
 
@@ -187,11 +186,11 @@ body.
 - `artifacts/SteppingScaling/results.json` records revisions, toolchain, machine, cache
   assumptions, raw process-time samples and per-instruction costs.
 
-Wall times are observations of the current machine load; use isolated sequential runs for latency
-comparisons. These measurements cover checked stepping, not extraction, editor feedback or
-certificate completion.
+Wall times vary with machine load; use isolated sequential runs for latency comparisons. These
+measurements cover checked stepping only, and exclude extraction, editor feedback and certificate
+completion.
 
-## What the checks cover
+## Coverage pages
 
 Positive fixtures compare compiled .NET behavior with checked model execution or establish
 universal theorems. Negative fixtures independently tamper with translation evidence, violate

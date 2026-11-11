@@ -20,33 +20,31 @@ The workflow builds `scripts/Test.cs`, `Tests/ContractExport.cs` and
 - The workflow checks executable hashes before starting the runner. Nested fixture invocations
   check the same identity and use the compiled assembly; absent or incompatible preparation falls
   back to an ordinary local build.
-- Modified example assemblies are rebuilt by their mutation tests.
+- Mutation tests rebuild the example assemblies they modify.
 - Only relocated fixture binaries use the shared checkout override; source-built child scripts
   keep their own source root, including producers running against an isolated modified library.
-- Fixtures with `#:project` references use an ordinary build, because their external MSBuild
-  source graph is not described by file-app includes.
+- Fixtures with `#:project` references use an ordinary build: file-app includes do not describe
+  their external MSBuild source graph.
 
 `Tests/PreparedFixtures.cs` covers arguments, included-source changes, nested configuration
 changes, unsupported project references, SDK/runtime mismatches, manifest tampering and added or
-modified output files. Shared preparation amortizes fixture compilation across suites; producer
-work and artifact transfers are part of total CI time.
+modified output files.
 
 ### Extractor indexes and analysis reuse
 
 - Branch positions and prefix-bypass checks use indexes scoped to each body traversal, and call
   translation uses a method index scoped to the current ordered call graph. Original and
   specialized bodies have separate instruction indexes.
-- Dependency invalidation traverses reverse import edges once with a queue, including missing
-  roots and cycles. Support reuse keeps the external module and extraction-source binding
-  exceptions.
+- Dependency invalidation traverses reverse import edges once, including missing roots and
+  cycles. Support reuse keeps the external module and extraction-source binding exceptions.
 - `Tests/InstructionIndexes.cs`, `Tests/ConstrainedResolution.cs` and
   `Tests/ConsumerSupportCandidates.cs` cover identity, fresh traversal, branch/switch prefix
   bypasses, reverse-ordered chains, cycles, missing imports and support source bindings.
-- Extraction reuses each method's reachability result within validation, emission and exception
-  linting, and feature evidence uses the same incoming states as instruction selection. Each
-  phase computes a fresh result, so no analysis is cached across method mutation or profile
-  changes. `Tests/ExtractionBatch.cs` compares direct and batch output across assemblies, scalar
-  and SIMD profiles, feature queries and a loop backedge, and checks source/assembly tampering.
+- Validation, emission and exception linting each compute one reachability result per method and
+  reuse it within that phase, so no analysis is cached across method mutation or profile changes.
+  Feature evidence uses the same incoming states as instruction selection.
+  `Tests/ExtractionBatch.cs` compares direct and batch output across assemblies, scalar and SIMD
+  profiles, feature queries and a loop backedge, and checks source/assembly tampering.
 
 ### Feature evidence
 
@@ -106,12 +104,12 @@ workflow.
   hashes and whole-assembly signature validation are shared within the batch. Long-form argument
   fixtures use a separate batch after writing their modified assembly. Expected extraction
   failures are isolated, since a batch stops at its first failure.
-- Generated positive evidence in `PrimitiveArrays`, `LayoutEvidence`, `ParameterEvidence`,
-  `GenericEvidence` and `StaticScalarValues` shares imports within each fixture. Each extraction
-  and its proof stay in their own namespace. The combined file is compiled once and independently
-  replayed with `leanchecker`; passes are printed only after both checks and source-stability
-  checks succeed. Rejection fixtures run separately with their own diagnostic assertions. The
-  array read, null and bounds checks share one final file.
+- `PrimitiveArrays`, `LayoutEvidence`, `ParameterEvidence`, `GenericEvidence` and
+  `StaticScalarValues` each compile their generated positive evidence once as one file, with
+  shared imports and a namespace per extraction and proof, and replay it independently with
+  `leanchecker`. A pass is printed only after both checks and the source-stability checks
+  succeed. Rejection fixtures run separately with their own diagnostic assertions. The array
+  read, null and bounds checks share one final file.
 - Each of these five scripts accepts `--measure`, which first checks the same final source files
   separately. `artifacts/<fixture>/batch-timings.json` records source hashes, separate time and
   batch compilation/replay time.
@@ -206,14 +204,14 @@ boundaries. Malformed UTF-16 is rejected before serialization, and invalid UTF-8
 validity proof. A compiled `Math.Abs` extraction passes, while a changed, valid UTF-8 call
 identity fails `ScalarFlowValid`.
 
-`scripts/BenchmarkExternalIdentities.cs` accepts fixed baseline `Extracted.lean` files with
-`externalIdentityNBytes_eq` declarations. It replaces only their identity encoding with the
-current emitter, compiles both complete modules with one Lean worker, then independently
-kernel-replays each. All chunk declarations are included. `artifacts/ExternalIdentityBenchmark`
-contains the paired sources and `timings.json`, including input SHA-256, source/artifact sizes,
-compilation and replay times. Use the same fixed files and toolchain when comparing results. For
-per-declaration kernel costs, run the paired Lean files with `--json --profile -j1
--DElab.async=false -Dprofiler.threshold=0`; JSON source positions identify each declaration.
+`scripts/BenchmarkExternalIdentities.cs` takes fixed baseline `Extracted.lean` files with
+`externalIdentityNBytes_eq` declarations, replaces only their identity encoding with the current
+emitter's, compiles both complete modules with one Lean worker and kernel-replays each
+independently, all chunk declarations included. `artifacts/ExternalIdentityBenchmark` holds the
+paired sources and `timings.json`: input SHA-256, source/artifact sizes, compilation and replay
+times. Compare results only for the same fixed files and toolchain. For per-declaration kernel
+costs, run the paired Lean files with `--json --profile -j1 -DElab.async=false
+-Dprofiler.threshold=0`; JSON source positions identify each declaration.
 
 ### Consumer checks
 
@@ -385,9 +383,8 @@ lake build
 dotnet run --file scripts/Test.cs
 ```
 
-Pass `--suite <name>` after `--` to run one suite; [validation](VALIDATION.md#suites) lists the
-names and what a run writes. The suites cover the same check groups as the full command. In CI one
-job builds the extractor and example assembly with `--build-tools`, and suite jobs set
+[Validation](VALIDATION.md#running-suites) shows how to run one suite and what a run writes. In
+CI one job builds the extractor and example assembly with `--build-tools`, and suite jobs set
 `LEANCIL_PREBUILT_TOOLS=true` to use them.
 
 The runner:
@@ -420,7 +417,7 @@ kernel replay. This section covers `scripts/PrepareLibrary.cs` and its tests.
 | `--reuse <trusted-manifest-sha256> [--producer-replayed]` | Rechecks the library key, the source binding and every file against that manifest, then kernel-replays the library unless `--producer-replayed` is passed. Obtain the digest independently from a trusted producer, never by hashing the restored manifest itself. Missing or invalid reuse evidence fails without replacing the destination. |
 | `--incremental <donor-directory> <trusted-manifest-sha256>` | For changed Lean sources. Authenticates every donor file before reusing its Lake build traces in a private copy. The runtime, compiler, kernel checker and build configuration must match; the configuration is the [library view](CI.md#identity) of `lakefile.toml`. Changed and removed modules lose their compiled artifacts; Lake checks the current source hashes and rebuilds the dependent closure. The native auditor is relinked, every resulting module is kernel-replayed, including those kept from the donor, since a byte-identical module can import a rebuilt one, and canonical fingerprints are regenerated before a new source-bound manifest is published. |
 
-Tests:
+These tests cover preparation:
 
 - `Tests/LibraryCache.cs` covers substituted auditors and compiled modules with regenerated
   manifests, missing producer digests, preservation of unrelated destination files, and a
@@ -451,7 +448,7 @@ Tests:
 | Coverage | Checks |
 | --- | --- |
 | Profile-parametric templates | Compiled AVX2/SSE4.2 dispatch helper, one generated template proof on three profiles, renumbered managed callees, exact per-pc equations, independent kernel replay, and wrong flag/callee/branch/equation, stale source and metadata rejection |
-| Cyclic control flow and termination | Universal checked countdown proof for every `uint`, including zero and maximum value; a counted loop proved through its helper's contract, unchanged for a reimplemented helper and rejecting a discarded result or double count; a loop that returns or raises its helper's exception after earlier calls, proved for every pair of `uint`s from the helper's outcome contract, unchanged for a reimplemented helper and rejecting another exception type, a nondecreasing measure, a non-inductive invariant and a wrong specified exception; a buffer fill loop proved to write exactly `count` words for every nonnegative count, with four runtime comparisons and shifted or skipping stores rejected; 17 runtime comparisons; incorrect implementation rejected under the unchanged contract; infinite loop proved to exhaust every fuel budget; backward switch, native arithmetic and fixed-feature loops checked; eight malformed or unsupported fixtures rejected; `new-proof` outlines of loop examples (one with two loops in sequence, one searching a free list through an object local, one filling a writable span, one filling it through a helper that stores the first element of the span it is lent, one summing and one filling an array by index, and three slicing a span local, which sum a span and an array and fill an array), straight-line methods with `bool`, narrow, writable span and array parameters, a `bool` result, unsigned and signed checked adds, a bit count and splits on unsigned and signed word tests, straight-line methods over class instances, string fields and arrays of class references, including element facts carried across element and field stores and an array the method allocates, methods over value arrays of words, structs and vectors that class fields hold, including a struct element named across lines, and struct instance methods storing fields elaborate with only `sorry` warnings and are byte-identical across runs; the countdown outline is refused for `sorryAx` and verifies once only its holes are filled, as do filled outlines for array/class composition, multiple struct-field stores, signed and unsigned narrow fields, struct value parameters, nested locals and receiver loops; a static helper over words gets a contract stub whose filled outline verifies where the helper tests its arguments and its result is returned, stored into a field or returned by a caller over words alone, where it throws on one side and where it only computes, and a `post` the helper's body does not meet, a `post` that does not give the caller's postcondition and a `pre` that admits the throwing side are rejected; a helper's result kept in an integer local by a caller over an object or over words alone, tested after it or not, a helper over words that keeps its own locals and one that tests them, and a helper that tests a field of the object it is handed are outlined so that the filled outline verifies, and a `post` the object helper's body does not meet is rejected; an object helper called from a frame of locals, one that throws beyond a field and one that throws from a frame of its own verify filled, and a `pre` that admits the object helper's throw fails saying the path must be ruled out; an indexed array loop's outline states the null exclusion in `Precondition`, and a precondition without it fails naming null; mutations to arithmetic, indexes, element types and loop progress are rejected |
+| Cyclic control flow, termination and generated proof outlines | The `loops` and outline suites; the lists below the table give their cases |
 | Generic method specialization | 125 C#/F# runtime comparisons, six universal identity proofs, six reference checks, twelve metadata/recursion rejections, wrong-implementation rejection and provenance tamper detection |
 | Block memory and alignment prefixes | 251 checks; ten malformed-prefix/type cases rejected; universal out-of-bounds fill rejection |
 | Layout-based Unsafe helpers | 418 checks across 19 element types and all three managed offset overloads; ten malformed generic calls rejected |
@@ -534,6 +531,57 @@ Tests:
 | Static `ReadOnlySpan<byte>` lookup tables | First and last byte proved; past-end read and write to immutable data rejected; tampered RVA bytes change the proved value; four intended span metadata rejections and positive stored-span parameter/local fixtures |
 | Tampered Lean output, changed compiled assembly, changed assembly version with a short selector, changed proof and changed feature profile | Five intended stale-artifact rejections |
 
+The `loops` suite checks cyclic control flow and termination:
+
+- A universal checked countdown proof holds for every `uint`, including zero and the maximum
+  value, with 17 runtime comparisons. An incorrect implementation is rejected under the unchanged
+  contract, and an infinite loop is proved to exhaust every fuel budget. Backward switch, native
+  arithmetic and fixed-feature loops are checked, and eight malformed or unsupported fixtures are
+  rejected.
+- A counted loop is proved through its helper's contract, unchanged for a reimplemented helper; a
+  discarded result and a double count are rejected.
+- A loop that returns or raises its helper's exception after earlier calls is proved for every
+  pair of `uint`s from the helper's outcome contract, unchanged for a reimplemented helper.
+  Another exception type, a nondecreasing measure, a non-inductive invariant and a wrong
+  specified exception are rejected.
+- A buffer fill loop is proved to write exactly `count` words for every nonnegative count, with
+  four runtime comparisons; shifted or skipping stores are rejected.
+
+The outline suites check `new-proof` outlines:
+
+- These outlines elaborate with only `sorry` warnings and are byte-identical across runs:
+  - loop examples: one with two loops in sequence, one searching a free list through an object
+    local, one filling a writable span, one filling it through a helper that stores the first
+    element of the span it is lent, one summing and one filling an array by index, and three
+    slicing a span local, which sum a span and an array and fill an array;
+  - straight-line methods with `bool`, narrow, writable span and array parameters, a `bool`
+    result, unsigned and signed checked adds, a bit count and splits on unsigned and signed word
+    tests;
+  - straight-line methods over class instances, string fields and arrays of class references,
+    including element facts carried across element and field stores and an array the method
+    allocates;
+  - methods over value arrays of words, structs and vectors that class fields hold, including a
+    struct element named across lines;
+  - struct instance methods storing fields.
+- The countdown outline is refused for `sorryAx` and verifies once only its holes are filled, as
+  do filled outlines for array/class composition, multiple struct-field stores, signed and
+  unsigned narrow fields, struct value parameters, nested locals and receiver loops.
+- A static helper over words gets a contract stub. Its filled outline verifies where the helper
+  tests its arguments and its result is returned, stored into a field or returned by a caller
+  over words alone, where it throws on one side and where it only computes. A `post` the helper's
+  body does not meet, a `post` that does not give the caller's postcondition and a `pre` that
+  admits the throwing side are rejected.
+- Filled outlines verify for a helper's result kept in an integer local by a caller over an
+  object or over words alone, tested after it or not, for a helper over words that keeps its own
+  locals and one that tests them, and for a helper that tests a field of the object it is handed.
+  A `post` the object helper's body does not meet is rejected.
+- An object helper called from a frame of locals, one that throws beyond a field and one that
+  throws from a frame of its own verify filled. A `pre` that admits the object helper's throw
+  fails saying the path must be ruled out.
+- An indexed array loop's outline states the null exclusion in `Precondition`, and a precondition
+  without it fails naming null.
+- Mutations to arithmetic, indexes, element types and loop progress are rejected.
+
 The addition theorem proves modular arithmetic correctness for arbitrary 64-bit inputs in the
 checked execution model. The unsigned-short theorem proves reduction modulo 65,536 for arbitrary
 32-bit inputs. The invalid-access and expired-reference theorems classify faults and rule out
@@ -545,19 +593,16 @@ Audited example theorems must use only the permitted standard Lean axioms, if an
 The verifier rejects `sorry`, `admit`, native proof evaluation and unproved summaries.
 See [the trusted base](SOUNDNESS.md) for runtime and extraction assumptions.
 
-Machine-readable results are written to `artifacts/test-results.json`; each successful proof
-produces an identity-bound `verified.json`. These generated files are reproducible outputs and are
-not committed. Passing the suites does not establish support for arbitrary .NET programs;
-see the [support boundary](SOUNDNESS.md).
+Each successful proof produces an identity-bound `verified.json`. It and the
+[result files](VALIDATION.md#running-suites) are reproducible outputs and are not committed.
+Passing the suites does not establish support for arbitrary .NET programs; see the
+[support boundary](SOUNDNESS.md).
 
 Typed copy validation covers 648 runtime result/byte-copy cases across 18 primitive, struct and
 vector types, including self-copies. The universal UInt64 copy contract rejects reversed
 source/destination operands. Four unsupported/forged type-token cases test extraction rejection.
 Ten semantic tests cover initialization, permissions, lifetime, GC-sensitive storage,
 bounds, null references and partial overlap. A generic snapshot theorem covers typed copying.
-Packed test inputs use explicitly unaligned stores to their managed field addresses, so
-constructing them does not require aligned reflection stores on ARM64 or interop marshaling of
-Boolean/char fields.
 
 Portable helper validation compares actual .NET results with extracted execution, covering
 power-of-two boundaries, zero/all-ones values, signed boundaries and negative/oversized rotation
@@ -653,13 +698,9 @@ sites, and managed or non-call sites reaching the import range; the certificate 
 certificate over a different import table. These tests do not establish full raw-CIL/runtime
 correspondence.
 
-The native extraction suite checks 2,511 runtime comparisons and kernel proofs, a universal
-addition contract, 60 ambiguous mixed unsigned-branch rejections and five metadata/profile
-rejections. See the [pinned native evidence](evidence/native/README.md) for recorded x64 and ARM64
-observations, model divergences, provenance and reproduction commands.
-
-Memory-view equivalence covers access, writes and subsequent checked execution, including calls,
-constructors and frame cleanup.
+The [pinned native evidence](evidence/native/README.md) records x64 and ARM64 observations, model
+divergences, provenance and reproduction commands for the `native` suite.
+[Store view reuse](VALIDATION-PROOFS.md#store-view-reuse) covers memory-view equivalence.
 
 The initialized-types end-to-end test and four mandatory-certificate audit cases check that
 verification reports record both the schema-3 extraction audit and initialized-type assumptions.
