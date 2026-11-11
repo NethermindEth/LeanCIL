@@ -1,9 +1,10 @@
 # Method contracts and exceptional outcomes
 
-How to state a method's interface as a `MethodContract` or `OutcomeContract`, prove it, and use it
-at call sites, across class instances, struct construction, exceptions, forwarders and separately
-extracted libraries. Read it when a proof crosses a call or publishes a guarantee for callers.
-[Stepping](PROOFS-STEPPING.md) covers the instruction-level tactics these sections build on.
+This page describes how to state a method's interface as a `MethodContract` or `OutcomeContract`,
+prove it, and use it at call sites, across class instances, struct construction, exceptions,
+forwarders and separately extracted libraries. Read this page when a proof crosses a call or
+publishes a guarantee for callers. [Stepping](PROOFS-STEPPING.md) covers the instruction-level
+tactics these sections use.
 
 ## Compose calls through contracts
 
@@ -53,8 +54,8 @@ theorem root_holds (add : addContract.Holds Extracted.program addTo) :
 | `post` | The meaning of the result and the memory guarantees |
 
 `Holds` is `Ensures` with the footprint added to the postcondition (`Holds.ensures`). Fuel stays
-existential, so a caller never depends on a callee's step count. The contract fixes no profile:
-the program does ([profiles](#carry-a-contract-across-profiles)).
+existential, so a caller never depends on a callee's step count. The program fixes the profile
+and the contract fixes none ([profiles](#carry-a-contract-across-profiles)).
 
 ### Footprints and confinement
 
@@ -84,13 +85,14 @@ two intervals share no byte, in different allocations or at disjoint offsets of 
 
 A store through an argument reference needs only write access: `store_word64 word writable` gives
 the `write`, the `storeValue` step fact and the readback of its encoding, so `Confined.write` and
-the stepping tactics consume the same equation.
+the stepping tactics use the same equation.
 
 A callee with locals writes its own frame too. List those slots in the footprint while executing,
 then drop them with `Confined.forget_fresh` and cover frame entry with `Confined.then_below`.
 `framed.after_leaveFrame owned` covers teardown, given that every identity the frame owns is at
 least the caller's `nextIdentity`. A method with locals that changes no caller memory ends with
-`MemoryBelow memory.nextIdentity memory final`, not `final = memory`; `MemoryBelow.compose_invoke`
+`MemoryBelow memory.nextIdentity memory final` instead of `final = memory`;
+`MemoryBelow.compose_invoke`
 composes consecutive such calls ([span contents](PROOFS-BUFFERS.md#describe-span-contents)).
 
 ### Remember numeric locals
@@ -131,8 +133,8 @@ Pass the `writable` projection to the general snapshot lemmas.
 ### Walk local stores and loads with snapshots
 
 The snapshot forms of the stepping tactics (`CIL.Safety.LocalSnapshotSteps`, part of `import CIL`)
-take numeric local stores and loads through a `LocalSnapshots` hypothesis and thread the updated
-snapshots through the walk. A load pushes the latest remembered value; a store replaces it.
+take numeric local stores and loads through a `LocalSnapshots` hypothesis and pass the updated
+snapshots to each later step. A load pushes the latest remembered value; a store replaces it.
 
 #### Tactic forms
 
@@ -189,8 +191,8 @@ Each case has further requirements:
 - Homes at an earlier memory need `entered.WellFormed`, the current memory's `WellFormed`,
   `entered.nextIdentity ≤ watermark` and a link: `AccessBelow watermark entered current` or
   `MemoryBelow watermark entered current`. The link carries each home's write access to the
-  current memory (`CompleteWritableHomes.home_retained`). Without the link the walk stops at the
-  store.
+  current memory (`CompleteWritableHomes.home_retained`). Without the link the tactic stops at
+  the store.
 - Homes after leading slots, as in `layout : frame.locals = .root value :: slots` with
   `NumericHomes entered boundary specs slots`, need each leading slot to be a constructor other
   than `.bytes` or to have a hypothesis `∀ kind reference, slot ≠ .bytes kind reference`.
@@ -207,7 +209,7 @@ A kind lookup that does not compute needs a supplied fact:
 
 #### Names each store introduces
 
-Each store the walk generates, in either form, introduces:
+Each store the tactic generates, in either form, introduces:
 
 | Name | Statement |
 | --- | --- |
@@ -243,7 +245,7 @@ the memory written to at the new memory, each under the name it already has:
 
 A fact whose condition is not shown stays at the old memory.
 
-The walk then prepares its step facts again at `storedLocal`. The carried `ValidCall` forms the
+The tactic then prepares its step facts again at `storedLocal`. The carried `ValidCall` forms the
 by-reference arguments and reads their fields there, and the restated reads supply their loads, so
 `.arg`, `.fieldAt` and memory loads of caller data continue in the same call. After a store, a
 word load through a `ValidCall` is stated at that store's memory, as `view.word storedLocal
@@ -277,7 +279,8 @@ own state predicate once, from the restated facts and the last `localSnapshots`.
 `MethodContract.Holds.reprofile` (`CIL.Safety.ProfileContract`) carries a contract proved for a
 program whose methods all use profile `p` to `CIL.reprofile program q`, for any `q` that agrees
 with `p` on the program. It has `OutcomeContract` and `HoldsCLR` forms, and `_statics` forms of
-the first two for a contract indexed by `programStaticDescriptors`.
+the `MethodContract` and `OutcomeContract` lemmas for a contract indexed by
+`programStaticDescriptors`.
 
 `CIL.Program.ProfileAgreement.of_flags` reduces agreement to the flags in `program.profileReads`,
 which `decide` checks for concrete profiles, so one proof covers every profile in a family. For a
@@ -552,7 +555,7 @@ copies at every later step, nested checked calls included:
 - Each checked step simplifies the goal with the default simp set, its interpreter definitions
   and the facts.
 - Preparation adds each local fact normalised by the default simp set and the supplied non-local
-  facts, so both sides meet in the same form. Supply any definition the computed value is stated
+  facts, so both sides have the same form. Supply any definition the computed value is stated
   through, such as a carry or borrow word, among the facts.
 - The original hypotheses stay in the proof context and in the simp set. A fact that differs
   after normalisation stops the steps at its instruction, with the hypothesis shown as stated.
@@ -566,13 +569,13 @@ copies at every later step, nested checked calls included:
 Hand-written stepping can use the same simplification, with an optional simp configuration, as
 `cil_fact_simp (config := ...) [definitions] [facts]`. `trace.CIL.factNormalize` emits one event
 per supplied local proposition when it is prepared; the count measures how often normalisation
-runs, not elapsed time.
+runs and does not measure elapsed time.
 
 ### Read missing-fact diagnostics
 
 Missing-fact diagnostics distinguish `authority`, `contentSnapshot` and `helperPrecondition`.
 Their suggestions identify the unresolved checked operation and its memory, local or region;
-[failure records](PROOFS-STEPPING.md#see-what-the-tactics-did) retain the obligation tag and
+[failure records](PROOFS-STEPPING.md#observer-linter) retain the obligation tag and
 source position. A missing proof is not a proved violation. Access evidence alone does not
 identify initialized contents: after an overlapping write use its updated snapshot, or prove the
 disjointness needed to preserve an old snapshot. A snapshot may retain unknown bytes; a
@@ -584,12 +587,12 @@ successful snapshot copy does not establish initialization.
 | --- | --- |
 | `invoke_ok_unique` | Ties a computed run to the contract's existential one |
 | `invoke_ok_observation_unique` | The same for one observation of the run, such as the returned values, so the refutation never compares memories |
-| `MethodContract.not_holds_of_fault` | Refutes a contract from a checked located fault on an input meeting its precondition. It uses fuel monotonicity to rule out success at every budget; the witness must be a semantic fault, not fuel exhaustion |
+| `MethodContract.not_holds_of_fault` | Refutes a contract from a checked located fault on an input meeting its precondition. It uses fuel monotonicity to rule out success at every budget; the witness must be a semantic fault; fuel exhaustion is not a witness |
 
 ## Frame class instances
 
 A contract for a method taking [class instances](SOUNDNESS-RUNTIME.md#class-instances) names
-fields, not offsets. For every field of an admitted class that its methods load or store, an
+fields instead of offsets. For every field of an admitted class that its methods load or store, an
 extraction emits a descriptor under `Extracted.Classes`, such as `Account.Balance :
 WordField 8`, `Node.Next : ReferenceField` or `Samples.Values : ArrayField .signed32`, carrying
 the class and the model offset the extractor validated. Each comes with a theorem, checked by
@@ -655,14 +658,14 @@ A method that creates an instance uses these lemmas:
   `ObjectSitesConsistent` for the extraction, and `invoke_preserves_classes` keeps the premise
   across any invocation, including the instances it creates.
 
-[PoolRent](../Examples/Proofs/PoolRent.lean) uses each of these.
+[PoolRent](../Examples/Proofs/PoolRent.lean) uses each of these lemmas.
 
 A list linked through a reference field, such as a free list, is described by
 `ReferenceField.Segment field memory start stop nodes`: following `field` from `start` visits the
 readable instances `nodes` and arrives at `stop`. A segment is a finite path, so one to null
 shows no cycle is reachable from `start`, and `nodes.length` is the measure of a loop that walks
 it. `Segment.next` gives the head's readable field and the one-shorter rest, `Segment.formed` the
-reference the walk loads and compares, and `Segment.after_below` carries the segment into the
+reference the loop loads and compares, and `Segment.after_below` carries the segment into the
 entered frame. The segment is a precondition the caller proves of its memory; a program can link
 a cycle, and then no segment to null exists.
 [PoolIdle](../Examples/Proofs/PoolIdle.lean) proves a search of the pool's free list this way.
@@ -685,9 +688,9 @@ references `objectFieldAddress` locates. Use it directly for a field no extracti
 | The aliased case: equal references locate the same field, so the case follows by substitution | `objectFieldAddress_same` |
 | The formation fact the stepping tactics need for an argument whose field is located | `formObject_of_objectFieldAddress` |
 
-A class-typed field keeps its reference in the field's slot, not in bytes. One footprint entry
-starting at the field covers both, so a contract's footprint names the fields whose bytes or
-references it may change.
+A class-typed field keeps its reference in the field's slot instead of in bytes. One footprint
+entry starting at the field covers both, so a contract's footprint names the fields whose bytes
+or references it may change.
 
 | Need | Use |
 | --- | --- |
@@ -871,8 +874,8 @@ back to the memory before `newobj`; `Confined.forget_fresh` then drops the stora
 caller's frame owns and expires on return.
 
 Because `newobj` zeroes the storage, a field the constructor leaves unassigned reads back as
-zero, not as an uninitialized read, so the readback is still full width. A contract may take that
-zero readback as a precondition. `run_construct_of_contract` and
+zero instead of as an uninitialized read, so the readback is still full width. A contract may
+take that zero readback as a precondition. `run_construct_of_contract` and
 `run_construct_of_contract_formed` take the construct step equation instead, like
 `run_call_of_contract`; they cover aggregate storage only. `read_append` joins adjacent field
 reads into the full readback, and `Confined.write_within` confines a field write to the whole
@@ -1095,7 +1098,7 @@ an extraction made without `--import` has no slots, so its `Extracted.imports` a
 extracting against an imported interface.
 
 The identity checks that bind a slot to a certified library implementation are not part of this
-rule; the next section relocates a library into the slot.
+rule; the next section describes relocating a library into the slot.
 
 ## Link separately extracted libraries
 
@@ -1129,7 +1132,7 @@ Here `closed` and `proved` are each library's `Closed` and `Holds` facts. `Impor
 one `Relocatable` property per slot, so libraries may export contracts of different types. Each
 library exports only its index-0 method. Static identities are not renamed: two linked libraries
 that use the same identity for different bytes fault `invalidState` at the second static access, so
-a collision can only make a proof fail, never prove a false statement.
+a collision can make a proof fail and cannot prove a false statement.
 
 ## Reuse framework contracts
 

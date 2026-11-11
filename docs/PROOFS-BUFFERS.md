@@ -1,17 +1,17 @@
 # Buffer content proofs
 
-The predicates and lemmas for what memory holds: span and array contents, runs of integer
-elements, write authority, struct fields, and the `LoopFrame` that carries a loop's frame facts.
-Read it when a contract or loop invariant speaks about buffer contents, or when a fact about
-caller memory must hold in a later memory.
+This page describes the predicates and lemmas for what memory holds: span and array contents,
+runs of integer elements, write authority, struct fields, and the `LoopFrame` that carries a
+loop's frame facts. Read this page when a contract or loop invariant states buffer contents, or
+when a fact about caller memory must hold in a later memory.
 
 ## Describe span contents
 
-`CIL.Safety.SpanContents` is the vocabulary for what a span holds. `SpanContents memory view width
-values` says the view has element width `width`, its length is `values.length`, a null view holds
-`[]`, and an addressed view's elements read back from its base as `Contents`. It asserts neither
-validity nor write authority; state `view.validate memory = .ok ()` and the access mode separately.
-`SpanContents.nil` builds the empty case for any zero-length view. For a valid view,
+`CIL.Safety.SpanContents` defines the predicates for what a span holds. `SpanContents memory view
+width values` says the view has element width `width`, its length is `values.length`, a null view
+holds `[]`, and an addressed view's elements read back from its base as `Contents`. It asserts
+neither validity nor write authority; state `view.validate memory = .ok ()` and the access mode
+separately. `SpanContents.nil` builds the empty case for any zero-length view. For a valid view,
 `SpanContents.load` gives element `index` as a successful `view.element` reference whose scalar
 load is `numericOfWidth width value.toNat`; `SpanContents.head` is that fact for the first element
 of `value :: rest`. `SpanContents.drop` and `SpanContents.tail` give the successful
@@ -31,7 +31,8 @@ the memory of a `LoopFrame` confined to no caller storage, and `span.tail_below`
 keeping the suffix checked in caller memory. The loop tactics take these facts from a `CheckedSpan`
 in context.
 
-A loop that writes a span from the front needs authority over its elements, not their contents.
+A loop that writes a span from the front needs authority over its elements and does not need
+their contents.
 [`SpanWritable`](../CIL/Safety/SpanWrites.lean) `memory footprint view` is write access to every
 element of `view` with its bytes inside an entry of `footprint`; `SpanWritable.own` builds it over
 `view.footprint` from a `Writable` run, `SpanWritable.slice` keeps it for any slice and
@@ -58,7 +59,7 @@ the memory after frame entry and local stores.
 
 A method with locals ends with `MemoryBelow memory.nextIdentity memory final`, as `SpanSum` does,
 because its expired frame allocations stay in the final memory; its callers should expect that
-instead of `final = memory`. Two such calls compose with
+`MemoryBelow` fact instead of `final = memory`. Two such calls compose with
 [`MemoryBelow.compose_invoke`](../CIL/Safety/ExecutionLifetime.lean) `called first second`, which
 takes the watermark growth from the first call's successful `invoke`;
 [`MemoryBelow.compose`](../CIL/Safety/MemoryBelow.lean) takes it as a premise. Without that growth
@@ -78,9 +79,9 @@ running total lives in a frame home, so its state keeps the `CheckedSpan` suffix
 which the loop tactics move to the current frame memory with `span.within`. Its `FrameState`
 carries the `LoopFrame` of its `bind_entry ... allocating wellFormed` entry across each store with
 `frame.store` and each slice with `set_local`; see [loop verification
-conditions](PROOFS-STEPPING.md#loop-verification-conditions). Both measure the remaining length,
-prove the loop inside the public theorem through `invoke_loop_returns` or `invoke_loop_results`, and
-cover null empty spans.
+conditions](PROOFS-STEPPING.md#loop-verification-conditions). Both proofs measure the
+remaining length, prove the loop inside the public theorem through `invoke_loop_returns` or
+`invoke_loop_results`, and cover null empty spans.
 
 ## Read a supplied array
 
@@ -121,15 +122,16 @@ x.toNat width`, with the byte alignment scalar loads and stores use. `Contents.l
 `load_scalar_of_read`) turns an element at any `ScalarWidth` (1, 2, 4, 8, 16, 32 or 64 bytes) into
 the `loadValue` result `numericOfWidth width x.toNat`: widths 1 to 4 zero-extend to `.i32`, 16 and
 up are vectors, and width 8 yields `.i64 (BitVec.ofNat 64 x.toNat)`, so `Contents.load_word`
-(`load_word64_of_read`) stays the direct route to `.i64 x`. `byteNumber_elementBytes` decodes a
+(`load_word64_of_read`) still gives `.i64 x` directly. `byteNumber_elementBytes` decodes a
 whole buffer as the sum of its elements, element `i` scaled by `256 ^ (width * i)`, and
 `byteNumber_elementBytes_lt` bounds it by `256 ^ (width * xs.length)`. Rewriting with it at a
-literal width such as 8 makes the kernel unfold the powers and can hit deep recursion; prove the sum
-at symbolic width and instantiate, as `byteNumber_elementBytes_four` does for four limbs
-(instantiate, then `simp only [Nat.reduceMul, Nat.reducePow] at h`), or peel one limb at a time with
-`byteNumber_elementBytes_cons`. Contents grant no write authority: `Writable m base width start
-count` is write authority alone, and `Filled m base width xs room` is an initialized prefix followed
-by `room` writable elements that need not be readable. An empty `Contents` asserts nothing.
+literal width such as 8 makes the kernel unfold the powers and can fail with deep recursion;
+prove the sum at symbolic width and instantiate, as `byteNumber_elementBytes_four` does for four
+limbs (instantiate, then `simp only [Nat.reduceMul, Nat.reducePow] at h`), or split off one limb
+at a time with `byteNumber_elementBytes_cons`. Contents grant no write authority:
+`Writable m base width start count` is write authority alone, and `Filled m base width xs room`
+is an initialized prefix followed by `room` writable elements that need not be readable. An
+empty `Contents` asserts nothing.
 `Contents.read` joins the elements into one checked read only given that read's `access`, so a
 zero-width read keeps its formation check and elements separated by a reference slot do not join;
 `Contents.of_read` splits a checked read through `read_slice_bytes`. `take`, `drop` and `append`
@@ -246,8 +248,8 @@ snapshot, and its `storageN` field carries allocation freshness and bounds as `n
 A default span or object local holds the null span or null and allocates nothing.
 `LoopFrame.ofEntry`, `WritableHomes.cons` and `skip`, and `LocalSnapshots.entry` and `skip` are
 the lemmas it composes. `set_local` keeps the frame when a local without a byte home is assigned,
-as the span fold slices its span and a list walk moves its object local to the next node; it
-rejects a home and a remembered local.
+as the span fold slices its span and a loop over a list moves its object local to the next node;
+`set_local` rejects a home and a remembered local.
 
 Each lemma proves the frame after one step. `load` and `store` read and write a remembered local;
 `write` and `write_element` keep the frame across a write inside the footprint; `after_confined`
@@ -280,8 +282,8 @@ contract needs a proof of the additional allocation, slot and permission guarant
 offset and its compare. The [buffer fill proof](../Examples/Proofs/FillWords.lean) uses them with
 an invariant of only `Filled` and `k <= n`. [Countdown](../Examples/Proofs/Countdown.lean) needs
 no invariant beyond the frame, and [CountCalls](../Examples/Proofs/CountCalls.lean) and
-[CountUntil](../Examples/Proofs/CountUntil.lean) keep two locals across a helper call, the first
-through `cil_loop_call` and the second with `after_confined`.
+[CountUntil](../Examples/Proofs/CountUntil.lean) keep two locals across a helper call,
+CountCalls through `cil_loop_call` and CountUntil with `after_confined`.
 
 ### Caller facts in frame memory
 
@@ -355,7 +357,7 @@ Each `caller_*` lemma also takes the caller's `WellFormed`. The loop tactics app
 at the caller's memory: `(span.within wellFormed frame).head` reads a caller span's first element
 in frame memory, with `cil_span_apart` finding each entry's `SpanApart` in context, and
 `writable.add_int wellFormed formed` gives an `int` index's `Unsafe.Add` address for every frame.
-[CopyUntilZero](../Examples/Proofs/CopyUntilZero.lean) states only these.
+[CopyUntilZero](../Examples/Proofs/CopyUntilZero.lean) states only these caller facts.
 `Filled.element_writable` and `Writable.element_writable` give write authority over one element
 of a run, and `cil_loop_obligation [defs]` proves an element write's authority, index bound and
 footprint membership from the hypotheses with `defs` unfolded, failing at the write when they do

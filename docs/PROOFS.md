@@ -58,7 +58,7 @@ Select the smallest interface that expresses the result.
 | Prove one body for several hardware profiles | [Profile templates](PROOFS-BINDING.md#generated-profile-templates) and [reprofiling](PROOFS-CONTRACTS.md#carry-a-contract-across-profiles) | The guides' commands and manifest |
 | Select the goals a tactic leaves by purpose | [Obligation tags](PROOFS-STEPPING.md#obligation-tags) | [TallyTwice](../Examples/Proofs/TallyTwice.lean) |
 | Import a separately proved interface | [Imported contracts](PROOFS-CONTRACTS.md#compose-through-imported-contracts) | [Interface guide](CONTRACT-INTERFACES.md) |
-| Find why a tactic stopped | [Observer](PROOFS-STEPPING.md#see-what-the-tactics-did) | `leancil verify --trace` |
+| Find why a tactic stopped | [Observer](PROOFS-STEPPING.md#observer-linter) | `leancil verify --trace` |
 
 ## Choose a tactic
 
@@ -88,7 +88,7 @@ input and `site` a `bind_call` name.
 | `Extracted.program[i]? = some body` | `cil_body` | [Body binding](PROOFS-BINDING.md#bind-bodies-to-the-extraction) |
 | The same when a profile inserts dead code or dead locals | `cil_embed` | [Dead code](PROOFS-BINDING.md#bodies-modulo-dead-code) |
 
-Commands that name parts of an extraction:
+These commands name parts of an extraction:
 
 | Name | Command | Guide |
 | --- | --- | --- |
@@ -147,7 +147,7 @@ name them in a `simp` list; step with `cil_checked_steps` and pass a fact about 
 instead. The [documentation checks](CI.md#documentation-checks) reject them in examples and
 checked documentation.
 
-## Keep proof work local
+## Lemma reuse
 
 - Reuse the checked stepping, memory readback and contract composition lemmas. Do not unfold a
   helper body when its contract suffices.

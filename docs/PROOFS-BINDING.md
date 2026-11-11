@@ -1,10 +1,10 @@
 # Binding and transporting compiled proofs
 
-How to tie a proof to an extraction and keep it tied when the extraction changes: the `bind_*`
-commands that name entries, cutpoints, methods, call sites and loops, `cil_body` and `cil_embed`
-for body equalities, and the transports across dead code, dead locals and hardware profiles. Read
-it when a proof names a method index, a pc or a frame layout, or must hold for several
-extractions of one method.
+This page describes how to bind a proof to an extraction and keep the proof bound when the
+extraction changes. It covers the `bind_*` commands that name entries, cutpoints, methods, call
+sites and loops, `cil_body` and `cil_embed` for body equalities, and the transports across dead
+code, dead locals and hardware profiles. Read this page when a proof names a method index, a pc
+or a frame layout, or must hold for several extractions of one method.
 
 ## Generate loop entry and cutpoint scaffolding
 
@@ -49,11 +49,7 @@ local list to reduce; this form leaves that layout opaque. The command does not 
 premises or generate invariant-preservation verification conditions.
 
 When the success premises are available as rewrite facts, use `simplifying [facts]` instead of
-`using`. It derives an explicit frame and memory expression and checks the resulting entry
-equation, so stepping can inspect the local slots:
-
-When the success premises are available as rewrite facts, use `simplifying [facts]` instead of
-`using`. This derives an explicit frame and memory expression and checks the resulting entry
+`using`. This form derives an explicit frame and memory expression and checks the resulting entry
 equation, allowing stepping to inspect the local slots:
 
 ```lean excerpt Examples/Proofs/SpanDrain.lean
@@ -121,8 +117,9 @@ home is rejected.
 [SpanSum](../Examples/Proofs/SpanSum.lean), [FillWords](../Examples/Proofs/FillWords.lean),
 [Struct](../Examples/Proofs/Struct.lean), [Countdown](../Examples/Proofs/Countdown.lean),
 [CountCalls](../Examples/Proofs/CountCalls.lean) and
-[CountUntil](../Examples/Proofs/CountUntil.lean) enter this way, the last three from
-`Memory.empty` with `Memory.empty_wellFormed`. The body may be a `bind_method` name: setup
+[CountUntil](../Examples/Proofs/CountUntil.lean) enter this way; Countdown, CountCalls and
+CountUntil enter from `Memory.empty` with `Memory.empty_wellFormed`. The body may be a
+`bind_method` name: setup
 unfolds each definition that only names another constant, down to the extracted method.
 
 `bind_entry` gives `entry.frame` and, for the `simplifying` form, `entry.result` and
@@ -140,8 +137,8 @@ header and that execution reaches it.
 
 For repeated instruction shapes, `bind_cutpoint name := body at location matching predicate
 with frame` checks that particular instruction rather than requiring a unique predicate match.
-`location` is an emitted instruction index, not a raw CIL byte offset. Reuse `bind_loop` from
-`CIL.StructuralLabels` to select nested or sequential loops:
+`location` is an index into the emitted instructions; it is not a raw CIL byte offset. Reuse
+`bind_loop` from `CIL.StructuralLabels` to select nested or sequential loops:
 
 ```lean extracted
 bind_loop outer := Extracted.method0 [0]
@@ -176,8 +173,8 @@ contracts](PROOFS-BUFFERS.md) describes its memory preconditions.
 
 ## Move a run that starts inside a region
 
-Embedding relates whole bodies. When only a suffix is shared, `CIL.Safety.RegionRun` cuts the rest
-away first. `RegionClosed program region` says fallthroughs, targets and callee entries of region
+Embedding relates whole bodies. When only a suffix is shared, `CIL.Safety.RegionRun` removes the
+rest first. `RegionClosed program region` says fallthroughs, targets and callee entries of region
 instructions stay in the region; `regionClosedCheck` decides it for a region listed as `(method,
 lower)` suffixes (`inStarts`). `AgreesOn program other region` says `other` has the same methods and
 metadata and the same instruction at every region pc; `AgreesOn.set` and `code_agrees_of_drop` build
@@ -313,8 +310,9 @@ rootBody has 2 loops; select one with [i]:
   [1] head pc 6, back edge from pc 7
 ```
 
-Labels read the compiled layout, so a compiler that rotates a loop moves its head; a cutpoint that
-must survive that, such as `Examples/Proofs/Countdown.lean`, keeps a unique-instruction predicate.
+Labels are computed from the compiled layout, so a compiler that rotates a loop moves its head; a
+cutpoint that must survive that rotation, such as `Examples/Proofs/Countdown.lean`, keeps a
+unique-instruction predicate.
 
 ### PDB local names and source locations
 
@@ -336,7 +334,7 @@ their index; a missing name lists the method's named locals. Importing `Extracte
 matching PDB fails verification with that reason, naming the assembly and method. Consumer packages
 import it like `Extracted`, directly or through their own modules, in `leancil verify --proof-root`
 and `leancil verify-batch`. Only proofs whose imports reach it compile it, replay it and bind its
-hash into their cache key, so a PDB-only change rechecks them and no symbol-free proof.
+hash into their cache key, so a PDB-only change rechecks those proofs and no symbol-free proof.
 
 With the module imported, `cil_body` and `cil_embed` failures end with the nearest sequence point of
 the actual pc they report:
@@ -394,7 +392,7 @@ map, including branch targets and callee indices. The no-argument form handles c
 
 One template and one open theorem about it thus bind to every valid profile, shifted branch
 targets included. To remove an irrelevant open argument, supply the definition that ignores it in
-the fact list; this is justified by reduction, not an assumption about that argument's value.
+the fact list; reduction justifies the removal, with no assumption about that argument's value.
 
 `bound.certificate` transports an `InvocationCertificate` and `bound.descriptors` the program's
 static descriptor list; `ProgramRefines.set` composes several bound methods. Named exceptions
@@ -402,8 +400,8 @@ transfer too: `bound.raises` transports `Raises`, `bound.holds` an `OutcomeContr
 clauses (from `CIL.Safety.Embedding.Outcomes`), and `Embeds.invoke_raise` states the actual fault,
 whose pc is the one the map assigns in the throwing method. Other faults, including fuel exhaustion
 and `.unsupported`, do not transfer. The pc map is computed outside the kernel and then checked by
-it, so a wrong map is rejected, not trusted. A changed reachable instruction or an inserted live one
-is reported by expected and actual pc:
+it, so the kernel rejects a wrong map without trusting it. A changed reachable instruction or an
+inserted live one is reported by expected and actual pc:
 
 ```text
 cil_embed: the expected body does not embed into the extracted method
@@ -485,8 +483,8 @@ declarations.
 This entry route requires `OrdinaryFrame` on both sides: `opaqueVectorLocals`, `vectorArgs` and
 `parameterHomes` are empty. Retained initializers stay exact, including initialized numeric helpers;
 their successful setup is derived from the actual source execution. Local widths must fit the native
-range; span element widths must be positive and less than `2^64`. These are explicit, checked
-metadata conditions, not assumed target frame-entry success.
+range; span element widths must be positive and less than `2^64`. These metadata conditions are
+explicit and checked; target frame-entry success is not assumed.
 
 Starting from the same well-formed memory with bounded static bindings,
 `ProgramRenaming.invoke_scalars` transfers a successful checked invocation with the same fuel and
@@ -512,9 +510,10 @@ A contract whose precondition names only fields and objects does not establish m
 the result from the contract's own proof, so the transfer states the contract for every initial
 memory a caller can hold ([LinkedNodes](../Examples/Proofs/LinkedNodes.lean)).
 
-This is not exact-memory transport: extra homes change counters and fresh references. Arbitrary
-reference results and postconditions naming fresh allocations need a statement modulo the allocation
-relation. For the exact-memory subset, use `cil_embed` and `MethodEmbedsDeadLocals` as above.
+Extra homes change counters and fresh references, so this transfer is not exact-memory transport.
+Arbitrary reference results and postconditions naming fresh allocations need a statement modulo
+the allocation relation. For the exact-memory subset, use `cil_embed` and
+`MethodEmbedsDeadLocals` as above.
 
 ### Generated profile templates
 

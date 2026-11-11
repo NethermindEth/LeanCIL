@@ -1,9 +1,9 @@
 # Instruction composition and proof reduction
 
-Reference for the stepping tactics: which tactic steps which goal, the facts each instruction
-family needs, the goals a tactic leaves, and how loops, segments and `WP` goals compose. Read it
-when a stepping tactic stops or leaves a goal you did not expect. [Contracts](PROOFS-CONTRACTS.md)
-covers calls through `MethodContract`.
+This page is a reference for the stepping tactics: which tactic steps which goal, the facts each
+instruction family needs, the goals a tactic leaves, and how loops, segments and `WP` goals
+compose. Read this page when a stepping tactic stops or leaves a goal you did not expect.
+[Contracts](PROOFS-CONTRACTS.md) covers calls through `MethodContract`.
 
 Use `CIL.Safety.invoke` for specifications that include checked memory execution. State the
 mathematical contract and its input and memory preconditions independently of the implementation.
@@ -55,7 +55,7 @@ The fact list holds proved facts the steps depend on: hypotheses, lemmas or appl
 | One fetched instruction's `step` equation | `cil_checked_step [facts]` | |
 | `WP`, or an existential successful execution | `cil_contract_steps [facts]` | Applies callee contracts; see [contract stepping](PROOFS-CONTRACTS.md#step-a-caller-through-its-callees) |
 | The same, stopping early | `cil_contract_steps n [facts]`, or `[facts] until continuation` | Takes at most `n` steps and stops without an error when one fails |
-| One contract step | `cil_contract_step [facts]` | `cil_contract_step_normalized [facts]` is the same step over facts a walk has already prepared |
+| One contract step | `cil_contract_step [facts]` | `cil_contract_step_normalized [facts]` is the same step over facts already prepared during a walk |
 | A `Raises` goal | `cil_raise_steps [facts]` | See [exceptional outcomes](PROOFS-CONTRACTS.md#name-exceptional-outcomes) |
 | Numeric local stores and loads over symbolic memory | `cil_checked_steps (snapshots := snapshots) [facts]`, `cil_contract_steps (snapshots := snapshots) [facts]` | See [snapshot walks](PROOFS-CONTRACTS.md#walk-local-stores-and-loads-with-snapshots) |
 | A `Segment` or `SegmentRun` boundary | `cil_segment n [facts]`, `cil_segment_steps [facts]` | See [segments](#place-code-and-compose-segments) |
@@ -155,8 +155,8 @@ strategy:
 `cil_contract_step [facts]` prepares `facts` as `cil_checked_step` does, so a supplied `read` steps
 a `.loadAggregate` through a managed-reference address there as well.
 
-Pass facts about formation and successful memory operations, not evaluator definitions or monadic
-binds. The tactics accept these fact forms:
+Pass facts about formation and successful memory operations instead of evaluator definitions or
+monadic binds. The tactics accept these fact forms:
 
 | Situation | Fact |
 | --- | --- |
@@ -338,7 +338,7 @@ and located faults.
 | `cil_segment 3 [found, placed, facts]` | Proves the boundary of an exact-state contract with `cil_checked_steps`; fails unless the complete equation closes |
 | `cil_segment_steps [facts]` | Proves a `SegmentRun` boundary directly |
 
-Neither tactic invents a memory or availability premise. `LoopReaches` uses the same prefix
+Neither tactic assumes a memory or availability premise. `LoopReaches` uses the same prefix
 relation with an exact-target postcondition.
 
 For numeric-local framing, record successful write equations in `SegmentLocalEffects`. The
@@ -369,9 +369,9 @@ the exited frame's memory is tried before cleanup rewrites past it.
 
 The loop tactics step one fetched instruction at a time and simplify literal stack `drop`, `take`,
 `reverse` and append after each step. A tactic that cannot go on fails instead of leaving a goal,
-and its message names the pc. Messages, and the loop goals a walk hands back, write each pc as a
-literal, such as `18` rather than `17 + 1`. Goals print a bit-vector literal of `2 ^ 16` or more
-in hexadecimal, such as `0x80000000` or `0x80000000#32`
+and its message names the pc. Messages, and the loop goals a tactic leaves after a walk, write
+each pc as a literal, such as `18` rather than `17 + 1`. Goals print a bit-vector literal of
+`2 ^ 16` or more in hexadecimal, such as `0x80000000` or `0x80000000#32`
 ([LiteralDisplay](../CIL/LiteralDisplay.lean)), and smaller ones in decimal. The failures are:
 - `cannot step pc N (op) at memory M` shows the step and what is left of it after the step
   equations and gathered facts, and names the fact that residual lacks: a span's validity, a
@@ -459,7 +459,7 @@ All gather facts as the other loop tactics do, so their lists are optional:
   not the head's at `values` fails, showing the reached state.
 
 Each store names its memory, step and frame (`stored`, `storing`, `storedFrame`, `storedBelow`),
-and the walk restates each `Contents`, `Filled` and `Writable` hypothesis about the stored-over
+and the tactic restates each `Contents`, `Filled` and `Writable` hypothesis about the stored-over
 memory, or about the caller's, at the new one under the same name, so an invariant reads them at
 the memory it is stated at.
 
@@ -484,22 +484,23 @@ tactic only continues, such as the loop path after `cil_loop_advance` or the con
 | `raises` | the callee's `raises` equation | `cil_loop_outcome_call`, `cil_loop_outcome_raise`, `cil_outcome_call`, `cil_formed_outcome_call`, `cil_outcome_raise` |
 | `postcondition`, `postcondition.part<n>` | the postcondition at a return, or its `n`th conjunct | `cil_loop_finish`, `cil_contract_steps` |
 
-Tag naming rules:
+The tags are named by these rules:
 
 - The callee part of a precondition tag is the last component of the callee's constant, such as
   `precondition.stamp` for a `bind_callee stamp`; a callee given as a literal index leaves the
   bare `precondition`. `case precondition` selects either, since `case` also matches a tag's
   prefix.
 - `cil_loop_finish` numbers the conjuncts it leaves by their place among all the postcondition's
-  conjuncts, `postcondition.part2` for the second, so a conjunct keeps its tag whichever others
-  the exit facts close, and `case postcondition` selects the first left. A postcondition that is
-  not a conjunction is left as `postcondition`.
+  conjuncts, `postcondition.part2` for the second conjunct, so a conjunct keeps its tag whichever
+  other conjuncts the exit facts close, and `case postcondition` selects the first conjunct left.
+  A postcondition that is not a conjunction is left as `postcondition`.
 - A loop head hypothesis with one condition leaves `invariant`, as the entry hypothesis of
-  `invoke_loop_induction` does. One with more leaves its last, the back edge's decrease, as
-  `measure`, and the others as the invariant's parts: `invariant` for one, as in the iteration
-  hypothesis, and `invariant.part1`, `invariant.part2`, ... for several.
+  `invoke_loop_induction` does. A hypothesis with more conditions leaves its last
+  condition, the back edge's decrease, as `measure`, and the other conditions as the invariant's
+  parts: `invariant` for one condition, as in the iteration hypothesis, and `invariant.part1`,
+  `invariant.part2`, ... for several.
 - A mistyped tag is Lean's `Case tag ... not found` error, which lists the tags of the open
-  goals. A loop tactic handed a tagged obligation instead of a loop path says which obligation
+  goals. A loop tactic given a tagged obligation instead of a loop path says which obligation
   the main goal is and how to select it.
 
 The tag names and their numbering are fixed:
@@ -626,13 +627,13 @@ A loop over symbolic caller memory keeps the frame part of its state as the
 `FrameState`; [frame facts](PROOFS-BUFFERS.md#carry-frame-facts-through-a-loop) describes its
 lemmas. `frame.store index value rfl` stores into a home and gives the step's store equation and
 the frame after the store, without composing `MemoryBelow` by hand. Its remembered locals are a
-literal list, as after the loop tactics' stores, so either frame feeds the next step. The loop
+literal list, as after the loop tactics' stores, so the next step accepts either frame. The loop
 tactics derive `LoopFrame.load` and, for any exited frame with the entry's owned identities,
 `LoopFrame.leave_kept` from the state's frame. [SpanSum](../Examples/Proofs/SpanSum.lean) stores
 through its frame this way, and its loop steps name no frame or span fact;
 [Countdown](../Examples/Proofs/Countdown.lean) leaves its stores to `cil_loop_recurse`.
 
-## See what the tactics did
+## Observer linter
 
 The [`observer`](../CIL/Observe.lean) linter of `CIL.Observe` reads each declaration's
 elaborated proof after it is checked and reports on it. No tactic runs any of its code, so
@@ -658,7 +659,7 @@ evaluates the method with `rfl` or `decide`, logs that it took no step to trace.
 
 Each failure record is a message starting `[LeanCIL failure v1] `, followed by a
 JSON object of the method, pc and instruction reached, the reached and expected state, the kind
-of fact the step lacks, the obligation the tactic was handed and the position of the error it
+of fact the step lacks, the obligation the tactic was given and the position of the error it
 explains, each unknown field with its reason. The kind is the one the loop tactics name in their
 errors, read by [`missingFactOf`](../CIL/Safety/MissingFacts.lean) from the step rewritten as far
 as the step equations and the result facts in scope go; a stuck step on a class instance lacks
@@ -675,9 +676,10 @@ error, once each and in source order, as a message starting `[LeanCIL goal v1] `
 proof's first import line, which moves no other line or column, set these options and report the
 steps, goals and records apart from the proof's messages.
 
-## Read control flow off one step
+## Control-flow targets of a step
 
-`CIL.Safety.StepFlow` says where a successful `step` can go without unfolding it.
+The lemmas of `CIL.Safety.StepFlow` give the possible successors of a successful `step` without
+unfolding it.
 `step_next_target` proves that an action that stays in the frame resumes at `pc + 1` of a
 continuing instruction or at one of `op.targets`. Given a successful action and its selected
 callee, `step_callee` proves membership in `Op.callees`: a singleton for a direct call or
@@ -687,7 +689,7 @@ without continuing in the current frame. `step_call_action` and `step_newVector2
 simulation, so a consumer reasoning about reachable pcs does not compile the import and linking
 layers.
 
-## Keep proof work local
+## Proof cost
 
 Prefer a small `change` or an instruction equation over repeatedly unfolding `run`,
 `CIL.Safety.step` and `CIL.step`. For generic opcode proofs, split the opcode and stack shape before
