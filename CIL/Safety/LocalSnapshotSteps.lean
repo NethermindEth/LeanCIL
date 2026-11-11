@@ -10,7 +10,8 @@ The optional snapshot forms of `cil_checked_steps` and `cil_contract_steps` carr
 enables these forms without requiring snapshot support in the ordinary tactics' dependencies.
 A store names the memory it produces and the evidence about it, and the contract form restates
 the caller facts of the context at that memory, as the loop tactics of
-`CIL.Safety.LoopFrameSteps` do.
+`CIL.Safety.LoopFrameSteps` do, and prepares its step facts again there. The contract form also
+stops after a step count.
 -/
 
 namespace CIL.Safety
