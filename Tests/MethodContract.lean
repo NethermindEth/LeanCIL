@@ -466,4 +466,39 @@ theorem coerced_index_facts (program : CIL.Program) (index : Nat) (body : CIL.Me
 
 #print axioms coerced_index_facts
 
+/-- Two symbolic words are combined and branched on. -/
+@[cil_code] def symbolicBranchBody : CIL.Method :=
+  { returnsValue := true, locals := [], code :=
+    [.arg 0, .arg 1, .bor, .brnonzero 6, .const32 7, .ret, .const32 9, .ret] }
+
+/-- A branch no fact decides ends the walk with its condition in the program counter, where
+    `split` gives both successors; stepping resumes in each. -/
+theorem symbolic_branch_splits (program : CIL.Program) (index : Nat)
+    (found : program[index]? = some symbolicBranchBody) (frame : Frame) (memory : Memory)
+    (left right : CIL.W64) :
+    ∃ fuel result returned, run program fuel index 0
+      [.scalar (.i64 left), .scalar (.i64 right)] frame [] memory = .ok (result, returned) ∧
+        (returned = [.scalar (.i32 7)] ∨ returned = [.scalar (.i32 9)]) := by
+  cil_contract_steps [found]
+  guard_target = ∃ fuel result returned, run program fuel index
+    (if ¬left ||| right = 0#64 then 6 else 4) [.scalar (.i64 left), .scalar (.i64 right)]
+      frame [] memory = .ok (result, returned) ∧
+        (returned = [.scalar (.i32 7)] ∨ returned = [.scalar (.i32 9)])
+  split
+  · cil_contract_steps [found]
+    exact Or.inr rfl
+  · cil_contract_steps [found]
+    exact Or.inl rfl
+
+#print axioms symbolic_branch_splits
+
+-- An instruction lookup at an undecided branch reports the branch without evaluating it.
+/--
+error: cil_lookup: undecided branch if ¬left = 0#64 then 6 else 4; split on its condition
+-/
+#guard_msgs in
+example (left : CIL.W64) (operation : CIL.Op) :
+    symbolicBranchBody.code[if ¬left = 0#64 then 6 else 4]? = some operation := by
+  cil_lookup []
+
 end Tests.MethodContract

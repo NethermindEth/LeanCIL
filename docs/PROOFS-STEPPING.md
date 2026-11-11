@@ -152,6 +152,11 @@ numeral program counter.
 A step fact may state an opcode index as closed arithmetic, such as `.local (↑(6 : Fin 10) + 1)`:
 fact preparation also states it at the numeral, `.local 7`, which is the form a fetched opcode has.
 
+A branch whose condition the facts do not decide leaves the condition in the program counter,
+`run p fuel m (if c then target else next) ..`, and stepping stops there: `split` gives both
+successors and each resumes with the stepping tactic. An instruction lookup at such a program
+counter fails with `cil_lookup: undecided branch` and is not evaluated.
+
 Intrinsic steps expose `checkedIntrinsic` and apply proved `@[cil_eval]` lemmas before unfolding the
 intrinsic evaluator. Register consumer lemmas in the form `CIL.evalIntrinsic operation operands =
 some result`. Nonnegative `BitVec.ofInt` literals become `BitVec.ofNat` literals so these equations

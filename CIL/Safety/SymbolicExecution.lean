@@ -613,6 +613,14 @@ elab_rules : tactic
       ↓reduceIte, $[$facts:term],*]))
     pruneSolvedGoals
     if (← getGoals).isEmpty then return
+    -- No instruction is fetched at a branch the facts left undecided; evaluating the lookup
+    -- there would unfold the condition's decision procedure on symbolic operands.
+    if let some (_, pending, _) := (← instantiateMVars (← getMainTarget)).consumeMData.eq? then
+      if pending.isAppOf ``GetElem?.getElem? then
+        let position := pending.getAppArgs.back!.consumeMData
+        if (position.isAppOfArity ``ite 5 || position.isAppOfArity ``dite 5) &&
+            position.getAppArgs[1]!.hasFVar then
+          throwError "cil_lookup: undecided branch {position}; split on its condition"
     if ← attempt (← `(tactic| cil_lookup_rfl [$facts:term,*])) then return
     evalTactic (← `(tactic| cil_lookup_failure))
 
