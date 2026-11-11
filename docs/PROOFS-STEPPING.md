@@ -12,8 +12,8 @@ The [soundness boundary](SOUNDNESS.md) describes what a successful checked execu
 ## Compose instructions
 
 Import `CIL.Safety.SymbolicExecution` and mark definitions used for instruction lookup with
-`@[cil_code]`. This complete example executes eight instructions on symbolic inputs and preserves
-arbitrary caller memory:
+`@[cil_code]`. This example executes eight instructions on symbolic inputs and preserves arbitrary
+caller memory:
 
 ```lean
 import CIL.Safety.SymbolicExecution
@@ -34,15 +34,15 @@ theorem checked_arithmetic (memory : CIL.Safety.Memory) (left right : CIL.W32) :
 end ProofGuide
 ```
 
-This handwritten body demonstrates the tactic; a proof about an assembly must bind its body to the
-generated program, as described in [Bind bodies to the
-extraction](PROOFS-BINDING.md#bind-bodies-to-the-extraction), and pass verification.
+This body is handwritten. A proof about an assembly must bind its body to the generated program
+(see [Bind bodies to the extraction](PROOFS-BINDING.md#bind-bodies-to-the-extraction)) and pass
+verification.
 
 `cil_checked_steps` composes `invoke_of_run`, `run_next`, `run_return` and `run_call_of_invoke`. It
-checks method and instruction lookups and frame setup, infers intermediate states, and checks the
-returned values. These lemmas are also available directly from
+checks method and instruction lookups, frame setup and the returned values, and infers
+intermediate states. Apply the lemmas by hand from
 [StepComposition](../CIL/Safety/StepComposition.lean) and
-[CallComposition](../CIL/Safety/CallComposition.lean) for manual proofs.
+[CallComposition](../CIL/Safety/CallComposition.lean).
 
 ### Choose a stepping tactic
 
@@ -62,25 +62,23 @@ The fact list holds proved facts the steps depend on: hypotheses, lemmas or appl
 | A loop path | `cil_loop_steps`, `cil_loop_advance`, `cil_loop_recurse`, `cil_loop_call`, `cil_loop_finish` | See [loops](#step-loops) |
 
 In every counted form a call counts as one step: the callee runs to its return and the residual
-starts at the caller's next instruction. `cil_checked_steps n` errors on a short walk because a
-residual at the wrong pc would not match its target; `cil_contract_steps n` does not.
-`cil_checked_steps`, `cil_contract_steps` and `cil_raise_steps` fail when they cannot take a first
-step, instead of returning the goal unchanged.
+starts at the caller's next instruction. `cil_checked_steps`, `cil_contract_steps` and
+`cil_raise_steps` fail when they cannot take a first step, instead of returning the goal unchanged.
 
 ### Goals the tactics accept
 
-- **Existential fuel.** A goal `∃ fuel, invoke program fuel method args memory = result` is opened
-  with `CIL.executionBound program method` as its fuel, so a proof states none; fuel that is
-  already a term is left as written.
-- **Contracts.** `cil_checked_steps` and `cil_contract_steps` state the goal with the `args`,
-  `results`, `pre`, `footprint` and `post` of each defined contract unfolded, at entry and in each
-  call's continuation, so a goal they step needs no `dsimp only [contract]` first. A contract
-  variable and `Returns` stay folded, as does a goal a proof enters by hand.
-- **Existential `run` budget.** The budget can come from a method-body lookup hypothesis, or from a
-  `CodeAt` placement beginning at its starting pc. The remaining code length supplies a candidate
-  budget; the proof must establish that it suffices. Use `WP` and a proved suffix when composing
-  code with independent call or loop budgets.
-- **Located faults.** A goal `invoke p fuel m args memory = .error ⟨m, pc, fault⟩` enters through
+- A goal `∃ fuel, invoke program fuel method args memory = result` is opened with
+  `CIL.executionBound program method` as its fuel, so a proof states none. Fuel that is already a
+  term is left as written.
+- `cil_checked_steps` and `cil_contract_steps` unfold the `args`, `results`, `pre`, `footprint`
+  and `post` of each defined contract, at entry and in each call's continuation, so a goal needs
+  no `dsimp only [contract]` first. A contract variable and `Returns` stay folded, as does a goal
+  a proof enters by hand.
+- An existential `run` budget can come from a method-body lookup hypothesis or from a `CodeAt`
+  placement beginning at its starting pc. The remaining code length supplies a candidate budget;
+  the proof must establish that it suffices. Use `WP` and a proved suffix when composing code
+  with independent call or loop budgets.
+- A located-fault goal `invoke p fuel m args memory = .error ⟨m, pc, fault⟩` enters through
   `invoke_of_run_fault` and steps the same way. At the stated `pc` the tactic first tries
   `run_fault`, which closes the goal when the fetched step raises exactly `fault`; other steps
   continue through `run_next`. Pass the fact that makes the step fail, such as
@@ -89,7 +87,7 @@ step, instead of returning the goal unchanged.
   a successful result never tries a fault lemma.
   [MathDivRemQuotient](../Examples/Proofs/MathDivRemQuotient.lean) proves its success and both
   `div` faults this way.
-- **Run-to-run.** A goal `run p (fuel + n) m 0 .. = run p fuel m n ..` closes with
+- A run-to-run goal `run p (fuel + n) m 0 .. = run p fuel m n ..` closes with
   `cil_checked_steps` when the stepped state is syntactically the target: symbolic `fuel` stops
   stepping there. With literal fuel and a target equal only up to rewriting, use
   `cil_checked_steps n [facts]` and prove the residual `run` equation.
@@ -101,13 +99,13 @@ step, instead of returning the goal unchanged.
 Every stepping, call and loop tactic closes method and instruction lookups with
 `cil_lookup [facts]`: by evaluation of an `@[cil_code]` extraction, by `rfl`, from a lookup
 hypothesis such as `found : program[index]? = some (body profile)`, or by rewriting feature tests
-in a profile-dependent body with the facts. A proof stated over an abstract `program` therefore
-steps exactly like one over `Extracted.program`.
+in a profile-dependent body with the facts. A proof over an abstract `program` therefore steps
+like one over `Extracted.program`.
 
-- Computed positions such as `base + stride * index.val` for `index : Fin n` resolve with a closed
-  bound of at most 64. Each finite case uses the same generated instruction equations or `CodeAt`
-  placement as a literal lookup. A quantified lookup theorem is applied directly; its index domain
-  need not satisfy the enumeration bound.
+- A computed position such as `base + stride * index.val` for `index : Fin n` resolves with a
+  closed bound of at most 64; each finite case uses the same instruction equations or `CodeAt`
+  placement as a literal lookup. A quantified lookup theorem is applied directly, and its index
+  domain need not satisfy that bound.
 - Named method indices reduce normally.
 - A closed position outside a concrete body reports its position and the body length.
 - A lookup at a program counter that holds an undecided branch condition fails with
@@ -116,8 +114,8 @@ steps exactly like one over `Extracted.program`.
 ### Facts read from the context
 
 A named `LoopFrame` in the context supplies local addresses and remembered values to straight-line
-stepping through the same fact-gathering rules used by loop proofs. Unknown homes provide storage
-and address facts only; a checked write or helper postcondition must establish their contents.
+stepping, by the fact-gathering rules of the loop tactics. Unknown homes provide storage and
+address facts only; a checked write or helper postcondition must establish their contents.
 
 The stepping tactics read object evidence from the context, so a fact list does not repeat it. A
 hypothesis is recognized by the head of its statement, also as one side of a conjunction, when the
@@ -135,8 +133,8 @@ a reference field, `readable.signedFacts` for a signed narrow load, and the equa
 returns. A checked reference load also makes its target's object evidence reachable, including
 when its equation is supplied through a projection such as `readable.facts held live`. Evidence
 for an unrelated object or memory is excluded. A fact passed explicitly is used as given and not
-read again. Each fact read is added to the goal as a hypothesis, as the loop tactics add theirs,
-so it is elaborated once and a goal the tactics leave shows it.
+read again. Each fact read is added to the goal as a hypothesis, so a goal the tactics leave
+shows it.
 
 ### Supply step facts
 
@@ -157,40 +155,38 @@ strategy:
 `cil_contract_step [facts]` prepares `facts` as `cil_checked_step` does, so a supplied `read` steps
 a `.loadAggregate` through a managed-reference address there as well.
 
-Pass facts about formation and successful memory operations; evaluator definitions and monadic
-binds do not belong in the fact list. Fact forms the tactics accept:
+Pass facts about formation and successful memory operations, not evaluator definitions or monadic
+binds. The tactics accept these fact forms:
 
 | Situation | Fact |
 | --- | --- |
 | A branch on a symbolic condition | `v = 0` or `Not (v = 0)` on the condition value; no `CIL.truth` restatement is needed. A literal condition, such as the `1` a decided feature test pushes, decides itself and continues at a numeral program counter |
-| An opcode index stated as closed arithmetic, such as `.local (↑(6 : Fin 10) + 1)` | Accepted: fact preparation also states it at the numeral, `.local 7`, the form a fetched opcode has |
-| A read stated at a closed width, such as `read memory home (localWidth (.aggregate 32)) 1` | Accepted: its load is derived at the numeral width an opcode carries |
+| An opcode index stated as closed arithmetic, such as `.local (↑(6 : Fin 10) + 1)` | Fact preparation also states it at the numeral, `.local 7`, the form a fetched opcode has |
+| A read stated at a closed width, such as `read memory home (localWidth (.aggregate 32)) 1` | Fact preparation derives its load at the numeral width an opcode carries |
 | A value known only as `argument : CIL.Value`, loaded as an argument or passed to a call | `numericValue argument = true`; preparation also states it over the unfolded definition, the form the checked value test has when the step reaches it |
 | `bitcastByteBool`, whose operand must be `0` or `1` | None for a comparison result `if c then 1 else 0`; for any other int32, `bits.toNat ≤ 1`. The fact may bound a value inside width changes, as `field.toNat ≤ 1` does for the operand `(field.setWidth 8).setWidth 32` |
 | A symbolic reference | Its formation equation; the equation stays usable without splitting the reference |
 
 A branch whose condition the facts do not decide leaves the condition in the program counter,
 `run p fuel m (if c then target else next) ..`, and stepping stops there. `split` gives both
-successors and each resumes with the stepping tactic. Branches use equations before reflexivity,
-so a fact can decide the next program counter before the next lookup.
+successors and each resumes with the stepping tactic.
 
-After each step the tactics evaluate the closed literal operands the state holds with the
-`cil_literal` simp set: a width conversion, sign extension or `toNat` of a bit-vector numeral, and
-a remainder of numerals, as a masked shift count is. The set fires on numerals only, so a symbolic
-operand stays as stated, and `simp only [cil_literal]` gives a hand-written step the same form.
-A `localResult kind value` whose constructors decide it is stated as the value the load pushes, so
-a `.vector128` load of `.v128 bits` leaves `.v128 bits` for the next fact; `cil_local_results`
-does the same for a hand-written step.
+After each step the tactics evaluate closed literal operands with the `cil_literal` simp set: a
+width conversion, sign extension or `toNat` of a bit-vector numeral, and a remainder of numerals
+such as a masked shift count. A symbolic operand stays as stated, and `simp only [cil_literal]`
+gives a hand-written step the same form. A `localResult kind value` whose constructors decide it
+is stated as the value the load pushes, so a `.vector128` load of `.v128 bits` leaves `.v128 bits`
+for the next fact; `cil_local_results` does the same for a hand-written step.
 
 [Fact preparation](PROOFS-CONTRACTS.md#supply-facts-to-the-stepping-tactics) describes how local
 facts are normalised and instantiated.
 
 ### Calls and returns
 
-The frame-entry and return premises (checked arguments, frame setup and checked results) use
-`cil_checked_side`, shared by the contract, outcome and loop tactics. It normalizes with the
-closed `cil_side`, `cil_checked` and `cil_guard` sets plus supplied facts. The instruction
-equations use the same side-condition rules.
+`cil_checked_side` closes the frame-entry and return premises (checked arguments, frame setup and
+checked results) for the stepping, contract, outcome and loop tactics. It normalizes with the
+closed `cil_side`, `cil_checked` and `cil_guard` sets plus supplied facts, the side-condition
+rules the instruction equations also use.
 
 At a call, including `callvirt` and the constructor call of `newobj`, `cil_checked_steps` proves
 the callee by stepping it or from an invocation fact in context, then keeps stepping the caller
@@ -199,45 +195,42 @@ with numeric locals is not a closed term; `bind_entry ... allocating` supplies i
 and home facts instead (see [loop
 scaffolding](PROOFS-BINDING.md#generate-loop-entry-and-cutpoint-scaffolding)).
 
-At a return, the tactic leaves the equation between the computed checked result and the stated
-result as a proof goal. The goal contains the returned values, not an unexecuted `run`. It is
-closed automatically only when `with_reducible rfl` succeeds after frame cleanup, list
+At a fetched `.ret`, narrow returns included, the tactic leaves the equation between the computed
+checked result and the stated result as a goal over the returned values, with no unexecuted `run`.
+The goal closes automatically only when `with_reducible rfl` succeeds after frame cleanup, list
 normalization and literal shift-count reduction. Cleanup also drops the narrowing of an `if p then
 1 else 0` result, and the closing `simp` drops it from a comparison already decided to `1` or `0`,
 so a narrow Boolean return needs no unfolding of `NarrowKind.extend`. Other mathematical results
 can need a separate `simp` or case split. `cil_contract_steps` likewise leaves the return
 postcondition as a goal, stated of the memory the body left when the returning frame is a literal
-that owns no allocation. Return proofs are tried only for fetched `.ret` instructions, narrow
-returns included.
+that owns no allocation.
 
 ### Instruction families
 
-**Intrinsics.** Intrinsic steps expose `checkedIntrinsic` and apply proved `@[cil_eval]` lemmas
-before unfolding the intrinsic evaluator. Register consumer lemmas in the form
-`CIL.evalIntrinsic operation operands = some result`. Nonnegative `BitVec.ofInt` literals become
-`BitVec.ofNat` literals so these equations can match, so state `@[cil_eval]` lemmas with
-`BitVec.ofNat` operands. A supplied evaluation fact may instead use a numeral operand, such as
-`.i32 27`: when one is supplied, a second pass respells literal `BitVec.ofNat n k` operands as
-numerals and leaves symbolic `BitVec.ofNat n x` values unchanged. The tactic keeps the lemma's
-result form, then removes literal stack `take`, `drop`, `reverse` and append expressions before
-the next step. These rewrites do not simplify consumer arithmetic or unfold consumer value
-definitions.
+Intrinsic steps expose `checkedIntrinsic` and apply proved `@[cil_eval]` lemmas before unfolding
+the intrinsic evaluator. Register consumer lemmas in the form
+`CIL.evalIntrinsic operation operands = some result` with `BitVec.ofNat` operands, because
+nonnegative `BitVec.ofInt` literals become `BitVec.ofNat` literals before matching. A supplied
+evaluation fact may instead use a numeral operand, such as `.i32 27`: a second pass then respells
+literal `BitVec.ofNat n k` operands as numerals and leaves symbolic `BitVec.ofNat n x` values
+unchanged. The tactic keeps the lemma's result form, then removes literal stack `take`, `drop`,
+`reverse` and append expressions before the next step. These rewrites do not simplify consumer
+arithmetic or unfold consumer value definitions.
 
-**Value-only operations.** Checked arithmetic, conversions and division have one equation per
-i32/i64 operand shape, generated by `cil_value_steps` when the library builds. The stepper uses
-these equations and has no dispatcher-unfolding fallback. For a hand-written step, use the
-corresponding equation directly or `simp only [cil_step, facts]`.
+Value-only operations (checked arithmetic, conversions and division) have one equation per i32/i64
+operand shape, generated by `cil_value_steps` when the library builds. The stepper has no
+dispatcher-unfolding fallback for them. For a hand-written step, use the corresponding equation
+directly or `simp only [cil_step, facts]`.
 
-**Reference and field instructions.** The `instruction` arms of `load64`, `store64` and
+Reference and field instructions have one `@[cil_instruction_step]` equation per operand shape in
+[InstructionSteps](../CIL/Safety/InstructionSteps.lean), which rewrites a step to checked memory
+and formation operations. They cover the `instruction` arms of `load64`, `store64` and
 `storeScalar` through a reference, `fieldAt` and `fieldAddress` on an address, `setFieldAt` of
-width 1, 2, 4 or 8, `fieldAt` of width 4 or 8 on a struct value, `asRef`, `skipInit` and `initobj`
-have one `@[cil_instruction_step]` equation per operand shape in
-[InstructionSteps](../CIL/Safety/InstructionSteps.lean). They rewrite a step to checked memory and
-formation operations.
+width 1, 2, 4 or 8, `fieldAt` of width 4 or 8 on a struct value, `asRef`, `skipInit` and `initobj`.
 
-- Successful encoded byte reads and writes can be supplied directly: the stepper derives the
-  scalar or vector bridge once before stepping. Narrow scalar reads support signed and unsigned
-  results. Facts may be quantified or nested in conjunctions.
+- Supply successful encoded byte reads and writes directly: the stepper derives the scalar or
+  vector bridge before stepping. Narrow scalar reads support signed and unsigned results. Facts
+  may be quantified or nested in conjunctions.
 - `CIL.Safety.CheckedMemoryFacts` exposes the vector load and store bridges for direct use.
 - The bridges retain the operation's exact memory, reference, width and initialization checks;
   write authority alone does not establish a readable snapshot.
@@ -247,15 +240,14 @@ formation operations.
   `instructionStep`. A `.call` step has its own `cil_step` equation, so a call checks its
   arguments without unfolding the dispatcher.
 
-**Aggregates.** Aggregate loads and stores use the address-shape equations in
+Aggregate loads and stores use the address-shape equations in
 [AggregateMemorySteps](../CIL/Safety/AggregateMemorySteps.lean). A checked `readSnapshot` supplies
 the actual initialization mask; it does not establish that every byte is initialized. Initialized
 byte reads and writes reuse the corresponding snapshot bridges. Null faults retain the
 instruction's requested width.
 
-**Memory operations.** Each `.memory` operation has one equation per operand shape in
-`CIL.Safety.MemorySteps`. Supply checked `read`, `write`, `add` and formation equations instead of
-evaluator definitions.
+Each `.memory` operation has one equation per operand shape in `CIL.Safety.MemorySteps`. Supply
+checked `read`, `write`, `add` and formation equations instead of evaluator definitions.
 
 - A `memoryInstruction` or `staticInstruction` equation is usable when its complete operation,
   stack and memory match.
@@ -265,10 +257,9 @@ evaluator definitions.
   without retrying dispatcher unfolds.
 - Reference shapes `.null` and `.address r` normalize in the shared closed set, so a successful
   `add` fact on a known address needs no extra reference-conversion fact.
-- The public steppers share this selection; manual proofs can apply the matching opcode or
-  operation equation directly.
+- Manual proofs can apply the matching opcode or operation equation directly.
 
-**Feature tests.** A `.feature f` step pushes `body.profile.evaluate f`. For a known feature,
+A `.feature f` step pushes `body.profile.evaluate f`. For a known feature,
 `cil_step` reduces that expression to the profile field; a symbolic `f` stays
 `body.profile.evaluate f`, so a fact about it applies as stated. `cil_step` unfolds a method
 definition or literal only as far as its profile, so a fact such as `profile.avx2 = true` decides
@@ -280,19 +271,11 @@ fact on the field or first run `simp only [CIL.Safety.reduceMethodProfile, cil_f
 
 ### Consumer stepping regressions
 
-The public tactics, with symbolic values and memory and no consumer-specific execution rules,
-handle these cases:
-
-- supplied store and load facts take priority over generic equations;
-- zero, nonzero and literal branch conditions decide the next program counter;
-- memory operations use their own equations;
-- profile facts decide instruction lookup;
-- intrinsic evaluation facts normalize the next stack;
-- signed, unsigned and loaded-limb comparisons, and signed or unsigned widening in both argument
-  orders, step within fixed heartbeat budgets.
-
-The [proof automation regressions](VALIDATION-PROOFS.md#consumer-stepping-regressions) name the
-proof that pins each case and its budget.
+The public tactics handle store and load facts, branch conditions, memory operations, profile
+lookups, intrinsic facts, comparisons and widening over symbolic values and memory, with no
+consumer-specific execution rules. The [proof automation
+regressions](VALIDATION-PROOFS.md#consumer-stepping-regressions) name the proof that pins each
+case and its heartbeat budget.
 
 ### State goals with WP
 
@@ -384,13 +367,12 @@ context, quantified or not, is used whenever its instruction is reached. The exi
 normalised facts, then again after unfolding `leaveFrame` and narrow extension, so a fact about
 the exited frame's memory is tried before cleanup rewrites past it.
 
-The loop tactics step one fetched instruction at a time, simplifying the stack with the `drop`,
-`take`, `reverse` and append lemmas after each step. When one cannot go on it fails instead of
-leaving a goal, and the message names the pc. Every state, step and residual a message shows
-writes its pc as a literal, such as `18` rather than `17 + 1`, as does a loop goal a walk hands
-back. Goals print a bit-vector literal of `2 ^ 16` or more in hexadecimal, such as `0x80000000`
-or `0x80000000#32` ([LiteralDisplay](../CIL/LiteralDisplay.lean)), and smaller ones in decimal:
-
+The loop tactics step one fetched instruction at a time and simplify literal stack `drop`, `take`,
+`reverse` and append after each step. A tactic that cannot go on fails instead of leaving a goal,
+and its message names the pc. Messages, and the loop goals a walk hands back, write each pc as a
+literal, such as `18` rather than `17 + 1`. Goals print a bit-vector literal of `2 ^ 16` or more
+in hexadecimal, such as `0x80000000` or `0x80000000#32`
+([LiteralDisplay](../CIL/LiteralDisplay.lean)), and smaller ones in decimal. The failures are:
 - `cannot step pc N (op) at memory M` shows the step and what is left of it after the step
   equations and gathered facts, and names the fact that residual lacks: a span's validity, a
   slice, an element's address, an `Unsafe.Add` result, a `form` fact, a load's value, or a
@@ -403,11 +385,10 @@ or `0x80000000#32` ([LiteralDisplay](../CIL/LiteralDisplay.lean)), and smaller o
 
 ### Write bit-vector literals in simp-normal form
 
-When a bit-vector hypothesis will be passed to default `simp`, write its literals in
-simp-normal form: `0#32`, `1#64` or `0x80000000#32`. Use the same form in definitions that
-the proof unfolds. Default `simp` normalizes ordinary numerals in the goal, but a supplied
-hypothesis written as `value ≠ 0` can then fail to match `value ≠ 0#32`.
-For example:
+Write the literals of a bit-vector hypothesis passed to default `simp` in simp-normal form:
+`0#32`, `1#64` or `0x80000000#32`. Use the same form in definitions that the proof unfolds.
+Default `simp` normalizes ordinary numerals in the goal, so a supplied hypothesis written as
+`value ≠ 0` can fail to match `value ≠ 0#32`:
 
 ```lean
 import CIL
@@ -416,10 +397,9 @@ example (value : CIL.W32) (nonzero : value ≠ 0#32) : value ≠ 0#32 := by
   simp [nonzero]
 ```
 
-[CopyUntilZero](../Examples/Proofs/CopyUntilZero.lean) uses this convention in its list predicate
-and branch hypotheses, so ordinary `simp` handles the nonzero case without a
-literal-normalization override. Natural-number lengths, offsets and fuel remain ordinary numerals.
-For a hypothesis that uses an ordinary numeral, pass its canonical restatement:
+[CopyUntilZero](../Examples/Proofs/CopyUntilZero.lean) uses this form in its list predicate and
+branch hypotheses. Natural-number lengths, offsets and fuel remain ordinary numerals. For a
+hypothesis that uses an ordinary numeral, pass its canonical restatement:
 
 ```lean
 import CIL
@@ -431,10 +411,10 @@ example (value : CIL.W32) (nonzero : value ≠ 0) : value ≠ 0#32 := by
 ### Compose a helper call inside a loop
 
 A loop body that calls a helper composes through the helper's `MethodContract`
-([LoopContract](../CIL/Safety/LoopContract.lean)). `LoopSegment` fixes one cost for every
-continuation budget, which a contract's existential fuel cannot supply, so
-`loop_terminates_induction` asks each iteration for `LoopTerminates` at its own state while assuming
-it at every invariant state of smaller measure.
+([LoopContract](../CIL/Safety/LoopContract.lean)). A contract's existential fuel cannot supply the
+one cost `LoopSegment` fixes for every continuation budget, so `loop_terminates_induction` asks
+each iteration for `LoopTerminates` at its own state while assuming it at every invariant state of
+smaller measure.
 
 | Rule | Use |
 | --- | --- |
@@ -457,19 +437,18 @@ All gather facts as the other loop tactics do, so their lists are optional:
   [obligation tags](#obligation-tags)), with those facts in context.
 - `cil_loop_call holds input at site [facts]` applies the contract (`loop_terminates_call`) at
   the `bind_call` site or, without `at site`, at the fetched call. It leaves the precondition,
-  tagged `precondition.<callee>`, unless `trivial` or a hypothesis proves it, then continues: it
-  names the returned memory `called`, the typed output `output` and, read by field from the call's
-  `CallResult`, its invocation `invoked`, footprint fact `confined` and postcondition `returned`,
-  unfolds the contract in them, substitutes an output its postcondition states as an equation
-  (unless `cil_loop_call keeping`, which keeps it as `output`), names the callee's `WellFormed`
-  (`calledFormed`) and proves the frame at the returned memory (`calledFrame`, through
-  `LoopFrame.after_confined`), and carries the caller-buffer facts across the call: write
-  authority always, contents when `omega` shows them apart from the callee's footprint. It fails
-  naming the pc and instruction when the goal is not at a call, the argument check and the fact it
-  needs when the call does not step, the contract's arguments beside the stack when they differ,
-  and the side condition when the callee's footprint is not shown inside the frame's footprint or
-  below the caller's watermark, from the facts or a hypothesis stating it, such as
-  `WritableSpan.covered` for a lent span.
+  tagged `precondition.<callee>`, unless `trivial` or a hypothesis proves it, then continues with
+  these names in context: the returned memory `called`, the typed output `output` and, from the
+  call's `CallResult`, its invocation `invoked`, footprint fact `confined` and postcondition
+  `returned`, each with the contract unfolded; the callee's `WellFormed` (`calledFormed`); and
+  the frame at the returned memory (`calledFrame`, through `LoopFrame.after_confined`). An output
+  the postcondition states as an equation is substituted, unless `cil_loop_call keeping` keeps it
+  as `output`. Caller-buffer facts cross the call: write authority always, contents when `omega`
+  shows them apart from the callee's footprint. The tactic fails naming the pc and instruction
+  when the goal is not at a call, the argument check and the fact it needs when the call does not
+  step, the contract's arguments beside the stack when they differ, and the side condition when
+  the callee's footprint is not shown inside the frame's footprint or below the caller's
+  watermark by the facts or a hypothesis such as `WritableSpan.covered` for a lent span.
 - `cil_loop_recurse hypothesis values [facts]` steps to the loop head of `hypothesis`, the entry
   goal's or the iteration's statement that every (smaller) invariant head state terminates. It
   takes each struct zeroing, field store and numeric local store on the way through
@@ -491,9 +470,9 @@ the helper or naming its fuel.
 
 Every goal a loop or contract tactic leaves for the author carries a tag naming its purpose
 ([Obligations](../CIL/Safety/Obligations.lean)), so a proof selects it with `case <tag> =>` and
-the infoview shows it. Tagging is goal metadata: it prints nothing and does no proof work. The
-goal a tactic only continues, such as the loop path after `cil_loop_advance` or the continuation
-after `cil_loop_call`, keeps the tag it had.
+the infoview shows it. A tag is goal metadata: it prints nothing and does no proof work. A goal a
+tactic only continues, such as the loop path after `cil_loop_advance` or the continuation after
+`cil_loop_call`, keeps the tag it had.
 
 | Tag | Obligation | Left by |
 | --- | --- | --- |
@@ -523,7 +502,7 @@ Tag naming rules:
   goals. A loop tactic handed a tagged obligation instead of a loop path says which obligation
   the main goal is and how to select it.
 
-The tags are the proof API:
+The tag names and their numbering are fixed:
 
 ```lean
 import CIL.Safety.Obligations
@@ -590,12 +569,12 @@ reaches a next state that keeps the invariant with a smaller measure.
 [`invoke_loop_returns`](../CIL/Safety/LoopVC.lean) states the result as `∃ fuel, invoke ... =
 .ok (final, values)` and [`invoke_loop_results`](../CIL/Safety/LoopVC.lean) as `∃ fuel final,
 invoke ... = .ok (final, values) ∧ kept final`, so `refine` against a theorem of that shape fixes
-the postcondition. Inside the progress goal, `cil_loop_continue next [facts]` leaves only
-preservation and decrease, and `cil_loop_finish [facts]` proves an exit.
+the postcondition. Inside the progress goal, `cil_loop_continue next [facts]` checks the path with
+`cil_loop_steps`, infers its cost and leaves only invariant preservation and strict measure
+decrease, and `cil_loop_finish [facts]` proves an exit.
 
-The loop tactics take their facts from the proof context as well as from the optional list.
-[`gatherLoopFacts`](../CIL/Safety/LoopFacts.lean) selects hypotheses by the head of their type, so
-an unrelated context adds nothing to simp:
+[`gatherLoopFacts`](../CIL/Safety/LoopFacts.lean) selects context hypotheses by the head of their
+type, so an unrelated context adds nothing to simp. It gathers:
 
 - the declarations in scope with the `cil_loop_unfold` simp attribute, which `bind_cutpoint`
   gives its state and `bind_entry` its frame and normalized result and memory;
@@ -635,26 +614,22 @@ without an equation. A fact about a memory that no state of the goal holds and n
 produces, such as the caller's memory once the frame has stored, is dropped; a frame fact at a
 memory that a kept store or call produces is kept, and so are the caller facts that frame
 carries, such as a span's validity, so a span local loads after a word local's store. Derived
-facts are added as hygienic hypotheses, so the stepper looks them up by name instead of
-elaborating a proof term at every step, and a statement already gathered is not added again.
+facts are added as hygienic hypotheses, and a statement already gathered is not added again.
 `SpanSum` names no fact but its invariant equation.
 
-The stepping tactics give each instruction only the facts it can read. Home forms reach only
-`ldloca`, field reads only `ldfld`, and the negative sides of case splits only instructions that
-test or compute on data, while `ret` reads them all; each group is added and normalised the first
-time such an instruction is reached. Stack lemmas join the rewrite only when the goal holds a
-stack operation.
+Each instruction is given only the facts it can read: home forms reach only `ldloca`, field reads
+only `ldfld`, and the negative sides of case splits only instructions that test or compute on
+data, while `ret` reads them all.
 
 A loop over symbolic caller memory keeps the frame part of its state as the
 [`LoopFrame`](../CIL/Safety/LoopFrames.lean) that `bind_entry ... allocating` returns, in a
-`FrameState`. `frame.store index value rfl` stores into a home and gives the step's store
-equation and the frame after the store, without composing `MemoryBelow` by hand. Its remembered
-locals are a literal list, as after the loop tactics' stores, so either frame feeds the next step.
-`LoopFrame.load` reads a home at a loop head, and `LoopFrame.leave_kept` `setup` is the exit's
-`MemoryBelow` fact for a frame confined to no caller storage, for any exited frame with the
-entry's owned identities, closing a postcondition such as `SpanSum`'s; the loop tactics derive
-both from the state's frame. [SpanSum](../Examples/Proofs/SpanSum.lean) stores through its frame
-this way, and its loop steps name no frame or span fact;
+`FrameState`; [frame facts](PROOFS-BUFFERS.md#carry-frame-facts-through-a-loop) describes its
+lemmas. `frame.store index value rfl` stores into a home and gives the step's store equation and
+the frame after the store, without composing `MemoryBelow` by hand. Its remembered locals are a
+literal list, as after the loop tactics' stores, so either frame feeds the next step. The loop
+tactics derive `LoopFrame.load` and, for any exited frame with the entry's owned identities,
+`LoopFrame.leave_kept` from the state's frame. [SpanSum](../Examples/Proofs/SpanSum.lean) stores
+through its frame this way, and its loop steps name no frame or span fact;
 [Countdown](../Examples/Proofs/Countdown.lean) leaves its stores to `cil_loop_recurse`.
 
 ## See what the tactics did
@@ -669,7 +644,7 @@ importing it does not change how a proof elaborates. Import it and set an option
 | `set_option cil.diagnostics true` | A failure record for each error a `cil_` tactic raised and each goal one left unsolved |
 | `set_option cil.goals true` | The goal at each `sorry`, failing tactic and unsolved goal |
 
-**Steps.** Any application of a lemma to a `step ... = ...` premise counts, whichever tactic or
+A traced step is any application of a lemma to a `step ... = ...` premise, whichever tactic or
 hand-written term took it, so `cil_loop_steps`, `cil_checked_steps`, `cil_contract_steps`, the
 outcome and return tactics and `run_next` by hand are all traced. Each step message gives the pc
 and instruction, the source line from `ExtractedSymbols` when the proof imports it, the lemma
@@ -681,7 +656,7 @@ goals it left; a step no such tactic took is logged at its tactic block as taken
 block whose goal states a run of a method but whose proof applies no step lemma, such as one that
 evaluates the method with `rfl` or `decide`, logs that it took no step to trace.
 
-**Failure records.** Each record is a message starting `[LeanCIL failure v1] `, followed by a
+Each failure record is a message starting `[LeanCIL failure v1] `, followed by a
 JSON object of the method, pc and instruction reached, the reached and expected state, the kind
 of fact the step lacks, the obligation the tactic was handed and the position of the error it
 explains, each unknown field with its reason. The kind is the one the loop tactics name in their
@@ -691,7 +666,7 @@ as the step equations and the result facts in scope go; a stuck step on a class 
 contract's run, as `cil_contract_steps` leaves one at a call, is read as the run it states. The
 error itself is unchanged.
 
-**Goals.** The observer logs the goal at each `sorry` written in the source, as a term or a
+With `cil.goals`, the observer logs the goal at each `sorry` written in the source, as a term or a
 tactic, the goal before each tactic that raised an error and each goal of an `unsolved goals`
 error, once each and in source order, as a message starting `[LeanCIL goal v1] ` and `sorry`,
 `error` or `unsolved`, followed by the goal as Lean prints it.
@@ -703,13 +678,14 @@ steps, goals and records apart from the proof's messages.
 ## Read control flow off one step
 
 `CIL.Safety.StepFlow` says where a successful `step` can go without unfolding it.
-`step_next_target`: an action that stays in the frame resumes at `pc + 1` of a continuing
-instruction or at one of `op.targets`. Given a successful action and its selected callee,
-`step_callee` proves membership in `Op.callees`: a singleton for a direct call or construction, or
-all authenticated targets for an indirect call. Tail transfers enter a callee without continuing in
-the current frame. `step_call_action` and `step_newVector256_action` / `step_newAggregate_action`
-separate a call from a construction. The module imports only the step simulation, so a consumer
-reasoning about reachable pcs does not compile the import and linking layers.
+`step_next_target` proves that an action that stays in the frame resumes at `pc + 1` of a
+continuing instruction or at one of `op.targets`. Given a successful action and its selected
+callee, `step_callee` proves membership in `Op.callees`: a singleton for a direct call or
+construction, or all authenticated targets for an indirect call. Tail transfers enter a callee
+without continuing in the current frame. `step_call_action` and `step_newVector256_action` /
+`step_newAggregate_action` separate a call from a construction. The module imports only the step
+simulation, so a consumer reasoning about reachable pcs does not compile the import and linking
+layers.
 
 ## Keep proof work local
 
