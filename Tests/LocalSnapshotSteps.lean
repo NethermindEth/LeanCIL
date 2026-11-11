@@ -585,4 +585,23 @@ theorem caller_reads_after_stores (memory : Memory) (slots : List LocalSlot) (bo
   rfl
 
 #print axioms caller_reads_after_stores
+
+/-- A counted walk stops after its last step, a store here, with that store's evidence named,
+    and a second walk resumes from those snapshots. -/
+theorem counted_walk (memory : Memory) (slots : List LocalSlot) (boundary : Nat)
+    (homes : CompleteWritableHomes memory boundary mixedHomes.localKinds slots)
+    (formed : memory.WellFormed) (word : BitVec 64) (vector : BitVec 128) :
+    WP (Execution (fun fuel => run [mixedHomes] fuel 0 0
+      [.scalar (.i64 word), .scalar (.v128 vector)] ⟨0, slots, [], [], 0⟩ [] memory))
+      (fun result => result.2 = [.scalar (.i64 word)]) := by
+  have snapshots := LocalSnapshots.empty memory slots
+  cil_contract_steps (snapshots := snapshots) 2 []
+  have _remembered : LocalSnapshots storedLocal slots
+      (rememberLocal (fun _ => none) 0 (.i64 word)) := localSnapshots
+  -- The walk took no third step, so no second store has named its memory.
+  fail_if_success (have _second := localSnapshots_1)
+  cil_contract_steps (snapshots := localSnapshots) []
+  rfl
+
+#print axioms counted_walk
 end Tests.LocalSnapshotSteps

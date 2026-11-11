@@ -638,17 +638,19 @@ private def snapshotEvidenceAt (memory : Expr) (facts : Array Term) : TacticM Bo
 
 /-- Walk a contract goal with numeric local snapshots: ordinary contract steps, and the numeric
     local loads and stores they do not take, through `initial` and each store's snapshots. The
-    walk ends when `continuation` closes the goal or at the first step that fails. After each store it crosses, the step facts are prepared again from `facts`
+    walk ends when `continuation` closes the goal, after `limit` steps, or at the first step
+    that fails. After each store it crosses, the step facts are prepared again from `facts`
     at the store's memory, where the store restated the caller facts they name. Returns
     whether a step was taken. -/
 private def snapshotContractWalk (initial : Term) (facts : Array Term)
-    (continuation : Option Term) : TacticM Bool := do
+    (continuation : Option Term) (limit : Option Nat) : TacticM Bool := do
   let mut facts := facts
   let mut prepared ← prepareStepFacts facts
   let finish ← continuation.mapM fun term => do
     return (← cilContractContinuation term).2
   evalTactic (← `(tactic| cil_contract_prepare [$[$prepared:term],*]))
   let mut snapshot := initial
+  let mut taken := 0
   let mut progressed := false
   repeat
     if (← getGoals).isEmpty then break
@@ -659,6 +661,7 @@ private def snapshotContractWalk (initial : Term) (facts : Array Term)
         progressed := true
         break
       catch _ => saved.restore
+    if limit.any (taken ≥ ·) then break
     let saved ← saveState
     let stepFacts := prepared
     -- A numeric local's step through the snapshots; a store's step may be `supplied`.
@@ -710,6 +713,7 @@ private def snapshotContractWalk (initial : Term) (facts : Array Term)
         trace[CIL.snapshots] "{error.toMessageData}"
         break
     progressed := true
+    taken := taken + 1
     -- Facts prepared before the store are about the memory it wrote to.
     if let some stored := crossed then
       let carried ← carrySuppliedReads stored.source stored.below facts
@@ -731,12 +735,16 @@ private def snapshotContractWalk (initial : Term) (facts : Array Term)
     continuation stops the walk. -/
 syntax "cil_contract_steps" "(" &"snapshots" ":=" term ")" "[" term,* "]"
   (" until " term)? : tactic
-
+/-- As `cil_contract_steps (snapshots := ..)`, but stop silently after at most `count` steps. -/
+syntax "cil_contract_steps" "(" &"snapshots" ":=" term ")" num "[" term,* "]" : tactic
 
 elab_rules : tactic
   | `(tactic| cil_contract_steps (snapshots := $initial) [$facts:term,*]
       $[until $continuation]?) => focus do
-    unless ← snapshotContractWalk initial facts.getElems continuation do
+    unless ← snapshotContractWalk initial facts.getElems continuation none do
       throwError "Snapshot contract stepping took no step"
+  | `(tactic| cil_contract_steps (snapshots := $initial) $count:num [$facts:term,*]) =>
+    focus do
+      discard <| snapshotContractWalk initial facts.getElems none (some count.getNat)
 
 end CIL.Safety

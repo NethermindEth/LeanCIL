@@ -319,7 +319,8 @@ store at a symbolic local index. A supplied store
 advances the snapshots to its own memory, and a store's named evidence and the caller reads and
 buffers it carries are checked against the final memory. One walk crosses three stores while forming
 argument references, reading an input word through `ValidCall` and loading two caller limbs, one
-named and one supplied as a projection, and stops when a limb is not shown below the boundary.
+named and one supplied as a projection, and stops when a limb is not shown below the boundary. A counted walk stops after its second step
+and a second walk resumes from the snapshots it named.
 
 `Tests/PrimitiveArrays.cs` checks compiled loads and stores for twelve primitive integer element
 types against runtime results and certified checked execution. It also covers length, helper calls,

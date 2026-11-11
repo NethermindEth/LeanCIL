@@ -101,7 +101,12 @@ listed in [coverage](VALIDATION-COVERAGE.md).
 
 For `WP` or existential successful-execution goals, use
 `cil_contract_steps (snapshots := snapshots) [facts]`, optionally followed by
-`until continuation`. Ordinary contract stepping handles supplied step facts, calls and returns;
+`until continuation`. `cil_contract_steps (snapshots := snapshots) n [facts]` takes at most `n` steps
+and stops silently, like `cil_contract_steps n [facts]`: count the steps up to the program counter
+where a helper lemma over `CodeAt body start segment` applies, apply the lemma there, and continue
+from the last `localSnapshots`. A call counts as one step.
+
+Ordinary contract stepping handles supplied step facts, calls and returns;
 the snapshot form supplies missing numeric local loads and stores, so one call walks a path
 through both. `CompleteWritableHomes` or `NumericHomes` supplies each selected home and its write
 access even when the slot list is opaque. An explicit `WritableHomes` bundle with individual slot
