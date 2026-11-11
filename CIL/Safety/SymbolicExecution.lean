@@ -27,6 +27,25 @@ and loop tactics, the automation tests and downstream proofs all build on these;
 
 namespace CIL.Safety
 
+/-- Checked local loads use the slot's kind; the opcode annotation adds no second conversion. -/
+theorem step_local_annotation (body : CIL.Method) (index : Nat)
+    (narrow : Option CIL.NarrowKind) (pc : Nat) (args : List Value) (frame : Frame)
+    (stack : List Value) (memory : Memory) :
+    step body (.local index narrow) pc args frame stack memory =
+      step body (.local index) pc args frame stack memory := rfl
+
+#print axioms step_local_annotation
+
+/-- Checked local stores use the slot's kind independently of the opcode annotation. -/
+theorem step_setLocal_annotation (body : CIL.Method) (index : Nat)
+    (narrow : Option CIL.NarrowKind) (pc : Nat) (args : List Value) (frame : Frame)
+    (stack : List Value) (memory : Memory) :
+    step body (.setLocal index narrow) pc args frame stack memory =
+      step body (.setLocal index) pc args frame stack memory := by
+  cases stack <;> rfl
+
+#print axioms step_setLocal_annotation
+
 open Lean Elab Tactic Conv in
 /-- Replaces the focused term by its full reduction; stepping applies it to the goal's fuel. -/
 elab "cil_reduce_fuel" : conv => do
@@ -150,8 +169,12 @@ open Lean in
 private def hasClosedLiteralOperand (expression : Expr) : Bool :=
   let numeral (value : Expr) := value.isRawNatLit || value.isAppOfArity ``OfNat.ofNat 3 ||
     (value.isAppOfArity ``BitVec.ofNat 2 &&
-      (value.appArg!.isRawNatLit || value.appArg!.isAppOfArity ``OfNat.ofNat 3))
+      (value.appArg!.isRawNatLit || value.appArg!.isAppOfArity ``OfNat.ofNat 3)) ||
+    (value.isAppOfArity ``BitVec.ofFin 2 && value.appArg!.isAppOfArity ``Fin.ofNat 3 &&
+      (value.appArg!.appArg!.isRawNatLit ||
+        value.appArg!.appArg!.isAppOfArity ``OfNat.ofNat 3))
   (expression.find? fun value =>
+    (value.isAppOfArity ``BitVec.ofFin 2 && numeral value) ||
     ((value.isAppOfArity ``BitVec.signExtend 3 || value.isAppOfArity ``BitVec.setWidth 3 ||
       value.isAppOfArity ``BitVec.zeroExtend 3 || value.isAppOfArity ``BitVec.toNat 2) &&
       numeral value.appArg!) ||
@@ -547,6 +570,16 @@ elab_rules : tactic
 
 -- The closed literal operands every stepping tactic evaluates, so a state reads the same
 -- whichever tactic produced it. Each is a simproc that fires on numerals only.
+open Lean Meta in
+/-- Restore a closed bit-vector constructor to the numeral form used by Lean's simprocs. -/
+dsimproc_decl closedBitVecConstructor (BitVec.ofFin _) := fun expression => do
+  let some width ← getNatValue? expression.getAppArgs[0]! | return .continue
+  let finite := expression.appArg!
+  unless finite.isAppOfArity ``Fin.ofNat 3 do return .continue
+  let some value ← getNatValue? finite.appArg! | return .continue
+  return .done (mkApp2 (mkConst ``BitVec.ofNat) (toExpr width) (toExpr value))
+
+attribute [cil_literal_proc] closedBitVecConstructor
 attribute [cil_literal_proc] BitVec.reduceSignExtend BitVec.reduceSetWidth
   BitVec.reduceZeroExtend BitVec.reduceToNat BitVec.reduceOfInt Nat.reduceMod
 
@@ -758,7 +791,13 @@ def stepFacts (target : Expr) (facts : Array Term) : TacticM (Array Term) := do
     | _, _ => pure ()
     if openParameters then return true
     -- A named body may need its generated equation unfolded before application.
-    let arguments := factLhs.getAppArgs |>.set! 0 lhs.getAppArgs[0]!
+    let mut arguments := factLhs.getAppArgs |>.set! 0 lhs.getAppArgs[0]!
+    let operation ← whnfR arguments[1]!
+    if operation.isAppOfArity ``CIL.Op.local 2 ||
+        operation.isAppOfArity ``CIL.Op.setLocal 2 then
+      arguments := arguments.set! 1
+        (mkApp2 operation.getAppFn operation.getAppArgs[0]!
+          (mkApp (mkConst ``Option.none [Level.zero]) (mkConst ``CIL.NarrowKind)))
     withTransparency .instances <| isDefEq (mkAppN factLhs.getAppFn arguments) lhs
   let mut matching := #[]
   for fact in facts do
@@ -773,15 +812,14 @@ def stepFacts (target : Expr) (facts : Array Term) : TacticM (Array Term) := do
   return matching
 
 open Lean Elab Tactic Meta in
-/-- Close the goal with `fact` after unfolding the `@[cil_code]` definitions in its type, for a
-    goal whose lookup already replaced a named body by its literal. Fails when the type has no
-    such definition. -/
+/-- Close the goal with `fact` after normalizing named bodies and local annotations in its type.
+    Fails when the supplied normalization does not change the type. -/
 def applyUnfoldedStepFact (unfold : Simp.Context) (simprocs : Simp.SimprocsArray) (fact : Term) :
     TacticM Unit := withMainContext do
   let proof ← Term.withoutErrToSorry <| Term.withSynthesize <| Term.elabTerm fact none
   let type ← instantiateMVars (← inferType proof)
   let (result, _) ← simp type unfold simprocs
-  if result.expr == type then throwError "The step fact names no cil_code definition"
+  if result.expr == type then throwError "The step fact needs no body or annotation normalization"
   let proof ← match result.proof? with
     | some eq => mkEqMP eq proof
     | none => mkExpectedTypeHint proof result.expr
@@ -828,11 +866,20 @@ open Lean Elab Tactic Meta in
 elab_rules : tactic
   | `(tactic| cil_checked_step_normalized [$facts:term,*]) => withMainContext do
     let initial := (← instantiateMVars (← getMainTarget)).consumeMData
+    let mut localOperation := false
     if let some (_, step, _) := initial.eq? then
       if step.isAppOfArity ``CIL.Safety.step 7 &&
           step.getAppArgs[1]!.isConstOf ``CIL.Op.nop then
         evalTactic (← `(tactic| exact step_nop_eq ..))
         return
+      if step.isAppOfArity ``CIL.Safety.step 7 then
+        let operation ← whnfR step.getAppArgs[1]!
+        localOperation := operation.isAppOfArity ``CIL.Op.local 2 ||
+          operation.isAppOfArity ``CIL.Op.setLocal 2
+        if localOperation then
+          unless (← whnfR operation.appArg!).isAppOf ``Option.none do
+            evalTactic (← `(tactic| simp only [step_local_annotation, step_setLocal_annotation]))
+            if (← getGoals).isEmpty then return
     -- A body reached through a lookup hypothesis stays named; one reached by unfolding a
     -- `cil_code` program is already a literal, so a fact on the named body needs its own
     -- `cil_code` unfolded to match it.
@@ -844,8 +891,10 @@ elab_rules : tactic
         return
       catch _ => saved.restore
     if !candidates.isEmpty then
-      let { ctx, simprocs, .. } ←
-        mkSimpContext (← `(tactic| simp only [cil_code])) (eraseLocal := false)
+      let normalize ← if localOperation then
+          `(tactic| simp only [cil_code, step_local_annotation, step_setLocal_annotation])
+        else `(tactic| simp only [cil_code])
+      let { ctx, simprocs, .. } ← mkSimpContext normalize (eraseLocal := false)
       for fact in candidates do
         let saved ← saveState
         try
@@ -1196,8 +1245,13 @@ def cilFetchedOp (lemma : Lean.Name) (select : Lean.Expr → Option Lean.Expr) (
   let some (_, _, found) := fetched.eq? | throwError "Unexpected instruction lookup"
   let operation :=
     ((← cilReducedOp? found.appArg!).bind (·.getAppFn.constName?)).getD Name.anonymous
-  return (← Term.exprToSyntax (← instantiateMVars methodFound),
-    ← Term.exprToSyntax (← instantiateMVars instructionFound), operation)
+  let lookupSyntax (proof : Expr) : TacticM Term := do
+    let expected ← instantiateMVars (← inferType proof)
+    let proof ← instantiateMVars proof
+    let actual ← instantiateMVars (← inferType proof)
+    -- Reflexivity may infer `code[pc]? = code[pc]?`; consumers need the fetched `some op`.
+    Term.exprToSyntax (if actual == expected then proof else mkExpectedPropHint proof expected)
+  return (← lookupSyntax methodFound, ← lookupSyntax instructionFound, operation)
 
 open Lean Elab Tactic Meta in
 /-- Derive current argument facts once for a write's continuation, retaining old snapshots only

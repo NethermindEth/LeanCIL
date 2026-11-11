@@ -991,6 +991,31 @@ def cilNameCall (before : Array FVarId) (called output call : Name) : TacticM Bo
   return found
 
 open Lean Elab Tactic in
+/-- Cache a continuation and adapt an existing WP proof once, retaining contextual elaboration. -/
+def cilContractContinuation (continuation : Term) : TacticM (Term × TSyntax `tactic) :=
+  withMainContext do
+  let saved ← saveState
+  try
+    unless continuation.raw.isIdent || continuation.raw.isOfKind ``Lean.Parser.Term.app do
+      throwError "The continuation requires its reached goal"
+    let proof ← Term.withoutErrToSorry <| Term.withSynthesize <|
+      Term.elabTerm continuation none
+    let proof ← instantiateMVars proof
+    if proof.hasMVar then throwError "The continuation requires its reached goal"
+    let direct ← Term.exprToSyntax proof
+    let suffix ← if (← Meta.whnfUntil (← Meta.inferType proof) ``WP).isSome then
+      let adapted ← Term.withoutErrToSorry <| Term.withSynthesize <|
+        Term.elabTerm (← `(term| CIL.Safety.WP.adequate.mp $direct)) none
+      Term.exprToSyntax adapted
+    else pure direct
+    pure (direct, ← `(tactic| exact $suffix))
+  catch _ =>
+    -- Contextual terms still receive each reached goal as their expected type.
+    saved.restore
+    pure (continuation, ← `(tactic| first
+      | exact $continuation | exact CIL.Safety.WP.adequate.mp $continuation))
+
+open Lean Elab Tactic in
 elab_rules : tactic
   | `(tactic| cil_contract_steps [$facts:term,*] with $called:ident $output:ident $call:ident) =>
     withMainContext do
@@ -1018,27 +1043,7 @@ elab_rules : tactic
         break
   | `(tactic| cil_contract_steps [$facts:term,*] until $continuation) => do
     let prepared ← prepareStepFacts facts.getElems
-    let (direct, finish) ← withMainContext do
-      let saved ← saveState
-      try
-        unless continuation.raw.isIdent || continuation.raw.isOfKind ``Lean.Parser.Term.app do
-          throwError "The continuation requires its reached goal"
-        let proof ← Term.withoutErrToSorry <| Term.withSynthesize <|
-          Term.elabTerm continuation none
-        let proof ← instantiateMVars proof
-        if proof.hasMVar then throwError "The continuation requires its reached goal"
-        let direct ← Term.exprToSyntax proof
-        let suffix ← if (← Meta.whnfUntil (← Meta.inferType proof) ``WP).isSome then
-          let adapted ← Term.withoutErrToSorry <| Term.withSynthesize <|
-            Term.elabTerm (← `(term| CIL.Safety.WP.adequate.mp $direct)) none
-          Term.exprToSyntax adapted
-        else pure direct
-        pure (direct, ← `(tactic| exact $suffix))
-      catch _ =>
-        -- Contextual terms still receive each reached goal as their expected type.
-        saved.restore
-        pure (continuation, ← `(tactic| first
-          | exact $continuation | exact CIL.Safety.WP.adequate.mp $continuation))
+    let (direct, finish) ← cilContractContinuation continuation
     withMainContext <| evalTactic (← `(tactic| (first
       | (cil_strict exact $direct)
       | (
