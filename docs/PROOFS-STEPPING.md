@@ -87,6 +87,9 @@ After each step the tactics evaluate the closed literal operands the state holds
 `cil_literal` simp set: a width conversion, sign extension or `toNat` of a bit-vector numeral, and
 a remainder of numerals, as a masked shift count is. The set fires on numerals only, so a symbolic
 operand stays as stated, and `simp only [cil_literal]` gives a hand-written step the same form.
+A `localResult kind value` whose constructors decide it is stated as the value the load pushes, so
+a `.vector128` load of `.v128 bits` leaves `.v128 bits` for the next fact; `cil_local_results`
+does the same for a hand-written step.
 
 A goal stating a located fault, `invoke p fuel m args memory = .error ⟨m, pc, fault⟩`, enters
 through `invoke_of_run_fault` and steps the same way. At the stated `pc` the tactic first tries
@@ -142,6 +145,32 @@ Memory operations, local operations, instruction-dispatcher arms and branches us
 equations and the supplied facts. This keeps memory results in the form named by their facts, and
 resolves branch conditions before choosing the next program counter. Unknown opcode heads use the
 equation path.
+
+A branch on a literal operand, such as the `1` a decided feature test pushes, continues at a
+numeral program counter.
+
+A step fact may state an opcode index as closed arithmetic, such as `.local (↑(6 : Fin 10) + 1)`:
+fact preparation also states it at the numeral, `.local 7`, which is the form a fetched opcode has.
+
+A branch whose condition the facts do not decide leaves the condition in the program counter,
+`run p fuel m (if c then target else next) ..`, and stepping stops there: `split` gives both
+successors and each resumes with the stepping tactic. An instruction lookup at such a program
+counter fails with `cil_lookup: undecided branch` and is not evaluated.
+
+A read stated at a closed width, such as `read memory home (localWidth (.aggregate 32)) 1`,
+derives its load at the numeral width an opcode carries.
+
+`cil_contract_step [facts]` takes one contract step. It prepares `facts` as `cil_checked_step` does,
+so a supplied `read` steps a `.loadAggregate` through a managed-reference address there as well.
+`cil_contract_step_normalized [facts]` is the same step over facts a walk has already prepared.
+
+`bitcastByteBool` requires its operand to be `0` or `1`. A comparison result `if c then 1 else 0`
+meets that for every `c`; any other int32 needs the fact `bits.toNat ≤ 1`. The fact may bound a value
+inside width changes, as `field.toNat ≤ 1` does for the operand `(field.setWidth 8).setWidth 32`.
+
+A value known only as `argument : CIL.Value` loads as an argument, and passes to a call, from the
+fact `numericValue argument = true`: fact preparation also states it over the unfolded definition,
+the form the checked value test has when the step reaches it.
 
 Intrinsic steps expose `checkedIntrinsic` and apply proved `@[cil_eval]` lemmas before unfolding the
 intrinsic evaluator. Register consumer lemmas in the form `CIL.evalIntrinsic operation operands =

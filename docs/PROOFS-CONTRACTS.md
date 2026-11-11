@@ -71,6 +71,9 @@ words. `LocalSnapshots` (`CIL.Safety.LocalSnapshots`) remembers locals of every 
 as vectors and int32s; `LocalSnapshots.after_confined` keeps them across such a call, and
 `after_write_apart`, `after_below` and `store` across writes, frame changes and local stores.
 `snapshots.load value specified` is a step fact for `.local`, so stepping tactics take it.
+`snapshots.read_at specified slot` gives back the typed read of a remembered local whose slot is
+known, and `read_vector128`, `read_vector256` and `read_vector512` state it for a remembered
+vector as `read memory home 16 1 = .ok (numberBytes bits.toNat 16)` and its wider forms.
 
 `unknown_frame_setup` supplies `CompleteWritableHomes` for numeric locals with unknown initial
 contents. Its `home_at` lookup proves that every declared local has a typed writable byte home;
@@ -95,6 +98,78 @@ manually split execution segments. Loads use the latest remembered value; overwr
 stops at an unsupported step or an unproved obligation, and fails if it takes no step. It does not
 infer authority, initialization, or preservation across calls and unrelated writes. Vector and int32 store-and-reload regressions are
 listed in [coverage](VALIDATION-COVERAGE.md).
+
+For `WP` or existential successful-execution goals, use
+`cil_contract_steps (snapshots := snapshots) [facts]`, optionally followed by
+`until continuation`. `cil_contract_steps (snapshots := snapshots) n [facts]` takes at most `n` steps
+and stops silently, like `cil_contract_steps n [facts]`: count the steps up to the program counter
+where a helper lemma over `CodeAt body start segment` applies, apply the lemma there, and continue
+from the last `localSnapshots`. A call counts as one step.
+
+Ordinary contract stepping handles supplied step facts, calls and returns;
+the snapshot form supplies missing numeric local loads and stores, so one call walks a path
+through both. `CompleteWritableHomes` or `NumericHomes` supplies each selected home and its write
+access even when the slot list is opaque. An explicit `WritableHomes` bundle with individual slot
+and access facts also suffices.
+
+The homes may be stated at an earlier memory than the one the store runs in, such as the frame's
+entry memory. The context must then hold that memory's `WellFormed` and an `AccessBelow watermark
+entered current` or `MemoryBelow watermark entered current` with `entered.nextIdentity ≤
+watermark`, which carries each home's write access to the current memory
+(`CompleteWritableHomes.home_retained`); the current memory's `WellFormed` is needed as for any
+store. Without that link the walk stops at the store. The homes may also cover the locals after
+leading slots that have no byte home, as in `layout : frame.locals = .root value :: slots` with
+`NumericHomes entered boundary specs slots`: the home is found at the shifted index, and each
+leading slot must be a constructor other than `.bytes` or have a hypothesis `∀ kind reference,
+slot ≠ .bytes kind reference` (`WritableHomes.after_skipped`).
+
+A kind lookup that does not compute, as over an opaque `specs` in `NumericHomes entered boundary
+specs slots`, is closed from a supplied fact: `specs[4]? = some spec` (`numericKinds_getElem?`) or
+`(numericKinds specs)[4]? = some kind`. The fact is stated at the index among the homes, which is
+the local's index less the leading slots skipped.
+
+A local index that is not a numeral, such as the `base + 3` of a block stated at a symbolic local
+base, is taken when the homes cover the frame's locals from the first slot and a supplied fact
+states the kind at exactly that index term, `kinds[base + 3]? = some kind`. With leading slots
+skipped the index must be a numeral.
+
+Each store, in the checked form too, names what it produced: the memory `storedLocal`, the step
+`storingLocal`, the snapshots `localSnapshots`, `localFormed : storedLocal.WellFormed`,
+`localBelow : MemoryBelow boundary memory storedLocal`, `localAccess : AccessBelow
+memory.nextIdentity memory storedLocal` and `localWrite : write memory home bytes 1 = .ok
+storedLocal`. All seven take the suffix `_1`, `_2` once a name is taken, so the second store of a
+walk gives `storedLocal_1` and `localSnapshots_1`. The remembered value is stated as the value a
+load pushes. In the contract form a store also restates, under the name each already has, the
+facts of the context about the memory it wrote to: `ValidCall`, `CompleteWritableHomes`,
+same-watermark `MemoryBelow`, `AccessBelow`, the caller-buffer and class-instance facts the loop
+tactics carry (`Contents`, `Filled`, `Writable`, `LiveObject` and the field predicates), each
+`read memory reference width alignment = .ok bytes` and each `form memory reference = .ok formed`. A
+buffer, read or formed reference is carried when the context shows its allocation below the homes'
+boundary, as `reference.allocation < boundary`; one that is not stays at the old memory. A supplied
+read or formed reference given as a term, such as `state.loaded`, is restated at `storedLocal` under
+the same condition (`MemoryBelow.read`, `MemoryBelow.form`).
+
+The walk then prepares its step facts again at `storedLocal` from the facts it was given: the
+carried `ValidCall` forms the by-reference arguments and reads their fields there, and the
+restated reads supply their loads, so `.arg`, `.fieldAt` and memory loads of caller data continue
+in the same call. A word `ValidCall` loads after a store is stated at that store's memory, as
+`view.word storedLocal offset`; `ArgumentView.word_below localBelow view old` states it at the memory
+the store wrote to, and `ArgumentView.bytes_below` does the same for the whole range.
+
+After the walk, `preserved` from `have preserved := MemoryBelow.refl
+boundary memory` therefore states `MemoryBelow boundary memory final`, and a caller's own state
+predicate is rebuilt once from these facts and the last `localSnapshots`. Caller-specific
+wrappers still require their own transport proof.
+
+A supplied store keeps its chosen memory. When the store's premises hold, the snapshots follow
+it to that memory (`LocalSnapshots.store_at`) and the store names `localSnapshots`,
+`localFormed`, `localBelow`, `localAccess` and `localWrite` about it, so the loads after it
+continue in the same call; otherwise its later loads need supplied step facts or snapshots about
+that memory. A snapshot load or store leaves a numeral program counter. Calls do not
+automatically preserve local snapshots: use the callee's effect and the existing snapshot frame
+rules. Pass named snapshot-map definitions or selected-index equations in `facts`. Lookup
+simplifies these equations and natural-number offsets without unfolding unrelated arithmetic
+definitions.
 
 A snapshot overlapping the footprint needs a postcondition instead. The contract fixes no profile:
 the program does. `MethodContract.Holds.reprofile` (`CIL.Safety.ProfileContract`, with
@@ -245,6 +320,14 @@ structure holding `after.WellFormed` with both: its fields `formed`, `staticWorl
 give each fact, and `left.trans right` composes all three. `call_frame_invariants` and
 `construct_frame_invariants` return it, and a formed continuation takes it whole. The two
 preservation names are abbreviations, so a function proves either directly.
+
+For a helper specified by an arbitrary `WP` postcondition, use `WP.call_framed` with its
+checked call instruction and the caller's well-formed memory. Its continuation receives the
+helper postcondition, `FrameInvariants` and `AllocationExtension`. Select `formed`, `staticWorld`
+and `classes` from the frame evidence, and `next` and `lookup` from the allocation evidence.
+These facts come from the successful invocation and need not be repeated in the helper's
+contract. Confinement, access permissions and content snapshots still require their own proved
+effects; a cell-only footprint does not imply `Confined`.
 
 Store facts may name their values in source form, such as `write m r (numberBytes (a + b + c).toNat
 8) 1 = .ok m'`. Each checked step simplifies the goal with the default simp set, its interpreter

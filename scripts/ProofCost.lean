@@ -149,6 +149,24 @@ heartbeats are counted.
 def singleThreaded : Options :=
   ({} : Options).setBool `Elab.async false
 
+/-- Parse and elaborate one command, retaining parser errors before elaboration resets its log. -/
+def processMeasuredCommand : Frontend.FrontendM (Bool × MessageLog) := do
+  Frontend.updateCmdPos
+  let state ← Frontend.getCommandState
+  let input ← Frontend.getInputContext
+  let parser ← Frontend.getParserState
+  let scope := state.scopes.head!
+  let context : Parser.ParserModuleContext := {
+    env := state.env, options := scope.opts
+    currNamespace := scope.currNamespace, openDecls := scope.openDecls }
+  let (command, parser, messages) := profileit "parsing" scope.opts fun _ =>
+    Parser.parseCommand input context parser state.messages
+  modify fun state => { state with commands := state.commands.push command }
+  Frontend.setParserState parser
+  Frontend.setMessages messages
+  Frontend.elabCommandAtFrontend command
+  return (Parser.isTerminalCommand command, messages)
+
 /-- Elaborates `sourcePath` as `moduleName`; returns each command's cost and the result. -/
 def measure (moduleName : Name) (sourcePath : String) :
     IO (Array CommandCost × Environment × Bool) := do
@@ -166,16 +184,19 @@ def measure (moduleName : Name) (sourcePath : String) :
   let mut state : Frontend.State := { commandState, parserState, cmdPos := parserState.pos }
   let mut known : NameSet := {}
   let mut costs : Array CommandCost := #[]
+  let mut diagnostics : MessageLog := {}
   let mut finished := false
   while !finished do
     let start := state.cmdPos
     let currentNamespace := state.commandState.scopes.head!.currNamespace
     let startBeats ← IO.getNumHeartbeats
     let startMs ← IO.monoMsNow
-    let (isLast, next) ← (Frontend.processCommand.run context).run state
+    let ((isLast, parsed), next) ← (processMeasuredCommand.run context).run state
     let heartbeats := (← IO.getNumHeartbeats) - startBeats
     let elapsedMs := (← IO.monoMsNow) - startMs
     state := next
+    -- Lean resets the immediate message log for each top-level command.
+    diagnostics := diagnostics ++ parsed ++ state.commandState.messages
     finished := isLast
     let some command := state.commands.back? | continue
     if command.isOfKind ``Parser.Command.eoi then continue
@@ -199,7 +220,10 @@ def measure (moduleName : Name) (sourcePath : String) :
       line := firstLine
       sourceLines := lastLine + 1 - firstLine
       constants := added.size }
-  let log := state.commandState.messages
+  let snapshots : Language.SnapshotTree :=
+    { element := default, children := state.commandState.snapshotTasks }
+  let log := snapshots.getAll.foldl
+    (fun messages snapshot => messages ++ snapshot.diagnostics.msgLog) diagnostics
   for message in log.toList do
     if message.severity == .error then IO.eprintln (← message.toString)
   return (costs, state.commandState.env, log.hasErrors)

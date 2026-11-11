@@ -277,7 +277,7 @@ theorem add_internal : addInternal.Holds Extracted.program addTo := by
   have la := load_word64_of_read readA
   have lb := load_word64_of_read readB
   refine MethodContract.Holds.intro stored _
-    ⟨9, ?_⟩ (Confined.write wrote (by simp [addInternal, numberBytes])) ⟨rfl, readback⟩
+    ?_ (Confined.write wrote (by simp [addInternal, numberBytes])) ⟨rfl, readback⟩
   cil_checked_steps [addArgs, fa, fb, fr, la, lb, store]
 
 /-- The frame fact comes from the internal footprint, not from re-executing `AddTo`. -/
@@ -614,7 +614,7 @@ def isSetContract : MethodContract Bool Bool where
 /-- `IsSet` meets its contract by stepping its body. -/
 theorem is_set_holds : isSetContract.Holds Extracted.program isSet := by
   intro flag memory _
-  refine MethodContract.Holds.intro memory flag ⟨3, ?_⟩ (Confined.refl _ memory) rfl
+  refine MethodContract.Holds.intro memory flag ?_ (Confined.refl _ memory) rfl
   dsimp only [isSetContract]
   cases flag <;> cil_checked_steps <;> rfl
 

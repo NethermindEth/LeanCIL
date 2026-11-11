@@ -925,7 +925,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     // generation. Lake still decides reuse; a rebuilt restored module forces full replay.
     // dependent selects extraction-dependent modules (true), the others (false) or both (null).
     SortedDictionary<string, string> RestoreConsumerSupport(string key, IReadOnlyDictionary<string, string> sources, string destination,
-        bool? dependent = null)
+        bool? dependent = null, IReadOnlyCollection<string>? requiredModules = null)
     {
         bool Selected(SortedDictionary<string, ConsumerSupportModule> record, string module) =>
             dependent is not bool wanted || record[module].Sources.ContainsKey(ExtractedSourceKey) == wanted;
@@ -938,7 +938,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             if (name.Contains('.')) continue;
             // Unauthenticated preselection only; the chosen generation is authenticated below.
             var record = ReadConsumerSupportRecord(Path.Combine(generation, "files", ConsumerSupportRecordName));
-            var count = record is null ? 0 : RestorableConsumerSupport(record, sources).Count(module => Selected(record, module));
+            var restorable = record is null ? [] : RestorableConsumerSupport(record, sources);
+            var count = record is null || requiredModules?.Any(module => !restorable.Contains(module)) == true
+                ? 0 : restorable.Count(module => Selected(record, module));
             if (count > 0) candidates.Add((name, count, Directory.GetLastWriteTimeUtc(generation)));
         }
         foreach (var (name, _, _) in candidates.OrderByDescending(item => item.Count).ThenByDescending(item => item.Time))
@@ -951,7 +953,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 if (!RestoreSuccess(name, staging)) continue;
                 var record = ReadConsumerSupportRecord(Path.Combine(staging, ConsumerSupportRecordName));
                 if (record is null) continue;
-                var files = RestorableConsumerSupport(record, sources).Where(module => Selected(record, module))
+                var restorable = RestorableConsumerSupport(record, sources);
+                if (requiredModules?.Any(module => !restorable.Contains(module)) == true) continue;
+                var files = restorable.Where(module => Selected(record, module))
                     .SelectMany(module => record[module].Files)
                     .Select(file => (Source: Within(staging, file), Target: Within(destination, file))).ToArray();
                 if (files.Any(file => !File.Exists(file.Source))) continue;
@@ -1772,13 +1776,14 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             if (restoredArtifacts.Count > 0) CacheProgress("certified consumer support library");
             var certificateRestoration = new SortedDictionary<string, string>(restoredArtifacts, StringComparer.Ordinal);
             // Not part of restoredArtifacts: these are rebuilt only if stale and always replayed.
-            void RestoreCertificateSupport(string key, bool? dependent)
+            SortedDictionary<string, string> RestoreCertificateSupport(string key, bool? dependent,
+                IReadOnlyCollection<string>? requiredModules = null)
             {
                 var own = Path.Combine(Path.GetTempPath(), "leancil-consumer-dependent-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(own);
                 try
                 {
-                    var dependentFiles = RestoreConsumerSupport(key, bound, own, dependent);
+                    var dependentFiles = RestoreConsumerSupport(key, bound, own, dependent, requiredModules);
                     foreach (var file in dependentFiles.Keys)
                     {
                         var target = Within(session, file);
@@ -1787,6 +1792,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                         certificateRestoration[file] = dependentFiles[file];
                     }
                     if (dependentFiles.Count > 0) CacheProgress("certified extraction-dependent consumer modules");
+                    return dependentFiles;
                 }
                 finally { Directory.Delete(own, true); }
             }
@@ -1831,23 +1837,26 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 .. checkRejectedProofs ? new[] { "ExtractionAudit" } : []];
             // Authenticated source-closed artifacts need no no-op Lake invocation. Their
             // bytes are still fixed before proof code, then independently replayed and audited.
-            bool GeneratedModulesRestored(IEnumerable<string> modules) => modules.All(module =>
+            bool GeneratedModulesRestored(IEnumerable<string> modules,
+                IReadOnlyDictionary<string, string> artifacts) => modules.All(module =>
             {
                 var path = Path.Combine(generatedPackage, ".lake/build/lib/lean", module.Replace('.', '/') + ".olean");
                 var relative = Path.GetRelativePath(session, path).Replace('\\', '/');
                 var parts = ConsumerModuleParts(path);
-                return parts.ContainsKey(".olean") && certificateRestoration.ContainsKey(relative) &&
-                    certificateRestoration.ContainsKey(relative[..^".olean".Length] + ".trace") &&
-                    parts.All(part => certificateRestoration.TryGetValue(
+                return parts.ContainsKey(".olean") && artifacts.ContainsKey(relative) &&
+                    artifacts.ContainsKey(relative[..^".olean".Length] + ".trace") &&
+                    parts.All(part => artifacts.TryGetValue(
                         relative[..^".olean".Length] + part.Key, out var hash) && hash == part.Value);
-            }) && certificateRestoration.All(pair =>
+            }) && artifacts.All(pair =>
                 File.Exists(Within(session, pair.Key)) && Sha(Within(session, pair.Key)) == pair.Value);
-            var restoredCertificate = GeneratedModulesRestored(certificateModules);
-            if (!restoredCertificate)
-            {
-                RestoreCertificateSupport(certificateSupportKey, dependent: null);
-                restoredCertificate = GeneratedModulesRestored(certificateModules);
-            }
+            // Source-matched modules from separate generations can have different compiled imports.
+            // Restore the entire extraction closure together before accepting its fixed bytes.
+            var previousRestoration = new Dictionary<string, string>(certificateRestoration, StringComparer.Ordinal);
+            var coherentCertificate = RestoreCertificateSupport(certificateSupportKey, dependent: null,
+                requiredModules: certificateModules);
+            var restoredCertificate = GeneratedModulesRestored(certificateModules, coherentCertificate);
+            var restorationUnchanged = coherentCertificate.All(pair =>
+                previousRestoration.TryGetValue(pair.Key, out var hash) && hash == pair.Value);
             string extractionAudit;
             if (restoredCertificate)
             {
@@ -1903,7 +1912,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             }
             if (generatedSources.Count > 0)
             {
-                if (GeneratedModulesRestored(generatedSources.Keys))
+                if (restorationUnchanged && GeneratedModulesRestored(generatedSources.Keys, certificateRestoration))
                     CacheProgress("certified fixed export references");
                 else
                     Run(["lake", "build", .. generatedSources.Keys.Select(module => "+" + module + ":olean")],

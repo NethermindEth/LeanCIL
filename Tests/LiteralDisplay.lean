@@ -152,4 +152,29 @@ example (count : W32)
   with_reducible exact rest
 
 end LiteralOperands
+
+/-- Reduced template constructors still use the shared closed-literal conversion rules. -/
+theorem constructor_literal_conversion (word : BitVec 64) :
+    word + BitVec.signExtend 64 ({ toFin := Fin.ofNat (2 ^ 32) 1 } : BitVec 32) =
+      word + 1#64 := by
+  cil_literal_operands
+
+#print axioms constructor_literal_conversion
+
+/-- Constructor normalization preserves sign extension at the negative boundary. -/
+theorem constructor_literal_signed :
+    BitVec.signExtend 64 ({ toFin := Fin.ofNat (2 ^ 32) 0xFFFFFFFF } : BitVec 32) =
+      0xFFFFFFFFFFFFFFFF#64 := by
+  cil_literal_operands
+
+#print axioms constructor_literal_signed
+
+/-- Symbolic constructor payloads remain untouched by the closed-literal normalization. -/
+theorem symbolic_constructor_unchanged (number : Nat) (word : BitVec 64) :
+    word + BitVec.signExtend 64 ({ toFin := Fin.ofNat (2 ^ 32) number } : BitVec 32) =
+      word + BitVec.signExtend 64 (BitVec.ofNat 32 number) := by
+  fail_if_success simp only [cil_literal]
+  rfl
+
+#print axioms symbolic_constructor_unchanged
 end Tests.LiteralDisplay

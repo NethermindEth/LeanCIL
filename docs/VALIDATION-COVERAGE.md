@@ -311,7 +311,16 @@ returns the full arbitrary 256-bit input after the other locals are written. Mis
 authority, mismatched local kinds and unknown local contents remain rejected. Each rejection uses an
 isolated store or load and a matching successful run with only the missing authority, correct value
 kind or remembered contents supplied. Strict proof elaboration prevents an incomplete rejected proof
-from inserting a placeholder.
+from inserting a placeholder. Contract walks cross stores whose homes are stated at the frame's
+entry memory or after a leading root slot, and are rejected without evidence that the current
+memory retains the homes' access or that the leading slot is no byte home. Homes over opaque
+numeric specs take a local's kind from a supplied fact and stop at the store without it, as does a
+store at a symbolic local index. A supplied store
+advances the snapshots to its own memory, and a store's named evidence and the caller reads and
+buffers it carries are checked against the final memory. One walk crosses three stores while forming
+argument references, reading an input word through `ValidCall` and loading two caller limbs, one
+named and one supplied as a projection, and stops when a limb is not shown below the boundary. A counted walk stops after its second step
+and a second walk resumes from the snapshots it named.
 
 `Tests/PrimitiveArrays.cs` checks compiled loads and stores for twelve primitive integer element
 types against runtime results and certified checked execution. It also covers length, helper calls,

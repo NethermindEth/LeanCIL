@@ -94,6 +94,13 @@ theorem MemoryBelow.read {watermark : Nat} {m result : Memory}
     (width alignment : Nat) : read result r width alignment = read m r width alignment := by
   simp only [CIL.Safety.read, preserved.access r old, preserved.cells _ old]
 
+/-- Formation below the watermark agrees: it reads only the allocation's metadata. -/
+theorem MemoryBelow.form {watermark : Nat} {m result : Memory}
+    (preserved : MemoryBelow watermark m result) (r : Reference)
+    (old : r.allocation < watermark) : form result r = form m r := by
+  simp only [CIL.Safety.form, liveAllocation, preserved.allocations _ old]
+#print axioms MemoryBelow.form
+
 /-- Allocation leaves every existing allocation untouched. -/
 theorem allocate_preserves_memory_below (m result : Memory) (a : Allocation) (id : AllocationId)
     (h : allocate m a = .ok (id, result)) : MemoryBelow m.nextIdentity m result := by

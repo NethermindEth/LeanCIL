@@ -27,7 +27,7 @@ theorem add_holds : addContract.Holds addProgram 0 := by
   have la := load_word64_of_read readA
   have lb := load_word64_of_read readB
   refine MethodContract.Holds.intro stored _
-    ⟨10, ?_⟩ (Confined.write wrote (by simp [addContract, numberBytes])) ⟨rfl, readback⟩
+    ?_ (Confined.write wrote (by simp [addContract, numberBytes])) ⟨rfl, readback⟩
   cil_checked_steps [fa, fb, fr, la, lb, store]
 
 @[cil_code] def linked : CIL.Program := link Tests.Imports.Calls.Extracted.program [addLib]

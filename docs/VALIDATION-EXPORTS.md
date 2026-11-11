@@ -478,6 +478,19 @@ checking and checked again afterward. Authenticated native replay also handles s
 sets; profiling retains the toolchain frontend, and rejected native replays retain the existing
 per-module fallback.
 
+Restored extraction modules and their components come from one complete authenticated generation.
+Matching source hashes alone cannot justify mixing compiled generations: different bytes for an
+import can make Lake rebuild its importer during proof checking. A focused real-Lake fixture
+produces two valid compilations of identical sources, reproduces that rewrite with mixed restored
+modules, and checks that restoring the complete closure keeps the extraction fixed when the proof
+changes. Missing closures require certificate preparation before the integrity snapshot.
+
+A two-request consumer fixture rewrites a compiled extraction artifact during proof compilation,
+after warming both clean requests. It checks authenticated-restored and freshly built preparation:
+the changed request reports extraction integrity, distinct before/after hashes and build provenance,
+removes its stale certificate, and fails even when proof rejection was expected. The unrelated
+request still verifies.
+
 The component-reuse and support-union fixtures skip their framework-only warmup verification when
 `LEANCIL_CERTIFIED_LIBRARY` is supplied. Their actual batches still authenticate that library and
 verify every original request with success caching disabled. Without a supplied library, the

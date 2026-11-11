@@ -31,18 +31,20 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
     exact run_call_raises_of_contract holds value found Extracted.method0_instruction1
       (by cil_checked_step []) rfl (by rfl) formed raised
   | none =>
-    refine invoke_exists_of_run found (by rfl) (by rfl) ?_
-    refine run_next_exists _ found Extracted.method0_instruction0 (by cil_checked_step []) ?_
-    refine run_call_of_outcome holds value found Extracted.method0_instruction1
-      (by cil_checked_step []) rfl formed raised ?_
-    intro final output call
-    have bounded := call.post
-    refine run_next_exists _ found Extracted.method0_instruction2 (by cil_checked_step []) ?_
-    refine run_next_exists _ found Extracted.method0_instruction3 (by cil_checked_step []) ?_
-    refine run_next_exists _ found Extracted.method0_instruction4 (by cil_checked_step []) ?_
-    refine run_return_exists found Extracted.method0_instruction5 (by cil_checked_step [])
-      (by rfl) ?_
-    refine ⟨call.framed, output + 1, rfl, ?_⟩
+    apply WP.exists_execution
+    apply WP.enter found (by rfl) (by rfl)
+    apply WP.step found Extracted.method0_instruction0 (by cil_checked_step [])
+    have returned := holds.returning (initial := memory) formed raised
+    apply WP.call found Extracted.method0_instruction1 (by cil_checked_step [])
+      ((WP.adequate (post := fun result => Confined [] memory result.1 ∧
+        DerivedInterface.percentBounded.Returns value memory result.1 result.2)).mpr
+        returned)
+    rintro final values ⟨framed, output, rfl, bounded⟩
+    apply WP.step found Extracted.method0_instruction2 (by cil_checked_step [])
+    apply WP.step found Extracted.method0_instruction3 (by cil_checked_step [])
+    apply WP.step found Extracted.method0_instruction4 (by cil_checked_step [])
+    apply WP.returned found Extracted.method0_instruction5 (by cil_checked_step []) (by rfl)
+    refine ⟨framed, output + 1, rfl, ?_⟩
     dsimp only [DerivedInterface.percentBounded] at bounded
     bv_omega
 

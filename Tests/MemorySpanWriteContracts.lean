@@ -59,7 +59,8 @@ theorem write_holds : writeContract.Holds Extracted.program 2 := by
       makeParameterHomes, makeLocal, storeLocal, Safety.Value.hasUnspecified, WriteInput.view,
       checked, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
   refine MethodContract.Holds.intro final ()
-    ⟨10, ?_⟩ (Confined.write written (by simp [writeContract])) updated
+    ?_ (Confined.write written (by simp [writeContract])) updated
+  cil_supply_fuel
   dsimp only [writeContract]
   simp only [Safety.invoke, Extracted.lookup2]
   simp [writeContract, checkedValue, numericValue, valid, checkedAt, Except.mapError,

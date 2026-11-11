@@ -4,6 +4,7 @@ import CIL.Safety.MethodContract
 import CIL.Safety.WordMemory
 import CIL.Safety.WordFootprint
 import CIL.Safety.ReturnMemory
+import CIL.Safety.Segment
 
 /-! A synthetic extraction with the bodies the C# fixture compiles to:
     `Root(ref r, in b) { AddTo(in r, in b, out r); r = Mix(r, b); }`. -/
@@ -115,7 +116,7 @@ theorem contract_steps_until_postcondition (frame : Frame) (memory : Memory)
 
 theorem mix_holds : mixContract.Holds Extracted.program mix := by
   rintro ⟨x, y⟩ m -
-  refine MethodContract.Holds.intro m _ ⟨8, ?_⟩ (Confined.refl _ m) rfl
+  refine MethodContract.Holds.intro m _ ?_ (Confined.refl _ m) rfl
   cil_checked_steps
 
 theorem add_holds : addContract.Holds Extracted.program addTo := by
@@ -128,7 +129,7 @@ theorem add_holds : addContract.Holds Extracted.program addTo := by
   have la := load_word64_of_read readA
   have lb := load_word64_of_read readB
   refine MethodContract.Holds.intro stored _
-    ⟨9, ?_⟩ (Confined.write wrote (by simp [addContract, numberBytes])) ⟨rfl, readback⟩
+    ?_ (Confined.write wrote (by simp [addContract, numberBytes])) ⟨rfl, readback⟩
   cil_checked_steps [fa, fb, fr, la, lb, store]
 
 set_option maxHeartbeats 400000 in
@@ -248,25 +249,23 @@ set_option maxHeartbeats 2000 in
 theorem loaded_unsigned_branch (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
     (found : program[index]? = some (loadedGuardBody profile)) (frame : Frame) (memory : Memory)
     (word : CIL.W32) (home : Reference) (slot : frame.locals[0]? = some (.bytes .word32 home))
-    (load : loadLocal memory (.bytes .word32 home) = .ok (.scalar (localResult .word32 (.i32 word))))
-    (post : Memory → List Value → Prop)
-    (continuation : ∃ fuel final returned, run program fuel index (if word < 4#32 then 7 else 3) [] frame []
-      memory = .ok (final, returned) ∧ post final returned) :
-    ∃ fuel final returned, run program fuel index 0 [] frame [] memory = .ok (final, returned) ∧
-      post final returned := by
-  cil_contract_steps [slot, load] until continuation
+    (load : loadLocal memory (.bytes .word32 home) =
+      .ok (.scalar (localResult .word32 (.i32 word)))) :
+    Segment program index 0 (if word < 4#32 then 7 else 3)
+      (SegmentState.exact [] ⟨frame, [], memory⟩)
+      (SegmentState.exact [] ⟨frame, [], memory⟩) := by
+  cil_segment 3 [found, slot, load]
 
 set_option maxHeartbeats 2000 in
 theorem loaded_signed_branch (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
     (found : program[index]? = some (loadedGuardBody profile)) (frame : Frame) (memory : Memory)
     (word : CIL.W32) (home : Reference) (slot : frame.locals[0]? = some (.bytes .word32 home))
-    (load : loadLocal memory (.bytes .word32 home) = .ok (.scalar (localResult .word32 (.i32 word))))
-    (post : Memory → List Value → Prop)
-    (continuation : ∃ fuel final returned, run program fuel index (if 0 ≤ word.toInt then 7 else 6) [] frame []
-      memory = .ok (final, returned) ∧ post final returned) :
-    ∃ fuel final returned, run program fuel index 3 [] frame [] memory = .ok (final, returned) ∧
-      post final returned := by
-  cil_contract_steps [slot, load] until continuation
+    (load : loadLocal memory (.bytes .word32 home) =
+      .ok (.scalar (localResult .word32 (.i32 word)))) :
+    Segment program index 3 (if 0 ≤ word.toInt then 7 else 6)
+      (SegmentState.exact [] ⟨frame, [], memory⟩)
+      (SegmentState.exact [] ⟨frame, [], memory⟩) := by
+  cil_segment 3 [found, slot, load]
 
 set_option maxHeartbeats 2000 in
 theorem loaded_limb_branch (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
@@ -274,14 +273,14 @@ theorem loaded_limb_branch (program : CIL.Program) (index : Nat) (profile : CIL.
     (low high : CIL.W64) (lowHome highHome : Reference)
     (lowSlot : frame.locals[1]? = some (.bytes .word64 lowHome))
     (highSlot : frame.locals[2]? = some (.bytes .word64 highHome))
-    (lowLoad : loadLocal memory (.bytes .word64 lowHome) = .ok (.scalar (localResult .word64 (.i64 low))))
-    (highLoad : loadLocal memory (.bytes .word64 highHome) = .ok (.scalar (localResult .word64 (.i64 high))))
-    (post : Memory → List Value → Prop)
-    (continuation : ∃ fuel final returned, run program fuel index (if low < high then 7 else 11) [] frame []
-      memory = .ok (final, returned) ∧ post final returned) :
-    ∃ fuel final returned, run program fuel index 8 [] frame [] memory = .ok (final, returned) ∧
-      post final returned := by
-  cil_contract_steps [lowSlot, highSlot, lowLoad, highLoad] until continuation
+    (lowLoad : loadLocal memory (.bytes .word64 lowHome) =
+      .ok (.scalar (localResult .word64 (.i64 low))))
+    (highLoad : loadLocal memory (.bytes .word64 highHome) =
+      .ok (.scalar (localResult .word64 (.i64 high)))) :
+    Segment program index 8 (if low < high then 7 else 11)
+      (SegmentState.exact [] ⟨frame, [], memory⟩)
+      (SegmentState.exact [] ⟨frame, [], memory⟩) := by
+  cil_segment 3 [found, lowSlot, highSlot, lowLoad, highLoad]
 
 -- A parameter-selected widening is fetched as `if true = true then ..` and must step by its
 -- equation; re-elaborating a tactic at every contract step exceeds the budget.
@@ -295,18 +294,17 @@ def widenArgs (scalarFirst : Bool) (input : Reference) (value : CIL.Value) : Lis
 set_option maxHeartbeats 3500 in
 theorem selected_widening (signed : Bool) (program : CIL.Program) (index : Nat)
     (found : program[index]? = some (widenBody signed)) (frame : Frame) (memory : Memory)
-    (input : Reference) (word : CIL.W32) (formed : form memory input = .ok input)
-    (post : Memory → List Value → Prop)
-    (continuation : ∃ fuel final returned,
-      run program fuel index 3 (widenArgs (true && true) input (.i32 word)) frame
-        [.reference (.address input), .scalar (.i64 (if signed then word.signExtend 64 else word.zeroExtend 64))]
-        memory = .ok (final, returned) ∧ post final returned) :
-    ∃ fuel final returned, run program fuel index 0 (widenArgs (true && true) input (.i32 word)) frame [] memory =
-      .ok (final, returned) ∧ post final returned := by
+    (input : Reference) (word : CIL.W32) (formed : form memory input = .ok input) :
+    Segment program index 0 3
+      (SegmentState.exact (widenArgs (true && true) input (.i32 word)) ⟨frame, [], memory⟩)
+      (SegmentState.exact (widenArgs (true && true) input (.i32 word))
+        ⟨frame, [.reference (.address input),
+          .scalar (.i64 (if signed then word.signExtend 64 else word.zeroExtend 64))],
+          memory⟩) := by
   cases signed
   all_goals
-    cil_contract_steps 3 [found, formed, widenArgs]
-    simpa only [ite_true, Bool.false_eq_true, ite_false] using continuation
+    simp only [Bool.false_eq_true, ite_true, ite_false]
+    cil_segment 3 [found, formed, widenArgs]
 
 /-- info: 'Tests.MethodContract.loaded_unsigned_branch' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms loaded_unsigned_branch
@@ -368,20 +366,19 @@ set_option maxHeartbeats 12000 in
 theorem ordered_widening (signed scalarFirst reversed : Bool) (program : CIL.Program) (index : Nat)
     (found : program[index]? = some (orderedWidenBody signed scalarFirst reversed))
     (frame : Frame) (memory : Memory) (input : Reference) (word : CIL.W32)
-    (formed : form memory input = .ok input) (post : Memory → List Value → Prop)
-    (continuation : ∃ fuel final returned,
-      run program fuel index 3 (widenArgs (scalarFirst != reversed) input (.i32 word)) frame
-        (widenArgs scalarFirst input
-          (.i64 (if signed then word.signExtend 64 else word.zeroExtend 64))).reverse memory =
-          .ok (final, returned) ∧ post final returned) :
-    ∃ fuel final returned, run program fuel index 0
-      (widenArgs (scalarFirst != reversed) input (.i32 word)) frame [] memory =
-        .ok (final, returned) ∧ post final returned := by
+    (formed : form memory input = .ok input) :
+    Segment program index 0 3
+      (SegmentState.exact (widenArgs (scalarFirst != reversed) input (.i32 word))
+        ⟨frame, [], memory⟩)
+      (SegmentState.exact (widenArgs (scalarFirst != reversed) input (.i32 word))
+        ⟨frame, (widenArgs scalarFirst input
+          (.i64 (if signed then word.signExtend 64 else word.zeroExtend 64))).reverse,
+          memory⟩) := by
   cases signed <;> cases scalarFirst <;> cases reversed
   all_goals
-    cil_contract_steps 3 [found, formed, widenArgs]
-    simpa only [widenArgs, Bool.false_eq_true, ite_true, ite_false,
-      List.reverse_cons, List.reverse_nil, List.nil_append, List.cons_append] using continuation
+    simp only [widenArgs, Bool.false_eq_true, ite_true, ite_false,
+      List.reverse_cons, List.reverse_nil, List.nil_append, List.cons_append]
+    cil_segment 3 [found, formed, widenArgs]
 
 #print axioms ordered_widening
 
@@ -395,12 +392,113 @@ theorem ordered_widening_returns (signed scalarFirst reversed : Bool)
       (widenArgs (scalarFirst != reversed) input (.i32 word)) frame [] memory =
         .ok (final, returned) ∧ final = leaveFrame frame memory ∧
         returned = [.scalar (.i32 0)] := by
-  apply ordered_widening signed scalarFirst reversed program index found frame memory input word formed
+  apply WP.exists_execution
+  apply (ordered_widening signed scalarFirst reversed program index found frame memory input word
+    formed).run_exists _ _ ⟨rfl, rfl⟩
+  rintro after ⟨_, rfl⟩
   cases scalarFirst <;> cases signed <;> cases reversed
   all_goals
     cil_contract_steps [found, formed, widenArgs, orderedWidenBody]
     exact ⟨rfl, rfl⟩
 
 #print axioms ordered_widening_returns
+
+/-- An opaque helper's result-only contract still supplies checked lifetime and frame facts.
+    No cell footprint or confinement assertion is needed or inferred. -/
+theorem framed_opaque_call {program : CIL.Program} {memory : Memory} (value : CIL.W32)
+    (formed : memory.WellFormed)
+    (found : program[0]? = some
+      { locals := [], returnsValue := true, code := [.call 1 0, .ret] })
+    (helper : WP (Execution (fun fuel => invoke program fuel 1 [] memory))
+      (fun result => result.2 = [.scalar (.i32 value)])) :
+    WP (Execution (fun fuel => run program fuel 0 0 [] ⟨0, [], [], [], 0⟩ [] memory))
+      (fun result => FrameInvariants program memory result.1 ∧
+        AllocationExtension memory result.1 ∧ result.2 = [.scalar (.i32 value)]) := by
+  apply WP.call_framed found rfl (by cil_checked_step []) formed helper
+  intro final values result preserved allocations
+  change values = [.scalar (.i32 value)] at result
+  subst values
+  cil_contract_steps [found]
+  exact ⟨preserved, allocations, rfl⟩
+
+#print axioms framed_opaque_call
+
+/-- A feature test and a literal each feed a branch, which then continues at a numeral. -/
+@[cil_code] def literalBranchBody (profile : CIL.FeatureProfile) : CIL.Method :=
+  { profile, returnsValue := true, locals := [], code :=
+    [.feature .avx2, .brzero 5, .const64 1, .brnonzero 6, .ret, .const32 9, .const32 7, .ret] }
+
+/-- A branch on a literal operand is decided where it is taken: the lookups after it meet a
+    numeral, and so does a continuation stated at the numeral. A conditional left in the
+    program counter would be carried through every later step. -/
+theorem literal_branch_pc (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (wide : profile.avx2 = true) (found : program[index]? = some (literalBranchBody profile))
+    (frame : Frame) (memory : Memory) :
+    ∃ fuel result returned, run program fuel index 0 [] frame [] memory =
+      .ok (result, returned) ∧ returned = [.scalar (.i32 7)] := by
+  cil_contract_steps 4 [found, wide]
+  -- The pinned goal is the check: both branches were decided to the numeral 6.
+  guard_target = ∃ fuel result returned, run program fuel index 6 [] frame [] memory =
+    .ok (result, returned) ∧ returned = [.scalar (.i32 7)]
+  cil_contract_steps [found, wide]
+  rfl
+
+#print axioms literal_branch_pc
+
+/-- Step facts match a fetched opcode whose index they state as closed arithmetic, here through
+    a `Fin` literal, and a loaded `localResult` of a typed value is the value the next fact
+    takes. The facts would otherwise match only an index spelled as the numeral. -/
+theorem coerced_index_facts (program : CIL.Program) (index : Nat) (body : CIL.Method)
+    (found : program[index]? = some body) (load : body.code[0]? = some (.local 7))
+    (store : body.code[1]? = some (.setLocal 8)) (frame : Frame) (memory after : Memory)
+    (bits : BitVec 128)
+    (loaded : ∀ pc args stack,
+      step body (.local (↑(6 : Fin 10) + 1)) pc args frame stack memory =
+        .ok (.next (pc + 1) (.scalar (localResult .vector128 (.v128 bits)) :: stack) frame
+          memory))
+    (stored : ∀ pc args stack,
+      step body (.setLocal (↑(7 : Fin 10) + 1)) pc args frame (.scalar (.v128 bits) :: stack)
+        memory = .ok (.next (pc + 1) stack frame after))
+    (continuation : WP (Execution (fun fuel => run program fuel index 2 [] frame [] after))
+      (fun _ => True)) :
+    WP (Execution (fun fuel => run program fuel index 0 [] frame [] memory)) (fun _ => True) := by
+  cil_contract_steps [found, load, store, loaded, stored] until continuation
+
+#print axioms coerced_index_facts
+
+/-- Two symbolic words are combined and branched on. -/
+@[cil_code] def symbolicBranchBody : CIL.Method :=
+  { returnsValue := true, locals := [], code :=
+    [.arg 0, .arg 1, .bor, .brnonzero 6, .const32 7, .ret, .const32 9, .ret] }
+
+/-- A branch no fact decides ends the walk with its condition in the program counter, where
+    `split` gives both successors; stepping resumes in each. -/
+theorem symbolic_branch_splits (program : CIL.Program) (index : Nat)
+    (found : program[index]? = some symbolicBranchBody) (frame : Frame) (memory : Memory)
+    (left right : CIL.W64) :
+    ∃ fuel result returned, run program fuel index 0
+      [.scalar (.i64 left), .scalar (.i64 right)] frame [] memory = .ok (result, returned) ∧
+        (returned = [.scalar (.i32 7)] ∨ returned = [.scalar (.i32 9)]) := by
+  cil_contract_steps [found]
+  guard_target = ∃ fuel result returned, run program fuel index
+    (if ¬left ||| right = 0#64 then 6 else 4) [.scalar (.i64 left), .scalar (.i64 right)]
+      frame [] memory = .ok (result, returned) ∧
+        (returned = [.scalar (.i32 7)] ∨ returned = [.scalar (.i32 9)])
+  split
+  · cil_contract_steps [found]
+    exact Or.inr rfl
+  · cil_contract_steps [found]
+    exact Or.inl rfl
+
+#print axioms symbolic_branch_splits
+
+-- An instruction lookup at an undecided branch reports the branch without evaluating it.
+/--
+error: cil_lookup: undecided branch if ¬left = 0#64 then 6 else 4; split on its condition
+-/
+#guard_msgs in
+example (left : CIL.W64) (operation : CIL.Op) :
+    symbolicBranchBody.code[if ¬left = 0#64 then 6 else 4]? = some operation := by
+  cil_lookup []
 
 end Tests.MethodContract

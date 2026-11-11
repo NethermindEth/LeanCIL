@@ -43,8 +43,8 @@ See [composable segments](PROOFS-STEPPING.md) and their
 `CodeAt` facts let the tactics resolve instructions within a known code segment without
 expanding the whole method. `cil_checked_steps (snapshots := snapshots) [facts]` also
 tracks numeric local stores and updated snapshots, including mixed Vector128, Vector256
-and int32 locals. Snapshot facts do not supply write authority or justify a value of the wrong
-local kind. Supported forwarder bodies can inherit a
+and int32 locals, and names each store's memory and evidence. Snapshot facts do not supply
+write authority or justify a value of the wrong local kind. Supported forwarder bodies can inherit a
 callee's proved contract, and embedding proofs can ignore trailing unread byref,
 pointer or span locals. Allocation refinement also relates numeric and interspersed dead
 locals in ordinary frames, including inserted locals with valid initializers: retained

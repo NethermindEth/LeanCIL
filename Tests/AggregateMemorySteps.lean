@@ -1,11 +1,12 @@
 import CIL.Safety.AggregateMemorySteps
-import CIL.Safety.SymbolicExecution
+import CIL.Safety.MethodContract
 
 /-!
 # Aggregate operation facts
 
-Checked aggregate steps consume byte or snapshot operations. Unknown bytes retain their flags;
-access authority, an old snapshot and a mismatched width cannot supply the missing contents.
+Checked aggregate steps consume byte or snapshot operations, as one checked step and as one
+contract step. Unknown bytes retain their flags; access authority, an old snapshot and a mismatched
+width cannot supply the missing contents.
 -/
 
 namespace Tests.AggregateMemorySteps
@@ -28,6 +29,83 @@ theorem readonly_load {memory : Memory} {source : Reference} {width : Nat}
       memory = .ok (.next (pc + 1) (.scalar (.aggregate bytes) :: rest) frame memory) := by
   cil_checked_step [loaded]
 #print axioms readonly_load
+
+/-- A read stated at a local kind's width, as a remembered aggregate local gives it, supplies
+    the load at the numeral width the opcode carries. -/
+theorem kind_width_load {memory : Memory} {source : Reference} {bytes : List (BitVec 8)}
+    (loaded : read memory source (localWidth (.aggregate 32)) 1 = .ok bytes)
+    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
+    step body (.loadAggregate 32) pc args frame (.reference (.address source) :: rest)
+      memory = .ok (.next (pc + 1) (.scalar (.aggregate bytes) :: rest) frame memory) := by
+  cil_checked_step [loaded]
+#print axioms kind_width_load
+
+/-- One contract step derives the aggregate load from a supplied read, as a checked step does,
+    so a walk taken one step at a time crosses a load through a managed-reference address. -/
+theorem contract_step_load {memory : Memory} {source : Reference} {bytes : List (BitVec 8)}
+    (loaded : read memory source 32 1 = .ok bytes)
+    (body : CIL.Method) (program : CIL.Program) (method : Nat)
+    (found : program[method]? = some body)
+    (instruction : body.code[0]? = some (.loadAggregate 32)) (frame : Frame) (rest : List Value)
+    (continuation : WP (Execution (fun fuel => run program fuel method 1 [] frame
+      (.scalar (.aggregate bytes) :: rest) memory)) (fun _ => True)) :
+    WP (Execution (fun fuel => run program fuel method 0 [] frame
+      (.reference (.address source) :: rest) memory)) (fun _ => True) := by
+  cil_contract_prepare []
+  -- The read is no step fact until it is prepared, so the unprepared step stops here.
+  fail_if_success cil_contract_step_normalized [found, instruction, loaded]
+  cil_contract_step [found, instruction, loaded]
+  exact WP.adequate.mp continuation
+#print axioms contract_step_load
+
+/-- The contract step also takes the read at a local kind's width, as a remembered aggregate
+    local states it. -/
+theorem contract_step_kind_width_load {memory : Memory} {source : Reference}
+    {bytes : List (BitVec 8)}
+    (loaded : read memory source (localWidth (.aggregate 32)) 1 = .ok bytes)
+    (body : CIL.Method) (program : CIL.Program) (method : Nat)
+    (found : program[method]? = some body)
+    (instruction : body.code[0]? = some (.loadAggregate 32)) (frame : Frame) (rest : List Value)
+    (continuation : WP (Execution (fun fuel => run program fuel method 1 [] frame
+      (.scalar (.aggregate bytes) :: rest) memory)) (fun _ => True)) :
+    WP (Execution (fun fuel => run program fuel method 0 [] frame
+      (.readOnlyReference (.address source) :: rest) memory)) (fun _ => True) := by
+  cil_contract_prepare []
+  cil_contract_step [found, instruction, loaded]
+  exact WP.adequate.mp continuation
+#print axioms contract_step_kind_width_load
+
+/-- A walk derives the load from a read restated by `have`, whose type is inferred, at the
+    width of a local kind: the width is evaluated to the numeral the opcode carries. -/
+theorem contract_walk_restated_kind_load {memory : Memory} {source : Reference}
+    {bytes : List (BitVec 8)}
+    (loaded : read memory source (localWidth (.aggregate 32)) 1 = .ok bytes)
+    (body : CIL.Method) (program : CIL.Program) (method : Nat)
+    (found : program[method]? = some body)
+    (instruction : body.code[0]? = some (.loadAggregate 32)) (frame : Frame) (rest : List Value)
+    (continuation : WP (Execution (fun fuel => run program fuel method 1 [] frame
+      (.scalar (.aggregate bytes) :: rest) memory)) (fun _ => True)) :
+    WP (Execution (fun fuel => run program fuel method 0 [] frame
+      (.reference (.address source) :: rest) memory)) (fun _ => True) := by
+  have restated := loaded
+  clear loaded
+  cil_contract_steps [found, instruction, restated] until continuation
+#print axioms contract_walk_restated_kind_load
+
+/-- The same walk takes a restated read at the numeral width. -/
+theorem contract_walk_restated_load {memory : Memory} {source : Reference}
+    {bytes : List (BitVec 8)} (loaded : read memory source 32 1 = .ok bytes)
+    (body : CIL.Method) (program : CIL.Program) (method : Nat)
+    (found : program[method]? = some body)
+    (instruction : body.code[0]? = some (.loadAggregate 32)) (frame : Frame) (rest : List Value)
+    (continuation : WP (Execution (fun fuel => run program fuel method 1 [] frame
+      (.scalar (.aggregate bytes) :: rest) memory)) (fun _ => True)) :
+    WP (Execution (fun fuel => run program fuel method 0 [] frame
+      (.reference (.address source) :: rest) memory)) (fun _ => True) := by
+  have restated := loaded
+  clear loaded
+  cil_contract_steps [found, instruction, restated] until continuation
+#print axioms contract_walk_restated_load
 
 /-- An unknown byte loads as a snapshot without becoming initialized. -/
 theorem unknown_load {memory : Memory} {source : Reference}

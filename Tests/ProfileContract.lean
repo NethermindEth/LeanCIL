@@ -50,7 +50,7 @@ theorem uniform : ∀ body ∈ program, body.profile = avx2Profile := by decide
 /-- Under `avx2Profile` the method returns `1`; the only proof that steps the body. -/
 theorem avx2_holds : avx2Contract.Holds program 0 := by
   rintro - memory -
-  refine MethodContract.Holds.intro memory _ ⟨10, ?_⟩ (Confined.refl _ memory) rfl
+  refine MethodContract.Holds.intro memory _ ?_ (Confined.refl _ memory) rfl
   cil_checked_steps [program, avx2Profile]
 
 /-- The contract holds on x86-64-v4, with agreement checked by `decide`. -/

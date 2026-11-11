@@ -4,6 +4,13 @@
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
 
+bool includeLake = args switch
+{
+    [] => false,
+    ["--lake"] => true,
+    _ => throw new ArgumentException("Usage: ConsumerSupportCandidates.cs [--lake]")
+};
+
 var root = Path.Combine(Path.GetTempPath(), "leancil-support-candidates-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 try
@@ -146,6 +153,105 @@ try
     }
     if (Family() != originalFamily) throw new Exception("Unchanged framework cannot recover its support generation");
     Console.WriteLine("PASS authenticated generated support requires the exact compiled framework parts");
+}
+finally
+{
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", previousCache);
+    Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", previousDisabled);
+    Directory.Delete(root, true);
+}
+
+if (!includeLake) return;
+
+Directory.CreateDirectory(root);
+try
+{
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", Path.Combine(root, "Cache"));
+    Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", null);
+    using var producer = new Program();
+    string Package(string name)
+    {
+        var package = Path.Combine(root, name);
+        Directory.CreateDirectory(package);
+        File.Copy(At("lean-toolchain"), Path.Combine(package, "lean-toolchain"));
+        File.WriteAllText(Path.Combine(package, "lakefile.toml"), """
+            name = "restored_extraction"
+            [[lean_lib]]
+            name = "Component"
+            [[lean_lib]]
+            name = "Extracted"
+            [[lean_lib]]
+            name = "Proof"
+            """);
+        // Different valid compiled bytes model a non-reproducible elaborator, without changing source.
+        File.WriteAllText(Path.Combine(package, "Component.lean"), """
+            import Lean
+            open Lean Elab Command in
+            run_cmd do
+              let stamp ← IO.monoNanosNow
+              elabCommand (← `(def $(mkIdent `fixtureNonce) : Nat := $(quote stamp)))
+            """);
+        File.WriteAllText(Path.Combine(package, "Extracted.lean"), """
+            import Component
+            open Lean Elab Term in
+            def importedNonce : Nat := by_elab
+              let .defnInfo declaration ← getConstInfo `fixtureNonce
+                | throwError "Expected fixture nonce"
+              return declaration.value
+            theorem certificate : True := True.intro
+            """);
+        File.WriteAllText(Path.Combine(package, "Proof.lean"),
+            "import Extracted\ntheorem checked : True := certificate\n");
+        return package;
+    }
+    var first = Package("First");
+    var second = Package("Second");
+    var destination = Package("Restored");
+    var bound = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["Component.lean"] = Sha(Path.Combine(first, "Component.lean")),
+        [ExtractedSourceKey] = Sha(Path.Combine(first, "Extracted.lean"))
+    };
+    var graph = new Dictionary<string, string[]>(StringComparer.Ordinal)
+    {
+        ["Component"] = ["Lean"], ["Extracted"] = ["Component"]
+    };
+    string Artifact(string package, string module) =>
+        Path.Combine(package, ".lake/build/lib/lean", module + ".olean");
+    foreach (var package in new[] { first, second })
+    {
+        Run(["lake", "build", "+Extracted:olean"], package);
+        var modules = graph.Keys.ToDictionary(module => module, module => Artifact(package, module));
+        var publication = producer.CollectConsumerSupport(package, modules, graph, [], ["Extracted"], bound)
+            ?? throw new Exception("Missing source-bound compiled generation");
+        var family = Path.GetFileName(package);
+        try { producer.PublishSuccess(family + "-generation", publication, family); }
+        finally { Directory.Delete(publication, true); }
+    }
+    if (Sha(Artifact(first, "Component")) == Sha(Artifact(second, "Component")))
+        throw new Exception("Fixture must produce two different valid compiled generations");
+    producer.RestoreConsumerSupport("First", bound, destination, dependent: false);
+    producer.RestoreConsumerSupport("Second", bound, destination, dependent: true);
+    var mixed = Sha(Artifact(destination, "Extracted"));
+    var rebuilt = Run(["lake", "build", "+Proof:olean"], destination);
+    if (!rebuilt.Contains("Built Extracted", StringComparison.Ordinal) ||
+        mixed == Sha(Artifact(destination, "Extracted")))
+        throw new Exception("Mixed authenticated generations did not reproduce the extraction rewrite");
+    Console.WriteLine("PASS mixed authenticated generations reproduce a Lake extraction rewrite during proof build");
+
+    var complete = producer.RestoreConsumerSupport("Second", bound, destination,
+        requiredModules: ["Component", "Extracted"]);
+    if (complete.Count == 0) throw new Exception("A complete authenticated extraction closure was not restored");
+    var coherent = Sha(Artifact(destination, "Extracted"));
+    File.AppendAllText(Path.Combine(destination, "Proof.lean"), "\n-- Recheck the changed proof.\n");
+    var checkedProof = Run(["lake", "build", "+Proof:olean"], destination);
+    if (checkedProof.Contains("Built Extracted", StringComparison.Ordinal) ||
+        coherent != Sha(Artifact(destination, "Extracted")))
+        throw new Exception("A coherent restored closure was rewritten during proof build");
+    if (producer.RestoreConsumerSupport("Second", bound, Path.Combine(root, "Incomplete"),
+            requiredModules: ["Component", "Extracted", "Missing"]).Count != 0)
+        throw new Exception("An incomplete generation was accepted as a complete extraction closure");
+    Console.WriteLine("PASS complete extraction closure restoration preserves bytes across a changed proof build");
 }
 finally
 {

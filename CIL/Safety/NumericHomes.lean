@@ -20,6 +20,14 @@ structure NumericLocalSpec where
 
 /-- The storage kinds of the locals, in order. -/
 def numericKinds (specs : List NumericLocalSpec) : List CIL.LocalKind := specs.map (·.kind)
+
+/-- The kind at an index of `numericKinds specs` is the kind of the spec at that index. -/
+theorem numericKinds_getElem? {specs : List NumericLocalSpec} {index : Nat}
+    {spec : NumericLocalSpec} (specified : specs[index]? = some spec) :
+    (numericKinds specs)[index]? = some spec.kind := by
+  simp [numericKinds, specified]
+
+#print axioms numericKinds_getElem?
 /-- The initial values of the locals, in order. -/
 def numericInitializers (specs : List NumericLocalSpec) : List CIL.Value := specs.map (·.value)
 
