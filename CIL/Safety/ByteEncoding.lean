@@ -36,11 +36,21 @@ theorem byteNumber_numberBytes (value width : Nat) :
     rw [ih]
     simp only [BitVec.toNat_ofNat, Nat.pow_succ]
     change value % 256 + 256 * (value / 256 % 256^width) = value % (256^width * 256)
-    simpa only [Nat.mod_mul_left_mod, Nat.mod_mul_left_div_self] using
-      Nat.mod_add_div (value % (256^width * 256)) 256
+    have bounded : value % 256 + 256 * (value / 256 % 256^width) < 256 * 256^width := by
+      have low := Nat.mod_lt value (by decide : 0 < 256)
+      have high := Nat.mod_lt (value / 256) (Nat.pow_pos (by decide : 0 < 256) : 0 < 256^width)
+      omega
+    calc
+      _ = (value % 256 + 256 * (value / 256 % 256^width)) % (256 * 256^width) :=
+        (Nat.mod_eq_of_lt bounded).symm
+      _ = (value % 256 + 256 * (value / 256)) % (256 * 256^width) := by
+        rw [Nat.add_mod, ← Nat.mul_mod_mul_left, Nat.mod_mod, ← Nat.add_mod]
+      _ = _ := by rw [Nat.mod_add_div, Nat.mul_comm 256]
 
 #print axioms numberBytes_length
 #print axioms numberBytes_succ
+/-- info: 'CIL.Safety.byteNumber_numberBytes' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
 #print axioms byteNumber_numberBytes
 
 end CIL.Safety
