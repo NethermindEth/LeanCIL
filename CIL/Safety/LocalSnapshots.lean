@@ -1,4 +1,5 @@
 import CIL.Safety.WordSnapshots
+import CIL.Safety.WordHomes
 import CIL.Safety.NumericHomes
 import CIL.Safety.MethodContract
 
@@ -231,6 +232,16 @@ theorem wordLocals_rememberWord (known : Nat → Option (BitVec 64)) (index : Na
   funext other
   by_cases same : other = index <;> simp [wordLocals, rememberWord, rememberLocal, same]
 
+/-- Initialized word and root locals retain their typed writable storage. -/
+theorem WordHomes.writable {memory : Memory} {lower : Nat} {specs slots}
+    (homes : WordHomes memory lower specs slots) :
+    WritableHomes memory lower (wordKinds specs) slots := by
+  induction homes with
+  | nil lower => exact .nil lower
+  | root _ tail => exact .skip (by intros; simp) tail
+  | word reference _ fresh _ writable _ tail =>
+    exact .cons reference .word64 fresh writable tail
+
 /-- Numeric homes are writable homes of their kinds. -/
 theorem NumericHomes.writable {memory : Memory} {lower : Nat} {specs slots}
     (homes : NumericHomes memory lower specs slots) :
@@ -279,6 +290,7 @@ theorem NumericHomes.snapshots {memory : Memory} {lower : Nat} {specs slots}
 #print axioms localWords_rememberLocal
 #print axioms wordLocals_rememberWord
 #print axioms NumericHomes.writable
+#print axioms WordHomes.writable
 #print axioms NumericHomes.complete
 #print axioms NumericHomes.snapshots
 end CIL.Safety
