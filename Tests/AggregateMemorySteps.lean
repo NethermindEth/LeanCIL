@@ -75,6 +75,38 @@ theorem contract_step_kind_width_load {memory : Memory} {source : Reference}
   exact WP.adequate.mp continuation
 #print axioms contract_step_kind_width_load
 
+/-- A walk derives the load from a read restated by `have`, whose type is inferred, at the
+    width of a local kind: the width is evaluated to the numeral the opcode carries. -/
+theorem contract_walk_restated_kind_load {memory : Memory} {source : Reference}
+    {bytes : List (BitVec 8)}
+    (loaded : read memory source (localWidth (.aggregate 32)) 1 = .ok bytes)
+    (body : CIL.Method) (program : CIL.Program) (method : Nat)
+    (found : program[method]? = some body)
+    (instruction : body.code[0]? = some (.loadAggregate 32)) (frame : Frame) (rest : List Value)
+    (continuation : WP (Execution (fun fuel => run program fuel method 1 [] frame
+      (.scalar (.aggregate bytes) :: rest) memory)) (fun _ => True)) :
+    WP (Execution (fun fuel => run program fuel method 0 [] frame
+      (.reference (.address source) :: rest) memory)) (fun _ => True) := by
+  have restated := loaded
+  clear loaded
+  cil_contract_steps [found, instruction, restated] until continuation
+#print axioms contract_walk_restated_kind_load
+
+/-- The same walk takes a restated read at the numeral width. -/
+theorem contract_walk_restated_load {memory : Memory} {source : Reference}
+    {bytes : List (BitVec 8)} (loaded : read memory source 32 1 = .ok bytes)
+    (body : CIL.Method) (program : CIL.Program) (method : Nat)
+    (found : program[method]? = some body)
+    (instruction : body.code[0]? = some (.loadAggregate 32)) (frame : Frame) (rest : List Value)
+    (continuation : WP (Execution (fun fuel => run program fuel method 1 [] frame
+      (.scalar (.aggregate bytes) :: rest) memory)) (fun _ => True)) :
+    WP (Execution (fun fuel => run program fuel method 0 [] frame
+      (.reference (.address source) :: rest) memory)) (fun _ => True) := by
+  have restated := loaded
+  clear loaded
+  cil_contract_steps [found, instruction, restated] until continuation
+#print axioms contract_walk_restated_load
+
 /-- An unknown byte loads as a snapshot without becoming initialized. -/
 theorem unknown_load {memory : Memory} {source : Reference}
     (loaded : readSnapshot memory source 1 1 = .ok [(0, false)])
