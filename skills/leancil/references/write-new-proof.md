@@ -178,7 +178,7 @@ by_cases zero : x = 0#32
 
 Every continuing iteration must decrease the measure; a finite sample of runs does not prove
 termination. Close the goals a loop or call tactic leaves by tag (`case invariant =>`,
-`case measure =>`, `case precondition =>`, `case postcondition =>`), never by position
+`case measure =>`, `case precondition =>`, `case postcondition =>`); do not select them by position
 ([obligation tags](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-STEPPING.md#obligation-tags),
 [loop scaffolding](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-BINDING.md#generate-loop-entry-and-cutpoint-scaffolding)).
 
@@ -192,8 +192,8 @@ termination. Close the goals a loop or call tactic leaves by tag (`case invarian
 - Keep the interpreter's own functions (`step`, `run`, `invoke`, `instruction` and the others
   the stepping reference lists) out of `simp` lists. Step with a tactic and pass a fact about the
   operation.
-- Use a helper's contract at its call sites and leave its body folded, so caller proofs survive
-  a rewrite of the helper.
+- Use a helper's contract at its call sites and leave its body folded, so caller proofs still
+  check after a rewrite of the helper.
 
 ## 5. Examples by method shape
 
@@ -215,7 +215,7 @@ and the [examples index](https://github.com/NethermindEth/LeanCIL/blob/main/docs
 
 ## 6. A property that does not hold
 
-A failing property is a result to report. Show the user the failing input, or prove the
+Report a property that does not hold as a result. Show the user the failing input, or prove the
 counterexample as its own theorem: [WrongAdd](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/WrongAdd.lean)
 proves a counterexample to the addition contract for a subtracting implementation, and
 `MethodContract.not_holds_of_fault` refutes a contract from a located fault on an input meeting its precondition

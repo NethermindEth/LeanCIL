@@ -29,7 +29,7 @@ definition and arguments:
 }
 ```
 
-The artifact records the definition, ordered arguments and actual specialized
+The artifact records the definition, ordered arguments and specialized
 entry. Export preparation, integrity checking and full verification reconstruct
 the same selection. The specialization certificate checks substitution
 of the raw method. Import identity includes the complete assembly, generic
@@ -59,7 +59,7 @@ computed from the selected module, and `ImportedLocalLayoutsBound` in
 slot that publishes its identity. Imported entries carry no interfaces, so they
 cannot satisfy a generic constraint.
 
-The public catalog is a signature closure, not the full implementation layout
+The public catalog is a signature closure. It is not the full implementation layout
 table. Private layouts can occur before or between its entries. The generated
 export audit kernel-checks `LayoutProjectionValid`, which reindexes nested
 aggregate references, checks raw metadata equality and equates each public
@@ -88,10 +88,10 @@ verification uses the published-certification trust boundary, and
 [full verification](FULL_VERIFICATION.md) applies to typed imports too.
 Typed imports add no method-summary axiom and no native proof evaluation.
 
-A typed import keeps the callee behind its contract. To extract the callee's body instead, pass
-its DLL as a [pinned reference](CLI.md#extract-from-referenced-assemblies). The two are exclusive
-per assembly: a sidecar for a pinned assembly is not discovered, and an explicit `--import` of
-a pinned assembly is rejected.
+A typed import gives the caller the callee's contract without its body. To extract the callee's
+body instead, pass its DLL as a [pinned reference](CLI.md#extract-from-referenced-assemblies). A
+typed import and a pinned reference are exclusive per assembly: a sidecar for a pinned assembly
+is not discovered, and an explicit `--import` of a pinned assembly is rejected.
 
 The repository's `exportstyped` suite checks these rules on SDK-built Lib/App assemblies,
 including the rejected cases above; see [validation](VALIDATION.md).

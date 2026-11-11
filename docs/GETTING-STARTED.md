@@ -90,7 +90,7 @@ leancil check artifacts/Add
 `Examples/Proofs/WrongAdd.lean` proves a counterexample to the addition contract for a subtracting
 implementation, for every successful fuel budget.
 
-## Try breaking the implementation
+## Break the implementation
 
 In `Examples/Assembly/Methods.cs`, change only `Add` to:
 
@@ -139,18 +139,18 @@ leancil verify artifacts/PastEnd --proof Examples/Proofs/PastEnd.lean
 
 This prints `Verified: ExampleProof.correctness` and the theorem statement: for every fuel budget
 and result, execution with the example caller memory cannot return `Except.ok result`. The
-verified property is **rejection of the unsafe access**, not a claim that the method is safe. The
-proof also includes a concrete `.outsideAllocation` fault witness. Its caller memory is fixed;
-the theorem does not claim the access fails for every possible allocation layout.
+verified property is **rejection of the unsafe access**. The theorem does not claim that the
+method is safe. The proof also includes a concrete `.outsideAllocation` fault witness. Its caller
+memory is fixed; the theorem does not claim the access fails for every possible allocation layout.
 
 The commands and output on this page are run and compared by the repository's `docs` suite; see
 [validation coverage](VALIDATION.md).
 
 ## Scope of a result
 
-- A verification report identifies the **specific named theorem and its printed type**, not all
-  methods or all inputs.
-- Fuel exhaustion and unsupported states are failures, never successful verification.
+- A verification report identifies the **specific named theorem and its printed type**. It does
+  not cover all methods or all inputs.
+- Fuel exhaustion and unsupported states are failures. Neither counts as successful verification.
 
 ## Prove another method
 

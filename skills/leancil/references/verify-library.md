@@ -6,7 +6,7 @@ verify-batch` verifies extractions that already exist.
 
 ## Requirements
 
-- The proofs live in one Lake package that pins `leancil`, uses the toolchain `leancil --version`
+- The proofs are in one Lake package that pins `leancil`, uses the toolchain `leancil --version`
   prints and has a resolved `lake-manifest.json`
   ([package setup](bridge-model-proof.md#package-setup)).
 - Dependencies are Git packages pinned to full revisions. Local path dependencies, symlinked
@@ -102,7 +102,7 @@ Paths are relative to the manifest. `expect` is `verified` (the default) or `rej
 | `--check` | Compile only; see below |
 | `--fresh`, `--rebuild-library` | Bypass reuse of earlier results; also rebuild the framework library |
 | `--trace` | Trace every request's proof |
-| `--parallel count` | Workspaces run at once after the first. Default: processor count / 8, at least 1 |
+| `--parallel count` | Workspaces run at once after the first. The default is processor count / 8, at least 1 |
 | `--results results.json` | Write every outcome as JSON in request order: `output`, `proof`, `theorem`, `expect`, `status`, `stage`, `error`, `axioms`, `failure` and `elapsedSeconds` |
 | `--format json` | Print one JSON document with `passed`, `failed` and each request's report |
 
@@ -134,7 +134,7 @@ verification. A request or variant that expects `rejected` is an error under `--
 
 ## Profiles
 
-List every deployment profile in `profiles`; a pass under one profile says nothing about another.
+List every deployment profile in `profiles`; a pass under one profile proves nothing for another.
 A method whose body differs by hardware profile needs a proof that holds for each extraction.
 `leancil templates output-directory extraction-directory...` generates one shared body with a
 profile parameter and a binding per input extraction

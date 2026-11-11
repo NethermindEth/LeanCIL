@@ -13,7 +13,7 @@ is a complete proof of this form.
 
 The snippets assume `open CIL` and the model's namespace.
 
-1. Leave the model and its theorems unchanged. This one is a `Nat` model:
+1. Leave the model and its theorems unchanged. The model in this example is a `Nat` model:
 
    ```lean
    def addMod (a b : Nat) : Nat := (a + b) % 2 ^ 64
@@ -79,11 +79,12 @@ Verify the transferred theorem. It depends on the bridge, so the bridge is check
 - The bridge must cover every input the transferred theorem uses. When the bridge needs a
   precondition (such as `y != 0` for division), the transferred theorem carries it too.
 - Numeric literals elaborate as `OfNat` terms, so `BitVec.toNat_zero` may not rewrite
-  `(0 : W64).toNat`; `show (0 : W64).toNat = 0 from rfl` does.
+  `(0 : W64).toNat`; `show (0 : W64).toNat = 0 from rfl` rewrites it.
 
 ## Package setup
 
-Keep the model in the user's own Lake package with LeanCIL as a dependency. `lakefile.toml`:
+Keep the model in the user's own Lake package with LeanCIL as a dependency. Its
+`lakefile.toml` is:
 
 ```toml
 name = "mylib_proofs"
@@ -131,8 +132,8 @@ The package rules are in
 
 ## Statement audit
 
-The transferred theorem is what the user gets. Make sure it says the method succeeds with the
-expected result. A purely relational statement ("both orders give equal outcomes") also holds
-for a method that always fails, so `AddModel.lean` keeps success in its statement. A theorem
-stated through `.map Prod.snd` compares returned values only; say so when the user also cares
-about memory effects.
+The user receives the transferred theorem as the result. Make sure the theorem says the method
+succeeds with the expected result. A purely relational statement ("both orders give equal
+outcomes") also holds for a method that always fails, so `AddModel.lean` keeps success in its
+statement. A theorem stated through `.map Prod.snd` compares returned values only; say so when the
+user also cares about memory effects.

@@ -12,8 +12,8 @@ leancil verify artifacts/Countdown --proof Examples/Proofs/Countdown.lean
 ```
 
 Sentences about what a suite checks describe the repository's own tests
-(`dotnet run --file scripts/Test.cs -- --suite <name>`, see [validation](VALIDATION.md)): the
-wrong implementations each unchanged proof rejects.
+(`dotnet run --file scripts/Test.cs -- --suite <name>`, see [validation](VALIDATION.md)). Those
+sentences name the wrong implementations that each unchanged proof rejects.
 
 ## Independent examples
 
@@ -82,7 +82,7 @@ wrong implementations each unchanged proof rejects.
 - `ItemPool.Rent` reuses the head of an intrusive free list. `PoolRent.lean` proves that it
   returns that head, advances the list past it, clears its link, decrements the idle count and
   marks it rented, writing no other field, and under the class catalog premise leaves the live
-  count alone; with an empty list and room under the capacity it creates an item owned by the
+  count unchanged; with an empty list and room under the capacity it creates an item owned by the
   pool, numbered with the next id and marked rented; an exhausted pool throws
   `InvalidOperationException` and a null pool `NullReferenceException`. Its object sites agree
   with the catalog, so the premise stated at entry holds after any invocation of the program.
@@ -158,9 +158,10 @@ the helper contract, and rejects builds that discard the helper result or count 
 
 [The struct-local loop proof](../Examples/Proofs/TallyTwice.lean) shows that `Loops.TallyTwice`
 returns twice its input for every `uint` and allocates nothing the caller sees. Its loop state is a
-struct local remembered by its `count` and `sum` fields. The loop tactics zero and store the struct,
-read its fields and cross the `AddTwo` call through its contract with the frame facts they carry,
-and the proof supplies only the invariant `sum = 2 * count`, the measure and the arithmetic.
+struct local remembered by its `count` and `sum` fields. The loop tactics zero and
+store the struct, read its fields and cross the `AddTwo` call through its contract with the frame
+facts they carry, and the proof supplies only the invariant `sum = 2 * count`, the measure and the
+arithmetic.
 
 [The early-exit copy proof](../Examples/Proofs/CopyUntilZero.lean) shows that `Loops.CopyUntilZero`
 copies the words of a readonly span before its first zero to a caller buffer through its `Stamp`
@@ -175,7 +176,8 @@ contents and write authority through every store and the return. The suite rejec
 [The outcome loop proof](../Examples/Proofs/CountUntil.lean) shows that
 `Loops.CountUntil(value, limit)` returns `value` when `value <= limit`, and otherwise propagates the
 `System.InvalidOperationException` that its `Bump` helper throws once the count reaches `limit`,
-after `limit` successful calls. It holds for every pair of `uint`s from empty caller memory. The
+after `limit` successful calls. The theorem holds for every pair of `uint`s from empty caller
+memory. The
 proof uses only `bumpContract`, an `OutcomeContract` naming when `Bump` throws, through
 `loop_outcome_induction`, `cil_loop_outcome_call` and `cil_loop_outcome_raise`;
 `ensures_outcome_of_loop` gives the method's `EnsuresOutcome`. The suite verifies the unchanged
@@ -186,24 +188,24 @@ say so.
 [The buffer fill proof](../Examples/Proofs/FillWords.lean) shows that `Loops.FillWords`, which
 stores `value` through `Unsafe.Add(ref destination, i)` for each `i < count`, leaves
 `Contents final destination 8 (List.replicate count value)` for every nonnegative `int` count and is
-`Confined` to those `8 * count` bytes. It assumes only write authority over the words (`Writable`),
-never readable or initialized contents, and its invariant is `Filled`: the first `i` words filled,
-the rest still only writable. The loop state is a `FrameState`, whose `LoopFrame` carries the
-footprint, well-formedness, index home and index value; the proof writes the element through the
-frame and the loop tactics keep the rest. The suite rejects builds that shift every store by one
-word or skip every other word.
+`Confined` to those `8 * count` bytes. The theorem assumes only write authority over the words
+(`Writable`). It does not assume readable or initialized contents. Its invariant is `Filled`: the
+first `i` words are filled and the rest are still only writable. The loop state is a
+`FrameState`, whose `LoopFrame` carries the footprint, well-formedness, index home and index value;
+the proof writes the element through the frame and the loop tactics keep the rest. The suite
+rejects builds that shift every store by one word or skip every other word.
 
 [The span predicate proof](../Examples/Proofs/SpanAllZero.lean) and [the span fold
 proof](../Examples/Proofs/SpanSum.lean) state their results over `SpanContents`, the library's
 description of what a span holds. `Loops.AllZero` returns whether `values.all (· == 0)` and leaves
 caller memory unchanged; `Loops.Sum` returns `values.sum` with wrapping `ulong` addition while a
 frame home holds the running total, and keeps all memory below the caller's allocation watermark.
-Both hold for every length, including null empty spans. Each invariant relates the remaining
-suffix to the answer (`remaining.all (· == 0) = result`, `total + remaining.sum = result`), its
-measure is the suffix length, and `CheckedSpan.head` and `CheckedSpan.tail` carry it across one
-`values[0]` read and `values.Slice(1)`. Each proof states its specification, invariant and
-measure, the next state of each iteration and the facts its steps use; frame entry, the frame
-home and the exit's memory fact come from the [loop verification
+Both theorems hold for every length, including null empty spans. Each invariant relates the
+remaining suffix to the answer (`remaining.all (· == 0) = result`,
+`total + remaining.sum = result`), its measure is the suffix length, and `CheckedSpan.head` and
+`CheckedSpan.tail` carry it across one `values[0]` read and `values.Slice(1)`. Each proof states
+its specification, invariant and measure, the next state of each iteration and the facts its steps
+use; frame entry, the frame home and the exit's memory fact come from the [loop verification
 conditions](PROOFS-STEPPING.md#loop-verification-conditions). The suite rejects a build of
 `AllZero` that replaces every read with zero and a build of `Sum` that stops while one element
 remains.

@@ -23,9 +23,9 @@ leancil check extracted
 | Option | Meaning |
 | --- | --- |
 | `--import path` | A sidecar. Optional when `Lib.leancil.contracts` lies next to the application, where it is discovered. |
-| `--import-implementation Lib=path` | The implementation DLL; an explicit path overrides discovery. Default: `Lib.dll` next to the sidecar, then next to the application. |
-| `--import-sha256 Lib=hex` | Required. The independently supplied SHA-256 of the implementation DLL. |
-| `--import-interface-sha256 Lib=digest` | Required. The independently supplied interface digest. |
+| `--import-implementation Lib=path` | The implementation DLL; an explicit path overrides discovery. The default is `Lib.dll` next to the sidecar, then next to the application. |
+| `--import-sha256 Lib=hex` | The independently supplied SHA-256 of the implementation DLL. This option is required. |
+| `--import-interface-sha256 Lib=digest` | The independently supplied interface digest. This option is required. |
 
 A discovered sidecar is read only when a reachable call resolves to `Lib`, so sidecars of
 uncalled libraries need no pins and never enter the extraction. A hash found in the same sidecar
@@ -62,24 +62,24 @@ leancil resolve-imports bin/App.dll --library Lib \
 | Option | Meaning |
 | --- | --- |
 | `--library Lib` | A library to resolve; at least one, repeatable. List every required library, including transitive contract dependencies: sidecar dependencies are not followed. |
-| `--deps file` | The deps file. Default: `App.deps.json` next to the application. |
+| `--deps file` | The deps file. The default is `App.deps.json` next to the application. |
 | `--assets file` | The NuGet assets file, `obj/project.assets.json`. One of the deps and assets files is required. |
 | `--package-root directory` | An extra package root, repeatable; the `packageFolders` of the assets file are used too. |
 | `--runtime-identifier RID` | The target RID; it must not conflict with the deps file's runtime target. |
 | `--rid-graph file` | The SDK's `PortableRuntimeIdentifierGraph.json`. |
 | `--profile name` or `@profile.json` | The execution profile; see the architecture rule below. |
-| `--output file` | Write the result as JSON there. Default: standard output. |
+| `--output file` | Write the result as JSON there. The default is standard output. |
 
 Only `net10.0` targets are accepted. The command does not restore, use the network, or infer a
 RID from the host.
 
 Selection follows the .NET 8+ host and NuGet. RID fallback is NuGet's breadth-first
 `RuntimeGraph.ExpandRuntime` over the SDK's `PortableRuntimeIdentifierGraph.json`. For
-`linux-x64` that is `linux-x64`, `linux`, `unix-x64`, `unix`, `any`, `base`; the host's built-in
-list is its prefix through `any`. A deps.json `runtimes` section is never read; the host ignores
-it too unless `UseRidGraph` is set. A library's best-matching RID group replaces its whole
-portable `runtime` group; with no match, the portable group applies. A library with
-RID-specific runtime assets needs `--runtime-identifier` and `--rid-graph`.
+`linux-x64` the fallback list is `linux-x64`, `linux`, `unix-x64`, `unix`, `any`, `base`; the
+host's built-in list is the prefix of that list through `any`. A deps.json `runtimes` section
+is never read; the host ignores it too unless `UseRidGraph` is set. A library's best-matching RID
+group replaces its whole portable `runtime` group; with no match, the portable group applies. A
+library with RID-specific runtime assets needs `--runtime-identifier` and `--rid-graph`.
 
 deps.json assets are probed in the application directory as hostpolicy does: at `localPath`
 (written for executables), else at a RID asset's relative path, else at the bare file name.
@@ -134,8 +134,8 @@ type identities. Profiles must name an exact built-in profile; custom profiles a
 
 For an implementation DLL, the selected export is validated with its independently pinned
 direct dependencies and its explicitly declared initialization assumptions. Its own reachable
-static identity set must match the selected certification exactly. This checks metadata and
-serialization; it does not verify the imported theorem.
+static identity set must match the selected certification exactly. This validation checks
+metadata and serialization; it does not verify the imported theorem.
 
 An optional `initializationAssumptions` descriptor records each exported profile's sorted
 assembly/type pairs and participates in the interface digest. Each local type must have a
@@ -144,9 +144,10 @@ DLL; a reference-only import is rejected. Imported dependency premises must matc
 by implementation validation exactly. The exporter kernel-checks and structurally audits
 equality with the generated `Extracted.initializationAssumptions` list. Callers propagate this
 list into their generated source, identity and report; exporting such a caller propagates it
-again. These are deployment premises that initialization completed successfully, not CLR
-initialization theorems or field-value guarantees. Recorded `staticValues`, including unknown
-ones, are unexportable, and forced full verification rejects initialization premises.
+again. The assumptions are deployment premises that initialization completed successfully. They
+are not CLR initialization theorems or field-value guarantees. Recorded `staticValues`,
+including unknown ones, are unexportable, and forced full verification rejects initialization
+premises.
 
 Each node's static identities are checked with those of its direct imports before output, and a
 collision reports both scoped field names. Extraction does not compare every pair of graph
@@ -157,8 +158,9 @@ nodes: conditional transitive proofs retain the `StaticWorldValid` premises, and
 The framework manifest lists `CIL.lean`, all `CIL/**/*.lean`, and `lean-toolchain`
 in ordinal relative-path order. Paths use `/`. Each line is `path=sha256(bytes)`.
 Join lines with `\n` and no final newline, then hash the UTF-8 bytes. The CLI
-uses the framework sources packaged with the executable, not the current working
-directory. This is a framework identity, not a semantic preservation theorem.
+uses the framework sources packaged with the executable. It does not read them from the current
+working directory. The framework key identifies the framework sources. It is not a semantic
+preservation theorem.
 
 The canonical interface descriptor serializes these fields in this order:
 `schema`, `semanticsVersion`, `formatVersion`, `frameworkKey`, `assemblyIdentity`,
@@ -200,12 +202,12 @@ Several slots form a conjunction. The selected kind uses the fully qualified
 framework `MethodContract.Holds` or `OutcomeContract.Holds` predicate. Both the
 framework predicate and selected contract use `_root_` qualification, so an
 `Extracted` namespace declaration cannot replace either one. Lean checks
-that the named value has that actual framework contract type. The audit compares
+that the named value has that framework contract type. The audit compares
 the head constant of that type, so a contract typed through an `abbrev` of
 `MethodContract` or `OutcomeContract` is rejected; declare it with the framework
 structure directly. A user-defined
 `Contract.Holds` predicate cannot replace this check. Each contract applies to
-the actual linked program and its absolute slot. No body, axiom, summary or
+the linked program and its absolute slot. No body, axiom, summary or
 implementation proof is generated for an import.
 
 The caller theorem must have the conditional form:
@@ -214,7 +216,7 @@ The caller theorem must have the conditional form:
 CIL.Safety.HoldsGiven Extracted.program Extracted.ImportsHold claim
 ```
 
-This retains both `Links` and the required imported contracts. The theorem audit
+This form retains both `Links` and the required imported contracts. The theorem audit
 (`leancil-audit`, on replayed oleans) compares the compiled theorem type with this
 application structurally, so no binder may precede it, and requires the compiled
 value of `Extracted.ImportsHold` to equal the conjunction rebuilt from

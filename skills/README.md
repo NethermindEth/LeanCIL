@@ -12,7 +12,7 @@ directory.
 
 | File | Read when |
 | --- | --- |
-| [SKILL.md](leancil/SKILL.md) | Always: the paths, the shared commands, the limits and the result audit |
+| [SKILL.md](leancil/SKILL.md) | Always; it holds the paths, the shared commands, the limits and the result audit |
 | [check-existing-proof.md](leancil/references/check-existing-proof.md) | A LeanCIL proof exists and needs running |
 | [bridge-model-proof.md](leancil/references/bridge-model-proof.md) | Lean theorems about a model exist |
 | [write-new-proof.md](leancil/references/write-new-proof.md) | Only code and a requirement exist |

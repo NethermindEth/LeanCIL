@@ -1,6 +1,6 @@
 # Consumer packages and batch verification
 
-Read this page when your proofs live in your own Lake package. It covers verifying a package
+Read this page when you keep your proofs in your own Lake package. It covers verifying a package
 (`--proof-root`), catalogs and batches, the editor workspace and `watch`, what verification
 caches and replays, library audits, and publishing or importing verified contracts. Single
 commands and their output are in the [CLI reference](CLI.md).
@@ -126,7 +126,7 @@ The report binds all copied `.lean`, `.toml`, `.json` and `lean-toolchain` files
 dependency revisions. Sources are checked again before the report is written. New or changed
 consumer and dependency modules undergo kernel replay, and the selected theorem's transitive
 axioms are audited with the same policy as single-file verification. `verification.json`
-remembers the package root.
+records the package root.
 
 ## Generated proof bindings
 
@@ -163,7 +163,7 @@ Use the exact assembly and method selector of the consumer build. Run `lake upda
 package first; the pinned Git dependency and framework/toolchain checks of
 [consumer verification](#consumer-proof-packages) apply.
 
-### One module per method
+### Editor extraction modules
 
 Each selected method and profile gets its own module, so proofs of different methods share a
 package and stay open at once. The command prints the import:
@@ -173,10 +173,10 @@ Editor extraction: Workspace.Wide::get_IsZeroOrOne() (scalar)
   Import: import Extracted.Wide_get_IsZeroOrOne_1f0c2a9e, import ExtractedSymbols.Wide_get_IsZeroOrOne_1f0c2a9e
 ```
 
-The module is `Extracted.KEY`, with `ExtractedSymbols.KEY` for PDB names; the second exists
-only while the assembly has a matching portable PDB. KEY is the method's type and name followed
-by the first eight hex digits of the SHA-256 of the assembly's simple name, the method's full
-signature, the profile name and the initialization assumptions. A rebuild or an assembly
+The module is `Extracted.KEY`, with `ExtractedSymbols.KEY` for PDB names; `ExtractedSymbols.KEY`
+exists only while the assembly has a matching portable PDB. KEY is the method's type and name
+followed by the first eight hex digits of the SHA-256 of the assembly's simple name, the method's
+full signature, the profile name and the initialization assumptions. A rebuild or an assembly
 version change therefore keeps the key, and overloads and profiles of one method get different
 keys.
 
@@ -219,8 +219,8 @@ The command rejects:
 
 - a package that already has overrides it did not write;
 - consumer sources named `Extracted.lean` or `ExtractedSymbols.lean`, or inside an `Extracted`
-  or `ExtractedSymbols` directory, because they would shadow an extraction. That includes the
-  output directory of `leancil extract`: keep it outside the proof package;
+  or `ExtractedSymbols` directory, because they would shadow an extraction. The output directory of
+  `leancil extract` holds such a file: keep it outside the proof package;
 - a proof root with no lakefile, or with no `lake-manifest.json` because `lake update` has not
   run there. The message gives the cause and the fix.
 
@@ -268,14 +268,14 @@ Each proof gets one status per cycle:
 | `unverified` | The selection names no `--theorem`; only the editor modules were refreshed. |
 
 A `missing` selection stays recorded until the method returns or its directory is deleted.
-After a failed build, the next good build verifies every proof again, so a failed build never
-leaves a green result.
+After a failed build, the next good build verifies every proof again, so no proof keeps a
+`verified` status from before the failed build.
 
-A result whose inputs did not change is reported again with `rechecked` false. That reports
-byte-identical extraction text and sources and issues no new certificate: its `verified.json`
-names the assembly it was verified against.
+A result whose inputs did not change is reported again with `rechecked` false. Such a result
+reports byte-identical extraction text and sources and issues no new certificate: its
+`verified.json` names the assembly it was verified against.
 
-On Windows the command also checks that the environment `lake serve` hands Lean fits Lean's
+On Windows the command also checks that the environment `lake serve` passes to Lean fits Lean's
 32,767-byte limit, and fails with the largest variables instead of leaving the editor without
 `LEAN_PATH`; see [environment size on Windows](CLI.md#environment-size-on-windows).
 
@@ -303,7 +303,7 @@ proof's closure imports, it generates a module containing only `import Extracted
 `import ExtractedSymbols`), after checking that KEY is the key of the extraction it checks; a
 key of another extraction is rejected. The theorem and certificate audits read `Extracted`
 itself, with extraction identity checks and independent kernel replay. A forged or stale editor
-module therefore changes nothing verification reads, and a certificate rests on the pinned
+module therefore changes nothing verification reads, and a certificate depends on the pinned
 `leancil` revision.
 
 ## Local support cache
@@ -338,7 +338,7 @@ A later run restores support per module:
 Reuse is authenticated and local to the machine:
 
 - A rebuilt framework with different compiled bytes cannot restore support from the previous
-  build, even when its sources are identical. That includes generated extraction certificates,
+  build, even when its sources are identical. This rule covers generated extraction certificates,
   whose Lake traces depend on those compiled imports.
 - Modified or unsigned cache files fall back to rebuilding and kernel replay, and a corrupt
   entry is replaced.
@@ -348,7 +348,7 @@ Reuse is authenticated and local to the machine:
 - On another machine, `LEANCIL_CERTIFIED_LIBRARY` can supply the base library; see
   [library cache](CLI.md#library-cache).
 
-Entries live in `success-v1` under the [library cache](CLI.md#library-cache) directory:
+Entries are stored in `success-v1` under the [library cache](CLI.md#library-cache) directory:
 
 - Generations hard-link files whose bytes an earlier generation holds, so a new generation
   costs about its changed modules. Each entry is authenticated on its own, and in-place damage
@@ -398,7 +398,7 @@ is reported as a stale input.
 | `--check` | [Compile only](#check-compilation); no certificate. |
 | `--fresh`, `--rebuild-library` | As for [`verify`](CLI.md#verify). |
 | `--trace` | Trace every request's proof; see [trace the proof's steps](CLI.md#trace-the-proofs-steps). |
-| `--parallel count` | How many workspaces after the first run at once. Default: processor count / 8, at least 1. |
+| `--parallel count` | How many workspaces after the first run at once. The default is processor count / 8, at least 1. |
 | `--results results.json` | Write every outcome as JSON, in request order. |
 | `--format json` | Print one JSON document instead of the per-request lines; see [batches](CLI.md#batches). |
 
@@ -563,7 +563,8 @@ leancil audit-library --project . --module MyLib --prefix MyLib. --prefix MyLemm
 
 The package must pin the bundled Lean toolchain; it need not depend on `leancil`. Unlike
 `verify`, the audit reads the package's own build directory rather than a fresh copy, so it
-certifies the replayed bytes, not that they were compiled from the current sources. Building
+certifies the replayed bytes. It does not certify that they were compiled from the current
+sources. Building
 runs the package's Lake configuration and elaborators; the replay and the audit do not.
 
 ## Limits
@@ -625,7 +626,7 @@ fresh verification session.
 Published interface modules must check with only the declared interface sources and the bundled
 framework/toolchain. They cannot require private implementation proofs or an `Extracted`
 module. Canonical contract closures are checked both in this isolated interface and in the
-actual proof environment, and their exact results must agree. Custom axioms, sorry and
+proof environment, and their exact results must agree. Custom axioms, sorry and
 valueless opaque interface declarations are not exportable. Contract predicates and their
 reachable definitions determine the closure digest; the name alone does not determine it.
 
@@ -714,7 +715,7 @@ deployment obligations are required as without it.
 The interface stage rejects undeclared dependencies and forbidden declarations and checks each
 canonical exported-constant [closure](CONTRACT-INTERFACES.md#sidecar-schema-1), so a
 postcondition helper cannot change behind an unchanged name and retain its old closure digest.
-Framework and toolchain stopping uses the constant's defining module, not its namespace.
+Framework and toolchain stopping uses the constant's defining module and ignores its namespace.
 
 The implementation proofs are not elaborated or replayed. The axiom audit applies to the caller
 theorem; imports are explicit hypotheses.
@@ -747,8 +748,8 @@ cycle error names the complete cycle path. The per-node checks are in
 [transitive imports](CONTRACT-INTERFACES.md#transitive-imports).
 
 The extraction identity records all nodes in `importGraph`. A verification report records their
-deployment bindings in `contractDependencies`. Only methods actually called by the selected App
-entry receive import slots. Published certifications remain the stated trust boundary for
+deployment bindings in `contractDependencies`. Only methods that the selected App
+entry calls receive import slots. Published certifications remain the stated trust boundary for
 library implementations; caller proofs remain conditional on the published contracts. A source
 bundle or graph digest does not prove that those contracts hold.
 

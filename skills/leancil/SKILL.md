@@ -24,7 +24,7 @@ Find out what the user has, then read only the matching reference.
 LeanCIL checks Lean theorems about compiled CIL. For a proof in another system (Coq, Dafny, F*,
 TLA+) or about C# source, restate the property as Lean definitions and follow the model reference.
 
-## Commands every path uses
+## Shared commands
 
 `leancil` is the .NET tool `Nethermind.LeanCIL`. It needs the .NET SDK and Lean through elan, at
 the toolchain `leancil --version` prints. When `leancil` is not on `PATH`, install it as
@@ -69,19 +69,19 @@ leancil verify artifacts/Method --proof proofs/Method.lean --theorem MyProof.cor
 Every command exits with `0` on success and `1` on failure. A failure prints `Invalid:` or
 `Error:`, a `Stage:` line and a `Next:` line on stderr.
 
-## Limits to tell the user first
+## Limits
 
-State these before promising a result.
+State these limits to the user before promising a result.
 
 - `extract` accepts Release, IL-only .NET 10 assemblies for 64-bit little-endian execution. It
   validates the selected method and every method reachable from it, and rejects an unsupported
   instruction, call, type or signature with the item named, at the stage
   `metadata and CIL validation`. `leancil list` prints methods without validating them.
-- Outside the supported subset: interface calls, virtual dispatch outside the extracted classes,
-  type tests against interfaces, `System.Object` or value types, boxing, ordinary recursion,
-  exception handlers, floating point, reading a string's characters and arbitrary external calls.
-  Classes, arrays, spans, structs and SIMD intrinsics are supported with restrictions. Look an
-  instruction or call up in the
+- These are outside the supported subset: interface calls, virtual dispatch outside the
+  extracted classes, type tests against interfaces, `System.Object` or value types, boxing,
+  ordinary recursion, exception handlers, floating point, reading a string's characters and
+  arbitrary external calls. Classes, arrays, spans, structs and SIMD intrinsics are supported with
+  restrictions. Look an instruction or call up in the
   [opcode table](https://github.com/NethermindEth/LeanCIL/blob/main/docs/OPCODES.md#unsupported-opcodes)
   and the [intrinsic tables](https://github.com/NethermindEth/LeanCIL/blob/main/docs/SIMD.md).
 - `leancil blockers assembly.dll --manifest blockers-manifest.json` reports every construct that

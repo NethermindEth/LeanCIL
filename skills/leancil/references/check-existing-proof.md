@@ -13,8 +13,9 @@ Read this when the user has a `.lean` file that imports `Extracted` and states a
    types declare a matching method, ask which one, or report the one you checked.
 3. Use the profile the proof was written for; the author's `identity.json` records it when they
    sent their artifacts. Otherwise ask. Without an answer use the default `scalar` and say so.
-4. Take the fully qualified theorem name from the proof, such as `MyProof.correctness`: its
-   `namespace` and the theorem to certify, usually the last one.
+4. Take the fully qualified theorem name from the proof, such as `MyProof.correctness`. The
+   name is the proof's `namespace` followed by the theorem to certify, which is usually the last
+   theorem in the file.
 5. A proof that imports the user's own modules needs `--proof-root` pointing at their Lake
    package ([package setup](bridge-model-proof.md#package-setup)). A proof that imports a keyed
    module `Extracted.KEY` was written in a `leancil workspace` package; `verify` accepts that

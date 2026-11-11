@@ -100,8 +100,8 @@ requirement still applies to ongoing or hostile producer processes.
 Reports retain the original conditional caller theorem and add the composed
 theorem and audit, source bundle identities, and `acceptedVia:
 independently-verified`. Faithful DLL decoding and CIL/runtime correspondence
-remain trust boundaries. These checks establish CIL theorems, not correctness
-of CoreCLR or a JIT.
+remain trust boundaries. These checks establish CIL theorems. They do not establish
+correctness of CoreCLR or a JIT.
 
 Supported dependency shapes include a chain (a caller importing A, which imports B) and a
 diamond (a caller importing A and C, which both import B). A shared dependency has one selected

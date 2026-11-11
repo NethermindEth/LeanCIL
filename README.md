@@ -31,7 +31,8 @@ flowchart TD
 ```
 
 The guarantee is exactly the proved theorem, including its preconditions and quantifiers.
-Lean checks the proof, not whether its statement captures your intended specification.
+Lean checks the proof. It does not check whether the theorem's statement captures your
+intended specification.
 The extractor, CIL model and verification machinery have an explicit
 [trust boundary](docs/SOUNDNESS.md); LeanCIL does not claim complete CLR or JIT verification.
 
