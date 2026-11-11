@@ -951,8 +951,8 @@ Lean prints an internal error when its runtime or a tactic reads a part of a ter
 that is absent, and elaboration then continues on a default value. The messages are
 `PANIC at ...`, `INTERNAL PANIC: ...`, `Error: index out of bounds`,
 `Stack overflow detected. Aborting.` and `LEAN ASSERTION VIOLATION`. One counts where a line of
-the process's stderr, or a line of a message Lean logged, starts with that text, which is where
-Lean's runtime writes it. The same words inside a sentence, a goal or a term are ordinary output,
+the output of Lean, Lake or the audit executable, or a line of a message Lean logged, starts with
+that exact text, which is how Lean's runtime writes it. The same words inside a sentence, a goal or a term are ordinary output,
 and a failed tactic, an expected rejection and the goals of `--goals` are Lean errors with their
 own kinds. Every command that runs
 Lean, Lake or the audit executable fails when their output holds one, including when the
@@ -962,7 +962,7 @@ report starts with `Lean or a LeanCIL tactic reported an internal error.` and le
 `Internal errors (N):`. It lists each message once with the number of times it was printed, its
 `file:line:col` when Lean logged it at a position, and the module Lake was building. The Lean
 errors of the run follow. In a batch, an internal error printed while building one request's
-proof module fails that request, and one printed while building a module the requests share
+proof module fails that request, whether or not the build as a whole succeeded, and one printed while building a module the requests share
 fails each of them. The [failure report](#failure-reports) has kind `internal-error`.
 
 Verification checks a copy of the proof, `Extracted.lean`, the PDB names and, under

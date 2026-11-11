@@ -336,6 +336,15 @@ Require(mixed is { kind: FailureReports.InternalError, line: 55, diagnostics.Len
 Require(Classify("proof checking", rejected.Message, ["LeanCILProof0"]).kind != FailureReports.InternalError &&
     LeanOutput.InternalErrors(panicking, ["LeanCILProof0"]).Count == 0,
     "another request's proof module does not make this request an internal error");
+// One request's proof fails while another's builds and panics: each internal error belongs to the request
+// whose proof module printed it, and one from a module the requests share belongs to none.
+var twoRequests = $"{failed} [1/3] Building LeanCILProof0 (1s)\nerror: LeanCILProof0.lean:4:2: unsolved goals\n" +
+    $"{built} [2/3] Built LeanCILProof1 (1s)\ninfo: LeanCILProof1.lean:9:0: Error: index out of bounds\n";
+var owned = LeanOutput.ByRequest(LeanOutput.InternalErrors(twoRequests), ["LeanCILProof0", "LeanCILProof1"]);
+Require(owned is [{ Length: 0 }, [{ Location: "LeanCILProof1.lean:9:0" }]] &&
+    LeanOutput.ByRequest(LeanOutput.InternalErrors(twoRequests + $"{built} [3/3] Built Client.Shared (1s)\n" +
+        "info: stderr:\nINTERNAL PANIC: out of memory\n"), ["LeanCILProof0", "LeanCILProof1"]) is null,
+    "a failed build still assigns an internal error to the request whose module printed it");
 var internalSummary = LeanDiagnostics.Summarize(rejected.Message, null,
     location => sessionCopies.Locate(location))!.Text;
 Require(internalSummary == $"Internal errors (1):\n  {proof}:55:0 (building LeanCILProof0)\n" +

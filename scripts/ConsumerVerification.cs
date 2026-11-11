@@ -1441,19 +1441,19 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 CompleteTiming(i);
             }
         }
-        // A successful build that printed an internal error fails the request whose proof module printed it; one
-        // printed while building anything the requests share fails them all.
-        void FailInternalErrors(int[] members, string[] names, string[] command, string output)
+        // A build that printed an internal error fails the request whose proof module printed it, whatever the
+        // build's exit code; one printed while building anything the requests share fails them all.
+        void FailInternalErrors(int[] members, string[] names, string[] command, int code, string output)
         {
             var errors = LeanOutput.InternalErrors(output);
             if (errors.Count == 0) return;
-            if (errors.Any(error => error.Module is null || !names.Contains(error.Module)))
-                throw LeanOutput.Failure(command, 0, output, errors);
+            if (LeanOutput.ByRequest(errors, names) is not { } requests)
+                throw LeanOutput.Failure(command, code, output, errors);
             for (var k = 0; k < members.Length; k++)
             {
-                var own = errors.Where(error => error.Module == names[k]).ToArray();
+                var own = requests[k];
                 if (own.Length == 0) continue;
-                var failure = LeanOutput.Failure(command, 0, output, own);
+                var failure = LeanOutput.Failure(command, code, output, own);
                 failure.Data[LeanDiagnostics.HiddenModulesKey] = names.Where((_, other) => other != k).ToArray();
                 Fail([members[k]], failure);
             }
@@ -1974,7 +1974,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 internalErrors: false);
             RequireExtractionArtifacts();
             RequireGeneratedArtifacts();
-            if (build.Code == 0) FailInternalErrors(members, names, command, build.Output);
+            FailInternalErrors(members, names, command, build.Code, build.Output);
             var buildFailure = build.Code == 0 ? null
                 : new InvalidOperationException($"Command failed ({build.Code}): {string.Join(' ', command)}\n{build.Output}");
             string[] importDirectories = [];
@@ -2380,7 +2380,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             string[] command = ["lake", "build", .. names.Select(name => "+" + name + ":olean")];
             var build = Execute(command, session, progress: "Compile checking consumer proofs and dependencies",
                 internalErrors: false);
-            if (build.Code == 0) FailInternalErrors(members, names, command, build.Output);
+            FailInternalErrors(members, names, command, build.Code, build.Output);
             var (directories, _) = ConsumerImportDirectories(session);
             for (var index = 0; index < members.Length; index++)
             {

@@ -3708,6 +3708,14 @@ internal static partial class LeanOutput
     }
 
     /// <summary>
+    /// The errors each request's proof module printed, in the order of `modules`, or null when a module the
+    /// requests share printed one, which no single request owns.
+    /// </summary>
+    internal static InternalError[][]? ByRequest(IReadOnlyList<InternalError> errors, IReadOnlyList<string> modules) =>
+        errors.Any(error => error.Module is null || !modules.Contains(error.Module)) ? null
+            : [.. modules.Select(module => errors.Where(error => error.Module == module).ToArray())];
+
+    /// <summary>
     /// The failure of a Lean command that exited 0 after printing an internal error, or null for any other run:
     /// a failed command already fails, and other programs print such text only when they quote it.
     /// </summary>

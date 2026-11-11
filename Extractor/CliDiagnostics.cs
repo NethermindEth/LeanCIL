@@ -88,7 +88,8 @@ internal static class CliDiagnostics
             next = "Install the missing tool and ensure it is on PATH. Verification requires .NET, Lean and Lake.";
 
         // A panic leaves a tactic running on a default value, so the report leads with it at any stage.
-        var internalError = !missingTool && LeanOutput.InternalErrors(error.Message).Count > 0;
+        var internalError = !missingTool && LeanOutput.InternalErrors(error.Message,
+            raised.Data[LeanDiagnostics.HiddenModulesKey] as string[]).Count > 0;
         if (internalError)
             next = "Report the internal error below as a LeanCIL issue with the proof or module that produced it. " +
                 "No result of this run is accepted.";
