@@ -260,7 +260,8 @@ elab_rules : tactic
 /-- Discover a selected writable home without exposing the concrete frame's slot list. Homes
     stated at an earlier memory, or after leading slots without byte homes, are used when the
     context shows that the current memory retains their access. A kind lookup that does not
-    compute, as over opaque kinds, is closed from `facts`. -/
+    compute, over opaque kinds or at a symbolic index, is closed from `facts`; a symbolic index
+    is taken only when no leading slot is skipped. -/
 private def prepareSnapshotHome (memory frame index : Expr) (facts : Array Term) :
     TacticM Unit := withMainContext do
   let locals ← mkAppM ``Frame.locals #[frame]
@@ -289,9 +290,18 @@ private def prepareSnapshotHome (memory frame index : Expr) (facts : Array Term)
             (by first | rfl | cil_snapshot_kind [$facts,*])))
         return
       let (skipped, layout) ← snapshotLeadingSlots locals slots
-      let some position ← getNatValue? (← whnfR index)
-        | throwError "The local index is not a numeral"
-      unless skipped.size ≤ position do throwError "The local precedes the homes"
+      let position ← getNatValue? (← whnfR index)
+      if position.isNone && !skipped.isEmpty then
+        throwError "The local index is not a numeral and leading slots are skipped"
+      unless position.all (skipped.size ≤ ·) do throwError "The local precedes the homes"
+      let indexTerm ← Term.exprToSyntax index
+      -- A symbolic index is its own position among the homes, which then skip no slot.
+      let inner : Term := match position with
+        | some position => Syntax.mkNumLit (toString (position - skipped.size))
+        | none => indexTerm
+      let outer : Term := match position with
+        | some position => Syntax.mkNumLit (toString position)
+        | none => indexTerm
       let retained ← if current then
           `(term| (MemoryBelow.refl (Memory.nextIdentity $(← Term.exprToSyntax entered))
             $(← Term.exprToSyntax entered)).accessBelow)
@@ -300,20 +310,21 @@ private def prepareSnapshotHome (memory frame index : Expr) (facts : Array Term)
       let skippedTerms ← skipped.mapM (Term.exprToSyntax ·)
       let layoutTerm ← layout.mapM (Term.exprToSyntax ·)
       -- A statement over the leading slots is restated over the frame's own locals.
-      let restate (statement : Term) : TacticM (TSyntax `tactic) :=
+      let restate (statement : Term) : TacticM (TSyntax `tactic) := do
+        -- The position `[].length + index` of a symbolic index is `index` only by rewriting.
+        let stated ← if position.isSome then `(tactic| exact $statement) else
+          `(tactic| simpa only [List.nil_append, List.length_nil, Nat.zero_add] using $statement)
         match layoutTerm with
         | some layout => `(tactic| first
-            | exact $statement
-            | (rw [$layout:term]; exact $statement))
-        | none => `(tactic| exact $statement)
+            | $stated:tactic
+            | (rw [$layout:term]; $stated:tactic))
+        | none => pure stated
       let localsTerm ← Term.exprToSyntax locals
       let raw := mkIdent (← mkFreshUserName `snapshotSlot)
-      let inner := Syntax.mkNumLit (toString (position - skipped.size))
       evalTactic (← `(tactic| cil_strict obtain ⟨$home, $raw, $bound, $ready⟩ :=
         CompleteWritableHomes.home_retained $homes (by assumption) $retained
           (by first | exact Nat.le_refl _ | assumption | omega) [$skippedTerms,*] $inner _
           (by first | rfl | cil_snapshot_kind [$facts,*])))
-      let outer := Syntax.mkNumLit (toString position)
       let kind ← withMainContext do
         let found ← instantiateMVars (← inferType (← Term.elabTerm raw none))
         let some (_, _, selected) := found.eq? | throwError "Unexpected home lookup"

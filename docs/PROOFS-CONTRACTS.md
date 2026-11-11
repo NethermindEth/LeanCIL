@@ -123,6 +123,11 @@ specs slots`, is closed from a supplied fact: `specs[4]? = some spec` (`numericK
 `(numericKinds specs)[4]? = some kind`. The fact is stated at the index among the homes, which is
 the local's index less the leading slots skipped.
 
+A local index that is not a numeral, such as the `base + 3` of a block stated at a symbolic local
+base, is taken when the homes cover the frame's locals from the first slot and a supplied fact
+states the kind at exactly that index term, `kinds[base + 3]? = some kind`. With leading slots
+skipped the index must be a numeral.
+
 Each store, in the checked form too, names what it produced: the memory `storedLocal`, the step
 `storingLocal`, the snapshots `localSnapshots`, `localFormed : storedLocal.WellFormed`,
 `localBelow : MemoryBelow boundary memory storedLocal`, `localAccess : AccessBelow

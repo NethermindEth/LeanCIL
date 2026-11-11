@@ -439,6 +439,41 @@ theorem opaque_kinds_wp (memory : Memory) (frame : Frame) (boundary : Nat)
   rfl
 
 #print axioms opaque_kinds_wp
+/-- Store an argument in the local three past a base and reload it. -/
+@[cil_code] def basedLocal (base : Nat) : CIL.Method := {
+  code := [.arg 0, .setLocal (base + 3), .local (base + 3), .ret]
+  locals := [], returnsValue := true }
+
+/-- A block stated at a symbolic local base stores and reloads through entry homes, given the
+    kind at exactly that index term; without the fact the walk stops at the store. -/
+theorem symbolic_home_wp (entered memory : Memory) (frame : Frame) (boundary base : Nat)
+    (kinds : List CIL.LocalKind)
+    (homes : CompleteWritableHomes entered boundary kinds frame.locals)
+    (specified : kinds[base + 3]? = some .word64)
+    (enteredFormed : entered.WellFormed) (formed : memory.WellFormed)
+    (retained : AccessBelow entered.nextIdentity entered memory) (word : BitVec 64) :
+    WP (Execution (fun fuel => run [basedLocal base] fuel 0 0 [.scalar (.i64 word)] frame []
+      memory)) (fun result => result.2 = [.scalar (.i64 word)]) := by
+  have snapshots := LocalSnapshots.empty memory frame.locals
+  fail_if_success (cil_contract_steps (snapshots := snapshots) []; rfl)
+  cil_contract_steps (snapshots := snapshots) [specified]
+  rfl
+
+#print axioms symbolic_home_wp
+
+/-- The same block steps when the homes are stated at the memory the store runs in. -/
+theorem symbolic_current_home_wp (memory : Memory) (frame : Frame) (boundary base : Nat)
+    (kinds : List CIL.LocalKind)
+    (homes : CompleteWritableHomes memory boundary kinds frame.locals)
+    (specified : kinds[base + 3]? = some .word64) (formed : memory.WellFormed)
+    (word : BitVec 64) :
+    WP (Execution (fun fuel => run [basedLocal base] fuel 0 0 [.scalar (.i64 word)] frame []
+      memory)) (fun result => result.2 = [.scalar (.i64 word)]) := by
+  have snapshots := LocalSnapshots.empty memory frame.locals
+  cil_contract_steps (snapshots := snapshots) [specified]
+  rfl
+
+#print axioms symbolic_current_home_wp
 /-- Store a vector and reload it. -/
 @[cil_code] def storeReload : CIL.Method := {
   code := [.setLocal 0, .local 0, .ret], locals := [.v128 0], returnsValue := true }
