@@ -1,18 +1,19 @@
 # Connect existing model proofs to compiled code
 
-The user has Lean definitions (a model or reference implementation) and theorems about them that
-never mention CIL. LeanCIL cannot check those against a DLL directly: nothing yet says the
-compiled method computes the model. Add one bridge theorem, then derive the guarantees about the
-compiled method from the bridge and the existing theorems, without re-proving them.
+Read this when the user has Lean definitions (a model or reference implementation) and theorems
+about them that never mention CIL. Those theorems say nothing about a DLL until a bridge theorem
+states that the compiled method computes the model. Add that one theorem, then derive the
+guarantees about the compiled method from the bridge and the existing theorems, without
+re-proving them.
 
-Worked example, verified in LeanCIL's CI:
-[Examples/Proofs/AddModel.lean](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/AddModel.lean).
+[Examples/Proofs/AddModel.lean](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/AddModel.lean)
+is a complete proof of this form.
 
-## The three pieces
+## Model, bridge and transferred theorem
 
 The snippets assume `open CIL` and the model's namespace.
 
-1. **Model and its theorems**, already written and left unchanged. Here a `Nat` model:
+1. Leave the model and its theorems unchanged. This one is a `Nat` model:
 
    ```lean
    def addMod (a b : Nat) : Nat := (a + b) % 2 ^ 64
@@ -20,8 +21,8 @@ The snippets assume `open CIL` and the model's namespace.
      simp [addMod, Nat.mod_eq_of_lt h]
    ```
 
-2. **Bridge**: for every input and caller memory, the extracted method succeeds and returns the
-   model's result, converted to the CIL word type.
+2. Write the bridge: for every input and caller memory, the extracted method succeeds and
+   returns the model's result, converted to the CIL word type.
 
    ```lean extracted
    theorem refines (x y : W64) (memory : Safety.Memory) :
@@ -35,9 +36,9 @@ The snippets assume `open CIL` and the model's namespace.
      rfl
    ```
 
-3. **Transferred theorem**, the one passed to `--theorem`: a statement about the extracted
-   method proved by rewriting with the bridge and applying the model theorem. A model hypothesis
-   such as `a < 2 ^ 64` is discharged from the word type (`a.isLt`):
+3. Write the transferred theorem, the one passed to `--theorem`: a statement about the extracted
+   method, proved by rewriting with the bridge and applying the model theorem. The word type
+   discharges a model hypothesis such as `a < 2 ^ 64` (`a.isLt`):
 
    ```lean extracted
    theorem correctness (a : W64) (memory : Safety.Memory) :
@@ -48,8 +49,8 @@ The snippets assume `open CIL` and the model's namespace.
        BitVec.ofNat_toNat, BitVec.setWidth_eq]
    ```
 
-Verify the transferred theorem. It depends on the bridge, so the bridge is checked too, and the
-model module is compiled and its hash recorded in `verified.json`.
+Verify the transferred theorem. It depends on the bridge, so the bridge is checked too. Under
+`--proof-root` the model module is compiled from source and `verified.json` binds its hash.
 
 ## Writing the bridge
 
@@ -57,25 +58,28 @@ model module is compiled and its hash recorded in `verified.json`.
   The entry method is index `0`. Fuel bounds the steps; the instruction count is enough for
   straight-line code.
 - Arguments are `CIL.Safety.Value`s: `.scalar (.i64 w)` for 64-bit and `.scalar (.i32 w)` for
-  32-bit integers. For narrower integers, references and spans, copy the argument shape from the
-  closest proof in
+  32-bit integers. For narrower integers, references and spans, run
+  `leancil new-proof artifacts/Method Proofs/Method.lean` and copy the argument list of the
+  theorem it states, or copy it from the closest proof in
   [Examples/Proofs](https://github.com/NethermindEth/LeanCIL/tree/main/Examples/Proofs).
   `CIL.W64` and `CIL.W32` are `BitVec 64` and `BitVec 32`.
 - Convert the model's types explicitly in the statement where a reader can see them:
   `BitVec.ofNat 64 (model x.toNat ...)` for a `Nat` model, `(model ...).toBitVec` for `UInt64`.
   A conversion is usually not definitionally equal to the CIL result, so prove the model equals
   the word expression first (as `model_eq` above), rewrite, then close by `rfl`.
-- Quantify over `memory : CIL.Safety.Memory` for methods that take and return scalars; it is the
-  stronger statement and still closes by `rfl`. `CIL.Safety.Memory.empty`, a caller memory with
-  no allocations, is the fixed alternative. Methods reading or writing caller memory need
-  preconditions describing it; use `MethodContract`
-  ([contracts](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md)).
-- Loops, calls and memory need the techniques in [write-new-proof.md](write-new-proof.md); the
-  bridge is then the theorem being written.
-- The bridge must cover every input the transferred theorem uses. If it needs a precondition
-  (such as `y != 0` for division), the transferred theorem carries it too.
-- Small rewriting traps: numeric literals elaborate as `OfNat` terms, so `BitVec.toNat_zero` may
-  not match `(0 : W64).toNat`; `show (0 : W64).toNat = 0 from rfl` does.
+- Quantify over `memory : CIL.Safety.Memory` for a method that takes and returns scalars; that
+  statement is stronger than one at a fixed memory and still closes by `rfl`.
+  `CIL.Safety.Memory.empty`, a caller memory with no allocations, is the fixed alternative.
+- A method that reads or writes caller memory needs preconditions describing that memory. State
+  the bridge as a `MethodContract` whose `post` names the model
+  ([contracts](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md#compose-calls-through-contracts)).
+- A method with a loop, a call or locals does not close by `rfl`. Prove the bridge with the
+  tactics in [write-new-proof.md](write-new-proof.md); the bridge is then the theorem being
+  written, with the model in its postcondition.
+- The bridge must cover every input the transferred theorem uses. When the bridge needs a
+  precondition (such as `y != 0` for division), the transferred theorem carries it too.
+- Numeric literals elaborate as `OfNat` terms, so `BitVec.toNat_zero` may not rewrite
+  `(0 : W64).toNat`; `show (0 : W64).toNat = 0 from rfl` does.
 
 ## Package setup
 
@@ -93,17 +97,23 @@ rev = "<the revision leancil --version prints>"
 name = "MyLib"
 ```
 
-- `leancil --version` prints this block with the matching revision, and the Lean toolchain to put
-  in the package's `lean-toolchain`. Then run `lake update`.
-- The pinned LeanCIL `CIL` sources must match the framework bundled with the installed tool;
-  `verify` rejects a mismatch and names the revision to pin.
+- `leancil --version` prints this `[[require]]` block with the matching revision, and the Lean
+  toolchain to put in the package's `lean-toolchain`. Then run `lake update`, which writes the
+  `lake-manifest.json` verification requires.
+- The pinned `CIL` sources must match the framework bundled with the installed tool. `verify`
+  rejects a mismatch with `Consumer leancil sources differ from the verifier's bundled
+  framework` and names the revision to pin.
+- Every dependency must be a Git package pinned to a full revision. Local path dependencies and
+  symlinked sources are not supported.
 - Put the model in `MyLib/Model.lean` and the bridge in `MyLib/AddBridge.lean`, starting with
-  the `import Extracted.KEY` line `leancil workspace` prints and `import MyLib.Model`. Lean
-  requires imports before the `/-! -/` module docstring.
-- `Extracted.KEY` exists in the package only after `leancil workspace` generates it (see
-  [write-new-proof.md](write-new-proof.md)); until then `lake build` of the package cannot build
-  the bridge. Build the model alone with `lake build MyLib.Model`; check the bridge with
-  `verify`, or with `lake build MyLib.AddBridge` after `leancil workspace`.
+  `import Extracted` and `import MyLib.Model`. Lean requires imports before the `/-! -/` module
+  docstring.
+- Keep the `extract` output directory outside the package, for example under `artifacts/`, and
+  keep no file named `Extracted.lean` among the package sources.
+- `lake build` of the package cannot build the bridge, because `Extracted` is supplied only
+  during verification. Build the model alone with `lake build MyLib.Model` and check the bridge
+  with `verify`. For live goals in an editor, run `leancil workspace` and import the keyed module
+  `Extracted.KEY` it prints instead of `Extracted` ([write-new-proof.md](write-new-proof.md)).
 - Verify with the package root:
 
   ```sh
@@ -116,12 +126,13 @@ name = "MyLib"
 - `verification.json` stores the proof and `--proof-root` as paths relative to the artifact
   directory. After moving either, pass `--proof` and `--proof-root` again.
 
-Package rules and the editor workspace are described in
-[consumer packages](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CONSUMERS.md).
+The package rules are in
+[consumer packages](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CONSUMERS.md#consumer-proof-packages).
 
-## Check the statement, not just the pass
+## Statement audit
 
-The transferred theorem is what the user gets. Make sure it says the method *succeeds* with the
+The transferred theorem is what the user gets. Make sure it says the method succeeds with the
 expected result. A purely relational statement ("both orders give equal outcomes") also holds
-for a method that always fails, so the worked example keeps success in the statement. The
-theorem compares returned values only; say so if the user also cares about memory effects.
+for a method that always fails, so `AddModel.lean` keeps success in its statement. A theorem
+stated through `.map Prod.snd` compares returned values only; say so when the user also cares
+about memory effects.
