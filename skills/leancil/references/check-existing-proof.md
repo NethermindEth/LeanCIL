@@ -1,7 +1,7 @@
 # Check an existing LeanCIL proof
 
 Read this when the user has a `.lean` file that imports `Extracted` and states a theorem about
-`Extracted.program`. The task is to run it against their compiled assembly and report the result.
+`Extracted.program`. Run it against their compiled assembly and report the result.
 
 ## Inputs
 
@@ -11,11 +11,10 @@ Read this when the user has a `.lean` file that imports `Extracted` and states a
    `leancil list Lib.dll` and match the signature the proof expects: the parameter count and
    types in its `invoke` arguments, or the signature string of its `bind_method`. When several
    types declare a matching method, ask which one, or report the one you checked.
-3. Use the profile the proof was written for; the author's `identity.json` records it when they
-   sent their artifacts. Otherwise ask. Without an answer use the default `scalar` and say so.
-4. Take the fully qualified theorem name from the proof, such as `MyProof.correctness`. The
-   name is the proof's `namespace` followed by the theorem to certify, which is usually the last
-   theorem in the file.
+3. Use the profile the proof was written for; the author's `identity.json` records it. Otherwise
+   ask, and without an answer use `scalar` and say so.
+4. Take the fully qualified theorem name from the proof: its `namespace` followed by the theorem
+   to certify, usually the last in the file, such as `MyProof.correctness`.
 5. A proof that imports the user's own modules needs `--proof-root` pointing at their Lake
    package ([package setup](bridge-model-proof.md#package-setup)). A proof that imports a keyed
    module `Extracted.KEY` was written in a `leancil workspace` package; `verify` accepts that
@@ -37,14 +36,12 @@ and theorem, and `verify` extracts again when the assembly changed.
 
 ## Outcome
 
-On success `verify` prints `Verified: <theorem>` and the statement. Audit them as "Reporting a
-result" in SKILL.md describes before telling the user.
+On success, audit the printed statement as "Reporting a result" in SKILL.md describes before
+telling the user. On failure, look the `kind` in `artifacts/Method/failed.json` and the `Stage:`
+line up in [failures.md](failures.md).
 
-On failure `verify` exits with `1` and writes `artifacts/Method/failed.json`. Look its `kind` and
-the `Stage:` line up in [failures.md](failures.md).
-
-LeanCIL cannot tell wrong code from a broken proof: both end at `proof checking` with an
-unsolved goal or a failed tactic. Decide which one it is before changing anything:
+Wrong code and a broken proof both end at `proof checking` with an unsolved goal or a failed
+tactic. Decide which one it is before changing anything:
 
 - When the proof passed before a code change and fails after it, the code probably changed
   behavior. Compare the old and new C# and report the difference. Leave the proof as it is.

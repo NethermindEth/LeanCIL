@@ -6,12 +6,8 @@ verify-batch` verifies extractions that already exist.
 
 ## Requirements
 
-- The proofs are in one Lake package that pins `leancil`, uses the toolchain `leancil --version`
-  prints and has a resolved `lake-manifest.json`
-  ([package setup](bridge-model-proof.md#package-setup)).
-- Dependencies are Git packages pinned to full revisions. Local path dependencies, symlinked
-  sources, custom Lake cache directories and native or precompiled dependencies are not
-  supported.
+- The proofs are in one Lake package set up as
+  [package setup](bridge-model-proof.md#package-setup) describes.
 - Proofs and extraction outputs are in different directories. Verification skips `.lake`,
   `.git`, `artifacts`, `generated`, `bin`, `obj` and `.work` inside the package, so keep proofs
   out of those and put outputs under `artifacts/`.
@@ -51,26 +47,26 @@ leancil gates gates.json
 | --- | --- |
 | `proofRoot`, `outputRoot`, `assembly`, `@profile.json` | Paths relative to the manifest |
 | `gates[].name` | Letters, digits, `_`, `.` and `-`; unique ignoring case |
-| `gates[].method` | A selector, as for `extract` |
-| `gates[].profiles` | Built-in names or `@profile.json`, without repeats. Each profile is extracted and verified separately |
+| `gates[].method`, `gates[].theorem` | A selector and a fully qualified theorem name, as for `extract` and `verify` |
+| `gates[].profiles` | Built-in names or `@profile.json`, without repeats; each is extracted and verified separately |
 | `gates[].proof` | Path relative to `proofRoot` |
-| `gates[].theorem` | Fully qualified theorem name |
 | `gates[].initializedTypes`, `gates[].typeArguments` | As `--assume-initialized` and `--type-argument` of `extract` |
-| `gates[].variants[]` | Another assembly the unchanged proof is applied to. `"expect": "certifies"` passes when the proof verifies; `"expect": "rejected"` passes when the proof fails at proof checking and leaves no `verified.json`. A variant cannot be named `production` |
+| `gates[].variants[]` | Another assembly the unchanged proof is applied to, with `"expect": "certifies"` or `"rejected"`. A variant cannot be named `production` |
 
-An unknown manifest key is an error. Each result goes to
-`<outputRoot>/<gate name>/<profile hash>/<variant name>`, where the gate's own assembly is the
-variant `production`, and the batch manifest `gates` generates is `<outputRoot>/requests.json`.
+An unknown manifest key is an error. A `certifies` variant passes when the proof verifies. A
+`rejected` variant passes when the proof fails at proof checking and leaves no `verified.json`;
+use one to show that a proof detects a wrong implementation, built as a mutated assembly.
 
-Use a `rejected` variant to show that a proof detects a wrong implementation: build the mutated
-assembly, name it as a variant, and the gate fails if the proof still verifies against it.
+Each result goes to `<outputRoot>/<gate name>/<profile hash>/<variant name>`, where the gate's
+own assembly is the variant `production`. `gates` writes the batch manifest it runs to
+`<outputRoot>/requests.json`.
 
 | Option | Meaning |
 | --- | --- |
 | `--method name` | Select gates whose `method` contains this substring |
 | `--profile name` | Select one exact profile name |
 | `--changed path` | Select gates affected by a changed `.lean`, `.cs`, assembly or project file; repeatable. Omitted gates get no verification claim |
-| `--check` | Compile only; see below |
+| `--check` | [Compile only](#compile-check) |
 | `--fresh`, `--rebuild-library`, `--trace`, `--parallel count`, `--results file`, `--format json` | As for `verify-batch` |
 
 A selection that matches no gate is an error.
@@ -99,11 +95,11 @@ Paths are relative to the manifest. `expect` is `verified` (the default) or `rej
 
 | Option | Meaning |
 | --- | --- |
-| `--check` | Compile only; see below |
+| `--check` | [Compile only](#compile-check) |
 | `--fresh`, `--rebuild-library` | Bypass reuse of earlier results; also rebuild the framework library |
 | `--trace` | Trace every request's proof |
 | `--parallel count` | Workspaces run at once after the first. The default is processor count / 8, at least 1 |
-| `--results results.json` | Write every outcome as JSON in request order: `output`, `proof`, `theorem`, `expect`, `status`, `stage`, `error`, `axioms`, `failure` and `elapsedSeconds` |
+| `--results results.json` | Write every outcome as JSON in request order: `output`, `proof`, `theorem`, `expect`, `status`, `stage`, `error`, `axioms`, `libraryBuild`, `failure` and `elapsedSeconds` |
 | `--format json` | Print one JSON document with `passed`, `failed` and each request's report |
 
 ## Output
@@ -116,9 +112,9 @@ PASS rejected artifacts/Mutant MyProof.correctness (proof checking)
 FAIL artifacts/Other MyProof.other (stage: proof checking)
 ```
 
-A `FAIL` line is followed by the same diagnostic `verify` prints, and the request's output gets
-a `failed.json` ([failures.md](failures.md)). The exit code is `0` only when every request met
-its expectation. A verified request writes `verified.json` into its output; when several requests
+A `FAIL` line is followed by the diagnostic `verify` prints, and the request's output gets a
+`failed.json` ([failures.md](failures.md)). The exit code is `0` only when every request met its
+expectation. A verified request writes `verified.json` into its output; when several requests
 share one output, only the last writes `verification.json` and `verified.json`.
 
 Audit each verified statement as "Reporting a result" in SKILL.md describes. A request passes
@@ -129,13 +125,12 @@ when its named theorem verifies, whatever that theorem states.
 `leancil verify-batch requests.json --check` and `leancil gates gates.json --check` compile each
 proof and its imports against its extraction and print `PASS Checked` or `FAIL` per request. A
 compile check skips kernel replay and the axiom audit, removes existing `verified.json` files and
-issues no certificate. Use it for fast feedback while editing, and never report its result as
-verification. A request or variant that expects `rejected` is an error under `--check`.
+issues no certificate. A request or variant that expects `rejected` is an error under `--check`.
 
 ## Profiles
 
-List every deployment profile in `profiles`; a pass under one profile proves nothing for another.
-A method whose body differs by hardware profile needs a proof that holds for each extraction.
+List every deployment profile in `profiles`. A method whose body differs by hardware profile
+needs a proof that holds for each extraction.
 `leancil templates output-directory extraction-directory...` generates one shared body with a
 profile parameter and a binding per input extraction
 ([profile templates](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-BINDING.md#generated-profile-templates)).
@@ -143,8 +138,8 @@ profile parameter and a binding per input extraction
 ## Further tools
 
 - `leancil blockers assembly.dll --manifest blockers-manifest.json` reports, for a list of method
-  and profile pairs, every construct that stops extraction; run it to plan which methods can be
-  verified
+  and profile pairs, every construct that blocks extraction, without stopping at the first. Run
+  it before estimating work on a library
   ([blockers](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CLI.md#report-extraction-blockers)).
 - Proof files generated from C# recipes, contract export for callers in other assemblies and
   audits of a whole Lean library are described in the

@@ -23,8 +23,8 @@ statement.
 
 The entry method is index `0`; name any other method with `bind_method` instead of a literal
 index. Arguments are `CIL.Safety.Value`s such as `.scalar (.i32 x)` and `.scalar (.i64 x)`, with
-`x : CIL.W32` or `CIL.W64`. Fuel exhaustion, a fault and an unsupported state are never
-successes, so `Ensures` and `Holds` state total correctness.
+`x : CIL.W32` (`BitVec 32`) or `CIL.W64` (`BitVec 64`). Fuel exhaustion, a fault and an
+unsupported state are never successes, so `Ensures` and `Holds` state total correctness.
 
 ## 2. Generate a starting proof
 
@@ -52,9 +52,9 @@ a commented `sorry`:
 - A hole whose comment starts with `not outlined:` marks a path the outline could not step; the
   comment names the instruction it met and what that step needs.
 
-`new-proof` never replaces a file. A shape it cannot state is refused at the stage
-`proof outline` and nothing is written; then write the proof by hand from the closest example
-below ([outline reference](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CLI.md#start-a-proof)).
+`new-proof` never replaces a file. It refuses a shape it cannot state at the stage
+`proof outline` and writes nothing; then write the proof by hand from the closest example below
+([outline reference](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CLI.md#start-a-proof)).
 
 A proof written by hand starts with `import Extracted` and `import CIL`, plus
 `import CIL.Safety.LoopScaffold` when it uses `bind_entry` or `bind_cutpoint`, and ends each
@@ -84,22 +84,28 @@ with `leancil verify artifacts/Method --proof Proofs/Method.lean`, which must pr
 `Verified: ExampleProof.correctness`. When a tactic stops, look its message up in
 [failures.md](failures.md).
 
-| Loop | Command |
-| --- | --- |
-| Terminal, one proof | `leancil verify artifacts/Method --goals` after each edit |
-| Terminal, C# and proofs both changing | `leancil watch . --project path/to/Lib.csproj --goals` rebuilds the C#, refreshes the changed extractions, verifies the affected proofs and prints their goals after every save; `--once` runs one cycle |
-| Editor with live goals | `leancil workspace path/to/Lib.dll 'Type::Method(uint)' --profile scalar --proof Proofs/Method.lean --theorem ExampleProof.correctness` generates the modules `Extracted.KEY` and `ExtractedSymbols.KEY` into the proof's Lake package and prints the `import` line to use. Run it again after a rebuild and restart the file in the editor |
+Two commands shorten the loop:
 
-`watch` verifies the proofs `workspace` recorded with `--theorem`, so run `workspace` once per
-method first. A proof with no Lake package above it gets one beside it. `lake lean
-Proofs/Method.lean` checks a workspace proof the way the editor does. Only `leancil verify`,
-which `watch` runs, produces a certificate
+```sh
+leancil workspace path/to/Lib.dll 'Type::Method(uint)' --profile scalar \
+  --proof Proofs/Method.lean --theorem ExampleProof.correctness
+leancil watch . --project path/to/Lib.csproj --goals
+```
+
+- `workspace` gives an editor live goals: it generates the modules `Extracted.KEY` and
+  `ExtractedSymbols.KEY` into the proof's Lake package and prints the `import` line to use.
+- `watch` rebuilds the C# after every save, refreshes the changed extractions, verifies the
+  affected proofs and prints their goals; `--once` runs one cycle. It verifies the proofs
+  `workspace` recorded with `--theorem`, so run `workspace` once per method first.
+
+Only `leancil verify`, which `watch` runs, produces a certificate
 ([workspace](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CONSUMERS.md#proof-authoring-workspace)).
 
 ## 4. Choose the tactic
 
-`[facts]` is a list of proved facts the steps depend on; it is optional except in the snapshot
-forms.
+`[facts]` is a list of proved facts the steps depend on. `cil_checked_steps`, `cil_loop_recurse`,
+`cil_loop_advance`, `cil_loop_call` and `cil_loop_finish` accept it omitted; the other tactics
+and the snapshot forms need it, written `[]` when empty.
 
 | Goal | Tactic |
 | --- | --- |
@@ -178,14 +184,14 @@ by_cases zero : x = 0#32
 
 Every continuing iteration must decrease the measure; a finite sample of runs does not prove
 termination. Close the goals a loop or call tactic leaves by tag (`case invariant =>`,
-`case measure =>`, `case precondition =>`, `case postcondition =>`); do not select them by position
+`case measure =>`, `case precondition =>`, `case postcondition =>`), never by position
 ([obligation tags](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-STEPPING.md#obligation-tags),
 [loop scaffolding](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-BINDING.md#generate-loop-entry-and-cutpoint-scaffolding)).
 
 ### Facts
 
-- Pass a fact for each step whose condition is not definitionally true: `v = 0` or `Not (v = 0)` for
-  a branch on `v`, a successful read, write or formation equation for a memory operation
+- Pass a fact for each step whose condition is not definitionally true: `v = 0` or `Not (v = 0)`
+  for a branch on `v`, a successful read, write or formation equation for a memory operation
   ([step facts](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-STEPPING.md#supply-step-facts)).
 - Write bit-vector literals in hypotheses and definitions in the form `simp` leaves them:
   `0#32`, `1#64`, `0x80000000#32`.
@@ -216,8 +222,9 @@ and the [examples index](https://github.com/NethermindEth/LeanCIL/blob/main/docs
 ## 6. A property that does not hold
 
 Report a property that does not hold as a result. Show the user the failing input, or prove the
-counterexample as its own theorem: [WrongAdd](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/WrongAdd.lean)
+counterexample as its own theorem:
+[WrongAdd](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/WrongAdd.lean)
 proves a counterexample to the addition contract for a subtracting implementation, and
-`MethodContract.not_holds_of_fault` refutes a contract from a located fault on an input meeting its precondition
+`MethodContract.not_holds_of_fault` refutes a contract from a located fault on an input meeting
+its precondition
 ([refutation](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md#refute-a-contract)).
-Never weaken the statement to make the proof pass.
