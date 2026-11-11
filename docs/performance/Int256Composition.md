@@ -56,9 +56,9 @@ consumer pin or measure its performance. No cancelled or failed run contributes 
 ## Follow-up proof composition
 
 Five consumer modules are measured before and after against the same compiled framework at
-`4f0f3d6d`: `Safety.LocalCallSafety`, `Methods.Multiply.Calls`,
-`Methods.Add.ScalarCarryPrefix`, `Methods.Subtract.ScalarBorrowSegments` and
-`Methods.AddSubtract.Vector128Ripple`, all below `UInt256`. The source comparison is consumer
+`4f0f3d6d`: `UInt256.Safety.LocalCallSafety`, `UInt256.Methods.Multiply.Calls`,
+`UInt256.Methods.Add.ScalarCarryPrefix`, `UInt256.Methods.Subtract.ScalarBorrowSegments` and
+`UInt256.Methods.AddSubtract.Vector128Ripple`. The source comparison is consumer
 `850ab571` → `84aef6bc7850cc36782260571bcab831e03bdf8b`.
 The comparison includes both shared consumer helper modules. It uses isolated elaboration for
 deterministic proof-cost measurement; it is not a compiled-method certificate or a timing claim.
