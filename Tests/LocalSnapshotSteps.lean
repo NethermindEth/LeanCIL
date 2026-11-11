@@ -604,4 +604,51 @@ theorem counted_walk (memory : Memory) (slots : List LocalSlot) (boundary : Nat)
   rfl
 
 #print axioms counted_walk
+
+/-- Store a word and reload it. -/
+@[cil_code] def reloadWord : CIL.Method := {
+  code := [.arg 0, .setLocal 0, .local 0, .ret], locals := [.i64 0], localKinds := [.word64]
+  returnsValue := true }
+
+/-- The same store and reload after a leading `nop`. -/
+@[cil_code] def paddedReloadWord : CIL.Method := {
+  code := [.nop, .arg 0, .setLocal 0, .local 0, .ret], locals := [.i64 0]
+  localKinds := [.word64], returnsValue := true }
+
+/-- One proof covers two bodies: the body is a variable until the case split, so the homes are
+    derived once before it by an untyped `have`, whose declared type is an assigned
+    metavariable. The walk reads that type without an internal error, which Lean prints
+    outside the messages `#guard_msgs` sees and which fails the build of this library. -/
+theorem generic_body_walk (program : CIL.Program) (method : Nat) (body : CIL.Method)
+    (variant : body = reloadWord ∨ body = paddedReloadWord)
+    (found : program[method]? = some body) (memory : Memory) (frame : Frame) (boundary : Nat)
+    (numeric : NumericHomes memory boundary [⟨.word64, .i64 0, 0, rfl⟩] frame.locals)
+    (formed : memory.WellFormed) (word : BitVec 64) :
+    WP (Execution (fun fuel => run program fuel method 0 [.scalar (.i64 word)] frame []
+      memory)) (fun result => result.2 = [.scalar (.i64 word)]) := by
+  have homes := NumericHomes.complete numeric
+  have snapshots := LocalSnapshots.empty memory frame.locals
+  rcases variant with rfl | rfl
+  all_goals
+    cil_contract_steps (snapshots := snapshots) [found]
+    rfl
+
+#print axioms generic_body_walk
+
+/-- Homes derived by an untyped `have` justify the store on their own, once the numeric homes
+    they came from are no longer in the context. -/
+theorem derived_homes_walk (program : CIL.Program) (method : Nat)
+    (found : program[method]? = some reloadWord) (memory : Memory) (frame : Frame)
+    (boundary : Nat)
+    (numeric : NumericHomes memory boundary [⟨.word64, .i64 0, 0, rfl⟩] frame.locals)
+    (formed : memory.WellFormed) (word : BitVec 64) :
+    WP (Execution (fun fuel => run program fuel method 0 [.scalar (.i64 word)] frame []
+      memory)) (fun result => result.2 = [.scalar (.i64 word)]) := by
+  have homes := NumericHomes.complete numeric
+  have snapshots := LocalSnapshots.empty memory frame.locals
+  clear numeric
+  cil_contract_steps (snapshots := snapshots) [found]
+  rfl
+
+#print axioms derived_homes_walk
 end Tests.LocalSnapshotSteps

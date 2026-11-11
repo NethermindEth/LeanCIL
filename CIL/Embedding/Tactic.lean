@@ -2,6 +2,7 @@ import CIL.MethodBinding
 import CIL.Embedding.Basic
 import Lean.Meta.Tactic.AuxLemma
 import Lean.Elab.Tactic.Simp
+import CIL.TermAccess
 
 /-!
 # The `cil_embed` tactic
@@ -41,7 +42,7 @@ def alignLive (expected actual : Array Op) : Array Nat := Id.run do
     unless op.live do continue
     let previous := if p = 0 then none else opAt expected (p - 1)
     let forced := match previous with
-      | some prior => if prior.live && prior.continues then (map[p - 1]!).map (· + 1) else none
+      | some prior => if prior.live && prior.continues then map[p - 1]?.join.map (· + 1) else none
       | none => none
     let hinted := (hints.get? p).filter fun k =>
       (opAt actual k).any fun found => shape found == shape op
@@ -60,15 +61,18 @@ def alignLive (expected actual : Array Op) : Array Nat := Id.run do
           unless hints.contains t do hints := hints.insert t t'
   -- Dead expected pcs only matter as targets or as the fallthrough of a live pc.
   let mut full : Array Nat := #[]
-  for p in [0:expected.size] do
-    let value := match map[p]! with
+  -- The value pushed for `p - 1`, read only when `p > 0`.
+  let mut last := 0
+  for h : p in [0:map.size] do
+    let value := match map[p] with
       | some k => k
       | none =>
         let previous := if p = 0 then none else opAt expected (p - 1)
         let follows := previous.any fun prior => prior.live && prior.continues
-        if follows then full[p - 1]! + 1
-        else (hints.get? p).getD (if p = 0 then 0 else full[p - 1]! + 1)
+        if follows then last + 1
+        else (hints.get? p).getD (if p = 0 then 0 else last + 1)
     full := full.push value
+    last := value
   return full
 
 /-- An instruction for a failure message. -/
@@ -194,11 +198,13 @@ private def reflFields (ctor : Name) (prefixArgs : Array Expr) : MetaM Expr := d
   let mut fieldsType ← instantiateForall (← inferType (mkConst ctor)) prefixArgs
   let mut fields : Array Expr := #[]
   while fieldsType.isForall do
-    let some (_, lhs, _) := fieldsType.bindingDomain!.eq? |
-      throwError "cil_embed: unexpected `{ctor}` field {fieldsType.bindingDomain!}"
+    let .forallE _ domain body _ := fieldsType |
+      throwError "cil_embed: unexpected `{ctor}` fields {fieldsType}"
+    let some (_, lhs, _) := domain.eq? |
+      throwError "cil_embed: unexpected `{ctor}` field {domain}"
     let proof ← mkEqRefl lhs
     fields := fields.push proof
-    fieldsType := fieldsType.bindingBody!.instantiate1 proof
+    fieldsType := body.instantiate1 proof
   return mkAppN (mkConst ctor) (prefixArgs ++ fields)
 
 /-- Elaborates `cil_embed`: evaluates the goal's terms, aligns the bodies, reports the first
@@ -223,9 +229,8 @@ private def reflFields (ctor : Name) (prefixArgs : Array Expr) : MetaM Expr := d
   if type.hasFVar || type.hasMVar then
     throwError "cil_embed: unresolved parameters remain in the program, index or expected body; \
       supply extraction flag and callee equalities with `cil_embed [facts]`"
-  let program := type.appFn!.appFn!.appArg!
-  let index := type.appFn!.appArg!
-  let expected := type.appArg!
+  let #[program, index, expected] := type.getAppArgs |
+    throwError "cil_embed: expected a goal with three arguments, but found{indentExpr type}"
   let indexValue ← evaluate Nat (mkConst ``Nat) index
   let programValue ← evaluate (List Method) (mkApp (mkConst ``List [Level.zero]) methodType) program
   let expectedValue ← evaluate Method methodType expected

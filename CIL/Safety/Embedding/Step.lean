@@ -1,5 +1,6 @@
 import CIL.Embedding.BaseStep
 import CIL.Safety.Execution
+import CIL.TermAccess
 
 /-!
 # Relabeled steps
@@ -505,10 +506,12 @@ elab "base_relabels" : tactic => withMainContext do
   let target ← instantiateMVars (← getMainTarget)
   unless target.isAppOfArity ``BaseRelabel 1 do
     throwError "Expected a BaseRelabel goal"
-  let operation ← whnfR target.getAppArgs[0]!
+  let operation ← whnfR (← argumentAt "base_relabels" target 0)
   let some constructor := operation.getAppFn.constName? |
     throwError "Expected an opcode constructor"
-  let theoremName := `CIL.Embedding ++ Name.mkSimple s!"base_relabel_{constructor.getString!}"
+  let .str _ opcode := constructor |
+    throwError "base_relabels: expected an opcode constructor, but found {constructor}"
+  let theoremName := `CIL.Embedding ++ Name.mkSimple s!"base_relabel_{opcode}"
   let goals ← (← getMainGoal).apply (← mkConstWithFreshMVarLevels theoremName)
   unless goals.isEmpty do throwError "The base-step equation left unsolved goals"
   replaceMainGoal []

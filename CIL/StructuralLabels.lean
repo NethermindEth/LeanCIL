@@ -1,5 +1,6 @@
 import CIL.MethodIdentity
 import CIL.Embedding.Basic
+import CIL.TermAccess
 
 /-!
 # Structural labels
@@ -57,7 +58,7 @@ elab_rules : command
       let chosen ← choose m!"{body} has {found.size} loops"
         (found.map fun (pc, latch) => s!"head pc {pc}, back edge from pc {latch}")
         (occurrence.map (·.getNat))
-      return found[chosen]!
+      entryAt "bind_loop" found chosen
     let latchName := mkIdent (head.getId ++ `latch)
     elabCommand (← `(@[cil_code] def $head : Nat := $(quote pc)))
     CIL.MethodIdentity.documentBinding doc head

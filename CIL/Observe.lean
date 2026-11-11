@@ -3,6 +3,7 @@ import Lean.Linter.Basic
 import CIL.DebugNames
 import CIL.Safety.FailureRecords
 import CIL.Safety.MissingFacts
+import CIL.TermAccess
 
 /-!
 # Observing LeanCIL tactics
@@ -65,38 +66,40 @@ def loopStateParts (state : Expr) : MetaM (Option (Array (String × Expr))) := d
 partial def steppingGoal? (type : Expr) : MetaM (Option SteppingGoal) := do
   let type := (← instantiateMVars type).consumeMData
   -- The reached state never mentions the witnesses, so a placeholder stands for each.
-  if type.isAppOfArity ``Exists 2 then
-    let .lam _ binder body _ := type.appArg!.consumeMData | return none
+  if let some #[_, predicate] := argumentsOf? type ``Exists 2 then
+    let .lam _ binder body _ := predicate.consumeMData | return none
     return ← steppingGoal? (body.instantiate1 (← mkFreshExprMVar binder))
-  if type.isAppOfArity ``And 2 then return ← steppingGoal? (type.getArg! 0)
-  if type.isAppOfArity `CIL.Safety.LoopTerminates 5 then
-    let some parts ← loopStateParts (type.getArg! 4) | return none
+  if let some #[left, _] := argumentsOf? type ``And 2 then return ← steppingGoal? left
+  if let some #[program, method, arguments, _, state] :=
+      argumentsOf? type `CIL.Safety.LoopTerminates 5 then
+    let some parts ← loopStateParts state | return none
     return some {
-      program := type.getArg! 0, method := type.getArg! 1, pc := (parts[0]!).2
-      args := type.getArg! 2, parts }
-  if type.isAppOfArity `CIL.Safety.LoopReaches 5 then
-    let some parts ← loopStateParts (type.getArg! 3) | return none
-    let target := (← loopStateParts (type.getArg! 4)).getD #[]
+      program, method, pc := parts[0]?.map (·.2)
+      args := arguments, parts }
+  if let some #[program, method, arguments, state, targetState] :=
+      argumentsOf? type `CIL.Safety.LoopReaches 5 then
+    let some parts ← loopStateParts state | return none
+    let target := (← loopStateParts targetState).getD #[]
     return some {
-      program := type.getArg! 0, method := type.getArg! 1, pc := (parts[0]!).2
-      args := type.getArg! 2, parts, target }
-  if type.isAppOfArity `CIL.Safety.RunRaises 8 then
-    let args := type.getAppArgs
+      program, method, pc := parts[0]?.map (·.2)
+      args := arguments, parts, target }
+  if let some #[program, method, pc, arguments, frame, stack, memory, _] :=
+      argumentsOf? type `CIL.Safety.RunRaises 8 then
     return some {
-      program := args[0]!, method := args[1]!, pc := args[2]!, args := args[3]!
-      parts := statePartNames.zip #[args[2]!, args[4]!, args[5]!, args[6]!] }
+      program, method, pc := some pc, args := arguments
+      parts := statePartNames.zip #[pc, frame, stack, memory] }
   let some (_, current, _) := type.eq? | return none
   let current := current.consumeMData
-  if current.isAppOfArity `CIL.Safety.run 8 then
-    let args := current.getAppArgs
+  if let some #[program, _, method, pc, arguments, frame, stack, memory] :=
+      argumentsOf? current `CIL.Safety.run 8 then
     return some {
-      program := args[0]!, method := args[2]!, pc := args[3]!, args := args[4]!
-      parts := statePartNames.zip #[args[3]!, args[5]!, args[6]!, args[7]!] }
-  if current.isAppOfArity `CIL.Safety.invoke 5 then
-    let args := current.getAppArgs
+      program, method, pc := some pc, args := arguments
+      parts := statePartNames.zip #[pc, frame, stack, memory] }
+  if let some #[program, _, method, arguments, memory] :=
+      argumentsOf? current `CIL.Safety.invoke 5 then
     return some {
-      program := args[0]!, method := args[2]!, pc := none, args := args[3]!
-      parts := #[("memory", args[4]!)] }
+      program, method, pc := none, args := arguments
+      parts := #[("memory", memory)] }
   return none
 
 /-- `value` as a natural number literal, reducing arithmetic on literals. -/
@@ -110,8 +113,8 @@ def natLiteral? (value : Expr) : MetaM (Option Nat) := do
 def bodyOf? (program method : Expr) : MetaM (Option Expr) := do
   try
     let found ← whnfD (← mkAppM ``GetElem?.getElem? #[program, method])
-    unless found.isAppOfArity ``Option.some 2 do return none
-    return some found.appArg!
+    let some #[_, body] := argumentsOf? found ``Option.some 2 | return none
+    return some body
   catch _ => return none
 
 /-- The instruction at `pc` of `body`, by reducing the lookup. -/
@@ -119,8 +122,8 @@ def instructionOf? (body pc : Expr) : MetaM (Option Expr) := do
   try
     let code ← mkAppM `CIL.Method.code #[body]
     let found ← whnfD (← mkAppM ``GetElem?.getElem? #[code, pc])
-    unless found.isAppOfArity ``Option.some 2 do return none
-    return some (← instantiateMVars found.appArg!)
+    let some #[_, instruction] := argumentsOf? found ``Option.some 2 | return none
+    return some (← instantiateMVars instruction)
   catch _ => return none
 
 /-- The name a goal goes by in a trace or record: its obligation tag, `path` for the stepping goal
@@ -157,10 +160,11 @@ def residualOf (step : MVarId) : MetaM (Option (Array Expr)) := step.withContext
 def objectArguments (args : Expr) : MetaM (Array Expr) := do
   let some (_, values) := (← instantiateMVars args).listLit? | return #[]
   return values.toArray.filterMap fun value =>
-    let value := value.consumeMData
-    if value.isAppOfArity `CIL.Safety.Value.object 1 &&
-        value.appArg!.consumeMData.isAppOf `CIL.Safety.ManagedReference.address then
-      some value.appArg! else none
+    match argumentsOf? value.consumeMData `CIL.Safety.Value.object 1 with
+    | some #[reference] =>
+      if reference.consumeMData.isAppOf `CIL.Safety.ManagedReference.address then
+        some reference else none
+    | _ => none
 
 /-- The record of a failure or stop of `tactic` on `goal`, handed `handed`: the reached state,
     the instruction there and what its step lacks. -/
@@ -249,7 +253,9 @@ def analyze (tactic : String) (goal : MVarId) (handed : Option MVarId) (error : 
     memory.2]
   let resultType ← inferType stepTerm
   let step ← mkFreshExprMVar (← mkEq stepTerm (← mkFreshExprMVar resultType))
-  let residual := (← residualOf step.mvarId!).getD #[← instantiateMVars (← inferType step)]
+  let .mvar stepGoal := step
+    | throwError "analyze: expected a fresh metavariable, but found{indentExpr step}"
+  let residual := (← residualOf stepGoal).getD #[← instantiateMVars (← inferType step)]
   let missing := missingFactOf residual
   return { record with
     missing := missing.name, residual,
@@ -287,8 +293,9 @@ def stateChanges (before after : Array (String × Expr)) : MetaM (Array MessageD
       let (olds, news) := (olds.toArray, news.toArray)
       if olds.size == news.size then
         for slot in [:olds.size] do
-          unless olds[slot]! == news[slot]! do
-            changes := changes.push m!"{name} {slot}: {olds[slot]!} ⟶ {news[slot]!}"
+          let (some oldEntry, some newEntry) := (olds[slot]?, news[slot]?) | continue
+          unless oldEntry == newEntry do
+            changes := changes.push m!"{name} {slot}: {oldEntry} ⟶ {newEntry}"
       else changes := changes.push m!"{name}: {old} ⟶ {new}"
     | _, _ => changes := changes.push m!"{name}: {old} ⟶ {new}"
   return changes
@@ -298,18 +305,21 @@ def stateChanges (before after : Array (String × Expr)) : MetaM (Array MessageD
 def resultChanges (before : Array (String × Expr)) (result : Expr) :
     MetaM (Array MessageData) := do
   let result ← whnfR (← instantiateMVars result)
-  if result.isAppOfArity ``Except.error 3 then return #[m!"faults: {result.appArg!}"]
+  if let some #[_, _, fault] := argumentsOf? result ``Except.error 3 then
+    return #[m!"faults: {fault}"]
   -- A step stated with an unknown result, as an existential step does, changes nothing it names.
-  unless result.isAppOfArity ``Except.ok 3 do return #[]
-  let action ← whnfR result.appArg!
+  let some #[_, _, value] := argumentsOf? result ``Except.ok 3 | return #[]
+  let action ← whnfR value
   let args := action.getAppArgs
-  if action.isAppOfArity `CIL.Safety.FrameAction.next 4 then
-    return ← stateChanges before (statePartNames.zip #[args[0]!, args[2]!, args[1]!, args[3]!])
-  if action.isAppOfArity `CIL.Safety.FrameAction.returned 2 then
-    return #[m!"returns {args[0]!}"]
+  if let some #[pc, stack, frame, memory] :=
+      argumentsOf? action `CIL.Safety.FrameAction.next 4 then
+    return ← stateChanges before (statePartNames.zip #[pc, frame, stack, memory])
+  if let some #[returned, _] := argumentsOf? action `CIL.Safety.FrameAction.returned 2 then
+    return #[m!"returns {returned}"]
   if action.isAppOf `CIL.Safety.FrameAction.call || action.isAppOf `CIL.Safety.FrameAction.tailCall
       || action.isAppOf `CIL.Safety.FrameAction.construct then
-    return #[m!"calls method {args[0]!} with {args[1]!}"]
+    if let (some callee, some arguments) := (args[0]?, args[1]?) then
+      return #[m!"calls method {callee} with {arguments}"]
   return #[m!"ends in {action}"]
 
 /-- A step found in a proof term: its tactic-independent key and its trace text. -/
@@ -349,18 +359,19 @@ def mentionsStep (name : Name) : StepWalkM Bool := do
 def stepText (lemma : MessageData) (proof : Expr) (equation : Expr) (siblings : Array Expr) :
     MetaM MessageData := do
   let some (_, current, result) := equation.eq? | return m!""
-  let args := current.getAppArgs
-  let (body, op, pcTerm) := (args[0]!, args[1]!, args[2]!)
+  let #[body, op, pcTerm, _, frame, stack, memory] := current.getAppArgs | return m!""
   let pc ← natLiteral? pcTerm
   -- The method is the index whose lookup gave the step's body.
   let mut method : Option Nat := none
   for sibling in siblings do
     let some (_, lookup, found) := (← instantiateMVars (← inferType sibling)).consumeMData.eq?
       | continue
+    let some candidate := lastArgument? found | continue
     if lookup.isAppOf ``GetElem?.getElem? && found.isAppOf ``Option.some &&
-        (← isDefEq found.appArg! body) then
-      method ← natLiteral? lookup.appArg!
-  let before := statePartNames.zip #[pcTerm, args[4]!, args[5]!, args[6]!]
+        (← isDefEq candidate body) then
+      let some index := lastArgument? lookup | continue
+      method ← natLiteral? index
+  let before := statePartNames.zip #[pcTerm, frame, stack, memory]
   let mut used := #[]
   for decl in ← getLCtx do
     if decl.isImplementationDetail then continue
@@ -677,7 +688,10 @@ def sorryGoals (tree : InfoTree) : IO (Array OpenGoal) := do
       unless term.stx.getKind == ``Lean.Parser.Term.sorry do continue
       let some type := term.expectedType? | continue
       let text ← context.runMetaM term.lctx do
-        Meta.ppGoal (← mkFreshExprMVar (← instantiateMVars type)).mvarId!
+        let hole ← mkFreshExprMVar (← instantiateMVars type)
+        let .mvar holeGoal := hole
+          | throwError "sorryGoals: expected a fresh metavariable, but found{indentExpr hole}"
+        Meta.ppGoal holeGoal
       goals := goals.push { start, stop, kind := .hole, text }
     | _ => pure ()
   return goals

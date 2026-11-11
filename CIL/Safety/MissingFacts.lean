@@ -1,4 +1,5 @@
 import CIL.Safety.SymbolicExecution
+import CIL.TermAccess
 
 /-!
 # The fact a stuck step lacks
@@ -126,7 +127,7 @@ def missingFactOf (residual : Array Expr) : MissingFact :=
     residual.any fun goal => (goal.find? fun term => term.isConstOf name).isSome
   let spanLocal := residual.any fun goal => (goal.find? fun term =>
     term.isAppOf `CIL.Safety.loadLocal && term.getAppNumArgs >= 2 &&
-      (term.getArg! 1).isAppOf `CIL.Safety.LocalSlot.span).isSome
+      (argument? term 1).any (·.isAppOf `CIL.Safety.LocalSlot.span)).isSome
   if spanLocal then .spanValidity
   else match missingFactMentions.find? (·.2.any mentions) with
     | some (fact, _) => fact

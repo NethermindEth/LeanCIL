@@ -88,6 +88,7 @@ def canonicalExpression (value : Expr) (levelParams : List Name := []) : Except 
     `mainModule`. -/
 def definingModule (environment : Environment) (constant : Name) : Name :=
   match environment.getModuleIdxFor? constant with
+  -- `getModuleIdxFor?` indexes the imported modules, which `header.moduleNames` lists in order.
   | some index => environment.header.moduleNames[index]!
   | none => environment.mainModule
 

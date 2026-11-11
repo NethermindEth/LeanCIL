@@ -2,6 +2,7 @@ import Lean
 import CIL.Instructions
 import CIL.SymbolicExecution
 import CIL.DebugNames
+import CIL.TermAccess
 
 /-!
 # Method identity
@@ -50,13 +51,14 @@ def resolveIn (tableName : Name) (signature : String) (noun : String := "extract
     (short : String := "method") : MetaM Nat := do
   let table ← strings (mkConst (← visible tableName))
   let indices := List.range table.size
-  let listing (shown : List Nat) := "\n".intercalate (shown.map fun i => s!"  [{i}] {table[i]!}")
-  match indices.filter (table[·]! == signature) with
+  let listing (shown : List Nat) :=
+    "\n".intercalate (shown.filterMap fun i => table[i]?.map (s!"  [{i}] {·}"))
+  match indices.filter (table[·]? == some signature) with
   | [index] => return index
   | [] =>
     if table.isEmpty then
       throwError "no {noun} has signature\n  {signature}\nthe extraction has no {noun}s"
-    let named := indices.filter (methodName table[·]! == methodName signature)
+    let named := indices.filter fun i => table[i]?.map methodName == some (methodName signature)
     let (label, shown) :=
       if named.isEmpty then (s!"{noun}s", indices)
       else (s!"{short}s named {methodName signature}", named)
@@ -167,7 +169,7 @@ def callSite (parent : Term) (method : Nat) (callee : String) (occurrence : Opti
   let sites ← callSites parent method callee
   let chosen ← choose m!"{parent} calls\n  {callee}\nat {sites.size} sites"
     (sites.map fun site => s!"pc {site.pc}") occurrence
-  return sites[chosen]!
+  entryAt "callSite" sites chosen
 
 /-- `bind_callee index body := "signature" from parent` binds as `bind_method` does and
 also requires `parent` to call that method; `index.call` states the instruction at its
@@ -213,7 +215,7 @@ elab_rules : command
       let chosen ← choose m!"{parent} makes {shaped.size} calls with {argc.getNat} arguments"
         (shaped.map fun site => s!"pc {site.pc}: {table[site.callee]?.getD "?"}")
         (occurrence.map (·.getNat))
-      let site := shaped[chosen]!
+      let site ← entryAt "bind_callee" shaped chosen
       return (site, table[site.callee]?.getD "")
     emit index body (Syntax.mkStrLit signature) site.callee
     documentBinding doc index

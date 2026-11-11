@@ -1,6 +1,7 @@
 import Lean
 import CIL.Instructions
 import CIL.DebugNames
+import CIL.TermAccess
 
 /-!
 # Method-body bindings
@@ -73,10 +74,11 @@ private unsafe def describeUnsafe (goal : Expr) : MetaM MessageData := do
     return m!"both sides must be closed terms to be compared"
   -- `program[i]?` elaborates to `getElem? program i`; name the method index when present.
   let (header, program) <- do
-    if lhs.isAppOfArity ``GetElem?.getElem? 7 then
-      let index : Nat <- evaluate Nat (mkConst ``Nat) lhs.appArg!
-      pure (m!"method index {index}\n", some (lhs.appFn!.appArg!, index))
-    else pure (m!"", none)
+    match argumentsOf? lhs ``GetElem?.getElem? 7 with
+    | some #[_, _, _, _, _, methods, position] =>
+      let index : Nat <- evaluate Nat (mkConst ``Nat) position
+      pure (m!"method index {index}\n", some (methods, index))
+    | _ => pure (m!"", none)
   let pair <- if <- isDefEq type optionMethodType then
       pure (<- evaluate (Option Method) optionMethodType lhs,
         <- evaluate (Option Method) optionMethodType rhs)
