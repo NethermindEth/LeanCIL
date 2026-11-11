@@ -3646,8 +3646,13 @@ internal static partial class LeanOutput
     private static partial Regex Entry();
 
     /// <summary>Whether `executable` is Lean, Lake or the audit executable built from Lean sources.</summary>
-    internal static bool RunsLean(string executable) =>
-        Path.GetFileNameWithoutExtension(executable) is "lean" or "lake" or "leancil-audit";
+    internal static bool RunsLean(string executable)
+    {
+        // Either separator ends the directory, so a path written on another host still names its program.
+        var name = executable[(executable.LastIndexOfAny(['/', '\\']) + 1)..];
+        if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) name = name[..^".exe".Length];
+        return name is "lean" or "lake" or "leancil-audit";
+    }
 
     /// <summary>
     /// Every internal error in `output`, in order: a line of stderr, or a line of a message Lean logged, that
