@@ -1,5 +1,10 @@
 # Writing checked proofs
 
+Entry page for writing a Lean proof about extracted .NET code with the `CIL` library. It gives the
+workflow, then tables that map a task or a goal shape to the interface, tactic and guide to use.
+The detail is in [stepping](PROOFS-STEPPING.md), [contracts](PROOFS-CONTRACTS.md),
+[binding](PROOFS-BINDING.md) and [buffers](PROOFS-BUFFERS.md).
+
 State the property independently of the emitted instructions. Use `CIL.Safety.invoke`,
 `WP`, `Ensures`, `MethodContract` or `OutcomeContract` when the claim includes checked execution.
 Make input quantifiers, initial-memory assumptions and permitted writes explicit.
@@ -18,39 +23,91 @@ Make input quantifiers, initial-memory assumptions and permitted writes explicit
    shows a complete theorem over symbolic inputs and arbitrary caller memory.
 4. **Compose calls and loops.** Apply a helper's proved contract at a call site. For a loop,
    state an invariant at its checked cutpoint and a measure that decreases on every continuing
-   iteration. See [call contracts](PROOFS-CONTRACTS.md#compose-calls-through-contracts) and
+   iteration; a finite successful sample does not establish termination for arbitrary input. See
+   [call contracts](PROOFS-CONTRACTS.md#compose-calls-through-contracts) and
    [loop cutpoints](PROOFS-BINDING.md#loop-heads-and-call-sites).
-5. **Verify the assembly-bound proof.** Inspect `#print axioms`, then run `leancil verify` on
-   the extracted artifact with `--proof`. Verification checks the extraction binding and replays the
-   compiled proof; elaboration alone is insufficient.
+5. **Verify the assembly-bound proof.** End each theorem with `#print axioms`, then run
+   `leancil verify` on the extracted artifact with `--proof`. Verification checks the extraction
+   binding and replays the compiled proof; elaboration alone is insufficient.
 
-Follow the [addition walkthrough](GETTING-STARTED.md) for the extraction, proof and verification
-commands, then select the smallest proof interface that expresses the result:
+The [addition walkthrough](GETTING-STARTED.md) shows the extraction, proof and verification
+commands. [Soundness](SOUNDNESS.md) states the trust boundary.
 
 ## Choose a proof interface
+
+Select the smallest interface that expresses the result.
 
 | Task | Guide | Executable example |
 | --- | --- | --- |
 | Execute a short method symbolically | [Instruction composition](PROOFS-STEPPING.md#compose-instructions) | [Add](../Examples/Proofs/Add.lean) |
 | Carry existing theorems about a Lean model to compiled code | [Model proofs](../skills/leancil/references/bridge-model-proof.md) | [AddModel](../Examples/Proofs/AddModel.lean) |
 | Call a helper through its proved contract | [Contract composition](PROOFS-CONTRACTS.md#compose-calls-through-contracts) | [CountCalls](../Examples/Proofs/CountCalls.lean) |
+| Step through numeric local stores and loads over symbolic memory | [Snapshot walks](PROOFS-CONTRACTS.md#walk-local-stores-and-loads-with-snapshots) | The guide's reference tables |
+| Pass byref buffers that may overlap | [ValidCall](PROOFS-CONTRACTS.md#pass-byref-arguments-with-validcall) | The guide's reference tables |
 | Prove a loop terminates | [Loop examples](EXAMPLES.md) and [loop cutpoints](PROOFS-BINDING.md#loop-heads-and-call-sites) | [Countdown](../Examples/Proofs/Countdown.lean) |
 | Store and load struct fields through a layout | [Struct field views](PROOFS-BUFFERS.md#view-struct-fields) | [Struct](../Examples/Proofs/Struct.lean) |
 | Name class fields in contracts and frame them across calls | [Class instances](PROOFS-CONTRACTS.md#frame-class-instances) | [DepositBoth](../Examples/Proofs/DepositBoth.lean) |
 | Walk a linked list to null in a loop | [Class instances](PROOFS-CONTRACTS.md#frame-class-instances) | [PoolIdle](../Examples/Proofs/PoolIdle.lean) |
+| Describe what a span or array holds | [Span contents](PROOFS-BUFFERS.md#describe-span-contents) | [SpanSum](../Examples/Proofs/SpanSum.lean) |
 | Establish buffer contents and preserve neighbours | [Buffer predicates](PROOFS-BUFFERS.md#describe-buffer-contents) | [FillWords](../Examples/Proofs/FillWords.lean) |
 | Keep frame facts out of a loop invariant | [Loop frames](PROOFS-BUFFERS.md#carry-frame-facts-through-a-loop) | [FillWords](../Examples/Proofs/FillWords.lean) |
+| Construct a struct through its constructor's contract | [Struct construction](PROOFS-CONTRACTS.md#construct-structs-through-contracts) | The guide's checked `pair_constructs` snippet |
 | Specify normal and exceptional outcomes | [Outcome contracts](PROOFS-CONTRACTS.md#name-exceptional-outcomes) | [CountUntil](../Examples/Proofs/CountUntil.lean) |
 | Publish a smaller public guarantee | [Contract consequence](PROOFS-CONTRACTS.md#derive-public-contracts) | The guide's checked `increment_refines` snippet |
+| Give a forwarding wrapper its callee's contract | [Forwarders](PROOFS-CONTRACTS.md#inherit-a-callees-contract-in-a-forwarder) | The guide's forwarding snippet |
 | Bind or transport a proof to extracted code | [Binding and transport](PROOFS-BINDING.md) | [CountCalls](../Examples/Proofs/CountCalls.lean) |
+| Prove one body for several hardware profiles | [Profile templates](PROOFS-BINDING.md#generated-profile-templates) and [reprofiling](PROOFS-CONTRACTS.md#carry-a-contract-across-profiles) | The guides' commands and manifest |
 | Select the goals a tactic leaves by purpose | [Obligation tags](PROOFS-STEPPING.md#obligation-tags) | [TallyTwice](../Examples/Proofs/TallyTwice.lean) |
 | Import a separately proved interface | [Imported contracts](PROOFS-CONTRACTS.md#compose-through-imported-contracts) | [Interface guide](CONTRACT-INTERFACES.md) |
+| Find why a tactic stopped | [Observer](PROOFS-STEPPING.md#see-what-the-tactics-did) | `leancil verify --trace` |
+
+## Choose a tactic
+
+`[facts]` is a list of proved facts the steps depend on. `holds` is a proved contract, `input` its
+input and `site` a `bind_call` name.
+
+| Goal or situation | Tactic | Guide |
+| --- | --- | --- |
+| `invoke` or `run` equals a result or a located fault | `cil_checked_steps [facts]` | [Stepping](PROOFS-STEPPING.md#choose-a-stepping-tactic) |
+| The same, but stop after exactly `n` steps | `cil_checked_steps n [facts]` | [Stepping](PROOFS-STEPPING.md#choose-a-stepping-tactic) |
+| `WP` or `∃ fuel` success, with calls through contracts | `cil_contract_steps [facts]`, with `n` or `until continuation` to stop early | [Contract stepping](PROOFS-CONTRACTS.md#step-a-caller-through-its-callees) |
+| The path stores or loads numeric locals in symbolic memory | `cil_contract_steps (snapshots := snapshots) [facts]`, `cil_checked_steps (snapshots := snapshots) [facts]` | [Snapshot walks](PROOFS-CONTRACTS.md#walk-local-stores-and-loads-with-snapshots) |
+| Apply one contract at a call and keep its precondition as a goal | `cil_contract_call holds input at site [facts]`; `cil_formed_call` to also receive `FrameInvariants` | [One call](PROOFS-CONTRACTS.md#apply-a-contract-at-one-call) |
+| Keep the callee's `InvocationCertificate` | `cil_certified_call`, `cil_contract_certified_call` | [One call](PROOFS-CONTRACTS.md#apply-a-contract-at-one-call) |
+| A `newobj` of a struct with a constructor contract | `cil_contract_construct holds constructs input [facts]` | [Struct construction](PROOFS-CONTRACTS.md#construct-structs-through-contracts) |
+| A `Raises` goal | `cil_raise_steps [facts]` | [Outcomes](PROOFS-CONTRACTS.md#name-exceptional-outcomes) |
+| A call whose callee has an `OutcomeContract` | `cil_outcome_call`, `cil_formed_outcome_call`, `cil_outcome_raise` | [Outcomes](PROOFS-CONTRACTS.md#name-exceptional-outcomes) |
+| A loop path to the next head | `cil_loop_recurse hypothesis values [facts]` | [Loops](PROOFS-STEPPING.md#compose-a-helper-call-inside-a-loop) |
+| A loop path to a call or return | `cil_loop_advance [facts]` | [Loops](PROOFS-STEPPING.md#compose-a-helper-call-inside-a-loop) |
+| A call inside a loop | `cil_loop_call holds input at site [facts]` | [Loops](PROOFS-STEPPING.md#compose-a-helper-call-inside-a-loop) |
+| A loop exit and its postcondition | `cil_loop_finish [facts]` | [Loops](PROOFS-STEPPING.md#step-loops) |
+| The progress goal of a loop verification condition | `cil_loop_continue next [facts]`, `cil_loop_finish [facts]` | [Loop VCs](PROOFS-STEPPING.md#loop-verification-conditions) |
+| A loop whose helper can raise | `cil_loop_outcome_advance`, `cil_loop_outcome_call`, `cil_loop_outcome_raise` | [Raising helpers](PROOFS-STEPPING.md#compose-a-helper-that-can-raise) |
+| An element write's authority, bound and footprint membership | `cil_loop_obligation [defs]` | [Caller facts](PROOFS-BUFFERS.md#caller-facts-in-frame-memory) |
+| A `Segment` boundary | `cil_segment n [facts]`, `cil_segment_steps [facts]` | [Segments](PROOFS-STEPPING.md#place-code-and-compose-segments) |
+| A method or instruction lookup | `cil_lookup [facts]` | [Lookups](PROOFS-STEPPING.md#lookups) |
+| `Extracted.program[i]? = some body` | `cil_body` | [Body binding](PROOFS-BINDING.md#bind-bodies-to-the-extraction) |
+| The same when a profile inserts dead code or dead locals | `cil_embed` | [Dead code](PROOFS-BINDING.md#bodies-modulo-dead-code) |
+
+Commands that name parts of an extraction:
+
+| Name | Command | Guide |
+| --- | --- | --- |
+| A method by signature | `bind_method` | [Methods by signature](PROOFS-BINDING.md#methods-by-signature) |
+| A callee of a bound method | `bind_callee` | [Methods by signature](PROOFS-BINDING.md#methods-by-signature) |
+| A call site or loop head | `bind_call`, `bind_loop` | [Loop heads and call sites](PROOFS-BINDING.md#loop-heads-and-call-sites) |
+| An imported method's slot | `bind_import` | [Imported contracts](PROOFS-CONTRACTS.md#compose-through-imported-contracts) |
+| A checked frame entry and a loop cutpoint | `bind_entry`, `bind_cutpoint` | [Loop scaffolding](PROOFS-BINDING.md#generate-loop-entry-and-cutpoint-scaffolding) |
+| A local by its C# name | `local_named sum "carry"` | [PDB names](PROOFS-BINDING.md#pdb-local-names-and-source-locations) |
+| Per-pc instruction equations of a parametric body | `cil_instruction_equations` | [Instruction equations](PROOFS-BINDING.md#instruction-equations-for-parametric-bodies) |
 
 ## Public proof surface
 
 `import CIL` is the supported umbrella for a consumer proof. It exports the interfaces below;
 the guides link their definitions and worked examples. The umbrella also imports embedding and
 renaming metatheory. There is no separate narrow proof facade or import-closure size guarantee.
+Import these separately when a proof uses them: `CIL.Safety.LoopScaffold` (`bind_entry`,
+`bind_cutpoint`), `CIL.Observe` and `CIL.Safety.AllocationRefinement`.
 
 | Purpose | Consumer interfaces |
 | --- | --- |
@@ -63,8 +120,8 @@ renaming metatheory. There is no separate narrow proof facade or import-closure 
 | Supply symbolic operation evidence | Checked read, write and snapshot equalities, vector operation equalities |
 
 Select call evidence by field name: `result.post` and `result.framed` from `CallResult`, and
-`preserved.formed` from `FrameInvariants`. Do not destructure preservation records positionally;
-an additional preservation fact should not require rewriting the continuation. Similarly, use
+`preserved.formed` from `FrameInvariants`. Do not destructure preservation records positionally,
+so that an additional preservation fact does not require rewriting the continuation. Likewise use
 `call.wellFormed`, `call.readable` and `call.writable` for a `ValidCall`.
 
 `WP` relates a finite budget to one result. Use `Execution` for successful interpreter returns
@@ -72,84 +129,33 @@ and `WP.adequate` at the raw `invoke` boundary. Exact segment relations retain a
 budgets and faults; their budget is chosen before the continuation budget. The
 [composition guide](PROOFS-STEPPING.md) describes these forms and their structural rules.
 
-Post-step expressions are part of this proof interface. A vector operation with a literal control
-must remain directly rewritable by a theorem stated with that literal; a computed segment must
-compose at its stated stack and memory boundary. The `core` suite checks these forms together with
-named call continuations, overlapping byrefs, mixed local snapshots and a checked loop cutpoint.
-Intrinsic Boolean results expose their scalar constructor for checked returns while retaining the
-symbolic condition. Aggregate snapshot maps retain their composition for post-step rewriting.
-Supplied checked arithmetic and conversion results avoid expanding the corresponding range checks.
-Changes to those forms require updating the documented interface and its consumer proofs together.
-Interpreter dispatch helpers and their unfolding equations are implementation details. The
-documentation checker rejects their direct use in the consumer fixture and their use in evaluator
-simp lists in examples and checked documentation.
+Post-step expressions are part of this proof interface:
+
+- A vector operation with a literal control stays directly rewritable by a theorem stated with
+  that literal.
+- A computed segment composes at its stated stack and memory boundary.
+- Intrinsic Boolean results expose their scalar constructor for checked returns while retaining
+  the symbolic condition.
+- Aggregate snapshot maps retain their composition for post-step rewriting.
+- Supplied checked arithmetic and conversion results avoid expanding the corresponding range
+  checks.
+
+The `core` suite checks these forms together with named call continuations, overlapping byrefs,
+mixed local snapshots and a checked loop cutpoint. A change to one of these forms is a change to
+the documented interface.
+
+Interpreter dispatch helpers and their unfolding equations are implementation details. Do not
+name them in a `simp` list; step with `cil_checked_steps` and pass a fact about the operation
+instead. The [documentation checks](CI.md#documentation-checks) reject them in examples and
+checked documentation.
 
 ## Keep proof work local
 
-Reuse checked stepping, memory readback and contract composition lemmas. Avoid unfolding helper
-bodies when their contracts suffice. Loop invariants must describe the state at a checked
-cutpoint, and continuing iterations must decrease an explicit measure. A finite successful
-sample does not establish termination for arbitrary input.
-
-`ValidCall memory inputs outputs` gives named `wellFormed`, `readable` and `writable` facts.
-Inputs may overlap each other and the outputs arbitrarily. Outputs need write access but need
-not be initialized. With `CIL.Safety.CallingFields`, the stepping tactics derive formed
-references and eight-byte field reads from this evidence, including fields indexed by a finite
-bound of at most 64. `input_snapshot` records current bytes; `output_slice` supplies write access
-to an in-range slice. `after_write` preserves call validity, but does not preserve old input
-contents when a write overlaps them. Read all needed input fields before an overlapping write,
-or prove the required contents separately.
-
-Use `MethodContract` for byref wrappers, with `ValidCall memory inputs outputs` in `pre`.
-The result encoding describes returned values; `post` independently states their meaning and
-the memory guarantees, while `footprint` bounds the permitted changes.
-
-| Wrapper result | `results` encoding | Calling requirements |
-| --- | --- | --- |
-| Read-only scalar | `[.scalar (.i64 word)]` | Readable input views, no output views; empty footprint |
-| Reporting flag | `[.scalar (.i32 (if flag then 1 else 0))]` | Readable inputs and any writable output views |
-| Aggregate value | `[.scalar (.aggregate bytes)]` | Readable inputs and any writable output views |
-
-`MethodContract.withArgs` changes only the argument encoding. `MethodContract.Holds.forward`
-proves an argument-loading wrapper from the helper's checked contract, keeping its precondition,
-postcondition, footprint and exact results. A narrowed flag return also requires
-`ReturnsUnchanged`; aggregate results retain their complete byte list. See
-[forwarder composition](PROOFS-CONTRACTS.md#inherit-a-callees-contract-in-a-forwarder).
-A wrapper that allocates a private output, calls a helper and loads that output before returning
-needs the helper's actual preservation and readback evidence. It is not an exact-result forwarder:
-write permission alone proves neither initialized bytes nor their value. Compose its checked
-call, local load and return using the evidence the helper actually guarantees.
-
-For a word store through a named output, `cil_contract_steps` first uses supplied checked
-operation facts. If none establishes the store, it derives a successful write from the current
-`ValidCall` and the output bounds. This covers `store64`, eight-byte `storeScalar`, and
-eight-byte `setFieldAt`. The continuation names the new memory `stored`, its address and byte
-write equations `addressed` and `written`, the initialized bytes `readback`, and the retained
-call requirements `storedCall`, with numeric suffixes when names are taken. Later argument
-loads use facts about this new memory. Earlier input snapshots remain facts about their original
-memory; no separation or initial output contents are inferred. `ValidCall.store_word` exposes
-the same write and readback evidence for explicit composition.
-
-`MethodContract.not_holds_of_fault` refutes a contract from a checked located fault on an input
-meeting its precondition. It uses fuel monotonicity to rule out success at every budget;
-the witness must be a semantic fault, not fuel exhaustion.
-
-`WP.of_embedded_run` transports a successful suffix through `CIL.Embeds`, reusing the checked
-embedding simulation. `CodeAt` identifies the suffix; embedding also checks instruction targets
-and method metadata, since equal instruction lists alone do not justify relocating absolute
-branches. `MethodContract.Holds.of_embeds` transports the complete contract through
-`CIL.MethodEmbeds`, including its footprint and precondition.
-
-`WP.load_call_store` composes a placed `loadCallStoreCode` segment with any proved scalar helper
-contract. Both input words are loaded before the call and output write, so the argument ranges
-may overlap. The continuation receives the helper's `CallResult` and the actual checked write.
-It retains the helper's full postcondition and footprint without unfolding the helper body.
-
-End new theorems with `#print axioms`. The normal verifier checks both the theorem and its
-extraction binding; a successful standalone elaboration is not the full verification workflow.
-See [soundness](SOUNDNESS.md) for the exact trust boundary and [validation](VALIDATION.md) for
-focused regression commands.
-
-Detailed reduction behavior and consumer-visible simplification interfaces are documented in
-[stepping and reduction](PROOFS-STEPPING.md). They are implementation references, not prerequisites
-for the first proof.
+- Reuse the checked stepping, memory readback and contract composition lemmas. Do not unfold a
+  helper body when its contract suffices.
+- State a loop invariant at a checked cutpoint, with an explicit measure that decreases on every
+  continuing iteration.
+- End each theorem with `#print axioms`. The verifier checks both the theorem and its extraction
+  binding; a successful standalone elaboration is not the full verification workflow.
+- [Stepping and reduction](PROOFS-STEPPING.md) documents reduction behaviour and the
+  simplification interfaces. It is a reference, not a prerequisite for a first proof.

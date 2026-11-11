@@ -1,5 +1,10 @@
 # Method contracts and exceptional outcomes
 
+How to state a method's interface as a `MethodContract` or `OutcomeContract`, prove it, and use it
+at call sites, across class instances, struct construction, exceptions, forwarders and separately
+extracted libraries. Read it when a proof crosses a call or publishes a guarantee for callers.
+[Stepping](PROOFS-STEPPING.md) covers the instruction-level tactics these sections build on.
+
 ## Compose calls through contracts
 
 A caller proof that steps into its callee breaks whenever the callee is reimplemented. State the
@@ -42,144 +47,228 @@ theorem root_holds (add : addContract.Holds Extracted.program addTo) :
 way, with `decrementContract.Holds Extracted.program decrement` as its only assumption about the
 helper.
 
-`pre` holds formation, authority and the permitted aliasing; the example lets `res` overlap either
-input. `Holds` is `Ensures` with the footprint added to the postcondition (`Holds.ensures`), and
-fuel stays existential so callers never depend on a callee's step count. `Confined footprint before
-after` is the memory guarantee: earlier allocations and write authority are unchanged, and bytes and
-read authority change only inside the footprint (a write grants read access to what it wrote).
-`Confined.trans`, `Confined.widen`, `Confined.write`, `Confined.read_eq` and `Confined.access_write`
-compose and consume it. A callee with locals writes its own frame too: list those slots in the
-footprint while executing, then drop them with `Confined.forget_fresh` and cover frame entry with
-`Confined.then_below`. `framed.after_leaveFrame owned` covers teardown, given that every identity
-the frame owns is at least the caller's `nextIdentity`. A method with locals that changes no
-caller memory ends with `MemoryBelow memory.nextIdentity memory final`, not `final = memory`;
-`MemoryBelow.compose_invoke` composes consecutive such calls
-([span contents](PROOFS-BUFFERS.md#describe-span-contents)). A store through an argument reference
-needs only write access: `store_word64 word writable` gives the `write`, the `storeValue` step
-fact and the readback of its encoding, so `Confined.write` and the stepping tactics consume the
-same equation. `Outside.nil` and `Outside.cons` are simp rules, so `simpa
-using ⟨hr, hq⟩` closes a word footprint from per-word `OutsideWord` facts; `Outside.word` builds it
-as a term. `Within inner outer` states that an interval lies inside another of the same allocation:
-`Confined.widen_within` widens a footprint to one whose entries enclose it, and
-`Confined.write_within` confines a write that lies inside one entry, so four limb writes satisfy a
-contract that declares one 32-byte output. Entries may overlap. `Apart r width entry` states that
-two intervals share no byte, in different allocations or at disjoint offsets of one.
-`Confined.read_apart` keeps a checked read of older memory apart from every entry, taking the
-allocation's age from `WellFormed`; `Confined.cells_apart` keeps every byte of an allocation no
-entry names, and `WordSnapshots.after_confined` (`CIL.Safety.ConfinedSnapshots`) keeps remembered
-words. `LocalSnapshots` (`CIL.Safety.LocalSnapshots`) remembers locals of every numeric kind, such
-as vectors and int32s; `LocalSnapshots.after_confined` keeps them across such a call, and
-`after_write_apart`, `after_below` and `store` across writes, frame changes and local stores.
-`snapshots.load value specified` is a step fact for `.local`, so stepping tactics take it.
-`snapshots.read_at specified slot` gives back the typed read of a remembered local whose slot is
-known, and `read_vector128`, `read_vector256` and `read_vector512` state it for a remembered
-vector as `read memory home 16 1 = .ok (numberBytes bits.toNat 16)` and its wider forms.
+| Field | States |
+| --- | --- |
+| `args` | The argument values the input encodes |
+| `pre` | Formation, authority and the permitted aliasing; the example lets `res` overlap either input |
+| `footprint` | The `(reference, width)` intervals the method may change; entries may overlap |
+| `results` | With a typed output, the returned values the output encodes ([typed results](#type-the-result)) |
+| `post` | The meaning of the result and the memory guarantees |
 
-`unknown_frame_setup` supplies `CompleteWritableHomes` for numeric locals with unknown initial
-contents. Its `home_at` lookup proves that every declared local has a typed writable byte home;
-it does not claim readable or initialized contents. `NumericHomes.complete` supplies the same
-interface for initialized numeric frames. Use the bundle's `writable` projection with general
-snapshot APIs. Plain `WritableHomes` also permits skipped slots, so its `home_at` requires
-separate evidence that the requested slot has a byte home.
+`Holds` is `Ensures` with the footprint added to the postcondition (`Holds.ensures`). Fuel stays
+existential, so a caller never depends on a callee's step count. The contract fixes no profile:
+the program does ([profiles](#carry-a-contract-across-profiles)).
 
-Missing-fact diagnostics distinguish `authority`, `contentSnapshot` and `helperPrecondition`.
-Their suggestions identify the unresolved checked operation and its memory, local or region;
-failure records retain the obligation tag and source position. A missing proof is not a proved
-violation. Access evidence alone does not identify initialized contents: after an overlapping
-write use its updated snapshot, or prove the disjointness needed to preserve an old snapshot.
-A snapshot may retain unknown bytes; a successful snapshot copy does not establish initialization.
+### Footprints and confinement
 
-Import `CIL.Safety.LocalSnapshotSteps` to step through numeric local stores and reloads with
-`cil_checked_steps (snapshots := snapshots) [facts]`. Use it on a checked `run` equality or an
-existential result such as `∃ after, run ... = .ok (after, result)`. The local context must justify
-`WritableHomes`, memory well-formedness, each home lookup and write access. The tactic introduces
-each store's new memory, updated snapshots and preserved access facts, so later stores need no
-manually split execution segments. Loads use the latest remembered value; overwrites replace it. It
-stops at an unsupported step or an unproved obligation, and fails if it takes no step. It does not
-infer authority, initialization, or preservation across calls and unrelated writes. Vector and int32 store-and-reload regressions are
-listed in [coverage](VALIDATION-COVERAGE.md).
+`Confined footprint before after` is the memory guarantee of `Holds`: earlier allocations and write
+authority are unchanged, and bytes and read authority change only inside the footprint (a write
+grants read access to what it wrote).
 
-For `WP` or existential successful-execution goals, use
-`cil_contract_steps (snapshots := snapshots) [facts]`, optionally followed by
-`until continuation`. `cil_contract_steps (snapshots := snapshots) n [facts]` takes at most `n` steps
-and stops silently, like `cil_contract_steps n [facts]`: count the steps up to the program counter
-where a helper lemma over `CodeAt body start segment` applies, apply the lemma there, and continue
-from the last `localSnapshots`. A call counts as one step.
+| Need | Use |
+| --- | --- |
+| Compose two confined changes under one footprint | `Confined.trans` |
+| Widen to a footprint that contains every entry | `Confined.widen` |
+| Confine a checked write whose interval is an entry | `Confined.write` |
+| Keep write access to memory that existed before the call | `Confined.access_write` |
+| Keep a read of older memory that lies wholly outside the footprint | `Confined.read_eq` |
+| Widen to a footprint whose entries enclose this one | `Confined.widen_within` |
+| Confine a write that lies inside one entry | `Confined.write_within` |
+| Keep a checked read of older memory apart from every entry | `Confined.read_apart` |
+| Keep every byte of an allocation no entry names | `Confined.cells_apart` |
+| Keep remembered words | `WordSnapshots.after_confined` (`CIL.Safety.ConfinedSnapshots`) |
 
-Ordinary contract stepping handles supplied step facts, calls and returns;
-the snapshot form supplies missing numeric local loads and stores, so one call walks a path
-through both. `CompleteWritableHomes` or `NumericHomes` supplies each selected home and its write
-access even when the slot list is opaque. An explicit `WritableHomes` bundle with individual slot
-and access facts also suffices.
+`Within inner outer` states that an interval lies inside another of the same allocation, so four
+limb writes satisfy a contract that declares one 32-byte output. `Apart r width entry` states that
+two intervals share no byte, in different allocations or at disjoint offsets of one;
+`Confined.read_apart` takes the allocation's age from `WellFormed`. `Outside.nil` and
+`Outside.cons` are simp rules, so `simpa using ⟨hr, hq⟩` closes a word footprint from per-word
+`OutsideWord` facts; `Outside.word` builds it as a term.
 
-The homes may be stated at an earlier memory than the one the store runs in, such as the frame's
-entry memory. The context must then hold that memory's `WellFormed` and an `AccessBelow watermark
-entered current` or `MemoryBelow watermark entered current` with `entered.nextIdentity ≤
-watermark`, which carries each home's write access to the current memory
-(`CompleteWritableHomes.home_retained`); the current memory's `WellFormed` is needed as for any
-store. Without that link the walk stops at the store. The homes may also cover the locals after
-leading slots that have no byte home, as in `layout : frame.locals = .root value :: slots` with
-`NumericHomes entered boundary specs slots`: the home is found at the shifted index, and each
-leading slot must be a constructor other than `.bytes` or have a hypothesis `∀ kind reference,
-slot ≠ .bytes kind reference` (`WritableHomes.after_skipped`).
+A store through an argument reference needs only write access: `store_word64 word writable` gives
+the `write`, the `storeValue` step fact and the readback of its encoding, so `Confined.write` and
+the stepping tactics consume the same equation.
 
-A kind lookup that does not compute, as over an opaque `specs` in `NumericHomes entered boundary
-specs slots`, is closed from a supplied fact: `specs[4]? = some spec` (`numericKinds_getElem?`) or
-`(numericKinds specs)[4]? = some kind`. The fact is stated at the index among the homes, which is
-the local's index less the leading slots skipped.
+A callee with locals writes its own frame too. List those slots in the footprint while executing,
+then drop them with `Confined.forget_fresh` and cover frame entry with `Confined.then_below`.
+`framed.after_leaveFrame owned` covers teardown, given that every identity the frame owns is at
+least the caller's `nextIdentity`. A method with locals that changes no caller memory ends with
+`MemoryBelow memory.nextIdentity memory final`, not `final = memory`; `MemoryBelow.compose_invoke`
+composes consecutive such calls ([span contents](PROOFS-BUFFERS.md#describe-span-contents)).
 
-A local index that is not a numeral, such as the `base + 3` of a block stated at a symbolic local
-base, is taken when the homes cover the frame's locals from the first slot and a supplied fact
-states the kind at exactly that index term, `kinds[base + 3]? = some kind`. With leading slots
-skipped the index must be a numeral.
+### Remember numeric locals
 
-Each store, in the checked form too, names what it produced: the memory `storedLocal`, the step
-`storingLocal`, the snapshots `localSnapshots`, `localFormed : storedLocal.WellFormed`,
-`localBelow : MemoryBelow boundary memory storedLocal`, `localAccess : AccessBelow
-memory.nextIdentity memory storedLocal` and `localWrite : write memory home bytes 1 = .ok
-storedLocal`. All seven take the suffix `_1`, `_2` once a name is taken, so the second store of a
-walk gives `storedLocal_1` and `localSnapshots_1`. The remembered value is stated as the value a
-load pushes. In the contract form a store also restates, under the name each already has, the
-facts of the context about the memory it wrote to: `ValidCall`, `CompleteWritableHomes`,
-same-watermark `MemoryBelow`, `AccessBelow`, the caller-buffer and class-instance facts the loop
-tactics carry (`Contents`, `Filled`, `Writable`, `LiveObject` and the field predicates), each
-`read memory reference width alignment = .ok bytes` and each `form memory reference = .ok formed`. A
-buffer, read or formed reference is carried when the context shows its allocation below the homes'
-boundary, as `reference.allocation < boundary`; one that is not stays at the old memory. A supplied
-read or formed reference given as a term, such as `state.loaded`, is restated at `storedLocal` under
-the same condition (`MemoryBelow.read`, `MemoryBelow.form`).
+`LocalSnapshots memory slots known` (`CIL.Safety.LocalSnapshots`) remembers the values of locals
+of every numeric kind, vectors and int32s included; `known index` is the value a load of that
+local pushes, or `none`.
 
-The walk then prepares its step facts again at `storedLocal` from the facts it was given: the
-carried `ValidCall` forms the by-reference arguments and reads their fields there, and the
-restated reads supply their loads, so `.arg`, `.fieldAt` and memory loads of caller data continue
-in the same call. A word `ValidCall` loads after a store is stated at that store's memory, as
-`view.word storedLocal offset`; `ArgumentView.word_below localBelow view old` states it at the memory
-the store wrote to, and `ArgumentView.bytes_below` does the same for the whole range.
+| Need | Use |
+| --- | --- |
+| Step a `.local` load | `snapshots.load value specified`, a step fact the stepping tactics take |
+| Step a numeric store and get the updated snapshots | `LocalSnapshots.store` |
+| Keep snapshots across a call confined apart from the homes | `LocalSnapshots.after_confined` |
+| Keep snapshots across a write, or memory that keeps old allocations | `after_write_apart`, `after_below` |
+| The typed read of a remembered local whose slot is known | `snapshots.read_at specified slot` |
+| That read for a vector | `read_vector128`, `read_vector256`, `read_vector512` |
 
-After the walk, `preserved` from `have preserved := MemoryBelow.refl
-boundary memory` therefore states `MemoryBelow boundary memory final`, and a caller's own state
-predicate is rebuilt once from these facts and the last `localSnapshots`. Caller-specific
-wrappers still require their own transport proof.
+The vector reads are stated as `read memory home 16 1 = .ok (numberBytes bits.toNat 16)` and its
+wider forms. A snapshot that overlaps a callee's footprint is not kept: restate it from the
+callee's postcondition.
 
-A supplied store keeps its chosen memory. When the store's premises hold, the snapshots follow
-it to that memory (`LocalSnapshots.store_at`) and the store names `localSnapshots`,
-`localFormed`, `localBelow`, `localAccess` and `localWrite` about it, so the loads after it
-continue in the same call; otherwise its later loads need supplied step facts or snapshots about
-that memory. A snapshot load or store leaves a numeral program counter. Calls do not
-automatically preserve local snapshots: use the callee's effect and the existing snapshot frame
-rules. Pass named snapshot-map definitions or selected-index equations in `facts`. Lookup
-simplifies these equations and natural-number offsets without unfolding unrelated arithmetic
-definitions.
+Stores need each local's writable byte home:
 
-A snapshot overlapping the footprint needs a postcondition instead. The contract fixes no profile:
-the program does. `MethodContract.Holds.reprofile` (`CIL.Safety.ProfileContract`, with
-`OutcomeContract` and `HoldsCLR` forms, and `_statics` forms of the first two for a contract indexed
-by `programStaticDescriptors`) carries a contract proved for a program whose methods all use profile
-`p` to `CIL.reprofile program q` for any `q` that agrees with `p` on the program.
+| Evidence | Gives | Source |
+| --- | --- | --- |
+| `CompleteWritableHomes` | Every declared local has a typed writable home (`home_at`); no claim that it is readable or initialized | `unknown_frame_setup`, for numeric locals with unknown initial contents |
+| `NumericHomes` | The same through `NumericHomes.complete` | An initialized numeric frame |
+| `WritableHomes` | Writable homes that may skip slots, so `home_at` needs separate evidence that the requested slot has a byte home | The `writable` projection of either bundle |
+
+Pass the `writable` projection to the general snapshot lemmas.
+
+### Walk local stores and loads with snapshots
+
+The snapshot forms of the stepping tactics (`CIL.Safety.LocalSnapshotSteps`, part of `import CIL`)
+take numeric local stores and loads through a `LocalSnapshots` hypothesis and thread the updated
+snapshots through the walk, so a path with several stores needs no manually split segments. A load
+pushes the latest remembered value; a store replaces it.
+
+#### What to write
+
+`snapshots` proves `LocalSnapshots memory frame.locals known` at the goal's current memory. The
+fact list is required; write `[]` when it is empty.
+
+| Goal | Tactic | The walk ends |
+| --- | --- | --- |
+| A checked `run` equality, or `∃ after, run ... = .ok (after, result)` | `cil_checked_steps (snapshots := snapshots) [facts]` | At the first unsupported step or unproved premise |
+| `WP`, or an existential successful execution | `cil_contract_steps (snapshots := snapshots) [facts]` | At the first step that fails |
+| The same | `cil_contract_steps (snapshots := snapshots) [facts] until continuation` | When `continuation` closes the goal, or at the first step that fails |
+| The same | `cil_contract_steps (snapshots := snapshots) n [facts]` | After at most `n` steps |
+
+The two forms differ:
+
+| | Checked form | Contract form |
+| --- | --- | --- |
+| Local instructions taken from the snapshots | `.local`, `.setLocal` | `.local`, `.setLocal`, `.vectorLocal`, `.setVectorLocal` |
+| Other instructions | Ordinary checked steps and the return | Ordinary contract steps: supplied step facts, calls and returns |
+| Finds each store's home | From the premises in context | From a `CompleteWritableHomes` or `NumericHomes` hypothesis, also at an earlier memory or after leading slots |
+| Restates context facts after a store | `access` equations only | `access` equations and the [caller facts](#what-the-contract-form-carries) |
+| Prepares step facts again after a store | No | Yes |
+| Follows a supplied store | No | Yes |
+| When it takes no step | Fails with `Snapshot stepping took no step; justify the local premises` | Fails with `Snapshot contract stepping took no step`; the counted form succeeds without stepping |
+
+In `facts`, pass the step facts the path needs and, for loads, the named definitions of the
+snapshot map or equations selecting an index of it. Lookup simplifies these and natural-number
+offsets without unfolding unrelated arithmetic definitions. In the contract form a snapshot load
+or store leaves a numeral program counter.
+
+#### What must be in context
+
+For a store of `value` into local `index` at memory `memory`, the checked form proves these
+premises from hypotheses and `facts`:
+
+- `WritableHomes` for the frame's locals, also as a `CompleteWritableHomes` or `NumericHomes`
+  hypothesis;
+- `memory.WellFormed`;
+- the home lookup `frame.locals[index]? = some (.bytes kind home)`;
+- write access, `access memory home (localWidth kind) 1 true = .ok ()`.
+
+The contract form finds the home itself:
+
+| Homes in context | Further requirements |
+| --- | --- |
+| `CompleteWritableHomes` or `NumericHomes` at the current memory over the frame's locals | The current memory's `WellFormed`. The slot list may be opaque |
+| The same at an earlier memory `entered`, such as the frame's entry memory | `entered.WellFormed`; `AccessBelow watermark entered current` or `MemoryBelow watermark entered current`; `entered.nextIdentity ≤ watermark`; the current memory's `WellFormed`. The link carries each home's write access to the current memory (`CompleteWritableHomes.home_retained`). Without it the walk stops at the store |
+| Homes for the locals after leading slots without a byte home, as in `layout : frame.locals = .root value :: slots` with `NumericHomes entered boundary specs slots` | Each leading slot is a constructor other than `.bytes`, or has a hypothesis `∀ kind reference, slot ≠ .bytes kind reference` (`WritableHomes.after_skipped`). The home is found at the shifted index |
+| An explicit `WritableHomes` bundle | The individual slot and access facts, as for the checked form |
+
+A kind lookup that does not compute needs a supplied fact:
+
+| Case | Fact to supply |
+| --- | --- |
+| Opaque `specs` in `NumericHomes entered boundary specs slots` | `specs[4]? = some spec` (`numericKinds_getElem?`) or `(numericKinds specs)[4]? = some kind`, at the index among the homes: the local's index less the leading slots skipped |
+| A local index that is not a numeral, such as the `base + 3` of a block stated at a symbolic local base | `kinds[base + 3]? = some kind`, at exactly that index term. The homes must cover the frame's locals from the first slot; with leading slots skipped the index must be a numeral |
+
+#### What each store names
+
+Each store the walk generates, in either form, introduces:
+
+| Name | Statement |
+| --- | --- |
+| `storedLocal` | The memory the store produced |
+| `storingLocal` | The store's step equation |
+| `localSnapshots` | The snapshots at `storedLocal`; the remembered value is stated as the value a load pushes |
+| `localFormed` | `storedLocal.WellFormed` |
+| `localBelow` | `MemoryBelow boundary memory storedLocal` |
+| `localAccess` | `AccessBelow memory.nextIdentity memory storedLocal` |
+| `localWrite` | `write memory home bytes 1 = .ok storedLocal` |
+
+All seven take the suffix `_1`, `_2` once a name is taken, so the second store of a walk gives
+`storedLocal_1` and `localSnapshots_1`.
+
+A store whose step a supplied fact proves keeps the memory that fact chose. When the store's
+premises hold, the contract form's snapshots follow it to that memory (`LocalSnapshots.store_at`)
+and the store names `localSnapshots`, `localFormed`, `localBelow`, `localAccess` and `localWrite`
+about it, so the loads after it continue in the same call. Otherwise the loads after it need
+supplied step facts or snapshots about that memory.
+
+#### What the contract form carries
+
+After each store it generates or follows, the contract form restates the context's facts about
+the memory written to at the new memory, each under the name it already has:
+
+| Fact | Condition |
+| --- | --- |
+| `ValidCall`, `CompleteWritableHomes`, `AccessBelow` | None |
+| `MemoryBelow` | Same watermark as the store's |
+| `Contents`, `Filled`, `Writable`, `LiveObject` and the `Readable`, `Owned` and `Holds` predicates of word and reference fields | The context shows the allocation below the homes' boundary, as `reference.allocation < boundary` |
+| `read memory reference width alignment = .ok bytes`, `form memory reference = .ok formed` | The same |
+| A read or formed reference supplied in `facts` as a term, such as `state.loaded` | The same; it is restated at `storedLocal` (`MemoryBelow.read`, `MemoryBelow.form`) |
+
+A fact whose condition is not shown stays at the old memory.
+
+The walk then prepares its step facts again at `storedLocal`. The carried `ValidCall` forms the
+by-reference arguments and reads their fields there, and the restated reads supply their loads, so
+`.arg`, `.fieldAt` and memory loads of caller data continue in the same call. After a store, a
+word load through a `ValidCall` is stated at that store's memory, as `view.word storedLocal
+offset`. `ArgumentView.word_below localBelow view old` restates a word at the memory the store
+wrote to, and `ArgumentView.bytes_below` the whole range.
+
+#### Stop a walk
+
+| Form | Behaviour |
+| --- | --- |
+| `until continuation` | Tries `continuation` before each step, the initial goal included, and stops when it closes the goal |
+| Step count `n` | Takes at most `n` steps and stops without an error, like `cil_contract_steps n [facts]`. A call counts as one step |
+
+The count and `until` cannot be combined. To apply a helper lemma stated over `CodeAt body start
+segment`, count the steps up to the program counter where it applies, apply the lemma there, and
+continue with a second walk from the last `localSnapshots`.
+
+After a contract-form walk, a hypothesis introduced before it as `have preserved :=
+MemoryBelow.refl boundary memory` states `MemoryBelow boundary memory final`. Rebuild a caller's
+own state predicate once, from the restated facts and the last `localSnapshots`.
+
+#### What is not carried
+
+- Neither form infers authority, initialization, or preservation across calls and unrelated
+  writes.
+- A call does not preserve local snapshots automatically. Derive the snapshots after it from the
+  callee's effect with the snapshot frame lemmas, such as `LocalSnapshots.after_confined`.
+- The checked form restates only `access` equations after a store; byte-value facts stay at the
+  old memory.
+- A caller-specific wrapper predicate needs its own transport proof.
+
+### Carry a contract across profiles
+
+`MethodContract.Holds.reprofile` (`CIL.Safety.ProfileContract`) carries a contract proved for a
+program whose methods all use profile `p` to `CIL.reprofile program q`, for any `q` that agrees
+with `p` on the program. It has `OutcomeContract` and `HoldsCLR` forms, and `_statics` forms of
+the first two for a contract indexed by `programStaticDescriptors`.
 `CIL.Program.ProfileAgreement.of_flags` reduces agreement to the flags in `program.profileReads`,
-which `decide` checks for concrete profiles, so one proof covers every profile in a family. A
-separate per-profile extraction is covered once it is shown equal to the reprofiled program, by
-`rfl` when only the profiles differ.
+which `decide` checks for concrete profiles, so one proof covers every profile in a family. For a
+program with no profile reads, an equality `empty : program.profileReads = []` discharges its
+premise with `by simp [empty]`. A separate per-profile extraction is covered once it is shown
+equal to the reprofiled program, by `rfl` when only the profiles differ.
 
 `leancil export-contracts` accepts one manifest entry for such a family:
 
@@ -198,47 +287,57 @@ separate per-profile extraction is covered once it is shown equal to the reprofi
 }
 ```
 
-The surrounding manifest still provides `schema`, `assembly`, `proofRoot` and `interface`. Each
-artifact's `verification.json` selects the shared proof source under `proofRoot`. The family theorem
-has shape `∀ q : FeatureProfile, Predicate q → contract.Holds (reprofile Reference.program q) 0`,
-where the concrete predicate is decidable. Both method and outcome contracts are supported. The
-selected artifacts must include `referenceProfile`. Its extraction is checked against the same DLL,
-copied into a reserved generated module, and compiled separately from author macros. Its compiled
-artifacts are frozen before author code runs and checked again afterward. Every profile must prove
-by `rfl` that the named reference program equals this fixed program; a definition that changes with
-the current extraction cannot substitute a different body. The reference program must use
-`referenceProfile` uniformly. Each profile receives its own ordinary extraction check, layout check,
-theorem audit and kernel replay; generated proofs instantiate the predicate with `by decide +kernel`
-and establish the exact program equality with `rfl`. Because the family theorem already concludes a
-reprofiled program, no second transport or handwritten per-profile proof file is needed.
+The surrounding manifest provides `schema`, `assembly`, `proofRoot` and `interface`. Each
+artifact's `verification.json` selects the shared proof source under `proofRoot`. The family
+theorem has the shape
+`∀ q : FeatureProfile, Predicate q → contract.Holds (reprofile Reference.program q) 0`, where the
+concrete predicate is decidable. Method and outcome contracts are both supported. Because the
+family theorem already concludes a reprofiled program, no second transport or handwritten
+per-profile proof file is needed.
 
-This manifest form covers same-flag transport: a separate checked `ProfileAgreement.of_flags`
-obligation rejects any selected profile that disagrees on a reference program read flag, including
-intrinsic prerequisites, and reports the flag's name. It deliberately does not accept general
-families whose observed branches differ. Use profile templates for those proofs. Even an otherwise
-valid family is rejected when extraction pruning, method numbering, instructions or metadata make
-its program differ from the reprofiled reference. The exact equality and agreement statements are
-independently audited, so proof-source macros cannot replace these checks. Nothing is published
-unless all selected profiles pass. Published source bundles retain every selected extraction; full
-verification freshly extracts both the selected profile and its fixed reference from the pinned
-implementation DLL, then repeats the family checks before composing the caller theorem. Identical
-fixed-reference modules can reuse authenticated, source-bound compilation across profile workspaces.
-Their compiled artifacts are still fixed before producer proof code runs and checked afterward;
-every selected profile retains its extraction replay and exact audit.
+Requirements:
 
-Profiles must be distinct built-in names and match their artifacts. A family entry cannot also
-specify `artifact`. Family transport currently
-requires a closed extraction without imported-contract slots. Explicit type-initialization premises
-remain bound to each exported profile; static-value assumptions remain unsupported. Full
-source-bundle verification rejects initialization premises, as for single-profile exports.
+- The selected artifacts include `referenceProfile`, and the reference program uses it uniformly.
+- Profiles are distinct built-in names and match their artifacts. A family entry cannot also
+  specify `artifact`.
+- Every profile proves by `rfl` that the named reference program equals the fixed reference
+  program; a definition that changes with the current extraction cannot substitute another body.
+- Every selected profile agrees with the reference on each profile flag the reference program
+  reads, intrinsic prerequisites included. A separate checked `ProfileAgreement.of_flags`
+  obligation rejects a profile that disagrees and reports the flag's name.
+- The extraction is closed: family transport does not support imported-contract slots.
+- Explicit type-initialization premises remain bound to each exported profile. Static-value
+  assumptions are not supported. Full source-bundle verification rejects initialization premises,
+  as for single-profile exports.
 
-For a program with no profile reads, use the same `ProfileAgreement.of_flags` rule: an equality
-`empty : program.profileReads = []` discharges its premise with `by simp [empty]`.
+What the export checks:
 
-A contract may also type its result: `MethodContract Input Output` adds `results : Output → List
-Value`, and `post` speaks of the `Output`. `Returns` requires the returned values to equal `results
-out` for some `out` satisfying `post`. Without `Output`, `results` is the identity and `post` sees
-the values:
+- The reference extraction is checked against the same DLL, copied into a reserved generated
+  module and compiled separately from author macros. Its compiled artifacts are frozen before
+  author code runs and checked again afterward.
+- Each profile receives its own extraction check, layout check, theorem audit and kernel replay.
+  Generated proofs instantiate the predicate with `by decide +kernel` and establish the exact
+  program equality with `rfl`.
+- The equality and agreement statements are independently audited, so proof-source macros cannot
+  replace these checks.
+- Nothing is published unless all selected profiles pass. Published source bundles retain every
+  selected extraction.
+- Full verification freshly extracts both the selected profile and its fixed reference from the
+  pinned implementation DLL, then repeats the family checks before composing the caller theorem.
+  Identical fixed-reference modules can reuse authenticated, source-bound compilation across
+  profile workspaces; their compiled artifacts are fixed before producer proof code runs and
+  checked afterward, and every selected profile retains its extraction replay and exact audit.
+
+This manifest form covers same-flag transport only. It does not accept families whose observed
+branches differ; use [profile templates](PROOFS-BINDING.md#generated-profile-templates) for those.
+A family is also rejected when extraction pruning, method numbering, instructions or metadata make
+a profile's program differ from the reprofiled reference.
+
+### Type the result
+
+`MethodContract Input Output` adds `results : Output → List Value`, and `post` speaks of the
+`Output`. `Returns` requires the returned values to equal `results out` for some `out` satisfying
+`post`. Without `Output`, `results` is the identity and `post` sees the values:
 
 ```lean
 import CIL
@@ -253,22 +352,34 @@ def mixContract : MethodContract (CIL.W64 × CIL.W64) CIL.W64 where
   post input _ _ v := v = input.1 * 3 + input.2
 ```
 
-In the caller, `cil_contract_steps [facts]` steps an existential-fuel goal through ordinary
-instructions and calls with supplied evidence. Mark a proved `MethodContract.Holds` theorem
-`@[cil_contract]`, or include its proof in `facts`, to apply it at a matching callee. The theorem's
-program and method binding must match the actual call; required binding premises are checked. Input
-fields, each component of a tuple input included, are inferred from the encoded arguments, and an
-input that is one word or one reference is the argument as the caller wrote it. The
-precondition is proved from facts when possible,
-otherwise it remains a goal before the continuation. Contracts merely present in the local context
-are not automatically selected.
+### Step a caller through its callees
 
-Each composed call leaves three names in the context: the callee's final memory `called`, its
-typed output `output` and its [`CallResult`](../CIL/Safety/MethodContract.lean) `call`, all three
-with the suffix `_1`, `_2` once a name is taken. `CallResult` is a structure, so a proof selects
-`call.invoked` (the invocation), `call.framed` (`Confined` to the footprint) and `call.post` (the
-postcondition of `output`) by field. `cil_contract_steps [facts] with memory result evidence`
-gives the first call it composes those three names instead, and fails when it composes no call:
+`cil_contract_steps [facts]` steps an existential-fuel goal through ordinary instructions and
+calls. At a call it applies:
+
+- a proved `MethodContract.Holds` theorem marked `@[cil_contract]`, or one whose proof is in
+  `facts`. Contracts merely present in the local context are not selected. The theorem's program
+  and method binding must match the actual call; required binding premises are checked;
+- a supplied successful child invocation, with fixed or existential fuel, or an
+  `InvocationCertificate`, without unfolding the helper body.
+
+Input fields, each component of a tuple input included, are inferred from the encoded arguments;
+an input that is one word or one reference is the argument as the caller wrote it. The
+precondition is proved from `facts` when possible; otherwise it remains a goal before the
+continuation. Without matching evidence the tactic stops at the call.
+
+Each composed call leaves three names in the context, each with the suffix `_1`, `_2` once a name
+is taken:
+
+| Name | Holds |
+| --- | --- |
+| `called` | The callee's final memory |
+| `output` | Its typed output |
+| `call` | Its [`CallResult`](../CIL/Safety/MethodContract.lean): `call.invoked` (the invocation), `call.framed` (`Confined` to the footprint) and `call.post` (the postcondition of `output`) |
+
+Select the fields by name; do not destructure a `CallResult` positionally.
+`cil_contract_steps [facts] with memory result evidence` gives the first call it composes those
+three names instead, and fails when it composes no call:
 
 ```lean excerpt Examples/Proofs/DepositBoth.lean
 cil_contract_steps [holds, depositContract, firstOwned]
@@ -277,107 +388,190 @@ obtain ⟨rfl, firstHeld⟩ := firstCall.post
 have firstFramed := firstCall.framed
 ```
 
-A contract proof builds the conclusion of `Holds` from the same parts by name:
-`MethodContract.Holds.intro final output invoked framed post`, where `invoked` may leave its fuel
-to `cil_checked_steps`. A proof that steps to its return with `cil_contract_steps` is left the
-footprint and `Returns` of the values returned, which `MethodContract.Holds.returns framed post`
-closes by name; the returned values name the output, and `(output := ())` gives it for a method
-that returns nothing.
-`holds.result input permitted` gives a caller the final memory, output and
-`CallResult` of a proved contract outside the stepping tactics.
+The stepping tactics state the goal with the `args`, `results`, `pre`, `footprint` and `post` of
+each defined contract unfolded, at entry and in each call's continuation, so the stack holds the
+encoded output. A fact read from `call.post` keeps the contract folded until
+`dsimp only [mixContract] at` it.
 
-A supplied successful child invocation, with fixed or existential fuel, or an
-`InvocationCertificate`, also composes without unfolding the helper body. Fixed-fuel
-`cil_checked_steps` can reuse a matching invocation or certificate at its actual child budget; a
-proof at a larger budget does not justify a smaller one. Contract and existential-child composition
-use `cil_contract_steps`, whose fuel remains existential.
+Variants:
 
-Without matching evidence, the contract stepper stops at the call. `cil_contract_call holds input at
-site [facts]` explicitly applies the contract at a `bind_call` site (or the fetched call without
-`at`), leaving the precondition and then a continuation over the callee's final memory, typed
-output and `CallResult`. The precondition is tagged `precondition.<callee>`, the other goals these
-tactics leave as their [obligation tags](PROOFS-STEPPING.md#obligation-tags) say, and the
-continuation keeps the call goal's tag, so `case precondition =>` selects the precondition.
-Introduce the continuation's three binders and read the call's facts by field, as after
-`cil_contract_steps`. The stepping tactics state the goal with the `args`, `results`, `pre`,
-`footprint` and `post` of each defined contract unfolded, at entry and in each call's continuation,
-so the stack holds the encoded output; a fact read from `call.post` keeps the contract folded
-until `dsimp only [mixContract] at` it. Use `cil_contract_steps n
-[facts]` to take at most `n` instruction steps and leave the remaining goal for a continuation. With
-`n = 0`, no instruction is executed. `cil_contract_steps [facts] until continuation` tries the
-continuation before each step, including at the initial goal. It stops when the continuation closes
-the goal or no instruction can be stepped. `cil_formed_call` (`run_call_of_contract_formed`) also
-takes the caller memory's `WellFormed` and hands the continuation, after the `CallResult`, the
-call's `FrameInvariants` from the caller's memory to the callee's final memory, so contracts need
-not restate well-formedness, static-world preservation or class catalog agreement;
-`cil_formed_outcome_call` does the same for `cil_outcome_call`.
+| Form | Behaviour |
+| --- | --- |
+| `cil_contract_steps n [facts]` | Takes at most `n` instruction steps and leaves the remaining goal. With `n = 0` no instruction is executed |
+| `cil_contract_steps [facts] until continuation` | Tries `continuation` before each step, the initial goal included; stops when it closes the goal or no instruction can be stepped |
+| `cil_contract_steps (snapshots := snapshots) [facts]` | Also takes numeric local stores and loads ([snapshot walks](#walk-local-stores-and-loads-with-snapshots)) |
 
-`StaticWorldPreserved program before after` names static-world preservation, and
-`ClassesPreserved program before after` says objects that agree with a catalog keep agreeing when
-the program's object sites do (see [class instances](SOUNDNESS-RUNTIME.md#class-instances)). Use
-`left.trans right` to compose either across calls. `FrameInvariants program before after` is a
-structure holding `after.WellFormed` with both: its fields `formed`, `staticWorld` and `classes`
-give each fact, and `left.trans right` composes all three. `call_frame_invariants` and
-`construct_frame_invariants` return it, and a formed continuation takes it whole. The two
-preservation names are abbreviations, so a function proves either directly.
+Fixed-fuel `cil_checked_steps` can reuse a matching invocation or certificate at its actual child
+budget; a proof at a larger budget does not justify a smaller one. Contract and existential-child
+composition use `cil_contract_steps`, whose fuel remains existential.
 
-For a helper specified by an arbitrary `WP` postcondition, use `WP.call_framed` with its
-checked call instruction and the caller's well-formed memory. Its continuation receives the
-helper postcondition, `FrameInvariants` and `AllocationExtension`. Select `formed`, `staticWorld`
-and `classes` from the frame evidence, and `next` and `lookup` from the allocation evidence.
-These facts come from the successful invocation and need not be repeated in the helper's
-contract. Confinement, access permissions and content snapshots still require their own proved
-effects; a cell-only footprint does not imply `Confined`.
+To prove a contract:
 
-Store facts may name their values in source form, such as `write m r (numberBytes (a + b + c).toNat
-8) 1 = .ok m'`. Each checked step simplifies the goal with the default simp set, its interpreter
-definitions and the facts. Fact preparation also adds each local fact normalised by the default simp
-set and the supplied non-local facts, so both sides meet in the same form. Supply any definition the
-computed value is stated through, such as a carry or borrow word, among the facts. The original
-hypotheses stay in the proof context and in the simp set; a fact that still differs stops the steps
-at its instruction, with the hypothesis shown as stated. Hand-written stepping can use the same
-simplification, with an optional simp configuration, as `cil_fact_simp (config := ...) [definitions]
-[facts]`. `cil_checked_steps`, `cil_contract_steps`, and `cil_raise_steps` prepare local facts once
-at entry. All later steps reuse these copies, including nested checked calls. The original
-hypotheses stay in the local context.
+- `MethodContract.Holds.intro final output invoked framed post` builds the conclusion of `Holds`
+  by name; `invoked` may leave its fuel to `cil_checked_steps`.
+- A proof that steps to its return with `cil_contract_steps` is left the footprint and `Returns`
+  of the values returned, which `MethodContract.Holds.returns framed post` closes by name. The
+  returned values name the output; `(output := ())` gives it for a method that returns nothing.
+- `holds.result input permitted` gives a caller the final memory, output and `CallResult` of a
+  proved contract outside the stepping tactics.
 
-When a local fact starts with `∀ index : Fin n`, preparation instantiates every index for a concrete
-`n` up to 64. Larger or symbolic domains keep their original quantified fact without eager
-enumeration. Any later binders, such as a stack suffix `rest`, stay quantified. This lets one
-four-limb field-load fact rewrite offsets 0, 8, 16, and 24. Preparation and stepping also normalize
-Fin constructor indices and the projection of the literal `3`. For example, a fact `words 1 = 0`
-applies to a value read as `words ⟨1, proof⟩`.
+### Apply a contract at one call
 
-Enable `trace.CIL.factNormalize` to see one event per supplied local proposition when it is
-prepared; the count measures normalization frequency, not elapsed time.
+These tactics apply a contract at the fetched call, or with `at site` at a `bind_call` site. Each
+leaves the listed goals and then a continuation. For `cil_contract_call` the continuation is over
+the callee's final memory, typed output and `CallResult`: introduce the three binders and read
+the call's facts by field. The other tactics add the binders listed.
 
-To refute a contract with a concrete run, `invoke_ok_unique` ties a computed run to the contract's
-existential one, and `invoke_ok_observation_unique` does so for one observation of it, such as the
-returned values, so the refutation never compares memories. The regressions for contract
-composition, store facts and refutation are described in [proof
-validation](VALIDATION-PROOFS.md#proof-automation).
+| Tactic | Goals before the continuation | Continuation also receives |
+| --- | --- | --- |
+| `cil_contract_call holds input at site [facts]` | The precondition | |
+| `cil_formed_call holds input at site [facts]` (`run_call_of_contract_formed`) | The precondition and the caller memory's `WellFormed` | The call's `FrameInvariants` from the caller's memory to the callee's final memory |
+| `cil_certified_call certified input [facts]` (`run_call_of_certified`) | The precondition | The callee's `InvocationCertificate` |
+| `cil_contract_certified_call holds input [facts]` (`run_call_of_contract_certified`) | The precondition, the caller memory's `WellFormed` and its static world | The callee's fuel and `InvocationCertificate` |
 
-A contract whose precondition implies well-formed memory and a valid static world can also keep the
-`InvocationCertificate` of each call: `MethodContract.Holds.certified` turns `Holds` into
-`MethodContract.Certified`, whose clause adds the certificate with its visited-state and
-returned-state invariants; `Certified.holds` recovers `Holds`, and `Certified.weaken` keeps the
-certificate through a `Refines`. `InvocationCertificate.of_invoke` certifies any successful `invoke`
-from those two premises, and `InvocationCertificate.of_run` certifies a run of the frame that
-checked arguments enter. At a call site, `run_call_of_certified` (from a `Certified` callee) and
-`run_call_of_contract_certified` (from `Holds`, a well-formed caller memory and a valid static
-world) hand the continuation the callee's certificate, which `run_call_of_contract` drops. At a
-fetched call, `cil_certified_call certified input [facts]` leaves the precondition and then the
-continuation, and `cil_contract_certified_call holds input [facts]` leaves the precondition, the
-caller memory's `WellFormed`, its static world and then the continuation. Both accept `at site` like
-`cil_contract_call`.
+The precondition is tagged `precondition.<callee>`, so `case precondition =>` selects it; the
+other goals carry their [obligation tags](PROOFS-STEPPING.md#obligation-tags), and the
+continuation keeps the call goal's tag. With `cil_formed_call`, a contract need not restate
+well-formedness, static-world preservation or class catalog agreement;
+`cil_formed_outcome_call` does the same for `cil_outcome_call`. `run_call_of_contract` is the
+lemma that drops the certificate.
 
-`ValidCall memory inputs outputs` states that memory is well formed, every input buffer is readable
-and every output buffer writable. `CIL.Safety.CallingTransport` carries it to later memory so a
-caller can pass the same buffers again: `ValidCall.after_write` after any checked write,
-`after_enterFrame` after frame entry, `after_below` across memory that keeps old allocations' access
-(`AccessBelow`, or `MemoryBelow.accessBelow`), and `after_confined` across a call whose footprint
-the inputs lie `Apart` from. `mono` drops buffers, and `input_bound` / `output_bound` give the
-identity bound those relations take.
+`FrameInvariants program before after` is a structure holding `after.WellFormed`,
+`StaticWorldPreserved program before after` and `ClassesPreserved program before after`. Its
+fields `formed`, `staticWorld` and `classes` give each fact, and `left.trans right` composes all
+three across calls, or either preservation alone. `ClassesPreserved` says objects that agree with
+a catalog keep agreeing when the program's object sites do (see [class
+instances](SOUNDNESS-RUNTIME.md#class-instances)). `call_frame_invariants` and
+`construct_frame_invariants` return the structure, and a formed continuation takes it whole. The
+two preservation names are abbreviations, so a function proves either directly.
+
+For a helper specified by an arbitrary `WP` postcondition, use `WP.call_framed` with its checked
+call instruction and the caller's well-formed memory. Its continuation receives the helper
+postcondition, `FrameInvariants` and `AllocationExtension`; select `next` and `lookup` from the
+allocation evidence. These facts come from the successful invocation and need not be repeated in
+the helper's contract. Confinement, access permissions and content snapshots require their own
+proved effects; a cell-only footprint does not imply `Confined`.
+
+`WP.load_call_store` composes a placed `loadCallStoreCode` segment with any proved scalar helper
+contract. Both input words are loaded before the call and the output write, so the argument ranges
+may overlap. The continuation receives the helper's `CallResult` and the actual checked write, and
+retains the helper's full postcondition and footprint without unfolding the helper body.
+
+### Keep certificates through a contract
+
+A contract whose precondition implies well-formed memory and a valid static world can keep the
+`InvocationCertificate` of each call:
+
+| Name | Use |
+| --- | --- |
+| `MethodContract.Holds.certified` | Turns `Holds` into `MethodContract.Certified`, whose clause adds the certificate with its visited-state and returned-state invariants |
+| `Certified.holds` | Recovers `Holds` |
+| `Certified.weaken` | Keeps the certificate through a `Refines` |
+| `InvocationCertificate.of_invoke` | Certifies any successful `invoke` from those two premises |
+| `InvocationCertificate.of_run` | Certifies a run of the frame that checked arguments enter |
+
+### Pass byref arguments with ValidCall
+
+`ValidCall memory inputs outputs` states that memory is well formed, every input buffer is
+readable and every output buffer writable. Read its facts by field: `call.wellFormed`,
+`call.readable` and `call.writable`. Inputs may overlap each other and the outputs arbitrarily.
+Outputs need write access but need not be initialized.
+
+With `CIL.Safety.CallingFields`, the stepping tactics derive formed references and eight-byte
+field reads from this evidence, including fields indexed by a finite bound of at most 64.
+`input_snapshot` records current bytes; `output_slice` supplies write access to an in-range
+slice.
+
+`CIL.Safety.CallingTransport` carries a `ValidCall` to later memory, so a caller can pass the same
+buffers again:
+
+| After | Lemma |
+| --- | --- |
+| Any checked write | `ValidCall.after_write` |
+| Frame entry | `after_enterFrame` |
+| Memory that keeps old allocations' access (`AccessBelow`, or `MemoryBelow.accessBelow`) | `after_below` |
+| A call whose footprint the inputs lie `Apart` from | `after_confined` |
+
+`mono` drops buffers, and `input_bound` and `output_bound` give the identity bound those
+relations take. `after_write` preserves call validity, but not old input contents when the write
+overlaps them: read all needed input fields before an overlapping write, or prove the required
+contents separately.
+
+For a word store through a named output, `cil_contract_steps` first uses supplied checked
+operation facts. If none establishes the store, it derives a successful write from the current
+`ValidCall` and the output bounds. This covers `store64`, eight-byte `storeScalar` and eight-byte
+`setFieldAt`. The continuation names:
+
+| Name | Holds |
+| --- | --- |
+| `stored` | The new memory |
+| `addressed`, `written` | The address and byte write equations |
+| `readback` | The initialized bytes |
+| `storedCall` | The retained call requirements |
+
+Names take numeric suffixes when they are taken. Later argument loads use facts about the new
+memory. Earlier input snapshots remain facts about their original memory; no separation or
+initial output contents are inferred. `ValidCall.store_word` exposes the same write and readback
+evidence for explicit composition.
+
+Use `MethodContract` for a byref wrapper, with `ValidCall memory inputs outputs` in `pre`. The
+result encoding describes the returned values; `post` independently states their meaning and the
+memory guarantees, and `footprint` bounds the permitted changes.
+
+| Wrapper result | `results` encoding | Calling requirements |
+| --- | --- | --- |
+| Read-only scalar | `[.scalar (.i64 word)]` | Readable input views, no output views; empty footprint |
+| Reporting flag | `[.scalar (.i32 (if flag then 1 else 0))]` | Readable inputs and any writable output views |
+| Aggregate value | `[.scalar (.aggregate bytes)]` | Readable inputs and any writable output views |
+
+A wrapper that allocates a private output, calls a helper and loads that output before returning
+is not an exact-result [forwarder](#inherit-a-callees-contract-in-a-forwarder): write permission
+alone proves neither initialized bytes nor their value. Compose its checked call, local load and
+return from the preservation and readback evidence the helper's contract guarantees.
+
+### Supply facts to the stepping tactics
+
+Store facts may name their values in source form, such as
+`write m r (numberBytes (a + b + c).toNat 8) 1 = .ok m'`. `cil_checked_steps`,
+`cil_contract_steps` and `cil_raise_steps` prepare the local facts once at entry and reuse the
+copies at every later step, nested checked calls included:
+
+- Each checked step simplifies the goal with the default simp set, its interpreter definitions
+  and the facts.
+- Preparation adds each local fact normalised by the default simp set and the supplied non-local
+  facts, so both sides meet in the same form. Supply any definition the computed value is stated
+  through, such as a carry or borrow word, among the facts.
+- The original hypotheses stay in the proof context and in the simp set. A fact that differs
+  after normalisation stops the steps at its instruction, with the hypothesis shown as stated.
+- A local fact that starts with `∀ index : Fin n` is instantiated at every index for a concrete
+  `n` up to 64, so one four-limb field-load fact rewrites offsets 0, 8, 16 and 24. Larger or
+  symbolic domains keep the quantified fact without enumeration. Later binders, such as a stack
+  suffix `rest`, stay quantified.
+- Preparation and stepping normalise `Fin` constructor indices and the projection of the literal
+  `3`, so a fact `words 1 = 0` applies to a value read as `words ⟨1, proof⟩`.
+
+Hand-written stepping can use the same simplification, with an optional simp configuration, as
+`cil_fact_simp (config := ...) [definitions] [facts]`. Enable `trace.CIL.factNormalize` to see one
+event per supplied local proposition when it is prepared; the count measures how often
+normalisation runs, not elapsed time.
+
+### Read missing-fact diagnostics
+
+Missing-fact diagnostics distinguish `authority`, `contentSnapshot` and `helperPrecondition`.
+Their suggestions identify the unresolved checked operation and its memory, local or region;
+[failure records](PROOFS-STEPPING.md#see-what-the-tactics-did) retain the obligation tag and
+source position. A missing proof is not a proved violation. Access evidence alone does not
+identify initialized contents: after an overlapping write use its updated snapshot, or prove the
+disjointness needed to preserve an old snapshot. A snapshot may retain unknown bytes; a
+successful snapshot copy does not establish initialization.
+
+### Refute a contract
+
+| Lemma | Use |
+| --- | --- |
+| `invoke_ok_unique` | Ties a computed run to the contract's existential one |
+| `invoke_ok_observation_unique` | The same for one observation of the run, such as the returned values, so the refutation never compares memories |
+| `MethodContract.not_holds_of_fault` | Refutes a contract from a checked located fault on an input meeting its precondition. It uses fuel monotonicity to rule out success at every budget; the witness must be a semantic fault, not fuel exhaustion |
 
 ## Frame class instances
 
@@ -404,12 +598,13 @@ element are relied on.
 
 The stepping tactics read `readable.facts`, the one fact a load of a scalar field steps with, from
 a `Readable`, `Owned` or `Holds` hypothesis in the context, as they read `live.formed` from a
-`LiveObject` (see [composing instructions](PROOFS-STEPPING.md#compose-instructions)). A reference field's
-load takes `readable.facts held targetLive` and a signed narrow field's `readable.signedFacts`,
-which pushes the value sign-extended, and `owned.store value` gives the write, its `Confined`
-footprint and the `Holds` after it; for a reference field, `owned.store live` stores a live object and
-`owned.store_formed formed` any reference that forms, null included. A field holding a class outside
-the model is never read through: `readable.load_forms forms` steps its load from `Forms`.
+`LiveObject` (see [composing instructions](PROOFS-STEPPING.md#compose-instructions)). A reference
+field's load takes `readable.facts held targetLive` and a signed narrow field's
+`readable.signedFacts`, which pushes the value sign-extended, and `owned.store value` gives the
+write, its `Confined` footprint and the `Holds` after it; for a reference field, `owned.store
+live` stores a live object and `owned.store_formed formed` any reference that forms, null
+included. A field holding a class outside the model is never read through: `readable.load_forms
+forms` steps its load from `Forms`.
 `frame` keeps a field and its value across a call confined
 to a footprint apart from it, `after_confined` and `after_below` keep each predicate across a
 confined call and across memory that keeps old allocations, and `Owned.across` decides aliasing:
@@ -461,8 +656,9 @@ contract to any program that renames its fresh allocations.
 
 The predicates are built on `CIL.Safety.ObjectFraming`, which states the same facts about the
 references `objectFieldAddress` locates and which a proof about a field no extraction names can
-use directly. It carries object facts across a call confined to a footprint: `formObject_of_confined` and `objectFieldAddress_of_confined` keep a formed reference
-and a located field, given well-formed memory before the call. `objectField_apart_of_ne` makes
+use directly. It carries object facts across a call confined to a footprint:
+`formObject_of_confined` and `objectFieldAddress_of_confined` keep a formed reference and a
+located field, given well-formed memory before the call. `objectField_apart_of_ne` makes
 fields of two different objects `Apart`, so `Confined.objectField_read_of_ne` keeps a field of
 one object across a call confined to a field of another, given that the read field's allocation
 is older than the call. Equal references locate the same field (`objectFieldAddress_same`), so
@@ -514,7 +710,8 @@ the argument's null test directly. An integer guard reduces through `zeroGuardOu
 `comparisonGuardOutcome`; pass those with `CIL.guardOperand`, `CIL.ZeroGuard.throws` or
 `CIL.ComparisonGuard.throws` and the case hypothesis that decides the test, and bind the
 parameter-name literal as for `ldstr`
-([GuardCount](../Examples/Proofs/GuardCount.lean), [GuardIndex](../Examples/Proofs/GuardIndex.lean)).
+([GuardCount](../Examples/Proofs/GuardCount.lean),
+[GuardIndex](../Examples/Proofs/GuardIndex.lean)).
 
 A method that constructs an instance steps its `newobj` with `allocateObject_ok`, given
 well-formed memory and a `Memory.heapBudget` covering the instance, or `allocateObject_insufficient`
@@ -644,8 +841,9 @@ obligations receive `ConstructStorage memory updated this size`: the storage rea
 zero bytes, is writable at full width, is allocated at `memory.nextIdentity`, and the step kept all
 older memory. The continuation also gets the constructor's invocation, the final memory's
 `WellFormed`, static-world preservation, catalog agreement, `Confined` and `post`. No invocation,
-step or `loadLocal` equation is stated. `ConstructStorage.confined` moves `Confined` back to the memory before `newobj`;
-`Confined.forget_fresh` then drops the storage, which the caller's frame owns and expires on return.
+step or `loadLocal` equation is stated. `ConstructStorage.confined` moves `Confined` back to the
+memory before `newobj`; `Confined.forget_fresh` then drops the storage, which the caller's frame
+owns and expires on return.
 
 Because `newobj` zeroes the storage, a constructor that leaves a field unassigned still has a
 full-width readback: the field reads back as zero, not as an uninitialized read. A contract may take
@@ -689,9 +887,9 @@ normal-only contract, and `invoke_unique` ties a computed fault to the contract'
 alone.
 
 Import `CIL.Safety.RuntimeExceptions` to name modeled arithmetic failures with `RaisesCLR` and
-`OutcomeContract.HoldsCLR`. This contract mode uses the existing arguments, preconditions,
-normal-return clause, footprint and `raises` field. Its fixed `ExecutionFault.clrException` mapping
-is:
+`OutcomeContract.HoldsCLR`. This contract mode uses the contract's arguments, preconditions,
+normal-return clause, footprint and `raises` field unchanged. Its fixed
+`ExecutionFault.clrException` mapping is:
 
 | Fault | Named CLR exception |
 | --- | --- |
@@ -704,15 +902,15 @@ Checked add, subtract, multiply and integer conversions report overflow through 
 Integer division and remainder by zero report divide-by-zero. The admitted runtime model reports
 overflow for signed minimum divided by negative one, including its remainder instruction. Invalid
 arithmetic operands, invalid bounds, memory faults, unsupported instructions, invalid state and fuel
-exhaustion have no name in this mode. `Raises` and `.thrown` keep their existing meaning.
-`OutcomeContract.Holds.clr` lifts an existing thrown-outcome proof.
+exhaustion have no name in this mode. The mode does not change `Raises` or `.thrown`.
+`OutcomeContract.Holds.clr` lifts a thrown-outcome proof (`Holds`) to `HoldsCLR`.
 
-For a wide-integer `Divide` or `Mod` contract, select `some "System.DivideByZeroException"` in `raises`
-when its divisor is zero and prove `HoldsCLR`. Both an explicit throw and the mapped arithmetic
-failure can establish this exact outcome. The proof must still reach that fault through the actual
-extracted program. `run_fault_raisesCLR`, `run_next_raisesCLR` and `raisesCLR_of_run` compose that
-execution; `run_call_raisesCLR_of_contract` propagates a callee contract's named outcome.
-`RaisesCLR.not_of_invoke` refutes a wrong name from a settled checked invocation.
+For a wide-integer `Divide` or `Mod` contract, select `some "System.DivideByZeroException"` in
+`raises` when its divisor is zero and prove `HoldsCLR`. Both an explicit throw and the mapped
+arithmetic failure can establish this exact outcome. The proof must reach that fault through the
+actual extracted program. `run_fault_raisesCLR`, `run_next_raisesCLR` and `raisesCLR_of_run`
+compose that execution; `run_call_raisesCLR_of_contract` propagates a callee contract's named
+outcome. `RaisesCLR.not_of_invoke` refutes a wrong name from a settled checked invocation.
 
 ## Derive public contracts
 
@@ -792,7 +990,8 @@ be the forwarder's at those indices, each kept by its load's narrowing (`LoadsUn
 forwarder argument must reach the callee or be valid under the precondition, since the forwarder's
 own invocation checks them all; the call must expose no unspecified vector bits; and a narrowed `ret
 (some kind)` must not change the callee's result (`ReturnsUnchanged`), which holds for a boolean.
-Use `Holds.weaken` afterwards to export a different contract.
+Aggregate results retain their complete byte list. Use `Holds.weaken` afterwards to export a
+different contract.
 
 `MethodContract.Holds.forward_out` covers `ldarg*; ldloca 0; call k; ret`, which passes the address
 of a fresh numeric local as a last out argument and drops it. References, spans, arrays, method
@@ -810,7 +1009,7 @@ its initializer (`LocalHolds`); the `inner` footprint must name fresh storage or
 `outer.footprint`; the two contracts must encode results alike, as scalars that survive the local's
 expiry and that a narrowed `ret` keeps; and `outer.post` must follow from `inner.post` once the
 frame has expired. The footprint is checked by the lemma (`Confined.across_frame`). The home's
-alignment is not surfaced, so a callee whose precondition requires it cannot be composed yet.
+alignment is not surfaced, so a callee whose precondition requires it cannot be composed.
 
 ## Compose through imported contracts
 
@@ -845,8 +1044,9 @@ through `Extracted.importSignatures` and defines `addTo` as `Extracted.program.l
 `addTo.slot`, `addTo.signature` and `addTo.unlinked` (`Extracted.program[addTo]? = none`) checked by
 `rfl`; `bind_call` then names its call site. The certificate accepts a call there only when
 `Extracted.imports` has a slot with the site's identity and arity (see [SOUNDNESS](SOUNDNESS.md));
-the extractor does not resolve imports yet, so `Extracted.imports` and `Extracted.importSignatures`
-are empty.
+an extraction made without `--import` has no slots, so its `Extracted.imports` and
+`Extracted.importSignatures` are empty. The [interface guide](CONTRACT-INTERFACES.md) describes
+extracting against an imported interface.
 
 The identity checks that bind a slot to a certified library implementation are not part of this
 rule; relocating a library into the slot is described next.
@@ -878,9 +1078,7 @@ Here `closed` and `proved` are each library's `Closed` and `Holds` facts. `Impor
 one `Relocatable` property per slot, so libraries may export contracts of different types. Each
 library exports only its index-0 method. Static identities are not renamed: two linked libraries
 that use the same identity for different bytes fault `invalidState` at the second static access, so
-a collision can only make a proof fail, never prove a false statement. The regressions for
-imported and linked contracts are described in
-[proof validation](VALIDATION-PROOFS.md#proof-automation).
+a collision can only make a proof fail, never prove a false statement.
 
 ## Reuse framework contracts
 

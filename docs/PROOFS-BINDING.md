@@ -1,5 +1,11 @@
 # Binding and transporting compiled proofs
 
+How to tie a proof to an extraction and keep it tied when the extraction changes: the `bind_*`
+commands that name entries, cutpoints, methods, call sites and loops, `cil_body` and `cil_embed`
+for body equalities, and the transports across dead code, dead locals and hardware profiles. Read
+it when a proof names a method index, a pc or a frame layout, or must hold for several
+extractions of one method.
+
 ## Generate loop entry and cutpoint scaffolding
 
 Import `CIL.Safety.LoopScaffold` to derive a concrete checked entry and a uniquely identified
@@ -112,10 +118,10 @@ stores without restating its validity. Every other local must allocate nothing: 
 without a checked initializer, a vector argument home or a numeric parameter home is rejected.
 [SpanSum](../Examples/Proofs/SpanSum.lean), [FillWords](../Examples/Proofs/FillWords.lean),
 [Struct](../Examples/Proofs/Struct.lean), [Countdown](../Examples/Proofs/Countdown.lean),
-[CountCalls](../Examples/Proofs/CountCalls.lean) and [CountUntil](../Examples/Proofs/CountUntil.lean)
-enter this way, the last three from `Memory.empty` with `Memory.empty_wellFormed`. The body may
-be a `bind_method` name: setup unfolds each definition that only names another constant, down to
-the extracted method.
+[CountCalls](../Examples/Proofs/CountCalls.lean) and
+[CountUntil](../Examples/Proofs/CountUntil.lean) enter this way, the last three from
+`Memory.empty` with `Memory.empty_wellFormed`. The body may be a `bind_method` name: setup
+unfolds each definition that only names another constant, down to the extracted method.
 
 `bind_entry` gives `entry.frame` and, for the `simplifying` form, `entry.result` and
 `entry.memory` the `cil_loop_unfold` simp attribute in the current scope, and `bind_cutpoint` gives
@@ -150,7 +156,7 @@ span loop, with no separate header definition.
 
 [Countdown](../Examples/Proofs/Countdown.lean) uses these commands without literal frame layouts,
 allocation identifiers or instruction offsets. The author still supplies the invariant, measure,
-specification and preservation proof using the existing checked loop tactics. Only requesting proofs
+specification and preservation proof using the checked loop tactics. Only requesting proofs
 elaborate the scaffold; ordinary extraction certificates do not grow.
 
 `CIL.Safety.LoopVC` supplies bounded verification-condition generation for explicit loop paths.
@@ -385,8 +391,7 @@ An expected body can be a shared template with local flag and callee parameters.
 and callee indices. The tactic rewrites only the supplied facts before alignment and unfolds local
 definitions; it does not infer flag equalities from the extracted code. Relevant parameters that
 remain open are rejected. The rewrite proof and the complete instruction map are kernel checked,
-including branch targets and callee indices. The no-argument form still handles closed bodies
-directly.
+including branch targets and callee indices. The no-argument form handles closed bodies.
 
 One template and one open theorem about it thus bind to every valid profile, including shifted
 branch targets, without restating the body for each profile. An irrelevant open argument may be
@@ -462,11 +467,10 @@ create or change any allocation.
 
 For numeric or interspersed dead locals, keep the extracted declarations and original local indices
 in the expected body and use ordinary `MethodEmbeds`. Unreachable code can still be omitted or
-marked `.unsupported`; declaring an unused numeric local continues to allocate its home. This
+marked `.unsupported`; a declared numeric local allocates its home whether or not it is used. This
 preserves the identities of later parent and callee allocations and allows exact-memory contract
-transport. The four-limb multiply fixture follows this route: its scalar body retains all 22 word64 and
-four vector256 homes used across its architecture-specific paths. This route retains exact final
-memory and remains useful when a postcondition names fresh references.
+transport. Use this route when a postcondition names fresh references, since it retains exact
+final memory.
 
 To omit numeric or interspersed declarations from the proof body, import
 `CIL.Safety.AllocationRefinement` explicitly; `import CIL` leaves this optional proof library
@@ -475,7 +479,7 @@ them. `LocalIndexMap.keep`, `.skip` and `.nil` describe the retained declaration
 `LocalDeclarations` checks matching retained kinds and initializers and requires each inserted
 initializer to satisfy `InitializerFits` for its kind. `LocalDeclarations.skip` takes the kind,
 initializer and this proof before the remaining declarations. It admits valid scalar, vector and
-aggregate values, and null managed slots; unmodeled values remain supported. Private initialized
+aggregate values, null managed slots and unmodeled values. Private initialized
 homes are written outside the entire mapped allocation image, preserving caller bytes and
 permissions. `MethodRenaming` checks the target code's relocated local operands; method indices,
 call targets, profiles, return metadata and static sites stay exact. `ProgramRenaming` supplies this
@@ -486,11 +490,7 @@ This entry route requires `OrdinaryFrame` on both sides: `opaqueVectorLocals`, `
 `parameterHomes` are empty. Retained initializers stay exact, including initialized numeric helpers;
 their successful setup is derived from the actual source execution. Local widths must fit the native
 range; span element widths must be positive and less than `2^64`. These are explicit, checked
-metadata conditions, not assumed target frame-entry success. The audited four-limb Multiply body across
-all fourteen profiles has 22 word64 and four vector256 unmodeled locals. Its reachable helper
-method4 has an initialized word64 zero local in every profile. The full extracted programs have no
-opaque, vector-argument or parameter homes; the relation preserves that helper initializer rather
-than treating it as unmodeled.
+metadata conditions, not assumed target frame-entry success.
 
 Starting from the same well-formed memory with bounded static bindings,
 `ProgramRenaming.invoke_scalars` transfers a successful checked invocation with the same fuel and
@@ -506,10 +506,11 @@ constructors, static allocation and `stackAlloc`; frame ownership and expiry rem
 
 `MethodContract.Holds.of_allocationRenaming` transfers the original complete contract, including its
 precondition and footprint. Supply proofs that the precondition establishes well-formed memory,
-bounded static bindings and bounded string literals (`Memory.LiteralsBounded`), that every output its postcondition admits encodes as scalars, and that
-its postcondition is preserved by `BytesBelow` and `SlotsAgreeBelow` on the initial caller prefix,
-given that the target's final memory has allocated past that prefix. The adapter derives
-confinement from the actual paired executions; it does not replace the contract with a weaker one.
+bounded static bindings and bounded string literals (`Memory.LiteralsBounded`), that every output
+its postcondition admits encodes as scalars, and that its postcondition is preserved by
+`BytesBelow` and `SlotsAgreeBelow` on the initial caller prefix, given that the target's final
+memory has allocated past that prefix. The adapter derives confinement from the actual paired
+executions; it does not replace the contract with a weaker one.
 A contract whose precondition names only fields and objects does not establish memory readiness;
 `MethodContract.fromReadyMemory` adds it to the precondition, and `Holds.fromReadyMemory` proves
 the result from the contract's own proof, so the transfer states the contract for every initial
@@ -517,7 +518,7 @@ memory a caller can hold ([LinkedNodes](../Examples/Proofs/LinkedNodes.lean)).
 
 This is not exact-memory transport: extra homes change counters and fresh references. Arbitrary
 reference results and postconditions naming fresh allocations need a statement modulo the allocation
-relation. The existing `MethodEmbedsDeadLocals` tactic continues to handle its exact-memory subset.
+relation. For the exact-memory subset, use `cil_embed` and `MethodEmbedsDeadLocals` as above.
 
 ### Generated profile templates
 
@@ -552,8 +553,7 @@ different instruction counts, or different instructions under identical observed
 Static descriptors are retained when their complete metadata agrees across the selected profiles,
 including field identities, bytes, initializer indices and arguments. Different static metadata is
 rejected rather than remapped. Imported callee slots and the model's `newVector256` constructor form
-are currently unsupported in template generation.
-
+are not supported in template generation.
 
 ### Instruction equations for parametric bodies
 

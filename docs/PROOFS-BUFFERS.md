@@ -1,5 +1,10 @@
 # Buffer content proofs
 
+The predicates and lemmas for what memory holds: span and array contents, runs of integer
+elements, write authority, struct fields, and the `LoopFrame` that carries a loop's frame facts.
+Read it when a contract or loop invariant speaks about buffer contents, or when a fact about
+caller memory must hold in a later memory.
+
 ## Describe span contents
 
 `CIL.Safety.SpanContents` is the vocabulary for what a span holds. `SpanContents memory view width
@@ -135,8 +140,7 @@ extends the prefix by one element write without reading the room. `Filled.fill` 
 `Contents.transform` prove fill and in-place map loops of any length (`writeElements`,
 `transformElements`) as sequence properties confined to the buffer; `add_element` steps `Unsafe.Add`
 to an element, and the [buffer fill proof](../Examples/Proofs/FillWords.lean) carries `Filled` as
-the invariant of a compiled loop. The [proof regressions](VALIDATION-PROOFS.md#proof-automation)
-list the neighbouring-byte, sibling-slice and rejected claims these lemmas are checked against.
+the invariant of a compiled loop.
 
 `SpanView.slice_reference` identifies the allocation-relative start of a successful addressed
 slice; `SpanContents.drop` combines it with `Contents.drop`. Slice validity alone does not assert
@@ -158,13 +162,13 @@ Aggregate and integer-vector spans use the same `SpanView`, indexed references, 
 loads/stores, byte snapshots and copy rules. Supply the validated element width rather than assuming
 one of the primitive widths. `Clear` initializes the byte extent. Aggregate/vector `Fill` repeats a
 captured snapshot with its initialization flags through `SpanView.fillSnapshot`;
-`spanFillSnapshot_effect` exposes its checked snapshot-write effect. Scalar `Fill` retains the
-existing sequence-content lemmas. Vector loads and stores preserve initialization masks, while span
+`spanFillSnapshot_effect` exposes its checked snapshot-write effect. Scalar `Fill` uses the
+sequence-content lemmas above. Vector loads and stores preserve initialization masks, while span
 copies require readable, initialized source bytes. View creation and reinterpretation alone
 establish neither initialization nor read/write authority.
 
 Single-reference and pointer span constructors, empty getters and in-place local resets use the
-same views; the [coverage reference](VALIDATION-COVERAGE.md) lists the runtime comparisons for each.
+same views.
 `memoryInstruction_emptySpan` proves that every supported element width and capability produces
 a null, zero-length view without changing memory. `SpanConstructor.empty` uses that same operation
 when `initializeSpanLocal` replaces a local's previous view.
@@ -184,7 +188,7 @@ allocated. `ArrayView.null_valid` requires a valid element width, and
 
 Closed generic-owner helpers, including nested owners and mixed owner/method arguments, use the
 ordinary specialized managed-call proof interface. Closed sequential generic structs
-use the existing checked layout, field and construction rules after substituting the owner
+use the checked layout, field and construction rules after substituting the owner
 arguments. Prove calls against the specialized closed body; no separate generic runtime or
 heap representation is introduced. Constrained interface calls on these closed owners, with
 implicit or explicit mutating implementations, use the same direct-call proof interface after the
@@ -200,8 +204,7 @@ obligations still apply.
 Managed indirect calls admit aggregate and integer-vector values and references through the ordinary
 checked argument/return storage, for normal and tail transfers alike; unspecified lanes are
 rejected. Pointer overloads of `Unsafe` block helpers use the same block operations and proof rules
-as their managed-reference overloads. The [coverage reference](VALIDATION-COVERAGE.md) lists the
-suites that check each of these interfaces.
+as their managed-reference overloads.
 
 ## View struct fields
 
@@ -224,8 +227,7 @@ and the write equation; a store also returns the decoded field values, which the
 load takes. Every other local's snapshot is kept. A frame from `bind_entry ... allocating`
 supplies its `LoopFrame`, whose `homes` and `snapshots` start the chain, and
 `MemoryBelow.frame_round_trip` composes the per-step facts on return.
-[Struct](../Examples/Proofs/Struct.lean) shows the frame-entry and remembered-local forms; the
-[proof regressions](VALIDATION-PROOFS.md#proof-automation) list the rejected overlapping layouts.
+[Struct](../Examples/Proofs/Struct.lean) shows the frame-entry and remembered-local forms.
 
 ## Carry frame facts through a loop
 
@@ -265,7 +267,7 @@ to one home and its checked readback, replaces that home's snapshot, and preserv
 homes using their allocation separation. `LoopFrame.after_helper_write` also permits writes
 within the caller footprint; retaining other snapshots then requires separation from the
 complete helper footprint. These rules retain caller confinement, well-formedness and writable
-homes. Existing `leave` and `leave_kept` rules still discharge frame exit from actual allocation.
+homes. `leave` and `leave_kept` discharge frame exit from actual allocation, as for any frame.
 
 `WP.local_call` composes a fetched call through a proved `MethodContract`, derives the updated
 frame, and supplies the continuation with named `CallResult` and `LoopFrame` evidence. Its
@@ -280,8 +282,7 @@ offset and its compare. The [buffer fill proof](../Examples/Proofs/FillWords.lea
 an invariant of only `Filled` and `k <= n`. [Countdown](../Examples/Proofs/Countdown.lean) needs
 no invariant beyond the frame, and [CountCalls](../Examples/Proofs/CountCalls.lean) and
 [CountUntil](../Examples/Proofs/CountUntil.lean) keep two locals across a helper call, the first
-through `cil_loop_call` and the second with `after_confined`. The [proof regressions](VALIDATION-PROOFS.md#proof-automation) list the
-rejected writes, including one through the second home of a generated two-local frame.
+through `cil_loop_call` and the second with `after_confined`.
 
 ### Caller facts in frame memory
 
@@ -393,8 +394,8 @@ store helper's contract, as `Stamp`'s in CopyUntilZero.
 `CIL.Safety.LoopFrameFields`, which `CIL.Safety.LoopScaffold` imports, remembers a struct local
 in a `LoopFrame` as `.aggregate (layout.encode fields)`: `AggregateLayout.encode` writes each
 field's value at its offset in zeroed bytes, so a state names the fields rather than the bytes.
-`AggregateLayout.zeros layout` is the value each field loads from zeroed bytes: `.i32 0` for a 1-, 2-
-or 4-byte field, `.i64 0` for a word, the vector zero for a 16- or 32-byte field and
+`AggregateLayout.zeros layout` is the value each field loads from zeroed bytes: `.i32 0` for a 1-,
+2- or 4-byte field, `.i64 0` for a word, the vector zero for a 16- or 32-byte field and
 `.aggregate (List.replicate width 0)` for a nested struct. `encode_zeros` proves the encoded
 zeros are the struct's zero bytes. `LoopFrame.zero_aggregate frame index layout fields` steps
 `initobj` through the home's address to a frame remembering `fields`; its `valid`, `sized` and
@@ -411,8 +412,8 @@ it by value and `load_narrow_field` through the address.
 
 The loop tactics gather the field reads and the home's `form` from each frame in scope, and
 `cil_loop_recurse`, `cil_loop_advance` and `cil_loop_finish` take the zeroing, the stores and
-numeric local stores themselves, so a proof names neither. A zeroed struct's layout is one its loop head remembers.
-A field reads back as the value stored, such as `.i32 (count + 1)`, with no `toNat` round trip
-through bytes, and a narrow field as its `narrowLoad`, which the tactics compute for a literal.
-[TallyTwice](../Examples/Proofs/TallyTwice.lean) counts and sums in a
+numeric local stores themselves, so a proof names neither. A zeroed struct's layout is one its
+loop head remembers. A field reads back as the value stored, such as `.i32 (count + 1)`, with no
+`toNat` round trip through bytes, and a narrow field as its `narrowLoad`, which the tactics
+compute for a literal. [TallyTwice](../Examples/Proofs/TallyTwice.lean) counts and sums in a
 struct across a helper call this way, naming no frame lemma, memory or step.
