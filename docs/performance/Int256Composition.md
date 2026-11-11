@@ -8,7 +8,7 @@ caller-memory guarantees. UInt256 arithmetic remains in the consumer. The implem
 migration are in [LeanCIL #554](https://github.com/NethermindEth/LeanCIL/pull/554) and the existing
 [int256 #141](https://github.com/NethermindEth/int256/pull/141).
 
-## Consumer source and proof costs
+## Whole-path proof measurements
 
 The baseline is consumer `bc1cc19f78f3b5faed2c50a0e75f6ed3036025ad`; the measured migration is
 `8fbb1fba00efe56a9e0c5c0cde2ed98cf0d8ed75`. Both sides use Lean 4.35.0 and the same compiled framework implementation
@@ -18,23 +18,23 @@ It collects errors from every command and nested snapshot, so a failed proof fol
 successful command cannot produce a report. Earlier failed experiments are excluded.
 
 The counts include the shared consumer definitions added by the migration. Module names are
-relative to `UInt256.Methods`, except `UInt256.Safety.InputLocalSafety`. Heartbeats measure work,
+relative to `UInt256/Methods`, except `UInt256/Safety/InputLocalSafety.lean`. Heartbeats measure work,
 not elapsed time. Compiled bytes cover each module's `.olean` parts.
 
 | Module | Source lines | Elaboration heartbeats | Kernel heartbeats | Compiled bytes |
 | --- | ---: | ---: | ---: | ---: |
-| `Add.ARMSmallPrefix` | 308 → 31 | 59,074,670 → 1,119,553 | 2,369,133 → 1,423 | 2,570,632 → 227,848 |
-| `Add.ARMSmallState` | 470 → 173 | 8,878,354 → 3,992,340 | 794,184 → 421,546 | 1,021,400 → 426,016 |
-| `Add.ARMSmallContract` | 256 → 282 | 7,661,932 → 52,214,239 | 292,914 → 1,189,092 | 516,360 → 900,000 |
-| `Add.PortableSmall` | 625 → 565 | 83,635,328 → 60,639,834 | 4,631,499 → 3,864,408 | 2,787,072 → 1,504,616 |
-| `UInt256.Safety.InputLocalSafety` | 49 → 35 | 1,295,165 → 1,312,202 | 48,570 → 41,130 | 109,072 → 87,440 |
-| `Multiply.FullSafety` | 952 → 673 | 44,438,054 → 70,890,731 | 7,433,627 → 7,160,617 | 1,609,952 → 1,632,904 |
-| `AddSubtract.RippleState` | 107 → 171 | 1,973,783 → 4,636,534 | 205,337 → 401,066 | 257,928 → 411,376 |
-| `AddSubtract.Vector128Ripple` | 244 → 245 | 22,962,693 → 24,246,760 | 1,134,457 → 1,020,435 | 1,065,248 → 775,344 |
-| `Add.SSERepair` | 271 → 174 | 4,989,138 → 2,287,394 | 352,452 → 59,910 | 530,928 → 207,616 |
-| `Subtract.Vector128Repair` | 275 → 177 | 4,922,934 → 2,259,917 | 351,525 → 60,357 | 537,824 → 214,480 |
-| `Multiply.FullSafetyAvx2Top` | 227 → 106 | 22,146,207 → 40,562,085 | 1,991,658 → 1,433,220 | 1,333,872 → 511,304 |
-| `Multiply.FullSafetyAvx512Top` | 48 → 45 | 11,005,142 → 16,478,130 | 506,303 → 448,426 | 475,400 → 262,128 |
+| `Add/ARMSmallPrefix.lean` | 308 → 31 | 59,074,670 → 1,119,553 | 2,369,133 → 1,423 | 2,570,632 → 227,848 |
+| `Add/ARMSmallState.lean` | 470 → 173 | 8,878,354 → 3,992,340 | 794,184 → 421,546 | 1,021,400 → 426,016 |
+| `Add/ARMSmallContract.lean` | 256 → 282 | 7,661,932 → 52,214,239 | 292,914 → 1,189,092 | 516,360 → 900,000 |
+| `Add/PortableSmall.lean` | 625 → 565 | 83,635,328 → 60,639,834 | 4,631,499 → 3,864,408 | 2,787,072 → 1,504,616 |
+| `UInt256/Safety/InputLocalSafety.lean` | 49 → 35 | 1,295,165 → 1,312,202 | 48,570 → 41,130 | 109,072 → 87,440 |
+| `Multiply/FullSafety.lean` | 952 → 673 | 44,438,054 → 70,890,731 | 7,433,627 → 7,160,617 | 1,609,952 → 1,632,904 |
+| `AddSubtract/RippleState.lean` | 107 → 171 | 1,973,783 → 4,636,534 | 205,337 → 401,066 | 257,928 → 411,376 |
+| `AddSubtract/Vector128Ripple.lean` | 244 → 245 | 22,962,693 → 24,246,760 | 1,134,457 → 1,020,435 | 1,065,248 → 775,344 |
+| `Add/SSERepair.lean` | 271 → 174 | 4,989,138 → 2,287,394 | 352,452 → 59,910 | 530,928 → 207,616 |
+| `Subtract/Vector128Repair.lean` | 275 → 177 | 4,922,934 → 2,259,917 | 351,525 → 60,357 | 537,824 → 214,480 |
+| `Multiply/FullSafetyAvx2Top.lean` | 227 → 106 | 22,146,207 → 40,562,085 | 1,991,658 → 1,433,220 | 1,333,872 → 511,304 |
+| `Multiply/FullSafetyAvx512Top.lean` | 48 → 45 | 11,005,142 → 16,478,130 | 506,303 → 448,426 | 475,400 → 262,128 |
 
 Across the twelve modules, maintained source falls **3,832 → 2,677 lines (−1,155; −30.1%)**.
 Elaboration is **272,983,400 → 280,639,719 (+2.80%)**; kernel work is
@@ -68,12 +68,57 @@ prefix proofs; the four-file ARM total falls in both counters. The declaration c
 15 regressions, not a blanket pass. The final Multiply call fact abstracts its four word arguments
 before instantiation, avoiding repeated checking of expanded arithmetic expressions.
 
+## Broader consumer reuse
+
+Across the complete migration, maintained consumer Lean falls **43,299 → 39,450 lines**
+(**−3,849; −8.9%**), including supporting proofs, handwritten bindings and unchanged Lean tests.
+Supporting proofs alone fall **40,392 → 37,896**. This total includes the twelve-module migration
+and all subsequent changes described below; it does not count ignored generated output as deleted
+proof work.
+
+The subsequent migration replaces 18 handwritten method-body definitions with specializations
+of extracted, profile-parametric templates: **1,135 fewer maintained Lean lines**, or **1,097
+fewer lines** after generator and lifecycle changes. One invocation of the existing template
+emitter shares 28 managed methods across 20 root/profile extractions. Universal definitional
+equality checks cover every flag and callee parameter, including the regression variants;
+20 affected modules and the actual Add/Subtract vector proof chains elaborate successfully.
+
+The manifest now generates **142 bindings**, including 79 previously handwritten bindings
+whose 1,353 lines are reproduced exactly. Registry validation rejects missing, duplicate or
+altered metadata. The same bindings and templates are materialized before source identity,
+snapshot creation and compiled-library auditing. All 188 registrations and mutation selections
+remain unchanged. Generated output still carries the same proof and extraction obligations.
+
+Shared carry/borrow initialization removes another **53 lines** across five modules
+(1,022 → 969), including all added adapters. Elaboration falls 30,166,998 → 27,951,875,
+kernel work 2,581,166 → 2,424,223 and compiled bytes 2,661,808 → 2,563,864.
+All 83 paired rows pass the existing cost policy without waivers. Charging the upstream
+12-line writable-home projection once leaves 41 fewer lines and 89,528 fewer compiled bytes.
+The 22 retained theorem headers are unchanged; the shared initializer accepts writable homes
+while retaining its complete state conclusion.
+
+AVX2 subtraction and its small scalar helper remove **15 private stepping bridges**, using
+existing shared equations and checked stepping. The focused measurements below isolate those
+changes from generated-body specialization. All 20 public theorem statements are unchanged.
+
+| Module | Elaboration heartbeats | Kernel heartbeats | Compiled bytes |
+| --- | ---: | ---: | ---: |
+| `Subtract/Vector256Steps.lean` | 48,322,067 → 36,927,196 | 5,829,129 → 5,481,612 | 2,443,232 → 1,436,080 |
+| `Subtract/Vector256Blended.lean` | 64,724,501 → 52,122,749 | 6,318,214 → 4,652,168 | 5,046,104 → 1,911,600 |
+| `Subtract/SmallHelper.lean` | 47,265,520 → 35,239,798 | 2,656,281 → 2,703,742 | 1,253,616 → 1,390,728 |
+
+The small helper shrinks 498 → 446 lines, but its compiled size rises 10.9% and its input-prefix
+declaration costs 19.4% more elaboration. These are explicit tradeoffs, not blanket comparator
+passes. The earlier twelve-module results are a separate snapshot; overlapping initializer
+modules must not be counted twice.
+
 ## Shared cost and source accounting
 
 Snapshot stepping adds **202 net production Lean lines** across `LocalSnapshotSteps`,
 `SymbolicExecution` and `MethodContract`. It extends existing checked stepping and WP rules;
 there is no second interpreter, wrapper engine or arithmetic model. The complete PR also includes
-the earlier 27-line `WP.call_framed` rule: **229 production Lean lines**, counted once.
+the earlier 27-line `WP.call_framed` rule, the 12-line writable-home projection and a 10-line
+constructive byte-decoding repair: **251 production Lean lines**, counted once.
 
 The three complete upstream modules are measured before and after the snapshot implementation:
 
@@ -90,27 +135,32 @@ Including these three complete upstream modules once, combined elaboration is
 and compiled size **28,222,832 → 24,034,712 bytes (−14.84%)**. The 27-line framed-call rule is
 already in this cost baseline; its source cost is included in the complete PR accounting below.
 
-This table charges the complete upstream PR against only the new consumer migration, excluding
-the earlier 52-line saving. Upstream changes are relative to main `062d43b5`; consumer changes
-are relative to `bc1cc19`. Shared additions and tests are included, not just selected deletions.
+The following accounting charges the complete upstream PR against the consumer migration,
+excluding the earlier 52-line saving. Upstream changes are relative to main `062d43b5`;
+consumer changes are relative to `bc1cc19`. Shared additions, tests, generators and documentation
+are included, not just selected deletions.
 
 | Source category | Net lines |
 | --- | ---: |
-| Maintained consumer Lean | −1,155 |
-| Shared CIL proof/automation | +229 |
-| C# verifier | +9 |
-| Lean measurement tooling | +6 |
-| Lean regression fixtures | +220 |
-| C# regression harnesses | +168 |
-| Documentation, both repositories | +192 |
-| Generated source and configuration | 0 |
-| **All categories** | **-331** |
+| Maintained consumer Lean | −3,849 |
+| Consumer generators/tooling | +452 |
+| Consumer tests, configuration and documentation | +49 |
+| Shared CIL proof/automation | +251 |
+| Upstream measurement/verifier tooling | +36 |
+| Upstream tests | +407 |
+| Upstream documentation | +271 |
+| **Maintained source, both repositories** | **−2,383** |
 
-Generated source changes by zero. The 188 method/profile registrations, independent arithmetic,
-extraction bindings and mutation selections are unchanged. The earlier 52-line consumer reduction
-is already in `bc1cc19` and is not counted again in the twelve-module comparison. Foundation PR
-#546 added 5,998 net lines across production, tests, documentation and tooling; that is an earlier
-interval, not source eliminated by this migration.
+Generated bodies grow **642 → 2,279 lines**; generated bindings grow **1,354 → 2,707 lines**.
+Their combined increase is **2,990 lines**. The additional bindings exactly reproduce removed
+handwritten source; their generation reduces maintenance, not emitted source. Removing the
+642 previously tracked generated lines is likewise excluded from the maintained-source saving.
+Including all generated output gives **+607 net lines** across both repositories.
+This distinguishes substantially less authored proof code from total generated source size.
+
+The earlier 52-line reduction is already in `bc1cc19` and is not counted again. Foundation PR
+#546 added 5,998 net lines across production, tests, documentation and tooling; that is an
+earlier interval, not source eliminated by this migration.
 
 ## Issue evidence
 
@@ -126,18 +176,45 @@ interval, not source eliminated by this migration.
 
 ## Validation and reproduction
 
-The exact upstream CIL tree passes all 544 library build jobs. The 396 paired rows for unchanged
+The upstream CIL tree at `674b3e53` passes all 544 library build jobs. The 396 paired rows for unchanged
 shared tactic tests pass without cost waivers. The real-Lake generation regression, incomplete
 closure rejection, and six fresh/restored integrity-mutation and sibling-isolation controls pass.
 Changed C# files pass final IDE0005 analyzer builds. The integrity guard is unchanged.
 
-The final workflow linked from [PR #141](https://github.com/NethermindEth/int256/pull/141) is the
-certificate evidence; focused elaboration is not a compiled-method certificate. Baseline
-[run 42933021229](https://github.com/NethermindEth/int256/actions/runs/42933021229) passes the same
-188 registrations, audit and eleven regression jobs. It records 3,545.08 seconds summed extraction
-preparation, 940.39 seconds proof building, 1,726.22 seconds joint replay and 1,027.47 seconds shared
-support preparation. These inclusive stages may overlap. Separate hosted runs are observational
-comparisons, not controlled wall-time benchmarks; do not add the stages as workflow elapsed time.
+Upstream [run 42999679732](https://github.com/NethermindEth/LeanCIL/actions/runs/42999679732)
+identified four failures: repeated fixed-reference compilation, a memory stepping fixture whose
+byte-decoding dependency acquired `Classical.choice`, one compiler-generated closure missing from
+the admission baseline, and abbreviated consumer filenames parsed as upstream Lean names.
+The fixes retain the integrity check and strict axiom guard. The exact fixed-reference assertion,
+unchanged memory fixture, refreshed admission baseline and documentation-name check pass locally.
+Full-suite results belong to the subsequent CI run, not these focused reproductions.
+
+Constructive byte decoding changes no statement or result form. Its isolated module costs rise:
+420,092 → 903,411 elaboration heartbeats, 16,164 → 102,847 kernel heartbeats, 910 → 3,377 proof
+objects and 39,208 → 81,400 compiled bytes. The 10 added source lines and checking cost remove
+the unwanted axiom dependency; they are not reported as a cost improvement.
+
+Consumer [run 42998596133](https://github.com/NethermindEth/int256/actions/runs/42998596133)
+at `3b1df363` passes all 188 certificates and the supporting-library audit. This certifies the
+initial whole-path migration, not the subsequent generator and proof-reuse changes. The current
+workflow linked from [PR #141](https://github.com/NethermindEth/int256/pull/141) must check those
+changes against the same workload; focused elaboration is not a compiled-method certificate.
+
+The following observations compare baseline consumer `bc1cc19` / framework `d187e600`
+([run 42933021229](https://github.com/NethermindEth/int256/actions/runs/42933021229)) with
+consumer `3b1df363` / framework `f997a7c6`. Both certify the identical ordered 188 entries in
+eight batches. All 16 jobs use runner 2.338.2 and Ubuntu 24.04 image 20261101.360.1; hosted
+machines, regions and load differ. Neither run finds reusable main-branch support.
+
+| Stage | Samples | Sum seconds, before → after | Median seconds, before → after |
+| --- | ---: | ---: | ---: |
+| Shared support build | 8 | 1,027.47 → 921.44 | 122.28 → 106.60 |
+| Extraction certificate check | 188 | 3,545.08 → 3,131.09 | 11.568 → 10.963 |
+| Fresh proof/dependency build | 188 | 940.39 → 883.44 | 3.195 → 3.299 |
+| Joint kernel replay | 188 | 1,726.22 → 1,595.41 | 6.185 → 6.273 |
+
+These inclusive stages may overlap. Their sums are not workflow elapsed time, and separate
+hosted runs do not establish a causal speedup. Build and replay medians increase slightly.
 
 To reproduce the source comparison, check out both consumer revisions, compile the framework
 once, and run `scripts/ProofCost.lean` for each listed module in dependency order, with that
@@ -150,3 +227,7 @@ Full command reports and source hashes are retained locally under consumer
 `verification/artifacts/composition-final/paired-cost/`; upstream reports are under
 `artifacts/int256/arm-small-pilot/` and `artifacts/snapshot-wp/`. These measurement artifacts are
 separate from the public certificate trace archives linked on the pull requests.
+Incremental initializer, vector and small-helper reports are under consumer
+`verification/artifacts/ripple-initial-reuse/`, `verification/artifacts/vector256-reuse/` and
+`verification/artifacts/small-helper-reuse/`; generator equality checks are under
+`verification/artifacts/template-reuse/`. Their source intervals are recorded separately.
