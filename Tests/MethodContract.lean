@@ -403,4 +403,24 @@ theorem ordered_widening_returns (signed scalarFirst reversed : Bool)
 
 #print axioms ordered_widening_returns
 
+/-- An opaque helper's result-only contract still supplies checked lifetime and frame facts.
+    No cell footprint or confinement assertion is needed or inferred. -/
+theorem framed_opaque_call {program : CIL.Program} {memory : Memory} (value : CIL.W32)
+    (formed : memory.WellFormed)
+    (found : program[0]? = some
+      { locals := [], returnsValue := true, code := [.call 1 0, .ret] })
+    (helper : WP (Execution (fun fuel => invoke program fuel 1 [] memory))
+      (fun result => result.2 = [.scalar (.i32 value)])) :
+    WP (Execution (fun fuel => run program fuel 0 0 [] ⟨0, [], [], [], 0⟩ [] memory))
+      (fun result => FrameInvariants program memory result.1 ∧
+        AllocationExtension memory result.1 ∧ result.2 = [.scalar (.i32 value)]) := by
+  apply WP.call_framed found rfl (by cil_checked_step []) formed helper
+  intro final values result preserved allocations
+  change values = [.scalar (.i32 value)] at result
+  subst values
+  cil_contract_steps [found]
+  exact ⟨preserved, allocations, rfl⟩
+
+#print axioms framed_opaque_call
+
 end Tests.MethodContract

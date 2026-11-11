@@ -246,6 +246,14 @@ give each fact, and `left.trans right` composes all three. `call_frame_invariant
 `construct_frame_invariants` return it, and a formed continuation takes it whole. The two
 preservation names are abbreviations, so a function proves either directly.
 
+For a helper specified by an arbitrary `WP` postcondition, use `WP.call_framed` with its
+checked call instruction and the caller's well-formed memory. Its continuation receives the
+helper postcondition, `FrameInvariants` and `AllocationExtension`. Select `formed`, `staticWorld`
+and `classes` from the frame evidence, and `next` and `lookup` from the allocation evidence.
+These facts come from the successful invocation and need not be repeated in the helper's
+contract. Confinement, access permissions and content snapshots still require their own proved
+effects; a cell-only footprint does not imply `Confined`.
+
 Store facts may name their values in source form, such as `write m r (numberBytes (a + b + c).toNat
 8) 1 = .ok m'`. Each checked step simplifies the goal with the default simp set, its interpreter
 definitions and the facts. Fact preparation also adds each local fact normalised by the default simp

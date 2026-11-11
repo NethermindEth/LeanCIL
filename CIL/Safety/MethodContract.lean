@@ -496,6 +496,33 @@ theorem call_frame_invariants {program : CIL.Program} {method pc callee fuel : N
     classes := fun _ sites consistent => invoke_preserves_classes sites
       (programStep_preserves_classes sites consistent called) invoked }
 
+/-- Compose an arbitrary checked helper postcondition with the frame and allocation evidence
+    proved by its invocation. Cell preservation alone does not establish confinement. -/
+theorem WP.call_framed {program : CIL.Program} {method pc callee : Nat}
+    {body : CIL.Method} {operation : CIL.Op} {args stack arguments rest : List Value}
+    {frame : Frame} {memory updated : Memory}
+    {helperPost post : (Memory × List Value) → Prop}
+    (found : program[method]? = some body) (fetched : body.code[pc]? = some operation)
+    (stepped : Safety.step body operation pc args frame stack memory =
+      .ok (.call callee arguments rest updated))
+    (formed : memory.WellFormed)
+    (helper : WP (Execution (fun fuel => invoke program fuel callee arguments updated))
+      helperPost)
+    (suffix : ∀ final values, helperPost (final, values) →
+      FrameInvariants program memory final → AllocationExtension updated final →
+      WP (Execution (fun fuel =>
+        run program fuel method (pc + 1) args frame (values ++ rest) final)) post) :
+    WP (Execution (fun fuel => run program fuel method pc args frame stack memory)) post := by
+  obtain ⟨fuel, ⟨final, values⟩, invoked, satisfied⟩ := helper
+  apply WP.call found fetched stepped ⟨fuel, (final, values), invoked, rfl⟩
+  intro after returned same
+  cases same
+  exact suffix final values satisfied
+    (call_frame_invariants found fetched stepped formed invoked)
+    (invoke_preserves_caller_allocations _ _ _ _ _ _ _ invoked)
+
+#print axioms WP.call_framed
+
 /-- The `FrameInvariants` a call composed through a contract keeps, from its `CallResult` and
     the step that made the call. -/
 theorem CallResult.frame_invariants {Input Output : Type} {c : MethodContract Input Output}
