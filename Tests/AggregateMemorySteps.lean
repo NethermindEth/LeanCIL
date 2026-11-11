@@ -29,6 +29,16 @@ theorem readonly_load {memory : Memory} {source : Reference} {width : Nat}
   cil_checked_step [loaded]
 #print axioms readonly_load
 
+/-- A read stated at a local kind's width, as a remembered aggregate local gives it, supplies
+    the load at the numeral width the opcode carries. -/
+theorem kind_width_load {memory : Memory} {source : Reference} {bytes : List (BitVec 8)}
+    (loaded : read memory source (localWidth (.aggregate 32)) 1 = .ok bytes)
+    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
+    step body (.loadAggregate 32) pc args frame (.reference (.address source) :: rest)
+      memory = .ok (.next (pc + 1) (.scalar (.aggregate bytes) :: rest) frame memory) := by
+  cil_checked_step [loaded]
+#print axioms kind_width_load
+
 /-- An unknown byte loads as a snapshot without becoming initialized. -/
 theorem unknown_load {memory : Memory} {source : Reference}
     (loaded : readSnapshot memory source 1 1 = .ok [(0, false)])

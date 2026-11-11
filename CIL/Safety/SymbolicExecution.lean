@@ -1121,7 +1121,18 @@ def prepareOperationFacts (facts : Array Term) : TacticM (Array Term) := withMai
           let some (_, operation, _) := conclusion.consumeMData.eq? | return #[]
           let reading := operation.isAppOfArity ``CIL.Safety.read 4
           let snapshot := operation.isAppOfArity ``CIL.Safety.readSnapshot 4
-          let applied := mkAppN part variables
+          let mut applied := mkAppN part variables
+          -- A read stated at a closed width such as `localWidth (.aggregate 32)` derives its
+          -- load at the numeral an opcode carries.
+          if reading || snapshot then
+            let width := operation.getAppArgs[2]!
+            unless width.hasFVar || width.hasMVar || (← getNatValue? width).isSome do
+              if let some value ← (Lean.Meta.evalNat (← reduce width)).run then
+                let stated := mkAppN operation.getAppFn
+                  (operation.getAppArgs.set! 2 (mkNatLit value))
+                applied ← mkExpectedTypeHint applied
+                  (conclusion.consumeMData.replace fun term =>
+                    if term == operation then some stated else none)
           let mut candidates : Array (Name × Array Expr) := #[]
           if reading then
             candidates := candidates.push (``loadSnapshot_aggregate_of_read, #[applied])

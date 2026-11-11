@@ -157,6 +157,9 @@ A branch whose condition the facts do not decide leaves the condition in the pro
 successors and each resumes with the stepping tactic. An instruction lookup at such a program
 counter fails with `cil_lookup: undecided branch` and is not evaluated.
 
+A read stated at a closed width, such as `read memory home (localWidth (.aggregate 32)) 1`,
+derives its load at the numeral width an opcode carries.
+
 Intrinsic steps expose `checkedIntrinsic` and apply proved `@[cil_eval]` lemmas before unfolding the
 intrinsic evaluator. Register consumer lemmas in the form `CIL.evalIntrinsic operation operands =
 some result`. Nonnegative `BitVec.ofInt` literals become `BitVec.ofNat` literals so these equations
