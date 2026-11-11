@@ -1,10 +1,13 @@
 # .NET 10 runtime profiles
 
+Read this page to choose the execution profile for an extraction, to write a custom profile
+or to see which deployments a proof under a profile covers.
+
 Execution profiles describe the capabilities reported by a deployed .NET 10
 CoreCLR process. They are not arbitrary CPU feature subsets. Both
 `FeatureProfile.Validate()` and Lean's `FeatureProfile.Valid` enforce the groups
 below. Passing these checks does not establish that a particular deployment uses
-the selected profile: deployment must still match the recorded capabilities.
+the selected profile: the deployment must match the recorded capabilities.
 
 ## Evidence
 
@@ -80,11 +83,14 @@ together; the tested individual ARM switches do not split that group.
 
 ## Profile selection
 
-`x64-sse2` supplies the x64 baseline with SSE4.2 and higher groups disabled.
-`scalar` remains the no-hardware-intrinsics profile. The repo's extraction and
-verification fixtures use the supported names.
+Pass a built-in name or `@profile.json` as the profile argument of `leancil extract`
+([CLI](CLI.md)); the default is `scalar`. The built-in profiles are `scalar`, `x64-sse2`,
+`x64-sse42`, `x64-v3`, `x64-v4` and `arm64-advsimd`; the
+[profile table](SIMD.md#feature-getters-profiles-and-execution-restrictions) lists the flags each
+enables. `scalar` is the no-hardware-intrinsics profile, and `x64-sse2` is the x64 baseline
+with SSE4.2 and higher groups disabled.
 
-The built-in list intentionally does not name every valid configuration. Use
+The built-in list does not name every valid configuration. Use
 custom JSON for SSE4.2+AVX without AVX2 and for v3/v4 with
 `vector256Accelerated: false`. The validators accept these observed states;
 their absence from the built-in list is not a deployment restriction.
@@ -106,7 +112,7 @@ These are the model's 64-bit capabilities, not the corresponding base-class flag
 Evidence field `advSimd64` is `AdvSimd.Arm64.IsSupported`. Extraction answers that getter
 with the `advSimd` capability, so validation rejects an observation that lacks it or
 records a different value; it is not a separate profile field. Other nested ARM64
-getters, such as `Crc32.Arm64` and `Rdm.Arm64`, remain unclassified and are rejected.
+getters, such as `Crc32.Arm64` and `Rdm.Arm64`, are unclassified and rejected.
 
 Evidence field `avx512Vbmi` is `Avx512Vbmi.IsSupported` and is a profile field.
 `avx512VbmiVL` is `Avx512Vbmi.VL.IsSupported`; extraction answers it with `avx512Vbmi`, so
@@ -118,7 +124,7 @@ Skylake-SP or `DOTNET_EnableAVX512v2=0`. For VBMI hardware such as Ice Lake or Z
 use a custom v4 profile with `avx512Vbmi: true`. A proof of a method that never reads VBMI
 transfers between the two through
 [`Program.ProfileAgreement`](../CIL/ProfileEquivalence.lean), which compares only the flags a
-program reads. Other AVX-512 getters, such as `Avx512BW` and `Avx512Vbmi2`, remain unclassified.
+program reads. Other AVX-512 getters, such as `Avx512BW` and `Avx512Vbmi2`, are unclassified.
 
 Evidence fields `aes` and `armAes` are `X86.Aes.IsSupported` and `Arm.Aes.IsSupported`, and are
 profile fields; `aesX64` and `armAes64` are their nested 64-bit getters, which extraction answers
@@ -128,19 +134,19 @@ removes it from v3/v4 hardware, and AES is optional on ARMv8. Proofs of a method
 getter under a built-in therefore cover only deployments without AES. For the usual hardware, use
 a custom profile with `aes: true` (x64) or `armAes: true` (ARM64); a proof of a method that never
 reads AES transfers to it through `Program.ProfileAgreement`. `Pclmulqdq`, which shares the x86
-AES group, remains unclassified.
+AES group, is unclassified.
 
-Custom consumer profiles must obey the same constraints. Set AVX2/BMI1/BMI2 together;
-set all four modeled AVX-512 flags together; set `avx512Vbmi` only with them; set `aes` only on x64
-and `armAes` only on ARM64; set all three
-modeled SSE4.2-group flags together. Custom profiles must include `avx512Vbmi`, `aes` and
-`armAes`, each with the value the deployment reports. ARM64 profiles
-must set ArmBase/AdvSimd/Vector128 together and cannot enable Vector256 acceleration. A reduced-width x64 profile may retain
-`vector256Accelerated: false` with the full AVX2 group enabled.
+Custom profiles must obey the same constraints and supply every capability field, including
+`avx512Vbmi`, `aes` and `armAes`, each with the value the deployment reports. Set
+AVX2/BMI1/BMI2 together; set all four modeled AVX-512 flags together; set `avx512Vbmi` only with
+them; set `aes` only on x64 and `armAes` only on ARM64; set all three modeled SSE4.2-group flags
+together. ARM64 profiles must set ArmBase/AdvSimd/Vector128 together and cannot enable Vector256
+acceleration. A reduced-width x64 profile may set `vector256Accelerated: false` with the full
+AVX2 group enabled.
 
 Changing a profile can select different CIL branches. Regenerate extraction, reprove
 each affected method/profile, re-export interfaces and rebuild full-verification
-bundles. Update consumer gates only after those proofs pass. Do not reuse old
-certificates, merely rename a profile, suppress the group checks, or weaken a
-contract to preserve an old gate. Cross-version runtime support needs its own
+bundles. Update gates only after those proofs pass. Do not reuse certificates from another
+profile, merely rename a profile, suppress the group checks, or weaken a
+contract to keep a gate passing. Cross-version runtime support needs its own
 explicit evidence and policy rather than relaxing these .NET 10 constraints.

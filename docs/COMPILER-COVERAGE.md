@@ -2,6 +2,10 @@
 
 <!-- audience: maintainers -->
 
+This page describes the checks that pin which compiler output and which runtime calls the
+extractor admits, and how to review and record a change to either. Read it when one of these
+baselines fails.
+
 The `dispatch` suite checks a pinned source corpus against Roslyn 4.14.0, 5.0.0 and 5.9.0,
 using the same .NET 10.0.0 reference pack and optimized compilation. Each compiler runs at its
 default language version and at `latest`; compilers supporting C# 14 also run explicitly at `14`.
@@ -47,11 +51,14 @@ it is independent of PR checks. `--latest --whole-only` runs this comparison loc
 Lean certification. `--whole-only` checks the pinned whole-corpus baseline alone.
 Neither scan establishes coverage over arbitrary programs or future compiler releases.
 
-Run `dotnet run --file Tests/RuntimeModelInventory.cs` to check the production runtime-call translator against the pinned reference metadata.
-The checked-in [catalog](../Tests/RuntimeModelInventory.txt) contains 473 admitted method definitions in 43 API-owner groups.
-The fixed primitive domain produces 1,998 admitted closed instances; these are reported separately to avoid counting each generic instantiation as a new definition.
-The artifact `artifacts/RuntimeModelInventory/inventory.json` records the complete inventory and counts by API owner.
-Additions and removals fail with a diff; after reviewing the model and its assumptions, update the catalog with `--update`.
+Run `dotnet run --file Tests/RuntimeModelInventory.cs` to check the production runtime-call
+translator against the pinned reference metadata. The checked-in
+[catalog](../Tests/RuntimeModelInventory.txt) contains 473 admitted method definitions in 43
+API-owner groups. The fixed primitive domain produces 1,998 admitted closed instances; these are
+reported separately so that a generic instantiation does not count as a new definition. The
+artifact `artifacts/RuntimeModelInventory/inventory.json` records the complete inventory and
+counts by API owner. Additions and removals fail with a diff; after reviewing the model and its
+assumptions, update the catalog with `--update`.
 
 The probe covers public methods in System.Runtime, System.Memory and System.Runtime.Intrinsics,
 up to one owner type parameter and two method type parameters, instantiated over the fixed
@@ -82,8 +89,9 @@ baseline omits, and an admitted method that no longer exists each fail the scan,
 baseline stops guarding the methods it leaves out. Review the difference, then record it with
 `dotnet run --file Tests/SelfAdmission.cs -- --update` in the PR that causes it. Counts, the
 difference and the most widely reached blockers are reported in
-`artifacts/SelfAdmission/summary.md` and the CI job summary. The baseline names a compiler-generated method (a closure, lambda, local
-function or state machine) by the source method it was generated for, one line per admitted method,
-since the compiler numbers it by positions that unrelated edits shift. Gaining or losing one
-still changes its source method's count and fails the gate. Any change to a source compiled into the extractor, or to the
-baseline, selects the suite.
+`artifacts/SelfAdmission/summary.md` and the CI job summary. The baseline names a
+compiler-generated method (a closure, lambda, local function or state machine) by the source
+method it was generated for, one line per admitted method, since the compiler numbers it by
+positions that unrelated edits shift. Gaining or losing one still changes its source method's
+count and fails the gate. Any change to a source compiled into the extractor, or to the baseline,
+selects the suite.

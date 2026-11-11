@@ -156,8 +156,8 @@ Whole-array and ranged `Array.Fill<T>` require the exact runtime signature and p
 integer-backed enum element identity. Typed array views must describe live, valid storage before
 named runtime exceptions can be selected. Valid null inputs fault before range checks; other
 inputs delegate to checked span slicing and filling. Range bounds use widened natural arithmetic
-over the unsigned int32 arguments, retaining rejection of negative or overflowing ranges. Empty non-null ranges
-perform no write. The view supplies no additional memory authority, and the shared span fill
+over the unsigned int32 arguments, retaining rejection of negative or overflowing ranges. Empty
+non-null ranges perform no write. The view supplies no additional memory authority, and the shared span fill
 preserves confinement and initialization guarantees. Other element families are not modeled.
 Nonempty destinations need write authority, not prior readability. Copy requires initialized source
 bytes. Empty operations grant no authority. Empty spans have null pinnable references; empty arrays
@@ -222,7 +222,8 @@ through admitted classes, has sequential or auto layout and no finalizer; an abs
 admitted as a type but never constructed. A reference to it is `Value.object`: null, or offset 0
 of a live allocation whose kind is `.object` with a runtime type (`formObject`). The runtime type
 records the instance's class and its bases, nearest first, up to but excluding `System.Object`
-(`RuntimeType.bases`); the class and its bases form its lineage (`RuntimeType.lineage`). Object references carry no byte position, so code cannot
+(`RuntimeType.bases`); the class and its bases form its lineage (`RuntimeType.lineage`). Object
+references carry no byte position, so code cannot
 form one from an integer, a byref or an interior offset, and `ldnull` pushes the one null
 object reference; `Unsafe.NullRef` keeps the distinct null byref. `ceq`, `beq` and `bne.un`
 compare identities; `cgt.un` and `brtrue`/`brfalse` test presence against null only. Object
@@ -279,7 +280,8 @@ A caller states the premise once, for its entry memory, and execution keeps it
 ([execution classes](../CIL/Safety/ExecutionClasses.lean)). Only `newobj` and `newarr` of a class
 create instances: `newobj` of the class and bases it records, `newarr` an array of its element
 type. Frame homes, statics, value arrays and expiry create none. `ObjectSitesConsistent catalog
-program` checks every such site of the program text against the catalog, once per extraction by `decide`. Given it, `step_preserves_classes`,
+program` checks every such site of the program text against the catalog, once per extraction by
+`decide`. Given it, `step_preserves_classes`,
 `run_preserves_classes` and `invoke_preserves_classes` keep the premise through every step,
 nested call and frame exit. Formed calls and constructions hand their continuation the same
 fact for the callee's final memory (`ClassesPreserved`, part of `FrameInvariants`). Nothing is
@@ -309,8 +311,8 @@ generic or library class, holds its reference in a slot through the same operati
 loaded, stored into another such field, compared for identity and tested against null, but no
 admitted operation takes its type as a field owner, call receiver, argument, local or result, so
 nothing reads through it. Its referent is an object allocation like any other, whose recorded
-runtime type the model never inspects. Fields of generic parameter type or a modified type stay
-rejected, as do fields holding multi-dimensional arrays, whose shape a slot cannot recover from
+runtime type the model never inspects. Fields of generic parameter type or a modified type are
+rejected, as are fields holding multi-dimensional arrays, whose shape a slot cannot recover from
 the allocation it names.
 
 `System.String` of `System.Runtime`, matched exactly, is the one such class that is also admitted
@@ -320,13 +322,13 @@ and in a root, typed `.object` with its exact scope and name, so it is passed, r
 an opaque field, compared for identity and tested against null like any object reference, and
 an argument must form like one: null or a live object allocation. No string method is admitted
 as a call, so nothing reads its length or characters, and a string root has no address: `ldarga`,
-`ldloca` and `string&` are rejected by name, as for class instances. A modified string type stays
+`ldloca` and `string&` are rejected by name, as for class instances. A modified string type is
 rejected.
 
 An instance method of an admitted class, virtual or not, is an entry whose receiver `this` is an
 object reference, not a byref. A theorem about a virtual method is about that body, which a `call`
-(a base call, or a direct call into it) runs exactly. The raw method records the class receiver (`objectReceiver`),
-from which Lean derives the receiver's storage and scalar kind. Lean rejects the address of
+(a base call, or a direct call into it) runs exactly. The raw method records the class receiver
+(`objectReceiver`), from which Lean derives the receiver's storage and scalar kind. Lean rejects the address of
 the receiver and of any class-typed local or argument, so no byref can stand in for an object
 receiver.
 
@@ -355,8 +357,8 @@ the allocation records, is the class, passes null through, and otherwise gives n
 or throws `System.InvalidCastException` (`castclass`) (ECMA-335 III.4.3, III.4.6). Those classes
 are the instance's whole lineage below `System.Object`, so the test is exact. For an instance
 the method does not construct, the runtime type, class and bases alike, is the theorem's
-hypothesis, as for field access and dispatch; one it constructs records its constructor's bases. Lean admits an
-`objectTest` only at `castclass` or `isinst` of the same class, on an object reference, and only
+hypothesis, as for field access and dispatch; one it constructs records its constructor's bases.
+Lean admits an `objectTest` only at `castclass` or `isinst` of the same class, on an object reference, and only
 against a pinned catalog class that is no interface
 ([DogTest](../Examples/Proofs/DogTest.lean), [DogCast](../Examples/Proofs/DogCast.lean)).
 
@@ -467,8 +469,8 @@ literal through the one `SystemDomain::GetGlobalStringLiteralMap()`, collectible
 included, and never consults the relaxation.
 
 The model claims nothing further. Distinct texts may bind one object, and a literal may be the
-same object as a caller's string, as interning that string at run time makes it. The bound object must form as a
-live object; an unbound text stops as unsupported rather than loading null, since a literal is
+same object as a caller's string, as interning that string at run time makes it. The bound object
+must form as a live object; an unbound text stops as unsupported rather than loading null, since a literal is
 never null. A literal is an opaque string like any other, so nothing reads its length or
 characters. Each bound literal must name an issued identity (`Memory.LiteralsBounded`) for a
 contract to transfer across [allocation renaming](PROOFS-BINDING.md), since a literal names the
@@ -509,9 +511,10 @@ The extractor maps each exact signature (`Extractor/ArgumentGuards.cs`) and Lean
 emitted guard again from the raw call's owner, name, type argument, parameter types and external
 identity (`CIL.Extraction.guardCallMatches`); no other instruction may emit a guard. Other
 instantiations, among them `char`, floating-point and `decimal`, the `void*` overload of
-`ThrowIfNull`, and the string guards such as `ThrowIfNullOrEmpty`, which read characters, remain
+`ThrowIfNull`, and the string guards such as `ThrowIfNullOrEmpty`, which read characters, are
 rejected calls. `ThrowIfNull` on a value array or any other operand that is not a class instance or
 null is rejected by name, since the model tests only object references.
+
 ## Sequential struct layout
 
 Admitted layouts are reference-free and bounded by 65,536 bytes. Sequential fields include supported
@@ -581,10 +584,10 @@ bit. Native overloads assume 64 bits. Primitive signed and unsigned 32-bit, 64-b
 population/leading-zero/trailing-zero counts reuse the same count functions, with the result
 encoded in the declared 32-bit or 64-bit stack representation. Unsigned primitive `Log2` uses
 the same logarithm function and result encoding. Primitive `IsPow2` uses the signedness-aware
-power-of-two model. Signed `Log2` remains unsupported.
+power-of-two model. Signed `Log2` is unsupported.
 Correspondence to these primitive methods and the selected .NET BitOperations and BinaryPrimitives
-overloads remains
-a runtime assumption backed by exact signature checks and boundary/runtime comparisons.
+overloads remains a runtime assumption backed by exact signature checks and boundary/runtime
+comparisons.
 See [SIMD](SIMD.md) and [OPCODES](OPCODES.md).
 
 `Math.DivRem` and the 32-bit and signed 64-bit `Math.BigMul` overloads are modelled from the
