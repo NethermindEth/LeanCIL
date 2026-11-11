@@ -2,7 +2,7 @@
 
 <!-- audience: maintainers -->
 
-LeanCIL models ECMA-335 6th edition (June 2012) as amended by the
+LeanCIL models ECMA-335 6th edition as amended by the
 [ECMA-335 augments](https://github.com/dotnet/runtime/blob/b22bfee2010118c58ae143c3b8a1aaee3d0c8c4c/docs/design/specs/Ecma-335-Augments.md)
 that Microsoft maintains in dotnet/runtime, pinned at commit
 `b22bfee2010118c58ae143c3b8a1aaee3d0c8c4c`. Where the two disagree, the augment is the
