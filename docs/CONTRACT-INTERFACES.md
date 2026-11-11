@@ -1,5 +1,12 @@
 # Contract interface imports
 
+Read this page to verify a caller against a contract that a separately compiled library
+publishes in a sidecar file, `Lib.leancil.contracts`. It covers the `extract` options, the
+sidecar schema, the form the caller theorem must have and what the result does and does not
+establish. Publishing a sidecar is in
+[publishing verified contracts](CONSUMERS.md#publishing-verified-contracts); generic instances
+and struct references are in [typed imports](TYPED-IMPORTS.md).
+
 `extract` can bind a plain static external `call` to a contract slot. The
 implementation DLL is read as metadata. Its method bodies are not copied into
 the caller program. The imported method has no body in the unlinked program.
@@ -13,15 +20,19 @@ leancil extract App.dll 'App::Entry(ulong)' extracted scalar \
 leancil check extracted
 ```
 
-A sidecar next to the application is discovered as `Lib.leancil.contracts`.
-It is read only when a reachable call resolves to `Lib`, so sidecars of uncalled
-libraries need no pins and never enter the extraction. The implementation defaults to `Lib.dll` next to the sidecar, then next to the
-application. Explicit implementation paths override discovery. A separate
-`--import-sha256` is required on extraction. A hash found in the same sidecar
-cannot serve as that independent input. A supplied digest establishes byte
+| Option | Meaning |
+| --- | --- |
+| `--import path` | A sidecar. Optional when `Lib.leancil.contracts` lies next to the application, where it is discovered. |
+| `--import-implementation Lib=path` | The implementation DLL; an explicit path overrides discovery. Default: `Lib.dll` next to the sidecar, then next to the application. |
+| `--import-sha256 Lib=hex` | Required. The independently supplied SHA-256 of the implementation DLL. |
+| `--import-interface-sha256 Lib=digest` | Required. The independently supplied interface digest. |
+
+A discovered sidecar is read only when a reachable call resolves to `Lib`, so sidecars of
+uncalled libraries need no pins and never enter the extraction. A hash found in the same sidecar
+cannot serve as the independent `--import-sha256` input. A supplied digest establishes byte
 identity; it does not establish authenticity or prove the implementation.
 
-An independent `--import-interface-sha256` is also required before staging or
+The independent `--import-interface-sha256` is required before staging or
 compiling the interface. It pins the canonical interface descriptor, including
 every Lean source byte. Obtain it through your accepted publisher channel.
 Interface sources can execute Lean metaprograms and IO with verifier permissions.
@@ -49,10 +60,19 @@ leancil resolve-imports bin/App.dll --library Lib \
   --output resolved.json
 ```
 
-It reads `App.deps.json` next to the application, or `--deps file`, and
-optionally `--assets file`. Package roots come from the assets `packageFolders`
-and `--package-root directory`. Only `net10.0` targets are accepted. It does not
-restore, use the network, or infer a RID from the host.
+| Option | Meaning |
+| --- | --- |
+| `--library Lib` | A library to resolve; at least one, repeatable. List every required library, including transitive contract dependencies: sidecar dependencies are not followed. |
+| `--deps file` | The deps file. Default: `App.deps.json` next to the application. |
+| `--assets file` | The NuGet assets file, `obj/project.assets.json`. One of the deps and assets files is required. |
+| `--package-root directory` | An extra package root, repeatable; the `packageFolders` of the assets file are used too. |
+| `--runtime-identifier RID` | The target RID; it must not conflict with the deps file's runtime target. |
+| `--rid-graph file` | The SDK's `PortableRuntimeIdentifierGraph.json`. |
+| `--profile name` or `@profile.json` | The execution profile; see the architecture rule below. |
+| `--output file` | Write the result as JSON there. Default: standard output. |
+
+Only `net10.0` targets are accepted. The command does not restore, use the network, or infer a
+RID from the host.
 
 Selection follows the .NET 8+ host and NuGet. RID fallback is NuGet's
 breadth-first `RuntimeGraph.ExpandRuntime` over the SDK's
@@ -84,14 +104,14 @@ arguments for `extract`. The attribute is a locator, not a pin.
 
 ## Sidecar schema 1
 
-The repository's `imports` suite checks a hand-written sidecar of this schema, filling its
-build-specific hashes and MVID. Required fields:
+Required fields of a sidecar:
 
 - `schema`, `semanticsVersion`, `formatVersion`: each is `1`.
 - `frameworkKey`: SHA-256 of the sorted framework source manifest described below.
 - `assemblyIdentity`, `mvid`, `targetFramework`, `implementationSha256`, and
   `isReferenceAssembly`: exact implementation metadata and bytes. Target framework
-  is `.NETCoreApp,Version=v10.0`. Reference assemblies are authoring-only; caller proofs can be checked, but no successful verification report is published.
+  is `.NETCoreApp,Version=v10.0`. Reference assemblies are authoring-only; caller proofs can be
+  checked, but no successful verification report is published.
 - `interfaceModules`: module names and full Lean source strings. Names are plain
   dotted identifiers. Framework, toolchain, generated, example and test module
   roots and the driver's `LeanCIL*` modules are reserved. Names are compared
@@ -166,7 +186,7 @@ and record the `sidecarSha256` the text came from.
 ## Generated proof interface and guarantees
 
 Import slot `j` is `Extracted.program.length + j`. `Extracted.lean` contains its
-full method identity, shape and closure digest. The existing kernel-checked
+full method identity, shape and closure digest. The kernel-checked
 `ManagedCallsValid` certificate binds each live raw external call to that slot.
 It checks call opcode, identity, type arguments, argument count, receiver and
 return arity. The implementation hash is absent from `Extracted.lean`.
@@ -223,13 +243,13 @@ Hashes and certification records never discharge those assumptions.
 `identity.json` schema 3 records each slot's identity, implementation path/hash,
 kind, sidecar path/hash, interface digest, contract constant and closure digest.
 It also hashes each generated interface source. The final extraction recheck
-runs before a successful report is published. Existing schema-2 extractions must
-be regenerated to acquire these records.
+runs before a successful report is published. A manifest of another schema is
+rejected; run `leancil extract` again.
 
-Run `dotnet run --file scripts/Test.cs -- --suite imports` for the Lib/App
-fixture, conditional caller proof, stale DLL/source checks and rejecting cases.
+## Transitive imports
 
-For transitive imports, each dependency node must have its own independently
+For [transitive imports](CONSUMERS.md#transitive-contract-imports), each dependency node must have
+its own independently
 pinned implementation and interface digest. The graph rejects cycles before
 method validation. Each library implementation is checked against its declared
 direct dependencies with separate call slots. Validation compares its actual

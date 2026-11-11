@@ -1,21 +1,57 @@
 # Command-line reference
 
-The [getting-started guide](GETTING-STARTED.md) walks through a first verification. This page gives the
-details of each command.
+This page is the reference for every `leancil` command: its arguments, options, output files and
+failure modes. Read the [getting-started guide](GETTING-STARTED.md) first for one complete
+verification.
+
+| Command | Purpose | Reference |
+| --- | --- | --- |
+| `leancil list assembly.dll` | Print the method signatures of an assembly | [Discover and select methods](#discover-and-select-methods) |
+| `leancil extract` | Validate a method and its reachable calls and translate them to Lean | [Extract](#extract) |
+| `leancil blockers` | Report everything that stops `extract` for a list of methods | [Report extraction blockers](#report-extraction-blockers) |
+| `leancil check` | Compare extraction artifacts with their assembly and settings | [Check](#check) |
+| `leancil new-proof` | Write a starting proof with marked holes | [Start a proof](#start-a-proof) |
+| `leancil verify` | Check, kernel-replay and audit one theorem | [Verify](#verify) |
+| `leancil verify-batch` | Verify many requests in one session | [Batch verification](CONSUMERS.md#batch-verification) |
+| `leancil gates` | Extract and verify a catalog of methods, profiles and proofs | [Run a proof catalog](CONSUMERS.md#run-a-proof-catalog) |
+| `leancil workspace` | Generate a method's extraction into a Lake package for editor goals | [Editor workspace](#editor-workspace) |
+| `leancil watch` | Rebuild, re-extract and verify on change | [Watch](CONSUMERS.md#watch) |
+| `leancil export-contracts` | Publish verified contracts as a sidecar | [Export contracts](#export-contracts) |
+| `leancil resolve-imports` | Locate contract sidecars and implementations from SDK output | [Resolving imports](CONTRACT-INTERFACES.md#resolving-imports-from-sdk-assets) |
+| `leancil audit-library` | Kernel-replay and axiom-audit the theorems of a Lean library | [Library audits](CONSUMERS.md#library-audits) |
+| `leancil templates` | Generate shared proof templates from extractions of several profiles | [Generated profile templates](PROOFS-BINDING.md#generated-profile-templates) |
+| `leancil lint-exceptions` | Compare modeled throw sites with XML documentation | [Exception documentation lint experiment](#exception-documentation-lint-experiment) |
+| `leancil --version` | Print the tool, framework and toolchain versions | [Version](#version) |
+
+`leancil --help`, `leancil -h` and `leancil` with no arguments print the usage of every command.
+A command that fails exits with `1`. Its text diagnostic on standard error is a summary line
+starting `Invalid:` or `Error:`, a `Stage:` line naming the step that failed and a `Next:` line
+with the fix to try. An unknown option is an error, as is repeating an option that takes one
+value.
 
 ## Build
 
-A regular `dotnet build Extractor -c Release` produces `Extractor/bin/leancil.exe` on Windows (`leancil` on other platforms). The managed assembly and package are named `Nethermind.LeanCIL`.
+`dotnet build Extractor -c Release` produces `Extractor/bin/leancil.exe` on Windows (`leancil` on
+other platforms). The managed assembly and package are named `Nethermind.LeanCIL`. To install the
+tool globally, see [getting started](GETTING-STARTED.md).
 
 ## Version
 
-`leancil --version` prints the tool version (the installed package version, such as `0.1.0-dev.<stamp>` for a development pack), the LeanCIL commit and Lean toolchain its framework comes from, and the `[[require]]` block a [consumer package](CONSUMERS.md#consumer-proof-packages) uses to pin the matching framework. A tool built outside a git checkout reports the revision as unknown.
+`leancil --version` prints the tool version (the installed package version, such as
+`0.1.0-dev.<stamp>` for a development pack), the LeanCIL commit and Lean toolchain its framework
+comes from, and the `[[require]]` block a [consumer package](CONSUMERS.md#consumer-proof-packages)
+uses to pin the matching framework. A tool built outside a git checkout reports the revision as
+unknown.
 
 ## Discover and select methods
 
-This lists canonical method signatures you can copy into `extract`, including overloads and non-public methods. Discovery reads metadata without executing the assembly. Listed methods are not necessarily supported: `extract` validates their signatures, CIL and reachable dependencies.
+`leancil list assembly.dll` prints the canonical signature of every method, including overloads
+and non-public methods, for copying into `extract`. It reads metadata without executing the
+assembly. A listed method is not necessarily supported: `extract` validates its signature, CIL and
+reachable dependencies.
 
-Method selectors accept C# type aliases, an optional return type, and an unqualified declaring type when the result is unique. These all select the same method:
+Method selectors accept C# type aliases, an optional return type, and an unqualified declaring
+type when the result is unique. These all select the same method:
 
 ```text
 System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64)
@@ -24,11 +60,41 @@ Examples.Arithmetic::Add(ulong,ulong)
 Arithmetic::Add(ulong,ulong)
 ```
 
-The parameter list remains required. Matching is case-sensitive; an explicit return type must match. Use `ulong&` for a by-reference parameter. An `in` parameter of a virtual, abstract or interface member, including an explicit interface implementation, is spelled `ulong& modreq(System.Runtime.InteropServices.InAttribute)`, as `discover` prints it; the modifier is part of the selector and the recorded signature, so it never matches the unmodified `ulong&` overload. Ambiguous selectors fail with a list of full candidate signatures, which can be copied into the command. Artifacts always record the resolved canonical signature, so equivalent selectors can check the same artifact. Selection never relaxes supported-type or instruction validation.
+- The parameter list is required. Matching is case-sensitive, and an explicit return type must
+  match.
+- Use `ulong&` for a by-reference parameter.
+- An `in` parameter of a virtual, abstract or interface member, including an explicit interface
+  implementation, is spelled `ulong& modreq(System.Runtime.InteropServices.InAttribute)`, as
+  `list` prints it. The modifier is part of the selector and the recorded signature, so it never
+  matches the unmodified `ulong&` overload.
+- An ambiguous selector fails with the full candidate signatures, which can be copied into the
+  command.
+- Artifacts record the resolved canonical signature, so equivalent selectors check the same
+  artifact. Selection never relaxes supported-type or instruction validation.
 
-The extraction CLI infers the assembly identity from the DLL's metadata. Optionally add `--assembly Examples` to require a specific short name, or supply a full identity to constrain version, culture and public key token as well. A mismatch is rejected. Generated artifacts always retain the actual full identity and assembly hash, including when `--assembly` is omitted.
+`extract` infers the assembly identity from the DLL's metadata. Add `--assembly Examples` to
+require a short name, or a full identity to constrain version, culture and public key token as
+well; a mismatch is rejected. Artifacts record the actual full identity and assembly hash with or
+without `--assembly`.
 
 ## Extract
+
+```text
+leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory
+    [profile|@profile.json] [--assembly name-or-identity] [--type-argument Type]...
+    [--assume-initialized Namespace.Type]... [--reference Lib.dll]...
+    [--import Lib.leancil.contracts]... [--import-implementation Lib=path]...
+    [--import-sha256 Lib=hex]... [--import-interface-sha256 Lib=hex]...
+```
+
+| Option | Meaning |
+| --- | --- |
+| `profile` or `@profile.json` | Execution profile, the fourth positional argument. Default `scalar`; see [runtime profiles](RUNTIME-PROFILES.md#profile-selection). |
+| `--assembly` | Required assembly short name or full identity; see [above](#discover-and-select-methods). |
+| `--type-argument` | A closed type argument of a generic entry, repeated in order; see [referenced assemblies](#extract-from-referenced-assemblies) and [typed imports](TYPED-IMPORTS.md). |
+| `--assume-initialized` | A type the caller guarantees completed initialization successfully before invocation; see [initialization assumptions](#initialization-assumptions). |
+| `--reference` | A referenced assembly whose bodies are extracted too; see [referenced assemblies](#extract-from-referenced-assemblies). |
+| `--import` and `--import-*` | Contract imports; see [contract interfaces](CONTRACT-INTERFACES.md). |
 
 Build the example assembly and extract a method from it:
 
@@ -43,11 +109,26 @@ From the repository root, `extract` prints:
 Extracted 1 reachable method into artifacts/Add/Extracted.lean
 ```
 
-The generated `Extracted.lean` contains `arg 0`, `arg 1`, `add`, `ret`, the exact method signature, metadata, profile and kernel-checked fetch equations; the assembly hash lives in `identity.json` and the report. The entry is method zero; reachable managed callees are emitted in dependency order.
+The output directory holds:
 
-Extraction also emits raw metadata and a `Extracted.translation_valid` certificate. Independent Lean validators recompute layouts, check all layout-dependent sites and parameter-home mappings, validate structural generic substitution and managed-call bindings, and check feature-analysis states, decided type tests and control-flow coverage. Per-site validators walk the raw code, reachability mask and emitted code in lockstep, so a long branch excluded by the profile adds linear rather than quadratic checking cost. Verification requires this certificate to have the exact validator type for the complete emitted program and kernel-replays it separately from the user proof. Raw metadata serialization and transformations outside those checks remain trusted.
+| File | Content |
+| --- | --- |
+| `Extracted.lean` | The program: here `arg 0`, `arg 1`, `add`, `ret`, with the exact method signature, metadata, profile and kernel-checked fetch equations. The entry is method zero; reachable managed callees follow in dependency order. |
+| `identity.json` | The manifest: assembly path, identity and SHA-256, entry, profile, assumptions, references, imports and extractor hash. |
+| `Symbols.lean` | PDB names and source locations, written only when the assembly has a matching portable PDB. |
 
-Profiles default to scalar. Pass a supported profile name or `@profile.json` as the final positional argument to `leancil extract`. Both `check` and `verify` recover the profile from the manifest. Capability prerequisites are validated. Instructions unreachable under that exact fixed profile are emitted as explicit unsupported placeholders; changing profiles invalidates artifacts.
+`Extracted.lean` also holds raw metadata and an `Extracted.translation_valid` certificate.
+Independent Lean validators recompute layouts, check all layout-dependent sites and
+parameter-home mappings, validate structural generic substitution and managed-call bindings, and
+check feature-analysis states, decided type tests and control-flow coverage. Per-site validators
+walk the raw code, reachability mask and emitted code in lockstep, so a long branch excluded by
+the profile adds linear checking cost. Verification requires this certificate to have the exact
+validator type for the complete emitted program and kernel-replays it separately from the user
+proof. Raw metadata serialization and transformations outside those checks are trusted.
+
+`check` and `verify` read the profile from the manifest. Capability prerequisites of a profile
+are validated. Instructions unreachable under the fixed profile are emitted as explicit
+unsupported placeholders, so artifacts of one profile are invalid for another.
 
 ### Initialization assumptions
 
@@ -72,7 +153,7 @@ read the caller's static binding. The generated Lean source and identity
 manifest retain the assumptions; `check` reuses them and rejects conflicting
 explicit assumptions. Verification binds the manifest hash, prints the
 initialization preconditions with the theorem and copies both lists into
-`verified.json`. Re-extract older artifacts to include the new manifest fields.
+`verified.json`.
 
 ### Extract from referenced assemblies
 
@@ -108,7 +189,8 @@ type argument may name one of its structs as `Namespace.Type, Assembly`, by simp
 assembly name:
 
 ```sh
-leancil extract App.dll 'App.Application::Size(ulong)' artifacts/Size --reference Lib.dll   --type-argument 'Lib.Cell, Lib'
+leancil extract App.dll 'App.Application::Size(ulong)' artifacts/Size --reference Lib.dll \
+  --type-argument 'Lib.Cell, Lib'
 ```
 
 A static method of a generic class can be the entry. `--type-argument` lists the method's own
@@ -119,7 +201,7 @@ ECMA-335 numbers them; the selector names the open definition:
 leancil extract App.dll 'App.Algo`1::Run(ulong)' artifacts/Run --type-argument App.Gas
 ```
 
-Instance methods of generic classes remain rejected as entries and as callees.
+Instance methods of generic classes are rejected as entries and as callees.
 
 ## Report extraction blockers
 
@@ -128,8 +210,13 @@ method and profile pairs, and reports everything that blocks each one instead of
 first failure. It checks no proofs and keeps no extraction artifacts:
 
 ```sh
-leancil blockers assembly.dll --manifest blockers-manifest.json [--output blockers.json]
+leancil blockers assembly.dll --manifest blockers-manifest.json [--output blockers.json] \
+  [--assembly name-or-identity] [--reference Lib.dll]... [--import Lib.leancil.contracts]... \
+  [--import-implementation Lib=path]... [--import-sha256 Lib=hex]... \
+  [--import-interface-sha256 Lib=hex]...
 ```
+
+The manifest lists the entries and the settings shared by all of them:
 
 ```json
 {
@@ -146,32 +233,42 @@ leancil blockers assembly.dll --manifest blockers-manifest.json [--output blocke
 }
 ```
 
-`profile` is a profile name or `@file`, resolved against the manifest's directory;
-`initializedTypes` applies `--assume-initialized` to every entry, `references` (paths relative to
-the manifest) or `--reference` pins referenced assemblies for every entry, and an entry's optional
-`typeArguments` applies `--type-argument` to it. Contract imports are those of `extract`: the
-`--import`, `--import-implementation`, `--import-sha256` and `--import-interface-sha256` options,
-or the manifest's `imports`, `importImplementations`, `importSha256` and `importInterfaceSha256`
-(paths relative to the manifest), apply to every entry, and a sidecar beside the assembly is
-discovered as `extract` discovers it. An entry with no blockers is then extracted into a scratch
-directory, so `admitted` means exactly that `extract` succeeds. The report goes to
-`--output`, by default `blockers.json` next to the manifest, and a short summary goes to standard
-output. Each entry is `admitted` (extraction would succeed), `blocked`, or `notChecked` with the
-reason: a selector that matches no method or several, a malformed type argument, an unknown
-profile, or an assembly, import or assumption that fails before any method is checked. An entry
-the selector resolves but `extract` rejects by its shape, such as an `init` setter or a member of
-an open generic type, is `blocked`, and its definition is analysed as an entry. Each blocker is
-one unsupported construct (instruction, call, type, layout, method metadata or static
-constructor). It lists every site, with method, IL offset, instruction and the PDB source location
-when one is present, and every affected entry with the call chains from it to those sites. A
-condition found by two checks, such as an entry's modifier and the type that carries it, is
-reported once, by the more specific check. A rejected signature, receiver, static constructor or
-entry shape does not stop the analysis: the body and callees behind it are still checked and
-their blockers reported. Only a method without IL to analyse, or a body whose control flow cannot
-be analysed, ends its branch, and that blocker's message names what was not analysed behind it.
-Only code reachable under the entry's profile is checked, so a branch excluded by a constant
-`IsSupported` is never reported. Admission is not verification: an admitted entry still needs a
-proof. The command exits with `0` whenever the report is written, whatever the entries' status.
+| Manifest key | Meaning |
+| --- | --- |
+| `entries[].signature` | A method selector, as for `extract`. |
+| `entries[].profile` | A profile name or `@file`, resolved against the manifest's directory. |
+| `entries[].typeArguments` | Optional; applies `--type-argument` to that entry. |
+| `initializedTypes` | Applies `--assume-initialized` to every entry. |
+| `references` | Pins referenced assemblies for every entry, as `--reference` does; paths are relative to the manifest. |
+| `imports`, `importImplementations`, `importSha256`, `importInterfaceSha256` | The contract imports of `extract` for every entry, as the `--import`, `--import-implementation`, `--import-sha256` and `--import-interface-sha256` options give them; paths are relative to the manifest. |
+
+A sidecar beside the assembly is discovered as `extract` discovers it. `--assembly` has its
+`extract` meaning. Any other manifest key is rejected.
+
+The report goes to `--output`, by default `blockers.json` next to the manifest, and a short
+summary goes to standard output. The command exits with `0` whenever the report is written,
+whatever the entries' status. Each entry has one status:
+
+| Status | Meaning |
+| --- | --- |
+| `admitted` | `extract` succeeds: an entry with no blockers is extracted into a scratch directory to confirm it. |
+| `blocked` | At least one blocker is listed. An entry the selector resolves but `extract` rejects by its shape, such as an `init` setter or a member of an open generic type, is `blocked`, and its definition is analysed as an entry. |
+| `notChecked` | Nothing was analysed, for the reason given: a selector that matches no method or several, a malformed type argument, an unknown profile, or an assembly, import or assumption that fails before any method is checked. |
+
+Each blocker is one unsupported construct (instruction, call, type, layout, method metadata or
+static constructor). It lists every site, with method, IL offset, instruction and the PDB source
+location when one is present, and every affected entry with the call chains from it to those
+sites.
+
+- A condition found by two checks, such as an entry's modifier and the type that carries it, is
+  reported once, by the more specific check.
+- A rejected signature, receiver, static constructor or entry shape does not stop the analysis:
+  the body and callees behind it are checked and their blockers reported. Only a method without
+  IL to analyse, or a body whose control flow cannot be analysed, ends its branch, and that
+  blocker's message names what was not analysed behind it.
+- Only code reachable under the entry's profile is checked, so a branch excluded by a constant
+  `IsSupported` is never reported.
+- Admission is not verification: an admitted entry needs a proof.
 
 ## Check
 
@@ -198,7 +295,19 @@ Valid: extraction artifacts match the assembly and recorded settings.
 
 Paths under the current directory are displayed relative to it; paths outside it remain absolute.
 
-The check reads the assembly path, method and hardware profile from the manifest, regenerates the extraction in memory, and compares it with the saved files without overwriting them. Assembly paths are stored relative to the artifact directory. If the DLL moves, use `leancil check artifacts/Add --assembly-path path/to/Examples.dll`; its identity and content must still match. Older manifests must be regenerated with `extract`.
+`check` reads the assembly path, method and profile from the manifest, regenerates the extraction
+in memory, and compares it with the saved files without overwriting them. It runs no Lean.
+
+| Option | Meaning |
+| --- | --- |
+| `--assembly-path path/to/Examples.dll` | Use a DLL that moved. Assembly paths are stored relative to the artifact directory; the DLL's identity and content must match the manifest. |
+| `--assembly name-or-identity` | Require that assembly name or identity, as for `extract`. |
+| `--import-implementation`, `--import-sha256`, `--import-interface-sha256` | Override a recorded import's path or pin; see [contract interfaces](CONTRACT-INTERFACES.md). |
+
+`check` replays the recorded `--reference` assemblies and rejects that option. A changed assembly
+or extractor, or a saved file that differs from the regenerated one, fails at the
+`extraction integrity` stage; run `leancil extract` again. A manifest whose `schema` is not `3` is
+rejected the same way.
 
 ## Start a proof
 
@@ -359,7 +468,8 @@ comment saying which obligation it is:
 - An instance of an admitted class is a `Reference`, and an instance method binds `this` under its
   class's name in lower case, such as `account`, or as `receiver` for a compiler-generated class.
   A parameter named like a hypothesis or memory the proof introduces, such as `held` or `stored1`,
-  is bound as `argument` and its position instead. The statement assumes `LiveObject initial account`, and `Readable` of each field the body or a
+  is bound as `argument` and its position instead. The statement assumes
+  `LiveObject initial account`, and `Readable` of each field the body or a
   callee it steps reads of each object and `Owned` of each they write, using the field views the
   extraction emits in `Extracted.Classes` (see
   [Frame class instances](PROOFS-CONTRACTS.md#frame-class-instances)). An object the body loads from
@@ -422,7 +532,8 @@ comment saying which obligation it is:
   these integers with other local kinds, narrow or native-sized local homes, uninitialized homes,
   escaped local addresses and reference-field or reference-array effects remain explicitly
   unsupported. Helper summaries allow at most one field store and no nested calls.
-- An array argument of structs or vectors binds `valuesLength` and is passed as `.array ⟨.address values,
+- An array argument of structs or vectors binds `valuesLength` and is passed as
+  `.array ⟨.address values,
   valuesLength, element⟩`, with the premise `WholeArray initial element values valuesLength`. The
   element is the `elementType` of a field that holds such arrays, such as `Tiles.Pairs.elementType`,
   or a literal such as `.signed32`; a struct or vector element no field names is a reducible
@@ -431,7 +542,8 @@ comment saying which obligation it is:
   field holds it and that it is whole. A store into such a field of an argument or loaded array
   steps through `Owned.store_whole`, and each `ldlen`, local, call argument and return of an array
   is stepped with its `WholeArray` fact carried across the writes before it. A value-array result is
-  an `ArrayView`. A load of the field after a write, a store of a null array into it, and a call to a
+  an `ArrayView`. A load of the field after a write, a store of a null array into it, and a call to
+  a
   method that takes a value array or loads a value-array field are `not outlined:` holes, and an
   unstepped body over a value array leaves its `footprint` to the author. A struct instance method
   or a method with a loop that takes a value array, or a loop that returns one, is refused.
@@ -581,7 +693,42 @@ writing nothing; the message names the parameter, local, loop or test and what i
 
 ## Verify
 
-`verify` first checks the extraction artifacts, reuses an integrity-checked source-keyed library cache (or builds it on a cache miss), checks and kernel-replays the selected proof, and audits its transitive axioms. Use `--fresh` to bypass proof and support reuse while retaining the source-bound library cache. Use `--rebuild-library` to rebuild the library as well; CI bypasses the local library cache automatically. Stdout carries only the report; stderr carries [stage progress](#stage-progress). Only `propext`, `Quot.sound` and `Classical.choice` are permitted. It checks artifact and source identity again before writing `artifacts/Add/verified.json`. Lean and Lake must be installed. The tool ships the framework's `CIL` sources only: proofs import `Extracted` (or a method's `Extracted.KEY`, see [Editor workspace](#editor-workspace)) and `CIL.*`, and `CIL.Safety.Memory.empty` is the caller memory with no allocations. LeanCIL's own example and test modules are not shipped; a proof importing one is rejected as `invalid-request`.
+```text
+leancil verify output-directory [--proof proof.lean] [--theorem name] [--proof-root package]
+    [--fresh] [--rebuild-library] [--goals] [--trace] [--format text|json]
+    [--force-full-verify] [--full-artifact Lib=directory]...
+```
+
+`verify` establishes one named theorem about an extraction. In order, it:
+
+1. checks the extraction artifacts as `check` does;
+2. opens the certified framework library from its cache, or builds it on a cache miss (see
+   [stage progress](#stage-progress));
+3. checks the selected proof with Lean and kernel-replays it;
+4. audits the theorem's transitive axioms, permitting only `propext`, `Quot.sound` and
+   `Classical.choice`;
+5. checks artifact and source identity again and writes `verified.json` in the output directory.
+
+Its guarantee is exactly the theorem's statement, including its preconditions and quantifiers.
+Standard output carries only the report; standard error carries stage progress and diagnostics.
+Lean and Lake must be installed.
+
+| Option | Meaning |
+| --- | --- |
+| `--proof` | The proof file. Default: the saved setting, else `Proof.lean` in the output directory. |
+| `--theorem` | The theorem to check. Default: the saved setting, else `ExampleProof.correctness`. |
+| `--proof-root` | The Lake package holding the proof's own modules; see [consumer proof packages](CONSUMERS.md#consumer-proof-packages). |
+| `--fresh` | Bypass proof and support reuse; the source-bound library cache is kept. |
+| `--rebuild-library` | Rebuild the library as well. CI bypasses the local library cache automatically. |
+| `--goals` | Print the goal at each hole; see [goals of an unfinished proof](#goals-of-an-unfinished-proof). |
+| `--trace` | Log each step the proof takes; see [trace the proof's steps](#trace-the-proofs-steps). |
+| `--format json` | Print one JSON report; see [machine-readable verify output](#machine-readable-verify-output). |
+| `--force-full-verify`, `--full-artifact` | Re-check imported libraries; see [verify with imported contracts](#verify-with-imported-contracts). `--full-artifact` requires `--force-full-verify`. |
+
+The tool ships the framework's `CIL` sources only. A proof imports `Extracted` (or a method's
+`Extracted.KEY`, see [Editor workspace](#editor-workspace)) and `CIL.*`;
+`CIL.Safety.Memory.empty` is the caller memory with no allocations. LeanCIL's own example and
+test modules are not shipped, and a proof importing one is rejected as `invalid-request`.
 
 ### Stage progress
 
@@ -600,43 +747,68 @@ PROGRESS Building fresh Lean verification library: 212 of 332 Lake jobs (240s)
 END Building fresh Lean verification library (exit 0, 501.7s)
 ```
 
-A cache miss on the certified library first prints one line saying what is being built and
-kernel-replayed and where later runs reuse it from. The whole library holds every framework
-module, each replayed, and certifies every proof and proof dependency for that framework
-version; building it takes several minutes. The cache is `LEANCIL_CACHE_DIR`, by default
-`<local application data>/LeanCIL/libraries`.
+### Library cache
 
-With no whole library cached, `verify` of one proof without `--proof-root` first builds a
-closure entry instead: the framework modules that the proof, the extraction, its symbols and
-the statement display import, transitively, together with those of the audit executable. Every
-module of the entry is kernel-replayed. Its cache key and receipt name exactly that module list,
-and `verified.json` records that key as `libraryKey`, `closure` or `closure-cache` as
-`libraryBuild` and the list as `libraryModules`. The entry holds no other framework source, so
-a module outside it can be neither imported from it nor built into it, and `verify` reads the
-import headers of the compiled proof and extraction and refuses a framework import the entry
-does not hold. After a verified result is reported, the same command
-builds, replays and caches the whole library, which stderr announces, reusing the entry's
-compiled modules where Lake's traces allow, and removes the entry once no process reads it. If
-that build fails, the verified result and its `verified.json` stand, and the command reports
-the failure and exits nonzero. A failed proof, or one with open goals under `--goals`, leaves
-the entry for the next run. One closure entry exists per library: a proof with other imports builds
-the whole library. `--proof-root`, batch, contract-import and `--full` verification,
-`workspace`, `watch`, CI and `--rebuild-library` use the whole library only, and a
-package never requires a closure entry by path.
+The certified library is the compiled framework: every `CIL` module, each kernel-replayed. It
+certifies every proof and proof dependency for one framework version, and building it takes
+several minutes. It is cached in the directory `LEANCIL_CACHE_DIR` names, by default
+`<local application data>/LeanCIL/libraries`, under a key of the framework sources, toolchain
+and platform. A cache miss first prints one line saying what is being built and kernel-replayed
+and where later runs reuse it from.
 
-A cache entry is read in place by verification sessions and by packages that require it by
-path after `workspace`, and Lake rebuilds a required module it finds out of date inside the
-entry. Each run therefore hashes every file of the entry against the manifest its receipt
-binds, about half a second for the whole library. An entry that does not match is named on
-stderr and replaced by a rebuilt library; on Windows the replacement fails while another
-process, such as an editor, holds the entry's files open. A library supplied through
-`LEANCIL_CERTIFIED_LIBRARY` is hashed against its manifest the same way before a package
-requires it by path, and refused when it does not match. `verify` also compares the library's
-files, by name, length and write time, with those it had when it was opened, each time it
-snapshots the library's compiled modules after a build and once more before single-file and
-batch verification write their reports; a difference fails the run. A command that finds
-another building or opening the library waits for it and says so on stderr.
-The theorem defaults to `ExampleProof.correctness`; select another with `--theorem Namespace.theoremName`. The first invocation saves the selection in `artifacts/Add/verification.json`, independently of the generated success report:
+**Closure entry.** With no whole library cached, `verify` of one proof without `--proof-root`
+first builds a closure entry instead: the framework modules that the proof, the extraction, its
+symbols and the statement display import, transitively, together with those of the audit
+executable.
+
+- Every module of the entry is kernel-replayed. Its cache key and receipt name exactly that
+  module list, and `verified.json` records that key as `libraryKey`, `closure` or
+  `closure-cache` as `libraryBuild` and the list as `libraryModules`.
+- The entry holds no other framework source, so a module outside it can be neither imported from
+  it nor built into it. `verify` reads the import headers of the compiled proof and extraction
+  and refuses a framework import the entry does not hold.
+- After a verified result is reported, the same command builds, replays and caches the whole
+  library, which stderr announces, reusing the entry's compiled modules where Lake's traces
+  allow, and removes the entry once no process reads it. If that build fails, the verified
+  result and its `verified.json` stand, and the command reports the failure and exits nonzero.
+- A failed proof, or one with open goals under `--goals`, leaves the entry for the next run.
+- One closure entry exists per library: a proof with other imports builds the whole library.
+- `--proof-root`, batch, contract-import and `--force-full-verify` verification, `workspace`,
+  `watch`, CI and `--rebuild-library` use the whole library only, and a package never requires a
+  closure entry by path.
+
+**Integrity.** A cache entry is read in place by verification sessions and by packages that
+require it by path after `workspace`, and Lake rebuilds a required module it finds out of date
+inside the entry. Each run therefore hashes every file of the entry against the manifest its
+receipt binds, about half a second for the whole library.
+
+- An entry that does not match is named on stderr and replaced by a rebuilt library. On Windows
+  the replacement fails while another process, such as an editor, holds the entry's files open.
+- `verify` also compares the library's files, by name, length and write time, with those it had
+  when it was opened, each time it snapshots the library's compiled modules after a build and
+  once more before single-file and batch verification write their reports; a difference fails
+  the run.
+- A command that finds another building or opening the library waits for it and says so on
+  stderr.
+
+**Supplied library.** Set `LEANCIL_CERTIFIED_LIBRARY` to a prepared library directory and
+`LEANCIL_CERTIFIED_LIBRARY_SHA256` to the independently trusted SHA-256 of its
+`cache-manifest.json` to use that library instead of the cache. It must have the tool's library
+key and sources; a missing digest or any mismatch fails the run. It is hashed against its
+manifest before a package requires it by path, and `--rebuild-library` does not bypass it.
+
+**Release download.** A release package can include a certified-library descriptor for the
+current runtime. On the first cache miss, the tool downloads that exact release asset from the
+official LeanCIL GitHub repository. The installed package pins its archive hash, producer
+manifest hash, runtime and source/toolchain key. The download is validated and independently
+kernel-replayed before it receives a local cache receipt. A missing descriptor, incompatible
+library or unavailable download falls back to building the packaged sources. `--rebuild-library`
+bypasses this download and the local library cache.
+
+### Saved settings
+
+The first invocation saves the proof and theorem selection in `verification.json` in the output
+directory, apart from the success report:
 
 ```json
 {
@@ -646,7 +818,11 @@ The theorem defaults to `ExampleProof.correctness`; select another with `--theor
 }
 ```
 
-Proof paths in settings are relative to the artifact directory; command-line paths are relative to the current directory. Settings are reusable inputs that can be versioned separately from reports. They survive failed proofs and re-extraction. Explicit `--proof` and `--theorem` arguments override the saved values. Without settings, the default proof is `Proof.lean` in the artifact directory. Older reports are used once to migrate the selection into settings.
+Proof paths in settings are relative to the artifact directory; command-line paths are relative
+to the current directory. With `--proof-root`, the settings also record the package root as
+`proofRoot`. Settings are reusable inputs that can be versioned separately from reports, and they
+survive failed proofs and re-extraction. Explicit `--proof`, `--theorem` and `--proof-root`
+arguments override the saved values.
 
 Run verification using the saved settings:
 
@@ -654,7 +830,18 @@ Run verification using the saved settings:
 leancil verify artifacts/Add
 ```
 
-Every invocation checks the proof afresh. A failed proof removes the previous verification report. When the assembly or the extractor changed since extraction, `verify` first extracts again from the settings `identity.json` records (assembly path, method, profile, assumptions, references and imports) and prints `Re-extracted artifacts/Add: the assembly changed since extraction.` (on stderr with `--format json`); a method that no longer exists then fails at extraction. An artifact that changed while its assembly and extractor did not is still rejected as tampered. `verify-batch` does not extract again; it reports such an output as a stale input. `extract` generates definitions and `check` validates extraction consistency; `verify` establishes the selected theorem about those definitions. Its guarantee is exactly the theorem's statement, including its preconditions and quantifiers.
+Every invocation validates the request's identity and required proof evidence. Authenticated
+caches can reuse unchanged certified builds and an unchanged proof's result (see
+[local support cache](CONSUMERS.md#local-support-cache)); source and hash checks, audits and
+required kernel replay apply regardless, and `--fresh` bypasses the reuse. A failed proof removes
+the previous `verified.json`.
+
+When the assembly or the extractor changed since extraction, `verify` first extracts again from
+the settings `identity.json` records (assembly path, method, profile, assumptions, references and
+imports) and prints `Re-extracted artifacts/Add: the assembly changed since extraction.` (on
+stderr with `--format json`); a method that no longer exists then fails at extraction. An
+artifact that changed while its assembly and extractor did not is rejected as tampered.
+`verify-batch` does not extract again; it reports such an output as a stale input.
 
 ### Reading the report
 
@@ -748,15 +935,9 @@ option `cil.goals` set (see [PROOFS-STEPPING](PROOFS-STEPPING.md#see-what-the-ta
 its result is cached apart from one without it. With `--format json` the goals are the report's
 `goals`. [`leancil watch --goals`](CONSUMERS.md#watch) prints them after every save.
 
-Release packages can include a certified-library descriptor for the current runtime. On the first
-cache miss, the CLI downloads that exact release asset from the official LeanCIL GitHub repository.
-The installed package pins its archive hash, producer manifest hash, runtime and source/toolchain
-key. The download is validated and independently kernel-replayed before receiving a local cache
-receipt. A missing descriptor, incompatible library or unavailable download falls back to building
-the packaged sources. `--rebuild-library` bypasses this download and the local library cache;
-an explicitly supplied certified library remains usable.
-
 ### Publishing certified library assets
+
+This section is for whoever packs a LeanCIL release; using the tool does not need it.
 
 For each supported runtime, from the exact sources that will be packaged, prepare and replay a
 library, then create its archive and package descriptor. The digest comes from the preparation
@@ -900,7 +1081,8 @@ certificate of the refutation, and also writes `failed.json` with kind
 
 `leancil verify ... --format json` prints one JSON report on stdout instead of
 the text report, and nothing on stderr except [stage progress](#stage-progress);
-the exit code is the same as without it. `--format text` is the default. The report has `schema` 1, `result`
+the exit code is the same as without it. `--format text` is the default. The report has `schema` 1,
+`result`
 (`verified` or `failed`), the `stage` that failed, the `theorem`, `method`,
 `proof` and `output`, and on success the `axioms`, the `statement` and its
 `specification`, the definitions [`Specification:`](#reading-the-report) prints,
@@ -967,7 +1149,8 @@ the proof's step equations and the `_ = .ok _` and `_ = .error _` facts in scope
 A side condition, such as an unfolded step a tactic could not close, has a shape
 when it names one of these operations. A run stopped before its first instruction
 because the entry could not check an object argument lacks `objectForm`, with the
-`formObject` of each object argument as its residual. `obligations` lists the obligation tags of the goal that
+`formObject` of each object argument as its residual. `obligations` lists the obligation tags of the
+goal that
 failed, or of the goals an `unsolved goals` error lists, such as `invariant`.
 `suggestions` is advice, kept apart from these facts. Every field left `null`
 for lack of data, and an empty `obligations`, has its reason under `unknown`,
@@ -998,14 +1181,15 @@ stdout instead of the per-request lines: `schema` 1, the `passed` and `failed`
 counts, and `requests`, each with its `expect`, its `status` (`verified`,
 `rejected` or `failed`) and the `report` that `verify --format json` prints for
 it. `--trace` traces every request's proof, after its line in the text report
-and in each `report` in JSON.
+and in each `report` in JSON. The request manifest, the other options and what a batch shares are
+in [batch verification](CONSUMERS.md#batch-verification).
 
 ## Export contracts
 
 `leancil export-contracts manifest.json [--output Lib.leancil.contracts] [--bundle directory]`
 checks a library's selected contracts and writes their bound sidecar. See
 [Publishing verified contracts](CONSUMERS.md#publishing-verified-contracts) for
-the manifest, exact theorem guarantee, version-1 restrictions and source bundle.
+the manifest, exact theorem guarantee, export restrictions and source bundle.
 All exports must pass before the sidecar is published.
 
 ## Verify with imported contracts
@@ -1015,12 +1199,12 @@ the caller under the published contracts. `--proof-root` uses the same interface
 audit for a consumer package. `--fresh` can use an empty `LEANCIL_CACHE_DIR`; no
 library implementation proof source, artifact or full bundle is required.
 
-The sidecar export adds `kind` (`method` or `outcome`). Each selected certification
+Each sidecar export has a `kind` (`method` or `outcome`). Each selected certification
 record requires `theorem`, `statement` and `statementDigest`. The driver checks
 its required `staticIdentities` list against the selected implementation's
 reachable static fields. Each entry contains `identity`, `assemblyIdentity` and
-`fieldName`. Extraction recomputes this list from the selected implementation's metadata and reachable instructions.
-The driver also checks
+`fieldName`. Extraction recomputes this list from the selected implementation's metadata and
+reachable instructions. The driver also checks
 the actual exported contract type structurally and computes its canonical closure
 from replayed oleans. `statementDigest` hashes the UTF-8 `statement` returned by
 that audit. The consumer records this provenance without obtaining the
@@ -1031,24 +1215,24 @@ A schema-4 `verified.json` contains `imports[]` with `acceptedVia` set to
 certification theorem/statement/digest, `sidecarSha256`, `certificationAuthenticated`
 (always `false`: no pinned digest covers the certification text) and deployment
 obligation. CLI output prints the certification as an unauthenticated sidecar
-record with its sidecar SHA-256, and the obligation. The caller theorem remains
+record with its sidecar SHA-256, and the obligation. The caller theorem is
 conditional on those imported contracts.
 
 `--force-full-verify` freshly checks the selected library implementations and
 discharges those imports in a concrete linked CIL theorem. Repeat
 `--full-artifact Lib=directory` to select relocated copies of the published
-source bundles. Missing or invalid bundles fail without fallback. See
-[Independent imported-library verification](FULL_VERIFICATION.md) for the
-supported source format, checks and remaining trust boundaries.
+source bundles; it is rejected without `--force-full-verify`. Missing or invalid bundles fail
+without fallback. See [Independent imported-library verification](FULL_VERIFICATION.md) for the
+supported source format, checks and trust boundaries.
 
 Reference-only extraction is an authoring input. Verification checks its caller
 proof, then exits with status 1 and an authoring-only diagnostic. It does not
 write `verified.json` or publish a successful proof receipt.
 
-Contract imports also require `--import-interface-sha256 Lib=<digest>` from an
-accepted publisher channel. This independently pins the interface descriptor
-and all executable Lean source bytes before compilation. See
-[CONTRACT-INTERFACES.md](CONTRACT-INTERFACES.md) for the source trust boundary.
+Extraction with contract imports requires `--import-sha256 Lib=<hex>` and
+`--import-interface-sha256 Lib=<digest>` from an accepted publisher channel. The second
+independently pins the interface descriptor and all executable Lean source bytes before
+compilation. See [contract interfaces](CONTRACT-INTERFACES.md) for the source trust boundary.
 
 ## Exception documentation lint experiment
 
@@ -1074,49 +1258,41 @@ No documentation text becomes evidence or a contract premise.
 
 ## Editor workspace
 
-`leancil workspace <assembly> <method> --profile <profile> --proof <file> [--theorem name]`
-generates the method's extraction into the proof's Lake package as `Extracted.KEY` and
-`ExtractedSymbols.KEY`, modules of the framework's `LeanCILEditor` library below `.lake`, so the
-proof file itself shows live goals. It prints the import; KEY names the method and digests its
-assembly name, signature, profile and initialization assumptions, so each method keeps its own
-module and proofs of several methods stay open at once. After rebuilding the assembly, run it
-again to refresh the extraction in place, then restart the file in the editor. A proof outside
-any Lake package gets a package beside it, so no `lake update` or `--proof-root` is needed. That
-package declares the `LeanCILEditor` library itself and requires the certified library, the one
-`verify` uses, by path where it is cached: it holds no framework sources and no framework build,
-and its editor build compiles only the extraction. Lake leaves an up-to-date required library
-unwritten, `workspace` and `watch` fail if their build wrote into it, and every run
-[checks the cache entry](#stage-progress) against its manifest. When the tool's framework
-changes, the next `workspace` or `watch` points the package at the library of the new key. A
-package that pins `leancil` keeps its manifest and its checkout as they are: the command writes
-`.lake/package-overrides.json`, which Lake reads in place of the manifest entry, so the
-`leancil` requirement resolves to `.lake/leancil-framework`, whose source and build directories
-are the cached certified library, and which brings in `.lake/leancil-editor`, the package that
-declares the editor library. Its editor builds compile no
-framework module either, and verification reads no `.lake` directory, so a certificate still
-rests on the pinned revision. A LeanCIL checkout is the framework package and builds its own
-modules. On a machine without the certified library, the first `workspace`
-builds it whole, as `verify --proof-root` would; for a package it is cached in CI too, where
-`verify` bypasses the cache, because the package must require a library that stays on disk.Verification accepts the keyed import only for the
-extraction it checks and builds it as a re-export of `Extracted`. `new-proof` writes the same
-keyed import, so its outline opens in the editor as generated.
+```text
+leancil workspace assembly.dll method --profile profile --proof proof.lean [--theorem name]
+    [--proof-root package] [--assembly identity] [--assume-initialized Namespace.Type]...
+leancil workspace --remove key-or-method [--profile profile] [--proof-root package]
+leancil watch [package] [--project app.csproj]... [--configuration name] [--once] [--goals]
+    [--format text|json]
+```
 
-`leancil workspace --remove <key-or-method> [--profile profile] [--proof-root package]` drops one
-selection from the package (by default the one holding the current directory): its record, both
-modules and their Lake outputs. A method selector must name one recorded profile, so pass the
-key or `--profile` when it names several. Nothing else is rebuilt.
+`workspace` generates the method's extraction into the proof's Lake package as the modules
+`Extracted.KEY` and `ExtractedSymbols.KEY`, so the proof file shows live goals in the editor, and
+prints the import to use. KEY names the method and digests its assembly name, signature, profile
+and initialization assumptions, so each method has its own module. Run it again after rebuilding
+the assembly, then restart the file in the editor.
 
-`workspace` names the cause and, on the `Next:` line, the fix when the package is not ready: a
-proof root with no `lakefile.toml` or `lakefile.lean` is not a Lake package, one with no
-`lake-manifest.json` needs `lake update`, and an extraction directory inside the proof package
-must move outside it, since its `Extracted.lean` would shadow the generated module.
+| Option | Meaning |
+| --- | --- |
+| `--profile` | Required. The execution profile, as for `extract`. |
+| `--proof` | Required. The proof file to open in the editor. |
+| `--theorem` | The theorem `watch` verifies; without it `watch` only refreshes the editor modules. |
+| `--proof-root` | The Lake package. Default: the nearest package above the proof; a proof outside any package gets one beside it. |
+| `--assembly`, `--assume-initialized` | As for `extract`. |
+| `--remove` | Drop one recorded selection, named by KEY or by a method selector that names one recorded profile (add `--profile` when it names several), from the package given by `--proof-root`, by default the one holding the current directory. Its record, both modules and their Lake outputs are deleted; nothing is rebuilt. |
 
-`leancil watch [package] --project app.csproj... [--configuration name] [--once] [--goals] [--format text|json]`
-rebuilds the C# on change, refreshes only the extractions whose generated modules changed and
-runs ordinary `verify` for each recorded proof whose extraction or sources changed. With
-`--goals` each cycle also prints the goal at every `sorry` and failing tactic of each proof. A failed
-build reports every proof `stale` with the compiler errors' C# locations and deletes their
-certificates; a method that no longer extracts is `missing`. See
-[Proof-authoring workspace](CONSUMERS.md#proof-authoring-workspace) for the loop, the watch
-statuses, pinned imports and the separate certification step. Editor checking is not a
-certificate.
+`watch` rebuilds the C# on change, refreshes the extractions whose generated modules changed and
+runs `verify` for each recorded proof whose extraction or sources changed.
+
+| Option | Meaning |
+| --- | --- |
+| `package` | The Lake package `workspace` used. Default: the current directory. |
+| `--project` | A C# project to build and watch; repeatable. |
+| `--configuration` | The build configuration. Default `Release`. |
+| `--once` | Run one cycle; exit `1` unless every proof verified or names no theorem. |
+| `--goals` | Print each proof's open goals every cycle. |
+| `--format json` | Print each cycle as one JSON line. |
+
+Editor checking is not a certificate: run `verify` on the same files. The package layout, the
+editing loop, the watch statuses and the certification step are in
+[proof-authoring workspace](CONSUMERS.md#proof-authoring-workspace).

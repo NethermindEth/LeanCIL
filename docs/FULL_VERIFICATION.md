@@ -1,7 +1,17 @@
 # Independent imported-library verification
 
-`leancil verify artifact --force-full-verify` checks each selected imported
-library against its current independently pinned DLL. `--full-artifact Lib=dir`
+Read this page when a caller proof imports
+[published contracts](CONTRACT-INTERFACES.md) and you want the libraries' own proofs re-checked
+instead of trusting the publisher's certification. It states what full verification checks, what
+it requires of a library's [source bundle](CONSUMERS.md#publishing-verified-contracts) and what
+stays trusted.
+
+```text
+leancil verify artifact --force-full-verify [--full-artifact Lib=directory]...
+```
+
+`--force-full-verify` checks each selected imported
+library against its current independently pinned DLL. `--full-artifact Lib=directory`
 selects a local copy of the producer's content-addressed source bundle. Its
 directory name and complete inventory must match the recorded bundle identity.
 Missing, stale or unsupported inputs fail without fallback or `verified.json`.
@@ -38,7 +48,8 @@ Libraries may read immutable RVA static tables. The fresh extraction decides
 each export's reachable tables. Their scoped identities must equal the
 certification's, the caller binding's and the bundled extraction's records, and
 each must name a field of the library assembly. The three published records are
-compared before any build; the fresh extraction is compared with them after it runs. Table bytes come only from the
+compared before any build; the fresh extraction is compared with them after it runs. Table bytes
+come only from the
 fresh extraction, so a re-certified DLL with changed bytes fails the author
 proof that ties them to the published `StaticWorldValid` descriptors. The
 composed theorem states `linkChecked` for the whole linked program: the
@@ -47,7 +58,7 @@ several imports, have one descriptor per identity. `StaticWorldValid` premises
 remain preconditions of the contracts and of the caller's claim; the composed
 theorem does not establish the runtime's static state at the call. Mutable
 statics, static constructors and `ldsfld` of constructor-initialized fields
-remain unsupported.
+are not supported.
 
 Imports from one source bundle share one staged package and one fresh library
 build. The author source first passes the ordinary fresh export, extraction,
@@ -92,10 +103,9 @@ independently-verified`. Faithful DLL decoding and CIL/runtime correspondence
 remain trust boundaries. These checks establish CIL theorems, not correctness
 of CoreCLR or a JIT.
 
-The graph regression covers an actual arithmetic caller through A → B and a
-single caller importing A and C, both of which depend on B. This four-node
-diamond reuses the same selected B identity; all three implementations are checked
-once even when an ordinary proof receipt is already available. Separate fixtures preserve
-a named exceptional outcome through three forwarders and a table-reading contract
-through a transitive dependency. The table fixture retains its explicit
-`StaticWorldValid` premise and checks the final `linkChecked` composition audit.
+Supported dependency shapes include a chain (a caller importing A, which imports B) and a
+diamond (a caller importing A and C, which both import B). A shared dependency has one selected
+identity, and each implementation is checked once per run, also when an ordinary proof receipt
+for it exists. A named exceptional outcome is preserved through forwarding libraries, and a
+table-reading contract through a transitive dependency keeps its explicit `StaticWorldValid`
+premise and is covered by the final `linkChecked` composition audit.

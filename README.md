@@ -74,17 +74,21 @@ strings, generic methods, loops, memory access and compiled F#.
 | --- | --- |
 | `leancil list` | Discover canonical method signatures in an assembly |
 | `leancil extract` | Validate and translate a method and its reachable calls |
+| `leancil blockers` | Report every construct that stops extraction of a list of methods |
 | `leancil check` | Check extraction artifacts against their assembly and settings |
 | `leancil new-proof` | Write a starting proof, with its holes marked, for an extraction |
 | `leancil verify` | Check, kernel-replay and audit a named theorem |
 | `leancil workspace` | Generate a method's extraction into the proof's package for live editor goals |
 | `leancil watch` | Rebuild C# on change, refresh the changed extractions and verify the affected proofs |
 | `leancil verify-batch` | Verify multiple requests against one consumer snapshot |
+| `leancil gates` | Extract and verify a catalog of methods, profiles and proofs |
+| `leancil export-contracts` | Publish verified method contracts for separately compiled callers |
+| `leancil audit-library` | Kernel-replay and axiom-audit the theorems of a Lean library |
 
 `check` validates extraction consistency; `verify` establishes the selected theorem, and
 `verify --goals` prints the goal at each `sorry` and failing tactic of an unfinished proof.
-Failures return a nonzero exit code. See the [CLI reference](docs/CLI.md) for all commands,
-profiles, saved settings and diagnostics.
+Failures return a nonzero exit code. See the [CLI reference](docs/CLI.md) for every command and
+option, profiles, saved settings and diagnostics.
 
 ## Consumer packages and batches
 
@@ -140,7 +144,8 @@ lake build
 dotnet run --file scripts/Test.cs -- --suite core
 ```
 
-Run `dotnet run --file scripts/Test.cs` for the full suite. Tests compile example assemblies,
+These commands are for working on LeanCIL itself; using the tool needs neither. Run
+`dotnet run --file scripts/Test.cs` for the full suite. Tests compile example assemblies,
 check Lean proofs, exercise rejection cases and validate artifact identity. Results are written
 to `artifacts/`. Use separate checkouts for concurrent suites because they mutate those files.
 See [validation coverage and suite commands](docs/VALIDATION.md) and [CI operation](docs/CI.md).
@@ -150,7 +155,11 @@ See [validation coverage and suite commands](docs/VALIDATION.md) and [CI operati
 | Topic | Guide |
 | --- | --- |
 | First proof and failure diagnostics | [Getting started](docs/GETTING-STARTED.md) |
+| Every command, option and report | [CLI reference](docs/CLI.md) |
+| Complete example proofs | [Examples](docs/EXAMPLES.md) |
+| Proofs in your own Lake package, batches and editor workspace | [Consumer packages](docs/CONSUMERS.md) |
 | Proofs, contracts, loops and automation | [Writing proofs](docs/PROOFS.md) |
+| Supported instructions and intrinsics | [Opcodes](docs/OPCODES.md), [SIMD](docs/SIMD.md) |
 | Checking proofs against your library with a coding agent | [Agent skill](skills/leancil/SKILL.md) |
 | Modules and proof APIs | [Architecture](docs/ARCHITECTURE.md) |
 | Cross-assembly contracts | [Contract interfaces](docs/CONTRACT-INTERFACES.md) |
