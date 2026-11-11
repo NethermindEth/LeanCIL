@@ -39,9 +39,9 @@ that script names, its file-based includes and the Lean modules those import.
 | Any other path, including `verification.yml` and build configuration | all |
 
 The `docs` suite also owns each example file that a `sh run` block names. Selection includes
-exactly the selected suites: grouping them into jobs adds none. Test the selection rules and the
-final gate locally with `dotnet run --file scripts/TestSelectVerification.cs`; it needs no Lean
-build or fixture SDK project.
+exactly the selected suites: grouping them into jobs adds no suite. Test the selection rules and
+the final gate locally with `dotnet run --file scripts/TestSelectVerification.cs`; it needs no
+Lean build or fixture SDK project.
 
 ## Required check
 
@@ -150,17 +150,18 @@ A library's identity covers the toolchain, `CIL.lean`, `CIL/`, `lake-manifest.js
 view of `lakefile.toml`, which is the file the library is built from: the checkout lakefile without
 blank lines, comments and plain `[[lean_lib]]` tables naming a library outside CIL. Package
 settings, dependencies, the `CIL` library, the `leancil-audit` executable and any library with
-further keys stay in it. Adding or removing a test library therefore keeps both the identity and
-incremental donors; checkout inputs, such as session cache keys, hash the complete lakefile.
-`Tests/LibraryConfiguration.cs` checks both directions.
+further keys stay in the library view. Adding or removing a test library therefore keeps both the
+identity and incremental donors; checkout inputs, such as session cache keys, hash the complete
+lakefile. `Tests/LibraryConfiguration.cs` checks both directions.
 
 ### Publication and transfer
 
-A run uploads the library it built. A `main` push also uploads after exact reuse, so that it stays
-a donor for later PRs without a chain of earlier runs. Suite jobs take the current run's artifact
-when it uploaded one; a PR run that reused a donor takes that donor's artifact directly.
+A run uploads the library it built. A `main` push also uploads after exact reuse, so that the
+push stays a donor for later PRs without a chain of earlier runs. Suite jobs take the current
+run's artifact when it uploaded one; a PR run that reused a donor takes that donor's artifact
+directly.
 
-A library travels between jobs as one authenticated tar/zstd archive;
+A library is transferred between jobs as one authenticated tar/zstd archive;
 [library distribution](performance/LibraryDistribution.md) defines the format, the restore checks
 and how to measure them. A donor artifact stored as raw files, with no archive digest, is checked
 against its manifest.
@@ -214,7 +215,7 @@ the frontend `scripts/ProofCost.lean`, and writes one row per command and one pe
 | Elapsed ms | wall time of the command; kernel time is in the JSON report | no |
 
 Elapsed time depends on the runner's load, so it is reported and never fails a job. The
-verification suites accept a proof; the frontend certifies none. An error in any command
+verification suites accept a proof; the frontend certifies no proof. An error in any command
 or nested elaboration snapshot makes the module unmeasured; later successful commands cannot
 erase it. Expected diagnostics consumed by `#guard_msgs` do not count as errors. Auxiliary
 theorems contribute to the declaring command's kernel heartbeats and proof objects.
@@ -251,18 +252,19 @@ verified: the group runner records when each member started, and an owned direct
 another member wrote, or a report a proof suite wrote outside its directories, stops the
 measurement of the suites involved. A proof suite that gains an output directory declares it
 there. The shortest `Verify` job also measures `libraries`, which needs only the certified
-library. Neither step can fail its job: a source without rows fails the comparison instead.
+library. Neither measuring step can fail its job: a source without rows fails the comparison
+instead.
 
 A run measures only its own tree. A push to `main` measures every source, and its `Proof cost` job
-gathers those that hold rows into one artifact and logs its digest; a suite that failed on `main`,
-or left no rows, is not among them, and the rows of the suites that passed are. A PR run takes
-those rows as its base when the push run of its merge base published them: the run must be a push
-of that commit on `main`, which is what reusing a certified library without replay requires of its
-producer, the file must have the digest that job logged, and its rows must come from the same
-measurer and from that commit. The measurer is `scripts/ProofCost.lean`,
+gathers the sources that hold rows into one artifact and logs its digest; the artifact omits a
+suite that failed on `main` or left no rows and holds the rows of the suites that passed. A PR
+run takes those rows as its base when the push run of its merge base published them: the run must
+be a push of that commit on `main`, which is what reusing a certified library without replay
+requires of its producer, the file must have the digest that job logged, and its rows must come
+from the same measurer and from that commit. The measurer is `scripts/ProofCost.lean`,
 `scripts/ProofCostReport.cs`, the shared selection helpers in `scripts/Verification.cs`, the row
 schema and the two workflow steps that measure. No other run supplies a base, and no pull request
-run measures one.
+run measures a base.
 
 ### Comparison
 
@@ -298,7 +300,7 @@ reports the measurement noise between two runs.
 Accept an increase that is worth its cost by adding it to `scripts/proof-cost-accepted.json` in
 the same PR. The summary prints the entry: the row, the measure, the base and head values and a
 reason to fill in. An entry applies only to that base value and up to that head value, each with
-1,000 heartbeats of allowance for the difference between reruns, so it cannot excuse later growth;
+1,000 heartbeats of allowance for the difference between reruns, so it does not cover later growth;
 entries that no source of the run matched are listed for removal and never fail.
 
 ### Other producers and local runs
@@ -334,7 +336,7 @@ Selection runs `dotnet run --file scripts/CheckDocReferences.cs`, which needs no
 - Every line of a Lean block, excerpts included, fits in 100 characters, the limit of the
   library's own Lean. An excerpt copies whole lines of its source, so a wide excerpt is
   fixed by wrapping its source.
-- A document's audience decides what it may cite. Documents are for users unless they declare
+- What a document may cite depends on its audience. Documents are for users unless they declare
   `<!-- audience: maintainers -->` below their title; maintainers documents describe how LeanCIL
   itself is built, validated and audited (the `VALIDATION*`, `SOUNDNESS-*` detail pages, this page,
   compiler coverage, performance and evidence records). The tool ships `CIL/`, and `Examples/` holds
@@ -374,15 +376,15 @@ Every fenced Lean block is elaborated unless its info string says why not:
 | `lean illustrative` | A shape rather than code to run, checked like `extracted`. |
 
 Any other info string fails. Prefer an elaborated block, then an excerpt of a verified example;
-`extracted` and `illustrative` blocks can drift in ways only a reader notices. Never mark a block
-to hide an error.
+`extracted` and `illustrative` blocks can become wrong in ways only a reader notices. Never mark
+a block to hide an error.
 
 ### The docs suite
 
 The `docs` suite (`Tests/DocSnippets.cs`) needs the certified library. It writes the elaborated
-blocks into one Lean file per distinct import set, so a block sees only the modules it imports, and
-the names cited outside elaborated code into a file that imports every library module; the files
-elaborate concurrently. Names are probed by these rules:
+blocks into one Lean file per distinct import set, so a block can use only the modules it
+imports, and the names cited outside elaborated code into a file that imports every library
+module; the files elaborate concurrently. Names are probed by these rules:
 
 - A `CIL.`-rooted name in prose or in an unelaborated block must be a declaration or namespace as
   written, unless it is a module path.
@@ -392,10 +394,10 @@ elaborate concurrently. Names are probed by these rules:
   whose first component is capitalised (`LoopFrame.store_field`), must be a declaration, namespace,
   syntax or attribute of the environment, or the suffix of a declaration or namespace of a `CIL`
   module. A dotted name whose part before the last component is no namespace, such as
-  `X86.Aes.Encrypt`, is .NET's and not probed; so are names rooted at `Extracted`,
-  `ExtractedSymbols`, `Examples`, `Tests` or `System`, file names, and .NET accessor names such as
-  `get_Item`, which capitalise after the underscore. A lowercase dotted span such as `entry.memory`
-  or `ldind.i` is a term or an opcode, not a name.
+  `X86.Aes.Encrypt`, is .NET's and not probed. Names rooted at `Extracted`, `ExtractedSymbols`,
+  `Examples`, `Tests` or `System`, file names, and .NET accessor names such as `get_Item`, which
+  capitalise after the underscore, are not probed either. A lowercase dotted span such as
+  `entry.memory` or `ldind.i` is a term or an opcode, not a name.
 - A name that a Lean block of the documentation declares, or binds with `have`, needs no probe; in
   a maintainers document neither does a name declared under `Tests/`, which its own suite checks.
 
@@ -415,7 +417,7 @@ walkthrough when its info string marks it:
 | `sh run fails` | As `sh run`, except that the last command must exit with a failure. |
 | `text stdout` | The whole standard output of the last command run above it. A line `...` stands for any run of lines. |
 | `text stderr` | Lines that the standard error of that command holds in a row, such as the start of a diagnostic. |
-| `csharp edit PATH` | Each line replaces the one line of `PATH`, a file under `Examples/`, that declares the same expression-bodied member; the commands after it see the edit. |
+| `csharp edit PATH` | Each line replaces the one line of `PATH`, a file under `Examples/`, that declares the same expression-bodied member; the commands after it run on the edited file. |
 
 Any other word after `sh`, `text` or `csharp` fails, as does a command the suite does not run, a
 `sh run` block with no command, an output block with no command above it and an edit that names
@@ -431,7 +433,7 @@ label the tool does not print, a line removed and an altered error line, and req
 fail at its line. A change to a tool source or to an example file a `sh run` block names selects
 the suite.
 
-Run it locally with `dotnet run --file scripts/Test.cs -- --suite docs`;
+Run the `docs` suite locally with `dotnet run --file scripts/Test.cs -- --suite docs`;
 `scripts/TestCheckDocReferences.cs` tests the static rules and the output comparison.
 
 Separately, the `Countdown` case of the `outlines-control` suite fails unless the first

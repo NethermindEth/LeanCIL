@@ -44,8 +44,8 @@ dotnet run --file scripts/Test.cs -- --suite outlines-objects
 
 ## Suites
 
-Every name `--suite` accepts, in the order a full run executes them. The names come from
-[VerificationSuites.cs](../scripts/VerificationSuites.cs) and
+This table lists every name `--suite` accepts, in the order a full run executes them. The names
+come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 [ExportVerificationSuites.cs](../scripts/ExportVerificationSuites.cs);
 `scripts/CheckDocReferences.cs` fails when this table and those registries disagree.
 

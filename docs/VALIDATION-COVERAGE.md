@@ -123,7 +123,8 @@ workflow.
 dotnet run --file Tests/PrimitiveArrays.cs -- --measure
 ```
 
-Positive controls for generic, constrained-call, feature-flow and folded-span mutations:
+The positive controls for generic, constrained-call, feature-flow and folded-span mutations follow
+these rules:
 
 - Generic and constrained-call positive controls keep their narrowed declarations and exact
   obligation types, and reuse the original checked theorem without reducing its validator again.
@@ -180,7 +181,7 @@ suite, with one certified-base preparation.
 
 - Imported axioms, unchecked declarations, expected-rejection mismatches and invalid execution
   proofs keep their own outcomes and certificate assertions.
-- Successful requests after rejected proofs verify that failures do not contaminate their shared
+- Successful requests after rejected proofs verify that failures do not affect their shared
   session.
 - `--separate` runs two isolated rejections followed by the seven-request batch, with three
   preparations. Both modes write stage counts and timings under `artifacts/ConsumerBatchSetup-*`,
@@ -229,11 +230,11 @@ processes, each with its private process and worker checks. Run one with
 | `fingerprints` | `Tests/ConsumerFingerprintReuse.cs` | Authenticated canonical fingerprints across independent verifier processes, using two framework modules and a multipart fixture: corrupt receipts, changed or missing parts, module names, auditor bytes, fresh and disabled caches, diagnostic normalization, source/import invalidation and kernel replay. |
 | `certified-fingerprints` | `Tests/CertifiedFingerprints.cs` | Direct normalization compared with an authenticated prepared-library table while local receipts are disabled: identical canonical results across independent receivers, relocation, renamed modules, changed parts and native tools, metadata mutation before publication and consumption, and self-rehashed corruption. The fixture uses two framework modules plus one consumer module. |
 
-Measuring options:
+The checks take these measuring options:
 
 - `timings.json` records wall, build and replay timings and module counts for `support-union`,
   process counts and elapsed times for `certificate-reuse`, and source byte counts and
-  compilation/replay/wall timings for `components`. For each of the three, pass a baseline
+  compilation/replay/wall timings for `components`. For each of the three checks, pass a baseline
   extractor DLL path and `--measure` to record the same workload without asserting reuse.
 - `fingerprints --measure` uses the fixed full framework plus fixture workload and records wall
   time, raw input bytes, serialization counts and native normalization time. Supply a baseline
@@ -343,7 +344,7 @@ For checked-step and loop tactics, see [proof automation](VALIDATION-PROOFS.md#p
   `Tests/ArrayElementReferences.lean` covers null, empty and out-of-range accesses, expired
   references and address formation without granting memory authority. Both run in the `evidence`
   suite.
-- `Tests/ReadOnlyArrayReferences.cs` inserts real `readonly.` prefixes into compiled fixtures,
+- `Tests/ReadOnlyArrayReferences.cs` inserts `readonly.` prefixes into compiled fixtures,
   checks returned and locally stored references, and proves that caller stores fail despite
   writable backing memory. It rejects independently forged writable evidence, separated prefixes
   and branches that skip a prefix. `Tests/ReadOnlyArrayReferences.lean` also checks alias updates,
@@ -400,10 +401,10 @@ The runner:
   tooling uses the same pinned Mono.Cecil version as the extractor; the F# example assembly uses
   pinned FSharp.Core.
 
-Its CLI regressions cover initial proof selection and theorem output, an actual
+Its CLI regressions cover initial proof selection and theorem output, an
 addition-to-subtraction source edit and rebuild, recovery using settings kept after the failed
 proof, the invalid-memory-access theorem, the integer opcode, narrow-storage and
-primitive-operation matrices, `new-proof` refusing an existing file, a stale extraction and a
+primitive-operation matrices, `new-proof` rejecting an existing file, a stale extraction and a
 struct parameter, and an isolated installation of the packaged .NET tool.
 
 ## Certified library preparation
@@ -423,13 +424,13 @@ These tests cover preparation:
   manifests, missing producer digests, preservation of unrelated destination files, and a
   receipted cache entry whose module was rewritten, restored or joined by a file its manifest
   lacks.
-- It also covers closure entries: their key names exactly their modules, a compiled module or
-  source outside the closure rejects the entry, an import outside it fails, and one is never
-  accepted as the whole library. With a few modules standing in for the framework and CI's
-  settings cleared, it builds and kernel-replays a closure from an empty cache, reuses it, keeps
-  it while a process reads it, reports a whole library that cannot be built, completes the whole
-  library, which replaces the entry and is preferred, and refuses an import outside a closure from
-  the compiled import header in three spellings.
+- `Tests/LibraryCache.cs` also covers closure entries: their key names exactly their modules, a
+  compiled module or source outside the closure rejects the entry, an import outside the closure
+  fails, and a closure entry is never accepted as the whole library. With a few modules in place
+  of the framework and CI's settings cleared, the fixture builds and kernel-replays a closure
+  from an empty cache, reuses it, keeps it while a process reads it, reports a whole library that
+  cannot be built, completes the whole library, which replaces the entry and is preferred, and
+  rejects an import outside a closure from the compiled import header in three spellings.
 - The `workspace` suite checks that a full audit, contract imports and a package import are never
   offered a closure entry.
 - Closure verification of a real extraction through the CLI, with its `verified.json` fields and
@@ -505,18 +506,18 @@ These tests cover preparation:
 | Malformed settings, missing proof, unsupported CIL, changed assembly and missing Lake produce stage-specific guidance | Regression checks |
 | Subtraction rejected by the unchanged universal addition contract | Rejects the implementation and removes any successful report |
 | Reference-free array allocation | Checked primitive/enum, packed/nested aggregate and vector zero initialization, payload alignment, empty/non-null identity, negative/native lengths, helper returns and packed field stores; forged element identity, layout identity/width and byref-like certificates, malformed markers and unsupported extents rejected |
-| Integer `div`, `div.un`, `rem`, `rem.un`, both widths | 648 comparisons against actual .NET execution and corresponding Lean proofs, including divide-by-zero and signed overflow |
+| Integer `div`, `div.un`, `rem`, `rem.un`, both widths | 648 comparisons against .NET execution and corresponding Lean proofs, including divide-by-zero and signed overflow |
 | Extracted unsigned quotient for arbitrary inputs with a nonzero divisor | Universal proofs for 32 and 64 bits; multiplication substituted for division rejected by the unchanged contract |
 | Division with mixed widths, references, stack underflow or a zero divisor | Semantic rejection tests |
-| Checked add/subtract/multiply, signed and unsigned at both widths | 2,028 comparisons against actual .NET results or overflow exceptions and corresponding Lean proofs |
+| Checked add/subtract/multiply, signed and unsigned at both widths | 2,028 comparisons against .NET results or overflow exceptions and corresponding Lean proofs |
 | Checked addition with a sum that fits | Universal 32-/64-bit natural-number addition proofs; subtraction substituted for addition rejected |
-| All 20 integer checked-conversion encodings, from both input widths | 762 comparisons against actual .NET execution and corresponding Lean proofs, including native destinations and overflow |
+| All 20 integer checked-conversion encodings, from both input widths | 762 comparisons against .NET execution and corresponding Lean proofs, including native destinations and overflow |
 | Checked 64-to-32-bit unsigned narrowing with a representable input | Universal preservation proof; an eight-bit truncating implementation rejected |
-| Native signatures, locals, calls, fields, references, arithmetic, shifts, casts and `sizeof`, plus exact mixed native/int32 operations in both operand orders | 2,511 comparisons against actual .NET results or arithmetic exceptions and corresponding Lean proofs; all 60 ambiguous mixed unsigned-branch forms rejected unless explicitly widened |
+| Native signatures, locals, calls, fields, references, arithmetic, shifts, casts and `sizeof`, plus exact mixed native/int32 operations in both operand orders | 2,511 comparisons against .NET results or arithmetic exceptions and corresponding Lean proofs; all 60 ambiguous mixed unsigned-branch forms rejected unless explicitly widened |
 | Extracted native addition on the admitted 64-bit target | Universal modular-addition proof |
 | Required-32-bit assembly, forged native type identity, native field overrun, native/int64 operands and 32-bit execution profile | Five intended extraction rejections |
 | Native widening wrapper with memory instructions, nested wrappers or references | Semantic rejection tests; unsigned branch/comparison widening differences checked explicitly |
-| Argument assignment/addressing, both full and short encodings, all admitted integer storage types, aliases, calls, byref reassignment and structs | 639 runtime/memory cases, including 636 actual .NET comparisons |
+| Argument assignment/addressing, both full and short encodings, all admitted integer storage types, aliases, calls, byref reassignment and structs | 639 runtime/memory cases, including 636 .NET comparisons |
 | Overwriting an argument with a replacement value | Universal proof for arbitrary inputs; assignment to the wrong parameter rejected |
 | Returning an address into a parameter home | Lifetime fault proved for every input; successful execution ruled out for every fuel budget |
 | Parameter setup with missing inputs or incompatible scalar/reference values, and narrow initialization | Semantic checks; taking the address of a byref parameter rejected during extraction |
@@ -552,7 +553,7 @@ The outline suites check `new-proof` outlines:
 - These outlines elaborate with only `sorry` warnings and are byte-identical across runs:
   - loop examples: one with two loops in sequence, one searching a free list through an object
     local, one filling a writable span, one filling it through a helper that stores the first
-    element of the span it is lent, one summing and one filling an array by index, and three
+    element of the span it is passed, one summing and one filling an array by index, and three
     slicing a span local, which sum a span and an array and fill an array;
   - straight-line methods with `bool`, narrow, writable span and array parameters, a `bool`
     result, unsigned and signed checked adds, a bit count and splits on unsigned and signed word
@@ -563,7 +564,7 @@ The outline suites check `new-proof` outlines:
   - methods over value arrays of words, structs and vectors that class fields hold, including a
     struct element named across lines;
   - struct instance methods storing fields.
-- The countdown outline is refused for `sorryAx` and verifies once only its holes are filled, as
+- The countdown outline is rejected for `sorryAx` and verifies once only its holes are filled, as
   do filled outlines for array/class composition, multiple struct-field stores, signed and
   unsigned narrow fields, struct value parameters, nested locals and receiver loops.
 - A static helper over words gets a contract stub. Its filled outline verifies where the helper
@@ -573,7 +574,7 @@ The outline suites check `new-proof` outlines:
   admits the throwing side are rejected.
 - Filled outlines verify for a helper's result kept in an integer local by a caller over an
   object or over words alone, tested after it or not, for a helper over words that keeps its own
-  locals and one that tests them, and for a helper that tests a field of the object it is handed.
+  locals and one that tests them, and for a helper that tests a field of the object it is passed.
   A `post` the object helper's body does not meet is rejected.
 - An object helper called from a frame of locals, one that throws beyond a field and one that
   throws from a frame of its own verify filled. A `pre` that admits the object helper's throw
@@ -593,7 +594,7 @@ Audited example theorems must use only the permitted standard Lean axioms, if an
 The verifier rejects `sorry`, `admit`, native proof evaluation and unproved summaries.
 See [the trusted base](SOUNDNESS.md) for runtime and extraction assumptions.
 
-Each successful proof produces an identity-bound `verified.json`. It and the
+Each successful proof produces an identity-bound `verified.json`. That file and the
 [result files](VALIDATION.md#running-suites) are reproducible outputs and are not committed.
 Passing the suites does not establish support for arbitrary .NET programs; see the
 [support boundary](SOUNDNESS.md).
@@ -604,7 +605,7 @@ source/destination operands. Four unsupported/forged type-token cases test extra
 Ten semantic tests cover initialization, permissions, lifetime, GC-sensitive storage,
 bounds, null references and partial overlap. A generic snapshot theorem covers typed copying.
 
-Portable helper validation compares actual .NET results with extracted execution, covering
+Portable helper validation compares .NET results with extracted execution, covering
 power-of-two boundaries, zero/all-ones values, signed boundaries and negative/oversized rotation
 counts. Primitive 32-bit, 64-bit and native rotation aliases use compact boundary samples;
 the full BitOperations matrix covers their shared scalar operation.
@@ -627,7 +628,7 @@ System.Runtime version. A universal instance store/load proof rejects an incorre
 implementation. Four malformed metadata cases test rejection. For the `init` modifier, `modopt`,
 another `modreq` type, a same-named marker in another namespace and a value-returning or
 parameter placement are rejected by name, both as an entry and behind its caller; selectors and
-recorded entries tell the accessor from a plain void setter, and both members of a
+recorded entries distinguish the accessor from a plain void setter, and both members of a
 modifier-only pair are rejected. An `init` accessor export is rejected as non-static.
 
 Struct construction validation covers 56 runtime comparisons for packed and nested structs,
@@ -636,7 +637,7 @@ A universal constructed-value proof covers every 64-bit input and rejects an inc
 Five malformed constructor cases test rejection. Semantic tests cover zero-sized construction,
 missing arguments, zero initialization and a non-void constructor result.
 
-F# validation compares actual .NET execution for addition, unsigned branching, managed calls,
+F# validation compares .NET execution for addition, unsigned branching, managed calls,
 mutable structs and by-reference stores across 324 cases. The addition, store/load and constructor
 contracts are checked against the F# assembly. Subtraction must fail the addition contract,
 and a list-returning function must fail extraction. These examples use the shared CIL semantics.
@@ -650,7 +651,7 @@ certificate. `Tests/StackAllocation.lean` covers alignment, repeated allocations
 `Tests/StackAllocationEvidence.lean` rejects forged flags, injected allocations, extra stack items
 and non-native 64-bit size operands. These run in the `dispatch` suite.
 
-Constrained and constant calls, all in the `dispatch` suite:
+These fixtures cover constrained and constant calls, all in the `dispatch` suite:
 
 - `Tests/ConstrainedCalls.cs` checks compiled implicit and explicit struct-interface calls,
   including closed generic owners and mutation through the receiver, and rejects forged generated
@@ -673,14 +674,14 @@ Constrained and constant calls, all in the `dispatch` suite:
   (conjunction, negation, a getter chain, generic type tests and derived-interface bodies) against
   the runtime, keeps a static-field getter live, rejects live, swapped and untracked flags, forged
   caller and callee certificates and a recursive getter pair, and prunes a getter computing false.
-- It also proves, against the runtime, compiled most specific bodies (`MostSpecificBodies`, the
-  derived generic `SpendRefunding` and derived flag getters in `DerivedFlags`) and static slots on
-  closed generic struct receivers (`GenericReceivers`: a type-argument flag that keeps or prunes
-  its block, an implementation and an interface default whose interface is instantiated at the
-  receiver's argument). It rejects a catalog listing another instantiation of that interface and
-  an open receiver, rejects a compiled diamond, re-abstraction, unlisted base interface and live
-  derived flag, and has Lean reject a catalog hiding the most specific `MethodImpl` or moving its
-  interface outside its pin.
+- `Tests/ConstrainedCalls.cs` also proves, against the runtime, compiled most specific bodies
+  (`MostSpecificBodies`, the derived generic `SpendRefunding` and derived flag getters in
+  `DerivedFlags`) and static slots on closed generic struct receivers (`GenericReceivers`: a
+  type-argument flag that keeps or prunes its block, an implementation and an interface default
+  whose interface is instantiated at the receiver's argument). It rejects a catalog listing
+  another instantiation of that interface and an open receiver, rejects a compiled diamond,
+  re-abstraction, unlisted base interface and live derived flag, and has Lean reject a catalog
+  hiding the most specific `MethodImpl` or moving its interface outside its pin.
 
 The core and universal-contract suites cover checked execution and memory preservation. Choose and
 GenericIdentity preserve arbitrary caller memory exactly; Struct preserves preexisting caller memory

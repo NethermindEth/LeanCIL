@@ -52,12 +52,13 @@ library and tactic regressions kernel-check the resulting proofs.
   endpoint states, fuel costs and mismatched composition positions or assertions, and placements
   from a different body or end boundary. Each theorem's axiom set is reported.
 - `Tests.CodeAt` steps a segment of an abstract body at a symbolic start from the lookups its
-  `CodeAt` placement yields, with the error asserted when stepping has no placement. It hands that
-  segment theorem the middle of a larger placed region, closes a concrete placement by `rfl` and
-  refutes a shifted one and one running past the code. It composes adjacent placements and splits
-  them back with `cons_iff`, `take` and `drop`, including past the segment's end, and recovers the
-  positional `leading ++ segment ++ tail` form from a nonempty placement alone, proving the bound
-  `exists_eq_append` needs by placing the empty segment past the end of a body.
+  `CodeAt` placement yields, with the error asserted when stepping has no placement. It applies
+  that segment theorem to the middle of a larger placed region, closes a concrete placement by
+  `rfl` and refutes a shifted placement and a placement running past the code. It composes
+  adjacent placements and splits them back with `cons_iff`, `take` and `drop`, including past the
+  segment's end, and recovers the positional `leading ++ segment ++ tail` form from a nonempty
+  placement alone, proving the bound `exists_eq_append` needs by placing the empty segment past
+  the end of a body.
 
 ### Embedding and allocation renaming
 
@@ -111,9 +112,9 @@ library and tactic regressions kernel-check the resulting proofs.
   name to the extracted method. The caller-fact lemmas carry a formed reference, an `Unsafe.Add`
   result and a span's validity and slice from the caller's memory to a frame's, and reject a fact
   about another memory; a slice of a span apart from an entry stays apart, and a stored word
-  extends a filled run only right after it, so a word past the next one is refused. A span fold
-  that stores its total before each load of the span steps through `cil_loop_recurse` alone, so
-  the span's validity reaches the memory a word local's store produces.
+  extends a filled run only right after the run, so a word stored further on is rejected. A span
+  fold that stores its total before each load of the span steps through `cil_loop_recurse` alone,
+  so the span's validity reaches the memory a word local's store produces.
 - `Tests.LoopDiagnostics` proves a loop over a struct local that calls a method, passing no facts
   to the loop tactics: the gathered frame facts read the struct's fields by value and by address,
   and the call is crossed by its contract.
@@ -123,14 +124,15 @@ library and tactic regressions kernel-check the resulting proofs.
   - A field store outside the layout or of the wrong kind, and a by-value read of a field narrower
     than its value, do not elaborate.
   - A second loop over an int local stamps a caller buffer through a helper whose contract writes
-    one word, with no frame lemma, memory or store named: the walk takes the local's stores,
-    carries the `Unsafe.Add` result and write authority, and crosses the call with the frame after
-    it. Without the `Unsafe.Add` fact the walk stops at the add, naming that fact; a narrowing
-    local store stops the walk; without the index bound the call names the footprint side
-    condition; an unformed argument names the argument check; and a contract input whose arguments
-    differ from the stack names both.
-  - At a return `cil_loop_finish` closes the results and confinement and hands back the rest of
-    the postcondition.
+    one word, with no frame lemma, memory or store named: the loop tactics step through the
+    local's stores, carry the `Unsafe.Add` result and write authority, and cross the call with
+    the frame after it. Without the `Unsafe.Add` fact the tactics stop at the add and the failure
+    names that fact; the tactics stop at a narrowing local store; without the index bound the
+    failure at the call names the footprint side condition; for an unformed argument the failure
+    names the argument check; and for a contract input whose arguments differ from the stack the
+    failure names both the arguments and the stack.
+  - At a return `cil_loop_finish` closes the results and confinement and leaves the rest of the
+    postcondition open.
   - The proofs select what the tactics leave by its obligation tag, so a dropped or renamed tag
     fails the build: `invariant` and `measure` after `cil_loop_recurse`,
     `precondition.stampMethod` for a named callee's open precondition, the third conjunct's
@@ -157,7 +159,7 @@ symbolic values and memory and the checked interpreter's own execution rules.
 Each comparison proof has a 2,000-heartbeat budget. The widening proof handles all eight
 combinations of signed conversion, scalar position and reversed arguments in 12,000 heartbeats,
 using one `cil_contract_steps 3` invocation per case. Its arbitrary continuation preserves the
-actual widened stack and memory. The budgets detect elaboration regressions independently of
+widened stack and memory. The budgets detect elaboration regressions independently of
 machine speed. `ordered_widening_returns` composes that prefix with a concrete suffix which
 discards both operands and returns zero, proving that the continuation premise is satisfiable for
 every case; the prefix theorem checks the widened value.
@@ -190,8 +192,9 @@ every case; the prefix theorem checks the widened value.
   - `SumDiscard` inherits `AddFlag`'s contract with an uninitialized out local, and `CopyTo`
     inherits `AddFrom`'s with a zeroed local, a callee region footprint inside its own and an
     `Apart` fact from the local's freshness.
-  - `IsZeroForward`, `IsZeroIgnoring` and `IsZeroSecond` re-narrow `IsZero`'s boolean, the last
-    two skipping an argument; `IsSetForward` passes a boolean through a narrowed load.
+  - `IsZeroForward`, `IsZeroIgnoring` and `IsZeroSecond` re-narrow `IsZero`'s boolean, and
+    `IsZeroIgnoring` and `IsZeroSecond` each skip an argument; `IsSetForward` passes a boolean
+    through a narrowed load.
   - Rejected are a body whose loads differ, a selection that passes one argument twice, a result
     or load outside the narrow range, and two false contracts: `IsZeroSecond` as if it loaded its
     first argument, and `IsZeroIgnoring` with a dangling unused argument.
@@ -281,7 +284,7 @@ When changing proof tactics or shared contracts:
 
 ## Binding and transport
 
-These checks back [binding and transport](PROOFS-BINDING.md).
+These checks cover the behavior that [binding and transport](PROOFS-BINDING.md) documents.
 
 - `Tests.MethodBinding` proves a body binding with `cil_body` and pins the diagnostic for a
   differing instruction, a differing local, an index past the program and a `Method = Method`
@@ -301,7 +304,7 @@ These checks back [binding and transport](PROOFS-BINDING.md).
 - `Tests.ProfileEmbedding` binds one template and one open theorem to three valid profiles,
   including shifted branch targets, without restating the template body for each profile. It
   rejects unresolved flags, incorrect flag and callee values, and a changed branch target.
-- `Tests/ProfileTemplates.cs` compiles a real AVX2/SSE4.2 dispatch helper and checks one shared
+- `Tests/ProfileTemplates.cs` compiles an AVX2/SSE4.2 dispatch helper and checks one shared
   proof from `Tests/ProfileTemplatesProof.lean` against three profiles. A fourth extraction
   changes the managed callee numbering through a wrapper entry point. The suite replays the
   generated equations, extraction certificates, bindings and consumer proofs in the kernel, and

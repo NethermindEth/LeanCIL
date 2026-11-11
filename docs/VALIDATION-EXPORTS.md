@@ -48,8 +48,8 @@ and their case IDs. [Suite jobs](CI.md#suite-jobs) gives their CI time limits.
 
 - The base ledger has 49 cases: 22 core, 3 protected, 2 callback, 2 resolution and 20 full cases.
   Each partition rejects an omitted, repeated or unexpected completion.
-- The artifact-mode rejection follows real consumer positives, so it checks removal of an actual
-  successful report.
+- The artifact-mode rejection runs after consumer requests that succeed, so it checks removal of
+  a successful report that a request wrote.
 - The default eight-argument `Tests/FullImportVerification.cs` invocation runs resolution and all
   full cohorts once; `--cohort NAME` selects one full cohort. Unknown, missing or duplicate
   selections fail before fixture setup. The full plan holds only its ten base cohorts; the
@@ -61,13 +61,13 @@ and their case IDs. [Suite jobs](CI.md#suite-jobs) gives their CI time limits.
   coverage.
 - `exportsdiscovery` records one separate `discovery.fixture` completion after the child
   succeeds; the child's behaviors are outside the 49 base cases. The partition builds the
-  producer library and creates real proof packages and publication. The child builds, extracts
+  producer library and creates its proof packages and publication. The child builds, extracts
   and verifies its own caller and needs no baseline caller artifact or verified report. The
   partition runs no core caller verification, restrictions, callbacks or full cases.
 - `exportstyped` owns its fixture and five input proof/interface modules; shared model and proof
   dependencies keep their own owners.
 - `exportsderived` owns its fixture and the five `Derived*` interface, producer and caller modules
-  in `Tests/ContractImports`. It proves exact internal method and outcome contracts on the actual
+  in `Tests/ContractImports`. It proves exact internal method and outcome contracts on its own
   extraction and exports public ones derived only through `Holds.weaken`. Callers verify from the
   sidecar alone, on normal and named-exception paths. Stronger posts, weaker preconditions,
   smaller footprints and renamed exceptions are refuted on the same extraction; at the exporter,
@@ -210,7 +210,7 @@ These regressions cover the extractor's own C# indexes:
 
 - Imported-interface auditing selects declarations from the imported module catalogs;
   current-file declarations use the environment scan. Private and auxiliary declarations are
-  included and their actual module ownership is checked. Dependency traversal visits shared
+  included and their module ownership is checked. Dependency traversal visits shared
   expression nodes once; contract serialization uses canonical expressions.
   `Tests.ContractClosure` compares selected membership with the list-based scan, including
   current, imported, missing and duplicate modules. The `imports` suite compiles that test against
@@ -266,7 +266,7 @@ before executing it. Bootstrap and profiling use the toolchain frontend runner.
 | Situation | Behavior |
 | --- | --- |
 | Standalone proof, generated batch or single-request consumer group, when eligible | Final replay and theorem audit run together in one native environment, including single-module target sets. Dependency certification, artifact identity checks and failure diagnostics are unchanged. |
-| Compatible consumer requests | May share that replay and audit. Each selected theorem and its reachable replay-target declarations must belong to the request's own import closure. The fallback replays each request's import-closed target set independently, so a forged proof cannot borrow an undeclared sibling dependency before an isolated axiom audit. |
+| Compatible consumer requests | May share that replay and audit. Each selected theorem and its reachable replay-target declarations must belong to the request's own import closure. The fallback replays each request's import-closed target set independently, so a forged proof cannot use an undeclared sibling dependency before an isolated axiom audit. |
 | Duplicate declarations, skipped consumer support | Checked separately. |
 | Export callback, full-import audit, profiled replay, audit needing source locations | Use the ordinary audit import of the checked artifacts. |
 | Direct and consumer contract interfaces | Replayed and validated in the same native environment when their complete declaration ownership is unambiguous. The ownership map enumerates private, auxiliary and unused declarations; interface checks do not select only the exported contract's dependencies. |
@@ -280,7 +280,7 @@ environment for structural theorem and constant checks, with no second dependenc
 duplicate declaration, interface/closure/namespace request, or contract refutation requiring
 source locations uses the ordinary audit import. Standalone replay keeps its duplicate rule:
 equal theorem types can have different proof bodies, so a merged replay environment must not
-choose which body's axioms a subsequent audit sees. Byte snapshots, module-path checks and
+choose which body's axioms a subsequent audit reads. Byte snapshots, module-path checks and
 post-audit integrity checks bind the result. The verifier records `auditFused`, so measured runs
 distinguish shared environments from metadata or duplicate-declaration fallbacks.
 
@@ -330,7 +330,7 @@ These regressions cover joint replay:
 - Constrained-call rejection fixtures keep the emitted definitions and the exact constrained
   validator obligations, while their full positive certificates check every validator. Positive
   controls compile that same reduced fixture before changing its call target, so a missing
-  prerequisite cannot masquerade as rejection.
+  prerequisite cannot be the cause of the rejection.
 - Static-span proofs share one batch across original and mutated assemblies, and UTF-8 identity
   mutations use isolated rejection scopes.
 - Generated verification batches use the authenticated native kernel replay command when it
@@ -389,8 +389,8 @@ These regressions cover joint replay:
 - Restored extraction modules and their components come from one complete authenticated
   generation. Matching source hashes alone cannot justify mixing compiled generations: different
   bytes for an import can make Lake rebuild its importer during proof checking. A focused
-  real-Lake fixture produces two valid compilations of identical sources, reproduces that rewrite
-  with mixed restored modules, and checks that restoring the complete closure keeps the
+  fixture that runs Lake produces two valid compilations of identical sources, reproduces that
+  rewrite with mixed restored modules, and checks that restoring the complete closure keeps the
   extraction fixed when the proof changes. Missing closures require certificate preparation
   before the integrity snapshot.
 - A two-request consumer fixture rewrites a compiled extraction artifact during proof
