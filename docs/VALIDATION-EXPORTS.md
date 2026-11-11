@@ -489,8 +489,7 @@ A two-request consumer fixture rewrites a compiled extraction artifact during pr
 after warming both clean requests. It checks authenticated-restored and freshly built preparation:
 the changed request reports extraction integrity, distinct before/after hashes and build provenance,
 removes its stale certificate, and fails even when proof rejection was expected. The unrelated
-request still verifies. This deterministic mutation tests detection and isolation; it does not
-identify the cause of an intermittent rebuild in an external consumer.
+request still verifies.
 
 The component-reuse and support-union fixtures skip their framework-only warmup verification when
 `LEANCIL_CERTIFIED_LIBRARY` is supplied. Their actual batches still authenticate that library and
