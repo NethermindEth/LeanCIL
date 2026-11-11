@@ -20,6 +20,24 @@ def ArgumentView.bytes (view : ArgumentView) (memory : Memory) : List (BitVec 8)
 def ArgumentView.word (view : ArgumentView) (memory : Memory) (offset : Nat) : CIL.W64 :=
   BitVec.ofNat 64 (byteNumber (((view.bytes memory).drop offset).take 8))
 
+/-- Memory kept below a watermark keeps the bytes of an argument range allocated below it. -/
+theorem ArgumentView.bytes_below {watermark : Nat} {before after : Memory}
+    (preserved : MemoryBelow watermark before after) (view : ArgumentView)
+    (old : view.reference.allocation < watermark) : view.bytes after = view.bytes before := by
+  simp only [ArgumentView.bytes, preserved.cells _ old]
+
+#print axioms ArgumentView.bytes_below
+
+/-- Memory kept below a watermark keeps each word of an argument range allocated below it,
+    so a word loaded after a private store is the word the caller passed. -/
+theorem ArgumentView.word_below {watermark : Nat} {before after : Memory}
+    (preserved : MemoryBelow watermark before after) (view : ArgumentView)
+    (old : view.reference.allocation < watermark) (offset : Nat) :
+    view.word after offset = view.word before offset := by
+  simp only [ArgumentView.word, view.bytes_below preserved old]
+
+#print axioms ArgumentView.word_below
+
 /-- A valid input's snapshot is obtained by an actual checked read. -/
 theorem ValidCall.input_snapshot {memory : Memory} {inputs outputs : List ArgumentView}
     (call : ValidCall memory inputs outputs) (input : ArgumentView) (member : input ∈ inputs) :

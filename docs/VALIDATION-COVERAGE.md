@@ -317,7 +317,9 @@ memory retains the homes' access or that the leading slot is no byte home. Homes
 numeric specs take a local's kind from a supplied fact and stop at the store without it, as does a
 store at a symbolic local index. A supplied store
 advances the snapshots to its own memory, and a store's named evidence and the caller reads and
-buffers it carries are checked against the final memory.
+buffers it carries are checked against the final memory. One walk crosses three stores while forming
+argument references, reading an input word through `ValidCall` and loading two caller limbs, one
+named and one supplied as a projection, and stops when a limb is not shown below the boundary.
 
 `Tests/PrimitiveArrays.cs` checks compiled loads and stores for twelve primitive integer element
 types against runtime results and certified checked execution. It also covers length, helper calls,

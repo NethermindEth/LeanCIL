@@ -1,3 +1,4 @@
+import CIL.Safety.CallingFields
 import CIL.Safety.LocalSnapshotSteps
 
 /-!
@@ -531,4 +532,57 @@ theorem store_evidence (memory : Memory) (slots : List LocalSlot) (boundary : Na
 
 #print axioms store_evidence
 
+/-- A two-word argument range. -/
+def pair (reference : Reference) : ArgumentView := ⟨reference, 16⟩
+
+/-- Store an argument, then read caller data after each store: an input word, the output
+    reference, and two caller limbs. -/
+@[cil_code] def callerReads : CIL.Method := {
+  code := [.arg 0, .setLocal 0,
+    .arg 1, .fieldAt 8 8, .setLocal 1,
+    .arg 2, .pop,
+    .arg 3, .load64, .setLocal 0,
+    .arg 4, .load64, .pop,
+    .local 1, .local 0, .add, .ret]
+  locals := [.i64 0, .i64 0], localKinds := [.word64, .word64], returnsValue := true }
+
+/-- A caller limb whose facts are projections, which no hypothesis name carries. -/
+structure Limb (memory : Memory) (reference : Reference) (word : CIL.W64) : Prop where
+  formed : form memory reference = .ok reference
+  loaded : read memory reference 8 1 = .ok (numberBytes word.toNat 8)
+
+/-- After each store the walk prepares its facts at the store's memory: the carried
+    `ValidCall` forms the argument references and reads the input word there, and the
+    supplied reads and formed references below the boundary follow, by name or as terms. A
+    fact not shown below the boundary stays at the entry memory and the walk stops. -/
+theorem caller_reads_after_stores (memory : Memory) (slots : List LocalSlot) (boundary : Nat)
+    (homes : CompleteWritableHomes memory boundary [.word64, .word64] slots)
+    (input output limb other : Reference)
+    (valid : ValidCall memory [pair input] [pair output])
+    (inputOld : (pair input).reference.allocation < boundary)
+    (limbOld : limb.allocation < boundary) (otherOld : other.allocation < boundary)
+    (first second word : CIL.W64)
+    (limbFormed : form memory limb = .ok limb)
+    (limbLoaded : read memory limb 8 1 = .ok (numberBytes first.toNat 8))
+    (limbs : Limb memory other second) :
+    WP (Execution (fun fuel => run [callerReads] fuel 0 0
+      [.scalar (.i64 word), .reference (.address input), .reference (.address output),
+        .reference (.address limb), .reference (.address other)]
+      ⟨0, slots, [], [], 0⟩ [] memory))
+      (fun result => result.2 = [.scalar (.i64 ((pair input).word memory 8 + first))]) := by
+  have formed := valid.wellFormed
+  have snapshots := LocalSnapshots.empty memory slots
+  fail_if_success (
+    clear otherOld
+    cil_contract_steps (snapshots := snapshots)
+      [limbFormed, limbLoaded, limbs.formed, limbs.loaded]
+    rw [← ArgumentView.word_below localBelow (pair input) inputOld]
+    rfl)
+  cil_contract_steps (snapshots := snapshots)
+    [limbFormed, limbLoaded, limbs.formed, limbs.loaded]
+  -- The input word was loaded after the first store, at the memory it produced.
+  rw [← ArgumentView.word_below localBelow (pair input) inputOld]
+  rfl
+
+#print axioms caller_reads_after_stores
 end Tests.LocalSnapshotSteps

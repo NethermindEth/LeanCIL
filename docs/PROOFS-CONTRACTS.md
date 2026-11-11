@@ -137,10 +137,21 @@ walk gives `storedLocal_1` and `localSnapshots_1`. The remembered value is state
 load pushes. In the contract form a store also restates, under the name each already has, the
 facts of the context about the memory it wrote to: `ValidCall`, `CompleteWritableHomes`,
 same-watermark `MemoryBelow`, `AccessBelow`, the caller-buffer and class-instance facts the loop
-tactics carry (`Contents`, `Filled`, `Writable`, `LiveObject` and the field predicates) and each
-`read memory reference width alignment = .ok bytes`. A buffer or read is carried when the context
-shows its allocation below the homes' boundary, as `reference.allocation < boundary`; one that is
-not stays at the old memory. After the walk, `preserved` from `have preserved := MemoryBelow.refl
+tactics carry (`Contents`, `Filled`, `Writable`, `LiveObject` and the field predicates), each
+`read memory reference width alignment = .ok bytes` and each `form memory reference = .ok formed`. A
+buffer, read or formed reference is carried when the context shows its allocation below the homes'
+boundary, as `reference.allocation < boundary`; one that is not stays at the old memory. A supplied
+read or formed reference given as a term, such as `state.loaded`, is restated at `storedLocal` under
+the same condition (`MemoryBelow.read`, `MemoryBelow.form`).
+
+The walk then prepares its step facts again at `storedLocal` from the facts it was given: the
+carried `ValidCall` forms the by-reference arguments and reads their fields there, and the
+restated reads supply their loads, so `.arg`, `.fieldAt` and memory loads of caller data continue
+in the same call. A word `ValidCall` loads after a store is stated at that store's memory, as
+`view.word storedLocal offset`; `ArgumentView.word_below localBelow view old` states it at the memory
+the store wrote to, and `ArgumentView.bytes_below` does the same for the whole range.
+
+After the walk, `preserved` from `have preserved := MemoryBelow.refl
 boundary memory` therefore states `MemoryBelow boundary memory final`, and a caller's own state
 predicate is rebuilt once from these facts and the last `localSnapshots`. Caller-specific
 wrappers still require their own transport proof.
