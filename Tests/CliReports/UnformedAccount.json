@@ -59,21 +59,21 @@
       "line": 44,
       "column": 0,
       "severity": "info",
-      "text": "'ExampleProof.deposit_holds' depends on axioms: [propext, Classical.choice, Quot.sound]"
+      "text": "'ExampleProof.deposit_holds' depends on axioms: [propext, Quot.sound]"
     },
     {
       "file": "<proof>",
       "line": 90,
       "column": 0,
       "severity": "info",
-      "text": "'ExampleProof.depositBoth_holds' depends on axioms: [propext, Classical.choice, Quot.sound]"
+      "text": "'ExampleProof.depositBoth_holds' depends on axioms: [propext, Quot.sound]"
     },
     {
       "file": "<proof>",
       "line": 96,
       "column": 0,
       "severity": "info",
-      "text": "'ExampleProof.correctness' depends on axioms: [propext, Classical.choice, Quot.sound]"
+      "text": "'ExampleProof.correctness' depends on axioms: [propext, Quot.sound]"
     },
     {
       "file": "<proof>",
@@ -87,7 +87,7 @@
       "line": 132,
       "column": 0,
       "severity": "info",
-      "text": "'ExampleProof.second_null_throws' depends on axioms: [propext, Classical.choice, Quot.sound]"
+      "text": "'ExampleProof.second_null_throws' depends on axioms: [propext, Quot.sound]"
     }
   ],
   "goals": null,

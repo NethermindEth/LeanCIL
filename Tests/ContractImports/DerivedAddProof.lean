@@ -123,7 +123,7 @@ theorem smaller_footprint_rejected : ¬ addUnframed.Holds Extracted.program 0 :=
 #guard_msgs (whitespace := lax) in
 #print axioms smaller_footprint_not_refines
 /-- info: 'DerivedAddProof.Rejected.smaller_footprint_rejected'
-  depends on axioms: [propext, Classical.choice, Quot.sound] -/
+  depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms smaller_footprint_rejected
 
