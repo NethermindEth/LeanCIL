@@ -922,11 +922,12 @@ elab_rules : tactic
                   break
         let branchFacts := truthDefinitions ++ facts.getElems
         -- Decide a branch before reflexivity can assign its unknown next pc a conditional.
-        -- Numerals use the same spelling as the normalized branch facts.
+        -- Numerals use the same spelling as the normalized branch facts, and a comparison of
+        -- two numerals is decided, so a literal operand leaves a numeral pc.
         evalTactic (← `(tactic| cil_strict (
           simp only [cil_code, Nat.reduceAdd, cil_step, cil_guard, cil_checked, cil_side,
             BitVec.ofNat_eq_ofNat, BitVec.setWidth_ofNat_of_le, Nat.reduceLeDiff,
-            $[$branchFacts:term],*]
+            BitVec.reduceEq, ↓reduceIte, $[$branchFacts:term],*]
           all_goals ((repeat constructor) <;> rfl))))
         return
     evalTactic (← `(tactic| try simp only [cil_code, Nat.reduceAdd]))

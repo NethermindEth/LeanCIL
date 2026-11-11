@@ -423,4 +423,26 @@ theorem framed_opaque_call {program : CIL.Program} {memory : Memory} (value : CI
 
 #print axioms framed_opaque_call
 
+/-- A feature test and a literal each feed a branch, which then continues at a numeral. -/
+@[cil_code] def literalBranchBody (profile : CIL.FeatureProfile) : CIL.Method :=
+  { profile, returnsValue := true, locals := [], code :=
+    [.feature .avx2, .brzero 5, .const64 1, .brnonzero 6, .ret, .const32 9, .const32 7, .ret] }
+
+/-- A branch on a literal operand is decided where it is taken: the lookups after it meet a
+    numeral, and so does a continuation stated at the numeral. A conditional left in the
+    program counter would be carried through every later step. -/
+theorem literal_branch_pc (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
+    (wide : profile.avx2 = true) (found : program[index]? = some (literalBranchBody profile))
+    (frame : Frame) (memory : Memory) :
+    ∃ fuel result returned, run program fuel index 0 [] frame [] memory =
+      .ok (result, returned) ∧ returned = [.scalar (.i32 7)] := by
+  cil_contract_steps 4 [found, wide]
+  -- The pinned goal is the check: both branches were decided to the numeral 6.
+  guard_target = ∃ fuel result returned, run program fuel index 6 [] frame [] memory =
+    .ok (result, returned) ∧ returned = [.scalar (.i32 7)]
+  cil_contract_steps [found, wide]
+  rfl
+
+#print axioms literal_branch_pc
+
 end Tests.MethodContract

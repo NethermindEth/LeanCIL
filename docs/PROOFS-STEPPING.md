@@ -143,6 +143,9 @@ equations and the supplied facts. This keeps memory results in the form named by
 resolves branch conditions before choosing the next program counter. Unknown opcode heads use the
 equation path.
 
+A branch on a literal operand, such as the `1` a decided feature test pushes, continues at a
+numeral program counter.
+
 Intrinsic steps expose `checkedIntrinsic` and apply proved `@[cil_eval]` lemmas before unfolding the
 intrinsic evaluator. Register consumer lemmas in the form `CIL.evalIntrinsic operation operands =
 some result`. Nonnegative `BitVec.ofInt` literals become `BitVec.ofNat` literals so these equations
