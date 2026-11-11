@@ -1,34 +1,33 @@
 # Writing checked proofs
 
-Entry page for writing a Lean proof about extracted .NET code with the `CIL` library. It gives the
-workflow, then tables that map a task or a goal shape to the interface, tactic and guide to use.
-The detail is in [stepping](PROOFS-STEPPING.md), [contracts](PROOFS-CONTRACTS.md),
+This entry page for writing a Lean proof about extracted .NET code with the `CIL` library gives
+the workflow, then tables that map a task or a goal shape to the interface, tactic and guide to
+use. The detail is in [stepping](PROOFS-STEPPING.md), [contracts](PROOFS-CONTRACTS.md),
 [binding](PROOFS-BINDING.md) and [buffers](PROOFS-BUFFERS.md).
 
-State the property independently of the emitted instructions. Use `CIL.Safety.invoke`,
-`WP`, `Ensures`, `MethodContract` or `OutcomeContract` when the claim includes checked execution.
-Make input quantifiers, initial-memory assumptions and permitted writes explicit.
+State the property independently of the emitted instructions, with explicit input quantifiers,
+initial-memory assumptions and permitted writes. Use `CIL.Safety.invoke`, `WP`, `Ensures`,
+`MethodContract` or `OutcomeContract` when the claim includes checked execution.
 
 ## Author workflow
 
-1. **State the specification.** Quantify over the inputs and memory allowed by the contract.
-   For addition, the result must equal the sum for every pair of input words; checking a few
-   concrete calls does not prove that claim.
-2. **Bind the method.** Extract the assembly and bind the proof's method body to the generated
-   program with the [body-binding API](PROOFS-BINDING.md#bind-bodies-to-the-extraction).
-   A theorem about a handwritten instruction list alone does not establish an assembly property.
-3. **Step straight-line code.** Use `cil_checked_steps` to compose checked execution steps.
-   Supply facts for symbolic branches and memory operations when their conditions are not
-   definitionally true. The [worked instruction example](PROOFS-STEPPING.md#compose-instructions)
-   shows a complete theorem over symbolic inputs and arbitrary caller memory.
-4. **Compose calls and loops.** Apply a helper's proved contract at a call site. For a loop,
-   state an invariant at its checked cutpoint and a measure that decreases on every continuing
-   iteration; a finite successful sample does not establish termination for arbitrary input. See
-   [call contracts](PROOFS-CONTRACTS.md#compose-calls-through-contracts) and
-   [loop cutpoints](PROOFS-BINDING.md#loop-heads-and-call-sites).
-5. **Verify the assembly-bound proof.** End each theorem with `#print axioms`, then run
-   `leancil verify` on the extracted artifact with `--proof`. Verification checks the extraction
-   binding and replays the compiled proof; elaboration alone is insufficient.
+1. State the specification over every input and memory the contract allows. A check of a few
+   concrete calls does not prove a claim about all inputs.
+2. Extract the assembly and bind the proof's method body to the generated program with the
+   [body-binding API](PROOFS-BINDING.md#bind-bodies-to-the-extraction). A theorem about a
+   handwritten instruction list alone does not establish an assembly property.
+3. Step straight-line code with `cil_checked_steps`. Supply facts for symbolic branches and
+   memory operations whose conditions are not definitionally true. The
+   [worked instruction example](PROOFS-STEPPING.md#compose-instructions) is a complete theorem
+   over symbolic inputs and arbitrary caller memory.
+4. Apply a helper's proved contract at each call site
+   ([call contracts](PROOFS-CONTRACTS.md#compose-calls-through-contracts)). For a loop, state an
+   invariant at its checked cutpoint and a measure that decreases on every continuing iteration
+   ([loop cutpoints](PROOFS-BINDING.md#loop-heads-and-call-sites)); a finite successful sample
+   does not establish termination for arbitrary input.
+5. End each theorem with `#print axioms`, then run `leancil verify` on the extracted artifact
+   with `--proof`. Verification checks the extraction binding and replays the compiled proof;
+   elaboration alone is insufficient.
 
 The [addition walkthrough](GETTING-STARTED.md) shows the extraction, proof and verification
 commands. [Soundness](SOUNDNESS.md) states the trust boundary.
@@ -103,11 +102,11 @@ Commands that name parts of an extraction:
 
 ## Public proof surface
 
-`import CIL` is the supported umbrella for a consumer proof. It exports the interfaces below;
-the guides link their definitions and worked examples. The umbrella also imports embedding and
-renaming metatheory. There is no separate narrow proof facade or import-closure size guarantee.
-Import these separately when a proof uses them: `CIL.Safety.LoopScaffold` (`bind_entry`,
-`bind_cutpoint`), `CIL.Observe` and `CIL.Safety.AllocationRefinement`.
+`import CIL` is the supported import for a consumer proof and exports the interfaces below. It
+also imports embedding and renaming metatheory; there is no narrower proof facade and no
+import-closure size guarantee. Import these separately when a proof uses them:
+`CIL.Safety.LoopScaffold` (`bind_entry`, `bind_cutpoint`), `CIL.Observe` and
+`CIL.Safety.AllocationRefinement`.
 
 | Purpose | Consumer interfaces |
 | --- | --- |
@@ -119,10 +118,10 @@ Import these separately when a proof uses them: `CIL.Safety.LoopScaffold` (`bind
 | Prove checked loop paths | `LoopReaches`, `LoopSpec`, `cil_loop_steps` |
 | Supply symbolic operation evidence | Checked read, write and snapshot equalities, vector operation equalities |
 
-Select call evidence by field name: `result.post` and `result.framed` from `CallResult`, and
-`preserved.formed` from `FrameInvariants`. Do not destructure preservation records positionally,
-so that an additional preservation fact does not require rewriting the continuation. Likewise use
-`call.wellFormed`, `call.readable` and `call.writable` for a `ValidCall`.
+Select call evidence by field name: `result.post` and `result.framed` from `CallResult`,
+`preserved.formed` from `FrameInvariants`, and `call.wellFormed`, `call.readable` and
+`call.writable` from a `ValidCall`. Do not destructure preservation records positionally, so
+that an additional preservation fact does not require rewriting the continuation.
 
 `WP` relates a finite budget to one result. Use `Execution` for successful interpreter returns
 and `WP.adequate` at the raw `invoke` boundary. Exact segment relations retain all continuation
@@ -140,9 +139,8 @@ Post-step expressions are part of this proof interface:
 - Supplied checked arithmetic and conversion results avoid expanding the corresponding range
   checks.
 
-The `core` suite checks these forms together with named call continuations, overlapping byrefs,
-mixed local snapshots and a checked loop cutpoint. A change to one of these forms is a change to
-the documented interface.
+The `core` [suite](VALIDATION.md#suites) checks these forms. A change to one of them is a change
+to the documented interface.
 
 Interpreter dispatch helpers and their unfolding equations are implementation details. Do not
 name them in a `simp` list; step with `cil_checked_steps` and pass a fact about the operation
@@ -153,9 +151,5 @@ checked documentation.
 
 - Reuse the checked stepping, memory readback and contract composition lemmas. Do not unfold a
   helper body when its contract suffices.
-- State a loop invariant at a checked cutpoint, with an explicit measure that decreases on every
-  continuing iteration.
-- End each theorem with `#print axioms`. The verifier checks both the theorem and its extraction
-  binding; a successful standalone elaboration is not the full verification workflow.
-- [Stepping and reduction](PROOFS-STEPPING.md) documents reduction behaviour and the
-  simplification interfaces. It is a reference, not a prerequisite for a first proof.
+- [Stepping and reduction](PROOFS-STEPPING.md) is a reference for reduction behaviour and the
+  simplification interfaces. A first proof does not need it.

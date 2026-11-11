@@ -7,9 +7,8 @@ extracted libraries. Read it when a proof crosses a call or publishes a guarante
 
 ## Compose calls through contracts
 
-A caller proof that steps into its callee breaks whenever the callee is reimplemented. State the
-callee's interface as a `MethodContract` instead (`CIL.Safety.MethodContract`) and prove the caller
-against it:
+State a callee's interface as a `MethodContract` (`CIL.Safety.MethodContract`) and prove the caller
+against it, so the caller's proof survives a reimplementation of the callee:
 
 ```lean
 import CIL
@@ -35,17 +34,15 @@ def addContract : MethodContract AddInput where
     values = [] ∧ read final input.res 8 1 = .ok (numberBytes (input.x + input.y).toNat 8)
 ```
 
-The caller's theorem then takes the callee's contract as a hypothesis, so it holds for any
-implementation that meets it:
+The caller's theorem takes the callee's contract as a hypothesis:
 
 ```lean extracted
 theorem root_holds (add : addContract.Holds Extracted.program addTo) :
     rootContract.Holds Extracted.program root
 ```
 
-[CountCalls](../Examples/Proofs/CountCalls.lean) proves a loop through its helper's contract this
-way, with `decrementContract.Holds Extracted.program decrement` as its only assumption about the
-helper.
+[CountCalls](../Examples/Proofs/CountCalls.lean) proves a loop this way;
+`decrementContract.Holds Extracted.program decrement` is its only assumption about the helper.
 
 | Field | States |
 | --- | --- |
@@ -117,11 +114,17 @@ callee's postcondition.
 
 Stores need each local's writable byte home:
 
-| Evidence | Gives | Source |
-| --- | --- | --- |
-| `CompleteWritableHomes` | Every declared local has a typed writable home (`home_at`); no claim that it is readable or initialized | `unknown_frame_setup`, for numeric locals with unknown initial contents |
-| `NumericHomes` | The same through `NumericHomes.complete` | An initialized numeric frame |
-| `WritableHomes` | Writable homes that may skip slots, so `home_at` needs separate evidence that the requested slot has a byte home | The `writable` projection of either bundle |
+| Evidence | Source |
+| --- | --- |
+| `CompleteWritableHomes` | `unknown_frame_setup`, for numeric locals with unknown initial contents |
+| `NumericHomes` | An initialized numeric frame |
+| `WritableHomes` | The `writable` projection of either bundle |
+
+- `CompleteWritableHomes` gives every declared local a typed writable home (`home_at`). It does
+  not claim the home is readable or initialized.
+- `NumericHomes` gives the same through `NumericHomes.complete`.
+- `WritableHomes` may skip slots, so `home_at` needs separate evidence that the requested slot
+  has a byte home.
 
 Pass the `writable` projection to the general snapshot lemmas.
 
@@ -129,10 +132,9 @@ Pass the `writable` projection to the general snapshot lemmas.
 
 The snapshot forms of the stepping tactics (`CIL.Safety.LocalSnapshotSteps`, part of `import CIL`)
 take numeric local stores and loads through a `LocalSnapshots` hypothesis and thread the updated
-snapshots through the walk, so a path with several stores needs no manually split segments. A load
-pushes the latest remembered value; a store replaces it.
+snapshots through the walk. A load pushes the latest remembered value; a store replaces it.
 
-#### What to write
+#### Tactic forms
 
 `snapshots` proves `LocalSnapshots memory frame.locals known` at the goal's current memory. The
 fact list is required; write `[]` when it is empty.
@@ -150,8 +152,8 @@ The two forms differ:
 | --- | --- | --- |
 | Local instructions taken from the snapshots | `.local`, `.setLocal` | `.local`, `.setLocal`, `.vectorLocal`, `.setVectorLocal` |
 | Other instructions | Ordinary checked steps and the return | Ordinary contract steps: supplied step facts, calls and returns |
-| Finds each store's home | From the premises in context | From a `CompleteWritableHomes` or `NumericHomes` hypothesis, also at an earlier memory or after leading slots |
-| Restates context facts after a store | `access` equations only | `access` equations and the [caller facts](#what-the-contract-form-carries) |
+| Finds each store's home | From the premises in context | From a homes hypothesis ([required context](#required-context)) |
+| Restates context facts after a store | `access` equations only; byte-value facts stay at the old memory | `access` equations and the [caller facts](#facts-the-contract-form-carries) |
 | Prepares step facts again after a store | No | Yes |
 | Follows a supplied store | No | Yes |
 | When it takes no step | Fails with `Snapshot stepping took no step; justify the local premises` | Fails with `Snapshot contract stepping took no step`; the counted form succeeds without stepping |
@@ -161,7 +163,7 @@ snapshot map or equations selecting an index of it. Lookup simplifies these and 
 offsets without unfolding unrelated arithmetic definitions. In the contract form a snapshot load
 or store leaves a numeral program counter.
 
-#### What must be in context
+#### Required context
 
 For a store of `value` into local `index` at memory `memory`, the checked form proves these
 premises from hypotheses and `facts`:
@@ -174,21 +176,36 @@ premises from hypotheses and `facts`:
 
 The contract form finds the home itself:
 
-| Homes in context | Further requirements |
+| Homes in context | How the home is found |
 | --- | --- |
-| `CompleteWritableHomes` or `NumericHomes` at the current memory over the frame's locals | The current memory's `WellFormed`. The slot list may be opaque |
-| The same at an earlier memory `entered`, such as the frame's entry memory | `entered.WellFormed`; `AccessBelow watermark entered current` or `MemoryBelow watermark entered current`; `entered.nextIdentity ≤ watermark`; the current memory's `WellFormed`. The link carries each home's write access to the current memory (`CompleteWritableHomes.home_retained`). Without it the walk stops at the store |
-| Homes for the locals after leading slots without a byte home, as in `layout : frame.locals = .root value :: slots` with `NumericHomes entered boundary specs slots` | Each leading slot is a constructor other than `.bytes`, or has a hypothesis `∀ kind reference, slot ≠ .bytes kind reference` (`WritableHomes.after_skipped`). The home is found at the shifted index |
-| An explicit `WritableHomes` bundle | The individual slot and access facts, as for the checked form |
+| `CompleteWritableHomes` or `NumericHomes` at the current memory, over the frame's locals | Directly; the slot list may be opaque |
+| The same at an earlier memory `entered`, such as the frame's entry memory | Through a link from `entered` to the current memory |
+| Homes for the locals after leading slots without a byte home | At the shifted index (`WritableHomes.after_skipped`) |
+| An explicit `WritableHomes` bundle | From the individual slot and access facts, as for the checked form |
+
+Each case has further requirements:
+
+- Homes at the current memory need the current memory's `WellFormed`.
+- Homes at an earlier memory need `entered.WellFormed`, the current memory's `WellFormed`,
+  `entered.nextIdentity ≤ watermark` and a link: `AccessBelow watermark entered current` or
+  `MemoryBelow watermark entered current`. The link carries each home's write access to the
+  current memory (`CompleteWritableHomes.home_retained`). Without the link the walk stops at the
+  store.
+- Homes after leading slots, as in `layout : frame.locals = .root value :: slots` with
+  `NumericHomes entered boundary specs slots`, need each leading slot to be a constructor other
+  than `.bytes` or to have a hypothesis `∀ kind reference, slot ≠ .bytes kind reference`.
 
 A kind lookup that does not compute needs a supplied fact:
 
-| Case | Fact to supply |
-| --- | --- |
-| Opaque `specs` in `NumericHomes entered boundary specs slots` | `specs[4]? = some spec` (`numericKinds_getElem?`) or `(numericKinds specs)[4]? = some kind`, at the index among the homes: the local's index less the leading slots skipped |
-| A local index that is not a numeral, such as the `base + 3` of a block stated at a symbolic local base | `kinds[base + 3]? = some kind`, at exactly that index term. The homes must cover the frame's locals from the first slot; with leading slots skipped the index must be a numeral |
+- For opaque `specs` in `NumericHomes entered boundary specs slots`, supply
+  `specs[4]? = some spec` (`numericKinds_getElem?`) or `(numericKinds specs)[4]? = some kind`.
+  The index is the local's index among the homes: its index less the leading slots skipped.
+- For a local index that is not a numeral, such as the `base + 3` of a block stated at a symbolic
+  local base, supply `kinds[base + 3]? = some kind` at exactly that index term. The homes must
+  cover the frame's locals from the first slot; with leading slots skipped the index must be a
+  numeral.
 
-#### What each store names
+#### Names each store introduces
 
 Each store the walk generates, in either form, introduces:
 
@@ -211,7 +228,7 @@ and the store names `localSnapshots`, `localFormed`, `localBelow`, `localAccess`
 about it, so the loads after it continue in the same call. Otherwise the loads after it need
 supplied step facts or snapshots about that memory.
 
-#### What the contract form carries
+#### Facts the contract form carries
 
 After each store it generates or follows, the contract form restates the context's facts about
 the memory written to at the new memory, each under the name it already has:
@@ -235,27 +252,24 @@ wrote to, and `ArgumentView.bytes_below` the whole range.
 
 #### Stop a walk
 
-| Form | Behaviour |
-| --- | --- |
-| `until continuation` | Tries `continuation` before each step, the initial goal included, and stops when it closes the goal |
-| Step count `n` | Takes at most `n` steps and stops without an error, like `cil_contract_steps n [facts]`. A call counts as one step |
+`until continuation` and a step count `n` stop a snapshot walk as they stop
+[plain contract stepping](#step-a-caller-through-its-callees). The counted form stops without an
+error, and a call counts as one step. The count and `until` cannot be combined.
 
-The count and `until` cannot be combined. To apply a helper lemma stated over `CodeAt body start
-segment`, count the steps up to the program counter where it applies, apply the lemma there, and
-continue with a second walk from the last `localSnapshots`.
+To apply a helper lemma stated over `CodeAt body start segment`, count the steps up to the program
+counter where it applies, apply the lemma there, and continue with a second walk from the last
+`localSnapshots`.
 
 After a contract-form walk, a hypothesis introduced before it as `have preserved :=
 MemoryBelow.refl boundary memory` states `MemoryBelow boundary memory final`. Rebuild a caller's
 own state predicate once, from the restated facts and the last `localSnapshots`.
 
-#### What is not carried
+#### Facts the walk does not carry
 
 - Neither form infers authority, initialization, or preservation across calls and unrelated
   writes.
-- A call does not preserve local snapshots automatically. Derive the snapshots after it from the
-  callee's effect with the snapshot frame lemmas, such as `LocalSnapshots.after_confined`.
-- The checked form restates only `access` equations after a store; byte-value facts stay at the
-  old memory.
+- A call does not preserve local snapshots. Derive the snapshots after it from the callee's
+  effect with the snapshot frame lemmas, such as `LocalSnapshots.after_confined`.
 - A caller-specific wrapper predicate needs its own transport proof.
 
 ### Carry a contract across profiles
@@ -264,11 +278,12 @@ own state predicate once, from the restated facts and the last `localSnapshots`.
 program whose methods all use profile `p` to `CIL.reprofile program q`, for any `q` that agrees
 with `p` on the program. It has `OutcomeContract` and `HoldsCLR` forms, and `_statics` forms of
 the first two for a contract indexed by `programStaticDescriptors`.
+
 `CIL.Program.ProfileAgreement.of_flags` reduces agreement to the flags in `program.profileReads`,
 which `decide` checks for concrete profiles, so one proof covers every profile in a family. For a
-program with no profile reads, an equality `empty : program.profileReads = []` discharges its
-premise with `by simp [empty]`. A separate per-profile extraction is covered once it is shown
-equal to the reprofiled program, by `rfl` when only the profiles differ.
+program with no profile reads, `empty : program.profileReads = []` discharges the premise with
+`by simp [empty]`. A separate per-profile extraction is covered once it is shown equal to the
+reprofiled program, by `rfl` when only the profiles differ.
 
 `leancil export-contracts` accepts one manifest entry for such a family:
 
@@ -291,11 +306,11 @@ The surrounding manifest provides `schema`, `assembly`, `proofRoot` and `interfa
 artifact's `verification.json` selects the shared proof source under `proofRoot`. The family
 theorem has the shape
 `∀ q : FeatureProfile, Predicate q → contract.Holds (reprofile Reference.program q) 0`, where the
-concrete predicate is decidable. Method and outcome contracts are both supported. Because the
-family theorem already concludes a reprofiled program, no second transport or handwritten
-per-profile proof file is needed.
+concrete predicate is decidable. Method and outcome contracts are both supported. The family
+theorem concludes a reprofiled program, so it needs no second transport or handwritten
+per-profile proof file.
 
-Requirements:
+A family entry must meet these requirements:
 
 - The selected artifacts include `referenceProfile`, and the reference program uses it uniformly.
 - Profiles are distinct built-in names and match their artifacts. A family entry cannot also
@@ -310,28 +325,28 @@ Requirements:
   assumptions are not supported. Full source-bundle verification rejects initialization premises,
   as for single-profile exports.
 
-What the export checks:
+The export runs these checks:
 
 - The reference extraction is checked against the same DLL, copied into a reserved generated
   module and compiled separately from author macros. Its compiled artifacts are frozen before
   author code runs and checked again afterward.
-- Each profile receives its own extraction check, layout check, theorem audit and kernel replay.
-  Generated proofs instantiate the predicate with `by decide +kernel` and establish the exact
-  program equality with `rfl`.
-- The equality and agreement statements are independently audited, so proof-source macros cannot
+- Each profile gets its own extraction check, layout check, theorem audit and kernel replay.
+  Generated proofs instantiate the predicate with `by decide +kernel` and prove the exact program
+  equality with `rfl`.
+- The equality and agreement statements are audited independently, so proof-source macros cannot
   replace these checks.
 - Nothing is published unless all selected profiles pass. Published source bundles retain every
   selected extraction.
-- Full verification freshly extracts both the selected profile and its fixed reference from the
-  pinned implementation DLL, then repeats the family checks before composing the caller theorem.
+- Full verification extracts the selected profile and its fixed reference afresh from the pinned
+  implementation DLL, then repeats the family checks before composing the caller theorem.
   Identical fixed-reference modules can reuse authenticated, source-bound compilation across
   profile workspaces; their compiled artifacts are fixed before producer proof code runs and
   checked afterward, and every selected profile retains its extraction replay and exact audit.
 
-This manifest form covers same-flag transport only. It does not accept families whose observed
-branches differ; use [profile templates](PROOFS-BINDING.md#generated-profile-templates) for those.
-A family is also rejected when extraction pruning, method numbering, instructions or metadata make
-a profile's program differ from the reprofiled reference.
+This manifest form covers same-flag transport only. For families whose observed branches differ,
+use [profile templates](PROOFS-BINDING.md#generated-profile-templates). A family is also rejected
+when extraction pruning, method numbering, instructions or metadata make a profile's program
+differ from the reprofiled reference.
 
 ### Type the result
 
@@ -393,7 +408,7 @@ each defined contract unfolded, at entry and in each call's continuation, so the
 encoded output. A fact read from `call.post` keeps the contract folded until
 `dsimp only [mixContract] at` it.
 
-Variants:
+The tactic has these variants:
 
 | Form | Behaviour |
 | --- | --- |
@@ -405,7 +420,7 @@ Fixed-fuel `cil_checked_steps` can reuse a matching invocation or certificate at
 budget; a proof at a larger budget does not justify a smaller one. Contract and existential-child
 composition use `cil_contract_steps`, whose fuel remains existential.
 
-To prove a contract:
+Prove a contract with these lemmas:
 
 - `MethodContract.Holds.intro final output invoked framed post` builds the conclusion of `Holds`
   by name; `invoked` may leave its fuel to `cil_checked_steps`.
@@ -436,11 +451,11 @@ well-formedness, static-world preservation or class catalog agreement;
 `cil_formed_outcome_call` does the same for `cil_outcome_call`. `run_call_of_contract` is the
 lemma that drops the certificate.
 
-`FrameInvariants program before after` is a structure holding `after.WellFormed`,
-`StaticWorldPreserved program before after` and `ClassesPreserved program before after`. Its
-fields `formed`, `staticWorld` and `classes` give each fact, and `left.trans right` composes all
-three across calls, or either preservation alone. `ClassesPreserved` says objects that agree with
-a catalog keep agreeing when the program's object sites do (see [class
+`FrameInvariants program before after` holds `after.WellFormed`,
+`StaticWorldPreserved program before after` and `ClassesPreserved program before after` in its
+fields `formed`, `staticWorld` and `classes`. `left.trans right` composes all three across calls,
+or either preservation alone. `ClassesPreserved` says objects that agree with a catalog keep
+agreeing when the program's object sites do (see [class
 instances](SOUNDNESS-RUNTIME.md#class-instances)). `call_frame_invariants` and
 `construct_frame_invariants` return the structure, and a formed continuation takes it whole. The
 two preservation names are abbreviations, so a function proves either directly.
@@ -514,9 +529,7 @@ memory. Earlier input snapshots remain facts about their original memory; no sep
 initial output contents are inferred. `ValidCall.store_word` exposes the same write and readback
 evidence for explicit composition.
 
-Use `MethodContract` for a byref wrapper, with `ValidCall memory inputs outputs` in `pre`. The
-result encoding describes the returned values; `post` independently states their meaning and the
-memory guarantees, and `footprint` bounds the permitted changes.
+Use `MethodContract` for a byref wrapper, with `ValidCall memory inputs outputs` in `pre`:
 
 | Wrapper result | `results` encoding | Calling requirements |
 | --- | --- | --- |
@@ -551,9 +564,9 @@ copies at every later step, nested checked calls included:
   `3`, so a fact `words 1 = 0` applies to a value read as `words ⟨1, proof⟩`.
 
 Hand-written stepping can use the same simplification, with an optional simp configuration, as
-`cil_fact_simp (config := ...) [definitions] [facts]`. Enable `trace.CIL.factNormalize` to see one
-event per supplied local proposition when it is prepared; the count measures how often
-normalisation runs, not elapsed time.
+`cil_fact_simp (config := ...) [definitions] [facts]`. `trace.CIL.factNormalize` emits one event
+per supplied local proposition when it is prepared; the count measures how often normalisation
+runs, not elapsed time.
 
 ### Read missing-fact diagnostics
 
@@ -581,7 +594,7 @@ extraction emits a descriptor under `Extracted.Classes`, such as `Account.Balanc
 WordField 8`, `Node.Next : ReferenceField` or `Samples.Values : ArrayField .signed32`, carrying
 the class and the model offset the extractor validated. Each comes with a theorem, checked by
 `decide`, that the descriptor matches the operands of an instruction it names
-(`Account.Balance_accessed`); a field name is a label, and only the class, offset and width or
+(`Account.Balance_accessed`). A field name is a label; only the class, offset and width or
 element are relied on.
 
 `CIL.Safety.ObjectFields` gives each descriptor its predicates and lemmas:
@@ -596,95 +609,103 @@ element are relied on.
 | `LiveObject memory object` | `object` forms as an object reference older than later allocations |
 | `field.entry object` | The footprint entry of a call that may change the field |
 
-The stepping tactics read `readable.facts`, the one fact a load of a scalar field steps with, from
-a `Readable`, `Owned` or `Holds` hypothesis in the context, as they read `live.formed` from a
-`LiveObject` (see [composing instructions](PROOFS-STEPPING.md#compose-instructions)). A reference
-field's load takes `readable.facts held targetLive` and a signed narrow field's
-`readable.signedFacts`, which pushes the value sign-extended, and `owned.store value` gives the
-write, its `Confined` footprint and the `Holds` after it; for a reference field, `owned.store
-live` stores a live object and `owned.store_formed formed` any reference that forms, null
-included. A field holding a class outside the model is never read through: `readable.load_forms
-forms` steps its load from `Forms`.
-`frame` keeps a field and its value across a call confined
-to a footprint apart from it, `after_confined` and `after_below` keep each predicate across a
-confined call and across memory that keeps old allocations, and `Owned.across` decides aliasing:
-after a call confined to the field of `written`, the same field of `object` holds the written
-value when they are the same object and its old value otherwise, for word, reference and
-value-array fields; `Readable.across` does the same for a field the caller only reads.
-`apart_of_offsets` and `apart_of_objects` give `Apart` for two fields of one object and for fields
-of two different objects. `ReferenceField.Holds.of_agree` and `ArrayField.Holds.of_agree` keep a
-held caller reference under `BytesBelow` and
-`SlotsAgreeBelow`, the premise `MethodContract.Holds.of_allocationRenaming` needs. The loop tactics
-carry `LiveObject` and every field predicate across the frame's stores and across a confined call
-whose footprint is apart from the field, as they carry caller buffers.
+Step a field access with:
 
-A method that creates an instance starts from `WordField.fresh_owned`,
-`ReferenceField.fresh_holds_null` and `ArrayField.fresh_holds_null`, which give each field of the
-fresh instance before its constructor runs; `enterFrame_heapBudget` shows the caller's heap
-budget reaches the `newobj`
-unchanged by frame entry. No frame owns an instance, so `leaveFrame_memoryAt` gives `MemoryAt`
-for it when the method returns, and the `after_kept` lemmas carry its field predicates there;
-`cil_checked_steps` returns it given that its allocation is not the frame's home. Fields of two
-unrelated classes are apart under the [class catalog](SOUNDNESS-RUNTIME.md#class-instances)
-premise, through `Memory.ClassesConsistent.allocation_ne`. A caller states the premise once at
-entry: `decide` proves `ObjectSitesConsistent` for the extraction, and `invoke_preserves_classes`
-keeps the premise across any invocation, including the instances it creates.
+| Access | Evidence |
+| --- | --- |
+| Load of a scalar field | `readable.facts`, which the stepping tactics read from a `Readable`, `Owned` or `Holds` hypothesis in the context, as they read `live.formed` from a `LiveObject` (see [composing instructions](PROOFS-STEPPING.md#compose-instructions)) |
+| Load of a reference field | `readable.facts held targetLive` |
+| Load of a signed narrow field | `readable.signedFacts`, which pushes the value sign-extended |
+| Load of a field holding a class outside the model | `readable.load_forms forms`, from `Forms`; the field is never read through |
+| Store of a value | `owned.store value`, which gives the write, its `Confined` footprint and the `Holds` after it |
+| Store of a live object into a reference field | `owned.store live` |
+| Store of any reference that forms, null included | `owned.store_formed formed` |
+
+Keep field facts across calls with:
+
+| Need | Use |
+| --- | --- |
+| Keep a field and its value across a call confined to a footprint apart from it | `frame` |
+| Keep each predicate across a confined call | `after_confined` |
+| Keep each predicate across memory that keeps old allocations | `after_below` |
+| Decide aliasing after a call confined to the field of `written` | `Owned.across`; `Readable.across` for a field the caller only reads |
+| `Apart` for two fields of one object | `apart_of_offsets` |
+| `Apart` for fields of two different objects | `apart_of_objects` |
+| Keep a held caller reference under `BytesBelow` and `SlotsAgreeBelow`, the premise `MethodContract.Holds.of_allocationRenaming` needs | `ReferenceField.Holds.of_agree`, `ArrayField.Holds.of_agree` |
+
+`Owned.across` covers word, reference and value-array fields: the same field of `object` holds
+the written value when `object` and `written` are the same object, and its old value otherwise.
+
+The loop tactics carry `LiveObject` and every field predicate across the frame's stores and
+across a confined call whose footprint is apart from the field, as they carry caller buffers.
+Restate a fact the call may change from the contract's postcondition.
+
+A method that creates an instance uses these lemmas:
+
+- `WordField.fresh_owned`, `ReferenceField.fresh_holds_null` and `ArrayField.fresh_holds_null`
+  give each field of the fresh instance before its constructor runs.
+- `enterFrame_heapBudget` shows the caller's heap budget reaches the `newobj` unchanged by frame
+  entry.
+- No frame owns an instance, so `leaveFrame_memoryAt` gives `MemoryAt` for it when the method
+  returns, and the `after_kept` lemmas carry its field predicates there. `cil_checked_steps`
+  returns it given that its allocation is not the frame's home.
+- Fields of two unrelated classes are apart under the
+  [class catalog](SOUNDNESS-RUNTIME.md#class-instances) premise, through
+  `Memory.ClassesConsistent.allocation_ne`. State the premise once at entry: `decide` proves
+  `ObjectSitesConsistent` for the extraction, and `invoke_preserves_classes` keeps the premise
+  across any invocation, including the instances it creates.
+
 [PoolRent](../Examples/Proofs/PoolRent.lean) uses each of these.
 
 A list linked through a reference field, such as a free list, is described by
 `ReferenceField.Segment field memory start stop nodes`: following `field` from `start` visits the
 readable instances `nodes` and arrives at `stop`. A segment is a finite path, so one to null
 shows no cycle is reachable from `start`, and `nodes.length` is the measure of a loop that walks
-it: `Segment.next` gives the head's readable field and the one-shorter rest, and
-`Segment.formed` the reference the walk loads and compares. It is a precondition the caller
-proves of its memory; a program can link a cycle, and then no segment to null exists.
-`Segment.after_below` carries it into the entered frame.
+it. `Segment.next` gives the head's readable field and the one-shorter rest, `Segment.formed` the
+reference the walk loads and compares, and `Segment.after_below` carries the segment into the
+entered frame. The segment is a precondition the caller proves of its memory; a program can link
+a cycle, and then no segment to null exists.
 [PoolIdle](../Examples/Proofs/PoolIdle.lean) proves a search of the pool's free list this way.
 
-[DepositBoth](../Examples/Proofs/DepositBoth.lean) composes two `callvirt` calls of
-`Account.Deposit` through `depositContract`, whose precondition is `Account.Balance.Owned` and
-whose postcondition is `Account.Balance.Holds final account (Account.Balance.of initial account +
-amount)`, and proves the null receiver's fault at the caller's pc.
-[BumpBoth](../Examples/Proofs/BumpBoth.lean) proves the static analogue, the distinct and the
-aliased case, and states the null receiver's `NullReferenceException` as an `OutcomeContract`.
-[DepositTimes](../Examples/Proofs/DepositTimes.lean) crosses the same call inside a loop with
-`cil_loop_call`, its invariant an `Account.Balance.Holds` fact the loop tactics carry across the
-counter's store. [LinkedNodes](../Examples/Proofs/LinkedNodes.lean) composes `Link` and
-`SecondValue` through `Node.Next` and `Node.Value`, keeps the linked node's `Value` across the one
-slot `Link` writes, proves both null faults of `SecondValue` at their pcs, and transfers `Link`'s
-contract to any program that renames its fresh allocations.
+| Example | Shows |
+| --- | --- |
+| [DepositBoth](../Examples/Proofs/DepositBoth.lean) | Two `callvirt` calls of `Account.Deposit` composed through `depositContract`, whose precondition is `Account.Balance.Owned` and whose postcondition is `Account.Balance.Holds final account (Account.Balance.of initial account + amount)`; the null receiver's fault at the caller's pc |
+| [BumpBoth](../Examples/Proofs/BumpBoth.lean) | The static analogue, in the distinct and the aliased case; the null receiver's `NullReferenceException` as an `OutcomeContract` |
+| [DepositTimes](../Examples/Proofs/DepositTimes.lean) | The same call inside a loop with `cil_loop_call`; its invariant is an `Account.Balance.Holds` fact the loop tactics carry across the counter's store |
+| [LinkedNodes](../Examples/Proofs/LinkedNodes.lean) | `Link` and `SecondValue` composed through `Node.Next` and `Node.Value`: keeps the linked node's `Value` across the one slot `Link` writes, proves both null faults of `SecondValue` at their pcs, and transfers `Link`'s contract to any program that renames its fresh allocations |
 
 The predicates are built on `CIL.Safety.ObjectFraming`, which states the same facts about the
-references `objectFieldAddress` locates and which a proof about a field no extraction names can
-use directly. It carries object facts across a call confined to a footprint:
-`formObject_of_confined` and `objectFieldAddress_of_confined` keep a formed reference and a
-located field, given well-formed memory before the call. `objectField_apart_of_ne` makes
-fields of two different objects `Apart`, so `Confined.objectField_read_of_ne` keeps a field of
-one object across a call confined to a field of another, given that the read field's allocation
-is older than the call. Equal references locate the same field (`objectFieldAddress_same`), so
-the aliased case of a proof follows by substitution. `formObject_of_objectFieldAddress` gives the
-formation fact the stepping tactics need for an argument whose field is located.
+references `objectFieldAddress` locates. Use it directly for a field no extraction names:
 
-A class-typed field keeps its reference in the field's slot, not in bytes, and one footprint
-entry starting at the field covers both: `Confined.setSlot` and `Confined.storeSlot` confine a
-store to it, so a contract's footprint names the fields whose bytes or references it may change.
-`Confined.objectSlot_of_ne` keeps the reference a field of a different, older object holds.
-`step_objectReferenceField_eq` and `step_setObjectReferenceField_eq` step the field accesses;
-`loadSlot_of_access` and `storeSlot_of_access` reduce them, given the slot's access check, to
-the held reference and to `setSlot`, which `setSlot_slots_same` and `setSlot_slots_of_ne` read
-back and which leaves bytes, authority and field locations unchanged (`read_setSlot`,
-`access_setSlot`, `objectFieldAddress_setSlot`).
+| Need | Use |
+| --- | --- |
+| Keep a formed reference and a located field across a confined call, given well-formed memory before the call | `formObject_of_confined`, `objectFieldAddress_of_confined` |
+| `Apart` for fields of two different objects | `objectField_apart_of_ne` |
+| Keep a field of one object across a call confined to a field of another, given that the read field's allocation is older than the call | `Confined.objectField_read_of_ne` |
+| The aliased case: equal references locate the same field, so the case follows by substitution | `objectFieldAddress_same` |
+| The formation fact the stepping tactics need for an argument whose field is located | `formObject_of_objectFieldAddress` |
+
+A class-typed field keeps its reference in the field's slot, not in bytes. One footprint entry
+starting at the field covers both, so a contract's footprint names the fields whose bytes or
+references it may change.
+
+| Need | Use |
+| --- | --- |
+| Confine a store to that entry | `Confined.setSlot`, `Confined.storeSlot` |
+| Keep the reference a field of a different, older object holds | `Confined.objectSlot_of_ne` |
+| Step the field accesses | `step_objectReferenceField_eq`, `step_setObjectReferenceField_eq` |
+| Reduce them, given the slot's access check, to the held reference and to `setSlot` | `loadSlot_of_access`, `storeSlot_of_access` |
+| Read `setSlot` back | `setSlot_slots_same`, `setSlot_slots_of_ne` |
+| `setSlot` leaves bytes, authority and field locations unchanged | `read_setSlot`, `access_setSlot`, `objectFieldAddress_setSlot` |
 
 An instance call compiled as `callvirt` steps like a call once its receiver forms as a live
 object (`step_callInstance_eq`, `receiverCall_address`), so `cil_contract_steps` composes it
-through the callee's contract; a null receiver steps to `NullReferenceException` at the
-`callvirt` itself (`receiverCall_null`). The loop tactics carry a fact across a call only when it
-is apart from the callee's footprint, so a fact the call may change is restated from the
-contract's postcondition.
+through the callee's contract. A null receiver steps to `NullReferenceException` at the
+`callvirt` itself (`receiverCall_null`).
 
-A virtual call steps the same way once the receiver's runtime type is known: pass a fact
-`runtimeTypeOf memory receiver = .ok type`, together with the definitions of `type` and its
-assembly scope, and stepping looks the class up in the call's table (`step_callVirtual_eq`,
+A virtual call steps the same way once the receiver's runtime type is known. Pass a fact
+`runtimeTypeOf memory receiver = .ok type`, with the definitions of `type` and its assembly
+scope; stepping looks the class up in the call's table (`step_callVirtual_eq`,
 `virtualCall_address`) and enters the listed body
 ([AnimalLegs](../Examples/Proofs/AnimalLegs.lean)). For an instance the method constructs, the
 fact is `objectMemory_runtimeTypeOf` ([FreshDogLegs](../Examples/Proofs/FreshDogLegs.lean)).
@@ -714,12 +735,13 @@ parameter-name literal as for `ldstr`
 [GuardIndex](../Examples/Proofs/GuardIndex.lean)).
 
 A method that constructs an instance steps its `newobj` with `allocateObject_ok`, given
-well-formed memory and a `Memory.heapBudget` covering the instance, or `allocateObject_insufficient`
-for the `allocationFailure` fault when it does not. `objectMemory_formObject`, `objectMemory_field`
-and `objectMemory_access` give the fresh instance's formation, field addresses and access, and
-`allocateObject_effect` its `MemoryBelow` frame for the caller; `objectMemory_field` takes the
-field's declaring class as a member of the instance's `RuntimeType.lineage`, so it covers fields
-of a base class too.
+well-formed memory and a `Memory.heapBudget` covering the instance, or with
+`allocateObject_insufficient` for the `allocationFailure` fault when the budget does not cover
+it. `objectMemory_formObject`, `objectMemory_field` and `objectMemory_access` give the fresh
+instance's formation, field addresses and access, and `allocateObject_effect` its `MemoryBelow`
+frame for the caller. `objectMemory_field` takes the field's declaring class as a member of the
+instance's `RuntimeType.lineage`, so it covers fields of a base class too.
+
 [FreshObject](../Examples/Proofs/FreshObject.lean) proves both outcomes, stepping the
 constructor's call in place, and [DerivedObject](../Examples/Proofs/DerivedObject.lean) steps a
 derived class's constructor through its base's.
@@ -739,64 +761,63 @@ predicates in the `ReferenceArray` namespace:
 | `ReferenceArray.entry array index` | The footprint entry of a call that may change the element |
 | `ReferenceArray.Forms memory array index` | The reference element `index` holds forms: null or any live object |
 
-`readable.facts held targetLive` and `readable.facts_null held` step `ldelem.ref`, and
-`readable.facts_forms forms` steps it whatever the element holds, never reading through it;
-`owned.store targetLive storable`, `owned.store_null` and `owned.store_formed formed storable`, for
-any reference that forms, such as a string, step `stelem.ref` and give its
-`Confined` footprint and the `Holds` after it, with `storableIn_of_lineage` deciding the
-covariance check for an instance whose class derives from the element class and
-`storableIn_mismatch` giving the `ArrayTypeMismatchException` of one that does not.
-`live.slot_outside` gives the `IndexOutOfRangeException` of an index past the length.
-`frame`, `Holds.after_confined` and `Owned.across` keep and decide elements across a confined
-call as they do fields. `Holds.across_ne` and `Reads.across_ne` keep an element across a store
-into another index of its array, `Live.field_ne` separates an array from every object with a
-located field, so `apart_single` frames elements and fields across each other's stores, and
-`reads.facts formed` steps a load of what an earlier store wrote. `storableIn_after_confined` and
-`storableIn_of_allocations` carry a covariance check, and `formObject_of_allocations` with
-`allocations_of_setSlot` a formation, across later stores; `storableIn_of_confined` carries a
-check across an allocation from well-formed memory, and `entries_young` lets
-`Confined.forget_fresh` drop the elements of an array the method allocated.
-`ReferenceArray.fresh` gives a fresh array from `newReferenceArray_ok`
-as live with every element owned and null. `step_referenceArrayLength_eq`,
-`step_referenceArrayLoad_eq` and `step_referenceArrayStore_eq` step the three instructions.
-[NodePair](../Examples/Proofs/NodePair.lean) fills a fresh array and reads it back, with its
-`allocationFailure` without budget; [ArrayElement](../Examples/Proofs/ArrayElement.lean) and
-[ArrayLength](../Examples/Proofs/ArrayLength.lean) read an element and the length, with the
-bounds and null faults; [ArrayCovariance](../Examples/Proofs/ArrayCovariance.lean) stores into
-a `Circle[]` passed as a `Shape[]`, proving the `ArrayTypeMismatchException` of a `Square`.
-A field holding such an array is a `ReferenceField` whose held reference is the array:
-[BucketItems](../Examples/Proofs/BucketItems.lean) reads an element through one, with its null
-and bounds faults, and [BucketRefill](../Examples/Proofs/BucketRefill.lean) replaces it.
-An array of `string` holds opaque references: [TagStore](../Examples/Proofs/TagStore.lean)
-stores a string a field holds into one, deciding covariance by the string's own class, and
-[TagLoad](../Examples/Proofs/TagLoad.lean) loads one into a field, as `ReferenceField.Forms`
-and `Owned.store_formed` take it.
+| Need | Use |
+| --- | --- |
+| Step `ldelem.ref` | `readable.facts held targetLive`, `readable.facts_null held` |
+| Step `ldelem.ref` whatever the element holds, never reading through it | `readable.facts_forms forms` |
+| Step `stelem.ref`, with its `Confined` footprint and the `Holds` after it | `owned.store targetLive storable`, `owned.store_null`; `owned.store_formed formed storable` for any reference that forms, such as a string |
+| Decide the covariance check for an instance whose class derives from the element class | `storableIn_of_lineage` |
+| The `ArrayTypeMismatchException` of one whose class does not | `storableIn_mismatch` |
+| The `IndexOutOfRangeException` of an index past the length | `live.slot_outside` |
+| Keep and decide elements across a confined call, as for fields | `frame`, `Holds.after_confined`, `Owned.across` |
+| Keep an element across a store into another index of its array | `Holds.across_ne`, `Reads.across_ne` |
+| Separate an array from every object with a located field, so `apart_single` frames elements and fields across each other's stores | `Live.field_ne` |
+| Step a load of what an earlier store wrote | `reads.facts formed` |
+| Carry a covariance check across later stores | `storableIn_after_confined`, `storableIn_of_allocations` |
+| Carry a formation across later stores | `formObject_of_allocations` with `allocations_of_setSlot` |
+| Carry a covariance check across an allocation from well-formed memory | `storableIn_of_confined` |
+| Let `Confined.forget_fresh` drop the elements of an array the method allocated | `entries_young` |
+| A fresh array from `newReferenceArray_ok`, live with every element owned and null | `ReferenceArray.fresh` |
+| Step the three instructions | `step_referenceArrayLength_eq`, `step_referenceArrayLoad_eq`, `step_referenceArrayStore_eq` |
 
-A field holding a single-dimensional array of a value type, an integer, Boolean, char, enum,
-struct or integer vector, is an `ArrayField element` whose slot keeps the whole array's origin;
+| Example | Shows |
+| --- | --- |
+| [NodePair](../Examples/Proofs/NodePair.lean) | Fills a fresh array and reads it back, with its `allocationFailure` without budget |
+| [ArrayElement](../Examples/Proofs/ArrayElement.lean), [ArrayLength](../Examples/Proofs/ArrayLength.lean) | Read an element and the length, with the bounds and null faults |
+| [ArrayCovariance](../Examples/Proofs/ArrayCovariance.lean) | Stores into a `Circle[]` passed as a `Shape[]`, proving the `ArrayTypeMismatchException` of a `Square` |
+| [BucketItems](../Examples/Proofs/BucketItems.lean) | Reads an element through a field holding such an array, with its null and bounds faults. The field is a `ReferenceField` whose held reference is the array |
+| [BucketRefill](../Examples/Proofs/BucketRefill.lean) | Replaces the array such a field holds |
+| [TagStore](../Examples/Proofs/TagStore.lean) | Stores a string a field holds into an array of `string`, which holds opaque references, deciding covariance by the string's own class |
+| [TagLoad](../Examples/Proofs/TagLoad.lean) | Loads a string from such an array into a field, as `ReferenceField.Forms` and `Owned.store_formed` take it |
+
+A field holding a single-dimensional array of a value type (an integer, Boolean, char, enum,
+struct or integer vector) is an `ArrayField element` whose slot keeps the whole array's origin;
 `field.elementType` names its element in a statement. `WholeArray memory element array length`
 says `array` starts a live heap array of exactly `length` elements, allocated before any later
-one, whose view validates. A readable field holding one loads it (`readable.facts held whole`, or
-`load_whole`), one holding null loads the null array (`load_null`), and `owned.store_whole whole`
-and `owned.store_null` store into an owned field, confined to its slot. The field keeps the rest
-of the field lemmas above: `frame`, `after_confined`, `after_below`, `after_kept`, `across`,
-`Holds.of_agree` and `fresh_holds_null`. `WholeArray.after_confined`, `after_below` and
-`after_kept` keep an array whole across the same changes, whatever its elements then hold;
-`checkedValue_array` passes a whole array as a call argument, and `storeLocal_array` and
-`loadLocal_array` move it through a local, each from its view's `valid`.
-`step_arrayField_eq` and `step_setArrayField_eq` step `ldfld` and `stfld`, and
-`step_memory_arrayLength_address_eq` steps `ldlen` of the loaded array to its length once its
-view validates (`whole.valid`), while `step_memory_arrayLength_null_eq` throws on the null array.
-[SampleValues](../Examples/Proofs/SampleValues.lean) returns the array a field holds, and the
-null array for a null field, [SampleCount](../Examples/Proofs/SampleCount.lean) returns its
-length, and [SampleRefill](../Examples/Proofs/SampleRefill.lean) replaces it under a contract
-whose footprint is the field's slot. [TilePairs](../Examples/Proofs/TilePairs.lean) and
-[TilePairCount](../Examples/Proofs/TilePairCount.lean) do the same for an array of 16-byte
-structs, and [TileRelane](../Examples/Proofs/TileRelane.lean) stores an array of vectors.
-[SampleCountAfterRefill](../Examples/Proofs/SampleCountAfterRefill.lean) counts the array a field
-holds after a call that may replace it, deciding the aliasing with `Readable.across`, and
-[TileHold](../Examples/Proofs/TileHold.lean) constructs a `Tiles` and stores an array into each
-of its fields, starting from `fresh_holds_null`.
+one, whose view validates.
+
+| Need | Use |
+| --- | --- |
+| Load the array a readable field holds | `readable.facts held whole`, or `load_whole` |
+| Load the null array from a field holding null | `load_null` |
+| Store into an owned field, confined to its slot | `owned.store_whole whole`, `owned.store_null` |
+| The rest of the field lemmas above | `frame`, `after_confined`, `after_below`, `after_kept`, `across`, `Holds.of_agree`, `fresh_holds_null` |
+| Keep an array whole across the same changes, whatever its elements then hold | `WholeArray.after_confined`, `after_below`, `after_kept` |
+| Pass a whole array as a call argument, from its view's `valid` | `checkedValue_array` |
+| Move it through a local, from its view's `valid` | `storeLocal_array`, `loadLocal_array` |
+| Step `ldfld` and `stfld` | `step_arrayField_eq`, `step_setArrayField_eq` |
+| Step `ldlen` of the loaded array to its length, once its view validates (`whole.valid`) | `step_memory_arrayLength_address_eq` |
+| Step `ldlen` of the null array to its throw | `step_memory_arrayLength_null_eq` |
+
+| Example | Shows |
+| --- | --- |
+| [SampleValues](../Examples/Proofs/SampleValues.lean) | Returns the array a field holds, and the null array for a null field |
+| [SampleCount](../Examples/Proofs/SampleCount.lean) | Returns its length |
+| [SampleRefill](../Examples/Proofs/SampleRefill.lean) | Replaces it under a contract whose footprint is the field's slot |
+| [TilePairs](../Examples/Proofs/TilePairs.lean), [TilePairCount](../Examples/Proofs/TilePairCount.lean) | The same for an array of 16-byte structs |
+| [TileRelane](../Examples/Proofs/TileRelane.lean) | Stores an array of vectors |
+| [SampleCountAfterRefill](../Examples/Proofs/SampleCountAfterRefill.lean) | Counts the array a field holds after a call that may replace it, deciding the aliasing with `Readable.across` |
+| [TileHold](../Examples/Proofs/TileHold.lean) | Constructs a `Tiles` and stores an array into each of its fields, starting from `fresh_holds_null` |
 
 ## Construct structs through contracts
 
@@ -835,22 +856,27 @@ theorem pair_constructs :
 
 The storage does not exist before the step, so a caller names the contract input as a function of
 it. `cil_contract_construct holds constructs input [facts]` applies `run_newAggregate_of_contract`
-at the fetched `newobj` and leaves the caller memory's `WellFormed`, the precondition over the fresh
-storage, and a continuation that resumes at `pc + 1` with the read-back value on the stack. Both
-obligations receive `ConstructStorage memory updated this size`: the storage reads back as `size`
-zero bytes, is writable at full width, is allocated at `memory.nextIdentity`, and the step kept all
-older memory. The continuation also gets the constructor's invocation, the final memory's
-`WellFormed`, static-world preservation, catalog agreement, `Confined` and `post`. No invocation,
-step or `loadLocal` equation is stated. `ConstructStorage.confined` moves `Confined` back to the
-memory before `newobj`; `Confined.forget_fresh` then drops the storage, which the caller's frame
-owns and expires on return.
+at the fetched `newobj` and leaves:
 
-Because `newobj` zeroes the storage, a constructor that leaves a field unassigned still has a
-full-width readback: the field reads back as zero, not as an uninitialized read. A contract may take
-that zero readback as a precondition. `run_construct_of_contract` and
+- the caller memory's `WellFormed`;
+- the precondition over the fresh storage;
+- a continuation that resumes at `pc + 1` with the read-back value on the stack.
+
+Both obligations receive `ConstructStorage memory updated this size`: the storage reads back as
+`size` zero bytes, is writable at full width, is allocated at `memory.nextIdentity`, and the step
+kept all older memory. The continuation also gets the constructor's invocation, the final
+memory's `WellFormed`, static-world preservation, catalog agreement, `Confined` and `post`. No
+invocation, step or `loadLocal` equation is stated. `ConstructStorage.confined` moves `Confined`
+back to the memory before `newobj`; `Confined.forget_fresh` then drops the storage, which the
+caller's frame owns and expires on return.
+
+Because `newobj` zeroes the storage, a field the constructor leaves unassigned reads back as
+zero, not as an uninitialized read, so the readback is still full width. A contract may take that
+zero readback as a precondition. `run_construct_of_contract` and
 `run_construct_of_contract_formed` take the construct step equation instead, like
-`run_call_of_contract`; they cover aggregate storage only. `read_append` joins adjacent field reads
-into the full readback, and `Confined.write_within` confines a field write to the whole struct.
+`run_call_of_contract`; they cover aggregate storage only. `read_append` joins adjacent field
+reads into the full readback, and `Confined.write_within` confines a field write to the whole
+struct.
 
 ## Name exceptional outcomes
 
@@ -875,11 +901,13 @@ def percentContract : OutcomeContract CIL.W64 CIL.W64 where
   raises v _ := if v ≤ 100 then none else some "System.ArgumentOutOfRangeException"
 ```
 
-`cil_raise_steps [facts]` steps a `Raises` goal to its `.throw`; `cil_outcome_call holds input at
-site [facts]` continues after a call the callee's contract says returns, whether the caller then
-returns or raises, and `cil_outcome_raise holds input at site [facts]` closes a `Raises` goal by
-propagating the exception the callee's contract names. `MethodContract.Holds.outcomes` lifts a
-normal-only contract, and `invoke_unique` ties a computed fault to the contract's existential one.
+| Name | Use |
+| --- | --- |
+| `cil_raise_steps [facts]` | Steps a `Raises` goal to its `.throw` |
+| `cil_outcome_call holds input at site [facts]` | Continues after a call the callee's contract says returns, whether the caller then returns or raises |
+| `cil_outcome_raise holds input at site [facts]` | Closes a `Raises` goal by propagating the exception the callee's contract names |
+| `MethodContract.Holds.outcomes` | Lifts a normal-only contract |
+| `invoke_unique` | Ties a computed fault to the contract's existential one |
 
 [CountUntil](../Examples/Proofs/CountUntil.lean) proves `bumpContract`, which raises
 `System.InvalidOperationException` when its two arguments are equal, with `cil_raise_steps` and
@@ -914,8 +942,9 @@ outcome. `RaisesCLR.not_of_invoke` refutes a wrong name from a settled checked i
 
 ## Derive public contracts
 
-A method's proved contract can be more detailed than its callers need. Export a smaller interface by
-proving that the internal contract refines it, without unfolding or executing the method again:
+When a method's proved contract is more detailed than its callers need, export a smaller
+interface by proving that the internal contract refines it, without unfolding or executing the
+method again:
 
 ```lean
 import CIL
@@ -951,13 +980,17 @@ theorem changes_holds {program : CIL.Program} {method : Nat}
 #print axioms changes_holds
 ```
 
-`MethodContract.Refines internal exported` requires the same `args` and `results` encodings, the
-exported precondition to imply the internal one, every internal footprint entry to lie `Within` an
-exported entry under the exported precondition (so `Confined.widen_within` applies), and the
-internal postcondition to imply the exported one under the exported precondition and the internal
-footprint's `Confined`. That last premise lets the exported post state a frame fact, such as a read
-apart from the footprint surviving through `Confined.read_apart`. `MethodContract.Holds.weaken`
-turns a proved `Holds` and a `Refines` into the exported `Holds`.
+`MethodContract.Refines internal exported` requires:
+
+- the same `args` and `results` encodings;
+- the exported precondition to imply the internal one;
+- every internal footprint entry to lie `Within` an exported entry under the exported
+  precondition (so `Confined.widen_within` applies);
+- the internal postcondition to imply the exported one under the exported precondition and the
+  internal footprint's `Confined`. That premise lets the exported post state a frame fact, such
+  as a read apart from the footprint surviving through `Confined.read_apart`.
+
+`MethodContract.Holds.weaken` turns a proved `Holds` and a `Refines` into the exported `Holds`.
 
 `OutcomeContract.Refines` adds that both contracts select the same outcome (`raises`) under the
 exported precondition; the footprint and postcondition premises apply only where that outcome is
@@ -985,11 +1018,16 @@ theorem sum_forwards : sumContract.Holds Extracted.program sum :=
 with no locals, vector argument homes or parameter homes, so frame entry and exit leave memory
 unchanged and the callee's precondition, footprint and postcondition carry over verbatim. The loads
 are data: each is an argument index and the narrowing the extractor attaches to `bool`, `byte`,
-`sbyte`, `short` and `ushort` parameters (`plainLoads` for wider ones). The callee's arguments must
-be the forwarder's at those indices, each kept by its load's narrowing (`LoadsUnchanged`); every
-forwarder argument must reach the callee or be valid under the precondition, since the forwarder's
-own invocation checks them all; the call must expose no unspecified vector bits; and a narrowed `ret
-(some kind)` must not change the callee's result (`ReturnsUnchanged`), which holds for a boolean.
+`sbyte`, `short` and `ushort` parameters (`plainLoads` for wider ones). The lemma has these premises:
+
+- The callee's arguments are the forwarder's at those indices, each kept by its load's narrowing
+  (`LoadsUnchanged`).
+- Every forwarder argument reaches the callee or is valid under the precondition, since the
+  forwarder's own invocation checks them all.
+- The call exposes no unspecified vector bits.
+- A narrowed `ret (some kind)` does not change the callee's result (`ReturnsUnchanged`), which
+  holds for a boolean.
+
 Aggregate results retain their complete byte list. Use `Holds.weaken` afterwards to export a
 different contract.
 
@@ -998,18 +1036,26 @@ of a fresh numeric local as a last out argument and drops it. References, spans,
 pointers and handler tables have no byte home; `ForwardsOut` excludes them with its `notSpan`,
 `notArray`, `notPointer` and `notTable` premises. `make_fitting_local` and `make_unknown_local`
 require the same exclusions. The local may hold any initializer that fits its kind; the extractor
-emits `.unmodeled` without `InitLocals` and the kind's zero with it. The callee runs in the memory
-after frame entry and the result is read after the local expires, so the forwarder's contract
-`outer` is related to the callee's `inner` through `extend input home` and premises over those
-memories. The callee's arguments must be the forwarder's selected by the loads followed by the home,
-each kept by its load's narrowing and none with unspecified vector bits; `outer.pre` must give a
-well-formed memory in which every forwarder argument is valid (`checked`), since the forwarder
-checks them all; `inner.pre` must follow from `outer.pre` with the home fresh, writable and holding
-its initializer (`LocalHolds`); the `inner` footprint must name fresh storage or lie inside
-`outer.footprint`; the two contracts must encode results alike, as scalars that survive the local's
-expiry and that a narrowed `ret` keeps; and `outer.post` must follow from `inner.post` once the
-frame has expired. The footprint is checked by the lemma (`Confined.across_frame`). The home's
-alignment is not surfaced, so a callee whose precondition requires it cannot be composed.
+emits `.unmodeled` without `InitLocals` and the kind's zero with it.
+
+The callee runs in the memory after frame entry and the result is read after the local expires, so
+the forwarder's contract `outer` is related to the callee's `inner` through `extend input home` and
+premises over those memories:
+
+- The callee's arguments are the forwarder's selected by the loads followed by the home, each kept
+  by its load's narrowing and none with unspecified vector bits.
+- `outer.pre` gives a well-formed memory in which every forwarder argument is valid (`checked`),
+  since the forwarder checks them all.
+- `inner.pre` follows from `outer.pre` with the home fresh, writable and holding its initializer
+  (`LocalHolds`).
+- The `inner` footprint names fresh storage or lies inside `outer.footprint`. The lemma checks
+  the footprint (`Confined.across_frame`).
+- The two contracts encode results alike, as scalars that survive the local's expiry and that a
+  narrowed `ret` keeps.
+- `outer.post` follows from `inner.post` once the frame has expired.
+
+The home's alignment is not surfaced, so a callee whose precondition requires it cannot be
+composed.
 
 ## Compose through imported contracts
 
@@ -1049,19 +1095,24 @@ an extraction made without `--import` has no slots, so its `Extracted.imports` a
 extracting against an imported interface.
 
 The identity checks that bind a slot to a certified library implementation are not part of this
-rule; relocating a library into the slot is described next.
+rule; the next section relocates a library into the slot.
 
 ## Link separately extracted libraries
 
 A library extracted on its own calls its helpers by its own method indices. `CIL.Safety.Linking`
-relocates it into a linked program. `Op.relocate f` renames only the method index of `.call`,
-`.newVector256` and `.newAggregate` (`Op.callees`); pcs, locals, profiles and static sites are
-unchanged. `Closed lib` says every callee index in `lib` is one of its methods (`Closed.of_check`
-decides it), and `RelocatesInto lib linked f` says method `i` sits at `f i` relocated by `f`. Then
-`run_relocate` and `invoke_relocate` give exactly the same result: the same memory and values on
-return, and on a fault the same pc and fault with only its method index renamed to `f method`. A
-raise is still the same `.thrown`, so `MethodContract.Holds.relocate` and
-`OutcomeContract.Holds.relocate` move a contract proved on the library alone to its relocated index.
+relocates it into a linked program:
+
+- `Op.relocate f` renames only the method index of `.call`, `.newVector256` and `.newAggregate`
+  (`Op.callees`); pcs, locals, profiles and static sites are unchanged.
+- `Closed lib` says every callee index in `lib` is one of its methods (`Closed.of_check` decides
+  it).
+- `RelocatesInto lib linked f` says method `i` sits at `f i` relocated by `f`.
+- `run_relocate` and `invoke_relocate` then give exactly the same result: the same memory and
+  values on return, and on a fault the same pc and fault with only its method index renamed to
+  `f method`.
+- A raise is still the same `.thrown`, so `MethodContract.Holds.relocate` and
+  `OutcomeContract.Holds.relocate` move a contract proved on the library alone to its relocated
+  index.
 
 A `Library` is its exported entry and its private helpers. `link app libs` puts library `j`'s entry
 at import slot `importIndex app j` and all helpers after the entries, library by library
@@ -1095,7 +1146,6 @@ traversal proof. Names in this table are in `CIL.Safety`, except the base relabe
 | `StepContract` | Memory/frame effects and conditional live-value validity for a checked action | [ExecutionInvariants](../CIL/Safety/ExecutionInvariants.lean) |
 | `Fallthrough`, `Branching` | Shared relabeling proofs for base instruction families | [BaseStep](../CIL/Embedding/BaseStep.lean) |
 
-These contracts retain their hypotheses. For example, `InstructionContract.values` requires
-well-formed input memory and valid input values; its memory-effect field does not require those
-additional hypotheses. `RunTrace` describes successful execution; fault-preservation proofs need the
-appropriate equivalence lemmas.
+These contracts retain their hypotheses: `InstructionContract.values` requires well-formed input
+memory and valid input values, while its memory-effect field does not. `RunTrace` describes
+successful execution; fault-preservation proofs need the appropriate equivalence lemmas.
