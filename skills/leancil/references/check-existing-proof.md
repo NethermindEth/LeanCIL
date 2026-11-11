@@ -1,26 +1,28 @@
 # Check an existing LeanCIL proof
 
-The user has a `.lean` file that imports `Extracted` and states a theorem about
-`Extracted.program`. The job is to run it against their compiled assembly and report the result.
+Read this when the user has a `.lean` file that imports `Extracted` and states a theorem about
+`Extracted.program`. Run it against their compiled assembly and report the result.
 
-## Gather the inputs
+## Inputs
 
-1. The assembly: build it in Release and use that DLL, not a Debug or stale build. If the user
-   hands over only a DLL, say that its build configuration and source are unverified.
-2. The method selector: if the proof's author did not record it, run `leancil list Lib.dll` and
-   match the signature the proof expects (parameter count and types in its `invoke` arguments).
-   If several types declare a matching method, ask which one, or report the one you checked.
-3. The profile: the one the proof was written for, recorded in the author's `identity.json` if
-   they sent their artifacts. Otherwise ask; without an answer use the default `scalar` and say
-   so. Profile names and what they assume are in
-   [runtime profiles](https://github.com/NethermindEth/LeanCIL/blob/main/docs/RUNTIME-PROFILES.md).
-4. The theorem name: the fully qualified name, such as `MyProof.correctness`.
-5. Whether the proof imports the user's own modules. If it does, it needs `--proof-root` pointing
-   at their Lake package (setup in [bridge-model-proof.md](bridge-model-proof.md#package-setup)).
-6. Any `--assume-initialized` types the extraction needs. `extract` names each type with a static
-   constructor and the flag; pass it only if every caller really runs that constructor first.
+1. Build the assembly in Release and use that DLL. When the user hands over only a DLL, say that
+   its build configuration and source are unverified.
+2. Find the method selector. When the proof's author did not record it, run
+   `leancil list Lib.dll` and match the signature the proof expects: the parameter count and
+   types in its `invoke` arguments, or the signature string of its `bind_method`. When several
+   types declare a matching method, ask which one, or report the one you checked.
+3. Use the profile the proof was written for; the author's `identity.json` records it. Otherwise
+   ask, and without an answer use `scalar` and say so.
+4. Take the fully qualified theorem name from the proof: its `namespace` followed by the theorem
+   to certify, usually the last in the file, such as `MyProof.correctness`.
+5. A proof that imports the user's own modules needs `--proof-root` pointing at their Lake
+   package ([package setup](bridge-model-proof.md#package-setup)). A proof that imports a keyed
+   module `Extracted.KEY` was written in a `leancil workspace` package; `verify` accepts that
+   import for the matching extraction only.
+6. `extract` names each type with a static constructor and the `--assume-initialized` flag it
+   needs. Pass the flag only when every caller runs that constructor first.
 
-## Run
+## Commands
 
 ```sh
 dotnet build path/to/Lib.csproj -c Release
@@ -28,32 +30,26 @@ leancil extract path/to/bin/Release/net10.0/Lib.dll 'Type::Method(ulong,ulong)' 
 leancil verify artifacts/Method --proof proofs/Method.lean --theorem MyProof.correctness
 ```
 
-Add `--proof-root .` for a Lake package and `--fresh` to bypass proof reuse. Later runs, such as
-in CI after a rebuild, only need `extract` (to pick up the new DLL) and `leancil verify
-artifacts/Method`.
+Add `--proof-root .` for a Lake package and `--fresh` to bypass reuse of an earlier result. In CI
+after a rebuild, `leancil verify artifacts/Method` is enough: the saved settings supply the proof
+and theorem, and `verify` extracts again when the assembly changed.
 
-## Read the outcome
+## Outcome
 
-Success: audit the printed `Statement:` as described in SKILL.md before reporting.
+On success, audit the printed statement as "Reporting a result" in SKILL.md describes before
+telling the user. On failure, look the `kind` in `artifacts/Method/failed.json` and the `Stage:`
+line up in [failures.md](failures.md).
 
-Failure: read `artifacts/Method/failed.json` and act on `kind`:
+Wrong code and a broken proof both end at `proof checking` with an unsolved goal or a failed
+tactic. Decide which one it is before changing anything:
 
-| `kind` | Meaning | Next step |
-| --- | --- | --- |
-| `stale-input` | The DLL or artifacts changed after extraction | Re-run `extract`, then `verify` |
-| `unsupported-extraction` | The method or something it calls is outside the supported subset | Report the named item; see [opcodes](https://github.com/NethermindEth/LeanCIL/blob/main/docs/OPCODES.md) |
-| `invalid-request` | Proof path or theorem name is wrong | Fix `--proof` / `--theorem` |
-| `elaboration-error` | Any other Lean error: a failed tactic (`Tactic rfl failed`), missing import, renamed API | A failed tactic can mean the code is wrong; see below. Otherwise fix the proof |
-| `unsolved-goal` | A tactic block left goals open, or a `--goals` run stopped at the goals it found open | The code may not satisfy the theorem; see below. `verify --goals` prints each open goal |
-| `resource-limit` | Heartbeats or recursion depth ran out | Confirm the method and profile first; a proof run on the wrong method or a false property can also exhaust limits. Do not raise limits blindly |
-| `replay-or-audit-rejected` | Kernel replay or the axiom audit failed | Treat as a failed proof; look for `sorry` or extra axioms |
-
-LeanCIL does not tell "the code is wrong" apart from "the proof is broken": both surface as
-`unsolved-goal` or as an `elaboration-error` whose first message is a failed tactic. A proof that
-passed before a code change and fails after it usually means the code changed behavior, which is
-the check doing its job. Compare the old and new C# before touching the proof. A proof written for
-an older LeanCIL version may also fail because tactic or lemma names changed; that is a proof
-maintenance task, not evidence about the code.
+- When the proof passed before a code change and fails after it, the code probably changed
+  behavior. Compare the old and new C# and report the difference. Leave the proof as it is.
+- When the proof fails against unchanged code after a tool update, a tactic or lemma name it
+  uses may differ in the installed framework. Updating those names is proof maintenance and says
+  nothing about the code.
+- `leancil verify artifacts/Method --goals` prints the goal before the failing tactic; read it to
+  see what the proof could not establish about the compiled code.
 
 ## Example
 

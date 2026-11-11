@@ -21,11 +21,12 @@ cannot substitute for it.
 | Static values | Checked execution yields emitted bytes without circular reads of the values being justified; unknown values have no initializer and are read only from the caller's binding | Initializer recognition and deployment initialization/immutability |
 
 Exact scalar matching covers integer literals, wrapping/checked add/subtract/multiply, signed and
-unsigned divide/remainder, bitwise operations, shifts, negation, integer comparisons, admitted integer
-conversions and all short/long compare-and-branch encodings. Literal ranges and high-bit-set int64
-values, conversion width/signedness/checkedness and exact branch targets cannot pass by stack effect
-alone. Non-covered raw opcodes cannot emit these scalar operations, except feature-bound type-test
-words and size constants bound to exact primitive/vector widths or validated layouts.
+unsigned divide/remainder, bitwise operations, shifts, negation, integer comparisons, admitted
+integer conversions and all short/long compare-and-branch encodings. Literal ranges and
+high-bit-set int64 values, conversion width/signedness/checkedness and exact branch targets cannot
+pass by stack effect alone. Non-covered raw opcodes cannot emit these scalar operations, except
+feature-bound type-test words and size constants bound to exact primitive/vector widths or
+validated layouts.
 
 Mixed native/int32 operations require the exact `nativeBinary` wrapper; homogeneous operands forbid
 it. Native/int64 arithmetic mixtures are rejected. The 64-bit representation interchange at homes
@@ -48,17 +49,18 @@ output can lose admission without invalidating a theorem over an already admitte
 
 The [compiler corpus](COMPILER-COVERAGE.md) checks admission changes, not compiler correctness or
 every possible folded pattern. The runtime-call inventory does not count these folds.
-[OPCODES](OPCODES.md) records the admitted forms. Metadata decoding, raw-input fidelity, static-data
-serialization and runtime-helper correspondence remain trusted even when evidence validates.
+[OPCODES](OPCODES.md) records the admitted forms. Metadata decoding, raw-input fidelity,
+static-data serialization and runtime-helper correspondence remain trusted even when evidence
+validates.
 
 ## Negative evidence
 
 Direct Lean mutations exercise validators independently of hashes/regeneration: scalar meanings,
 stack kinds/joins, layouts, homes, generic substitution, pruning, call slots and folds. Positive
-controls establish that fixtures reach the intended obligation. See [validation](VALIDATION-COVERAGE.md).
-Wrong-addition has an execution witness and an all-successful-fuel refutation; bounds/lifetime
-examples use `invoke_fault_refutes_success`. A failed positive proof or resource exhaustion alone
-is not a semantic counterexample.
+controls establish that fixtures reach the intended obligation. See
+[validation](VALIDATION-COVERAGE.md). Wrong-addition has an execution witness and an
+all-successful-fuel refutation; bounds/lifetime examples use `invoke_fault_refutes_success`. A
+failed positive proof or resource exhaustion alone is not a semantic counterexample.
 
 ## Caller proofs and published library contracts
 
@@ -70,9 +72,9 @@ contracts. A false or unsatisfiable imported contract can make a caller theorem 
 
 Every supplied interface module is kernel-replayed. The canonical contract-closure audit includes
 definition values, theorem/inductive types, constructors and computational recursor rules. It
-rejects custom axioms, sorry, unsafe/partial declarations, free variables and missing opaque values.
-Normalization removes binder names/metadata, normalizes universe binders and stops at pinned
-framework/toolchain identities.
+rejects custom axioms, sorry, unsafe/partial declarations, free variables and missing opaque
+values. Normalization removes binder names/metadata, normalizes universe binders and stops at
+pinned framework/toolchain identities.
 
 Ordinary caller verification accepts the implementation-to-contract assertion from published
 certification; it does not reprove the implementation. Sidecar/DLL hashes identify bytes, not
@@ -82,9 +84,10 @@ elaborator code with verifier privileges; untrusted bundles need isolated, read-
 execution. See [full verification](FULL_VERIFICATION.md).
 
 Initialization premises are bound by assembly, type and profile, checked against extraction and
-propagated through dependencies into reports. They identify assumptions, not evidence that a CLR
-initializer ran. Constructor-derived exported field values and forced-full initialization premises
-are unsupported. Reference-only authoring checks do not issue deployment certificates.
+propagated through dependencies into reports. They identify assumptions; they are not evidence
+that a CLR initializer ran. Constructor-derived exported field values and forced-full
+initialization premises are unsupported. Reference-only authoring checks do not issue deployment
+certificates.
 
 ## Pinned referenced assemblies
 
@@ -97,7 +100,7 @@ trusted inputs on the same terms as the selected one; no other assembly can cont
 - `TranslationValid` requires `AttributionValid`: each body's owner identity is scoped by its
   own pin's colon-free identity, so a body attributed to the wrong assembly fails the kernel
   check ([tests](../Tests/AssemblyPins.lean)). Distinct pins and a complete `assemblies` list
-  are extractor output that `check` regenerates, not a Lean obligation.
+  are extractor output that `check` regenerates; they are not a Lean obligation.
 - Lean cannot hash bytes. `identity.json` records each assembly's identity, MVID and SHA-256;
   `check`, and so `verify`, rehashes the selected and every referenced DLL against it and
   regenerates the certificate, so a substituted DLL or a changed recorded hash is rejected
@@ -128,13 +131,13 @@ binds its body to a pin as well. An interface of an unpinned assembly fails reso
 
 ## Typed import metadata
 
-`LayoutProjectionValid` and `ImportedLayoutsValid` bind closed generic identities and admitted byref
-aggregate layouts: raw catalog, selected entries, nested reindexing, computed layouts, uniqueness
-and signature coverage. Extraction also compares the pinned DLL metadata. These checks do not
-verify Cecil or remove runtime assumptions. See [typed imports](TYPED-IMPORTS.md).
+`LayoutProjectionValid` and `ImportedLayoutsValid` bind closed generic identities and admitted
+byref aggregate layouts: raw catalog, selected entries, nested reindexing, computed layouts,
+uniqueness and signature coverage. Extraction also compares the pinned DLL metadata. These checks
+do not verify Cecil or remove runtime assumptions. See [typed imports](TYPED-IMPORTS.md).
 
 An imported aggregate local sizes caller frame storage from the same pinned metadata that byref
-contracts already trust; it adds a consumer, not a trusted source. `ImportedLocalLayoutsBound`
+contracts already trust; it adds a consumer and no trusted source. `ImportedLocalLayoutsBound`
 requires every caller layout entry whose identity a slot publishes to equal that slot's selected
 layout, nested indices bound by identity, with the same computed layout, for every such slot.
 Extraction admits such a local only when its whole closure is published and one bound typed call
@@ -146,12 +149,15 @@ Truth tests and equality check formation/lifetime without reading bytes or grant
 Same-allocation equality uses offsets. Different-allocation interiors are distinct; comparisons
 involving end pointers across allocations are unsupported because adjacent addresses may coincide.
 Pointer difference and unsigned ordering require a single live allocation and assume a contiguous,
-non-wrapping runtime address interval. Native displacement arithmetic retains provenance and readonly
-restrictions; no ordering between allocation bases is inferred.
+non-wrapping runtime address interval. Native displacement arithmetic retains provenance and
+readonly restrictions; no ordering between allocation bases is inferred.
 
-Object `ldnull` has a distinct scalar-flow kind. Its bounded truth/equality tests do not justify
-object storage, parameters/results or comparisons with managed references. The raw literal,
-comparison operation and branch target remain exactly checked.
+Object `ldnull` has a distinct scalar-flow kind. The certificate admits it in truth tests, in
+identity comparisons with class instance references, and as a local, argument, call parameter or
+return value whose type is a class instance, a supported array or a typed handler table. It is
+also admitted as the value of a class-typed field or of a reference-array element. It is never
+admitted in a numeric or managed-reference slot, and its comparison with a managed reference is
+rejected. The raw literal, comparison operation and branch target remain exactly checked.
 
 Each `ldstr` emits the string literal of exactly its own text, typed as an object; no other raw
 opcode emits a literal, and inside a folded `throw` the load emits nothing.

@@ -2,7 +2,7 @@
 
 <!-- audience: maintainers -->
 
-## What is defined and proved
+## Definitions and proved properties
 
 `CIL.Safety.run` and `CIL.Safety.invoke` execute methods over allocation-aware memory.
 Value-only instructions delegate to `CIL.step`. Memory operations and frame transitions use
@@ -26,9 +26,10 @@ Handlers, exception-object identity, unwinding and post-throw memory are outside
 Outcome loop rules require preservation and decrease only for continuing iterations; exits must
 establish the specified normal or exceptional outcome from the initial state.
 
-[Countdown](../Examples/Proofs/Countdown.lean) proves termination and zero return for all uint inputs
-under its empty-memory precondition. [FillWords](../Examples/Proofs/FillWords.lean) proves a fill for
-every admitted count, final sequence contents and confinement. Neither is a runtime cost claim.
+[Countdown](../Examples/Proofs/Countdown.lean) proves termination and zero return for all uint
+inputs under its empty-memory precondition. [FillWords](../Examples/Proofs/FillWords.lean) proves a
+fill for every admitted count, final sequence contents and confinement. Neither proof is a runtime
+cost claim.
 
 ### Allocation and access
 
@@ -41,11 +42,13 @@ escaping references and spans. The raw `localsinit` bit selects zeroed or unread
 A zero-size request returns null. Nonempty reservations round to 16 bytes and charge
 `Memory.stackLimit`: default zero, at most 65,536 bytes per activation. A positive quota requires
 a deployment premise; it excludes ordinary frames, calls and probing overhead and does not prove
-physical stack availability. Quota failure is a model fault, not automatically a CLR exception.
+physical stack availability. Quota failure is a model fault; it is not automatically a CLR
+exception.
 The conventions assume the admitted .NET 10
 [x64](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/jit/codegenxarch.cpp) and
-[ARM64](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/jit/codegenarm64.cpp) implementations.
-Heap-array lifetime and resource assumptions are in [runtime storage](SOUNDNESS-RUNTIME.md).
+[ARM64](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/jit/codegenarm64.cpp)
+implementations. Heap-array lifetime and resource assumptions are in
+[runtime storage](SOUNDNESS-RUNTIME.md).
 
 ### Virtual dispatch
 
@@ -66,9 +69,10 @@ name a slot declared outside those assemblies, a derived class that is not admit
 in another assembly, a method that hides the slot with `newslot`, a concrete class that inherits
 an abstract slot, an explicit `MethodImpl`, and generic virtual methods.
 
-The closed world is a checked premise, not an assumption: a run that reaches the call with an
-instance of an outside class ends in `outsideDispatchTable`, which is neither a return nor a named
-exception, and more fuel does not change it. Interface calls are not modelled.
+The closed world is a checked premise; it is not an assumption: a run that
+reaches the call with an instance of an outside class ends in `outsideDispatchTable`, which is
+neither a return nor a named exception, and more fuel does not change it. Interface calls are not
+modelled.
 
 ## Aggregate storage
 
@@ -83,7 +87,8 @@ not CLR correspondence. See [layout assumptions](SOUNDNESS-RUNTIME.md#sequential
 `MethodEmbeds` checks execution metadata, static descriptors and live instructions under a PC map.
 Entry, branch/call targets and resumable fallthroughs must match. Expected `.unsupported` locations
 constrain no actual code and cannot occur on a successful expected path. Even a live inserted `nop`
-is outside this exact relation. `cil_embed` computes a candidate map; the kernel checks every field.
+is outside this exact relation. `cil_embed` computes a candidate map; the kernel checks every
+field.
 
 `ProgramRefines` transfers successful runs with the same fuel and final memory. Outcome variants
 transfer named throws with relocated PCs, preserving method and exception. They do not transfer

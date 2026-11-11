@@ -1,34 +1,73 @@
 # Examples
 
+This page lists the example methods and proofs shipped in the repository and what each theorem
+establishes. Read it to find a complete proof close to the method you want to verify. The C#
+sources are under `Examples/Assembly`, the F# sources under `Examples/FSharp` and the proofs under
+`Examples/Proofs`. Build, extract and verify one as in [getting started](GETTING-STARTED.md):
+
+```sh
+dotnet build Examples/Assembly -c Release
+leancil extract Examples/Assembly/bin/Examples.dll "Loops::Countdown(uint)" artifacts/Countdown
+leancil verify artifacts/Countdown --proof Examples/Proofs/Countdown.lean
+```
+
+Sentences about what a suite checks describe the repository's own tests
+(`dotnet run --file scripts/Test.cs -- --suite <name>`, see [validation](VALIDATION.md)). Those
+sentences name the wrong implementations that each unchanged proof rejects.
+
 ## Independent examples
 
 - `Add`: universal modular arithmetic correctness in the specified empty initial memory.
 - `AddModel`: carries a theorem about a pure Lean model to the compiled `Add` through one theorem
   that the method returns the model's result, without re-proving the model theorem.
-- `CheckedArithmetic.Add64`: universal checked addition for every pair whose sum fits, over arbitrary caller memory, with exact memory preservation. The checked automation follows generated instruction lookups; the same contract is tested after inserting NOPs and rejected for subtraction.
-- `Choose`: universal checked selection for both Boolean inputs and every pair of 64-bit values, preserving arbitrary caller memory exactly.
-- `GenericIdentity`: universal identity through direct, repeated and nested generic calls in C#, and a compiled F# identity wrapper, preserving arbitrary caller memory exactly.
-- `Loops.Countdown`: universal termination and a zero result for every `uint`, including zero and `uint.MaxValue`, using a decreasing natural-number measure over checked local storage.
+- `CheckedArithmetic.Add64`: universal checked addition for every pair whose sum fits, over
+  arbitrary caller memory, with exact memory preservation. The checked automation follows generated
+  instruction lookups; the same contract is tested after inserting NOPs and rejected for
+  subtraction.
+- `Choose`: universal checked selection for both Boolean inputs and every pair of 64-bit values,
+  preserving arbitrary caller memory exactly.
+- `GenericIdentity`: universal identity through direct, repeated and nested generic calls in C#, and
+  a compiled F# identity wrapper, preserving arbitrary caller memory exactly.
+- `Loops.Countdown`: universal termination and a zero result for every `uint`, including zero and
+  `uint.MaxValue`, using a decreasing natural-number measure over checked local storage.
 - `Loops.Drain`: universal termination of a reassigned `ReadOnlySpan<int>` parameter, returning
   zero after repeated slicing and preserving arbitrary caller memory exactly.
 - `Loops.AllZero` and `Loops.Sum`: an early-exit predicate and a wrapping fold over the symbolic
   contents of an arbitrary-length `ReadOnlySpan<uint>` or `ReadOnlySpan<ulong>`.
 - `Calls`: a managed-call chain with an address-taken mutable local.
-- `IntegerOperations.Negate32` / `Negate64`: checked-execution proofs that negation returns the modular additive inverse for every input, including the signed minimum.
-- `NarrowIntegers`: signed/unsigned casts, character values, calls and an eight-byte struct containing narrow fields. `UnsignedShort.lean` proves reduction modulo 65,536 for every 32-bit input.
-- `PrimitiveOperations`: reads/writes through integer references, aliasing, switch tables and aggregate `sizeof`. `PrimitiveReadWrite.lean` proves that a store followed by a load returns every 32-bit input unchanged.
+- `IntegerOperations.Negate32` / `Negate64`: checked-execution proofs that negation returns the
+  modular additive inverse for every input, including the signed minimum.
+- `NarrowIntegers`: signed/unsigned casts, character values, calls and an eight-byte struct
+  containing narrow fields. `UnsignedShort.lean` proves reduction modulo 65,536 for every 32-bit
+  input.
+- `PrimitiveOperations`: reads/writes through integer references, aliasing, switch tables and
+  aggregate `sizeof`. `PrimitiveReadWrite.lean` proves that a store followed by a load returns every
+  32-bit input unchanged.
 - `Alias`: two arguments naming the same caller storage.
-- `Struct`: universal return of the input through a **12-byte explicit-layout struct**, initialization, two field stores and a byref helper call. For every well-formed caller memory, all earlier allocation metadata, bytes and access permissions are preserved; temporary frame allocations are expired on return. The proof tracks the struct local in `LocalSnapshots` and steps field stores and loads decoded from the layout rather than through bytes. `StructCopy` separately checks by-value use of the same layout.
+- `Struct`: universal return of the input through a **12-byte explicit-layout struct**,
+  initialization, two field stores and a byref helper call. For every well-formed caller memory, all
+  earlier allocation metadata, bytes and access permissions are preserved; temporary frame
+  allocations are expired on return. The proof tracks the struct local in `LocalSnapshots` and steps
+  field stores and loads decoded from the layout rather than through bytes. `StructCopy` separately
+  checks by-value use of the same layout.
 - `LargeStruct`: a **40-byte** explicit layout with a field at offset 32.
-- `PastEnd`: a permitted end sentinel whose dereference is rejected as outside the allocation, for every fuel budget.
+- `PastEnd`: a permitted end sentinel whose dereference is rejected as outside the allocation, for
+  every fuel budget.
 - `Escape`: a reference to an expired local is rejected on return, for every fuel budget.
 - `WrongAdd`: a mathematical counterexample to the intended addition contract.
-- A separate `Examples.Hardware` assembly, built from the file-based library `Examples/Hardware/Hardware.cs`, tests runtime capability extraction.
+- A separate `Examples.Hardware` assembly, built from the file-based library
+  `Examples/Hardware/Hardware.cs`, tests runtime capability extraction.
 - A Cecil-generated independent fixture tests extraction-bound static RVA bytes.
-- `StaticSpans` reads a 16-byte `ReadOnlySpan<byte>` lookup table; out-of-bounds reads, writes and tampered RVA bytes are checked.
-- `StaticValues` loads `Word256.Zero`, `One` and `MinValue`, fixed by implicit conversions in the static constructor, proves their limbs and stores them through an out parameter; `MaxValue`, writes and stores outside the static constructor are rejected.
-- `SeededHash` mixes a value with two `static readonly ulong` seeds drawn from `RandomNumberGenerator`; `OpaqueSeeds.lean` proves the hash for every seed pair and that a fixed seed is not the contract.
-- `SpanTables` indexes `ReadOnlySpan<uint>` and `ReadOnlySpan<ulong>` tables, reads a length and the first element, and faults with `System.IndexOutOfRangeException` out of range.
+- `StaticSpans` reads a 16-byte `ReadOnlySpan<byte>` lookup table; out-of-bounds reads, writes and
+  tampered RVA bytes are checked.
+- `StaticValues` loads `Word256.Zero`, `One` and `MinValue`, fixed by implicit conversions in the
+  static constructor, proves their limbs and stores them through an out parameter; `MaxValue`,
+  writes and stores outside the static constructor are rejected.
+- `SeededHash` mixes a value with two `static readonly ulong` seeds drawn from
+  `RandomNumberGenerator`; `OpaqueSeeds.lean` proves the hash for every seed pair and that a fixed
+  seed is not the contract.
+- `SpanTables` indexes `ReadOnlySpan<uint>` and `ReadOnlySpan<ulong>` tables, reads a length and the
+  first element, and faults with `System.IndexOutOfRangeException` out of range.
 - [`WordReader.Read`](../Examples/Assembly/WordReader.cs) consumes a word from a caller-supplied
   array: a helper advances `Position`, the caller decrements `Remaining`, then reads the element.
   Its completed outline proves the returned element and cursor consumption for a nonempty remaining
@@ -43,7 +82,7 @@
 - `ItemPool.Rent` reuses the head of an intrusive free list. `PoolRent.lean` proves that it
   returns that head, advances the list past it, clears its link, decrements the idle count and
   marks it rented, writing no other field, and under the class catalog premise leaves the live
-  count alone; with an empty list and room under the capacity it creates an item owned by the
+  count unchanged; with an empty list and room under the capacity it creates an item owned by the
   pool, numbered with the next id and marked rented; an exhausted pool throws
   `InvalidOperationException` and a null pool `NullReferenceException`. Its object sites agree
   with the catalog, so the premise stated at entry holds after any invocation of the program.
@@ -51,7 +90,9 @@
   as a `Segment` to null visiting `nodes`, whose length is the loop's measure, and proves that
   the method answers whether the item is one of `nodes`, for a null or any live item, and writes
   nothing.
-- `NullReferences` tests `Unsafe.NullRef<T>` with `Unsafe.IsNullRef<T>`, faults on loads, stores and field accesses through it, and selects an optional `ref` argument that is either unset or bound, as optional outputs do.
+- `NullReferences` tests `Unsafe.NullRef<T>` with `Unsafe.IsNullRef<T>`, faults on loads, stores and
+  field accesses through it, and selects an optional `ref` argument that is either unset or bound,
+  as optional outputs do.
 - `VirtualCalls` calls an abstract and a defaulted virtual method of `Animal` on any animal:
   `AnimalLegs.lean` and `AnimalLoudness.lean` prove the override or inherited body the receiver's
   runtime class selects, the null receiver's `NullReferenceException`, and that a class outside
@@ -70,60 +111,122 @@
   raises `ArgumentNullException` exactly for null. The `guards` test shows `GuardCount.lean`
   fails once the guard becomes `ThrowIfNegativeOrZero`.
 
-Concrete example proofs establish their displayed inputs. Only explicitly universally quantified theorems claim arbitrary-input correctness. `CheckedAdd64`, `Choose` and `GenericIdentity` quantify caller memory and prove it unchanged. `Struct` quantifies well-formed caller memory and proves `MemoryBelow` preservation of the caller's storage. Other examples fix the caller memory to `CIL.Safety.Memory.empty` or to the 8-byte `callerMemory` the file defines; argument quantification alone does not imply arbitrary caller memory. The allocating generic instance wrapper retains a separate fixed-memory check in `GenericInstance.lean`.
+Concrete example proofs establish their displayed inputs. Only explicitly universally quantified
+theorems claim arbitrary-input correctness. `CheckedAdd64`, `Choose` and `GenericIdentity` quantify
+caller memory and prove it unchanged. `Struct` quantifies well-formed caller memory and proves
+`MemoryBelow` preservation of the caller's storage. Other examples fix the caller memory to
+`CIL.Safety.Memory.empty` or to the 8-byte `callerMemory` the file defines; argument quantification
+alone does not imply arbitrary caller memory. The allocating generic instance wrapper retains a
+separate fixed-memory check in `GenericInstance.lean`.
 
-The `Examples.Bits` methods exercise these APIs, including universal proofs of the integer logarithm and of a rotation round trip. Incorrect implementations fail the same contracts. `Log2(0)` returns zero; rounding up returns zero for zero input or overflow; signed power-of-two checks reject negative values.
+The `Examples.Bits` methods call the integer bit helpers such as `PopCount`, `LeadingZeroCount`,
+`TrailingZeroCount`, `Log2` and `IsPow2`, with universal proofs of the integer logarithm
+and of a rotation round trip. Incorrect implementations fail the same contracts. `Log2(0)` returns
+zero; rounding up returns zero for zero input or overflow; signed power-of-two checks reject
+negative values.
 
 ## Loop verification
 
-Reachable backward branches and switch targets are admitted when control-flow targets and stack joins validate. Feature reachability uses a fixed point: a backedge that invalidates a constant fact causes affected instructions to be revisited. Recursive managed calls remain unsupported.
+Reachable backward branches and switch targets are admitted when control-flow targets and stack
+joins validate. Feature reachability uses a fixed point: a backedge that invalidates a constant
+fact causes affected instructions to be revisited. Recursive managed calls are not supported.
 
-Extraction does not establish termination. [The countdown proof](../Examples/Proofs/Countdown.lean) uses `CIL.Safety.invoke_loop_satisfies`, which applies `loop_terminates_induction`, with the measure `remaining.toNat` and no invariant of its own: the loop state is a `FrameState` whose `LoopFrame`, generated by `bind_entry ... allocating`, keeps the counter's home writable and its value known. The loop head is found from the compiled branch instruction. `cil_loop_recurse` steps the path from entry, and from each head with a nonzero count, to the next head and infers its execution cost; each iteration proves a strictly smaller measure; `cil_loop_finish` proves the return of the zero case. The rule composes this with frame entry into the `CIL.Safety.Ensures` obligation, so the theorem supplies successful finite execution for every input, including the maximum 32-bit unsigned value, without unrolling billions of iterations. Subtraction cannot underflow because it occurs only when the counter is positive.
+Extraction does not establish termination. [The countdown proof](../Examples/Proofs/Countdown.lean)
+uses `CIL.Safety.invoke_loop_satisfies`, which applies `loop_terminates_induction`, with the measure
+`remaining.toNat` and no invariant of its own: the loop state is a `FrameState` whose `LoopFrame`,
+generated by `bind_entry ... allocating`, keeps the counter's home writable and its value known. The
+loop head is found from the compiled branch instruction. `cil_loop_recurse` steps the path from
+entry, and from each head with a nonzero count, to the next head and infers its execution cost; each
+iteration proves a strictly smaller measure; `cil_loop_finish` proves the return of the zero case.
+The rule composes this with frame entry into the `CIL.Safety.Ensures` obligation, so the theorem
+supplies successful finite execution for every input, including the maximum 32-bit unsigned value,
+without unrolling billions of iterations. Subtraction cannot underflow because it occurs only when
+the counter is positive.
 
-The loop suite checks the unchanged universal proof after inserting NOPs and rearranging basic blocks. It also requires that proof to reject both an incorrect result and a loop whose counter never decreases.
+The `loops` suite checks the unchanged universal proof after inserting NOPs and rearranging basic
+blocks, and requires it to reject both an incorrect result and a loop whose counter never
+decreases.
 
-[The counted-loop proof](../Examples/Proofs/CountCalls.lean) shows that `Loops.CountCalls` returns its input for every `uint`, counting iterations while a `Decrement` helper lowers the remaining count. Each iteration crosses the call through `decrementContract` with `loop_terminates_induction` and `cil_loop_call`, which names the returned count and keeps both locals of the generated frame across the call through `LoopFrame.after_confined`; `cil_loop_recurse` stores them and steps back to the head, and the invariant states only `count + remaining = value`. The suite verifies the unchanged loop proof against a build whose helper computes `value + 0xFFFFFFFF`, re-proving only the helper contract, and rejects builds that discard the helper result or count twice. Against the correct build, measuring by the count instead of the remaining value fails the decrease obligation, and the non-inductive invariant `count + remaining = value + count * remaining` fails only its preservation.
+[The counted-loop proof](../Examples/Proofs/CountCalls.lean) shows that `Loops.CountCalls` returns
+its input for every `uint`, counting iterations while a `Decrement` helper lowers the remaining
+count. Each iteration crosses the call through `decrementContract` with `loop_terminates_induction`
+and `cil_loop_call`, which names the returned count and keeps both locals of the generated frame
+across the call through `LoopFrame.after_confined`; `cil_loop_recurse` stores them and steps back to
+the head, and the invariant states only `count + remaining = value`. The suite verifies the
+unchanged loop proof against a build whose helper computes `value + 0xFFFFFFFF`, re-proving only
+the helper contract, and rejects builds that discard the helper result or count twice.
 
-[The struct-local loop proof](../Examples/Proofs/TallyTwice.lean) shows that `Loops.TallyTwice` returns twice its input for every `uint` and allocates nothing the caller sees. Its loop state is a struct local remembered by its `count` and `sum` fields. The loop tactics zero and store the struct, read its fields and cross the `AddTwo` call through its contract with the frame facts they carry, and the proof supplies only the invariant `sum = 2 * count`, the measure and the arithmetic.
+[The struct-local loop proof](../Examples/Proofs/TallyTwice.lean) shows that `Loops.TallyTwice`
+returns twice its input for every `uint` and allocates nothing the caller sees. Its loop state is a
+struct local remembered by its `count` and `sum` fields. The loop tactics zero and
+store the struct, read its fields and cross the `AddTwo` call through its contract with the frame
+facts they carry, and the proof supplies only the invariant `sum = 2 * count`, the measure and the
+arithmetic.
 
-[The early-exit copy proof](../Examples/Proofs/CopyUntilZero.lean) shows that `Loops.CopyUntilZero` copies the words of a readonly span before its first zero to a caller buffer through its `Stamp` helper, returns their count with bit 31 set exactly when a zero ended the copy, and changes no caller byte outside the copied words, for every span length and contents and every output with write authority over those words that lies apart from the span. The proof states the bindings, `Stamp`'s contract, the invariant and the measure: the loop tactics read the span in each frame memory from its facts at the caller's memory, cross the call with the frame after it, and carry the buffer's contents and write authority through every store and the return. The suite compares five spans with .NET, checking the words past the copy are unchanged, and rejects builds whose `Stamp` writes zero or whose loop copies past a zero.
+[The early-exit copy proof](../Examples/Proofs/CopyUntilZero.lean) shows that `Loops.CopyUntilZero`
+copies the words of a readonly span before its first zero to a caller buffer through its `Stamp`
+helper, returns their count with bit 31 set exactly when a zero ended the copy, and changes no
+caller byte outside the copied words, for every span length and contents and every output with write
+authority over those words that lies apart from the span. The proof states the bindings, `Stamp`'s
+contract, the invariant and the measure: the loop tactics read the span in each frame memory from
+its facts at the caller's memory, cross the call with the frame after it, and carry the buffer's
+contents and write authority through every store and the return. The suite rejects builds whose
+`Stamp` writes zero or whose loop copies past a zero.
 
-[The outcome loop proof](../Examples/Proofs/CountUntil.lean) shows that `Loops.CountUntil(value, limit)` returns `value` when `value <= limit`, and otherwise propagates the `System.InvalidOperationException` that its `Bump` helper throws once the count reaches `limit`, after `limit` successful calls. It holds for every pair of `uint`s from empty caller memory. The proof uses only `bumpContract`, an `OutcomeContract` naming when `Bump` throws, through `loop_outcome_induction`, `cil_loop_outcome_call` and `cil_loop_outcome_raise`; `ensures_outcome_of_loop` gives the method's `EnsuresOutcome`. The suite compares five inputs with .NET, two of which throw. It verifies the unchanged loop proof against a `Bump` that tests inequality and subtracts minus one, and rejects it at the exceptional exit for a `Bump` that throws `System.ArgumentException` under a contract re-proved to say so. Against the correct build, measuring by the count fails the decrease obligation, the invariant `count <= limit - remaining` fails only its preservation, and specifying `System.ArgumentException` for the loop fails only at the exceptional exit.
+[The outcome loop proof](../Examples/Proofs/CountUntil.lean) shows that
+`Loops.CountUntil(value, limit)` returns `value` when `value <= limit`, and otherwise propagates the
+`System.InvalidOperationException` that its `Bump` helper throws once the count reaches `limit`,
+after `limit` successful calls. The theorem holds for every pair of `uint`s from empty caller
+memory. The
+proof uses only `bumpContract`, an `OutcomeContract` naming when `Bump` throws, through
+`loop_outcome_induction`, `cil_loop_outcome_call` and `cil_loop_outcome_raise`;
+`ensures_outcome_of_loop` gives the method's `EnsuresOutcome`. The suite verifies the unchanged
+loop proof against a `Bump` that tests inequality and subtracts minus one, and rejects it at the
+exceptional exit for a `Bump` that throws `System.ArgumentException` under a contract re-proved to
+say so.
 
-[The buffer fill proof](../Examples/Proofs/FillWords.lean) shows that `Loops.FillWords`, which stores `value` through `Unsafe.Add(ref destination, i)` for each `i < count`, leaves `Contents final destination 8 (List.replicate count value)` for every nonnegative `int` count and is `Confined` to those `8 * count` bytes. It assumes only write authority over the words (`Writable`), never readable or initialized contents, and its invariant is `Filled`: the first `i` words filled, the rest still only writable. The loop state is a `FrameState`, whose `LoopFrame` carries the footprint, well-formedness, index home and index value; the proof writes the element through the frame and the loop tactics keep the rest. The suite compares the runtime result for four counts, checking that both neighbouring words are unchanged, and rejects builds that shift every store by one word or skip every other word.
+[The buffer fill proof](../Examples/Proofs/FillWords.lean) shows that `Loops.FillWords`, which
+stores `value` through `Unsafe.Add(ref destination, i)` for each `i < count`, leaves
+`Contents final destination 8 (List.replicate count value)` for every nonnegative `int` count and is
+`Confined` to those `8 * count` bytes. The theorem assumes only write authority over the words
+(`Writable`). It does not assume readable or initialized contents. Its invariant is `Filled`: the
+first `i` words are filled and the rest are still only writable. The loop state is a
+`FrameState`, whose `LoopFrame` carries the footprint, well-formedness, index home and index value;
+the proof writes the element through the frame and the loop tactics keep the rest. The suite
+rejects builds that shift every store by one word or skip every other word.
 
 [The span predicate proof](../Examples/Proofs/SpanAllZero.lean) and [the span fold
 proof](../Examples/Proofs/SpanSum.lean) state their results over `SpanContents`, the library's
 description of what a span holds. `Loops.AllZero` returns whether `values.all (· == 0)` and leaves
 caller memory unchanged; `Loops.Sum` returns `values.sum` with wrapping `ulong` addition while a
 frame home holds the running total, and keeps all memory below the caller's allocation watermark.
-Both hold for every length, including null empty spans. Each invariant relates the remaining
-suffix to the answer (`remaining.all (· == 0) = result`, `total + remaining.sum = result`), its
-measure is the suffix length, and `CheckedSpan.head` and `CheckedSpan.tail` carry it across one
-`values[0]` read and `values.Slice(1)`. Each proof states its specification, invariant and
-measure, the next state of each iteration and the facts its steps use; frame entry, the frame
-home and the exit's memory fact come from the [loop verification
-conditions](PROOFS-STEPPING.md#loop-verification-conditions). The suite compares both methods with .NET, including
-`default` spans and wrapping sums, and rejects a build of `AllZero` that replaces every read with
-zero and a build of `Sum` that stops while one element remains.
+Both theorems hold for every length, including null empty spans. Each invariant relates the
+remaining suffix to the answer (`remaining.all (· == 0) = result`,
+`total + remaining.sum = result`), its measure is the suffix length, and `CheckedSpan.head` and
+`CheckedSpan.tail` carry it across one `values[0]` read and `values.Slice(1)`. Each proof states
+its specification, invariant and measure, the next state of each iteration and the facts its steps
+use; frame entry, the frame home and the exit's memory fact come from the [loop verification
+conditions](PROOFS-STEPPING.md#loop-verification-conditions). The suite rejects a build of
+`AllZero` that replaces every read with zero and a build of `Sum` that stops while one element
+remains.
 
-```sh
-leancil extract Examples/Assembly/bin/Examples.dll "Loops::Countdown(uint)" artifacts/Countdown
-leancil verify artifacts/Countdown --proof Examples/Proofs/Countdown.lean
-dotnet run --file scripts/Test.cs -- --suite loops
-```
-
-Loop invariants and decreasing measures are supplied by the proof author. The suite rejects an incorrect loop under the unchanged contract, checks malformed stack joins and changing loop facts, and proves that an admitted infinite loop exhausts every fuel budget. Fuel exhaustion is never successful verification of total correctness.
+Loop invariants and decreasing measures are supplied by the proof author. The `loops` suite
+rejects an incorrect loop under the unchanged contract, checks malformed stack joins and changing
+loop facts, and proves that an admitted infinite loop exhausts every fuel budget. Fuel exhaustion
+is never successful verification of total correctness.
 
 ## F# examples
 
-The [F# examples](../Examples/FSharp/Examples.fs) demonstrate arithmetic, branching, real method calls, `byref` mutation and mutable structs with constructors. They use the same CIL semantics, extractor and Lean proof pipeline as the C# examples.
+The [F# examples](../Examples/FSharp/Examples.fs) demonstrate arithmetic, branching, real method
+calls, `byref` mutation and mutable structs with constructors. They use the same CIL semantics,
+extractor and Lean proof pipeline as the C# examples.
 
 ```fsharp
 let Add (x: uint64) (y: uint64) = x + y
 ```
 
-Verify the compiled F# addition with the existing language-independent [addition contract](../Examples/Proofs/Add.lean):
+Verify the compiled F# addition with the language-independent
+[addition contract](../Examples/Proofs/Add.lean), the proof the C# `Add` uses:
 
 ```sh
 dotnet build Examples/FSharp -c Release
@@ -131,18 +234,24 @@ leancil extract Examples/FSharp/bin/Examples.FSharp.dll "Arithmetic::Add(ulong,u
 leancil verify artifacts/FSharpAdd --proof Examples/Proofs/Add.lean
 ```
 
-The theorem proves `(x + y) mod 2^64` for every pair of 64-bit inputs. The suite also checks universal store/load and constructor contracts, compares compiled F# results with checked CIL execution, and rejects subtraction under the unchanged addition contract:
+The theorem proves `(x + y) mod 2^64` for every pair of 64-bit inputs. The `fsharp` suite also
+checks universal store/load and constructor contracts and rejects subtraction under the unchanged
+addition contract.
 
-```sh
-dotnet run --file scripts/Test.cs -- --suite fsharp
-```
+These examples cover F# programs that compile into the supported CIL subset. F# lists, closures,
+discriminated unions and arbitrary FSharp.Core calls are not generally supported; the suite
+includes an explicitly rejected list example.
 
-These examples cover F# programs that compile into the supported CIL subset. F# lists, closures, discriminated unions and arbitrary FSharp.Core calls are not generally supported; the suite includes an explicitly rejected list example.
-
-The `GenericMethods` module also demonstrates generic identity and selection functions. LeanCIL specializes their compiled CIL for the concrete value types used by reachable calls. In a specialized body, `typeof(T) == typeof(Marker)` and `!=` become constants when both types are closed and decided, as the JIT folds them, so a profile-dependent or marker-type branch is pruned like a feature check. Lean recomputes each folded constant from the raw closed body; see [type tests](OPCODES.md#type-tests) for the exact pattern. `Examples.TypeTests` exercises a matching and a non-matching type argument. The F# and C# identity examples share the same [universal Lean contract](../Examples/Proofs/GenericIdentity.lean):
+The `GenericMethods` module also demonstrates generic identity and selection functions. LeanCIL
+specializes their compiled CIL for the concrete value types used by reachable calls. In a
+specialized body, `typeof(T) == typeof(Marker)` and `!=` become constants when both types are closed
+and decided, as the JIT folds them, so a profile-dependent or marker-type branch is pruned like a
+feature check. Lean recomputes each folded constant from the raw closed body; see [type
+tests](OPCODES.md#type-tests) for the exact pattern. `Examples.TypeTests` exercises a matching and a
+non-matching type argument; the `generics` suite checks these examples. The F# and C# identity
+examples share the same [universal Lean contract](../Examples/Proofs/GenericIdentity.lean):
 
 ```sh
 leancil extract Examples/FSharp/bin/Examples.FSharp.dll "GenericMethods::Identity64(ulong)" artifacts/FSharpIdentity
 leancil verify artifacts/FSharpIdentity --proof Examples/Proofs/GenericIdentity.lean
-dotnet run --file scripts/Test.cs -- --suite generics
 ```

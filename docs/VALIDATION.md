@@ -2,8 +2,12 @@
 
 <!-- audience: maintainers -->
 
+This page lists the verification suites, says which to run for a change and how to compare proof
+cost with a base. Read it before changing LeanCIL itself; the linked pages hold the detail.
+
+## Running suites
+
 Run the smallest suite covering the changed behavior, then the checks required by `AGENTS.md`.
-Concurrent suites need separate checkouts because they build and mutate `artifacts/`.
 
 ```sh
 dotnet run --file scripts/Test.cs -- --suite core
@@ -12,7 +16,16 @@ dotnet run --file scripts/Test.cs -- --suite loops
 dotnet run --file scripts/Test.cs -- --suite outlines-objects
 ```
 
-Omit `--suite` to run everything; the [suite table](#suites) lists each name.
+- Omit `--suite` to run everything; the [suite table](#suites) lists each name.
+- A suite builds its own prerequisites, checks every Lean proof fresh and writes
+  `artifacts/test-results-<suite>.json`; a full run writes `artifacts/test-results.json`.
+- Suites build and mutate `artifacts/`, so run concurrent suites in separate checkouts.
+- In CI one job builds the extractor and example assembly with `--build-tools`, and suite jobs set
+  `LEANCIL_PREBUILT_TOOLS=true` to use them.
+- `lake build` builds only `CIL`. A change under `CIL/` requires building every library target in
+  `lakefile.toml` before pushing.
+- A C# change requires analyzer validation, including changed file-based tests.
+- Any `sorryAx`, unexpected diagnostic or failed proof is a failure.
 
 | Changed area | Relevant suites or checks |
 | --- | --- |
@@ -31,16 +44,10 @@ Omit `--suite` to run everything; the [suite table](#suites) lists each name.
 | Exported interfaces and implementation checks | The affected `exports` partition in the [suite table](#suites) |
 | Documentation, its Lean snippets, cited names and documented command output | `docs`, plus `scripts/CheckDocReferences.cs`; see [documentation checks](CI.md#documentation-checks) |
 
-`lake build` builds only `CIL`. Changes under `CIL/` require building every library target in
-`lakefile.toml` before pushing. C# changes require analyzer validation, including changed
-file-based tests. Any `sorryAx`, unexpected diagnostic or failed proof is a failure.
-Proof-cost measurement stops on import errors before elaborating diagnostic assertions; a module
-with missing imports produces no cost report or compiled output.
-
 ## Suites
 
-Every name `--suite` accepts, in the order a full run executes them. The names come from
-[VerificationSuites.cs](../scripts/VerificationSuites.cs) and
+This table lists every name `--suite` accepts, in the order a full run executes them. The names
+come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 [ExportVerificationSuites.cs](../scripts/ExportVerificationSuites.cs);
 `scripts/CheckDocReferences.cs` fails when this table and those registries disagree.
 
@@ -127,10 +134,13 @@ Every name `--suite` accepts, in the order a full run executes them. The names c
 | `exportsinitialized` | scoped initialization assumptions in exported and imported contracts |
 | `exportsprofiles` | one contract family across independently checked profile extractions |
 
+The [export page](VALIDATION-EXPORTS.md#export-suite-selection) lists the cases of each `exports`
+partition.
+
 ## Proof cost
 
-A change to shared tactics or the library is compared with its base by what each proof costs,
-not only by whether the suites pass. Measure both checkouts on one machine and compare them:
+For a change to shared tactics or the library, also compare what each proof costs with the base.
+Measure both checkouts on one machine:
 
 ```sh
 git worktree add --detach ../base "$(git merge-base origin/main HEAD)"
@@ -143,48 +153,61 @@ dotnet run --file scripts/ProofCost.cs -- compare --base artifacts/cost/base.jso
 `measure` runs from the head checkout for both trees, so the base needs no copy of the tool. Each
 tree needs its compiled library: pass `--library` with a certified library, or build every `CIL`
 module in the tree first, since `lake build CIL` leaves modules outside the aggregate unbuilt.
-`--libraries` measures every test library; `--module Tests.Automation` measures one module and
-the checkout modules it imports; `--artifacts artifacts` measures the proofs a suite verified in
-that tree, after running the suite there. A suite binds the sources of its checkout, so keep the
-base checkout outside the head checkout and edit neither while its suite runs. `compare` exits nonzero on a regression and prints the
-table that CI puts in the job summary; [proof cost in CI](CI.md#proof-cost) defines the measures,
-the thresholds and how an increase is accepted.
 
-The `stepping` suite generates explicit scalar and checked-memory bodies near 16, 64 and 256
-instructions and proves each invocation end to end. The memory bodies repeat an idempotent
-checked store and reload, holding operation facts constant as the instruction count grows.
-It uses the same measuring frontend, with three sequential proof compilations per body.
-`artifacts/SteppingScaling/results.json` records revisions, toolchain, machine, cache assumptions,
-raw process-time samples and per-instruction costs. Frontend heartbeats include the initial
-kernel check; kernel columns measure a separate recheck. Compiled proof bytes subtract the
-same module containing only the body and its lookup equations.
+| `measure` option | Measures |
+| --- | --- |
+| `--libraries` | every test library |
+| `--module Tests.Automation` | one module and the checkout modules it imports |
+| `--artifacts artifacts` | the proofs a suite verified in that tree, after running the suite there |
 
-For each successive size, frontend heartbeats, kernel heartbeats and compiled proof bytes per
-instruction may grow by at most 1.35 times, and median frontend milliseconds by at most twice.
-Heartbeats and bytes must repeat exactly across the three runs. Wall times remain observations
-of the current machine load; use isolated sequential runs for latency comparisons. These
-measurements cover checked stepping, not extraction, editor feedback or certificate completion.
+A suite binds the sources of its checkout, so keep the base checkout outside the head checkout and
+edit neither while its suite runs. Measurement stops on import errors before elaborating
+diagnostic assertions: a module with missing imports produces no cost report and no compiled
+output. `compare` exits nonzero on a regression and prints the table that CI puts in the job
+summary; [proof cost in CI](CI.md#proof-cost) defines the measures, the thresholds and how to
+accept an increase.
+
+### Stepping scaling
 
 ```sh
 dotnet run --file scripts/Test.cs -- --suite stepping
 ```
 
-## What the checks cover
+The `stepping` suite generates explicit scalar and checked-memory bodies near 16, 64 and 256
+instructions and proves each invocation end to end. The memory bodies repeat an idempotent
+checked store and reload, so the operation facts stay constant as the instruction count grows.
+The suite uses the proof-cost measuring frontend, with three sequential proof compilations per
+body.
+
+- For each successive size, frontend heartbeats, kernel heartbeats and compiled proof bytes per
+  instruction may grow by at most 1.35 times, and median frontend milliseconds by at most twice.
+- Heartbeats and bytes must repeat exactly across the three runs.
+- Frontend heartbeats include the initial kernel check; the kernel columns measure a separate
+  recheck. Compiled proof bytes subtract the same module containing only the body and its lookup
+  equations.
+- `artifacts/SteppingScaling/results.json` records revisions, toolchain, machine, cache
+  assumptions, raw process-time samples and per-instruction costs.
+
+Wall times vary with machine load; use isolated sequential runs for latency comparisons. These
+measurements cover checked stepping only, and exclude extraction, editor feedback and certificate
+completion.
+
+## Coverage pages
 
 Positive fixtures compare compiled .NET behavior with checked model execution or establish
 universal theorems. Negative fixtures independently tamper with translation evidence, violate
-memory premises, or change implementations while retaining their specifications. An unsupported
-instruction must not satisfy a named-exception obligation.
+memory premises, or change implementations while retaining their specifications.
 
 - [Coverage reference](VALIDATION-COVERAGE.md): extraction, runtime comparisons, artifact binding
   and preparation infrastructure.
-- [Proof automation regressions](VALIDATION-PROOFS.md): shared tactics, memory facts and composition.
+- [Proof automation regressions](VALIDATION-PROOFS.md): shared tactics, memory facts and
+  composition.
 - [Export and consumer checks](VALIDATION-EXPORTS.md): interface pins, audit and consumer packages.
 - [CI operation](CI.md): job selection, prepared libraries and artifacts.
 - [Pinned compiler corpus and runtime inventory](COMPILER-COVERAGE.md): compiler-sensitive
   recognizers, visible changes to admitted runtime-call definitions, and admission of
   LeanCIL's own assembly.
 
-Use existing fixture batches for related cases. Measure producer work, proof compilation and
-kernel replay separately; moving work between jobs or caches does not itself demonstrate a
-reduction in total verification work.
+When adding a case, extend the existing fixture batch for related cases. When measuring, report
+producer work, proof compilation and kernel replay separately; moving work between jobs or caches
+does not itself demonstrate a reduction in total verification work.

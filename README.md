@@ -31,7 +31,8 @@ flowchart TD
 ```
 
 The guarantee is exactly the proved theorem, including its preconditions and quantifiers.
-Lean checks the proof, not whether its statement captures your intended specification.
+Lean checks the proof. It does not check whether the theorem's statement captures your
+intended specification.
 The extractor, CIL model and verification machinery have an explicit
 [trust boundary](docs/SOUNDNESS.md); LeanCIL does not claim complete CLR or JIT verification.
 
@@ -59,14 +60,14 @@ leancil extract Examples/Assembly/bin/Examples.dll "Arithmetic::Add(ulong,ulong)
 leancil verify artifacts/Add --proof Examples/Proofs/Add.lean
 ```
 
-Success prints `Verified: ExampleProof.correctness` and writes `artifacts/Add/verified.json`.
-The theorem states that the result equals `(x + y) mod 2^64` for every pair of 64-bit inputs.
-Changing the implementation to subtraction makes the unchanged proof fail.
+Success prints `Verified: ExampleProof.correctness` and writes `artifacts/Add/verified.json`. The
+theorem states that the result equals `(x + y) mod 2^64` for every pair of 64-bit inputs. Changing
+the implementation to subtraction makes the unchanged proof fail.
 
-The [getting-started walkthrough](docs/GETTING-STARTED.md) shows the expected output,
-edit/rebuild/failure/recovery sequence, and a proof that an invalid memory access cannot succeed.
-The [examples](docs/EXAMPLES.md) cover arithmetic, calls, structs, classes and virtual calls,
-strings, generic methods, loops, memory access and compiled F#.
+The [getting-started walkthrough](docs/GETTING-STARTED.md) shows the expected output, a failing
+proof and its recovery, and a proof that an invalid memory access cannot succeed. The
+[examples](docs/EXAMPLES.md) cover arithmetic, calls, structs, classes and virtual calls, strings,
+generic methods, loops, memory access and compiled F#.
 
 ## Commands
 
@@ -74,17 +75,20 @@ strings, generic methods, loops, memory access and compiled F#.
 | --- | --- |
 | `leancil list` | Discover canonical method signatures in an assembly |
 | `leancil extract` | Validate and translate a method and its reachable calls |
+| `leancil blockers` | Report every construct that stops extraction of a list of methods |
 | `leancil check` | Check extraction artifacts against their assembly and settings |
 | `leancil new-proof` | Write a starting proof, with its holes marked, for an extraction |
 | `leancil verify` | Check, kernel-replay and audit a named theorem |
 | `leancil workspace` | Generate a method's extraction into the proof's package for live editor goals |
 | `leancil watch` | Rebuild C# on change, refresh the changed extractions and verify the affected proofs |
 | `leancil verify-batch` | Verify multiple requests against one consumer snapshot |
+| `leancil gates` | Extract and verify a catalog of methods, profiles and proofs |
+| `leancil export-contracts` | Publish verified method contracts for separately compiled callers |
+| `leancil audit-library` | Kernel-replay and axiom-audit the theorems of a Lean library |
 
-`check` validates extraction consistency; `verify` establishes the selected theorem, and
-`verify --goals` prints the goal at each `sorry` and failing tactic of an unfinished proof.
-Failures return a nonzero exit code. See the [CLI reference](docs/CLI.md) for all commands,
-profiles, saved settings and diagnostics.
+`verify --goals` prints the goal at each `sorry` and failing tactic of an unfinished proof. A
+failing command returns a nonzero exit code. See the [CLI reference](docs/CLI.md) for every
+command and option, profiles, saved settings and diagnostics.
 
 ## Consumer packages and batches
 
@@ -140,17 +144,21 @@ lake build
 dotnet run --file scripts/Test.cs -- --suite core
 ```
 
-Run `dotnet run --file scripts/Test.cs` for the full suite. Tests compile example assemblies,
-check Lean proofs, exercise rejection cases and validate artifact identity. Results are written
-to `artifacts/`. Use separate checkouts for concurrent suites because they mutate those files.
-See [validation coverage and suite commands](docs/VALIDATION.md) and [CI operation](docs/CI.md).
+These commands are for working on LeanCIL itself; using the tool needs neither. Run
+`dotnet run --file scripts/Test.cs` for the full suite. Results are written to `artifacts/`; use
+separate checkouts for concurrent suites because they mutate those files. See [validation coverage
+and suite commands](docs/VALIDATION.md) and [CI operation](docs/CI.md).
 
 ## Documentation
 
 | Topic | Guide |
 | --- | --- |
 | First proof and failure diagnostics | [Getting started](docs/GETTING-STARTED.md) |
+| Every command, option and report | [CLI reference](docs/CLI.md) |
+| Complete example proofs | [Examples](docs/EXAMPLES.md) |
+| Proofs in your own Lake package, batches and editor workspace | [Consumer packages](docs/CONSUMERS.md) |
 | Proofs, contracts, loops and automation | [Writing proofs](docs/PROOFS.md) |
+| Supported instructions and intrinsics | [Opcodes](docs/OPCODES.md), [SIMD](docs/SIMD.md) |
 | Checking proofs against your library with a coding agent | [Agent skill](skills/leancil/SKILL.md) |
 | Modules and proof APIs | [Architecture](docs/ARCHITECTURE.md) |
 | Cross-assembly contracts | [Contract interfaces](docs/CONTRACT-INTERFACES.md) |

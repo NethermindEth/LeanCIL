@@ -1,100 +1,125 @@
 ---
 name: leancil
-description: Check that compiled .NET code (C#, F#) satisfies Lean 4 proofs using LeanCIL. Use when someone wants to verify a .NET method or assembly against a Lean theorem, run or debug `leancil extract`, `leancil check` or `leancil verify`, connect existing Lean proofs about a model or specification to their compiled library, or write a new LeanCIL proof about a method's CIL.
+description: Verify compiled .NET code (C#, F#) against Lean 4 theorems with the `leancil` tool and the `CIL` Lean library. Use when asked to prove or check a property of a .NET method or assembly, run or debug a `leancil` command (`extract`, `check`, `new-proof`, `verify`, `verify-batch`, `gates`, `workspace`, `watch`), connect existing Lean model proofs to a compiled method, write a new LeanCIL proof, verify many methods or profiles of a library, or diagnose a failed extraction or verification.
 ---
 
 # Verifying compiled .NET code with LeanCIL
 
-LeanCIL extracts the CIL of a compiled method into Lean and checks a named Lean theorem about
-it. A pass means exactly that theorem holds for those compiled bytes under LeanCIL's CIL model;
-nothing more. Documentation: https://github.com/NethermindEth/LeanCIL/tree/main/docs
+`leancil` extracts the CIL of a compiled method into Lean and checks a named Lean theorem about
+it. A pass means that theorem holds for those compiled bytes under LeanCIL's CIL model and the
+theorem's own hypotheses.
 
-## Pick the path
+## Paths
 
-Ask what the user already has, then read only the matching reference:
+Find out what the user has, then read only the matching reference.
 
-| The user has | Path | Reference |
+| The user has | Task | Reference |
 | --- | --- | --- |
-| A Lean proof written against LeanCIL's extracted code (`import Extracted`) | Run the check | [references/check-existing-proof.md](references/check-existing-proof.md) |
-| Lean definitions and theorems about a model or spec that never mention CIL | Write one bridge theorem, then check | [references/bridge-model-proof.md](references/bridge-model-proof.md) |
-| Only the code and an informal requirement | Write the proof | [references/write-new-proof.md](references/write-new-proof.md) |
+| A Lean proof that imports `Extracted` and states a theorem about `Extracted.program` | Run it against the assembly | [references/check-existing-proof.md](references/check-existing-proof.md) |
+| Lean definitions and theorems about a model or specification that never mention CIL | Write one bridge theorem, then verify | [references/bridge-model-proof.md](references/bridge-model-proof.md) |
+| Only the code and an informal requirement | Write the specification and the proof | [references/write-new-proof.md](references/write-new-proof.md) |
+| Proofs for many methods, profiles or assembly variants of one library | Run them as a catalog or a batch | [references/verify-library.md](references/verify-library.md) |
+| A `leancil` command or a proof step that failed | Look up the message | [references/failures.md](references/failures.md) |
 
-Proofs in another system (Coq, Dafny, F*, TLA+) or about C# source cannot be checked directly:
-restate the property as Lean definitions and take the model path.
+For a proof in another system (Coq, Dafny, F*, TLA+) or about C# source, restate the property as
+Lean definitions and follow the model reference.
 
-## Commands every path uses
+## Shared commands
 
-The tool is the `Nethermind.LeanCIL` .NET tool (`leancil`); it needs Lean through elan at the
-version pinned in LeanCIL's `lean-toolchain`. Build the assembly in Release first.
+`leancil` is the .NET tool `Nethermind.LeanCIL`. It needs the .NET SDK and Lean through elan, at
+the toolchain `leancil --version` prints
+([install](https://github.com/NethermindEth/LeanCIL/blob/main/docs/GETTING-STARTED.md#install)).
+Build the assembly in Release before extracting.
 
 ```sh
-leancil --version                                              # tool, framework revision, toolchain
-leancil list path/to/Lib.dll                                   # canonical method selectors
+leancil --version                              # tool, LeanCIL revision, Lean toolchain
+leancil list path/to/Lib.dll                   # canonical selector of every method
 leancil extract path/to/Lib.dll 'Type::Method(ulong,ulong)' artifacts/Method [profile]
-leancil check artifacts/Method                                 # artifacts still match the DLL
+                                               # writes Extracted.lean and identity.json
+leancil check artifacts/Method                 # artifacts match the DLL; runs no Lean
 leancil verify artifacts/Method --proof proofs/Method.lean --theorem MyProof.correctness
 ```
 
-- The selector needs the parameter list. C# aliases (`ulong`) and an unqualified type name are
-  accepted when unique; `leancil list` prints the full forms. Use `ulong&` for `ref`/`out`.
-  Several types can declare a method with the same name and parameters: the `Extraction entry:`
-  line of `verify` shows the method extracted and `Subject:` the method the theorem is about;
-  report them, and ask the user when the choice is unclear.
-- The profile defaults to `scalar` (no hardware intrinsics). Built-in names are `scalar`,
-  `x64-sse2`, `x64-sse42`, `x64-v3`, `x64-v4` and `arm64-advsimd`; custom ones are JSON
-  ([runtime profiles](https://github.com/NethermindEth/LeanCIL/blob/main/docs/RUNTIME-PROFILES.md)).
-  Pick the one matching the deployment; if the user does not say, use `scalar` and state it.
-  The profile is recorded and `check`/`verify` reuse it.
-- `--theorem` defaults to `ExampleProof.correctness`. The first `verify` saves proof and theorem
-  in `verification.json`, so later runs need only `leancil verify artifacts/Method`.
-- Proofs can import `Extracted` (the generated code) and the framework's `CIL.*` modules.
-  LeanCIL's own `Examples` and `Tests` modules are not shipped. Proofs that import the user's own
-  Lean modules need `--proof-root <lake package root>`; see the model reference for the setup.
-- After changing the C# code, rebuild and re-run `extract` before `verify`; `check` reports a
-  changed assembly.
+- A selector needs the parameter list. C# aliases (`ulong`), an optional return type and an
+  unqualified type name work when the result is unique; `ulong&` is a `ref` or `out` parameter.
+  An ambiguous selector fails with the candidate signatures.
+- The profile is `scalar` (the default, no hardware intrinsics), `x64-sse2`, `x64-sse42`,
+  `x64-v3`, `x64-v4`, `arm64-advsimd` or a custom `@profile.json`
+  ([runtime profiles](https://github.com/NethermindEth/LeanCIL/blob/main/docs/RUNTIME-PROFILES.md#profile-selection)).
+  A result holds for the extracted profile only, so extract and verify once per deployment
+  profile; when the user names none, use `scalar` and say so. `check` and `verify` read the
+  profile from `identity.json`.
+- `--proof` defaults to `Proof.lean` in the output directory and `--theorem` to
+  `ExampleProof.correctness`. The first `verify` saves both in `verification.json`, so later
+  runs need only `leancil verify artifacts/Method`.
+- A proof imports `Extracted` and the `CIL` modules; the tool does not ship LeanCIL's example
+  and test modules. Importing the user's own modules needs `--proof-root`
+  ([package setup](references/bridge-model-proof.md#package-setup)).
+- After a rebuild of the assembly, `verify` extracts again by itself. `check` and `verify-batch`
+  fail on the changed assembly as stale until `extract` runs again.
+- The first `verify` on a machine builds and kernel-replays the framework library for several
+  minutes, with progress on stderr. Later runs reuse it.
+- A command exits with `0` on success and `1` on failure. A failure prints `Invalid:` or
+  `Error:`, a `Stage:` line and a `Next:` line on stderr; a failed `verify` also removes any
+  earlier `verified.json` and writes `failed.json` ([failures](references/failures.md)).
 
-## Report a result honestly
+## Limits
 
-On success `verify` prints `Verified: <theorem>`, the axioms, the elaborated `Statement:` and,
-under `Specification:`, the proof file's definitions the statement names, such as its
-precondition and postcondition, and writes `verified.json`. Statements usually run the method with
-`CIL.Safety.invoke program fuel methodIndex args memory`: the entry method is index `0`, `args`
-are the argument values and `memory` is the caller memory. Before telling the user the code is
-verified, read the printed statement and specification and confirm:
+State these limits to the user before promising a result.
 
-- It quantifies over every input the user cares about, not a few concrete values.
-- The caller memory is either quantified or a fixed one such as `CIL.Safety.Memory.empty` (no
-  allocations). A fixed memory is an assumption to state; it is harmless only for methods that
-  take and return scalars and never touch memory.
-- It states success with a result (`= .ok ...` or `Ensures`), not only a relation between
-  outcomes; "equal for both argument orders" also holds for a method that always fails.
-- Its preconditions are ones callers actually guarantee, and none of them contradict each other.
-- The profile matches the deployment. It is not part of the statement: `leancil check` prints it
-  and `identity.json` records it. `--assume-initialized` types are printed with the statement as
-  preconditions and must hold in the deployment too.
-- Axioms are only `propext`, `Quot.sound` and `Classical.choice`; `verify` rejects anything else.
+- `extract` accepts Release, IL-only .NET 10 assemblies, and every profile is 64-bit
+  little-endian. It validates the selected method and every method reachable from it, and rejects
+  an unsupported instruction, call, type or signature by name at the stage
+  `metadata and CIL validation`. `leancil list` validates nothing.
+- Outside the supported subset are interface calls, virtual dispatch outside the extracted
+  classes, type tests against interfaces, `System.Object` or value types, boxing, ordinary
+  recursion, exception handlers, floating point, reading a string's characters and arbitrary
+  external calls. Classes, arrays, spans, structs and SIMD intrinsics are supported
+  with restrictions; look an instruction or call up in the
+  [opcode table](https://github.com/NethermindEth/LeanCIL/blob/main/docs/OPCODES.md#unsupported-opcodes)
+  and the [intrinsic tables](https://github.com/NethermindEth/LeanCIL/blob/main/docs/SIMD.md).
+- A method on a type with a static constructor is rejected unless `extract` is given
+  `--assume-initialized Namespace.Type`. The flag records an unproved caller precondition that
+  the type initialized successfully before the call, and `verify` prints it with the theorem.
 
-Say what the theorem guarantees in plain words, and name what it does not cover: the JIT,
-runtime and hardware are trusted, not proved
-([soundness boundary](https://github.com/NethermindEth/LeanCIL/blob/main/docs/SOUNDNESS.md)).
+## Reporting a result
 
-On failure `verify` exits nonzero, prints `Invalid:` with the Lean errors, and writes
-`failed.json`, whose `kind` classifies the failure (`stale-input`, `unsupported-extraction`,
-`unsolved-goal`, `resource-limit`, ...) and whose `rerun` repeats the request
-([failure reports](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CLI.md#failure-reports)).
-`leancil verify ... --goals` prints the goal at each `sorry`, before each failing tactic and left
-unsolved, which is how to read goals without an editor
-([goals](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CLI.md#goals-of-an-unfinished-proof)).
+On success `verify` writes `verified.json` and prints `Verified: <theorem>`, `Subject:` (each
+method the statement's conclusion is about), `Extraction entry:`, `Axioms:`, the elaborated
+`Statement:` and, under `Specification:`, the proof file's definitions the statement names.
+Before telling the user the code is verified, read the statement and specification and confirm
+each point.
+
+- `Subject:` names the method the user asked about. Several types can declare a method with the
+  same name and parameters, and a theorem can concern a callee instead of the extraction entry.
+- The statement quantifies over every input the user cares about. A theorem about fixed argument
+  values is a test of those values.
+- The caller memory is quantified, or is a fixed one such as `CIL.Safety.Memory.empty` (no
+  allocations). A fixed memory is an assumption to state; it is harmless only for a method that
+  takes and returns scalars and never touches caller memory.
+- The statement asserts success with a result (`= .ok ...`, `Ensures` or a contract's `Holds`).
+  A relation between two outcomes, such as "equal for both argument orders", also holds for a
+  method that always fails.
+- Callers guarantee every precondition, and the preconditions do not contradict each other.
+- The profile, which `leancil check` prints, and each `--assume-initialized` type match the
+  deployment.
+- `Axioms:` lists only `propext`, `Quot.sound` and `Classical.choice`. `verify` rejects a
+  theorem that depends on any other with `Unapproved proof axioms:` at the stage `theorem audit`.
+
+Then quote the theorem name, the `Subject:` line and the profile, and say in plain words what the
+theorem guarantees and what remains trusted: the CIL and memory model's correspondence to the
+CLR, the extractor's decoding, the modeled runtime helpers, the JIT, the runtime and the hardware
+([soundness boundary](https://github.com/NethermindEth/LeanCIL/blob/main/docs/SOUNDNESS.md#trusted-components-and-deployment-assumptions)).
+The theorem covers the compiled CIL; it says nothing about whether the specification is the one
+the user needs.
 
 ## Rules
 
-- Never weaken the theorem, add a precondition, or change the method under test to make a proof
-  pass. If the property does not hold or the code is outside the supported subset, report that.
-- No `sorry`, `admit`, custom `axiom`, or `native_decide`; the verifier rejects them anyway.
-- Editor checks (`lake build`, `leancil workspace`) are not verification. Only `leancil verify`
-  produces a result to report.
-- A theorem about fixed argument values is a test, not a contract; say so.
-- Unsupported features (classes outside the README's admitted subset, interface calls, type
-  tests against interfaces, `System.Object` or value types, recursion, exception handlers, floating point, reading a string's length or characters,
-  arbitrary external calls) fail at `extract` with the rejected item named;
-  report it rather than rewriting the user's code without asking.
+- Never weaken the theorem, add a precondition or change the method under test to make a proof
+  pass. When the property does not hold or the code is outside the supported subset, report
+  that; do not rewrite the user's code to avoid an unsupported construct without asking.
+- Write no `sorry`, `admit`, custom `axiom` or `native_decide`: each adds an axiom the audit
+  rejects.
+- Report a result only from `leancil verify`, `leancil gates` or `leancil verify-batch` without
+  `--check`. An editor check, `lake build`, `leancil workspace` and `--check` issue no
+  certificate.

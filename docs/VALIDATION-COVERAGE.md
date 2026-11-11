@@ -2,161 +2,197 @@
 
 <!-- audience: maintainers -->
 
+This page lists what the fixtures behind the [suites](VALIDATION.md#suites) check for extraction,
+runtime comparison, artifact identity, consumer reuse and certified library preparation, and how
+to run each focused fixture. Read it to find the fixture that covers a behavior before changing it.
+
 ## Preparation and shared infrastructure
 
+### Prepared fixtures
+
 The workflow builds `scripts/Test.cs`, `Tests/ContractExport.cs` and
-`Tests/FullImportVerification.cs` once with Release analyzer checks. Their shared artifact is bound
-to a separately supplied manifest digest, the SDK/runtime, included sources, repository build
-configuration and the complete output file set. The workflow checks executable hashes before
-starting the runner. Nested fixture invocations check the same identity and use the compiled
-assembly; absent or incompatible preparation falls back to an ordinary local build. Modified example
-assemblies are still rebuilt by their mutation tests. Only relocated fixture binaries use the shared
-checkout override; source-built child scripts retain their own source root, including producers
-running against an isolated modified library. Configuration identity includes props, targets and
-configuration files along the entry script's directory chain through the checkout root. Fixtures
-with `#:project` references use an ordinary build because their external MSBuild source graph is not
-described by file-app includes.
+`Tests/FullImportVerification.cs` once with Release analyzer checks.
 
-`Tests/PreparedFixtures.cs` covers arguments, included-source changes, nested configuration changes,
-unsupported project references, SDK/runtime mismatches, manifest tampering and added or modified
-output files. Shared preparation amortizes fixture compilation across suites; producer work and
-artifact transfers remain part of total CI time.
+- Their shared artifact is bound to a separately supplied manifest digest, the SDK/runtime,
+  included sources, repository build configuration and the complete output file set.
+  Configuration identity includes props, targets and configuration files along the entry script's
+  directory chain through the checkout root.
+- The workflow checks executable hashes before starting the runner. Nested fixture invocations
+  check the same identity and use the compiled assembly; absent or incompatible preparation falls
+  back to an ordinary local build.
+- Mutation tests rebuild the example assemblies they modify.
+- Only relocated fixture binaries use the shared checkout override; source-built child scripts
+  keep their own source root, including producers running against an isolated modified library.
+- Fixtures with `#:project` references use an ordinary build: file-app includes do not describe
+  their external MSBuild source graph.
 
-Branch positions and prefix-bypass checks use indexes scoped to each body traversal, and call
-translation uses a method index scoped to the current ordered call graph. Original and specialized
-bodies have separate instruction indexes. Dependency invalidation traverses reverse import edges
-once with a queue, including missing roots and cycles. Support reuse retains the existing external
-module and extraction-source binding exceptions. `Tests/InstructionIndexes.cs`,
-`Tests/ConstrainedResolution.cs` and `Tests/ConsumerSupportCandidates.cs` cover identity, fresh
-traversal, branch/switch prefix bypasses, reverse-ordered chains, cycles, missing imports and
-support source bindings.
+`Tests/PreparedFixtures.cs` covers arguments, included-source changes, nested configuration
+changes, unsupported project references, SDK/runtime mismatches, manifest tampering and added or
+modified output files.
 
-Extraction reuses each method's reachability result within validation, emission and exception
-linting. Feature evidence uses the same incoming states as instruction selection. Each phase
-computes a fresh result, so no analysis is cached across method mutation or profile changes.
-`Tests/ExtractionBatch.cs` compares direct and batch output across assemblies, scalar and SIMD
-profiles, feature queries and a loop backedge, and retains source/assembly tampering checks.
+### Extractor indexes and analysis reuse
 
-`Tests/FeatureEvidence.lean` checks known int32 comparisons at signed/unsigned boundaries,
-short/long branch encodings, unknown operands and loss of facts after native conversions.
-Independent certificates reject changed comparison signedness, unjustified pruning and constants
-that do not survive a loop backedge. Compiled profile guards exercise the same propagation.
-Switch checks cover known, unknown, negative and out-of-range selectors, empty and duplicate
-tables, and backedge weakening. Unselected targets still reject out-of-range positions and
-tail-transfer interiors in both extraction and independent evidence validation.
-`Tests/FeatureEvidence.cs` proves that `AdvSimd.Arm64.IsSupported` agrees with `AdvSimd` under
-scalar, x64 and ARM64 profiles, that the unmodeled ARM64 body it guards blocks only
-`arm64-advsimd`, and that `Crc32.Arm64` and `Rdm.Arm64` stay unclassified. It likewise proves
-that `Avx512Vbmi.VL` agrees with `Avx512Vbmi`: both are false under the built-in profiles and
-true under a custom v4 profile declaring VBMI, where the unmodeled VBMI body blocks extraction;
-`Avx512Vbmi2.VL` stays unclassified, and observations that omit or split `avx512VbmiVL` are rejected.
-The x86 `Aes` and `Aes.X64` getters read `aes`, and ARM64 `Aes` and `Aes.Arm64` read `armAes`: all four
-are false under the built-in profiles, and each architecture's pair is true only under a custom profile
-declaring its flag. `Pclmulqdq` stays unclassified, and observations that omit or split `aesX64` or
-`armAes64` are rejected.
-`BitConverter.IsLittleEndian` prunes its big-endian branch on those profiles; forged owners and values are rejected by both certificates,
+- Branch positions and prefix-bypass checks use indexes scoped to each body traversal, and call
+  translation uses a method index scoped to the current ordered call graph. Original and
+  specialized bodies have separate instruction indexes.
+- Dependency invalidation traverses reverse import edges once, including missing roots and
+  cycles. Support reuse keeps the external module and extraction-source binding exceptions.
+- `Tests/InstructionIndexes.cs`, `Tests/ConstrainedResolution.cs` and
+  `Tests/ConsumerSupportCandidates.cs` cover identity, fresh traversal, branch/switch prefix
+  bypasses, reverse-ordered chains, cycles, missing imports and support source bindings.
+- Validation, emission and exception linting each compute one reachability result per method and
+  reuse it within that phase, so no analysis is cached across method mutation or profile changes.
+  Feature evidence uses the same incoming states as instruction selection.
+  `Tests/ExtractionBatch.cs` compares direct and batch output across assemblies, scalar and SIMD
+  profiles, feature queries and a loop backedge, and checks source/assembly tampering.
+
+### Feature evidence
+
+`Tests/FeatureEvidence.lean` checks:
+
+- known int32 comparisons at signed/unsigned boundaries, short/long branch encodings, unknown
+  operands and loss of facts after native conversions;
+- that independent certificates reject changed comparison signedness, unjustified pruning and
+  constants that do not survive a loop backedge; compiled profile guards exercise the same
+  propagation;
+- switches with known, unknown, negative and out-of-range selectors, empty and duplicate tables,
+  and backedge weakening. Unselected targets reject out-of-range positions and tail-transfer
+  interiors in both extraction and independent evidence validation.
+
+`Tests/FeatureEvidence.cs` proves how each feature getter is classified:
+
+| Getter | Classification |
+| --- | --- |
+| `AdvSimd.Arm64.IsSupported` | Agrees with `AdvSimd` under scalar, x64 and ARM64 profiles; the unmodeled ARM64 body it guards blocks only `arm64-advsimd`. `Crc32.Arm64` and `Rdm.Arm64` stay unclassified. |
+| `Avx512Vbmi.VL` | Agrees with `Avx512Vbmi`: both are false under the built-in profiles and true under a custom v4 profile declaring VBMI, where the unmodeled VBMI body blocks extraction. `Avx512Vbmi2.VL` stays unclassified, and observations that omit or split `avx512VbmiVL` are rejected. |
+| x86 `Aes` and `Aes.X64` | Read `aes`. |
+| ARM64 `Aes` and `Aes.Arm64` | Read `armAes`. |
+
+All four AES getters are false under the built-in profiles, and each architecture's pair is true
+only under a custom profile declaring its flag. `Pclmulqdq` stays unclassified, and observations
+that omit or split `aesX64` or `armAes64` are rejected. `BitConverter.IsLittleEndian` prunes its
+big-endian branch on those profiles; forged owners and values are rejected by both certificates,
 and lookalike scopes, fields and same-named module types are rejected by the extractor.
-`Tests/ExactIntrinsics.cs` compares `Avx2.Shuffle` and `Ssse3.Shuffle`, fed by
-`Vector256.Create<byte>` and `Vector128.Create<byte>` over byte spans, with the host CPU on twelve
-seeded span pairs each, one of them a 32-byte reversal mask. Both short-span calls raise
-`ArgumentOutOfRangeException` in the runtime and the model. The test fails if its inputs do not
-separate the model from shuffles that ignore bit 7 or cross 128-bit halves. Each shuffle is rejected
-under a profile without its feature, and forged load widths or substituted intrinsics are rejected.
-`Tests/ExactIntrinsics.cs` compares `Sse2.Multiply` on `Vector128.Create` lanes reinterpreted as `uint` with the host CPU on twelve argument sets.
-Two of them are chosen with set high halves and both 32-bit extremes.
-The test fails if its inputs do not separate the model from odd lanes, a signed product or a full 64-bit product.
-The call is rejected under `scalar`, and forged evidence substituting the 256-bit multiply or another exact SSE call is rejected.
-`Tests/ExactIntrinsics.cs` also runs a portable AES hash round on the host CPU's `Aes.Encrypt`
-for eight seeded blocks and proves that its extraction returns the same vectors under a custom x64 profile
-declaring `aes` and under a custom ARM64 profile declaring `armAes`, where it uses AESE and AESMC. Every
-built-in profile rejects the reachable ARM64 calls, and forged evidence substituting another AES step is
-rejected. `Tests/AesHardware.cs` checks the host's own AES instructions against the Lean model on sixteen
-seeded blocks: x86 AESENC in the intrinsics suite, and ARM64 AESE and AESMC in the ARM64 AES workflow.
-A 256-bit arithmetic shift window, `Avx512F.VL.PermuteVar4x64x2` over a sign fill from
-`Vector256.LessThan<long>`, runs on the host CPU for the five windows such a shift loads and seven
-random index vectors, and its x64-v4 extraction returns the same vectors; the inputs must separate
-the model from a bit-3 table select and from swapped tables. `Vector256.Create` of eight `uint`s is
-compared the same way. Under arm64-advsimd, `AdvSimd.ReverseElement8` is checked against
-`BinaryPrimitives.ReverseEndianness` of each lane, since no ARM64 host runs it, and a method that swaps
-two halves through `Vector128.LoadUnsafe` and `StoreUnsafe`, with and without an offset, matches the
-host and faults on the second store into a 31-byte destination. Profiles without AdvSimd or AVX-512
-VL reject the reachable calls, and forged permutations, reversals and transfer offset forms are rejected.
 
-The array, generic, layout and parameter evidence fixtures submit their 63 independent positive
-extractions in six batches. Each method retains fresh mutable metadata; immutable assembly bytes,
-hashes and whole-assembly signature validation are shared within the batch. Long-form argument
-fixtures use a separate batch after writing their modified assembly. Expected extraction failures
-remain isolated, since a batch stops at its first failure.
+### Exact intrinsics
 
-Generated positive evidence in `PrimitiveArrays`, `LayoutEvidence`, `ParameterEvidence`,
-`GenericEvidence` and `StaticScalarValues` shares imports within each fixture. Each extraction and
-its proof remain in their own namespace, following the generated verification batch pattern. The
-combined file is compiled once and independently replayed with `leanchecker`; passes are printed
-only after both checks and source-stability checks succeed. Rejection fixtures still run separately
-with their original diagnostic assertions. The array read, null and bounds checks share one final
-file instead of checking the read twice.
+`Tests/ExactIntrinsics.cs` compares each intrinsic below with the host CPU, except where the row
+says otherwise. Where a row names wrong models, the test fails if its inputs do not separate the
+model from them:
 
-Generic and constrained-call positive controls retain their narrowed declarations and exact
-obligation types, but reuse the original checked theorem instead of reducing its validator again.
-Generic controls compile and replay in the original positive batch. Missing or changed control
-declarations must still fail type checking; isolated mutation cases retain their original validator
-proofs and diagnostic checks, without access to the positive-control witnesses. Constrained fixtures
-include direct closed generic struct slots with substituted parameters and results, closed
-interfaces on ordinary and generic structs, and explicit implementations whose interface
-instantiations share a token and signature. A forged closed override owner must fail the same
-checked dispatch obligation. These cases share the existing positive batch and kernel replay. The
-projected declarations use a distinct namespace, so missing names cannot fall back to the original
-`Extracted` namespace. Controls reject explicit access to that namespace while preserving quoted
-metadata strings and disable automatic implicit parameters. Regression cases cover removed
-declarations used by definitions or obligation types, changed definitions, qualified references and
-opened namespaces. Rejection diagnostics retain their case boundaries with or without Lean's
-diagnostic classification codes. Feature-flow and folded-span mutations use the same checked
-controls and retain only the intended feature-flow obligation in each negative fixture. Every
-rejection must identify `FeatureFlowValid` as false. Full positive certificates, runtime
-comparisons, and consumer replay remain; folded instructions with an unrecognized theorem cannot
-silently skip a test.
+| Intrinsic | Inputs | Must separate the model from | Rejections |
+| --- | --- | --- | --- |
+| `Avx2.Shuffle` and `Ssse3.Shuffle`, fed by `Vector256.Create<byte>` and `Vector128.Create<byte>` over byte spans | Twelve seeded span pairs each, one a 32-byte reversal mask; both short-span calls raise `ArgumentOutOfRangeException` in the runtime and the model | Shuffles that ignore bit 7 or cross 128-bit halves | A profile without the feature; forged load widths; substituted intrinsics |
+| `Sse2.Multiply` on `Vector128.Create` lanes reinterpreted as `uint` | Twelve argument sets, two with set high halves and both 32-bit extremes | Odd lanes, a signed product, a full 64-bit product | `scalar`; forged evidence substituting the 256-bit multiply or another exact SSE call |
+| A portable AES hash round on `Aes.Encrypt` | Eight seeded blocks; the extraction returns the same vectors under a custom x64 profile declaring `aes` and under a custom ARM64 profile declaring `armAes`, where it uses AESE and AESMC | | Every built-in profile rejects the reachable ARM64 calls; forged evidence substituting another AES step |
+| A 256-bit arithmetic shift window: `Avx512F.VL.PermuteVar4x64x2` over a sign fill from `Vector256.LessThan<long>` | The five windows such a shift loads and seven random index vectors; the x64-v4 extraction returns the same vectors | A bit-3 table select and swapped tables | See below |
+| `Vector256.Create` of eight `uint`s | Compared the same way | | |
+| `AdvSimd.ReverseElement8` under arm64-advsimd | Checked against `BinaryPrimitives.ReverseEndianness` of each lane, since no ARM64 host runs it | | See below |
+| A method that swaps two halves through `Vector128.LoadUnsafe` and `StoreUnsafe`, with and without an offset | Matches the host and faults on the second store into a 31-byte destination | | See below |
 
-Each of these five scripts accepts `--measure`, which first checks the same final source files
-separately. `artifacts/<fixture>/batch-timings.json` records source hashes, separate time and batch
-compilation/replay time.
+For the last four rows, profiles without AdvSimd or AVX-512 VL reject the reachable calls, and
+forged permutations, reversals and transfer offset forms are rejected.
 
-`GenericEvidence` also checks that an invalid proof fails batch compilation
-and that an unchecked declaration reaches, and fails, independent kernel replay.
+`Tests/AesHardware.cs` checks the host's own AES instructions against the Lean model on sixteen
+seeded blocks: x86 AESENC in the `intrinsics` suite, and ARM64 AESE and AESMC in the ARM64 AES
+workflow.
+
+### Evidence batches
+
+- The array, generic, layout and parameter evidence fixtures submit their 63 independent positive
+  extractions in six batches. Each method keeps fresh mutable metadata; immutable assembly bytes,
+  hashes and whole-assembly signature validation are shared within the batch. Long-form argument
+  fixtures use a separate batch after writing their modified assembly. Expected extraction
+  failures are isolated, since a batch stops at its first failure.
+- `PrimitiveArrays`, `LayoutEvidence`, `ParameterEvidence`, `GenericEvidence` and
+  `StaticScalarValues` each compile their generated positive evidence once as one file, with
+  shared imports and a namespace per extraction and proof, and replay it independently with
+  `leanchecker`. A pass is printed only after both checks and the source-stability checks
+  succeed. Rejection fixtures run separately with their own diagnostic assertions. The array
+  read, null and bounds checks share one final file.
+- Each of these five scripts accepts `--measure`, which first checks the same final source files
+  separately. `artifacts/<fixture>/batch-timings.json` records source hashes, separate time and
+  batch compilation/replay time.
+- `GenericEvidence` also checks that an invalid proof fails batch compilation and that an
+  unchecked declaration reaches, and fails, independent kernel replay.
+- Runtime bit tests narrow each source pattern to the parameter type before removing duplicates,
+  so each distinct typed input runs once; every rotation count runs as supplied, including
+  negative and out-of-width counts. Replay fallback tests check rejection and attribution in one
+  invocation. Independent metadata mutations, malformed proofs, cache
+  invalidation and native/bootstrap paths each have their own case.
 
 ```sh
 dotnet run --file Tests/PrimitiveArrays.cs -- --measure
 ```
 
-`Tests/CliImportedKernelAudit.cs`, called by the CLI suite, extends the producer's certified base
-with two previously uncompiled helper sources. Both standalone `verify --fresh` calls use private
-copies authenticated by that producer's manifest digest. The valid helper succeeds; the forged
-`AuditBad.helper` fails specifically during kernel replay and removes the previous certificate. Both
-helpers remain outside the audited base aggregate. The fixture also rejects using the modified
-corpus's certificate with the unmodified tool. Trace assertions require zero fresh base
-builds/replays, one source extension and two successful private copies. New helper declarations
-never inherit certification from that extension. Run `dotnet run --file
-Tests/CliImportedKernelAudit.cs` after building the extractor and example assembly; `--
---fresh-preparation` measures one fresh preparation, and `-- --measure-baseline` measures the
-original two-build workload. Without a supplied base, a local run prepares it before measuring the
-extension. Each run writes `timings.json` beneath its isolated `artifacts/CliImportedKernelAudit-*`
-directory.
+The positive controls for generic, constrained-call, feature-flow and folded-span mutations follow
+these rules:
+
+- Generic and constrained-call positive controls keep their narrowed declarations and exact
+  obligation types, and reuse the original checked theorem without reducing its validator again.
+  Generic controls compile and replay in the original positive batch. A constrained-call control
+  compiles the same reduced fixture its mutation changes, so a missing prerequisite cannot cause
+  the rejection, and the full positive certificate checks every validator.
+- Missing or changed control declarations must fail type checking. Isolated mutation cases keep
+  their own validator proofs and diagnostic checks, without access to the positive-control
+  witnesses.
+- Constrained fixtures include direct closed generic struct slots with substituted parameters and
+  results, closed interfaces on ordinary and generic structs, and explicit implementations whose
+  interface instantiations share a token and signature. A forged closed override owner must fail
+  the same checked dispatch obligation. These cases share the positive batch and kernel replay.
+- The projected declarations use a distinct namespace, so missing names cannot fall back to the
+  original `Extracted` namespace. Controls reject explicit access to that namespace while
+  preserving quoted metadata strings, and disable automatic implicit parameters.
+- Regression cases cover removed declarations used by definitions or obligation types, changed
+  definitions, qualified references and opened namespaces. Rejection diagnostics keep their case
+  boundaries with or without Lean's diagnostic classification codes.
+- Feature-flow and folded-span mutations use the same checked controls and keep only the intended
+  feature-flow obligation in each negative fixture. Every rejection must identify
+  `FeatureFlowValid` as false. Full positive certificates, runtime comparisons and consumer replay
+  run as well; folded instructions with an unrecognized theorem cannot silently skip a test.
+
+### Imported kernel audit and library extension
+
+`Tests/CliImportedKernelAudit.cs`, called by the `cli` suite, extends the producer's certified
+base with two uncompiled helper sources.
+
+- Both standalone `verify --fresh` calls use private copies authenticated by that producer's
+  manifest digest. The valid helper succeeds; the forged `AuditBad.helper` fails specifically
+  during kernel replay and removes the previous certificate.
+- Both helpers stay outside the audited base aggregate, and new helper declarations never inherit
+  certification from that extension.
+- The fixture rejects using the modified corpus's certificate with the unmodified tool.
+- Trace assertions require zero fresh base builds/replays, one source extension and two successful
+  private copies.
+
+Run `dotnet run --file Tests/CliImportedKernelAudit.cs` after building the extractor and example
+assembly. `-- --fresh-preparation` measures one fresh preparation, and `-- --measure-baseline`
+measures a two-build workload. Without a supplied base, a local run prepares it before measuring
+the extension. Each run writes `timings.json` beneath its isolated
+`artifacts/CliImportedKernelAudit-*` directory.
 
 `Tests/LibrarySourceExtension.cs` independently checks manifest authentication, private copies,
 changed/self-rehashed compiled artifacts, existing-source edits/removals, configuration changes,
-compiled-module shadows (including case variants on case-insensitive filesystems), and preservation
-of an existing destination. Its synthetic compiled bytes exercise preparation integrity only; the
-CLI fixture supplies the end-to-end kernel checks against real compiled declarations.
+compiled-module shadows (including case variants on case-insensitive filesystems), and
+preservation of an existing destination. Its synthetic compiled bytes exercise preparation
+integrity only; the CLI fixture supplies the end-to-end kernel checks against real compiled
+declarations.
 
-`Tests/ConsumerBatchSetup.cs` runs the fixed mixed-outcome consumer checks used by the core suite.
-Imported axioms, unchecked declarations, expected-rejection mismatches and invalid execution proofs
-retain their own outcomes and certificate assertions. Successful requests after rejected proofs
-verify that failures do not contaminate their shared session. The checks use one certified-base
-preparation instead of three; `--separate` reproduces the old two isolated rejections followed by
-the seven-request batch. Both modes write stage counts and timings under
-`artifacts/ConsumerBatchSetup-*`, with caches disabled for the measured requests. When a certified
-artifact is supplied, copy counts are asserted as one versus three. Mutable-source, environment,
-provenance, receipt-tampering and process-progress tests remain separate. The core test copies only
-its exact framework cache entry into its private cache.
+### Consumer batch setup
+
+`Tests/ConsumerBatchSetup.cs` runs the fixed mixed-outcome consumer checks used by the `core`
+suite, with one certified-base preparation.
+
+- Imported axioms, unchecked declarations, expected-rejection mismatches and invalid execution
+  proofs keep their own outcomes and certificate assertions.
+- Successful requests after rejected proofs verify that failures do not affect their shared
+  session.
+- `--separate` runs two isolated rejections followed by the seven-request batch, with three
+  preparations. Both modes write stage counts and timings under `artifacts/ConsumerBatchSetup-*`,
+  with caches disabled for the measured requests. When a certified artifact is supplied, copy
+  counts are asserted as one versus three.
+- Mutable-source, environment, provenance, receipt-tampering and process-progress tests are
+  separate. The `core` test copies only its exact framework cache entry into its private cache.
 
 ```sh
 dotnet run --file Tests/ConsumerBatchSetup.cs -- --separate
@@ -165,308 +201,264 @@ dotnet run --file Tests/ConsumerBatchSetup.cs
 
 ## Artifact identity and consumer reuse
 
+### External identity encoding
+
 `Tests/ExternalIdentityEncoding.cs` kernel-checks generated identity strings against their literal
 values, including empty strings, embedded NULs, escaping and Unicode characters crossing chunk
-boundaries. Malformed UTF-16 is rejected before serialization, and invalid UTF-8 fails its validity
-proof. A compiled `Math.Abs` extraction passes, while a changed, still-valid UTF-8 call identity
-fails `ScalarFlowValid`.
+boundaries. Malformed UTF-16 is rejected before serialization, and invalid UTF-8 fails its
+validity proof. A compiled `Math.Abs` extraction passes, while a changed, valid UTF-8 call
+identity fails `ScalarFlowValid`.
 
-`scripts/BenchmarkExternalIdentities.cs` accepts fixed baseline `Extracted.lean` files with
-`externalIdentityNBytes_eq` declarations. It replaces only their identity encoding with the current
-emitter, compiles both complete modules with one Lean worker, then independently kernel-replays
-each. All chunk declarations are included. `artifacts/ExternalIdentityBenchmark` contains the paired
-sources and `timings.json`, including input SHA-256, source/artifact sizes, compilation and replay
-times. Use the same fixed files and toolchain when comparing results. For per-declaration kernel
+`scripts/BenchmarkExternalIdentities.cs` takes fixed baseline `Extracted.lean` files with
+`externalIdentityNBytes_eq` declarations, replaces only their identity encoding with the current
+emitter's, compiles both complete modules with one Lean worker and kernel-replays each
+independently, all chunk declarations included. `artifacts/ExternalIdentityBenchmark` holds the
+paired sources and `timings.json`: input SHA-256, source/artifact sizes, compilation and replay
+times. Compare results only for the same fixed files and toolchain. For per-declaration kernel
 costs, run the paired Lean files with `--json --profile -j1 -DElab.async=false
 -Dprofiler.threshold=0`; JSON source positions identify each declaration.
 
-Consumer checks compile together in `Tests/ConsumerVerification.cs` and run in separate child
-processes. Run one with `dotnet run --file Tests/ConsumerVerification.cs -- --check <name>`. Names
-are `source-resolution`, `support-union`, `certificate-reuse`, `components`, `fingerprints`, and
-`certified-fingerprints`. Each retains its private process and worker checks.
+### Consumer checks
 
-`Tests/ConsumerComponents.cs` checks four independently certified wrappers around one helper. The
-common profile/layout and helper modules must compile and replay once, while all four complete
-extraction certificates must replay. Profile, helper and call-target changes invalidate their
-component identities; a consumer source shadowing a generated component must fail without a
-certificate. Source byte counts and compilation/replay/wall timings are recorded in `timings.json`.
-Pass a baseline extractor DLL and `--measure` to run the same workload without asserting reuse. The
-existing certificate-reuse fixture still checks authenticated cross-process restoration,
-self-rehashed corrupt artifacts, changed extraction sources and generated-source tampering.
+Consumer checks compile together in `Tests/ConsumerVerification.cs` and run in separate child
+processes, each with its private process and worker checks. Run one with
+`dotnet run --file Tests/ConsumerVerification.cs -- --check <name>`:
+
+| `--check` name | Fixture | Checks |
+| --- | --- | --- |
+| `source-resolution` | `Tests/ConsumerSourceResolution.cs` | Consumer source resolution |
+| `compile-check` | `Tests/ConsumerComponents.cs` | The components fixture run with `--compile-check` |
+| `support-union` | `Tests/ConsumerSupportUnion.cs` | A fixed three-extraction consumer batch in two orders. Support imported only by later groups must build and replay once; direct and indirect extraction-dependent modules must replay in every consuming group, including repeated import commands on one line. Compiled import headers are authoritative when scheduling misses an import. |
+| `certificate-reuse` | `Tests/ConsumerCertificateReuse.cs` | Four independent verifier processes with distinct proof sources. Unchanged generated certificates keep their authenticated build outputs and run no certificate `lake build`. Reuse requires the complete certificate module parts and traces, unchanged authenticated restored artifacts, and the source/import closure binding. Changed extraction text and self-rehashed corrupt artifacts force rebuilding `Extracted`. Every successful request independently replays `Extracted` and the proof and audits the certificate. Expected rejection groups keep the separate `ExtractionAudit` module. Generated-source tampering is rejected before receipt reuse, and proof code cannot replace restored or freshly built certificate artifacts; both rejection paths remove a stale report. |
+| `components` | `Tests/ConsumerComponents.cs` | Four independently certified wrappers around one helper. The common profile/layout and helper modules must compile and replay once, while all four complete extraction certificates must replay. Profile, helper and call-target changes invalidate their component identities; a consumer source shadowing a generated component must fail without a certificate. |
+| `fingerprints` | `Tests/ConsumerFingerprintReuse.cs` | Authenticated canonical fingerprints across independent verifier processes, using two framework modules and a multipart fixture: corrupt receipts, changed or missing parts, module names, auditor bytes, fresh and disabled caches, diagnostic normalization, source/import invalidation and kernel replay. |
+| `certified-fingerprints` | `Tests/CertifiedFingerprints.cs` | Direct normalization compared with an authenticated prepared-library table while local receipts are disabled: identical canonical results across independent receivers, relocation, renamed modules, changed parts and native tools, metadata mutation before publication and consumption, and self-rehashed corruption. The fixture uses two framework modules plus one consumer module. |
+
+The checks take these measuring options:
+
+- `timings.json` records wall, build and replay timings and module counts for `support-union`,
+  process counts and elapsed times for `certificate-reuse`, and source byte counts and
+  compilation/replay/wall timings for `components`. For each of the three checks, pass a baseline
+  extractor DLL path and `--measure` to record the same workload without asserting reuse.
+- `fingerprints --measure` uses the fixed full framework plus fixture workload and records wall
+  time, raw input bytes, serialization counts and native normalization time. Supply a baseline
+  worker DLL before `--measure` to compare the same seven requests.
+- `certified-fingerprints --measure` uses the complete prepared framework and compares direct and
+  prepared requests, recording fingerprint time, total worker time and serialization counts.
+  Preparation normalizes the framework once; include its cost when assessing a workload's
+  amortized savings.
+
+Generated certificates have their own authenticated support records containing only the closed
+generated module set. Their preparation key binds all generated sources and their Lake
+configuration, framework artifacts, tools and declared environment inputs. A consumer package
+configuration change can reuse this preparation without reusing consumer modules or exempting the
+certificate from replay. The default consumer workload checks this with its
+custom-build-directory request and checks invalidation with its Lake environment mutation.
+
+Two opt-in checks are excluded from the default workload:
+
+- `dotnet run --file Tests/ConsumerVerification.cs -- --check certificate-reuse
+  --configuration-reuse` checks configuration reuse, fresh verification, self-rehashed corruption
+  and post-restoration artifact mutation.
+- `dotnet run --file Tests/ConsumerVerification.cs -- --check components --configuration-reuse`
+  checks that split certificates keep their complete generated dependency set across a consumer
+  configuration change.
+
+Ordinary consumer requests regenerate the extraction and recheck their original inputs once after
+proof execution. Export and full-import callbacks add a recheck after the callback executes. The
+fixture records these recheck counts and times. The export and full-import mutation cohorts check
+the post-callback integrity guards.
+
+### Library copies
 
 `Tests/VerificationCache.cs` checks certified-library copying against the pinned manifest, source
 snapshot and toolchain key, rejects changed/missing/extra files and rehashed manifests, and
 independently detects destination corruption. On Unix it also checks that both streamed artifacts
-and copied metadata retain their file modes. `Tests/LibraryCopyScaling.cs` compares separate
-validation/copying with hashing during copying, retaining independent destination validation in both
-paths. It alternates four pairs over the same framework/native build files and records file count,
-bytes and wall time. An optional argument selects the donor `.lake/build` directory, by default the
-certified library's; the synthetic performance fixture is never supplied to a verifier as a
-certified library.
+and copied metadata keep their file modes.
 
-`Tests/ConsumerFingerprintReuse.cs` checks authenticated canonical fingerprints across independent
-verifier processes using two framework modules and a multipart fixture. It covers corrupt receipts,
-changed or missing parts, module names, auditor bytes, fresh and disabled caches, diagnostic
-normalization, source/import invalidation and kernel replay. `--measure` uses the fixed full
-framework plus fixture workload and records wall time, raw input bytes, serialization counts and
-native normalization time. Supply a baseline worker DLL before `--measure` to compare the same seven
-requests.
+`Tests/LibraryCopyScaling.cs` compares separate validation/copying with hashing during copying,
+with independent destination validation in both paths. It alternates four pairs over the same
+framework/native build files and records file count, bytes and wall time. An optional argument
+selects the donor `.lake/build` directory, by default the certified library's; the synthetic
+performance fixture is never supplied to a verifier as a certified library.
 
-`Tests/CertifiedFingerprints.cs` compares direct normalization with an authenticated
-prepared-library table while local receipts remain disabled. It checks identical canonical results
-across independent receivers, relocation, renamed modules, changed parts and native tools, metadata
-mutation before publication and consumption, and self-rehashed corruption. The normal fixture uses
-two framework modules plus one consumer module; `--measure` uses the complete prepared framework and
-compares direct and prepared requests, recording fingerprint time, total worker time and
-serialization counts. Preparation normalizes the framework once; its cost must be included when
-assessing a workload's amortized savings.
+### Standalone certificates and translation audit
 
-`Tests/ConsumerCertificateReuse.cs` measures four independent verifier processes with distinct proof
-sources. Unchanged generated certificates retain their authenticated build outputs and skip the
-otherwise redundant certificate `lake build` invocation. Reuse requires the complete certificate
-module parts and traces, unchanged authenticated restored artifacts, and the existing source/import
-closure binding. Changed extraction text and self-rehashed corrupt artifacts force rebuilding
-`Extracted`. Every successful request still independently replays `Extracted` and the proof and
-audits the certificate. Expected rejection groups retain the separate `ExtractionAudit` module.
-Generated-source tampering remains rejected before receipt reuse, and proof code cannot replace
-restored or freshly built certificate artifacts; both rejection paths remove a stale report. Pass a
-baseline extractor DLL and `--measure` to collect the same workload without requiring preparation
-reuse; process counts and elapsed times are written to `timings.json`.
+- `Tests/StandaloneCertificateReuse.cs` measures complete CLI requests against a certified
+  library, including source guards, native theorem audits and independent kernel replay.
+  Standalone verification audits `Extracted.translation_valid` directly, with no separate
+  `ExtractionAudit` elaboration; the
+  [export page](VALIDATION-EXPORTS.md#interface-and-theorem-audits) states what that audit
+  requires. The fixture checks frontend process counts for initial,
+  unchanged, proof-edited, changed-extraction and `--fresh` requests. The generated and proof
+  modules elaborate independently; there are no shared frontend environments or native snapshots.
+- `Tests/TranslationAudit.cs` compiles six certificate variants against one checked prefix,
+  replays them together and audits each exact statement. Missing, unrelated, non-theorem and
+  wrong-import-table certificates must fail both the `ExtractionAudit` wrapper and the direct
+  audit; a definitionally equal but structurally different statement passes elaboration and the
+  wrapper but fails the direct audit. A changed prefix is rejected before any suffix can use the
+  checked module.
+- CLI regressions cover unchecked-theorem and transitive-helper rejection, stale-report removal
+  and changed-code proof failure.
+- `Tests/TranslationScaling.cs` checks the extraction prefix once, then imports it into the
+  compositional certificate and a deliberately failing monolithic certificate. `--measure` also
+  checks both complete files and records command timings for the identical six-method workload.
+  The consumer verifies the original extraction.
 
-Generated certificates have their own authenticated support records containing only the closed
-generated module set. Their preparation key binds all generated sources and their Lake
-configuration, framework artifacts, tools and declared environment inputs. Consumer package
-configuration changes can reuse this preparation without reusing consumer modules or exempting the
-certificate from replay. The default consumer workload checks this with its existing
-custom-build-directory request and checks invalidation with its existing Lake environment mutation;
-these assertions add no verification requests.
+### Proof workspace
 
-Run `dotnet run --file Tests/ConsumerVerification.cs -- --check certificate-reuse
---configuration-reuse` for focused configuration reuse, fresh verification, self-rehashed corruption
-and post-restoration artifact mutation checks. Run `dotnet run --file Tests/ConsumerVerification.cs
--- --check components --configuration-reuse` to check that split certificates retain their complete
-generated dependency set across a consumer configuration change. These extra requests are opt-in and
-are excluded from the default workload.
-
-Ordinary consumer requests regenerate the extraction and recheck their original inputs once after
-proof execution. Export and full-import callbacks retain another recheck after the callback
-executes. The fixture records these recheck counts and times. The export and full-import
-mutation cohorts check the post-callback integrity guards.
-
-`Tests/StandaloneCertificateReuse.cs` measures complete CLI requests against an already certified
-library, including source guards, native theorem audits and independent kernel replay. Standalone
-verification audits `Extracted.translation_valid` directly, eliminating the separate
-`ExtractionAudit` elaboration. The fixture checks frontend process counts for initial, unchanged,
-proof-edited, changed-extraction and `--fresh` requests.
-
-The existing `Tests/TranslationAudit.cs` independently checks the direct certificate's exact type
-and rejects missing, unrelated, non-theorem and wrong-import-table declarations, as well as a
-definitionally equal but structurally different statement. CLI regressions retain unchecked-theorem
-and transitive-helper rejection, stale-report removal and changed-code proof failure. The remaining
-generated and proof modules still elaborate independently; this improvement does not introduce
-shared frontend environments or native snapshots.
-
-`Tests/TranslationScaling.cs` checks the unchanged extraction prefix once, then imports it into the
-compositional certificate and deliberately failing monolithic certificate. Its `--measure` option
-also checks both original complete files and records command timings for the identical six-method
-workload. The consumer still verifies the original extraction. `Tests/TranslationAudit.cs` shares
-and replays the prefix once across certificate mutations; each variant retains its original
-certificate audit and rejection assertions. A changed prefix is rejected before any suffix can use
-the checked module.
+The `workspace` suite (`Tests/ProofWorkspace.cs`) builds a small library with a four-limb
+`Workspace.Wide` struct and opens `Workspace.Wide::get_IsZeroOrOne()` under the scalar profile
+with `--assume-initialized Workspace.Wide`. It checks the proof in place, adds a helper about the
+method body, and expects that helper to fail after a C# rebuild with a different body and no Lean
+edit. It verifies the same files fresh, shows that a forged editor module changes nothing
+verification reads, and rejects a tampered extraction and a proof importing another extraction's
+key. Under `watch`, editing a second method, `Workspace.Arith::Twice(ulong)`, refreshes and
+rechecks only its proof, which fails at its theorem, while every file of the first method keeps
+its bytes and write time. A C# syntax error makes both proofs stale and deletes both
+certificates, and renaming the method reports its proof missing.
 
 ## Execution and extraction regressions
 
-`Tests.CertificateFlow` covers streaming fallthrough, indexed forward/backward edges, missing
-states, out-of-bounds targets and mismatched certificate lengths. The feature and scalar equivalence
-theorems retain the original list-indexed rules, including rejection when the feature and scalar
-certificate lengths differ.
+For checked-step and loop tactics, see [proof automation](VALIDATION-PROOFS.md#proof-automation).
 
-`Tests/CertificateFlowScaling.lean` and `Tests/CertificateBranchScaling.lean` provide fixed 512-nop
-and 512-branch workloads, each followed by a return, for kernel checking and independent replay.
-Their profiler reports tactic execution and kernel type-checking separately. Compile and replay each
-workload, for example:
+- `Tests.CertificateFlow` covers streaming fallthrough, indexed forward/backward edges, missing
+  states, out-of-bounds targets and mismatched certificate lengths. The feature and scalar
+  equivalence theorems keep the list-indexed rules, including rejection when the feature and
+  scalar certificate lengths differ.
+- `Tests/LocalSnapshotSteps.lean` checks opt-in local snapshot stepping:
+  - Vector and int32 stores, reloads and overwrites with abstract homes and memory, plus
+    signed-byte narrowing. The mixed-width case carries Vector256, Vector128 and int32 locals
+    through one snapshot invariant and returns the full arbitrary 256-bit input after the other
+    locals are written.
+  - Missing write authority, mismatched local kinds and unknown local contents are rejected. Each
+    rejection uses an isolated store or load and a matching successful run with only the missing
+    authority, correct value kind or remembered contents supplied. Strict proof elaboration
+    prevents an incomplete rejected proof from inserting a placeholder.
+  - Contract walks cross stores whose homes are stated at the frame's entry memory or after a
+    leading root slot, and are rejected without evidence that the current memory keeps the homes'
+    access or that the leading slot is no byte home.
+  - Homes over opaque numeric specs take a local's kind from a supplied fact and stop at the store
+    without it, as does a store at a symbolic local index.
+  - A supplied store advances the snapshots to its own memory, and a store's named evidence and
+    the caller reads and buffers it carries are checked against the final memory.
+  - One walk crosses three stores while forming argument references, reading an input word through
+    `ValidCall` and loading two caller limbs, one named and one supplied as a projection, and
+    stops when a limb is not shown below the boundary. A counted walk stops after its second step
+    and a second walk resumes from the snapshots it named.
+- `Tests/PrimitiveArrays.cs` checks compiled loads and stores for twelve primitive integer element
+  types against runtime results and certified checked execution. It also covers length, helper
+  calls, aliases, returned arrays, named null/bounds faults and unsupported array forms. Generic
+  integer and enum fills cover readback, neighboring bytes, empty arrays, named null exceptions and
+  missing write authority. Ranged fills cover interior slices, end-position empty ranges,
+  null-first faults and negative or overflowing bounds. Malformed or expired storage cannot
+  establish a named runtime exception. Independent changes to fill element identities, widths,
+  operations, scope, arity and range selection, or load width and signedness, must fail the Lean
+  scalar certificate. `Tests/PrimitiveArrays.lean` covers empty and null arrays, signed and native
+  indices, initialization, authority, invalid extents, local storage and neighboring-byte
+  preservation. Both run in the `evidence` suite.
+- `Tests/ArrayElementReferences.cs` checks compiled `ldelema` returns, helper reads and writes
+  against runtime behavior, preserving neighboring contents and rejecting a forged element type.
+  `Tests/ArrayElementReferences.lean` covers null, empty and out-of-range accesses, expired
+  references and address formation without granting memory authority. Both run in the `evidence`
+  suite.
+- `Tests/ReadOnlyArrayReferences.cs` inserts `readonly.` prefixes into compiled fixtures,
+  checks returned and locally stored references, and proves that caller stores fail despite
+  writable backing memory. It rejects independently forged writable evidence, separated prefixes
+  and branches that skip a prefix. `Tests/ReadOnlyArrayReferences.lean` also checks alias updates,
+  read access and rejection of an adapter that would remove the restriction, plus readonly
+  `GetReference` results for nonempty, empty and out-of-extent views and field loads, field
+  addresses and rejected field stores through restricted references. Both run in the `evidence`
+  suite.
+- `Tests/StaticScalarValues.cs` compares 16 compiled readonly-field loads with the runtime,
+  covering integer widths, Boolean/Char, native integers, signed/unsigned enums, helper
+  initialization and copies. It rejects missing initialization assumptions, mutable fields,
+  repeated stores, branches and address-taking during initialization. Independent Lean checks
+  reject forged scalar signedness, width and literal evidence. For `SeededHash`, whose seeds come
+  from `RandomNumberGenerator`, it verifies `OpaqueSeeds.lean` for every seed, checks the reported
+  `opaqueStaticValues`, and rejects a proof that reads a seed without a caller binding, a value
+  forged into a seed's placeholder, `ldsflda` of a seed, and missing assumptions, mutable fields,
+  repeated stores and outside stores. It runs in the `evidence` suite.
+
+`Tests/CertificateFlowScaling.lean` and `Tests/CertificateBranchScaling.lean` provide fixed
+512-nop and 512-branch workloads, each followed by a return, for kernel checking and independent
+replay. Their profiler reports tactic execution and kernel type-checking separately. They are
+separate from ordinary library builds. Compile and replay each workload, for example:
 
 ```sh
 lake env lean -o .lake/build/lib/lean/Tests/CertificateFlowScaling.olean Tests/CertificateFlowScaling.lean
 lake env leanchecker Tests.CertificateFlowScaling
 ```
 
-Compare identical source with baseline and updated libraries; native evaluation alone does not
-measure this workload. The benchmark is separate from ordinary library builds.
-
-`Tests/ConsumerSupportUnion.cs` runs a fixed three-extraction consumer batch in two orders. Support
-imported only by later groups must build and replay once; direct and indirect extraction-dependent
-modules must replay in every consuming group, including repeated import commands on one line.
-Compiled import headers remain authoritative when scheduling misses an import. The fixture records
-wall, build and replay timings and module counts in `timings.json`. Run it with an extractor DLL
-path and `--measure` to record a baseline without asserting the improved reuse counts. The ordinary
-consumer suite runs the assertions.
-
-For checked-step and loop tactics, see [proof automation](VALIDATION-PROOFS.md#proof-automation).
-
-`Tests/LocalSnapshotSteps.lean` checks opt-in local snapshot stepping through vector and int32
-stores, reloads and overwrites with abstract homes and memory, plus signed-byte narrowing. The
-mixed-width case carries Vector256, Vector128 and int32 locals through one snapshot invariant and
-returns the full arbitrary 256-bit input after the other locals are written. Missing write
-authority, mismatched local kinds and unknown local contents remain rejected. Each rejection uses an
-isolated store or load and a matching successful run with only the missing authority, correct value
-kind or remembered contents supplied. Strict proof elaboration prevents an incomplete rejected proof
-from inserting a placeholder. Contract walks cross stores whose homes are stated at the frame's
-entry memory or after a leading root slot, and are rejected without evidence that the current
-memory retains the homes' access or that the leading slot is no byte home. Homes over opaque
-numeric specs take a local's kind from a supplied fact and stop at the store without it, as does a
-store at a symbolic local index. A supplied store
-advances the snapshots to its own memory, and a store's named evidence and the caller reads and
-buffers it carries are checked against the final memory. One walk crosses three stores while forming
-argument references, reading an input word through `ValidCall` and loading two caller limbs, one
-named and one supplied as a projection, and stops when a limb is not shown below the boundary. A counted walk stops after its second step
-and a second walk resumes from the snapshots it named.
-
-`Tests/PrimitiveArrays.cs` checks compiled loads and stores for twelve primitive integer element
-types against runtime results and certified checked execution. It also covers length, helper calls,
-aliases, returned arrays, named null/bounds faults and unsupported array forms. Generic integer
-and enum fills cover readback, neighboring bytes, empty arrays, named null exceptions and missing
-write authority. Ranged fills cover interior slices, end-position empty ranges, null-first faults
-and negative or overflowing bounds. Malformed or expired storage cannot establish a named
-runtime exception. Independent changes to fill element identities, widths,
-operations, scope, arity and range selection, or load width and signedness, must fail the Lean
-scalar certificate. `Tests/PrimitiveArrays.lean`
-covers empty and null arrays, signed and native indices, initialization, authority, invalid extents,
-local storage and neighboring-byte preservation. Both run in the evidence suite.
-
-`Tests/ArrayElementReferences.cs` checks compiled `ldelema` returns, helper reads and writes against
-runtime behavior, preserving neighboring contents and rejecting a forged element type.
-`Tests/ArrayElementReferences.lean` covers null, empty and out-of-range accesses, expired references
-and address formation without granting memory authority. Both run in the evidence suite.
-
-`Tests/ReadOnlyArrayReferences.cs` inserts real `readonly.` prefixes into compiled fixtures, checks
-returned and locally stored references, and proves that caller stores fail despite writable backing
-memory. It rejects independently forged writable evidence, separated prefixes and branches that skip
-a prefix. `Tests/ReadOnlyArrayReferences.lean` also checks alias updates, read access and rejection
-of an adapter that would remove the restriction, plus readonly `GetReference` results for nonempty,
-empty and out-of-extent views and field loads, field addresses and rejected field stores through
-restricted references. Both run in the evidence suite.
-
-`Tests/StaticScalarValues.cs` compares 16 compiled readonly-field loads with the runtime, covering
-integer widths, Boolean/Char, native integers, signed/unsigned enums, helper initialization and
-copies. It rejects missing initialization assumptions, mutable fields, repeated stores, branches and
-address-taking during initialization. Independent Lean checks reject forged scalar signedness, width
-and literal evidence. For `SeededHash`, whose seeds come from `RandomNumberGenerator`, it verifies
-`OpaqueSeeds.lean` for every seed, checks the reported `opaqueStaticValues`, and rejects a proof
-that reads a seed without a caller binding, a value forged into a seed's placeholder, `ldsflda` of
-a seed, and missing assumptions, mutable fields, repeated stores and outside stores. It runs in the
-evidence suite.
+Compare identical source with two libraries; native evaluation alone does not measure this
+workload.
 
 ## Running the suites
 
-The repository pins .NET SDK **10.0.403** and Lean **4.35.0**. The checks below cover semantic
-behavior, extracted contracts, artifact integrity and rejection cases.
+[Validation](VALIDATION.md#running-suites) shows how to run the suites and what a run writes.
+The runner:
 
-```sh
-lake build
-dotnet run --file scripts/Test.cs
-```
+- builds the independent assemblies and the CIL library, then prepares a source-keyed,
+  kernel-replayed library for verification. In CI that library comes from the
+  [`prepare` job](CI.md#certified-library); a local run may reuse a cache entry whose receipt
+  binds its key and manifest and whose files all hash to that manifest on each use;
+- checks the library by its trusted manifest digest and reads it in place: every proof compiles
+  and undergoes kernel replay in a new private session package that requires the library as a
+  path dependency, so Lake writes only below that session;
+- uses file-based C# apps for the test runner, verifier and metadata fixture generator. Metadata
+  tooling uses the same pinned Mono.Cecil version as the extractor; the F# example assembly uses
+  pinned FSharp.Core.
 
-The regression runner covers
-initial CLI proof selection and theorem output, an actual addition-to-subtraction source edit and
-rebuild, recovery using settings retained after the failed proof, the invalid-memory-access theorem,
-the integer opcode, narrow-storage and primitive-operation matrices, and `new-proof` refusing an
-existing file, a stale extraction and a struct parameter. The CLI tests also exercise
-an isolated installation of the packaged .NET tool.
-
-The runner builds the independent assemblies and the CIL library, then prepares a source-keyed,
-kernel-replayed library for verification. CI rebuilds from sources; local runs may reuse a cache
-entry whose receipt binds its key and manifest and whose files all hash to that manifest on
-each use. The library is checked by its trusted manifest
-digest and read in place: every proof still compiles and undergoes kernel replay in a new private
-session package that requires the library as a path dependency, so Lake writes only below that
-session. File-based C# apps provide the test runner, verifier and metadata fixture generator.
-Metadata tooling uses the same pinned Mono.Cecil version as the extractor; the F# example assembly
-also uses pinned FSharp.Core.
+Its CLI regressions cover initial proof selection and theorem output, an
+addition-to-subtraction source edit and rebuild, recovery using settings kept after the failed
+proof, the invalid-memory-access theorem, the integer opcode, narrow-storage and
+primitive-operation matrices, `new-proof` rejecting an existing file, a stale extraction and a
+struct parameter, and an isolated installation of the packaged .NET tool.
 
 ## Certified library preparation
 
-CI prepares the certified library once per workflow attempt and passes its immutable artifact ID,
-the run that uploaded it and its manifest digest from the producer job to the suite jobs. The
-producer first looks for a library already certified by a run of the same commit. On push events it
-next checks at most ten associated merged PRs from the same repository, requiring their merge commit
-to be this push and their complete Git tree to match exactly. Runs of those heads whose prepare job
-succeeded, whatever their suites concluded, precede the main push of the checkout's first parent.
-API failures or absent eligible artifacts retain the older-main/source-build fallback. Their own
-trusted code built that library and printed its digest, so the digest is read from the donor job's
-log, never from the artifact. `PrepareLibrary.cs --reuse` then rechecks the library key, the source
-binding and every file against that manifest; any mismatch, or no donor, builds from source.
-It kernel-replays the library unless `--producer-replayed` is passed, which CI does only when the
-donor run was a push of a commit reachable from `refs/heads/main`, or the run of exactly one
-same-repository pull request into main whose head commit holds the same git objects as its merge base
-with the PR's base commit at every `CertifiedLibraryDonor.ProducerPaths` entry. A pull request run
-builds its merge with its base, whose SHA no trusted metadata records, so the head's own changes
-decide whether that merge ran main's reviewed producer code; a stacked PR builds into an unreviewed
-branch and replays. A PR that changes the workflow
-or `scripts/` can log a digest for a forged library, so any later reuse of it replays.
-`scripts/TestFindCertifiedLibrary.cs` covers main pushes, unchanged and changed PR producer paths,
-non-main bases, forks, PR entry and head mismatches, unreachable pushes, ambiguous main refs,
-unknown merge bases and other runs, and `Tests/LibraryReplayCoverage.cs` checks that reviewed reuse
-runs no replay yet rejects a changed file or digest, while other reuse and release replay reject a
-forged module. It does not restore compiled libraries from the GitHub Actions cache: a cache's
-source key and self-described file hashes cannot authenticate the native auditor or establish that
-compiled modules came from those sources.
+This section covers `scripts/PrepareLibrary.cs` and its tests. CI's [donors](CI.md#donors) and
+[reuse and replay](CI.md#reuse-and-replay) rules say which runs may donate a library and when
+reuse skips kernel replay.
 
-`dotnet run --file scripts/PrepareLibrary.cs -- <output-directory>` requires an empty or absent
-destination and publishes a freshly built library through a staging directory. Explicit reuse uses
-`--reuse <trusted-manifest-sha256> [--producer-replayed]`; obtain this digest independently from a
-trusted producer, never
-by hashing the restored manifest itself. Missing or invalid reuse evidence fails without replacing
-the destination. Rebuilding an existing library requires a separate output directory.
-`Tests/LibraryCache.cs` covers substituted auditors and compiled modules with regenerated manifests,
-missing producer digests, preservation of unrelated destination files, a receipted cache entry
-whose module was rewritten, restored or joined by a file its manifest lacks, and closure entries:
-their key names exactly their modules, a compiled module or source outside the closure rejects
-the entry, an import outside it fails, and one is never accepted as the whole library. With a
-few modules standing in for the framework and CI's settings cleared, it also builds and
-kernel-replays a closure from an empty cache, reuses it, keeps it while a process reads it,
-reports a whole library that cannot be built, completes the whole library, which replaces the
-entry and is preferred, and refuses an import outside a closure from the compiled import header
-in three spellings. The `workspace` suite checks that a full audit, contract imports and a
-package import are never offered a closure entry. Closure verification of a real extraction
-through the CLI, with its `verified.json` fields and exit code, runs in no suite: it needs the
-95 framework modules an extraction imports.
+| Invocation | Behavior |
+| --- | --- |
+| `dotnet run --file scripts/PrepareLibrary.cs -- <output-directory>` | Requires an empty or absent destination and publishes a freshly built, kernel-replayed library through a staging directory. Rebuilding an existing library requires a separate output directory. |
+| `--reuse <trusted-manifest-sha256> [--producer-replayed]` | Rechecks the library key, the source binding and every file against that manifest, then kernel-replays the library unless `--producer-replayed` is passed. Obtain the digest independently from a trusted producer, never by hashing the restored manifest itself. Missing or invalid reuse evidence fails without replacing the destination. |
+| `--incremental <donor-directory> <trusted-manifest-sha256>` | For changed Lean sources. Authenticates every donor file before reusing its Lake build traces in a private copy. The runtime, compiler, kernel checker and build configuration must match; the configuration is the [library view](CI.md#identity) of `lakefile.toml`. Changed and removed modules lose their compiled artifacts; Lake checks the current source hashes and rebuilds the dependent closure. The native auditor is relinked, every resulting module is kernel-replayed, including those kept from the donor, since a byte-identical module can import a rebuilt one, and canonical fingerprints are regenerated before a new source-bound manifest is published. |
 
-Main push runs publish their validated library even after exact reuse. This keeps the main run
-eligible to donate to later PRs without following a chain of earlier runs. Suite jobs prefer the
-current run's artifact when it uploaded one; PR runs that reuse a donor still consume that donor
-directly. Publication follows the existing source binding and the replay rule above.
+These tests cover preparation:
 
-When only Lean sources changed, `--incremental <donor-directory> <trusted-manifest-sha256>`
-authenticates every donor file before reusing its Lake build traces in a private copy. The runtime,
-compiler, kernel checker and build configuration must match; the configuration is the library view
-of `lakefile.toml`, so a change to test libraries alone keeps the donor. Changed and removed modules
-lose their compiled artifacts; Lake checks the current source hashes and rebuilds the dependent closure. The
-native auditor is relinked, every resulting module is kernel-replayed, including those kept from the
-donor, since a byte-identical module can import a rebuilt one, and canonical fingerprints
-are regenerated before a new source-bound manifest is published. CI tries this after exact reuse,
-then falls back to a cold build if incremental preparation fails. `Tests/LibraryIncremental.cs`
-covers artifact tampering, incompatible identities/configuration, source removal and copy isolation.
-
-`Tests/LibraryReplayCoverage.cs` uses a small synthetic producer manifest with a valid aggregate and
-an invalid theorem in a separate module. Both joint replay and its external-checker fallback must
-reject that declaration; checking only the aggregate is insufficient. The cache fixture runs this
-regression alongside the authentication tests.
-
-The runner accepts `--suite <name>` after `--`, with the names in the
-[suite table](VALIDATION.md#suites). These partitions cover the same check groups as the full
-command and can run concurrently in separate checkouts. Each partition builds its own
-prerequisites (in CI, one job builds the extractor and example assembly with `--build-tools` and suite jobs set
-`LEANCIL_PREBUILT_TOOLS=true` to use them), retains fresh Lean proof checking and writes
-`artifacts/test-results-<suite>.json`; running without arguments checks everything and writes
-`artifacts/test-results.json`.
+- `Tests/LibraryCache.cs` covers substituted auditors and compiled modules with regenerated
+  manifests, missing producer digests, preservation of unrelated destination files, and a
+  receipted cache entry whose module was rewritten, restored or joined by a file its manifest
+  lacks.
+- `Tests/LibraryCache.cs` also covers closure entries: their key names exactly their modules, a
+  compiled module or source outside the closure rejects the entry, an import outside the closure
+  fails, and a closure entry is never accepted as the whole library. With a few modules in place
+  of the framework and CI's settings cleared, the fixture builds and kernel-replays a closure
+  from an empty cache, reuses it, keeps it while a process reads it, reports a whole library that
+  cannot be built, completes the whole library, which replaces the entry and is preferred, and
+  rejects an import outside a closure from the compiled import header in three spellings.
+- The `workspace` suite checks that a full audit, contract imports and a package import are never
+  offered a closure entry.
+- Closure verification of a real extraction through the CLI, with its `verified.json` fields and
+  exit code, runs in no suite: it needs the 95 framework modules an extraction imports.
+- `Tests/LibraryIncremental.cs` covers artifact tampering, incompatible identities/configuration,
+  source removal and copy isolation.
+- `Tests/LibraryReplayCoverage.cs` uses a small synthetic producer manifest with a valid aggregate
+  and an invalid theorem in a separate module. Both joint replay and its external-checker fallback
+  must reject that declaration; checking only the aggregate is insufficient. It also checks that
+  reviewed reuse runs no replay yet rejects a changed file or digest, while other reuse and
+  release replay reject a forged module. The cache fixture runs it alongside the authentication
+  tests.
 
 ## Coverage by behavior
 
 | Coverage | Checks |
 | --- | --- |
 | Profile-parametric templates | Compiled AVX2/SSE4.2 dispatch helper, one generated template proof on three profiles, renumbered managed callees, exact per-pc equations, independent kernel replay, and wrong flag/callee/branch/equation, stale source and metadata rejection |
-| Cyclic control flow and termination | Universal checked countdown proof for every `uint`, including zero and maximum value; a counted loop proved through its helper's contract, unchanged for a reimplemented helper and rejecting a discarded result or double count; a loop that returns or raises its helper's exception after earlier calls, proved for every pair of `uint`s from the helper's outcome contract, unchanged for a reimplemented helper and rejecting another exception type, a nondecreasing measure, a non-inductive invariant and a wrong specified exception; a buffer fill loop proved to write exactly `count` words for every nonnegative count, with four runtime comparisons and shifted or skipping stores rejected; 17 runtime comparisons; incorrect implementation rejected under the unchanged contract; infinite loop proved to exhaust every fuel budget; backward switch, native arithmetic and fixed-feature loops checked; eight malformed or unsupported fixtures rejected; `new-proof` outlines of loop examples (one with two loops in sequence, one searching a free list through an object local, one filling a writable span, one filling it through a helper that stores the first element of the span it is lent, one summing and one filling an array by index, and three slicing a span local, which sum a span and an array and fill an array), straight-line methods with `bool`, narrow, writable span and array parameters, a `bool` result, unsigned and signed checked adds, a bit count and splits on unsigned and signed word tests, straight-line methods over class instances, string fields and arrays of class references, including element facts carried across element and field stores and an array the method allocates, methods over value arrays of words, structs and vectors that class fields hold, including a struct element named across lines, and struct instance methods storing fields elaborate with only `sorry` warnings and are byte-identical across runs; the countdown outline is refused for `sorryAx` and verifies once only its holes are filled, as do filled outlines for array/class composition, multiple struct-field stores, signed and unsigned narrow fields, struct value parameters, nested locals and receiver loops; a static helper over words gets a contract stub whose filled outline verifies where the helper tests its arguments and its result is returned, stored into a field or returned by a caller over words alone, where it throws on one side and where it only computes, and a `post` the helper's body does not meet, a `post` that does not give the caller's postcondition and a `pre` that admits the throwing side are rejected; a helper's result kept in an integer local by a caller over an object or over words alone, tested after it or not, a helper over words that keeps its own locals and one that tests them, and a helper that tests a field of the object it is handed are outlined so that the filled outline verifies, and a `post` the object helper's body does not meet is rejected; an object helper called from a frame of locals, one that throws beyond a field and one that throws from a frame of its own verify filled, and a `pre` that admits the object helper's throw fails saying the path must be ruled out; an indexed array loop's outline states the null exclusion in `Precondition`, and a precondition without it fails naming null; mutations to arithmetic, indexes, element types and loop progress are rejected |
+| Cyclic control flow, termination and generated proof outlines | The `loops` and outline suites; the lists below the table give their cases |
 | Generic method specialization | 125 C#/F# runtime comparisons, six universal identity proofs, six reference checks, twelve metadata/recursion rejections, wrong-implementation rejection and provenance tamper detection |
 | Block memory and alignment prefixes | 251 checks; ten malformed-prefix/type cases rejected; universal out-of-bounds fill rejection |
 | Layout-based Unsafe helpers | 418 checks across 19 element types and all three managed offset overloads; ten malformed generic calls rejected |
@@ -523,18 +515,18 @@ prerequisites (in CI, one job builds the extractor and example assembly with `--
 | Malformed settings, missing proof, unsupported CIL, changed assembly and missing Lake produce stage-specific guidance | Regression checks |
 | Subtraction rejected by the unchanged universal addition contract | Rejects the implementation and removes any successful report |
 | Reference-free array allocation | Checked primitive/enum, packed/nested aggregate and vector zero initialization, payload alignment, empty/non-null identity, negative/native lengths, helper returns and packed field stores; forged element identity, layout identity/width and byref-like certificates, malformed markers and unsupported extents rejected |
-| Integer `div`, `div.un`, `rem`, `rem.un`, both widths | 648 comparisons against actual .NET execution and corresponding Lean proofs, including divide-by-zero and signed overflow |
+| Integer `div`, `div.un`, `rem`, `rem.un`, both widths | 648 comparisons against .NET execution and corresponding Lean proofs, including divide-by-zero and signed overflow |
 | Extracted unsigned quotient for arbitrary inputs with a nonzero divisor | Universal proofs for 32 and 64 bits; multiplication substituted for division rejected by the unchanged contract |
 | Division with mixed widths, references, stack underflow or a zero divisor | Semantic rejection tests |
-| Checked add/subtract/multiply, signed and unsigned at both widths | 2,028 comparisons against actual .NET results or overflow exceptions and corresponding Lean proofs |
+| Checked add/subtract/multiply, signed and unsigned at both widths | 2,028 comparisons against .NET results or overflow exceptions and corresponding Lean proofs |
 | Checked addition with a sum that fits | Universal 32-/64-bit natural-number addition proofs; subtraction substituted for addition rejected |
-| All 20 integer checked-conversion encodings, from both input widths | 762 comparisons against actual .NET execution and corresponding Lean proofs, including native destinations and overflow |
+| All 20 integer checked-conversion encodings, from both input widths | 762 comparisons against .NET execution and corresponding Lean proofs, including native destinations and overflow |
 | Checked 64-to-32-bit unsigned narrowing with a representable input | Universal preservation proof; an eight-bit truncating implementation rejected |
-| Native signatures, locals, calls, fields, references, arithmetic, shifts, casts and `sizeof`, plus exact mixed native/int32 operations in both operand orders | 2,511 comparisons against actual .NET results or arithmetic exceptions and corresponding Lean proofs; all 60 ambiguous mixed unsigned-branch forms rejected unless explicitly widened |
+| Native signatures, locals, calls, fields, references, arithmetic, shifts, casts and `sizeof`, plus exact mixed native/int32 operations in both operand orders | 2,511 comparisons against .NET results or arithmetic exceptions and corresponding Lean proofs; all 60 ambiguous mixed unsigned-branch forms rejected unless explicitly widened |
 | Extracted native addition on the admitted 64-bit target | Universal modular-addition proof |
 | Required-32-bit assembly, forged native type identity, native field overrun, native/int64 operands and 32-bit execution profile | Five intended extraction rejections |
 | Native widening wrapper with memory instructions, nested wrappers or references | Semantic rejection tests; unsigned branch/comparison widening differences checked explicitly |
-| Argument assignment/addressing, both full and short encodings, all admitted integer storage types, aliases, calls, byref reassignment and structs | 639 runtime/memory cases, including 636 actual .NET comparisons |
+| Argument assignment/addressing, both full and short encodings, all admitted integer storage types, aliases, calls, byref reassignment and structs | 639 runtime/memory cases, including 636 .NET comparisons |
 | Overwriting an argument with a replacement value | Universal proof for arbitrary inputs; assignment to the wrong parameter rejected |
 | Returning an address into a parameter home | Lifetime fault proved for every input; successful execution ruled out for every fuel budget |
 | Parameter setup with missing inputs or incompatible scalar/reference values, and narrow initialization | Semantic checks; taking the address of a byref parameter rejected during extraction |
@@ -549,6 +541,69 @@ prerequisites (in CI, one job builds the extractor and example assembly with `--
 | Static `ReadOnlySpan<byte>` lookup tables | First and last byte proved; past-end read and write to immutable data rejected; tampered RVA bytes change the proved value; four intended span metadata rejections and positive stored-span parameter/local fixtures |
 | Tampered Lean output, changed compiled assembly, changed assembly version with a short selector, changed proof and changed feature profile | Five intended stale-artifact rejections |
 
+The `loops` suite checks cyclic control flow and termination:
+
+- A universal checked countdown proof holds for every `uint`, including zero and the maximum
+  value, with 17 runtime comparisons, and holds unchanged after inserted NOPs and reordered
+  blocks. An incorrect implementation is rejected under the unchanged contract, and an infinite
+  loop is proved to exhaust every fuel budget. Backward switch, native arithmetic and
+  fixed-feature loops are checked, and eight malformed or unsupported fixtures are rejected.
+- `CountCalls` is proved through its helper's contract, unchanged for a helper reimplemented as
+  `value + 0xFFFFFFFF` with only its contract re-proved; builds that discard the helper result or
+  count twice are rejected. On the correct build, measuring by the count fails the decrease
+  obligation, and the non-inductive invariant `count + remaining = value + count * remaining`
+  fails only its preservation.
+- `CountUntil`, which returns or raises its helper's exception after earlier calls, is proved for
+  every pair of `uint`s from the helper's outcome contract and compared with .NET on five inputs,
+  two of which throw. The proof holds unchanged for a reimplemented helper and fails at the
+  exceptional exit for a helper throwing `System.ArgumentException` under a re-proved contract.
+  On the correct build, measuring by the count fails the decrease obligation, the invariant
+  `count <= limit - remaining` fails only its preservation, and specifying
+  `System.ArgumentException` for the loop fails only at the exceptional exit.
+- `CopyUntilZero` is compared with .NET on five spans, checking that the words past the copy are
+  unchanged; builds whose `Stamp` writes zero or whose loop copies past a zero are rejected.
+- `FillWords` is proved to write exactly `count` words for every nonnegative count and compared
+  with .NET for four counts, keeping both neighbouring words; shifted or skipping stores are
+  rejected.
+- `AllZero` and `Sum` are compared with their sequence specifications on five spans each and a
+  `default` span, including wrapping sums; a build of `AllZero` that replaces every read with zero
+  and a build of `Sum` that stops while one element remains are rejected.
+
+The outline suites check `new-proof` outlines:
+
+- These outlines elaborate with only `sorry` warnings and are byte-identical across runs:
+  - loop examples: one with two loops in sequence, one searching a free list through an object
+    local, one filling a writable span, one filling it through a helper that stores the first
+    element of the span it is passed, one summing and one filling an array by index, and three
+    slicing a span local, which sum a span and an array and fill an array;
+  - straight-line methods with `bool`, narrow, writable span and array parameters, a `bool`
+    result, unsigned and signed checked adds, a bit count and splits on unsigned and signed word
+    tests;
+  - straight-line methods over class instances, string fields and arrays of class references,
+    including element facts carried across element and field stores and an array the method
+    allocates;
+  - methods over value arrays of words, structs and vectors that class fields hold, including a
+    struct element named across lines;
+  - struct instance methods storing fields.
+- The countdown outline is rejected for `sorryAx` and verifies once only its holes are filled, as
+  do filled outlines for array/class composition, multiple struct-field stores, signed and
+  unsigned narrow fields, struct value parameters, nested locals and receiver loops.
+- A static helper over words gets a contract stub. Its filled outline verifies where the helper
+  tests its arguments and its result is returned, stored into a field or returned by a caller
+  over words alone, where it throws on one side and where it only computes. A `post` the helper's
+  body does not meet, a `post` that does not give the caller's postcondition and a `pre` that
+  admits the throwing side are rejected.
+- Filled outlines verify for a helper's result kept in an integer local by a caller over an
+  object or over words alone, tested after it or not, for a helper over words that keeps its own
+  locals and one that tests them, and for a helper that tests a field of the object it is passed.
+  A `post` the object helper's body does not meet is rejected.
+- An object helper called from a frame of locals, one that throws beyond a field and one that
+  throws from a frame of its own verify filled. A `pre` that admits the object helper's throw
+  fails saying the path must be ruled out.
+- An indexed array loop's outline states the null exclusion in `Precondition`, and a precondition
+  without it fails naming null.
+- Mutations to arithmetic, indexes, element types and loop progress are rejected.
+
 The addition theorem proves modular arithmetic correctness for arbitrary 64-bit inputs in the
 checked execution model. The unsigned-short theorem proves reduction modulo 65,536 for arbitrary
 32-bit inputs. The invalid-access and expired-reference theorems classify faults and rule out
@@ -556,24 +611,22 @@ successful execution for every fuel budget. The subtraction theorem independentl
 intended addition result. Other example claims have the quantifiers and inputs displayed in their
 theorem statements; concrete examples do not establish universal method correctness.
 
-Audited example theorems must use only the permitted standard Lean axioms, if any.
-The verifier rejects `sorry`, `admit`, native proof evaluation and unproved summaries.
-See [the trusted base](SOUNDNESS.md) for runtime and extraction assumptions.
+Audited example theorems meet the axiom rules of the
+[trusted computing base](SOUNDNESS-VERIFICATION.md#trusted-computing-base);
+[the trusted base](SOUNDNESS.md) lists the runtime and extraction assumptions.
 
-Machine-readable results are written to `artifacts/test-results.json`; each successful proof
-produces an identity-bound `verified.json`. These generated files are reproducible outputs and are
-not committed. Passing the suites does not establish support for arbitrary .NET programs;
-see the [support boundary](SOUNDNESS.md).
+Each successful proof produces an identity-bound `verified.json`. That file and the
+[result files](VALIDATION.md#running-suites) are reproducible outputs and are not committed.
+Passing the suites does not establish support for arbitrary .NET programs; see the
+[support boundary](SOUNDNESS.md).
 
 Typed copy validation covers 648 runtime result/byte-copy cases across 18 primitive, struct and
 vector types, including self-copies. The universal UInt64 copy contract rejects reversed
 source/destination operands. Four unsupported/forged type-token cases test extraction rejection.
 Ten semantic tests cover initialization, permissions, lifetime, GC-sensitive storage,
 bounds, null references and partial overlap. A generic snapshot theorem covers typed copying.
-Packed test inputs use explicitly unaligned stores to their managed field addresses, so constructing
-them does not require aligned reflection stores on ARM64 or interop marshaling of Boolean/char fields.
 
-Portable helper validation compares actual .NET results with extracted execution, covering
+Portable helper validation compares .NET results with extracted execution, covering
 power-of-two boundaries, zero/all-ones values, signed boundaries and negative/oversized rotation
 counts. Primitive 32-bit, 64-bit and native rotation aliases use compact boundary samples;
 the full BitOperations matrix covers their shared scalar operation.
@@ -596,7 +649,7 @@ System.Runtime version. A universal instance store/load proof rejects an incorre
 implementation. Four malformed metadata cases test rejection. For the `init` modifier, `modopt`,
 another `modreq` type, a same-named marker in another namespace and a value-returning or
 parameter placement are rejected by name, both as an entry and behind its caller; selectors and
-recorded entries tell the accessor from a plain void setter, and both members of a
+recorded entries distinguish the accessor from a plain void setter, and both members of a
 modifier-only pair are rejected. An `init` accessor export is rejected as non-static.
 
 Struct construction validation covers 56 runtime comparisons for packed and nested structs,
@@ -605,72 +658,69 @@ A universal constructed-value proof covers every 64-bit input and rejects an inc
 Five malformed constructor cases test rejection. Semantic tests cover zero-sized construction,
 missing arguments, zero initialization and a non-void constructor result.
 
-F# validation compares actual .NET execution for addition, unsigned branching, managed calls,
+F# validation compares .NET execution for addition, unsigned branching, managed calls,
 mutable structs and by-reference stores across 324 cases. The addition, store/load and constructor
 contracts are checked against the F# assembly. Subtraction must fail the addition contract,
 and a list-returning function must fail extraction. These examples use the shared CIL semantics.
 
 ## Contracts and extraction evidence
 
-`Tests/StackAllocation.cs` extracts compiled pointer and span stack allocations, checks results with
-and without localsinit, rejects uninitialized reads and escaped storage, and checks
+`Tests/StackAllocation.cs` extracts compiled pointer and span stack allocations, checks results
+with and without localsinit, rejects uninitialized reads and escaped storage, and checks
 insufficient-budget failure. Mutating the emitted initialization flag is rejected by the Lean
 certificate. `Tests/StackAllocation.lean` covers alignment, repeated allocations and expiry;
 `Tests/StackAllocationEvidence.lean` rejects forged flags, injected allocations, extra stack items
 and non-native 64-bit size operands. These run in the `dispatch` suite.
 
-`Tests/ConstrainedCalls.cs` checks compiled implicit and explicit struct-interface calls, including
-closed generic owners and mutation through the receiver, and rejects forged generated call targets,
-owner arguments and malformed prefix, branch and interface-constraint metadata. Explicit
-implementations with `in` aggregate and span parameters (`modreq(InAttribute)`) are proved as
-entries and through constrained generic calls, including a generic helper forwarding its own `in`
-span; `modopt`, another `modreq` type, by-value and
-nested placements, versioned and foreign modifier scopes and a slot reference without the
-modifier are rejected, as are a `ref readonly` return and both members of a modifier-only
-overload pair.
-`Tests/ConstrainedResolution.cs` checks the extractor's resolution rules;
-`Tests/ConstrainedEvidence.lean` independently checks Lean resolution, target, signature, ambiguity
-and prefix rejection, most specific interface bodies (derived over default, deepest in a chain, a
-body for a base abstract slot, the receiver's own override over all), diamond, re-abstraction and
-incomplete-closure rejection, a forged less specific target, a struct implementing another pin's
-interface and catalog entries outside their pin. `Tests/ConstantCalls.lean` checks that constant and computed flag getters
-prune only the block their word rules out, and rejects a swapped getter, a forged word,
-non-constant bodies and a callee certificate claiming a word its body does not compute;
-`Tests/ConstrainedCalls.cs` proves the pruned `ConstantFlags` and `ComputedFlags` entry points
-(conjunction, negation, a getter chain, generic type tests and derived-interface bodies) against
-the runtime, keeps a static-field getter live, rejects live, swapped and untracked flags, forged
-caller and callee certificates and a recursive getter pair, and prunes a getter computing false. It also proves compiled most specific bodies
-(`MostSpecificBodies`, the derived generic `SpendRefunding` and derived flag getters in
-`DerivedFlags`) and static slots on closed generic struct receivers (`GenericReceivers`: a
-type-argument flag that keeps or prunes its block, an implementation and an interface default
-whose interface is instantiated at the receiver's argument) against the runtime, rejects a catalog
-listing another instantiation of that interface and an open receiver, rejects a compiled diamond, re-abstraction, unlisted base
-interface and live derived flag, and has Lean reject a catalog hiding the most specific
-`MethodImpl` or moving its interface outside its pin. These run in the `dispatch` suite.
+These fixtures cover constrained and constant calls, all in the `dispatch` suite:
 
-The core and universal-contract suites cover checked execution and memory preservation. Choose and
-GenericIdentity preserve arbitrary caller memory exactly; Struct preserves preexisting caller memory
-under its well-formedness hypothesis. Each unchanged contract rejects its incorrect compiled
-implementation. Countdown validation covers original instructions, inserted NOPs and reordered
-blocks, and rejects wrong results and nontermination.
+- `Tests/ConstrainedCalls.cs` checks compiled implicit and explicit struct-interface calls,
+  including closed generic owners and mutation through the receiver, and rejects forged generated
+  call targets, owner arguments and malformed prefix, branch and interface-constraint metadata.
+- Explicit implementations with `in` aggregate and span parameters (`modreq(InAttribute)`) are
+  proved as entries and through constrained generic calls, including a generic helper forwarding
+  its own `in` span. `modopt`, another `modreq` type, by-value and nested placements, versioned
+  and foreign modifier scopes and a slot reference without the modifier are rejected, as are a
+  `ref readonly` return and both members of a modifier-only overload pair.
+- `Tests/ConstrainedResolution.cs` checks the extractor's resolution rules.
+- `Tests/ConstrainedEvidence.lean` independently checks Lean resolution, target, signature,
+  ambiguity and prefix rejection, most specific interface bodies (derived over default, deepest in
+  a chain, a body for a base abstract slot, the receiver's own override over all), diamond,
+  re-abstraction and incomplete-closure rejection, a forged less specific target, a struct
+  implementing another pin's interface and catalog entries outside their pin.
+- `Tests/ConstantCalls.lean` checks that constant and computed flag getters prune only the block
+  their word rules out, and rejects a swapped getter, a forged word, non-constant bodies and a
+  callee certificate claiming a word its body does not compute.
+- `Tests/ConstrainedCalls.cs` proves the pruned `ConstantFlags` and `ComputedFlags` entry points
+  (conjunction, negation, a getter chain, generic type tests and derived-interface bodies) against
+  the runtime, keeps a static-field getter live, rejects live, swapped and untracked flags, forged
+  caller and callee certificates and a recursive getter pair, and prunes a getter computing false.
+- `Tests/ConstrainedCalls.cs` also proves, against the runtime, compiled most specific bodies
+  (`MostSpecificBodies`, the derived generic `SpendRefunding` and derived flag getters in
+  `DerivedFlags`) and static slots on closed generic struct receivers (`GenericReceivers`: a
+  type-argument flag that keeps or prunes its block, an implementation and an interface default
+  whose interface is instantiated at the receiver's argument). It rejects a catalog listing
+  another instantiation of that interface and an open receiver, rejects a compiled diamond,
+  re-abstraction, unlisted base interface and live derived flag, and has Lean reject a catalog
+  hiding the most specific `MethodImpl` or moving its interface outside its pin.
+
+The core and universal-contract suites cover checked execution and memory preservation. Choose
+and GenericIdentity preserve arbitrary caller memory exactly; Struct preserves preexisting caller
+memory under its well-formedness hypothesis. Each unchanged contract rejects its incorrect
+compiled implementation.
 
 Extraction evidence validation covers Lean regressions, compiled certificate fixtures,
-generated-evidence mutations and mandatory-certificate positive/negative checks. CLI checks
-include kernel replay of imported helpers and rejection of unchecked direct/transitive proofs.
-`Tests/ImportEvidence.lean` accepts an external call into a matching
-import slot and rejects a forged identity, parameter count, receiver or result shape, a wrong
-emitted argument count, a slot index inside the program or past the table, constructor and generic
-sites, and managed or non-call sites reaching the import range; the certificate audit also rejects a
-certificate over a different import table. These tests do not establish full raw-CIL/runtime
+generated-evidence mutations and mandatory-certificate positive/negative checks.
+`Tests/ImportEvidence.lean` accepts an external call into a matching import slot and rejects a
+forged identity, parameter count, receiver or result shape, a wrong emitted argument count, a slot
+index inside the program or past the table, constructor and generic sites, and managed or non-call
+sites reaching the import range; the certificate audit also rejects a certificate over a different
+import table. These tests do not establish full raw-CIL/runtime
 correspondence.
 
-The native extraction suite checks 2,511 runtime comparisons and kernel proofs, a universal
-addition contract, 60 ambiguous mixed unsigned-branch rejections and five metadata/profile
-rejections. See the [pinned native evidence](evidence/native/README.md) for recorded x64 and ARM64
-observations, model divergences, provenance and reproduction commands.
-
-Memory-view equivalence covers access, writes and subsequent checked execution, including calls,
-constructors and frame cleanup.
+The [pinned native evidence](evidence/native/README.md) records x64 and ARM64 observations, model
+divergences, provenance and reproduction commands for the `native` suite.
+[Store view reuse](VALIDATION-PROOFS.md#store-view-reuse) covers memory-view equivalence.
 
 The initialized-types end-to-end test and four mandatory-certificate audit cases check that
 verification reports record both the schema-3 extraction audit and initialized-type assumptions.

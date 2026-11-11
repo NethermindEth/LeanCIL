@@ -4,11 +4,12 @@
 
 ## Trusted computing base
 
-The [trust table](SOUNDNESS.md#trusted-components-and-deployment-assumptions) identifies the trusted
-components. Lean's admitted foundational axioms are `propext`, `Quot.sound` and `Classical.choice`.
-Delivered correctness proofs cannot depend on sorry, custom axioms, native proof evaluation or
-unchecked summaries. `rfl`, `decide` and `decide +kernel` produce kernel-checked evidence.
-Build failure, missing audits or proof-resource exhaustion cannot produce a successful receipt.
+The [trust table](SOUNDNESS.md#trusted-components-and-deployment-assumptions) identifies the
+trusted components. Lean's admitted foundational axioms are `propext`, `Quot.sound` and
+`Classical.choice`. Delivered correctness proofs cannot depend on sorry, custom axioms, native
+proof evaluation or unchecked summaries. `rfl`, `decide` and `decide +kernel` produce
+kernel-checked evidence. Build failure, missing audits or proof-resource exhaustion cannot produce
+a successful receipt.
 
 Extraction reads compiled CIL, not a proved source-level semantics. Correspondence between the
 model and actual CLR/JIT/hardware behavior remains assumed. The user's specification and its
@@ -22,7 +23,7 @@ quantifiers/preconditions determine the theorem's practical meaning.
 | Source-only extension | Existing sources/configuration/artifacts unchanged; added sources cannot shadow modules; stability checked before publication | Added helpers have no certified declarations until their ordinary compilation, replay and audit. |
 | Incremental preparation | Authenticated donor and matching configuration; affected declarations rebuilt and required replay performed | Import analysis alone is not proof that arbitrary elaborator dependencies are tracked. |
 | Factored extraction modules | Deterministic source transformation, exact regenerated input hash, compiled graph, stability and certificate audit | No proved Lean source-transformation theorem; module names alone grant no trust. |
-| Import location resolution | Selected sidecar/DLL bytes checked against independent pins by extraction | deps.json, assets, RID graphs and location attributes are discovery inputs, not evidence. |
+| Import location resolution | Selected sidecar/DLL bytes checked against independent pins by extraction | deps.json, assets, RID graphs and location attributes are discovery inputs and are not evidence. |
 
 UTF-8 identity chunk proofs validate the emitted bytes and exact concatenation. They do not prove
 that metadata decoding serialized the intended assembly identity. Preparation and distribution
@@ -31,18 +32,19 @@ commands belong in [CI operation](CI.md) and [validation](VALIDATION.md).
 ## Artifact integrity
 
 The extractor reads assembly bytes without executing them. Selection and validation bind assembly
-identity, target framework, Release metadata, method/type signatures, layouts, profiles and reachable
-instructions. Ambiguous method selection fails before unsupported candidates can be filtered out.
-Assembly SHA-256, MVID, canonical identity, extractor hash and generated-source hashes bind artifacts.
-These checks establish identity and consistency, not semantic correctness of the extractor.
+identity, target framework, Release metadata, method/type signatures, layouts, profiles and
+reachable instructions. Ambiguous method selection fails before unsupported candidates can be
+filtered out. Assembly SHA-256, MVID, canonical identity, extractor hash and generated-source
+hashes bind artifacts. These checks establish identity and consistency, not semantic correctness of
+the extractor.
 
-Verification requires regenerated extraction, compiled proof dependencies, kernel replay, extraction
-certificate audit, selected theorem audit and final source/artifact stability. Generated code and
-proofs use isolated module roots. A failed attempt removes its previous output report. Verification
-settings select the theorem but are not evidence. Reports record the actual audited statement,
-inputs and library identity; their prose is not an independent specification.
+Verification requires regenerated extraction, compiled proof dependencies, kernel replay,
+extraction certificate audit, selected theorem audit and final source/artifact stability. Generated
+code and proofs use isolated module roots. A failed attempt removes its previous output report.
+Verification settings select the theorem but are not evidence. Reports record the actual audited
+statement, inputs and library identity; their prose is not an independent specification.
 
-| Operation | What it establishes | Limit |
+| Operation | Guarantee | Limit |
 | --- | --- | --- |
 | `leancil verify` | Full verification workflow for the selected theorem | Theorem hypotheses and runtime assumptions remain obligations. |
 | Repository `--check` | Recorded selection and input/artifact identity | No kernel rerun and no signature against an attacker controlling the report/toolchain. |
@@ -50,7 +52,8 @@ inputs and library identity; their prose is not an independent specification.
 | `leancil list` | Metadata method discovery | Listing does not imply admission or correctness. |
 | `audit-library` | Kernel-replayed compiled declarations and namespace theorem audit | Not proof that a package build directory was compiled from its current sources. |
 
-`Extracted.signatures` selects method indices and is hash-bound, not part of `TranslationValid`.
+`Extracted.signatures` selects method indices and is hash-bound; it is not part of
+`TranslationValid`.
 Bindings are kernel-checked against the actual program. PDB names and locations are similarly
 untrusted selection aids: they cannot change `Extracted.lean` or its translation evidence.
 Proofs importing `Symbols.lean` compile/replay it and bind its hash; forged names cannot make the
@@ -66,14 +69,15 @@ to replace them, the driver or the checker is outside the model.
 
 Consumer support reuse requires authenticated receipts, matching source and compiled-import
 closures, file hashes and unchanged artifacts after building. Imports of `Extracted` and
-`ExtractedSymbols` do not gain extraction-independent reuse authority. Restored extraction-dependent
-modules and closed generated certificates still undergo required kernel replay when proof checking.
-Certificate/theorem audits and extraction regeneration remain mandatory.
+`ExtractedSymbols` do not gain extraction-independent reuse authority. Restored
+extraction-dependent modules and closed generated certificates still undergo required kernel replay
+when proof checking. Certificate/theorem audits and extraction regeneration remain mandatory.
 
 Canonical fingerprints deserialize every available olean part with the pinned Lean toolchain,
-remove only the diagnostic `Lean.Linter.lintLogExt`, and reserialize. Constants, private declarations,
-import modifiers, other extensions and source paths in definitions remain covered. Canonical files
-are temporary hash inputs, never proof artifacts. A changed fingerprint invalidates dependents.
+remove only the diagnostic `Lean.Linter.lintLogExt`, and reserialize. Constants, private
+declarations, import modifiers, other extensions and source paths in definitions remain covered.
+Canonical files are temporary hash inputs and are never proof artifacts. A changed fingerprint
+invalidates dependents.
 
 Normalization receipts bind module name, compiled-part presence and hashes, normalization policy,
 toolchain and auditor identities. Local receipts additionally bind the verifier binary; portable
@@ -83,7 +87,8 @@ success or source provenance. Fresh/disabled-cache requests bypass local normali
 
 Tracked environment keys cover Lean/Lake/elan configuration. Elaborator-specific dependencies on
 other variables need `LEANCIL_CACHE_ENVIRONMENT` or `--fresh`. Kernel replay validates the output
-when first certified; it does not infer every environmental dependency of arbitrary elaborator code.
+when first certified; it does not infer every environmental dependency of arbitrary elaborator
+code.
 
 ### Batch isolation
 
@@ -106,7 +111,7 @@ unfolding or instance resolution, and computes axiom closure by walking declarat
 than trusting stored summaries. Namespace audit requests must match at least one theorem.
 See [the auditor](../CIL/OleanAudit.lean) for the request/result formats.
 
-Auditing is not type checking: it is sound only for bytes accepted by kernel replay. Isolated
+Auditing is sound only for bytes accepted by kernel replay; it is not type checking. Isolated
 replay follows the pinned Lean checker, including private parts, and uses separate target
 environments. The driver binds compiled inputs, replayed files and audited files with identity and
 stability checks. Certified modules can be exempt only under their authenticated closure policy.

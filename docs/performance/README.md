@@ -2,106 +2,76 @@
 
 <!-- audience: maintainers -->
 
-Measurements here describe their exact workloads, machines and validation boundaries.
-Local gains are not automatically whole-job CI gains; inclusive stage times can overlap.
+These pages describe how to measure the cost of LeanCIL's proofs, library modules and CI
+artifacts, with reference figures to compare against. Read the page for the part you are
+changing before and after the change.
 
-| Area | Report |
+| You are changing | Measure | Page |
+| --- | --- | --- |
+| Tactics, lemmas or anything proofs elaborate against | Heartbeats and olean bytes per proof | [Proof cost](ProofCost.md) |
+| `cil_instruction_equations`, or the code list of emitted methods | Heartbeats per instruction as methods grow | [Instruction lookups](InstructionLookups.md) |
+| A slow proof inside a `CIL/` module | Elaboration time of that module | [Proof work](ProofWork.md) |
+| Packing or restoring the certified library | Archive bytes, pack and restore time | [Library distribution](LibraryDistribution.md) |
+| Packing or restoring the Lean toolchain in CI | Archive bytes, compression and restore time | [Toolchain distribution](ToolchainDistribution.md) |
+| Fold discovery in `CIL/Extraction/Folds.lean` | Kernel time of role discovery | [Fold discovery](#fold-discovery) |
+| A test suite or its harness | Suite seconds | [Suite times](#suite-times) |
+
+## Reading a measurement
+
+- Heartbeats, olean bytes, kernel heartbeats and proof objects do not depend on machine load.
+  Compare them between any two runs on one toolchain.
+- Wall and CPU time depend on the machine and its load. Compare two times only when both were
+  taken in one session on one machine with nothing else running, and repeat each at least once.
+- Stage times inside a suite overlap (a fixture time includes its Lean calls), and modules
+  compile concurrently. Do not add stage or module savings to predict a job's time.
+- A local time does not predict a hosted runner's time. Use the suite times below for CI.
+
+## Scaling suites
+
+Four suites fail when cost grows faster than the size of the input. Run one with
+`dotnet run --file scripts/Test.cs -- --suite <name>`.
+
+| Suite | Fails when |
 | --- | --- |
-| Shared Lean installation and compression | [Toolchain distribution](ToolchainDistribution.md) |
-| Authenticated certified-library transport | [Library distribution](LibraryDistribution.md) |
-| Consumer harness compilation | [Consumer harness](ConsumerHarness.md) |
-| Export closure imports and repeated fixture work | [Export audits and fixtures](ExportAuditAndFixtures.md) |
-| Interface replay and evidence checks | [Replay and evidence checks](ReplayAndEvidence.md) |
-| Current-file declaration lookup | [Import declarations](ImportDeclarations.md) |
-| Feature-flow mutation checks | [Evidence harness reuse](EvidenceHarnessReuse.md) |
-| Long excluded-branch certificates | [Excluded-branch scaling](ExcludedBranchScaling.md) |
-| Instruction lookup equations of long methods | [Instruction lookups](InstructionLookups.md) |
-| Generic constraint certificates | [Generic evidence](GenericEvidence.md) |
-| Typed runtime-case deduplication | [Runtime bits](RuntimeBits.md) |
-| Embedding, scalar and span proof work | [Proof work](ProofWork.md) |
-| Per-proof heartbeats and olean size against a base | [Proof cost](ProofCost.md) |
+| `lookups` | Heartbeats per instruction grow more than 1.25 times from about 500 to about 2,000 instructions; see [instruction lookups](InstructionLookups.md) |
+| `stepping` | Checked stepping exceeds its per-instruction growth budgets; see [validation](../VALIDATION.md#proof-cost) |
+| `scaling` | The certificate of a six-method call graph exceeds the default heartbeat limit |
+| `excluded` | Certificates with hundreds of excluded and live sites exceed the default heartbeat limit |
 
-## Extraction and certificates
+## Suite times
 
-Generated external-call identities use shared, kernel-checked UTF-8 chunks. This avoids
-re-encoding long assembly-qualified signatures while retaining exact byte identities and
-all translation validators. See [validation coverage](../VALIDATION.md) for the fixed-input
-compilation and replay benchmark.
+`scripts/verification-durations.json` holds the verification seconds of each suite on the hosted
+runner, excluding job setup; its `source` field names the runs they came from. CI packs suites
+into jobs from this table. Print the resulting jobs and their estimated minutes with:
 
-Generic value-type constraints also share exact byte-backed identities between extraction
-and validation. Their [equivalence proofs and measurements](GenericEvidence.md)
-retain the original scoped metadata strings and rejection rules.
+```sh
+dotnet run --file scripts/EstimateVerificationSchedule.cs -- --jobs
+```
 
-Published-interface declaration discovery uses Lean's local constant map for current-file
-queries, avoiding scans of imported declarations while retaining ownership checks and
-full-traversal regression coverage. See [import declaration measurements](ImportDeclarations.md).
+A job's summary and each suite's transcript report the suite's verification time; see
+[CI operation](../CI.md).
 
-Caller proofs can register proved interfaces with `@[cil_contract]` and use
-`cil_contract_steps` to compose calls. The stepper checks the callee binding and
-precondition and exposes the postcondition; it can also reuse proved child invocations.
-See [contract composition](../PROOFS.md) for explicit and automatic call proofs.
+## Fold discovery
 
-Feature and division getter recognition use exact byte comparisons with kernel-checked
-equivalence to their original signature rules. This reduces certificate replay work while
-preserving metadata rejection. Feature-flow checks share an indexed classification of local
-types and address exclusions, proved equivalent to the original metadata scans.
-Managed-call certificates use structural equality proofs for
-matching metadata, reducing repeated string comparisons during replay. Primitive metadata also
-shares the exact runtime assembly identity. Reachable external calls reuse their complete
-identities as checked UTF-8 byte constants, avoiding repeated decoding in the kernel. See
-[certificate validation](../PROOFS.md).
-Fold discovery indexes local-use counts once and bounds exception-message prefix scans;
-both changes have exact equivalence proofs to the original checks.
-Constrained dispatch compares linked UTF-8 byte keys and decodes ASCII metadata without repeated
-indexed reads. Checked equivalence preserves Unicode handling and the original dispatch rules.
+Two files measure the kernel evaluating `foldRoles`, which
+[fold discovery](../VALIDATION-EXPORTS.md#fold-discovery) keeps from scanning the whole body once
+per local or per message load. Each proves its statement by `decide +kernel`:
 
-## Proofs and test reuse
+| File | Workload |
+| --- | --- |
+| `docs/performance/fold-roles/CountScaling.lean` | 256 span locals, each stored once and loaded by address once before a receiver call; includes building the local-use index |
+| `docs/performance/fold-roles/ThrowScaling.lean` | 4,096 message loads with no admitted throw fold |
 
-Array, layout, parameter and generic fixtures batch independent extractions to share immutable
-assembly reads and signature validation. Positive evidence also shares Lean imports in
-generated batches, with independent kernel replay. Rejection batches restore Lean's environment
-after each case and require that case's own expected diagnostics. The evidence suite compiles its
-regression modules directly against the certified library, avoiding another CIL build.
-See [validation coverage](../VALIDATION.md) for reproducible measurements.
+Build the module they import, then time each file:
 
-Embedding proofs close impossible operand cases before splitting further, and control-flow
-proofs eliminate impossible bind errors. Scalar evidence groups related checks to share metadata
-reductions; span contract fixtures reuse the certificates checked alongside their execution tests.
-The proof statements and rejection cases remain unchanged. See [proof timings](ProofWork.md).
+```sh
+lake build CIL.Extraction.Folds
+lake env lean -Dprofiler=true docs/performance/fold-roles/CountScaling.lean
+lake env lean -Dprofiler=true docs/performance/fold-roles/ThrowScaling.lean
+```
 
-Integer Math boundary tests encode all 21,804 runtime comparisons as checked data. A generic
-execution proof covers every table entry, preserving narrowing and exact arithmetic faults
-without elaborating a separate execution-proof application for each input.
-
-Core consumer tests batch fixed rejection cases to reuse certified-library setup while keeping
-source, environment and cache-invalidation checks isolated. Their harness compiles once and
-dispatches each check to a separate process, avoiding repeated compilation of shared verifier code.
-See the reproducible comparison in
-[validation coverage](../VALIDATION.md).
-
-Edited consumer proofs reuse authenticated extraction preparation without starting a redundant
-certificate build. Rechecked proofs still independently replay and audit the generated certificate
-and check that proof elaboration leaves its compiled bytes unchanged.
-Generated certificate preparation also survives unrelated consumer package configuration changes;
-its own generated sources, configuration, framework artifacts and toolchain remain bound.
-Rejected joint replays use native per-module checking, preserving isolated failure attribution
-without elaborating a temporary checker script.
-
-Prepared certified libraries include canonical fingerprints of their compiled modules.
-Consumer verification reuses them only while module bytes and the normalizer match,
-avoiding repeated framework serialization even when local receipts are disabled.
-
-## Verification and CI reuse
-
-Eligible standalone proofs, generated batches and consumer groups audit the environment returned
-by kernel replay, avoiding a second import. Consumer groups retain each request's theorem and
-dependency scope. Duplicate declarations and audits requiring source locations or module metadata
-retain the separate audit path; theorem and artifact checks still apply.
-After a merge, CI can reuse the same-repository PR head's certified library when its complete Git
-tree matches the push commit. Source binding, artifact authentication and kernel replay still apply.
-Main republishes the validated library under its own run so later PRs can reuse it too.
-
-Standalone verification directly audits the generated translation theorem, as consumer verification
-does, avoiding a separate wrapper compilation while retaining exact-type checks and kernel replay.
-
-See [CI operation](../CI.md) and [validation coverage](../VALIDATION.md).
+To check scaling, double the size (`256` or `4096`, at each occurrence in the file) in a scratch
+copy and compare. The time of `ThrowScaling.lean` should about double; a fourfold increase means
+a scan per load has returned. The time of `CountScaling.lean` grows faster than double, because
+each local's type is looked up by position in the list of locals. Compare it with the same
+doubling on the base commit. There are no reference figures for these files.
