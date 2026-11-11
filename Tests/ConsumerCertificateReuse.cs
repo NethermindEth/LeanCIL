@@ -7,8 +7,9 @@ partial class Program
     {
         var measureOnly = args.Contains("--measure", StringComparer.Ordinal);
         var configurationReuse = args.Contains("--configuration-reuse", StringComparer.Ordinal);
+        var integrityOnly = args.Contains("--integrity-only", StringComparer.Ordinal);
         var cli = new[] { "dotnet", args.FirstOrDefault(value =>
-            value is not ("--measure" or "--configuration-reuse")) ?? ExtractorPath };
+            value is not ("--measure" or "--configuration-reuse" or "--integrity-only")) ?? ExtractorPath };
         // Lake on Windows fails past MAX_PATH, and the copied cache nests a 64-digit key and
         // the compiled library beneath this directory, so keep its name short.
         var directory = At("artifacts/CertificateReuse-" + Guid.NewGuid().ToString("N")[..8]);
@@ -93,6 +94,11 @@ partial class Program
             Console.WriteLine((measureOnly ? "MEASURE" : "PASS") + " consumer certificate " + label);
         }
         Extract("scalar");
+        if (integrityOnly)
+        {
+            CheckConsumerExtractionIntegrity(cli, directory, package, output, proof);
+            return;
+        }
         Verify("initial", expectedBuild: true);
         Verify("unchanged", expectedBuild: false);
         if (configurationReuse)
@@ -129,8 +135,38 @@ partial class Program
         if (configurationReuse)
             File.AppendAllText(Path.Combine(package, "lakefile.toml"),
                 "\n# Restore generated-only preparation before mutation.\n");
+        CheckConsumerExtractionIntegrity(cli, directory, package, output, proof);
+        File.WriteAllText(Path.Combine(directory, "timings.json"), JsonSerializer.Serialize(measurements, Json));
+        Console.WriteLine("Measurements: " + Path.Combine(directory, "timings.json"));
+    }
+
+    static void CheckConsumerExtractionIntegrity(string[] cli, string directory, string package,
+        string output, string proof)
+    {
         var cleanProof = Path.Combine(package, "CleanProof.lean");
         File.Copy(proof, cleanProof);
+        var other = Path.Combine(directory, "OtherExtraction");
+        Run([.. cli, "extract", At("Examples/Assembly/bin/Examples.dll"),
+            "Arithmetic::Add(ulong,ulong)", other, "x64-v3"]);
+        var batch = Path.Combine(directory, "requests.json");
+        var results = Path.Combine(directory, "results.json");
+        void Requests(bool replaceArtifact, bool expectRejection = false) =>
+            File.WriteAllText(batch, JsonSerializer.Serialize(new
+        {
+            schema = 1, proofRoot = package,
+            requests = new[]
+            {
+                new { output, proof = replaceArtifact ? proof : cleanProof,
+                    theorem = "ExampleProof.correctness", expect = expectRejection ? "rejected" : "verified" },
+                new { output = other, proof = cleanProof, theorem = "ExampleProof.correctness", expect = "verified" }
+            }
+        }, Json));
+        Requests(replaceArtifact: false);
+        Run([.. cli, "verify-batch", batch, "--parallel", "2", "--results", results]);
+        var warm = JsonSerializer.Deserialize<JsonElement[]>(File.ReadAllText(results))!;
+        if (warm.Length != 2 || warm.Any(row => row.GetProperty("status").GetString() != "verified"))
+            throw new InvalidOperationException("Clean extraction batch did not verify both requests.");
+        File.Copy(results, Path.Combine(directory, "integrity-clean-results.json"));
         File.AppendAllText(proof, """
 
         open Lean Elab Command in
@@ -144,44 +180,34 @@ partial class Program
         """);
         foreach (string[] options in new string[][] { [], ["--fresh"] })
         {
+            var preparation = options.Length == 0 ? "restored" : "built";
+            // Expected rejections require an audit wrapper absent from the verified warmup.
+            Requests(replaceArtifact: true, expectRejection: options.Length != 0);
             File.WriteAllText(Path.Combine(output, "verified.json"), "stale report");
-            var replaced = Execute([.. cli, "verify", output, "--proof", proof, "--proof-root", package, .. options]);
-            if (replaced.Code != 1 ||
-                !replaced.Output.Contains("Extraction certificate artifacts changed during proof checking") ||
-                !replaced.Output.Contains("Stage: extraction integrity", StringComparison.Ordinal) ||
-                !replaced.Output.Contains("Extracted.olean: sha256 before=", StringComparison.Ordinal) ||
-                !replaced.Output.Contains(", after=", StringComparison.Ordinal) ||
-                !replaced.Output.Contains("trace sha256=", StringComparison.Ordinal) ||
+            var replaced = Execute([.. cli, "verify-batch", batch, "--parallel", "2",
+                "--results", results, .. options]);
+            File.WriteAllText(Path.Combine(directory, "integrity-" + preparation + ".log"), replaced.Output);
+            File.Copy(results, Path.Combine(directory, "integrity-" + preparation + "-results.json"));
+            var rows = JsonSerializer.Deserialize<JsonElement[]>(File.ReadAllText(results))!;
+            var hashes = System.Text.RegularExpressions.Regex.Match(replaced.Output,
+                @"Extracted\.olean: sha256 before=([0-9a-fA-F]{64}), after=([0-9a-fA-F]{64})");
+            var independentOutcomes = rows.Length == 2 &&
+                rows[0].GetProperty("stage").GetString() == "extraction integrity" &&
+                rows[0].GetProperty("status").GetString() == "failed" &&
+                rows[1].GetProperty("status").GetString() == "verified";
+            var changedArtifactReported =
+                replaced.Output.Contains("Extraction certificate artifacts changed during proof checking") &&
+                replaced.Output.Contains("Preparation: " + preparation + "; package:", StringComparison.Ordinal) &&
+                hashes.Success && hashes.Groups[1].Value != hashes.Groups[2].Value &&
+                replaced.Output.Contains("artifact modified=", StringComparison.Ordinal) &&
+                replaced.Output.Contains("trace sha256=", StringComparison.Ordinal);
+            if (replaced.Code != 1 || !independentOutcomes || !changedArtifactReported ||
                 replaced.Output.Contains("Lean could not prove", StringComparison.Ordinal) ||
-                File.Exists(Path.Combine(output, "verified.json")))
-                throw new InvalidOperationException("Consumer proof replaced the prechecked extraction artifact: " + replaced.Output);
+                File.Exists(Path.Combine(output, "verified.json")) ||
+                !File.Exists(Path.Combine(other, "verified.json")))
+                throw new InvalidOperationException("Batch extraction integrity mismatch: " + replaced.Output);
+            Console.WriteLine("PASS " + preparation + " batch extraction rewrite reports exact changed hashes, " +
+                "fails the changed request and preserves the unrelated certificate");
         }
-        Console.WriteLine("PASS consumer proof cannot replace restored or freshly checked extraction artifacts");
-        var other = Path.Combine(directory, "OtherExtraction");
-        Run([.. cli, "extract", At("Examples/Assembly/bin/Examples.dll"),
-            "Arithmetic::Add(ulong,ulong)", other, "x64-v3"]);
-        var batch = Path.Combine(directory, "requests.json");
-        var results = Path.Combine(directory, "results.json");
-        File.WriteAllText(batch, JsonSerializer.Serialize(new
-        {
-            schema = 1, proofRoot = package,
-            requests = new[]
-            {
-                new { output, proof, theorem = "ExampleProof.correctness" },
-                new { output = other, proof = cleanProof, theorem = "ExampleProof.correctness" }
-            }
-        }, Json));
-        var changed = Execute([.. cli, "verify-batch", batch, "--results", results]);
-        var rows = JsonSerializer.Deserialize<JsonElement[]>(File.ReadAllText(results))!;
-        if (changed.Code != 1 || rows[0].GetProperty("stage").GetString() != "extraction integrity" ||
-            rows[0].GetProperty("status").GetString() != "failed" ||
-            rows[1].GetProperty("status").GetString() != "verified" ||
-            File.Exists(Path.Combine(output, "verified.json")))
-            throw new InvalidOperationException(
-                "Batch did not isolate the changed extraction artifact: " + changed.Output);
-        Console.WriteLine("PASS batch artifact replacement reports integrity failure " +
-            "and preserves unrelated verification");
-        File.WriteAllText(Path.Combine(directory, "timings.json"), JsonSerializer.Serialize(measurements, Json));
-        Console.WriteLine("Measurements: " + Path.Combine(directory, "timings.json"));
     }
 }
