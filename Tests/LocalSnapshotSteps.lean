@@ -332,4 +332,137 @@ theorem numeric_narrow_wp (memory : Memory) (frame : Frame) (bits : BitVec 32)
 
 #print axioms numeric_narrow_wp
 
+/-- Homes stated at the frame's entry memory justify stores at a later memory that retains
+    its access; each store advances that evidence, so the walk crosses every store. -/
+theorem entry_homes_wp (entered memory : Memory) (slots : List LocalSlot) (boundary : Nat)
+    (homes : CompleteWritableHomes entered boundary mixedHomes.localKinds slots)
+    (enteredFormed : entered.WellFormed) (formed : memory.WellFormed)
+    (retained : AccessBelow entered.nextIdentity entered memory)
+    (word : BitVec 64) (vector : BitVec 128) :
+    WP (Execution (fun fuel => run [mixedHomes] fuel 0 0
+      [.scalar (.i64 word), .scalar (.v128 vector)] ⟨0, slots, [], [], 0⟩ [] memory))
+      (fun result => result.2 = [.scalar (.i64 word)] ∧
+        AccessBelow entered.nextIdentity entered result.1 ∧
+        MemoryBelow boundary memory result.1) := by
+  have preserved := MemoryBelow.refl boundary memory
+  have snapshots := LocalSnapshots.empty memory slots
+  cil_contract_steps (snapshots := snapshots) []
+  exact ⟨rfl, retained, preserved⟩
+
+#print axioms entry_homes_wp
+
+/-- Entry homes grant nothing at a later memory without evidence that it retains their
+    access; a `MemoryBelow` link supplies that evidence as well as `AccessBelow` does. -/
+theorem entry_homes_need_retained_access (entered memory : Memory) (frame : Frame)
+    (vector : BitVec 128) (homes : CompleteWritableHomes entered 0 [.vector128] frame.locals)
+    (enteredFormed : entered.WellFormed) (formed : memory.WellFormed)
+    (preserved : MemoryBelow entered.nextIdentity entered memory) :
+    WP (Execution (fun fuel => run [storeOnly] fuel 0 0 [] frame
+      [.scalar (.v128 vector)] memory)) (fun result => result.2 = []) := by
+  have snapshots := LocalSnapshots.empty memory frame.locals
+  fail_if_success (clear preserved; cil_contract_steps (snapshots := snapshots) [])
+  fail_if_success (clear enteredFormed; cil_contract_steps (snapshots := snapshots) [])
+  cil_contract_steps (snapshots := snapshots) []
+  rfl
+
+#print axioms entry_homes_need_retained_access
+
+/-- A reference local precedes the numeric local the method stores and reloads. -/
+@[cil_code] def rootedHomes : CIL.Method := {
+  code := [.arg 0, .setLocal 1, .local 1, .ret]
+  locals := [.i64 0, .i64 0], localKinds := [.reference, .word64], returnsValue := true }
+
+/-- Numeric homes that cover the locals after a leading root slot justify a store past it:
+    the home is found at the shifted index and the root takes part in no numeric write. -/
+theorem rooted_homes_wp (entered memory : Memory) (frame : Frame)
+    (root : Option ManagedReference) (slots : List LocalSlot) (boundary : Nat)
+    (layout : frame.locals = .root root :: slots)
+    (homes : NumericHomes entered boundary [⟨.word64, .i64 0, 0, rfl⟩] slots)
+    (enteredFormed : entered.WellFormed) (formed : memory.WellFormed)
+    (retained : AccessBelow entered.nextIdentity entered memory) (word : BitVec 64) :
+    WP (Execution (fun fuel => run [rootedHomes] fuel 0 0 [.scalar (.i64 word)] frame []
+      memory)) (fun result => result.2 = [.scalar (.i64 word)]) := by
+  have snapshots := LocalSnapshots.empty memory frame.locals
+  cil_contract_steps (snapshots := snapshots) []
+  rfl
+
+#print axioms rooted_homes_wp
+
+/-- An opaque leading slot may be a byte home that a numeric store aliases, so it is skipped
+    only once the context shows that it is not one. -/
+theorem opaque_leading_slot (entered : Memory) (frame : Frame) (leading : LocalSlot)
+    (slots : List LocalSlot) (boundary : Nat) (layout : frame.locals = leading :: slots)
+    (homes : NumericHomes entered boundary [⟨.word64, .i64 0, 0, rfl⟩] slots)
+    (formed : entered.WellFormed) (word : BitVec 64) :
+    (∀ stored reference, leading ≠ .bytes stored reference) →
+      WP (Execution (fun fuel => run [rootedHomes] fuel 0 1 [.scalar (.i64 word)] frame
+        [.scalar (.i64 word)] entered)) (fun result => result.2 = [.scalar (.i64 word)]) := by
+  have snapshots := LocalSnapshots.empty entered frame.locals
+  fail_if_success (cil_strict (
+    have : WP (Execution (fun fuel => run [rootedHomes] fuel 0 1 [.scalar (.i64 word)] frame
+        [.scalar (.i64 word)] entered)) (fun result => result.2 = [.scalar (.i64 word)]) := by
+      solve | (cil_contract_steps (snapshots := snapshots) []; rfl)))
+  intro notHome
+  cil_contract_steps (snapshots := snapshots) []
+  rfl
+
+#print axioms opaque_leading_slot
+
+/-- Store a vector and reload it. -/
+@[cil_code] def storeReload : CIL.Method := {
+  code := [.setLocal 0, .local 0, .ret], locals := [.v128 0], returnsValue := true }
+
+/-- A supplied store keeps its chosen memory and the snapshots follow it there, so the reload
+    after it reads the stored value in the same walk. -/
+theorem supplied_store_reload (before after : Memory) (frame : Frame) (boundary : Nat)
+    (home : Reference) (vector : BitVec 128)
+    (homes : WritableHomes before boundary [.vector128] frame.locals)
+    (formed : before.WellFormed)
+    (slot : frame.locals[0]? = some (.bytes .vector128 home))
+    (ready : access before home 16 1 true = .ok ())
+    (supplied : step storeReload (.setLocal 0) 0 [] frame [.scalar (.v128 vector)] before =
+      .ok (.next 1 [] frame after)) :
+    WP (Execution (fun fuel => run [storeReload] fuel 0 0 [] frame
+      [.scalar (.v128 vector)] before))
+      (fun result => result.1 = leaveFrame frame after ∧
+        result.2 = [.scalar (.v128 vector)]) := by
+  have snapshots := LocalSnapshots.empty before frame.locals
+  cil_contract_steps (snapshots := snapshots) [supplied, slot, ready]
+  -- The snapshots and the write are stated at the supplied memory under their own names.
+  have _remembered : LocalSnapshots after frame.locals
+      (rememberLocal (fun _ => none) 0 (.v128 vector)) := localSnapshots
+  have _written : write before home (numberBytes vector.toNat 16) 1 = .ok after := localWrite
+  exact ⟨rfl, rfl⟩
+
+#print axioms supplied_store_reload
+
+/-- Store a word and return. -/
+@[cil_code] def wordStore : CIL.Method := {
+  code := [.arg 0, .setLocal 0, .ret], locals := [.i64 0], localKinds := [.word64]
+  returnsValue := false }
+
+/-- A store names its memory and evidence, and restates the caller's reads and buffers below
+    the homes' boundary at that memory under their own names, so a caller's state is rebuilt
+    once after the walk. A read not shown below the boundary is left at the old memory. -/
+theorem store_evidence (memory : Memory) (slots : List LocalSlot) (boundary : Nat)
+    (homes : CompleteWritableHomes memory boundary [.word64] slots) (formed : memory.WellFormed)
+    (caller other : Reference) (old : caller.allocation < boundary)
+    (bytes unknown : List (BitVec 8)) (kept : read memory caller 8 1 = .ok bytes)
+    (unrelated : read memory other 8 1 = .ok unknown) (room : Writable memory caller 8 0 2)
+    (word : BitVec 64) :
+    WP (Execution (fun fuel => run [wordStore] fuel 0 0 [.scalar (.i64 word)]
+      ⟨0, slots, [], [], 0⟩ [] memory))
+      (fun result => result.2 = [] ∧ read result.1 caller 8 1 = .ok bytes ∧
+        Writable result.1 caller 8 0 2 ∧ result.1.WellFormed ∧
+        MemoryBelow boundary memory result.1 ∧
+        ∃ home, write memory home (numberBytes word.toNat 8) 1 = .ok result.1) := by
+  have snapshots := LocalSnapshots.empty memory slots
+  cil_contract_steps (snapshots := snapshots) []
+  have _stale : read memory other 8 1 = .ok unknown := unrelated
+  have _remembered : LocalSnapshots storedLocal slots
+      (rememberLocal (fun _ => none) 0 (.i64 word)) := localSnapshots
+  exact ⟨rfl, kept, room, localFormed, localBelow, _, localWrite⟩
+
+#print axioms store_evidence
+
 end Tests.LocalSnapshotSteps
