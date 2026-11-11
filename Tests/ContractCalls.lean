@@ -132,7 +132,7 @@ theorem word_input (program : Program) (memory : Safety.Memory) (value : W32)
 /-- Registration retains a checked theorem, not an unchecked interface adapter. -/
 @[cil_contract] theorem registered_seven : seven.Holds boundProgram 1 := by
   intro input memory _
-  refine MethodContract.Holds.intro memory 7 ⟨3, ?_⟩ (Confined.refl _ memory) rfl
+  refine MethodContract.Holds.intro memory 7 ?_ (Confined.refl _ memory) rfl
   cil_checked_steps [seven]
 #print axioms registered_seven
 
@@ -258,8 +258,10 @@ theorem explicit_precondition (program : Program) (memory : Safety.Memory) (left
 @[cil_contract] theorem bound_seven (program : Program)
     (found : program[1]? = some helper) : seven.Holds program 1 := by
   intro input memory _
-  refine MethodContract.Holds.intro memory 7 ⟨3, ?_⟩ (Confined.refl _ memory) rfl
-  cil_checked_steps [found, seven]
+  apply WP.enter found (by rfl) (by rfl)
+  apply WP.step found (by rfl) (by cil_checked_step [])
+  apply WP.returned found (by rfl) (by cil_checked_step []) (by rfl)
+  exact ⟨Confined.refl _ memory, 7, rfl, rfl⟩
 #print axioms bound_seven
 
 /-- The registry instantiates program parameters and proves the required callee binding. -/

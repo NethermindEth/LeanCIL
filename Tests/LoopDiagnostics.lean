@@ -41,7 +41,7 @@ def addTwoContract : MethodContract W32 W32 where
 
 theorem addTwo_holds : addTwoContract.Holds program 1 := by
   rintro x memory -
-  refine MethodContract.Holds.intro memory _ ⟨8, ?_⟩ (Confined.refl _ memory) rfl
+  refine MethodContract.Holds.intro memory _ ?_ (Confined.refl _ memory) rfl
   cil_checked_steps
 #print axioms addTwo_holds
 
@@ -454,7 +454,7 @@ theorem stamp_holds : stampContract.Holds stampsProgram 1 := by
   rintro ⟨slot, value⟩ memory writable
   dsimp only [stampContract] at writable
   obtain ⟨after, wrote, formed, confined, filled⟩ := writable.write_one value
-  refine MethodContract.Holds.intro after () ⟨8, ?_⟩ confined filled
+  refine MethodContract.Holds.intro after () ?_ confined filled
   cil_checked_steps [step_storeScalar_of_write wrote, formed]
 /-- info: 'Tests.LoopDiagnostics.stamp_holds' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
@@ -794,7 +794,7 @@ example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True 
 set_option trace.CIL.step true in
 example : addTwoContract.Holds program 1 := by
   rintro x memory -
-  refine MethodContract.Holds.intro memory _ ⟨8, ?_⟩ (Confined.refl _ memory) rfl
+  refine MethodContract.Holds.intro memory _ ?_ (Confined.refl _ memory) rfl
   cil_checked_steps
 
 -- A step taken by hand, outside any LeanCIL tactic, is traced at its tactic block.
